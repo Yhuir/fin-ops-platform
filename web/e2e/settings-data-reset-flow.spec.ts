@@ -226,17 +226,17 @@ test.describe("settings data reset browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("marks a project completed and verifies cost statistics active project scope refresh", async ({ page }, testInfo) => {
+  test("marks a project completed without removing its historical cost", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "admin",
-      settingsProjectScopeFanout: true,
+      settingsProjectCostEvidence: true,
     });
     const recordLatency = createSettingsLatencyRecorder(page, testInfo);
     const projectName = "昆明卷烟厂动力设备控制系统升级改造项目";
 
     await recordLatency({
-      operationId: "settings.open-page-project-scope",
+      operationId: "settings.open-page-project-status",
       visibleLabel: "设置",
       actionType: "navigate",
     }, async (mark) => {
@@ -273,7 +273,7 @@ test.describe("settings data reset browser flow", () => {
       && request.method() === "POST");
     let saveResponseStatus: number | undefined;
     await recordLatency({
-      operationId: "settings.save-project-scope",
+      operationId: "settings.save-project-status",
       visibleLabel: "保存设置",
       actionType: "click",
     }, async (mark) => {
@@ -291,37 +291,37 @@ test.describe("settings data reset browser flow", () => {
     await expect(completedProjects.getByText(projectName)).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    let activePayload: Record<string, unknown> | undefined;
+    let costPayload: Record<string, unknown> | undefined;
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",
       module: "cost-statistics",
-      operationId: "cost-statistics.open-after-settings-project-scope-save",
+      operationId: "cost-statistics.open-after-settings-project-status-save",
       visibleLabel: "成本统计",
       actionType: "click",
     }, async (mark) => {
-      const activeCostExplorerResponse = page.waitForResponse((response) => {
+      const costExplorerResponse = page.waitForResponse((response) => {
         const url = new URL(response.url());
         return response.request().method() === "GET"
           && responsePathMatches(response.url(), "/api/cost-statistics/explorer")
-          && url.searchParams.get("project_scope") === "active"
+          && !url.searchParams.has("project_scope")
           && response.status() === 200;
       });
       await page.getByRole("link", { name: "成本统计" }).click();
-      const response = await mark("apiLatencyMs", activeCostExplorerResponse);
-      activePayload = await response.json() as Record<string, unknown>;
+      const response = await mark("apiLatencyMs", costExplorerResponse);
+      costPayload = await response.json() as Record<string, unknown>;
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    if (!activePayload) {
-      throw new Error("missing cost statistics active payload after settings project scope save");
+    if (!costPayload) {
+      throw new Error("missing cost statistics payload after settings project status save");
     }
-    expectDirectCanonicalPayload(activePayload);
+    expectDirectCanonicalPayload(costPayload);
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",
       module: "cost-statistics",
-      operationId: "cost-statistics.switch-project-view-after-settings-project-scope-save",
+      operationId: "cost-statistics.switch-project-view-after-settings-project-status-save",
       visibleLabel: "按项目",
       actionType: "click",
     }, async (mark) => {
@@ -329,7 +329,7 @@ test.describe("settings data reset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
-    await expect(page.getByText(projectName)).toHaveCount(0);
+    await expect(page.getByText(projectName)).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);

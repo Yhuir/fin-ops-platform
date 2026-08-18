@@ -111,7 +111,8 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `新增标签` | `web/src/features/bankDetails/AutoTagRulesDrawer.tsx` | 银行明细自动标签规则新增。 |
 | `开始预览` | `web/src/components/imports/ImportWorkflowPage.tsx` | 导入 preview。 |
 | `确认导入` | `web/src/components/imports/ImportWorkflowPage.tsx` | 导入确认。 |
-| `保存` | `web/src/components/cost-statistics/CostStatisticsTagRulesDrawer.tsx` | 成本统计标签准入规则 canonical 保存；不等待 read model barrier。 |
+| `保存` | `web/src/components/cost-statistics/CostStatisticsTimeTagRulesDrawer.tsx` | 按标签/按时间银行流水标签规则保存；只影响两个原始流水视图。 |
+| `保存` | `web/src/components/cost-statistics/CostStatisticsNoOaRulesDrawer.tsx` | 无 OA 虚拟项目与互斥标签归属保存；只影响三个成本归因视图。 |
 
 ## Mutating feature API coverage map
 
@@ -123,7 +124,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `appHealth/api.ts` | `app-health-operations` | 管理员从导入历史撤回可证明为单批次独占创建的银行流水。 |
 | `bankDetails/api.ts` | `bank-details` | 银行明细分类、自动标签、关系入口等写入口。 |
 | `batchAccounting/api.ts` | `batch-accounting` | 批量账务标签规则保存、提交和撤回。 |
-| `cost-statistics/api.ts` | `cost-statistics` | 成本统计标签准入规则 PUT；导出仍为只读能力。 |
+| `cost-statistics/api.ts` | `cost-statistics` | 两套独立规则 PUT：按标签/按时间标签选择，以及无 OA 虚拟项目分配；导出仍为只读能力。 |
 | `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口。 |
 | `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 通用导入 preview/confirm/template 写链路。 |
 | `inputInvoiceUsage/api.ts` | `input-invoice-usage` | 支付规则、OA reverse 草稿/批次/状态写入口。 |
@@ -146,7 +147,8 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `reconciliation-workbench:paired-withdraw-actions` | `reconciliation-workbench` | 已配对 active relation 选择后的关系级撤回入口 | read-export 下选择已配对关系后撤回关联禁用，行级更多/取消关联/人工异常入口不存在，withdraw durable mutation 零调用，且复扫当前关系。 |
 | `reconciliation-workbench:cash-special-actions` | `reconciliation-workbench` | 已配对银行行的现金过账、现金买票和取消现金处理行级菜单 | deterministic mock 暴露 `confirm_cash_pass_through`、`confirm_cash_ticket_purchase`、`cancel_cash_special` 后，read-export 下更多菜单不可见，确认为过账/确认为买票/取消现金处理 menuitem 和确认买票成本弹窗均不可见，三个现金处理 durable mutation 零调用，且复扫候选。 |
 | `bank-details:auto-tag-rules` | `bank-details` | 自动标签规则抽屉 | read-export 下新增标签、重新应用规则、保存禁用，且复扫 visible enabled 写控件候选。 |
-| `cost-statistics:tag-rules` | `cost-statistics` | 成本统计标签规则抽屉 | read-export 下可查看规则，但 `保存` disabled，`PUT /api/cost-statistics/tag-rules` 零调用，并复扫 visible enabled 写控件候选。 |
+| `cost-statistics:time-tag-rules` | `cost-statistics` | 按标签/按时间标签规则抽屉 | read-export 下可查看完整标签集合，但全选、清空、标签选择与 `保存` disabled，`PUT /api/cost-statistics/time-tag-rules` 零调用，并复扫 visible enabled 写控件候选。 |
+| `cost-statistics:no-oa-rules` | `cost-statistics` | 无 OA 成本范围抽屉 | read-export 下可查看候选与虚拟项目，但新增、编辑、删除、标签选择与 `保存` disabled，`PUT /api/cost-statistics/no-oa-rules` 零调用，并复扫 visible enabled 写控件候选。 |
 | `bank-details:category-confirmation` | `bank-details` | 银行明细行内分类确认入口 | read-export 下待确认分类按钮禁用，分类菜单不打开，category-confirmation durable mutation 零调用，且复扫候选。 |
 | `bank-details:manual-category-assignment` | `bank-details` | 银行明细待分类/待确认/自动标签人工覆盖入口 | read-export 下待分类与自动标签“撤销”按钮禁用，人工分类菜单不打开，category-assignment durable mutation 零调用，且复扫候选。 |
 | `bank-flow-rule-batches:tag-drawer` | `bank-flow-rule-batches` | 流水规则批量处理标签规则抽屉 | read-export 下提交/撤回入口不可见，标签规则 OA/发票复选框和保存禁用，且复扫候选。 |

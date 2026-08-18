@@ -6012,7 +6012,6 @@ class Application:
         self,
         *,
         month: str,
-        project_scope: str,
         duration_ms: float,
         entry_count: int,
     ) -> None:
@@ -6022,7 +6021,6 @@ class Application:
                     "kind": "cost_statistics_explorer_metric",
                     "metric": "cost_statistics.explorer.duration_ms",
                     "month": month,
-                    "project_scope": project_scope,
                     "duration_ms": round(float(duration_ms), 3),
                     "entry_count": int(entry_count),
                     "timestamp": datetime.now().isoformat(),

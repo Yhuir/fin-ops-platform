@@ -602,7 +602,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(restored["turnover_ledger_tag_selection"], previous_state)
         self.assertEqual(app._audit_service.as_dicts()[-1]["action"], "turnover_ledger_tag_selection_updated")
 
-    def test_cost_statistics_tag_selection_defaults_empty(self) -> None:
+    def test_cost_statistics_rules_default_to_all_time_tags_and_no_virtual_projects(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
                 temp_dir,
@@ -613,66 +613,64 @@ class AppSettingsServiceTests(unittest.TestCase):
             )
             app = build_application(data_dir=Path(temp_dir))
 
-            selection = app._app_settings_service.get_cost_statistics_tag_selection_payload()
+            time_selection = app._app_settings_service.get_cost_statistics_time_tag_selection_payload()
+            no_oa = app._app_settings_service.get_cost_statistics_no_oa_projects_payload()
 
-            self.assertFalse(selection["default_selection_applied"])
-            self.assertEqual(selection["display_name"], "")
-            self.assertEqual(selection["selected_tag_codes"], [])
-            self.assertEqual(selection["inactive_selected_tag_codes"], [])
+            self.assertEqual(time_selection["mode"], "all")
+            self.assertEqual(time_selection["selected_tag_codes"], [])
+            self.assertEqual(no_oa["projects"], [])
 
-            saved = app._app_settings_service.update_cost_statistics_tag_selection(
+            saved = app._app_settings_service.update_cost_statistics_time_tag_selection(
                 {
-                    "expected_version": selection["version"],
-                    "selected_tag_codes": [],
+                    "expected_version": time_selection["version"],
+                    "mode": "custom",
+                    "selected_tag_codes": ["fee", "__uncategorized__"],
                 },
                 actor_id="cost-owner",
+                allowed_tag_codes={"fee", "income_refund", "__uncategorized__"},
             )
 
-            self.assertFalse(saved["default_selection_applied"])
-            self.assertEqual(saved["selected_tag_codes"], [])
-            with self.assertRaises(AppSettingsValidationError) as name_context:
-                app._app_settings_service.update_cost_statistics_tag_selection(
-                    {
-                        "expected_version": saved["version"],
-                        "selected_tag_codes": ["fee"],
-                    },
-                    actor_id="cost-owner",
-                )
-            self.assertEqual(
-                name_context.exception.error_code,
-                "cost_statistics_virtual_project_name_required",
-            )
+            self.assertEqual(saved["mode"], "custom")
+            self.assertEqual(saved["selected_tag_codes"], ["fee", "__uncategorized__"])
             with self.assertRaises(AppSettingsValidationError) as context:
-                app._app_settings_service.update_cost_statistics_tag_selection(
+                app._app_settings_service.update_cost_statistics_no_oa_projects(
                     {
-                        "expected_version": saved["version"],
-                        "selected_tag_codes": ["unknown_tag"],
+                        "expected_version": no_oa["version"],
+                        "projects": [
+                            {
+                                "id": "project-1",
+                                "display_name": "无 OA 项目",
+                                "tag_codes": ["unknown_tag"],
+                            }
+                        ],
                     },
                     actor_id="cost-owner",
+                    allowed_tag_codes={"fee"},
                 )
-            self.assertEqual(context.exception.error_code, "unknown_cost_statistics_tag")
+            self.assertEqual(context.exception.error_code, "unknown_cost_statistics_no_oa_tag")
 
-    def test_cost_statistics_tag_selection_mapper_uses_only_the_supplied_gate_snapshot(self) -> None:
-        payload = AppSettingsService.cost_statistics_tag_selection_payload_from_settings(
+    def test_cost_statistics_rule_mappers_use_only_the_supplied_gate_snapshot(self) -> None:
+        payload = AppSettingsService.cost_statistics_no_oa_projects_payload_from_settings(
             {
                 "bank_transaction_tags": {
                     "version": 7,
                     "definitions": [self._custom_auto_rule("fee", "手续费")],
                 },
-                "cost_statistics_tag_selection": {
+                "cost_statistics_no_oa_projects": {
                     "version": 2,
-                    "selection_schema_version": 3,
-                    "display_name": "无 OA 项目",
-                    "selected_tag_codes": ["fee"],
+                    "schema_version": 1,
+                    "projects": [
+                        {"id": "project-1", "display_name": "无 OA 项目", "tag_codes": ["fee"]}
+                    ],
                 },
             }
         )
 
         self.assertEqual(payload["version"], 2)
-        self.assertEqual(payload["effective_selected_tag_codes"], ["fee"])
+        self.assertEqual(payload["projects"][0]["tag_codes"], ["fee"])
         self.assertFalse(payload["can_save"])
 
-    def test_cost_statistics_tag_selection_resets_legacy_selection_to_empty(self) -> None:
+    def test_cost_statistics_legacy_selection_migrates_to_one_virtual_project(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
                 temp_dir,
@@ -683,19 +681,26 @@ class AppSettingsServiceTests(unittest.TestCase):
             )
             store = ApplicationStateStore(Path(temp_dir))
             snapshot = store.load_app_settings()
+            snapshot.pop("cost_statistics_no_oa_projects", None)
             snapshot["cost_statistics_tag_selection"] = {
                 "version": 4,
+                "display_name": "旧无 OA 项目",
                 "selected_tag_codes": ["fee"],
             }
-            store.save_app_settings(snapshot)
+            Path(temp_dir, "app_settings.json").write_text(
+                json.dumps(snapshot, ensure_ascii=False),
+                encoding="utf-8",
+            )
 
             app = build_application(data_dir=Path(temp_dir))
-            selection = app._app_settings_service.get_cost_statistics_tag_selection_payload()
+            selection = app._app_settings_service.get_cost_statistics_no_oa_projects_payload()
 
-            self.assertEqual(selection["version"], 5)
-            self.assertEqual(selection["selection_schema_version"], 3)
-            self.assertEqual(selection["display_name"], "")
-            self.assertEqual(selection["selected_tag_codes"], [])
+            self.assertEqual(selection["version"], 4)
+            self.assertEqual(selection["schema_version"], 1)
+            self.assertEqual(
+                selection["projects"],
+                [{"id": "legacy", "display_name": "旧无 OA 项目", "tag_codes": ["fee"]}],
+            )
 
     def test_file_rule_replacement_detaches_pending_invoice_and_no_oa_archived_codes_atomically(self) -> None:
         fixture = json.loads(
@@ -737,14 +742,20 @@ class AppSettingsServiceTests(unittest.TestCase):
                 {"expected_version": selection["version"], "selected_tag_codes": ["salary"]},
                 actor_id="settings-owner",
             )
-            cost_selection = app._app_settings_service.get_cost_statistics_tag_selection_payload()
-            app._app_settings_service.update_cost_statistics_tag_selection(
+            cost_selection = app._app_settings_service.get_cost_statistics_no_oa_projects_payload()
+            app._app_settings_service.update_cost_statistics_no_oa_projects(
                 {
                     "expected_version": cost_selection["version"],
-                    "display_name": "云南溯源无 OA 分类",
-                    "selected_tag_codes": ["salary"],
+                    "projects": [
+                        {
+                            "id": "salary-project",
+                            "display_name": "云南溯源无 OA 分类",
+                            "tag_codes": ["salary"],
+                        }
+                    ],
                 },
                 actor_id="settings-owner",
+                allowed_tag_codes={"salary"},
             )
             bank_flow_rules = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
             app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
@@ -781,11 +792,11 @@ class AppSettingsServiceTests(unittest.TestCase):
             3,
         )
         self.assertEqual(
-            settings["cost_statistics_tag_selection"]["selected_tag_codes"],
+            settings["cost_statistics_no_oa_projects"]["projects"][0]["tag_codes"],
             ["salary"],
         )
         self.assertEqual(
-            settings["cost_statistics_tag_selection"]["display_name"],
+            settings["cost_statistics_no_oa_projects"]["projects"][0]["display_name"],
             "云南溯源无 OA 分类",
         )
         self.assertNotIn("selected_tag_codes", settings["bank_flow_rule_batch_tag_rules"])

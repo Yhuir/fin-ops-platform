@@ -1142,6 +1142,23 @@ class PostgresStateStoreTests(unittest.TestCase):
             )
             self.assertTrue(all("%s" in sql for sql, _ in connection.executed))
 
+    def test_postgres_store_preserves_legacy_cost_rule_for_one_time_normalization(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            connection = FakePostgresConnection()
+            connection.settings["app_settings"] = {
+                "cost_statistics_tag_selection": {
+                    "version": 4,
+                    "display_name": "旧无 OA 项目",
+                    "selected_tag_codes": ["salary"],
+                }
+            }
+            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
+
+            settings = store.load_app_settings()
+
+            self.assertEqual(settings["cost_statistics_tag_selection"]["version"], 4)
+            self.assertNotIn("cost_statistics_no_oa_projects", settings)
+
     def test_postgres_store_snapshot_methods_round_trip_without_full_state_fallback(self) -> None:
         with TemporaryDirectory() as temp_dir, patch.dict(
             "os.environ",

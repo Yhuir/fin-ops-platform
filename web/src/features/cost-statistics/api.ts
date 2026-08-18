@@ -3,17 +3,18 @@ import type {
   CostBankTagPrimaryExplorerRow,
   CostBankTagSubExplorerRow,
   CostExpenseTypeExplorerRow,
-  CostProjectScope,
   CostProjectExplorerRow,
   CostStatisticsExportPreview,
   CostStatisticsExplorerPage,
   CostStatisticsExplorerPageRequest,
-  CostStatisticsTagRules,
+  CostStatisticsNoOaRules,
+  CostStatisticsTimeTagRules,
   CostStatisticsTagRuleTag,
   CostStatisticsView,
   CostExplorerEntryRow,
   CostEntryDetail,
-  SaveCostStatisticsTagRulesRequest,
+  SaveCostStatisticsNoOaRulesRequest,
+  SaveCostStatisticsTimeTagRulesRequest,
 } from "./types";
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 
@@ -213,16 +214,25 @@ type ApiCostStatisticsTagRuleTag = {
   output_sub_label?: string | null;
 };
 
-type ApiCostStatisticsTagRules = {
+type ApiCostStatisticsRulesBase = {
   version: number;
   bank_auto_tag_rules_version: number;
-  display_name?: string | null;
-  default_selection_applied?: boolean | null;
   selected_tag_codes?: string[] | null;
-  effective_selected_tag_codes?: string[] | null;
   inactive_selected_tag_codes?: string[] | null;
-  active_tags?: ApiCostStatisticsTagRuleTag[] | null;
+  available_tags?: ApiCostStatisticsTagRuleTag[] | null;
   can_save?: boolean | null;
+};
+
+type ApiCostStatisticsTimeTagRules = ApiCostStatisticsRulesBase & {
+  mode?: "all" | "custom" | null;
+};
+
+type ApiCostStatisticsNoOaRules = ApiCostStatisticsRulesBase & {
+  projects?: Array<{
+    id: string;
+    display_name: string;
+    tag_codes?: string[] | null;
+  }> | null;
 };
 
 function mapSummary(summary: ApiCostSummary) {
@@ -308,16 +318,29 @@ function mapTagRuleTag(row: ApiCostStatisticsTagRuleTag): CostStatisticsTagRuleT
   };
 }
 
-function mapTagRules(payload: ApiCostStatisticsTagRules): CostStatisticsTagRules {
+function mapTimeTagRules(payload: ApiCostStatisticsTimeTagRules): CostStatisticsTimeTagRules {
   return {
     version: Number(payload.version || 1),
     bankAutoTagRulesVersion: Number(payload.bank_auto_tag_rules_version || 1),
-    displayName: optionalString(payload.display_name) ?? "",
-    defaultSelectionApplied: Boolean(payload.default_selection_applied),
+    mode: payload.mode === "custom" ? "custom" : "all",
     selectedTagCodes: stringList(payload.selected_tag_codes) ?? [],
-    effectiveSelectedTagCodes: stringList(payload.effective_selected_tag_codes) ?? stringList(payload.selected_tag_codes) ?? [],
     inactiveSelectedTagCodes: stringList(payload.inactive_selected_tag_codes) ?? [],
-    activeTags: (payload.active_tags ?? []).map(mapTagRuleTag).filter((tag) => tag.code.trim()),
+    availableTags: (payload.available_tags ?? []).map(mapTagRuleTag).filter((tag) => tag.code.trim()),
+    canSave: payload.can_save !== false,
+  };
+}
+
+function mapNoOaRules(payload: ApiCostStatisticsNoOaRules): CostStatisticsNoOaRules {
+  return {
+    version: Number(payload.version || 1),
+    bankAutoTagRulesVersion: Number(payload.bank_auto_tag_rules_version || 1),
+    projects: (payload.projects ?? []).map((project) => ({
+      id: project.id,
+      displayName: project.display_name,
+      tagCodes: stringList(project.tag_codes) ?? [],
+    })),
+    inactiveSelectedTagCodes: stringList(payload.inactive_selected_tag_codes) ?? [],
+    availableTags: (payload.available_tags ?? []).map(mapTagRuleTag).filter((tag) => tag.code.trim()),
     canSave: payload.can_save !== false,
   };
 }
@@ -343,7 +366,6 @@ export async function fetchCostStatisticsExplorerPage(
     buildScopedUrl("/api/cost-statistics/explorer", {
       scope: request.scope,
       view: request.view,
-      project_scope: request.projectScope ?? "active",
       project_name: request.projectName,
       expense_type: request.expenseType,
       payment_account_label: request.paymentAccountLabel,
@@ -430,27 +452,53 @@ export async function fetchCostStatisticsExplorerPage(
   };
 }
 
-export async function fetchCostStatisticsTagRules(signal?: AbortSignal): Promise<CostStatisticsTagRules> {
-  const payload = await requestJson<ApiCostStatisticsTagRules>("/api/cost-statistics/tag-rules", {
+export async function fetchCostStatisticsTimeTagRules(signal?: AbortSignal): Promise<CostStatisticsTimeTagRules> {
+  const payload = await requestJson<ApiCostStatisticsTimeTagRules>("/api/cost-statistics/time-tag-rules", {
     method: "GET",
     signal,
   });
-  return mapTagRules(payload);
+  return mapTimeTagRules(payload);
 }
 
-export async function saveCostStatisticsTagRules(
-  request: SaveCostStatisticsTagRulesRequest,
-): Promise<CostStatisticsTagRules> {
-  const payload = await requestJson<ApiCostStatisticsTagRules>("/api/cost-statistics/tag-rules", {
+export async function saveCostStatisticsTimeTagRules(
+  request: SaveCostStatisticsTimeTagRulesRequest,
+): Promise<CostStatisticsTimeTagRules> {
+  const payload = await requestJson<ApiCostStatisticsTimeTagRules>("/api/cost-statistics/time-tag-rules", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       expected_version: request.expectedVersion,
-      display_name: request.displayName,
+      mode: request.mode,
       selected_tag_codes: request.selectedTagCodes,
     }),
   });
-  return mapTagRules(payload);
+  return mapTimeTagRules(payload);
+}
+
+export async function fetchCostStatisticsNoOaRules(signal?: AbortSignal): Promise<CostStatisticsNoOaRules> {
+  const payload = await requestJson<ApiCostStatisticsNoOaRules>("/api/cost-statistics/no-oa-rules", {
+    method: "GET",
+    signal,
+  });
+  return mapNoOaRules(payload);
+}
+
+export async function saveCostStatisticsNoOaRules(
+  request: SaveCostStatisticsNoOaRulesRequest,
+): Promise<CostStatisticsNoOaRules> {
+  const payload = await requestJson<ApiCostStatisticsNoOaRules>("/api/cost-statistics/no-oa-rules", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      expected_version: request.expectedVersion,
+      projects: request.projects.map((project) => ({
+        id: project.id,
+        display_name: project.displayName,
+        tag_codes: project.tagCodes,
+      })),
+    }),
+  });
+  return mapNoOaRules(payload);
 }
 
 export async function fetchCostEntryDetail(
@@ -458,14 +506,12 @@ export async function fetchCostEntryDetail(
   view: CostStatisticsView,
   scope: string,
   signal?: AbortSignal,
-  projectScope: CostProjectScope = "active",
 ): Promise<CostEntryDetail> {
   const path = row.rowKind === "bank_transaction"
     ? `/api/cost-statistics/bank-transactions/${encodeURIComponent(row.entryId)}`
     : `/api/cost-statistics/allocations/${encodeURIComponent(row.entryId)}`;
   const payload = await requestJson<ApiCostBankTransactionDetail | ApiCostAllocationDetail>(
     buildScopedUrl(path, {
-      project_scope: projectScope,
       view,
       scope,
     }),
@@ -543,7 +589,6 @@ export async function fetchCostEntryDetail(
 export type ProjectCostExportParams = {
   month: string;
   view: "project";
-  projectScope?: CostProjectScope;
   projectNames: string[];
   expenseTypes?: string[];
   aggregateBy: "month" | "year";
@@ -559,7 +604,6 @@ export type CostExportParams =
   | {
       month: string;
       view: "time" | "bank_tag";
-      projectScope?: CostProjectScope;
       startMonth?: string;
       endMonth?: string;
       startDate?: string;
@@ -568,13 +612,11 @@ export type CostExportParams =
   | {
       month: string;
       view: "month";
-      projectScope?: CostProjectScope;
     }
   | ProjectCostExportParams
   | {
       month: string;
       view: "expense_type";
-      projectScope?: CostProjectScope;
       expenseTypes: string[];
       startMonth?: string;
       endMonth?: string;
@@ -645,7 +687,6 @@ function buildCostStatisticsQuery(
     month: params.month,
     view: params.view,
   });
-  query.set("project_scope", params.projectScope ?? "active");
 
   if ("startMonth" in params && params.startMonth) {
     query.set("start_month", params.startMonth);
@@ -778,7 +819,6 @@ export type PreviewCostExportParams =
   | {
       month: string;
       view: "time" | "bank_tag";
-      projectScope?: CostProjectScope;
       startMonth?: string;
       endMonth?: string;
       startDate?: string;
@@ -787,7 +827,6 @@ export type PreviewCostExportParams =
   | {
       month: string;
       view: "project";
-      projectScope?: CostProjectScope;
       projectNames: string[];
       aggregateBy: "month" | "year";
       expenseTypes?: string[];
@@ -795,7 +834,6 @@ export type PreviewCostExportParams =
   | {
       month: string;
       view: "expense_type";
-      projectScope?: CostProjectScope;
       expenseTypes: string[];
       startMonth?: string;
       endMonth?: string;

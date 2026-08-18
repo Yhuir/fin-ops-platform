@@ -271,15 +271,32 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
     },
   },
   {
-    id: "cost-statistics:tag-rules",
-    label: "cost statistics tag rules drawer",
+    id: "cost-statistics:time-tag-rules",
+    label: "cost statistics time/tag rules drawer",
     verify: async (page) => {
       await page.goto("/cost-statistics");
       await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-      await page.getByRole("button", { name: "成本统计标签规则" }).click();
-      const tagRulesDrawer = page.getByRole("dialog", { name: "成本统计标签规则" });
-      await expect(tagRulesDrawer).toBeVisible();
-      await expect(tagRulesDrawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+      await page.getByRole("button", { name: "按标签/按时间标签规则" }).click();
+      const drawer = page.getByRole("dialog", { name: "按标签/按时间标签规则" });
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByRole("button", { name: "全选" })).toBeDisabled();
+      await expect(drawer.getByRole("button", { name: "清空" })).toBeDisabled();
+      await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+      await expectNoEnabledWriteControlCandidates(page);
+      await drawer.getByRole("button", { name: "关闭抽屉" }).click();
+    },
+  },
+  {
+    id: "cost-statistics:no-oa-rules",
+    label: "cost statistics no-OA rules drawer",
+    verify: async (page) => {
+      await page.goto("/cost-statistics");
+      await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+      await page.getByRole("button", { name: "无 OA 成本范围" }).click();
+      const drawer = page.getByRole("dialog", { name: "无 OA 成本范围" });
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByRole("button", { name: "新增虚拟项目" })).toBeDisabled();
+      await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);
     },
   },
@@ -839,7 +856,7 @@ test.describe("permissions browser role matrix", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
-      settingsProjectScopeFanout: true,
+      settingsProjectCostEvidence: true,
     });
     const projectName = "昆明卷烟厂动力设备控制系统升级改造项目";
 

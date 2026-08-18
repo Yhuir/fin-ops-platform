@@ -298,31 +298,31 @@ describe("Cost statistics page", () => {
     expect(within(timeGrid).queryByRole("columnheader", { name: "项目名" })).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "费用类型" })).not.toBeInTheDocument();
     expect(await within(timeGrid).findByRole("button", { name: "查看银行流水 云南航空 2026-03-18 17:02:09 860.00" })).toBeInTheDocument();
-    expect(within(timeGrid).queryByRole("button", { name: "查看银行流水 昆明运维服务商 2026-03-20 15:11:02 5200.00" })).not.toBeInTheDocument();
+    expect(within(timeGrid).getByRole("button", { name: "查看银行流水 昆明运维服务商 2026-03-20 15:11:02 5200.00" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2026-03-10 21:27:55")).toBeInTheDocument();
     expect(within(timeGrid).queryByText("2026-03-10T21:27:55+08:00")).not.toBeInTheDocument();
     expect(within(timeGrid).queryByRole("columnheader", { name: "资金方向" })).not.toBeInTheDocument();
     expect(within(timeGrid).getAllByText("支出")[0]).toHaveClass("direction-tag");
-    expect(screen.getByLabelText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByLabelText("支出金额 18560.00")).toHaveClass("cost-direction-amount--expense");
     expect(screen.getByLabelText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
     expect(
       Array.from(screen.getByLabelText("时间统计方向金额").children).map((node) => node.getAttribute("aria-label")),
-    ).toEqual(["支出金额 13360.00", "收入金额 2000.00"]);
-    expect(screen.queryByText("总金额 15360.00")).not.toBeInTheDocument();
+    ).toEqual(["支出金额 18560.00", "收入金额 2000.00"]);
+    expect(screen.queryByText("总金额 20560.00")).not.toBeInTheDocument();
     expect(await within(timeGrid).findByRole("button", { name: "查看银行流水 项目客户 2026-03-22 10:30:00 2000.00" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
     expectInlineTimeSelection("三月");
     expect(screen.queryByRole("button", { name: /加载更多/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=1",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=1",
       expect.any(Object),
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      "/api/cost-statistics/explorer?scope=all&view=project&page_size=1",
       expect.any(Object),
     );
 
@@ -333,7 +333,7 @@ describe("Cost statistics page", () => {
     expect(await within(nextTimeGrid).findByRole("button", { name: "查看银行流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
     expectInlineTimeSelection("四月");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-04&view=time&project_scope=active&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-04&view=time&page_size=50&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -351,7 +351,7 @@ describe("Cost statistics page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        `/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&query=${encodeURIComponent("昆明设备")}&page_size=50&include_statistics=false`,
+        `/api/cost-statistics/explorer?scope=2026-03&view=time&query=${encodeURIComponent("昆明设备")}&page_size=50&include_statistics=false`,
         expect.any(Object),
       );
     });
@@ -370,8 +370,8 @@ describe("Cost statistics page", () => {
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "无 OA 成本范围" }));
     const drawer = await screen.findByRole("dialog", { name: "无 OA 成本范围" });
-    expect(within(drawer).getByText("支出 · 费用")).toBeInTheDocument();
-    await user.type(within(drawer).getByLabelText("无 OA 虚拟项目名称"), "云南溯源无 OA 分类");
+    await user.click(within(drawer).getByRole("button", { name: "新增虚拟项目" }));
+    await user.type(within(drawer).getByLabelText("虚拟项目名称"), "云南溯源无 OA 分类");
     await user.click(within(drawer).getByText("材料费"));
 
     await user.click(within(drawer).getByRole("button", { name: "保存" }));
@@ -384,9 +384,44 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false",
       expect.any(Object),
     );
+  });
+
+  test("keeps time/tag rules independent and refreshes only the visible raw-bank view", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    const initialExplorerCallCount = fetchMock.mock.calls.filter(([request]) =>
+      String(request).startsWith("/api/cost-statistics/explorer?scope=2026-03&view=time"),
+    ).length;
+    await user.click(screen.getByRole("button", { name: "按标签/按时间标签规则" }));
+    const drawer = await screen.findByRole("dialog", { name: "按标签/按时间标签规则" });
+    expect(within(drawer).getByText("当前：全部标签（自动包含新标签）")).toBeInTheDocument();
+    expect(within(drawer).getByText("未标记流水")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "清空" }));
+    expect(within(drawer).getByText("当前：自定义范围")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "按标签/按时间标签规则" })).not.toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/time-tag-rules",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ expected_version: 1, mode: "custom", selected_tag_codes: [] }),
+      }),
+    );
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([request]) =>
+        String(request).startsWith("/api/cost-statistics/explorer?scope=2026-03&view=time"),
+      ).length).toBeGreaterThan(initialExplorerCallCount);
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/cost-statistics/no-oa-rules", expect.any(Object));
   });
 
   test("disables tag rules save when API marks the rule set read-only", async () => {
@@ -401,6 +436,27 @@ describe("Cost statistics page", () => {
     const drawer = await screen.findByRole("dialog", { name: "无 OA 成本范围" });
 
     expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
+  });
+
+  test("shows no-OA tags as mutually exclusive across virtual projects", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch();
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "无 OA 成本范围" }));
+    const drawer = await screen.findByRole("dialog", { name: "无 OA 成本范围" });
+    await user.click(within(drawer).getByRole("button", { name: "新增虚拟项目" }));
+    const firstName = within(drawer).getByLabelText("虚拟项目名称");
+    await user.type(firstName, "项目 A{Enter}");
+    await user.click(within(drawer).getByText("材料费"));
+    await user.click(within(drawer).getByRole("button", { name: "新增虚拟项目" }));
+    await user.type(within(drawer).getByLabelText("虚拟项目名称"), "项目 B{Enter}");
+
+    expect(within(drawer).getByText("已归属：项目 A")).toBeInTheDocument();
+    expect(within(drawer).getByRole("checkbox", { name: /材料费/ })).toBeDisabled();
   });
 
   test("admin can run the cost statistics title audit icon", async () => {
@@ -438,16 +494,16 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按项目" }));
     expect(await screen.findByRole("button", { name: "项目统计时间范围：年月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=all&view=project&page_size=50&include_statistics=false",
       expect.any(Object),
     );
     expect(screen.getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
-    expect(screen.queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
+    expect(screen.getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /项目范围：/ })).not.toBeInTheDocument();
 
     const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
     expect(projectLane).not.toBeNull();
-    expect(within(projectLane as HTMLElement).getByText("58.2%")).toBeInTheDocument();
+    expect(within(projectLane as HTMLElement).getByText("47.4%")).toBeInTheDocument();
     expect(within(projectLane as HTMLElement).getByLabelText("支出 13360.00")).toHaveClass("cost-direction-amount--aligned");
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
 
@@ -479,7 +535,7 @@ describe("Cost statistics page", () => {
     expectProjectCostDialog("OA 成本归集明细");
     expect(dialog).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/allocations/${encodeURIComponent("cost-txn-001:allocation:PLC 模块采购")}?project_scope=active&view=project&scope=all`,
+      `/api/cost-statistics/allocations/${encodeURIComponent("cost-txn-001:allocation:PLC 模块采购")}?view=project&scope=all`,
       expect.any(Object),
     );
     expect(screen.getAllByText("PLC 模块采购").length).toBeGreaterThan(0);
@@ -659,7 +715,7 @@ describe("Cost statistics page", () => {
     const projectLane = () => screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane") as HTMLElement;
     expect(within(projectLane()).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(projectLane()).getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
-    expect(within(projectLane()).queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
+    expect(within(projectLane()).getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
 
     await chooseScopeOption(user, "项目统计时间范围：年月", "2026年");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
@@ -730,11 +786,11 @@ describe("Cost statistics page", () => {
     expect(within(primaryLane as HTMLElement).getByText("项目开销")).toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("差旅交通")).toBeInTheDocument();
     expect(within(primaryLane as HTMLElement).getByText("经营收入")).toBeInTheDocument();
-    expect(screen.getByLabelText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(screen.getByLabelText("支出金额 18560.00")).toHaveClass("cost-direction-amount--expense");
     expect(screen.getByLabelText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
     expect(
       Array.from(screen.getByLabelText("标签统计方向金额").children).map((node) => node.getAttribute("aria-label")),
-    ).toEqual(["支出金额 13360.00", "收入金额 2000.00"]);
+    ).toEqual(["支出金额 18560.00", "收入金额 2000.00"]);
     expect(within(primaryLane as HTMLElement).queryByText(/%$/)).not.toBeInTheDocument();
     const incomeCountRow = within(primaryLane as HTMLElement).getByRole("button", { name: /经营收入/ });
     expect(incomeCountRow).toHaveTextContent("支出 0 笔");
@@ -783,7 +839,7 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findByRole("dialog", { name: "银行流水详情" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/bank-transactions/cost-txn-001?project_scope=active&view=bank_tag&scope=2026-03",
+      "/api/cost-statistics/bank-transactions/cost-txn-001?view=bank_tag&scope=2026-03",
       expect.any(Object),
     );
   });
@@ -803,10 +859,10 @@ describe("Cost statistics page", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
 
-    expect(await within(dialog).findByText("支出金额 13360.00")).toHaveClass("cost-direction-amount--expense");
+    expect(await within(dialog).findByText("支出金额 18560.00")).toHaveClass("cost-direction-amount--expense");
     expect(within(dialog).getByText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/export-preview?month=2026-03&view=bank_tag&project_scope=active",
+      "/api/cost-statistics/export-preview?month=2026-03&view=bank_tag",
       expect.any(Object),
     );
 
@@ -848,8 +904,8 @@ describe("Cost statistics page", () => {
     expect(within(bankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("平安银行 账户 8821")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
-    expect(within(bankLane as HTMLElement).getByText("54.4%")).toBeInTheDocument();
-    expect(screen.getByLabelText("支出金额 22960.00")).toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByText("44.4%")).toBeInTheDocument();
+    expect(screen.getByLabelText("支出金额 28160.00")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByLabelText("支出 12500.00")).toHaveClass("cost-direction-amount--aligned");
 
     await user.click(within(bankLane as HTMLElement).getByRole("button", { name: /工商银行 账户 0001/ }));
@@ -1023,7 +1079,7 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("成本统计数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeEnabled();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -1044,7 +1100,7 @@ describe("Cost statistics page", () => {
       () => {
         const explorerCalls = fetchMock.mock.calls.filter(([request]) => (
           String(request)
-            === "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false"
+            === "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false"
         ));
         expect(explorerCalls).toHaveLength(1);
       },
@@ -1056,7 +1112,7 @@ describe("Cost statistics page", () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    const initialUrl = "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50&include_statistics=false";
+    const initialUrl = "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false";
 
     renderCostStatisticsPage();
 
@@ -1065,7 +1121,7 @@ describe("Cost statistics page", () => {
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([request]) => String(request) === initialUrl)).toHaveLength(2);
-      expect(fetchMock.mock.calls.filter(([request]) => String(request) === "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=1")).toHaveLength(2);
+      expect(fetchMock.mock.calls.filter(([request]) => String(request) === "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=1")).toHaveLength(2);
     });
   });
 
@@ -1105,7 +1161,7 @@ describe("Cost statistics page", () => {
     expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按时间" })).toHaveAttribute("aria-pressed", "true");
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      "/api/cost-statistics/explorer?scope=all&view=project&page_size=1",
       expect.any(Object),
     );
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();
@@ -1121,17 +1177,17 @@ describe("Cost statistics page", () => {
 
     expect(await within(dialog).findByText("预览结果")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/export-preview?month=all&view=time&project_scope=active&start_date=2026-03-10&end_date=2026-04-16",
+      "/api/cost-statistics/export-preview?month=all&view=time&start_date=2026-03-10&end_date=2026-04-16",
       expect.any(Object),
     );
-    expect(within(dialog).getByText("预计导出 6 条流水")).toBeInTheDocument();
-    expect(within(dialog).getByText("支出金额 22960.00")).toHaveClass("cost-direction-amount--expense");
+    expect(within(dialog).getByText("预计导出 7 条流水")).toBeInTheDocument();
+    expect(within(dialog).getByText("支出金额 28160.00")).toHaveClass("cost-direction-amount--expense");
     expect(within(dialog).getByText("收入金额 2000.00")).toHaveClass("cost-direction-amount--income");
 
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_2026-03-10至2026-04-16_按时间统计.xlsx")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/export?month=all&view=time&project_scope=active&start_date=2026-03-10&end_date=2026-04-16",
+      "/api/cost-statistics/export?month=all&view=time&start_date=2026-03-10&end_date=2026-04-16",
       expect.any(Object),
     );
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
@@ -1148,7 +1204,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "导出中心" }));
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      "/api/cost-statistics/explorer?scope=all&view=project&page_size=1",
       expect.any(Object),
     );
 
@@ -1156,7 +1212,7 @@ describe("Cost statistics page", () => {
 
     await waitFor(() => expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked());
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=all&view=project&page_size=1&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -1195,11 +1251,12 @@ describe("Cost statistics page", () => {
     await waitFor(() => expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked());
     await user.click(within(dialog).getByLabelText("交通费"));
     await user.click(within(dialog).getByLabelText("经营/办公费用"));
+    await user.click(within(dialog).getByLabelText("人工费/劳务费/服务费"));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
 
     expect(await within(dialog).findByText("预览结果")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export-preview?month=all&view=project&project_scope=active&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}`,
+      `/api/cost-statistics/export-preview?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}`,
       expect.any(Object),
     );
     expect(within(dialog).getByText("预计导出 2 条流水")).toBeInTheDocument();
@@ -1207,7 +1264,7 @@ describe("Cost statistics page", () => {
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_全部期间_按项目统计_按月_云南溯源科技.xlsx")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export?month=all&view=project&project_scope=active&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}&include_oa_details=true&include_invoice_details=true&include_exception_rows=true&include_ignored_rows=true&include_expense_content_summary=true&sort_by=time`,
+      `/api/cost-statistics/export?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&expense_type=${encodeURIComponent("设备货款及材料费")}&include_oa_details=true&include_invoice_details=true&include_exception_rows=true&include_ignored_rows=true&include_expense_content_summary=true&sort_by=time`,
       expect.any(Object),
     );
   });
@@ -1222,14 +1279,14 @@ describe("Cost statistics page", () => {
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("radio", { name: "按费用类型" }));
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      "/api/cost-statistics/explorer?scope=all&view=project&page_size=1",
       expect.any(Object),
     );
     await user.click(screen.getByRole("button", { name: "导出中心" }));
 
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=expense_type&project_scope=active&page_size=1&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=all&view=expense_type&page_size=1&include_statistics=false",
       expect.any(Object),
     );
     expectProjectCostDialog("导出中心");
@@ -1248,14 +1305,14 @@ describe("Cost statistics page", () => {
 
     expect(await within(dialog).findByText("预览结果")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export-preview?month=all&view=expense_type&project_scope=active&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
+      `/api/cost-statistics/export-preview?month=all&view=expense_type&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
       expect.any(Object),
     );
 
     await user.click(within(dialog).getByRole("button", { name: "导出" }));
     expect(await within(dialog).findByText("已导出 成本统计_2026-03-18至2026-04-16_按费用类型统计_交通费.xlsx")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/cost-statistics/export?month=all&view=expense_type&project_scope=active&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
+      `/api/cost-statistics/export?month=all&view=expense_type&start_date=2026-03-18&end_date=2026-04-16&expense_type=${encodeURIComponent("交通费")}`,
       expect.any(Object),
     );
   });

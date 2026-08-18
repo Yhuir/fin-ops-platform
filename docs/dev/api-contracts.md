@@ -80,17 +80,17 @@
 
 `GET /api/cost-statistics/explorer`
 
-- query 保持 `scope`、`view`、`project_scope`、筛选、cursor 与 `page_size` 合同；可选 `query` 会折叠空白并限制为 200 字符。
+- query 保持 `scope`、`view`、筛选、cursor 与 `page_size` 合同；可选 `query` 会折叠空白并限制为 200 字符。旧 `project_scope` 已移除，项目完成状态不再过滤历史成本。
 - 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
 - `include_statistics=false` 时 `statistics=null`，repository 可按当前 scope 下推事实读取。成本统计首屏先用该模式取得可见内容，再以独立 `page_size=1` 请求非阻塞加载全局 statistics；辅助统计失败不得清空或重新锁住已返回的内容。
 - `query` 只搜索当前 view 的事实域，并在 summary、facets、row count 和 cursor 分页之前生效；cursor identity 必须包含规范化 query，禁止跨搜索条件复用。
-- 五个 view 使用同一组按银行交易日期归属的 signed cost events；`project|bank|expense_type` 搜索 `bank_transaction × OA_unit` 归因行和无 OA 银行行，`time|bank_tag` 搜索同一事件集合的未拆分银行行。相同 scope 的根层 `summary.total_amount` 应一致。
+- `project|bank|expense_type` 使用 `bank_transaction × OA_unit` 归因行和无 OA 银行行；`time|bank_tag` 使用独立规则过滤后的原始 canonical 银行流水。全部视图按银行交易日期归属。三种归因视图相互对账，两个原始银行视图相互对账；五个 view 的根层总额不要求一致。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
 - 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
 
 `GET /api/cost-statistics/bank-transactions/{transaction_id}`
 
-- 服务五个 view 中 `row_kind=bank_transaction` 的行，返回当前成本事件对应的 canonical 银行流水详情；无 OA 行可包含虚拟项目名和“无 OA 分类”。必须携带当前 `view`、`scope` 与 `project_scope`；非法参数返回 `400 invalid_cost_statistics_bank_transaction_request`，未找到返回 `404`。
+- 服务五个 view 中 `row_kind=bank_transaction` 的行，返回对应 canonical 银行流水详情；无 OA 行可包含虚拟项目名和“无 OA 分类”。必须携带当前 `view` 与 `scope`；非法参数返回 `400 invalid_cost_statistics_bank_transaction_request`，未找到返回 `404`。
 
 `GET /api/cost-statistics/allocations/{allocation_id}`
 
@@ -102,11 +102,16 @@
 - 复用 explorer 相同事实源和筛选口径；preview 最多 8 行，download 受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 导出不入队、不等待 worker，也不读取旧 Cost 投影。
 
-`GET|PUT /api/cost-statistics/tag-rules`
+`GET|PUT /api/cost-statistics/time-tag-rules`
 
-- 写 owner 仍为 `AppSettingsService`，保持 version conflict、权限与 audit 合同。
-- GET 的候选仅来自当前全历史实际无 active OA 关系的支出流水标签；配置 `display_name` 和 `selected_tag_codes` 默认空。PUT 选择标签时名称必填，只允许保存当前候选或已保存但已不可用的 code。
-- 保存不触发 Cost read-model refresh；前端保存成功后重新 GET，下一次 canonical snapshot 对全部历史期间逐笔应用规则。
+- 只控制 `time|bank_tag`。写 owner 为 `AppSettingsService`，保持独立 version conflict、权限与 audit 合同。
+- 默认 `{mode: "all", selected_tag_codes: []}`，表示当前和未来新增标签、历史仍被事实引用的标签及 `__uncategorized__` 都进入；`mode=custom` 时仅保留 `selected_tag_codes`。
+
+`GET|PUT /api/cost-statistics/no-oa-rules`
+
+- 只控制 `project|bank|expense_type` 的无 OA 例外。默认 `projects=[]`；每项包含稳定 `id`、非空 `display_name` 与 `tag_codes`。
+- GET 候选仅来自当前全历史实际无 active OA 关系的支出流水标签。PUT 由服务端校验项目 ID/名称、候选范围与 tag→project 全局互斥；已保存但当前不可用的 code 仍可返回并由用户显式取消。
+- 两套规则保存都不触发 Cost read-model refresh；下一次 canonical snapshot 直接应用。保存任一规则不会修改或刷新另一套统计集合。
 
 ## Workbench 设置 API
 

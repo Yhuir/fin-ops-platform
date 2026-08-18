@@ -22,7 +22,7 @@ DAILY_REIMBURSEMENT_TYPE = "日常报销"
 PAYMENT_APPLICATION_TYPE = "支付申请"
 MISSING_OA_EXPENSE_TYPE_LABEL = "未填写 OA 费用类型"
 NO_OA_EXPENSE_TYPE_LABEL = "无 OA 分类"
-VIRTUAL_PROJECT_ID = "cost-statistics:no-oa"
+VIRTUAL_PROJECT_ID_PREFIX = "cost-statistics:no-oa:"
 
 
 class CostStatisticsAllocationConflictError(ValueError):
@@ -35,11 +35,7 @@ class CostStatisticsPolicy:
     def __init__(
         self,
         snapshot: dict[str, Any],
-        *,
-        project_scope: str,
     ) -> None:
-        if project_scope not in {"active", "all"}:
-            raise ValueError("project_scope must be active or all")
         self._settings = dict(snapshot.get("settings") or {})
         self._bank_rows = [
             dict(row)
@@ -68,16 +64,30 @@ class CostStatisticsPolicy:
             for value in list(snapshot.get("available_years") or [])
             if re.fullmatch(r"\d{4}", str(value))
         ]
-        self._project_scope = project_scope
+        self._time_tag_settings = (
+            AppSettingsService.cost_statistics_time_tag_selection_payload_from_settings(
+                self._settings
+            )
+        )
         self._no_oa_settings = (
-            AppSettingsService.cost_statistics_tag_selection_payload_from_settings(
+            AppSettingsService.cost_statistics_no_oa_projects_payload_from_settings(
                 self._settings
             )
         )
 
     @cached_property
     def bank_flow_rows(self) -> list[dict[str, Any]]:
-        return [_serialize_bank_row(row) for row in self._raw_cost_events]
+        mode = _clean_text(self._time_tag_settings.get("mode")) or "all"
+        selected_codes = {
+            _clean_text(code)
+            for code in list(self._time_tag_settings.get("selected_tag_codes") or [])
+            if _clean_text(code)
+        }
+        return [
+            _serialize_bank_row(row)
+            for row in self._bank_rows
+            if mode == "all" or _bank_tag_code(row) in selected_codes
+        ]
 
     @cached_property
     def serialized_cost_rows(self) -> list[dict[str, Any]]:
@@ -85,27 +95,22 @@ class CostStatisticsPolicy:
 
     @cached_property
     def allocation_quality(self) -> dict[str, Any]:
-        return dict(self._allocation_result[2])
+        return dict(self._allocation_result[1])
 
     @cached_property
     def _allocation_result(
         self,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         return _cost_entries(
             self._groups,
             all_bank_rows=self._bank_rows,
             oa_related_bank_ids=self._oa_related_bank_ids,
-            project_scope=self._project_scope,
             settings=self._settings,
         )
 
     @cached_property
     def _raw_cost_entries(self) -> list[dict[str, Any]]:
         return self._allocation_result[0]
-
-    @cached_property
-    def _raw_cost_events(self) -> list[dict[str, Any]]:
-        return self._allocation_result[1]
 
     def explorer_page(
         self,
@@ -238,10 +243,6 @@ class CostStatisticsPolicy:
             "bank_accounts": bank_accounts_from_settings_payload(self._settings),
             "allocation_quality": (
                 None if bank_flow_view else self.allocation_quality
-            ),
-            "tag_selection_version": int(
-                self._no_oa_settings.get("version")
-                or 1
             ),
         }
 
@@ -448,6 +449,8 @@ class CostStatisticsPolicy:
             ):
                 continue
             code = _bank_tag_code(bank_row)
+            if code == COST_STATISTICS_UNCATEGORIZED_TAG_CODE:
+                continue
             context = bank_tag_context_from_row(bank_row)
             label = _clean_text(context.get("bank_tag_label")) or "未分类"
             primary = _clean_text(context.get("bank_tag_primary_label")) or label
@@ -479,22 +482,54 @@ class CostStatisticsPolicy:
             ),
         )
 
+    def time_tag_candidates(self) -> list[dict[str, Any]]:
+        candidates: dict[str, dict[str, Any]] = {}
+        for bank_row in self._bank_rows:
+            code = _bank_tag_code(bank_row)
+            context = bank_tag_context_from_row(bank_row)
+            label = _clean_text(context.get("bank_tag_label")) or "未标记流水"
+            primary = _clean_text(context.get("bank_tag_primary_label")) or label
+            sub = _clean_text(context.get("bank_tag_sub_label")) or label
+            path = [
+                _clean_text(value)
+                for value in list(context.get("bank_tag_label_path") or [])
+                if _clean_text(value)
+            ]
+            direction = "income" if _inflow_amount(bank_row) is not None else "expense"
+            existing = candidates.get(code)
+            if existing is not None:
+                if existing.get("direction") != direction:
+                    existing["direction"] = "any"
+                continue
+            candidates[code] = {
+                    "code": code,
+                    "label": label,
+                    "path": path or ([primary] if primary == sub else [primary, sub]),
+                    "source": "observed_bank_fact",
+                    "status": "active",
+                    "direction": direction,
+                    "output_primary_label": primary,
+                    "output_sub_label": sub,
+                }
+        return sorted(
+            candidates.values(),
+            key=lambda item: (
+                str(item.get("direction") or ""),
+                str(item.get("output_primary_label") or ""),
+                str(item.get("output_sub_label") or ""),
+                str(item.get("code") or ""),
+            ),
+        )
+
 
 def _cost_entries(
     groups: list[dict[str, Any]],
     *,
     all_bank_rows: list[dict[str, Any]],
     oa_related_bank_ids: set[str],
-    project_scope: str,
     settings: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    completed_project_ids, completed_project_names = (
-        _completed_project_identities(settings)
-        if project_scope == "active"
-        else (set(), set())
-    )
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     entries: list[dict[str, Any]] = []
-    events: list[dict[str, Any]] = []
     owners: dict[str, str] = {}
     event_owners: dict[str, str] = {}
     protected_bank_ids = set(oa_related_bank_ids)
@@ -511,7 +546,7 @@ def _cost_entries(
             for row in list(group.get("bank_rows") or [])
             if isinstance(row, dict)
         ]
-        if not oa_rows or not group_bank_rows:
+        if not group_bank_rows:
             continue
         relation_case_id = _clean_text(group.get("group_id"))
         if not relation_case_id:
@@ -524,6 +559,23 @@ def _cost_entries(
             if _bank_transaction_id(row)
         }
         protected_bank_ids.update(group_bank_ids)
+        declared_oa_ids = {
+            _clean_text(value)
+            for value in list(group.get("declared_oa_ids") or [])
+            if _clean_text(value)
+        }
+        loaded_oa_ids = {
+            _clean_text(row.get("id") or row.get("row_id"))
+            for row in oa_rows
+            if _clean_text(row.get("id") or row.get("row_id"))
+        }
+        if declared_oa_ids and loaded_oa_ids != declared_oa_ids:
+            excluded_by_reason["incomplete_oa_members"] = (
+                excluded_by_reason.get("incomplete_oa_members", 0) + 1
+            )
+            continue
+        if not oa_rows:
+            continue
         if not all(_is_completed_oa_cost_row(row) for row in oa_rows):
             excluded_by_reason["incomplete_oa_relation"] = (
                 excluded_by_reason.get("incomplete_oa_relation", 0) + 1
@@ -616,29 +668,13 @@ def _cost_entries(
                 contexts,
                 oa_total=oa_total,
             )
-            included_allocations = [
-                (context, amount)
-                for context, amount in allocations
-                if not _is_completed_project_allocation(
-                    context,
-                    completed_project_ids=completed_project_ids,
-                    completed_project_names=completed_project_names,
-                )
-            ]
+            included_allocations = allocations
             included_event_amount = sum(
                 (amount for _context, amount in included_allocations),
                 start=ZERO,
             ).quantize(MONEY_QUANTUM)
             if included_event_amount == ZERO:
                 continue
-            events.append(
-                _cost_event(
-                    bank_row,
-                    relation_case_id=relation_case_id,
-                    amount=included_event_amount,
-                    source_kind="oa",
-                )
-            )
             for context, allocated_amount in included_allocations:
                 entries.append(
                     _allocation_entry(
@@ -652,24 +688,31 @@ def _cost_entries(
                     )
                 )
 
-    no_oa_payload = AppSettingsService.cost_statistics_tag_selection_payload_from_settings(
+    no_oa_payload = AppSettingsService.cost_statistics_no_oa_projects_payload_from_settings(
         settings
     )
-    virtual_project_name = _clean_text(no_oa_payload.get("display_name"))
-    selected_tag_codes = {
-        _clean_text(code)
-        for code in list(no_oa_payload.get("selected_tag_codes") or [])
+    project_by_tag = {
+        _clean_text(code): {
+            "id": _clean_text(project.get("id")),
+            "display_name": _clean_text(project.get("display_name")),
+        }
+        for project in list(no_oa_payload.get("projects") or [])
+        if isinstance(project, dict)
+        and _clean_text(project.get("id"))
+        and _clean_text(project.get("display_name"))
+        for code in list(project.get("tag_codes") or [])
         if _clean_text(code)
     }
-    if virtual_project_name and selected_tag_codes:
+    if project_by_tag:
         for bank_row in all_bank_rows:
             transaction_id = _bank_transaction_id(bank_row)
             amount = _outflow_amount(bank_row)
+            project = project_by_tag.get(_bank_tag_code(bank_row))
             if (
                 not transaction_id
                 or transaction_id in protected_bank_ids
                 or amount is None
-                or _bank_tag_code(bank_row) not in selected_tag_codes
+                or project is None
             ):
                 continue
             event = _cost_event(
@@ -677,13 +720,18 @@ def _cost_entries(
                 relation_case_id="",
                 amount=amount,
                 source_kind="no_oa",
-                project_name=virtual_project_name,
+                project_name=project["display_name"],
+                project_id=project["id"],
             )
-            events.append(event)
-            entries.append(_no_oa_entry(event, project_name=virtual_project_name))
+            entries.append(
+                _no_oa_entry(
+                    event,
+                    project_name=project["display_name"],
+                    project_id=project["id"],
+                )
+            )
     return (
         sorted(entries, key=_row_sort_key, reverse=True),
-        sorted(events, key=_row_sort_key, reverse=True),
         {
             "excluded_allocation_count": sum(excluded_by_reason.values()),
             "excluded_by_reason": [
@@ -701,6 +749,7 @@ def _cost_event(
     amount: Decimal,
     source_kind: str,
     project_name: str = "",
+    project_id: str = "",
 ) -> dict[str, Any]:
     return {
         **dict(bank_row),
@@ -709,12 +758,21 @@ def _cost_event(
         "source_kind": source_kind,
         "cost_amount_decimal": amount.quantize(MONEY_QUANTUM),
         "project_name": project_name,
-        "project_id": VIRTUAL_PROJECT_ID if source_kind == "no_oa" else "",
+        "project_id": (
+            f"{VIRTUAL_PROJECT_ID_PREFIX}{project_id}"
+            if source_kind == "no_oa"
+            else ""
+        ),
         "expense_type": NO_OA_EXPENSE_TYPE_LABEL if source_kind == "no_oa" else "",
     }
 
 
-def _no_oa_entry(event: dict[str, Any], *, project_name: str) -> dict[str, Any]:
+def _no_oa_entry(
+    event: dict[str, Any],
+    *,
+    project_name: str,
+    project_id: str,
+) -> dict[str, Any]:
     transaction_id = _bank_transaction_id(event)
     occurred_at = _clean_text(
         event.get("trade_time") or event.get("pay_receive_time") or event.get("txn_date")
@@ -735,7 +793,7 @@ def _no_oa_entry(event: dict[str, Any], *, project_name: str) -> dict[str, Any]:
         "occurred_at": occurred_at,
         "direction": "支出",
         "project_name": project_name,
-        "project_id": VIRTUAL_PROJECT_ID,
+        "project_id": f"{VIRTUAL_PROJECT_ID_PREFIX}{project_id}",
         "expense_type": NO_OA_EXPENSE_TYPE_LABEL,
         "expense_content": _clean_text(event.get("summary") or event.get("remark")) or "—",
         "oa_applicant": "",
@@ -777,10 +835,14 @@ def _proportional_allocations(
 
 
 def _paid_wrong_refund_tag_codes(settings: dict[str, Any]) -> set[str]:
-    payload = AppSettingsService.cost_statistics_tag_selection_payload_from_settings(settings)
+    tag_dictionary = (
+        settings.get("bank_transaction_tags")
+        if isinstance(settings.get("bank_transaction_tags"), dict)
+        else {}
+    )
     return {
         _clean_text(tag.get("code"))
-        for tag in list(payload.get("active_tags") or [])
+        for tag in list(tag_dictionary.get("definitions") or [])
         if isinstance(tag, dict)
         and "付错退款"
         in {
@@ -1182,93 +1244,6 @@ def _first_present(*values: Any) -> Any:
     return next((value for value in values if value is not None), None)
 
 
-def _completed_project_identities(
-    settings: dict[str, Any],
-) -> tuple[set[str], set[str]]:
-    projects = (
-        settings.get("projects")
-        if isinstance(settings.get("projects"), dict)
-        else {}
-    )
-    completed_ids = {
-        _clean_text(value)
-        for value in list(
-            projects.get("completed_project_ids")
-            or settings.get("completed_project_ids")
-            or []
-        )
-        if _clean_text(value)
-    }
-    completed_names: set[str] = set()
-    candidates = [
-        *[
-            item
-            for item in list(projects.get("completed") or [])
-            if isinstance(item, dict)
-        ],
-        *[
-            item
-            for item in list(settings.get("manual_projects") or [])
-            if isinstance(item, dict)
-            and _clean_text(item.get("id")) in completed_ids
-        ],
-        *[
-            item
-            for item in list(settings.get("synced_projects") or [])
-            if isinstance(item, dict)
-            and _clean_text(item.get("id")) in completed_ids
-        ],
-    ]
-    for project in candidates:
-        project_id = _clean_text(project.get("id"))
-        project_name = _clean_text(
-            project.get("project_name") or project.get("name")
-        )
-        if project_id:
-            completed_ids.add(project_id)
-        if project_name:
-            completed_names.add(project_name)
-    return completed_ids, completed_names
-
-
-def _is_completed_project_allocation(
-    context: dict[str, Any],
-    *,
-    completed_project_ids: set[str],
-    completed_project_names: set[str],
-) -> bool:
-    source_contexts = context.get("source_project_contexts")
-    if isinstance(source_contexts, list) and source_contexts:
-        return all(
-            _is_completed_project_identity(
-                item,
-                completed_project_ids=completed_project_ids,
-                completed_project_names=completed_project_names,
-            )
-            for item in source_contexts
-            if isinstance(item, dict)
-        )
-    return _is_completed_project_identity(
-        context,
-        completed_project_ids=completed_project_ids,
-        completed_project_names=completed_project_names,
-    )
-
-
-def _is_completed_project_identity(
-    context: dict[str, Any],
-    *,
-    completed_project_ids: set[str],
-    completed_project_names: set[str],
-) -> bool:
-    project_id = _clean_text(context.get("project_id"))
-    project_name = _clean_text(context.get("project_name"))
-    return bool(
-        (project_id and project_id in completed_project_ids)
-        or (project_name and project_name in completed_project_names)
-    )
-
-
 def _is_completed_oa_cost_row(row: dict[str, Any]) -> bool:
     return bool(
         _clean_text(row.get("completed_at"))
@@ -1489,30 +1464,24 @@ def _bank_tag_facet_sort_key(
 
 
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    total = sum(
-        (_decimal(row.get("amount")) or ZERO for row in rows),
-        start=ZERO,
-    )
     expense_rows = [row for row in rows if row.get("direction") == "支出"]
     income_rows = [row for row in rows if row.get("direction") == "收入"]
+    expense_total = sum(
+        (abs(_decimal(row.get("amount")) or ZERO) for row in expense_rows),
+        start=ZERO,
+    )
+    income_total = sum(
+        (abs(_decimal(row.get("amount")) or ZERO) for row in income_rows),
+        start=ZERO,
+    )
     return {
         "row_count": len(rows),
         "transaction_count": len(
             {_row_identity(row) for row in rows}
         ),
-        "total_amount": _money(total),
-        "expense_amount": _money(
-            sum(
-                (_decimal(row.get("amount")) or ZERO for row in expense_rows),
-                start=ZERO,
-            )
-        ),
-        "income_amount": _money(
-            sum(
-                (abs(_decimal(row.get("amount")) or ZERO) for row in income_rows),
-                start=ZERO,
-            )
-        ),
+        "total_amount": _money(expense_total - income_total),
+        "expense_amount": _money(expense_total),
+        "income_amount": _money(income_total),
         "expense_transaction_count": len(
             {_row_identity(row) for row in expense_rows}
         ),

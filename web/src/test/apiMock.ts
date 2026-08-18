@@ -3521,14 +3521,6 @@ type CostEntryFixture = {
   };
 };
 
-const completedCostProjectNames = new Set([
-  "昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
-]);
-
-function isCostProjectVisibleForScope(projectName: string, projectScope: string | null | undefined) {
-  return projectScope === "all" || !completedCostProjectNames.has(projectName);
-}
-
 const costStatisticsProjectRows: Record<string, Record<string, CostProjectRow[]>> = {
   "2026-03": {
     云南溯源科技: [
@@ -3852,7 +3844,6 @@ function buildAllCostProjectRows() {
 
 function buildCostStatisticsExplorerPayload(
   month: string,
-  projectScope = "active",
   options: { duplicateTransactionRows?: boolean } = {},
 ) {
   const baseProjectRowMap = month === "all" ? buildAllCostProjectRows() : (costStatisticsProjectRows[month] ?? {});
@@ -3873,11 +3864,7 @@ function buildCostStatisticsExplorerPayload(
       ];
     }
   }
-  const projectRowMap = Object.fromEntries(
-    Object.entries(sourceProjectRowMap).filter(([projectName]) =>
-      isCostProjectVisibleForScope(projectName, projectScope),
-    ),
-  );
+  const projectRowMap = sourceProjectRowMap;
   const timeRows = Object.entries(projectRowMap)
     .flatMap(([projectName, rows]) =>
       rows.map((row) => ({
@@ -4409,7 +4396,6 @@ function buildFilteredCostTimeRows({
   endDate,
   projectNames,
   expenseTypes,
-  projectScope,
 }: {
   month: string;
   startMonth?: string | null;
@@ -4418,7 +4404,6 @@ function buildFilteredCostTimeRows({
   endDate?: string | null;
   projectNames?: string[];
   expenseTypes?: string[];
-  projectScope?: string | null;
 }) {
   const projectNameSet = new Set((projectNames ?? []).filter(Boolean));
   const expenseTypeSet = new Set((expenseTypes ?? []).filter(Boolean));
@@ -4441,7 +4426,6 @@ function buildFilteredCostTimeRows({
         })),
       ),
     )
-    .filter((row) => isCostProjectVisibleForScope(row.project_name, projectScope ?? "active"))
     .filter((row) => (projectNameSet.size > 0 ? projectNameSet.has(row.project_name) : true))
     .filter((row) => (expenseTypeSet.size > 0 ? expenseTypeSet.has(row.expense_type) : true))
     .filter((row) => {
@@ -4519,7 +4503,6 @@ function buildCostStatisticsExportPreviewPayload({
   projectNames,
   aggregateBy,
   expenseTypes,
-  projectScope,
   startMonth,
   endMonth,
   startDate,
@@ -4530,7 +4513,6 @@ function buildCostStatisticsExportPreviewPayload({
   projectNames?: string[];
   aggregateBy?: string | null;
   expenseTypes?: string[];
-  projectScope?: string | null;
   startMonth?: string | null;
   endMonth?: string | null;
   startDate?: string | null;
@@ -4544,12 +4526,11 @@ function buildCostStatisticsExportPreviewPayload({
     endDate,
     projectNames,
     expenseTypes,
-    projectScope,
   });
   const bankFlowRows = (view === "time" || view === "bank_tag")
     ? resolveCostStatisticMonths(month, startMonth, endMonth, startDate, endDate)
         .flatMap((resolvedMonth) => (
-          buildCostStatisticsExplorerPayload(resolvedMonth, projectScope ?? "active").bank_flow_time_rows
+          buildCostStatisticsExplorerPayload(resolvedMonth).bank_flow_time_rows
         ))
         .filter((row) => {
           const tradeDate = row.trade_time.slice(0, 10);
@@ -5739,7 +5720,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       };
     },
-    "/api/cost-statistics/tag-rules": ({ init, jsonBody }) => {
+    "/api/cost-statistics/time-tag-rules": ({ init, jsonBody }) => {
       const selectedCodes = Array.isArray(jsonBody?.selected_tag_codes)
         ? jsonBody.selected_tag_codes.map((code) => String(code))
         : [];
@@ -5747,12 +5728,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         body: {
           version: init?.method === "PUT" ? 2 : 1,
           bank_auto_tag_rules_version: 8,
-          display_name: init?.method === "PUT" ? String(jsonBody?.display_name ?? "") : "",
-          default_selection_applied: false,
+          mode: init?.method === "PUT" ? String(jsonBody?.mode ?? "all") : "all",
           selected_tag_codes: selectedCodes,
-          effective_selected_tag_codes: selectedCodes,
           inactive_selected_tag_codes: [],
-          active_tags: [
+          available_tags: [
             {
               code: "fee",
               label: "材料费",
@@ -5765,23 +5744,41 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             },
             {
               code: "__uncategorized__",
-              label: "未分类",
-              path: ["未分类", "未分类"],
+              label: "未标记流水",
+              path: ["未标记流水"],
               source: "system",
               status: "active",
-              direction: "expense",
-              output_primary_label: "未分类",
-              output_sub_label: "未分类",
+              direction: "any",
+              output_primary_label: "未标记流水",
+              output_sub_label: "未标记流水",
             },
           ],
           can_save: options.costTagRulesCanSave ?? true,
         },
       };
     },
+    "/api/cost-statistics/no-oa-rules": ({ init, jsonBody }) => ({
+      body: {
+        version: init?.method === "PUT" ? 2 : 1,
+        bank_auto_tag_rules_version: 8,
+        projects: init?.method === "PUT" && Array.isArray(jsonBody?.projects) ? jsonBody.projects : [],
+        inactive_selected_tag_codes: [],
+        available_tags: [{
+          code: "fee",
+          label: "材料费",
+          path: ["费用", "材料费"],
+          source: "custom",
+          status: "active",
+          direction: "expense",
+          output_primary_label: "费用",
+          output_sub_label: "材料费",
+        }],
+        can_save: options.costTagRulesCanSave ?? true,
+      },
+    }),
     "/api/cost-statistics/explorer": ({ url }) => {
       const scope = url.searchParams.get("scope") ?? "all";
       const month = scope.startsWith("year:") ? "all" : scope;
-      const projectScope = url.searchParams.get("project_scope") ?? "active";
       if (costExplorerFailuresRemaining > 0 && month !== "all") {
         costExplorerFailuresRemaining -= 1;
         return {
@@ -5798,7 +5795,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return {
         body: buildCostStatisticsExplorerPagePayload(
           url,
-          buildCostStatisticsExplorerPayload(month, projectScope, {
+          buildCostStatisticsExplorerPayload(month, {
             duplicateTransactionRows: options.costDuplicateTransactionRows,
           }),
         ),
@@ -5807,7 +5804,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/cost-statistics/export-preview": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       const view = url.searchParams.get("view") ?? "time";
-      const projectScope = url.searchParams.get("project_scope") ?? "active";
       const projectNames = url.searchParams.getAll("project_name");
       const aggregateBy = url.searchParams.get("aggregate_by");
       const expenseTypes = url.searchParams.getAll("expense_type");
@@ -5822,7 +5818,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           projectNames,
           aggregateBy,
           expenseTypes,
-          projectScope,
           startMonth,
           endMonth,
           startDate,

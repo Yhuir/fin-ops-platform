@@ -301,7 +301,6 @@ def _raw_bank_oa_invoice_scenario(name: str, key_prefix: str) -> dict[str, objec
     _set_bank_oa_cost_probe(
         scenario,
         view="bank",
-        project_scope="active",
         include_semantic_assertion=True,
     )
     return scenario
@@ -311,12 +310,9 @@ def _set_bank_oa_cost_probe(
     scenario: dict[str, object],
     *,
     view: str,
-    project_scope: str | None,
     include_semantic_assertion: bool,
 ) -> None:
     query = f"scope=2026-07&view={view}"
-    if project_scope is not None:
-        query = f"{query}&project_scope={project_scope}"
     for checkpoint in [
         *scenario["checkpoints"],  # type: ignore[index]
         scenario["recovery_checkpoint"],
@@ -1605,7 +1601,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             _set_bank_oa_cost_probe(
                 scenario,
                 view=view,
-                project_scope="active",
                 include_semantic_assertion=True,
             )
             with self.subTest(view=view), TemporaryDirectory() as temp_dir:
@@ -1614,30 +1609,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Workbench-dependent Cost view"):
                     write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
 
-    def test_bank_oa_relation_impact_cost_probe_requires_active_project_scope(self) -> None:
-        for project_scope in (None, "all"):
-            scenario = _raw_bank_oa_invoice_scenario(
-                f"cost-scope-{project_scope}",
-                f"cost-scope-{project_scope}",
-            )
-            _set_bank_oa_cost_probe(
-                scenario,
-                view="bank",
-                project_scope=project_scope,
-                include_semantic_assertion=True,
-            )
-            with self.subTest(project_scope=project_scope), TemporaryDirectory() as temp_dir:
-                path = Path(temp_dir) / "scenario.json"
-                path.write_text(json.dumps([scenario]), encoding="utf-8")
-                with self.assertRaisesRegex(ValueError, "project_scope=active"):
-                    write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
-
     def test_bank_oa_relation_impact_cost_probe_rejects_positional_transaction_identity_only(self) -> None:
         scenario = _raw_bank_oa_invoice_scenario("cost-identity-only", "cost-identity-only")
         _set_bank_oa_cost_probe(
             scenario,
             view="bank",
-            project_scope="active",
             include_semantic_assertion=False,
         )
         with TemporaryDirectory() as temp_dir:
@@ -1646,12 +1622,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "relation-derived semantic"):
                 write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
 
-    def test_bank_oa_relation_impact_cost_probe_accepts_active_relation_view_with_semantic_assertion(self) -> None:
+    def test_bank_oa_relation_impact_cost_probe_accepts_relation_view_with_semantic_assertion(self) -> None:
         scenario = _raw_bank_oa_invoice_scenario("cost-relation-impact", "cost-relation-impact")
         _set_bank_oa_cost_probe(
             scenario,
             view="bank",
-            project_scope="active",
             include_semantic_assertion=True,
         )
         with TemporaryDirectory() as temp_dir:
@@ -1661,100 +1636,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(loaded.shape, "bank_oa_invoice")
 
-    def test_bank_oa_relation_impact_cost_probe_allows_additional_all_scope_for_system_audit(self) -> None:
-        scenario = _raw_bank_oa_invoice_scenario("cost-active-and-all", "cost-active-and-all")
-        _set_bank_oa_cost_probe(
-            scenario,
-            view="bank",
-            project_scope="active",
-            include_semantic_assertion=True,
-        )
-        for checkpoint in [
-            *scenario["checkpoints"],  # type: ignore[index]
-            scenario["recovery_checkpoint"],
-        ]:
-            active_consumer = next(
-                consumer
-                for consumer in checkpoint["consumers"]
-                if consumer["page_key"] == "cost-statistics"
-            )
-            all_consumer = json.loads(json.dumps(active_consumer))
-            all_consumer["name"] = f"{all_consumer['name']}-all"
-            all_consumer["path"] = all_consumer["path"].replace(
-                "project_scope=active",
-                "project_scope=all",
-            )
-            checkpoint["consumers"].append(all_consumer)
-
-        with TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "scenario.json"
-            path.write_text(json.dumps([scenario]), encoding="utf-8")
-            loaded = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
-
-        for checkpoint in (*loaded.checkpoints, loaded.recovery_checkpoint):
-            assert checkpoint is not None
-            self.assertEqual(
-                sum(consumer.page_key == "cost-statistics" for consumer in checkpoint.consumers),
-                2,
-            )
-
-    def test_bank_oa_relation_impact_cost_probe_allows_empty_active_scope_with_exact_all_scope_proof(self) -> None:
-        scenario = _raw_bank_oa_invoice_scenario(
-            "cost-empty-active-and-all",
-            "cost-empty-active-and-all",
-        )
-        _set_bank_oa_cost_probe(
-            scenario,
-            view="project",
-            project_scope="active",
-            include_semantic_assertion=True,
-        )
-        for checkpoint in [
-            *scenario["checkpoints"],  # type: ignore[index]
-            scenario["recovery_checkpoint"],
-        ]:
-            active_consumer = next(
-                consumer
-                for consumer in checkpoint["consumers"]
-                if consumer["page_key"] == "cost-statistics"
-            )
-            all_consumer = json.loads(json.dumps(active_consumer))
-            all_consumer["name"] = f"{all_consumer['name']}-all"
-            all_consumer["path"] = all_consumer["path"].replace(
-                "project_scope=active",
-                "project_scope=all",
-            )
-            checkpoint["consumers"].append(all_consumer)
-            active_consumer["assertions"] = [{"pointer": "/rows", "equals": []}]
-
-        with TemporaryDirectory() as temp_dir:
-            path = Path(temp_dir) / "scenario.json"
-            path.write_text(json.dumps([scenario]), encoding="utf-8")
-            loaded = write_operation_e2e_smoke.load_scenarios(
-                path,
-                http_target_ms=1000,
-            )[0]
-
-        for checkpoint in (*loaded.checkpoints, loaded.recovery_checkpoint):
-            assert checkpoint is not None
-            active_consumer = next(
-                consumer
-                for consumer in checkpoint.consumers
-                if consumer.page_key == "cost-statistics"
-                and "project_scope=active" in consumer.probe.path
-            )
-            self.assertEqual(
-                active_consumer.assertions,
-                (
-                    write_operation_e2e_smoke.JsonPointerAssertion(
-                        "/rows",
-                        "equals",
-                        [],
-                    ),
-                ),
-            )
-
-    def test_bank_oa_relation_impact_cost_probe_rejects_only_empty_active_scopes(self) -> None:
+    def test_bank_oa_relation_impact_cost_probe_rejects_only_empty_cost_proof(self) -> None:
         scenario = _raw_bank_oa_invoice_scenario(
             "cost-only-empty-active",
             "cost-only-empty-active",
@@ -1762,7 +1644,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         _set_bank_oa_cost_probe(
             scenario,
             view="project",
-            project_scope="active",
             include_semantic_assertion=True,
         )
         for checkpoint in [
@@ -1781,7 +1662,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             path.write_text(json.dumps([scenario]), encoding="utf-8")
             with self.assertRaisesRegex(
                 ValueError,
-                "active Cost proof must include a relation-derived semantic field",
+                "Cost proof must include a relation-derived semantic field",
             ):
                 write_operation_e2e_smoke.load_scenarios(
                     path,
@@ -1867,7 +1748,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 {
                     **cost_consumer,
                     "name": "cost-statistics-all-scope",
-                    "path": f"{cost_consumer['path']}&project_scope=all",
+                    "path": f"{cost_consumer['path']}&probe=all",
                 }
             )
 
@@ -1895,7 +1776,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                     {
                         **cost_consumer,
                         "name": f"cost-statistics-{suffix}",
-                        "path": f"{cost_consumer['path']}&project_scope=all&probe={suffix}",
+                        "path": f"{cost_consumer['path']}&probe={suffix}",
                         "assertions": [{"pointer": "/rows", "equals": []}],
                     }
                 )
@@ -1924,7 +1805,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                     {
                         **cost_consumer,
                         "name": f"cost-statistics-{suffix}",
-                        "path": f"{cost_consumer['path']}&project_scope=all&probe={suffix}",
+                        "path": f"{cost_consumer['path']}&probe={suffix}",
                     }
                 )
 
@@ -2850,7 +2731,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 write_operation_e2e_smoke.ConsumerProbe(
                     probe=http_slo_probe.HttpProbe(
                         "cost-all",
-                        "/api/cost-statistics/explorer?scope=all&view=time&project_scope=active",
+                        "/api/cost-statistics/explorer?scope=all&view=time",
                         target_ms=1000,
                     ),
                     assertions=(

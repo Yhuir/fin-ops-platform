@@ -56,7 +56,8 @@
 | Affected scope/version | 调用页面 | 普通保存只返回业务 version 和信息性 affected scopes；不写页面 refresh queue |
 | OA manual import result envelope | 设置页 | 返回精确 affected scopes，`freshness_targets` 与 `operation_barrier_targets` 为空；后续业务页面 normal GET 读取 canonical facts |
 | 银行账户映射只读 payload | cost statistics canonical query | `AppSettingsService.get_cost_statistics_source_settings_payload()` 一次输出 `bank_account_mappings` 与 `bank_transaction_tags`；下游不得直接读取设置页前端状态 |
-| 成本统计无 OA 范围 payload | cost_statistics query/filter route | `AppSettingsService.get_cost_statistics_tag_selection_payload()` 输出 schema v3、虚拟项目 `display_name` 和 selected tag codes，默认都为空。实际候选由成本统计 route 从 canonical 无 active OA 支出计算并作为 `allowed_tag_codes` 传入更新端口；选择非空时项目名必填。设置 owner 只做归一化、CAS、持久化和 audit，不判断流水是否无 OA，不写成本统计 read model、不入队 dirty scope；自动标签归档不得静默 detach 此设置 |
+| 成本统计按标签/按时间规则 payload | cost_statistics query/filter route | `get/update_cost_statistics_time_tag_selection*` 输出独立 schema/version、`mode=all|custom` 和 stable tag codes；默认 all 自动包含后续新标签。候选由成本统计 route 合并完整标签字典、历史 observed code 与“未标记流水”。设置 owner 只做归一化、CAS、持久化和 audit，不读取 OA 关系 |
+| 成本统计无 OA 范围 payload | cost_statistics query/filter route | `get/update_cost_statistics_no_oa_projects*` 输出独立 schema/version 与 `projects[{id,display_name,tag_codes}]`，默认空数组；服务端强制项目 ID/名称唯一和标签全局互斥。实际候选由成本统计 route 从 canonical 无 active OA 支出计算并作为 `allowed_tag_codes` 传入；成本计算时仍逐条检查 active OA 保护。设置 owner 不判断流水是否无 OA，不写成本统计 read model、不入队 dirty scope |
 | 外部往来标签选择事务端口 | turnover ledger local write UoW | 只允许调用 `get_turnover_ledger_tag_selection_state()`、`commit_turnover_ledger_tag_selection_update(...)`、`restore_turnover_ledger_tag_selection_state(...)`；rollback 只恢复该 setting family，禁止读取/保存整份私有 `_snapshot` |
 | 批量账务标签规则 payload | batch-accounting route/service | 输出实际出现的 active labels、stable selected codes、version 和 `can_save`；更新只接受完整 `selected_tag_codes[] + expected_version`，semantic no-op 不递增 version |
 | 批量账务标签规则 result | batch-accounting drawer/list | `update_batch_accounting_tag_selection(...)` 只合并 `app.app_settings.batch_accounting_tag_selection`；PostgreSQL 在同一事务内检查 expected version，归档标签由 bank-tag owner 写链原子剔除，不写页面 read model 或 queue |
@@ -73,7 +74,7 @@
   settings route 不自行构造或重复入队；OA 待付款、
   税金抵扣、成本统计和关联台等 direct 页面在下一次 normal GET 读取最新事实；
   `workbench_relation` 是否刷新由其 owner 的显式合同决定。
-- Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。`AppSettingsService.get_cost_statistics_source_settings_payload()` 是成本统计读取银行账户映射与自动标签规则版本的受控 read port；`get_cost_statistics_tag_selection_payload()` / `update_cost_statistics_tag_selection(...)` 是 schema v3 无 OA 虚拟项目设置的受控 read/write port，由成本统计 route 注入实际候选并暴露给既有页面抽屉；Turnover Ledger 本地 UoW 只能通过领域化 tag-selection state/commit/restore 端口进入 Settings owner。
+- Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。`AppSettingsService.get_cost_statistics_source_settings_payload()` 是成本统计读取银行账户映射与自动标签字典的受控 read port；time/tag 与 no-OA 两套设置分别使用独立 get/update port、version 和 audit，由成本统计 route 注入实际候选并暴露给两个独立抽屉；Turnover Ledger 本地 UoW 只能通过领域化 tag-selection state/commit/restore 端口进入 Settings owner。
 
 ## 文件范围
 

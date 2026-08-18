@@ -76,7 +76,8 @@
 | `bankFlowRuleBatches/api.ts#submitBankFlowRuleBatch`<br>`bankFlowRuleBatches/api.ts#submitBankFlowRuleBatchSelection`<br>`bankFlowRuleBatches/api.ts#withdrawBankFlowRuleBatch` | `/api/bank-flow-rule-batches/**`; page batch controls | `explicit-batch` | batch/relation facts + changed batch ids/months | `bank_flow_rule_batch`; relation/workbench consumers on access | commit batch delta; delete broad lifecycle and cross-page wait | `test_bank_flow_rule_batch_*`; `p27-op-bank-flow-batch` |
 | `batchAccounting/api.ts#submitBatchAccounting`<br>`batchAccounting/api.ts#withdrawBatchAccounting` | `/api/batch-accounting/**`; OA selection/submitted bucket | `fact-write` | canonical Workbench relation case/row ids + months | `workbench_relation`; workbench/cost/invoice consumers on access | relation commit only + exact visible-page reconcile | `test_batch_accounting_*`; `p27-op-batch-accounting` |
 | `batchAccounting/api.ts#saveBatchAccountingTagRules` | `/api/batch-accounting/tag-rules`; tag rules Drawer | `rule-write` | settings 内稳定标签代码集合与 CAS version | none；batch accounting 直接查询 current-effective 分类 | 语义保存后只重新查询当前可见页；不 fan-out、不 rebuild read model | `test_batch_accounting_*`; `p27-op-batch-accounting-tag-rule` |
-| `cost-statistics/api.ts#saveCostStatisticsTagRules` | `/api/cost-statistics/tag-rules`; tag rules Drawer | `rule-write` | app settings rule version; query-time filter contract | none for rebuild; `cost_statistics` query reads rule | delete save-and-sync barrier/rebuild; refetch current view | `test_cost_statistics_*`; `p27-op-cost-rule` |
+| `cost-statistics/api.ts#saveCostStatisticsTimeTagRules` | `/api/cost-statistics/time-tag-rules`; 按标签/按时间规则 Drawer | `rule-write` | 独立 app settings version；只过滤原始银行流水视图 | none for rebuild; time/bank_tag query reads rule | PUT 后仅重取当前原始流水视图 | `test_cost_statistics_*`; `p27-op-cost-time-tag-rule` |
+| `cost-statistics/api.ts#saveCostStatisticsNoOaRules` | `/api/cost-statistics/no-oa-rules`; 无 OA 成本范围 Drawer | `rule-write` | 独立 app settings version；只扩展三个成本归因视图 | none for rebuild; project/bank/expense_type query reads rule | PUT 后仅重取当前成本归因视图 | `test_cost_statistics_*`; `p27-op-cost-no-oa-rule` |
 | `etc/api.ts#previewEtcZipFiles`<br>`etc/api.ts#importEtcZipFiles` | `/api/etc/import/preview`; import preview | `read-like-command` | transient preview/session only; no canonical business fact | none | no dirty/enqueue/barrier | `test_etc_*`; `p27-op-etc-preview` |
 | `etc/api.ts#confirmEtcImportSession` | `/api/etc/import/confirm`; import confirm | `explicit-batch` | import session/job + exact imported identities | affected invoice/search resources | durable job acceptance; access-driven consumers | `test_etc_import_*`; `p27-op-etc-import` |
 | `etc/api.ts#createEtcReconciliationTask`<br>`etc/api.ts#deleteEtcReconciliationSourceFile`<br>`etc/api.ts#deleteEtcReconciliationTask`<br>`etc/api.ts#deleteEtcReconciliationTaskImportedInvoices`<br>`etc/api.ts#patchEtcReconciliationItem`<br>`etc/api.ts#refreshEtcReconciliationMatches`<br>`etc/api.ts#reopenEtcReconciliationTask`<br>`etc/api.ts#confirmEtcReconciliationTask`<br>`etc/api.ts#uploadEtcCreditCardStatement`<br>`etc/api.ts#uploadEtcSupplementEvidenceForCard`<br>`etc/api.ts#uploadEtcSupplementEvidences`<br>`etc/api.ts#uploadEtcTicketRootFiles`<br>`etc/api.ts#uploadEtcTicketRootTexts` | `/api/etc/reconciliation-tasks/**`; ETC workflow | `explicit-batch` | reconciliation task/item/source file state + task version | task-local; imported invoice consumers only after explicit confirm | keep task job boundary; remove unrelated page fan-out | `test_etc_reconciliation_*`; `p27-op-etc-task` |
@@ -113,7 +114,8 @@
 | `web/src/components/batchAccounting/BatchAccountingTagRulesDrawer.tsx` | batch accounting | `writable` | `saveBatchAccountingTagRules` | read-export 只读；CAS 保存后只刷新当前页，不 fan-out |
 | `web/src/components/common/OaDraftPrefillDrawer.tsx` | ETC / input usage | `writable` | `saveOaDraftPrefill` | 仅 admin 展示入口和保存；两个独立 setting family 使用 version CAS，零 read-model fan-out |
 | `web/src/components/cost-statistics/CostEntryDetailDrawer.tsx` | cost | `read-only` | none | canonical OA allocation / quality detail read only；不得 mutation、dirty 或 fan-out |
-| `web/src/components/cost-statistics/CostStatisticsTagRulesDrawer.tsx` | cost | `writable` | `saveCostStatisticsTagRules` | rule version save；不 rebuild read model |
+| `web/src/components/cost-statistics/CostStatisticsTimeTagRulesDrawer.tsx` | cost | `writable` | `saveCostStatisticsTimeTagRules` | 独立 rule version save；不 rebuild read model |
+| `web/src/components/cost-statistics/CostStatisticsNoOaRulesDrawer.tsx` | cost | `writable` | `saveCostStatisticsNoOaRules` | 独立 rule version save；不 rebuild read model |
 | `web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx` | input usage | `read-only` | none | freshness-gated detail read only |
 | `web/src/components/inputInvoiceUsage/InputInvoiceUsageExportDrawer.tsx` | input usage | `read-only` | none | export read only；不得 dirty |
 | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | input usage | `mixed` | preview read-like；draft/batch/status/revoke writes | preview zero mutation；writes only exact current scope |
@@ -142,7 +144,8 @@
 | `reconciliation-workbench:paired-withdraw-actions` | `writable` | workbench withdraw |
 | `reconciliation-workbench:cash-special-actions` | `writable` | workbench cash facts |
 | `bank-details:auto-tag-rules` | `writable` | bank rule save/reapply |
-| `cost-statistics:tag-rules` | `writable` | cost rule save |
+| `cost-statistics:time-tag-rules` | `writable` | time/bank_tag rule save |
+| `cost-statistics:no-oa-rules` | `writable` | no-OA virtual project rule save |
 | `bank-details:category-confirmation` | `writable` | bank classification fact |
 | `bank-details:manual-category-assignment` | `writable` | bank classification fact |
 | `bank-flow-rule-batches:tag-drawer` | `writable` | bank-flow rule/batch |

@@ -364,7 +364,7 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("month=2026-03", probe_paths["tax_offset_rows"])
         self.assertIn("scope=2026-03", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("view=time", probe_paths["cost_statistics_explorer_all"])
-        self.assertIn("project_scope=active", probe_paths["cost_statistics_explorer_all"])
+        self.assertNotIn("project_scope=", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("bucket=unsubmitted", probe_paths["bank_flow_rule_batches"])
         self.assertIn("page=1", probe_paths["bank_flow_rule_batches"])
         self.assertIn("page_size=200", probe_paths["bank_flow_rule_batches"])

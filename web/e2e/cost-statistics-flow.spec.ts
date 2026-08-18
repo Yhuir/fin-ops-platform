@@ -37,13 +37,12 @@ function getResponse(pathnameSuffix: string) {
     response.request().method() === "GET" && requestPath(response.url()).endsWith(pathnameSuffix);
 }
 
-function waitForCostStatisticsExplorer(page: Page, month = "2026-03", projectScope = "active") {
+function waitForCostStatisticsExplorer(page: Page, month = "2026-03") {
   return page.waitForResponse((response) => {
     const url = new URL(response.url());
     return response.request().method() === "GET"
       && url.pathname.endsWith("/api/cost-statistics/explorer")
-      && url.searchParams.get("scope") === month
-      && url.searchParams.get("project_scope") === projectScope;
+      && url.searchParams.get("scope") === month;
   });
 }
 
@@ -192,7 +191,7 @@ async function expectVerticalScroll(locator: Locator, label: string) {
 }
 
 test.describe("cost statistics browser flow", () => {
-  test("saves tag rules without a write-time barrier and reloads the visible cost view", async ({ page }, testInfo) => {
+  test("saves no-OA rules without a barrier or refreshing the unrelated raw-bank view", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
     });
@@ -210,15 +209,16 @@ test.describe("cost statistics browser flow", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "无 OA 成本范围" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
-      await drawer.getByRole("textbox", { name: "无 OA 虚拟项目名称" }).fill("云南溯源无 OA 分类");
+      await drawer.getByRole("button", { name: "新增虚拟项目" }).click();
+      await drawer.getByRole("textbox", { name: "虚拟项目名称" }).fill("云南溯源无 OA 分类");
       await drawer.getByText("材料费", { exact: true }).click();
       await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "保存" })).toBeEnabled());
     });
 
     const saveResponsePromise = page.waitForResponse((response) =>
       response.request().method() === "PUT"
-      && requestPath(response.url()).endsWith("/api/cost-statistics/tag-rules"));
-    const explorerResponsePromise = waitForCostStatisticsExplorer(page);
+      && requestPath(response.url()).endsWith("/api/cost-statistics/no-oa-rules"));
+    const explorerCallsBeforeSave = api.count("GET /api/cost-statistics/explorer");
     await recordLatency({
       operationId: "cost-statistics.save-tag-rules",
       visibleLabel: "保存无 OA 成本范围",
@@ -227,13 +227,33 @@ test.describe("cost statistics browser flow", () => {
       await drawer.getByRole("button", { name: "保存" }).click();
       await mark("apiLatencyMs", saveResponsePromise);
       await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeHidden());
-      await mark("finalSettledLatencyMs", explorerResponsePromise);
+      await mark("finalSettledLatencyMs", expect(drawer).toBeHidden());
     });
 
-    expect(api.count("PUT /api/cost-statistics/tag-rules")).toBe(1);
+    expect(api.count("PUT /api/cost-statistics/no-oa-rules")).toBe(1);
+    expect(api.count("GET /api/cost-statistics/explorer")).toBe(explorerCallsBeforeSave);
     expect(api.count("GET /api/operation-barrier/status")).toBe(0);
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
+  test("saves time/tag rules and refreshes only the visible raw-bank view", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+    await page.getByRole("button", { name: "按标签/按时间标签规则" }).click();
+    const drawer = page.getByRole("dialog", { name: "按标签/按时间标签规则" });
+    await expect(drawer.getByText("当前：全部标签（自动包含新标签）")).toBeVisible();
+    await expect(drawer.getByText("未标记流水", { exact: true })).toBeVisible();
+    await drawer.getByRole("button", { name: "清空" }).click();
+    const refreshResponse = waitForCostStatisticsExplorer(page);
+    await drawer.getByRole("button", { name: "保存" }).click();
+    await refreshResponse;
+
+    await expect(drawer).toBeHidden();
+    expect(api.count("PUT /api/cost-statistics/time-tag-rules")).toBe(1);
+    expect(api.count("PUT /api/cost-statistics/no-oa-rules")).toBe(0);
   });
 
   test("recovers explorer after a transient load failure when refreshed", async ({ page }) => {
@@ -353,7 +373,7 @@ test.describe("cost statistics browser flow", () => {
     expect(previewResponse.status()).toBe(200);
     expect(previewUrl.searchParams.get("view")).toBe("time");
     expect(previewUrl.searchParams.get("month")).toBe("2026-03");
-    expect(previewUrl.searchParams.get("project_scope")).toBe("active");
+    expect(previewUrl.searchParams.has("project_scope")).toBe(false);
     expect(previewUrl.searchParams.has("page")).toBe(false);
     expect(previewUrl.searchParams.has("page_size")).toBe(false);
     const exportResponsePromise = page.waitForResponse((response) => {
@@ -377,7 +397,7 @@ test.describe("cost statistics browser flow", () => {
     expect(exportResponse.status()).toBe(200);
     expect(exportUrl.searchParams.get("view")).toBe("time");
     expect(exportUrl.searchParams.get("month")).toBe("2026-03");
-    expect(exportUrl.searchParams.get("project_scope")).toBe("active");
+    expect(exportUrl.searchParams.has("project_scope")).toBe(false);
     expect(exportUrl.searchParams.has("page")).toBe(false);
     expect(exportUrl.searchParams.has("page_size")).toBe(false);
     expect(download.suggestedFilename()).toBe("成本统计_全部期间_按时间统计.xlsx");
@@ -395,7 +415,7 @@ test.describe("cost statistics browser flow", () => {
     expect(downloadedText).toContain("浏览器设备供应商");
     expect(downloadedText).toContain("view=time");
     expect(downloadedText).toContain("month=2026-03");
-    expect(downloadedText).toContain("project_scope=active");
+    expect(downloadedText).not.toContain("project_scope=");
     expect(downloadedText).toContain("page=");
     expect(downloadedText).toContain("page_size=");
     expect(api.count("GET /api/cost-statistics/export-preview")).toBe(1);
@@ -606,7 +626,7 @@ test.describe("cost statistics browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByText("云南溯源科技")).toBeVisible());
     });
     await expect(page.getByText("云南溯源科技")).toBeVisible();
-    await expect(page.getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toHaveCount(0);
+    await expect(page.getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeVisible();
     await expect(page.getByRole("button", { name: /项目范围：/ })).toHaveCount(0);
 
     const projectRows = page.getByRole("grid", { name: "项目成本明细表" });
@@ -637,7 +657,7 @@ test.describe("cost statistics browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(detailDialog).toBeVisible());
       await mark("finalSettledLatencyMs", expect(detailDialog.getByText("浏览器成本统计明细").first()).toBeVisible());
     });
-    expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("active");
+    expect(new URL((await detailRequest).url()).searchParams.has("project_scope")).toBe(false);
     await expect(detailDialog).toHaveClass(/cost-transaction-detail-drawer/);
     await expect(detailDialog.getByText("PLC 模块采购").first()).toBeVisible();
     await expect(detailDialog.getByText(/查看当前成本流水|展示这条支出流水|用于快速核对|保留原始银行流水/)).toHaveCount(0);
@@ -679,7 +699,7 @@ test.describe("cost statistics browser flow", () => {
       await mark("finalSettledLatencyMs", expect(exportDialog.getByText("预计导出 3 条流水")).toBeVisible());
     });
     const previewUrl = new URL((await previewRequest).url());
-    expect(previewUrl.searchParams.get("project_scope")).toBe("active");
+    expect(previewUrl.searchParams.has("project_scope")).toBe(false);
     expect(previewUrl.searchParams.getAll("project_name")).toContain("云南溯源科技");
     expect(previewUrl.searchParams.getAll("expense_type")).toContain("设备货款及材料费");
     const exportResponse = page.waitForResponse((response) =>
@@ -727,7 +747,7 @@ test.describe("cost statistics browser flow", () => {
     );
     await bankRows.getByRole("button", { name: costTransactionLabels.oaExpense }).click();
     const bankDetailUrl = new URL((await bankDetailRequest).url());
-    expect(bankDetailUrl.searchParams.get("project_scope")).toBe("active");
+    expect(bankDetailUrl.searchParams.has("project_scope")).toBe(false);
     const bankDetailDialog = page.getByRole("dialog", { name: "OA 成本归集明细" });
     await expect(bankDetailDialog).toBeVisible();
     await expect(bankDetailDialog.getByText("PLC 模块采购").first()).toBeVisible();
@@ -749,7 +769,7 @@ test.describe("cost statistics browser flow", () => {
     );
     await expenseRows.getByRole("button", { name: costTransactionLabels.oaExpense }).click();
     const expenseDetailUrl = new URL((await expenseDetailRequest).url());
-    expect(expenseDetailUrl.searchParams.get("project_scope")).toBe("active");
+    expect(expenseDetailUrl.searchParams.has("project_scope")).toBe(false);
     const expenseDetailDialog = page.getByRole("dialog", { name: "OA 成本归集明细" });
     await expect(expenseDetailDialog).toBeVisible();
     await expect(expenseDetailDialog.getByText("PLC 模块采购").first()).toBeVisible();
@@ -771,8 +791,7 @@ test.describe("cost statistics browser flow", () => {
       const url = new URL(response.url());
       return response.request().method() === "GET"
         && url.pathname.endsWith("/api/cost-statistics/explorer")
-        && url.searchParams.get("scope") === "2026-03"
-        && url.searchParams.get("project_scope") === "active";
+        && url.searchParams.get("scope") === "2026-03";
     });
     await page.goto("/cost-statistics");
     const timeExplorerPayload = await (await timeExplorerResponsePromise).json() as CostExplorerBrowserPayload;
@@ -796,8 +815,7 @@ test.describe("cost statistics browser flow", () => {
       const url = new URL(response.url());
       return response.request().method() === "GET"
         && url.pathname.endsWith("/api/cost-statistics/explorer")
-        && url.searchParams.get("scope") === "all"
-        && url.searchParams.get("project_scope") === "active";
+        && url.searchParams.get("scope") === "all";
     });
     await page.getByRole("radio", { name: "按项目" }).click();
     const projectExplorerPayload = await (await projectExplorerResponsePromise).json() as CostExplorerBrowserPayload;

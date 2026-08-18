@@ -59,7 +59,7 @@ type ApiMockOptions = {
   bankFlowRuleBatchFailOnce?: boolean;
   bankFlowRuleBatchFailuresBeforeSuccess?: number;
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
-  settingsProjectScopeFanout?: boolean;
+  settingsProjectCostEvidence?: boolean;
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
   turnoverLedgerFailuresBeforeSuccess?: number;
@@ -4692,9 +4692,6 @@ function pendingInvoiceExpenseRulesPayload({
   };
 }
 
-const completedCostProjectNames = new Set([
-  "昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
-]);
 const settingsCostProject = {
   id: "settings-cost-project-e2e",
   project_code: "SETTINGS-COST-E2E",
@@ -4829,14 +4826,6 @@ const turnoverCostRow: CostBrowserProjectRow = {
   payment_account_label: "建行 8106",
 };
 
-function isCostProjectVisibleForScope(
-  projectName: string,
-  projectScope: string | null,
-  completedProjectNames = completedCostProjectNames,
-) {
-  return projectScope === "all" || !completedProjectNames.has(projectName);
-}
-
 function sumCostAmounts(rows: Array<{ amount: string }>) {
   const total = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
   return total.toLocaleString("en-US", {
@@ -4900,17 +4889,14 @@ function allCostProjectRows(
 
 function costTimeRows(
   month: string,
-  projectScope: string | null,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
-  completedProjectNames = completedCostProjectNames,
   includeLargeCostDataset = false,
 ) {
   const sourceProjectRowMap = month === "all"
     ? allCostProjectRows(relationConfirmed, includeWorkbenchRelationEvidence, includeLargeCostDataset)
     : costProjectRowsForMonth(month, relationConfirmed, includeWorkbenchRelationEvidence, includeLargeCostDataset);
   return Object.entries(sourceProjectRowMap)
-    .filter(([projectName]) => isCostProjectVisibleForScope(projectName, projectScope, completedProjectNames))
     .flatMap(([projectName, rows]) =>
       rows.map((row) => ({
         transaction_id: row.transaction_id,
@@ -4931,7 +4917,6 @@ function costTimeRows(
 
 function costBankFlowRows(
   month: string,
-  projectScope: string | null,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
   includeInvoiceImportEvidence = false,
@@ -4939,15 +4924,12 @@ function costBankFlowRows(
   includeBankImportEvidence = false,
   includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
-  completedProjectNames = completedCostProjectNames,
   includeLargeCostDataset = false,
 ) {
   const oaPaymentRows = costTimeRows(
     month,
-    projectScope,
     relationConfirmed,
     includeWorkbenchRelationEvidence,
-    completedProjectNames,
     includeLargeCostDataset,
   );
   const standaloneBankImportRows = includeBankImportEvidence
@@ -5017,7 +4999,6 @@ function costBankFlowRows(
 
 function costStatisticsExplorerPayload(
   month: string,
-  projectScope: string | null,
   relationConfirmed = false,
   includeWorkbenchRelationEvidence = false,
   includeInvoiceImportEvidence = false,
@@ -5025,20 +5006,16 @@ function costStatisticsExplorerPayload(
   includeBankImportEvidence = false,
   includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
-  completedProjectNames = completedCostProjectNames,
   includeLargeCostDataset = false,
 ) {
   const timeRows = costTimeRows(
     month,
-    projectScope,
     relationConfirmed,
     includeWorkbenchRelationEvidence,
-    completedProjectNames,
     includeLargeCostDataset,
   );
   const bankFlowTimeRows = costBankFlowRows(
     month,
-    projectScope,
     relationConfirmed,
     includeWorkbenchRelationEvidence,
     includeInvoiceImportEvidence,
@@ -5046,7 +5023,6 @@ function costStatisticsExplorerPayload(
     includeBankImportEvidence,
     includeBankFlowRuleCostEvidence,
     includeTurnoverCostEvidence,
-    completedProjectNames,
     includeLargeCostDataset,
   );
   const expenseBankRows = bankFlowTimeRows.filter((row) => row.direction === "支出");
@@ -5318,7 +5294,7 @@ function costBankTransactionPayload(
   includeBankFlowRuleCostEvidence = false,
   includeTurnoverCostEvidence = false,
 ) {
-  const row = costBankFlowRows("all", "all", relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence)
+  const row = costBankFlowRows("all", relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence)
     .find((item) => item.transaction_id === transactionId);
   return {
     month: transactionId.includes("101") ? "2026-04" : "2026-03",
@@ -5347,7 +5323,7 @@ function costAllocationPayload(
   includeTurnoverCostEvidence = false,
 ) {
   const transactionId = allocationId.replace(/^oa:/, "");
-  const row = costTimeRows("all", "all", relationConfirmed, includeWorkbenchRelationEvidence)
+  const row = costTimeRows("all", relationConfirmed, includeWorkbenchRelationEvidence)
     .find((item) => item.transaction_id === transactionId);
   const amount = row?.amount ?? "10,000.00";
   return {
@@ -5398,13 +5374,12 @@ function costStatisticsExportPreviewPayload(
 ) {
   const month = url.searchParams.get("month") ?? "all";
   const view = url.searchParams.get("view") ?? "time";
-  const projectScope = url.searchParams.get("project_scope") ?? "active";
   const projectNames = new Set(url.searchParams.getAll("project_name").filter(Boolean));
   const expenseTypes = new Set(url.searchParams.getAll("expense_type").filter(Boolean));
   const isBankFlowView = view === "time" || view === "bank_tag";
   const rows = (isBankFlowView
-    ? costBankFlowRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence)
-    : costTimeRows(month, projectScope, relationConfirmed, includeWorkbenchRelationEvidence))
+    ? costBankFlowRows(month, relationConfirmed, includeWorkbenchRelationEvidence, includeInvoiceImportEvidence, includeEtcImportEvidence, includeBankImportEvidence, includeBankFlowRuleCostEvidence, includeTurnoverCostEvidence)
+    : costTimeRows(month, relationConfirmed, includeWorkbenchRelationEvidence))
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
     .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true));
   const fileName = view === "project"
@@ -5458,21 +5433,21 @@ function costStatisticsExportBody(
   includeTurnoverCostEvidence = false,
 ) {
   const month = url.searchParams.get("month") ?? "all";
-  const projectScope = url.searchParams.get("project_scope") ?? "active";
   const projectNames = new Set(url.searchParams.getAll("project_name").filter(Boolean));
   const expenseTypes = new Set(url.searchParams.getAll("expense_type").filter(Boolean));
   const view = url.searchParams.get("view") ?? "time";
-  const exportRows = (view === "time" || view === "bank_tag" ? costBankFlowRows : costTimeRows)(
-    month,
-    projectScope,
-    relationConfirmed,
-    includeWorkbenchRelationEvidence,
-    includeInvoiceImportEvidence,
-    includeEtcImportEvidence,
-    includeBankImportEvidence,
-    includeBankFlowRuleCostEvidence,
-    includeTurnoverCostEvidence,
-  )
+  const exportRows = (view === "time" || view === "bank_tag"
+    ? costBankFlowRows(
+        month,
+        relationConfirmed,
+        includeWorkbenchRelationEvidence,
+        includeInvoiceImportEvidence,
+        includeEtcImportEvidence,
+        includeBankImportEvidence,
+        includeBankFlowRuleCostEvidence,
+        includeTurnoverCostEvidence,
+      )
+    : costTimeRows(month, relationConfirmed, includeWorkbenchRelationEvidence))
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
     .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true));
   const preview = costStatisticsExportPreviewPayload(
@@ -5507,7 +5482,6 @@ function costStatisticsExportBody(
       "导出筛选",
       `view=${url.searchParams.get("view") ?? ""}`,
       `month=${url.searchParams.get("month") ?? ""}`,
-      `project_scope=${url.searchParams.get("project_scope") ?? ""}`,
       `project_name=${url.searchParams.getAll("project_name").join("|")}`,
       `expense_type=${url.searchParams.getAll("expense_type").join("|")}`,
       `page=${url.searchParams.get("page") ?? ""}`,
@@ -8546,7 +8520,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       return json(route, workbenchSettingsPayload(
         settingsCompletedProjectIds,
-        Boolean(options.settingsProjectScopeFanout),
+        Boolean(options.settingsProjectCostEvidence),
       ));
     }
 
@@ -8821,11 +8795,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     const bankImportDownstreamConfirmed = importConfirmed.bank && Boolean(options.bankImportDownstreamFanout);
     const bankFlowRuleCostConfirmed = bankFlowRuleBatchStatus === "submitted" && Boolean(options.bankFlowRuleCostFanout);
     const turnoverCostConfirmed = turnoverClosureConfirmed && Boolean(options.turnoverCostFanout);
-    const costCompletedProjectNames = new Set(completedCostProjectNames);
-    if (settingsCompletedProjectIds.includes(settingsCostProject.id)) {
-      costCompletedProjectNames.add(settingsCostProject.project_name);
-    }
-
     if (path === "/api/tax-offset") {
       return json(route, taxOffsetPayload(
         taxSelectedInputIds,
@@ -9150,16 +9119,14 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }));
     }
 
-    if (path === "/api/cost-statistics/tag-rules") {
+    if (path === "/api/cost-statistics/time-tag-rules") {
       return json(route, {
         version: 1,
         bank_auto_tag_rules_version: 8,
-        display_name: "",
-        default_selection_applied: false,
+        mode: request.method() === "PUT" ? "custom" : "all",
         selected_tag_codes: [],
-        effective_selected_tag_codes: [],
         inactive_selected_tag_codes: [],
-        active_tags: [
+        available_tags: [
           {
             code: "fee",
             label: "材料费",
@@ -9172,22 +9139,42 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           },
           {
             code: "__uncategorized__",
-            label: "未分类",
-            path: ["未分类", "未分类"],
+            label: "未标记流水",
+            path: ["未标记流水"],
             source: "system",
             status: "active",
-            direction: "expense",
-            output_primary_label: "未分类",
-            output_sub_label: "未分类",
+            direction: "any",
+            output_primary_label: "未标记流水",
+            output_sub_label: "未标记流水",
           },
         ],
-        can_save: true,
+        can_save: configuredSessionTier() === "admin" || configuredSessionTier() === "full_access",
+      });
+    }
+
+    if (path === "/api/cost-statistics/no-oa-rules") {
+      const body = request.method() === "PUT" ? await request.postDataJSON() : null;
+      return json(route, {
+        version: request.method() === "PUT" ? 2 : 1,
+        bank_auto_tag_rules_version: 8,
+        projects: request.method() === "PUT" && Array.isArray(body?.projects) ? body.projects : [],
+        inactive_selected_tag_codes: [],
+        available_tags: [{
+          code: "fee",
+          label: "材料费",
+          path: ["费用", "材料费"],
+          source: "custom",
+          status: "active",
+          direction: "expense",
+          output_primary_label: "费用",
+          output_sub_label: "材料费",
+        }],
+        can_save: configuredSessionTier() === "admin" || configuredSessionTier() === "full_access",
       });
     }
 
     if (path === "/api/cost-statistics/explorer") {
       const explorerScope = url.searchParams.get("scope") ?? "all";
-      const explorerProjectScope = url.searchParams.get("project_scope") ?? "active";
       if (
         costStatisticsExplorerFailuresRemaining > 0
         && explorerScope !== "all"
@@ -9201,7 +9188,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       const payload = costStatisticsExplorerPayload(
         "all",
-        explorerProjectScope,
         relationConfirmed,
         Boolean(options.costStatisticsRelationFanout),
         invoiceImportDownstreamConfirmed,
@@ -9209,7 +9195,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         bankImportDownstreamConfirmed,
         bankFlowRuleCostConfirmed,
         turnoverCostConfirmed,
-        costCompletedProjectNames,
         Boolean(options.costStatisticsLargeDataset),
       );
       return json(route, costStatisticsExplorerPagePayload(url, payload));

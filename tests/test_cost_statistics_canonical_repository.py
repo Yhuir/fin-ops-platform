@@ -164,7 +164,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(connection.transaction_count, 1)
-        self.assertLessEqual(len(connection.snapshot_transaction.fetched), 7)
+        self.assertLessEqual(len(connection.snapshot_transaction.fetched), 8)
         sql = "\n".join(connection.snapshot_transaction.fetched)
         self.assertIn("txn_month >= %s and txn_month < %s", sql)
         self.assertNotIn("approved_at >= %s::date and approved_at < %s::date", sql)
@@ -225,7 +225,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(len(snapshot["cost_groups"]), 1)
         self.assertEqual(
             {row["id"] for row in snapshot["cost_groups"][0]["bank_rows"]},
-            {"bank-march"},
+            {"bank-march", "bank-april"},
         )
         self.assertEqual(snapshot["available_years"], ["2026"])
 
@@ -259,7 +259,9 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             include_statistics=False,
         )
 
-        self.assertEqual(snapshot["cost_groups"], [])
+        self.assertEqual(len(snapshot["cost_groups"]), 1)
+        self.assertEqual(snapshot["cost_groups"][0]["declared_oa_ids"], ["oa-unavailable"])
+        self.assertEqual(snapshot["cost_groups"][0]["oa_rows"], [])
         self.assertEqual(snapshot["oa_related_bank_ids"], ["bank-protected"])
 
     def test_snapshot_preserves_canonical_oa_expense_item_fields(self) -> None:

@@ -4,8 +4,10 @@ import {
   exportCostStatisticsView,
   fetchCostStatisticsExplorerPage,
   fetchCostStatisticsExportPreview,
-  fetchCostStatisticsTagRules,
-  saveCostStatisticsTagRules,
+  fetchCostStatisticsNoOaRules,
+  fetchCostStatisticsTimeTagRules,
+  saveCostStatisticsNoOaRules,
+  saveCostStatisticsTimeTagRules,
 } from "../features/cost-statistics/api";
 
 const originalFetch = global.fetch;
@@ -53,7 +55,7 @@ describe("Cost statistics export API", () => {
     })).rejects.toThrow("导出结果超过 20000 行，请缩小筛选范围后重试。");
   });
 
-  test("passes the isolated cursor-page contract and project scope to explorer, preview, and export requests", async () => {
+  test("passes the isolated cursor-page contract without the removed project scope", async () => {
     global.fetch = vi.fn(async (input) => {
       const url = String(input);
       if (url.startsWith("/api/cost-statistics/explorer")) {
@@ -107,7 +109,6 @@ describe("Cost statistics export API", () => {
     const page = await fetchCostStatisticsExplorerPage({
       scope: "all",
       view: "project",
-      projectScope: "all",
       projectName: "云南溯源科技",
       query: "PLC",
       pageSize: 50,
@@ -116,24 +117,22 @@ describe("Cost statistics export API", () => {
     await fetchCostStatisticsExportPreview({
       month: "all",
       view: "time",
-      projectScope: "all",
     });
     await exportCostStatisticsView({
       month: "all",
       view: "time",
-      projectScope: "all",
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/cost-statistics/explorer?scope=all&view=project&project_scope=all&project_name=${encodeURIComponent("云南溯源科技")}&query=PLC&page_size=50&include_statistics=false`,
+      `/api/cost-statistics/explorer?scope=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&query=PLC&page_size=50&include_statistics=false`,
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/export-preview?month=all&view=time&project_scope=all",
+      "/api/cost-statistics/export-preview?month=all&view=time",
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/export?month=all&view=time&project_scope=all",
+      "/api/cost-statistics/export?month=all&view=time",
       expect.any(Object),
     );
     expect(page.availableYears).toEqual(["2026", "2025"]);
@@ -189,7 +188,6 @@ describe("Cost statistics export API", () => {
     const payload = await fetchCostStatisticsExplorerPage({
       scope: "2026-03",
       view: "time",
-      projectScope: "active",
     });
 
     expect(payload.statistics).toEqual(expect.objectContaining({
@@ -209,19 +207,17 @@ describe("Cost statistics export API", () => {
     });
   });
 
-  test("loads and saves cost statistics tag rules without read model barrier targets", async () => {
+  test("loads and saves independent time/tag and no-OA rules", async () => {
     global.fetch = vi.fn(async (input, init) => {
       const url = String(input);
-      if (url === "/api/cost-statistics/tag-rules" && init?.method === "PUT") {
+      if (url === "/api/cost-statistics/time-tag-rules") {
         return new Response(JSON.stringify({
           version: 2,
           bank_auto_tag_rules_version: 8,
-          display_name: "云南溯源无 OA 分类",
-          default_selection_applied: false,
-          selected_tag_codes: ["fee"],
-          effective_selected_tag_codes: ["fee"],
+          mode: init?.method === "PUT" ? "custom" : "all",
+          selected_tag_codes: init?.method === "PUT" ? ["fee"] : [],
           inactive_selected_tag_codes: [],
-          active_tags: [
+          available_tags: [
             {
               code: "fee",
               label: "费用",
@@ -229,55 +225,70 @@ describe("Cost statistics export API", () => {
               output_primary_label: "费用",
               output_sub_label: "材料",
             },
+            {
+              code: "__uncategorized__",
+              label: "未标记流水",
+              path: ["未标记流水"],
+              output_primary_label: "未标记流水",
+              output_sub_label: "未标记流水",
+            },
           ],
           can_save: true,
         }), { status: 200 });
       }
-      return new Response(JSON.stringify({
-        version: 1,
-        bank_auto_tag_rules_version: 8,
-        display_name: "",
-        default_selection_applied: false,
-        selected_tag_codes: [],
-        effective_selected_tag_codes: [],
-        inactive_selected_tag_codes: [],
-        active_tags: [
-          {
+      if (url === "/api/cost-statistics/no-oa-rules") {
+        return new Response(JSON.stringify({
+          version: 3,
+          bank_auto_tag_rules_version: 8,
+          projects: init?.method === "PUT" ? [{ id: "travel", display_name: "差旅无 OA", tag_codes: ["fee"] }] : [],
+          inactive_selected_tag_codes: [],
+          available_tags: [{
             code: "fee",
             label: "费用",
             path: ["费用", "材料"],
             output_primary_label: "费用",
             output_sub_label: "材料",
-          },
-          {
-            code: "__uncategorized__",
-            label: "未分类",
-            path: ["未分类", "未分类"],
-            output_primary_label: "未分类",
-            output_sub_label: "未分类",
-          },
-        ],
-        can_save: true,
-      }), { status: 200 });
+          }],
+          can_save: true,
+        }), { status: 200 });
+      }
+      return new Response(null, { status: 404 });
     }) as typeof fetch;
 
-    const rules = await fetchCostStatisticsTagRules();
-    const saved = await saveCostStatisticsTagRules({
-      expectedVersion: rules.version,
-      displayName: "云南溯源无 OA 分类",
+    const timeRules = await fetchCostStatisticsTimeTagRules();
+    const savedTimeRules = await saveCostStatisticsTimeTagRules({
+      expectedVersion: timeRules.version,
+      mode: "custom",
       selectedTagCodes: ["fee"],
     });
+    const noOaRules = await fetchCostStatisticsNoOaRules();
+    const savedNoOaRules = await saveCostStatisticsNoOaRules({
+      expectedVersion: noOaRules.version,
+      projects: [{ id: "travel", displayName: "差旅无 OA", tagCodes: ["fee"] }],
+    });
 
-    expect(rules.activeTags.map((tag) => tag.label)).toEqual(["费用", "未分类"]);
-    expect(saved.selectedTagCodes).toEqual(["fee"]);
+    expect(timeRules.mode).toBe("all");
+    expect(timeRules.availableTags.map((tag) => tag.label)).toEqual(["费用", "未标记流水"]);
+    expect(savedTimeRules.selectedTagCodes).toEqual(["fee"]);
+    expect(savedNoOaRules.projects[0]).toEqual({ id: "travel", displayName: "差旅无 OA", tagCodes: ["fee"] });
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/tag-rules",
+      "/api/cost-statistics/time-tag-rules",
       expect.objectContaining({
         method: "PUT",
         body: JSON.stringify({
-          expected_version: 1,
-          display_name: "云南溯源无 OA 分类",
+          expected_version: 2,
+          mode: "custom",
           selected_tag_codes: ["fee"],
+        }),
+      }),
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/cost-statistics/no-oa-rules",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          expected_version: 3,
+          projects: [{ id: "travel", display_name: "差旅无 OA", tag_codes: ["fee"] }],
         }),
       }),
     );
@@ -301,8 +312,8 @@ describe("Cost statistics export API", () => {
       }), { status: 200 }),
     ) as typeof fetch;
 
-    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time", projectScope: "active" });
-    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time", projectScope: "active" });
+    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time" });
+    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time" });
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });

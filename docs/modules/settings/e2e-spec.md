@@ -1,6 +1,6 @@
 # 设置 Spec-first E2E Spec
 
-本文件定义 `/settings` 页面在真实浏览器中的业务验收合同。测试必须保护平台配置、权限、数据重置、OA 凭据、项目范围 fan-out、read model/worker 边界和下游页面一致性，而不是保护当前 React 组件实现细节。
+本文件定义 `/settings` 页面在真实浏览器中的业务验收合同。测试必须保护平台配置、权限、数据重置、OA 凭据、项目状态边界、read model/worker 边界和下游页面一致性，而不是保护当前 React 组件实现细节。
 
 ## 模块目标
 
@@ -18,7 +18,7 @@
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
 | `SETTINGS-E2E-001` | 页面 ready 和配置边界 | P0 | 进入 `/settings` 后显示设置标题、分类树和可访问 section；普通 settings payload 不包含 OA 密码、token、密文或银行自动标签写字段。 |
-| `SETTINGS-E2E-002` | 项目范围保存后成本统计访问收敛 | P0 | 用户把项目标记完成并保存后，请求必须包含 `completed_project_ids` 且零页面 fan-out；进入成本统计时页面固定 active scope 通过 fresh gate/read model 排除已完成项目，且不暴露项目范围切换 UI。`project_scope=all` 保留为成本统计 API/read model 合同，不作为当前 settings Browser 页面入口。 |
+| `SETTINGS-E2E-002` | 项目状态与历史成本隔离 | P0 | 用户把项目标记完成并保存后，请求必须包含 `completed_project_ids` 且零页面 fan-out；项目状态只影响设置/项目管理，不得删除已发生并满足 OA 完成条件的历史成本。成本统计请求不再携带 `project_scope`，页面也不暴露项目范围切换 UI。 |
 | `SETTINGS-E2E-003` | 数据重置双确认和 job polling | P0 | admin 选择数据重置目标后必须先确认影响，再输入 OA 密码；POST job 返回 202 后页面显示进度、轮询 job、重新读取 settings 并显示成功反馈；不得出现隐藏浏览器错误或未预期 dialog。 |
 | `SETTINGS-E2E-004` | 数据重置安全边界 | P0 | data reset 必须 admin/password gate、protected targets、active job reentry、并发 409、失败不清数据、不泄露密码；重置后旧 read model/cache 不得伪装 fresh。 |
 | `SETTINGS-E2E-005` | OA 申请人凭据独立事实源 | P0 | admin 可维护 OA 申请人凭据；settings GET/POST 和凭据列表不得回显密码、token 或密文；目标 OA token provider 只通过 credential service 取密。 |

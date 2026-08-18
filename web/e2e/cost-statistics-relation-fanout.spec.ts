@@ -44,16 +44,15 @@ test.describe("cost statistics relation browser fan-out", () => {
     await expect(linkedExpenseType).toContainText("58000.00");
     await linkedExpenseType.click();
 
-    const projectRows = page.getByRole("grid", { name: "项目 OA 成本归集明细表" });
+    const projectRows = page.getByRole("grid", { name: "项目成本明细表" });
     await expect(projectRows).toBeVisible();
     await expect(projectRows).toContainText("智能工厂设备尾款");
-    await expect(projectRows).toContainText("智能工厂设备商");
 
     const detailRequest = page.waitForRequest((request) =>
       decodeURIComponent(requestPath(request.url())).endsWith("/api/cost-statistics/allocations/oa:bk-o-202603-001"),
     );
     await projectRows.getByRole("button", { name: /^查看OA 成本归集 智能工厂项目/ }).click();
-    expect(new URL((await detailRequest).url()).searchParams.get("project_scope")).toBe("active");
+    expect(new URL((await detailRequest).url()).searchParams.has("project_scope")).toBe(false);
 
     const detailDialog = page.getByRole("dialog", { name: "OA 成本归集明细" });
     await expect(detailDialog).toBeVisible();

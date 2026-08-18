@@ -60,15 +60,18 @@ class CostStatisticsApiRoutes:
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> Any | None:
-        if method == "GET" and route_path == "/api/cost-statistics/tag-rules":
-            return self.handle_tag_rules(headers)
-        if method == "PUT" and route_path == "/api/cost-statistics/tag-rules":
-            return self.handle_update_tag_rules(body, headers)
+        if method == "GET" and route_path == "/api/cost-statistics/time-tag-rules":
+            return self.handle_time_tag_rules(headers)
+        if method == "PUT" and route_path == "/api/cost-statistics/time-tag-rules":
+            return self.handle_update_time_tag_rules(body, headers)
+        if method == "GET" and route_path == "/api/cost-statistics/no-oa-rules":
+            return self.handle_no_oa_rules(headers)
+        if method == "PUT" and route_path == "/api/cost-statistics/no-oa-rules":
+            return self.handle_update_no_oa_rules(body, headers)
         if method == "GET" and route_path == "/api/cost-statistics/explorer":
             return self.handle_explorer(
                 scope=query.get("scope", [None])[0],
                 view=query.get("view", [None])[0],
-                project_scope=query.get("project_scope", [None])[0],
                 project_name=query.get("project_name", [None])[0],
                 expense_type=query.get("expense_type", [None])[0],
                 payment_account_label=query.get("payment_account_label", [None])[0],
@@ -90,7 +93,6 @@ class CostStatisticsApiRoutes:
                 start_date=query.get("start_date", [None])[0],
                 end_date=query.get("end_date", [None])[0],
                 aggregate_by=query.get("aggregate_by", [None])[0],
-                project_scope=query.get("project_scope", [None])[0],
             )
         if method == "GET" and route_path == "/api/cost-statistics/export":
             return self.handle_export(
@@ -111,13 +113,11 @@ class CostStatisticsApiRoutes:
                     query.get("include_expense_content_summary", [None])[0]
                 ),
                 sort_by=query.get("sort_by", [None])[0],
-                project_scope=query.get("project_scope", [None])[0],
             )
         if method == "GET" and route_path.startswith("/api/cost-statistics/bank-transactions/"):
             transaction_id = route_path.rsplit("/", 1)[-1]
             return self.handle_bank_transaction(
                 transaction_id,
-                query.get("project_scope", [None])[0],
                 query.get("view", [None])[0],
                 query.get("scope", [None])[0],
             )
@@ -125,13 +125,55 @@ class CostStatisticsApiRoutes:
             allocation_id = route_path.rsplit("/", 1)[-1]
             return self.handle_allocation(
                 allocation_id,
-                query.get("project_scope", [None])[0],
                 query.get("view", [None])[0],
                 query.get("scope", [None])[0],
             )
         return None
 
-    def handle_tag_rules(self, headers: dict[str, str] | None) -> Any:
+    def handle_time_tag_rules(self, headers: dict[str, str] | None) -> Any:
+        session, error = self._read_session(headers)
+        if error is not None:
+            return error
+        service = self._settings_service()
+        candidates = self._query_service.get_time_tag_candidates()
+        payload = _merge_tag_candidates(
+            service.get_cost_statistics_time_tag_selection_payload(
+                can_save=bool(session is None or session.can_mutate_data),
+            ),
+            candidates,
+            include_definitions=True,
+        )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def handle_update_time_tag_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+        session, error = self._write_session(headers)
+        if error is not None:
+            return error
+        payload, body_error = self._load_body(body)
+        if body_error is not None:
+            return body_error
+        service = self._settings_service()
+        try:
+            candidates = self._query_service.get_time_tag_candidates()
+            current = service.get_cost_statistics_time_tag_selection_payload(can_save=True)
+            allowed_codes = _candidate_codes(candidates)
+            allowed_codes.update(_candidate_codes(list(current.get("available_tags") or [])))
+            result = service.update_cost_statistics_time_tag_selection(
+                payload,
+                actor_id=actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "cost_statistics"),
+                allowed_tag_codes=allowed_codes,
+            )
+            result = _merge_tag_candidates(
+                result,
+                candidates,
+                include_definitions=True,
+            )
+        except AppSettingsValidationError as exc:
+            status = HTTPStatus.CONFLICT if exc.error_code.endswith("version_conflict") else HTTPStatus.BAD_REQUEST
+            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
+        return self._json_response(HTTPStatus.OK, result)
+
+    def handle_no_oa_rules(self, headers: dict[str, str] | None) -> Any:
         session, error = self._read_session(headers)
         if error is not None:
             return error
@@ -140,8 +182,8 @@ class CostStatisticsApiRoutes:
             candidates = self._query_service.get_no_oa_tag_candidates()
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
             return self._integrity_error_response(exc)
-        payload = _merge_no_oa_tag_candidates(
-            service.get_cost_statistics_tag_selection_payload(
+        payload = _merge_tag_candidates(
+            service.get_cost_statistics_no_oa_projects_payload(
                 can_save=bool(session is None or session.can_mutate_data),
             ),
             candidates,
@@ -151,7 +193,7 @@ class CostStatisticsApiRoutes:
             payload,
         )
 
-    def handle_update_tag_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+    def handle_update_no_oa_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
         session, error = self._write_session(headers)
         if error is not None:
             return error
@@ -160,30 +202,28 @@ class CostStatisticsApiRoutes:
             return body_error
         service = self._settings_service()
         try:
-            current = service.get_cost_statistics_tag_selection_payload(can_save=True)
+            current = service.get_cost_statistics_no_oa_projects_payload(can_save=True)
             candidates = self._query_service.get_no_oa_tag_candidates()
-            allowed_tag_codes = {
-                str(tag.get("code") or "").strip()
-                for tag in candidates
-                if str(tag.get("code") or "").strip()
-            }
+            allowed_tag_codes = _candidate_codes(candidates)
             allowed_tag_codes.update(
-                str(code).strip()
-                for code in list(current.get("selected_tag_codes") or [])
+                str(code)
+                for project in list(current.get("projects") or [])
+                if isinstance(project, dict)
+                for code in list(project.get("tag_codes") or [])
                 if str(code).strip()
             )
-            result = service.update_cost_statistics_tag_selection(
+            result = service.update_cost_statistics_no_oa_projects(
                 payload,
                 actor_id=actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "cost_statistics"),
                 allowed_tag_codes=allowed_tag_codes,
             )
-            result = _merge_no_oa_tag_candidates(result, candidates)
+            result = _merge_tag_candidates(result, candidates)
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
             return self._integrity_error_response(exc)
         except AppSettingsValidationError as exc:
             status = (
                 HTTPStatus.CONFLICT
-                if exc.error_code == "cost_statistics_tag_selection_version_conflict"
+                if exc.error_code.endswith("version_conflict")
                 else HTTPStatus.BAD_REQUEST
             )
             return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
@@ -194,7 +234,6 @@ class CostStatisticsApiRoutes:
         *,
         scope: str | None,
         view: str | None,
-        project_scope: str | None,
         project_name: str | None,
         expense_type: str | None,
         payment_account_label: str | None,
@@ -208,7 +247,6 @@ class CostStatisticsApiRoutes:
         current_scope = scope or self._now_provider().strftime("%Y-%m")
         started_at = monotonic()
         try:
-            normalized_project_scope = self._normalize_project_scope(project_scope)
             if (
                 include_statistics is not None
                 and str(include_statistics).strip().lower()
@@ -218,7 +256,6 @@ class CostStatisticsApiRoutes:
             payload = self._query_service.get_explorer_page(
                 scope=current_scope,
                 view=str(view or ""),
-                project_scope=normalized_project_scope,
                 filters={
                     "project_name": project_name,
                     "expense_type": expense_type,
@@ -238,7 +275,6 @@ class CostStatisticsApiRoutes:
         if self._metric_emitter is not None:
             self._metric_emitter(
                 month=current_scope,
-                project_scope=normalized_project_scope,
                 duration_ms=self._duration_ms(started_at),
                 entry_count=self._entry_count(payload),
             )
@@ -266,7 +302,6 @@ class CostStatisticsApiRoutes:
         include_ignored_rows: bool = True,
         include_expense_content_summary: bool = True,
         sort_by: str | None = None,
-        project_scope: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
         if view not in {"month", "time", "bank_tag", "project", "expense_type"}:
@@ -278,7 +313,6 @@ class CostStatisticsApiRoutes:
                 },
             )
         try:
-            normalized_project_scope = self._normalize_project_scope(project_scope)
             filename, content = self._query_service.export_view(
                 month=current_month,
                 view=view,
@@ -295,7 +329,6 @@ class CostStatisticsApiRoutes:
                 include_ignored_rows=include_ignored_rows,
                 include_expense_content_summary=include_expense_content_summary,
                 sort_by=sort_by or "time",
-                project_scope=normalized_project_scope,
             )
         except CostStatisticsExportLimitError as error:
             return self._json_response(
@@ -305,8 +338,6 @@ class CostStatisticsApiRoutes:
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
             return self._integrity_error_response(error)
         except ValueError as error:
-            if str(error) == "project_scope must be active or all":
-                return self._project_scope_error_response(error)
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cost_statistics_export_request", "message": str(error)},
@@ -325,7 +356,6 @@ class CostStatisticsApiRoutes:
         start_date: str | None = None,
         end_date: str | None = None,
         aggregate_by: str | None = None,
-        project_scope: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
         if view not in {"time", "bank_tag", "project", "expense_type"}:
@@ -337,7 +367,6 @@ class CostStatisticsApiRoutes:
                 },
             )
         try:
-            normalized_project_scope = self._normalize_project_scope(project_scope)
             payload = self._query_service.get_export_preview(
                 month=current_month,
                 view=view,
@@ -348,7 +377,6 @@ class CostStatisticsApiRoutes:
                 start_date=start_date,
                 end_date=end_date,
                 aggregate_by=aggregate_by,
-                project_scope=normalized_project_scope,
             )
         except CostStatisticsExportLimitError as error:
             return self._json_response(
@@ -358,8 +386,6 @@ class CostStatisticsApiRoutes:
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
             return self._integrity_error_response(error)
         except ValueError as error:
-            if str(error) == "project_scope must be active or all":
-                return self._project_scope_error_response(error)
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cost_statistics_export_preview_request", "message": str(error)},
@@ -369,7 +395,6 @@ class CostStatisticsApiRoutes:
     def handle_bank_transaction(
         self,
         transaction_id: str,
-        project_scope: str | None,
         view: str | None,
         scope: str | None,
     ) -> Any:
@@ -383,18 +408,14 @@ class CostStatisticsApiRoutes:
                 },
             )
         try:
-            normalized_project_scope = self._normalize_project_scope(project_scope)
             payload = self._query_service.get_bank_transaction_detail(
                 transaction_id,
-                project_scope=normalized_project_scope,
                 view=normalized_view,
                 scope=str(scope or ""),
             )
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
             return self._integrity_error_response(error)
         except ValueError as error:
-            if str(error) == "project_scope must be active or all":
-                return self._project_scope_error_response(error)
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
@@ -412,7 +433,6 @@ class CostStatisticsApiRoutes:
     def handle_allocation(
         self,
         allocation_id: str,
-        project_scope: str | None,
         view: str | None,
         scope: str | None,
     ) -> Any:
@@ -428,15 +448,12 @@ class CostStatisticsApiRoutes:
         try:
             payload = self._query_service.get_allocation_detail(
                 allocation_id,
-                project_scope=self._normalize_project_scope(project_scope),
                 view=normalized_view,
                 scope=str(scope or ""),
             )
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as error:
             return self._integrity_error_response(error)
         except ValueError as error:
-            if str(error) == "project_scope must be active or all":
-                return self._project_scope_error_response(error)
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_cost_statistics_allocation_request", "message": str(error)},
@@ -468,26 +485,8 @@ class CostStatisticsApiRoutes:
             raise RuntimeError("Cost statistics JSON body loader is not configured.")
         return self._load_json_body(body)
 
-    @staticmethod
-    def _normalize_project_scope(project_scope: str | None) -> str:
-        normalized_project_scope = str(project_scope or "active").strip().lower()
-        if normalized_project_scope not in {"active", "all"}:
-            raise ValueError("project_scope must be active or all")
-        return normalized_project_scope
-
-    def _project_scope_error_response(self, error: ValueError) -> Any:
-        return self._json_response(
-            HTTPStatus.BAD_REQUEST,
-            {
-                "error": "invalid_cost_statistics_project_scope",
-                "message": str(error),
-            },
-        )
-
     def _page_query_error_response(self, error: ValueError) -> Any:
         message = str(error)
-        if "project_scope" in message:
-            return self._project_scope_error_response(error)
         error_code = "invalid_cost_statistics_cursor" if "cursor" in message else "invalid_cost_statistics_query"
         return self._json_response(HTTPStatus.BAD_REQUEST, {"error": error_code, "message": message})
 
@@ -518,31 +517,68 @@ def _explorer_entry_count(payload: dict[str, Any]) -> int:
     return 0
 
 
-def _merge_no_oa_tag_candidates(
+def _candidate_codes(candidates: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(tag.get("code") or "").strip()
+        for tag in candidates
+        if str(tag.get("code") or "").strip()
+    }
+
+
+def _merge_tag_candidates(
     payload: dict[str, Any],
     candidates: list[dict[str, Any]],
+    *,
+    include_definitions: bool = False,
 ) -> dict[str, Any]:
     result = dict(payload)
     definitions = {
         str(tag.get("code") or ""): dict(tag)
-        for tag in list(result.get("active_tags") or [])
+        for tag in list(result.get("available_tags") or [])
         if isinstance(tag, dict) and str(tag.get("code") or "")
     }
-    candidate_codes = {
-        str(tag.get("code") or "")
-        for tag in candidates
-        if str(tag.get("code") or "")
-    }
-    selected_codes = [
+    candidate_codes = _candidate_codes(candidates)
+    selected_codes = {
         str(code)
         for code in list(result.get("selected_tag_codes") or [])
         if str(code)
-    ]
+    }
+    selected_codes.update(
+        str(code)
+        for project in list(result.get("projects") or [])
+        if isinstance(project, dict)
+        for code in list(project.get("tag_codes") or [])
+        if str(code)
+    )
     unavailable_codes = [
-        code for code in selected_codes if code not in candidate_codes
+        code for code in sorted(selected_codes) if code not in candidate_codes
     ]
-    result["active_tags"] = [
-        *candidates,
+    candidate_by_code = {
+        str(tag.get("code") or ""): dict(tag)
+        for tag in candidates
+        if str(tag.get("code") or "")
+    }
+    result["available_tags"] = [
+        *(
+            [
+                {
+                    **definition,
+                    "status": str(definition.get("status") or "available"),
+                }
+                for code, definition in definitions.items()
+                if code not in candidate_by_code
+            ]
+            if include_definitions
+            else []
+        ),
+        *[
+            {
+                **definitions.get(code, {}),
+                **candidate,
+                "status": "active",
+            }
+            for code, candidate in candidate_by_code.items()
+        ],
         *[
             {
                 **definitions.get(
@@ -554,6 +590,12 @@ def _merge_no_oa_tag_candidates(
             for code in unavailable_codes
         ],
     ]
+    deduplicated: dict[str, dict[str, Any]] = {}
+    for tag in result["available_tags"]:
+        code = str(tag.get("code") or "") if isinstance(tag, dict) else ""
+        if code:
+            deduplicated[code] = dict(tag)
+    result["available_tags"] = list(deduplicated.values())
     result["inactive_selected_tag_codes"] = unavailable_codes
     return result
 

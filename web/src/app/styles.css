@@ -16927,6 +16927,8 @@ body.column-layout-dragging {
 .cost-header-actions {
   align-items: center;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--fp-space-2);
 }
 
@@ -19137,6 +19139,20 @@ body.column-layout-dragging {
   line-height: 1.6;
 }
 
+.cost-tag-rules-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cost-tag-rules-toolbar span {
+  margin-left: auto;
+  color: var(--fp-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .cost-tag-rules-name {
   margin-bottom: 14px;
 }
@@ -19228,6 +19244,98 @@ body.column-layout-dragging {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+}
+
+.cost-no-oa-rules-drawer .finance-drawer__body {
+  padding-top: 8px;
+}
+
+.cost-no-oa-add {
+  margin-bottom: 12px;
+}
+
+.cost-no-oa-projects {
+  display: grid;
+  gap: 8px;
+}
+
+.cost-no-oa-project {
+  border: 1px solid var(--fp-border-subtle);
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-surface);
+  overflow: hidden;
+}
+
+.cost-no-oa-project-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: var(--fp-surface-muted);
+}
+
+.cost-no-oa-project-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--fp-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cost-no-oa-project-toggle span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cost-no-oa-project-toggle em,
+.cost-no-oa-tag em {
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-caption);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.cost-no-oa-project-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--fp-border-subtle);
+}
+
+.cost-no-oa-tag-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.cost-no-oa-tag {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cost-no-oa-tag span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cost-no-oa-tag em {
+  margin-left: auto;
+  text-align: right;
 }
 
 .cost-drawer-secondary-button,

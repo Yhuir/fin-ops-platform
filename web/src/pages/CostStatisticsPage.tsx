@@ -12,7 +12,8 @@ import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
-import CostStatisticsTagRulesDrawer from "../components/cost-statistics/CostStatisticsTagRulesDrawer";
+import CostStatisticsNoOaRulesDrawer from "../components/cost-statistics/CostStatisticsNoOaRulesDrawer";
+import CostStatisticsTimeTagRulesDrawer from "../components/cost-statistics/CostStatisticsTimeTagRulesDrawer";
 import ExportCenterModal, {
   type ExportCenterMode,
   type ExportRangeMode,
@@ -29,10 +30,12 @@ import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   exportCostStatisticsView,
   fetchCostStatisticsExplorerPage,
-  fetchCostStatisticsTagRules,
+  fetchCostStatisticsNoOaRules,
+  fetchCostStatisticsTimeTagRules,
   fetchCostStatisticsExportPreview,
   fetchCostEntryDetail,
-  saveCostStatisticsTagRules,
+  saveCostStatisticsNoOaRules,
+  saveCostStatisticsTimeTagRules,
   type CostExportParams,
   type PreviewCostExportParams,
 } from "../features/cost-statistics/api";
@@ -44,12 +47,13 @@ import type {
   CostBankTagPrimaryExplorerRow,
   CostBankTagSubExplorerRow,
   CostExpenseTypeExplorerRow,
-  CostProjectScope,
   CostProjectExplorerRow,
+  CostStatisticsNoOaProject,
+  CostStatisticsNoOaRules,
   CostStatisticsExplorerPage,
   CostStatisticsExplorerPageRequest,
   CostStatisticsExportPreview,
-  CostStatisticsTagRules,
+  CostStatisticsTimeTagRules,
   CostExplorerEntryRow,
   CostEntryDetail,
 } from "../features/cost-statistics/types";
@@ -92,7 +96,7 @@ function getExplorerTransitionScope(
 
   const previous = JSON.parse(previousRequestKey) as CostStatisticsExplorerPageRequest;
   const next = JSON.parse(nextRequestKey) as CostStatisticsExplorerPageRequest;
-  if (previous.scope !== next.scope || previous.view !== next.view || previous.projectScope !== next.projectScope) {
+  if (previous.scope !== next.scope || previous.view !== next.view) {
     return "surface";
   }
   if (previous.query !== next.query) {
@@ -377,7 +381,6 @@ export default function CostStatisticsPage() {
   const { value: costSession } = costPageSession;
   const viewMode = costSession.viewMode;
   const setViewMode = (value: SetStateAction<CostViewMode>) => setCostSessionField("viewMode", value);
-  const costProjectScope: CostProjectScope = "active";
   const timeScopeMode = costSession.timeScopeMode;
   const timeScopeYear = costSession.timeScopeYear;
   const timeScopeMonth = costSession.timeScopeMonth;
@@ -400,13 +403,19 @@ export default function CostStatisticsPage() {
   const [exportPreview, setExportPreview] = useState<CostStatisticsExportPreview | null>(null);
   const [exportCenterMode, setExportCenterMode] = useState<ExportCenterMode>("time");
   const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
-  const [isTagRulesDrawerOpen, setIsTagRulesDrawerOpen] = useState(false);
-  const [tagRules, setTagRules] = useState<CostStatisticsTagRules | null>(null);
-  const [tagRuleDraftName, setTagRuleDraftName] = useState("");
-  const [tagRuleDraftCodes, setTagRuleDraftCodes] = useState<string[]>([]);
-  const [isTagRulesLoading, setIsTagRulesLoading] = useState(false);
-  const [isTagRulesSaving, setIsTagRulesSaving] = useState(false);
-  const [tagRulesError, setTagRulesError] = useState<string | null>(null);
+  const [isTimeTagRulesOpen, setIsTimeTagRulesOpen] = useState(false);
+  const [timeTagRules, setTimeTagRules] = useState<CostStatisticsTimeTagRules | null>(null);
+  const [timeTagDraftMode, setTimeTagDraftMode] = useState<"all" | "custom">("all");
+  const [timeTagDraftCodes, setTimeTagDraftCodes] = useState<string[]>([]);
+  const [isTimeTagRulesLoading, setIsTimeTagRulesLoading] = useState(false);
+  const [isTimeTagRulesSaving, setIsTimeTagRulesSaving] = useState(false);
+  const [timeTagRulesError, setTimeTagRulesError] = useState<string | null>(null);
+  const [isNoOaRulesOpen, setIsNoOaRulesOpen] = useState(false);
+  const [noOaRules, setNoOaRules] = useState<CostStatisticsNoOaRules | null>(null);
+  const [noOaDraftProjects, setNoOaDraftProjects] = useState<CostStatisticsNoOaProject[]>([]);
+  const [isNoOaRulesLoading, setIsNoOaRulesLoading] = useState(false);
+  const [isNoOaRulesSaving, setIsNoOaRulesSaving] = useState(false);
+  const [noOaRulesError, setNoOaRulesError] = useState<string | null>(null);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchComposing, setIsSearchComposing] = useState(false);
@@ -517,7 +526,6 @@ export default function CostStatisticsPage() {
   const explorerRequest: CostStatisticsExplorerPageRequest = {
     scope: explorerScope,
     view: explorerView,
-    projectScope: costProjectScope,
     pageSize: 50,
     ...(viewMode === "project" && selectedProjectName ? { projectName: selectedProjectName } : {}),
     ...(viewMode === "project" && selectedProjectExpenseType ? { expenseType: selectedProjectExpenseType } : {}),
@@ -655,96 +663,118 @@ export default function CostStatisticsPage() {
     setDomainRefreshNonce((current) => current + 1);
   }, [invalidateExportReferenceData]);
 
-  const openTagRulesDrawer = useCallback(() => {
-    setTagRulesError(null);
-    setIsTagRulesDrawerOpen(true);
-  }, []);
-  const closeTagRulesDrawer = useCallback(() => {
-    if (isTagRulesSaving) {
-      return;
+  const closeTimeTagRules = useCallback(() => {
+    if (!isTimeTagRulesSaving) {
+      setIsTimeTagRulesOpen(false);
+      setTimeTagRulesError(null);
     }
-    setIsTagRulesDrawerOpen(false);
-    setTagRulesError(null);
-  }, [isTagRulesSaving]);
-  const toggleTagRuleCode = useCallback((code: string) => {
-    setTagRuleDraftCodes((current) => (
-      current.includes(code)
-        ? current.filter((item) => item !== code)
-        : [...current, code]
-    ));
-  }, []);
-  const toggleTagRuleGroup = useCallback((codes: string[], checked: boolean) => {
-    setTagRuleDraftCodes((current) => {
-      const next = new Set(current);
-      for (const code of codes) {
-        if (checked) {
-          next.add(code);
-        } else {
-          next.delete(code);
-        }
-      }
-      return Array.from(next);
-    });
-  }, []);
+  }, [isTimeTagRulesSaving]);
+  const closeNoOaRules = useCallback(() => {
+    if (!isNoOaRulesSaving) {
+      setIsNoOaRulesOpen(false);
+      setNoOaRulesError(null);
+    }
+  }, [isNoOaRulesSaving]);
+
   useEffect(() => {
-    if (!active || !isTagRulesDrawerOpen) {
+    if (!active || !isTimeTagRulesOpen) {
       return undefined;
     }
     const controller = new AbortController();
-    async function loadTagRules() {
-      setIsTagRulesLoading(true);
-      setTagRulesError(null);
+    async function loadRules() {
+      setIsTimeTagRulesLoading(true);
+      setTimeTagRulesError(null);
       try {
-        const payload = await fetchCostStatisticsTagRules(controller.signal);
+        const payload = await fetchCostStatisticsTimeTagRules(controller.signal);
         if (!controller.signal.aborted) {
-          setTagRules(payload);
-          setTagRuleDraftName(payload.displayName);
-          setTagRuleDraftCodes(payload.effectiveSelectedTagCodes);
+          setTimeTagRules(payload);
+          setTimeTagDraftMode(payload.mode);
+          setTimeTagDraftCodes(payload.selectedTagCodes);
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
-          setTagRulesError(getCostStatisticsLoadErrorMessage(caught));
+          setTimeTagRulesError(getCostStatisticsLoadErrorMessage(caught));
         }
       } finally {
         if (!controller.signal.aborted) {
-          setIsTagRulesLoading(false);
+          setIsTimeTagRulesLoading(false);
         }
       }
     }
-    void loadTagRules();
+    void loadRules();
     return () => controller.abort();
-  }, [active, activationGeneration, isTagRulesDrawerOpen]);
+  }, [active, activationGeneration, isTimeTagRulesOpen]);
 
-  const saveTagRules = useCallback(async () => {
-    if (!tagRules || isTagRulesSaving) {
-      return;
+  useEffect(() => {
+    if (!active || !isNoOaRulesOpen) return undefined;
+    const controller = new AbortController();
+    async function loadRules() {
+      setIsNoOaRulesLoading(true);
+      setNoOaRulesError(null);
+      try {
+        const payload = await fetchCostStatisticsNoOaRules(controller.signal);
+        if (!controller.signal.aborted) {
+          setNoOaRules(payload);
+          setNoOaDraftProjects(payload.projects);
+        }
+      } catch (caught) {
+        if (!controller.signal.aborted) setNoOaRulesError(getCostStatisticsLoadErrorMessage(caught));
+      } finally {
+        if (!controller.signal.aborted) setIsNoOaRulesLoading(false);
+      }
     }
-    setIsTagRulesSaving(true);
-    setTagRulesError(null);
-    invalidateExportReferenceData();
+    void loadRules();
+    return () => controller.abort();
+  }, [active, activationGeneration, isNoOaRulesOpen]);
+
+  const saveTimeTagRules = useCallback(async () => {
+    if (!timeTagRules || isTimeTagRulesSaving) return;
+    setIsTimeTagRulesSaving(true);
+    setTimeTagRulesError(null);
     try {
-      const result = await saveCostStatisticsTagRules({
-        expectedVersion: tagRules.version,
-        displayName: tagRuleDraftName.trim(),
-        selectedTagCodes: tagRuleDraftCodes,
+      const result = await saveCostStatisticsTimeTagRules({
+        expectedVersion: timeTagRules.version,
+        mode: timeTagDraftMode,
+        selectedTagCodes: timeTagDraftMode === "all" ? [] : timeTagDraftCodes,
       });
-      setTagRules(result);
-      setTagRuleDraftName(result.displayName);
-      setTagRuleDraftCodes(result.effectiveSelectedTagCodes);
-      setDomainRefreshNonce((current) => current + 1);
-      setIsTagRulesDrawerOpen(false);
+      setTimeTagRules(result);
+      setTimeTagDraftMode(result.mode);
+      setTimeTagDraftCodes(result.selectedTagCodes);
+      if (viewMode === "time" || viewMode === "bankTag") setDomainRefreshNonce((current) => current + 1);
+      setIsTimeTagRulesOpen(false);
     } catch (caught) {
-      setTagRulesError(getCostStatisticsActionErrorMessage(caught));
+      setTimeTagRulesError(getCostStatisticsActionErrorMessage(caught));
     } finally {
-      setIsTagRulesSaving(false);
+      setIsTimeTagRulesSaving(false);
     }
   }, [
-    invalidateExportReferenceData,
-    isTagRulesSaving,
-    tagRuleDraftName,
-    tagRuleDraftCodes,
-    tagRules,
+    isTimeTagRulesSaving,
+    timeTagDraftCodes,
+    timeTagDraftMode,
+    timeTagRules,
+    viewMode,
   ]);
+
+  const saveNoOaRules = useCallback(async () => {
+    if (!noOaRules || isNoOaRulesSaving) return;
+    setIsNoOaRulesSaving(true);
+    setNoOaRulesError(null);
+    invalidateExportReferenceData();
+    try {
+      const result = await saveCostStatisticsNoOaRules({
+        expectedVersion: noOaRules.version,
+        projects: noOaDraftProjects.map((project) => ({ ...project, displayName: project.displayName.trim() })),
+      });
+      setNoOaRules(result);
+      setNoOaDraftProjects(result.projects);
+      if (viewMode === "project" || viewMode === "bank" || viewMode === "expenseType") setDomainRefreshNonce((current) => current + 1);
+      setIsNoOaRulesOpen(false);
+    } catch (caught) {
+      setNoOaRulesError(getCostStatisticsActionErrorMessage(caught));
+    } finally {
+      setIsNoOaRulesSaving(false);
+    }
+  }, [invalidateExportReferenceData, isNoOaRulesSaving, noOaDraftProjects, noOaRules, viewMode]);
 
   useEffect(() => {
     if (!active) {
@@ -1077,7 +1107,6 @@ export default function CostStatisticsPage() {
         detailView,
         explorerScope,
         controller.signal,
-        costProjectScope,
       );
       if (!controller.signal.aborted) {
         setEntryDetail(payload);
@@ -1157,7 +1186,6 @@ export default function CostStatisticsPage() {
         fetchCostStatisticsExplorerPage({
           scope: "all",
           view: "project",
-          projectScope: costProjectScope,
           pageSize: 1,
           includeStatistics: false,
           signal: controller.signal,
@@ -1165,7 +1193,6 @@ export default function CostStatisticsPage() {
         fetchCostStatisticsExplorerPage({
           scope: "all",
           view: "expense_type",
-          projectScope: costProjectScope,
           pageSize: 1,
           includeStatistics: false,
           signal: controller.signal,
@@ -1281,13 +1308,11 @@ export default function CostStatisticsPage() {
         return {
           month: timeMonth,
           view: exportCenterMode,
-          projectScope: costProjectScope,
         };
       }
       return {
         month: "all",
         view: exportCenterMode,
-        projectScope: costProjectScope,
         startDate: timeStartDate <= timeEndDate ? timeStartDate : timeEndDate,
         endDate: timeStartDate <= timeEndDate ? timeEndDate : timeStartDate,
       };
@@ -1300,7 +1325,6 @@ export default function CostStatisticsPage() {
       return {
         month: "all",
         view: "project",
-        projectScope: costProjectScope,
         projectNames: projectExportNames,
         aggregateBy: projectAggregateBy,
         expenseTypes: projectExpenseTypes,
@@ -1320,14 +1344,12 @@ export default function CostStatisticsPage() {
       return {
         month: expenseTypeMonth,
         view: "expense_type",
-        projectScope: costProjectScope,
         expenseTypes: expenseTypeSelections,
       };
     }
     return {
       month: "all",
       view: "expense_type",
-      projectScope: costProjectScope,
       expenseTypes: expenseTypeSelections,
       startDate: expenseTypeStartDate <= expenseTypeEndDate ? expenseTypeStartDate : expenseTypeEndDate,
       endDate: expenseTypeStartDate <= expenseTypeEndDate ? expenseTypeEndDate : expenseTypeStartDate,
@@ -1649,8 +1671,17 @@ export default function CostStatisticsPage() {
           </Button>
           <Button
             className="cost-page-action"
-            isDisabled={isTagRulesSaving}
-            onPress={openTagRulesDrawer}
+            isDisabled={isTimeTagRulesSaving}
+            onPress={() => { setTimeTagRulesError(null); setIsTimeTagRulesOpen(true); }}
+            size="sm"
+            variant="secondary"
+          >
+            按标签/按时间标签规则
+          </Button>
+          <Button
+            className="cost-page-action"
+            isDisabled={isNoOaRulesSaving}
+            onPress={() => { setNoOaRulesError(null); setIsNoOaRulesOpen(true); }}
             size="sm"
             variant="secondary"
           >
@@ -2148,21 +2179,33 @@ export default function CostStatisticsPage() {
         rowKind={activeRowKind}
       />
 
-      <CostStatisticsTagRulesDrawer
-        canSave={canMutateData && !interactionLocked && (tagRules?.canSave ?? true)}
-        displayName={tagRuleDraftName}
-        error={tagRulesError}
+      <CostStatisticsTimeTagRulesDrawer
+        canSave={canMutateData && !interactionLocked && (timeTagRules?.canSave ?? true)}
+        error={timeTagRulesError}
         interactionLocked={interactionLocked}
-        loading={isTagRulesLoading}
-        onClose={closeTagRulesDrawer}
-        onDisplayNameChange={setTagRuleDraftName}
-        onSave={() => void saveTagRules()}
-        onToggleCode={toggleTagRuleCode}
-        onToggleGroup={toggleTagRuleGroup}
-        open={isTagRulesDrawerOpen}
-        rules={tagRules}
-        saving={isTagRulesSaving}
-        selectedCodes={tagRuleDraftCodes}
+        loading={isTimeTagRulesLoading}
+        mode={timeTagDraftMode}
+        onChange={(mode, codes) => { setTimeTagDraftMode(mode); setTimeTagDraftCodes(codes); }}
+        onClose={closeTimeTagRules}
+        onSave={() => void saveTimeTagRules()}
+        open={isTimeTagRulesOpen}
+        rules={timeTagRules}
+        saving={isTimeTagRulesSaving}
+        selectedCodes={timeTagDraftCodes}
+      />
+
+      <CostStatisticsNoOaRulesDrawer
+        canSave={canMutateData && !interactionLocked && (noOaRules?.canSave ?? true)}
+        error={noOaRulesError}
+        interactionLocked={interactionLocked}
+        loading={isNoOaRulesLoading}
+        onClose={closeNoOaRules}
+        onProjectsChange={setNoOaDraftProjects}
+        onSave={() => void saveNoOaRules()}
+        open={isNoOaRulesOpen}
+        projects={noOaDraftProjects}
+        rules={noOaRules}
+        saving={isNoOaRulesSaving}
       />
 
       {isExportCenterOpen ? (

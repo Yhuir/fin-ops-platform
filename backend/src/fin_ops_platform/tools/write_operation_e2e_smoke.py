@@ -2563,7 +2563,6 @@ def _validate_relation_impact_cost_consumers(
         for consumer in checkpoint.consumers
         if consumer.page_key == "cost-statistics" and consumer.role == "affected"
     ]
-    has_active_scope = False
     has_relation_semantic_assertion = False
     for consumer in cost_consumers:
         query = parse_qs(urlsplit(consumer.probe.path).query, keep_blank_values=True)
@@ -2573,13 +2572,6 @@ def _validate_relation_impact_cost_consumers(
                 f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
                 "consumer must use a Workbench-dependent Cost view: project, bank, or expense_type."
             )
-        project_scopes = query.get("project_scope", [])
-        if len(project_scopes) != 1 or project_scopes[0] not in {"active", "all"}:
-            raise ValueError(
-                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
-                "consumer must declare exactly one project_scope=active or project_scope=all."
-            )
-        has_active_scope = has_active_scope or project_scopes[0] == "active"
         consumer_has_relation_semantic = any(
             _is_relation_derived_cost_assertion(assertion)
             for assertion in consumer.assertions
@@ -2596,19 +2588,13 @@ def _validate_relation_impact_cost_consumers(
                 "consumer must assert a relation-derived semantic field or the exact empty "
                 "rows result for that scope; positional transaction_id identity alone is insufficient."
             )
-    if cost_consumers and not has_active_scope:
-        raise ValueError(
-            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
-            "consumers must include project_scope=active; project_scope=all may only be an additional "
-            "System Audit scope."
-        )
     if (
         cost_consumers
         and checkpoint.relation_state_after == "active"
         and not has_relation_semantic_assertion
     ):
         raise ValueError(
-            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} active Cost proof "
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} Cost proof "
             "must include a relation-derived semantic field in at least one exact scope."
         )
 

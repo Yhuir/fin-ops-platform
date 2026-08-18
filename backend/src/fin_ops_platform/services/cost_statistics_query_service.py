@@ -47,13 +47,11 @@ class CostStatisticsQueryService:
         *,
         scope: str,
         view: str,
-        project_scope: str,
         filters: dict[str, str | None],
         cursor: str | None,
         page_size: int,
         include_statistics: bool = True,
     ) -> dict[str, Any]:
-        normalized_project_scope = self._normalize_project_scope(project_scope)
         scope_kind, scope_value, normalized_scope = self._normalize_page_scope(
             scope
         )
@@ -79,7 +77,6 @@ class CostStatisticsQueryService:
                 view=normalized_view,
                 include_statistics=include_statistics,
             ),
-            project_scope=normalized_project_scope,
         )
         raw_page = policy.explorer_page(
             scope_kind=scope_kind,
@@ -140,9 +137,6 @@ class CostStatisticsQueryService:
                 and len(next_cursor_values) == 4
                 else None
             ),
-            "cost_statistics_tag_selection_version": int(
-                raw_page.get("tag_selection_version") or 1
-            ),
             "allocation_quality": (
                 dict(raw_page["allocation_quality"])
                 if isinstance(raw_page.get("allocation_quality"), dict)
@@ -155,11 +149,9 @@ class CostStatisticsQueryService:
         self,
         transaction_id: str,
         *,
-        project_scope: str,
         view: str,
         scope: str,
     ) -> dict[str, Any]:
-        normalized_project_scope = self._normalize_project_scope(project_scope)
         scope_kind, scope_value, _normalized_scope = self._normalize_page_scope(
             scope
         )
@@ -174,7 +166,6 @@ class CostStatisticsQueryService:
                 view=normalized_view,
                 include_statistics=False,
             ),
-            project_scope=normalized_project_scope,
         ).bank_transaction(
             transaction_id=normalized_transaction_id,
             scope_kind=scope_kind,
@@ -223,11 +214,9 @@ class CostStatisticsQueryService:
         self,
         allocation_id: str,
         *,
-        project_scope: str,
         view: str,
         scope: str,
     ) -> dict[str, Any]:
-        normalized_project_scope = self._normalize_project_scope(project_scope)
         scope_kind, scope_value, _normalized_scope = self._normalize_page_scope(scope)
         normalized_view, _filters = self._normalize_page_query(view, {})
         if normalized_view not in {"project", "bank", "expense_type"}:
@@ -242,7 +231,6 @@ class CostStatisticsQueryService:
                 view=normalized_view,
                 include_statistics=False,
             ),
-            project_scope=normalized_project_scope,
         ).allocation(
             allocation_id=normalized_allocation_id,
             scope_kind=scope_kind,
@@ -290,14 +278,21 @@ class CostStatisticsQueryService:
                 view="project",
                 include_statistics=False,
             ),
-            project_scope="all",
         )
         return policy.no_oa_tag_candidates()
 
-    def get_export_preview(self, **kwargs: Any) -> dict[str, Any]:
-        project_scope = self._normalize_project_scope(
-            str(kwargs.get("project_scope") or "active")
+    def get_time_tag_candidates(self) -> list[dict[str, Any]]:
+        policy = CostStatisticsPolicy(
+            self._canonical_repository.load_snapshot(
+                scope_kind="all",
+                scope_value=None,
+                view="time",
+                include_statistics=False,
+            )
         )
+        return policy.time_tag_candidates()
+
+    def get_export_preview(self, **kwargs: Any) -> dict[str, Any]:
         view = str(kwargs.get("view") or "").strip()
         month = str(kwargs.get("month") or "all").strip() or "all"
         project_names = self._normalize_text_set(
@@ -321,7 +316,7 @@ class CostStatisticsQueryService:
                 "expense_type is required for expense_type export preview"
             )
         row_shape = "raw_bank" if view in {"time", "bank_tag"} else "raw_cost"
-        page = self._policy(project_scope=project_scope).export_page(
+        page = self._policy().export_page(
             month=month,
             project_names=sorted(project_names),
             expense_types=sorted(expense_types),
@@ -456,9 +451,6 @@ class CostStatisticsQueryService:
         )
 
     def export_view(self, **kwargs: Any) -> tuple[str, bytes]:
-        project_scope = self._normalize_project_scope(
-            str(kwargs.get("project_scope") or "active")
-        )
         view = str(kwargs.get("view") or "").strip()
         month = str(kwargs.get("month") or "all").strip() or "all"
         project_names = self._normalize_text_set(
@@ -503,7 +495,7 @@ class CostStatisticsQueryService:
                 if (aggregate_by or "month") == "month"
                 else "project_year"
             )
-        policy = self._policy(project_scope=project_scope)
+        policy = self._policy()
         page = policy.export_page(
             month=export_month,
             project_names=sorted(project_names),
@@ -680,11 +672,8 @@ class CostStatisticsQueryService:
             )
         return filename, self._serialize_workbook(workbook)
 
-    def _policy(self, *, project_scope: str) -> CostStatisticsPolicy:
-        return CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(),
-            project_scope=project_scope,
-        )
+    def _policy(self) -> CostStatisticsPolicy:
+        return CostStatisticsPolicy(self._canonical_repository.load_snapshot())
 
     @staticmethod
     def _normalize_page_scope(
@@ -867,13 +856,6 @@ class CostStatisticsQueryService:
     @staticmethod
     def explorer_entry_count(payload: dict[str, Any]) -> int:
         return int(payload.get("row_count") or 0)
-
-    @staticmethod
-    def _normalize_project_scope(project_scope: str) -> str:
-        normalized = str(project_scope or "active").strip().lower()
-        if normalized not in {"active", "all"}:
-            raise ValueError("project_scope must be active or all")
-        return normalized
 
     @staticmethod
     def _export_page_summary(page: dict[str, Any]) -> dict[str, Any]:

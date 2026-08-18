@@ -97,17 +97,17 @@ class CostStatisticsApiTests(unittest.TestCase):
             "time": "/api/cost-statistics/explorer?scope=2026-03&view=time",
             "project": (
                 "/api/cost-statistics/explorer?scope=2026-03&view=project"
-                "&project_scope=all&project_name=云南溯源科技"
+                "&project_name=云南溯源科技"
                 "&expense_type=设备货款及材料费"
             ),
             "bank": (
                 "/api/cost-statistics/explorer?scope=2026-03&view=bank"
-                f"&project_scope=all&payment_account_label={time_row['payment_account_label']}"
+                f"&payment_account_label={time_row['payment_account_label']}"
                 "&project_name=云南溯源科技"
             ),
             "expense_type": (
                 "/api/cost-statistics/explorer?scope=2026-03&view=expense_type"
-                "&project_scope=all&expense_type=设备货款及材料费"
+                "&expense_type=设备货款及材料费"
             ),
             "bank_tag": (
                 "/api/cost-statistics/explorer?scope=2026-03&view=bank_tag"
@@ -128,7 +128,7 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_project_view_and_detail_use_the_same_active_relation(self) -> None:
         status, page = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=云南溯源科技"
+            "&project_name=云南溯源科技"
             "&expense_type=设备货款及材料费"
         )
         self.assertEqual(status, 200)
@@ -143,7 +143,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         allocation_id = page["rows"][0]["allocation_id"]
         status, detail = self._json(
             f"/api/cost-statistics/allocations/{allocation_id}"
-            "?scope=2026-03&view=project&project_scope=all"
+            "?scope=2026-03&view=project"
         )
         self.assertEqual(status, 200)
         self.assertEqual(detail["kind"], "oa_allocation")
@@ -172,7 +172,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         status, _detail = self._json(
             f"/api/cost-statistics/bank-transactions/{self.bank_id}"
-            "?scope=2026-03&view=time&project_scope=all"
+            "?scope=2026-03&view=time"
         )
 
         self.assertEqual(status, 200)
@@ -191,13 +191,13 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_detail_endpoints_are_explicit_and_old_route_stays_removed(self) -> None:
         old_response = self._get(
             f"/api/cost-statistics/transactions/{self.bank_id}"
-            "?scope=2026-03&view=time&project_scope=all"
+            "?scope=2026-03&view=time"
         )
         self.assertEqual(old_response.status_code, 404)
 
         status, payload = self._json(
             f"/api/cost-statistics/bank-transactions/{self.bank_id}"
-            "?scope=2026-03&view=project&project_scope=all"
+            "?scope=2026-03&view=project"
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload["kind"], "bank_transaction")
@@ -217,7 +217,6 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         status, payload = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all"
         )
 
         self.assertEqual(status, 409)
@@ -236,7 +235,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             with self.subTest(view=view):
                 status, payload = self._json(
                     "/api/cost-statistics/explorer"
-                    f"?scope=2026-03&view={view}&project_scope=all"
+                    f"?scope=2026-03&view={view}"
                 )
                 self.assertEqual(status, 200)
                 self.assertEqual(payload["summary"]["total_amount"], "0.00")
@@ -247,8 +246,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             "/api/cost-statistics/explorer?scope=2026-03&view=time"
         )
         self.assertEqual(time_status, 200)
-        self.assertEqual(time_payload["row_count"], 0)
-        self.assertEqual(time_payload["rows"], [])
+        self.assertEqual(time_payload["row_count"], 1)
+        self.assertEqual(time_payload["rows"][0]["transaction_id"], self.bank_id)
 
     def test_daily_reimbursement_items_drive_views_detail_and_export(self) -> None:
         daily_oa = replace(
@@ -283,7 +282,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         status, project_page = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=项目A&expense_type=交通费"
+            "&project_name=项目A&expense_type=交通费"
         )
         self.assertEqual(status, 200)
         self.assertEqual(project_page["row_count"], 1)
@@ -300,7 +299,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         allocation_id = project_page["rows"][0]["allocation_id"]
         status, detail = self._json(
             f"/api/cost-statistics/allocations/{allocation_id}"
-            "?scope=2026-03&view=project&project_scope=all"
+            "?scope=2026-03&view=project"
         )
         self.assertEqual(status, 200)
         self.assertEqual(detail["allocation"]["project_name"], "项目A")
@@ -310,7 +309,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         status, preview = self._json(
             "/api/cost-statistics/export-preview"
-            "?month=2026-03&view=project&project_scope=all"
+            "?month=2026-03&view=project"
             "&project_name=项目B"
         )
         self.assertEqual(status, 200)
@@ -334,7 +333,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         status, payload = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=云南溯源科技"
+            "&project_name=云南溯源科技"
             "&expense_type=设备货款及材料费"
         )
 
@@ -344,7 +343,7 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_next_request_observes_relation_withdrawal_without_refresh_job(self) -> None:
         before_status, before = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=云南溯源科技"
+            "&project_name=云南溯源科技"
             "&expense_type=设备货款及材料费"
         )
         self.assertEqual(before_status, 200)
@@ -357,7 +356,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         after_status, after = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=云南溯源科技"
+            "&project_name=云南溯源科技"
             "&expense_type=设备货款及材料费"
         )
         self.assertEqual(after_status, 200)
@@ -368,13 +367,13 @@ class CostStatisticsApiTests(unittest.TestCase):
             "/api/cost-statistics/explorer?scope=2026-03&view=time"
         )
         self.assertEqual(time_status, 200)
-        self.assertEqual(time_payload["row_count"], 0)
-        self.assertEqual(time_payload["rows"], [])
+        self.assertEqual(time_payload["row_count"], 1)
+        self.assertEqual(time_payload["rows"][0]["transaction_id"], self.bank_id)
 
     def test_export_preview_and_workbook_use_canonical_snapshot(self) -> None:
         status, preview = self._json(
             "/api/cost-statistics/export-preview"
-            "?month=2026-03&view=project&project_scope=all"
+            "?month=2026-03&view=project"
             "&project_name=云南溯源科技"
         )
         self.assertEqual(status, 200)
@@ -384,7 +383,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         response = self._get(
             "/api/cost-statistics/export"
-            "?month=2026-03&view=project&project_scope=all"
+            "?month=2026-03&view=project"
             "&project_name=云南溯源科技"
         )
         self.assertEqual(response.status_code, 200)
@@ -411,7 +410,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         repository.load_snapshot = counted_snapshot
         status, _payload = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=云南溯源科技"
+            "&project_name=云南溯源科技"
             "&expense_type=设备货款及材料费"
         )
         self.assertEqual(status, 200)
@@ -420,7 +419,7 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_follow_up_request_can_skip_rebuilding_global_statistics(self) -> None:
         status, payload = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=云南溯源科技"
+            "&project_name=云南溯源科技"
             "&expense_type=设备货款及材料费&include_statistics=false"
         )
 
@@ -443,7 +442,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         status, expense_payload = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=expense_type"
-            "&project_scope=all&query=PLC"
+            "&query=PLC"
         )
         self.assertEqual(status, 200)
         self.assertEqual(
@@ -456,7 +455,7 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         status, empty_payload = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=expense_type"
-            "&project_scope=all&query=不存在的内容"
+            "&query=不存在的内容"
         )
         self.assertEqual(status, 200)
         self.assertEqual(empty_payload["summary"]["total_amount"], "0.00")
@@ -474,11 +473,6 @@ class CostStatisticsApiTests(unittest.TestCase):
             ),
             (
                 "/api/cost-statistics/explorer"
-                "?scope=2026-03&view=time&project_scope=bad",
-                "invalid_cost_statistics_project_scope",
-            ),
-            (
-                "/api/cost-statistics/explorer"
                 "?scope=2026-03&view=time&include_statistics=maybe",
                 "invalid_cost_statistics_query",
             ),
@@ -493,6 +487,37 @@ class CostStatisticsApiTests(unittest.TestCase):
                 status, payload = self._json(path)
                 self.assertEqual(status, 400)
                 self.assertEqual(payload["error"], error_code)
+
+    def test_time_tag_rules_default_to_all_and_custom_empty_filters_raw_bank_views(self) -> None:
+        status, rules = self._json("/api/cost-statistics/time-tag-rules")
+        self.assertEqual(status, 200)
+        self.assertEqual(rules["mode"], "all")
+        self.assertEqual(rules["selected_tag_codes"], [])
+        self.assertTrue(rules["available_tags"])
+
+        response = self.app.handle_request(
+            "PUT",
+            "/api/cost-statistics/time-tag-rules",
+            body=json.dumps(
+                {
+                    "expected_version": rules["version"],
+                    "mode": "custom",
+                    "selected_tag_codes": [],
+                }
+            ),
+        )
+        self.assertEqual(response.status_code, 200)
+        saved = json.loads(response.body)
+        self.assertEqual(saved["mode"], "custom")
+
+        status, time_page = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=time"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(time_page["row_count"], 0)
+
+        legacy = self.app.handle_request("GET", "/api/cost-statistics/tag-rules")
+        self.assertEqual(legacy.status_code, 404)
 
     def test_no_oa_scope_defaults_empty_and_includes_only_unpaired_rows_after_save(self) -> None:
         preview = self.app._import_service.preview_import(  # noqa: SLF001
@@ -516,33 +541,65 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.app._import_service.confirm_import(preview.id)  # noqa: SLF001
         unpaired_bank_id = self.app._import_service.list_transactions()[-1].id  # noqa: SLF001
 
-        status, rules = self._json("/api/cost-statistics/tag-rules")
+        status, rules = self._json("/api/cost-statistics/no-oa-rules")
         self.assertEqual(status, 200)
-        self.assertEqual(rules["display_name"], "")
-        self.assertEqual(rules["selected_tag_codes"], [])
-        self.assertEqual(len(rules["active_tags"]), 1)
-        candidate_code = rules["active_tags"][0]["code"]
-        self.assertEqual(rules["active_tags"][0]["label"], "手续费")
+        self.assertEqual(rules["projects"], [])
+        self.assertEqual(len(rules["available_tags"]), 1)
+        candidate_code = rules["available_tags"][0]["code"]
+        self.assertEqual(rules["available_tags"][0]["label"], "手续费")
 
         response = self.app.handle_request(
             "PUT",
-            "/api/cost-statistics/tag-rules",
+            "/api/cost-statistics/no-oa-rules",
             body=json.dumps(
                 {
                     "expected_version": rules["version"],
-                    "display_name": "云南溯源无 OA 分类",
-                    "selected_tag_codes": [candidate_code],
+                    "projects": [
+                        {
+                            "id": "yunnan-no-oa",
+                            "display_name": "云南溯源无 OA 分类",
+                            "tag_codes": [candidate_code],
+                        }
+                    ],
                 },
                 ensure_ascii=False,
             ),
         )
         self.assertEqual(response.status_code, 200)
         saved = json.loads(response.body)
-        self.assertEqual(saved["display_name"], "云南溯源无 OA 分类")
+        self.assertEqual(saved["projects"][0]["display_name"], "云南溯源无 OA 分类")
+
+        duplicate_response = self.app.handle_request(
+            "PUT",
+            "/api/cost-statistics/no-oa-rules",
+            body=json.dumps(
+                {
+                    "expected_version": saved["version"],
+                    "projects": [
+                        {
+                            "id": "project-a",
+                            "display_name": "项目 A",
+                            "tag_codes": [candidate_code],
+                        },
+                        {
+                            "id": "project-b",
+                            "display_name": "项目 B",
+                            "tag_codes": [candidate_code],
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        )
+        self.assertEqual(duplicate_response.status_code, 400)
+        self.assertEqual(
+            json.loads(duplicate_response.body)["error"],
+            "duplicate_cost_statistics_no_oa_tag_assignment",
+        )
 
         status, project = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
-            "&project_scope=all&project_name=云南溯源无%20OA%20分类"
+            "&project_name=云南溯源无%20OA%20分类"
             "&expense_type=无%20OA%20分类"
         )
         self.assertEqual(status, 200)
@@ -553,7 +610,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(project["summary"]["total_amount"], "1258.00")
 
         status, time_page = self._json(
-            "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=all"
+            "/api/cost-statistics/explorer?scope=2026-03&view=time"
         )
         self.assertEqual(status, 200)
         self.assertEqual(
@@ -568,7 +625,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             started = monotonic()
             status, payload = self._json(
                 "/api/cost-statistics/explorer?scope=2026-03&view=project"
-                "&project_scope=all&project_name=云南溯源科技"
+                "&project_name=云南溯源科技"
                 "&expense_type=设备货款及材料费"
             )
             samples.append(monotonic() - started)

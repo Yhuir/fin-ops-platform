@@ -61,21 +61,57 @@ class PostgresCostStatisticsCanonicalRepository:
                 else _bank_available_years(bank_rows)
             )
             bank_ids = _bank_row_ids(bank_rows)
-            category_provider = _postgres_category_provider(
-                transaction,
-                settings=settings,
-                transaction_ids=bank_ids if scoped else None,
-            )
-            _apply_bank_tags(bank_rows, category_provider=category_provider)
+            if view in {"time", "bank_tag"}:
+                category_provider = _postgres_category_provider(
+                    transaction,
+                    settings=settings,
+                    transaction_ids=bank_ids if scoped else None,
+                )
+                _apply_bank_tags(bank_rows, category_provider=category_provider)
+                return _build_snapshot(
+                    settings=settings,
+                    bank_rows=bank_rows,
+                    oa_rows=[],
+                    relations=[],
+                    available_years=available_years,
+                )
             relations = _postgres_relations(
                 transaction,
                 bank_row_ids=bank_ids,
             )
+            relation_bank_ids = _relation_member_ids(
+                relations,
+                {"bank", "bank_transaction"},
+            )
+            relation_bank_rows = (
+                _postgres_bank_rows(
+                    transaction,
+                    settings=settings,
+                    transaction_ids=relation_bank_ids,
+                )
+                if scoped
+                else bank_rows
+            )
+            category_ids = list(
+                dict.fromkeys([*bank_ids, *_bank_row_ids(relation_bank_rows)])
+            )
+            category_provider = _postgres_category_provider(
+                transaction,
+                settings=settings,
+                transaction_ids=category_ids if scoped else None,
+            )
+            _apply_bank_tags(bank_rows, category_provider=category_provider)
+            if relation_bank_rows is not bank_rows:
+                _apply_bank_tags(
+                    relation_bank_rows,
+                    category_provider=category_provider,
+                )
             relation_oa_ids = _relation_member_ids(relations, {"oa"})
             oa_rows = _postgres_oa_rows(transaction, oa_ids=relation_oa_ids)
             return _build_snapshot(
                 settings=settings,
                 bank_rows=bank_rows,
+                relation_bank_rows=relation_bank_rows,
                 oa_rows=oa_rows,
                 relations=relations,
                 available_years=available_years,
@@ -138,6 +174,14 @@ class LocalCostStatisticsCanonicalRepository:
             and str(relation.get("status") or "active").strip().lower() == "active"
         ]
         _apply_bank_tags(scoped_bank_rows, category_provider=self._category_provider)
+        if view in {"time", "bank_tag"}:
+            return _build_snapshot(
+                settings=settings,
+                bank_rows=scoped_bank_rows,
+                oa_rows=[],
+                relations=[],
+                available_years=bank_available_years,
+            )
         scoped_bank_ids = set(_bank_row_ids(scoped_bank_rows))
         relations = [
             relation
@@ -148,6 +192,16 @@ class LocalCostStatisticsCanonicalRepository:
             and _relation_member_ids([relation], {"oa"})
         ]
         relation_oa_ids = _relation_member_ids(relations, {"oa"})
+        relation_bank_ids = set(
+            _relation_member_ids(relations, {"bank", "bank_transaction"})
+        )
+        relation_bank_rows = [
+            row
+            for row in all_bank_rows
+            if _text(row.get("id") or row.get("transaction_id") or row.get("row_id"))
+            in relation_bank_ids
+        ]
+        _apply_bank_tags(relation_bank_rows, category_provider=self._category_provider)
         all_oa_rows = [
             _object_payload(row)
             for row in self._oa_rows_by_ids_provider(relation_oa_ids)
@@ -161,6 +215,7 @@ class LocalCostStatisticsCanonicalRepository:
         return _build_snapshot(
             settings=settings,
             bank_rows=scoped_bank_rows,
+            relation_bank_rows=relation_bank_rows,
             oa_rows=oa_rows,
             relations=relations,
             available_years=bank_available_years,
@@ -588,6 +643,7 @@ def _build_snapshot(
     *,
     settings: dict[str, Any],
     bank_rows: list[dict[str, Any]],
+    relation_bank_rows: list[dict[str, Any]] | None = None,
     oa_rows: list[dict[str, Any]],
     relations: list[dict[str, Any]],
     available_years: list[str] | None = None,
@@ -595,6 +651,11 @@ def _build_snapshot(
     banks_by_id = {
         _text(row.get("id") or row.get("transaction_id") or row.get("row_id")): row
         for row in bank_rows
+        if _text(row.get("id") or row.get("transaction_id") or row.get("row_id"))
+    }
+    relation_banks_by_id = {
+        _text(row.get("id") or row.get("transaction_id") or row.get("row_id")): row
+        for row in list(relation_bank_rows if relation_bank_rows is not None else bank_rows)
         if _text(row.get("id") or row.get("transaction_id") or row.get("row_id"))
     }
     oa_by_id = {
@@ -619,6 +680,11 @@ def _build_snapshot(
             )
         oa_members: list[dict[str, Any]] = []
         bank_members: list[dict[str, Any]] = []
+        declared_oa_ids = {
+            row_id
+            for index, row_id in enumerate(row_ids)
+            if index < len(row_types) and row_types[index] == "oa"
+        }
         relation_has_oa = any(
             index < len(row_types) and _text(row_types[index]).lower() == "oa"
             for index in range(len(row_ids))
@@ -627,17 +693,19 @@ def _build_snapshot(
             row_type = row_types[index]
             if row_type == "oa" and row_id in oa_by_id:
                 oa_members.append(oa_by_id[row_id])
-            elif row_type in {"bank", "bank_transaction"} and row_id in banks_by_id:
-                bank_members.append(banks_by_id[row_id])
+            elif row_type in {"bank", "bank_transaction"} and row_id in relation_banks_by_id:
+                bank_members.append(relation_banks_by_id[row_id])
                 if relation_has_oa:
-                    oa_related_bank_ids.add(row_id)
-        if oa_members and bank_members:
+                    if row_id in banks_by_id:
+                        oa_related_bank_ids.add(row_id)
+        if declared_oa_ids and bank_members:
             groups.append(
                 {
                     "group_id": _text(
                         relation.get("case_id") or relation.get("group_id")
                     ),
                     "relation_mode": _text(relation.get("relation_mode")),
+                    "declared_oa_ids": sorted(declared_oa_ids),
                     "oa_rows": oa_members,
                     "bank_rows": bank_members,
                     "special_metadata": dict(

@@ -1,5 +1,12 @@
 # 设置 实施记录
 
+## 2026-08-18 - 成本统计两套规则拆分
+
+- 新增独立 `cost_statistics_time_tag_selection`：默认 `mode=all`，按标签/按时间直接筛选 canonical 银行流水，未来新增标签自动纳入。
+- `cost_statistics_no_oa_projects` 改为多个稳定 ID 虚拟项目，服务端强制名称唯一和标签互斥；候选与最终归集仍由成本统计逐笔判断 active OA 关系。
+- 旧 `cost_statistics_tag_selection` 仅作为一次性无损读取迁移源；新保存只写两套新 schema，旧 endpoint、DTO、drawer 和运行时过滤链已删除。
+- 项目完成状态不再过滤历史成本；两套规则使用独立 CAS/version/audit，不建表、不增加 read model、worker 或 cache。
+
 ## 2026-08-18 - 成本统计无 OA 设置收敛
 
 - `cost_statistics_tag_selection` 升级为 schema v3，只保存虚拟项目名和标签 code，默认空；旧默认全选/收入标签自动加入语义一次性重置为空。

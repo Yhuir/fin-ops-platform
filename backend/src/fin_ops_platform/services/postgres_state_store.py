@@ -65,7 +65,8 @@ def _default_app_settings_payload() -> dict[str, Any]:
         "pending_invoice_tag_groups": {},
         "pending_output_invoice_tag_groups": {},
         "bank_flow_rule_batch_tag_rules": {},
-        "cost_statistics_tag_selection": {},
+        "cost_statistics_time_tag_selection": {},
+        "cost_statistics_no_oa_projects": {},
         "input_invoice_usage_payment_status_rules": {},
     }
 
@@ -217,7 +218,13 @@ class PostgresStateStore:
         payload = self._load_settings(APP_SETTINGS_KEY)
         if not payload:
             return _default_app_settings_payload()
-        return {**_default_app_settings_payload(), **payload}
+        merged = {**_default_app_settings_payload(), **payload}
+        if (
+            "cost_statistics_tag_selection" in payload
+            and "cost_statistics_no_oa_projects" not in payload
+        ):
+            merged.pop("cost_statistics_no_oa_projects", None)
+        return merged
 
     def save_app_settings(self, payload: dict[str, Any]) -> None:
         self._save_settings(APP_SETTINGS_KEY, payload)

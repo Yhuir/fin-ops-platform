@@ -1,5 +1,3 @@
-export type CostProjectScope = "active" | "all";
-
 export type CostSummary = {
   rowCount: number;
   transactionCount: number;
@@ -114,7 +112,6 @@ export type CostStatisticsExplorerPage = {
 export type CostStatisticsExplorerPageRequest = {
   scope: string;
   view: CostStatisticsView;
-  projectScope?: CostProjectScope;
   projectName?: string;
   expenseType?: string;
   paymentAccountLabel?: string;
@@ -225,20 +222,38 @@ export type CostStatisticsTagRuleTag = {
   outputSubLabel: string;
 };
 
-export type CostStatisticsTagRules = {
+export type CostStatisticsTimeTagRules = {
   version: number;
   bankAutoTagRulesVersion: number;
-  displayName: string;
-  defaultSelectionApplied: boolean;
+  mode: "all" | "custom";
   selectedTagCodes: string[];
-  effectiveSelectedTagCodes: string[];
   inactiveSelectedTagCodes: string[];
-  activeTags: CostStatisticsTagRuleTag[];
+  availableTags: CostStatisticsTagRuleTag[];
   canSave: boolean;
 };
 
-export type SaveCostStatisticsTagRulesRequest = {
+export type SaveCostStatisticsTimeTagRulesRequest = {
   expectedVersion: number;
-  displayName: string;
+  mode: "all" | "custom";
   selectedTagCodes: string[];
+};
+
+export type CostStatisticsNoOaProject = {
+  id: string;
+  displayName: string;
+  tagCodes: string[];
+};
+
+export type CostStatisticsNoOaRules = {
+  version: number;
+  bankAutoTagRulesVersion: number;
+  projects: CostStatisticsNoOaProject[];
+  availableTags: CostStatisticsTagRuleTag[];
+  inactiveSelectedTagCodes: string[];
+  canSave: boolean;
+};
+
+export type SaveCostStatisticsNoOaRulesRequest = {
+  expectedVersion: number;
+  projects: CostStatisticsNoOaProject[];
 };
