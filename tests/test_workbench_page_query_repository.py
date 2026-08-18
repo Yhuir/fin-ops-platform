@@ -385,6 +385,7 @@ def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> No
     assert "admission.source_payload->>'expense_type'" in connection.sql
     assert "'supporting_documents'" in connection.sql
     assert connection.sql.count("app.workbench_oa_supporting_documents") == 2
+    assert connection.sql.count("from jsonb_array_elements( case when jsonb_typeof(") >= 2
 
 
 def test_detail_queries_are_typed_and_bounded_without_full_scope_spine() -> None:

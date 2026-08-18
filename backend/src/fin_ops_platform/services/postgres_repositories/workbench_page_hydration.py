@@ -74,7 +74,7 @@ def oa_expense_items_with_supporting_documents_sql(
     """Attach active supplemental evidence to each OA expense item in one SQL read."""
 
     return f"""
-        case when jsonb_typeof({expense_items_sql}) = 'array' then coalesce((
+        coalesce((
             select jsonb_agg(
                 item.value || jsonb_build_object(
                     'supporting_documents', coalesce((
@@ -96,9 +96,12 @@ def oa_expense_items_with_supporting_documents_sql(
                 )
                 order by item.ordinality
             )
-            from jsonb_array_elements({expense_items_sql})
-                with ordinality item(value, ordinality)
-        ), '[]'::jsonb) else '[]'::jsonb end
+            from jsonb_array_elements(
+                case when jsonb_typeof({expense_items_sql}) = 'array'
+                     then {expense_items_sql}
+                     else '[]'::jsonb end
+            ) with ordinality item(value, ordinality)
+        ), '[]'::jsonb)
     """
 
 
