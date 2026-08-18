@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import unittest
+
+from fin_ops_platform.services.workbench_oa_supporting_document_service import (
+    SupportingDocumentUpload,
+    WorkbenchOaSupportingDocumentError,
+    WorkbenchOaSupportingDocumentService,
+)
+
+
+class _FileStore:
+    def __init__(self) -> None:
+        self.contents: dict[str, bytes] = {}
+        self.deleted: list[str] = []
+
+    def store_workbench_oa_supporting_document(self, *, document_id, file_name, content, content_type):
+        del file_name, content_type
+        uri = f"store://{document_id}"
+        self.contents[uri] = content
+        return {
+            "file_object_id": "00000000-0000-0000-0000-000000000001",
+            "storage_uri": uri,
+            "sha256": "sha",
+            "size_bytes": len(content),
+        }
+
+    def read_workbench_oa_supporting_document(self, storage_uri: str) -> bytes:
+        return self.contents[storage_uri]
+
+    def delete_workbench_oa_supporting_document(self, storage_uri: str) -> None:
+        self.deleted.append(storage_uri)
+        self.contents.pop(storage_uri, None)
+
+
+class _Repository:
+    def __init__(self) -> None:
+        self.rows: dict[str, dict] = {}
+        self.counter = 0
+        self.fail_on_create = 0
+
+    def create(self, **values):
+        self.counter += 1
+        if self.fail_on_create == self.counter:
+            raise RuntimeError("create failed")
+        row = {
+            "id": f"document-{self.counter}",
+            "storage_uri": f"store://{values['file_object_id']}",
+            "status": "active",
+            **values,
+        }
+        # The production repository obtains storage_uri through app.file_objects on reads.
+        row["storage_uri"] = next(reversed(self._file_store.contents)) if hasattr(self, "_file_store") else ""
+        self.rows[row["id"]] = row
+        return row
+
+    def list_active(self, *, oa_row_id: str, expense_item_id: str):
+        return [row for row in self.rows.values() if row["status"] == "active" and row["oa_row_id"] == oa_row_id and row["expense_item_id"] == expense_item_id]
+
+    def get_active(self, document_id: str):
+        row = self.rows.get(document_id)
+        return row if row and row["status"] == "active" else None
+
+    def soft_delete(self, document_id: str, *, deleted_by: str):
+        row = self.get_active(document_id)
+        if row is None:
+            return None
+        row["status"] = "deleted"
+        row["deleted_by"] = deleted_by
+        return row
+
+
+class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.store = _FileStore()
+        self.repository = _Repository()
+        self.repository._file_store = self.store
+        self.target_exists = True
+        self.service = WorkbenchOaSupportingDocumentService(
+            repository=self.repository,
+            file_store=self.store,
+            target_exists=lambda _oa_row_id, _expense_item_id: self.target_exists,
+        )
+
+    def test_upload_list_preview_and_delete_stay_outside_invoice_pool(self) -> None:
+        documents = self.service.upload(
+            relation_case_id="CASE-1",
+            oa_row_id="oa-1",
+            expense_item_id="oa-1:item:0",
+            actor_id="finance-user",
+            uploads=[SupportingDocumentUpload("凭证.pdf", b"%PDF-1.7\ncontent")],
+        )
+
+        self.assertEqual(documents[0]["file_name"], "凭证.pdf")
+        self.assertEqual(documents[0]["content_url"], "/api/workbench/oa-invoice-supplements/documents/document-1/content")
+        listed = self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0")
+        self.assertEqual([item["id"] for item in listed], ["document-1"])
+        _document, content = self.service.content("document-1")
+        self.assertEqual(content, b"%PDF-1.7\ncontent")
+
+        self.service.delete("document-1", actor_id="finance-user")
+
+        self.assertEqual(self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0"), [])
+        self.assertEqual(len(self.store.deleted), 1)
+
+    def test_rejects_extension_signature_mismatch_before_storage(self) -> None:
+        with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "文件内容与扩展名不一致"):
+            self.service.upload(
+                relation_case_id="CASE-1",
+                oa_row_id="oa-1",
+                expense_item_id="oa-1:item:0",
+                actor_id="finance-user",
+                uploads=[SupportingDocumentUpload("fake.pdf", b"not a pdf")],
+            )
+
+        self.assertEqual(self.store.contents, {})
+
+    def test_rejects_unsupported_type_and_empty_target(self) -> None:
+        with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "仅支持 JPG"):
+            self.service.upload(
+                relation_case_id="CASE-1",
+                oa_row_id="oa-1",
+                expense_item_id="oa-1:item:0",
+                actor_id="finance-user",
+                uploads=[SupportingDocumentUpload("transfer.png", b"png")],
+            )
+        with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "不能为空"):
+            self.service.upload(
+                relation_case_id="CASE-1",
+                oa_row_id="",
+                expense_item_id="oa-1:item:0",
+                actor_id="finance-user",
+                uploads=[SupportingDocumentUpload("凭证.pdf", b"%PDF-1.7")],
+            )
+
+    def test_rejects_stale_or_mismatched_oa_expense_item_before_storage(self) -> None:
+        self.target_exists = False
+
+        with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "不存在或已变化"):
+            self.service.upload(
+                relation_case_id="CASE-1",
+                oa_row_id="oa-1",
+                expense_item_id="oa-other:item:0",
+                actor_id="finance-user",
+                uploads=[SupportingDocumentUpload("凭证.pdf", b"%PDF-1.7")],
+            )
+
+        self.assertEqual(self.store.contents, {})
+
+    def test_batch_failure_removes_documents_created_earlier_in_the_request(self) -> None:
+        self.repository.fail_on_create = 2
+
+        with self.assertRaisesRegex(RuntimeError, "create failed"):
+            self.service.upload(
+                relation_case_id="CASE-1",
+                oa_row_id="oa-1",
+                expense_item_id="oa-1:item:0",
+                actor_id="finance-user",
+                uploads=[
+                    SupportingDocumentUpload("first.pdf", b"%PDF-1.7\nfirst"),
+                    SupportingDocumentUpload("second.pdf", b"%PDF-1.7\nsecond"),
+                ],
+            )
+
+        self.assertEqual(self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0"), [])
+        self.assertEqual(self.store.contents, {})
+
+
+if __name__ == "__main__":
+    unittest.main()

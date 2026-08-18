@@ -26,12 +26,11 @@ class ManualInvoiceEntryError(ValueError):
 
 
 class ManualInvoiceImportPort(Protocol):
-    def preview_manual_invoice_entry(
+    def preview_manual_invoice_entries(
         self,
         *,
         imported_by: str,
-        batch_type: BatchType,
-        row: dict[str, Any],
+        entries: list[tuple[BatchType, dict[str, Any]]],
     ) -> FileImportSession: ...
 
     def discard_session(self, *, session_id: str, imported_by: str) -> FileImportSession: ...
@@ -42,10 +41,10 @@ class InvoiceDocumentRecognizerPort(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class ManualInvoiceEntryPreview:
+class ManualInvoiceEntryBatchPreview:
     session: FileImportSession
-    file_id: str
-    values: dict[str, str]
+    file_ids: list[str]
+    values: list[dict[str, str]]
 
 
 class ManualInvoiceEntryService:
@@ -84,34 +83,66 @@ class ManualInvoiceEntryService:
             "total_with_tax": self._text(evidence.get("total_with_tax")),
         }
 
-    def preview(self, *, payload: dict[str, Any], imported_by: str) -> ManualInvoiceEntryPreview:
-        values, row, batch_type = self._normalize_payload(payload)
-        session = self._file_import_service.preview_manual_invoice_entry(
+    def preview_batch(
+        self,
+        *,
+        payloads: list[dict[str, Any]],
+        imported_by: str,
+    ) -> ManualInvoiceEntryBatchPreview:
+        if not payloads:
+            raise ManualInvoiceEntryError("manual_invoice_batch_empty", "请至少录入一张发票。")
+        normalized_entries = [self._normalize_payload(payload) for payload in payloads]
+        identities: set[tuple[str, str, str, str, str]] = set()
+        for values, _row, _batch_type in normalized_entries:
+            identity = (
+                values["invoice_direction"],
+                values["invoice_number"],
+                values["invoice_code"],
+                values["seller_tax_no"],
+                values["buyer_tax_no"],
+            )
+            if identity in identities:
+                raise ManualInvoiceEntryError(
+                    "manual_invoice_batch_duplicate",
+                    "本次录入中存在重复发票，请修改或删除重复项后再提交。",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            identities.add(identity)
+        session = self._file_import_service.preview_manual_invoice_entries(
             imported_by=imported_by,
-            batch_type=batch_type,
-            row=row,
+            entries=[(batch_type, row) for _values, row, batch_type in normalized_entries],
         )
-        file_item = session.files[0]
-        row_result = file_item.row_results[0]
-        if row_result.decision == ImportDecision.CREATED:
-            return ManualInvoiceEntryPreview(session=session, file_id=file_item.id, values=values)
-
-        self._file_import_service.discard_session(session_id=session.id, imported_by=imported_by)
-        if row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
+        invalid_result = next(
+            (
+                row_result
+                for file_item in session.files
+                for row_result in file_item.row_results
+                if row_result.decision != ImportDecision.CREATED
+            ),
+            None,
+        )
+        if invalid_result is not None:
+            self._file_import_service.discard_session(session_id=session.id, imported_by=imported_by)
+            if invalid_result.decision == ImportDecision.DUPLICATE_SKIPPED:
+                raise ManualInvoiceEntryError(
+                    "manual_invoice_duplicate",
+                    "批次中有发票已存在于统一发票池，整批未录入。",
+                    status_code=HTTPStatus.CONFLICT,
+                )
+            if invalid_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
+                raise ManualInvoiceEntryError(
+                    "manual_invoice_suspected_duplicate",
+                    "批次中有发票与现有记录高度相似，整批未录入。",
+                    status_code=HTTPStatus.CONFLICT,
+                )
             raise ManualInvoiceEntryError(
-                "manual_invoice_duplicate",
-                "该发票已存在于统一发票池，不能重复录入。",
-                status_code=HTTPStatus.CONFLICT,
+                "manual_invoice_invalid",
+                invalid_result.decision_reason or "批次中有发票未通过导入校验，整批未录入。",
             )
-        if row_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
-            raise ManualInvoiceEntryError(
-                "manual_invoice_suspected_duplicate",
-                "发票信息与现有记录高度相似，请核对发票号码和发票代码。",
-                status_code=HTTPStatus.CONFLICT,
-            )
-        raise ManualInvoiceEntryError(
-            "manual_invoice_invalid",
-            row_result.decision_reason or "发票信息未通过导入校验。",
+        return ManualInvoiceEntryBatchPreview(
+            session=session,
+            file_ids=[item.id for item in session.files],
+            values=[values for values, _row, _batch_type in normalized_entries],
         )
 
     def _normalize_payload(

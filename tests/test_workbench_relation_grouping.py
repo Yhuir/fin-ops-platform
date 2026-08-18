@@ -933,8 +933,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         item = group["workbench_anomaly"]["items"][0]
         self.assertEqual(payload["summary"]["unpaired_exception_count"], 1)
         self.assertEqual(group["workbench_anomaly"]["review_decision"], "pending")
-        self.assertEqual(item["code"], "oa_invoice_attachment_missing")
-        self.assertEqual(item["display_label"], "OA发票附件缺失")
+        self.assertEqual(item["code"], "oa_invoice_attachment_unparsed")
+        self.assertEqual(item["display_label"], "OA发票附件未解析")
         self.assertEqual(item["source_expense_item_ids"], ["oa-1:item:0"])
         self.assertEqual(item["invoice_row_ids"], [])
 class WorkbenchRelationPreviewGroupingServiceTests(unittest.TestCase):

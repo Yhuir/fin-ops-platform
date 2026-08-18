@@ -19,6 +19,24 @@ class OperationHistorySemanticsTests(unittest.TestCase):
             ("POST", "/api/tax-offset/calculate", "计算抵扣方案", "税金抵扣计划"),
             (
                 "POST",
+                "/api/workbench/oa-invoice-supplements/manual",
+                "录入并关联 OA 发票",
+                "OA 发票关联",
+            ),
+            (
+                "POST",
+                "/api/workbench/oa-invoice-supplements/documents",
+                "上传 OA 补充凭证",
+                "OA 补充凭证",
+            ),
+            (
+                "DELETE",
+                "/api/workbench/oa-invoice-supplements/documents/document-1",
+                "删除 OA 补充凭证",
+                "OA 补充凭证",
+            ),
+            (
+                "POST",
                 "/api/pending-invoices/rows/row-1/attach-existing-invoice/preview",
                 "预览发票关联",
                 "发票关联",

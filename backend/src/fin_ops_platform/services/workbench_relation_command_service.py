@@ -276,6 +276,24 @@ class WorkbenchRelationCommandService:
         self._confirm_preparation_owner = object()
         self._withdraw_preparation_owner = object()
 
+    def runtime_snapshot(self) -> dict[str, Any]:
+        snapshot = getattr(self._relation_repository, "runtime_snapshot", None)
+        if not callable(snapshot):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_runtime_snapshot_unavailable",
+                "Workbench relation runtime does not expose a rollback snapshot.",
+            )
+        return deepcopy(snapshot())
+
+    def restore_runtime_snapshot(self, snapshot: dict[str, Any]) -> None:
+        restore = getattr(self._relation_repository, "restore_runtime_snapshot", None)
+        if not callable(restore):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_runtime_snapshot_unavailable",
+                "Workbench relation runtime does not expose rollback restore.",
+            )
+        restore(deepcopy(snapshot))
+
     def prepare_confirm_relation(
         self,
         *,

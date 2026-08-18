@@ -10,7 +10,8 @@ export type WorkbenchInlineAction =
   | "unlink"
   | "confirm-cash-pass-through"
   | "confirm-cash-ticket-purchase"
-  | "cancel-cash-special";
+  | "cancel-cash-special"
+  | "enter-invoice";
 
 type RowActionsProps = {
   recordType: WorkbenchRecordType;

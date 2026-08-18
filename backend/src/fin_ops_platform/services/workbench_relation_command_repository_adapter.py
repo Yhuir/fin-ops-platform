@@ -25,6 +25,12 @@ class WorkbenchRelationCommandRepositoryAdapter:
             return deepcopy(snapshot) if isinstance(snapshot, dict) else {}
         return self._pair_relation_service.snapshot()
 
+    def runtime_snapshot(self) -> dict[str, Any]:
+        return self._pair_relation_service.snapshot()
+
+    def restore_runtime_snapshot(self, snapshot: dict[str, Any]) -> None:
+        self._pair_relation_service.restore_runtime_snapshot(snapshot)
+
     def load_workbench_pair_relations_for_row_ids(
         self,
         row_ids: list[str],

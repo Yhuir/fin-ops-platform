@@ -1585,7 +1585,14 @@
 ## 2026-08-05 - OA/发票比较单元与附件缺失异常（历史，比较单元仍有效，处置已替代）
 
 - 根因收口：旧投影先按关系组汇总 OA/发票总额，再把同一异常复制到每张发票，无法表达 `290=145+145`、`405=350+55` 等子付款项组合，也让显式 ownership 被金额差异拆行。新合同以日常报销 `source_expense_item_id` 为比较单元，支付申请才使用关系组总额；显式 ownership 决定同行，金额只决定异常。
-- 新增同一 bundle 下的 `oa_invoice_amount_mismatch|oa_invoice_attachment_missing` items。子付款项有附件但零已解析绑定发票时，发票栏生成只读 display-only 占位；一个比较单元只显示一个 chip，旧逐发票 `amount_anomaly` 字段和复制循环已删除。
+- 新增同一 bundle 下的 OA/发票比较 item。该历史版本的附件状态已于 2026-08-18 收口为 `oa_invoice_attachment_absent|oa_invoice_attachment_unparsed|oa_invoice_attachment_unassigned`；一个比较单元只显示一个 chip，旧逐发票 `amount_anomaly` 字段和复制循环已删除。
+
+## 2026-08-18 - OA 附件补录闭环与金额异常显示目标
+
+- 删除旧单张人工预览 DTO/方法和旧“附件缺失/解析失败”状态，不保留兼容分支。导入页与关联台共享 `ManualInvoiceBatchEditor`，在同一个抽屉内部完成 `新发票N -> 预览 -> 保存信息 -> 整批提交`；关联台不再产生抽屉套抽屉。
+- 新增 `app.workbench_oa_supporting_documents` 作为补充凭证元数据 owner，文件复用 `app.file_objects` 和既有文件存储，只能按 OA row + expense item 列表、预览和软删除；该边界不写统一发票池、relation member、worker/read model 或缓存。
+- 手工补录通过 `WorkbenchInvoiceSupplementService` 在一个 PostgreSQL 事务内确认整批 canonical 发票、持久化 import delta、增加 `oa_expense_item_invoice` 来源边并复用正式 relation command。失败恢复 import/relation 进程镜像，不留下半批或孤立关系。
+- anomaly item 显式发布 `display_scope/display_pane/display_row_id`。只有唯一单票与唯一子付款项差异落发票；一项多票落 OA 子项；无法定位的组级差异落 OA/流水，解决历史把“流水发票金额不一致”误贴到最后一张 55 元发票的问题。
 - 投影 schema 升级为 v19，v18 generation/cache fail closed 并通过既有 Workbench exact-scope refresh 重建；没有新增数据库表、migration、read model、scope、worker、queue、Redis owner、依赖或并行旧路径。既有 amount-mismatch command/repository 继续作为关系组忽略决定的持久化边界。
 - 前端异常入口固定为 `异常 n | 已忽略 m`；统一抽屉继续复用 HeroUI `ToggleButtonGroup`、`DisclosureGroup`、`Chip`、`Button`，默认折叠、按需展开、只保留一条操作栏。
 

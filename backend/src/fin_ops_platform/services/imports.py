@@ -282,6 +282,31 @@ class ImportNormalizationService:
         ]
         return snapshot
 
+    def attach_source_links_to_invoices(
+        self,
+        invoice_ids: list[str],
+        *,
+        source_links: list[dict[str, str]],
+        oa_form_id: str | None = None,
+    ) -> None:
+        normalized_links = [
+            {str(key): str(value) for key, value in link.items() if str(value).strip()}
+            for link in source_links
+            if isinstance(link, dict)
+        ]
+        for invoice_id in invoice_ids:
+            invoice = self._invoices_by_id.get(str(invoice_id or "").strip())
+            if invoice is None:
+                raise KeyError(f"Unknown invoice id: {invoice_id}")
+            existing = {tuple(sorted(link.items())) for link in invoice.source_links}
+            for link in normalized_links:
+                fingerprint = tuple(sorted(link.items()))
+                if fingerprint not in existing:
+                    invoice.source_links.append(link)
+                    existing.add(fingerprint)
+            if oa_form_id:
+                invoice.oa_form_id = str(oa_form_id).strip()
+
     def preview_import(
         self,
         *,
@@ -347,11 +372,19 @@ class ImportNormalizationService:
         return preview
 
     def confirm_import(self, batch_id: str) -> ImportedBatch:
-        preview = self._batches[batch_id]
-        if preview.batch.status != BatchStatus.PENDING:
-            return preview.batch
+        return self.confirm_imports([batch_id])[0]
+
+    def confirm_imports(self, batch_ids: list[str]) -> list[ImportedBatch]:
+        normalized_batch_ids = list(dict.fromkeys(
+            str(batch_id).strip() for batch_id in batch_ids if str(batch_id).strip()
+        ))
+        if not normalized_batch_ids:
+            raise ValueError("at least one import batch is required")
         rollback = {
-            "preview": deepcopy(preview),
+            "previews": {
+                batch_id: deepcopy(self._batches[batch_id])
+                for batch_id in normalized_batch_ids
+            },
             "invoices": deepcopy(self._invoices_by_id),
             "transactions": deepcopy(self._transactions_by_id),
             "counterparties": deepcopy(self._counterparties_by_normalized_name),
@@ -364,34 +397,9 @@ class ImportNormalizationService:
             "counterparty_counter": self._counterparty_counter,
         }
         try:
-            with self._invoice_identity_cache_for(
-                preview.normalized_rows,
-                enabled=preview.batch.batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE),
-            ):
-                with self._transaction_identity_cache_for(
-                    preview.normalized_rows,
-                    enabled=preview.batch.batch_type == BatchType.BANK_TRANSACTION,
-                ):
-                    for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
-                        self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
-                        if row_result.decision == ImportDecision.CREATED:
-                            self._persist_created_row(preview.batch.batch_type, row_result, normalized)
-                        elif row_result.decision == ImportDecision.STATUS_UPDATED:
-                            self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
-                        elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
-                            self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
-
-            preview.batch.success_count = self._count_decisions(preview.row_results, ImportDecision.CREATED, ImportDecision.STATUS_UPDATED)
-            preview.batch.duplicate_count = self._count_decisions(preview.row_results, ImportDecision.DUPLICATE_SKIPPED)
-            preview.batch.suspected_duplicate_count = self._count_decisions(preview.row_results, ImportDecision.SUSPECTED_DUPLICATE)
-            preview.batch.updated_count = self._count_decisions(preview.row_results, ImportDecision.STATUS_UPDATED)
-            preview.batch.error_count = self._count_decisions(preview.row_results, ImportDecision.ERROR)
-            has_issues = preview.error_count > 0 or preview.suspected_duplicate_count > 0
-            preview.batch.status = BatchStatus.COMPLETED_WITH_ERRORS if has_issues else BatchStatus.COMPLETED
-            self._batches[batch_id] = preview
-            return preview.batch
+            return [self._confirm_import_without_rollback(batch_id) for batch_id in normalized_batch_ids]
         except Exception:
-            self._batches[batch_id] = rollback["preview"]
+            self._batches.update(rollback["previews"])
             self._invoices_by_id = rollback["invoices"]
             self._transactions_by_id = rollback["transactions"]
             self._counterparties_by_normalized_name = rollback["counterparties"]
@@ -403,6 +411,37 @@ class ImportNormalizationService:
             self._txn_counter = rollback["txn_counter"]
             self._counterparty_counter = rollback["counterparty_counter"]
             raise
+
+    def _confirm_import_without_rollback(self, batch_id: str) -> ImportedBatch:
+        preview = self._batches[batch_id]
+        if preview.batch.status != BatchStatus.PENDING:
+            return preview.batch
+        with self._invoice_identity_cache_for(
+            preview.normalized_rows,
+            enabled=preview.batch.batch_type in (BatchType.OUTPUT_INVOICE, BatchType.INPUT_INVOICE),
+        ):
+            with self._transaction_identity_cache_for(
+                preview.normalized_rows,
+                enabled=preview.batch.batch_type == BatchType.BANK_TRANSACTION,
+            ):
+                for row_result, normalized in zip(preview.row_results, preview.normalized_rows, strict=True):
+                    self._refresh_row_decision_before_confirm(preview.batch.batch_type, row_result, normalized)
+                    if row_result.decision == ImportDecision.CREATED:
+                        self._persist_created_row(preview.batch.batch_type, row_result, normalized)
+                    elif row_result.decision == ImportDecision.STATUS_UPDATED:
+                        self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
+                    elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
+                        self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
+
+        preview.batch.success_count = self._count_decisions(preview.row_results, ImportDecision.CREATED, ImportDecision.STATUS_UPDATED)
+        preview.batch.duplicate_count = self._count_decisions(preview.row_results, ImportDecision.DUPLICATE_SKIPPED)
+        preview.batch.suspected_duplicate_count = self._count_decisions(preview.row_results, ImportDecision.SUSPECTED_DUPLICATE)
+        preview.batch.updated_count = self._count_decisions(preview.row_results, ImportDecision.STATUS_UPDATED)
+        preview.batch.error_count = self._count_decisions(preview.row_results, ImportDecision.ERROR)
+        has_issues = preview.error_count > 0 or preview.suspected_duplicate_count > 0
+        preview.batch.status = BatchStatus.COMPLETED_WITH_ERRORS if has_issues else BatchStatus.COMPLETED
+        self._batches[batch_id] = preview
+        return preview.batch
 
     def discard_preview(self, batch_id: str) -> ImportedBatch:
         preview = self._batches[batch_id]

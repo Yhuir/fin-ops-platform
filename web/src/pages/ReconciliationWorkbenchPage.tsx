@@ -9,6 +9,7 @@ import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
+import WorkbenchInvoiceEntryDrawer from "../components/workbench/WorkbenchInvoiceEntryDrawer";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
 import { useAppChrome } from "../contexts/AppChromeContext";
@@ -63,6 +64,7 @@ import type {
   WorkbenchGroupsPageQuery,
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
+  WorkbenchOaInvoiceSupplementTarget,
   WorkbenchAnomalyReviewClassificationCode,
   WorkbenchRecord,
   WorkbenchRecordType,
@@ -390,6 +392,7 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerContentGeneration, setExceptionDrawerContentGeneration] = useState(0);
   const [exceptionDrawerReloadGeneration, setExceptionDrawerReloadGeneration] = useState(0);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
+  const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<WorkbenchOaInvoiceSupplementTarget | null>(null);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "pairedDisplayState",
@@ -1764,6 +1767,20 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
+    if (action === "enter-invoice") {
+      const expenseItemId = row.sourceExpenseItemIds?.[0] ?? "";
+      if (!row.sourceOaId || !expenseItemId) {
+        openActionResultDialog("无法确定需要补录发票的 OA 子付款项，请刷新页面后重试。", "无法录入发票");
+        return;
+      }
+      setInvoiceEntryTarget({
+        caseId: row.caseId ?? "",
+        oaRowId: row.sourceOaId,
+        expenseItemId,
+      });
+      return;
+    }
+
     if (action === "confirm-cash-pass-through") {
       const rows = collectCaseRows(row);
       await runBlockingAction({
@@ -2442,6 +2459,18 @@ export default function ReconciliationWorkbenchPage() {
           onSubmit={handleSubmitCashTicketPurchase}
         />
       ) : null}
+      <WorkbenchInvoiceEntryDrawer
+        disabled={!canWriteWorkbench}
+        open={invoiceEntryTarget !== null}
+        target={invoiceEntryTarget}
+        onClose={() => setInvoiceEntryTarget(null)}
+        onCompleted={async () => {
+          const reread = await rereadWorkbenchAfterCommit();
+          if (!reread) {
+            throw new Error("数据已保存，但关联台重新读取失败，请稍后刷新页面确认。");
+          }
+        }}
+      />
     </div>
   );
 }

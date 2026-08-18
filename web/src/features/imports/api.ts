@@ -7,7 +7,7 @@ import type {
   ImportReviewRowsPage,
   ImportSessionPayload,
   ImportTemplate,
-  ManualInvoiceEntryPreview,
+  ManualInvoiceEntryBatchPreview,
   ManualInvoiceEntryValues,
   MatchingRunSummary,
 } from "./types";
@@ -480,21 +480,21 @@ export async function recognizeManualInvoice(file: File): Promise<Partial<Manual
   return mapManualInvoiceEntryValues(payload.values ?? {});
 }
 
-export async function previewManualInvoice(
-  values: ManualInvoiceEntryValues,
-): Promise<ManualInvoiceEntryPreview> {
+export async function previewManualInvoices(
+  values: ManualInvoiceEntryValues[],
+): Promise<ManualInvoiceEntryBatchPreview> {
   const payload = await requestJson<{
-    values: ApiManualInvoiceEntryValues;
-    file_id: string;
+    values: ApiManualInvoiceEntryValues[];
+    file_ids: string[];
     import_session: ApiImportSessionPayload;
   }>("/imports/invoices/manual/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(serializeManualInvoiceEntryValues(values)),
+    body: JSON.stringify({ invoices: values.map(serializeManualInvoiceEntryValues) }),
   });
   return {
-    values: mapManualInvoiceEntryValues(payload.values) as ManualInvoiceEntryValues,
-    fileId: payload.file_id,
+    values: payload.values.map((item) => mapManualInvoiceEntryValues(item) as ManualInvoiceEntryValues),
+    fileIds: payload.file_ids.map(String),
     importSession: mapImportPayload(payload.import_session),
   };
 }

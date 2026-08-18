@@ -57,6 +57,11 @@ class WorkbenchPairRelationService:
             payload["pair_relation_history"] = deepcopy(self._pair_relation_history)
         return payload
 
+    def restore_runtime_snapshot(self, snapshot: dict[str, Any] | None) -> None:
+        restored = self.from_snapshot(snapshot)
+        self._pair_relations = deepcopy(restored._pair_relations)
+        self._pair_relation_history = deepcopy(restored._pair_relation_history)
+
     def apply_snapshot_delta(
         self,
         snapshot: dict[str, Any],

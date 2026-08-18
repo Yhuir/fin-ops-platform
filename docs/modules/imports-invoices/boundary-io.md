@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-08-14
+日期：2026-08-18
 
 ## 模块化状态
 
@@ -15,7 +15,7 @@
 ### 负责
 
 - 发票文件上传、模板识别、预览、确认导入和导入 job。
-- 单张发票人工录入；可选 JPG/JPEG/PDF 识别只负责预填，用户输入经服务端校验后生成普通 file import preview，并复用既有 confirm job。
+- 多张发票人工录入；每张可选 JPG/JPEG/PDF 识别只负责预填，用户逐张“保存信息”后整批执行服务端校验并生成一个普通 `FileImportSession`。导入页复用既有 confirm job；关联台的 OA 补录入口使用受限的跨模块原子提交边界，使整批发票与指定 OA 子付款项关系同成同败。
 - XLSX 统一通过有界共享 reader 读取；对来源文件错误声明的 worksheet dimension 先重算可见范围，再执行模板识别、行数/单元格/压缩比资源门禁，不为发票建立第二条 parser 链。
 - 多 sheet 税务导出若存在唯一 `发票基础信息`，只从该 sheet 生成 canonical invoice facts；`信息汇总表` 仅提供同票明细证据。表头 sheet 重名、无有效行、模板不合法或明细强身份不能唯一归属时 fail closed，禁止回退到首个可解析 sheet。历史单 sheet 文件仍走共享模板识别。
 - 将导入结果转化为发票源事实与精确 affected scopes。
@@ -34,8 +34,8 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportInvoicesPage.tsx` | 文件先进入 import file service |
-| 可选单张附件识别 | `POST /imports/invoices/manual/recognize` | 只接收第一份 JPG/JPEG/PDF；PDF 先读原生文本，无可识别发票时逐页 OCR 并在首张发票命中后停止。只返回允许预填的发票字段，不写业务事实。 |
-| 单张人工预览 | `POST /imports/invoices/manual/preview` | 票据方向、红蓝字、购销双方、票号/条件式代码、日期和金额税率由服务端校验；红字表单收正数、canonical 金额统一转负数；精确重复返回 `409`。成功后只生成当前用户的普通 `FileImportSession`。 |
+| 可选单张附件识别 | `POST /imports/invoices/manual/recognize` | 每次只接收当前发票的一份 JPG/JPEG/PDF；PDF 先读原生文本，无可识别发票时逐页 OCR 并在首张发票命中后停止。只返回允许预填的发票字段，不写业务事实，也不保留上传文件。 |
+| 多张人工预览 | `POST /imports/invoices/manual/preview` | 请求体固定为 `invoices[]`。每张票据方向、红蓝字、购销双方、票号/条件式代码、日期和金额税率由服务端校验；红字表单收正数、canonical 金额统一转负数。同批重复或任一现存/疑似重复整批返回 `409` 并终结预览，不允许部分进入发票池；成功后生成当前用户的一个 `FileImportSession` 和与发票一一对应的 `file_ids[]`。 |
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
 | 预览陈旧校验 | `FileImportService.assert_session_preview_current` | 除汇总 audit counts 外逐行比较 decision、linked object type/id；数量不变但 canonical invoice owner 调换仍返回 `preview_stale`，不得确认旧预览。错误只报告字段名和变化数量。 |
 | 预览恢复/放弃 | `GET /imports/files/sessions?mode=invoice`、`POST /imports/files/discard` | 服务端仅列出当前认证用户的活跃预览。放弃校验 owner 并事务化终结 file/session/pending batch；已确认或已创建活跃/成功 job 时拒绝。 |
@@ -55,7 +55,8 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 预览 rows/errors | 前端页面 / `app.import_batches` / `app.import_batch_rows` / `app.import_files` | 未确认前不作为业务事实；只写当前 session/preview batches，不得携带正式 `invoices` / `transactions` facts，也不得覆盖其它 session 的 terminal 状态。session GET 只返回摘要，重复/未导入明细经有界分页 API 读取。 |
-| 人工录入确认 | `/imports/files/confirm` | 只使用 manual preview 返回的 session/file id；与 Excel 导入共用 durable `file_import.confirm`、canonical invoice identity、source link、审计和失败回滚。不得自动建立 OA/银行流水关系。 |
+| 导入页人工录入确认 | `/imports/files/confirm` | 只使用 manual preview 返回的 session 和全部 `file_ids[]`；与 Excel 导入共用 durable `file_import.confirm`、canonical invoice identity、source link、审计和失败回滚。不得自动建立 OA/银行流水关系。 |
+| 关联台人工补录确认 | `POST /api/workbench/oa-invoice-supplements/manual` | 仅接受当前认证用户拥有的完整 `manual_invoice_entry` session；在一个 PostgreSQL 事务中确认全部发票、写 canonical import facts、增加精确 `oa_expense_item_invoice` 来源边，并通过正式 relation command 创建或扩展目标关系。任一步失败同时恢复 import runtime 与 relation runtime，不留下半批发票或半关系。该窄入口不改变导入页的 durable job 合同。 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入结果 | state store/repository | 可审计、可幂等；确认异常必须回滚 import service 与 file session 内存状态。相同 fingerprint 的失败确认通过正式 confirm I/O 复用原 job id；不同 fingerprint 返回结构化 `409 idempotency_conflict`。 |
 | Affected scope | 前端 / 必要领域任务 | 返回本次 canonical 写入影响的精确月份，不在写路径展开为页面 refresh jobs |
@@ -74,10 +75,10 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | 层 | 文件或目录 |
 | --- | --- |
 | Frontend page | `web/src/pages/imports/ImportInvoicesPage.tsx` |
-| Frontend components | `web/src/components/imports/ImportWorkflowPage.tsx`、`ManualInvoiceEntryDrawer.tsx` |
+| Frontend components | `web/src/components/imports/ImportWorkflowPage.tsx`、`ManualInvoiceEntryDrawer.tsx`、`ManualInvoiceBatchEditor.tsx` |
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
-| Backend service | `manual_invoice_entry_service.py`、`oa_attachment_invoice_service.py`、`import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py`、`import_lifecycle_service.py` |
+| Backend service | `manual_invoice_entry_service.py`、`oa_attachment_invoice_service.py`、`import_file_service.py`、`imports.py`、`workbench_invoice_supplement_service.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py`、`import_lifecycle_service.py` |
 | Lifecycle persistence | `services/postgres_repositories/import_lifecycle.py`；聚合既有 import facts/job，不新增表、队列或 read model。 |
 | Controlled repair | `services/import_audit_repair_service.py`、`services/invoice_header_fact_repair_service.py`（纯 plan）、`services/postgres_repositories/import_audit_repair.py`（SQL I/O）、`tools/import_audit_repair_ops.py`（CLI 编排）；发票表头事实修复只接受批准的工作簿 SHA-256 和 11 张精确 allowlist，dry-run/execute 指纹绑定并保留 rollback manifest；生命周期修复只接受显式 batch/file，且必须由 succeeded job + 行计数 + canonical/source-link 闭环证明；放弃预览的 payload 修复只接受显式 reverted batch，并证明严格 file/session 已终结且无 job/canonical ownership |
 | Worker/runtime | `runtime_worker_handlers.py` |
@@ -99,6 +100,8 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - `web/src/test/ImportsApi.test.ts`
 - `tests/test_manual_invoice_entry_service.py`
 - `web/src/test/ManualInvoiceEntryDrawer.test.tsx`
+- `tests/test_workbench_invoice_supplement_service.py`
+- `tests/test_workbench_invoice_supplement_api.py`
 - `tests/test_import_lifecycle_service.py`
 - `web/src/test/ImportCenterPage.test.tsx`
 - `web/e2e/imports-invoices-flow.spec.ts`

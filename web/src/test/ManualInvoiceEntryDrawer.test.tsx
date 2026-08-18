@@ -3,11 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import ManualInvoiceEntryDrawer from "../components/imports/ManualInvoiceEntryDrawer";
-import type { ImportSessionPayload, ManualInvoiceEntryPreview } from "../features/imports/types";
+import type { ImportSessionPayload, ManualInvoiceEntryBatchPreview } from "../features/imports/types";
 import {
   confirmImportFiles,
-  discardImportSession,
-  previewManualInvoice,
+  previewManualInvoices,
   recognizeManualInvoice,
 } from "../features/imports/api";
 
@@ -16,8 +15,7 @@ vi.mock("../features/imports/api", async () => {
   return {
     ...actual,
     confirmImportFiles: vi.fn(),
-    discardImportSession: vi.fn(),
-    previewManualInvoice: vi.fn(),
+    previewManualInvoices: vi.fn(),
     recognizeManualInvoice: vi.fn(),
   };
 });
@@ -52,8 +50,8 @@ const sessionPayload: ImportSessionPayload = {
   affectedScopeKeys: [],
 };
 
-const previewPayload: ManualInvoiceEntryPreview = {
-  values: {
+const previewPayload: ManualInvoiceEntryBatchPreview = {
+  values: [{
     invoiceDirection: "input",
     invoiceNature: "blue",
     sellerName: "云南供应商",
@@ -67,8 +65,8 @@ const previewPayload: ManualInvoiceEntryPreview = {
     taxRate: "13",
     taxAmount: "13.00",
     totalWithTax: "113.00",
-  },
-  fileId: "manual_file_1",
+  }],
+  fileIds: ["manual_file_1"],
   importSession: sessionPayload,
 };
 
@@ -90,12 +88,11 @@ function fillRequiredFields() {
 }
 
 describe("ManualInvoiceEntryDrawer", () => {
-  test("supports upload-free preview, return-to-edit cleanup, and canonical confirm", async () => {
+  test("saves invoice information locally before one batch preview and canonical confirm", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     const onImportAccepted = vi.fn();
-    vi.mocked(previewManualInvoice).mockResolvedValue(previewPayload);
-    vi.mocked(discardImportSession).mockResolvedValue(sessionPayload);
+    vi.mocked(previewManualInvoices).mockResolvedValue(previewPayload);
     vi.mocked(confirmImportFiles).mockResolvedValue({
       ...sessionPayload,
       session: { ...sessionPayload.session, status: "confirmed" },
@@ -111,27 +108,27 @@ describe("ManualInvoiceEntryDrawer", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "发票录入" })).toBeInTheDocument();
-    expect(screen.getByText("上传")).toBeInTheDocument();
+    expect(screen.getByText("上传识别")).toBeInTheDocument();
     fillRequiredFields();
     await user.click(screen.getByRole("button", { name: "预览" }));
 
-    expect(await screen.findByRole("dialog", { name: "确认发票信息" })).toBeInTheDocument();
+    expect(await screen.findByText("12345678901234567890")).toBeInTheDocument();
     expect(screen.getByText("12345678901234567890")).toBeInTheDocument();
-    expect(previewManualInvoice).toHaveBeenCalledWith(expect.objectContaining({
-      invoiceDirection: "input",
-      invoiceNature: "blue",
-      invoiceCode: "",
-    }));
+    expect(previewManualInvoices).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "返回编辑" }));
-    await waitFor(() => expect(discardImportSession).toHaveBeenCalledWith("manual_session_1"));
-    expect(screen.queryByRole("dialog", { name: "确认发票信息" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("销方名称")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "预览" }));
-    await screen.findByRole("dialog", { name: "确认发票信息" });
-    await user.click(screen.getByRole("button", { name: "确认导入" }));
+    await user.click(screen.getByRole("button", { name: "保存信息" }));
+    await user.click(screen.getByRole("button", { name: "录入发票池" }));
 
     await waitFor(() => {
+      expect(previewManualInvoices).toHaveBeenCalledWith([expect.objectContaining({
+        invoiceDirection: "input",
+        invoiceNature: "blue",
+        invoiceCode: "",
+      })]);
       expect(confirmImportFiles).toHaveBeenCalledWith("manual_session_1", ["manual_file_1"]);
       expect(onImportAccepted).toHaveBeenCalledTimes(1);
       expect(onClose).toHaveBeenCalledTimes(1);
@@ -146,7 +143,7 @@ describe("ManualInvoiceEntryDrawer", () => {
     });
 
     render(<ManualInvoiceEntryDrawer onClose={vi.fn()} onImportAccepted={vi.fn()} open />);
-    await user.click(screen.getByText("上传"));
+    await user.click(screen.getByText("上传识别"));
     const input = screen.getByLabelText("上传并识别发票").querySelector("input[type='file']") as HTMLInputElement;
     const first = new File(["first"], "first.jpg", { type: "image/jpeg" });
     const second = new File(["second"], "second.pdf", { type: "application/pdf" });

@@ -340,8 +340,11 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(anomaly["items"][0]["code"], "oa_invoice_amount_mismatch")
         self.assertEqual(anomaly["items"][0]["invoice_row_ids"], ["invoice-1", "invoice-2"])
         self.assertEqual(anomaly["items"][0]["amount_delta"], "0.01")
+        self.assertEqual(anomaly["items"][0]["display_scope"], "expense_item")
+        self.assertEqual(anomaly["items"][0]["display_pane"], "oa")
+        self.assertEqual(anomaly["items"][0]["display_row_id"], "item-290")
 
-    def test_uploaded_expense_item_without_parsed_invoice_is_missing_anomaly(self) -> None:
+    def test_uploaded_expense_item_without_parsed_invoice_is_unparsed_anomaly(self) -> None:
         anomaly = self.service.workbench_anomaly(
             {
                 "oa": [{
@@ -357,8 +360,8 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         assert anomaly is not None
         self.assertEqual(len(anomaly["items"]), 1)
         item = anomaly["items"][0]
-        self.assertEqual(item["code"], "oa_invoice_attachment_missing")
-        self.assertEqual(item["label"], "OA发票附件缺失")
+        self.assertEqual(item["code"], "oa_invoice_attachment_unparsed")
+        self.assertEqual(item["label"], "OA发票附件未解析")
         self.assertEqual(item["source_expense_item_ids"], ["item-38"])
         self.assertEqual(item["attachment_file_count"], 1)
         self.assertEqual(item["invoice_row_ids"], [])
@@ -368,6 +371,65 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
                 relation_id="CASE-1",
             )
         )
+
+    def test_expense_item_without_attachment_is_explicit_absent_status(self) -> None:
+        anomaly = self.service.workbench_anomaly(
+            {
+                "oa": [{
+                    **self._oa_row("38.00"),
+                    "id": "oa-1",
+                    "expense_items": [{"id": "item-38", "amount": "38.00", "attachment_file_count": "0"}],
+                }],
+                "invoice": [],
+            },
+            relation_id="CASE-ABSENT",
+        )
+
+        assert anomaly is not None
+        self.assertEqual(anomaly["items"][0]["code"], "oa_invoice_attachment_absent")
+        self.assertEqual(anomaly["items"][0]["label"], "无OA附件")
+
+    def test_exact_single_invoice_mismatch_is_displayed_on_that_invoice(self) -> None:
+        anomaly = self.service.workbench_anomaly(
+            {
+                "oa": [{
+                    **self._oa_row("55.00"),
+                    "id": "oa-1",
+                    "expense_items": [{"id": "item-55", "amount": "55.00", "attachment_file_count": "1"}],
+                }],
+                "invoice": [{
+                    **self._invoice_row("54.99"),
+                    "id": "invoice-55",
+                    "source_expense_item_ids": ["item-55"],
+                }],
+            },
+            relation_id="CASE-EXACT-MISMATCH",
+        )
+
+        assert anomaly is not None
+        item = anomaly["items"][0]
+        self.assertEqual(item["display_scope"], "row")
+        self.assertEqual(item["display_pane"], "invoice")
+        self.assertEqual(item["display_row_id"], "invoice-55")
+
+    def test_group_bank_invoice_mismatch_is_not_attached_to_arbitrary_invoice(self) -> None:
+        anomaly = self.service.workbench_anomaly(
+            {
+                "oa": [{**self._oa_row("405.00"), "id": "oa-1"}],
+                "bank": [{"id": "bank-1", "type": "bank", "direction": "expense", "amount": "400.00"}],
+                "invoice": [
+                    {**self._invoice_row("350.00"), "id": "invoice-350"},
+                    {**self._invoice_row("55.00"), "id": "invoice-55"},
+                ],
+            },
+            relation_id="CASE-GROUP-MISMATCH",
+        )
+
+        assert anomaly is not None
+        item = next(value for value in anomaly["items"] if value["code"] == "bank_invoice_amount_mismatch")
+        self.assertEqual(item["display_scope"], "group")
+        self.assertEqual(item["display_pane"], "bank")
+        self.assertIsNone(item["display_row_id"])
 
     def test_shared_invoice_is_counted_once_across_two_expense_items(self) -> None:
         self.assertIsNone(
@@ -391,7 +453,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
             )
         )
 
-    def test_unassigned_and_parse_failed_are_not_reported_as_missing(self) -> None:
+    def test_unassigned_is_distinct_and_any_unusable_attachment_uses_unparsed_status(self) -> None:
         unassigned = self.service.workbench_anomaly(
             {
                 "oa": [{
@@ -415,7 +477,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         assert unassigned is not None
         self.assertEqual(unassigned["items"][0]["code"], "oa_invoice_attachment_unassigned")
 
-        parse_failed = self.service.workbench_anomaly(
+        unparsed = self.service.workbench_anomaly(
             {
                 "oa": [{
                     **self._oa_row("38.00"),
@@ -424,15 +486,14 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
                         "id": "item-38",
                         "amount": "38.00",
                         "attachment_file_count": "1",
-                        "attachment_parse_failed_count": "1",
                     }],
                 }],
                 "invoice": [],
             },
             relation_id="CASE-PARSE-FAILED",
         )
-        assert parse_failed is not None
-        self.assertEqual(parse_failed["items"][0]["code"], "oa_invoice_attachment_parse_failed")
+        assert unparsed is not None
+        self.assertEqual(unparsed["items"][0]["code"], "oa_invoice_attachment_unparsed")
         self.assertIsNone(
             self.service.workbench_anomaly(
                 {

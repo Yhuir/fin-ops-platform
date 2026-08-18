@@ -290,6 +290,7 @@ from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal impo
 from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
 )
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
     input_invoice_usage_oa_reverse_statistics_snapshot,
@@ -328,6 +329,9 @@ from fin_ops_platform.services.postgres_repositories.tax_offset import (
     PostgresTaxOffsetCanonicalRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
+    PostgresWorkbenchOaSupportingDocumentRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
     PostgresWorkbenchPageQueryRepository,
 )
@@ -408,8 +412,18 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
 )
+from fin_ops_platform.services.workbench_invoice_supplement_service import (
+    ManualInvoiceSupplementCommand,
+    WorkbenchInvoiceSupplementError,
+    WorkbenchInvoiceSupplementService,
+)
 from fin_ops_platform.services.workbench_oa_attachment_context_row_index import (
     WorkbenchOaAttachmentContextRowIndex,
+)
+from fin_ops_platform.services.workbench_oa_supporting_document_service import (
+    SupportingDocumentUpload,
+    WorkbenchOaSupportingDocumentError,
+    WorkbenchOaSupportingDocumentService,
 )
 from fin_ops_platform.services.workbench_oa_retention_date_parser import WorkbenchOaRetentionDateParser
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
@@ -1896,6 +1910,29 @@ class Application:
             return self._handle_manual_invoice_recognize(body, headers)
         if method == "POST" and route_path == "/imports/invoices/manual/preview":
             return self._handle_manual_invoice_preview(body, imported_by=request_actor_id)
+        if method == "POST" and route_path == "/api/workbench/oa-invoice-supplements/manual":
+            return self._handle_workbench_manual_invoice_supplement(
+                body,
+                actor_id=request_actor_id,
+                request_id=request_id,
+            )
+        if method == "POST" and route_path == "/api/workbench/oa-invoice-supplements/documents":
+            return self._handle_workbench_supporting_document_upload(
+                body,
+                headers,
+                actor_id=request_actor_id,
+            )
+        if method == "GET" and route_path == "/api/workbench/oa-invoice-supplements/documents":
+            return self._handle_workbench_supporting_document_list(query)
+        if method == "GET" and route_path.startswith("/api/workbench/oa-invoice-supplements/documents/") and route_path.endswith("/content"):
+            document_id = route_path.removesuffix("/content").rsplit("/", 1)[-1]
+            return self._handle_workbench_supporting_document_content(document_id)
+        if method == "DELETE" and route_path.startswith("/api/workbench/oa-invoice-supplements/documents/"):
+            document_id = route_path.rsplit("/", 1)[-1]
+            return self._handle_workbench_supporting_document_delete(
+                document_id,
+                actor_id=request_actor_id,
+            )
         if method == "POST" and route_path == "/imports/files/preview":
             return self._handle_import_file_preview(body, headers, imported_by=request_actor_id)
         if method == "POST" and route_path == "/imports/files/confirm":
@@ -1983,6 +2020,9 @@ class Application:
                 "/imports/files/sessions/{session_id}",
                 "/imports/invoices/manual/recognize",
                 "/imports/invoices/manual/preview",
+                "/api/workbench/oa-invoice-supplements/manual",
+                "/api/workbench/oa-invoice-supplements/documents",
+                "/api/workbench/oa-invoice-supplements/documents/{document_id}/content",
                 "/api/workbench",
                 "/api/workbench/groups/detail",
                 "/api/bank-details/auto-tag-rules/reapply",
@@ -7188,8 +7228,9 @@ class Application:
         if error is not None:
             return error
         try:
-            preview = self._manual_invoice_entry_service.preview(
-                payload=payload,
+            payloads = payload.get("invoices") if isinstance(payload.get("invoices"), list) else []
+            preview = self._manual_invoice_entry_service.preview_batch(
+                payloads=[item for item in payloads if isinstance(item, dict)],
                 imported_by=imported_by,
             )
             self._persist_import_preview_delta(preview.session.id)
@@ -7204,10 +7245,154 @@ class Application:
             HTTPStatus.OK,
             {
                 "values": preview.values,
-                "file_id": preview.file_id,
+                "file_ids": preview.file_ids,
                 "import_session": self._serialize_file_session(preview.session),
             },
         )
+
+    def _workbench_invoice_supplement_service(self) -> WorkbenchInvoiceSupplementService:
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres" or connection is None:
+            raise RuntimeError("Workbench invoice supplements require PostgreSQL storage.")
+        return WorkbenchInvoiceSupplementService(
+            connection=connection,
+            file_import_service=self._file_import_service,
+            relation_repository_factory=PostgresWorkbenchRelationRepository,
+            relation_command_service_factory=lambda repository: self._workbench_relation_command_service(
+                repository=repository
+            ),
+            target_exists=self._workbench_oa_expense_item_target_exists,
+            next_case_id=self._next_workbench_relation_case_id,
+            persist_import_delta=lambda transaction, imports_snapshot, file_imports_snapshot: (
+                PostgresCoreRepository(transaction).save_import_delta_in_transaction(
+                    transaction,
+                    imports_snapshot=imports_snapshot,
+                    file_imports_snapshot=file_imports_snapshot,
+                )
+            ),
+            restore_import_runtime=self._reload_file_import_runtime_state,
+        )
+
+    def _handle_workbench_manual_invoice_supplement(
+        self,
+        body: str | bytes | None,
+        *,
+        actor_id: str,
+        request_id: str,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            result = self._workbench_invoice_supplement_service().attach_manual_invoices(
+                ManualInvoiceSupplementCommand(
+                    session_id=str(payload.get("session_id") or ""),
+                    file_ids=tuple(str(value) for value in list(payload.get("file_ids") or [])),
+                    oa_row_id=str(payload.get("oa_row_id") or ""),
+                    expense_item_id=str(payload.get("expense_item_id") or ""),
+                    case_id=str(payload.get("case_id") or ""),
+                    actor_id=actor_id,
+                    request_id=request_id,
+                )
+            )
+        except WorkbenchInvoiceSupplementError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": exc.error, "message": exc.message},
+            )
+        except WorkbenchRelationCommandError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": exc.error_code, "message": exc.message, **dict(exc.payload or {})},
+            )
+        except (KeyError, PermissionError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_manual_invoice_supplement", "message": str(exc)},
+            )
+        except RuntimeError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "manual_invoice_supplement_unavailable", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _workbench_oa_supporting_document_service(self) -> WorkbenchOaSupportingDocumentService:
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres" or connection is None:
+            raise RuntimeError("Workbench supporting documents require PostgreSQL storage.")
+        return WorkbenchOaSupportingDocumentService(
+            repository=PostgresWorkbenchOaSupportingDocumentRepository(connection),
+            file_store=state_store,
+            target_exists=self._workbench_oa_expense_item_target_exists,
+        )
+
+    def _handle_workbench_supporting_document_upload(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        *,
+        actor_id: str,
+    ) -> Response:
+        fields, files, error = self._load_multipart_body(body, headers)
+        if error is not None:
+            return error
+        try:
+            documents = self._workbench_oa_supporting_document_service().upload(
+                relation_case_id=str((fields.get("case_id") or [""])[0] or ""),
+                oa_row_id=str((fields.get("oa_row_id") or [""])[0] or ""),
+                expense_item_id=str((fields.get("expense_item_id") or [""])[0] or ""),
+                actor_id=actor_id,
+                uploads=[
+                    SupportingDocumentUpload(file_name=file.file_name, content=file.content)
+                    for file in files
+                ],
+            )
+        except WorkbenchOaSupportingDocumentError as exc:
+            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": exc.error, "message": exc.message})
+        except RuntimeError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "supporting_document_unavailable", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.CREATED, {"documents": documents})
+
+    def _handle_workbench_supporting_document_list(self, query: dict[str, list[str]]) -> Response:
+        try:
+            documents = self._workbench_oa_supporting_document_service().list(
+                oa_row_id=str((query.get("oa_row_id") or [""])[0] or ""),
+                expense_item_id=str((query.get("expense_item_id") or [""])[0] or ""),
+            )
+        except RuntimeError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "supporting_document_unavailable", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, {"documents": documents})
+
+    def _handle_workbench_supporting_document_content(self, document_id: str) -> Response:
+        try:
+            document, content = self._workbench_oa_supporting_document_service().content(document_id)
+        except WorkbenchOaSupportingDocumentError as exc:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": exc.error, "message": exc.message})
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": str(document.get("content_type") or "application/octet-stream"),
+                "Content-Disposition": f'inline; filename="{_build_ascii_download_name(str(document.get("original_filename") or "document"))}"',
+                "Cache-Control": "private, max-age=60",
+            },
+        )
+
+    def _handle_workbench_supporting_document_delete(self, document_id: str, *, actor_id: str) -> Response:
+        try:
+            self._workbench_oa_supporting_document_service().delete(document_id, actor_id=actor_id)
+        except WorkbenchOaSupportingDocumentError as exc:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": exc.error, "message": exc.message})
+        return self._json_response(HTTPStatus.OK, {"status": "deleted", "document_id": document_id})
 
     def _handle_import_file_preview(
         self,
@@ -9017,6 +9202,30 @@ class Application:
             for row_id, row in dict(rows or {}).items()
             if isinstance(row, dict)
         }
+
+    def _workbench_oa_expense_item_target_exists(
+        self,
+        oa_row_id: str,
+        expense_item_id: str,
+    ) -> bool:
+        normalized_oa_row_id = str(oa_row_id or "").strip()
+        normalized_expense_item_id = str(expense_item_id or "").strip()
+        if not normalized_oa_row_id or not normalized_expense_item_id:
+            return False
+        row = self._resolve_rows_from_workbench_canonical_selection(
+            [normalized_oa_row_id],
+            row_types=["oa"],
+        ).get(normalized_oa_row_id)
+        if not isinstance(row, dict):
+            return False
+        raw_items = row.get("expense_items")
+        if not isinstance(raw_items, list):
+            raw_items = row.get("oa_expense_items")
+        return any(
+            isinstance(item, dict)
+            and str(item.get("id") or "").strip() == normalized_expense_item_id
+            for item in list(raw_items or [])
+        )
 
     def _resolve_typed_canonical_rows(
         self,

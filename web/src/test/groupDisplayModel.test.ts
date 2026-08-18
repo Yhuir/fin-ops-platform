@@ -549,9 +549,9 @@ describe("groupDisplayModel time filter", () => {
 
   test("renders one display-only invoice placeholder for an uploaded item with no parsed invoice", () => {
     const missingAnomaly = {
-      code: "oa_invoice_attachment_missing" as const,
-      label: "OA发票附件缺失",
-      displayLabel: "OA发票附件缺失",
+      code: "oa_invoice_attachment_unparsed" as const,
+      label: "OA发票附件未解析",
+      displayLabel: "OA发票附件未解析",
       fingerprint: "a".repeat(64),
       comparisonUnitId: "item-missing",
       sourceOaIds: ["oa-exp-missing"],
@@ -559,6 +559,9 @@ describe("groupDisplayModel time filter", () => {
       oaTotal: "38.00",
       invoiceRowIds: [],
       attachmentFileCount: 1,
+      displayScope: "expense_item" as const,
+      displayPane: "oa" as const,
+      displayRowId: "item-missing",
     };
     const parent = {
       ...buildOaRow("oa-exp-missing", "38.00"),
@@ -568,7 +571,7 @@ describe("groupDisplayModel time filter", () => {
         projectName: "项目甲",
         amount: "38.00",
         attachmentFileCount: 1,
-        oaInvoiceAnomaly: missingAnomaly,
+        workbenchAnomalies: [missingAnomaly],
       }],
     };
     const group: WorkbenchRelationGroup = {
@@ -586,18 +589,18 @@ describe("groupDisplayModel time filter", () => {
     expect(invoiceRows).toHaveLength(1);
     expect(invoiceRows?.[0]).toMatchObject({
       displayOnly: true,
-      label: "OA发票附件缺失",
+      label: "OA发票附件未解析",
       externalUrl: "/oa/#/normal/32?formId=32",
-      oaInvoiceAnomaly: missingAnomaly,
+      workbenchAnomalies: [missingAnomaly],
     });
     expect(workbenchInvoiceSourceLabel(invoiceRows?.[0].sourceKind)).toBeNull();
   });
 
   test("spans a parent bank row while keeping reimbursement invoices aligned to their owned items", () => {
     const missingAnomaly = {
-      code: "oa_invoice_attachment_missing" as const,
-      label: "OA发票附件缺失",
-      displayLabel: "OA发票附件缺失",
+      code: "oa_invoice_attachment_unparsed" as const,
+      label: "OA发票附件未解析",
+      displayLabel: "OA发票附件未解析",
       fingerprint: "b".repeat(64),
       comparisonUnitId: "item-28.80",
       sourceOaIds: ["oa-exp-174.94"],
@@ -605,6 +608,9 @@ describe("groupDisplayModel time filter", () => {
       oaTotal: "28.80",
       invoiceRowIds: [],
       attachmentFileCount: 1,
+      displayScope: "expense_item" as const,
+      displayPane: "oa" as const,
+      displayRowId: "item-28.80",
     };
     const parent = {
       ...buildOaRow("oa-exp-174.94", "174.94"),
@@ -617,7 +623,7 @@ describe("groupDisplayModel time filter", () => {
           projectName: "项目丙",
           amount: "28.80",
           attachmentFileCount: 1,
-          oaInvoiceAnomaly: missingAnomaly,
+          workbenchAnomalies: [missingAnomaly],
         },
         { id: "item-55.80", rowIndex: "3", projectName: "项目丁", amount: "55.80" },
       ],
@@ -656,7 +662,7 @@ describe("groupDisplayModel time filter", () => {
     expect(layout?.segments.find(({ id }) => id === "item-55.80")?.rows.invoice).toEqual([invoices[2]]);
     expect(layout?.segments.find(({ id }) => id === "item-28.80")?.rows.invoice[0]).toMatchObject({
       displayOnly: true,
-      label: "OA发票附件缺失",
+      label: "OA发票附件未解析",
     });
   });
 

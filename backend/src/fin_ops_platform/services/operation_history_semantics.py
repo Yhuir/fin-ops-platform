@@ -217,6 +217,20 @@ _EXACT_ROUTES = {
     ("POST", "/api/workbench/settings/projects"): _semantic(
         "settings.projects.create", "新增项目", "project", "项目", "新增一个项目。"
     ),
+    ("POST", "/api/workbench/oa-invoice-supplements/manual"): _semantic(
+        "workbench.oa_invoice.manual_attach",
+        "录入并关联 OA 发票",
+        "workbench_relation",
+        "OA 发票关联",
+        "将手工录入的整批发票写入统一发票池并关联到指定 OA 子付款项。",
+    ),
+    ("POST", "/api/workbench/oa-invoice-supplements/documents"): _semantic(
+        "workbench.oa_invoice.document_upload",
+        "上传 OA 补充凭证",
+        "oa_supporting_document",
+        "OA 补充凭证",
+        "上传不进入统一发票池的补充凭证并关联到指定 OA 子付款项。",
+    ),
     ("POST", "/api/workbench/settings/data-reset/jobs"): _semantic(
         "settings.data_reset.create", "提交数据重置", "data_reset_job", "数据重置任务", "提交受控的数据重置任务。"
     ),
@@ -351,6 +365,17 @@ _WORKBENCH_ACTIONS = {
 
 
 _DYNAMIC_RULES = (
+    _RouteRule(
+        "DELETE",
+        "/api/workbench/oa-invoice-supplements/documents/",
+        _semantic(
+            "workbench.oa_invoice.document_delete",
+            "删除 OA 补充凭证",
+            "oa_supporting_document",
+            "OA 补充凭证",
+            "删除指定 OA 子付款项的补充凭证。",
+        ),
+    ),
     _RouteRule(
         "POST",
         "/api/bank-details/transactions/",

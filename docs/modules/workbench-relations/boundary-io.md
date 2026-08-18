@@ -17,6 +17,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | manual command | Workbench/业务 owner API | normalize 后至少 2 个不同 requested canonical row ids、actor、tenant、idempotency、expected versions、既有 `note`；每个 exact requested id 都必须重读为 `oa|bank|invoice`，成员可同栏或跨栏，金额/方向和材料完整性不作为人工创建门槛。`amount_check.requires_note=true` 时 `note` 必填并写 relation/history；浏览器为一次 preview/confirm 或 withdraw 意图生成稳定 key，并在 ambiguous 网络重试中复用，缺失时 API fail closed。重复 identity、canonical 缺失/未知类型、active overlap/version drift 和非法 summary 仍 fail closed。银行分类不是 command router：mixed 或全 `internal_transfer` 银行成员仍生成 `manual_confirmed` command，不得转交 no-OA batch owner。 |
+| OA manual invoice supplement | `WorkbenchInvoiceSupplementService` | 输入为完整 manual import session、全部 file ids、精确 OA row、expense item、可选 active case、actor/request id。在同一 PostgreSQL 事务确认整批 canonical invoices、写 import facts/source links，再复用正式 relation command 创建或扩展目标 `manual_confirmed` case；目标 case 存在时必须包含该 OA。任一步失败同时恢复 import 与 relation 进程镜像，禁止半批发票或半关系。 |
 | in-progress OA bank link | OA pending payment command | canonical OA/bank ids、workflow snapshot、actor、scope；只允许创建新 formal case 或扩展唯一 active case并保留其发票成员，多个 owner/冲突 fail closed |
 | formal auto plan | matching orchestrator | immutable `FormalRelationPlan`：case/member set/fingerprint/rule/evidence/amount/scope/batch hash；涉及银行成员时，fact repository 对计划银行 IDs 一次批量读取 Bank Details owner 的 canonical effective-category projection，再冻结 requirement metadata；OA 显式 source reference 必须先经父 OA 自身字段及其 FK-owned 付款明细/附件的 alias map 归一为 canonical typed identity，计划携带由 `attachment_source` 直接证明的 exact `(parent OA row id, invoice row id)` binding |
 | current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
@@ -58,6 +59,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 
 - command service 必须接收明确 repository/idempotency/freshness 依赖，不接收整个 `Application`。
 - relation、history、idempotency 与 audit 的业务事务必须原子；失败不得留下半关系。普通关系写入不承担下游 dirty/outbox 事务，页面访问通过 canonical version drift 发现并收敛。
+- OA 手工补录是唯一受限的 import+relation 组合 UoW：只编排既有 import normalization/persistence 和正式 relation command，不直接 SQL 写 relation/history，不创建第二发票池、专用 worker、read model、fallback 或异步补偿。
 - PostgreSQL 生产运行时固定使用 durable idempotency repository；旧 feature flag 和生产内存幂等路径已删除，本地非 PostgreSQL 测试只使用显式内存适配器。
 - 分类关系闭环只能通过 category writer + relation command/repository 的同一事务完成；提交后只发布 changed-case 进程镜像增量。禁止恢复写后 callback、页面通知、第二条 metadata writer 或事务外补偿。
 - repository adapter 持久化 scoped snapshot 后，只能通过 domain service 的 changed-case delta I/O 更新进程内镜像；禁止读取并重建全局 relation/history snapshot，也禁止 adapter 直接写 domain service 私有状态。
@@ -93,7 +95,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 | 层 | 文件 |
 | --- | --- |
 | Domain/command | `workbench_pair_relation_service.py`、`workbench_relation_command_service.py`、`workbench_relation_modes.py` |
-| UoW/repository | `workbench_uow.py`、`workbench_relation_command_repository_adapter.py`、`postgres_repositories/workbench_relation.py`、`bank_relation_requirement_recalculation.py` |
+| UoW/repository | `workbench_uow.py`、`workbench_relation_command_repository_adapter.py`、`workbench_invoice_supplement_service.py`、`postgres_repositories/workbench_relation.py`、`bank_relation_requirement_recalculation.py` |
 | Read/projection | `workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py` |
 | Auto formalization | `workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`、`workbench_etc_batch_link.py`、`postgres_repositories/workbench_formal_relation.py` |
 | Tests | `tests/test_workbench_relation_*.py`、`test_workbench_formal_relation_repository.py`、`test_workbench_matching_orchestrator.py` |

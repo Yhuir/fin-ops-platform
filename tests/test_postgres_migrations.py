@@ -161,6 +161,7 @@ EXPECTED_MIGRATIONS = [
     "0147_bank_relation_requirement_scope_retry.sql",
     "0148_retire_workbench_matching_progress_jobs.sql",
     "0149_remove_read_model_runtime.sql",
+    "0150_workbench_oa_supporting_documents.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -182,6 +183,7 @@ EXPECTED_TABLES = [
     "app.import_batch_rows",
     "app.import_files",
     "app.file_objects",
+    "app.workbench_oa_supporting_documents",
     "app.invoices",
     "app.bank_transactions",
     "app.financial_fact_corrections",
@@ -319,7 +321,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 150)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 151)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -333,6 +335,14 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("selected_tag_codes", sql)
         self.assertIn("jsonb_array_elements_text", sql)
         self.assertNotIn("no_oa_bank_batch_tag_selection", sql)
+
+    def test_workbench_supporting_documents_have_exact_item_lookup_and_file_ownership(self) -> None:
+        sql = (MIGRATIONS_DIR / "0150_workbench_oa_supporting_documents.sql").read_text(encoding="utf-8").lower()
+
+        self.assertIn("create table if not exists app.workbench_oa_supporting_documents", sql)
+        self.assertIn("file_object_id uuid not null references app.file_objects(id)", sql)
+        self.assertIn("oa_row_id, expense_item_id, content_sha256", sql)
+        self.assertIn("where status = 'active'", sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
         sql = (

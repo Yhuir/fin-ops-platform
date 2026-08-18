@@ -29,6 +29,7 @@
 - `web/src/pages/imports/ImportInvoicesPage.tsx`
 - `web/src/components/imports/ImportWorkflowPage.tsx`
 - `web/src/components/imports/ManualInvoiceEntryDrawer.tsx`
+- `web/src/components/imports/ManualInvoiceBatchEditor.tsx`
 - `web/src/features/imports/api.ts`
 - `web/src/features/imports/types.ts`
 - `web/src/app/importRoutes.ts`
@@ -52,7 +53,7 @@
 
 当前发票导入支持每个文件指定 `input_invoice` 或 `output_invoice` batch type。前端预览调用 `/imports/files/preview`，以 multipart `file_overrides` 传 `template_code=invoice_export` 和 `batch_type`；确认调用 `/imports/files/confirm`，返回后台 job 或已确认 session。
 
-同一页面的“发票录入”是单张发票的人工入口：JPG/JPEG/PDF 上传可选，`/imports/invoices/manual/recognize` 只返回当前发票池需要的预填字段；用户编辑后由 `/imports/invoices/manual/preview` 执行服务端必填、金额、红蓝字、票号/代码条件和重复校验，并生成普通 `FileImportSession`。最终确认仍只调用 `/imports/files/confirm`，不建立第二发票池、专用确认写链、专用 read model 或银行流水关系。旧 `/imports/preview`、`/imports/confirm` JSON 写入入口，以及待找发票 service 内不可达的 `preview_manual_invoice` / `confirm_manual_invoice` 旧链均已删除。
+同一页面的“发票录入”支持一次录入多张发票：`新发票N` 页签各自编辑、预览并“保存信息”，`＋` 新增下一张，最后一次“录入发票池”才以 `invoices[]` 整批服务端校验并确认全部 `file_ids[]`。每张 JPG/JPEG/PDF 上传均为可选 OCR 预填，不写文件事实；同批重复或任一现存重复整批失败。导入页最终仍调用 `/imports/files/confirm`，不建立第二发票池、专用 read model 或银行流水关系。关联台复用同一批量编辑器，但最终通过受限原子入口把整批 canonical 发票直接绑定到指定 OA 子付款项。旧单张 preview DTO/方法、旧 `/imports/preview`、`/imports/confirm` JSON 写入入口，以及待找发票 service 内不可达的 `preview_manual_invoice` / `confirm_manual_invoice` 链均已删除。
 
 税务平台多 sheet 工作簿若包含唯一的 `发票基础信息`，该 sheet 是每张 canonical 发票的唯一表头事实源；不得因前面的 `信息汇总表` 可以解析就提前返回。`信息汇总表` 只作为同票商品/服务行证据附着到表头行，不参与 canonical 金额、税额、价税合计或商品行字段的顶层赋值。`发票基础信息` 重名、无法识别、无有效发票或与明细强身份不一致时整文件 fail closed，不回退旧首 sheet 链；不含该 sheet 的历史单 sheet 模板继续使用共享模板识别合同。
 

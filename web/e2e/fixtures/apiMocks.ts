@@ -138,6 +138,7 @@ type ApiMockOptions = {
   workbenchLargeDataset?: boolean;
   workbenchExplicitBankFanoutScenario?: boolean;
   workbenchOaExpenseItemsScenario?: boolean;
+  workbenchOaInvoiceUnparsedScenario?: boolean;
   workbenchWithdrawSubmitDelayMs?: number;
 };
 
@@ -911,6 +912,56 @@ function buildOaExpenseItemsWorkbenchGroup() {
       },
     ],
     can_withdraw: false,
+  };
+}
+
+function buildOaInvoiceUnparsedWorkbenchGroup() {
+  const rows = workbenchRows();
+  const oaRowId = "oa-unparsed-20260818";
+  const expenseItemId = `${oaRowId}:item:0`;
+  return {
+    group_id: `row:${oaRowId}`,
+    group_type: "unpaired",
+    reason: "browser_e2e_oa_invoice_attachment_unparsed",
+    oa_rows: [{
+      ...rows.oa,
+      id: oaRowId,
+      case_id: "CASE-OA-UNPARSED-20260818",
+      applicant: "吴云江",
+      project_name: "设备采购及安装项目",
+      apply_type: "日常报销",
+      expense_type: "交通费",
+      amount: "55.00",
+      expense_items: [{
+        id: expenseItemId,
+        row_index: "0",
+        project_name: "设备采购及安装项目",
+        expense_type: "交通费",
+        amount: "55.00",
+      }],
+    }],
+    bank_rows: [],
+    invoice_rows: [],
+    can_withdraw: false,
+    workbench_anomaly: {
+      code: "workbench_anomaly",
+      fingerprint: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      review_decision: null,
+      items: [{
+        code: "oa_invoice_attachment_unparsed",
+        label: "OA发票附件未解析",
+        display_label: "OA发票附件未解析",
+        fingerprint: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        comparison_unit_id: expenseItemId,
+        source_oa_ids: [oaRowId],
+        source_expense_item_ids: [expenseItemId],
+        invoice_row_ids: [],
+        attachment_file_count: 1,
+        display_scope: "expense_item",
+        display_pane: "oa",
+        display_row_id: expenseItemId,
+      }],
+    },
   };
 }
 
@@ -9427,6 +9478,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
+    if (
+      path === "/api/workbench/oa-invoice-supplements/documents"
+      && request.method() === "GET"
+    ) {
+      return json(route, { documents: [] });
+    }
+
     if (path === "/api/workbench") {
       if (options.workbenchCombinedRereadError && workbenchMutationCommitted) {
         return json(route, {
@@ -9461,6 +9519,32 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           unpaired: {
             ...payload.unpaired,
             total: groups.length,
+            row_counts: countWorkbenchRows(groups),
+            groups,
+          },
+        });
+      }
+      if (options.workbenchOaInvoiceUnparsedScenario) {
+        const payload = workbenchInitialPayload(false);
+        const groups = [withWorkbenchDetailKey(buildOaInvoiceUnparsedWorkbenchGroup())];
+        return json(route, {
+          ...payload,
+          summary: {
+            ...payload.summary,
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 0,
+            unpaired_count: 1,
+          },
+          invoice_inventory: {
+            ...payload.invoice_inventory,
+            system_total: 0,
+            workbench_visible_total: 0,
+            oa_attachment_total: 0,
+          },
+          unpaired: {
+            ...payload.unpaired,
+            total: 1,
             row_counts: countWorkbenchRows(groups),
             groups,
           },
@@ -9815,6 +9899,24 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           ...workbenchGroupsPayload(
             zone,
             relationConfirmed,
+            false,
+            false,
+            requestedCursor,
+            Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
+          ),
+          total: groups.length,
+          row_counts: countWorkbenchRows(groups),
+          has_more: false,
+          next_cursor: null,
+          groups: groups.map(withWorkbenchDetailKey),
+        });
+      }
+      if (options.workbenchOaInvoiceUnparsedScenario) {
+        const groups = zone === "unpaired" ? [buildOaInvoiceUnparsedWorkbenchGroup()] : [];
+        return json(route, {
+          ...workbenchGroupsPayload(
+            zone,
+            false,
             false,
             false,
             requestedCursor,

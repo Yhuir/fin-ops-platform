@@ -86,7 +86,7 @@
 
 ## 2026-08-05 OA/发票比较单元与附件缺失异常
 
-- Business core：`tests/test_workbench_amount_check_service.py` 保护日常报销逐 `source_expense_item_id` 比较全部显式绑定发票，覆盖 `290=145+145`、`405=350+55`、一项多发票差异只生成一个 anomaly item、附件数大于零且零绑定发票生成 `OA发票附件缺失`；支付申请继续按关系组总额比较，缺金额不误报。
+- Business core：`tests/test_workbench_amount_check_service.py` 保护日常报销逐 `source_expense_item_id` 比较全部显式绑定发票，覆盖 `290=145+145`、`405=350+55`、一项多发票差异只生成一个 anomaly item、无附件/附件未解析/待归属三类状态，以及“唯一单票落发票、一项多票落 OA 子项、组级流水—发票差异落流水而不误贴 55 元发票”；支付申请继续按关系组总额比较，缺金额不误报。
 - Service/API：`tests/test_workbench_relation_grouping.py` 保护 `workbench_anomaly.items[]` 和具体 pair chip；`tests/test_workbench_anomaly_review_service.py` 保护 exact item review、stale fingerprint、其他 blocker 与新 API；PostgreSQL integration 保护异常桶在分页前过滤及 SQL/Python fingerprint 一致。
 - Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行和附件占位；`WorkbenchApi.test.ts` 保护统一 anomaly DTO；抽屉/页面测试保护具体 chip、两个新 bucket、逐项审阅、流转与只读行为。
 
@@ -135,7 +135,14 @@
 
 - Backend/API：`tests/test_workbench_query_service.py` 保护父 OA 行只发布精简稳定付款明细字段，附件发票继续携带显式 `source_expense_item_id`；不新增 relation member 或独立配对对象。
 - Frontend：`web/src/test/WorkbenchApi.test.ts` 保护 item/source ID DTO；`WorkbenchColumns.test.tsx` 保护申请类型移入申请人栏并清理项目栏 process/evidence chip；`RelationGroupGrid.test.tsx` 保护“多个项目 · N + 父 OA 金额”、逐项项目/金额、单条精确金额才同行、部分精确覆盖与残余发票独立展示，以及点击子项仍只选择父 OA。
-- Frontend display：`groupDisplayModel.test.ts` 以 `174.94 = 78.34 + 12.00 + 28.80 + 55.80` 的生产形状保护显式发票逐付款项同行、父 OA 级银行流水不参与子项分段，以及缺失项只保留 `OA发票附件缺失`；`RelationGroupGrid.test.tsx` 保护该父级流水复用既有整栏 CSS grid 跨越全部展开行。
+- Frontend display：`groupDisplayModel.test.ts` 以 `174.94 = 78.34 + 12.00 + 28.80 + 55.80` 的生产形状保护显式发票逐付款项同行、父 OA 级银行流水不参与子项分段，以及未解析项只保留 `OA发票附件未解析 + 录入发票`；`RelationGroupGrid.test.tsx` 保护该父级流水复用既有整栏 CSS grid 跨越全部展开行。
+
+## 2026-08-18 OA 附件处置、多发票录入与防误导显示目标
+
+- Business core / service：`tests/test_manual_invoice_entry_service.py` 保护一个 session 多张发票、同批重复整批拒绝；`tests/test_workbench_invoice_supplement_service.py` 保护全部 file ids、canonical source link、现有 case 扩展以及 relation 失败时 import runtime 回滚；`tests/test_workbench_oa_supporting_document_service.py` 保护 JPG/PDF 签名、精确 OA 子付款项归属、预览与删除且不写发票池。
+- API contract：`tests/test_import_file_api.py` 保护 `invoices[] / values[] / file_ids[]`；`tests/test_workbench_invoice_supplement_api.py` 保护手工整批关联和补充凭证上传/列表/内容/删除 DTO；`tests/test_operation_history_semantics.py` 保护三种写操作的审计语义。
+- Frontend：`ManualInvoiceEntryDrawer.test.tsx` 保护“预览/保存信息”只保存本地编辑态、最后一次整批入池；`WorkbenchInvoiceEntryDrawer.test.tsx` 保护单抽屉两种内部页面和精确 target 透传；`WorkbenchApi.test.ts`、`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx` 保护显示目标、补充凭证和录入入口。
+- Regression / performance：普通发票文件导入继续走原 durable confirm job；关联台 direct GET 仅在已读取的 OA 子项 JSON 上附加索引查询得到的补充凭证，不增加页面 HTTP、worker、read model、Redis 或全表投影。生产使用既有 HTTP SLO probe 与 runtime closure gate 只读验证。
 - Read model：Workbench schema 升级为 v8，使旧 generation/page cache 失效并经现有 exact/all freshness gateway 重建；没有新增表、worker、cache 或第二 read model。
 
 ## 2026-07-26 relation preview 真实 DTO、并发反馈与安全错误回归

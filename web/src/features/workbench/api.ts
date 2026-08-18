@@ -44,7 +44,10 @@ import type {
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
   WorkbenchAccessControl,
+  WorkbenchOaInvoiceSupplementTarget,
+  WorkbenchOaSupportingDocument,
 } from "./types";
+import type { ManualInvoiceEntryBatchPreview } from "../imports/types";
 import { apiUrl } from "../../app/runtime";
 import { ApiClientError, apiRequestJson } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
@@ -115,7 +118,14 @@ type ApiWorkbenchRow = {
     fee_content?: string | null;
     fee_description?: string | null;
     attachment_file_count?: string | number | null;
-    attachment_parse_failed_count?: string | number | null;
+    supporting_documents?: Array<{
+      id?: string | null;
+      file_name?: string | null;
+      content_type?: string | null;
+      size_bytes?: string | number | null;
+      created_at?: string | null;
+      content_url?: string | null;
+    }> | null;
   }> | null;
   apply_type?: string | null;
   workflow_status?: string | null;
@@ -189,6 +199,9 @@ type ApiWorkbenchAnomalyItem = {
   mismatch_pair?: unknown[] | null;
   invoice_row_ids?: unknown[] | null;
   attachment_file_count?: string | number | null;
+  display_scope?: string | null;
+  display_pane?: string | null;
+  display_row_id?: string | null;
 };
 
 type ApiWorkbenchAnomaly = {
@@ -875,6 +888,9 @@ function mapWorkbenchAnomaly(
         .map((rowId) => String(rowId).trim())
         .filter(Boolean),
       attachmentFileCount: toCount(item.attachment_file_count),
+      displayScope: toDisplayValue(item.display_scope, "group") as WorkbenchAnomalyItem["displayScope"],
+      displayPane: toDisplayValue(item.display_pane, "oa") as WorkbenchAnomalyItem["displayPane"],
+      displayRowId: toDisplayValue(item.display_row_id, "") || undefined,
     }];
   });
   if (!fingerprint || items.length === 0) {
@@ -1259,6 +1275,18 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
     if (!id) {
       return [];
     }
+    const supportingDocuments = (Array.isArray(item.supporting_documents) ? item.supporting_documents : []).flatMap((document) => {
+      const documentId = String(document?.id ?? "").trim();
+      if (!documentId) return [];
+      return [{
+        id: documentId,
+        fileName: toDisplayValue(document.file_name, "补充凭证"),
+        contentType: toDisplayValue(document.content_type, "application/octet-stream"),
+        sizeBytes: toCount(document.size_bytes),
+        createdAt: toDisplayValue(document.created_at, ""),
+        contentUrl: toDisplayValue(document.content_url, ""),
+      }];
+    });
     return [{
       id,
       rowIndex: String(item.row_index ?? "").trim(),
@@ -1268,9 +1296,7 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
       feeContent: toDisplayValue(item.fee_content, ""),
       feeDescription: toDisplayValue(item.fee_description, ""),
       attachmentFileCount: toCount(item.attachment_file_count),
-      ...(item.attachment_parse_failed_count === null || item.attachment_parse_failed_count === undefined
-        ? {}
-        : { attachmentParseFailedCount: toCount(item.attachment_parse_failed_count) }),
+      ...(supportingDocuments.length > 0 ? { supportingDocuments } : {}),
     }];
   });
   return mapped.length > 0 ? mapped : undefined;
@@ -1329,7 +1355,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     });
   }
   const workbenchAnomaly = mapWorkbenchAnomaly(group.workbench_anomaly);
-  decorateOaInvoiceAnomaly(rows, workbenchAnomaly);
+  decorateWorkbenchAnomalies(rows, workbenchAnomaly);
   const rawGroupType = String(group.group_type || "").trim();
   const mapped: WorkbenchRelationGroup = {
     id: group.group_id,
@@ -1379,7 +1405,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
   return mapped;
 }
 
-function decorateOaInvoiceAnomaly(
+function decorateWorkbenchAnomalies(
   rows: WorkbenchPaneRows,
   anomaly: WorkbenchAnomaly | undefined,
 ) {
@@ -1387,22 +1413,24 @@ function decorateOaInvoiceAnomaly(
     return;
   }
   anomaly.items.forEach((item) => {
-    const invoiceRow = item.invoiceRowIds
-      .map((rowId) => rows.invoice.find((row) => row.id === rowId))
-      .find((row): row is WorkbenchRecord => Boolean(row));
-    if (invoiceRow) {
-      invoiceRow.oaInvoiceAnomaly = item;
-    }
-    if (item.sourceExpenseItemIds.length === 0) {
+    if (item.displayScope === "expense_item" && item.displayRowId) {
+      rows.oa.forEach((oaRow) => {
+        oaRow.expenseItems
+          ?.filter((candidate) => candidate.id === item.displayRowId)
+          .forEach((expenseItem) => {
+            expenseItem.workbenchAnomalies = [...(expenseItem.workbenchAnomalies ?? []), item];
+          });
+      });
       return;
     }
-    rows.oa.forEach((oaRow) => {
-      oaRow.expenseItems
-        ?.filter((candidate) => item.sourceExpenseItemIds.includes(candidate.id))
-        .forEach((expenseItem) => {
-          expenseItem.oaInvoiceAnomaly = item;
-        });
-    });
+    const paneRows = rows[item.displayPane] ?? [];
+    const targetRow = item.displayScope === "row" && item.displayRowId
+      ? paneRows.find((row) => row.id === item.displayRowId)
+      : paneRows[0];
+    if (!targetRow) {
+      return;
+    }
+    targetRow.workbenchAnomalies = [...(targetRow.workbenchAnomalies ?? []), item];
   });
 }
 
@@ -1416,11 +1444,11 @@ function anomalyLabel(code: string) {
   if (code === "bank_invoice_amount_mismatch") {
     return "流水发票金额不一致";
   }
-  if (code === "oa_invoice_attachment_missing") {
-    return "OA发票附件缺失";
+  if (code === "oa_invoice_attachment_absent") {
+    return "无OA附件";
   }
-  if (code === "oa_invoice_attachment_parse_failed") {
-    return "OA附件解析失败";
+  if (code === "oa_invoice_attachment_unparsed") {
+    return "OA发票附件未解析";
   }
   if (code === "oa_invoice_attachment_unassigned") {
     return "OA发票待归属";
@@ -1432,6 +1460,86 @@ function toStringList(values: unknown[] | null | undefined) {
   return Array.isArray(values)
     ? Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)))
     : [];
+}
+
+type ApiWorkbenchOaSupportingDocument = {
+  id?: string | null;
+  relation_case_id?: string | null;
+  oa_row_id?: string | null;
+  expense_item_id?: string | null;
+  file_name?: string | null;
+  content_type?: string | null;
+  sha256?: string | null;
+  size_bytes?: string | number | null;
+  created_at?: string | null;
+  content_url?: string | null;
+};
+
+function mapSupportingDocument(document: ApiWorkbenchOaSupportingDocument): WorkbenchOaSupportingDocument {
+  return {
+    id: String(document.id ?? ""),
+    relationCaseId: toDisplayValue(document.relation_case_id, "") || undefined,
+    oaRowId: toDisplayValue(document.oa_row_id, ""),
+    expenseItemId: toDisplayValue(document.expense_item_id, ""),
+    fileName: toDisplayValue(document.file_name, "补充凭证"),
+    contentType: toDisplayValue(document.content_type, "application/octet-stream"),
+    sha256: toDisplayValue(document.sha256, ""),
+    sizeBytes: toCount(document.size_bytes),
+    createdAt: toDisplayValue(document.created_at, ""),
+    contentUrl: toDisplayValue(document.content_url, ""),
+  };
+}
+
+export async function listWorkbenchOaSupportingDocuments(
+  target: WorkbenchOaInvoiceSupplementTarget,
+): Promise<WorkbenchOaSupportingDocument[]> {
+  const query = new URLSearchParams({
+    oa_row_id: target.oaRowId,
+    expense_item_id: target.expenseItemId,
+  });
+  const payload = await requestJson<{ documents?: ApiWorkbenchOaSupportingDocument[] }>(
+    `/api/workbench/oa-invoice-supplements/documents?${query.toString()}`,
+  );
+  return (payload.documents ?? []).map(mapSupportingDocument);
+}
+
+export async function uploadWorkbenchOaSupportingDocuments(
+  target: WorkbenchOaInvoiceSupplementTarget,
+  files: File[],
+): Promise<WorkbenchOaSupportingDocument[]> {
+  const formData = new FormData();
+  formData.append("case_id", target.caseId);
+  formData.append("oa_row_id", target.oaRowId);
+  formData.append("expense_item_id", target.expenseItemId);
+  files.forEach((file) => formData.append("files", file));
+  const payload = await requestJson<{ documents?: ApiWorkbenchOaSupportingDocument[] }>(
+    "/api/workbench/oa-invoice-supplements/documents",
+    { method: "POST", body: formData },
+  );
+  return (payload.documents ?? []).map(mapSupportingDocument);
+}
+
+export async function deleteWorkbenchOaSupportingDocument(documentId: string): Promise<void> {
+  await requestJson(`/api/workbench/oa-invoice-supplements/documents/${encodeURIComponent(documentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function confirmWorkbenchManualInvoiceSupplement(
+  target: WorkbenchOaInvoiceSupplementTarget,
+  preview: ManualInvoiceEntryBatchPreview,
+): Promise<{ case_id?: string; invoice_row_ids?: string[] }> {
+  return requestJson("/api/workbench/oa-invoice-supplements/manual", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: preview.importSession.session.id,
+      file_ids: preview.fileIds,
+      case_id: target.caseId,
+      oa_row_id: target.oaRowId,
+      expense_item_id: target.expenseItemId,
+    }),
+  });
 }
 
 function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchRelationGroup["rowCounts"] | undefined {

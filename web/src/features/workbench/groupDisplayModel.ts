@@ -468,6 +468,15 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
           expenseType: item.expenseType,
           sourceExpenseItemIds: [item.id],
           displayRole: "expense-claim-item" as const,
+          ...(item.workbenchAnomalies?.some((anomaly) => ![
+            "oa_invoice_attachment_absent",
+            "oa_invoice_attachment_unparsed",
+          ].includes(anomaly.code)) ? {
+            workbenchAnomalies: item.workbenchAnomalies.filter((anomaly) => ![
+              "oa_invoice_attachment_absent",
+              "oa_invoice_attachment_unparsed",
+            ].includes(anomaly.code)),
+          } : {}),
           tableValues: {
             ...parent.tableValues,
             applicant: "—",
@@ -485,9 +494,11 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
           availableActions: [],
         })),
         bank: [],
-        invoice: componentInvoiceRows.size > 0
-          ? Array.from(componentInvoiceRows.values())
-          : missingInvoicePlaceholder(parent, componentItems[0]),
+        invoice: [
+          ...Array.from(componentInvoiceRows.values()),
+          ...componentItems.flatMap((item) => supportingDocumentRows(parent, item)),
+          ...(componentInvoiceRows.size > 0 ? [] : missingInvoicePlaceholder(parent, componentItems[0])),
+        ],
       },
     });
   }
@@ -516,16 +527,19 @@ function missingInvoicePlaceholder(
   parent: WorkbenchRecord,
   item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
 ) {
-  const anomaly = item.oaInvoiceAnomaly;
+  const anomaly = item.workbenchAnomalies?.find((candidate) => [
+    "oa_invoice_attachment_absent",
+    "oa_invoice_attachment_unparsed",
+  ].includes(candidate.code));
   if (!anomaly || ![
-    "oa_invoice_attachment_missing",
-    "oa_invoice_attachment_parse_failed",
+    "oa_invoice_attachment_absent",
+    "oa_invoice_attachment_unparsed",
   ].includes(anomaly.code)) {
     return [];
   }
-  const label = anomaly.code === "oa_invoice_attachment_parse_failed"
-    ? "OA附件解析失败"
-    : "OA发票附件缺失";
+  const label = anomaly.code === "oa_invoice_attachment_unparsed"
+    ? "OA发票附件未解析"
+    : "无OA附件";
   return [{
     id: `${parent.id}:missing-invoice:${item.id}`,
     caseId: parent.caseId,
@@ -551,18 +565,53 @@ function missingInvoicePlaceholder(
     },
     detailFields: [],
     actionVariant: "detail-only" as const,
-    availableActions: [],
-    oaInvoiceAnomaly: anomaly,
+    availableActions: anomaly.code === "oa_invoice_attachment_unparsed" ? ["enter_invoice"] : [],
+    workbenchAnomalies: [anomaly],
     displayOnly: true,
   }];
+}
+
+function supportingDocumentRows(
+  parent: WorkbenchRecord,
+  item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
+): WorkbenchRecord[] {
+  return (item.supportingDocuments ?? []).map((document) => ({
+    id: `supporting-document:${document.id}`,
+    caseId: parent.caseId,
+    recordType: "invoice",
+    sourceKind: "oa_supporting_document",
+    sourceOaId: parent.id,
+    sourceExpenseItemIds: [item.id],
+    externalUrl: document.contentUrl,
+    label: document.fileName,
+    status: "补充凭证",
+    statusCode: "supporting_document",
+    statusTone: "info",
+    exceptionHandled: true,
+    amount: "—",
+    counterparty: "—",
+    tableValues: {
+      sellerName: document.fileName,
+      sellerTaxId: "补充凭证（不进入发票池）",
+      buyerName: "—",
+      buyerTaxId: "—",
+      grossAmount: "—",
+      amount: "—",
+      issueDate: document.createdAt,
+    },
+    detailFields: [],
+    actionVariant: "detail-only",
+    availableActions: [],
+    displayOnly: true,
+  }));
 }
 
 function hasExpandableExpenseItems(row: WorkbenchRecord) {
   const items = row.expenseItems ?? [];
   return items.length > 1 || items.some((item) => [
-    "oa_invoice_attachment_missing",
-    "oa_invoice_attachment_parse_failed",
-  ].includes(item.oaInvoiceAnomaly?.code ?? ""));
+    "oa_invoice_attachment_absent",
+    "oa_invoice_attachment_unparsed",
+  ].some((code) => item.workbenchAnomalies?.some((anomaly) => anomaly.code === code)));
 }
 
 function shouldExpandExpenseClaim(parent: WorkbenchRecord, invoiceRows: WorkbenchRecord[]) {
@@ -961,6 +1010,9 @@ export function workbenchInvoiceSourceLabel(sourceKind: WorkbenchSourceKind | un
   }
   if (sourceKind === "oa_attachment_payment_receipt") {
     return "付款凭证";
+  }
+  if (sourceKind === "oa_supporting_document") {
+    return "补充凭证";
   }
   if (sourceKind === "oa_attachment_unknown") {
     return null;

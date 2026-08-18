@@ -296,6 +296,19 @@ class FileImportService:
             "sessions": self._sessions,
         }
 
+    def attach_source_links_to_invoices(
+        self,
+        invoice_ids: list[str],
+        *,
+        source_links: list[dict[str, str]],
+        oa_form_id: str | None = None,
+    ) -> None:
+        self._import_service.attach_source_links_to_invoices(
+            invoice_ids,
+            source_links=source_links,
+            oa_form_id=oa_form_id,
+        )
+
     def preview_session_persistence_payload(self, session_id: str) -> dict[str, Any]:
         session = self._sessions[session_id]
         batch_ids = [
@@ -400,44 +413,47 @@ class FileImportService:
         self._sessions[session.id] = session
         return session
 
-    def preview_manual_invoice_entry(
+    def preview_manual_invoice_entries(
         self,
         *,
         imported_by: str,
-        batch_type: BatchType,
-        row: dict[str, Any],
+        entries: list[tuple[BatchType, dict[str, Any]]],
     ) -> FileImportSession:
-        if batch_type not in {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE}:
-            raise ValueError("manual invoice entry requires an invoice batch type")
-        preview = self._import_service.preview_import(
-            batch_type=batch_type,
-            source_name="manual_invoice_entry",
-            imported_by=imported_by,
-            rows=[dict(row)],
-        )
-        file_item = FileImportPreviewItem(
-            id=self._next_file_id(),
-            file_name="发票录入",
-            template_code="manual_invoice_entry",
-            batch_type=batch_type,
-            status="preview_ready",
-            message="手工录入发票已通过预览校验。",
-            row_count=1,
-            success_count=preview.success_count,
-            error_count=preview.error_count,
-            duplicate_count=preview.duplicate_count,
-            suspected_duplicate_count=preview.suspected_duplicate_count,
-            updated_count=preview.updated_count,
-            preview_batch_id=preview.id,
-            row_results=preview.row_results,
-            normalized_rows=preview.normalized_rows,
-        )
+        if not entries:
+            raise ValueError("manual invoice entry batch requires at least one invoice")
+        files: list[FileImportPreviewItem] = []
+        for index, (batch_type, row) in enumerate(entries, start=1):
+            if batch_type not in {BatchType.INPUT_INVOICE, BatchType.OUTPUT_INVOICE}:
+                raise ValueError("manual invoice entry requires an invoice batch type")
+            preview = self._import_service.preview_import(
+                batch_type=batch_type,
+                source_name="manual_invoice_entry",
+                imported_by=imported_by,
+                rows=[dict(row)],
+            )
+            files.append(FileImportPreviewItem(
+                id=self._next_file_id(),
+                file_name=f"新发票{index}",
+                template_code="manual_invoice_entry",
+                batch_type=batch_type,
+                status="preview_ready",
+                message="手工录入发票已通过预览校验。",
+                row_count=1,
+                success_count=preview.success_count,
+                error_count=preview.error_count,
+                duplicate_count=preview.duplicate_count,
+                suspected_duplicate_count=preview.suspected_duplicate_count,
+                updated_count=preview.updated_count,
+                preview_batch_id=preview.id,
+                row_results=preview.row_results,
+                normalized_rows=preview.normalized_rows,
+            ))
         session = FileImportSession(
             id=self._next_session_id(),
             imported_by=imported_by,
-            file_count=1,
+            file_count=len(files),
             status="preview_ready",
-            files=[file_item],
+            files=files,
         )
         self._refresh_session_audit(session)
         self._sessions[session.id] = session
@@ -550,6 +566,7 @@ class FileImportService:
         session_id: str,
         selected_file_ids: list[str],
         progress_callback: Callable[[FileImportSession, int, int], None] | None = None,
+        atomic_batch: bool = False,
     ) -> FileImportSession:
         session = self._sessions[session_id]
         selected = set(selected_file_ids)
@@ -577,6 +594,17 @@ class FileImportService:
         progress_current = 0
         rollback_session = deepcopy(session)
         try:
+            confirmed_batches = {
+                batch.id: batch
+                for batch in self._import_service.confirm_imports([
+                    str(item.preview_batch_id)
+                    for item in selected_items
+                    if item.status == "preview_ready" and item.preview_batch_id
+                ])
+            } if atomic_batch and any(
+                item.status == "preview_ready" and item.preview_batch_id
+                for item in selected_items
+            ) else {}
             for item in session.files:
                 if item.id not in selected:
                     if item.status == "preview_ready":
@@ -593,7 +621,9 @@ class FileImportService:
                     if progress_callback is not None:
                         progress_callback(session, progress_current, progress_total)
                     continue
-                batch = self._import_service.confirm_import(item.preview_batch_id)
+                batch = confirmed_batches.get(item.preview_batch_id)
+                if batch is None:
+                    batch = self._import_service.confirm_import(item.preview_batch_id)
                 item.batch_id = batch.id
                 item.status = "confirmed"
                 confirmed_any = True

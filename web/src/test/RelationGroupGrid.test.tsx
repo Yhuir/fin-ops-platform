@@ -1096,9 +1096,9 @@ describe("Workbench candidate grouping layout", () => {
   test("aligns exact multi-item reimbursement invoices and keeps parent selection identity", () => {
     const selectRow = vi.fn();
     const missingAnomaly = {
-      code: "oa_invoice_attachment_missing" as const,
-      label: "OA发票附件缺失",
-      displayLabel: "OA发票附件缺失",
+      code: "oa_invoice_attachment_unparsed" as const,
+      label: "OA发票附件未解析",
+      displayLabel: "OA发票附件未解析",
       fingerprint: "c".repeat(64),
       comparisonUnitId: "oa-exp-413:item:0",
       sourceOaIds: ["oa-exp-413"],
@@ -1106,6 +1106,9 @@ describe("Workbench candidate grouping layout", () => {
       oaTotal: "33.00",
       invoiceRowIds: [],
       attachmentFileCount: 1,
+      displayScope: "expense_item" as const,
+      displayPane: "oa" as const,
+      displayRowId: "oa-exp-413:item:0",
     };
     const parentOa: WorkbenchRecord = {
       ...createOaRecord("oa-exp-413", "吴云江", "413.00"),
@@ -1120,7 +1123,7 @@ describe("Workbench candidate grouping layout", () => {
           projectName: "曲靖项目",
           amount: "33.00",
           attachmentFileCount: 1,
-          oaInvoiceAnomaly: missingAnomaly,
+          workbenchAnomalies: [missingAnomaly],
         },
         { id: "oa-exp-413:item:1", rowIndex: "1", projectName: "曲靖项目", amount: "33.00" },
         {
@@ -1197,7 +1200,8 @@ describe("Workbench candidate grouping layout", () => {
     const missingInvoiceItem = screen.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:0",
     );
-    expect(within(missingInvoiceItem).getByText("OA发票附件缺失")).toBeInTheDocument();
+    expect(within(missingInvoiceItem).getByText("OA发票附件未解析")).toBeInTheDocument();
+    expect(within(missingInvoiceItem).getByRole("button", { name: "录入发票" })).toBeInTheDocument();
     expect(within(missingInvoiceItem).queryByText("未识别附件")).not.toBeInTheDocument();
 
     const invoiceItem = screen.getByTestId(

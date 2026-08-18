@@ -71,6 +71,9 @@ class WorkbenchAmountCheckService:
                     invoice_rows=invoice_rows,
                     attachment_file_count=0,
                     mismatch_pair=(left, right),
+                    display_scope="group",
+                    display_pane="bank" if "bank" in (left, right) else "oa",
+                    display_row_id="",
                 )
             )
         if not items:
@@ -130,23 +133,23 @@ class WorkbenchAmountCheckService:
             if item_invoice_ids[expense_item_id]:
                 continue
             attachment_count = self._non_negative_int(expense_item.get("attachment_file_count"))
-            if attachment_count <= 0:
-                continue
             source_oa_id = self._row_id(oa_row)
             matching_unassigned_invoices = [
                 row
                 for row in unassigned_invoice_rows
                 if self._invoice_matches_oa(row, source_oa_id)
             ]
-            parse_failed_count = self._non_negative_int(
-                expense_item.get("attachment_parse_failed_count")
-            )
             code = (
                 "oa_invoice_attachment_unassigned"
                 if matching_unassigned_invoices
-                else "oa_invoice_attachment_parse_failed"
-                if parse_failed_count > 0
-                else "oa_invoice_attachment_missing"
+                else "oa_invoice_attachment_absent"
+                if attachment_count <= 0
+                else "oa_invoice_attachment_unparsed"
+            )
+            exact_invoice_id = (
+                self._row_id(matching_unassigned_invoices[0])
+                if len(matching_unassigned_invoices) == 1
+                else ""
             )
             anomalies.append(
                 self._anomaly_item(
@@ -161,6 +164,9 @@ class WorkbenchAmountCheckService:
                     invoice_rows=matching_unassigned_invoices,
                     attachment_file_count=attachment_count,
                     mismatch_pair=None,
+                    display_scope="row" if exact_invoice_id else "expense_item",
+                    display_pane="invoice" if exact_invoice_id else "oa",
+                    display_row_id=exact_invoice_id or expense_item_id,
                 )
             )
 
@@ -227,6 +233,25 @@ class WorkbenchAmountCheckService:
                         for item_id in ordered_item_ids
                     ),
                     mismatch_pair=("oa", "invoice"),
+                    display_scope=(
+                        "row"
+                        if len(ordered_item_ids) == 1 and len(component_invoices) == 1
+                        else "expense_item"
+                        if len(ordered_item_ids) == 1
+                        else "group"
+                    ),
+                    display_pane=(
+                        "invoice"
+                        if len(ordered_item_ids) == 1 and len(component_invoices) == 1
+                        else "oa"
+                    ),
+                    display_row_id=(
+                        self._row_id(component_invoices[0])
+                        if len(ordered_item_ids) == 1 and len(component_invoices) == 1
+                        else ordered_item_ids[0]
+                        if len(ordered_item_ids) == 1
+                        else ""
+                    ),
                 )
             )
         return anomalies
@@ -245,11 +270,14 @@ class WorkbenchAmountCheckService:
         invoice_rows: list[dict[str, Any]],
         attachment_file_count: int,
         mismatch_pair: tuple[str, str] | None,
+        display_scope: str,
+        display_pane: str,
+        display_row_id: str,
     ) -> dict[str, Any]:
         invoice_row_ids = sorted(self._row_id(row) for row in invoice_rows if self._row_id(row))
         label = {
-            "oa_invoice_attachment_missing": "OA发票附件缺失",
-            "oa_invoice_attachment_parse_failed": "OA附件解析失败",
+            "oa_invoice_attachment_absent": "无OA附件",
+            "oa_invoice_attachment_unparsed": "OA发票附件未解析",
             "oa_invoice_attachment_unassigned": "OA发票待归属",
             "oa_bank_amount_mismatch": "OA流水金额不一致",
             "oa_invoice_amount_mismatch": "OA发票金额不一致",
@@ -286,6 +314,9 @@ class WorkbenchAmountCheckService:
             "mismatch_pair": list(mismatch_pair) if mismatch_pair else None,
             "invoice_row_ids": invoice_row_ids,
             "attachment_file_count": attachment_file_count,
+            "display_scope": display_scope,
+            "display_pane": display_pane,
+            "display_row_id": display_row_id or None,
         }
 
     def _mismatch_delta(
@@ -315,7 +346,10 @@ class WorkbenchAmountCheckService:
         for source_link in list(row.get("source_links") or []):
             if not isinstance(source_link, dict):
                 continue
-            if str(source_link.get("source_type") or "").strip() != "oa_attachment_invoice":
+            if str(source_link.get("source_type") or "").strip() not in {
+                "oa_attachment_invoice",
+                "oa_expense_item_invoice",
+            }:
                 continue
             source_item_id = str(source_link.get("source_expense_item_id") or "").strip()
             if source_item_id:
@@ -330,7 +364,10 @@ class WorkbenchAmountCheckService:
             oa_attachment_matches_oa(source_link, oa_row_id)
             for source_link in list(invoice_row.get("source_links") or [])
             if isinstance(source_link, dict)
-            and str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
+            and str(source_link.get("source_type") or "").strip() in {
+                "oa_attachment_invoice",
+                "oa_expense_item_invoice",
+            }
         )
 
     @staticmethod

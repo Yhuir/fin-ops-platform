@@ -55,8 +55,8 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
             document_recognizer=FakeDocumentRecognizer(),
         )
 
-    def test_preview_uses_current_invoice_import_session_and_canonical_shape(self) -> None:
-        preview = self.service.preview(payload=payload(), imported_by="finance-user")
+    def test_preview_batch_uses_current_invoice_import_session_and_canonical_shape(self) -> None:
+        preview = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
 
         self.assertEqual(preview.session.status, "preview_ready")
         self.assertEqual(preview.session.files[0].template_code, "manual_invoice_entry")
@@ -70,13 +70,13 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
         self.assertEqual(normalized["is_positive_invoice"], "是")
 
     def test_red_invoice_accepts_positive_form_values_and_persists_negative_money(self) -> None:
-        preview = self.service.preview(
-            payload=payload(
+        preview = self.service.preview_batch(
+            payloads=[payload(
                 invoice_direction="output",
                 invoice_nature="red",
                 invoice_number="12345678",
                 invoice_code="123456789012",
-            ),
+            )],
             imported_by="finance-user",
         )
         file_item = preview.session.files[0]
@@ -90,7 +90,7 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
 
         self.file_import_service.confirm_session(
             session_id=preview.session.id,
-            selected_file_ids=[preview.file_id],
+            selected_file_ids=preview.file_ids,
         )
         invoice = self.import_service.list_invoices()[0]
         self.assertEqual(str(invoice.amount), "-100.00")
@@ -99,35 +99,65 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
 
     def test_traditional_invoice_requires_code_but_twenty_digit_invoice_does_not(self) -> None:
         with self.assertRaisesRegex(ManualInvoiceEntryError, "传统发票必须填写发票代码"):
-            self.service.preview(
-                payload=payload(invoice_number="12345678", invoice_code=""),
+            self.service.preview_batch(
+                payloads=[payload(invoice_number="12345678", invoice_code="")],
                 imported_by="finance-user",
             )
 
-        preview = self.service.preview(payload=payload(invoice_code=""), imported_by="finance-user")
-        self.assertEqual(preview.values["invoice_code"], "")
+        preview = self.service.preview_batch(payloads=[payload(invoice_code="")], imported_by="finance-user")
+        self.assertEqual(preview.values[0]["invoice_code"], "")
 
     def test_amount_balance_and_tax_rate_are_validated_before_import_preview(self) -> None:
         with self.assertRaisesRegex(ManualInvoiceEntryError, "价税合计必须等于"):
-            self.service.preview(
-                payload=payload(total_with_tax="112.99"),
+            self.service.preview_batch(
+                payloads=[payload(total_with_tax="112.99")],
                 imported_by="finance-user",
             )
         with self.assertRaisesRegex(ManualInvoiceEntryError, "税率必须是 0 到 100"):
-            self.service.preview(
-                payload=payload(tax_rate="101"),
+            self.service.preview_batch(
+                payloads=[payload(tax_rate="101")],
                 imported_by="finance-user",
             )
 
     def test_duplicate_invoice_is_blocked_and_not_left_as_active_manual_session(self) -> None:
-        first = self.service.preview(payload=payload(), imported_by="finance-user")
+        first = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
         self.file_import_service.confirm_session(
             session_id=first.session.id,
-            selected_file_ids=[first.file_id],
+            selected_file_ids=first.file_ids,
         )
 
         with self.assertRaisesRegex(ManualInvoiceEntryError, "已存在于统一发票池"):
-            self.service.preview(payload=payload(), imported_by="finance-user")
+            self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
+
+        self.assertEqual(
+            self.file_import_service.list_active_sessions(imported_by="finance-user", mode="manual_invoice"),
+            [],
+        )
+
+    def test_preview_batch_keeps_multiple_invoices_in_one_confirmable_session(self) -> None:
+        preview = self.service.preview_batch(
+            payloads=[
+                payload(invoice_number="26117000001052654674"),
+                payload(invoice_number="26117000001052654675", total_with_tax="55.00", net_amount="50.00", tax_amount="5.00"),
+            ],
+            imported_by="finance-user",
+        )
+
+        self.assertEqual(preview.session.file_count, 2)
+        self.assertEqual([item.file_name for item in preview.session.files], ["新发票1", "新发票2"])
+        self.assertEqual(len(preview.file_ids), 2)
+        self.file_import_service.confirm_session(
+            session_id=preview.session.id,
+            selected_file_ids=preview.file_ids,
+        )
+        self.assertEqual(len(self.import_service.list_invoices()), 2)
+
+    def test_preview_batch_rejects_duplicate_entries_before_creating_a_session(self) -> None:
+        with self.assertRaisesRegex(ManualInvoiceEntryError, "本次录入中存在重复发票"):
+            self.service.preview_batch(
+                payloads=[payload(), payload()],
+                imported_by="finance-user",
+            )
 
         self.assertEqual(
             self.file_import_service.list_active_sessions(imported_by="finance-user", mode="manual_invoice"),

@@ -6,7 +6,7 @@ import {
   fetchActiveImportSessions,
   fetchImportReviewRows,
   fetchImportSession,
-  previewManualInvoice,
+  previewManualInvoices,
   previewImportFiles,
   recognizeManualInvoice,
   resolveImportApiErrorMessage,
@@ -33,7 +33,7 @@ describe("imports api", () => {
         },
       }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        values: {
+        values: [{
           invoice_direction: "input",
           invoice_nature: "red",
           seller_name: "云南供应商",
@@ -47,8 +47,8 @@ describe("imports api", () => {
           tax_rate: "13",
           tax_amount: "13.00",
           total_with_tax: "113.00",
-        },
-        file_id: "manual_file_1",
+        }],
+        file_ids: ["manual_file_1"],
         import_session: {
           session: {
             id: "manual_session_1",
@@ -77,7 +77,7 @@ describe("imports api", () => {
     global.fetch = fetchMock as typeof fetch;
 
     const recognized = await recognizeManualInvoice(new File(["jpg"], "invoice.jpg", { type: "image/jpeg" }));
-    const preview = await previewManualInvoice({
+    const preview = await previewManualInvoices([{
       invoiceDirection: "input",
       invoiceNature: "red",
       sellerName: "云南供应商",
@@ -91,11 +91,11 @@ describe("imports api", () => {
       taxRate: "13",
       taxAmount: "13",
       totalWithTax: "113",
-    });
+    }]);
 
     expect(recognized).toMatchObject({ sellerName: "云南供应商", taxRate: "13" });
-    expect(preview.fileId).toBe("manual_file_1");
-    expect(preview.values.invoiceNature).toBe("red");
+    expect(preview.fileIds).toEqual(["manual_file_1"]);
+    expect(preview.values[0]?.invoiceNature).toBe("red");
     expect(preview.importSession.files[0]?.templateCode).toBe("manual_invoice_entry");
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -104,10 +104,12 @@ describe("imports api", () => {
     );
     const previewRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
     expect(JSON.parse(String(previewRequest.body))).toMatchObject({
-      invoice_direction: "input",
-      invoice_nature: "red",
-      invoice_number: "12345678901234567890",
-      tax_rate: "13",
+      invoices: [{
+        invoice_direction: "input",
+        invoice_nature: "red",
+        invoice_number: "12345678901234567890",
+        tax_rate: "13",
+      }],
     });
   });
 

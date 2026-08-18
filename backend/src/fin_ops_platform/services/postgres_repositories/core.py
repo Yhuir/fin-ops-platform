@@ -917,6 +917,16 @@ class PostgresCoreRepository:
             self._save_imports_with_connection(connection, imports_snapshot)
             self._save_file_imports_with_connection(connection, file_imports_snapshot)
 
+    def save_import_delta_in_transaction(
+        self,
+        transaction: Any,
+        *,
+        imports_snapshot: dict[str, Any],
+        file_imports_snapshot: dict[str, Any],
+    ) -> None:
+        self._save_imports_with_connection(transaction, imports_snapshot)
+        self._save_file_imports_with_connection(transaction, file_imports_snapshot)
+
     def save_invoices(self, invoices: list[Any]) -> None:
         serialized_invoices = self._iter_items(invoices)
         if not serialized_invoices:

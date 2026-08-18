@@ -11,6 +11,7 @@ export type WorkbenchSourceKind =
   | "oa_attachment_invoice"
   | "oa_attachment_payment_receipt"
   | "oa_attachment_unknown"
+  | "oa_supporting_document"
   | (string & {});
 
 export type WorkbenchActionVariant = "detail-only" | "bank-review";
@@ -34,8 +35,15 @@ export type WorkbenchExpenseItem = {
   feeContent?: string;
   feeDescription?: string;
   attachmentFileCount?: number;
-  attachmentParseFailedCount?: number;
-  oaInvoiceAnomaly?: WorkbenchAnomalyItem;
+  supportingDocuments?: Array<{
+    id: string;
+    fileName: string;
+    contentType: string;
+    sizeBytes: number;
+    createdAt: string;
+    contentUrl: string;
+  }>;
+  workbenchAnomalies?: WorkbenchAnomalyItem[];
 };
 
 export type WorkbenchAmountCheck = {
@@ -55,8 +63,8 @@ export type WorkbenchAnomalyItem = {
     | "oa_bank_amount_mismatch"
     | "oa_invoice_amount_mismatch"
     | "bank_invoice_amount_mismatch"
-    | "oa_invoice_attachment_missing"
-    | "oa_invoice_attachment_parse_failed"
+    | "oa_invoice_attachment_absent"
+    | "oa_invoice_attachment_unparsed"
     | "oa_invoice_attachment_unassigned"
     | (string & {});
   label: string;
@@ -72,6 +80,9 @@ export type WorkbenchAnomalyItem = {
   mismatchPair?: ["oa" | "bank" | "invoice", "oa" | "bank" | "invoice"];
   invoiceRowIds: string[];
   attachmentFileCount: number;
+  displayScope: "row" | "expense_item" | "group" | (string & {});
+  displayPane: WorkbenchRecordType;
+  displayRowId?: string;
 };
 
 export type WorkbenchAnomalyReviewClassificationCode =
@@ -138,7 +149,7 @@ export type WorkbenchRecord = {
   relationNote?: string;
   relationAmountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
-  oaInvoiceAnomaly?: WorkbenchAnomalyItem;
+  workbenchAnomalies?: WorkbenchAnomalyItem[];
   displayOnly?: boolean;
 };
 
@@ -257,6 +268,25 @@ export type WorkbenchRelationGroup = {
     missingRecordTypes: WorkbenchRecordType[];
     blockingReasons: string[];
   };
+};
+
+export type WorkbenchOaInvoiceSupplementTarget = {
+  caseId: string;
+  oaRowId: string;
+  expenseItemId: string;
+};
+
+export type WorkbenchOaSupportingDocument = {
+  id: string;
+  relationCaseId?: string;
+  oaRowId: string;
+  expenseItemId: string;
+  fileName: string;
+  contentType: string;
+  sha256: string;
+  sizeBytes: number;
+  createdAt: string;
+  contentUrl: string;
 };
 
 export type WorkbenchAmountSummaryTotals = {

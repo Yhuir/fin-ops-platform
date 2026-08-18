@@ -108,6 +108,39 @@ def _anomaly_invoice_source_links_sql(invoice_alias: str) -> str:
         end
     """
 
+
+def _oa_expense_items_with_supporting_documents_sql(
+    oa_row_id_sql: str,
+    expense_items_sql: str,
+) -> str:
+    return f"""
+        case when jsonb_typeof({expense_items_sql}) = 'array' then coalesce((
+            select jsonb_agg(
+                item.value || jsonb_build_object(
+                    'supporting_documents', coalesce((
+                        select jsonb_agg(jsonb_build_object(
+                            'id', document.id::text,
+                            'file_name', document.original_filename,
+                            'content_type', document.content_type,
+                            'size_bytes', document.size_bytes,
+                            'created_at', document.created_at::text,
+                            'content_url', '/api/workbench/oa-invoice-supplements/documents/' || document.id::text || '/content'
+                        ) order by document.created_at, document.id)
+                        from app.workbench_oa_supporting_documents document
+                        where document.oa_row_id = {oa_row_id_sql}
+                          and document.expense_item_id = coalesce(
+                              item.value->>'id', item.value->>'expense_item_id'
+                          )
+                          and document.status = 'active'
+                    ), '[]'::jsonb)
+                )
+                order by item.ordinality
+            )
+            from jsonb_array_elements({expense_items_sql})
+                with ordinality item(value, ordinality)
+        ), '[]'::jsonb) else '[]'::jsonb end
+    """
+
 _COMPLETED_OA_SQL = """
 (
     oa.workflow_status is null
@@ -568,9 +601,7 @@ oa_candidate_facts as materialized (
             'workflowStatus', 'completed'
         )) as column_values,
         null::text as external_etc_batch_id,
-        case when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
-             then oa.normalized_payload->'expense_items'
-             else '[]'::jsonb end as oa_expense_items,
+        {_oa_expense_items_with_supporting_documents_sql("oa.row_id", "oa.normalized_payload->'expense_items'")} as oa_expense_items,
         case when jsonb_typeof(oa.normalized_payload->'source_aliases') = 'array'
              then oa.normalized_payload->'source_aliases'
              else '[]'::jsonb end as oa_source_aliases,
@@ -637,9 +668,7 @@ oa_candidate_facts as materialized (
             'workflowStatus', 'in_progress'
         )),
         null::text,
-        case when jsonb_typeof(admission.source_payload->'expense_items') = 'array'
-             then admission.source_payload->'expense_items'
-             else '[]'::jsonb end,
+        {_oa_expense_items_with_supporting_documents_sql("admission.oa_id", "admission.source_payload->'expense_items'")},
         case when jsonb_typeof(admission.source_payload->'source_aliases') = 'array'
              then admission.source_payload->'source_aliases'
              else '[]'::jsonb end,
@@ -1334,12 +1363,7 @@ oa_expense_items as materialized (
             when coalesce(item.value->>'attachment_file_count', '') ~ '^[0-9]+$'
                 then greatest(0, (item.value->>'attachment_file_count')::integer)
             else 0
-        end as attachment_file_count,
-        case
-            when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
-                then greatest(0, (item.value->>'attachment_parse_failed_count')::integer)
-            else 0
-        end as attachment_parse_failed_count
+        end as attachment_file_count
     from relation_anomaly_members member
     cross join lateral jsonb_array_elements(member.oa_expense_items) item(value)
     where member.row_type = 'oa'
@@ -1381,7 +1405,7 @@ invoice_anomaly_facts as materialized (
             link.value->>'source_type',
             link.value->>'type',
             link.value->>'source'
-        ) = 'oa_attachment_invoice'
+        ) in ('oa_attachment_invoice', 'oa_expense_item_invoice')
     ) source_link on true
     where member.row_type = 'invoice'
 ),
@@ -1592,7 +1616,6 @@ unlinked_expense_items as materialized (
         expense.item_id,
         expense.item_amount,
         expense.attachment_file_count,
-        expense.attachment_parse_failed_count,
         count(unassigned.invoice_row_id)::bigint as unassigned_invoice_count,
         string_agg(
             encode(convert_to(unassigned.invoice_row_id, 'UTF8'), 'hex'),
@@ -1606,14 +1629,12 @@ unlinked_expense_items as materialized (
       on unassigned.internal_key = expense.internal_key
      and unassigned.item_id = expense.item_id
     where linked.invoice_row_id is null
-      and expense.attachment_file_count > 0
     group by
         expense.internal_key,
         expense.case_id,
         expense.item_id,
         expense.item_amount,
-        expense.attachment_file_count,
-        expense.attachment_parse_failed_count
+        expense.attachment_file_count
 ),
 unlinked_expense_anomaly_items as materialized (
     select
@@ -1624,9 +1645,9 @@ unlinked_expense_anomaly_items as materialized (
             convert_to(
                 case when totals.unassigned_invoice_count > 0
                      then 'oa_invoice_attachment_unassigned'
-                     when totals.attachment_parse_failed_count > 0
-                     then 'oa_invoice_attachment_parse_failed'
-                     else 'oa_invoice_attachment_missing' end,
+                     when totals.attachment_file_count = 0
+                     then 'oa_invoice_attachment_absent'
+                     else 'oa_invoice_attachment_unparsed' end,
                 'UTF8'
             ) || decode('00', 'hex') ||
             convert_to(totals.item_id, 'UTF8') || decode('00', 'hex') ||

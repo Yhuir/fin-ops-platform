@@ -1,5 +1,6 @@
 import unittest
 from decimal import Decimal
+from unittest.mock import patch
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
@@ -1383,6 +1384,56 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(restored.batch.status.value, "pending")
         self.assertEqual(service.list_invoices(), [])
         self.assertIsNone(restored.row_results[0].linked_object_id)
+
+    def test_confirm_imports_rolls_back_all_batches_when_later_batch_fails(self) -> None:
+        first = self.service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="manual-invoice-1.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_no": "MANUAL-BATCH-ROLLBACK-1",
+                    "counterparty_name": "供应商A",
+                    "invoice_date": "2026-08-18",
+                    "amount": "10.00",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+        second = self.service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="manual-invoice-2.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_no": "MANUAL-BATCH-ROLLBACK-2",
+                    "counterparty_name": "供应商B",
+                    "invoice_date": "2026-08-18",
+                    "amount": "20.00",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+        invoice_ids_before = [invoice.id for invoice in self.service.list_invoices()]
+        persist_created_row = self.service._persist_created_row
+        call_count = 0
+
+        def fail_second_created_row(*args: object, **kwargs: object) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("second batch failed")
+            persist_created_row(*args, **kwargs)
+
+        with patch.object(self.service, "_persist_created_row", side_effect=fail_second_created_row):
+            with self.assertRaisesRegex(RuntimeError, "second batch failed"):
+                self.service.confirm_imports([first.id, second.id])
+
+        self.assertEqual([invoice.id for invoice in self.service.list_invoices()], invoice_ids_before)
+        for preview in (first, second):
+            restored = self.service.get_batch(preview.id)
+            self.assertEqual(restored.batch.status.value, "pending")
+            self.assertIsNone(restored.row_results[0].linked_object_id)
 
     def test_batch_persistence_snapshot_can_exclude_formalized_facts(self) -> None:
         preview = self.service.preview_import(

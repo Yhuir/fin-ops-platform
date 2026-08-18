@@ -87,8 +87,8 @@ def manual_invoice_payload(**overrides: str) -> dict[str, str]:
 class ImportFileApiTests(unittest.TestCase):
     def test_postgres_discard_synchronizes_local_session_without_full_runtime_reload(self) -> None:
         app = build_application()
-        preview = app._manual_invoice_entry_service.preview(  # type: ignore[attr-defined]
-            payload=manual_invoice_payload(invoice_number="26117000001052654675"),
+        preview = app._manual_invoice_entry_service.preview_batch(  # type: ignore[attr-defined]
+            payloads=[manual_invoice_payload(invoice_number="26117000001052654675")],
             imported_by="local",
         )
         lifecycle = SimpleNamespace(discard_session=Mock(return_value=1))
@@ -118,12 +118,24 @@ class ImportFileApiTests(unittest.TestCase):
         preview_response = app.handle_request(
             "POST",
             "/imports/invoices/manual/preview",
-            json.dumps(manual_invoice_payload()),
+            json.dumps({"invoices": [
+                manual_invoice_payload(),
+                manual_invoice_payload(
+                    invoice_number="26117000001052654675",
+                    net_amount="50.00",
+                    tax_amount="5.00",
+                    total_with_tax="55.00",
+                ),
+            ]}),
         )
 
         self.assertEqual(preview_response.status_code, 200)
         preview_payload = json.loads(preview_response.body)
-        self.assertEqual(preview_payload["values"]["invoice_number"], "26117000001052654674")
+        self.assertEqual([item["invoice_number"] for item in preview_payload["values"]], [
+            "26117000001052654674",
+            "26117000001052654675",
+        ])
+        self.assertEqual(len(preview_payload["file_ids"]), 2)
         self.assertEqual(preview_payload["import_session"]["files"][0]["template_code"], "manual_invoice_entry")
         self.assertEqual(preview_payload["import_session"]["files"][0]["batch_type"], "input_invoice")
 
@@ -133,7 +145,7 @@ class ImportFileApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "session_id": preview_payload["import_session"]["session"]["id"],
-                    "selected_file_ids": [preview_payload["file_id"]],
+                    "selected_file_ids": preview_payload["file_ids"],
                 }
             ),
         )
@@ -143,7 +155,7 @@ class ImportFileApiTests(unittest.TestCase):
 
         import_queue.process_all()
         invoices = app._import_service.list_invoices()  # type: ignore[attr-defined]
-        self.assertEqual(len(invoices), 1)
+        self.assertEqual(len(invoices), 2)
         self.assertEqual(invoices[0].invoice_no, "26117000001052654674")
         self.assertEqual(str(invoices[0].amount), "100.00")
         self.assertEqual(invoices[0].invoice_source, "manual_invoice_entry")
@@ -151,19 +163,19 @@ class ImportFileApiTests(unittest.TestCase):
 
     def test_manual_invoice_preview_blocks_exact_duplicate(self) -> None:
         app = build_application()
-        first = app._manual_invoice_entry_service.preview(  # type: ignore[attr-defined]
-            payload=manual_invoice_payload(),
+        first = app._manual_invoice_entry_service.preview_batch(  # type: ignore[attr-defined]
+            payloads=[manual_invoice_payload()],
             imported_by="local",
         )
         app._file_import_service.confirm_session(  # type: ignore[attr-defined]
             session_id=first.session.id,
-            selected_file_ids=[first.file_id],
+            selected_file_ids=first.file_ids,
         )
 
         response = app.handle_request(
             "POST",
             "/imports/invoices/manual/preview",
-            json.dumps(manual_invoice_payload()),
+            json.dumps({"invoices": [manual_invoice_payload()]}),
         )
 
         self.assertEqual(response.status_code, 409)

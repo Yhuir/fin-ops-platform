@@ -13,7 +13,12 @@ import {
   formatWorkbenchAmountCents,
   parseWorkbenchAmountCents,
 } from "../../features/workbench/selectionModel";
-import type { WorkbenchRecord, WorkbenchRecordType, WorkbenchSourceKind } from "../../features/workbench/types";
+import type {
+  WorkbenchAnomalyItem,
+  WorkbenchRecord,
+  WorkbenchRecordType,
+  WorkbenchSourceKind,
+} from "../../features/workbench/types";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import { splitBankAccountLabel } from "../BankAccountValue";
@@ -95,6 +100,31 @@ function WorkbenchRecordCard({
             <div className={`record-card-cell-content${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
+              {columnIndex === 0 && row.workbenchAnomalies?.length ? (
+                <span className="workbench-anomaly-chip-row">
+                  {row.workbenchAnomalies.map((anomaly) => (
+                    <span className="workbench-anomaly-chip-actions" key={anomaly.fingerprint}>
+                      {renderWorkbenchAnomalyChip(
+                        anomaly,
+                        isOaAttachmentStatus(anomaly.code) ? row.externalUrl : undefined,
+                      )}
+                      {anomaly.code === "oa_invoice_attachment_unparsed" && row.availableActions.includes("enter_invoice") ? (
+                        <button
+                          className="row-action-btn row-action-btn-inline"
+                          disabled={!canMutateData || readOnly}
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onRowAction(row, "enter-invoice");
+                          }}
+                        >
+                          录入发票
+                        </button>
+                      ) : null}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
             </div>
           </div>
         );
@@ -276,14 +306,13 @@ function renderCellValue(
       row.tableValues.sellerTaxId ?? "",
       row.tableValues.invoiceType ?? "",
       row.sourceKind,
-      row.oaInvoiceAnomaly,
       row.externalUrl,
       searchQuery,
     );
   }
 
   if (paneId === "invoice" && column.key === "buyerName") {
-    return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "", undefined, undefined, undefined, searchQuery);
+    return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "", undefined, undefined, searchQuery);
   }
 
   if (paneId === "invoice" && column.key === "issueDate") {
@@ -792,7 +821,6 @@ function renderInvoicePartyValue(
   taxId: string,
   invoiceType: string,
   sourceKind?: WorkbenchSourceKind,
-  anomaly?: WorkbenchRecord["oaInvoiceAnomaly"],
   externalUrl?: string,
   searchQuery = "",
 ) {
@@ -804,7 +832,17 @@ function renderInvoicePartyValue(
     <span className="compound-cell-value invoice-party-value">
       <span className="compound-cell-primary invoice-party-primary">
         <span className="invoice-party-text-stack">
-          <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
+          {sourceKind === "oa_supporting_document" && externalUrl ? (
+            <a
+              className="invoice-oa-anomaly-link cell-text-value cell-text-value-full"
+              href={externalUrl}
+              rel="noopener noreferrer"
+              target="_blank"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {highlightSearchText(value, searchQuery)}
+            </a>
+          ) : <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>}
           {hasTaxId ? <span className="cell-text-value cell-text-value-full cell-subtext-value">{highlightSearchText(taxId, searchQuery)}</span> : null}
           {flowLabel || sourceLabel ? (
             <span className="invoice-chip-row">
@@ -814,21 +852,20 @@ function renderInvoicePartyValue(
               {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{highlightSearchText(sourceLabel, searchQuery)}</span> : null}
             </span>
           ) : null}
-          {anomaly ? renderInvoiceAnomalyChip(anomaly, externalUrl) : null}
         </span>
       </span>
     </span>
   );
 }
 
-function renderInvoiceAnomalyChip(
-  anomaly: NonNullable<WorkbenchRecord["oaInvoiceAnomaly"]>,
+function renderWorkbenchAnomalyChip(
+  anomaly: WorkbenchAnomalyItem,
   externalUrl?: string,
 ) {
   const chip = (
     <Chip
       className="invoice-oa-anomaly-chip"
-      color={anomaly.code === "oa_invoice_amount_mismatch" ? "danger" : "warning"}
+      color={anomaly.mismatchPair ? "danger" : "warning"}
       size="sm"
       title={anomalyTitle(anomaly)}
       variant="soft"
@@ -853,17 +890,34 @@ function renderInvoiceAnomalyChip(
   );
 }
 
-function anomalyTitle(anomaly: NonNullable<WorkbenchRecord["oaInvoiceAnomaly"]>) {
-  if (anomaly.code === "oa_invoice_attachment_missing") {
-    return `OA子付款项已上传 ${anomaly.attachmentFileCount} 个附件，但未解析出发票`;
+function isOaAttachmentStatus(code: string) {
+  return code === "oa_invoice_attachment_absent"
+    || code === "oa_invoice_attachment_unparsed"
+    || code === "oa_invoice_attachment_unassigned";
+}
+
+function anomalyTitle(anomaly: WorkbenchAnomalyItem) {
+  if (anomaly.code === "oa_invoice_attachment_absent") {
+    return "OA子付款项没有附件";
   }
-  if (anomaly.code === "oa_invoice_attachment_parse_failed") {
-    return `OA子付款项已有 ${anomaly.attachmentFileCount} 个附件，但发票解析失败`;
+  if (anomaly.code === "oa_invoice_attachment_unparsed") {
+    return `OA子付款项已有 ${anomaly.attachmentFileCount} 个附件，但未解析出可用正式发票`;
   }
   if (anomaly.code === "oa_invoice_attachment_unassigned") {
     return "OA 已解析出发票，但缺少明确的子付款项来源";
   }
-  return `OA ${anomaly.oaTotal ?? "—"} / 发票 ${anomaly.invoiceTotal ?? "—"} / 差额 ${anomaly.amountDelta ?? "—"}`;
+  const totals = {
+    oa: anomaly.oaTotal,
+    bank: anomaly.bankTotal,
+    invoice: anomaly.invoiceTotal,
+  };
+  const labels = { oa: "OA", bank: "流水", invoice: "发票" };
+  const pair = anomaly.mismatchPair;
+  if (!pair) {
+    return anomaly.displayLabel;
+  }
+  const scopeLabel = anomaly.displayScope === "group" ? "该关联组" : "";
+  return `${scopeLabel}${labels[pair[0]]} ${totals[pair[0]] ?? "—"} / ${labels[pair[1]]} ${totals[pair[1]] ?? "—"} / 差额 ${anomaly.amountDelta ?? "—"}`;
 }
 
 function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: string, taxAmount: string, searchQuery = "") {

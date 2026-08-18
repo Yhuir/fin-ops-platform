@@ -927,7 +927,10 @@ class WorkbenchCanonicalRowsBuilder:
         source_expense_item_ids = list(dict.fromkeys(
             value
             for source_link in source_links
-            if str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
+            if str(source_link.get("source_type") or "").strip() in {
+                "oa_attachment_invoice",
+                "oa_expense_item_invoice",
+            }
             and (value := str(source_link.get("source_expense_item_id") or "").strip())
         ))
         source_kind = OA_ATTACHMENT_INVOICE_SOURCE_KIND if oa_attachment_source_link is not None else "invoice"

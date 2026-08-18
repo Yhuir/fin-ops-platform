@@ -855,6 +855,9 @@ describe("workbench api bank amount mapping", () => {
                   amount_delta: "1.00",
                   invoice_row_ids: ["invoice-paired"],
                   attachment_file_count: 1,
+                  display_scope: "row",
+                  display_pane: "invoice",
+                  display_row_id: "invoice-paired",
                 }],
               },
               oa_rows: [
@@ -965,7 +968,6 @@ describe("workbench api bank amount mapping", () => {
         feeContent: "住宿费",
         feeDescription: "",
         attachmentFileCount: 1,
-        oaInvoiceAnomaly: expect.objectContaining({ displayLabel: "OA发票金额不一致" }),
       },
     ]);
     expect(group.rows.bank[0]).toMatchObject({
@@ -981,7 +983,7 @@ describe("workbench api bank amount mapping", () => {
     expect(group.rows.oa[0].relationAmountCheck).toEqual(group.amountCheck);
     expect(group.rows.bank[0].relationAmountCheck).toEqual(group.amountCheck);
     expect(group.rows.invoice[0].relationAmountCheck).toEqual(group.amountCheck);
-    expect(group.rows.invoice[0].oaInvoiceAnomaly).toMatchObject({ displayLabel: "OA发票金额不一致", amountDelta: "1.00" });
+    expect(group.rows.invoice[0].workbenchAnomalies?.[0]).toMatchObject({ displayLabel: "OA发票金额不一致", amountDelta: "1.00" });
   });
 
   test("serializes workbench group page SQL query controls", async () => {

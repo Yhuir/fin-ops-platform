@@ -442,20 +442,7 @@ class PostgresWorkbenchPageHydrationRepository:
                                     ),
                                     'fee_content', item.value->>'fee_content',
                                     'fee_description', item.value->>'fee_description',
-                                    'attachment_file_count', item.value->>'attachment_file_count',
-                                    'attachment_parse_failed_count', case
-                                        when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
-                                            then (item.value->>'attachment_parse_failed_count')::integer
-                                        else (
-                                            select count(*)::integer
-                                            from jsonb_array_elements(
-                                                case when jsonb_typeof(item.value->'attachment_artifacts') = 'array'
-                                                     then item.value->'attachment_artifacts'
-                                                     else '[]'::jsonb end
-                                            ) artifact(value)
-                                            where artifact.value->>'parse_status' = 'parse_failed'
-                                        )
-                                    end
+                                    'attachment_file_count', item.value->>'attachment_file_count'
                                 )) order by item.ordinality
                             )
                             from jsonb_array_elements(
@@ -538,20 +525,7 @@ class PostgresWorkbenchPageHydrationRepository:
                                     ),
                                     'fee_content', item.value->>'fee_content',
                                     'fee_description', item.value->>'fee_description',
-                                    'attachment_file_count', item.value->>'attachment_file_count',
-                                    'attachment_parse_failed_count', case
-                                        when coalesce(item.value->>'attachment_parse_failed_count', '') ~ '^[0-9]+$'
-                                            then (item.value->>'attachment_parse_failed_count')::integer
-                                        else (
-                                            select count(*)::integer
-                                            from jsonb_array_elements(
-                                                case when jsonb_typeof(item.value->'attachment_artifacts') = 'array'
-                                                     then item.value->'attachment_artifacts'
-                                                     else '[]'::jsonb end
-                                            ) artifact(value)
-                                            where artifact.value->>'parse_status' = 'parse_failed'
-                                        )
-                                    end
+                                    'attachment_file_count', item.value->>'attachment_file_count'
                                 )) order by item.ordinality
                             )
                             from jsonb_array_elements(

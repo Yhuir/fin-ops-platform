@@ -20,6 +20,8 @@ const anomalyItems = [
     mismatchPair: ["oa", "bank"] as ["oa", "bank"],
     invoiceRowIds: [],
     attachmentFileCount: 0,
+    displayScope: "group" as const,
+    displayPane: "bank" as const,
   },
   {
     code: "bank_invoice_amount_mismatch" as const,
@@ -35,6 +37,8 @@ const anomalyItems = [
     mismatchPair: ["bank", "invoice"] as ["bank", "invoice"],
     invoiceRowIds: ["invoice-1"],
     attachmentFileCount: 0,
+    displayScope: "group" as const,
+    displayPane: "bank" as const,
   },
 ];
 
@@ -206,9 +210,9 @@ describe("WorkbenchExceptionDrawer", () => {
     const user = userEvent.setup();
     const attachmentGroup = group("unpaired");
     attachmentGroup.workbenchAnomaly!.items = [{
-      code: "oa_invoice_attachment_missing",
-      label: "OA发票附件缺失",
-      displayLabel: "OA发票附件缺失",
+      code: "oa_invoice_attachment_absent",
+      label: "无OA附件",
+      displayLabel: "无OA附件",
       fingerprint: "d".repeat(64),
       comparisonUnitId: "CASE-1:item:0",
       sourceOaIds: ["oa-1"],
@@ -216,12 +220,15 @@ describe("WorkbenchExceptionDrawer", () => {
       oaTotal: "100.00",
       invoiceRowIds: [],
       attachmentFileCount: 0,
+      displayScope: "expense_item",
+      displayPane: "oa",
+      displayRowId: "oa-1:item:0",
     }];
     const onReview = vi.fn();
     renderDrawer("unpaired", onReview, true, attachmentGroup);
 
     await expandFirstGroup(user);
-    const checkbox = screen.getByRole("checkbox", { name: "确认已审阅 OA发票附件缺失" });
+    const checkbox = screen.getByRole("checkbox", { name: "确认已审阅 无OA附件" });
     const accept = screen.getByRole("button", { name: "进入已配对" });
     expect(accept).toBeDisabled();
     await user.click(checkbox);

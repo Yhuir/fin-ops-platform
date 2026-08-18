@@ -1001,11 +1001,6 @@ class MongoOAAdapter(OAAdapter):
                     "fee_description": fee_description,
                     "reimbursement_date": reimbursement_date,
                     "attachment_file_count": str(len(item_attachment_files)),
-                    "attachment_parse_failed_count": str(sum(
-                        1
-                        for artifact in item_attachment_artifacts
-                        if clean_string(artifact.get("parse_status")) == "parse_failed"
-                    )),
                     "attachment_files": [
                         dict(file_entry)
                         for file_entry in (

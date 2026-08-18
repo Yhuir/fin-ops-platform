@@ -9,6 +9,7 @@
 - 通过 direct canonical API 读取 OA、银行流水、发票、ETC 批次和正式关系，并把当前提交事实划分为 `paired` / `unpaired`。
 - 提供同一只读快照内的首屏统计与两区首页、区域级搜索/筛选/排序、cursor 分页、filter options、group/row detail 和异常抽屉。
 - 提供人工正式关联、关系级撤回和异常人工审阅；撤回关系恢复最近一次确认前的稳定拓扑，撤回异常放行只改变展示分区。
+- 对“OA发票附件未解析”提供一个右侧录入抽屉：补充凭证只关联当前 OA 子付款项且不进发票池；手工录入整批进入统一发票池并原子扩展当前正式关系。
 - 保持权限、审计、幂等、canonical member exact-set、preview fingerprint、relation/entity version 和稳定加锁顺序。
 - 写成功后由页面执行一次普通 direct GET，读取已提交事实；页面不等待 projection worker。
 
@@ -47,7 +48,9 @@ ReconciliationWorkbenchPage
 | canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment `source_links[]`、已提交 ETC business batch/link；同一发票在同一 OA 可携带多个子付款项来源边，direct DTO 去重发布 `source_expense_item_ids[]`，不得压回单值。ETC summary identity 保持 deterministic，禁止从 raw payload 猜 owner。 |
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
 | completion metadata | workbench-relations | 关系是否要求 OA/发票及 mode 豁免使用确认时持久化事实，不在 GET 中重跑当前规则。关系含 in-progress OA 时完整 case 保留在 `unpaired`。 |
-| anomaly decisions | workbench exception repository | 当前 canonical group 同时计算 OA—流水、OA—发票、流水—发票按分差异，并保留付款项—发票连通分量及 missing / parse_failed / unassigned 附件异常。付款关系的流水金额按同一正式关系内 `支出合计 - 收入/退款合计` 计算净额，不能把退款收入丢弃后误报。任一异常默认阻断进入已配对区；人工 `review_classification_codes[]` 与 `accept_paired|keep_unpaired` 决定共同绑定当前 bundle fingerprint，输入变化后自动失效。系统异常证据与人工分类必须分字段保存。历史 ignore/restore、WEX/row-ignore 只保留审计，不重新进入页面分区。 |
+| anomaly decisions | workbench exception repository | 当前 canonical group 同时计算 OA—流水、OA—发票、流水—发票按分差异，并保留付款项—发票连通分量及 `absent / unparsed / unassigned` 附件状态。付款关系的流水金额按同一正式关系内 `支出合计 - 收入/退款合计` 计算净额，不能把退款收入丢弃后误报。金额异常只有在唯一来源边证明具体单票与具体子付款项时才定位到发票；一项多票落 OA 子付款项，组级/流水—发票差异落 OA 或流水，禁止复制到任意发票。任一异常默认阻断进入已配对区；人工决定绑定当前 bundle fingerprint。 |
+| OA 补充凭证 | `app.workbench_oa_supporting_documents` + `app.file_objects` | 只接受 JPG/JPEG/PDF 且校验签名和 25MB 单文件上限；以 `oa_row_id + expense_item_id` 精确关联，可列表、内联预览、软删除。它不是 canonical invoice，不写 `app.invoices`、import session、relation member、matching 或 read model。 |
+| OA 手工发票补录 | `POST /api/workbench/oa-invoice-supplements/manual` | 只接受当前用户完整的批量 manual import preview；确认全部发票、写 `oa_expense_item_invoice` 来源边并通过正式 relation command 创建/扩展目标 case，单事务同成同败。 |
 | list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`page_size` 和 opaque `cursor`。复合列只接受 `direction/account/bankTag`、`oaType/workflow/applicant`、`expenseType/project` 类型前缀；所有字符串和集合有界，SQL 参数化。 |
 | write command | Workbench action routes | server-authenticated actor/tenant、canonical member exact-set、preview id/fingerprint、expected relation/entity versions、idempotency key。页面 read-model version 和 cursor 均不是写 CAS。 |
 
@@ -118,7 +121,7 @@ requested tenant/scope
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户完成人工分类并明确 `accept_paired` 的 active formal relation；chip 显示人工选择的具体金额分类或“无异常”，系统检测项仍保留作审计。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
-| OA expense/invoice display | 前端 | OA row 的 compact DTO 输出顶层 canonical `expense_type`，同时输出 `expense_items[]`，其中每项直接携带 canonical `expense_type`；直接 OA 行和日常报销子付款项都在“项目名称”单元格第二行用 Chip 显示真实费用类型，缺失时不显示占位或“其他”，且不得增加逐行 API。OA attachment invoice 输出复数 canonical `source_expense_item_ids[]`。前端只用该顶层数组建立来源图，`source_links[]` 仅保留为审计证据；一张发票只出现一次，无 canonical item 来源的 OA 附件发票只能进入独立待归属残余带，禁止按金额兜底，也不能进入父 OA 摘要。缺失/解析失败占位可用稳定 OA 列表 URL 新窗口打开，不承诺 OA 未提供的详情 deep link。 |
+| OA expense/invoice display | 前端 | OA row 的 compact DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零显示“无OA附件”；附件存在但未产生正式发票显示“OA发票附件未解析”和“录入发票”；已有父 OA 发票但缺子项来源显示“OA发票待归属”。补充凭证同行展示文件名与预览链接，但不得伪装成发票或进入金额合计。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |
@@ -193,19 +196,19 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 | --- | --- |
 | Routes / wiring | `backend/src/fin_ops_platform/app/routes_workbench.py`、`backend/src/fin_ops_platform/app/server.py` |
 | Query service | `backend/src/fin_ops_platform/services/workbench_query_facade.py`、`workbench_filter_options.py`、`workbench_page_cursor.py` |
-| Direct repository | `backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_query.py`、`workbench_page_hydration.py`、`workbench_page_selection.py` |
-| Relation writes | `workbench_write_facade.py`、`workbench_relation_command_service.py`、`workbench_uow.py`、relation repositories |
-| Frontend | `web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/features/workbench/`、`web/src/components/workbench/` |
+| Direct repository | `backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_query.py`、`workbench_page_hydration.py`、`workbench_page_selection.py`、`workbench_oa_supporting_document.py` |
+| Relation writes | `workbench_write_facade.py`、`workbench_relation_command_service.py`、`workbench_uow.py`、`workbench_invoice_supplement_service.py`、relation repositories |
+| Frontend | `web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/features/workbench/`、`web/src/components/workbench/WorkbenchInvoiceEntryDrawer.tsx`、`web/src/components/imports/ManualInvoiceBatchEditor.tsx` |
 | Runtime/deploy | page retirement portions of runtime registry/manifest/worker/deploy；shared relation/matching files不属于删除范围 |
 | Tests | `tests/test_workbench_*`、`web/src/test/Workbench*`、`web/e2e/workbench-*` 及跨页面 regression |
 
 ## 测试与验证
 
-- 业务核心：typed identity、任意类型组合、不完整 relation、三组按分差异、附件异常、exact-set、withdraw 前序拓扑、异常 accept/keep/withdraw。
+- 业务核心：typed identity、任意类型组合、不完整 relation、三组按分差异、三类附件状态、金额异常精确显示目标、手工补录整批原子性、exact-set、withdraw 前序拓扑、异常 accept/keep/withdraw。
 - repository/service：单请求 RR/RO、scope-first、fixed query count、batch hydration、exact totals、cursor/query hash、search/filter/facet/exception 等价、timeout/rollback。
 - API：direct response shape、不含 RM 字段、refresh-status 不存在、GET 零 queue/cache、权限和稳定错误映射、action 无 expected RM version。
 - runtime：page `workbench` registry/manifest/event/worker/timer 为零；`workbench_relation` 与 matching 正常。
-- frontend：mount 无 status poll、zone-only query、cursor pagination、单 bucket bounded exception drawer、逐项审阅、OA/global gates、每次写一次 mutation + 一次 canonical refetch。
+- frontend：mount 无 status poll、zone-only query、cursor pagination、单 bucket bounded exception drawer、单一录入抽屉内两种模式、多发票本地保存后整批提交、OA/global gates、每次写一次 mutation + 一次 canonical refetch。
 - E2E：direct load、confirm/refetch、withdraw 恢复、incomplete relation、异常、权限、no-OA 隔离、direct failure 不 fallback。
 - 跨页面：bank details、pending invoices、OA、cost/turnover、batch accounting、no-OA、App Health 和 operations 不产生回归或污染 I/O。
 

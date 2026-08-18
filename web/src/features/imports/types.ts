@@ -215,8 +215,8 @@ export type ManualInvoiceEntryValues = {
   totalWithTax: string;
 };
 
-export type ManualInvoiceEntryPreview = {
-  values: ManualInvoiceEntryValues;
-  fileId: string;
+export type ManualInvoiceEntryBatchPreview = {
+  values: ManualInvoiceEntryValues[];
+  fileIds: string[];
   importSession: ImportSessionPayload;
 };
