@@ -31,7 +31,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     plan = _normalization_plan(current)
     if args.execute and plan["changed"]:
         with connection.transaction() as transaction:
-            repository.save_app_settings_in_transaction(
+            repository.replace_normalized_app_settings_in_transaction(
                 plan.pop("normalized_payload"),
                 transaction=transaction,
             )

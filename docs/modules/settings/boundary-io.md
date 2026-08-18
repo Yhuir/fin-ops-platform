@@ -133,7 +133,7 @@
 - 本变更不新增 read model、worker、dirty scope、outbox、cache 或其他页面 response 字段。
 
 - `settings_normalization_ops` dry-run 只输出 changed top-level keys 与前后 hash，不输出完整设置或秘密。
-- execute 调用 `AppSettingsService.normalize_settings_payload(...)`，并在单事务内通过 `PostgresOpsTaxEtcRepository.save_app_settings_in_transaction(...)` 保存；tool 不复制 normalization 规则，也不直接拼 settings SQL。
+- execute 调用 `AppSettingsService.normalize_settings_payload(...)`，并在单事务内通过 `PostgresOpsTaxEtcRepository.replace_normalized_app_settings_in_transaction(...)` 精确替换非 ACL 设置、保留当前 ACL；因此已退休的旧 key 会被删除。tool 不复制 normalization 规则，也不直接拼 settings SQL。
 - 生产入口固定为 `finops-deploy-control settings-normalize <release> --dry-run|--execute`。
 
 ## 流水规则 formal/raw 一致性（2026-07-21）

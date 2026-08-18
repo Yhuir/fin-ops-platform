@@ -1159,6 +1159,33 @@ class PostgresStateStoreTests(unittest.TestCase):
             self.assertEqual(settings["cost_statistics_tag_selection"]["version"], 4)
             self.assertNotIn("cost_statistics_no_oa_projects", settings)
 
+    def test_postgres_repository_normalization_replace_removes_legacy_non_acl_keys(self) -> None:
+        connection = FakePostgresConnection()
+        connection.settings["app_settings"] = {
+            "allowed_usernames": ["YNSYLP005", "legacy-user"],
+            "readonly_export_usernames": ["legacy-user"],
+            "admin_usernames": ["YNSYLP005"],
+            "full_access_usernames": [],
+            "access_control_version": 7,
+            "cost_statistics_tag_selection": {"version": 4},
+        }
+        repository = PostgresOpsTaxEtcRepository(connection)
+
+        repository.replace_normalized_app_settings_in_transaction(
+            {
+                "allowed_usernames": ["attempted-replacement"],
+                "cost_statistics_time_tag_selection": {"version": 1, "mode": "all"},
+                "cost_statistics_no_oa_projects": {"version": 4, "projects": []},
+            },
+            transaction=connection,
+        )
+
+        saved = connection.settings["app_settings"]
+        self.assertNotIn("cost_statistics_tag_selection", saved)
+        self.assertEqual(saved["allowed_usernames"], ["YNSYLP005", "legacy-user"])
+        self.assertEqual(saved["access_control_version"], 7)
+        self.assertEqual(saved["cost_statistics_time_tag_selection"]["mode"], "all")
+
     def test_postgres_store_snapshot_methods_round_trip_without_full_state_fallback(self) -> None:
         with TemporaryDirectory() as temp_dir, patch.dict(
             "os.environ",

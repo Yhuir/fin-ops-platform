@@ -154,6 +154,38 @@ class PostgresOpsTaxEtcRepository:
     def save_app_settings_in_transaction(self, payload: dict[str, Any], *, transaction: Any) -> None:
         self.save_settings_in_transaction("app_settings", payload, transaction=transaction)
 
+    def replace_normalized_app_settings_in_transaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        transaction: Any,
+    ) -> None:
+        transaction.execute(
+            "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+        )
+        row = transaction.fetch_one(
+            """
+            select settings_payload
+            from app.app_settings
+            where settings_key = %s
+            for update
+            """,
+            (APP_SETTINGS_KEY,),
+        )
+        current = row_payload(row, "settings_payload") if row is not None else {}
+        current = current if isinstance(current, dict) else {}
+        normalized_non_acl = {
+            key: value
+            for key, value in serialize_value(payload).items()
+            if key not in SETTINGS_ACCESS_CONTROL_KEYS
+        }
+        persisted = {
+            **normalized_non_acl,
+            **settings_access_control_from_payload(current),
+        }
+        self._save_settings_with_executor(transaction, APP_SETTINGS_KEY, persisted)
+
     def save_app_settings_for_bank_flow_rule_version_in_transaction(
         self,
         payload: dict[str, Any],

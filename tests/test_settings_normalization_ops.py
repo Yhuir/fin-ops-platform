@@ -28,7 +28,12 @@ class FakeRepository:
         assert settings_key == "app_settings"
         return dict(self.payload)
 
-    def save_app_settings_in_transaction(self, payload: dict[str, object], *, transaction: object) -> None:
+    def replace_normalized_app_settings_in_transaction(
+        self,
+        payload: dict[str, object],
+        *,
+        transaction: object,
+    ) -> None:
         self.saves.append((dict(payload), transaction))
 
 
@@ -56,7 +61,16 @@ class SettingsNormalizationOpsTests(unittest.TestCase):
 
     def test_execute_writes_canonical_payload_once_in_one_transaction(self) -> None:
         connection = FakeConnection()
-        repository = FakeRepository({"bank_flow_rule_batch_tag_rules": {"rules": None}})
+        repository = FakeRepository(
+            {
+                "bank_flow_rule_batch_tag_rules": {"rules": None},
+                "cost_statistics_tag_selection": {
+                    "version": 3,
+                    "display_name": "旧无 OA 项目",
+                    "selected_tag_codes": ["salary"],
+                },
+            }
+        )
         stdout = StringIO()
 
         with (
@@ -77,6 +91,11 @@ class SettingsNormalizationOpsTests(unittest.TestCase):
         self.assertEqual(
             saved["bank_flow_rule_batch_tag_rules"],
             {"version": 1, "requirements_by_tag_code": {}},
+        )
+        self.assertNotIn("cost_statistics_tag_selection", saved)
+        self.assertEqual(
+            saved["cost_statistics_no_oa_projects"]["projects"][0]["display_name"],
+            "旧无 OA 项目",
         )
 
 
