@@ -246,6 +246,31 @@ class WorkbenchCanonicalRowsBuilder:
             hydrated.append({**row, "id": row_id})
         return hydrated
 
+    def load_page_etc_summaries(
+        self,
+        relations: list[dict[str, Any]],
+        *,
+        preloaded: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Load missing ETC summaries for a selected relation page in one query."""
+
+        summaries = {
+            str(external_batch_id).strip(): dict(row)
+            for external_batch_id, row in dict(preloaded or {}).items()
+            if str(external_batch_id).strip() and isinstance(row, dict)
+        }
+        missing_external_batch_ids = {
+            external_batch_id
+            for relation in relations
+            if (external_batch_id := self._relation_external_etc_batch_id(relation))
+            and external_batch_id not in summaries
+        }
+        if missing_external_batch_ids:
+            summaries.update(
+                self._etc_invoice_summary_rows_for_page(missing_external_batch_ids)
+            )
+        return summaries
+
     def _etc_invoice_summary_rows_for_page(
         self,
         external_batch_ids: set[str],

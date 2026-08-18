@@ -230,6 +230,18 @@ class PostgresWorkbenchPageHydrationRepository:
             connection=connection,
             settings=settings,
         )
+        preloaded_page_etc_summaries = {
+            external_batch_id: row
+            for row_id, external_batch_id in etc_summary_external_ids.items()
+            if isinstance(
+                (row := rows_by_typed_id.get(("invoice", row_id))),
+                dict,
+            )
+        }
+        page_etc_summaries = builder.load_page_etc_summaries(
+            relations,
+            preloaded=preloaded_page_etc_summaries,
+        )
         expected_typed_ids = {
             (row_type, row_id)
             for row_type, row_ids in typed_row_ids.items()
@@ -247,6 +259,7 @@ class PostgresWorkbenchPageHydrationRepository:
             rows_by_typed_id=rows_by_typed_id,
             relations=relations,
             anomaly_review_decisions=decisions,
+            page_etc_summaries=page_etc_summaries,
         )
         grouped_groups = [
             group

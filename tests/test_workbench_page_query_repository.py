@@ -441,6 +441,133 @@ def test_page_hydration_enforces_fixed_statement_budget(monkeypatch: pytest.Monk
         )
 
 
+def test_page_etc_summary_loader_reuses_preloaded_rows_and_batches_missing_relations() -> None:
+    class _EmptyConnection:
+        pass
+
+    builder = WorkbenchCanonicalRowsBuilder(connection=_EmptyConnection())
+    requested: list[set[str]] = []
+
+    def load_missing(external_batch_ids: set[str]) -> dict[str, dict[str, Any]]:
+        requested.append(set(external_batch_ids))
+        return {
+            "ETC-B": {
+                "id": "etc-summary-ETC-B",
+                "type": "invoice",
+                "etc_batch_id": "ETC-B",
+            }
+        }
+
+    builder._etc_invoice_summary_rows_for_page = load_missing  # type: ignore[method-assign]
+
+    result = builder.load_page_etc_summaries(
+        [
+            {"special_metadata": {"external_etc_batch_id": "ETC-A"}},
+            {"special_metadata": {"external_etc_batch_id": "ETC-B"}},
+        ],
+        preloaded={
+            "ETC-A": {
+                "id": "etc-summary-ETC-A",
+                "type": "invoice",
+                "etc_batch_id": "ETC-A",
+            }
+        },
+    )
+
+    assert requested == [{"ETC-B"}]
+    assert set(result) == {"ETC-A", "ETC-B"}
+
+
+def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    relation = {
+        "case_id": "CASE-ETC",
+        "status": "active",
+        "row_ids": ["oa-1"],
+        "row_types": ["oa"],
+        "special_metadata": {"external_etc_batch_id": "ETC-1"},
+    }
+    oa_row = {
+        "id": "oa-1",
+        "type": "oa",
+        "status": "unpaired",
+        "expense_items": [],
+    }
+    etc_summary = {
+        "id": "etc-summary-ETC-1",
+        "type": "invoice",
+        "etc_batch_id": "ETC-1",
+    }
+
+    class _PageBuilder:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def load_page_rows(
+            self,
+            _typed_row_ids: object,
+            **_kwargs: object,
+        ) -> dict[tuple[str, str], dict[str, Any]]:
+            return {("oa", "oa-1"): dict(oa_row)}
+
+        def load_page_etc_summaries(
+            self,
+            relations: list[dict[str, Any]],
+            *,
+            preloaded: dict[str, dict[str, Any]],
+        ) -> dict[str, dict[str, Any]]:
+            captured["relations"] = relations
+            captured["preloaded"] = preloaded
+            return {"ETC-1": dict(etc_summary)}
+
+        def build_page_groups(self, **kwargs: Any) -> dict[str, Any]:
+            captured["page_etc_summaries"] = kwargs.get("page_etc_summaries")
+            return {
+                "paired": {"groups": []},
+                "unpaired": {
+                    "groups": [
+                        {
+                            "group_id": "case:CASE-ETC",
+                            "zone": "unpaired",
+                            "status": "unpaired",
+                            "oa_rows": [dict(oa_row)],
+                            "bank_rows": [],
+                            "invoice_rows": [],
+                        }
+                    ]
+                },
+            }
+
+    monkeypatch.setattr(
+        "fin_ops_platform.services.postgres_repositories.workbench_page_hydration.WorkbenchCanonicalRowsBuilder",
+        _PageBuilder,
+    )
+    repository = PostgresWorkbenchPageHydrationRepository(object())
+    repository._load_relations = lambda *_args, **_kwargs: ([relation], {})  # type: ignore[method-assign]
+
+    groups = repository.hydrate_groups(
+        scope_key="2026-07",
+        descriptors=[
+            {
+                "internal_key": "case:CASE-ETC",
+                "detail_key": "CASE-ETC",
+                "group_kind": "relation",
+                "member_ids": ["oa-1"],
+                "member_types": ["oa"],
+                "external_etc_batch_id": "ETC-1",
+            }
+        ],
+        detail_level="full",
+    )
+
+    assert groups[0]["group_id"] == "case:CASE-ETC"
+    assert captured["relations"] == [relation]
+    assert captured["preloaded"] == {}
+    assert captured["page_etc_summaries"] == {"ETC-1": etc_summary}
+
+
 def test_scope_spine_prunes_relation_candidates_then_rechecks_typed_membership() -> None:
     normalized = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split()).lower()
 
