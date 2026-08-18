@@ -271,6 +271,16 @@ def test_set_based_anomaly_query_nets_bank_refunds_inside_a_relation() -> None:
     assert "member.bank_direction in ('payment', 'receipt')" in sql
 
 
+def test_set_based_anomaly_query_uses_turnover_principal_for_exact_closure() -> None:
+    sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
+
+    assert "relation.relation_mode" in sql
+    assert "totals.relation_mode = 'turnover_manual_closure'" in sql
+    assert "totals.bank_gross_total = totals.bank_contra_total" in sql
+    assert "then totals.bank_gross_total" in sql
+    assert "else totals.bank_net_total" in sql
+
+
 def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases() -> None:
     canonical_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split())
     anomaly_sql = " ".join(_ANOMALY_STATE_CTES.split())

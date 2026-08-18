@@ -1261,6 +1261,7 @@ relation_anomaly_members as materialized (
     select
         groups.internal_key,
         groups.detail_key as case_id,
+        relation.relation_mode,
         member.row_type,
         member.row_id,
         member.oa_expense_items,
@@ -1280,6 +1281,8 @@ relation_anomaly_members as materialized (
         member.invoice_direction,
         member.invoice_source_links
     from canonical_groups groups
+    join scoped_relations relation
+      on relation.case_id = groups.detail_key
     join canonical_group_members member
       on member.internal_key = groups.internal_key
     left join etc_summary_keys etc_key
@@ -1694,6 +1697,7 @@ relation_pane_totals as materialized (
     select
         member.internal_key,
         min(member.case_id) as case_id,
+        min(member.relation_mode) as relation_mode,
         count(*) filter (where member.row_type = 'oa')::bigint as oa_count,
         count(*) filter (
             where member.row_type = 'oa'
@@ -1721,7 +1725,30 @@ relation_pane_totals as materialized (
                       and member.bank_direction in ('payment', 'receipt')
                       and member.bank_direction <> direction.direction
                 ), 0)
-        end, 2) as bank_total,
+        end, 2) as bank_net_total,
+        round(case
+            when direction.direction is null then
+                sum(member.bank_amount) filter (where member.row_type = 'bank')
+            when count(*) filter (
+                where member.row_type = 'bank' and member.bank_direction is not null
+            ) = 0 then
+                sum(member.bank_amount) filter (where member.row_type = 'bank')
+            else coalesce(sum(member.bank_amount) filter (
+                where member.row_type = 'bank'
+                  and member.bank_direction = direction.direction
+            ), 0)
+        end, 2) as bank_gross_total,
+        round(case
+            when direction.direction is null then 0
+            when count(*) filter (
+                where member.row_type = 'bank' and member.bank_direction is not null
+            ) = 0 then 0
+            else coalesce(sum(member.bank_amount) filter (
+                where member.row_type = 'bank'
+                  and member.bank_direction in ('payment', 'receipt')
+                  and member.bank_direction <> direction.direction
+            ), 0)
+        end, 2) as bank_contra_total,
         count(*) filter (where member.row_type = 'invoice')::bigint as invoice_count,
         count(*) filter (
             where member.row_type = 'invoice'
@@ -1754,10 +1781,22 @@ relation_pane_totals as materialized (
     join relation_directions direction on direction.internal_key = member.internal_key
     group by member.internal_key, direction.direction
 ),
+relation_comparison_totals as materialized (
+    select
+        totals.*,
+        case
+            when totals.relation_mode = 'turnover_manual_closure'
+             and totals.bank_gross_total > 0
+             and totals.bank_gross_total = totals.bank_contra_total
+                then totals.bank_gross_total
+            else totals.bank_net_total
+        end as bank_total
+    from relation_pane_totals totals
+),
 relation_pair_mismatches as materialized (
     select totals.*, 'oa_bank_amount_mismatch'::text as code,
            totals.oa_total as left_total, totals.bank_total as right_total
-    from relation_pane_totals totals
+    from relation_comparison_totals totals
     where totals.oa_count > 0 and totals.bank_count > 0
       and totals.invalid_oa_amount_count = 0 and totals.invalid_bank_amount_count = 0
       and totals.oa_total is not null and totals.bank_total is not null
@@ -1765,7 +1804,7 @@ relation_pair_mismatches as materialized (
     union all
     select totals.*, 'oa_invoice_amount_mismatch',
            totals.oa_total, totals.invoice_total
-    from relation_pane_totals totals
+    from relation_comparison_totals totals
     where totals.oa_count > 0 and totals.invoice_count > 0
       and totals.invalid_oa_amount_count = 0 and totals.invalid_invoice_amount_count = 0
       and totals.oa_total is not null and totals.invoice_total is not null
@@ -1777,7 +1816,7 @@ relation_pair_mismatches as materialized (
     union all
     select totals.*, 'bank_invoice_amount_mismatch',
            totals.bank_total, totals.invoice_total
-    from relation_pane_totals totals
+    from relation_comparison_totals totals
     where totals.bank_count > 0 and totals.invoice_count > 0
       and totals.invalid_bank_amount_count = 0 and totals.invalid_invoice_amount_count = 0
       and totals.bank_total is not null and totals.invoice_total is not null
