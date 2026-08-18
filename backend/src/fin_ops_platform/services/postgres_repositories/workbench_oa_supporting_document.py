@@ -19,7 +19,7 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
         content_sha256: str,
         size_bytes: int,
         created_by: str,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         row = self._connection.fetch_one(
             """
             insert into app.workbench_oa_supporting_documents(
@@ -27,6 +27,9 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 original_filename, content_type, content_sha256, size_bytes, created_by
             )
             values (%s, %s, %s, %s::uuid, %s, %s, %s, %s, %s)
+            on conflict (oa_row_id, expense_item_id, content_sha256)
+                where status = 'active'
+                do nothing
             returning id::text as id, relation_case_id, oa_row_id, expense_item_id,
                       file_object_id::text as file_object_id, original_filename,
                       content_type, content_sha256, size_bytes, status, created_by,
@@ -37,9 +40,34 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 original_filename, content_type, content_sha256, size_bytes, created_by,
             ),
         )
-        if not row:
-            raise RuntimeError("supporting document insert did not return a row")
-        return dict(row)
+        return dict(row) if row else None
+
+    def find_active_by_content(
+        self,
+        *,
+        oa_row_id: str,
+        expense_item_id: str,
+        content_sha256: str,
+    ) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select document.id::text as id, document.relation_case_id, document.oa_row_id,
+                   document.expense_item_id, document.file_object_id::text as file_object_id,
+                   document.original_filename, document.content_type,
+                   document.content_sha256, document.size_bytes, document.status,
+                   document.created_by, document.created_at::text, file.storage_uri
+            from app.workbench_oa_supporting_documents document
+            join app.file_objects file on file.id = document.file_object_id
+            where document.oa_row_id = %s
+              and document.expense_item_id = %s
+              and document.content_sha256 = %s
+              and document.status = 'active'
+              and file.tombstoned_at is null
+            limit 1
+            """,
+            (oa_row_id, expense_item_id, content_sha256),
+        )
+        return dict(row) if row else None
 
     def list_active(self, *, oa_row_id: str, expense_item_id: str) -> list[dict[str, Any]]:
         return [dict(row) for row in self._connection.fetch_all(

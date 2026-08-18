@@ -1596,6 +1596,12 @@
 - 投影 schema 升级为 v19，v18 generation/cache fail closed 并通过既有 Workbench exact-scope refresh 重建；没有新增数据库表、migration、read model、scope、worker、queue、Redis owner、依赖或并行旧路径。既有 amount-mismatch command/repository 继续作为关系组忽略决定的持久化边界。
 - 前端异常入口固定为 `异常 n | 已忽略 m`；统一抽屉继续复用 HeroUI `ToggleButtonGroup`、`DisclosureGroup`、`Chip`、`Button`，默认折叠、按需展开、只保留一条操作栏。
 
+## 2026-08-19 - 补充凭证上传可靠性与局部刷新
+
+- 单抽屉上传页改用 HeroUI Tabs，支持点击或拖拽 JPG/JPEG/PNG/PDF；前后端共享扩展名、签名和 25MB 上限口径，已知错误显示明确原因与请求编号，不再统一降级成“操作失败”。
+- 上传以 `oa_row_id + expense_item_id + content_sha256` 复用既有 partial unique index实现重试幂等；写入成功或删除后只替换当前 OA 子付款项的 `supporting_documents[]`，不触发关联台全量重读。页面 compact query 与 detail hydration 复用同一段 set-based SQL，避免详情加载后丢失文件。
+- 手工录入继续复用原批量编辑和原子提交边界，只扩展 PNG 识别；没有新增表、migration、read model、worker、queue、缓存、依赖或第二条上传链路。
+
 ## 2026-08-05 - 历史 WEX 运行时退役与搜索可发现性闭环（历史）
 
 - 根因：历史 WEX/row-ignore 元数据被当作第三种运行时状态，导致无 active relation 的 canonical rows 被主区过滤、进入异常抽屉并触发无意义 generation stale；金额搜索又直接比较原始金额字符串，`202.00` 无法命中存储值 `202`，OA 完成时间也未进入搜索投影。

@@ -146,10 +146,10 @@
 
 ## 2026-08-18 OA 附件处置、多发票录入与防误导显示目标
 
-- Business core / service：`tests/test_manual_invoice_entry_service.py` 保护一个 session 多张发票、同批重复整批拒绝；`tests/test_workbench_invoice_supplement_service.py` 保护全部 file ids、canonical source link、现有 case 扩展以及 relation 失败时 import runtime 回滚；`tests/test_workbench_oa_supporting_document_service.py` 保护 JPG/PDF 签名、精确 OA 子付款项归属、预览与删除且不写发票池。
+- Business core / service：`tests/test_manual_invoice_entry_service.py` 保护一个 session 多张发票、同批重复整批拒绝及 PNG 识别入口；`tests/test_workbench_invoice_supplement_service.py` 保护全部 file ids、canonical source link、现有 case 扩展以及 relation 失败时 import runtime 回滚；`tests/test_workbench_oa_supporting_document_service.py` 保护 JPG/JPEG/PNG/PDF 签名、内容哈希重试幂等、精确 OA 子付款项归属、预览与删除且不写发票池。
 - API contract：`tests/test_import_file_api.py` 保护 `invoices[] / values[] / file_ids[]`；`tests/test_workbench_invoice_supplement_api.py` 保护手工整批关联和补充凭证上传/列表/内容/删除 DTO；`tests/test_operation_history_semantics.py` 保护三种写操作的审计语义。
-- Frontend：`ManualInvoiceEntryDrawer.test.tsx` 保护“预览/保存信息”只保存本地编辑态、最后一次整批入池；`WorkbenchInvoiceEntryDrawer.test.tsx` 保护单抽屉两种内部页面和精确 target 透传；`WorkbenchApi.test.ts`、`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx` 保护显示目标、补充凭证和录入入口。
-- Regression / performance：普通发票文件导入继续走原 durable confirm job；关联台 direct GET 仅在已读取的 OA 子项 JSON 上附加索引查询得到的补充凭证，不增加页面 HTTP、worker、read model、Redis 或全表投影。生产使用既有 HTTP SLO probe 与 runtime closure gate 只读验证。
+- Frontend：`ManualInvoiceEntryDrawer.test.tsx` 保护“预览/保存信息”只保存本地编辑态、最后一次整批入池及拖拽 PNG 识别；`WorkbenchInvoiceEntryDrawer.test.tsx` 保护 HeroUI 单抽屉两种内部页面、JPG/PNG/PDF 拖拽上传、精确 target 透传与明确错误；`WorkbenchApi.test.ts`、`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx` 保护显示目标、补充凭证局部更新和录入入口。
+- Regression / performance：普通发票文件导入继续走原 durable confirm job；关联台 direct GET 与 detail hydration 都在已读取的 OA 子项 JSON 上附加索引查询得到的补充凭证，不增加页面 HTTP、worker、read model、Redis 或全表投影。补充凭证写入后直接局部更新目标子付款项，只有 canonical 手工发票提交才执行关联台 post-commit 重读。生产使用既有 HTTP SLO probe 与 runtime closure gate 验证。
 - Read model：Workbench schema 升级为 v8，使旧 generation/page cache 失效并经现有 exact/all freshness gateway 重建；没有新增表、worker、cache 或第二 read model。
 
 ## 2026-07-26 relation preview 真实 DTO、并发反馈与安全错误回归

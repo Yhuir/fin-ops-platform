@@ -87,7 +87,12 @@ class OAAttachmentInvoiceService:
 
     def recognize_uploaded_invoice(self, *, file_name: str, content: bytes) -> dict[str, str]:
         suffix = Path(file_name).suffix.lower()
-        expected_kind = "jpeg" if suffix in {".jpg", ".jpeg"} else "pdf" if suffix == ".pdf" else ""
+        expected_kind = (
+            "jpeg" if suffix in {".jpg", ".jpeg"}
+            else "png" if suffix == ".png"
+            else "pdf" if suffix == ".pdf"
+            else ""
+        )
         document = inspect_untrusted_document(
             file_name=file_name,
             content=content,

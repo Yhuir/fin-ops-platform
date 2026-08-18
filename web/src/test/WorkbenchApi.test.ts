@@ -19,6 +19,8 @@ import {
   refreshManualOaImportAttachments,
   removeManualOaImport,
   reviewWorkbenchAnomaly,
+  resolveWorkbenchActionErrorMessage,
+  uploadWorkbenchOaSupportingDocuments,
   withdrawWorkbenchLink,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
@@ -52,6 +54,32 @@ test("does not infer a safe OA write state when the status contract is missing",
     dirtyScopes: [],
   });
   fetchSpy.mockRestore();
+});
+
+test("maps supplemental evidence validation errors to an actionable message", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    error: "supporting_document_signature_invalid",
+    message: "raw backend message",
+    requestId: "request-upload-1",
+  }), {
+    status: 400,
+    headers: { "Content-Type": "application/json" },
+  }));
+
+  let captured: unknown;
+  try {
+    await uploadWorkbenchOaSupportingDocuments(
+      { caseId: "CASE-1", oaRowId: "oa-1", expenseItemId: "oa-1:item:0" },
+      [new File(["invalid"], "voucher.jpg", { type: "image/jpeg" })],
+    );
+  } catch (error) {
+    captured = error;
+  }
+
+  expect(captured).toBeInstanceOf(WorkbenchApiError);
+  expect(resolveWorkbenchActionErrorMessage(captured, "fallback")).toBe(
+    "文件内容与扩展名不一致，请重新选择有效文件。（请求编号：request-upload-1）",
+  );
 });
 
 function createWorkbenchRow(paneId: WorkbenchRecordType, id: string, counterparty: string): WorkbenchRecord {

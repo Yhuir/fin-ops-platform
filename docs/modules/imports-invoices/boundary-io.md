@@ -15,7 +15,7 @@
 ### 负责
 
 - 发票文件上传、模板识别、预览、确认导入和导入 job。
-- 多张发票人工录入；每张可选 JPG/JPEG/PDF 识别只负责预填，用户逐张“保存信息”后整批执行服务端校验并生成一个普通 `FileImportSession`。导入页复用既有 confirm job；关联台的 OA 补录入口使用受限的跨模块原子提交边界，使整批发票与指定 OA 子付款项关系同成同败。
+- 多张发票人工录入；每张可点击或拖拽 JPG/JPEG/PNG/PDF，识别只负责预填，用户逐张“保存信息”后整批执行服务端校验并生成一个普通 `FileImportSession`。导入页复用既有 confirm job；关联台的 OA 补录入口使用受限的跨模块原子提交边界，使整批发票与指定 OA 子付款项关系同成同败。
 - XLSX 统一通过有界共享 reader 读取；对来源文件错误声明的 worksheet dimension 先重算可见范围，再执行模板识别、行数/单元格/压缩比资源门禁，不为发票建立第二条 parser 链。
 - 多 sheet 税务导出若存在唯一 `发票基础信息`，只从该 sheet 生成 canonical invoice facts；`信息汇总表` 仅提供同票明细证据。表头 sheet 重名、无有效行、模板不合法或明细强身份不能唯一归属时 fail closed，禁止回退到首个可解析 sheet。历史单 sheet 文件仍走共享模板识别。
 - 将导入结果转化为发票源事实与精确 affected scopes。
@@ -34,7 +34,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportInvoicesPage.tsx` | 文件先进入 import file service |
-| 可选单张附件识别 | `POST /imports/invoices/manual/recognize` | 每次只接收当前发票的一份 JPG/JPEG/PDF；PDF 先读原生文本，无可识别发票时逐页 OCR 并在首张发票命中后停止。只返回允许预填的发票字段，不写业务事实，也不保留上传文件。 |
+| 可选单张附件识别 | `POST /imports/invoices/manual/recognize` | 每次只接收当前发票的一份 JPG/JPEG/PNG/PDF；图片走统一图片规范化和 OCR，PDF 先读原生文本，无可识别发票时逐页 OCR 并在首张发票命中后停止。只返回允许预填的发票字段，不写业务事实，也不保留上传文件。 |
 | 多张人工预览 | `POST /imports/invoices/manual/preview` | 请求体固定为 `invoices[]`。每张票据方向、红蓝字、购销双方、票号/条件式代码、日期和金额税率由服务端校验；红字表单收正数、canonical 金额统一转负数。同批重复或任一现存/疑似重复整批返回 `409` 并终结预览，不允许部分进入发票池；成功后生成当前用户的一个 `FileImportSession` 和与发票一一对应的 `file_ids[]`。 |
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
 | 预览陈旧校验 | `FileImportService.assert_session_preview_current` | 除汇总 audit counts 外逐行比较 decision、linked object type/id；数量不变但 canonical invoice owner 调换仍返回 `preview_stale`，不得确认旧预览。错误只报告字段名和变化数量。 |

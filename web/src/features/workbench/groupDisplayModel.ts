@@ -1,4 +1,6 @@
 import type {
+  WorkbenchOaInvoiceSupplementTarget,
+  WorkbenchOaSupportingDocument,
   WorkbenchRelationGroup,
   WorkbenchGroupsPageQuery,
   WorkbenchPaneRows,
@@ -118,6 +120,58 @@ export function buildWorkbenchPaneRows(groups: WorkbenchRelationGroup[]): Workbe
     bank: groups.flatMap((group) => group.rows.bank),
     invoice: groups.flatMap((group) => group.rows.invoice),
   };
+}
+
+export function replaceWorkbenchSupportingDocuments(
+  groups: WorkbenchRelationGroup[],
+  target: WorkbenchOaInvoiceSupplementTarget,
+  documents: WorkbenchOaSupportingDocument[],
+): WorkbenchRelationGroup[] {
+  const supportingDocuments = documents.map((document) => ({
+    id: document.id,
+    fileName: document.fileName,
+    contentType: document.contentType,
+    sizeBytes: document.sizeBytes,
+    createdAt: document.createdAt,
+    contentUrl: document.contentUrl,
+  }));
+
+  function replaceOaRow(row: WorkbenchRecord) {
+    if (row.id !== target.oaRowId || !row.expenseItems?.some((item) => item.id === target.expenseItemId)) {
+      return row;
+    }
+    return {
+      ...row,
+      expenseItems: row.expenseItems.map((item) => item.id === target.expenseItemId
+        ? { ...item, supportingDocuments }
+        : item),
+    };
+  }
+
+  return groups.map((group) => {
+    const oaRows = group.rows.oa.map(replaceOaRow);
+    const summaryRow = group.summaryRow?.recordType === "oa"
+      ? replaceOaRow(group.summaryRow)
+      : group.summaryRow;
+    const collapsedOaRows = group.collapsedRows?.oa?.map(replaceOaRow);
+    const changed = oaRows.some((row, index) => row !== group.rows.oa[index])
+      || summaryRow !== group.summaryRow
+      || collapsedOaRows?.some((row, index) => row !== group.collapsedRows?.oa?.[index]);
+    if (!changed) {
+      return group;
+    }
+    return {
+      ...group,
+      rows: { ...group.rows, oa: oaRows },
+      ...(summaryRow ? { summaryRow } : {}),
+      ...(group.collapsedRows ? {
+        collapsedRows: {
+          ...group.collapsedRows,
+          ...(collapsedOaRows ? { oa: collapsedOaRows } : {}),
+        },
+      } : {}),
+    };
+  });
 }
 
 export function buildWorkbenchGroupDisplayLayout(

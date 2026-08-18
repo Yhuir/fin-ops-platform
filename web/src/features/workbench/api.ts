@@ -1983,6 +1983,22 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   workbench_anomaly_review_blocked: "该关系仍有未解决的配对条件，不能进入已配对。",
   invalid_workbench_anomaly_review_request: "异常审阅信息无效，请刷新后重新审阅。",
   oa_password_verification_failed: "当前 OA 用户密码复核失败，未执行数据重置。",
+  invalid_multipart_body: "上传请求无效，请重新选择文件后再试。",
+  invalid_supporting_document_upload: "请选择文件，并确认当前 OA 子付款项仍然有效。",
+  supporting_document_format_not_allowed: "仅支持 JPG、JPEG、PNG 或 PDF 文件。",
+  supporting_document_size_invalid: "文件不能为空且单个文件不能超过 25MB。",
+  supporting_document_signature_invalid: "文件内容与扩展名不一致，请重新选择有效文件。",
+  supporting_document_target_not_found: "目标 OA 子付款项不存在或已变化，请刷新后重试。",
+  supporting_document_not_found: "补充凭证不存在或已删除，请刷新后确认。",
+  supporting_document_cleanup_failed: "批量上传未完整保存，请联系管理员处理。",
+  supporting_document_unavailable: "文件存储暂时不可用，上传未保存。请稍后重试。",
+  invalid_manual_invoice_supplement: "手工录入会话或 OA 子付款项无效，请重新录入。",
+  manual_invoice_supplement_target_not_found: "目标 OA 子付款项不存在或已变化，请刷新后重试。",
+  manual_invoice_batch_must_be_complete: "必须一次提交本批次全部发票。",
+  invalid_manual_invoice_supplement_session: "当前批次不是有效的手工录入发票批次。",
+  manual_invoice_batch_changed: "发票池状态已变化，整批未录入，请重新校验。",
+  manual_invoice_relation_oa_mismatch: "当前关联关系不包含该 OA 付款项，请刷新后重试。",
+  manual_invoice_supplement_unavailable: "手工发票录入暂时不可用，请稍后重试。",
 };
 
 function requestIdFromPayload(payload: unknown) {
@@ -2038,6 +2054,16 @@ export class WorkbenchApiError extends Error {
     this.requestId = options.requestId;
     this.currentVersion = options.currentVersion ?? null;
   }
+}
+
+export function resolveWorkbenchActionErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof WorkbenchApiError) {
+    return error.requestId ? `${error.message}（请求编号：${error.requestId}）` : error.message;
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  return fallback;
 }
 
 function createWorkbenchApiError(error: ApiClientError) {

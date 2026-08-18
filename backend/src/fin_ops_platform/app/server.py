@@ -7206,7 +7206,7 @@ class Application:
         if not files:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
-                {"error": "manual_invoice_file_required", "message": "请选择 JPG、JPEG 或 PDF 发票文件。"},
+                {"error": "manual_invoice_file_required", "message": "请选择 JPG、JPEG、PNG 或 PDF 发票文件。"},
             )
         upload = files[0]
         try:
@@ -7352,10 +7352,13 @@ class Application:
             )
         except WorkbenchOaSupportingDocumentError as exc:
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": exc.error, "message": exc.message})
-        except RuntimeError as exc:
+        except RuntimeError:
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "supporting_document_unavailable", "message": str(exc)},
+                {
+                    "error": "supporting_document_unavailable",
+                    "message": "文件存储暂时不可用，上传未保存。请稍后重试。",
+                },
             )
         return self._json_response(HTTPStatus.CREATED, {"documents": documents})
 

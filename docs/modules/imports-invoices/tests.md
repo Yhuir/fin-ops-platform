@@ -20,7 +20,7 @@
 ## 场景覆盖清单
 
 - 发票导入页必须发送每文件方向：`input_invoice` / `output_invoice`。
-- 单张人工录入必须覆盖纯手工、仅取首个 JPG/PDF、OCR 后可编辑、20 位票号代码可选、传统票代码必填、0–100 数字税率、红字正数输入转 canonical 负数、金额平衡、精确重复阻断、返回编辑 discard 和普通 confirm job。
+- 单张人工录入必须覆盖纯手工、JPG/JPEG/PNG/PDF 点击或拖拽识别、OCR 后可编辑、20 位票号代码可选、传统票代码必填、0–100 数字税率、红字正数输入转 canonical 负数、金额平衡、精确重复阻断、返回编辑 discard 和普通 confirm job。
 - Browser e2e 必须覆盖发票导入页真实选择控件、预览按钮禁用/启用、慢预览 in-flight 动作锁定、审计汇总、重复项明细、未导入项明细、确认导入、显式 operation barrier 等待和零 Workbench 页面请求。
 - read_export_only 用户必须能打开发票导入页但不能选择文件、预览或确认导入。
 - 预览必须显示重复审计 counts、duplicate groups 和 review copy。

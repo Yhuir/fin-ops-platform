@@ -220,7 +220,7 @@ class ManualInvoiceEntryService:
     @staticmethod
     def _recognition_error_message(code: str) -> str:
         if code in {"document_format_not_allowed", "document_signature_mismatch", "document_signature_invalid"}:
-            return "仅支持有效的 JPG、JPEG 或 PDF 发票文件。"
+            return "仅支持有效的 JPG、JPEG、PNG 或 PDF 发票文件。"
         if code in {"document_too_large", "document_image_too_large", "document_pdf_render_too_large"}:
             return "文件过大，无法安全解析。"
         if code in {"document_pdf_too_many_pages"}:

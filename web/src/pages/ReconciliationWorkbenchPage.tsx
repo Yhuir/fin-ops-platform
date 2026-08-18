@@ -48,6 +48,7 @@ import {
   createEmptyWorkbenchZoneDisplayState,
   hasWorkbenchServerPageCriteria,
   mergeWorkbenchGroupsById,
+  replaceWorkbenchSupportingDocuments,
   resolveWorkbenchActivePane,
   type WorkbenchPaneTimeFilter,
   type WorkbenchZoneDisplayState,
@@ -65,6 +66,7 @@ import type {
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
   WorkbenchOaInvoiceSupplementTarget,
+  WorkbenchOaSupportingDocument,
   WorkbenchAnomalyReviewClassificationCode,
   WorkbenchRecord,
   WorkbenchRecordType,
@@ -1848,6 +1850,26 @@ export default function ReconciliationWorkbenchPage() {
     openRelationPreviewErrorDialog,
   ]);
 
+  const handleSupportingDocumentsChanged = useCallback((
+    target: WorkbenchOaInvoiceSupplementTarget,
+    documents: WorkbenchOaSupportingDocument[],
+  ) => {
+    setWorkbenchData((current) => current ? {
+      ...current,
+      paired: {
+        groups: replaceWorkbenchSupportingDocuments(current.paired.groups, target, documents),
+      },
+      unpaired: {
+        groups: replaceWorkbenchSupportingDocuments(current.unpaired.groups, target, documents),
+      },
+    } : current);
+    setSelectionSourceGroups((current) => ({
+      paired: replaceWorkbenchSupportingDocuments(current.paired, target, documents),
+      unpaired: replaceWorkbenchSupportingDocuments(current.unpaired, target, documents),
+    }));
+    setExceptionDrawerGroups((current) => replaceWorkbenchSupportingDocuments(current, target, documents));
+  }, []);
+
   const handleCloseCashTicketPurchaseDialog = useCallback(() => {
     setCashTicketPurchaseDialog(null);
   }, []);
@@ -2464,6 +2486,7 @@ export default function ReconciliationWorkbenchPage() {
         open={invoiceEntryTarget !== null}
         target={invoiceEntryTarget}
         onClose={() => setInvoiceEntryTarget(null)}
+        onSupportingDocumentsChanged={handleSupportingDocumentsChanged}
         onCompleted={async () => {
           const reread = await rereadWorkbenchAfterCommit();
           if (!reread) {

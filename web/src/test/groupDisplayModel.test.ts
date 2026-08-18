@@ -4,6 +4,7 @@ import {
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
+  replaceWorkbenchSupportingDocuments,
   workbenchInvoiceSourceLabel,
   workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
@@ -595,6 +596,60 @@ describe("groupDisplayModel time filter", () => {
     });
     expect(invoiceRows?.[0].externalUrl).toBeUndefined();
     expect(workbenchInvoiceSourceLabel(invoiceRows?.[0].sourceKind)).toBeNull();
+  });
+
+  test("patches supplemental evidence into the exact OA expense item for immediate display", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-support", "38.00"),
+      expenseItems: [{
+        id: "item-support",
+        rowIndex: "1",
+        projectName: "项目",
+        amount: "38.00",
+      }, {
+        id: "item-other",
+        rowIndex: "2",
+        projectName: "项目",
+        amount: "1.00",
+      }],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "group-support",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "supporting document",
+      rows: { oa: [parent], bank: [], invoice: [] },
+    };
+    const documents = [{
+      id: "document-1",
+      oaRowId: parent.id,
+      expenseItemId: "item-support",
+      fileName: "voucher.png",
+      contentType: "image/png",
+      sha256: "sha",
+      sizeBytes: 128,
+      createdAt: "2026-08-19T01:00:00+08:00",
+      contentUrl: "/api/documents/document-1/content",
+    }];
+
+    const [updated] = replaceWorkbenchSupportingDocuments(
+      [group],
+      { caseId: "CASE-1", oaRowId: parent.id, expenseItemId: "item-support" },
+      documents,
+    );
+    const invoiceRows = buildWorkbenchGroupDisplayLayout(updated)?.segments
+      .find(({ id }) => id === "item-support")?.rows.invoice;
+
+    expect(updated.rows.oa[0].expenseItems?.[0].supportingDocuments).toEqual([
+      expect.objectContaining({ id: "document-1", contentType: "image/png" }),
+    ]);
+    expect(invoiceRows).toEqual([
+      expect.objectContaining({
+        id: "supporting-document:document-1",
+        sourceKind: "oa_supporting_document",
+        externalUrl: "/api/documents/document-1/content",
+      }),
+    ]);
   });
 
   test("spans a parent bank row while keeping reimbursement invoices aligned to their owned items", () => {

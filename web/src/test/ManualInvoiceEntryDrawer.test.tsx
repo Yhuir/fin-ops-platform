@@ -135,7 +135,7 @@ describe("ManualInvoiceEntryDrawer", () => {
     });
   });
 
-  test("silently recognizes only the first selected file and keeps OCR fields editable", async () => {
+  test("recognizes a dropped PNG file and keeps OCR fields editable", async () => {
     const user = userEvent.setup();
     vi.mocked(recognizeManualInvoice).mockResolvedValue({
       sellerName: "OCR销方",
@@ -144,13 +144,11 @@ describe("ManualInvoiceEntryDrawer", () => {
 
     render(<ManualInvoiceEntryDrawer onClose={vi.fn()} onImportAccepted={vi.fn()} open />);
     await user.click(screen.getByText("上传识别"));
-    const input = screen.getByLabelText("上传并识别发票").querySelector("input[type='file']") as HTMLInputElement;
-    const first = new File(["first"], "first.jpg", { type: "image/jpeg" });
-    const second = new File(["second"], "second.pdf", { type: "application/pdf" });
-    await user.upload(input, [first, second]);
+    const dropzoneText = screen.getByText("拖入或选择 JPG / PNG / PDF");
+    const file = new File(["png"], "invoice.png", { type: "image/png" });
+    fireEvent.drop(dropzoneText.closest("label")!, { dataTransfer: { files: [file] } });
 
-    await waitFor(() => expect(recognizeManualInvoice).toHaveBeenCalledWith(first));
-    expect(recognizeManualInvoice).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(recognizeManualInvoice).toHaveBeenCalledWith(file));
     const seller = screen.getByLabelText("销方名称") as HTMLInputElement;
     expect(seller.value).toBe("OCR销方");
     await user.clear(seller);

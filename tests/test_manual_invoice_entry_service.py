@@ -244,6 +244,19 @@ class UploadedInvoiceRecognitionTests(unittest.TestCase):
             {},
         )
 
+    def test_png_upload_is_validated_and_reaches_image_recognition(self) -> None:
+        output = BytesIO()
+        Image.new("RGB", (800, 600), color="white").save(output, format="PNG")
+        service = OAAttachmentInvoiceService()
+        ocr_calls: list[bytes] = []
+        service._run_image_ocr = lambda content: ocr_calls.append(content) or []  # type: ignore[method-assign]
+
+        self.assertEqual(
+            service.recognize_uploaded_invoice(file_name="invoice.png", content=output.getvalue()),
+            {},
+        )
+        self.assertEqual(len(ocr_calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

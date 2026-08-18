@@ -1,14 +1,14 @@
-import { Alert, Button } from "@heroui/react";
+import { Alert, Button, Chip, Tabs } from "@heroui/react";
 import { FileText, Trash2, Upload } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { type DragEvent, useEffect, useId, useRef, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import ManualInvoiceBatchEditor from "../imports/ManualInvoiceBatchEditor";
-import { resolveImportApiErrorMessage } from "../../features/imports/api";
 import {
   confirmWorkbenchManualInvoiceSupplement,
   deleteWorkbenchOaSupportingDocument,
   listWorkbenchOaSupportingDocuments,
+  resolveWorkbenchActionErrorMessage,
   uploadWorkbenchOaSupportingDocuments,
 } from "../../features/workbench/api";
 import type {
@@ -22,6 +22,10 @@ type WorkbenchInvoiceEntryDrawerProps = {
   disabled?: boolean;
   onClose: () => void;
   onCompleted: () => Promise<void> | void;
+  onSupportingDocumentsChanged?: (
+    target: WorkbenchOaInvoiceSupplementTarget,
+    documents: WorkbenchOaSupportingDocument[],
+  ) => void;
 };
 
 export default function WorkbenchInvoiceEntryDrawer({
@@ -30,22 +34,26 @@ export default function WorkbenchInvoiceEntryDrawer({
   disabled = false,
   onClose,
   onCompleted,
+  onSupportingDocumentsChanged,
 }: WorkbenchInvoiceEntryDrawerProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
   const [mode, setMode] = useState<"upload" | "manual">("upload");
   const [documents, setDocuments] = useState<WorkbenchOaSupportingDocument[]>([]);
   const [loading, setLoading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open || !target) return;
     let active = true;
+    setDocuments([]);
     setLoading(true);
     setErrorMessage(null);
     void listWorkbenchOaSupportingDocuments(target)
       .then((items) => { if (active) setDocuments(items); })
-      .catch((error) => { if (active) setErrorMessage(resolveImportApiErrorMessage(error, "补充凭证加载失败。")); })
+      .catch((error) => { if (active) setErrorMessage(resolveWorkbenchActionErrorMessage(error, "补充凭证加载失败。")); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [open, target]);
@@ -55,10 +63,13 @@ export default function WorkbenchInvoiceEntryDrawer({
     setLoading(true); setErrorMessage(null);
     try {
       const created = await uploadWorkbenchOaSupportingDocuments(target, files);
-      setDocuments((current) => [...current, ...created]);
-      await onCompleted();
+      const byId = new Map(documents.map((document) => [document.id, document]));
+      created.forEach((document) => byId.set(document.id, document));
+      const nextDocuments = Array.from(byId.values());
+      setDocuments(nextDocuments);
+      onSupportingDocumentsChanged?.(target, nextDocuments);
     } catch (error) {
-      setErrorMessage(resolveImportApiErrorMessage(error, "补充凭证上传失败。"));
+      setErrorMessage(resolveWorkbenchActionErrorMessage(error, "补充凭证上传失败。"));
     } finally {
       setLoading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -70,11 +81,32 @@ export default function WorkbenchInvoiceEntryDrawer({
     setLoading(true); setErrorMessage(null);
     try {
       await deleteWorkbenchOaSupportingDocument(documentId);
-      setDocuments((current) => current.filter((document) => document.id !== documentId));
-      await onCompleted();
+      const nextDocuments = documents.filter((document) => document.id !== documentId);
+      setDocuments(nextDocuments);
+      if (target) onSupportingDocumentsChanged?.(target, nextDocuments);
     } catch (error) {
-      setErrorMessage(resolveImportApiErrorMessage(error, "补充凭证删除失败。"));
+      setErrorMessage(resolveWorkbenchActionErrorMessage(error, "补充凭证删除失败。"));
     } finally { setLoading(false); }
+  }
+
+  function handleDragEnter(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (disabled || loading) return;
+    dragDepthRef.current += 1;
+    setDragging(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragging(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setDragging(false);
+    if (!disabled && !loading) void upload(Array.from(event.dataTransfer.files));
   }
 
   return (
@@ -88,18 +120,32 @@ export default function WorkbenchInvoiceEntryDrawer({
       title="录入发票"
       width="min(800px, 100vw)"
     >
-      <div className="workbench-invoice-entry-drawer__mode-tabs" role="tablist" aria-label="录入方式">
-        <button aria-selected={mode === "upload"} data-active={mode === "upload" || undefined} role="tab" type="button" onClick={() => setMode("upload")}>JPG/PDF上传</button>
-        <button aria-selected={mode === "manual"} data-active={mode === "manual" || undefined} role="tab" type="button" onClick={() => setMode("manual")}>手工录入</button>
-      </div>
+      <Tabs selectedKey={mode} onSelectionChange={(key) => setMode(String(key) as "upload" | "manual")}>
+        <Tabs.ListContainer className="workbench-invoice-entry-drawer__mode-tabs-container">
+          <Tabs.List aria-label="录入方式" className="workbench-invoice-entry-drawer__mode-tabs">
+            <Tabs.Tab id="upload">上传凭证</Tabs.Tab>
+            <Tabs.Tab id="manual">手工录入</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.ListContainer>
+      </Tabs>
       {errorMessage ? <Alert className="manual-invoice-entry__notice manual-invoice-entry__notice--danger">{errorMessage}</Alert> : null}
       {mode === "upload" ? (
         <div className="workbench-supporting-documents">
-          <label className="workbench-supporting-documents__upload" htmlFor={inputId}>
+          <label
+            className="workbench-supporting-documents__upload"
+            data-dragging={dragging || undefined}
+            htmlFor={inputId}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleDrop}
+          >
             <Upload aria-hidden="true" size={18} />
-            <span>{loading ? "处理中..." : "选择 JPG / PDF 文件"}</span>
+            <strong>{loading ? "处理中..." : dragging ? "松开以上传文件" : "拖拽文件到此处，或点击选择"}</strong>
+            <span>支持 JPG、JPEG、PNG、PDF，单个文件不超过 25MB</span>
             <input
-              accept=".jpg,.jpeg,.pdf,image/jpeg,application/pdf"
+              aria-label="上传 JPG、PNG 或 PDF 补充凭证"
+              accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
               disabled={disabled || loading}
               id={inputId}
               multiple
@@ -108,7 +154,10 @@ export default function WorkbenchInvoiceEntryDrawer({
               onChange={(event) => { void upload(Array.from(event.currentTarget.files ?? [])); }}
             />
           </label>
-          <p>这些文件作为补充凭证直接关联当前 OA 子付款项，不进入统一发票池。</p>
+          <div className="workbench-supporting-documents__summary">
+            <p>补充凭证直接关联当前 OA 子付款项，不进入统一发票池。</p>
+            {documents.length > 0 ? <Chip color="default" size="sm" variant="soft"><Chip.Label>{documents.length} 个文件</Chip.Label></Chip> : null}
+          </div>
           <div className="workbench-supporting-documents__list">
             {documents.length === 0 && !loading ? <span>尚未上传补充凭证。</span> : null}
             {documents.map((document) => (

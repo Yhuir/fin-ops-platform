@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
 
 MAX_SUPPORTING_DOCUMENT_BYTES = 25 * 1024 * 1024
-ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".pdf"}
+ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".pdf"}
 
 
 class WorkbenchOaSupportingDocumentError(ValueError):
@@ -62,6 +63,15 @@ class WorkbenchOaSupportingDocumentService:
         created_resources: list[tuple[str, str]] = []
         try:
             for upload, content_type in validated:
+                content_sha256 = sha256(upload.content).hexdigest()
+                existing = self._repository.find_active_by_content(
+                    oa_row_id=oa_row_id,
+                    expense_item_id=expense_item_id,
+                    content_sha256=content_sha256,
+                )
+                if existing is not None:
+                    documents.append(self._present(existing))
+                    continue
                 storage_id = f"oa-support-{uuid4().hex}"
                 stored = self._file_store.store_workbench_oa_supporting_document(
                     document_id=storage_id,
@@ -77,7 +87,7 @@ class WorkbenchOaSupportingDocumentService:
                         file_object_id=str(stored["file_object_id"]),
                         original_filename=upload.file_name,
                         content_type=content_type,
-                        content_sha256=str(stored["sha256"]),
+                        content_sha256=content_sha256,
                         size_bytes=int(stored["size_bytes"]),
                         created_by=actor_id,
                     )
@@ -86,6 +96,19 @@ class WorkbenchOaSupportingDocumentService:
                         str(stored["storage_uri"])
                     )
                     raise
+                if document is None:
+                    self._file_store.delete_workbench_oa_supporting_document(
+                        str(stored["storage_uri"])
+                    )
+                    existing = self._repository.find_active_by_content(
+                        oa_row_id=oa_row_id,
+                        expense_item_id=expense_item_id,
+                        content_sha256=content_sha256,
+                    )
+                    if existing is None:
+                        raise RuntimeError("supporting document conflict could not be resolved")
+                    documents.append(self._present(existing))
+                    continue
                 created_resources.append((str(document["id"]), str(stored["storage_uri"])))
                 documents.append(self._present(document))
         except Exception as exc:
@@ -152,7 +175,7 @@ class WorkbenchOaSupportingDocumentService:
         if suffix not in ALLOWED_SUFFIXES:
             raise WorkbenchOaSupportingDocumentError(
                 "supporting_document_format_not_allowed",
-                "仅支持 JPG、JPEG 或 PDF 文件。",
+                "仅支持 JPG、JPEG、PNG 或 PDF 文件。",
             )
         if not content or len(content) > MAX_SUPPORTING_DOCUMENT_BYTES:
             raise WorkbenchOaSupportingDocumentError(
@@ -161,14 +184,18 @@ class WorkbenchOaSupportingDocumentService:
             )
         is_pdf = content.startswith(b"%PDF-")
         is_jpeg = content.startswith(b"\xff\xd8\xff")
-        if (suffix == ".pdf" and not is_pdf) or (suffix in {".jpg", ".jpeg"} and not is_jpeg):
+        is_png = content.startswith(b"\x89PNG\r\n\x1a\n")
+        if (
+            (suffix == ".pdf" and not is_pdf)
+            or (suffix in {".jpg", ".jpeg"} and not is_jpeg)
+            or (suffix == ".png" and not is_png)
+        ):
             raise WorkbenchOaSupportingDocumentError(
                 "supporting_document_signature_invalid",
                 "文件内容与扩展名不一致。",
             )
-        return SupportingDocumentUpload(file_name=file_name, content=content), (
-            "application/pdf" if is_pdf else "image/jpeg"
-        )
+        content_type = "application/pdf" if is_pdf else "image/png" if is_png else "image/jpeg"
+        return SupportingDocumentUpload(file_name=file_name, content=content), content_type
 
     @staticmethod
     def _present(document: dict[str, Any]) -> dict[str, Any]:
