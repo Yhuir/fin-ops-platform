@@ -1599,7 +1599,7 @@
 ## 2026-08-19 - 补充凭证上传可靠性与局部刷新
 
 - 单抽屉上传页改用 HeroUI Tabs，支持点击或拖拽 JPG/JPEG/PNG/PDF；前后端共享扩展名、签名和 25MB 上限口径，已知错误显示明确原因与请求编号，不再统一降级成“操作失败”。
-- 上传以 `oa_row_id + expense_item_id + content_sha256` 复用既有 partial unique index实现重试幂等；写入成功或删除后只替换当前 OA 子付款项的 `supporting_documents[]`，不触发关联台全量重读。页面 compact query 与 detail hydration 复用同一段 set-based SQL，避免详情加载后丢失文件。
+- 上传以 `oa_row_id + expense_item_id + content_sha256` 复用既有 partial unique index 实现重试幂等；写入成功或删除后只替换当前 OA 子付款项的 `supporting_documents[]`，不触发关联台全量重读。direct page query 使用 set-based SQL 输出文件，录入抽屉以精确 OA 子付款项列表 API 为权威来源；summary hydration 保留窄字段投影，避免把历史原始 OA JSON 扩散到分页链路。
 - 手工录入继续复用原批量编辑和原子提交边界，只扩展 PNG 识别；没有新增表、migration、read model、worker、queue、缓存、依赖或第二条上传链路。
 
 ## 2026-08-05 - 历史 WEX 运行时退役与搜索可发现性闭环（历史）

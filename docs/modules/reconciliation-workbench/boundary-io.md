@@ -122,7 +122,7 @@ requested tenant/scope
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户完成人工分类并明确 `accept_paired` 的 active formal relation；chip 显示人工选择的具体金额分类或“无异常”，系统检测项仍保留作审计。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
-| OA expense/invoice display | 前端 | OA row 的 compact DTO 与 detail hydration 都输出 `expense_items[]` 及每项 `supporting_documents[]`。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零显示“无OA附件”；附件存在但未产生正式发票显示“OA发票附件未解析”和“录入发票”；已有父 OA 发票但缺子项来源显示“OA发票待归属”。补充凭证同行展示文件名与预览链接，但不得伪装成发票或进入金额合计；上传/删除成功后只局部更新当前子付款项，不触发关联台全量重读。 |
+| OA expense/invoice display | 前端 | OA direct page DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`；summary hydration 保持原有窄字段投影，录入抽屉通过专用列表 API 读取权威补充凭证。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零显示“无OA附件”；附件存在但未产生正式发票显示“OA发票附件未解析”和“录入发票”；已有父 OA 发票但缺子项来源显示“OA发票待归属”。补充凭证同行展示文件名与预览链接，但不得伪装成发票或进入金额合计；上传/删除成功后只局部更新当前子付款项，不触发关联台全量重读。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |

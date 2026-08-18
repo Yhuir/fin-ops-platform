@@ -471,7 +471,30 @@ class PostgresWorkbenchPageHydrationRepository:
                         'amount_source', oa.normalized_payload->>'amount_source',
                         'amount_mismatch', oa.normalized_payload->'amount_mismatch',
                         'reason', oa.normalized_payload->>'reason',
-                        'expense_items', __COMPLETED_OA_EXPENSE_ITEMS_SQL__,
+                        'expense_items', coalesce((
+                            select jsonb_agg(
+                                jsonb_strip_nulls(jsonb_build_object(
+                                    'id', coalesce(item.value->>'id', item.value->>'expense_item_id'),
+                                    'expense_item_id', item.value->>'expense_item_id',
+                                    'row_index', item.value->>'row_index',
+                                    'project_name', item.value->>'project_name',
+                                    'expense_type', item.value->>'expense_type',
+                                    'amount', coalesce(
+                                        item.value->>'amount',
+                                        item.value->>'settlement_amount',
+                                        item.value->>'total_with_tax'
+                                    ),
+                                    'fee_content', item.value->>'fee_content',
+                                    'fee_description', item.value->>'fee_description',
+                                    'attachment_file_count', item.value->>'attachment_file_count'
+                                )) order by item.ordinality
+                            )
+                            from jsonb_array_elements(
+                                case when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
+                                     then oa.normalized_payload->'expense_items'
+                                     else '[]'::jsonb end
+                            ) with ordinality as item(value, ordinality)
+                        ), '[]'::jsonb),
                         'source_aliases', oa.normalized_payload->'source_aliases',
                         'source_identity_aliases', __COMPLETED_OA_SOURCE_IDENTITY_ALIASES_SQL__,
                         'oa_row_id', oa.normalized_payload->>'oa_row_id',
@@ -531,7 +554,30 @@ class PostgresWorkbenchPageHydrationRepository:
                         'amount', admission.amount::text,
                         'reconciliation_amount', admission.source_payload->>'reconciliation_amount',
                         'reason', admission.source_payload->>'reason',
-                        'expense_items', __PENDING_OA_EXPENSE_ITEMS_SQL__,
+                        'expense_items', coalesce((
+                            select jsonb_agg(
+                                jsonb_strip_nulls(jsonb_build_object(
+                                    'id', coalesce(item.value->>'id', item.value->>'expense_item_id'),
+                                    'expense_item_id', item.value->>'expense_item_id',
+                                    'row_index', item.value->>'row_index',
+                                    'project_name', item.value->>'project_name',
+                                    'expense_type', item.value->>'expense_type',
+                                    'amount', coalesce(
+                                        item.value->>'amount',
+                                        item.value->>'settlement_amount',
+                                        item.value->>'total_with_tax'
+                                    ),
+                                    'fee_content', item.value->>'fee_content',
+                                    'fee_description', item.value->>'fee_description',
+                                    'attachment_file_count', item.value->>'attachment_file_count'
+                                )) order by item.ordinality
+                            )
+                            from jsonb_array_elements(
+                                case when jsonb_typeof(admission.source_payload->'expense_items') = 'array'
+                                     then admission.source_payload->'expense_items'
+                                     else '[]'::jsonb end
+                            ) with ordinality as item(value, ordinality)
+                        ), '[]'::jsonb),
                         'source_aliases', admission.source_payload->'source_aliases',
                         'source_identity_aliases', __PENDING_OA_SOURCE_IDENTITY_ALIASES_SQL__,
                         'oa_row_id', admission.source_payload->>'oa_row_id',
@@ -1124,20 +1170,6 @@ class PostgresWorkbenchPageHydrationRepository:
             .replace(
                 "__PENDING_OA_SOURCE_IDENTITY_ALIASES_SQL__",
                 oa_source_identity_aliases_sql("admission.source_payload"),
-            )
-            .replace(
-                "__COMPLETED_OA_EXPENSE_ITEMS_SQL__",
-                oa_expense_items_with_supporting_documents_sql(
-                    "oa.row_id",
-                    "oa.normalized_payload->'expense_items'",
-                ),
-            )
-            .replace(
-                "__PENDING_OA_EXPENSE_ITEMS_SQL__",
-                oa_expense_items_with_supporting_documents_sql(
-                    "admission.oa_id",
-                    "admission.source_payload->'expense_items'",
-                ),
             ),
             (
                 member_types,
