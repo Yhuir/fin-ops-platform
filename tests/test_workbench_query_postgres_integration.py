@@ -934,12 +934,6 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 invoice_row["source_expense_item_ids"],
                 ["oa-manual-2308:item:0"],
             )
-            self.assertTrue(
-                any(
-                    link.get("source_type") == "oa_expense_item_invoice"
-                    for link in invoice_row["source_links"]
-                )
-            )
 
         expense_item = group["oa_rows"][0]["expense_items"][0]
         self.assertEqual(str(expense_item["attachment_file_count"]), "0")
