@@ -7912,25 +7912,7 @@ textarea {
 
 .pending-invoices-page {
   min-height: 100%;
-  padding: var(--fp-space-4) var(--fp-space-5);
   background: var(--fp-page);
-}
-
-.pending-invoices-page__scaffold {
-  gap: var(--fp-space-3);
-}
-
-.pending-invoices-page__scaffold .page-header {
-  align-items: flex-start;
-  padding-bottom: var(--fp-space-3);
-  border-bottom: 1px solid var(--fp-border);
-}
-
-.pending-invoices-page__scaffold .page-header > div:first-child {
-  display: flex;
-  align-items: center;
-  gap: var(--fp-space-3);
-  min-width: 0;
 }
 
 .pending-invoices-direction-segment {
@@ -9260,10 +9242,6 @@ textarea {
 }
 
 @media (max-width: 900px) {
-  .pending-invoices-page {
-    padding: var(--fp-space-4);
-  }
-
   .pending-invoices-table-shell {
     max-height: calc(100vh - 220px);
   }
@@ -9323,7 +9301,7 @@ textarea {
   flex-direction: column;
   gap: var(--fp-space-3);
   min-height: 100%;
-  padding: var(--fp-space-5);
+  padding: var(--fp-space-4);
   background: var(--fp-page);
 }
 
@@ -9822,10 +9800,6 @@ textarea {
 }
 
 @media (max-width: 760px) {
-  .app-health-page {
-    padding: var(--fp-space-4);
-  }
-
   .app-health-header {
     align-items: flex-start;
   }
@@ -21960,7 +21934,7 @@ body.column-layout-dragging {
 
 .bank-details-page-header {
   flex: 0 0 auto;
-  padding: 16px 20px 12px;
+  padding: 16px 16px 12px;
 }
 
 .bank-details-workbench {

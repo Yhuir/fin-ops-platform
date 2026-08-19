@@ -37,7 +37,7 @@ describe("AppHealthOperationsPage", () => {
   test("keeps AppHealth premium visual treatment compact and scoped", () => {
     const styles = readFileSync("src/app/styles.css", "utf8");
 
-    expect(styles).toMatch(/\.app-health-page\s*\{[\s\S]*gap:\s*var\(--fp-space-3\)/);
+    expect(styles).toMatch(/\.app-health-page\s*\{[^}]*gap:\s*var\(--fp-space-3\)[^}]*padding:\s*var\(--fp-space-4\)/s);
     expect(styles).toMatch(/\.app-health-title\s*\{[\s\S]*font-size:\s*var\(--fp-text-display\)/);
     expect(styles).toMatch(/\.app-health-section__header\s*\{[\s\S]*background:\s*var\(--fp-surface-muted\)/);
     expect(styles).toMatch(/\.app-health-inventory-table__number,[\s\S]*font-family:\s*var\(--fp-font-data\)/);

@@ -43,6 +43,13 @@
 - repository 或外部 adapter 不可用时返回明确错误；禁止 fallback 到历史表或旧 payload。
 - 金额统一两位小数、不使用千分位；共享 formatter 位于 `web/src/features/money.ts`。
 
+## 页面页头布局合同
+
+- `进项发票使用情况` 的标准页面壳层作为业务页面页头基线：主内容区顶部和左右均使用 `16px` 间距。
+- 标准页面通过共享 `PageScaffold` / `page-stack` 承担外层间距；页面根节点不得再次叠加 page padding。
+- 页面可以在共享壳层内调整工具栏、表格或内容区，但不得用页面私有 header padding 改变标题起点。
+- `关联台` 的沉浸式三栏工作台和 `设置` 的复合导航布局是显式例外，不套用标准业务页头基线。
+
 ## 权限
 
 `SessionProvider` 与 backend guards 使用 canonical ACL。前端隐藏/禁用只改善交互，不能替代 API permission。

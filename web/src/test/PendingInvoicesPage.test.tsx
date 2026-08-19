@@ -1010,8 +1010,12 @@ describe("Pending invoices page", () => {
 
   test("locks compact premium table, drawer, and motion styling contracts", () => {
     const css = readWebSource("src/app/styles.css");
+    const pageSource = readWebSource("src/pages/PendingInvoicesPage.tsx");
 
-    expect(css).toMatch(/\.pending-invoices-page\s*{[^}]*padding:\s*var\(--fp-space-4\) var\(--fp-space-5\)/s);
+    expect(pageSource).toContain('className="invoice-count-page-scaffold"');
+    expect(css).toMatch(/\.pending-invoices-page\s*{[^}]*min-height:\s*100%;[^}]*background:\s*var\(--fp-page\)/s);
+    expect(css).not.toMatch(/\.pending-invoices-page\s*{[^}]*padding:/s);
+    expect(css).not.toContain(".pending-invoices-page__scaffold");
     expect(css).toMatch(/\.pending-invoices-button,\s*\.pending-invoice-status-filter-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.finance-page-table-frame\s*{[^}]*height:\s*clamp\(600px, calc\(100dvh - 132px\), 1080px\)/s);
     expect(css).not.toMatch(/\.pending-invoices-table-frame\s*{[^}]*border-radius:/s);

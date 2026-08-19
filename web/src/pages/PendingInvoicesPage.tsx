@@ -672,7 +672,7 @@ export default function PendingInvoicesPage() {
             </Button>
           </div>
         )}
-        className="pending-invoices-page__scaffold"
+        className="invoice-count-page-scaffold"
         title="待找发票"
         titleAccessory={titleAccessory}
       >

@@ -12,6 +12,55 @@ function createAppShellLatencyRecorder(page: Parameters<typeof createOperationLa
 }
 
 test.describe("app shell responsive browser smoke", () => {
+  test("aligns standard page headers to the input invoice usage baseline", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installDeterministicApiMocks(page, { sessionMode: "admin" });
+
+    const routes = [
+      { path: "/input-invoice-usage", title: "进项发票使用情况" },
+      { path: "/pending-invoices", title: "待找发票" },
+      { path: "/bank-details", title: "银行明细" },
+    ] as const;
+
+    let baseline: { top: number; left: number } | null = null;
+    for (const route of routes) {
+      await page.goto(route.path);
+      const title = page.getByRole("heading", { name: route.title, exact: true });
+      await expect(title).toBeVisible();
+      const inset = await title.evaluate((heading) => {
+        const pageBody = heading.closest(".page-body");
+        if (!(pageBody instanceof HTMLElement)) throw new Error("page body missing");
+        const headingRect = heading.getBoundingClientRect();
+        const pageBodyRect = pageBody.getBoundingClientRect();
+        return {
+          top: headingRect.top - pageBodyRect.top,
+          left: headingRect.left - pageBodyRect.left,
+        };
+      });
+      if (baseline === null) {
+        baseline = inset;
+        continue;
+      }
+      expect(inset.top, route.path).toBeCloseTo(baseline.top, 1);
+      expect(inset.left, route.path).toBeCloseTo(baseline.left, 1);
+    }
+
+    await page.goto("/operations/app-health");
+    await expect(page.getByRole("heading", { name: "AppHealth 运维状态", exact: true })).toBeVisible();
+    const operationsInset = await page.locator(".app-health-header").evaluate((header) => {
+      const pageBody = header.closest(".page-body");
+      if (!(pageBody instanceof HTMLElement)) throw new Error("page body missing");
+      const headerRect = header.getBoundingClientRect();
+      const pageBodyRect = pageBody.getBoundingClientRect();
+      return {
+        top: headerRect.top - pageBodyRect.top,
+        left: headerRect.left - pageBodyRect.left,
+      };
+    });
+    expect(operationsInset.top).toBeCloseTo(16, 1);
+    expect(operationsInset.left).toBeCloseTo(16, 1);
+  });
+
   test("opens the compact navigation drawer and closes it after route navigation", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });

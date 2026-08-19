@@ -291,6 +291,7 @@ describe("Bank details page", () => {
     const source = readFileSync(resolve(process.cwd(), "src/app/styles.css"), "utf8");
     const pageSource = readFileSync(resolve(process.cwd(), "src/pages/BankDetailsPage.tsx"), "utf8");
 
+    expect(source).toMatch(/\.bank-details-page-header\s*\{[^}]*padding:\s*16px 16px 12px/s);
     expect(source).toMatch(/\.bank-transaction-table-container\s*\{[^}]*flex:\s*1 1 0[^}]*overflow:\s*hidden/s);
     expect(source).toMatch(/\.finance-table--contained \.finance-table__scroll\s*\{[^}]*overflow:\s*auto[^}]*overscroll-behavior:\s*contain/s);
     expect(pageSource).toContain('scrollMode="contained"');
