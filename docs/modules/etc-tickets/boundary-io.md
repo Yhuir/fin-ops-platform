@@ -1,6 +1,6 @@
 # ETC票据管理模块边界与 I/O
 
-日期：2026-08-02
+日期：2026-08-19
 
 ## 页面完整性统计合同
 
@@ -45,6 +45,7 @@
 | ETC 对账来源文件 | `untrusted_document_policy.py`、`etc_reconciliation_source_upload_service.py` | 在对象存储和解析之前统一校验后缀、文件签名、类型、字节数、图片像素/尺寸、PDF 页数/渲染像素和 DOCX 解压资源；票根只接受 TXT/PDF/JPG/PNG，信用卡账单只接受 PDF。签名与后缀不一致、未知二进制或超限文件返回 `invalid_document_upload`，不得再按 document fallback、写入 source file 或进入 OCR。 |
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 通过统一文件边界后，先从 PDF 文字层解析交易行；无可用交易行时才逐页渲染并用布局 OCR 重建表格行，不积压全部页面位图。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。禁止恢复外部 `pdftotext` 进程或 raw bytes OCR fallback。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
+| 导入批次与业务批次成员 | `app.etc_import_batches.invoice_ids`、`app.etc_business_batches.invoice_ids` | 当前导入尝试必须记录本次确认的完整 ETC 发票成员，包括已存在且附件完整、结果为 `duplicate_skipped` 的发票；重复发票保留首次 `import_batch_id` 作为 provenance，不据此排除其加入后续导入批次。绑定业务批次前先验证全部成员未提交且未被其它业务批次占用，再一次性写入目标批次与发票 owner，冲突整批失败、不得半绑定。创建 OA 草稿只按目标业务批次精确 `invoice_ids` 校验，不得通过成员旧 `import_batch_id` 拉入历史批次的其它发票。 |
 | ETC invoice list | `GET /api/etc/invoices` | 只读查询入口；route owner 只接收 `etc_service`、`json_response`、`serialize_invoice` 三个读侧端口，不接收 JSON body、link refresh 或状态回退端口 |
 | OA 草稿/已提交批次发票 PDF 下载 | `GET /api/etc/business-batches/{id}/invoice-pdf` | 使用 read session；application service 校验 actor scope，并要求存在 OA 草稿或批次属于 `ETC_BUSINESS_BATCH_SUBMITTED_STATUSES`；历史已提交批次不因缺少 `oa_draft_id` 被拒绝。成员只取 `business_batch.invoice_ids`，再把发票元数据与 `EtcService.read_invoice_pdf_bytes` 读取端口交给 PDF bundle service；不直接读取 HTTP cookie/header，不写业务状态 |
 | 已提交批次附件恢复 | `POST /api/etc/business-batches/{id}/invoice-pdf/repair` | 仅管理员、仅 submitted 状态、仅 multipart 原始 ZIP；必须提交 `expectedVersion` 与 `reason`。已有 hash 的附件继续严格校验 SHA-256；只有附件路径/hash、导入来源全空且来源为 `canonical_invoice:*` 的历史后补成员可在强身份、单页 PDF 内发票号和 business/submission 成员一致校验后 bootstrap PDF/XML，并从原始 XML 纠正通行日期、车牌、车型、来源及提交批次汇总。对象先写、事实 CAS 持久化，失败恢复 preimage 并删除新对象；不创建发票、不改成员、不改 OA/配对/提交状态，重复执行返回零修复 |

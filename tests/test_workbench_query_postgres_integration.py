@@ -839,7 +839,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 business_batch_id, status, scope_month, invoice_count,
                 total_amount, raw_payload
             ) values (
-                'priority-business', 'oa_submitted', '2026-07-01', 1, 22,
+                'priority-business', 'oa_submitted', '2026-07-01', 2, 33,
                 '{"normalized_payload":{"external_etc_batch_id":"priority-batch"}}'::jsonb
             )
             """
@@ -850,11 +850,17 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 etc_invoice_id, business_batch_id, status, invoice_no,
                 invoice_date, seller_name, amount, tax_amount, total_with_tax,
                 raw_payload
-            ) values (
-                'priority-business-invoice', 'priority-business', 'submitted',
-                'PRIORITY-BUSINESS', '2026-07-28', '业务批次供应商', 20, 2, 22,
-                '{}'::jsonb
-            )
+            ) values
+                (
+                    'priority-business-linked', 'priority-business', 'submitted',
+                    'PRIORITY-LINK', '2026-07-28', '业务批次供应商', 10, 1, 11,
+                    '{}'::jsonb
+                ),
+                (
+                    'priority-business-invoice', 'priority-business', 'submitted',
+                    'PRIORITY-BUSINESS', '2026-07-28', '业务批次供应商', 20, 2, 22,
+                    '{}'::jsonb
+                )
             """
         )
         self.raw_connection.execute(
@@ -868,6 +874,41 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 'test', 'strict', '{}'::jsonb
             from app.invoices invoices
             where invoices.legacy_mongo_id = 'priority-linked-invoice'
+            """
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount,
+                currency, normalized_payload, raw_payload
+            ) values (
+                'oa-source-priority', 'payment_request', '付款申请', 'oa-priority',
+                'active', 'completed', '测试用户', '2026-07-28', '2026-07-01',
+                'ETC部分桥接测试', 33, 'CNY',
+                '{"id":"oa-priority","month":"2026-07","amount":"33","workflow_status":"completed"}'::jsonb,
+                '{}'::jsonb
+            );
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                trade_time, summary, raw_payload, status
+            ) values (
+                'bank-priority', '6222000011118106', '基本户', 'outflow',
+                'ETC部分桥接测试', 33, -33, '2026-07-28', '2026-07-01',
+                '2026-07-28 10:00:00+08', 'ETC报销', '{}'::jsonb, 'active'
+            );
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'CASE-ETC-PARTIAL-BRIDGE', 'manual_confirmed', 'active', 1,
+                '2026-07-01',
+                array['oa-priority','bank-priority','etc-summary-priority-batch'],
+                array['oa','bank','invoice'], '{}'::jsonb,
+                '{"external_etc_batch_id":"priority-batch"}'::jsonb,
+                '{}'::jsonb
+            )
             """
         )
 
@@ -900,16 +941,56 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             for external_id, row in legacy_rows.items()
         }
 
-        self.assertEqual(
-            {str(row["etc_batch_id"]): row for row in page_rows},
-            expected_rows,
-        )
+        actual_rows = {str(row["etc_batch_id"]): row for row in page_rows}
+        self.assertEqual(set(actual_rows), set(expected_rows))
+        for external_batch_id in sorted(expected_rows):
+            self.assertEqual(
+                actual_rows[external_batch_id],
+                expected_rows[external_batch_id],
+                external_batch_id,
+            )
         self.assertEqual(page_statement_count, 1)
         self.assertEqual(legacy_statement_count, 5)
-        self.assertEqual(expected_rows["priority-batch"]["amount"], "11.00")
+        self.assertEqual(expected_rows["priority-batch"]["amount"], "33.00")
+        self.assertEqual(expected_rows["priority-batch"]["etc_invoice_count"], 2)
         self.assertEqual(
-            expected_rows["priority-batch"]["etc_invoice_detail_rows"][0]["invoice_no"],
-            "PRIORITY-LINK",
+            {
+                row["invoice_no"]
+                for row in expected_rows["priority-batch"]["etc_invoice_detail_rows"]
+            },
+            {"PRIORITY-LINK", "PRIORITY-BUSINESS"},
+        )
+        self.assertNotIn(
+            "PRIORITY-SUBMITTED",
+            {
+                row["invoice_no"]
+                for row in expected_rows["priority-batch"]["etc_invoice_detail_rows"]
+            },
+        )
+        initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        priority_group = next(
+            group
+            for zone in ("paired", "unpaired")
+            for group in initial[zone]["groups"]
+            if group.get("detail_key") == "CASE-ETC-PARTIAL-BRIDGE"
+        )
+        self.assertEqual(priority_group["invoice_rows"][0]["amount"], "33.00")
+        anomaly_items = list(
+            (priority_group.get("workbench_anomaly") or {}).get("items") or []
+        )
+        self.assertNotIn(
+            "bank_invoice_amount_mismatch",
+            {
+                item.get("code")
+                for item in anomaly_items
+            },
+        )
+        self.assertNotIn(
+            "oa_invoice_amount_mismatch",
+            {
+                item.get("code")
+                for item in anomaly_items
+            },
         )
 
     def test_typed_selection_accepts_cross_pane_same_text_id_and_untyped_fails_closed(self) -> None:

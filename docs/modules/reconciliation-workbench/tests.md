@@ -2,6 +2,13 @@
 
 日期：2026-08-19
 
+## 2026-08-19 ETC 68 张部分桥接回归
+
+- PostgreSQL integration：`tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_page_etc_hydration_is_one_statement_and_matches_legacy_dto` 构造同批 canonical link、重复 business row、未桥接 business row 与 legacy submission，断言现代层逐票去重后保留完整 2 张/33 元，link 覆盖同票、legacy 不混入，page/detail DTO 一致。
+- Business anomaly：同一 fixture 让 OA、银行流水与 ETC summary 都为 33 元，证明异常 SQL 使用相同现代来源集合，不再因部分桥接产生 OA/流水—发票金额误报。
+- Audit：`tests/test_workbench_page_audit.py` 保护 submitted business 与现代合并集的数量/金额 parity warning；audit 为独立只读查询，不进入页面热路径。
+- Regression/performance：旧批次级 source 选择和 Python skip 已删除；关联台仍使用一个 set-based hydration statement，无 API/schema/read model/worker/cache 变化。
+
 ## 2026-08-19 外部往来闭环、已接受异常与历史来源修复
 
 - Business core：`tests/test_workbench_amount_check_service.py` 保护 `turnover_manual_closure` 的 240000 收入 + 240000 支出闭环以付款本金侧和 OA 240000 比较且不误报，同时真实本金差异继续生成异常；普通付款关系仍使用支出减退款收入的净额。

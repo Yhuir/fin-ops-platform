@@ -1097,18 +1097,20 @@ class PostgresWorkbenchPageHydrationRepository:
             ),
             preferred_etc_rows as materialized (
                 select source.*,
+                       case when source.source_rank in (1, 2) then 1 else 2 end
+                           as source_tier,
                        row_number() over (
                            partition by source.external_batch_id,
                                coalesce(
                                    nullif(source.digital_invoice_no, ''),
                                    nullif(source.invoice_no, ''),
                                    source.row_id
-                               )
+                           )
                            order by source.source_rank, source.row_id
                        ) as identity_rank,
-                       min(source.source_rank) over (
+                       min(case when source.source_rank in (1, 2) then 1 else 2 end) over (
                            partition by source.external_batch_id
-                       ) as preferred_source_rank
+                       ) as preferred_source_tier
                 from etc_source_rows source
             ),
             etc_summary_rows as materialized (
@@ -1136,7 +1138,7 @@ class PostgresWorkbenchPageHydrationRepository:
                         ))[1]
                     ) as payload
                 from preferred_etc_rows preferred
-                where preferred.source_rank = preferred.preferred_source_rank
+                where preferred.source_tier = preferred.preferred_source_tier
                   and preferred.identity_rank = 1
                 group by preferred.external_batch_id
             )

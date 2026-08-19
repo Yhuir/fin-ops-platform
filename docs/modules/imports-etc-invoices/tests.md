@@ -1,5 +1,11 @@
 # ETC发票导入测试矩阵
 
+## 2026-08-19 重复发票当前批次成员回归
+
+- `tests/test_etc_backend.py::EtcServiceTests::test_business_batch_import_reuses_duplicate_invoice_as_current_batch_member` 保护重复完整发票不重建、仍进入当前 import/business batch、首次 provenance 不被覆盖，且 OA prepare 不拉入旧批次其它发票。
+- `tests/test_etc_backend.py::EtcServiceTests::test_business_batch_import_rejects_invoice_owned_by_another_batch_without_half_binding` 保护跨业务批次 owner 冲突整批拒绝、目标集合零半写。
+- 本次不改变 HTTP DTO、前端交互、队列、schema 或 read model；API/Frontend/Browser 由既有导入回归覆盖，新增价值集中在 business/service 和跨模块闭环。
+
 ## 2026-07-14 MinIO worker wiring / confirmable count 增量
 
 | 类别 | 覆盖 |

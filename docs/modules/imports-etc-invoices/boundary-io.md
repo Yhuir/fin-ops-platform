@@ -1,6 +1,6 @@
 # ETC发票导入模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-08-19
 
 ## 模块化状态
 
@@ -45,6 +45,7 @@ ETC preview 与 confirm 都是写入操作，必须在 multipart/JSON 解析前�
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | ETC import preview/result | 前端页面 | 可审计、可失败恢复；missing requirement 返回需求 ID、缺票数、金额、车牌、通行时间和处理提示，非法 ZIP 明确阻止确认 |
+| 当前导入批次成员 | `app.etc_import_batches.invoice_ids` | confirm 的成员集合包含本次 ZIP 中所有通过确认的发票；已存在且附件完整的发票继续计为 `duplicate_skipped`，但必须返回既有 ETC invoice id 并加入当前导入批次。发票的首次 `import_batch_id/import_session_id` 只表示 provenance，不是当前批次成员判定；不得把“重复”误解释为“从当前批次移除”。 |
 | ETC import session/files | PostgreSQL + object storage | metadata/edge 在 PostgreSQL；ZIP bytes 只经窄 file-object port；import worker 必须用与 API 相同的对象存储环境配置构造 state store，才能跨进程重载 `minio://` / S3 archive ref |
 | Worker 完成后的 ETC 查询 | PostgreSQL state store -> reconciliation/business batch/invoice query services | 独立 worker 持久化 task、business batch 和 invoice 后，常驻 API 的只读查询入口必须先重载 PostgreSQL snapshot；不得继续返回进程启动时的旧内存状态，也不得依赖重启 API 才可见 |
 | OA 草稿后续状态 | ETC 票据管理页面 | 导入模块只产出 imported business batch；不得创建、检测、重试或恢复 OA 草稿。用户发起创建后 creating/pending 都由 ETC 票据页作为暂存，并只接受两个 manual-status 决定 |

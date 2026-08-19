@@ -1,5 +1,11 @@
 # ETC发票导入 实施记录
 
+## 2026-08-19 - 重复发票仍属于当前导入批次
+
+- 已存在且附件完整的发票继续显示为 `duplicate_skipped`，不重复写附件或创建第二张 ETC 发票；但 confirm 必须返回既有 id，使当前 import batch 保存完整本次确认成员。
+- `invoice.import_batch_id/import_session_id` 保留首次 provenance；多批次成员关系由各批次 `invoice_ids` 表达。业务批次绑定对全部成员先验证未提交和 owner 唯一性，再一次性落目标集合，避免部分成功。
+- OA prepare 只使用业务批次精确 `invoice_ids`，不再沿首次 import batch 把旧批次其它成员带入。无 API/schema/worker/read model 变化。
+
 ## 2026-08-14 - OA-first 成本隔离更正
 
 - 单独 ETC 发票导入只产生 ETC/发票事实，不构成 OA 与付款流水关系，因此不能进入 OA 项目成本。

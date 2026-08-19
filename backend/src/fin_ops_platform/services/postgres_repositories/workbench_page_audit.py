@@ -92,6 +92,86 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
             from canonical_etc_batch_candidates
             where nullif(external_batch_id, '') is not null
         ),
+        submitted_business_batches as (
+            select
+                batch.business_batch_id,
+                batch.scope_month,
+                coalesce(
+                    nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                    batch.business_batch_id
+                ) as external_batch_id
+            from app.etc_business_batches batch
+            where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+        ),
+        business_etc_rows as (
+            select
+                batch.external_batch_id,
+                batch.scope_month,
+                2 as source_rank,
+                coalesce(
+                    nullif(invoice.invoice_no, ''),
+                    coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text)
+                ) as invoice_identity,
+                coalesce(invoice.total_with_tax, invoice.amount, 0) as invoice_amount
+            from submitted_business_batches batch
+            join app.etc_invoices invoice
+              on invoice.business_batch_id = batch.business_batch_id
+             and invoice.status <> 'deleted'
+        ),
+        linked_etc_rows as (
+            select
+                batch.external_batch_id,
+                batch.scope_month,
+                1 as source_rank,
+                coalesce(
+                    nullif(invoice.digital_invoice_no, ''),
+                    nullif(invoice.invoice_no, ''),
+                    coalesce(invoice.legacy_mongo_id, invoice.id::text)
+                ) as invoice_identity,
+                coalesce(invoice.total_with_tax, invoice.amount, 0) as invoice_amount
+            from submitted_business_batches batch
+            join app.etc_batch_invoice_links link
+              on link.business_batch_id = batch.business_batch_id
+             and link.link_status = 'active'
+            join app.invoices invoice
+              on invoice.id = link.invoice_id
+             and invoice.status <> 'deleted'
+        ),
+        modern_etc_rows as (
+            select * from linked_etc_rows
+            union all
+            select * from business_etc_rows
+        ),
+        ranked_modern_etc_rows as (
+            select
+                source.*,
+                row_number() over (
+                    partition by source.external_batch_id, source.invoice_identity
+                    order by source.source_rank
+                ) as identity_rank
+            from modern_etc_rows source
+        ),
+        expected_business_totals as (
+            select
+                external_batch_id,
+                min(scope_month) as scope_month,
+                count(distinct invoice_identity)::bigint as invoice_count,
+                round(sum(invoice_amount), 2) as invoice_amount
+            from business_etc_rows
+            group by external_batch_id
+        ),
+        effective_modern_totals as (
+            select
+                external_batch_id,
+                count(*)::bigint as invoice_count,
+                round(sum(invoice_amount), 2) as invoice_amount
+            from ranked_modern_etc_rows
+            where identity_rank = 1
+            group by external_batch_id
+        ),
         members as (
             select relation.case_id,
                    to_char(relation.month_scope, 'YYYY-MM') as scope_key,
@@ -160,10 +240,30 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
                    end as mismatch_kind
             from active_relations relation
         ),
+        invalid_etc_summaries as (
+            select
+                expected.external_batch_id as subject_id,
+                to_char(expected.scope_month, 'YYYY-MM') as scope_key,
+                'etc-summary-' || regexp_replace(
+                    expected.external_batch_id,
+                    '[^A-Za-z0-9_-]+',
+                    '-',
+                    'g'
+                ) as row_id,
+                'invoice'::text as row_type,
+                'etc_summary_modern_source_parity_mismatch'::text as mismatch_kind
+            from expected_business_totals expected
+            left join effective_modern_totals effective
+              on effective.external_batch_id = expected.external_batch_id
+            where expected.invoice_count <> coalesce(effective.invoice_count, 0)
+               or expected.invoice_amount <> coalesce(effective.invoice_amount, 0)
+        ),
         issues as (
             select * from invalid_members where mismatch_kind is not null
             union all
             select * from invalid_shapes where mismatch_kind is not null
+            union all
+            select * from invalid_etc_summaries
         )
         select mismatch_kind, subject_id, scope_key, row_id, row_type
         from issues
@@ -174,9 +274,19 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
     )
     return [
         AuditIssue(
-            severity="error",
+            severity=(
+                "warning"
+                if str(row.get("mismatch_kind") or "").strip()
+                == "etc_summary_modern_source_parity_mismatch"
+                else "error"
+            ),
             code="workbench_canonical_relation_integrity_mismatch",
-            message="关联台 active relation 包含无效或缺失的 canonical 成员。",
+            message=(
+                "已提交 ETC 业务批次与关联台现代发票合并集的数量或金额不一致。"
+                if str(row.get("mismatch_kind") or "").strip()
+                == "etc_summary_modern_source_parity_mismatch"
+                else "关联台 active relation 包含无效或缺失的 canonical 成员。"
+            ),
             subject_id=str(row.get("subject_id") or "").strip(),
             scope_key=str(row.get("scope_key") or "").strip(),
             details={

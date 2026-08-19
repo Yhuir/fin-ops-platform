@@ -1,5 +1,13 @@
 # ETC票据管理 实施记录
 
+## 2026-08-19 - 68 张批次部分桥接闭环
+
+- 根因一：关联台把 canonical link 设为整个 ETC 批次的最高优先来源；只要 68 张中 4 张建立 link，就丢弃同批 64 张 `app.etc_invoices`，形成 4 张/部分桥接假象。
+- 根因二：ETC confirm 遇到已存在且附件完整的发票时返回空 id，导致重复发票不进入当前 import batch；后续 OA prepare 又通过发票首次 `import_batch_id` 校验旧批次，混淆“首次导入来源”和“当前批次成员”。
+- 修复：Workbench 将 link + business invoice 合并为现代来源层并按统一发票身份逐票去重；legacy submission 只在无现代来源时使用。ETC import 的重复项返回既有 id 并加入当前批次，业务批次绑定先全量验证 owner 冲突再原子应用，OA prepare 只校验目标业务批次精确成员。
+- 旧链删除：删除批次级 `min(source_rank)` 选源、Python 的“存在任意 link 即跳过全部 business rows”以及 OA prepare 的历史 import batch 扩张校验；不增加 fallback、表、API、worker、cache 或 read model。
+- 审计：Page Audit 只读比较 submitted business 成员与 link+business 去重后数量/金额，漂移记 warning，页面热查询不增加 statement。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

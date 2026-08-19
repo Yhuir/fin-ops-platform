@@ -678,6 +678,92 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual(batch.status, EtcBusinessBatchStatus.IMPORTED.value)
             self.assertEqual(batch.invoice_ids, ["etc_invoice_0001", "etc_invoice_0002", "etc_invoice_0003"])
 
+    def test_business_batch_import_reuses_duplicate_invoice_as_current_batch_member(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=FakeEtcOAClient())
+            service.import_zips(
+                [UploadedEtcZipFile("earlier.zip", etc_zip(["ETC001", "ETC-OLDER"]))]
+            )
+            earlier_invoices, _total, _counts = service.list_invoices(page=1, page_size=20)
+            earlier_by_number = {invoice.invoice_number: invoice for invoice in earlier_invoices}
+            original_import_batch_id = earlier_by_number["ETC001"].import_batch_id
+
+            batch = service.create_business_batch(task_id="ETC-TASK-REUSE")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("current.zip", etc_zip(["ETC001", "ETC002"]))],
+                expected_version=batch.version,
+            )
+            batch, result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            current_import_batch = next(
+                item
+                for item in service.list_import_batches()
+                if item.source_session_id == preview["sessionId"]
+            )
+            invoices, _total, _counts = service.list_invoices(page=1, page_size=20)
+            by_number = {invoice.invoice_number: invoice for invoice in invoices}
+            drafted = service.create_business_batch_oa_draft(
+                batch.business_batch_id,
+                idempotency_key="reuse-duplicate-member",
+                expected_version=batch.version,
+            )
+
+        self.assertEqual(result.imported, 1)
+        self.assertEqual(result.duplicates_skipped, 1)
+        self.assertEqual(
+            set(current_import_batch.invoice_ids),
+            {by_number["ETC001"].id, by_number["ETC002"].id},
+        )
+        self.assertEqual(
+            set(batch.invoice_ids),
+            {by_number["ETC001"].id, by_number["ETC002"].id},
+        )
+        self.assertNotIn(by_number["ETC-OLDER"].id, batch.invoice_ids)
+        self.assertEqual(by_number["ETC001"].import_batch_id, original_import_batch_id)
+        self.assertEqual(
+            drafted.status,
+            EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
+        )
+
+    def test_business_batch_import_rejects_invoice_owned_by_another_batch_without_half_binding(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir))
+            first = service.create_business_batch(task_id="ETC-TASK-FIRST")
+            first_preview = service.preview_business_batch_import_zips(
+                first.business_batch_id,
+                [UploadedEtcZipFile("first.zip", etc_zip(["ETC001"]))],
+                expected_version=first.version,
+            )
+            first, _result = service.confirm_business_batch_import(
+                first.business_batch_id,
+                str(first_preview["sessionId"]),
+                expected_version=first_preview["businessBatch"]["version"],
+            )
+            second = service.create_business_batch(task_id="ETC-TASK-SECOND")
+            second_preview = service.preview_business_batch_import_zips(
+                second.business_batch_id,
+                [UploadedEtcZipFile("second.zip", etc_zip(["ETC001"]))],
+                expected_version=second.version,
+            )
+
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as raised:
+                service.confirm_business_batch_import(
+                    second.business_batch_id,
+                    str(second_preview["sessionId"]),
+                    expected_version=second_preview["businessBatch"]["version"],
+                )
+
+            latest_second = service.get_business_batch(second.business_batch_id)
+            invoices, _total, _counts = service.list_invoices(page=1, page_size=20)
+
+        self.assertEqual(raised.exception.code, "invoice_business_batch_conflict")
+        self.assertEqual(latest_second.invoice_ids, [])
+        self.assertEqual(invoices[0].current_batch_id, first.business_batch_id)
+
     def test_business_batch_oa_draft_is_idempotent(self) -> None:
         with TemporaryDirectory() as temp_dir:
             fake_oa = FakeEtcOAClient()

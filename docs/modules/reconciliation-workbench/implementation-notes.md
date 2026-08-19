@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-19 - ETC link 覆盖改为逐票覆盖
+
+- 68 张已提交业务批次仅 4 张存在 canonical link 时，旧 SQL/Python 以批次级来源优先级只发布 4 张；实际 64 张仍在 `app.etc_invoices`，不是文件或发票事实丢失。
+- direct page hydration、异常金额合计与详情 builder 统一使用同一规则：link 与 business invoice 同属现代层，按统一发票号身份逐票去重；link 覆盖同票展示，未桥接 business rows 保留；legacy submission 只在没有现代层时回退。
+- 删除旧 `preferred_source_rank` 与“link 存在则整批跳过 business rows”分支。查询仍为既有 set-based 单 statement，不新增 SQL round-trip、API、表、worker、cache 或 read model。
+- PostgreSQL 集成回归使用同批 link 11 元 + business 11/22 元 + legacy 33 元，断言最终 2 张/33 元、页面与详情一致且不产生金额误报。
+
 ## 2026-08-15 - 统一异常审阅与展示分区
 
 - 当前合同以 `workbench_anomaly` 为唯一自动异常 bundle，覆盖 OA—流水、OA—发票、流水—发票以及 OA 附件缺失/解析失败/待归属；旧 `oa_invoice_anomaly`、amount-mismatch ignore/restore service、routes 和前端动作已删除。

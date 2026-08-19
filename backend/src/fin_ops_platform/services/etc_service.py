@@ -1120,13 +1120,15 @@ class EtcService:
                 if str(import_batch.source_session_id or "").strip() == normalized_session_id
             ]
             now = datetime.now(UTC)
+            next_import_batch_ids = list(batch.import_batch_ids)
+            next_invoice_ids = list(batch.invoice_ids)
             for import_batch in linked_import_batches:
-                if import_batch.id not in batch.import_batch_ids:
-                    batch.import_batch_ids.append(import_batch.id)
+                if import_batch.id not in next_import_batch_ids:
+                    next_import_batch_ids.append(import_batch.id)
                 for invoice_id in list(import_batch.invoice_ids or []):
-                    if invoice_id not in batch.invoice_ids:
-                        batch.invoice_ids.append(invoice_id)
-            for invoice_id in list(batch.invoice_ids):
+                    if invoice_id not in next_invoice_ids:
+                        next_invoice_ids.append(invoice_id)
+            for invoice_id in next_invoice_ids:
                 invoice = self._invoices.get(invoice_id)
                 if invoice is None:
                     continue
@@ -1135,6 +1137,18 @@ class EtcService:
                         f"ETC invoice {invoice.invoice_number} is already submitted.",
                         code="invoice_already_submitted",
                     )
+                current_owner = str(invoice.current_batch_id or invoice.business_batch_id or "").strip()
+                if current_owner and current_owner != batch.business_batch_id:
+                    raise EtcBusinessBatchInvalidTransitionError(
+                        f"ETC invoice {invoice.invoice_number} belongs to another business batch.",
+                        code="invoice_business_batch_conflict",
+                    )
+            batch.import_batch_ids = next_import_batch_ids
+            batch.invoice_ids = next_invoice_ids
+            for invoice_id in next_invoice_ids:
+                invoice = self._invoices.get(invoice_id)
+                if invoice is None:
+                    continue
                 invoice.current_batch_id = batch.business_batch_id
                 invoice.business_batch_id = batch.business_batch_id
                 invoice.last_batch_id = batch.business_batch_id
@@ -3794,7 +3808,7 @@ class EtcService:
         existing_has_xml = existing is not None and self._stored_invoice_file_exists(existing.xml_file_path)
         existing_has_pdf = existing is not None and self._stored_invoice_file_exists(existing.pdf_file_path)
         if existing is not None and existing_has_xml and existing_has_pdf:
-            return "duplicate_skipped", None
+            return "duplicate_skipped", existing.id
 
         xml_path, xml_hash = (None, None)
         pdf_path, pdf_hash = (None, None)
@@ -3849,7 +3863,7 @@ class EtcService:
         if existing.import_session_id is None:
             existing.import_session_id = import_batch.source_session_id
         existing.updated_at = now
-        return ("attachment_completed" if completed else "duplicate_skipped"), existing.id if completed else None
+        return ("attachment_completed" if completed else "duplicate_skipped"), existing.id
 
     def _create_import_batch(
         self,
@@ -4057,7 +4071,6 @@ class EtcService:
         if not invoice_ids:
             raise EtcDraftRequestError("invoiceIds must not be empty.")
         invoices = [self._get_invoice(invoice_id) for invoice_id in invoice_ids]
-        self._validate_complete_import_batches(invoices)
         missing_attachments: list[str] = []
         for invoice in invoices:
             if invoice.status != EtcInvoiceStatus.UNSUBMITTED:

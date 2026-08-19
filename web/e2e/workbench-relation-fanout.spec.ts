@@ -22,7 +22,7 @@ test.describe("workbench relation browser flow", () => {
     const drawer = page.getByRole("dialog", { name: "录入发票" });
     await expect(drawer).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(1);
-    await expect(drawer.getByRole("tab", { name: "JPG/PDF上传" })).toHaveAttribute("aria-selected", "true");
+    await expect(drawer.getByRole("tab", { name: "上传凭证" })).toHaveAttribute("aria-selected", "true");
     await expect(drawer.getByText("不进入统一发票池", { exact: false })).toBeVisible();
     await expect(drawer.getByText("尚未上传补充凭证。", { exact: true })).toBeVisible();
 

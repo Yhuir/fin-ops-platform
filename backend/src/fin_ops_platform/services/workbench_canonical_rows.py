@@ -532,14 +532,27 @@ class WorkbenchCanonicalRowsBuilder:
             ranked_rows as (
                 select
                     source_rows.*,
-                    min(source_rank) over (partition by external_batch_id)
-                        as preferred_source_rank
+                    case when source_rank in (1, 2) then 1 else 2 end
+                        as source_tier,
+                    row_number() over (
+                        partition by external_batch_id,
+                            coalesce(
+                                nullif(digital_invoice_no, ''),
+                                nullif(invoice_no, ''),
+                                row_id
+                            )
+                        order by source_rank, row_id
+                    ) as identity_rank,
+                    min(case when source_rank in (1, 2) then 1 else 2 end) over (
+                        partition by external_batch_id
+                    ) as preferred_source_tier
                 from source_rows
             )
             select *
             from ranked_rows
-            where source_rank = preferred_source_rank
-            order by external_batch_id, invoice_date, row_id
+            where source_tier = preferred_source_tier
+              and identity_rank = 1
+            order by external_batch_id, invoice_date, source_rank, row_id
             """,
             (sorted(external_batch_ids),),
         )
@@ -1651,8 +1664,6 @@ class WorkbenchCanonicalRowsBuilder:
             ),
         )
         for row in business_rows:
-            if str(row.get("external_etc_batch_id") or "").strip() in linked_external_batch_ids:
-                continue
             append_summary_source_row(
                 row,
                 batch_payload=self._etc_business_summary_batch_payload(row),
@@ -1870,10 +1881,13 @@ class WorkbenchCanonicalRowsBuilder:
 
     @staticmethod
     def _etc_invoice_summary_invoice_identity(row: dict[str, Any]) -> str:
-        for key in ("digital_invoice_no", "invoice_no", "row_id"):
+        for key in ("digital_invoice_no", "invoice_no"):
             value = str(row.get(key) or "").strip()
             if value:
-                return f"{key}:{value}"
+                return f"invoice:{value}"
+        row_id = str(row.get("row_id") or "").strip()
+        if row_id:
+            return f"row:{row_id}"
         return f"row:{id(row)}"
 
     @staticmethod

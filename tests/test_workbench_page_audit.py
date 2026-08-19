@@ -47,6 +47,11 @@ class WorkbenchPageAuditTests(unittest.TestCase):
             "invoice.id is null and etc_batch.external_batch_id is null",
             connection.integrity_sql,
         )
+        self.assertIn("ranked_modern_etc_rows", connection.integrity_sql)
+        self.assertIn(
+            "etc_summary_modern_source_parity_mismatch",
+            connection.integrity_sql,
+        )
 
     def test_invalid_noncanonical_summary_member_remains_blocking(self) -> None:
         connection = _Connection(
@@ -69,6 +74,26 @@ class WorkbenchPageAuditTests(unittest.TestCase):
             report["issues"][0]["details"]["mismatch_kind"],
             "missing_canonical_invoice_member",
         )
+
+    def test_partial_bridge_parity_mismatch_is_diagnostic_warning(self) -> None:
+        connection = _Connection(
+            [
+                {
+                    "mismatch_kind": "etc_summary_modern_source_parity_mismatch",
+                    "subject_id": "ETC-PARTIAL",
+                    "scope_key": "2026-07",
+                    "row_id": "etc-summary-ETC-PARTIAL",
+                    "row_type": "invoice",
+                }
+            ]
+        )
+
+        report = audit_workbench_relation_display(connection)
+
+        self.assertEqual(report["summary"]["warning_count"], 1)
+        self.assertEqual(report["summary"]["error_count"], 0)
+        self.assertEqual(report["issues"][0]["severity"], "warning")
+        self.assertIn("ETC 业务批次", report["issues"][0]["message"])
 
 
 if __name__ == "__main__":

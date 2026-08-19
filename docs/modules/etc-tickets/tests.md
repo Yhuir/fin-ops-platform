@@ -2,6 +2,12 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-08-19 重复成员与部分桥接闭环
+
+- `tests/test_etc_backend.py` 保护重复完整发票仍进入当前 import/business batch、首次 provenance 保留、跨 business owner 冲突整批失败且零半绑定，并验证 OA prepare 只消费目标批次精确成员。
+- `tests/test_workbench_query_postgres_integration.py` 保护同一 ETC 批次只有部分 canonical link 时，关联台仍发布全部 business 成员并逐票去重；金额合计与异常判断使用同一集合。
+- `tests/test_workbench_page_audit.py` 保护 submitted business 成员与现代合并集的数量/金额 parity warning；不新增 schema、API、worker、cache、read model 或前端状态。
+
 ## 影响面清单
 
 | 层级 | 当前入口 | 回归风险 |
