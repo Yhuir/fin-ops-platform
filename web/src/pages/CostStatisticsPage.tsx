@@ -1822,7 +1822,7 @@ export default function CostStatisticsPage() {
                       setSelectedProjectEntryId(null);
                       setEntryDetail(null);
                     }}
-                    renderPrimary={(row) => row.projectName}
+                    getPrimaryText={(row) => row.projectName}
                     renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
@@ -1846,7 +1846,7 @@ export default function CostStatisticsPage() {
                       setSelectedProjectEntryId(null);
                       setEntryDetail(null);
                     }}
-                    renderPrimary={(row) => row.expenseType}
+                    getPrimaryText={(row) => row.expenseType}
                     renderSecondary={(row) => `${row.transactionCount} 条归集`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
@@ -1917,7 +1917,7 @@ export default function CostStatisticsPage() {
                       setSelectedBankEntryId(null);
                       setEntryDetail(null);
                     }}
-                    renderPrimary={(row) => row.paymentAccountLabel}
+                    getPrimaryText={(row) => row.paymentAccountLabel}
                     renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
@@ -1939,7 +1939,7 @@ export default function CostStatisticsPage() {
                       setSelectedBankEntryId(null);
                       setEntryDetail(null);
                     }}
-                    renderPrimary={(row) => row.projectName}
+                    getPrimaryText={(row) => row.projectName}
                     renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
@@ -2009,7 +2009,7 @@ export default function CostStatisticsPage() {
                       setSelectedExpenseEntryId(null);
                       setEntryDetail(null);
                     }}
-                    renderPrimary={(row) => row.expenseType}
+                    getPrimaryText={(row) => row.expenseType}
                     renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
@@ -2083,7 +2083,7 @@ export default function CostStatisticsPage() {
                       setSelectedBankTagEntryId(null);
                       setEntryDetail(null);
                     }}
-                    renderPrimary={(row) => row.primaryLabel}
+                    getPrimaryText={(row) => row.primaryLabel}
                     renderSecondary={(row) => (
                       <span className="cost-tag-counts">
                         <span>支出 <strong className="cost-tag-count cost-tag-count--expense">{row.expenseTransactionCount}</strong> 笔</span>
@@ -2111,7 +2111,7 @@ export default function CostStatisticsPage() {
                       setSelectedBankTagEntryId(null);
                       setEntryDetail(null);
                     }}
-                    renderPrimary={(row) => row.subLabel}
+                    getPrimaryText={(row) => row.subLabel}
                     renderSecondary={(row) => (
                       <span className="cost-tag-counts">
                         <span>支出 <strong className="cost-tag-count cost-tag-count--expense">{row.expenseTransactionCount}</strong> 笔</span>

@@ -198,9 +198,12 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-time-workspace,\s*\.cost-explorer-grid\s*{[^}]*height:\s*var\(--cost-workspace-height\)/s);
     expect(css).toMatch(/\.cost-analysis-layout\.time-layout\s*{[^}]*grid-template-columns:\s*minmax\(190px, 15%\) minmax\(0, 1fr\)/s);
     expect(css).toMatch(/\.cost-explorer-list\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
-    expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-explorer-item-select\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-item-main strong\s*{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s);
     expect(css).toMatch(/\.cost-explorer-item\.active\s*{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
+    expect(css).toMatch(/\.cost-explorer-item-disclosure\s*{[^}]*position:\s*absolute[^}]*min-height:\s*28px/s);
+    expect(css).toMatch(/\.cost-explorer-text-dialog\s*{[^}]*max-height:\s*min\(240px, 45vh\)[^}]*overflow:\s*auto/s);
     expect(css).not.toContain("height: max(560px, calc(100dvh - 240px))");
     expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*justify-content:\s*flex-end/s);
     expect(css).toMatch(/\.cost-view-scope-heading\s*{[^}]*min-height:\s*44px/s);
@@ -213,9 +216,11 @@ describe("Cost statistics page", () => {
     expect(pageSource).toContain("lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]");
     expect(pageSource).toContain("lg:grid-cols-[minmax(210px,0.82fr)_minmax(210px,0.82fr)_minmax(0,2.36fr)]");
     expect(pageSource).toContain("bg-[var(--fp-page)]");
-    expect(listSource).toContain('import { Button, Chip } from "@heroui/react";');
-    expect(listSource).toContain("<Button");
-    expect(listSource).toContain("<Chip");
+    ["Button", "Chip", "PopoverRoot", "PopoverTrigger", "PopoverContent", "PopoverDialog"].forEach((symbol) => {
+      expect(listSource).toContain(symbol);
+    });
+    expect(listSource).toContain("getPrimaryText");
+    expect(listSource).not.toContain("renderPrimary");
     expect(css).toMatch(/\.cost-lock-target\.is-locked\s*{[^}]*opacity:\s*0\.62/s);
     expect(css).toMatch(/\.cost-lock-overlay\s*{[^}]*background:\s*color-mix\(in srgb, var\(--fp-page\) 20%, transparent\)[^}]*pointer-events:\s*auto/s);
     expect(css).not.toMatch(/\.cost-lock-overlay\s*{[^}]*backdrop-filter/s);

@@ -836,6 +836,16 @@ test.describe("cost statistics browser flow", () => {
     ).toBeLessThanOrEqual(narrowHeadingGeometry.clientWidth + 1);
     const largeProject = page.getByRole("button", { name: /大型成本浏览器稳定性项目/ }).first();
     await expectVisibleAndUncovered(largeProject, "large cost project selector");
+    const largeProjectItem = largeProject.locator("..");
+    const collapsedProjectHeight = await largeProjectItem.evaluate((element) => element.getBoundingClientRect().height);
+    await largeProjectItem.getByRole("button", { name: "展开项目名完整内容" }).click();
+    const projectNameDialog = page.getByRole("dialog", { name: "项目名完整内容" });
+    await expect(projectNameDialog).toContainText("大型成本浏览器稳定性项目");
+    expect(await largeProjectItem.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+      collapsedProjectHeight,
+    );
+    await largeProjectItem.getByRole("button", { name: "折叠项目名完整内容" }).click();
+    await expect(projectNameDialog).toHaveCount(0);
     await largeProject.click();
     const largeExpenseType = page.getByRole("button", { name: /大型宽表费用类型-1/ }).first();
     await expectVisibleAndUncovered(largeExpenseType, "large cost expense type selector");
