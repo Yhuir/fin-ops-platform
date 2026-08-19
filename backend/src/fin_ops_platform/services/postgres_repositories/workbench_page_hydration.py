@@ -1561,9 +1561,31 @@ class PostgresWorkbenchPageHydrationRepository:
             },
         )
         if isinstance(compact, dict):
-            compact.pop("collapsed_rows", None)
+            collapsed = compact.get("collapsed_rows")
+            invoice_rows = list(compact.get("invoice_rows") or [])
+            is_etc_summary = any(
+                isinstance(row, dict)
+                and str(row.get("source_kind") or "").strip() == "etc_invoice_summary"
+                for row in invoice_rows
+            )
+            first_etc_invoice = next(
+                (
+                    row
+                    for row in list(collapsed.get("invoice") or [])
+                    if isinstance(row, dict)
+                    and str(row.get("source_kind") or "").strip() == "etc_invoice"
+                ),
+                None,
+            ) if isinstance(collapsed, dict) and is_etc_summary else None
+            if first_etc_invoice is None:
+                compact.pop("collapsed_rows", None)
+            else:
+                compact["collapsed_rows"] = {"invoice": [first_etc_invoice]}
             for pane in ("oa", "bank", "invoice"):
-                for row in list(compact.get(f"{pane}_rows") or []):
+                visible_rows = list(compact.get(f"{pane}_rows") or [])
+                if pane == "invoice":
+                    visible_rows.extend(list((compact.get("collapsed_rows") or {}).get("invoice") or []))
+                for row in visible_rows:
                     if not isinstance(row, dict):
                         continue
                     # Summary pages inherit the relation-level amount check in

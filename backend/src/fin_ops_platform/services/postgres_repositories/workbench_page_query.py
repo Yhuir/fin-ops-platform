@@ -2101,10 +2101,16 @@ class PostgresWorkbenchPageQueryRepository:
                   and (scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month)
             ),
             batch_inventory as materialized (
-                select count(*)::bigint as inventory_etc_summary_batch_count
+                select count(distinct coalesce(
+                    nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                    batch.business_batch_id
+                ))::bigint as inventory_etc_summary_batch_count
                 from app.etc_business_batches batch
                 cross join requested_scope scope
-                where batch.status <> 'withdrawn'
+                where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
                   and (scope.scope_key = 'all' or batch.scope_month = scope.scope_month)
             ),
             anomaly_counts as materialized (
@@ -3935,7 +3941,27 @@ class PostgresWorkbenchPageQueryRepository:
                 "invoice.invoice_type",
             ]
         )
-        etc_text, etc_params = text_predicates(["summary.external_batch_id"])
+        etc_text, etc_params = text_predicates(
+            [
+                "summary.external_batch_id",
+                "etc_batch.business_batch_id",
+                "etc_batch.raw_payload->'normalized_payload'->>'submission_batch_id'",
+                "etc_batch.raw_payload->'normalized_payload'->>'submissionBatchId'",
+            ]
+        )
+        etc_predicates = [
+            etc_text,
+            """
+            exists (
+                select 1
+                from app.etc_invoices etc_invoice
+                where etc_invoice.business_batch_id = etc_batch.business_batch_id
+                  and etc_invoice.status <> 'deleted'
+                  and coalesce(etc_invoice.invoice_no, '') ilike %s escape E'\\\\'
+            )
+            """,
+        ]
+        etc_params.append(pattern)
         oa_predicates = [oa_text]
         pending_predicates = [pending_text]
         bank_predicates = [bank_text]
@@ -3951,6 +3977,8 @@ class PostgresWorkbenchPageQueryRepository:
             pending_params.append(amount)
             bank_params.append(amount)
             invoice_params.extend([amount, amount])
+            etc_predicates.append("etc_batch.total_amount = %s::numeric")
+            etc_params.append(amount)
         if search_date is not None:
             oa_predicates.append(
                 "(oa.application_date = %s::date or oa.approved_at::date = %s::date)"
@@ -4009,7 +4037,16 @@ class PostgresWorkbenchPageQueryRepository:
                 from etc_summary_keys summary
                 join needed_keys needed
                   on needed.row_type = 'invoice' and needed.row_id = summary.row_id
-                where ({etc_text})
+                left join app.etc_business_batches etc_batch
+                  on coalesce(
+                      nullif(etc_batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                      nullif(etc_batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                      nullif(etc_batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                      nullif(etc_batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                      etc_batch.business_batch_id
+                  ) = summary.external_batch_id
+                 and etc_batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+                where ({' or '.join(etc_predicates)})
             ),
             """,
             [*oa_params, *pending_params, *bank_params, *invoice_params, *etc_params],

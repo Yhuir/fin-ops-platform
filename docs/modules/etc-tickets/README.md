@@ -60,7 +60,8 @@
 - OA 草稿创建后的结果弹窗只提供两个状态决定：“我已在 OA 系统上完成 OA 草稿的提交”进入已提交，“我已在 OA 系统上删除该 OA 草稿”回到未提交。打开草稿与下载发票 PDF 只保留在暂存批次的常驻操作区，不混入结果决定弹窗。
 - OA 草稿创建拆为本地 prepare、锁外 OA I/O、CAS finalize；请求必须携带稳定 `idempotencyKey`。附件通过 OA adapter 以默认 4、最多 8 路有界并发上传并保持顺序。点击创建后前端立即把目标批次放入暂存；同页请求仍在执行时禁用决定按钮，避免与 finalize 竞态；请求结束或重新进入页面后，`oa_draft_creating` 与 `oa_confirmation_pending` 都直接显示既有两个决定。App 不检测 OA 是否已生成草稿，也不自动重试；用户按 OA 中的实际操作声明“已提交”或“已删除草稿”。管理员 recovery 只保留给历史/技术修复，不进入普通页面。
 - OA 草稿创建成功后，页面提供当前业务批次 ETC 发票 PDF 合并下载。批次 `invoice_ids` 是成员事实源，application service 负责范围校验与审计，PDF bundle service 只通过文件读取端口读取对象存储/本地字节并按开票日期、发票号、ID 稳定排序；每张来源必须恰好一页，任一缺失、损坏、hash 不一致或多页时整包失败，不允许静默漏票。
-- `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。
+- `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；状态变化会把精确月份投递到既有 `workbench-matching` durable queue，由 OA 的 `etc_batch_id` 把 ETC summary 挂入已有 OA/流水正式关系。已 submitted 决定允许无业务写的幂等重放，用于修复历史漏投；缺 OA 时必须保持未配对并显式审计，不能按金额猜测。
+- 左侧批次名称使用成员发票最早/最晚开票月份范围，缺日期时只回退 scope month，不再使用提交/创建日期。
 - ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
 - 未提交批次允许本地删除；已提交但尚无正式 `oa_row_id` 的本地批次仍可 reset。已绑定正式 OA 行的 submitted 批次禁止普通删除，避免真实 OA、ETC 发票成员和关联台关系被拆散。历史错误 reset 只能通过指纹守卫的精确 tombstone 恢复工具处理。
 - 已提交业务批次删除/reset 在修改本地批次前必须先通过 Workbench relation command boundary 的 canonical write safety；权限/session、DB/目标写模型不可用、owner 状态或 relation version/idempotency/row occupation 冲突时 fail fast，不得乐观删除本地批次或 relation。普通 `workbench_relation` distribution non-fresh 只作为读侧诊断，不能作为默认写阻断条件。

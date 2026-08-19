@@ -2721,6 +2721,8 @@ function etcBusinessBatchPayload(status: EtcBusinessBatchStatus, includeItems = 
     oa_row_id: submitted ? "oa-etc-e2e-001" : "",
     oa_process_status: submitted ? "manual_without_oa_row" : "",
     invoice_summary: { count: 2, amount: "32.26" },
+    invoice_date_start: "2026-03-27",
+    invoice_date_end: "2026-03-28",
     create_oa_draft_action: createOaDraftAction,
     created_at: "2026-06-17T09:00:00+08:00",
     updated_at: "2026-06-17T09:00:00+08:00",

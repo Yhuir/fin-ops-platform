@@ -1,6 +1,6 @@
 # ETC票据管理模块边界与 I/O
 
-日期：2026-08-19
+日期：2026-08-20
 
 ## 页面完整性统计合同
 
@@ -40,8 +40,8 @@
 | OA 草稿 command | `POST /api/etc/business-batches/{id}/oa-draft`、`.../oa-draft/recover` | create 请求携带稳定 idempotency key；prepare 在 ETC 锁内持久化 attempt，OA HTTP 在锁外执行，finalize 通过 `save_etc_oa_draft_attempt` 对单一 business batch 做 version CAS 并只合并该 attempt 改动的 business batch/submission/invoice/import 行；同 key 重放不得创建第二个草稿。OA 附件 adapter 以默认 4、允许 1..8 路有界并发上传且保持输入顺序；finalize 持久化失败必须保持 outcome unknown。普通页面点击后立即把 creating 放入暂存并显示两个 manual-status 决定，不调用 recover、不检测 OA。recover 仅管理员用于历史技术修复，仍要求严格证据与 CAS，且不调用 OA create/submit/delete。所有 OA draft command 不读取/写入 canonical invoice link，也不触发下游 read model |
 | OA 草稿预填配置 | `GET/PUT /api/workbench/settings/oa-draft-prefill/etc` | 所有已授权 App 账户可见并可只读打开页面右上角抽屉，仅 admin 可编辑/保存独立 versioned family；ETC prepare 原子保存当次配置快照和 session display name，锁外 OA I/O 不重读设置。申请日期和金额由当次创建动态填充；申请事由只显示业务文本，ETC/business batch ID 仅放结构化字段供同步识别 |
 | OA 金额与发票金额展示 | linked reconciliation task `oaTotalAmount`、business batch `invoiceSummary`、`amountBreakdown` | `oaTotalAmount`/`amountBreakdown.oaAmount` 是 OA 提交金额事实源；`invoiceSummary` 的持久化标量只从 business batch `invoice_ids` 对应 ETC 发票求数量和含税总额，不得被 submission/OA `total_amount`、`oa_total_amount` 覆盖。列表与详情必须返回同一发票汇总；历史差额使用既有 `amountBreakdown.gapAmount/gapReason` 如实展示，不据差额自动补发票。所有金额以无千分位两位小数展示；差额只提示、不阻断、不写回；禁止为该展示新增共享 API、read model、queue 或跨页面写入 |
-| OA 草稿结果决定 | `POST /api/etc/business-batches/{id}/manual-oa-status` | creating 与 pending 都允许决定；`submitted` 表示用户已在 OA 完成草稿提交，批次进入已提交；`not_submitted` 表示用户已在 OA 删除草稿，批次回到未提交。结果弹窗和暂存区只暴露这两个 command；同页 OA create 请求未完成时暂时禁用按钮，之后由 version CAS 防并发覆盖。该 command 只写 business batch / reconciliation task / audit 与精确 affected scope，禁止检测 OA、relink canonical invoice 或投递页面 refresh |
-| 批次列表标题 | `EtcTicketManagementPage.tsx` | 左栏仅展示 `created_at` 的用户可读时间，并在同一行展示发票数量和金额；不展示或编辑 internal business batch ID、external batch ID 或历史内部 title。后端 title/PATCH 合同只保留给现有非页面调用方。 |
+| OA 草稿结果决定 | `POST /api/etc/business-batches/{id}/manual-oa-status` | creating 与 pending 都允许决定；`submitted` 表示用户已在 OA 完成草稿提交，批次进入已提交；`not_submitted` 表示用户已在 OA 删除草稿，批次回到未提交。结果弹窗和暂存区只暴露这两个 command；同页 OA create 请求未完成时暂时禁用按钮，之后由 version CAS 防并发覆盖。该 command 写 business batch / reconciliation task / audit，并在提交事实落地后把受影响月份交给既有 `workbench-matching` durable dirty-scope 边界；禁止检测 OA、relink canonical invoice 或投递已退役的 Workbench page refresh。对已经 submitted 的同一决定允许幂等重放：不得推进 version 或重复写业务审计，只补投同一精确 matching scope；若请求携带的 OA row 与既有非空 OA row 冲突则 fail fast。 |
+| 批次列表标题 | `EtcTicketManagementPage.tsx` | 左栏按当前页 business batch 成员发票的最早/最晚开票月份命名，例如 `2026年4月–5月 ETC发票`；单月只显示一个月份，跨年同时显示两端年份。成员没有开票日期时仅回退到既有 `scopeMonth`，仍缺失则明确显示“开票月份未记录”，禁止回退提交/创建日期。列表 DTO 只对已分页的业务批次做一次 lateral `min/max(invoice_date)`，count/statistics 查询不得扫描日期范围；同一行继续展示发票数量和金额，不展示 internal business batch ID、external batch ID 或历史内部 title。后端 title/PATCH 合同只保留给现有非页面调用方。 |
 | ETC 对账来源文件 | `untrusted_document_policy.py`、`etc_reconciliation_source_upload_service.py` | 在对象存储和解析之前统一校验后缀、文件签名、类型、字节数、图片像素/尺寸、PDF 页数/渲染像素和 DOCX 解压资源；票根只接受 TXT/PDF/JPG/PNG，信用卡账单只接受 PDF。签名与后缀不一致、未知二进制或超限文件返回 `invalid_document_upload`，不得再按 document fallback、写入 source file 或进入 OCR。 |
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 通过统一文件边界后，先从 PDF 文字层解析交易行；无可用交易行时才逐页渲染并用布局 OCR 重建表格行，不积压全部页面位图。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。禁止恢复外部 `pdftotext` 进程或 raw bytes OCR fallback。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
@@ -56,13 +56,13 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| ETC ticket/batch payload | 前端页面 | summary DTO 只含当前页列表展示、三 bucket counts、全量 statistics、pagination 和统一 `createOaDraftAction`；页面 rail 的“批次数”展示 `pagination.total`，不是当前页 `items.length`，每行只显示创建时间、发票数量和金额。不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
+| ETC ticket/batch payload | 前端页面 | summary DTO 只含当前页列表展示、三 bucket counts、全量 statistics、pagination、当前页批次的 `invoiceDateStart/invoiceDateEnd` 和统一 `createOaDraftAction`；页面 rail 的“批次数”展示 `pagination.total`，不是当前页 `items.length`，每行显示发票开票月份范围、发票数量和金额。不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
 | Worker 持久化后的查询可见性 | ETC 票据/导入页面 | PostgreSQL 模式的 task、business batch、invoice 查询在读取前重载正式 snapshot，保证独立 import worker 的完成结果无需 API 重启即可见；file/memory backend 保持原有进程内语义 |
 | ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
 | ETC OA 附件引用 | OA form draft | `HttpEtcOAClient` 在上传响应边界把已知 OA absolute `/fileManager/` / `/profile/` URL 归一为根相对路径；已有相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。现有 payload builder 把同一规范值写入 `response.data` 与 `response.extra.filePath`，页面/Nginx 不做补偿拼接 |
 | ETC OA 付款申请预填 | OA form draft | 使用已验证的 OA code 写入申请类型、支付方式、发票种类和项目 ID，并写入申请人、当天日期、批次金额、收款方、开户行、账号及模板渲染的申请事由；配置变更不改已 prepare attempt，重放保持原快照 |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
-| 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
+| 关联候选/关系影响 | `workbench-matching` | submitted 状态变化或 submitted 幂等重放只通过 server 组装的既有 matching dirty-scope 端口，按批次精确月份 normalize/dedupe/enqueue；ETC service 不直接写 queue SQL，不创建第二套 matcher、relation 或页面 refresh 路径。 |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复；恢复只写回原 tombstone 或精确缺失成员，不创建第二个业务批次，不直接写页面投影；成员修复完成后通过 historical ETC repair runtime port 执行 official lifecycle，并仅按共享消费者合同 enqueue 精确月份的 `workbench_relation`，不得投递已退役的 page `workbench` event 或 `all` scope |
 | Completed import job consumption | background job progress / current page load | ETC 发票导入 job 完成后当前可见页执行一次普通 canonical GET；其它页面不被写后强制重建。 |
 | 前端刷新提示 | `etcBusinessBatchUpdated` / `invoiceFactUpdated` | 事件仅允许刷新当前可见且订阅该领域的页面；hidden 页面忽略且不重放。事件不是 freshness 事实源，也不得触发其它页面重建 |

@@ -3873,13 +3873,15 @@ class EtcApiTests(unittest.TestCase):
                     "linked_canonical_invoice_count": 58,
                     "oa_draft_batch_count": 2,
                 }]
-            if "select batch_payload, task_payload" in normalized_sql:
+            if "select page.batch_payload" in normalized_sql:
                 return [{
                     "batch_payload": batch_payload,
                     "task_payload": {"task_id": "ETC-TASK-PERF-SQL", "status": "imported"},
                     "scope_month": None,
                     "invoice_count": 65,
                     "total_amount": "849.55",
+                    "invoice_date_start": "2026-03-28",
+                    "invoice_date_end": "2026-04-27",
                 }]
             if "from app.etc_invoices" in normalized_sql:
                 return [
@@ -3927,12 +3929,17 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("invoice.raw_payload->'normalized_payload'->>'import_batch_id'", list_count_sql)
         self.assertIn("count(*) filter (where import_batch.batch_id is not null)", list_count_sql)
         self.assertIn("count(*) filter (where oa_draft_id is not null)", list_count_sql)
+        self.assertNotIn("invoice_ranges", list_count_sql)
+        self.assertIn("left join lateral", list_page_sql)
+        self.assertIn("min(invoice.invoice_date) as invoice_date_start", list_page_sql)
         self.assertEqual(list_count_sql.count("from app.etc_business_batches"), 1)
         self.assertNotIn("jsonb_array_elements_text", list_count_sql)
         self.assertNotIn("cross join lateral unnest", list_count_sql)
         self.assertEqual(list_payload["counts"]["unsubmitted"], 1)
         self.assertEqual(list_payload["statistics"]["business_batch_count"], 9)
         self.assertEqual(list_payload["statistics"]["invoice_count"], 65)
+        self.assertEqual(list_payload["items"][0]["invoice_date_start"], "2026-03-28")
+        self.assertEqual(list_payload["items"][0]["invoice_date_end"], "2026-04-27")
         repository.get_etc_business_batch_record("ETC-BATCH-PERF-SQL")
         repository.list_etc_invoice_records_by_ids(invoice_ids)
         repository.get_etc_reconciliation_task_record("ETC-TASK-PERF-SQL")
@@ -3967,7 +3974,7 @@ class EtcApiTests(unittest.TestCase):
                         "linked_canonical_invoice_count": 2,
                         "oa_draft_batch_count": 0,
                     }]
-                if "select batch_payload, task_payload" in normalized_sql:
+                if "select page.batch_payload" in normalized_sql:
                     return [{
                         "batch_payload": {
                             "business_batch_id": "ETC-BATCH-SNAPSHOT",
@@ -3981,6 +3988,8 @@ class EtcApiTests(unittest.TestCase):
                         "scope_month": None,
                         "invoice_count": 2,
                         "total_amount": "26.14",
+                        "invoice_date_start": "2026-03-28",
+                        "invoice_date_end": "2026-04-27",
                     }]
                 raise AssertionError(f"unexpected fetch_all SQL: {normalized_sql}")
 
@@ -4255,13 +4264,31 @@ class EtcApiTests(unittest.TestCase):
                     }),
                 )
                 payload = json.loads(response.body)["data"]["businessBatch"]
+                replay_response = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{drafted.business_batch_id}/manual-oa-status",
+                    json.dumps({
+                        "decision": "submitted",
+                        "reason": "用户重复确认 OA 草稿已提交。",
+                        "expectedVersion": drafted.version,
+                    }),
+                )
+                replay_payload = json.loads(replay_response.body)["data"]["businessBatch"]
             finally:
                 app.close()
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(replay_response.status_code, 200)
         self.assertEqual(payload["status"], "manually_marked_submitted")
         self.assertEqual(payload["oaProcessStatus"], "manual_without_oa_row")
-        self.assertEqual(status_refreshes, [(["2026-02"], "etc_business_manual_oa_status")])
+        self.assertEqual(replay_payload["version"], payload["version"])
+        self.assertEqual(
+            status_refreshes,
+            [
+                (["2026-02"], "etc_business_manual_oa_status"),
+                (["2026-02"], "etc_business_manual_oa_status_replayed"),
+            ],
+        )
 
     def test_etc_business_manual_submitted_closes_the_linked_reconciliation_task(self) -> None:
         with TemporaryDirectory() as temp_dir:

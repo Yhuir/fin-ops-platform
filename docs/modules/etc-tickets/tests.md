@@ -2,6 +2,12 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-08-20 submitted matching 闭环与开票月份标题
+
+- `tests/test_workbench_dirty_queue_wiring.py` 保护 ETC status callback 把精确月份交给既有 `workbench-matching` durable queue，不恢复 Workbench page refresh。
+- `tests/test_etc_backend.py` 保护 submitted 决定幂等重放：只补投 matching scope，不推进 business batch version、不追加第二次状态审计；同时保护当前分页的发票最早/最晚开票日期查询与 DTO。
+- `web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx` 保护日期字段映射、同月/跨月批次名称以及禁止回退创建时间。
+
 ## 2026-08-19 重复成员与部分桥接闭环
 
 - `tests/test_etc_backend.py` 保护重复完整发票仍进入当前 import/business batch、首次 provenance 保留、跨 business owner 冲突整批失败且零半绑定，并验证 OA prepare 只消费目标批次精确成员。
@@ -12,12 +18,12 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/EtcTicketManagementPage.tsx`、`web/src/features/etc/EtcBatchProgress.tsx` | unsubmitted/staged/submitted 三 bucket、HeroUI 原生等宽全宽状态切换、50 条服务端分页、`total > 100` 全页可达、bucket/page 请求身份与末页回退、无本地跨 bucket 数组/计数伪更新、无月份/车牌/关键词页面搜索链路、左侧批次 rail + 右侧连续工作面、四阶段状态投影、完成阶段只保留标题、summary 首屏、单次精确 detail、同一选中行重复点击不清空明细且不追加 detail 请求、无 full task list/双 selection、禁用态不展示冗余原因、OA intent idempotency、OA 提交金额与实际发票金额分离展示且仅在不一致时显示紧凑差额及既有差额原因、两按钮暂存确认/退回未提交、error/loading/delete dialog、暂存与已提交发票明细标题栏复用批次 PDF 下载且不触发折叠、source file 和严格浏览器错误捕获 |
+| Frontend page | `web/src/pages/EtcTicketManagementPage.tsx`、`web/src/features/etc/EtcBatchProgress.tsx` | unsubmitted/staged/submitted 三 bucket、按成员发票开票月份范围命名且不使用创建日期、HeroUI 原生等宽全宽状态切换、50 条服务端分页、`total > 100` 全页可达、bucket/page 请求身份与末页回退、无本地跨 bucket 数组/计数伪更新、无月份/车牌/关键词页面搜索链路、左侧批次 rail + 右侧连续工作面、四阶段状态投影、完成阶段只保留标题、summary 首屏、单次精确 detail、同一选中行重复点击不清空明细且不追加 detail 请求、无 full task list/双 selection、禁用态不展示冗余原因、OA intent idempotency、OA 提交金额与实际发票金额分离展示且仅在不一致时显示紧凑差额及既有差额原因、两按钮暂存确认/退回未提交、error/loading/delete dialog、暂存与已提交发票明细标题栏复用批次 PDF 下载且不触发折叠、source file 和严格浏览器错误捕获 |
 | Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/business-batches*` 三 bucket/count/action envelope、精确 detail、OA create 长请求与 manual-status contract、发票 PDF blob/UTF-8 文件名、HTML/proxy error、multipart upload、stale preview error、本地化错误、旧 `/api/etc/batches*` 和 `/api/etc/invoices/revoke-submitted` API 不得回归 |
 | Workbench UI | `web/src/components/workbench/CandidateGroupGrid.tsx` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、撤回/删除后 summary 释放和已存在 canonical invoice 可见性 |
 | HTTP routes | `server.py` `/api/etc*` | business batch、business batch title patch、reconciliation task、只读 invoice list、`invoice-pdf` 二进制响应/错误码/权限、submitted 批次附件受限恢复的 admin/version/hash/idempotency 合同、import preview/confirm、source files、manual status、delete/reset 的状态码和结构化错误；慢解析期间 source file 被删除时必须返回 409 / `source_file_deleted_during_parse`；旧 `/api/etc/batches*`、`/api/etc/business-batches/{id}/oa-status/refresh`、`/api/etc/invoices/revoke-submitted` 不得回归 |
 | Business service | `EtcService`、`EtcBatchInvoiceLinkService` | 业务批次幂等、标题持久化/版本/提交后锁定、状态流转、OA 附件有界并发与稳定顺序、finalize 失败 outcome-unknown、ETC metadata/附件占用释放、已存在 canonical invoice 关联、ETC batch invoice link 幂等写入、历史 batch 迁移、删除 audit |
-| Application service | `EtcBusinessBatchApplicationService`、`EtcInvoicePdfBundleService` | OA 草稿、creating/pending manual OA status、管理员历史 recovery、source file、绑定 task 恢复、发票 PDF actor scope/草稿或 submitted 资格/历史无草稿批次/成员/排序/单页/大小/hash/审计、OA 上传 absolute URL 归一与未知 host fail-closed、Workbench invalidation |
+| Application service | `EtcBusinessBatchApplicationService`、`EtcInvoicePdfBundleService` | OA 草稿、creating/pending manual OA status、submitted 幂等重放与精确 matching scope、管理员历史 recovery、source file、绑定 task 恢复、发票 PDF actor scope/草稿或 submitted 资格/历史无草稿批次/成员/排序/单页/大小/hash/审计、OA 上传 absolute URL 归一与未知 host fail-closed、Workbench invalidation |
 | Reconciliation service | `EtcReconciliationTaskService`、`CcbCreditCardStatementParser` | task ready/importing/imported/closed/deleted、source files、version、tombstone、重启 hydrate；统一不可信文件边界拒绝伪装后缀、未知二进制与超限资源且不落对象存储；信用卡 PDF 可选文字优先、图像型 PDF 逐页布局 OCR fallback、OCR 人工核对 warning；解析提交与删除互斥、已删除来源拒绝提交、历史孤儿解析结果可审计清理 |
 | Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 ETC metadata/附件关系保存，以及常驻 API 无需重启即可读取 worker 的 PostgreSQL 写入 |
 | Workbench direct query | `PostgresWorkbenchPageQueryRepository`、`WorkbenchPairRelationService` | normal GET 从 canonical submitted business batch 构造 `etc_invoice_summary`、active relation 排除 open summary、submitted ETC 重叠正式发票不再作为普通 open invoice row、delete/reset 后不恢复旧 OA+银行二栏 relation；零 page projection/cache/queue |

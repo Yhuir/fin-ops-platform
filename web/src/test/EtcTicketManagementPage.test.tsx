@@ -13,6 +13,7 @@ import type { EtcReconciliationTask } from "../features/etc/types";
 const etcTicketSourceFiles = [
   "src/pages/EtcTicketManagementPage.tsx",
 ] as const;
+const invoiceRangeBatchName = /\d{4}年\d{1,2}月(?:–(?:\d{4}年)?\d{1,2}月)? ETC发票/;
 
 function readWebSource(path: string) {
   return readFileSync(resolve(__dirname, "..", path.replace(/^src\//, "")), "utf8");
@@ -303,9 +304,9 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
     expect(within(page).getByRole("region", { name: "ETC批次列表区" })).toBeInTheDocument();
     expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("2026-05-19 09:00");
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent(invoiceRangeBatchName);
     await waitFor(() => expect(within(page).getByRole("button", { name: "提交审批" })).toBeEnabled());
-    expect(within(page).getAllByText("2026-05-19 09:00").length).toBeGreaterThanOrEqual(1);
+    expect(within(page).getAllByText(invoiceRangeBatchName).length).toBeGreaterThanOrEqual(1);
     expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
     expect(within(page).queryByText(/\/ v\d+/)).not.toBeInTheDocument();
     expect(within(page).queryByText(/已完成 ·/)).not.toBeInTheDocument();
@@ -324,7 +325,7 @@ describe("ETC ticket management page", () => {
     );
     expect(selectedDetailCalls).toHaveLength(1);
 
-    await user.click(within(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).getByRole("button", { name: "查看批次 2026-05-19 09:00" }));
+    await user.click(within(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).getByRole("button", { name: /查看批次 .*ETC发票/ }));
 
     expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
     expect(fetchMock.mock.calls.filter(([url]) =>
@@ -415,7 +416,7 @@ describe("ETC ticket management page", () => {
     await waitFor(() => {
       expect(within(page).queryByText("ETC业务批次加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
       expect(within(page).getByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
-      expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("2026-05-19 09:00");
+      expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent(invoiceRangeBatchName);
     });
     expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
 
@@ -545,6 +546,8 @@ describe("ETC ticket management page", () => {
       externalEtcBatchId: "etc_20260520_001",
       oaProcessStatus: "manual_without_oa_row",
       invoiceSummary: { count: 37, amount: "1673.30" },
+      invoiceDateStart: "2026-03-28",
+      invoiceDateEnd: "2026-04-27",
       invoiceIds: [],
     });
     vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(closedWorkflowTask as never);
@@ -567,6 +570,7 @@ describe("ETC ticket management page", () => {
     const submittedRow = await within(page).findByTestId("etc-batch-row-etc_business_batch_0004");
     expect(submittedRow).toHaveTextContent("人工确认已提交");
     expect(submittedRow).toHaveTextContent("1673.30");
+    expect(submittedRow).toHaveTextContent("2026年3月–4月 ETC发票");
     expect(within(page).queryByText("无匹配批次。")).not.toBeInTheDocument();
   });
 
@@ -687,7 +691,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("button", { name: "OA 草稿预填管理" })).toBeInTheDocument();
     expect(within(page).queryByRole("region", { name: "ETC对账任务列表" })).not.toBeInTheDocument();
     expect(within(page).queryByText("对账任务")).not.toBeInTheDocument();
-    expect(await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("2026-05-19 09:00");
+    expect(await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent(invoiceRangeBatchName);
   });
 
   test("shows business batch load errors without rendering a real empty batch state", async () => {
@@ -949,10 +953,10 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
-    await user.click(within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" }));
+    await user.click(within(row).getByRole("button", { name: /删除批次 .*ETC发票/ }));
 
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    expect(dialog).toHaveTextContent("2026-05-19 09:00");
+    expect(dialog).toHaveTextContent(invoiceRangeBatchName);
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {
@@ -987,7 +991,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
-    await user.click(within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" }));
+    await user.click(within(row).getByRole("button", { name: /删除批次 .*ETC发票/ }));
 
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
@@ -1028,7 +1032,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
-    await user.click(within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" }));
+    await user.click(within(row).getByRole("button", { name: /删除批次 .*ETC发票/ }));
 
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
@@ -1100,7 +1104,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc-business-batch-stale-delete-001");
-    await user.click(within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" }));
+    await user.click(within(row).getByRole("button", { name: /删除批次 .*ETC发票/ }));
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -1143,7 +1147,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc-business-legacy-001");
-    await user.click(within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" }));
+    await user.click(within(row).getByRole("button", { name: /删除批次 .*ETC发票/ }));
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -1177,6 +1181,7 @@ describe("ETC ticket management page", () => {
       oaRowId: "",
       oaProcessStatus: "",
       invoiceSummary: { count: 36, amount: "1673.30" },
+      scopeMonth: "2026-05",
       invoiceIds: ["etc-inv-001"],
       importAttempts: [],
       auditEvents: [],
@@ -1206,7 +1211,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc_business_batch_0001");
-    await user.click(within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" }));
+    await user.click(within(row).getByRole("button", { name: /删除批次 .*ETC发票/ }));
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -1240,6 +1245,7 @@ describe("ETC ticket management page", () => {
       oaRowId: "",
       oaProcessStatus: "",
       invoiceSummary: { count: 36, amount: "1673.30" },
+      scopeMonth: "2026-05",
       invoiceIds: ["etc-inv-001"],
       importAttempts: [],
       auditEvents: [],
@@ -1273,7 +1279,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const row = await within(page).findByTestId("etc-batch-row-etc_business_batch_0002");
-    await user.click(within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" }));
+    await user.click(within(row).getByRole("button", { name: /删除批次 .*ETC发票/ }));
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
     await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
@@ -1719,7 +1725,7 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("button", { name: "新建批次" })).toBeInTheDocument();
     const batchRow = await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01");
-    expect(batchRow).toHaveTextContent("2026-05-19 09:00");
+    expect(batchRow).toHaveTextContent(invoiceRangeBatchName);
     expect(batchRow).toHaveTextContent("2 张 · 32.26 元");
 
     expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
@@ -2312,7 +2318,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByText("票根网-成功.pdf")).not.toBeInTheDocument();
     expect(within(page).queryByText(/票根网通行项缺少车牌号/)).not.toBeInTheDocument();
 
-    await user.click(within(within(page).getByTestId("etc-batch-row-etc-business-source-files-001")).getByRole("button", { name: "查看批次 2026-05-19 09:00" }));
+    await user.click(within(within(page).getByTestId("etc-batch-row-etc-business-source-files-001")).getByRole("button", { name: /查看批次 .*ETC发票/ }));
     await waitFor(() => expect(within(page).getAllByText("票根网-失败.pdf").length).toBeGreaterThanOrEqual(1));
     await user.click(within(page).getByRole("button", { name: "删除源文件 票根网-失败.pdf" }));
     const dialog = await screen.findByRole("dialog", { name: "删除源文件" });
@@ -3465,13 +3471,13 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     await user.click(await within(page).findByRole("radio", { name: "已提交 1" }));
 
-    await waitFor(() => expect(within(page).getAllByText("2026-05-19 09:00").length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(within(page).getAllByText(invoiceRangeBatchName).length).toBeGreaterThanOrEqual(1));
     expect(within(page).queryByRole("button", { name: "提交审批" })).not.toBeInTheDocument();
     expect(within(page).getAllByText("已提交审批").length).toBeGreaterThanOrEqual(1);
     expect(within(page).queryByRole("button", { name: "撤销提交状态" })).not.toBeInTheDocument();
 
     const row = within(page).getByTestId("etc-batch-row-etc-batch-submitted-01");
-    const deleteButton = within(row).getByRole("button", { name: "删除批次 2026-05-19 09:00" });
+    const deleteButton = within(row).getByRole("button", { name: /删除批次 .*ETC发票/ });
     expect(deleteButton).toBeEnabled();
     await user.click(deleteButton);
     const dialog = await screen.findByRole("dialog", { name: "删除批次" });
@@ -3537,9 +3543,9 @@ describe("ETC ticket management page", () => {
     expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
     expect(within(page).queryByText("ETC-2026-003")).not.toBeInTheDocument();
 
-    await user.click(within(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-02")).getByRole("button", { name: "查看批次 2026-05-19 09:00" }));
+    await user.click(within(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-02")).getByRole("button", { name: /查看批次 .*ETC发票/ }));
 
-    await waitFor(() => expect(within(page).getAllByText("2026-05-19 09:00").length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(within(page).getAllByText(invoiceRangeBatchName).length).toBeGreaterThanOrEqual(1));
     await waitFor(() => {
       expect(within(page).getByText("ETC-2026-003")).toBeInTheDocument();
       expect(within(page).queryByText("ETC-2026-001")).not.toBeInTheDocument();
@@ -3599,6 +3605,8 @@ describe("ETC ticket management page", () => {
       oaRowId: "",
       oaProcessStatus: "",
       invoiceSummary: { count: 64, amount: "3686.36" },
+      invoiceDateStart: "2026-02-27",
+      invoiceDateEnd: "2026-02-27",
       createOaDraftAction: {
         enabled: true,
         code: "ready",
@@ -3660,7 +3668,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    await waitFor(() => expect(within(page).getAllByText("2026-05-19 09:00").length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(within(page).getAllByText(invoiceRangeBatchName).length).toBeGreaterThanOrEqual(1));
     const submitButton = await within(page).findByRole("button", { name: "提交审批" });
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);
@@ -3669,7 +3677,7 @@ describe("ETC ticket management page", () => {
     expect(dialog).toHaveTextContent("OA 草稿金额：3740.82 元");
     expect(dialog).toHaveTextContent("已导入 ETC 发票：64 张 / 3686.36 元");
     expect(dialog).toHaveTextContent("差额 54.46 元");
-    expect(dialog).toHaveTextContent("批次：2026-05-19 09:00");
+    expect(dialog).toHaveTextContent(/批次：.*ETC发票/);
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
     await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_0001", {

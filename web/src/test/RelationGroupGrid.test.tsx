@@ -1542,25 +1542,25 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
-    const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，2 张" });
+    const expandButton = screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" });
     expect(expandButton).toHaveAttribute("aria-expanded", "false");
-    expect(invoiceCell).not.toHaveTextContent("ETC-001");
+    expect(invoiceCell).toHaveTextContent("ETC-001");
     expect(invoiceCell).not.toHaveTextContent("ETC-002");
 
     fireEvent.click(expandButton);
 
-    const collapseButton = screen.getByRole("button", { name: "收起ETC发票明细" });
+    const collapseButton = screen.getByRole("button", { name: "收起ETC发票" });
     expect(collapseButton).toHaveAttribute("aria-expanded", "true");
     expect(invoiceCell).toHaveTextContent("ETC-001");
     expect(invoiceCell).toHaveTextContent("ETC-002");
 
     fireEvent.click(collapseButton);
 
-    expect(screen.getByRole("button", { name: "展开ETC发票明细，2 张" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
-    expect(invoiceCell).not.toHaveTextContent("ETC-001");
+    expect(invoiceCell).toHaveTextContent("ETC-001");
     expect(invoiceCell).not.toHaveTextContent("ETC-002");
   });
 
@@ -1766,7 +1766,7 @@ describe("Workbench candidate grouping layout", () => {
     await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledTimes(2));
   });
 
-  test("renders ETC invoice summaries collapsed by default and expands in the invoice pane", () => {
+  test("renders the first ETC invoice directly and expands all invoices in the invoice pane", () => {
     const group = createEtcCollapsedGroup();
     render(
       <RelationGroupGrid
@@ -1788,13 +1788,13 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
-    const summaryRow = within(invoiceCell).getByRole("row", { name: /ETC-OA-20260215-154900/ });
-    expect(screen.getByText("ETC批次")).toBeInTheDocument();
-    expect(within(summaryRow).queryByRole("button", { name: /^查看发票 .* 详情$|^详情$/ })).not.toBeInTheDocument();
-    expect(screen.queryByText("ETC-001")).not.toBeInTheDocument();
+    const firstInvoiceRow = within(invoiceCell).getByRole("row", { name: /ETC-001/ });
+    expect(screen.queryByText("ETC批次")).not.toBeInTheDocument();
+    expect(within(firstInvoiceRow).getByRole("button", { name: /^查看发票 .* 详情$|^详情$/ })).toBeInTheDocument();
+    expect(screen.getByText("ETC-001")).toBeInTheDocument();
     expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
-    const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，2 张" });
-    expect(expandButton).toHaveTextContent("展开 2 张明细");
+    const expandButton = screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" });
+    expect(expandButton).toHaveTextContent("展开全部 2 张发票");
     expect(screen.queryByText("当前显示 1 条摘要")).not.toBeInTheDocument();
     expect(screen.queryByText("实际 2 张发票")).not.toBeInTheDocument();
     expect(invoiceCell).toContainElement(expandButton);
@@ -1805,7 +1805,7 @@ describe("Workbench candidate grouping layout", () => {
 
     expect(screen.getByText("ETC-001")).toBeInTheDocument();
     expect(screen.getByText("ETC-002")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "收起ETC发票明细" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起ETC发票" })).toBeInTheDocument();
     expect(within(invoiceCell).getAllByRole("row")).toHaveLength(2);
   });
 
@@ -1830,8 +1830,8 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
-    const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，34 张" });
-    expect(expandButton).toHaveTextContent("展开 34 张明细");
+    const expandButton = screen.getByRole("button", { name: "展开全部ETC发票，共 34 张" });
+    expect(expandButton).toHaveTextContent("展开全部 34 张发票");
   });
 
   test("renders submitted salary and internal-transfer no-OA rows directly", () => {

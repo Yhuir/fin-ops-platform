@@ -175,6 +175,10 @@ type ApiEtcBusinessBatch = ApiEtcBatch & {
     count?: number | null;
     amount?: string | number | null;
   } | null;
+  invoiceDateStart?: string | null;
+  invoice_date_start?: string | null;
+  invoiceDateEnd?: string | null;
+  invoice_date_end?: string | null;
   invoiceIds?: string[] | null;
   invoice_ids?: string[] | null;
   amountBreakdown?: Record<string, unknown> | null;
@@ -841,6 +845,8 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
       count: invoiceSummary?.count ?? batch.invoiceCount ?? batch.invoice_count ?? 0,
       amount: normalizeMoney(invoiceSummary?.amount ?? batch.totalAmount ?? batch.total_amount),
     },
+    invoiceDateStart: String(batch.invoiceDateStart ?? batch.invoice_date_start ?? ""),
+    invoiceDateEnd: String(batch.invoiceDateEnd ?? batch.invoice_date_end ?? ""),
     amountBreakdown: {
       reportedAmount: normalizeMoney(String(amountBreakdown.reported_amount ?? amountBreakdown.reportedAmount ?? "")),
       oaAmount: normalizeMoney(String(amountBreakdown.oa_amount ?? amountBreakdown.oaAmount ?? "")),

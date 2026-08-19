@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -366,6 +367,36 @@ def test_compact_summary_removes_repeated_internal_row_metadata() -> None:
             },
         }
     ]
+
+
+def test_compact_etc_summary_keeps_only_the_first_real_invoice_preview() -> None:
+    group = {
+        "group_id": "case:ETC-68",
+        "invoice_rows": [
+            {"id": "etc-summary-ETC-68", "type": "invoice", "source_kind": "etc_invoice_summary"}
+        ],
+        "collapsed_rows": {
+            "invoice": [
+                {
+                    "id": "etc-invoice-1",
+                    "type": "invoice",
+                    "source_kind": "etc_invoice",
+                    "detail_fields": [{"label": "冗余", "value": "不进入列表"}],
+                },
+                {"id": "etc-invoice-2", "type": "invoice", "source_kind": "etc_invoice"},
+            ]
+        },
+        "collapsed_row_counts": {"invoice": 68},
+    }
+
+    compact = PostgresWorkbenchPageHydrationRepository._compact_group(group)
+
+    assert compact["collapsed_rows"] == {
+        "invoice": [
+            {"id": "etc-invoice-1", "type": "invoice", "source_kind": "etc_invoice"}
+        ]
+    }
+    assert compact["collapsed_row_counts"] == {"invoice": 68}
 
 
 def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> None:
@@ -744,6 +775,23 @@ def test_filter_sql_escapes_literal_search_and_preserves_and_or_semantics() -> N
     assert "invoice" in params
     assert "2026-01-01" in params
     assert "2027-01-01" in params
+
+
+def test_etc_summary_search_uses_batch_ids_invoice_numbers_and_exact_amount() -> None:
+    search_ctes, search_params, _hit_name = (
+        PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(
+            prefix="etc",
+            search="1549.00",
+        )
+    )
+    normalized_sql = " ".join(search_ctes.split()).lower()
+
+    assert "etc_batch.business_batch_id" in normalized_sql
+    assert "submission_batch_id" in normalized_sql
+    assert "from app.etc_invoices etc_invoice" in normalized_sql
+    assert "etc_invoice.invoice_no" in normalized_sql
+    assert "etc_batch.total_amount = %s::numeric" in normalized_sql
+    assert Decimal("1549.00") in search_params
 
 
 def test_grouped_filter_contract_rejects_legacy_flat_values() -> None:

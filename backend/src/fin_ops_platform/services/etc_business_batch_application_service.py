@@ -129,6 +129,8 @@ class EtcBusinessBatchApplicationService:
                 invoice_count=int(item.get("invoice_count") or len(batch.invoice_ids)),
                 total_amount=item.get("total_amount") or "0",
                 scope_month=item.get("scope_month"),
+                invoice_date_start=item.get("invoice_date_start"),
+                invoice_date_end=item.get("invoice_date_end"),
             )
             payload["createOaDraftAction"] = evaluate_etc_oa_draft_action(batch, item.get("reconciliation_task"), actor)
             items.append(payload)
@@ -204,6 +206,14 @@ class EtcBusinessBatchApplicationService:
             invoice_count=len(invoices),
             total_amount=sum((getattr(invoice, "total_amount", Decimal("0")) for invoice in invoices), Decimal("0")),
             scope_month=(batch.amount_breakdown or {}).get("scope_month"),
+            invoice_date_start=min(
+                (value for invoice in invoices if (value := str(getattr(invoice, "issue_date", "") or "").strip())),
+                default=None,
+            ),
+            invoice_date_end=max(
+                (value for invoice in invoices if (value := str(getattr(invoice, "issue_date", "") or "").strip())),
+                default=None,
+            ),
         )
         payload.update({
             "invoiceIds": list(batch.invoice_ids),
@@ -445,6 +455,21 @@ class EtcBusinessBatchApplicationService:
         actor: EtcBusinessBatchActor,
     ) -> dict[str, object]:
         current = self._scoped_batch(business_batch_id, actor)
+        normalized_decision = str(decision or "").strip().lower()
+        current_status = str(getattr(current, "status", "") or "")
+        if normalized_decision == "submitted" and current_status in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
+            current_oa_row_id = str(getattr(current, "oa_row_id", "") or "").strip()
+            requested_oa_row_id = str(candidate_oa_row_id or "").strip()
+            if requested_oa_row_id and current_oa_row_id and requested_oa_row_id != current_oa_row_id:
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "submitted ETC business batch is linked to another OA row.",
+                    code="business_batch_oa_row_conflict",
+                )
+            self._refresh_business_batch_status_change(
+                current,
+                reason="etc_business_manual_oa_status_replayed",
+            )
+            return {"businessBatch": self.business_batch_payload(current)}
         if str(getattr(current, "status", "")) not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
             raise EtcBusinessBatchInvalidTransitionError(
                 "manual OA status is allowed only after OA draft creation has started.",
@@ -457,7 +482,7 @@ class EtcBusinessBatchApplicationService:
             expected_version=expected_version,
             candidate_oa_row_id=candidate_oa_row_id,
         )
-        if str(decision or "").strip().lower() == "submitted":
+        if normalized_decision == "submitted":
             self._record_reconciliation_task_submitted(batch, actor=actor)
         self._refresh_business_batch_status_change(batch, reason="etc_business_manual_oa_status")
         return {"businessBatch": self.business_batch_payload(batch)}
@@ -506,6 +531,8 @@ class EtcBusinessBatchApplicationService:
         invoice_count: int,
         total_amount: object,
         scope_month: object,
+        invoice_date_start: object = None,
+        invoice_date_end: object = None,
     ) -> dict[str, object]:
         return {
             "businessBatchId": batch.business_batch_id,
@@ -526,6 +553,8 @@ class EtcBusinessBatchApplicationService:
             "oaRowId": batch.oa_row_id,
             "oaProcessStatus": batch.oa_process_status,
             "invoiceSummary": {"count": invoice_count, "amount": str(total_amount or "0")},
+            "invoiceDateStart": str(invoice_date_start or "")[:10],
+            "invoiceDateEnd": str(invoice_date_end or "")[:10],
             "amountBreakdown": {**dict(batch.amount_breakdown or {}), **({"scope_month": str(scope_month)[:7]} if scope_month else {})},
             "createdAt": batch.created_at,
             "updatedAt": batch.updated_at,

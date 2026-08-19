@@ -268,6 +268,27 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertEqual(queue.mark_calls[0]["reason"], "import_confirm")
         self.assertEqual(result, ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"])
 
+    def test_etc_business_batch_status_change_marks_exact_matching_scopes(self) -> None:
+        app = build_application()
+        queue = RecordingDirtyQueue()
+        app._workbench_reconciliation_dirty_queue = queue
+
+        app._refresh_after_etc_business_batch_status_change(
+            ["2026-07", "invalid", "2026-05", "2026-07"],
+            reason="etc_business_manual_oa_status",
+        )
+
+        self.assertEqual(
+            queue.mark_calls,
+            [
+                {
+                    "months": ["2026-05", "2026-07"],
+                    "reason": "etc_business_manual_oa_status",
+                    "source_versions": app._workbench_matching_source_versions(),
+                }
+            ],
+        )
+
     def test_db_dirty_queue_mark_failure_does_not_fall_back_to_in_memory_state(self) -> None:
         app = build_application()
         app._workbench_reconciliation_dirty_queue = FailingMarkDirtyQueue()

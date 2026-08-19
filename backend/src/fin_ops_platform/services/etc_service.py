@@ -1008,6 +1008,8 @@ class EtcService:
                     "scope_month": item.get("scope_month"),
                     "invoice_count": item.get("invoice_count"),
                     "total_amount": item.get("total_amount"),
+                    "invoice_date_start": item.get("invoice_date_start"),
+                    "invoice_date_end": item.get("invoice_date_end"),
                 }
             )
         return {**payload, "items": items}

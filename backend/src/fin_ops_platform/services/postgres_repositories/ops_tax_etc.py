@@ -1253,11 +1253,31 @@ class PostgresOpsTaxEtcRepository:
             rows = connection.fetch_all(
                 common_sql
                 + """
-                    select batch_payload, task_payload, scope_month, invoice_count, total_amount
-                    from scoped
-                    where bucket = %s::text
-                    order by created_at desc, business_batch_id desc
-                    limit %s::integer offset %s::integer
+                    select
+                        page.batch_payload,
+                        page.task_payload,
+                        page.scope_month,
+                        page.invoice_count,
+                        page.total_amount,
+                        invoice_ranges.invoice_date_start,
+                        invoice_ranges.invoice_date_end
+                    from (
+                        select *
+                        from scoped
+                        where bucket = %s::text
+                        order by created_at desc, business_batch_id desc
+                        limit %s::integer offset %s::integer
+                    ) page
+                    left join lateral (
+                        select
+                            min(invoice.invoice_date) as invoice_date_start,
+                            max(invoice.invoice_date) as invoice_date_end
+                        from app.etc_invoices invoice
+                        where invoice.business_batch_id = page.business_batch_id
+                          and coalesce(invoice.legacy_mongo_id, '') !~ '^current_state:'
+                          and invoice.status <> 'deleted'
+                    ) invoice_ranges on true
+                    order by page.created_at desc, page.business_batch_id desc
                 """,
                 repeated_params + (bucket, page_size, (page - 1) * page_size),
             )
@@ -1288,6 +1308,8 @@ class PostgresOpsTaxEtcRepository:
                     "scope_month": row.get("scope_month"),
                     "invoice_count": int(row.get("invoice_count") or 0),
                     "total_amount": str(row.get("total_amount") or "0"),
+                    "invoice_date_start": row.get("invoice_date_start"),
+                    "invoice_date_end": row.get("invoice_date_end"),
                 }
                 for row in rows
             ],

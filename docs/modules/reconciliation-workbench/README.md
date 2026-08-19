@@ -44,6 +44,8 @@ canonical fact repositories
 
 页面为 direct-only：不读 projection/Redis，不比较 generation/freshness，不投递 page refresh，也不从旧 snapshot、旧 candidate/decision 表或 row metadata 恢复关系。自动匹配仍由 `workbench-matching` 通过 relation UoW 写 active relations；共享 `workbench_relation` read model 只为其它明确消费者服务，不参与 Workbench page read path。
 
+ETC 批次在折叠态直接显示第一张真实发票，不显示汇总占位行；“展开全部 N 张发票”通过既有 group detail I/O 一次加载该批次完整发票成员，收起后回到第一张。首屏仍只携带一张窄发票行和总数，避免 68 张等大批次放大初始 payload。关联台统计只计算 submitted/closed 批次；搜索可命中 ETC 批次标识、成员发票号和精确批次金额。
+
 ## 代码入口
 
 - 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`

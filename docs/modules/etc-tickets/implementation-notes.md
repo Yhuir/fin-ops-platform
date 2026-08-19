@@ -1,5 +1,12 @@
 # ETC票据管理 实施记录
 
+## 2026-08-20 - submitted matching 漏投与批次名称闭环
+
+- 根因：`EtcBusinessBatchApplicationService` 已计算受影响月份，但 server 组装的 status-change callback 是 no-op；因此人工确认 submitted 只落业务事实，未把 ETC 批次交给既有 deterministic matcher，历史 7 批不会自动挂入已有 OA/流水关系。
+- 修复：删除 no-op，复用已有 matching dirty-scope boundary；已 submitted 决定支持无业务写的幂等重放，只补投 scope，不推进 version/重复审计，冲突 OA row fail fast。没有新增 matcher、worker、表、fallback 或 direct relation SQL。
+- 展示：业务批次 summary/detail 增加成员发票最早/最晚开票日期；列表 SQL 只对分页后的批次做 lateral 聚合，页面按同月/跨月/跨年范围命名，不再使用创建日期。
+- 验证：`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_etc_backend.py`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`。
+
 ## 2026-08-19 - 68 张批次部分桥接闭环
 
 - 根因一：关联台把 canonical link 设为整个 ETC 批次的最高优先来源；只要 68 张中 4 张建立 link，就丢弃同批 64 张 `app.etc_invoices`，形成 4 张/部分桥接假象。

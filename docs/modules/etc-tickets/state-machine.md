@@ -20,11 +20,11 @@
   - 创建 OA 草稿必须按 `prepare -> execute external -> finalize` 执行并使用稳定 `idempotencyKey`；外部 I/O 不得持 ETC 业务锁。点击后 UI 立即进入暂存，附件在 adapter 边界以有界并发上传并保持稳定顺序。明确失败回到未提交；结果未知保持 creating 并禁止盲重试。
   - 普通页面不查询 OA、不要求草稿 ID/URL，也不展示 recovery 表单。`oa_draft_creating` 与 `oa_confirmation_pending` 都允许用户直接声明已在 OA 提交或已在 OA 删除草稿；决定由用户负责，App 只做版本 CAS、状态持久化和审计。管理员 recovery 仅用于历史/技术修复。
   - prepare/finalize/recovery 的 durable write 必须以目标 business batch 当前 version 为 CAS 前置条件，并只写当前 attempt 拥有的 business batch、submission batch 及确实发生变化的 invoice/import rows；不能回写全量旧 snapshot。business batch 已进入 `oa_confirmation_pending`、但 linked task OA 元数据写入失败时，相同 idempotency key 或相同 recovery 证据只执行修复写，禁止第二次调用 OA。
-  - 暂存批次选择“我已在 OA 系统上完成 OA 草稿的提交”进入已提交；选择“我已在 OA 系统上删除该 OA 草稿”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
+  - 暂存批次选择“我已在 OA 系统上完成 OA 草稿的提交”进入已提交，并按受影响月份投递既有 `workbench-matching` durable dirty scope；选择“我已在 OA 系统上删除该 OA 草稿”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。已 submitted 的同一决定可幂等重放以修复历史漏投 matching scope，但不推进业务 version、不重复审计，也不允许用冲突 OA row 覆盖既有事实。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - OA 草稿创建成功后，或 business batch 已进入 `oa_submitted` / `manually_marked_submitted` / `closed` 后，允许只读下载当前批次关联的 ETC 发票合并 PDF；历史已提交批次不要求补造 OA 草稿 ID。暂存区与已提交“发票明细”标题栏复用同一 API，下载不改变批次/折叠状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
   - 历史已提交批次若 PDF/XML 对象缺失，管理员可用原始 ZIP、当前版本和原因执行受限附件恢复。已有 hash 时只能写回完全一致内容；仅附件与导入来源全空、来源为 `canonical_invoice:*` 的历史后补成员，可在强身份、单页 PDF 发票号和 business/submission 成员一致校验后建立附件事实，并从原始 XML 纠正通行日期、车牌、车型和提交批次汇总。恢复不改变批次状态、成员、OA 或配对关系，失败必须回滚事实与新对象，重复执行必须幂等。
-  - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
+  - `submitted` 成功后，关联台生成 `source_kind=etc_invoice_summary` 的批次关系锚点，金额取业务批次上报金额；既有 matching worker 以 OA `etc_batch_id` 精确匹配同一 external batch，并在 OA、银行流水已形成 active relation 时把 ETC summary 原子挂入该关系。没有对应 OA 时保留未配对事实并由 Page Audit 明确报告，不允许按金额猜测或伪造 OA。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
   - 删除未提交批次会清理本地导入批次、ETC metadata/附件关系和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
   - 绑定的 `etc_reconciliation_tasks` 删除后必须落为 `deleted` tombstone，而不是从内存 snapshot 中物理移除；列表、详情、ready-for-import 入口必须过滤 deleted task，但 tombstone 保留 task counter 和重启后的删除事实，防止 Postgres 只追加/更新式持久化在部署后重新加载旧 task-only 行。
@@ -43,6 +43,7 @@
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
 - initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
 - batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 的窄 summary 事实；页面不再提供月份选择器，默认展示全部用户可见批次并分“未提交/暂存/已提交”三个互斥 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
+- batch name：每个批次按成员发票最早/最晚开票月份命名，单月合并、跨年保留年份；缺开票日期时只允许回退 scope month，不使用提交时间或创建时间。
 - workflow progress：页面按“准备核对资料 / 确认核对结果 / 导入 ETC 发票 / 提交 OA 审批”展示四阶段只读投影。`draft/reviewing/ready_for_import/importing/imported/OA creating/pending/failed/not_submitted/submitted/closed` 及失败、部分失败、迁移冲突必须映射为已完成、当前、处理中、待人工确认或需要处理；不得新增业务状态或把 `oa_confirmation_pending`、失败、回退伪装成已完成。
 - amount contract：创建 OA 草稿前同时显示对账任务 `oaTotalAmount` 与业务批次实际 `invoiceSummary`。OA 草稿始终使用前者；两者差额只做非阻断说明。创建结果弹窗只保留两个状态决定按钮，不提供打开草稿或关闭按钮；Escape/遮罩仍可退出，暂存区继续提供打开草稿与下载 PDF。
 - selection loading：用户切换批次时必须同步失效旧 task mutation target；新 batch 的精确 task 请求与 detail 请求并发发起。任一请求未完成时，旧 task 只能作为已清除状态，不能继续上传、删除、刷新匹配、确认或 reopen；人工状态变更由 active bucket effect 作为唯一 list reload owner。
@@ -58,7 +59,7 @@
 - ETC 业务批次列表直接读取业务批次事实源；关联台在同一 direct canonical GET 中由已提交 ETC business batch/links 构造 `etc_invoice_summary`，不读取 page projection。
 - `submitted` 人工确认会隐藏散落 ETC 发票，并让 Workbench 未配对区在下一次 normal GET 显示一条合并行；关联台读取失败不得回滚已经提交的业务批次。
 - `etc_invoice_summary` 与 ETC 页面金额统一显示无千分位的两位小数；关联台 direct descriptor/hydration 保留结构化金额，用于展示、金额搜索和过滤，禁止恢复 `workbench_rows` 物化字段。
-- ETC 导入确认、OA 草稿创建、人工提交/未提交确认、业务批次本地删除/重置只提交 owner canonical facts；关联台下一次 normal GET 自然可见，不 enqueue page refresh。正式关系变化仍按 shared relation/matching 的独立合同处理。
+- ETC 导入确认、OA 草稿创建、人工提交/未提交确认、业务批次本地删除/重置只提交 owner canonical facts；关联台下一次 normal GET 自然可见，不 enqueue page refresh。人工 submitted 状态变化或幂等重放必须把精确月份交给 shared `workbench-matching` durable queue，使 OA、流水和 ETC summary 通过既有 matching/正式关系命令闭环；ETC service 不直接写 relation 或 queue SQL。
 - canonical invoice identity：ETC 发票有稳定发票号/强 `source_unique_key` 时，不得同时持久化弱 `data_fingerprint`；runtime worker 和 API 导入确认只能把 ETC metadata 关联到已存在的 canonical invoice，不得从 ETC 专用表创建 canonical invoice。
 - 失败恢复：业务命令失败时通过正式 ETC/import job 重试；关联台 direct GET 失败只重试读取，不触发 rebuild。业务批次、ETC 发票占用和审计事实不得从前端临时修补。导入确认的同一 session 只有 queued/running 或近期 succeeded job 可复用；failed、acknowledged、cancelled 等旧 job 必须允许重新确认并创建新 job。
 - 生产残留清理：若历史部署已留下“业务批次已删除但 reconciliation task 仍存在”的 task-only 行，使用 `fin_ops_platform.tools.cleanup_orphan_etc_reconciliation_tasks` 按显式 `--task-id` dry-run/execute 清理；工具必须走 service 删除边界，不直接 SQL 删除任务行。
@@ -67,6 +68,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-20 | 修复 submitted ETC 状态变化漏投 matching scope；允许 submitted 决定幂等重放历史批次；批次标题改用成员发票开票月份范围 | ETC manual-status application service、既有 workbench-matching durable queue、业务批次 summary/detail DTO 与页面 rail；不新增状态、表、worker、matcher 或 page read model | `tests/test_workbench_dirty_queue_wiring.py`；`tests/test_etc_backend.py`；`web/src/test/EtcApi.test.ts`；`web/src/test/EtcTicketManagementPage.test.tsx` |
 | 2026-08-13 | 点击创建草稿即进入暂存；creating/pending 均展示两个既有人工决定，App 不检测 OA 草稿；附件改为有界并发上传 | ETC bucket、manual-status 状态机、紧凑既有 HeroUI 操作区与 OA adapter；不新增状态、API、worker、read model 或数据库结构 | `tests/test_etc_backend.py`；`tests/test_audit_etc_tickets_read_model_tool.py`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-08-03 | 已提交批次附件恢复支持对严格限定的历史 `canonical_invoice` 后补成员建立可信 PDF/XML 事实并纠正 ETC 元数据；保留已有 hash 的严格校验 | ETC 附件恢复 service、单页 PDF 校验复用、提交批次汇总和审计；不改成员/OA/relation/状态/read model/worker | `tests/test_etc_invoice_pdf_bundle_service.py` 68 张/4 张 bootstrap、身份拒绝、回滚、幂等与 68 页下载 |
 | 2026-08-01 | ETC 页面改为左侧批次 rail + 右侧连续工作面，删除车牌/关键词页面查询链路，并新增基于既有 batch/task 状态的四阶段只读进度 | 仅 ETC 前端页面结构、展示投影与页面请求参数；后端 API/状态机/read model/worker/权限/跨页 I/O 不变 | `web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts`；`web/e2e/etc-tickets-flow.spec.ts`；production build |

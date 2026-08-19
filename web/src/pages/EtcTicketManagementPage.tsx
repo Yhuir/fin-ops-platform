@@ -289,10 +289,25 @@ function isOaDecisionPendingStatus(status: EtcBusinessBatchStatus) {
 }
 
 function batchDisplayTitle(
-  batch: Pick<EtcBusinessBatchSummary, "createdAt">,
+  batch: Pick<EtcBusinessBatchSummary, "invoiceDateStart" | "invoiceDateEnd" | "scopeMonth">,
 ) {
-  const { date, time } = splitDateTimeParts(batch.createdAt);
-  return date === "-" ? "未记录时间" : `${date}${time ? ` ${time.slice(0, 5)}` : ""}`;
+  const start = datePart(batch.invoiceDateStart) ?? datePart(batch.invoiceDateEnd);
+  const end = datePart(batch.invoiceDateEnd) ?? start;
+  const fallbackMonth = /^\d{4}-\d{2}$/.test(batch.scopeMonth) ? batch.scopeMonth : null;
+  const startMonth = start?.slice(0, 7) ?? fallbackMonth;
+  const endMonth = end?.slice(0, 7) ?? startMonth;
+  if (!startMonth || !endMonth) {
+    return "开票月份未记录";
+  }
+  const [startYear, startMonthNumber] = startMonth.split("-");
+  const [endYear, endMonthNumber] = endMonth.split("-");
+  if (startMonth === endMonth) {
+    return `${startYear}年${Number(startMonthNumber)}月 ETC发票`;
+  }
+  if (startYear === endYear) {
+    return `${startYear}年${Number(startMonthNumber)}月–${Number(endMonthNumber)}月 ETC发票`;
+  }
+  return `${startYear}年${Number(startMonthNumber)}月–${endYear}年${Number(endMonthNumber)}月 ETC发票`;
 }
 
 function reconciliationStatusLabel(status: EtcReconciliationTask["status"]) {

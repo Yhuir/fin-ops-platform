@@ -258,12 +258,43 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
             where expected.invoice_count <> coalesce(effective.invoice_count, 0)
                or expected.invoice_amount <> coalesce(effective.invoice_amount, 0)
         ),
+        submitted_etc_relation_gaps as (
+            select
+                batch.external_batch_id as subject_id,
+                to_char(batch.scope_month, 'YYYY-MM') as scope_key,
+                'etc-summary-' || regexp_replace(
+                    batch.external_batch_id,
+                    '[^A-Za-z0-9_-]+',
+                    '-',
+                    'g'
+                ) as row_id,
+                'invoice'::text as row_type,
+                case
+                    when not exists (
+                        select 1
+                        from app.oa_applications oa
+                        where oa.status <> 'deleted'
+                          and nullif(oa.normalized_payload->>'etc_batch_id', '')
+                              = batch.external_batch_id
+                    ) then 'submitted_etc_batch_oa_missing'
+                    else 'submitted_etc_batch_relation_missing'
+                end as mismatch_kind
+            from submitted_business_batches batch
+            where nullif(batch.external_batch_id, '') is not null
+              and not exists (
+                  select 1
+                  from active_relations relation
+                  where relation.external_etc_batch_id = batch.external_batch_id
+              )
+        ),
         issues as (
             select * from invalid_members where mismatch_kind is not null
             union all
             select * from invalid_shapes where mismatch_kind is not null
             union all
             select * from invalid_etc_summaries
+            union all
+            select * from submitted_etc_relation_gaps
         )
         select mismatch_kind, subject_id, scope_key, row_id, row_type
         from issues
@@ -272,31 +303,37 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
         """,
         (TURNOVER_MANUAL_CLOSURE_RELATION_MODE, limit),
     )
-    return [
-        AuditIssue(
-            severity=(
-                "warning"
-                if str(row.get("mismatch_kind") or "").strip()
-                == "etc_summary_modern_source_parity_mismatch"
-                else "error"
-            ),
-            code="workbench_canonical_relation_integrity_mismatch",
-            message=(
-                "已提交 ETC 业务批次与关联台现代发票合并集的数量或金额不一致。"
-                if str(row.get("mismatch_kind") or "").strip()
-                == "etc_summary_modern_source_parity_mismatch"
-                else "关联台 active relation 包含无效或缺失的 canonical 成员。"
-            ),
-            subject_id=str(row.get("subject_id") or "").strip(),
-            scope_key=str(row.get("scope_key") or "").strip(),
-            details={
-                "mismatch_kind": str(row.get("mismatch_kind") or "").strip(),
-                "row_id": str(row.get("row_id") or "").strip(),
-                "row_type": str(row.get("row_type") or "").strip(),
-            },
+    issues: list[AuditIssue] = []
+    diagnostic_messages = {
+        "etc_summary_modern_source_parity_mismatch": "已提交 ETC 业务批次与关联台现代发票合并集的数量或金额不一致。",
+        "submitted_etc_batch_oa_missing": "已提交 ETC 业务批次尚未找到对应 OA。",
+        "submitted_etc_batch_relation_missing": "已提交 ETC 业务批次尚未挂入关联台 active relation。",
+    }
+    for row in rows:
+        mismatch_kind = str(row.get("mismatch_kind") or "").strip()
+        is_diagnostic = mismatch_kind in diagnostic_messages
+        issues.append(
+            AuditIssue(
+                severity="warning" if is_diagnostic else "error",
+                code=(
+                    mismatch_kind
+                    if mismatch_kind.startswith("submitted_etc_batch_")
+                    else "workbench_canonical_relation_integrity_mismatch"
+                ),
+                message=diagnostic_messages.get(
+                    mismatch_kind,
+                    "关联台 active relation 包含无效或缺失的 canonical 成员。",
+                ),
+                subject_id=str(row.get("subject_id") or "").strip(),
+                scope_key=str(row.get("scope_key") or "").strip(),
+                details={
+                    "mismatch_kind": mismatch_kind,
+                    "row_id": str(row.get("row_id") or "").strip(),
+                    "row_type": str(row.get("row_type") or "").strip(),
+                },
+            )
         )
-        for row in rows
-    ]
+    return issues
 
 
 def _canonical_fact_counts(connection: Any) -> dict[str, int]:

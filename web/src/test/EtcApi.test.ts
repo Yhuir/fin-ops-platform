@@ -118,6 +118,8 @@ describe("etc api", () => {
                   oa_draft_url: "https://oa.example.test/draft/001",
                   invoice_count: 37,
                   total_amount: "1673.30",
+                  invoice_date_start: "2026-03-28",
+                  invoice_date_end: "2026-04-27",
                   create_oa_draft_action: {
                     enabled: false,
                     code: "oa_confirmation_pending",
@@ -163,6 +165,8 @@ describe("etc api", () => {
       oaDraftId: "oa-draft-001",
       oaDraftUrl: "https://oa.example.test/draft/001",
       invoiceSummary: { count: 37, amount: "1673.30" },
+      invoiceDateStart: "2026-03-28",
+      invoiceDateEnd: "2026-04-27",
       amountBreakdown: {
         reportedAmount: "1935.45",
         oaAmount: "1935.45",

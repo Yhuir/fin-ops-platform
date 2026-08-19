@@ -4298,7 +4298,10 @@ class Application:
         ]
         if not normalized_months:
             return
-        _ = reason
+        self._mark_workbench_matching_dirty_scopes(
+            normalized_months,
+            reason=reason,
+        )
 
     def _refresh_after_workbench_requirement_repair(
         self,

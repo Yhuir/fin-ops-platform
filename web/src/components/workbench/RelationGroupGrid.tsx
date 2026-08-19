@@ -86,17 +86,24 @@ type CollapsedSummaryCopy = {
   countUnit: string;
 };
 
+function isEtcInvoiceCollapse(
+  group: WorkbenchRelationGroup,
+  paneId: WorkbenchRecordType,
+  collapsedRows: WorkbenchRecord[],
+) {
+  const summaryRow = group.summaryRow ?? group.rows[paneId]?.[0];
+  return paneId === "invoice" && (
+    summaryRow?.sourceKind === "etc_invoice_summary"
+    || collapsedRows.some((row) => row.sourceKind === "etc_invoice")
+  );
+}
+
 function resolveCollapsedSummaryCopy(
   group: WorkbenchRelationGroup,
   paneId: WorkbenchRecordType,
   collapsedRows: WorkbenchRecord[],
 ): CollapsedSummaryCopy {
-  const summaryRow = group.summaryRow ?? group.rows[paneId]?.[0];
-  const isEtcInvoiceSummary =
-    paneId === "invoice" &&
-    (summaryRow?.sourceKind === "etc_invoice_summary" || collapsedRows.some((row) => row.sourceKind === "etc_invoice"));
-
-  if (isEtcInvoiceSummary) {
+  if (isEtcInvoiceCollapse(group, paneId, collapsedRows)) {
     return {
       detailLabel: "ETC发票明细",
       countUnit: "张",
@@ -441,6 +448,9 @@ function RelationGroupGrid({
           if (expandedPaneGroups.has(collapseKey)) {
             return collapsedRows;
           }
+          if (isEtcInvoiceCollapse(group, paneId, collapsedRows)) {
+            return collapsedRows.slice(0, 1);
+          }
           return group.rows[paneId];
         };
         const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
@@ -455,16 +465,19 @@ function RelationGroupGrid({
           const rowTotal = group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
           const visibleRowCount = collapsedRows.length;
           const collapseCopy = resolveCollapsedSummaryCopy(group, paneId, collapsedRows);
+          const isEtcInvoice = isEtcInvoiceCollapse(group, paneId, collapsedRows);
           return (
             <Fragment>
               <button
                 aria-expanded={isExpanded}
                 aria-label={
                   isExpanded
-                    ? `收起${collapseCopy.detailLabel}`
+                    ? isEtcInvoice ? "收起ETC发票" : `收起${collapseCopy.detailLabel}`
                     : isFailed
                       ? `加载${collapseCopy.detailLabel}失败，点击重试`
-                      : `展开${collapseCopy.detailLabel}，${rowTotal} ${collapseCopy.countUnit}`
+                      : isEtcInvoice
+                        ? `展开全部ETC发票，共 ${rowTotal} 张`
+                        : `展开${collapseCopy.detailLabel}，${rowTotal} ${collapseCopy.countUnit}`
                 }
                 className="row-action-btn candidate-group-collapse-control"
                 disabled={isLoading}
@@ -477,10 +490,12 @@ function RelationGroupGrid({
                 {isLoading
                   ? "加载中"
                   : isExpanded
-                    ? "收起明细"
+                    ? isEtcInvoice ? "收起发票" : "收起明细"
                     : isFailed
                       ? "加载失败，点击重试"
-                      : `展开 ${rowTotal} ${collapseCopy.countUnit}明细`}
+                      : isEtcInvoice
+                        ? `展开全部 ${rowTotal} 张发票`
+                        : `展开 ${rowTotal} ${collapseCopy.countUnit}明细`}
               </button>
             </Fragment>
           );

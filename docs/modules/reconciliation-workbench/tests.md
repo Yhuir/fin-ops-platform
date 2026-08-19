@@ -138,10 +138,17 @@
 - Frontend：`WorkbenchSelection.test.tsx` 证明只有 409 重载一次 active generation；404 不重载、不重试并显示安全中文错误；关闭抽屉 abort 在途详情。`WorkbenchApi.test.ts` 覆盖新增 503 错误映射；`RelationGroupGrid.test.tsx` 证明 ETC/流水规则 summary 没有 row detail 入口。
 - Regression：OA、流水、发票继续共用同一 drawer/API/facade/repository 链路；没有新增表、索引、cache、worker、queue 或第二详情实现。生产验证要求为三类详情 p95 `<1s`、同一 exact generation 请求全成功、读取前后 generation/dirty scope/outbox 无增量，并完成 release gate T+0/T+60/T+300。
 
+## 2026-08-20 ETC 批次折叠、搜索、计数与关系缺口审计
+
+- Business/repository：`tests/test_workbench_page_query_repository.py` 保护 ETC inventory 只统计 submitted/closed distinct batch，搜索命中 external/business/submission batch ID、成员发票号和精确金额，并让 compact summary 只携带第一张真实 ETC 发票与完整总数。
+- Audit：`tests/test_workbench_page_audit.py` 保护缺 OA 与缺 active relation 的 submitted ETC batch 分别输出稳定 warning code，既有无效 relation member 仍为 error。
+- Frontend：`web/src/test/RelationGroupGrid.test.tsx` 保护折叠态不显示 summary 占位行、直接显示第一张发票，展开/收起复用既有 detail loader 展示全部 N 张。
+- 性能：首屏不携带全部 ETC 发票，成员发票号仅在用户搜索时通过有界 `exists` 查询；不新增 API、SQL round-trip、表、worker、read model、cache 或第二套展开状态。
+
 ## 2026-07-28 逐栏折叠、普通行直显与搜索真实预览
 
 - Business core：`no_oa_bank_batch` 与普通关系保留全部真实行；`bank_flow_rule_batch` 只有银行成员数 `>3` 才生成银行栏 summary/collapsed rows，1 到 3 行直接显示；ETC 仍只折叠发票栏。
-- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；折叠栏只传 summary + count，搜索只决定组命中、不携带或自动展开 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v12 淘汰旧 generation/page cache，并统一 ETC relation proof，不新增表、worker、cache 或 API。
+- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；折叠栏传 summary + count，ETC 例外保留第一张真实发票窄行，搜索只决定组命中、不自动展开全部 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v12 淘汰旧 generation/page cache，并统一 ETC relation proof，不新增表、worker、cache 或 API。
 - API/Frontend：group detail 按 `collapsed_row_counts.<pane>` 逐栏验证；ETC 的 OA/银行栏验证正常 rows，发票栏验证 collapsed rows。闭合态搜索直接渲染真实命中行并高亮，不显示“隐藏内容命中”、不自动展开或预取详情。
 - Regression：普通多行与 legacy no-OA 不出现通用“还有 N 条，展开”；bank-flow 与 ETC 保留 click-only detail、失败可重试和同 generation fail-closed。
 

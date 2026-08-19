@@ -155,6 +155,8 @@ export type EtcBusinessBatchSummary = {
   oaRowId: string;
   oaProcessStatus: string;
   invoiceSummary: EtcBusinessBatchInvoiceSummary;
+  invoiceDateStart?: string;
+  invoiceDateEnd?: string;
   amountBreakdown: EtcBusinessBatchAmountBreakdown;
   createOaDraftAction: EtcCreateOaDraftAction;
   createdAt: string;

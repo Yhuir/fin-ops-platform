@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-19
+日期：2026-08-20
 
 ## 职责
 
@@ -85,7 +85,7 @@ requested tenant/scope
 - `GET /api/workbench` 在一个短 `REPEATABLE READ READ ONLY` transaction 内返回 summary、statistics、invoice inventory 与 paired/unpaired 各 10 组首页。精确 total 不变，后续使用 opaque cursor 自动续读。
 - 首屏 candidate spine 只构建一次；禁止依次执行 summary、paired count/page、unpaired count/page 六套重复 canonical CTE。
 - `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`。
-- compact summary group 保留组级 `amount_check`；每行不重复输出相同 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only metadata。前端只把组级金额判断继承给可见行 chip，完整诊断仍由 detail I/O 提供。
+- compact summary group 保留组级 `amount_check`；每行不重复输出相同 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only metadata。ETC 发票栏首屏额外保留第一张真实 `source_kind=etc_invoice` 的窄行，隐藏 summary 锚点；其它发票只保留总数，用户展开时复用既有 group detail 一次加载全部成员。前端只把组级金额判断继承给可见行 chip，完整诊断仍由 detail I/O 提供。
 - `total` 和 row counts 是当前 query 的精确值；统计发生在 cursor 条件前。cursor 只减少深页排序/hydration，不能把 exact count 伪装成常数复杂度。
 - cursor 绑定 scope、zone、sort、search、filters、exception bucket 的规范化 query hash，并保存完整稳定排序 tuple 与 `group_key` tie-breaker。
 - cursor 是 opaque pagination boundary，不是 MVCC snapshot、read-model version、permission token 或写 CAS。跨 HTTP 请求采用 latest-committed 语义；并发写时页面在 mutation 成功后清空 cursor/selection 并重读首屏。
@@ -93,7 +93,7 @@ requested tenant/scope
 
 ### 搜索、筛选与 filter options
 
-- search 只覆盖用户可见的 OA/流水/发票结构化字段；内部 row/group id、`raw_payload`、`source_payload` 和 detail-only 文本不属于搜索面。
+- search 只覆盖用户可见的 OA/流水/发票结构化字段。ETC summary 额外支持 external business batch ID、business batch ID、submission batch ID、成员发票号和批次精确金额；成员发票号用同一 `exists` 子查询命中后返回完整组，不把全部成员塞进 summary payload。内部 row/group id、`raw_payload`、`source_payload` 和其它 detail-only 文本不属于搜索面。
 - `%`、`_`、反斜杠按 literal escape；金额先 canonicalize 后比较 numeric，日期使用显式表达式。
 - 任一成员命中返回完整 group；不得只返回命中行。
 - 同列多值 OR，不同列/不同 pane AND；同一 pane 的多个列条件必须由同一 member 满足。
@@ -117,7 +117,7 @@ requested tenant/scope
 
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
-| combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
+| combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。`invoice_inventory.inventory_etc_summary_batch_count` 只统计 `oa_submitted/manually_marked_submitted/closed` 的 distinct ETC external batch，不把 draft/withdrawn 历史状态计成已提交批次。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。 |
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户完成人工分类并明确 `accept_paired` 的 active formal relation；chip 显示人工选择的具体金额分类或“无异常”，系统检测项仍保留作审计。 |
@@ -128,6 +128,7 @@ requested tenant/scope
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |
 
 - `workbench-matching` 的运行事实仅来自 `job.workbench_matching_dirty_scopes`、worker heartbeat 和错误字段；它不是 Workbench 页面 read model，也不创建 `workbench_matching` BackgroundJob 或全局页面进度。
+- Page Audit 对每个已提交 ETC external batch 独立检查正式 OA 的 `normalized_payload.etc_batch_id` 与 active relation：缺 OA 输出 `submitted_etc_batch_oa_missing` warning，有 OA 但未挂入关系输出 `submitted_etc_batch_relation_missing` warning；active relation 的无效 canonical 成员仍是 error。warning 用于暴露可修复链路缺口，不把未配对事实伪装成完整关系。
 
 ## 写入与一致性
 

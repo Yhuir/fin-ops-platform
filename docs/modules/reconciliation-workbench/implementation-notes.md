@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-20 - ETC 全量折叠与历史关系缺口可观测
+
+- 折叠态删除 ETC summary 占位展示，直接保留第一张真实发票；展开使用既有 group detail 一次加载全部成员，收起回到第一张。首屏仍为 `O(1)` 发票窄行 + 总数，不把 68 张塞入 initial payload。
+- ETC inventory 只统计 submitted/closed distinct batch；搜索补齐 external/business/submission batch ID、成员发票号和精确批次金额，成员号通过 `exists` 命中完整 group。
+- Page Audit 新增 submitted batch 的 OA 缺失/active relation 缺失 warning，区分“上游 OA 不存在”和“OA 已存在但 matching 未闭环”；不改变 canonical relation 完整性 error。
+- 旧链：不引入 summary 展示行、客户端 68 行预载、第二展开组件、第二 matcher、page read model 或缓存。
+
 ## 2026-08-19 - ETC link 覆盖改为逐票覆盖
 
 - 68 张已提交业务批次仅 4 张存在 canonical link 时，旧 SQL/Python 以批次级来源优先级只发布 4 张；实际 64 张仍在 `app.etc_invoices`，不是文件或发票事实丢失。

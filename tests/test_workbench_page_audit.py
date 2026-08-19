@@ -52,6 +52,9 @@ class WorkbenchPageAuditTests(unittest.TestCase):
             "etc_summary_modern_source_parity_mismatch",
             connection.integrity_sql,
         )
+        self.assertIn("submitted_etc_relation_gaps", connection.integrity_sql)
+        self.assertIn("submitted_etc_batch_oa_missing", connection.integrity_sql)
+        self.assertIn("submitted_etc_batch_relation_missing", connection.integrity_sql)
 
     def test_invalid_noncanonical_summary_member_remains_blocking(self) -> None:
         connection = _Connection(
@@ -94,6 +97,26 @@ class WorkbenchPageAuditTests(unittest.TestCase):
         self.assertEqual(report["summary"]["error_count"], 0)
         self.assertEqual(report["issues"][0]["severity"], "warning")
         self.assertIn("ETC 业务批次", report["issues"][0]["message"])
+
+    def test_submitted_batch_relation_gap_is_reported_with_specific_warning_code(self) -> None:
+        connection = _Connection(
+            [
+                {
+                    "mismatch_kind": "submitted_etc_batch_relation_missing",
+                    "subject_id": "ETC-UNPAIRED",
+                    "scope_key": "2026-06",
+                    "row_id": "etc-summary-ETC-UNPAIRED",
+                    "row_type": "invoice",
+                }
+            ]
+        )
+
+        report = audit_workbench_relation_display(connection)
+
+        self.assertEqual(report["summary"]["warning_count"], 1)
+        self.assertEqual(report["summary"]["error_count"], 0)
+        self.assertEqual(report["issues"][0]["code"], "submitted_etc_batch_relation_missing")
+        self.assertIn("active relation", report["issues"][0]["message"])
 
 
 if __name__ == "__main__":
