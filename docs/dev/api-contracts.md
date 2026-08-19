@@ -907,7 +907,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 ]
 ```
 
-该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖。附件状态只以 `attachment_file_count` 和是否存在可用正式发票判定：无附件为“无OA附件”，有附件但没有可用正式发票统一为“OA发票附件未解析”，不再输出或依赖旧解析失败计数。OA 附件发票 row 返回去重后的 `source_expense_item_ids[]`；只有数组成员与 `expense_items[*].id` 精确相等时前端才可同带对齐。同一发票连接多个付款项时前端把这些付款项与该发票渲染为一个连通展示段，发票不得复制。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
+该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖。附件状态只以 `attachment_file_count` 和是否存在精确绑定到当前子付款项的可用正式发票判定：无附件且没有该正式发票来源证明时为“无OA附件”，有附件但没有解析出可用正式发票统一为“OA发票附件未解析”，不再输出或依赖旧解析失败计数。`oa_attachment_invoice` 与 `oa_expense_item_invoice` row 都返回去重后的 `source_expense_item_ids[]`；只有数组成员与 `expense_items[*].id` 精确相等时前端才可同带对齐。APP 内手工录入/选择发票不会改写 OA 原始附件数。同一发票连接多个付款项时前端把这些付款项与该发票渲染为一个连通展示段，发票不得复制。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
 
 ## 发票生命周期状态
 

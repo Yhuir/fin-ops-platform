@@ -506,6 +506,7 @@ def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> No
     assert "oa.normalized_payload->'detail_fields'->>'Mongo文档ID'" in connection.sql
     assert "oa.normalized_payload->>'expense_type'" in connection.sql
     assert "admission.source_payload->>'expense_type'" in connection.sql
+    assert connection.sql.count("'oa_expense_item_invoice'") >= 3
     assert "'supporting_documents'" not in connection.sql
 
 

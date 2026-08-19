@@ -433,6 +433,49 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertEqual(anomaly["items"][0]["code"], "oa_invoice_attachment_absent")
         self.assertEqual(anomaly["items"][0]["label"], "无OA附件")
 
+    def test_manual_invoice_binding_satisfies_zero_attachment_evidence(self) -> None:
+        anomaly = self.service.workbench_anomaly(
+            {
+                "oa": [{
+                    **self._oa_row("2308.02"),
+                    "id": "oa-2308",
+                    "expense_items": [{
+                        "id": "item-2308",
+                        "amount": "2308.02",
+                        "attachment_file_count": "0",
+                    }],
+                }],
+                "bank": [{
+                    "id": "bank-2038",
+                    "type": "bank",
+                    "direction": "expense",
+                    "amount": "2038.02",
+                }],
+                "invoice": [
+                    {
+                        **self._invoice_row("859.57"),
+                        "id": "invoice-859",
+                        "source_expense_item_ids": ["item-2308"],
+                    },
+                    {
+                        **self._invoice_row("1178.45"),
+                        "id": "invoice-1178",
+                        "source_expense_item_ids": ["item-2308"],
+                    },
+                ],
+            },
+            relation_id="CASE-MANUAL-2308",
+        )
+
+        assert anomaly is not None
+        anomaly_codes = {item["code"] for item in anomaly["items"]}
+        self.assertEqual(
+            anomaly_codes,
+            {"oa_bank_amount_mismatch", "oa_invoice_amount_mismatch"},
+        )
+        self.assertNotIn("oa_invoice_attachment_absent", anomaly_codes)
+        self.assertNotIn("oa_invoice_attachment_unparsed", anomaly_codes)
+
     def test_exact_single_invoice_mismatch_is_displayed_on_that_invoice(self) -> None:
         anomaly = self.service.workbench_anomaly(
             {

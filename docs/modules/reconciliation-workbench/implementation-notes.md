@@ -1747,3 +1747,9 @@
 - 根因：PostgreSQL candidate 为 `oa_invoice_attachment_absent` / `unparsed` / `unassigned` 计算 item fingerprint 时，空的 `bank_total` 与 `invoice_total` 之间少一个 NUL 分隔符；Python hydration 使用完整七字段序列。未审阅时双方都落未配对而未暴露，人工 `accept_paired` 后 candidate 仍判决定失效、hydration 判决定有效，最终触发 zone 一致性保护并返回 500。
 - 收口：只补齐现有 SQL 指纹序列的缺失分隔符，使其与 `WorkbenchAmountCheckService._anomaly_item(...)` 完全一致；不放宽 fingerprint、review freshness 或 completion 门禁，不增加 fallback、表、索引、migration、cache、read model、worker 或依赖。
 - 生产影响：历史 ETC 已提交关系中的附件异常和金额异常可继续保留，并在人工确认后稳定进入已配对；最新无 OA 批次仍按原规则留在未配对。
+
+## 2026-08-20 - APP 手工发票的子付款项来源在摘要链路闭环
+
+- 生产只读核验确认目标 OA 原始附件数为 `0`，但六张正式发票的 canonical `source_links` 已全部通过 `oa_expense_item_invoice` 精确绑定到目标 OA 子付款项；数据修复 dry-run 的 `update_count=0`，因此不改生产数据。
+- 根因是 Workbench compact summary hydration 的旧来源过滤只保留 `oa_attachment_invoice`，在组装当前页时丢弃了手工录入/选择发票的子付款项来源，导致 Python 异常重算误报“无OA附件”。
+- 收口仍使用既有来源边：摘要 hydration 同时保留 `oa_attachment_invoice` 与 `oa_expense_item_invoice`；OA 原始 `attachment_file_count` 保持不变，真实 OA—流水及 OA—发票金额差异继续显示。删除单一附件来源过滤的旧行为，不新增 API、表、migration、read model、worker、cache、依赖或兼容分支。

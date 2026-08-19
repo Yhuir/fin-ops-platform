@@ -783,15 +783,24 @@ class PostgresWorkbenchPageHydrationRepository:
                         bool_or(link.source_type = 'manual_invoice_import')
                             as has_manual_import,
                         coalesce(jsonb_agg(link.compact_link order by link.ordinality)
-                            filter (where link.source_type = 'oa_attachment_invoice'),
+                            filter (where link.source_type in (
+                                'oa_attachment_invoice',
+                                'oa_expense_item_invoice'
+                            )),
                             '[]'::jsonb) as compact_links,
                         coalesce(jsonb_agg(to_jsonb(link.compact_link->>'source_expense_item_id') order by link.ordinality)
                             filter (
-                                where link.source_type = 'oa_attachment_invoice'
+                                where link.source_type in (
+                                    'oa_attachment_invoice',
+                                    'oa_expense_item_invoice'
+                                )
                                   and nullif(link.compact_link->>'source_expense_item_id', '') is not null
                             ), '[]'::jsonb) as expense_item_ids,
                         (array_agg(link.compact_link order by link.ordinality)
-                            filter (where link.source_type = 'oa_attachment_invoice'))[1]
+                            filter (where link.source_type in (
+                                'oa_attachment_invoice',
+                                'oa_expense_item_invoice'
+                            )))[1]
                             as oa_link
                     from (
                         select

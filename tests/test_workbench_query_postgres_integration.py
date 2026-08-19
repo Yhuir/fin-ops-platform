@@ -820,6 +820,137 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             "accept_paired",
         )
 
+    def test_manual_expense_item_invoices_satisfy_missing_attachment_evidence(self) -> None:
+        oa_payload = {
+            "id": "oa-manual-2308",
+            "month": "2026-07",
+            "section": "unpaired",
+            "applicant": "刘涵静",
+            "project_name": "2025年1-12月电话费",
+            "apply_type": "日常报销",
+            "amount": "2308.02",
+            "workflow_status": "completed",
+            "expense_items": [
+                {
+                    "id": "oa-manual-2308:item:0",
+                    "expense_item_id": "oa-manual-2308:item:0",
+                    "row_index": "0",
+                    "amount": "2308.02",
+                    "attachment_file_count": "0",
+                }
+            ],
+        }
+        self.raw_connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount, currency,
+                normalized_payload, raw_payload
+            ) values (
+                'oa-source-manual-2308', '32', '日常报销', 'oa-manual-2308',
+                'active', 'completed', '刘涵静', '2026-07-20', '2026-07-01',
+                '2025年1-12月电话费', 2308.02, 'CNY', %s::jsonb, '{}'::jsonb
+            )
+            """,
+            (json.dumps(oa_payload, ensure_ascii=False),),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                trade_time, summary, raw_payload, status
+            ) values (
+                'bank-manual-2038', '6222000011118108', '基本户', 'outflow',
+                '中国电信股份有限公司昆明分公司', 2038.02, -2038.02,
+                '2026-07-20', '2026-07-01', '2026-07-20 10:00:00+08',
+                '2025年1-12月电话费', '{}'::jsonb, 'active'
+            )
+            """
+        )
+        source_links = [
+            {
+                "source_type": "oa_expense_item_invoice",
+                "entry_method": "manual_invoice_import",
+                "derived_from_oa_id": "oa-manual-2308",
+                "source_expense_item_id": "oa-manual-2308:item:0",
+                "source_expense_row_index": "0",
+                "source_relation_case_id": "CASE-MANUAL-2308",
+            }
+        ]
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                amount, signed_amount, total_with_tax, status, workbench_visibility,
+                source_links, raw_payload
+            ) values
+                (
+                    'invoice-manual-859', 'input', 'INV-MANUAL-859',
+                    '2026-07-18', '2026-07-01', 859.57, 859.57, 859.57,
+                    'active', 'visible', %s::jsonb, '{}'::jsonb
+                ),
+                (
+                    'invoice-manual-1178', 'input', 'INV-MANUAL-1178',
+                    '2026-07-18', '2026-07-01', 1178.45, 1178.45, 1178.45,
+                    'active', 'visible', %s::jsonb, '{}'::jsonb
+                )
+            """,
+            (
+                json.dumps(source_links, ensure_ascii=False),
+                json.dumps(source_links, ensure_ascii=False),
+            ),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'CASE-MANUAL-2308', 'manual_confirmed', 'active', 1, '2026-07-01',
+                array[
+                    'oa-manual-2308', 'bank-manual-2038',
+                    'invoice-manual-859', 'invoice-manual-1178'
+                ],
+                array['oa','bank','invoice','invoice'], '{}'::jsonb,
+                '{"requires_oa":true,"requires_invoice":true}'::jsonb,
+                '{}'::jsonb
+            )
+            """
+        )
+
+        page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="INV-MANUAL-859",
+            detail_level="summary",
+        )
+        group = next(
+            row for row in page["groups"] if row.get("detail_key") == "CASE-MANUAL-2308"
+        )
+        self.assertEqual(len(group["invoice_rows"]), 2)
+        for invoice_row in group["invoice_rows"]:
+            self.assertEqual(
+                invoice_row["source_expense_item_ids"],
+                ["oa-manual-2308:item:0"],
+            )
+            self.assertTrue(
+                any(
+                    link.get("source_type") == "oa_expense_item_invoice"
+                    for link in invoice_row["source_links"]
+                )
+            )
+
+        expense_item = group["oa_rows"][0]["expense_items"][0]
+        self.assertEqual(str(expense_item["attachment_file_count"]), "0")
+        anomaly_codes = {
+            item["code"] for item in group["workbench_anomaly"]["items"]
+        }
+        self.assertIn("oa_bank_amount_mismatch", anomaly_codes)
+        self.assertIn("oa_invoice_amount_mismatch", anomaly_codes)
+        self.assertNotIn("oa_invoice_attachment_absent", anomaly_codes)
+        self.assertNotIn("oa_invoice_attachment_unparsed", anomaly_codes)
+
     def test_summary_hydration_does_not_transport_large_unused_source_payloads(self) -> None:
         sentinel = "summary-hot-path-unused-" + ("x" * 200_000)
         self.raw_connection.execute(

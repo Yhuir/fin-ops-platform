@@ -514,3 +514,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 ## 2026-08-20 - 附件异常审阅分区回归
 
 - `tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_anomaly_state_is_sql_compact_fingerprint_parity_and_keyset_bounded` 在真实 PostgreSQL 中同时构造“无 OA 附件”和“流水发票金额不一致”，验证 SQL/Python 指纹一致；人工确认后 combined initial 与 paired/unpaired groups 必须稳定分区且不返回 500。
+
+## 2026-08-20 - 手工发票补足 OA 子付款项来源回归
+
+- `tests/test_workbench_amount_check_service.py::WorkbenchAmountCheckServiceTests::test_manual_invoice_binding_satisfies_zero_attachment_evidence` 保护 OA 原附件数为零但已有精确子付款项发票归属时不再生成“无OA附件”；OA—流水和 OA—发票的真实金额差异仍保留。
+- `tests/test_workbench_page_query_repository.py::test_compact_hydration_exposes_the_same_external_oa_identity_aliases` 锁住 compact summary SQL 同时承载 `oa_attachment_invoice` 与 `oa_expense_item_invoice`，禁止恢复只保留原附件来源的旧过滤。
+- `tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_manual_expense_item_invoices_satisfy_missing_attachment_evidence` 在 disposable PostgreSQL 中构造生产同形 OA、流水和多张手工发票关系，验证 summary hydration 输出精确来源、OA 原附件数保持零且仅保留真实金额异常。
