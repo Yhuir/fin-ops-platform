@@ -2745,6 +2745,11 @@ class AppSettingsService:
                 tag_codes.append(code)
                 local_codes.add(code)
                 assigned_codes.add(code)
+            if validate and not tag_codes:
+                raise AppSettingsValidationError(
+                    "empty_cost_statistics_no_oa_project_tags",
+                    "每个无 OA 虚拟项目必须至少选择一个银行流水标签。",
+                )
             project_ids.add(project_id)
             project_names.add(normalized_name)
             projects.append(

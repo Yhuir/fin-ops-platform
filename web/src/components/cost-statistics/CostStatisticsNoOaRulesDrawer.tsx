@@ -23,9 +23,9 @@ type Props = {
   onSave: () => void;
 };
 
-function leafLabel(tag: CostStatisticsTagRuleTag) {
-  return tag.path[1] || tag.outputSubLabel || tag.label || tag.code;
-}
+type TagSection =
+  | { kind: "group"; label: string; tags: CostStatisticsTagRuleTag[] }
+  | { kind: "singleton"; tag: CostStatisticsTagRuleTag };
 
 function createProjectId() {
   return `virtual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -57,8 +57,28 @@ export default function CostStatisticsNoOaRulesDrawer({
     projects.flatMap((project) => project.tagCodes.map((code) => [code, project] as const)),
   ), [projects]);
   const tags = rules?.availableTags ?? [];
+  const tagSections = useMemo(() => {
+    const sections: TagSection[] = [];
+    const groups = new Map<string, Extract<TagSection, { kind: "group" }>>();
+    tags.forEach((tag) => {
+      const path = tag.path.filter((part) => part.trim());
+      if (path.length < 2) {
+        sections.push({ kind: "singleton", tag });
+        return;
+      }
+      const label = path[0] || tag.outputPrimaryLabel || tag.label || tag.code;
+      let group = groups.get(label);
+      if (!group) {
+        group = { kind: "group", label, tags: [] };
+        groups.set(label, group);
+        sections.push(group);
+      }
+      group.tags.push(tag);
+    });
+    return sections;
+  }, [tags]);
   const assignedCount = new Set(projects.flatMap((project) => project.tagCodes)).size;
-  const hasInvalidName = projects.some((project) => !project.displayName.trim());
+  const hasIncompleteProject = projects.some((project) => !project.displayName.trim() || project.tagCodes.length === 0);
 
   function updateProject(projectId: string, update: (project: CostStatisticsNoOaProject) => CostStatisticsNoOaProject) {
     onProjectsChange(projects.map((project) => project.id === projectId ? update(project) : project));
@@ -87,7 +107,7 @@ export default function CostStatisticsNoOaRulesDrawer({
           <div className="cost-tag-rules-footer-status" role="status">{rules ? `${projects.length} 个虚拟项目 · 已分配 ${assignedCount} 个标签` : ""}</div>
           <div className="cost-tag-rules-footer-actions">
             <Button isDisabled={saving || interactionLocked} onPress={onClose} size="sm" variant="secondary">取消</Button>
-            <Button isDisabled={!rules || loading || saving || interactionLocked || !canSave || hasInvalidName} isPending={saving} onPress={onSave} size="sm" variant="primary">保存</Button>
+            <Button isDisabled={!rules || loading || saving || interactionLocked || !canSave || hasIncompleteProject} isPending={saving} onPress={onSave} size="sm" variant="primary">保存</Button>
           </div>
         </div>
       )}
@@ -123,21 +143,36 @@ export default function CostStatisticsNoOaRulesDrawer({
                         {editingId === project.id ? (
                           <Input aria-label="虚拟项目名称" autoFocus disabled={!canSave || saving || interactionLocked} maxLength={80} onBlur={() => project.displayName.trim() && setEditingId(null)} onChange={(event) => updateProject(project.id, (item) => ({ ...item, displayName: event.currentTarget.value }))} onKeyDown={(event) => { if (event.key === "Enter" && project.displayName.trim()) setEditingId(null); }} placeholder="输入虚拟项目名称" value={project.displayName} />
                         ) : null}
-                        <div aria-label={`${project.displayName || "虚拟项目"}标签`} className="cost-no-oa-tag-list" role="group">
-                          {tags.length === 0 ? <div className="cost-tag-rules-state">当前没有带标签的无 OA 支出流水。</div> : tags.map((tag) => {
-                            const owner = ownerByCode.get(tag.code);
-                            const selected = owner?.id === project.id;
-                            const occupied = Boolean(owner && owner.id !== project.id);
+                        <div aria-label={`${project.displayName || "虚拟项目"}标签`} className="cost-no-oa-tag-groups" role="group">
+                          {tags.length === 0 ? <div className="cost-tag-rules-state">当前没有带标签的无 OA 支出流水。</div> : tagSections.map((section) => {
+                            const sectionTags = section.kind === "group" ? section.tags : [section.tag];
+                            const content = sectionTags.map((tag) => {
+                              const owner = ownerByCode.get(tag.code);
+                              const selected = owner?.id === project.id;
+                              const occupied = Boolean(owner && owner.id !== project.id);
+                              const path = tag.path.filter((part) => part.trim());
+                              const label = path[path.length - 1] || tag.outputSubLabel || tag.label || tag.code;
+                              return (
+                                <Checkbox className="cost-no-oa-tag" isDisabled={!canSave || saving || interactionLocked || occupied || (tag.status === "unavailable" && !selected)} isSelected={selected} key={tag.code} onChange={(checked) => updateProject(project.id, (item) => ({ ...item, tagCodes: checked ? [...item.tagCodes, tag.code] : item.tagCodes.filter((code) => code !== tag.code) }))}>
+                                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                                  <span className="cost-no-oa-tag-copy">
+                                    <span>{label}</span>
+                                    {occupied ? <em>已归属：{owner?.displayName || "未命名项目"}</em> : null}
+                                    {tag.status === "unavailable" ? <em>当前无可归集流水，可取消</em> : null}
+                                  </span>
+                                </Checkbox>
+                              );
+                            });
+                            if (section.kind === "singleton") return content[0];
                             return (
-                              <Checkbox className="cost-no-oa-tag" isDisabled={!canSave || saving || interactionLocked || occupied || (tag.status === "unavailable" && !selected)} isSelected={selected} key={tag.code} onChange={(checked) => updateProject(project.id, (item) => ({ ...item, tagCodes: checked ? [...item.tagCodes, tag.code] : item.tagCodes.filter((code) => code !== tag.code) }))}>
-                                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                                <span>{leafLabel(tag)}</span>
-                                {occupied ? <em>已归属：{owner?.displayName || "未命名项目"}</em> : null}
-                                {tag.status === "unavailable" ? <em>当前无可归集流水，可取消</em> : null}
-                              </Checkbox>
+                              <div aria-label={section.label} className="cost-no-oa-tag-group" key={`group-${section.label}`} role="group">
+                                <div className="cost-no-oa-tag-group-title">{section.label}</div>
+                                <div className="cost-no-oa-tag-items">{content}</div>
+                              </div>
                             );
                           })}
                         </div>
+                        {project.tagCodes.length === 0 ? <div className="cost-no-oa-project-error" role="status">请至少选择一个标签。</div> : null}
                       </div>
                     ) : null}
                   </section>

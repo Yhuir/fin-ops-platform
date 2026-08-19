@@ -640,6 +640,28 @@ class AppSettingsServiceTests(unittest.TestCase):
                             {
                                 "id": "project-1",
                                 "display_name": "无 OA 项目",
+                                "tag_codes": [],
+                            }
+                        ],
+                    },
+                    actor_id="cost-owner",
+                    allowed_tag_codes={"fee"},
+                )
+            self.assertEqual(
+                context.exception.error_code,
+                "empty_cost_statistics_no_oa_project_tags",
+            )
+            unchanged = app._app_settings_service.get_cost_statistics_no_oa_projects_payload()
+            self.assertEqual(unchanged["version"], no_oa["version"])
+            self.assertEqual(unchanged["projects"], [])
+            with self.assertRaises(AppSettingsValidationError) as context:
+                app._app_settings_service.update_cost_statistics_no_oa_projects(
+                    {
+                        "expected_version": no_oa["version"],
+                        "projects": [
+                            {
+                                "id": "project-1",
+                                "display_name": "无 OA 项目",
                                 "tag_codes": ["unknown_tag"],
                             }
                         ],

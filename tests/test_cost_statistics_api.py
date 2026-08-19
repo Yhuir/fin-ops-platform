@@ -690,6 +690,38 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.assertEqual(time_page["summary"]["total_amount"], "1258.00")
 
+    def test_no_oa_scope_rejects_empty_projects_without_advancing_version(self) -> None:
+        status, rules = self._json("/api/cost-statistics/no-oa-rules")
+        self.assertEqual(status, 200)
+
+        response = self.app.handle_request(
+            "PUT",
+            "/api/cost-statistics/no-oa-rules",
+            body=json.dumps(
+                {
+                    "expected_version": rules["version"],
+                    "projects": [
+                        {
+                            "id": "empty-project",
+                            "display_name": "空项目",
+                            "tag_codes": [],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            json.loads(response.body)["error"],
+            "empty_cost_statistics_no_oa_project_tags",
+        )
+        status, unchanged = self._json("/api/cost-statistics/no-oa-rules")
+        self.assertEqual(status, 200)
+        self.assertEqual(unchanged["version"], rules["version"])
+        self.assertEqual(unchanged["projects"], [])
+
     def test_local_direct_read_stays_within_regression_budget(self) -> None:
         samples: list[float] = []
         for _index in range(5):

@@ -379,6 +379,14 @@ describe("Cost statistics page", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "无 OA 成本范围" })).not.toBeInTheDocument();
     });
+    const saveCall = fetchMock.mock.calls.find(([request, init]) =>
+      request === "/api/cost-statistics/no-oa-rules" && init?.method === "PUT",
+    );
+    const saveBody = JSON.parse(String(saveCall?.[1]?.body));
+    expect(saveBody.projects[0]).toMatchObject({
+      display_name: "云南溯源无 OA 分类",
+      tag_codes: ["fee"],
+    });
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/operation-barrier/status",
       expect.any(Object),
@@ -436,6 +444,34 @@ describe("Cost statistics page", () => {
     const drawer = await screen.findByRole("dialog", { name: "无 OA 成本范围" });
 
     expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
+  });
+
+  test("groups no-OA child tags under one parent and keeps singleton leaves selectable", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch();
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "无 OA 成本范围" }));
+    const drawer = await screen.findByRole("dialog", { name: "无 OA 成本范围" });
+    await user.click(within(drawer).getByRole("button", { name: "新增虚拟项目" }));
+    await user.type(within(drawer).getByLabelText("虚拟项目名称"), "项目 A");
+
+    const feeGroup = within(drawer).getByRole("group", { name: "费用" });
+    expect(within(drawer).getAllByText("费用")).toHaveLength(1);
+    expect(within(drawer).queryByRole("checkbox", { name: "费用" })).not.toBeInTheDocument();
+    expect(within(feeGroup).getByRole("checkbox", { name: "材料费" })).toBeInTheDocument();
+    expect(within(feeGroup).getByRole("checkbox", { name: "过路费（ETC）" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("checkbox", { name: "内部往来款" })).toBeInTheDocument();
+    expect(within(drawer).getByText("请至少选择一个标签。")).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
+
+    await user.click(within(drawer).getByRole("checkbox", { name: "内部往来款" }));
+
+    expect(within(drawer).queryByText("请至少选择一个标签。")).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "保存" })).toBeEnabled();
   });
 
   test("shows no-OA tags as mutually exclusive across virtual projects", async () => {
