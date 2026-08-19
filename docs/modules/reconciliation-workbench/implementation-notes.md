@@ -1707,3 +1707,9 @@
 - 部署后只读长样本显示 groups/filter-options 的单请求 P95 已低于 1 秒，但 combined initial 的 40 次样本 P95 为 `1000.891ms`，仍按硬合同判失败；不能用 0.891ms 的误差掩盖结果。
 - 根因收敛为 `overall_summary` 在成员展开结果上同时执行组级和成员级多组 distinct 聚合。组级计数只依赖一行一个 group 的 `effective_groups`，现拆为 `overall_group_summary` 直接 `count(*) filter`；成员级去重继续保留在 `overall_member_summary`，两者最后交叉合并，API 字段和异常语义不变。
 - 删除原成员展开上的组级 distinct 旧路径，不新增表、索引、migration、cache、read model、worker、依赖或兼容分支；变更只影响关联台 direct repository 的单条只读 SQL，不污染其它页面 I/O。
+
+## 2026-08-19 - 首屏成员去重与默认分区计数复用
+
+- 第一轮发布后 40 次长样本首屏 p95 为 `971.004ms`，但另一组 20 次样本出现 `1006.833ms` 的边缘失败，因此继续收紧现有 SQL，不把网络抖动包装成稳定达标。
+- 旧查询在同一份成员展开集上执行多个 `count(distinct (row_type, row_id))`，默认 paired/unpaired 首屏又各自重复成员去重和分区总数扫描。现在只物化一次 `overall_unique_members`，成员总统计和无筛选的 paired/unpaired 精确行数共享该集合；分区组数复用 `overall_group_summary`。
+- 带搜索、状态、来源、列或时间筛选的分区仍走原精确计数路径，避免为了性能改变筛选语义。没有新增 API、存储、索引、migration、cache、worker 或兼容分支。

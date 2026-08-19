@@ -492,5 +492,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 ## 2026-08-19 - combined initial 统计热路径回归
 
-- `tests/test_workbench_page_query_repository.py::test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration` 保护组级 summary 不再 join `canonical_group_members`、不再执行 `count(distinct groups.internal_key)`；成员级 summary 继续按 `(row_type, row_id)` 去重，防止性能修复改变计数合同。
+- `tests/test_workbench_page_query_repository.py::test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration` 保护组级 summary 不再 join `canonical_group_members`、不再执行 `count(distinct groups.internal_key)`；成员只先按 `(row_type, row_id)` 物化一次，默认 paired/unpaired 精确行数和组总数复用该统计事实，防止性能修复改变计数合同。
 - `tests/test_workbench_query_postgres_integration.py` 必须在 disposable PostgreSQL 上全量通过，证明拆分后的 CTE 可真实解析执行，initial/groups/detail 与 ETC 部分桥接 68 张恢复链路保持一致。

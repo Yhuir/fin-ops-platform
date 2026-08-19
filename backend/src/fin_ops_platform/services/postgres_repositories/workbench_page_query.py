@@ -1979,8 +1979,6 @@ class PostgresWorkbenchPageQueryRepository:
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
-            {self._initial_zone_ctes('paired', paired_plan)},
-            {self._initial_zone_ctes('unpaired', unpaired_plan)},
             overall_group_summary as materialized (
                 select
                     count(*) filter (where groups.zone = 'paired')::bigint
@@ -1999,51 +1997,66 @@ class PostgresWorkbenchPageQueryRepository:
                         as missing_invoice_group_count
                 from effective_groups groups
             ),
+            overall_unique_members as materialized (
+                select
+                    member.row_type,
+                    member.row_id,
+                    bool_or(groups.zone = 'paired') as in_paired,
+                    bool_or(groups.zone = 'unpaired') as in_unpaired,
+                    bool_or(member.column_values->>'direction' = '支出') as is_expense,
+                    bool_or(member.column_values->>'direction' = '收入') as is_income,
+                    bool_or(
+                        lower(coalesce(member.column_values->>'invoiceType', ''))
+                            like any(array['%%进%%', '%%input%%', '%%purchase%%'])
+                    ) as is_input_invoice,
+                    bool_or(
+                        lower(coalesce(member.column_values->>'invoiceType', ''))
+                            like any(array['%%销%%', '%%output%%', '%%sale%%'])
+                    ) as is_output_invoice
+                from effective_groups groups
+                join canonical_group_members member
+                  on member.internal_key = groups.internal_key
+                group by member.row_type, member.row_id
+            ),
             overall_member_summary as materialized (
                 select
-                    count(distinct (member.row_type, member.row_id))
-                        filter (where member.row_type = 'oa')::bigint as summary_oa_count,
-                    count(distinct (member.row_type, member.row_id))
-                        filter (where member.row_type = 'bank')::bigint as summary_bank_count,
-                    count(distinct (member.row_type, member.row_id))
+                    count(*) filter (where member.row_type = 'oa')::bigint
+                        as summary_oa_count,
+                    count(*) filter (where member.row_type = 'bank')::bigint
+                        as summary_bank_count,
+                    count(*)
                         filter (where member.row_type = 'invoice')::bigint
                         as summary_invoice_count,
-                    count(distinct (member.row_type, member.row_id)) filter (
-                        where member.row_type = 'bank'
-                          and member.column_values->>'direction' = '支出'
+                    count(*) filter (
+                        where member.row_type = 'bank' and member.is_expense
                     )::bigint as expense_transaction_count,
-                    count(distinct (member.row_type, member.row_id)) filter (
-                        where member.row_type = 'bank'
-                          and member.column_values->>'direction' = '收入'
+                    count(*) filter (
+                        where member.row_type = 'bank' and member.is_income
                     )::bigint as income_transaction_count,
-                    count(distinct (member.row_type, member.row_id)) filter (
-                        where member.row_type = 'invoice'
-                          and lower(coalesce(member.column_values->>'invoiceType', ''))
-                              like any(array['%%进%%', '%%input%%', '%%purchase%%'])
+                    count(*) filter (
+                        where member.row_type = 'invoice' and member.is_input_invoice
                     )::bigint as input_invoice_count,
-                    count(distinct (member.row_type, member.row_id)) filter (
-                        where member.row_type = 'invoice'
-                          and lower(coalesce(member.column_values->>'invoiceType', ''))
-                              like any(array['%%销%%', '%%output%%', '%%sale%%'])
+                    count(*) filter (
+                        where member.row_type = 'invoice' and member.is_output_invoice
                     )::bigint as output_invoice_count,
-                    count(distinct (member.row_type, member.row_id)) filter (
-                        where groups.zone = 'paired' and member.row_type = 'oa'
+                    count(*) filter (
+                        where member.in_paired and member.row_type = 'oa'
                     )::bigint as paired_oa_count,
-                    count(distinct (member.row_type, member.row_id)) filter (
-                        where groups.zone = 'paired' and member.row_type = 'bank'
+                    count(*) filter (
+                        where member.in_paired and member.row_type = 'bank'
                     )::bigint as paired_bank_count,
-                    count(distinct (member.row_type, member.row_id)) filter (
-                        where groups.zone = 'paired' and member.row_type = 'invoice'
+                    count(*) filter (
+                        where member.in_paired and member.row_type = 'invoice'
                     )::bigint as paired_invoice_count
-                from effective_groups groups
-                left join canonical_group_members member
-                  on member.internal_key = groups.internal_key
+                from overall_unique_members member
             ),
             overall_summary as materialized (
                 select *
                 from overall_group_summary
                 cross join overall_member_summary
             ),
+            {self._initial_zone_ctes('paired', paired_plan)},
+            {self._initial_zone_ctes('unpaired', unpaired_plan)},
             invoice_inventory as materialized (
                 select
                     count(*)::bigint as inventory_system_total,
@@ -2275,10 +2288,55 @@ class PostgresWorkbenchPageQueryRepository:
             "search_ctes": search_ctes,
             "search_params": search_params,
             "exception_bucket": exception_bucket,
+            "uses_unfiltered_zone_counts": not any(
+                (
+                    normalized_status,
+                    normalized_source_kind,
+                    normalized_search,
+                    normalized_columns,
+                    normalized_times,
+                    exception_bucket,
+                )
+            ),
         }
 
     @staticmethod
     def _initial_zone_ctes(prefix: str, plan: dict[str, Any]) -> str:
+        if plan["uses_unfiltered_zone_counts"]:
+            exact_totals_sql = f"""
+                select summary_{prefix}_count::bigint as total_count
+                from overall_group_summary
+            """
+            exact_row_counts_sql = f"""
+                select
+                    count(*) filter (
+                        where member.in_{prefix} and member.row_type = 'oa'
+                    )::bigint as oa_count,
+                    count(*) filter (
+                        where member.in_{prefix} and member.row_type = 'bank'
+                    )::bigint as bank_count,
+                    count(*) filter (
+                        where member.in_{prefix} and member.row_type = 'invoice'
+                    )::bigint as invoice_count
+                from overall_unique_members member
+            """
+        else:
+            exact_totals_sql = f"""
+                select count(*)::bigint as total_count
+                from {prefix}_keyed_groups
+            """
+            exact_row_counts_sql = f"""
+                select
+                    count(distinct (member.row_type, member.row_id))
+                        filter (where member.row_type = 'oa')::bigint as oa_count,
+                    count(distinct (member.row_type, member.row_id))
+                        filter (where member.row_type = 'bank')::bigint as bank_count,
+                    count(distinct (member.row_type, member.row_id))
+                        filter (where member.row_type = 'invoice')::bigint as invoice_count
+                from {prefix}_keyed_groups groups
+                left join canonical_group_members member
+                  on member.internal_key = groups.internal_key
+            """
         return f"""
             {plan['search_ctes']}
             {prefix}_filtered_groups as materialized (
@@ -2316,20 +2374,10 @@ class PostgresWorkbenchPageQueryRepository:
                 limit %s
             ),
             {prefix}_exact_totals as materialized (
-                select count(*)::bigint as total_count
-                from {prefix}_keyed_groups
+                {exact_totals_sql}
             ),
             {prefix}_exact_row_counts as materialized (
-                select
-                    count(distinct (member.row_type, member.row_id))
-                        filter (where member.row_type = 'oa')::bigint as oa_count,
-                    count(distinct (member.row_type, member.row_id))
-                        filter (where member.row_type = 'bank')::bigint as bank_count,
-                    count(distinct (member.row_type, member.row_id))
-                        filter (where member.row_type = 'invoice')::bigint as invoice_count
-                from {prefix}_keyed_groups groups
-                left join canonical_group_members member
-                  on member.internal_key = groups.internal_key
+                {exact_row_counts_sql}
             )
         """
 
