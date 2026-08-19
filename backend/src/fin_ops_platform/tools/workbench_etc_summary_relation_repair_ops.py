@@ -5,12 +5,12 @@ from collections.abc import Sequence
 from copy import deepcopy
 from hashlib import sha256
 import json
-import re
 import sys
 from typing import Any, TextIO
 
 from fin_ops_platform.services.workbench_etc_batch_link import (
     relation_external_etc_batch_ids,
+    workbench_etc_summary_row_id,
 )
 from fin_ops_platform.tools.runtime_application import (
     build_tool_runtime_application,
@@ -233,7 +233,7 @@ def _validated_identity(relation: dict[str, Any], external_batch_id: str) -> dic
     row_types = [str(value or "").strip().lower() for value in list(relation.get("row_types") or [])]
     if len(row_ids) != len(row_types):
         raise RuntimeError("Workbench relation row_ids/row_types are not aligned.")
-    expected_summary_row_id = _etc_summary_row_id(external_batch_id)
+    expected_summary_row_id = workbench_etc_summary_row_id(external_batch_id)
     summary_indexes = [index for index, row_id in enumerate(row_ids) if row_id == expected_summary_row_id]
     if len(summary_indexes) != 1 or row_types[summary_indexes[0]] not in _INVOICE_ROW_TYPES:
         raise RuntimeError(
@@ -249,11 +249,6 @@ def _validated_identity(relation: dict[str, Any], external_batch_id: str) -> dic
         "row_ids": row_ids,
         "row_types": row_types,
     }
-
-
-def _etc_summary_row_id(external_batch_id: str) -> str:
-    safe_batch_id = re.sub(r"[^A-Za-z0-9_-]+", "-", external_batch_id).strip("-") or "unknown"
-    return f"etc-summary-{safe_batch_id}"
 
 
 def _fingerprint(identity: dict[str, Any]) -> str:

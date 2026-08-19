@@ -62,7 +62,7 @@
 | ETC OA 附件引用 | OA form draft | `HttpEtcOAClient` 在上传响应边界把已知 OA absolute `/fileManager/` / `/profile/` URL 归一为根相对路径；已有相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。现有 payload builder 把同一规范值写入 `response.data` 与 `response.extra.filePath`，页面/Nginx 不做补偿拼接 |
 | ETC OA 付款申请预填 | OA form draft | 使用已验证的 OA code 写入申请类型、支付方式、发票种类和项目 ID，并写入申请人、当天日期、批次金额、收款方、开户行、账号及模板渲染的申请事由；配置变更不改已 prepare attempt，重放保持原快照 |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
-| 关联候选/关系影响 | `workbench-matching` | submitted 状态变化或 submitted 幂等重放只通过 server 组装的既有 matching dirty-scope 端口，按批次精确月份 normalize/dedupe/enqueue；ETC service 不直接写 queue SQL，不创建第二套 matcher、relation 或页面 refresh 路径。 |
+| 关联候选/关系影响 | `workbench-matching` | submitted 状态变化或 submitted 幂等重放只通过 server 组装的既有 matching dirty-scope 端口，按批次精确月份 normalize/dedupe/enqueue；matcher 用 OA 的 exact `normalized_payload.etc_batch_id` 找到批次，必要时把延迟 OA 申请月份并入同次 fact load，并通过正式 relation command 同时写入唯一 `etc-summary-*` invoice member 与 `etc_batch_link`。只有 metadata 不算关联完成；ETC service 不直接写 queue SQL，不创建第二套 matcher、relation 或页面 refresh 路径。 |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复；恢复只写回原 tombstone 或精确缺失成员，不创建第二个业务批次，不直接写页面投影；成员修复完成后通过 historical ETC repair runtime port 执行 official lifecycle，并仅按共享消费者合同 enqueue 精确月份的 `workbench_relation`，不得投递已退役的 page `workbench` event 或 `all` scope |
 | Completed import job consumption | background job progress / current page load | ETC 发票导入 job 完成后当前可见页执行一次普通 canonical GET；其它页面不被写后强制重建。 |
 | 前端刷新提示 | `etcBusinessBatchUpdated` / `invoiceFactUpdated` | 事件仅允许刷新当前可见且订阅该领域的页面；hidden 页面忽略且不重放。事件不是 freshness 事实源，也不得触发其它页面重建 |

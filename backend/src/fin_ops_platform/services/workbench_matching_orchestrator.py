@@ -168,16 +168,23 @@ class WorkbenchMatchingOrchestrator:
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         started_at = perf_counter()
-        scope_months = self._normalize_scope_months(changed_scope_months)
+        requested_scope_months = self._normalize_scope_months(changed_scope_months)
         normalized_reason = self._required_text(reason, "reason")
         normalized_request_id = self._required_text(request_id, "request_id")
         source_versions = self._source_versions()
+        etc_batch_link_candidates = self._fact_repository.load_etc_batch_link_candidates(
+            requested_scope_months
+        )
+        scope_months = self._expanded_etc_batch_link_scopes(
+            requested_scope_months,
+            etc_batch_link_candidates,
+        )
         batch = self._fact_repository.load_batch(scope_months, source_versions=source_versions)
         match_result = self._matcher.plan_relations(batch, self._search_limits)
         etc_batch_links, ambiguous_etc_batch_link_count, unowned_etc_batch_link_count = self._resolve_etc_batch_links(
             batch,
             match_result,
-            self._fact_repository.load_etc_batch_link_candidates(scope_months),
+            etc_batch_link_candidates,
         )
         summary: dict[str, Any] = {
             "request_id": normalized_request_id,
@@ -413,6 +420,23 @@ class WorkbenchMatchingOrchestrator:
         )
         ambiguous_count = len(ambiguous_external_ids) + len(resolved) - len(links)
         return links, ambiguous_count, unowned_count
+
+    @classmethod
+    def _expanded_etc_batch_link_scopes(
+        cls,
+        requested_scope_months: list[str],
+        candidates: list[dict[str, Any]],
+    ) -> list[str]:
+        discovered_scope_months = [
+            str(scope).strip()
+            for candidate in list(candidates or [])
+            if isinstance(candidate, dict)
+            for scope in list(candidate.get("scope_keys") or [])
+            if str(scope).strip() != "all"
+        ]
+        return cls._normalize_scope_months(
+            [*requested_scope_months, *discovered_scope_months]
+        )
 
     @staticmethod
     def _default_relation_command(context: Any) -> WorkbenchRelationCommandService:

@@ -16,7 +16,10 @@ from fin_ops_platform.services.workbench_matching_orchestrator import (
     WorkbenchMatchingOrchestrator,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-from fin_ops_platform.services.workbench_relation_command_service import CallbackWorkbenchRelationRepository
+from fin_ops_platform.services.workbench_relation_command_service import (
+    CallbackWorkbenchRelationRepository,
+    WorkbenchRelationCommandError,
+)
 from tests.workbench_deterministic_relation_fixtures import yunnan_lifu_520_fixture
 
 
@@ -427,6 +430,10 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(uow.calls[0].scope_keys, ("2026-05",))
         relation = next(iter(uow.snapshot["pair_relations"].values()))
         self.assertEqual(
+            set(relation["row_ids"]),
+            {"oa-etc", "bank-etc", "etc-summary-etc_20260622_001"},
+        )
+        self.assertEqual(
             relation["special_metadata"]["etc_batch_link"]["external_etc_batch_id"],
             "etc_20260622_001",
         )
@@ -450,6 +457,12 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
                     "status": "active",
                     "version": 1,
                     "month_scope": "2026-05",
+                    "amount_check": {"status": "matched", "invoice_total": None},
+                    "special_metadata": {
+                        "historical_etc_business_batch_migration": {
+                            "gap_reason": "保留已确认的历史差额说明。"
+                        }
+                    },
                 }
             },
             "pair_relation_history": [],
@@ -481,6 +494,112 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(uow.calls[0].scope_keys, ("2026-05",))
         self.assertEqual(uow.save_count, 1)
         self.assertEqual(set(uow.snapshot["pair_relations"]), {case_id})
+        self.assertEqual(
+            set(uow.snapshot["pair_relations"][case_id]["row_ids"]),
+            {oa.row_id, bank.row_id, "etc-summary-etc_20260622_001"},
+        )
+        self.assertEqual(
+            uow.snapshot["pair_relations"][case_id]["amount_check"],
+            {"status": "matched", "invoice_total": None},
+        )
+        self.assertEqual(
+            uow.snapshot["pair_relations"][case_id]["special_metadata"]
+            ["historical_etc_business_batch_migration"]["gap_reason"],
+            "保留已确认的历史差额说明。",
+        )
+
+    def test_delayed_oa_scope_is_loaded_before_exact_etc_relation_enrichment(self) -> None:
+        oa = fact("oa", "oa-delayed")
+        bank = fact("bank", "bank-delayed")
+        fixture = FormalRelationFactBatch(facts=(oa, bank))
+        candidate = {
+            "oa_row_id": oa.row_id,
+            "business_batch_id": "etc_business_batch_delayed",
+            "external_etc_batch_id": "etc_delayed_001",
+            "submission_batch_id": "etc_submission_delayed",
+            "invoice_count": 36,
+            "total_amount": "1673.30",
+            "external_batch_owner_count": 1,
+            "scope_keys": ["2026-03", "2026-07"],
+        }
+        orchestrator, repository, uow = self._orchestrator(
+            fixture,
+            etc_batch_link_candidates=[candidate],
+        )
+
+        summary = orchestrator.run(
+            changed_scope_months=["2026-03"],
+            reason="etc_business_manual_oa_status_replayed",
+            request_id="request-delayed-oa",
+        )
+
+        self.assertEqual(repository.calls[0], {"etc_scope_months": ["2026-03"]})
+        self.assertEqual(
+            repository.calls[1],
+            {"scope_months": ["2026-03", "2026-07"], "source_versions": {"matching": "v1"}},
+        )
+        self.assertEqual(summary["processed_months"], ["2026-03", "2026-07"])
+        relation = next(iter(uow.snapshot["pair_relations"].values()))
+        self.assertIn("etc-summary-etc_delayed_001", relation["row_ids"])
+
+    def test_existing_etc_summary_member_in_another_relation_fails_closed(self) -> None:
+        oa = fact("oa", "oa-existing-conflict")
+        bank = fact("bank", "bank-existing-conflict")
+        case_id = "case:existing-conflict"
+        fixture = FormalRelationFactBatch(
+            facts=(oa, bank),
+            active_relations=(ActiveFormalRelationAnchor(case_id, (oa.member_key, bank.member_key)),),
+        )
+        snapshot = {
+            "pair_relations": {
+                case_id: {
+                    "case_id": case_id,
+                    "row_ids": [oa.row_id, bank.row_id],
+                    "row_types": [oa.row_type, bank.row_type],
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "version": 1,
+                    "month_scope": "2026-05",
+                },
+                "case:summary-owner": {
+                    "case_id": "case:summary-owner",
+                    "row_ids": ["etc-summary-etc_conflict_001"],
+                    "row_types": ["invoice"],
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "version": 1,
+                    "month_scope": "2026-05",
+                },
+            },
+            "pair_relation_history": [],
+        }
+        candidate = {
+            "oa_row_id": oa.row_id,
+            "business_batch_id": "etc_business_batch_conflict",
+            "external_etc_batch_id": "etc_conflict_001",
+            "submission_batch_id": "etc_submission_conflict",
+            "invoice_count": 1,
+            "total_amount": "10.00",
+            "external_batch_owner_count": 1,
+            "scope_keys": ["2026-05"],
+        }
+        orchestrator, _repository, uow = self._orchestrator(
+            fixture,
+            uow=RecordingUow(snapshot),
+            etc_batch_link_candidates=[candidate],
+        )
+
+        with self.assertRaisesRegex(
+            WorkbenchRelationCommandError,
+            "already belongs to another active Workbench relation",
+        ):
+            orchestrator.run(
+                changed_scope_months=["2026-05"],
+                reason="dirty_scope_retry",
+                request_id="request-etc-summary-conflict",
+            )
+
+        self.assertEqual(uow.save_count, 0)
 
     def test_invalid_input_fails_before_repository_or_uow(self) -> None:
         fixture = FormalRelationFactBatch(facts=())

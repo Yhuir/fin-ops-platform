@@ -9,6 +9,7 @@ from typing import Any
 from fin_ops_platform.services.workbench_etc_batch_link import (
     relation_external_etc_batch_id,
     relation_external_etc_batch_ids,
+    workbench_etc_summary_row_id,
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
@@ -597,23 +598,30 @@ class WorkbenchRelationCommandService:
                 "affected_months": [],
                 "enriched_relation_count": 0,
             }
-        row_ids = [
-            str(row_id)
+        case_ids = [str(getattr(plan, "case_id", "") or "") for plan in normalized_plans]
+        links_by_case = {str(link["case_id"]): link for link in normalized_links}
+        typed_members_by_case = {
+            str(getattr(plan, "case_id", "") or ""): self._formal_plan_typed_members(
+                plan,
+                links_by_case.get(str(getattr(plan, "case_id", "") or "")),
+            )
             for plan in normalized_plans
-            for row_id in tuple(getattr(plan, "row_ids", ()) or ())
+        }
+        row_ids = [
+            row_id
+            for case_id in case_ids
+            for row_id in typed_members_by_case.get(case_id, ([], []))[0]
         ]
         row_types = [
-            str(row_type)
-            for plan in normalized_plans
-            for row_type in tuple(getattr(plan, "row_types", ()) or ())
+            row_type
+            for case_id in case_ids
+            for row_type in typed_members_by_case.get(case_id, ([], []))[1]
         ]
-        case_ids = [str(getattr(plan, "case_id", "") or "") for plan in normalized_plans]
         if len(row_ids) != len(row_types) or any(not item for item in (*row_ids, *row_types, *case_ids)):
             raise WorkbenchRelationCommandError(
                 "invalid_formal_relation_plan",
                 "Formal relation plans require aligned row ids, row types and case ids.",
             )
-        links_by_case = {str(link["case_id"]): link for link in normalized_links}
         requirements_by_case = {
             str(case_id): dict(metadata)
             for case_id, metadata in dict(paired_requirements_by_case_id or {}).items()
@@ -641,9 +649,8 @@ class WorkbenchRelationCommandService:
         changed_case_ids: set[str] = set()
         affected_months: set[str] = set()
         for plan in sorted(normalized_plans, key=lambda item: str(getattr(item, "relation_fingerprint", ""))):
-            plan_row_ids = [str(item) for item in tuple(getattr(plan, "row_ids", ()) or ())]
-            plan_row_types = [str(item) for item in tuple(getattr(plan, "row_types", ()) or ())]
             case_id = str(getattr(plan, "case_id", "") or "")
+            plan_row_ids, plan_row_types = typed_members_by_case[case_id]
             target_case_id = str(getattr(plan, "target_case_id", "") or "")
             active_relations = pair_service.active_relations_for_row_ids(plan_row_ids)
             conflicts = [
@@ -830,9 +837,22 @@ class WorkbenchRelationCommandService:
             }
 
         ordered_case_ids = sorted(str(item["case_id"]) for item in normalized)
-        self._acquire_relation_member_locks([], case_ids=ordered_case_ids)
+        summary_row_ids = [str(item["summary_row_id"]) for item in normalized]
+        summary_row_types = ["invoice"] * len(summary_row_ids)
+        self._assert_canonical_relation_members_available(
+            summary_row_ids,
+            row_types=summary_row_types,
+        )
+        self._acquire_relation_member_locks(
+            summary_row_ids,
+            row_types=summary_row_types,
+            case_ids=ordered_case_ids,
+        )
         self._validate_etc_batch_links(normalized)
-        pair_service = self._pair_service_for_case_ids(ordered_case_ids)
+        pair_service = self._pair_service_for_row_ids(
+            summary_row_ids,
+            case_ids=ordered_case_ids,
+        )
         relations: list[dict[str, Any]] = []
         histories: list[dict[str, Any]] = []
         affected_months: set[str] = set()
@@ -858,6 +878,34 @@ class WorkbenchRelationCommandService:
                     "The exact ETC OA row does not belong to the target Workbench relation.",
                     payload={"case_id": case_id, "oa_row_id": item["oa_row_id"]},
                 )
+            summary_row_id = str(item["summary_row_id"])
+            summary_relations = pair_service.active_relations_for_row_ids([summary_row_id])
+            conflicting_summary_relations = [
+                relation
+                for relation in summary_relations
+                if str(relation.get("case_id") or "") != case_id
+            ]
+            if conflicting_summary_relations:
+                raise WorkbenchRelationCommandError(
+                    "etc_batch_summary_active_relation_conflict",
+                    "The ETC batch summary already belongs to another active Workbench relation.",
+                    payload={
+                        "case_id": case_id,
+                        "external_etc_batch_id": item["external_etc_batch_id"],
+                        "conflicting_case_ids": sorted(
+                            str(relation.get("case_id") or "")
+                            for relation in conflicting_summary_relations
+                        ),
+                    },
+                )
+            member_type_by_id = dict(typed_members)
+            if summary_row_id in member_type_by_id and member_type_by_id[summary_row_id] != "invoice":
+                raise WorkbenchRelationCommandError(
+                    "etc_batch_summary_member_type_conflict",
+                    "The ETC batch summary is persisted with an invalid Workbench member type.",
+                    payload={"case_id": case_id, "row_id": summary_row_id},
+                )
+            summary_is_member = member_type_by_id.get(summary_row_id) == "invoice"
             current_external_batch_id = relation_external_etc_batch_id(active_relation)
             current_external_batch_ids = relation_external_etc_batch_ids(active_relation)
             if len(current_external_batch_ids) > 1:
@@ -883,16 +931,64 @@ class WorkbenchRelationCommandService:
                 if isinstance(current_metadata, dict)
                 else None
             )
-            if current_link == desired_link:
+            if current_link == desired_link and summary_is_member:
                 continue
-            relation, history = pair_service.update_relation_metadata_for_case_id(
-                case_id,
-                special_metadata={"etc_batch_link": desired_link},
-                display_tags=["ETC发票已关联"],
-                updated_by=actor_id,
-                note="系统按 OA 精确 ETC 批次标识补全正式关系归属。",
-                operation_type="link_etc_business_batch",
-            )
+            if summary_is_member:
+                relation, history = pair_service.update_relation_metadata_for_case_id(
+                    case_id,
+                    special_metadata={"etc_batch_link": desired_link},
+                    display_tags=["ETC发票已关联"],
+                    updated_by=actor_id,
+                    note="系统按 OA 精确 ETC 批次标识补全正式关系归属。",
+                    operation_type="link_etc_business_batch",
+                )
+            else:
+                current_metadata = (
+                    active_relation.get("special_metadata")
+                    if isinstance(active_relation.get("special_metadata"), dict)
+                    else {}
+                )
+                display_tags = list(
+                    dict.fromkeys(
+                        [
+                            *[
+                                str(tag).strip()
+                                for tag in list(active_relation.get("display_tags") or [])
+                                if str(tag).strip()
+                            ],
+                            "ETC发票已关联",
+                        ]
+                    )
+                )
+                relation, history = pair_service.replace_with_confirmed_relation(
+                    case_id=case_id,
+                    row_ids=[
+                        *[str(row_id) for row_id in list(active_relation.get("row_ids") or [])],
+                        summary_row_id,
+                    ],
+                    row_types=[
+                        *[str(row_type) for row_type in list(active_relation.get("row_types") or [])],
+                        "invoice",
+                    ],
+                    relation_mode=str(active_relation.get("relation_mode") or "manual_confirmed"),
+                    created_by=actor_id,
+                    month_scope=str(active_relation.get("month_scope") or "all"),
+                    note="系统按 OA 精确 ETC 批次标识补全正式关系及发票成员。",
+                    amount_check=dict(active_relation.get("amount_check") or {}),
+                    special_metadata={
+                        **deepcopy(current_metadata),
+                        "etc_batch_link": desired_link,
+                    },
+                    before_relations=[active_relation],
+                    operation_type="link_etc_business_batch",
+                    history_created_by=actor_id,
+                    history_note="系统按 OA 精确 ETC 批次标识补全正式关系及发票成员。",
+                    exception_case_id=str(active_relation.get("exception_case_id") or "") or None,
+                    rule_version=str(active_relation.get("rule_version") or "") or None,
+                    evidence=dict(active_relation.get("evidence") or {}),
+                    oa_exemption=dict(active_relation.get("oa_exemption") or {}),
+                    display_tags=display_tags,
+                )
             relations.append(relation)
             histories.append(history)
             affected_months.update(
@@ -950,6 +1046,7 @@ class WorkbenchRelationCommandService:
                     "oa_row_id": oa_row_id,
                     "business_batch_id": business_batch_id,
                     "external_etc_batch_id": external_batch_id,
+                    "summary_row_id": workbench_etc_summary_row_id(external_batch_id),
                     "submission_batch_id": str(raw.get("submission_batch_id") or "").strip(),
                     "invoice_count": int(raw.get("invoice_count") or 0),
                     "total_amount": str(raw.get("total_amount") or "0"),
@@ -990,6 +1087,34 @@ class WorkbenchRelationCommandService:
             "invoice_count": item["invoice_count"],
             "total_amount": item["total_amount"],
         }
+
+    @staticmethod
+    def _formal_plan_typed_members(
+        plan: Any,
+        etc_batch_link: dict[str, Any] | None,
+    ) -> tuple[list[str], list[str]]:
+        row_ids = [str(item) for item in tuple(getattr(plan, "row_ids", ()) or ())]
+        row_types = [str(item) for item in tuple(getattr(plan, "row_types", ()) or ())]
+        if len(row_ids) != len(row_types):
+            return row_ids, row_types
+        if etc_batch_link is None:
+            return row_ids, row_types
+        summary_row_id = str(etc_batch_link["summary_row_id"])
+        matching_types = [
+            row_types[index]
+            for index, row_id in enumerate(row_ids)
+            if row_id == summary_row_id
+        ]
+        if matching_types and matching_types != ["invoice"]:
+            raise WorkbenchRelationCommandError(
+                "etc_batch_summary_member_type_conflict",
+                "The ETC batch summary is present with an invalid formal relation member type.",
+                payload={"row_id": summary_row_id, "row_types": matching_types},
+            )
+        if not matching_types:
+            row_ids.append(summary_row_id)
+            row_types.append("invoice")
+        return row_ids, row_types
 
     def cancel_relation(
         self,

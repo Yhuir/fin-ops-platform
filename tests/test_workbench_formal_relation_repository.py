@@ -209,7 +209,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
                     "invoice_count": 34,
                     "total_amount": Decimal("1584.35"),
                     "external_batch_owner_count": 2,
-                    "oa_scope_month": "2026-06",
+                    "oa_scope_month": "2026-08",
                     "batch_scope_month": "2026-06",
                 }
             ]
@@ -221,12 +221,14 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
 
         self.assertEqual(candidates[0]["invoice_count"], 34)
         self.assertEqual(candidates[0]["external_batch_owner_count"], 2)
-        self.assertEqual(candidates[0]["scope_keys"], ["2026-06"])
+        self.assertEqual(candidates[0]["scope_keys"], ["2026-06", "2026-08"])
         sql, params = connection.queries[0]
         self.assertIn("batch.scope_month between %s::date and %s::date", sql)
         self.assertIn("oa.normalized_payload->>'etc_batch_id'", sql)
+        self.assertIn("to_char(coalesce(oa.application_date, oa.scope_month)", sql)
+        self.assertNotIn("coalesce(oa.application_date, oa.scope_month) between", sql)
         self.assertNotIn("like", sql.lower())
-        self.assertEqual(len(params), 4)
+        self.assertEqual(len(params), 2)
 
     def test_transactional_etc_validation_rejects_changed_totals_and_other_relation_owner(self) -> None:
         connection = FakeConnection(

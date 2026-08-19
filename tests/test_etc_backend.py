@@ -64,6 +64,7 @@ from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.workbench_etc_batch_link import workbench_etc_summary_row_id
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from unittest.mock import patch
 
@@ -4591,7 +4592,7 @@ class EtcApiTests(unittest.TestCase):
                 }),
             )
             manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
-            summary_row_id = app._etc_invoice_summary_row_id(manual_payload["externalEtcBatchId"])
+            summary_row_id = workbench_etc_summary_row_id(manual_payload["externalEtcBatchId"])
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="CASE-ETC-DELETE-OLD",
                 row_ids=["oa-etc-delete", "txn-etc-delete"],
@@ -4644,7 +4645,7 @@ class EtcApiTests(unittest.TestCase):
                 submission_batch_id="etc_batch_command",
                 external_etc_batch_id="ETC-COMMAND-202602",
             )
-            summary_row_id = app._etc_invoice_summary_row_id("ETC-COMMAND-202602")
+            summary_row_id = workbench_etc_summary_row_id("ETC-COMMAND-202602")
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="CASE-ETC-COMMAND",
                 row_ids=["oa-etc-command", "txn-etc-command", summary_row_id],
@@ -4702,7 +4703,7 @@ class EtcApiTests(unittest.TestCase):
             mutable_batch.external_etc_batch_id = "ETC-STALE-202602"
             mutable_batch.submission_batch_id = "etc_batch_stale"
             mutable_batch.amount_breakdown = {"scope_month": "2026-02"}
-            summary_row_id = app._etc_invoice_summary_row_id("ETC-STALE-202602")
+            summary_row_id = workbench_etc_summary_row_id("ETC-STALE-202602")
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="CASE-ETC-STALE",
                 row_ids=["oa-etc-stale", "txn-etc-stale", summary_row_id],
@@ -4769,7 +4770,7 @@ class EtcApiTests(unittest.TestCase):
             )
             manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
             task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-            summary_row_id = app._etc_invoice_summary_row_id(manual_payload["externalEtcBatchId"])
+            summary_row_id = workbench_etc_summary_row_id(manual_payload["externalEtcBatchId"])
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="CASE-ETC-TASK-DELETE-OLD",
                 row_ids=["oa-etc-task-delete", "txn-etc-task-delete"],

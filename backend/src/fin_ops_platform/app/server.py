@@ -405,7 +405,10 @@ from fin_ops_platform.services.workbench_anomaly_review_service import (
 from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port import (
     WorkbenchConfirmLinkContextRelationReadPort,
 )
-from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
+from fin_ops_platform.services.workbench_etc_batch_link import (
+    WORKBENCH_ETC_BATCH_LINK_VERSION,
+    workbench_etc_summary_row_id,
+)
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rollback_restore_service import (
@@ -3917,7 +3920,7 @@ class Application:
             str(getattr(batch, "business_batch_id", "") or "").strip(),
         }
         return [
-            self._etc_invoice_summary_row_id(external_id)
+            workbench_etc_summary_row_id(external_id)
             for external_id in sorted(external_ids)
             if external_id
         ]
@@ -8537,11 +8540,6 @@ class Application:
         payload = self._serialize_value(run)
         payload["issue_count"] = run.issue_count
         return payload
-
-    @staticmethod
-    def _etc_invoice_summary_row_id(external_batch_id: str) -> str:
-        safe_batch_id = re.sub(r"[^A-Za-z0-9_-]+", "-", external_batch_id).strip("-") or "unknown"
-        return f"etc-summary-{safe_batch_id}"
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
         return attachment_invoice_cache_parser_version()

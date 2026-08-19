@@ -93,6 +93,39 @@ class WorkbenchPendingOaRelationLockPostgresIntegrationTests(unittest.TestCase):
             (row_id,),
         )
 
+    def _insert_etc_summary(self, external_batch_id: str) -> str:
+        business_batch_id = f"business:{external_batch_id}"
+        self.connection.execute(
+            """
+            insert into app.etc_business_batches(
+                business_batch_id, status, scope_month, invoice_count,
+                total_amount, raw_payload
+            ) values (
+                %s, 'manually_marked_submitted', '2026-08-01', 1,
+                100, jsonb_build_object(
+                    'normalized_payload',
+                    jsonb_build_object('external_etc_batch_id', %s::text)
+                )
+            )
+            """,
+            (business_batch_id, external_batch_id),
+        )
+        self.connection.execute(
+            """
+            insert into app.etc_invoices(
+                etc_invoice_id, business_batch_id, status, invoice_no,
+                invoice_date, seller_name, amount, tax_amount, total_with_tax,
+                raw_payload
+            ) values (
+                %s, %s, 'submitted', %s,
+                '2026-08-09', 'ETC测试供应商', 90, 10, 100,
+                '{}'::jsonb
+            )
+            """,
+            (f"invoice:{external_batch_id}", business_batch_id, f"NO:{external_batch_id}"),
+        )
+        return f"etc-summary-{external_batch_id}"
+
     @staticmethod
     def _command(transaction: Any) -> WorkbenchRelationCommandService:
         return WorkbenchRelationCommandService(
@@ -141,6 +174,43 @@ class WorkbenchPendingOaRelationLockPostgresIntegrationTests(unittest.TestCase):
                 "row_ids": ["oa-pending-lock-1", "bank-pending-lock-1"],
                 "row_types": ["oa", "bank"],
                 "status": "active",
+            },
+        )
+
+    def test_submitted_etc_summary_is_lockable_as_canonical_invoice_member(self) -> None:
+        self._insert_completed_oa("oa-etc-summary-lock")
+        self._insert_bank("bank-etc-summary-lock")
+        summary_row_id = self._insert_etc_summary("etc_202608_lock")
+
+        with self.connection.transaction() as transaction:
+            result = self._command(transaction).confirm_relation(
+                case_id="CASE-ETC-SUMMARY-LOCK",
+                row_ids=["oa-etc-summary-lock", "bank-etc-summary-lock", summary_row_id],
+                row_types=["oa", "bank", "invoice"],
+                relation_mode="manual_confirmed",
+                actor_id="integration-test",
+                month_scope="2026-08",
+                amount_check={"status": "matched"},
+                tenant_id="tenant-a",
+            )
+
+        self.assertEqual(result["status"], "confirmed")
+        persisted = self.connection.fetch_one(
+            """
+            select row_ids, row_types
+            from app.workbench_pair_relations
+            where case_id = 'CASE-ETC-SUMMARY-LOCK'
+            """
+        )
+        self.assertEqual(
+            persisted,
+            {
+                "row_ids": [
+                    "oa-etc-summary-lock",
+                    "bank-etc-summary-lock",
+                    summary_row_id,
+                ],
+                "row_types": ["oa", "bank", "invoice"],
             },
         )
 

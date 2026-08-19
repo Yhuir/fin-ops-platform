@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
-WORKBENCH_ETC_BATCH_LINK_VERSION = "workbench-etc-batch-link-v5"
+WORKBENCH_ETC_BATCH_LINK_VERSION = "workbench-etc-batch-link-v6"
+
+
+def workbench_etc_summary_row_id(external_batch_id: str) -> str:
+    """Return the single canonical Workbench member id for one ETC batch."""
+    safe_batch_id = re.sub(r"[^A-Za-z0-9_-]+", "-", str(external_batch_id or "")).strip("-")
+    return f"etc-summary-{safe_batch_id or 'unknown'}"
 
 
 def relation_external_etc_batch_ids(relation: dict[str, Any]) -> frozenset[str]:

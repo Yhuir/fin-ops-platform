@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-20 - submitted ETC 关系成员与延迟 OA scope 闭环
+
+- 根因：历史 submitted ETC 匹配只在现有 OA/流水关系写入 `special_metadata.etc_batch_link`，没有把 canonical `etc-summary-*` 发票成员加入关系；页面因此同时看到“已标记归属的 OA/流水关系”和独立 ETC 汇总，金额搜索还可能命中冲突拓扑。另一个缺口是候选查询把 OA 申请日期限制在 ETC 发票月份，延迟数月提交的 OA 无法进入同次 matching fact batch。
+- 修复：正式关系 command 统一把精确 ETC summary 作为 `invoice` member；已有关系通过同一 replace-confirmed 边界保留 case、金额检查、历史差额、异常/豁免证据和展示标签后补成员，冲突 owner 或错误成员类型 fail closed。候选先按 ETC scope 查 exact batch marker，再把发现的 OA 申请月份并入一次 fact load；删除“只有 metadata 就算关联成功”的旧判断。
+- 审计：Page Audit 现在分别报告缺 OA、缺 active relation、以及 relation marker 存在但 summary member 缺失；只有 exact deterministic summary id 与 submitted/closed canonical batch 成员都存在时才允许写关系。
+- 性能与边界：候选和 fact 仍是集合式批量 I/O，同一 matching run 只扩展必要月份；不新增表、migration、worker、queue、read model、cache、API 或第二套 repair 链路。`workbench-etc-batch-link-v6` 使旧 matching 输入失效并通过现有 durable dirty scope 重算。
+
 ## 2026-08-20 - ETC 全量折叠与历史关系缺口可观测
 
 - 折叠态删除 ETC summary 占位展示，直接保留第一张真实发票；PostgreSQL 分页快速水合在既有 ETC 汇总 CTE 内按“开票日期、行 ID”同时聚合一张真实首票和完整总数，不能只依赖完整详情 builder。展开使用既有 group detail 一次加载全部成员，收起回到第一张。首屏仍为 `O(1)` 发票窄行 + 总数，不把 68 张塞入 initial payload。

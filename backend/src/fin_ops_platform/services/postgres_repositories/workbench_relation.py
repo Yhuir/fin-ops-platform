@@ -498,6 +498,57 @@ class PostgresWorkbenchRelationRepository:
                 for row in self._connection.fetch_all(sql, (typed_row_ids,))
                 if text(row.get("row_id"))
             )
+        etc_summary_row_ids = sorted(
+            row_id
+            for member_type, row_id in requested
+            if member_type == "invoice" and row_id.startswith("etc-summary-")
+        )
+        if etc_summary_row_ids:
+            etc_summary_rows = self._connection.fetch_all(
+                """
+                select
+                    'etc-summary-' || regexp_replace(
+                        coalesce(
+                            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                            batch.business_batch_id
+                        ),
+                        '[^A-Za-z0-9_-]+',
+                        '-',
+                        'g'
+                    ) as row_id
+                from app.etc_business_batches batch
+                where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+                  and 'etc-summary-' || regexp_replace(
+                        coalesce(
+                            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                            batch.business_batch_id
+                        ),
+                        '[^A-Za-z0-9_-]+',
+                        '-',
+                        'g'
+                      ) = any(%s::text[])
+                  and exists (
+                      select 1
+                      from app.etc_invoices invoice
+                      where invoice.business_batch_id = batch.business_batch_id
+                        and invoice.status <> 'deleted'
+                  )
+                order by row_id
+                for key share of batch
+                """,
+                (etc_summary_row_ids,),
+            )
+            found.update(
+                ("invoice", resolved_row_id)
+                for row in etc_summary_rows
+                if (resolved_row_id := text(row.get("row_id")))
+            )
         return sorted(f"{row_type}:{row_id}" for row_type, row_id in requested - found)
 
     def save_workbench_pair_relations(

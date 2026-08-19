@@ -128,7 +128,7 @@ requested tenant/scope
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |
 
 - `workbench-matching` 的运行事实仅来自 `job.workbench_matching_dirty_scopes`、worker heartbeat 和错误字段；它不是 Workbench 页面 read model，也不创建 `workbench_matching` BackgroundJob 或全局页面进度。
-- Page Audit 对每个已提交 ETC external batch 独立检查正式 OA 的 `normalized_payload.etc_batch_id` 与 active relation：缺 OA 输出 `submitted_etc_batch_oa_missing` warning，有 OA 但未挂入关系输出 `submitted_etc_batch_relation_missing` warning；active relation 的无效 canonical 成员仍是 error。warning 用于暴露可修复链路缺口，不把未配对事实伪装成完整关系。
+- Page Audit 对每个已提交 ETC external batch 独立检查正式 OA 的 `normalized_payload.etc_batch_id` 与 active relation：缺 OA 输出 `submitted_etc_batch_oa_missing` warning，有 OA 但未挂入关系输出 `submitted_etc_batch_relation_missing` warning，只有 metadata marker 但 exact `etc-summary-*` invoice member 未进入关系输出 `submitted_etc_batch_relation_member_missing` warning；active relation 的无效 canonical 成员仍是 error。只有 marker 与真实成员同时存在才算 ETC 归属闭合，warning 用于暴露可修复链路缺口，不把未配对事实伪装成完整关系。
 
 ## 写入与一致性
 
@@ -136,6 +136,7 @@ requested tenant/scope
 - 发票行只提供详情入口，不挂载逐行三点菜单。正式关联与撤回由区域顶部 selection action 负责；自动异常由右侧异常抽屉负责人工审阅。旧 `exception/preview`、`exception/apply`、`mark-exception`、`update-bank-exception`、`oa-bank-exception`、`cancel-exception`、`ignore-row` 和 `unignore-row` HTTP 入口均已退役并返回 `404`，禁止重新引入兼容分支。
 - preview 从 canonical typed selection 一次有界读取所选成员和必要 OA attachment context；不读取完整页面 payload。
 - submit 在 relation UoW 内重读并锁定 canonical rows，验证 exact-set、case owner、版本、preview/topology fingerprint 和幂等。
+- deterministic matching 按 OA 的 exact `normalized_payload.etc_batch_id` 发现 submitted ETC batch，并在读取 fact batch 前把候选 OA 申请月份并入请求 scope；新建或补全正式关系时必须把 deterministic `etc-summary-*` 作为 `invoice` member，同步持久化 `etc_batch_link`。仅有 metadata 不构成完整关系；summary 已由其它 active relation 拥有时 fail closed。
 - confirm 接受至少两个不同 canonical 成员，允许同类型组合；仅 `amount_check.requires_note=true` 时要求备注。
 - withdraw 只接受一个完整可撤回 active relation 的精确成员集合，恢复最近一次确认前的稳定拓扑；当前与前序关系锁集合一次全局稳定排序后加锁。
 - 写事务成功不 enqueue `workbench.read_model.refresh`。前端不应用本地 operation projection，不轮询 generation；direct refetch 失败时明确显示“写已提交、页面刷新失败”，不得重试 mutation。

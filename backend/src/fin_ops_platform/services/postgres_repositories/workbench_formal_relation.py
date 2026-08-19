@@ -325,19 +325,18 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 submitted.invoice_count,
                 submitted.total_amount,
                 submitted.external_batch_owner_count,
-                to_char(coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date), 'YYYY-MM') as oa_scope_month,
+                to_char(coalesce(oa.application_date, oa.scope_month), 'YYYY-MM') as oa_scope_month,
                 to_char(submitted.scope_month, 'YYYY-MM') as batch_scope_month
             from app.oa_applications oa
             join submitted_batches submitted
               on submitted.external_etc_batch_id = nullif(oa.normalized_payload->>'etc_batch_id', '')
-            where coalesce(oa.application_date, oa.scope_month) between %s::date and %s::date
-              and oa.status <> 'deleted'
+            where oa.status <> 'deleted'
               and """
             + COMPLETED_WORKFLOW_STATUS_SQL
             + """
             order by submitted.external_etc_batch_id, oa.row_id
             """,
-            (start_date, end_date, start_date, end_date),
+            (start_date, end_date),
         )
         return [
             {

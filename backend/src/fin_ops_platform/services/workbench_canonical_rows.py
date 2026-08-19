@@ -28,7 +28,10 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
     PostgresOAWorkflowRepository,
 )
-from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
+from fin_ops_platform.services.workbench_etc_batch_link import (
+    relation_external_etc_batch_id,
+    workbench_etc_summary_row_id,
+)
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_query_service import (
@@ -1947,7 +1950,7 @@ class WorkbenchCanonicalRowsBuilder:
         invoice_lines = [self._etc_invoice_summary_line(row) for row in invoices]
         detail_rows = [self._etc_invoice_detail_row(row, external_batch_id=external_batch_id) for row in invoices]
         return {
-            "id": _etc_invoice_summary_row_id(external_batch_id),
+            "id": workbench_etc_summary_row_id(external_batch_id),
             "type": "invoice",
             "case_id": None,
             "source_kind": "etc_invoice_summary",
@@ -2008,7 +2011,7 @@ class WorkbenchCanonicalRowsBuilder:
         seller_name = str(row.get("seller_name") or row.get("counterparty_name") or "—").strip() or "—"
         amount = _money_text(_decimal_value(row.get("total_with_tax") or row.get("amount")))
         return {
-            "id": row_id or f"{_etc_invoice_summary_row_id(external_batch_id)}:detail:{invoice_no}",
+            "id": row_id or f"{workbench_etc_summary_row_id(external_batch_id)}:detail:{invoice_no}",
             "type": "invoice",
             "source_kind": "etc_invoice",
             "status": "paired",
@@ -2233,11 +2236,6 @@ def _date_range_label(values: list[str]) -> str:
     if normalized[0] == normalized[-1]:
         return normalized[0]
     return f"{normalized[0]} 至 {normalized[-1]}"
-
-
-def _etc_invoice_summary_row_id(external_batch_id: str) -> str:
-    safe_batch_id = re.sub(r"[^A-Za-z0-9_-]+", "-", external_batch_id).strip("-") or "unknown"
-    return f"etc-summary-{safe_batch_id}"
 
 
 def _is_outflow(direction: str, signed_amount: object) -> bool:

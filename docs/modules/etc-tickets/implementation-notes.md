@@ -1,5 +1,12 @@
 # ETC票据管理 实施记录
 
+## 2026-08-20 - submitted ETC summary 正式关系闭环
+
+- 生产复核发现其余历史批次虽已有 `etc_batch_link` 标记，ETC summary 仍是独立未配对成员；这不是发票丢失，而是旧 matching 只补 metadata、未补 relation membership。另有一个延迟 OA 的申请月份晚于发票 scope，旧候选窗口无法发现。
+- 修复复用既有 `workbench-matching`、formal relation command 和 canonical summary identity：同批次的新建/已有关系都加入唯一 `etc-summary-*` invoice member，保留历史 case 与差额证据；matching 只扩展 exact candidate 的 OA 月份，不扫描全库、不按金额猜配对。
+- 已 submitted 的 manual-status 幂等重放仍是历史修复入口；它只补投现有 durable matching scope，不推进版本或重复业务审计。发布后将仅对确认有 OA 的历史缺口批次重放，最新无 OA 批次保持未配对并由 Audit 明确说明。
+- 没有新增数据库 migration、备份、worker、queue、read model、cache、API 或直接 SQL 修复路径；旧“metadata 即成功”的判定已删除。
+
 ## 2026-08-20 - submitted matching 漏投与批次名称闭环
 
 - 根因：`EtcBusinessBatchApplicationService` 已计算受影响月份，但 server 组装的 status-change callback 是 no-op；因此人工确认 submitted 只落业务事实，未把 ETC 批次交给既有 deterministic matcher，历史 7 批不会自动挂入已有 OA/流水关系。

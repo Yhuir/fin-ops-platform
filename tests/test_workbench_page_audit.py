@@ -55,6 +55,8 @@ class WorkbenchPageAuditTests(unittest.TestCase):
         self.assertIn("submitted_etc_relation_gaps", connection.integrity_sql)
         self.assertIn("submitted_etc_batch_oa_missing", connection.integrity_sql)
         self.assertIn("submitted_etc_batch_relation_missing", connection.integrity_sql)
+        self.assertIn("submitted_etc_batch_relation_member_missing", connection.integrity_sql)
+        self.assertIn("member.row_id = batch.summary_row_id", connection.integrity_sql)
 
     def test_invalid_noncanonical_summary_member_remains_blocking(self) -> None:
         connection = _Connection(
@@ -117,6 +119,28 @@ class WorkbenchPageAuditTests(unittest.TestCase):
         self.assertEqual(report["summary"]["error_count"], 0)
         self.assertEqual(report["issues"][0]["code"], "submitted_etc_batch_relation_missing")
         self.assertIn("active relation", report["issues"][0]["message"])
+
+    def test_metadata_only_etc_relation_is_reported_as_missing_actual_member(self) -> None:
+        connection = _Connection(
+            [
+                {
+                    "mismatch_kind": "submitted_etc_batch_relation_member_missing",
+                    "subject_id": "ETC-METADATA-ONLY",
+                    "scope_key": "2026-05",
+                    "row_id": "etc-summary-ETC-METADATA-ONLY",
+                    "row_type": "invoice",
+                }
+            ]
+        )
+
+        report = audit_workbench_relation_display(connection)
+
+        self.assertEqual(report["summary"]["warning_count"], 1)
+        self.assertEqual(
+            report["issues"][0]["code"],
+            "submitted_etc_batch_relation_member_missing",
+        )
+        self.assertIn("发票汇总成员", report["issues"][0]["message"])
 
 
 if __name__ == "__main__":

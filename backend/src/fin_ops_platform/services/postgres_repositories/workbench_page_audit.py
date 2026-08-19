@@ -102,7 +102,19 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
                     nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
                     nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
                     batch.business_batch_id
-                ) as external_batch_id
+                ) as external_batch_id,
+                'etc-summary-' || regexp_replace(
+                    coalesce(
+                        nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                        nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                        nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                        nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                        batch.business_batch_id
+                    ),
+                    '[^A-Za-z0-9_-]+',
+                    '-',
+                    'g'
+                ) as summary_row_id
             from app.etc_business_batches batch
             where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
         ),
@@ -262,12 +274,7 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
             select
                 batch.external_batch_id as subject_id,
                 to_char(batch.scope_month, 'YYYY-MM') as scope_key,
-                'etc-summary-' || regexp_replace(
-                    batch.external_batch_id,
-                    '[^A-Za-z0-9_-]+',
-                    '-',
-                    'g'
-                ) as row_id,
+                batch.summary_row_id as row_id,
                 'invoice'::text as row_type,
                 case
                     when not exists (
@@ -277,14 +284,26 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
                           and nullif(oa.normalized_payload->>'etc_batch_id', '')
                               = batch.external_batch_id
                     ) then 'submitted_etc_batch_oa_missing'
-                    else 'submitted_etc_batch_relation_missing'
+                    when not exists (
+                        select 1
+                        from active_relations relation
+                        where relation.external_etc_batch_id = batch.external_batch_id
+                    ) then 'submitted_etc_batch_relation_missing'
+                    else 'submitted_etc_batch_relation_member_missing'
                 end as mismatch_kind
             from submitted_business_batches batch
             where nullif(batch.external_batch_id, '') is not null
               and not exists (
                   select 1
                   from active_relations relation
+                  join lateral unnest(relation.row_ids) with ordinality
+                    as member(row_id, ordinality) on true
                   where relation.external_etc_batch_id = batch.external_batch_id
+                    and member.row_id = batch.summary_row_id
+                    and lower(coalesce(relation.row_types[member.ordinality], '')) in (
+                        'invoice', 'formal_invoice', 'input', 'input_invoice',
+                        'output', 'output_invoice'
+                    )
               )
         ),
         issues as (
@@ -308,6 +327,7 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
         "etc_summary_modern_source_parity_mismatch": "已提交 ETC 业务批次与关联台现代发票合并集的数量或金额不一致。",
         "submitted_etc_batch_oa_missing": "已提交 ETC 业务批次尚未找到对应 OA。",
         "submitted_etc_batch_relation_missing": "已提交 ETC 业务批次尚未挂入关联台 active relation。",
+        "submitted_etc_batch_relation_member_missing": "已提交 ETC 业务批次已标记关系归属，但 ETC 发票汇总成员尚未进入该关系。",
     }
     for row in rows:
         mismatch_kind = str(row.get("mismatch_kind") or "").strip()

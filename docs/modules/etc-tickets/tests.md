@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-08-20 submitted ETC relation membership 闭环
+
+- `tests/test_workbench_matching_orchestrator.py` 保护 same-run 新关系和历史已有 OA/流水关系都加入唯一 ETC summary invoice member，metadata-only 旧态被替换且历史差额不丢，owner 冲突 fail closed。
+- `tests/test_workbench_formal_relation_repository.py` 保护 ETC scope 与延迟 OA 申请 scope 一次发现；`tests/test_workbench_relation_repository.py` 和真实 PostgreSQL integration 保护 submitted ETC summary canonical lock。
+- `tests/test_workbench_page_audit.py` 保护 metadata-only 关系不再误报通过；缺 OA 的最新批次仍保持合法未配对 warning，不按金额或时间猜配对。
+- 既有 `manual-oa-status` 幂等重放、durable matching queue、68 张折叠展示和 direct query 回归继续覆盖；无新 HTTP/前端状态、migration、备份或第二套修复工具。
+
 ## 2026-08-20 submitted matching 闭环与开票月份标题
 
 - `tests/test_workbench_dirty_queue_wiring.py` 保护 ETC status callback 把精确月份交给既有 `workbench-matching` durable queue，不恢复 Workbench page refresh。

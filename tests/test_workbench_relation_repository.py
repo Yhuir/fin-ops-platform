@@ -211,6 +211,31 @@ def test_canonical_relation_member_lock_reports_deleted_member_and_locks_existin
     assert len(connection.fetch_all_calls) == 3
 
 
+def test_canonical_relation_member_lock_accepts_submitted_etc_summary_member() -> None:
+    class EtcSummaryLockConnection(RecordingConnection):
+        def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
+            self.fetch_all_calls.append((sql, params))
+            normalized_sql = " ".join(sql.lower().split())
+            if "from app.invoices" in normalized_sql:
+                return []
+            if "from app.etc_business_batches" in normalized_sql:
+                assert "for key share of batch" in normalized_sql
+                assert "from app.etc_invoices invoice" in normalized_sql
+                assert params == (["etc-summary-etc_20260520_001"],)
+                return [{"row_id": "etc-summary-etc_20260520_001"}]
+            return []
+
+    connection = EtcSummaryLockConnection()
+    missing = PostgresWorkbenchRelationRepository(connection).lock_canonical_relation_members(
+        ["etc-summary-etc_20260520_001"],
+        row_types=["invoice"],
+        tenant_id="tenant-a",
+    )
+
+    assert missing == []
+    assert len(connection.fetch_all_calls) == 2
+
+
 def test_relation_member_lock_includes_case_identity_and_persisted_members_in_stable_order() -> None:
     class RelationLockConnection(RecordingConnection):
         def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
