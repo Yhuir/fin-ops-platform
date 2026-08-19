@@ -130,12 +130,17 @@ PAGE_AUDIT_CONTRACTS: dict[str, PageAuditContract] = {
             "app.bank_transactions",
             "app.oa_applications",
             "app.invoices",
+            "app.etc_business_batches",
+            "app.etc_invoices",
+            "app.etc_batch_invoice_links",
+            "app.etc_submission_batches",
             "app.workbench_pair_relations",
         ),
         relation_tables=("app.workbench_pair_relations",),
         canonical_expected_set=(
             "active relation_mode=batch_accounting relations with source=batch_accounting "
-            "and aligned unique typed members resolving to canonical bank/OA/invoice facts"
+            "and aligned unique typed members resolving to canonical bank/OA/invoice facts "
+            "or an exact submitted ETC summary member"
         ),
         key_display_fields=("case_id", "relation_mode", "row_ids", "row_types", "special_metadata.source"),
         external_source_boundary="OA and bank source completeness before App registration",
@@ -950,13 +955,23 @@ def _key_display_field_issues(
     if domain == "batch_accounting":
         queries = [
             (
-                """
+                f"""
                 /* check: key_display_fields */
                 with batch_relations as (
-                    select relation.*
+                    select relation.*,
+                           {WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL}
+                               as external_etc_batch_id
                     from app.workbench_pair_relations relation
                     where relation.status = 'active'
                       and relation.relation_mode = 'batch_accounting'
+                ),
+                canonical_etc_batch_candidates as (
+                    {CANONICAL_ETC_BATCH_CANDIDATES_SQL}
+                ),
+                canonical_etc_batches as (
+                    select distinct external_batch_id
+                    from canonical_etc_batch_candidates
+                    where nullif(external_batch_id, '') is not null
                 ),
                 invalid_members as (
                     select relation.case_id,
@@ -980,6 +995,7 @@ def _key_display_field_issues(
                                       lower(coalesce(relation.row_types[member.ordinality], ''))
                                           in ('invoice', 'input_invoice', 'output_invoice')
                                       and invoice.id is null
+                                      and etc_batch.external_batch_id is null
                                   )
                            ) as invalid_member_ids
                     from batch_relations relation
@@ -994,6 +1010,14 @@ def _key_display_field_issues(
                     left join app.invoices invoice
                       on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
                      and invoice.status <> 'deleted'
+                    left join canonical_etc_batches etc_batch
+                      on etc_batch.external_batch_id = relation.external_etc_batch_id
+                     and member.row_id = 'etc-summary-' || regexp_replace(
+                         relation.external_etc_batch_id,
+                         '[^A-Za-z0-9_-]+',
+                         '-',
+                         'g'
+                     )
                     group by relation.case_id
                 )
                 select relation.case_id as subject_id,

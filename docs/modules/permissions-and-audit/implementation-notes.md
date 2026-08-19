@@ -1,5 +1,11 @@
 # 权限与审计 实施记录
 
+## 2026-08-20 - 批量账务 ETC summary Page Audit 事实对齐
+
+- Page Audit 的 `batch_accounting` proof 复用共享 canonical ETC summary SQL；只有 relation external batch 标识、规范化 `etc-summary-*` 行 ID 与已提交 ETC batch 事实精确一致时，虚拟 invoice 成员才视为存在。
+- 旧的 `app.invoices` 单源判断已移除；普通发票和错误 summary ID 仍 fail closed。Audit 保持只读、caller-owned snapshot，不新增 repair、read model、worker 或写能力。
+- `tests/test_audit_page_canonical_data_tool.py` 覆盖 SQL 合同与真实 PostgreSQL 正反例。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

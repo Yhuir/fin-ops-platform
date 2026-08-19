@@ -1,5 +1,13 @@
 # 批量账务 实施记录
 
+## 2026-08-20：ETC summary canonical 成员审计兼容
+
+- 目标：修复已提交 ETC 关系补齐 `etc-summary-*` invoice 成员后，批量账务 Page Audit 仍只查询 `app.invoices`、因而误报 `batch_accounting_key_display_fields_mismatch` 并阻断部署的问题。
+- 边界：不改变批量账务页面 API、写链路或成员 I/O；页面审计复用共享 `canonical_etc_summary_sql` 事实合同，只在 relation 的 external ETC batch 标识、规范化 summary row id、已提交 ETC batch 三者精确一致时把虚拟 invoice 成员视为存在。普通发票仍必须来自 `app.invoices`，错误 summary id 继续 fail closed。
+- 旧逻辑移除：删除“所有 invoice 类型成员只能由 `app.invoices` 证明”的单源假设，不新增兼容 fallback、缓存、read model 或 worker。
+- 测试：SQL 合同断言审计读取 canonical ETC batch/invoice facts；真实 PostgreSQL 同时验证 exact summary 通过、错误 summary 仍产生唯一 blocking issue。
+- docs impact assessment：审计事实源增加既有 canonical ETC tables，但页面业务 I/O、API shape、模块依赖方向和 runtime 均不变；因此更新实施记录和测试合同，不修改 `boundary-io.md`。
+
 ## 2026-08-10 HeroUI 批次筛选收敛
 
 - 未提交/已提交改用 HeroUI `ToggleButtonGroup`，流水年份改用共享年份控件；删除旧 segment 和 number input 外壳，批量账务 API、关联/撤回命令与 direct-read I/O 不变。

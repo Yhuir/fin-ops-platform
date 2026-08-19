@@ -35,6 +35,12 @@
 - 配置 `FIN_OPS_TEST_DATABASE_URL` 时验证 canonical bank/OA/attachment/invoice/active relation、筛选、分页、submitted detail 和窄提交上下文。
 - 未提交、已提交和 submit context 三条 SQL 链路都必须只提取银行名/尾号标量，不返回完整 `raw_payload`。
 
+### `tests/test_audit_page_canonical_data_tool.py`
+
+- 批量账务 Page Audit 对普通发票继续要求 `app.invoices` canonical 实体。
+- ETC summary 仅在 relation external batch 标识、规范化 `etc-summary-*` 行 ID 和已提交 ETC batch 事实精确一致时合法。
+- 真实 PostgreSQL 同时覆盖合法 summary 不误报与错误 summary ID 继续 blocking，防止通过放宽 invoice existence 门禁掩盖坏数据。
+
 ### `tests/test_platform_runtime_boundary_guards.py`
 
 - GET route 只委托 route/service/query repository。

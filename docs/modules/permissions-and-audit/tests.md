@@ -14,6 +14,7 @@
 | Settings permissions | `SettingsPage`、`AppSettingsService` | admin 账户管理、只读用户不可保存、数据重置和 OA 凭据 admin-only |
 | Export permissions | bank/tax/cost/input/output/turnover exports | read_export_only 可导出但不能写；导出错误/HTML 不能误当文件；`test_readonly_export_user_can_export_but_cannot_mutate_or_admin` 覆盖 cost/turnover 下载、pending export auth pass-through 和代表性写入/admin 403 |
 | Audit trail | `AuditTrailService`、业务 service/UoW | actor、tenant、action、entity、金额、metadata；事务失败不能留下半条 audit |
+| Page Audit canonical proof | `tests/test_audit_page_canonical_data_tool.py` | 批量账务 ETC summary 只在 exact relation marker + summary ID + submitted batch 事实一致时通过；错误 summary 继续 blocking |
 | Sensitive data | auth/session/settings/credential/reset/logging | token、密码、DSN、凭据密文、附件正文不出现在 response/log/audit |
 
 ## 场景覆盖清单

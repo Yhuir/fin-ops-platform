@@ -549,6 +549,12 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("app.bank_transactions", audit_sql)
         self.assertIn("app.oa_applications", audit_sql)
         self.assertIn("app.invoices", audit_sql)
+        self.assertIn("app.etc_business_batches", audit_sql)
+        self.assertIn("app.etc_invoices", audit_sql)
+        self.assertIn("etc-summary-", audit_sql)
+        self.assertIn("etc_batch.external_batch_id = relation.external_etc_batch_id", audit_sql)
+        self.assertIn("app.etc_business_batches", report["audit_contract"]["source_tables"])
+        self.assertIn("app.etc_invoices", report["audit_contract"]["source_tables"])
         self.assertNotIn("special_metadata->'oa_row_ids'", audit_sql)
         self.assertNotIn("special_metadata->'invoice_row_ids'", audit_sql)
         self.assertNotIn("special_metadata->>'bank_row_id'", audit_sql)
@@ -858,6 +864,125 @@ class BankDetailAuditPostgresTests(unittest.TestCase):
         self.assertEqual(
             report["summary"]["issue_sample_counts_by_code"],
             {"bank_details_canonical_relation_bank_member_missing": 1},
+        )
+
+
+class BatchAccountingAuditPostgresTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.database_url = require_postgres_test_database_url()
+        apply_test_migrations(cls.database_url)
+
+    def setUp(self) -> None:
+        truncate_test_database(self.database_url)
+        self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
+
+    def tearDown(self) -> None:
+        truncate_test_database(self.database_url)
+
+    def test_exact_etc_summary_member_is_valid_but_wrong_summary_id_is_blocking(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date,
+                txn_month, trade_time, summary, raw_payload, status
+            ) values
+                (
+                    'bank-etc-valid', '6222000011119999', '基本户', 'outflow',
+                    'ETC测试供应商', 100, -100, '2026-08-11', '2026-08-01',
+                    '2026-08-11 09:00:00+08', 'ETC通行费', '{}'::jsonb, 'active'
+                ),
+                (
+                    'bank-etc-invalid', '6222000011119999', '基本户', 'outflow',
+                    'ETC测试供应商', 100, -100, '2026-08-12', '2026-08-01',
+                    '2026-08-12 09:00:00+08', 'ETC通行费', '{}'::jsonb, 'active'
+                )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount,
+                currency, normalized_payload, raw_payload
+            ) values
+                (
+                    'source:oa-etc-valid', 'form:oa-etc-valid', '付款申请',
+                    'oa-etc-valid', 'active', 'completed', '测试申请人',
+                    '2026-08-10', '2026-08-01', 'ETC通行费', 100, 'CNY',
+                    '{}'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'source:oa-etc-invalid', 'form:oa-etc-invalid', '付款申请',
+                    'oa-etc-invalid', 'active', 'completed', '测试申请人',
+                    '2026-08-10', '2026-08-01', 'ETC通行费', 100, 'CNY',
+                    '{}'::jsonb, '{}'::jsonb
+                )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.etc_business_batches(
+                business_batch_id, status, scope_month, invoice_count,
+                total_amount, raw_payload
+            ) values (
+                'business:etc_202608_test', 'manually_marked_submitted',
+                '2026-08-01', 1, 100,
+                '{"normalized_payload":{"external_etc_batch_id":"etc_202608_test","invoice_ids":["invoice:etc_202608_test"]}}'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.etc_invoices(
+                etc_invoice_id, business_batch_id, status, invoice_no,
+                invoice_date, seller_name, amount, tax_amount, total_with_tax,
+                raw_payload
+            ) values (
+                'invoice:etc_202608_test', 'business:etc_202608_test', 'submitted',
+                'NO:etc_202608_test', '2026-08-09', 'ETC测试供应商',
+                90, 10, 100, '{}'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, month_scope, row_ids, row_types,
+                amount_check, special_metadata, updated_at
+            ) values
+                (
+                    'case:etc-summary-valid', 'batch_accounting', 'active', '2026-08-01',
+                    array['bank-etc-valid','oa-etc-valid','etc-summary-etc_202608_test'],
+                    array['bank','oa','invoice'], '{}'::jsonb,
+                    '{"source":"batch_accounting","external_etc_batch_id":"etc_202608_test"}'::jsonb,
+                    '2026-08-13 08:00:00+00'::timestamptz
+                ),
+                (
+                    'case:etc-summary-invalid', 'batch_accounting', 'active', '2026-08-01',
+                    array['bank-etc-invalid','oa-etc-invalid','etc-summary-wrong'],
+                    array['bank','oa','invoice'], '{}'::jsonb,
+                    '{"source":"batch_accounting","external_etc_batch_id":"etc_202608_test"}'::jsonb,
+                    '2026-08-13 08:00:00+00'::timestamptz
+                )
+            """
+        )
+
+        report = audit_page_canonical_data.audit_page_canonical_data(
+            self.connection,
+            domain_key="batch_accounting",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"batch_accounting_key_display_fields_mismatch": 1},
+        )
+        self.assertEqual(report["issues"][0]["subject_id"], "case:etc-summary-invalid")
+        self.assertEqual(
+            report["issues"][0]["details"]["invalid_member_ids"],
+            ["etc-summary-wrong"],
         )
 
 
