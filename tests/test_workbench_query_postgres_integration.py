@@ -239,7 +239,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 'oa-source-direct', 'payment_request', '付款申请', 'oa-direct-1',
                 'active', 'completed', '张三', '2026-07-21', '2026-07-01',
                 '直接查询项目', 100, 'CNY',
-                '{"id":"oa-direct-1","month":"2026-07","section":"unpaired","applicant":"张三","project_name":"直接查询项目","expense_type":"交通费","amount":"100","workflow_status":"completed"}'::jsonb,
+                '{"id":"oa-direct-1","month":"2026-07","section":"unpaired","applicant":"张三","project_name":"直接查询项目","expense_type":"交通费","amount":"100","workflow_status":"completed","expense_items":[{"id":"oa-direct-1:item:0","amount":"100","attachment_file_count":"0"}]}'::jsonb,
                 '{}'::jsonb
             )
             """
@@ -454,6 +454,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(initial["summary"]["paired_exception_count"], 0)
         self.assertEqual(anomaly.get("review_decision"), "pending")
         self.assertTrue(str(anomaly.get("fingerprint") or ""))
+        self.assertEqual(
+            {str(item.get("code") or "") for item in anomaly.get("items") or []},
+            {"oa_invoice_attachment_absent", "bank_invoice_amount_mismatch"},
+        )
         candidate_statement = next(
             statement
             for statement in self.connection.statements
@@ -490,26 +494,19 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertIn("groups.zone = %s", exception_sql)
         self.assertIn("limit %s", exception_sql.lower())
 
-        self.raw_connection.execute(
-            """
-            insert into app.workbench_exception_cases(
-                case_id, status, resolution, version, business_line, scenario, scope_month,
-                row_ids, candidate_ids, updated_by, raw_payload
-            ) values (
-                'amount-mismatch-sql-parity', 'resolved', 'accept_paired', 1,
-                'reconciliation_workbench', 'workbench_anomaly_review',
-                '2026-07-01', array[]::text[], array[]::text[], 'test-suite',
-                jsonb_build_object('normalized_payload', jsonb_build_object(
-                    'group_id', 'case:CASE-DIRECT-1',
-                    'fingerprint', %s::text,
-                    'reviewed_item_fingerprints', jsonb_build_array(%s::text)
-                ))
-            )
-            """,
-            (
-                str(anomaly["fingerprint"]),
-                str(anomaly["items"][0]["fingerprint"]),
-            ),
+        PostgresWorkbenchRepository(
+            self.raw_connection
+        ).set_workbench_anomaly_review_decision(
+            fingerprint=str(anomaly["fingerprint"]),
+            group_id="case:CASE-DIRECT-1",
+            scope_key="2026-07",
+            actor_id="test-suite",
+            decision="accept_paired",
+            note="附件异常与金额异常均已复核",
+            review_classification_codes=["bank_invoice_amount_mismatch"],
+            reviewed_item_fingerprints=[
+                str(item["fingerprint"]) for item in anomaly["items"]
+            ],
         )
         accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
         self.assertEqual(accepted["summary"]["unpaired_exception_count"], 0)
@@ -524,6 +521,16 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             exception_bucket="paired",
         )
         self.assertEqual(paired["total"], 1)
+        unpaired_after_review = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+        )
+        self.assertFalse(
+            any(
+                group.get("detail_key") == "CASE-DIRECT-1"
+                for group in unpaired_after_review["groups"]
+            )
+        )
 
     def test_shared_invoice_sources_are_counted_once_with_sql_fingerprint_parity(self) -> None:
         oa_payload = {

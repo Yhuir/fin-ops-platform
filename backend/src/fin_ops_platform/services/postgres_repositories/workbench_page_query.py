@@ -1630,6 +1630,7 @@ unlinked_expense_anomaly_items as materialized (
                 'FM999999999999999999990.00'
             ), ''), 'UTF8') || decode('00', 'hex') ||
             decode('00', 'hex') ||
+            decode('00', 'hex') ||
             convert_to(totals.attachment_file_count::text, 'UTF8') ||
             case when totals.unassigned_invoice_count > 0
                  then decode('00', 'hex') || decode(totals.invoice_row_ids_hex, 'hex')

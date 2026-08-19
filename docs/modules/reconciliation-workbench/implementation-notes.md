@@ -1735,3 +1735,9 @@
 - 第一轮发布后 40 次长样本首屏 p95 为 `971.004ms`，但另一组 20 次样本出现 `1006.833ms` 的边缘失败，因此继续收紧现有 SQL，不把网络抖动包装成稳定达标。
 - 旧查询在同一份成员展开集上执行多个 `count(distinct (row_type, row_id))`，默认 paired/unpaired 首屏又各自重复成员去重和分区总数扫描。现在只物化一次 `overall_unique_members`，成员总统计和无筛选的 paired/unpaired 精确行数共享该集合；分区组数复用 `overall_group_summary`。
 - 带搜索、状态、来源、列或时间筛选的分区仍走原精确计数路径，避免为了性能改变筛选语义。没有新增 API、存储、索引、migration、cache、worker 或兼容分支。
+
+## 2026-08-20 - OA 附件异常指纹 SQL/Python 一致性
+
+- 根因：PostgreSQL candidate 为 `oa_invoice_attachment_absent` / `unparsed` / `unassigned` 计算 item fingerprint 时，空的 `bank_total` 与 `invoice_total` 之间少一个 NUL 分隔符；Python hydration 使用完整七字段序列。未审阅时双方都落未配对而未暴露，人工 `accept_paired` 后 candidate 仍判决定失效、hydration 判决定有效，最终触发 zone 一致性保护并返回 500。
+- 收口：只补齐现有 SQL 指纹序列的缺失分隔符，使其与 `WorkbenchAmountCheckService._anomaly_item(...)` 完全一致；不放宽 fingerprint、review freshness 或 completion 门禁，不增加 fallback、表、索引、migration、cache、read model、worker 或依赖。
+- 生产影响：历史 ETC 已提交关系中的附件异常和金额异常可继续保留，并在人工确认后稳定进入已配对；最新无 OA 批次仍按原规则留在未配对。

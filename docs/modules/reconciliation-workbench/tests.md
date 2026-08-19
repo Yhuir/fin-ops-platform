@@ -509,3 +509,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 - `tests/test_workbench_page_query_repository.py::test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration` 保护组级 summary 不再 join `canonical_group_members`、不再执行 `count(distinct groups.internal_key)`；成员只先按 `(row_type, row_id)` 物化一次，默认 paired/unpaired 精确行数和组总数复用该统计事实，防止性能修复改变计数合同。
 - `tests/test_workbench_query_postgres_integration.py` 必须在 disposable PostgreSQL 上全量通过，证明拆分后的 CTE 可真实解析执行，initial/groups/detail 与 ETC 部分桥接 68 张恢复链路保持一致。
+
+## 2026-08-20 - 附件异常审阅分区回归
+
+- `tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_anomaly_state_is_sql_compact_fingerprint_parity_and_keyset_bounded` 在真实 PostgreSQL 中同时构造“无 OA 附件”和“流水发票金额不一致”，验证 SQL/Python 指纹一致；人工确认后 combined initial 与 paired/unpaired groups 必须稳定分区且不返回 500。
