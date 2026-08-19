@@ -7,6 +7,13 @@
 - 展示：业务批次 summary/detail 增加成员发票最早/最晚开票日期；列表 SQL 只对分页后的批次做 lateral 聚合，页面按同月/跨月/跨年范围命名，不再使用创建日期。
 - 验证：`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_etc_backend.py`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`。
 
+## 2026-08-20 - matching worker 幂等写权限闭环
+
+- 生产幂等重放确认 7 个历史批次均成功补投精确月份，但 worker 在正式关系命令的幂等预留阶段因
+  `fin_ops_worker` 只有读取权限而失败；`0117` 只覆盖 `fin_ops_app_runtime`，未覆盖实际 systemd worker 角色。
+- Migration `0151` 只补齐 `SELECT/INSERT/UPDATE`，不授予 `DELETE`，让既有 durable dirty scopes 自行重试；
+  不直写 relation、不删除失败 scope、不新增 worker、queue、fallback 或任务数据库备份。
+
 ## 2026-08-19 - 68 张批次部分桥接闭环
 
 - 根因一：关联台把 canonical link 设为整个 ETC 批次的最高优先来源；只要 68 张中 4 张建立 link，就丢弃同批 64 张 `app.etc_invoices`，形成 4 张/部分桥接假象。

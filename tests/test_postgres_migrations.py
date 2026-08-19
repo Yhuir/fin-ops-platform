@@ -162,6 +162,7 @@ EXPECTED_MIGRATIONS = [
     "0148_retire_workbench_matching_progress_jobs.sql",
     "0149_remove_read_model_runtime.sql",
     "0150_workbench_oa_supporting_documents.sql",
+    "0151_workbench_matching_worker_idempotency_grant.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -321,7 +322,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 151)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 152)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -485,6 +486,22 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
             " ".join(sql.split()),
         )
         self.assertNotIn("delete", sql.lower())
+
+    def test_workbench_matching_worker_can_commit_idempotency_records(self) -> None:
+        sql = " ".join(
+            (
+                MIGRATIONS_DIR / "0151_workbench_matching_worker_idempotency_grant.sql"
+            )
+            .read_text(encoding="utf-8")
+            .lower()
+            .split()
+        )
+
+        self.assertIn(
+            "grant select, insert, update on app.workbench_idempotency_records to fin_ops_worker",
+            sql,
+        )
+        self.assertNotIn("delete", sql)
 
     def test_tax_offset_runtime_can_read_and_save_plans(self) -> None:
         sql = " ".join(

@@ -7,6 +7,12 @@
 - Page Audit 新增 submitted batch 的 OA 缺失/active relation 缺失 warning，区分“上游 OA 不存在”和“OA 已存在但 matching 未闭环”；不改变 canonical relation 完整性 error。
 - 旧链：不引入 summary 展示行、客户端 68 行预载、第二展开组件、第二 matcher、page read model 或缓存。
 
+## 2026-08-20 - matching worker 正式命令权限修复
+
+- 历史 ETC scope 重放暴露 `fin_ops_worker` 无权写 `app.workbench_idempotency_records`；该 worker 会调用正式
+  relation command，幂等表不是只读审计证据。Migration `0151` 补齐最小 `SELECT/INSERT/UPDATE` 权限且保留
+  `DELETE` 禁止，既有 dirty-scope retry 继续作为唯一恢复入口，不绕过 canonical relation 边界。
+
 ## 2026-08-19 - ETC link 覆盖改为逐票覆盖
 
 - 68 张已提交业务批次仅 4 张存在 canonical link 时，旧 SQL/Python 以批次级来源优先级只发布 4 张；实际 64 张仍在 `app.etc_invoices`，不是文件或发票事实丢失。

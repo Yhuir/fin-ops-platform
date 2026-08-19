@@ -37,6 +37,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - processing lease 只在过期后接管；瞬时失败按 bounded retry 回到 pending，达到上限进入明确终态。
 - `job.outbox_events` 的 pending/processing/failed、dead-letter 和 required worker missing/stale/mismatch 都是发布 blocker。
 - Workbench matching scope 是领域状态，只由 matching repository/orchestrator 管理，不得塞进通用 queue adapter。
+- `workbench-matching` 复用正式关系命令，因此生产 `fin_ops_worker` 必须能 `SELECT/INSERT/UPDATE`
+  `app.workbench_idempotency_records`；Migration `0151` 是该权限的事实源，不授予 `DELETE`。
 - Runtime queue retention 只清理已完成历史；不得删除 pending、processing、failed 或 dead-lettered 行来伪造健康。
 
 ## Read Model 退役治理

@@ -18,7 +18,8 @@
 ## 输入 I/O
 
 - Event worker 只从 PostgreSQL durable queue claim；不经过第二套 broker/wakeup transport。
-- Matching worker 只读写其领域 dirty-scope repository，不使用通用 projection scope。
+- Matching worker 只读写其领域 dirty-scope repository，不使用通用 projection scope；执行正式关系命令时以
+  `fin_ops_worker` 对 `app.workbench_idempotency_records` 持有 `SELECT/INSERT/UPDATE`，不得授予 `DELETE`。
 - Matching worker 的银行有效分类由 formal-relation fact repository 对计划 IDs 一次批量读取 canonical SQL 分类投影；worker 不装载 category snapshot，不组装 Python effective-category provider。
 - 每个 job/event 必须有 bounded retry、lease、idempotency 和结构化失败证据。
 - API route 只 enqueue 已登记任务；worker 不读取 HTTP cookie/header，不构造 response，不依赖 `Application`。
@@ -57,3 +58,6 @@ per-worker env：`FIN_OPS_QUEUE_BACKEND` 固定为 `postgres`，删除该实例�
 - Queue/retry/idempotency：`tests/test_runtime_queue.py` 与业务 service tests。
 - Deploy exact set：`tests/test_deploy_runtime_examples.py`、`tests/test_read_model_runtime_removal.py`。
 - Production：`/health/ready`、worker heartbeat、PostgreSQL queue backlog/dead-letter、runtime closure gate。
+
+Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只读授权，确保 dirty scope 重试可通过
+正式关系命令的持久化幂等边界完成；禁止通过直写 relation 或删除失败 scope 绕过该合同。
