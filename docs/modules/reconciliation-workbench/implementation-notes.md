@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-20 - 未配对 ETC 批次详情精确定位闭环
+
+- 根因：分页列表把 submitted/closed ETC 批次发布为 canonical `etc-summary-*` 单成员组，但 singleton detail 的窄查询只解析普通 OA、流水和普通发票，导致无 active relation 的最新 ETC 批次列表可见、点击展开却返回 404。
+- 修复：列表与详情共用一份 `_ETC_SUMMARY_IDENTITY_CTES`，detail 只按 `detail_key` 解出的精确 summary row id 查询并携带权威 external batch id，再复用既有 bounded hydration 一次返回全部真实 ETC 发票；不扫描 group digest，不增加 fallback、API、表、worker、read model、cache 或前端状态机。
+- 完整性：summary identity 发生规范化碰撞继续 fail closed；scope、typed member、detail key、group id 和 zone 仍逐项复核。折叠态首票与完整数量合同不变，展开态不包含 summary 占位行。
+
 ## 2026-08-20 - submitted ETC 关系成员与延迟 OA scope 闭环
 
 - 根因：历史 submitted ETC 匹配只在现有 OA/流水关系写入 `special_metadata.etc_batch_link`，没有把 canonical `etc-summary-*` 发票成员加入关系；页面因此同时看到“已标记归属的 OA/流水关系”和独立 ETC 汇总，金额搜索还可能命中冲突拓扑。另一个缺口是候选查询把 OA 申请日期限制在 ETC 发票月份，延迟数月提交的 OA 无法进入同次 matching fact batch。

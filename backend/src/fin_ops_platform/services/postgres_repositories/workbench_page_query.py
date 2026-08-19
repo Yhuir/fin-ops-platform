@@ -178,6 +178,104 @@ coalesce(
 """
 
 
+# Keep submitted ETC summary identity resolution shared by the bounded page
+# query and the bounded singleton-detail lookup.  A detail key must resolve to
+# the exact same authoritative batch id, month, and summary row as the list.
+_ETC_SUMMARY_IDENTITY_CTES = """
+etc_summary_source_keys as materialized (
+    select
+        coalesce(
+            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+            batch.business_batch_id
+        ) as external_batch_id,
+        batch.scope_month,
+        batch.updated_at
+    from app.etc_business_batches batch
+    where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+      and exists (
+          select 1
+          from app.etc_invoices invoice
+          where invoice.business_batch_id = batch.business_batch_id
+            and invoice.status <> 'deleted'
+      )
+    union all
+    select
+        coalesce(
+            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+            link.business_batch_id
+        ),
+        coalesce(batch.scope_month, invoice.invoice_month),
+        greatest(link.updated_at, batch.updated_at, invoice.updated_at)
+    from app.etc_batch_invoice_links link
+    join app.invoices invoice on invoice.id = link.invoice_id
+    left join app.etc_business_batches batch
+      on batch.business_batch_id = link.business_batch_id
+    where link.link_status = 'active'
+      and invoice.status <> 'deleted'
+    union all
+    select
+        coalesce(
+            nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
+            submission.submission_batch_id
+        ),
+        coalesce(submission.scope_month, invoice.invoice_month),
+        greatest(submission.updated_at, invoice.updated_at)
+    from app.etc_submission_batches submission
+    join app.invoices invoice
+      on submission.submission_batch_id = coalesce(
+          invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id', ''
+      )
+      or coalesce(
+          nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
+          submission.submission_batch_id
+      ) = coalesce(
+          invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id', ''
+      )
+    where submission.status in ('submitted_confirmed', 'submitted', 'closed')
+      and invoice.status <> 'deleted'
+      and (
+          invoice.workbench_visibility = 'hidden_after_etc_submission'
+          or invoice.raw_payload->'normalized_payload'->>'workbench_visibility'
+              = 'hidden_after_etc_submission'
+          or invoice.raw_payload->'normalized_payload'->>'etc_submission_status'
+              = 'submitted'
+      )
+),
+etc_summary_keys as materialized (
+    select distinct on (source.external_batch_id)
+        'etc-summary-' || regexp_replace(
+            source.external_batch_id,
+            '[^A-Za-z0-9_-]+',
+            '-',
+            'g'
+        ) as row_id,
+        source.external_batch_id,
+        source.scope_month,
+        source.updated_at
+    from etc_summary_source_keys source
+    where nullif(source.external_batch_id, '') is not null
+      and source.scope_month is not null
+    order by source.external_batch_id, source.updated_at desc nulls last
+),
+etc_summary_identity_conflicts as materialized (
+    select summary.row_id
+    from etc_summary_keys summary
+    group by summary.row_id
+    having count(distinct summary.external_batch_id) > 1
+),
+etc_summary_identity_guard as materialized (
+    select 1 / case when count(*) = 0 then 1 else 0 end as guard
+    from etc_summary_identity_conflicts
+)
+"""
+
+
 # The page query deliberately starts with the requested source scope.  Active
 # relations are admitted only when their own month or one typed member belongs
 # to that scope.  Only then are the other members of those relations admitted.
@@ -270,97 +368,7 @@ visible_invoice_facts as materialized (
     from app.invoices invoice
     where {_VISIBLE_INVOICE_SQL}
 ),
-etc_summary_source_keys as materialized (
-    select
-        coalesce(
-            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
-            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
-            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
-            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
-            batch.business_batch_id
-        ) as external_batch_id,
-        batch.scope_month,
-        batch.updated_at
-    from app.etc_business_batches batch
-    where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-      and exists (
-          select 1
-          from app.etc_invoices invoice
-          where invoice.business_batch_id = batch.business_batch_id
-            and invoice.status <> 'deleted'
-      )
-    union all
-    select
-        coalesce(
-            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
-            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
-            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
-            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
-            link.business_batch_id
-        ),
-        coalesce(batch.scope_month, invoice.invoice_month),
-        greatest(link.updated_at, batch.updated_at, invoice.updated_at)
-    from app.etc_batch_invoice_links link
-    join app.invoices invoice on invoice.id = link.invoice_id
-    left join app.etc_business_batches batch
-      on batch.business_batch_id = link.business_batch_id
-    where link.link_status = 'active'
-      and invoice.status <> 'deleted'
-    union all
-    select
-        coalesce(
-            nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
-            submission.submission_batch_id
-        ),
-        coalesce(submission.scope_month, invoice.invoice_month),
-        greatest(submission.updated_at, invoice.updated_at)
-    from app.etc_submission_batches submission
-    join app.invoices invoice
-      on submission.submission_batch_id = coalesce(
-          invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id', ''
-      )
-      or coalesce(
-          nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
-          submission.submission_batch_id
-      ) = coalesce(
-          invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id', ''
-      )
-    where submission.status in ('submitted_confirmed', 'submitted', 'closed')
-      and invoice.status <> 'deleted'
-      and (
-          invoice.workbench_visibility = 'hidden_after_etc_submission'
-          or invoice.raw_payload->'normalized_payload'->>'workbench_visibility'
-              = 'hidden_after_etc_submission'
-          or invoice.raw_payload->'normalized_payload'->>'etc_submission_status'
-              = 'submitted'
-      )
-),
-etc_summary_keys as materialized (
-    select distinct on (source.external_batch_id)
-        'etc-summary-' || regexp_replace(
-            source.external_batch_id,
-            '[^A-Za-z0-9_-]+',
-            '-',
-            'g'
-        ) as row_id,
-        source.external_batch_id,
-        source.scope_month,
-        source.updated_at
-    from etc_summary_source_keys source
-    where nullif(source.external_batch_id, '') is not null
-      and source.scope_month is not null
-    order by source.external_batch_id, source.updated_at desc nulls last
-),
-etc_summary_identity_conflicts as materialized (
-    select summary.row_id
-    from etc_summary_keys summary
-    group by summary.row_id
-    having count(distinct summary.external_batch_id) > 1
-),
-etc_summary_identity_guard as materialized (
-    select 1 / case when count(*) = 0 then 1 else 0 end as guard
-    from etc_summary_identity_conflicts
-),
+{_ETC_SUMMARY_IDENTITY_CTES},
 scoped_source_keys as materialized (
     select 'oa'::text as row_type, oa.row_id
     from requested_scope scope
@@ -2867,6 +2875,7 @@ class PostgresWorkbenchPageQueryRepository:
             row_id,
             row_id,
             row_id,
+            row_id,
         ]
         if normalized_type:
             params.append(normalized_type)
@@ -2878,13 +2887,15 @@ class PostgresWorkbenchPageQueryRepository:
                     case when %s::text = 'all' then null else %s::date end as scope_month,
                     %s::text as tenant_id
             ),
+            {_ETC_SUMMARY_IDENTITY_CTES},
             target_source_candidates as materialized (
                 select
                     'oa'::text as row_type,
                     oa.row_id,
                     coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date)
                         as scope_month,
-                    oa.updated_at
+                    oa.updated_at,
+                    null::text as external_etc_batch_id
                 from app.oa_applications oa
                 where oa.row_id = %s
                   and oa.status <> 'deleted'
@@ -2894,7 +2905,8 @@ class PostgresWorkbenchPageQueryRepository:
                     'oa'::text,
                     admission.oa_id,
                     (admission.scope_key || '-01')::date,
-                    admission.updated_at
+                    admission.updated_at,
+                    null::text
                 from app.oa_pending_payment_admissions admission
                 where admission.tenant_id = (select tenant_id from requested_scope)
                   and admission.workflow_status = 'in_progress'
@@ -2904,7 +2916,8 @@ class PostgresWorkbenchPageQueryRepository:
                     'bank'::text,
                     coalesce(bank.legacy_mongo_id, bank.id::text),
                     bank.txn_month,
-                    bank.updated_at
+                    bank.updated_at,
+                    null::text
                 from app.bank_transactions bank
                 where coalesce(bank.legacy_mongo_id, bank.id::text) = %s
                   and bank.status <> 'deleted'
@@ -2913,10 +2926,22 @@ class PostgresWorkbenchPageQueryRepository:
                     'invoice'::text,
                     coalesce(invoice.legacy_mongo_id, invoice.id::text),
                     invoice.invoice_month,
-                    invoice.updated_at
+                    invoice.updated_at,
+                    null::text
                 from app.invoices invoice
                 where coalesce(invoice.legacy_mongo_id, invoice.id::text) = %s
                   and {_VISIBLE_INVOICE_SQL}
+                union all
+                select
+                    'invoice'::text,
+                    summary.row_id,
+                    summary.scope_month,
+                    summary.updated_at,
+                    summary.external_batch_id
+                from etc_summary_keys summary
+                cross join etc_summary_identity_guard guard
+                where summary.row_id = %s
+                  and guard.guard = 1
             ),
             target_oa_duplicate_ids as materialized (
                 select target.row_id
@@ -2986,7 +3011,7 @@ class PostgresWorkbenchPageQueryRepository:
                     array[target.row_type]::text[] as member_types,
                     target.scope_month,
                     target.updated_at,
-                    null::text as external_etc_batch_id,
+                    target.external_etc_batch_id,
                     array[]::text[] as missing_row_types
                 from target_sources target
                 cross join requested_scope scope

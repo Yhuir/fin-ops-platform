@@ -399,6 +399,73 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(page["total"], 1)
         self.assertEqual(page["groups"][0]["detail_key"], "CASE-DIRECT-1")
 
+    def test_unpaired_submitted_etc_summary_detail_hydrates_all_invoices(self) -> None:
+        self.raw_connection.execute(
+            """
+            insert into app.etc_business_batches(
+                business_batch_id, status, scope_month, invoice_count,
+                total_amount, raw_payload
+            ) values (
+                'etc_detail_49', 'oa_submitted', '2026-07-01', 49, 49,
+                '{"normalized_payload":{"external_etc_batch_id":"etc_detail_49"}}'::jsonb
+            );
+            insert into app.etc_invoices(
+                etc_invoice_id, business_batch_id, status, invoice_no,
+                invoice_date, seller_name, amount, tax_amount, total_with_tax,
+                raw_payload
+            )
+            select
+                'etc-detail-' || item::text,
+                'etc_detail_49',
+                'submitted',
+                'ETC-DETAIL-' || lpad(item::text, 2, '0'),
+                '2026-07-20'::date,
+                'ETC详情供应商',
+                1,
+                0,
+                1,
+                '{}'::jsonb
+            from generate_series(1, 49) item
+            """
+        )
+
+        page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            page_size=100,
+        )
+        group = next(
+            item
+            for item in page["groups"]
+            if list(item.get("invoice_rows") or [])
+            and item["invoice_rows"][0].get("etc_batch_id") == "etc_detail_49"
+        )
+        detail = self.repository.get_workbench_group_detail(
+            scope_key="all",
+            zone="unpaired",
+            group_id=str(group["group_id"]),
+            detail_key=str(group["detail_key"]),
+        )
+
+        self.assertIsNotNone(detail)
+        assert detail is not None
+        detailed_group = detail["group"]
+        self.assertEqual(detailed_group["collapsed_row_counts"], {"invoice": 49})
+        invoice_rows = detailed_group["collapsed_rows"]["invoice"]
+        self.assertEqual(len(invoice_rows), 49)
+        self.assertEqual(
+            {row["source_kind"] for row in invoice_rows},
+            {"etc_invoice"},
+        )
+        self.assertEqual(
+            len({row["invoice_no"] for row in invoice_rows}),
+            49,
+        )
+        self.assertNotIn(
+            "etc_invoice_summary",
+            {row["source_kind"] for row in invoice_rows},
+        )
+
     def test_pending_oa_uses_nested_application_date_for_display_and_search(self) -> None:
         self.raw_connection.execute(
             """
