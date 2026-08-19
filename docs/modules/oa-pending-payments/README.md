@@ -22,7 +22,7 @@
 - API route：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
 - 页面 query service：`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`
 - 页面 PostgreSQL repository：`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
-- 查询合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py`
+- 查询/导出合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_export.py`、`oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py`
 - 命令：`oa_pending_payment_command_service.py`、`workbench_relation_command_service.py`
 - Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_admission.py`、`oa_projection.py`
 - Audit：`postgres_repositories/page_business_audit.py`、`web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx`
@@ -45,6 +45,8 @@ browser
 
 页面请求不访问 OA Mongo/MySQL、对象存储、Redis、RabbitMQ、read-model queue、Workbench 页面 payload 或 `workbench_relation` projection。`rows`、`summary`、`statistics`、`filterOptions` 和当前页 descriptors 在同一个显式数据库快照内读取；详情和银行候选分别使用同一 repository 的只读快照。
 
+导出链路为 `GET /api/oa-pending-payments/export?sources=completed,in_progress`。它在一个只读快照中直接读取 `app.oa_applications` 和 `app.oa_pending_payment_admissions`，以 write-only workbook 生成 XLSX；不读取或导出流水、发票、关系、read model、raw payload，也不受页面月份、搜索、筛选、排序和分页影响。
+
 前端只保留 loading、empty、error、手工刷新和写后重新 GET。页面不解释 `read_model_status`、source versions、refresh enqueue、`202`、`304` 或 ETag，也不做 polling。
 
 ## 页面合同
@@ -56,6 +58,7 @@ browser
 - OA、银行、发票和 relation detail 继续惰性读取；未找到返回结构化 `404`，非法查询返回 `400`。
 - `bank-transaction-candidates` 直接从 PostgreSQL bank facts 与 active formal relations 做状态筛选、排序和分页；不再经 command service 全量加载。
 - `paymentStatus` 仍由既有纯业务组装和 lifecycle policy 计算，前端不得自行推断。
+- 右上角“导出 OA”只允许选择 `completed` / `in_progress`，默认全选且至少选择一种；返回一个 XLSX，选中的每个来源对应一个 sheet，空来源保留表头，最多 20,000 条 OA。
 
 ## Completed 与 in-progress
 

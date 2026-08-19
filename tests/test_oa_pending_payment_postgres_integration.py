@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from io import BytesIO
 from types import SimpleNamespace
 import unittest
+
+from openpyxl import load_workbook
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
@@ -259,6 +262,51 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(withdrawn["rows"][0]["bankTransaction"]["relationCount"], 0)
         self.assertEqual(withdrawn["rows"][0]["invoice"]["relationCount"], 0)
         self.assertEqual([row["id"] for row in withdrawn_candidates["rows"]], ["bank-direct-query"])
+
+    def test_export_reads_both_oa_fact_sources_without_queue_or_non_oa_fields(self) -> None:
+        completed = _record()
+        in_progress = _in_progress_record()
+        self._source_snapshot().commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[completed],
+            admission_records=[completed, in_progress],
+            payment_statuses={
+                "flow-integration-1": OAPaymentStatusRecord(
+                    flow_id="flow-integration-1",
+                    pay_status=0,
+                ),
+                "flow-in-progress-1": OAPaymentStatusRecord(
+                    flow_id="flow-in-progress-1",
+                    pay_status=0,
+                ),
+            },
+        )
+        outbox_count_before = int(
+            self.connection.fetch_one("select count(*)::integer as count from job.outbox_events")["count"]
+        )
+        service = OaPendingPaymentQueryService(
+            repository=PostgresOaPendingPaymentQueryRepository(self.connection)
+        )
+
+        exported = service.export_sources(
+            {"sources": ["completed,in_progress"]},
+            tenant_id="default",
+        )
+
+        workbook = load_workbook(BytesIO(exported["content"]), read_only=True, data_only=False)
+        self.assertEqual(workbook.sheetnames, ["已完成OA", "进行中OA"])
+        self.assertEqual(workbook["已完成OA"]["A2"].value, "oa-integration-1")
+        self.assertEqual(workbook["进行中OA"]["A2"].value, "oa-in-progress-1")
+        headers = [cell.value for cell in workbook["已完成OA"][1]]
+        workbook.close()
+        self.assertEqual(exported["counts"], {"completed": 1, "in_progress": 1})
+        self.assertTrue({"OA ID", "申请人", "申请金额", "申请事由"}.issubset(headers))
+        self.assertTrue({"流水", "发票", "关联关系"}.isdisjoint(headers))
+        self.assertEqual(
+            int(self.connection.fetch_one("select count(*)::integer as count from job.outbox_events")["count"]),
+            outbox_count_before,
+        )
 
     def test_identical_canonical_commit_keeps_projection_and_status_rows_unchanged(self) -> None:
         source_snapshot = self._source_snapshot()

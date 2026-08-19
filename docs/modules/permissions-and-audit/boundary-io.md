@@ -34,6 +34,7 @@
 | Permission check | `server.py` + `route_access_policy.py` + module-owned guard | 受保护 unsafe method 默认要求 mutation；只有登记的只读 POST 可豁免；module-owned OA pending guard 保持独立且必须等价 fail closed |
 | ACL audit event | Settings repository critical section | actor 来自后端 admin session，request id 来自受信 HTTP adapter；与 canonical version 同事务，no-op/失败无 success audit |
 | Audit event | business service/route | unsafe HTTP route 先经 operation history 语义注册表归一为稳定 action code/用户动作/对象文案，再记录服务端 session 的 actor id/name/account 快照和结果；同一 HTTP mutation 中 service 级审计继承受信 request id，避免拆成重复逻辑操作；有界业务证据随 completion 固化；不信任 body actor |
+| OA facts export audit | OA pending read route | read-export/full/admin 成功下载后记录 `oa_pending_payment_source_export_downloaded`；只接收 session actor、来源、数量和文件名，不接收 OA 行内容。 |
 | Workbench exception compatibility command | `POST /api/workbench/exception/apply` | 兼容 API 继续保留自动异常/行级异常能力，但 route 的 actor 只来自已认证 session；body `actor` / `confirmed_by` 不能覆盖业务或审计身份。删除未配对工具栏人工“异常处理”不等于删除该后端兼容能力。 |
 | Data reset audit | Settings request repository / settings-maintenance worker | queued 与 receipt 消费/job/outbox 同事务；started/success/partial/failed 由 worker durable audit 记录。actor 来自 admin session，reason 必填，记录 request/job/action/fingerprint/receipt，不记录 OA 密码。 |
 | Page Audit request | admin session + registered frontend page key | `PAGE_AUDIT_REGISTRY` 全覆盖校验；18 页只允许有限 executor；未实现 proof fail closed，不动态选择函数。`operation-history` 只检查覆盖点与 append-only 数据库保护，不触发业务写。 |

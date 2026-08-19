@@ -2888,6 +2888,37 @@ textarea {
   color: var(--fp-success-strong);
 }
 
+.oa-pending-payment-export-drawer__body {
+  display: grid;
+  gap: var(--fp-space-3);
+}
+
+.oa-pending-payment-export-drawer__body > p {
+  margin: 0;
+  color: var(--fp-text-secondary);
+  line-height: 1.6;
+}
+
+.oa-pending-payment-export-drawer__options {
+  display: grid;
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3);
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface-muted);
+}
+
+.oa-pending-payment-export-drawer__hint {
+  color: var(--fp-warning);
+  font-size: var(--fp-text-label);
+}
+
+.oa-pending-payment-export-drawer__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+}
+
 .oa-pending-payments-loading {
   display: grid;
   gap: var(--fp-space-3);

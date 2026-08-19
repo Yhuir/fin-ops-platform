@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-08-19 - OA 事实源 XLSX 导出
+
+- 页面右上角新增“导出 OA”，复用共享 `AppDrawer`；默认全选已完成/进行中 OA，可部分选择，至少选择一种后下载。
+- 新增 `GET /api/oa-pending-payments/export?sources=completed,in_progress`。route 只处理鉴权/tenant/HTTP/audit，service 处理来源和 20,000 行上限，repository 在单一只读快照内一次查询两个 canonical OA facts，write-only workbook 负责 XLSX。
+- 导出固定为 OA-only 14 列与来源 sheet，不读取、不 hydrate、不输出流水、发票、关系、read model 或 raw payload；也不继承页面月份、搜索、筛选、排序和分页。
+- 下载审计只记录 actor、来源、各来源数量、总行数和文件名；没有数据库 migration、备份、worker、queue、cache、fallback 或新依赖。
+- 全仓扫描确认此前不存在 OA 导出运行时链，因此没有可删除的旧 OA export；其他页面的有效导出属于各自模块，不进入本次清理范围。
+
 ## 2026-08-16 - OA 详情抽屉统一公开字段视图
 
 - 页面详情复用共享 HeroUI `AppDrawer` 与统一的紧凑分区 label/value 渲染，不再启用抽屉内嵌套表格和 persistent 变体。

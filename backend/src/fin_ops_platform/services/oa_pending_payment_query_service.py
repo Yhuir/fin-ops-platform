@@ -19,6 +19,12 @@ from fin_ops_platform.services.oa_pending_payment_details import (
     oa_pending_payment_oa_detail_from_row,
     oa_pending_payment_relation_details_from_row,
 )
+from fin_ops_platform.services.oa_pending_payment_export import (
+    OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT,
+    build_oa_pending_payment_export_workbook,
+    oa_pending_payment_export_filename,
+    parse_oa_pending_payment_export_sources,
+)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentStatusSnapshotReader,
 )
@@ -86,6 +92,44 @@ class OaPendingPaymentQueryService:
             "appliedFilters": {"filters": filters},
             "sort": {"field": sort_field, "direction": sort_direction},
             "viewMode": view_mode,
+        }
+
+    def export_sources(
+        self,
+        query: dict[str, list[str]],
+        *,
+        tenant_id: str,
+        today: date | None = None,
+    ) -> dict[str, Any]:
+        sources = parse_oa_pending_payment_export_sources(query)
+        repository = self._repository_required()
+        try:
+            with repository.snapshot() as snapshot:
+                rows = snapshot.export_oa_sources(
+                    tenant_id=tenant_id,
+                    sources=sources,
+                    limit=OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT + 1,
+                )
+        except OaPendingPaymentError:
+            raise
+        except ValueError as exc:
+            raise OaPendingPaymentError("invalid_oa_pending_payment_export", str(exc)) from exc
+        if len(rows) > OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT:
+            raise OaPendingPaymentError(
+                "oa_pending_payment_export_row_limit_exceeded",
+                f"OA 事实源超过 {OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT} 行导出上限。",
+                details={"limit": OA_PENDING_PAYMENT_EXPORT_ROW_LIMIT},
+            )
+        counts = {
+            source: sum(1 for row in rows if str(row.get("source_kind") or "") == source)
+            for source in sources
+        }
+        return {
+            "filename": oa_pending_payment_export_filename(today=today),
+            "content": build_oa_pending_payment_export_workbook(rows, sources=sources),
+            "sources": list(sources),
+            "counts": counts,
+            "row_count": len(rows),
         }
 
     def bank_transaction_candidates(

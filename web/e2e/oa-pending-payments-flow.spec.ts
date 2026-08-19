@@ -388,6 +388,45 @@ test.describe("OA pending payments browser flow", () => {
     expect(api.count("GET /api/oa-pending-payments/invoices/invoice-payment-e2e-001/detail")).toBe(1);
   });
 
+  test("downloads only the selected OA fact sources without refreshing the page", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
+    const mutationRequests: string[] = [];
+    page.on("request", (request) => {
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
+        mutationRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+      }
+    });
+
+    await page.goto("/oa-pending-payments");
+    await expect(page.getByRole("row", { name: /浏览器付款申请人/ })).toBeVisible();
+    const rowRequestsBeforeExport = api.count("GET /api/oa-pending-payments/rows");
+    await page.getByRole("button", { name: "导出 OA" }).click();
+    const drawer = page.getByRole("dialog", { name: "导出 OA 抽屉" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("checkbox", { name: "全选" })).toBeChecked();
+    await expect(drawer.getByRole("checkbox", { name: "已完成 OA" })).toBeChecked();
+    await expect(drawer.getByRole("checkbox", { name: "进行中 OA" })).toBeChecked();
+
+    await drawer.getByRole("checkbox", { name: "进行中 OA" }).uncheck({ force: true });
+    const exportRequest = page.waitForRequest((request) =>
+      request.method() === "GET"
+      && new URL(request.url()).pathname.endsWith("/api/oa-pending-payments/export"));
+    const downloadPromise = page.waitForEvent("download");
+    await drawer.getByRole("button", { name: "导出 xlsx" }).click();
+    const [request, download] = await Promise.all([exportRequest, downloadPromise]);
+
+    const exportUrl = new URL(request.url());
+    expect(exportUrl.searchParams.get("sources")).toBe("completed");
+    expect(exportUrl.searchParams.has("month")).toBe(false);
+    expect(exportUrl.searchParams.has("filters")).toBe(false);
+    expect(exportUrl.searchParams.has("page")).toBe(false);
+    expect(download.suggestedFilename()).toBe("OA事实源_2026-08-19.xlsx");
+    await expect(drawer.getByText("已生成 OA事实源_2026-08-19.xlsx")).toBeVisible();
+    expect(api.count("GET /api/oa-pending-payments/export")).toBe(1);
+    expect(api.count("GET /api/oa-pending-payments/rows")).toBe(rowRequestsBeforeExport);
+    expect(mutationRequests).toEqual([]);
+  });
+
   test("keeps column filter actions visible in compact viewports without mutation requests", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "full_access" });
     const mutationRequests: string[] = [];

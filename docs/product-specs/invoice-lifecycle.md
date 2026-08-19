@@ -77,6 +77,7 @@ OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票，并�
 - 实机验证显示 `t_payment_simple.flow_id` 对应 OA Mongo `form_data._id`，平台使用投影中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀读写支付状态；Flowable 流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为支付状态写回 key。
 - 详情 API 返回可解释的来源、匹配关系和异常原因；relation 明细必须支持 OA、支出流水和进项发票三类。
 - canonical repository 不可用时返回明确错误；页面保留现有内容与重试入口，不以旧 read model、空集或轮询 fallback 伪装成功。
+- 页面右上角提供 OA 事实源 XLSX 导出，可选择已完成、进行中或两者。导出读取全部 canonical OA facts，不受页面月份、搜索、筛选、排序和分页影响；只含 OA 字段，不含流水、发票、关系或 raw payload。
 
 ## 发票关系影响
 

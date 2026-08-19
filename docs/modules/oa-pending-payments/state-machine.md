@@ -79,6 +79,22 @@ drawer open
 
 详情不访问外部 OA，也不等待 read-model worker。relation kind 非法返回 `400`；identifier 不存在返回结构化 `404`。
 
+## OA 导出抽屉状态
+
+```text
+closed
+  -> ready(all selected)
+  -> ready(partial selected) | empty-selection
+  -> downloading
+  -> downloaded | export-error
+```
+
+- 打开时默认选择已完成和进行中 OA；“全选”只是前端聚合选择，不是第三种后端来源。
+- 至少选择一种来源后才允许下载；`downloading` 期间禁止重复提交和关闭。
+- 下载不改变 rows query、不刷新页面，也不继承月份、搜索、筛选、排序或分页。
+- 失败只在抽屉内显示并保留当前选择；关闭后恢复默认全选。
+- 后端在单一只读 snapshot 中生成 OA-only XLSX，成功后记录不含业务内容的下载审计。
+
 ## 支出流水候选抽屉状态
 
 ```text
@@ -158,3 +174,4 @@ Audit 不调用 operation barrier、不轮询，也不作为 rows 正确性的 g
 | 2026-08-06 | completed/in-progress 统一读写 active `app.workbench_pair_relations`；旧 pending relation/claim/promotion 退役 | canonical relation consistency / migration / Workbench workflow gate |
 | 2026-07-27 | 写命令不再返回 `readModelRefresh`，成功后 normal GET | command/API/frontend |
 | 2026-07-28 | 所有 active relation mode 均进入页面；混合收支关系只把 outflow 作为展示、已付金额和写回证据；Audit 对照期望关系集与 consumer | query/canonical rows/command/Audit/integration |
+| 2026-08-19 | 增加已完成/进行中 OA 事实源 XLSX 导出；单快照、OA-only、无页面刷新 | export service/repository/API/frontend/E2E |

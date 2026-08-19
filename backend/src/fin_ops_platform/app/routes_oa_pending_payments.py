@@ -15,6 +15,8 @@ WriteAuthContext = Callable[[dict[str, str] | None], tuple[str, str] | Any]
 JsonResponse = Callable[..., Any]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
 ErrorResponse = Callable[[OaPendingPaymentError], Any]
+XlsxResponse = Callable[[str, bytes], Any]
+ExportAuditRecorder = Callable[[Any | None, str, list[str], dict[str, int]], None]
 
 
 class OaPendingPaymentApiRoutes:
@@ -29,6 +31,8 @@ class OaPendingPaymentApiRoutes:
         json_response: JsonResponse | None = None,
         load_json_body: JsonBodyLoader | None = None,
         error_response: ErrorResponse | None = None,
+        xlsx_response: XlsxResponse | None = None,
+        record_export_download: ExportAuditRecorder | None = None,
     ) -> None:
         self._query_service = query_service
         self._command_service = command_service
@@ -38,6 +42,8 @@ class OaPendingPaymentApiRoutes:
         self._json_response = json_response
         self._load_json_body = load_json_body
         self._error_response = error_response
+        self._xlsx_response = xlsx_response
+        self._record_export_download = record_export_download
 
     def configure_platform_ports(
         self,
@@ -48,6 +54,8 @@ class OaPendingPaymentApiRoutes:
         json_response: JsonResponse,
         load_json_body: JsonBodyLoader,
         error_response: ErrorResponse,
+        xlsx_response: XlsxResponse | None = None,
+        record_export_download: ExportAuditRecorder | None = None,
     ) -> "OaPendingPaymentApiRoutes":
         self._resolve_read_session = resolve_read_session
         self._resolve_read_tenant = resolve_read_tenant
@@ -55,6 +63,8 @@ class OaPendingPaymentApiRoutes:
         self._json_response = json_response
         self._load_json_body = load_json_body
         self._error_response = error_response
+        self._xlsx_response = xlsx_response
+        self._record_export_download = record_export_download
         return self
 
     def route(
@@ -73,6 +83,8 @@ class OaPendingPaymentApiRoutes:
                     self.rows(query, tenant_id=self._tenant_id(session)),
                 ),
             )
+        if method == "GET" and route_path == "/api/oa-pending-payments/export":
+            return self._xlsx_read(headers, query)
         if method == "GET" and route_path == "/api/oa-pending-payments/bank-transaction-candidates":
             return self._json_read(
                 headers,
@@ -134,6 +146,14 @@ class OaPendingPaymentApiRoutes:
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         return self._query_service_required().rows(query, tenant_id=tenant_id)
+
+    def export_sources(
+        self,
+        query: dict[str, list[str]],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        return self._query_service_required().export_sources(query, tenant_id=tenant_id)
 
     def oa_detail(
         self,
@@ -222,6 +242,32 @@ class OaPendingPaymentApiRoutes:
         except RuntimeError as exc:
             return self._service_unavailable(exc)
         return self._json(status_code, payload, response_headers=response_headers)
+
+    def _xlsx_read(
+        self,
+        headers: dict[str, str] | None,
+        query: dict[str, list[str]],
+    ) -> Any:
+        session, auth_error = self._read_session(headers)
+        if auth_error is not None:
+            return auth_error
+        try:
+            result = self.export_sources(query, tenant_id=self._tenant_id(session))
+            filename = str(result["filename"])
+            sources = [str(source) for source in list(result.get("sources") or [])]
+            counts = {
+                str(source): int(count)
+                for source, count in dict(result.get("counts") or {}).items()
+            }
+            if callable(self._record_export_download):
+                self._record_export_download(session, filename, sources, counts)
+        except OaPendingPaymentError as exc:
+            return self._error(exc)
+        except RuntimeError as exc:
+            return self._service_unavailable(exc)
+        if callable(self._xlsx_response):
+            return self._xlsx_response(filename, bytes(result["content"]))
+        return HTTPStatus.OK, bytes(result["content"]), {"Content-Disposition": filename}
 
     def _json_write(
         self,

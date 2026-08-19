@@ -991,6 +991,16 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - `filterConfig`/`filterOptions` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
 - canonical repository 不可用时返回明确业务错误，不返回旧 projection、HTML 或空 body。
 
+### OA 事实源导出
+
+`GET /api/oa-pending-payments/export?sources=completed,in_progress`
+
+- `sources` 必填，可重复或逗号分隔，只允许 `completed` / `in_progress`，至少一种；响应按固定来源顺序生成 `已完成OA` / `进行中OA` sheet。
+- 导出范围是该 tenant 的全部选中 OA canonical facts，不读取也不继承 rows 的月份、关键字、日期、列筛选、排序、分页或 view mode。
+- 固定 OA-only 列为：`OA ID`、`OA单号`、`流程状态`、`归属月份`、`申请人`、`申请类型`、`申请时间`、`完成时间`、`项目名称`、`申请金额`、`往来单位`、`申请事由`、`费用类型`、`费用内容`。不得输出流水、发票、关系、支付 read model 或 raw payload。
+- 成功返回 XLSX MIME、UTF-8 `Content-Disposition`、`Cache-Control: no-store`，空来源 sheet 保留表头；总 OA 行数上限 20,000，超限返回结构化 `400`。
+- read-export-only 与 full/admin 可以下载，未认证或 denied 用户拒绝；成功审计只记录 actor、来源、数量和文件名，不记录 OA 内容。
+
 ### OA 已支付行写回
 
 `POST /api/oa-pending-payments/writeback-paid`
@@ -1011,7 +1021,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - completed 与 in-progress 行都必须存在包含目标 OA 的 Workbench active 支出流水 relation。候选流水、自动 decision、历史 pending relation/claim、未确认 relation 或收入流水都不能触发写回。
 - 写回前必须校验银行流水存在且方向为支出、支出合计等于 OA 金额、可解析 OA Mongo 文档 ID，并将 `t_payment_simple.flow_id` 对应记录写成 `pay_status=1`；缺记录时可插入一条已支付记录。Flowable 流程实例 ID 和流程请求 ID 不作为 `t_payment_simple.flow_id` 写回 key。
 - MySQL成功后，命令必须调用PG snapshot writer幂等更新payment-status snapshot、月份source watermark和精确月份dirty/outbox；即使MySQL此前已paid也不能跳过PG修复。PG三项写入同事务。
-- 成功响应返回 `success`、`action=oa_pending_payment_writeback_paid`、`oaRowIds`、`writebackCount`、`oaPaymentWriteback` 或 `oaPaymentWritebacks`、`readModelRefresh`和operation barrier targets；OA普通刷新只覆盖精确月份，目标commit-to-visible窗口为1秒。
+- 成功响应返回 `success`、`action=oa_pending_payment_writeback_paid`、`oaRowIds`、`writebackCount`、`oaPaymentWriteback` 或 `oaPaymentWritebacks`；不返回已退役的 `readModelRefresh` 或 operation barrier targets，前端成功后只执行一次普通 rows GET。
 - 金额、方向或flow id校验失败不得写MySQL。若MySQL已成功但PG snapshot提交失败，返回 `oa_payment_status_snapshot_write_failed` / 503和可安全重试语义，不得声称页面已fresh；下一次幂等重试或OA sync负责恢复。
 
 `GET /api/oa-pending-payments/bank-transaction-candidates`

@@ -1,6 +1,6 @@
 # OA 待付款核对 Spec-first E2E
 
-日期：2026-07-27
+日期：2026-08-19
 
 ## 全局合同
 
@@ -25,6 +25,7 @@
 | `OA-PENDING-E2E-008` | active relation withdraw | canonical relation 改为 withdrawn 后下一次 GET 不展示银行/发票 relation；无需 worker |
 | `OA-PENDING-E2E-009` | Audit | pass/checking/integrity fail/unavailable 文案正确；单次请求且无 page barrier |
 | `OA-PENDING-E2E-010` | 列筛选浮层 | HeroUI Popover 在窄高视口自动避让；内容可滚动、操作区始终可见；Escape 关闭并归还焦点；零业务写请求 |
+| `OA-PENDING-E2E-011` | OA 事实源导出 | 右上角打开抽屉；默认全选且可部分选择；只下载 OA-only XLSX；不继承页面条件、不刷新 rows、不发送 mutation；read-export-only 可用 |
 
 ## 基础设施边界
 

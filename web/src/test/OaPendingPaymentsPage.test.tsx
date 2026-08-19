@@ -499,10 +499,18 @@ function installOaPendingPaymentsFetch(overrides?: {
     delay?: Promise<void>;
     payload: Record<string, unknown>;
   }>;
+  exportResponses?: Array<{
+    status?: number;
+    body?: BodyInit;
+    contentType?: string;
+    fileName?: string;
+    delay?: Promise<void>;
+  }>;
 }) {
   const writebackPaidResponses = [...(overrides?.writebackPaidResponses ?? [])];
   const rowsResponses = [...(overrides?.rowsResponses ?? [])];
   const bankCandidatesResponses = [...(overrides?.bankCandidatesResponses ?? [])];
+  const exportResponses = [...(overrides?.exportResponses ?? [])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const detailPayload = overrides?.detailPayloads?.[url.pathname];
@@ -520,6 +528,19 @@ function installOaPendingPaymentsFetch(overrides?: {
       return new Response(JSON.stringify(responsePayload), {
         status: scriptedResponse?.status ?? 200,
         headers: { "Content-Type": "application/json" },
+      });
+    }
+    if (url.pathname === "/api/oa-pending-payments/export") {
+      const scriptedResponse = exportResponses.shift();
+      await scriptedResponse?.delay;
+      return new Response(scriptedResponse?.body ?? new Uint8Array([80, 75, 3, 4]), {
+        status: scriptedResponse?.status ?? 200,
+        headers: {
+          "Content-Type": scriptedResponse?.contentType
+            ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": scriptedResponse?.fileName
+            ?? "attachment; filename*=UTF-8''OA%E4%BA%8B%E5%AE%9E%E6%BA%90_2026-08-19.xlsx",
+        },
       });
     }
     if (url.pathname === "/api/oa-pending-payments/writeback-paid") {
@@ -648,6 +669,12 @@ function rowsRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch
     .filter((url) => url.pathname === "/api/oa-pending-payments/rows");
 }
 
+function exportRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
+  return fetchMock.mock.calls
+    .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
+    .filter((url) => url.pathname === "/api/oa-pending-payments/export");
+}
+
 function rulesRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
   return fetchMock.mock.calls
     .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
@@ -710,6 +737,7 @@ function cssRule(source: string, selector: string) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -718,6 +746,78 @@ afterEach(() => {
 });
 
 describe("OA pending payments page", () => {
+  test("exports selected OA fact sources without reloading or leaking page filters", async () => {
+    const exportDelay = deferred();
+    const fetchMock = installOaPendingPaymentsFetch({
+      exportResponses: [{ delay: exportDelay.promise }],
+    });
+    const createObjectUrl = vi.fn(() => "blob:oa-export");
+    const revokeObjectUrl = vi.fn();
+    const NativeUrl = URL;
+    class TestUrl extends NativeUrl {
+      static createObjectURL = createObjectUrl;
+      static revokeObjectURL = revokeObjectUrl;
+    }
+    vi.stubGlobal("URL", TestUrl);
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("张三");
+    const rowRequestCount = rowsRequests(fetchMock).length;
+
+    await user.click(within(page).getByRole("button", { name: "导出 OA" }));
+    const drawer = await screen.findByLabelText("导出 OA 抽屉");
+    expect(within(drawer).getByRole("checkbox", { name: "全选" })).toBeChecked();
+    expect(within(drawer).getByRole("checkbox", { name: "已完成 OA" })).toBeChecked();
+    expect(within(drawer).getByRole("checkbox", { name: "进行中 OA" })).toBeChecked();
+
+    await user.click(within(drawer).getByRole("checkbox", { name: "进行中 OA" }));
+    expect(within(drawer).getByRole("checkbox", { name: "全选" })).toBePartiallyChecked();
+    const downloadButton = within(drawer).getByRole("button", { name: "导出 xlsx" });
+    await user.click(downloadButton);
+    await user.click(downloadButton);
+    expect(exportRequests(fetchMock)).toHaveLength(1);
+    expect(downloadButton).toBeDisabled();
+
+    exportDelay.resolve();
+    await within(drawer).findByText("已生成 OA事实源_2026-08-19.xlsx");
+    const exportRequest = exportRequests(fetchMock)[0];
+    expect(exportRequest.searchParams.get("sources")).toBe("completed");
+    expect(exportRequest.searchParams.has("month")).toBe(false);
+    expect(exportRequest.searchParams.has("filters")).toBe(false);
+    expect(exportRequest.searchParams.has("page")).toBe(false);
+    expect(rowsRequests(fetchMock)).toHaveLength(rowRequestCount);
+    expect(createObjectUrl).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:oa-export");
+  });
+
+  test("keeps the selected OA sources after an export error", async () => {
+    const fetchMock = installOaPendingPaymentsFetch({
+      exportResponses: [{
+        status: 400,
+        body: JSON.stringify({ error: { message: "OA 导出来源无效。" } }),
+        contentType: "application/json",
+      }],
+    });
+    const user = userEvent.setup();
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("张三");
+    await user.click(within(page).getByRole("button", { name: "导出 OA" }));
+    const drawer = await screen.findByLabelText("导出 OA 抽屉");
+    await user.click(within(drawer).getByRole("checkbox", { name: "已完成 OA" }));
+    await user.click(within(drawer).getByRole("button", { name: "导出 xlsx" }));
+
+    expect(await within(drawer).findByRole("alert")).toHaveTextContent("OA 导出来源无效。");
+    expect(within(drawer).getByRole("checkbox", { name: "已完成 OA" })).not.toBeChecked();
+    expect(within(drawer).getByRole("checkbox", { name: "进行中 OA" })).toBeChecked();
+    expect(exportRequests(fetchMock)[0].searchParams.get("sources")).toBe("in_progress");
+  });
+
   test("routes the bank-link surface through the shared AppDrawer shell", () => {
     const pageSource = readWebSource("src/pages/OaPendingPaymentsPage.tsx");
 

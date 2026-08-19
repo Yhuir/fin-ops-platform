@@ -4,12 +4,15 @@ from contextlib import contextmanager
 from copy import deepcopy
 from decimal import Decimal
 from http import HTTPStatus
+from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
 from typing import Any, Callable
 import unittest
 from urllib.parse import quote
+
+from openpyxl import load_workbook
 
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
 from fin_ops_platform.app.server import Application, Response
@@ -22,6 +25,9 @@ from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_pending_payment_canonical_rows import build_oa_pending_payment_rows
+from fin_ops_platform.services.oa_pending_payment_export import (
+    build_oa_pending_payment_export_workbook,
+)
 from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 
@@ -60,6 +66,7 @@ class FakeCommandService:
 class FakeQueryService:
     def __init__(self) -> None:
         self.candidate_queries: list[tuple[dict[str, list[str]], str]] = []
+        self.export_queries: list[tuple[dict[str, list[str]], str]] = []
 
     def bank_transaction_candidates(
         self,
@@ -81,6 +88,41 @@ class FakeQueryService:
                 }
             ],
             "pagination": {"page": 1, "pageSize": 100, "total": 1},
+        }
+
+    def export_sources(
+        self,
+        query: dict[str, list[str]],
+        *,
+        tenant_id: str,
+    ) -> dict[str, Any]:
+        self.export_queries.append((dict(query), tenant_id))
+        sources = ("completed", "in_progress")
+        content = build_oa_pending_payment_export_workbook(
+            [
+                {
+                    "source_kind": "completed",
+                    "oa_id": "oa-completed-api",
+                    "workflow_no": "OA-2026-001",
+                    "workflow_status": "已完成",
+                    "applicant": "完成申请人",
+                },
+                {
+                    "source_kind": "in_progress",
+                    "oa_id": "oa-progress-api",
+                    "workflow_no": "OA-2026-002",
+                    "workflow_status": "进行中",
+                    "applicant": "进行中申请人",
+                },
+            ],
+            sources=sources,
+        )
+        return {
+            "filename": "OA事实源_2026-08-19.xlsx",
+            "content": content,
+            "sources": list(sources),
+            "counts": {"completed": 1, "in_progress": 1},
+            "row_count": 2,
         }
 
 
@@ -222,6 +264,46 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(query["oa_row_ids"], ["oa-api", "oa-extra"])
         self.assertEqual(tenant_id, "default")
 
+    def test_export_route_returns_xlsx_and_records_metadata_only_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            query_service = FakeQueryService()
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(  # noqa: SLF001
+                query_service=query_service  # type: ignore[arg-type]
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/oa-pending-payments/export?sources=completed,in_progress",
+            )
+            audit_entries = app._audit_service.as_dicts()  # noqa: SLF001
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertEqual(
+            response.headers["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn("OA%E4%BA%8B%E5%AE%9E%E6%BA%90_2026-08-19.xlsx", response.headers["Content-Disposition"])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.headers["Access-Control-Expose-Headers"], "Content-Disposition")
+        workbook = load_workbook(BytesIO(response.body), read_only=True, data_only=False)
+        self.assertEqual(workbook.sheetnames, ["已完成OA", "进行中OA"])
+        self.assertEqual(workbook["已完成OA"]["A2"].value, "oa-completed-api")
+        self.assertEqual(workbook["进行中OA"]["A2"].value, "oa-progress-api")
+        workbook.close()
+        self.assertEqual(
+            query_service.export_queries,
+            [({"sources": ["completed,in_progress"]}, "default")],
+        )
+        audit = audit_entries[-1]
+        self.assertEqual(audit["action"], "oa_pending_payment_source_export_downloaded")
+        self.assertEqual(audit["entity_type"], "oa_pending_payment_source_export")
+        self.assertEqual(audit["metadata"]["sources"], ["completed", "in_progress"])
+        self.assertEqual(audit["metadata"]["counts"], {"completed": 1, "in_progress": 1})
+        self.assertEqual(audit["metadata"]["row_count"], 2)
+        self.assertNotIn("amount", audit["metadata"])
+        self.assertNotIn("reason", audit["metadata"])
+
     def test_canonical_query_runtime_failure_returns_service_unavailable(self) -> None:
         class FailingQueryService:
             def rows(self, _query: dict[str, list[str]], *, tenant_id: str) -> dict[str, Any]:
@@ -318,6 +400,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             )
             endpoints = [
                 "/api/oa-pending-payments/rows",
+                "/api/oa-pending-payments/export?sources=completed",
                 "/api/oa-pending-payments/bank-transaction-candidates",
                 "/api/oa-pending-payments/oa/oa-api/detail",
                 "/api/oa-pending-payments/bank-transactions/bank-api/detail",
@@ -338,6 +421,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
     def test_all_module_endpoints_require_module_owned_authentication(self) -> None:
         requests = [
             ("GET", "/api/oa-pending-payments/rows", None),
+            ("GET", "/api/oa-pending-payments/export?sources=completed", None),
             ("GET", "/api/oa-pending-payments/bank-transaction-candidates", None),
             ("GET", "/api/oa-pending-payments/oa/oa-api/detail", None),
             ("GET", "/api/oa-pending-payments/bank-transactions/bank-api/detail", None),
@@ -390,6 +474,32 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertTrue(all(response.status_code == HTTPStatus.FORBIDDEN for response in responses))
         self.assertTrue(all(json.loads(response.body)["error"] == "permission_denied" for response in responses))
+
+    def test_export_route_allows_read_export_only_user(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            configure_access_control(app, read_export_only=["OA_READONLY"])
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(  # noqa: SLF001
+                user_id="oa-readonly-id",
+                username="OA_READONLY",
+                nickname="OA只读用户",
+                display_name="OA只读用户",
+                roles=[],
+                permissions=[],
+            )
+            query_service = FakeQueryService()
+            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(  # noqa: SLF001
+                query_service=query_service  # type: ignore[arg-type]
+            )
+
+            response = app.handle_request(
+                "GET",
+                "/api/oa-pending-payments/export?sources=completed,in_progress",
+                headers={"Authorization": "Bearer oa-readonly-token"},
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.OK)
+        self.assertEqual(query_service.export_queries[0][1], "default")
 
 
 

@@ -17,6 +17,7 @@
 - `/api/oa-pending-payments` owned endpoints 的单次鉴权、tenant 隔离和结构化 HTTP 错误。
 - 页面 query service 的业务组合，以及 page-specific repository 的 canonical SQL。
 - in-progress admission、正式 Workbench relation 和 OA paid writeback 编排。
+- 已完成/进行中 OA 事实源 XLSX 导出；导出边界不消费流水、发票或关系事实。
 - 写后重新 GET 和前端 loading/empty/error 状态。
 
 ### 本模块不负责
@@ -32,6 +33,7 @@
 | --- | --- | --- |
 | OA session/token | permissions/auth owner | route 在任何查询/命令 I/O 前解析一次；拒绝未认证、无权限和只读写入 |
 | rows query | frontend/API | `month`、keyword、trade-date range、filters、sort、page/page_size、view mode；非法参数 fail closed；纯金额 keyword 在 service 边界归一为无千分位文本，selector 搜索 OA、流水、已付和发票 canonical 金额。 |
+| export query | frontend/API | `sources=completed,in_progress`，允许部分选择且至少一种；不接收或继承 rows 的 month/keyword/filter/sort/page 参数。 |
 | bank candidate query | frontend/API | relation status、keyword、page/page_size、repeated oa_row_ids；全部支出流水池由 PostgreSQL 服务端分页 |
 | completed OA | OA integration | `app.oa_applications` 已提交 snapshot；页面不访问 Mongo |
 | in-progress admission | OA integration | `app.oa_pending_payment_admissions`，按 tenant 读取 |
@@ -47,6 +49,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | rows response | frontend | 固定 `200` canonical JSON：rows/pagination/summary/statistics/filterConfig/filterOptions/appliedFilters/sort/viewMode |
+| OA facts export | frontend download | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`；sheet 为 `已完成OA` / `进行中OA`；只含登记的 OA 字段，20,000 行上限，`Cache-Control: no-store`。 |
+| export audit | `audit.events` | action=`oa_pending_payment_source_export_downloaded`；只记录 actor、来源、各来源数量、总行数和文件名，不记录 OA 业务内容。 |
 | detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
 | bank candidates | frontend drawer | canonical bank facts + active formal relations；返回 relation status 与服务端 pagination |
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
@@ -65,6 +69,7 @@
 - 查询次数与 page size 无关；最大 `page_size=200`，禁止逐行/逐组查询和 Python/浏览器全量分页。
 - 详情各自使用一个只读 repeatable-read snapshot，先定位 descriptor，再批量 hydrate 单一 canonical group。
 - 候选抽屉用一个 set-based statement 读取全量月份的 outflow bank facts、active relation status、keyword filter、total 和当前页；不得经 command service 全量加载后 Python 分页。
+- 导出在一个只读 repeatable-read snapshot 内执行一条 `UNION ALL` 查询并按来源稳定排序；XLSX 使用 write-only workbook，禁止逐行 SQL、页面 rows 复用、read model 或全量关系 hydrate。
 
 ## 事实与持久化所有权
 
@@ -115,7 +120,7 @@ frontend -> page API only
 | 层 | 文件 |
 | --- | --- |
 | Frontend | `web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、`web/src/features/oaPendingPayments/*` |
-| Route/service | `routes_oa_pending_payments.py`、`oa_pending_payment_query_service.py`、`oa_pending_payment_query_contract.py` |
+| Route/service | `routes_oa_pending_payments.py`、`oa_pending_payment_query_service.py`、`oa_pending_payment_query_contract.py`、`oa_pending_payment_export.py` |
 | Query repository | `postgres_repositories/oa_pending_payment_query.py` |
 | Pure row/detail composition | `oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py` |
 | Command | `oa_pending_payment_command_service.py`、`workbench_relation_command_service.py` |
@@ -142,3 +147,4 @@ frontend -> page API only
 - 禁止从页面请求访问 OA Mongo/MySQL/对象存储。
 - 禁止恢复旧 filter endpoint、全量 `all_rows()`、Python/浏览器分页。
 - 禁止因历史表仍存在而恢复本页 read model 依赖。
+- 禁止把银行流水、发票、relation/raw payload 或页面筛选条件并入 OA 事实源导出。

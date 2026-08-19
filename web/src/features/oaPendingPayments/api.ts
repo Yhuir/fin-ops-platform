@@ -1,4 +1,4 @@
-import { apiRequestJson } from "../apiClient";
+import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
   OaPendingPaymentDetailResponse,
   OaPendingPaymentDetailTarget,
@@ -28,6 +28,13 @@ type FetchContextRequest = Pick<
   signal?: AbortSignal;
 };
 
+export type OaPendingPaymentExportSource = "completed" | "in_progress";
+
+export type OaPendingPaymentExportDownload = {
+  blob: Blob;
+  fileName: string;
+};
+
 export function nextOaPendingPaymentSortDirection(
   currentField: string,
   currentDirection: OaPendingPaymentSortDirection | "",
@@ -46,6 +53,37 @@ export async function fetchOaPendingPaymentRows(request: FetchRowsRequest): Prom
     method: "GET",
     signal: request.signal,
   });
+}
+
+export async function downloadOaPendingPaymentSources(
+  sources: OaPendingPaymentExportSource[],
+): Promise<OaPendingPaymentExportDownload> {
+  const params = new URLSearchParams();
+  params.set("sources", sources.join(","));
+  const url = `/api/oa-pending-payments/export?${params.toString()}`;
+  const response = await apiFetch(url, { method: "GET" });
+  const contentType = response.headers?.get?.("Content-Type") ?? "";
+  const normalizedContentType = contentType.toLowerCase();
+
+  if (!response.ok) {
+    const rawText = await response.text();
+    if (looksLikeHtmlResponse(rawText, contentType)) {
+      throw new Error("OA 导出接口返回了 HTML 页面，请确认后端服务和 /api 代理已正常启动。");
+    }
+    throw new Error(exportErrorMessage(rawText, "OA 导出失败。"));
+  }
+  if (!normalizedContentType.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) {
+    const rawText = await response.text();
+    if (looksLikeHtmlResponse(rawText, contentType)) {
+      throw new Error("OA 导出接口返回了 HTML 页面，请确认后端服务和 /api 代理已正常启动。");
+    }
+    throw new Error(exportErrorMessage(rawText, `OA 导出接口返回的不是 xlsx 文件：${contentType || "未知类型"}`));
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: exportFileName(response.headers?.get?.("Content-Disposition") ?? null) ?? "OA事实源.xlsx",
+  };
 }
 
 export async function fetchOaPendingPaymentDetail(
@@ -170,4 +208,42 @@ function appendContextQuery(params: URLSearchParams, request: FetchContextReques
 
 function encodeFilters(filters: OaPendingPaymentFilter[]) {
   return encodeURIComponent(JSON.stringify(filters));
+}
+
+function exportErrorMessage(rawText: string, fallback: string): string {
+  if (!rawText.trim()) {
+    return fallback;
+  }
+  try {
+    const payload = JSON.parse(rawText) as { error?: { message?: string } | string; message?: string };
+    if (typeof payload.error === "object" && payload.error?.message) {
+      return payload.error.message;
+    }
+    if (typeof payload.message === "string" && payload.message.trim()) {
+      return payload.message.trim();
+    }
+    if (typeof payload.error === "string" && payload.error.trim()) {
+      return payload.error.trim();
+    }
+  } catch {
+    return rawText;
+  }
+  return fallback;
+}
+
+function exportFileName(contentDisposition: string | null): string | null {
+  if (!contentDisposition) {
+    return null;
+  }
+  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  }
+  return contentDisposition.match(/filename="([^"]+)"/i)?.[1]
+    ?? contentDisposition.match(/filename=([^;]+)/i)?.[1]?.trim()
+    ?? null;
 }

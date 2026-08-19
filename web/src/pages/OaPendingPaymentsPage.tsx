@@ -1,5 +1,5 @@
 import { Button, Checkbox, Input, ToggleButton, ToggleButtonGroup } from "@heroui/react";
-import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
@@ -10,6 +10,7 @@ import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
 import OaPendingPaymentAuditIcon from "../components/oaPendingPayments/OaPendingPaymentAuditIcon";
+import OaPendingPaymentExportDrawer from "../components/oaPendingPayments/OaPendingPaymentExportDrawer";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
@@ -20,6 +21,7 @@ import {
   fetchOaPendingPaymentBankCandidates,
   fetchOaPendingPaymentDetail,
   fetchOaPendingPaymentRows,
+  downloadOaPendingPaymentSources,
   linkOaPendingPaymentBankTransactions,
   nextOaPendingPaymentSortDirection,
   writebackOaPendingPaymentPaid,
@@ -89,6 +91,7 @@ export default function OaPendingPaymentsPage() {
   const [selectedOaRowIds, setSelectedOaRowIds] = useState<Set<string>>(() => new Set());
   const [detailTarget, setDetailTarget] = useState<OaPendingPaymentDetailTarget | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
   const [writingBackOaRowIds, setWritingBackOaRowIds] = useState<Set<string>>(() => new Set());
   const requestIdRef = useRef(0);
@@ -292,6 +295,15 @@ export default function OaPendingPaymentsPage() {
         <SlidersHorizontal aria-hidden="true" size={16} />
         支出流水无需开票规则设置
       </button>
+      <button
+        aria-label="导出 OA"
+        className="oa-pending-payments-button"
+        onClick={() => setExportOpen(true)}
+        type="button"
+      >
+        <Download aria-hidden="true" size={16} />
+        导出 OA
+      </button>
     </div>
   ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
@@ -451,6 +463,11 @@ export default function OaPendingPaymentsPage() {
         onLinked={handleBankLinkSuccess}
         onError={setError}
         onClose={() => setBankLinkDrawerOpen(false)}
+      />
+      <OaPendingPaymentExportDrawer
+        downloadExport={downloadOaPendingPaymentSources}
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
       />
     </>
   );

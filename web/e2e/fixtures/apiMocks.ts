@@ -9079,6 +9079,21 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, oaPendingPaymentRowsPayload(invoiceImportDownstreamConfirmed));
     }
 
+    if (path === "/api/oa-pending-payments/export") {
+      return route.fulfill({
+        status: 200,
+        body: createMinimalXlsx([
+          ["OA ID", "OA单号", "流程状态", "申请人", "申请金额"],
+          ["oa-payment-e2e-001", "OA-E2E-001", "已完成", "浏览器付款申请人", "12000.00"],
+        ], "已完成OA"),
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": "attachment; filename*=UTF-8''OA%E4%BA%8B%E5%AE%9E%E6%BA%90_2026-08-19.xlsx",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
     if (path === "/api/oa-pending-payments/bank-transaction-candidates") {
       return json(route, oaPendingPaymentBankCandidatesPayload(url.searchParams.get("relation_status") ?? "all"));
     }

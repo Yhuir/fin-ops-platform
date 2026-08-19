@@ -5421,6 +5421,8 @@ class Application:
             json_response=self._json_response,
             load_json_body=self._load_json_body,
             error_response=self._oa_pending_payment_error_response,
+            xlsx_response=self._oa_pending_payment_xlsx_response,
+            record_export_download=self._record_oa_pending_payment_export_download,
         )
 
     def _oa_payment_status_repository(self):
@@ -5537,6 +5539,43 @@ class Application:
             }
         }
         return self._json_response(exc.status_code, payload)
+
+    def _record_oa_pending_payment_export_download(
+        self,
+        session: object | None,
+        filename: str,
+        sources: list[str],
+        counts: dict[str, int],
+    ) -> None:
+        actor_id = actor_id_for_session(session) if session is not None else "oa_pending_payment_export"
+        self._audit_service.record_action(
+            actor_id=actor_id,
+            action="oa_pending_payment_source_export_downloaded",
+            entity_type="oa_pending_payment_source_export",
+            entity_id=filename,
+            metadata={
+                "sources": sources,
+                "counts": counts,
+                "row_count": sum(counts.values()),
+                "filename": filename,
+            },
+        )
+
+    @staticmethod
+    def _oa_pending_payment_xlsx_response(filename: str, content: bytes) -> Response:
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": XLSX_MIME_TYPE,
+                "Content-Disposition": _build_content_disposition(filename),
+                "Cache-Control": "no-store",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                "Access-Control-Expose-Headers": "Content-Disposition",
+            },
+        )
 
     def _output_invoice_collection_service(self) -> OutputInvoiceCollectionQueryService:
         service = getattr(self, "_output_invoice_collection_query_service", None)
