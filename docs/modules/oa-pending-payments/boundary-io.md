@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | rows response | frontend | 固定 `200` canonical JSON：rows/pagination/summary/statistics/filterConfig/filterOptions/appliedFilters/sort/viewMode |
 | OA facts export | frontend download | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`；sheet 为 `已完成OA` / `进行中OA`；只含登记的 OA 字段，20,000 行上限，`Cache-Control: no-store`。 |
-| export audit | `audit.events` | action=`oa_pending_payment_source_export_downloaded`；只记录 actor、来源、各来源数量、总行数和文件名，不记录 OA 业务内容。 |
+| export audit | `audit.events` | action=`oa_pending_payment_source_export_downloaded`，以 `operation.completed/success` 终态记录；只记录 actor、来源、各来源数量、总行数和文件名，不记录 OA 业务内容。 |
 | detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
 | bank candidates | frontend drawer | canonical bank facts + active formal relations；返回 relation status 与服务端 pagination |
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |

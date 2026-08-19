@@ -5554,6 +5554,10 @@ class Application:
             entity_type="oa_pending_payment_source_export",
             entity_id=filename,
             metadata={
+                "event_type": "operation.completed",
+                "outcome": "success",
+                "page_key": "oa-pending-payments",
+                "operation_location": "/api/oa-pending-payments/export",
                 "sources": sources,
                 "counts": counts,
                 "row_count": sum(counts.values()),
