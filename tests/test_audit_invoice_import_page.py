@@ -544,7 +544,7 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
             sample_limit=20,
         )
 
-        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v28")
+        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v29")
         self.assertFalse(report["audit_contract"]["relation_proof_required"])
 
     def test_missing_invoice_and_missing_source_link_fail_closed(self) -> None:

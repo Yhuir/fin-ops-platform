@@ -9,7 +9,7 @@ from unittest.mock import patch
 from fin_ops_platform.tools import workbench_etc_summary_relation_repair_ops as repair_ops
 
 
-def _relation(*, marker: str | None = None) -> dict[str, object]:
+def _relation(*, marker: str | None = None, include_summary: bool = True) -> dict[str, object]:
     metadata: dict[str, object] = {"requires_oa": True, "requires_invoice": True}
     if marker:
         metadata["external_etc_batch_id"] = marker
@@ -18,8 +18,12 @@ def _relation(*, marker: str | None = None) -> dict[str, object]:
         "status": "active",
         "relation_mode": "manual_confirmed",
         "month_scope": "2026-07",
-        "row_ids": ["bank-1", "etc-summary-etc_20260720_001"],
-        "row_types": ["bank", "invoice"],
+        "row_ids": [
+            "oa-1",
+            "bank-1",
+            *(["etc-summary-etc_20260720_001"] if include_summary else []),
+        ],
+        "row_types": ["oa", "bank", *(["invoice"] if include_summary else [])],
         "special_metadata": metadata,
         "updated_at": "2026-07-30T09:00:00+08:00",
     }
@@ -37,23 +41,27 @@ class _CommandService:
     def list_history(self) -> list[dict[str, object]]:
         return deepcopy(self.histories)
 
-    def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
+    def confirm_relation(self, **kwargs: object) -> dict[str, object]:
         self.updates.append(deepcopy(kwargs))
         before = deepcopy(self.relation)
-        patch_metadata = deepcopy(kwargs["special_metadata"])
-        if kwargs.get("replace_special_metadata"):
-            self.relation["special_metadata"] = patch_metadata
-        else:
-            self.relation["special_metadata"] = {
-                **deepcopy(self.relation["special_metadata"]),
-                **patch_metadata,
-            }
+        self.relation = {
+            **deepcopy(self.relation),
+            "row_ids": deepcopy(kwargs["row_ids"]),
+            "row_types": deepcopy(kwargs["row_types"]),
+            "relation_mode": kwargs["relation_mode"],
+            "month_scope": kwargs["month_scope"],
+            "amount_check": deepcopy(kwargs["amount_check"]),
+            "special_metadata": deepcopy(kwargs["special_metadata"]),
+            "evidence": deepcopy(kwargs["evidence"]),
+            "oa_exemption": deepcopy(kwargs["oa_exemption"]),
+            "display_tags": deepcopy(kwargs["display_tags"]),
+        }
         self.relation["updated_at"] = f"2026-07-30T09:{len(self.histories) + 1:02d}:00+08:00"
         self.histories.append(
             {
                 "operation_type": kwargs["history_operation_type"],
                 "created_by": kwargs["actor_id"],
-                "note": kwargs["note"],
+                "note": kwargs["history_note"],
                 "before_relations": [before],
                 "after_relations": [deepcopy(self.relation)],
             }
@@ -102,9 +110,24 @@ class WorkbenchEtcSummaryRelationRepairOpsTests(unittest.TestCase):
         )
         self.assertEqual(len(command.updates), 1)
 
+    def test_execute_adds_missing_summary_member_from_exact_relation_marker(self) -> None:
+        command = _CommandService(
+            _relation(marker="etc_20260720_001", include_summary=False)
+        )
+        fingerprint = str(_run(command, _args("--dry-run"))["source_fingerprint"])
+
+        applied = _run(command, _args("--execute", fingerprint))
+
+        self.assertEqual(applied["written_relation_count"], 1)
+        self.assertEqual(
+            command.relation["row_ids"],
+            ["oa-1", "bank-1", "etc-summary-etc_20260720_001"],
+        )
+        self.assertEqual(command.relation["row_types"], ["oa", "bank", "invoice"])
+
     def test_rejects_wrong_summary_row_or_conflicting_marker(self) -> None:
         wrong_row = _relation()
-        wrong_row["row_ids"] = ["bank-1", "etc-summary-other"]
+        wrong_row["row_ids"] = ["oa-1", "bank-1", "etc-summary-other"]
         with self.assertRaisesRegex(RuntimeError, "proven invoice summary row"):
             _run(_CommandService(wrong_row), _args("--dry-run"))
 
@@ -113,7 +136,7 @@ class WorkbenchEtcSummaryRelationRepairOpsTests(unittest.TestCase):
 
     def test_rollback_restores_exact_metadata_preimage(self) -> None:
         command = _CommandService(_relation())
-        original_metadata = deepcopy(command.relation["special_metadata"])
+        original_relation = deepcopy(command.relation)
         fingerprint = str(_run(command, _args("--dry-run"))["source_fingerprint"])
         _run(command, _args("--execute", fingerprint))
 
@@ -122,7 +145,21 @@ class WorkbenchEtcSummaryRelationRepairOpsTests(unittest.TestCase):
 
         self.assertEqual(preview["written_relation_count"], 0)
         self.assertEqual(applied["written_relation_count"], 1)
-        self.assertEqual(command.relation["special_metadata"], original_metadata)
+        self.assertEqual(command.relation["special_metadata"], original_relation["special_metadata"])
+        self.assertEqual(command.relation["row_ids"], original_relation["row_ids"])
+        self.assertEqual(command.relation["row_types"], original_relation["row_types"])
+
+    def test_rollback_removes_summary_member_added_to_metadata_only_relation(self) -> None:
+        command = _CommandService(
+            _relation(marker="etc_20260720_001", include_summary=False)
+        )
+        fingerprint = str(_run(command, _args("--dry-run"))["source_fingerprint"])
+        _run(command, _args("--execute", fingerprint))
+
+        _run(command, _args("--rollback", fingerprint))
+
+        self.assertEqual(command.relation["row_ids"], ["oa-1", "bank-1"])
+        self.assertEqual(command.relation["row_types"], ["oa", "bank"])
 
 
 if __name__ == "__main__":

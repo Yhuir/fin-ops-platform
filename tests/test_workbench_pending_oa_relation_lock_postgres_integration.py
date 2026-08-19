@@ -10,6 +10,9 @@ from fin_ops_platform.services.postgres_connection import (
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_page_audit import (
+    audit_workbench_relation_display,
+)
 from fin_ops_platform.services.workbench_pair_relation_service import (
     WorkbenchPairRelationService,
 )
@@ -104,11 +107,14 @@ class WorkbenchPendingOaRelationLockPostgresIntegrationTests(unittest.TestCase):
                 %s, 'manually_marked_submitted', '2026-08-01', 1,
                 100, jsonb_build_object(
                     'normalized_payload',
-                    jsonb_build_object('external_etc_batch_id', %s::text)
+                    jsonb_build_object(
+                        'external_etc_batch_id', %s::text,
+                        'invoice_ids', jsonb_build_array(%s::text)
+                    )
                 )
             )
             """,
-            (business_batch_id, external_batch_id),
+            (business_batch_id, external_batch_id, f"invoice:{external_batch_id}"),
         )
         self.connection.execute(
             """
@@ -213,6 +219,63 @@ class WorkbenchPendingOaRelationLockPostgresIntegrationTests(unittest.TestCase):
                 "row_types": ["oa", "bank", "invoice"],
             },
         )
+
+    def test_historical_relation_case_proves_oa_then_member_repair_closes_audit(self) -> None:
+        external_batch_id = "ETC-OA-HISTORICAL-AUDIT"
+        case_id = "CASE-ETC-HISTORICAL-AUDIT"
+        self._insert_completed_oa("oa-etc-historical-audit")
+        self._insert_bank("bank-etc-historical-audit")
+        summary_row_id = self._insert_etc_summary(external_batch_id)
+        self.connection.execute(
+            """
+            update app.etc_business_batches
+            set raw_payload = jsonb_set(
+                raw_payload,
+                '{normalized_payload,amount_breakdown}',
+                jsonb_build_object('relation_case_id', %s::text),
+                true
+            )
+            where business_batch_id = %s
+            """,
+            (case_id, f"business:{external_batch_id}"),
+        )
+        with self.connection.transaction() as transaction:
+            command = self._command(transaction)
+            relation = command.confirm_relation(
+                case_id=case_id,
+                row_ids=["oa-etc-historical-audit", "bank-etc-historical-audit"],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                actor_id="integration-test",
+                month_scope="2026-08",
+                amount_check={"status": "matched"},
+                special_metadata={"external_etc_batch_id": external_batch_id},
+                tenant_id="tenant-a",
+            )["relation"]
+
+        before = audit_workbench_relation_display(self.connection)
+        self.assertEqual(
+            [issue["code"] for issue in before["issues"]],
+            ["submitted_etc_batch_relation_member_missing"],
+        )
+
+        with self.connection.transaction() as transaction:
+            self._command(transaction).confirm_relation(
+                case_id=case_id,
+                row_ids=[*relation["row_ids"], summary_row_id],
+                row_types=[*relation["row_types"], "invoice"],
+                relation_mode=str(relation["relation_mode"]),
+                actor_id="integration-test",
+                month_scope="2026-08",
+                amount_check=dict(relation["amount_check"]),
+                special_metadata=dict(relation["special_metadata"]),
+                before_relations=[relation],
+                replace_existing=True,
+                tenant_id="tenant-a",
+            )
+
+        after = audit_workbench_relation_display(self.connection)
+        self.assertEqual(after["issues"], [])
 
     def test_pending_oa_from_another_tenant_is_not_lockable(self) -> None:
         self._insert_pending_oa("oa-pending-tenant-a", tenant_id="tenant-a")

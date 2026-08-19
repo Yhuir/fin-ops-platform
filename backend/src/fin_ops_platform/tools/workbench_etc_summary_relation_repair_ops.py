@@ -122,17 +122,37 @@ def _forward(
             f"Workbench relation {case_id} already points to conflicting ETC batches: "
             f"{sorted(existing_batch_ids)}."
         )
-    already_applied = existing_batch_ids == frozenset({external_batch_id})
+    expected_summary_row_id = str(identity["expected_summary_row_id"])
+    current_metadata = (
+        deepcopy(relation.get("special_metadata"))
+        if isinstance(relation.get("special_metadata"), dict)
+        else {}
+    )
+    already_applied = (
+        bool(identity["summary_is_member"])
+        and existing_batch_ids == frozenset({external_batch_id})
+        and str(current_metadata.get("external_etc_batch_id") or "").strip()
+        == external_batch_id
+    )
     affected_months: set[str] = set()
     written = 0
     if execute and not already_applied:
-        result = command_service.update_relation_metadata_for_case_id(
-            case_id=case_id,
-            special_metadata={"external_etc_batch_id": external_batch_id},
+        target = deepcopy(relation)
+        if not identity["summary_is_member"]:
+            target["row_ids"] = [*list(target.get("row_ids") or []), expected_summary_row_id]
+            target["row_types"] = [*list(target.get("row_types") or []), "invoice"]
+        target["special_metadata"] = {
+            **current_metadata,
+            "external_etc_batch_id": external_batch_id,
+        }
+        result = _replace_relation(
+            command_service=command_service,
+            target=target,
+            before=relation,
             actor_id=REPAIR_ACTOR_ID,
-            note=f"{_FORWARD_NOTE_PREFIX}{fingerprint}",
+            history_note=f"{_FORWARD_NOTE_PREFIX}{fingerprint}",
             idempotency_key=f"workbench-etc-summary-repair-v1:{fingerprint}:{case_id}",
-            history_operation_type=REPAIR_OPERATION_TYPE,
+            operation_type=REPAIR_OPERATION_TYPE,
         )
         persist_workbench_pair_relations(app, [case_id])
         affected_months.update(_affected_months(result))
@@ -192,15 +212,14 @@ def _rollback(
     affected_months: set[str] = set()
     written = 0
     if execute and not already_applied:
-        before_metadata = before.get("special_metadata")
-        result = command_service.update_relation_metadata_for_case_id(
-            case_id=case_id,
-            special_metadata=deepcopy(before_metadata) if isinstance(before_metadata, dict) else {},
-            replace_special_metadata=True,
+        result = _replace_relation(
+            command_service=command_service,
+            target=before,
+            before=current,
             actor_id=ROLLBACK_ACTOR_ID,
-            note=f"{_ROLLBACK_NOTE_PREFIX}{fingerprint}",
+            history_note=f"{_ROLLBACK_NOTE_PREFIX}{fingerprint}",
             idempotency_key=f"workbench-etc-summary-repair-rollback-v1:{fingerprint}:{case_id}",
-            history_operation_type=ROLLBACK_OPERATION_TYPE,
+            operation_type=ROLLBACK_OPERATION_TYPE,
         )
         persist_workbench_pair_relations(app, [case_id])
         affected_months.update(_affected_months(result))
@@ -234,11 +253,35 @@ def _validated_identity(relation: dict[str, Any], external_batch_id: str) -> dic
     if len(row_ids) != len(row_types):
         raise RuntimeError("Workbench relation row_ids/row_types are not aligned.")
     expected_summary_row_id = workbench_etc_summary_row_id(external_batch_id)
+    if len(row_ids) != len(set(row_ids)):
+        raise RuntimeError("Workbench relation contains duplicate member ids.")
     summary_indexes = [index for index, row_id in enumerate(row_ids) if row_id == expected_summary_row_id]
-    if len(summary_indexes) != 1 or row_types[summary_indexes[0]] not in _INVOICE_ROW_TYPES:
+    if len(summary_indexes) > 1 or (
+        summary_indexes and row_types[summary_indexes[0]] not in _INVOICE_ROW_TYPES
+    ):
         raise RuntimeError(
             f"Workbench relation does not contain the proven invoice summary row "
             f"{expected_summary_row_id} exactly once."
+        )
+    marker_ids = relation_external_etc_batch_ids(relation)
+    if marker_ids and marker_ids != frozenset({external_batch_id}):
+        raise RuntimeError(
+            f"Workbench relation points to conflicting ETC batches: {sorted(marker_ids)}."
+        )
+    summary_is_member = len(summary_indexes) == 1
+    if not summary_is_member and not marker_ids:
+        raise RuntimeError(
+            f"Workbench relation contains neither the proven invoice summary row "
+            f"{expected_summary_row_id} nor the exact ETC batch marker."
+        )
+    oa_row_ids = [
+        row_id
+        for row_id, row_type in zip(row_ids, row_types, strict=True)
+        if row_type in {"oa", "oa_application"}
+    ]
+    if len(oa_row_ids) != 1:
+        raise RuntimeError(
+            "Workbench ETC summary repair requires exactly one OA member in the target relation."
         )
     return {
         "case_id": str(relation.get("case_id") or "").strip(),
@@ -248,12 +291,64 @@ def _validated_identity(relation: dict[str, Any], external_batch_id: str) -> dic
         "relation_mode": str(relation.get("relation_mode") or ""),
         "row_ids": row_ids,
         "row_types": row_types,
+        "desired_row_ids": [*row_ids, *([] if summary_is_member else [expected_summary_row_id])],
+        "desired_row_types": [*row_types, *([] if summary_is_member else ["invoice"])],
+        "oa_row_id": oa_row_ids[0],
+        "summary_is_member": summary_is_member,
+        "relation_batch_markers": sorted(marker_ids),
     }
 
 
+def _replace_relation(
+    *,
+    command_service: Any,
+    target: dict[str, Any],
+    before: dict[str, Any],
+    actor_id: str,
+    history_note: str,
+    idempotency_key: str,
+    operation_type: str,
+) -> dict[str, Any]:
+    return command_service.confirm_relation(
+        case_id=str(target.get("case_id") or ""),
+        row_ids=[str(value) for value in list(target.get("row_ids") or [])],
+        row_types=[str(value) for value in list(target.get("row_types") or [])],
+        relation_mode=str(target.get("relation_mode") or "manual_confirmed"),
+        actor_id=actor_id,
+        month_scope=str(target.get("month_scope") or "all"),
+        note=str(target.get("note") or "") or None,
+        amount_check=deepcopy(target.get("amount_check") or {}),
+        special_metadata=deepcopy(target.get("special_metadata") or {}),
+        evidence=deepcopy(target.get("evidence") or {}),
+        oa_exemption=deepcopy(target.get("oa_exemption") or {}),
+        display_tags=[str(value) for value in list(target.get("display_tags") or [])],
+        exception_case_id=str(target.get("exception_case_id") or "") or None,
+        rule_version=str(target.get("rule_version") or "") or None,
+        relation_created_by=str(target.get("created_by") or actor_id),
+        history_note=history_note,
+        idempotency_key=idempotency_key,
+        before_relations=[deepcopy(before)],
+        replace_existing=True,
+        history_operation_type=operation_type,
+    )
+
+
 def _fingerprint(identity: dict[str, Any]) -> str:
+    stable_identity = {
+        key: identity[key]
+        for key in (
+            "case_id",
+            "external_etc_batch_id",
+            "expected_summary_row_id",
+            "month_scope",
+            "relation_mode",
+            "desired_row_ids",
+            "desired_row_types",
+            "oa_row_id",
+        )
+    }
     return sha256(
-        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(stable_identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 
@@ -338,7 +433,9 @@ def _report(
         "external_etc_batch_id": identity["external_etc_batch_id"],
         "expected_summary_row_id": identity["expected_summary_row_id"],
         "source_fingerprint": fingerprint,
-        "fingerprint_contract": "case+batch+month+mode+ordered_row_ids+ordered_row_types",
+        "fingerprint_contract": (
+            "case+batch+month+mode+desired_ordered_row_ids+desired_ordered_row_types+oa_member"
+        ),
         "written_relation_count": written,
         "already_applied": already_applied,
         "affected_months": sorted(affected_months),

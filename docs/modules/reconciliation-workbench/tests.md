@@ -8,6 +8,7 @@
 - Repository/API contract：`tests/test_workbench_formal_relation_repository.py` 保护 exact ETC marker 候选不按 OA 申请日期误过滤，并输出 ETC 月份与 OA 申请月份；`tests/test_workbench_relation_repository.py` 保护只有 submitted/closed 且拥有真实 ETC 发票成员的 summary 才能通过 canonical lock。
 - Real PostgreSQL：`tests/test_workbench_pending_oa_relation_lock_postgres_integration.py` 证明 OA、流水和 submitted ETC summary 可在一个事务形成正式关系；`tests/test_workbench_query_postgres_integration.py` 继续保护 direct initial/groups/detail 与 68 张批次展示。
 - Audit/regression：`tests/test_workbench_page_audit.py` 区分缺 OA、缺 relation 和 metadata-only/member-missing 三类 warning；不新增前端交互、HTTP shape、表、worker、read model 或 cache。
+- Repair regression：`tests/test_workbench_etc_summary_relation_repair_ops.py` 覆盖 metadata-only 历史关系补 member、fingerprint 漂移拒绝、幂等和 rollback；`tests/test_workbench_page_audit.py` 锁定 v29 的 historical relation-case OA 证明条件。
 
 ## 2026-08-19 ETC 68 张部分桥接回归
 

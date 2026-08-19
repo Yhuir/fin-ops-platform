@@ -6,6 +6,8 @@
 - 修复复用既有 `workbench-matching`、formal relation command 和 canonical summary identity：同批次的新建/已有关系都加入唯一 `etc-summary-*` invoice member，保留历史 case 与差额证据；matching 只扩展 exact candidate 的 OA 月份，不扫描全库、不按金额猜配对。
 - 已 submitted 的 manual-status 幂等重放仍是历史修复入口；它只补投现有 durable matching scope，不推进版本或重复业务审计。发布后将仅对确认有 OA 的历史缺口批次重放，最新无 OA 批次保持未配对并由 Audit 明确说明。
 - 没有新增数据库 migration、备份、worker、queue、read model、cache、API 或直接 SQL 修复路径；旧“metadata 即成功”的判定已删除。
+- 生产重放进一步确认 4 个早期 migration 批次没有 OA 原始 `etc_batch_id`，但业务批次保存了唯一 `relation_case_id`，对应 active relation 也保存了唯一 OA 成员和同一 ETC owner marker。它们不进入日常 matcher 的严格 OA-marker 路径；复用既有 fingerprint-bound `workbench-etc-summary-repair`，仅在这些强证据全部一致时通过 relation command 补 summary member，并可从 relation history 精确回滚。
+- Workbench Page Audit 对历史批次只在 `business batch relation_case_id + active case + external batch marker + canonical OA member` 四项同时吻合时承认 OA 已存在；缺任何一项仍报告 `submitted_etc_batch_oa_missing`。审计合同升级为 `page-audit-contract.v29`。
 
 ## 2026-08-20 - submitted matching 漏投与批次名称闭环
 

@@ -8,6 +8,8 @@
 - `tests/test_workbench_formal_relation_repository.py` 保护 ETC scope 与延迟 OA 申请 scope 一次发现；`tests/test_workbench_relation_repository.py` 和真实 PostgreSQL integration 保护 submitted ETC summary canonical lock。
 - `tests/test_workbench_page_audit.py` 保护 metadata-only 关系不再误报通过；缺 OA 的最新批次仍保持合法未配对 warning，不按金额或时间猜配对。
 - 既有 `manual-oa-status` 幂等重放、durable matching queue、68 张折叠展示和 direct query 回归继续覆盖；无新 HTTP/前端状态、migration、备份或第二套修复工具。
+- `tests/test_workbench_etc_summary_relation_repair_ops.py` 保护历史 metadata-only relation 的 dry-run fingerprint、正式 summary member 补入、重复 execute 零写和 history rollback；工具必须有唯一 OA 成员及 exact batch marker，不能按金额猜配对。
+- Page Audit contract v29 只承认 business batch 保存的 exact historical relation case，不把任意 metadata marker 当作 OA 证据。
 
 ## 2026-08-20 submitted matching 闭环与开票月份标题
 

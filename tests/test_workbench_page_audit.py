@@ -54,6 +54,8 @@ class WorkbenchPageAuditTests(unittest.TestCase):
         )
         self.assertIn("submitted_etc_relation_gaps", connection.integrity_sql)
         self.assertIn("submitted_etc_batch_oa_missing", connection.integrity_sql)
+        self.assertIn("historical_relation_case_id", connection.integrity_sql)
+        self.assertIn("relation.case_id = batch.historical_relation_case_id", connection.integrity_sql)
         self.assertIn("submitted_etc_batch_relation_missing", connection.integrity_sql)
         self.assertIn("submitted_etc_batch_relation_member_missing", connection.integrity_sql)
         self.assertIn("member.row_id = batch.summary_row_id", connection.integrity_sql)

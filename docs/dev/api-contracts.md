@@ -1293,7 +1293,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "relation_tables": ["app.workbench_pair_relations"],
     "scope_types": [],
     "event_types": [],
-    "contract_revision": "page-audit-contract.v28",
+    "contract_revision": "page-audit-contract.v29",
     "proof_availability": "ready",
     "registered_read_model_keys": [],
     "relation_proof_required": true,

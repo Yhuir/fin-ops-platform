@@ -96,6 +96,10 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
             select
                 batch.business_batch_id,
                 batch.scope_month,
+                nullif(
+                    batch.raw_payload->'normalized_payload'->'amount_breakdown'->>'relation_case_id',
+                    ''
+                ) as historical_relation_case_id,
                 coalesce(
                     nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
                     nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
@@ -283,6 +287,20 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
                         where oa.status <> 'deleted'
                           and nullif(oa.normalized_payload->>'etc_batch_id', '')
                               = batch.external_batch_id
+                    ) and not exists (
+                        select 1
+                        from active_relations relation
+                        join lateral unnest(relation.row_ids) with ordinality
+                          as member(row_id, ordinality) on true
+                        join app.oa_applications oa
+                          on oa.row_id = member.row_id
+                         and oa.status <> 'deleted'
+                        where nullif(batch.historical_relation_case_id, '') is not null
+                          and relation.case_id = batch.historical_relation_case_id
+                          and relation.external_etc_batch_id = batch.external_batch_id
+                          and lower(coalesce(relation.row_types[member.ordinality], '')) in (
+                              'oa', 'oa_application'
+                          )
                     ) then 'submitted_etc_batch_oa_missing'
                     when not exists (
                         select 1

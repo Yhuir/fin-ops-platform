@@ -6,6 +6,8 @@
 - 修复：正式关系 command 统一把精确 ETC summary 作为 `invoice` member；已有关系通过同一 replace-confirmed 边界保留 case、金额检查、历史差额、异常/豁免证据和展示标签后补成员，冲突 owner 或错误成员类型 fail closed。候选先按 ETC scope 查 exact batch marker，再把发现的 OA 申请月份并入一次 fact load；删除“只有 metadata 就算关联成功”的旧判断。
 - 审计：Page Audit 现在分别报告缺 OA、缺 active relation、以及 relation marker 存在但 summary member 缺失；只有 exact deterministic summary id 与 submitted/closed canonical batch 成员都存在时才允许写关系。
 - 性能与边界：候选和 fact 仍是集合式批量 I/O，同一 matching run 只扩展必要月份；不新增表、migration、worker、queue、read model、cache、API 或第二套 repair 链路。`workbench-etc-batch-link-v6` 使旧 matching 输入失效并通过现有 durable dirty scope 重算。
+- 4 个早期 migration 批次缺 OA 原始 marker，不能进入常规 matcher。既有专用 summary repair 工具改为在 exact case、ETC marker、唯一 OA 成员和 submitted canonical summary 均可证明时，通过同一 relation command 追加正式 invoice member；回滚同样走 relation command/history，不直写 relation SQL。
+- Page Audit v29 将 business batch 的历史 `relation_case_id` 作为必要证据之一；只有该 case 的 active relation 同时包含 canonical OA 且 owner marker 一致时，才不会误报 OA 缺失。
 
 ## 2026-08-20 - ETC 全量折叠与历史关系缺口可观测
 
