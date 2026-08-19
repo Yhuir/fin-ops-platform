@@ -1981,7 +1981,25 @@ class PostgresWorkbenchPageQueryRepository:
             {_EFFECTIVE_GROUPS_CTES},
             {self._initial_zone_ctes('paired', paired_plan)},
             {self._initial_zone_ctes('unpaired', unpaired_plan)},
-            overall_summary as materialized (
+            overall_group_summary as materialized (
+                select
+                    count(*) filter (where groups.zone = 'paired')::bigint
+                        as summary_paired_count,
+                    count(*) filter (where groups.zone = 'unpaired')::bigint
+                        as summary_unpaired_count,
+                    count(*) filter (
+                        where groups.zone = 'unpaired'
+                          and groups.group_kind = 'relation'
+                    )::bigint as incomplete_group_count,
+                    count(*) filter (where 'oa' = any(groups.missing_row_types))::bigint
+                        as missing_oa_group_count,
+                    count(*) filter (where 'bank' = any(groups.missing_row_types))::bigint
+                        as missing_bank_group_count,
+                    count(*) filter (where 'invoice' = any(groups.missing_row_types))::bigint
+                        as missing_invoice_group_count
+                from effective_groups groups
+            ),
+            overall_member_summary as materialized (
                 select
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'oa')::bigint as summary_oa_count,
@@ -1990,25 +2008,6 @@ class PostgresWorkbenchPageQueryRepository:
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'invoice')::bigint
                         as summary_invoice_count,
-                    count(distinct groups.internal_key)
-                        filter (where groups.zone = 'paired')::bigint
-                        as summary_paired_count,
-                    count(distinct groups.internal_key)
-                        filter (where groups.zone = 'unpaired')::bigint
-                        as summary_unpaired_count,
-                    count(distinct groups.internal_key) filter (
-                        where groups.zone = 'unpaired'
-                          and groups.group_kind = 'relation'
-                    )::bigint as incomplete_group_count,
-                    count(distinct groups.internal_key)
-                        filter (where 'oa' = any(groups.missing_row_types))::bigint
-                        as missing_oa_group_count,
-                    count(distinct groups.internal_key)
-                        filter (where 'bank' = any(groups.missing_row_types))::bigint
-                        as missing_bank_group_count,
-                    count(distinct groups.internal_key)
-                        filter (where 'invoice' = any(groups.missing_row_types))::bigint
-                        as missing_invoice_group_count,
                     count(distinct (member.row_type, member.row_id)) filter (
                         where member.row_type = 'bank'
                           and member.column_values->>'direction' = '支出'
@@ -2039,6 +2038,11 @@ class PostgresWorkbenchPageQueryRepository:
                 from effective_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
+            ),
+            overall_summary as materialized (
+                select *
+                from overall_group_summary
+                cross join overall_member_summary
             ),
             invoice_inventory as materialized (
                 select

@@ -217,6 +217,16 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "paired_filtered_groups" in sql
     assert "unpaired_filtered_groups" in sql
     assert "overall_summary" in sql
+    group_summary_sql = sql.split(
+        "overall_group_summary as materialized (", 1
+    )[1].split("overall_member_summary as materialized (", 1)[0]
+    member_summary_sql = sql.split(
+        "overall_member_summary as materialized (", 1
+    )[1].split("overall_summary as materialized (", 1)[0]
+    assert "canonical_group_members" not in group_summary_sql
+    assert "count(distinct groups.internal_key)" not in group_summary_sql
+    assert "canonical_group_members" in member_summary_sql
+    assert "count(distinct (member.row_type, member.row_id))" in member_summary_sql
     assert "invoice_inventory" in sql
     assert WORKBENCH_GROUP_PAGE_SIZE == 10
     assert connection.calls[0][1].count(WORKBENCH_GROUP_PAGE_SIZE + 1) == 2

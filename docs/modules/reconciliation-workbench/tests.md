@@ -489,3 +489,8 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 - `web/src/test/ReconciliationWorkbenchPage.test.tsx` 继续保护关联台交互；共享对话框/抽屉与 token 由前端组件测试和 `DesignTokens.test.ts` 保护。
 - `web/src/test/RelationGroupGrid.test.tsx` 保护同一三栏 DOM 在窄屏按 OA、银行流水、进销项发票纵向重排，1440px 级宽度下工具栏换行；不新增 API、read model 请求或第二份页面状态。
+
+## 2026-08-19 - combined initial 统计热路径回归
+
+- `tests/test_workbench_page_query_repository.py::test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration` 保护组级 summary 不再 join `canonical_group_members`、不再执行 `count(distinct groups.internal_key)`；成员级 summary 继续按 `(row_type, row_id)` 去重，防止性能修复改变计数合同。
+- `tests/test_workbench_query_postgres_integration.py` 必须在 disposable PostgreSQL 上全量通过，证明拆分后的 CTE 可真实解析执行，initial/groups/detail 与 ETC 部分桥接 68 张恢复链路保持一致。

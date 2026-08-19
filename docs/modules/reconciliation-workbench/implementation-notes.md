@@ -1701,3 +1701,9 @@
 - 收口：每个筛选项建立局部定位上下文，Popover/Dialog 裁剪内部溢出，只有选项列表拥有纵向滚动并阻断滚动链；删除 Grid 子项中无效的 `flex: 1` 和宽泛 `overflow: auto`。不使用 `window.scrollTo`、全局 scroll listener、第二套菜单或自制 Checkbox。
 - 边界：筛选值、API、候选分组、zone query 和 HeroUI 交互合同均不改变；样式限定为关联台 `.column-filter-*`，不污染其它页面或全局 App Shell。无数据库、read model、worker、cache 或依赖变化。
 - 验证：Chromium 大数据 E2E 覆盖申请人、项目名称和流水金额三个菜单的内部滚轮、鼠标勾选、Tab/空格选择、查询完成后 document/三栏位置保持及无页面导航；组件测试保护勾选后菜单保持打开。
+
+## 2026-08-19 - 首屏组级统计与成员统计解耦
+
+- 部署后只读长样本显示 groups/filter-options 的单请求 P95 已低于 1 秒，但 combined initial 的 40 次样本 P95 为 `1000.891ms`，仍按硬合同判失败；不能用 0.891ms 的误差掩盖结果。
+- 根因收敛为 `overall_summary` 在成员展开结果上同时执行组级和成员级多组 distinct 聚合。组级计数只依赖一行一个 group 的 `effective_groups`，现拆为 `overall_group_summary` 直接 `count(*) filter`；成员级去重继续保留在 `overall_member_summary`，两者最后交叉合并，API 字段和异常语义不变。
+- 删除原成员展开上的组级 distinct 旧路径，不新增表、索引、migration、cache、read model、worker、依赖或兼容分支；变更只影响关联台 direct repository 的单条只读 SQL，不污染其它页面 I/O。
