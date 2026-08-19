@@ -85,6 +85,28 @@ class _Connection:
         yield self.transaction_object
 
 
+class _ProjectionTransaction:
+    def __init__(self) -> None:
+        self.reads: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_all(
+        self,
+        sql: str,
+        params: tuple[object, ...] = (),
+    ) -> list[dict[str, object]]:
+        self.reads.append((sql, tuple(params)))
+        return [
+            {
+                "row_id": "bank-legacy-1",
+                "effective_category_code": "fee",
+                "effective_category_label": "手续费",
+                "effective_category_primary_label": "费用",
+                "effective_category_sub_label": "手续费",
+                "effective_category_source": "auto",
+            }
+        ]
+
+
 class _SnapshotRepository:
     def transactions_snapshot(self, **_kwargs: object) -> dict[str, object]:
         definition = {
@@ -146,6 +168,40 @@ class _SnapshotRepository:
 
 
 class BankDetailsCanonicalQueryTests(unittest.TestCase):
+    def test_effective_category_projection_defers_unused_full_payload(self) -> None:
+        transaction = _ProjectionTransaction()
+
+        payload = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+            transaction,
+            settings={
+                "bank_transaction_tags": {
+                    "definitions": [
+                        {
+                            "code": "fee",
+                            "status": "active",
+                            "rules": {
+                                "match_fields": ["summary_text"],
+                                "contains_any": ["手续费"],
+                            },
+                        }
+                    ]
+                }
+            },
+            transaction_ids=["bank-legacy-1"],
+        )
+
+        self.assertEqual(payload["bank-legacy-1"]["effective_category_code"], "fee")
+        self.assertEqual(len(transaction.reads), 1)
+        sql, params = transaction.reads[0]
+        source_sql = sql.split("source_rows as materialized", 1)[1].split(
+            "display_rows as materialized",
+            1,
+        )[0]
+        self.assertIn("classified_with_semantics as not materialized", sql)
+        self.assertIn("'{}'::jsonb as normalized_payload", source_sql)
+        self.assertNotIn("bank.raw_payload,", source_sql)
+        self.assertEqual(sql.count("%s"), len(params))
+
     def test_transaction_snapshot_uses_one_fixed_repeatable_read_query_set(self) -> None:
         connection = _Connection()
         repository = PostgresBankDetailsCanonicalQueryRepository(connection)

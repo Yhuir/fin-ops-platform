@@ -245,6 +245,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
             date_from=None,
             date_to=None,
             candidate_transaction_ids=normalized_ids,
+            defer_full_payload=True,
         )
         rows = transaction.fetch_all(
             f"""
