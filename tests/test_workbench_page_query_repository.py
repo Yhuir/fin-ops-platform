@@ -399,6 +399,79 @@ def test_compact_etc_summary_keeps_only_the_first_real_invoice_preview() -> None
     assert compact["collapsed_row_counts"] == {"invoice": 68}
 
 
+def test_compact_etc_summary_builds_first_real_invoice_preview() -> None:
+    summary = PostgresWorkbenchPageHydrationRepository._compact_etc_summary_row(
+        row_id="etc-summary-ETC-68",
+        external_batch_id="ETC-68",
+        payload={
+            "invoice_count": 68,
+            "total_amount": "3740.82",
+            "issue_date_min": "2026-05-28",
+            "issue_date_max": "2026-06-28",
+            "seller_name": "云南省交通投资建设集团有限公司",
+            "first_invoice": {
+                "row_id": "etc-invoice-1",
+                "invoice_no": "26537912210500678556",
+                "invoice_code": "032002300111",
+                "invoice_date": "2026-05-28",
+                "seller_name": "云南省交通投资建设集团有限公司",
+                "buyer_name": "云南溯源科技有限公司",
+                "amount": "72.86",
+                "tax_rate": "3%",
+                "tax_amount": "2.19",
+                "total_with_tax": "75.05",
+                "invoice_type": "进项发票",
+            },
+        },
+    )
+
+    assert summary["etc_invoice_detail_count"] == 68
+    assert summary["etc_invoice_detail_rows"] == [
+        {
+            "id": "etc-invoice-1",
+            "type": "invoice",
+            "source_kind": "etc_invoice",
+            "status": "paired",
+            "seller_tax_no": "ETC发票",
+            "seller_name": "云南省交通投资建设集团有限公司",
+            "buyer_tax_no": "ETC-68",
+            "buyer_name": "云南溯源科技有限公司",
+            "invoice_code": "032002300111",
+            "invoice_no": "26537912210500678556",
+            "digital_invoice_no": "26537912210500678556",
+            "issue_date": "2026-05-28",
+            "amount": "75.05",
+            "amount_value": "75.05",
+            "tax_rate": "3%",
+            "tax_amount": "2.19",
+            "total_with_tax": "75.05",
+            "invoice_type": "进项发票",
+            "tags": ["ETC", "ETC发票明细"],
+            "etc_batch_id": "ETC-68",
+            "invoice_bank_relation": {
+                "code": "etc_batch_detail",
+                "label": "ETC批次明细",
+                "tone": "neutral",
+            },
+            "available_actions": ["detail"],
+            "summary_fields": {
+                "ETC批次": "ETC-68",
+                "发票号码": "26537912210500678556",
+                "销方": "云南省交通投资建设集团有限公司",
+                "金额": "75.05",
+                "开票日期": "2026-05-28",
+            },
+            "detail_fields": {
+                "ETC批次": "ETC-68",
+                "发票号码": "26537912210500678556",
+                "销方": "云南省交通投资建设集团有限公司",
+                "金额": "75.05",
+                "开票日期": "2026-05-28",
+            },
+        }
+    ]
+
+
 def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> None:
     class _CaptureConnection:
         def __init__(self) -> None:

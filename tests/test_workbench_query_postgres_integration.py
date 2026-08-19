@@ -975,6 +975,14 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             if group.get("detail_key") == "CASE-ETC-PARTIAL-BRIDGE"
         )
         self.assertEqual(priority_group["invoice_rows"][0]["amount"], "33.00")
+        self.assertEqual(priority_group["collapsed_row_counts"], {"invoice": 2})
+        self.assertEqual(
+            [
+                (row["source_kind"], row["invoice_no"])
+                for row in priority_group["collapsed_rows"]["invoice"]
+            ],
+            [("etc_invoice", "PRIORITY-BUSINESS")],
+        )
         anomaly_items = list(
             (priority_group.get("workbench_anomaly") or {}).get("items") or []
         )

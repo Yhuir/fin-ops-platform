@@ -392,7 +392,16 @@ class WorkbenchRelationGroupingService:
         group["summary_row"] = summary
         if details:
             group["collapsed_rows"] = {"invoice": details}
-            group["collapsed_row_counts"] = {"invoice": len(details)}
+            detail_count = len(details)
+            if str(summary.get("source_kind") or "").strip() == "etc_invoice_summary":
+                try:
+                    detail_count = max(
+                        detail_count,
+                        int(summary.get("etc_invoice_detail_count") or 0),
+                    )
+                except (TypeError, ValueError):
+                    pass
+            group["collapsed_row_counts"] = {"invoice": detail_count}
 
     @staticmethod
     def _apply_bank_batch_summary(group: dict[str, Any], *, relation_mode: str, zone: str) -> None:

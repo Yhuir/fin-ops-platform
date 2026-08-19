@@ -140,7 +140,7 @@
 
 ## 2026-08-20 ETC 批次折叠、搜索、计数与关系缺口审计
 
-- Business/repository：`tests/test_workbench_page_query_repository.py` 保护 ETC inventory 只统计 submitted/closed distinct batch，搜索命中 external/business/submission batch ID、成员发票号和精确金额，并让 compact summary 只携带第一张真实 ETC 发票与完整总数。
+- Business/repository：`tests/test_workbench_page_query_repository.py` 保护 ETC inventory 只统计 submitted/closed distinct batch，搜索命中 external/business/submission batch ID、成员发票号和精确金额，并让 compact summary 只携带第一张真实 ETC 发票与完整总数；`tests/test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 上保护分页快速水合从部分 link + business 完整成员中稳定选出首张真实发票，声明完整折叠数量，且 statement budget 不增加。
 - Audit：`tests/test_workbench_page_audit.py` 保护缺 OA 与缺 active relation 的 submitted ETC batch 分别输出稳定 warning code，既有无效 relation member 仍为 error。
 - Frontend：`web/src/test/RelationGroupGrid.test.tsx` 保护折叠态不显示 summary 占位行、直接显示第一张发票，展开/收起复用既有 detail loader 展示全部 N 张。
 - 性能：首屏不携带全部 ETC 发票，成员发票号仅在用户搜索时通过有界 `exists` 查询；不新增 API、SQL round-trip、表、worker、read model、cache 或第二套展开状态。

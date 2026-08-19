@@ -1011,7 +1011,10 @@ class PostgresWorkbenchPageHydrationRepository:
                     invoice.counterparty_name,
                     invoice.buyer_name,
                     invoice.amount,
-                    invoice.total_with_tax
+                    invoice.total_with_tax,
+                    invoice.tax_rate,
+                    invoice.tax_amount,
+                    invoice.invoice_type
                 from requested_etc requested
                 join app.etc_batch_invoice_links link on link.link_status = 'active'
                 join app.invoices invoice
@@ -1038,7 +1041,13 @@ class PostgresWorkbenchPageHydrationRepository:
                     invoice.seller_name,
                     invoice.buyer_name,
                     invoice.amount,
-                    invoice.total_with_tax
+                    invoice.total_with_tax,
+                    coalesce(
+                        invoice.raw_payload->'normalized_payload'->>'tax_rate',
+                        '—'
+                    ),
+                    invoice.tax_amount,
+                    '进项发票'::text
                 from requested_etc requested
                 join app.etc_business_batches batch
                   on batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
@@ -1065,7 +1074,10 @@ class PostgresWorkbenchPageHydrationRepository:
                     invoice.counterparty_name,
                     invoice.buyer_name,
                     invoice.amount,
-                    invoice.total_with_tax
+                    invoice.total_with_tax,
+                    invoice.tax_rate,
+                    invoice.tax_amount,
+                    invoice.invoice_type
                 from requested_etc requested
                 join app.etc_submission_batches submission
                   on submission.status in ('submitted_confirmed', 'submitted', 'closed')
@@ -1135,7 +1147,22 @@ class PostgresWorkbenchPageHydrationRepository:
                         'seller_name', (array_agg(
                             coalesce(preferred.seller_name, preferred.counterparty_name)
                             order by preferred.invoice_date, preferred.row_id
-                        ))[1]
+                        ))[1],
+                        'first_invoice', (jsonb_agg(jsonb_build_object(
+                            'row_id', preferred.row_id,
+                            'invoice_no', preferred.invoice_no,
+                            'invoice_code', preferred.invoice_code,
+                            'digital_invoice_no', preferred.digital_invoice_no,
+                            'invoice_date', preferred.invoice_date,
+                            'seller_name', preferred.seller_name,
+                            'counterparty_name', preferred.counterparty_name,
+                            'buyer_name', preferred.buyer_name,
+                            'amount', preferred.amount,
+                            'total_with_tax', preferred.total_with_tax,
+                            'tax_rate', preferred.tax_rate,
+                            'tax_amount', preferred.tax_amount,
+                            'invoice_type', preferred.invoice_type
+                        ) order by preferred.invoice_date, preferred.row_id)->0)
                     ) as payload
                 from preferred_etc_rows preferred
                 where preferred.source_tier = preferred.preferred_source_tier
@@ -1375,6 +1402,17 @@ class PostgresWorkbenchPageHydrationRepository:
         )
         title = f"ETC发票 {count} 张"
         amount = f"{total:.2f}"
+        first_invoice = payload.get("first_invoice")
+        detail_rows = (
+            [
+                WorkbenchCanonicalRowsBuilder._etc_invoice_detail_row(
+                    first_invoice,
+                    external_batch_id=external_batch_id,
+                )
+            ]
+            if isinstance(first_invoice, dict)
+            else []
+        )
         return {
             "id": row_id,
             "type": "invoice",
@@ -1403,6 +1441,7 @@ class PostgresWorkbenchPageHydrationRepository:
             "etc_batch_id": external_batch_id,
             "etc_invoice_count": count,
             "etc_invoice_detail_count": count,
+            "etc_invoice_detail_rows": detail_rows,
             "available_actions": ["detail"],
         }
 

@@ -273,6 +273,39 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
         self.assertEqual(group["collapsed_row_counts"], {"invoice": 2})
 
+    def test_etc_summary_count_can_exceed_loaded_preview_rows(self) -> None:
+        payload = self.service.group_payload(
+            "2026-04",
+            rows_by_id={
+                "etc-summary-batch-68": {
+                    "id": "etc-summary-batch-68",
+                    "type": "invoice",
+                    "object_identity_key": "etc-summary:batch-68",
+                    "source_kind": "etc_invoice_summary",
+                    "status": "unpaired",
+                    "etc_invoice_count": 68,
+                    "etc_invoice_detail_count": 68,
+                    "etc_invoice_detail_rows": [
+                        {
+                            "id": "etc-invoice-1",
+                            "type": "invoice",
+                            "source_kind": "etc_invoice",
+                            "status": "paired",
+                            "amount_value": "12.34",
+                        }
+                    ],
+                }
+            },
+            active_relations=[],
+        )
+
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(
+            [row["id"] for row in group["collapsed_rows"]["invoice"]],
+            ["etc-invoice-1"],
+        )
+        self.assertEqual(group["collapsed_row_counts"], {"invoice": 68})
+
     def test_no_oa_single_pane_relation_is_paired_without_collapsing_rows(self) -> None:
         rows = {
             "bank-a": {"id": "bank-a", "type": "bank", "object_identity_key": "bank-a"},
