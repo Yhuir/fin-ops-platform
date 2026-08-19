@@ -36,7 +36,11 @@ class CostStatisticsQueryService:
     """Serve Cost pages from one canonical snapshot per API request."""
 
     def __init__(self, *, canonical_repository: Any) -> None:
-        if not callable(getattr(canonical_repository, "load_snapshot", None)):
+        if not callable(
+            getattr(canonical_repository, "load_snapshot", None)
+        ) or not callable(
+            getattr(canonical_repository, "load_no_oa_tag_candidate_snapshot", None)
+        ):
             raise ValueError(
                 "Cost statistics query service requires a canonical snapshot repository."
             )
@@ -272,12 +276,7 @@ class CostStatisticsQueryService:
 
     def get_no_oa_tag_candidates(self) -> list[dict[str, Any]]:
         policy = CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(
-                scope_kind="all",
-                scope_value=None,
-                view="project",
-                include_statistics=False,
-            ),
+            self._canonical_repository.load_no_oa_tag_candidate_snapshot(),
         )
         return policy.no_oa_tag_candidates()
 

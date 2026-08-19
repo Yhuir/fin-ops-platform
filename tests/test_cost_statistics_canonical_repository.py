@@ -115,12 +115,149 @@ class _PopulatedCostConnection(_Connection):
         self.snapshot_transaction = _PopulatedCostSnapshotTransaction()
 
 
+class _NoOaCandidateTransaction(_SnapshotTransaction):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reads: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()):
+        normalized = " ".join(sql.lower().split())
+        self.fetched.append(normalized)
+        self.reads.append((normalized, params))
+        if "select row_id, effective_category_code" in normalized:
+            return [
+                {
+                    "row_id": "bank-unpaired-outflow",
+                    "effective_category_code": "fee",
+                    "effective_category_label": "手续费",
+                    "effective_category_primary_label": "费用",
+                    "effective_category_sub_label": "手续费",
+                    "effective_category_source": "auto",
+                }
+            ]
+        if "from app.workbench_pair_relations" in normalized:
+            return [
+                {
+                    "case_id": "case-protected",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["oa-1", "bank-protected"],
+                    "row_types": ["oa", "bank"],
+                    "month_scope": "2026-03",
+                    "special_metadata": {},
+                    "raw_payload": {},
+                }
+            ]
+        if "from app.bank_transactions" in normalized:
+            return [
+                self._bank_row("bank-unpaired-outflow", "outflow", "8.00"),
+                self._bank_row("bank-protected", "outflow", "9.00"),
+                self._bank_row("bank-unpaired-income", "inflow", "10.00"),
+            ]
+        return []
+
+    @staticmethod
+    def _bank_row(row_id: str, direction: str, amount: str) -> dict[str, str]:
+        return {
+            "row_id": row_id,
+            "account_no": "62220001",
+            "account_name": "测试账户",
+            "txn_direction": direction,
+            "counterparty_name_raw": "往来方",
+            "amount": amount,
+            "signed_amount": f"-{amount}" if direction == "outflow" else amount,
+            "txn_date": "2026-03-01",
+            "trade_time": "2026-03-01 10:00:00",
+            "pay_receive_time": "2026-03-01 10:00:00",
+            "summary": "手续费",
+            "remark": "",
+            "project_id": "",
+            "bank_text_fields": {},
+        }
+
+
+class _NoOaCandidateConnection(_Connection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.snapshot_transaction = _NoOaCandidateTransaction()
+
+
 class _CategoryProvider:
     def bulk_get_for_rows(self, _rows):
         return {}
 
 
 class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
+    def test_no_oa_candidate_snapshot_skips_oa_payload_and_classifies_only_candidates(self) -> None:
+        connection = _NoOaCandidateConnection()
+
+        snapshot = PostgresCostStatisticsCanonicalRepository(
+            connection
+        ).load_no_oa_tag_candidate_snapshot()
+
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(
+            [row["id"] for row in snapshot["bank_rows"]],
+            ["bank-unpaired-outflow"],
+        )
+        self.assertEqual(snapshot["oa_related_bank_ids"], ["bank-protected"])
+        self.assertEqual(snapshot["active_relation_count"], 1)
+        self.assertEqual(snapshot["cost_groups"], [])
+        sql = "\n".join(connection.snapshot_transaction.fetched)
+        self.assertNotIn("from app.oa_applications", sql)
+        projection_call = next(
+            params
+            for query, params in connection.snapshot_transaction.reads
+            if "select row_id, effective_category_code" in query
+        )
+        self.assertIn(["bank-unpaired-outflow"], projection_call)
+        self.assertNotIn("bank-protected", repr(projection_call))
+        self.assertNotIn("bank-unpaired-income", repr(projection_call))
+
+    def test_local_no_oa_candidate_snapshot_does_not_load_oa_rows(self) -> None:
+        classified_row_ids: list[str] = []
+
+        class RecordingCategoryProvider:
+            def bulk_get_for_rows(self, rows):
+                classified_row_ids.extend(row["id"] for row in rows)
+                return {
+                    "bank-unpaired-outflow": {
+                        "effective_category_code": "fee",
+                        "effective_category_label": "手续费",
+                        "effective_category_primary_label": "费用",
+                        "effective_category_sub_label": "手续费",
+                    }
+                }
+
+        repository = LocalCostStatisticsCanonicalRepository(
+            bank_rows_provider=lambda: [
+                {"id": "bank-unpaired-outflow", "amount": "8.00", "txn_direction": "outflow"},
+                {"id": "bank-protected", "amount": "9.00", "txn_direction": "outflow"},
+                {"id": "bank-unpaired-income", "amount": "10.00", "txn_direction": "inflow"},
+            ],
+            relations_provider=lambda: [
+                {
+                    "case_id": "case-protected",
+                    "status": "active",
+                    "row_ids": ["oa-1", "bank-protected"],
+                    "row_types": ["oa", "bank"],
+                }
+            ],
+            oa_rows_by_ids_provider=lambda _ids: self.fail(
+                "No-OA candidate snapshot must not load OA payloads."
+            ),
+            settings_provider=lambda: {},
+            category_provider=RecordingCategoryProvider(),
+        )
+
+        snapshot = repository.load_no_oa_tag_candidate_snapshot()
+
+        self.assertEqual(classified_row_ids, ["bank-unpaired-outflow"])
+        self.assertEqual(
+            [row["id"] for row in snapshot["bank_rows"]],
+            ["bank-unpaired-outflow"],
+        )
+        self.assertEqual(snapshot["oa_related_bank_ids"], ["bank-protected"])
+
     def test_load_uses_one_repeatable_read_snapshot_and_only_canonical_tables(self) -> None:
         connection = _Connection()
 

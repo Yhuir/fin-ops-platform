@@ -103,7 +103,8 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 - 归集计算按 relation 成员和 OA 付款明细线性遍历；repository 批量读取 relation、OA 和流水，不做逐明细 I/O。
 - OA 查询只映射当前范围银行流水命中的 active relation OA，并只读取 policy 消费的父单字段、明细字段和明细金额；不递归复制附件/发票树，附件仍由其 owner 页面读取。
 - 常规 scoped 请求保持有界批量查询，禁止按关系、银行流水或 OA 明细执行 N+1 I/O；两个规则候选的全历史读取只在打开/保存对应抽屉时执行，不进入普通 explorer 热路径。`time|bank_tag` 请求必须跳过 OA 与 relation 查询。
-- 有银行流水时只执行一次有界有效分类投影；空银行集合不查询分类/确认表。投影必须携带内部转账所需的有界上下文，同时延迟不进入投影结果的完整银行 payload，不能退回逐行或全量 Python 分类。
+- 有银行流水时只执行一次有界有效分类投影；空银行集合不查询分类/确认表。投影必须携带内部转账所需的有界上下文，不能退回逐行或全量 Python 分类。
+- “无 OA 成本范围”候选使用 repository 的专用只读快照：一次读取全量银行事实和 active OA/流水关系，先排除已有 OA 关系及收入流水，再只对剩余支出做同一 canonical 标签投影；不得读取 OA payload、构建成本组或回退普通 explorer 快照。
 - 分页和详情按当前 scope 有界读取；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 查询只对已加载 snapshot 做一次线性文本匹配，不新增 SQL、cache、worker 或逐行 I/O；前端搜索取消过期请求，避免竞态回写。
 - 候选发布必须记录各视图多次请求的 p50/p95/max，并确认无 Cost queue/worker I/O；若生产数据暴露慢查询，只依据实测 SQL 证据单独优化，不预先增加索引或缓存。

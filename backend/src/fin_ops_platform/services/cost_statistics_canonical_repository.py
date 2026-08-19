@@ -121,6 +121,45 @@ class PostgresCostStatisticsCanonicalRepository:
                 available_years=available_years,
             )
 
+    def load_no_oa_tag_candidate_snapshot(self) -> dict[str, Any]:
+        """Load only the canonical facts required by the no-OA tag picker."""
+        with self._snapshot_transaction() as transaction:
+            settings = _settings_payload(transaction)
+            bank_rows = _postgres_bank_rows(
+                transaction,
+                settings=settings,
+            )
+            relations = _postgres_relations(
+                transaction,
+                bank_row_ids=_bank_row_ids(bank_rows),
+            )
+            oa_related_bank_ids = set(
+                _relation_member_ids(relations, {"bank", "bank_transaction"})
+            )
+            candidate_rows = [
+                row
+                for row in bank_rows
+                if _text(row.get("id")) not in oa_related_bank_ids
+                and _direction(row) == "outflow"
+            ]
+            categories_by_transaction_id = (
+                PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                    transaction,
+                    settings=settings,
+                    transaction_ids=_bank_row_ids(candidate_rows),
+                )
+            )
+            _apply_bank_category_projection(
+                candidate_rows,
+                categories_by_transaction_id=categories_by_transaction_id,
+            )
+            return _no_oa_tag_candidate_snapshot(
+                settings=settings,
+                candidate_rows=candidate_rows,
+                oa_related_bank_ids=oa_related_bank_ids,
+                active_relation_count=len(relations),
+            )
+
     @contextmanager
     def _snapshot_transaction(self) -> Iterator[Any]:
         with self._connection.transaction() as transaction:
@@ -223,6 +262,47 @@ class LocalCostStatisticsCanonicalRepository:
             oa_rows=oa_rows,
             relations=relations,
             available_years=bank_available_years,
+        )
+
+    def load_no_oa_tag_candidate_snapshot(self) -> dict[str, Any]:
+        settings = dict(self._settings_provider() or {})
+        account_resolver = _bank_account_resolver(settings)
+        bank_rows = [
+            payload
+            for row in self._bank_rows_provider()
+            if (
+                payload := _bank_row_from_object(
+                    row,
+                    account_resolver=account_resolver,
+                )
+            )
+        ]
+        relations = [
+            dict(relation)
+            for relation in self._relations_provider()
+            if isinstance(relation, dict)
+            and str(relation.get("status") or "active").strip().lower() == "active"
+            and _relation_member_ids([relation], {"oa"})
+            and _relation_member_ids([relation], {"bank", "bank_transaction"})
+        ]
+        oa_related_bank_ids = set(
+            _relation_member_ids(relations, {"bank", "bank_transaction"})
+        )
+        candidate_rows = [
+            row
+            for row in bank_rows
+            if _text(row.get("id")) not in oa_related_bank_ids
+            and _direction(row) == "outflow"
+        ]
+        _apply_bank_tags(
+            candidate_rows,
+            category_provider=self._category_provider,
+        )
+        return _no_oa_tag_candidate_snapshot(
+            settings=settings,
+            candidate_rows=candidate_rows,
+            oa_related_bank_ids=oa_related_bank_ids,
+            active_relation_count=len(relations),
         )
 
 
@@ -599,6 +679,23 @@ def _build_snapshot(
         "oa_related_bank_ids": sorted(oa_related_bank_ids),
         "active_relation_count": len(relations),
         "available_years": list(available_years or []),
+    }
+
+
+def _no_oa_tag_candidate_snapshot(
+    *,
+    settings: dict[str, Any],
+    candidate_rows: list[dict[str, Any]],
+    oa_related_bank_ids: set[str],
+    active_relation_count: int,
+) -> dict[str, Any]:
+    return {
+        "settings": settings,
+        "bank_rows": candidate_rows,
+        "cost_groups": [],
+        "oa_related_bank_ids": sorted(oa_related_bank_ids),
+        "active_relation_count": active_relation_count,
+        "available_years": [],
     }
 
 
