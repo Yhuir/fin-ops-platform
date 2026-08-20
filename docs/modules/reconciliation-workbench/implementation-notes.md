@@ -1787,3 +1787,9 @@
 - 收口为单一职责：全量 SQL 只用三栏总额、成员 IDs 与附件状态生成稳定 review item fingerprints；已分页当前组继续由 `WorkbenchAmountCheckService` 在内存中构建连通分量并确定精确位置。金额、成员或附件状态变化仍使 review fingerprint 失效；单纯显示落点变化不再制造第二套审核业务身份。
 - 删除 `expense_component_reach`、component totals/items 和三组 pair mismatch fingerprint 旧 CTE，直接生成七类互斥 classification item；不增加 API、SQL round-trip、表、索引、migration、cache、read model、worker、依赖或 fallback，不改变其它页面 I/O。
 - 真实 disposable PostgreSQL integration 保护 SQL/Python fingerprint、accept 后 paired/unpaired 一致、共享发票来源去重以及旧递归 CTE 不得恢复；最终性能以新 release 激活后的相同 20 次、预热 2 次、并发 4 生产探针判定。
+
+## 2026-08-21 - 补充凭证只在可见页装配
+
+- 全量异常候选只需要费用项 ID、金额和附件解析状态，却在分页前为每个 OA 费用项关联并聚合 `workbench_oa_supporting_documents`；补充凭证列表只供当前可见页的明细卡片展示。
+- canonical anomaly spine 改为直接读取原始 `expense_items[]`，当前页继续由既有 `PostgresWorkbenchPageHydrationRepository` 批量装配补充凭证。保留完整历史 OA/发票 identity alias 映射，不再把曾导致异常 bucket 500 的旧映射删除与本优化混用。
+- 不新增 SQL round-trip、API、表、索引、migration、cache、read model、worker、依赖或 fallback；查询职责和模块 I/O 不变。

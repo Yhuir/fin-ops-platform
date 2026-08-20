@@ -537,3 +537,8 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `tests/test_workbench_amount_check_service.py::WorkbenchAmountCheckServiceTests::test_manual_invoice_binding_satisfies_zero_attachment_evidence` 保护 OA 原附件数为零但已有精确子付款项发票归属时不再生成“无OA附件”；OA—流水和 OA—发票的真实金额差异仍保留。
 - `tests/test_workbench_page_query_repository.py::test_compact_hydration_exposes_the_same_external_oa_identity_aliases` 锁住 compact summary SQL 同时承载 `oa_attachment_invoice` 与 `oa_expense_item_invoice`，禁止恢复只保留原附件来源的旧过滤。
 - `tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_manual_expense_item_invoices_satisfy_missing_attachment_evidence` 在 disposable PostgreSQL 中构造生产同形 OA、流水和多张手工发票关系，验证 summary hydration 输出精确来源、OA 原附件数保持零且仅保留真实金额异常。
+
+## 2026-08-21 - 补充凭证分页装配回归
+
+- `tests/test_workbench_page_query_repository.py::test_canonical_spine_defers_supporting_documents_to_page_hydration` 保护全量 anomaly candidate 不得重新扫描补充凭证表，同时保留完成态和进行中 OA 的原始费用项数组。
+- `tests/test_workbench_query_postgres_integration.py` 全量在 disposable PostgreSQL 运行，保护 initial/groups/detail、附件异常指纹以及已审阅 paired/unpaired 分区仍能真实解析并执行。
