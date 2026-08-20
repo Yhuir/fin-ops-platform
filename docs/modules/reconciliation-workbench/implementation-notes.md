@@ -1794,3 +1794,5 @@
 - 旧 SQL 仍为所有关系展开发票来源，并按父 OA 别名、行号和窗口计数猜测唯一费用项。该链路既没有生产命中，又违背“顶层 canonical `source_expense_item_ids[]` 是归属事实、无法证明则待归属”的现行合同，现已删除，不保留隐藏 fallback。
 - 现有 anomaly spine 先把候选限制到确实含 OA 费用项的关系组，再只做 `source_expense_item_id = expense_item_id` 精确连接；无法精确连接的父 OA 发票继续进入既有“发票待归属”，不按行号或金额猜测。
 - 与生产比例一致的 disposable PostgreSQL 样本（430 关系、304 费用项、304 发票来源）中，initial / paired / unpaired 的 4 并发 p95 由约 `141/144/74ms` 降至 `125/133/67ms`；16 项真实 PostgreSQL 集成测试全部通过。没有新增 API、表、索引、migration、read model、cache、worker、依赖或第二条读取链，模块 I/O 不变。
+- 二次运行指标确认旧链还让 canonical spine 为所有 OA 费用项相关查询并聚合补充凭证文档，但分页前异常只消费费用项 ID、金额和原附件数；补充凭证本来就由当前页 hydration 负责。现删除全量补充凭证投影以及已无消费者的三套 OA 身份别名字段，父 OA 归属同样只接受 canonical row ID。
+- 同一生产比例样本相对已部署精确 ID 基线，initial / paired / unpaired 的 4 并发 p95 由约 `151/136/85ms` 进一步降至 `109/131/66ms`。API 输出中的 `expense_items[].supporting_documents[]` 仍由可见页 hydration 完整返回；异常附件分类不读取补充凭证，语义不变。

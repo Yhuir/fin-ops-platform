@@ -16,12 +16,8 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
-    oa_expense_items_with_supporting_documents_sql,
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
-)
-from fin_ops_platform.services.oa_attachment_invoice_linking import (
-    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
 )
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
@@ -82,16 +78,6 @@ def _grouped_filter_token(prefix: str, value: object) -> str:
 def _literal_ilike_pattern(value: str) -> str:
     escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
-
-
-def _anomaly_oa_external_alias_values_sql(source_payload: str) -> str:
-    return ",\n                ".join(
-        "nullif(btrim("
-        f"{source_payload}{path}->>'{field_name}'"
-        "), '')"
-        for path in ("", "->'detail_fields'", "->'summary_fields'", "->'metadata'")
-        for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES
-    )
 
 
 def _anomaly_invoice_source_links_sql(invoice_alias: str) -> str:
@@ -578,20 +564,9 @@ oa_candidate_facts as materialized (
             'workflowStatus', 'completed'
         )) as column_values,
         null::text as external_etc_batch_id,
-        {oa_expense_items_with_supporting_documents_sql("oa.row_id", "oa.normalized_payload->'expense_items'")} as oa_expense_items,
-        case when jsonb_typeof(oa.normalized_payload->'source_aliases') = 'array'
-             then oa.normalized_payload->'source_aliases'
-             else '[]'::jsonb end as oa_source_aliases,
-        array_remove(array[
-            oa.row_id,
-            oa.normalized_payload->>'oa_row_id',
-            oa.normalized_payload->>'oa_id',
-            oa.normalized_payload->>'source_oa_row_id',
-            oa.normalized_payload->>'object_identity_key'
-        ]::text[], null) as oa_exact_identity_aliases,
-        array_remove(array[
-            {_anomaly_oa_external_alias_values_sql('oa.normalized_payload')}
-        ]::text[], null) as oa_external_identity_aliases,
+        case when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
+             then oa.normalized_payload->'expense_items'
+             else '[]'::jsonb end as oa_expense_items,
         coalesce(
             oa.normalized_payload->>'apply_type',
             oa.normalized_payload->>'application_type',
@@ -645,20 +620,9 @@ oa_candidate_facts as materialized (
             'workflowStatus', 'in_progress'
         )),
         null::text,
-        {oa_expense_items_with_supporting_documents_sql("admission.oa_id", "admission.source_payload->'expense_items'")},
-        case when jsonb_typeof(admission.source_payload->'source_aliases') = 'array'
-             then admission.source_payload->'source_aliases'
+        case when jsonb_typeof(admission.source_payload->'expense_items') = 'array'
+             then admission.source_payload->'expense_items'
              else '[]'::jsonb end,
-        array_remove(array[
-            admission.oa_id,
-            admission.source_payload->>'oa_row_id',
-            admission.source_payload->>'oa_id',
-            admission.source_payload->>'source_oa_row_id',
-            admission.source_payload->>'object_identity_key'
-        ]::text[], null),
-        array_remove(array[
-            {_anomaly_oa_external_alias_values_sql('admission.source_payload')}
-        ]::text[], null),
         coalesce(
             admission.source_payload->>'apply_type',
             admission.source_payload->>'application_type',
@@ -735,9 +699,6 @@ bank_candidates as materialized (
         )) as column_values,
         null::text as external_etc_batch_id,
         '[]'::jsonb as oa_expense_items,
-        '[]'::jsonb as oa_source_aliases,
-        array[]::text[] as oa_exact_identity_aliases,
-        array[]::text[] as oa_external_identity_aliases,
         null::text as oa_apply_type,
         null::numeric as oa_amount,
         bank.amount as bank_amount,
@@ -827,9 +788,6 @@ invoice_candidates as materialized (
         ) as active_relation_member,
         null::text as external_etc_batch_id,
         '[]'::jsonb as oa_expense_items,
-        '[]'::jsonb as oa_source_aliases,
-        array[]::text[] as oa_exact_identity_aliases,
-        array[]::text[] as oa_external_identity_aliases,
         null::text as oa_apply_type,
         null::numeric as oa_amount,
         null::numeric as bank_amount,
@@ -879,9 +837,6 @@ etc_summary_candidates as materialized (
         ) as column_values,
         summary.external_batch_id as external_etc_batch_id,
         '[]'::jsonb as oa_expense_items,
-        '[]'::jsonb as oa_source_aliases,
-        array[]::text[] as oa_exact_identity_aliases,
-        array[]::text[] as oa_external_identity_aliases,
         null::text as oa_apply_type,
         null::numeric as oa_amount,
         null::numeric as bank_amount,
@@ -897,9 +852,7 @@ etc_summary_candidates as materialized (
 canonical_rows as materialized (
     select row_id, pane, source_kind, scope_month, sort_date, updated_at,
            workflow_status, column_values, external_etc_batch_id,
-           oa_expense_items, oa_source_aliases,
-           oa_exact_identity_aliases, oa_external_identity_aliases,
-           oa_apply_type, oa_amount,
+           oa_expense_items, oa_apply_type, oa_amount,
            bank_amount, bank_direction,
            invoice_amount, invoice_total_with_tax, invoice_direction,
            invoice_source_links
@@ -907,9 +860,7 @@ canonical_rows as materialized (
     union all
     select row_id, pane, source_kind, scope_month, sort_date, updated_at,
            workflow_status, column_values, external_etc_batch_id,
-           oa_expense_items, oa_source_aliases,
-           oa_exact_identity_aliases, oa_external_identity_aliases,
-           oa_apply_type, oa_amount,
+           oa_expense_items, oa_apply_type, oa_amount,
            bank_amount, bank_direction,
            invoice_amount, invoice_total_with_tax, invoice_direction,
            invoice_source_links
@@ -917,9 +868,7 @@ canonical_rows as materialized (
     union all
     select row_id, pane, source_kind, scope_month, sort_date, updated_at,
            workflow_status, column_values, external_etc_batch_id,
-           oa_expense_items, oa_source_aliases,
-           oa_exact_identity_aliases, oa_external_identity_aliases,
-           oa_apply_type, oa_amount,
+           oa_expense_items, oa_apply_type, oa_amount,
            bank_amount, bank_direction,
            invoice_amount, invoice_total_with_tax, invoice_direction,
            invoice_source_links
@@ -930,9 +879,7 @@ canonical_rows as materialized (
     union all
     select row_id, pane, source_kind, scope_month, sort_date, updated_at,
            workflow_status, column_values, external_etc_batch_id,
-           oa_expense_items, oa_source_aliases,
-           oa_exact_identity_aliases, oa_external_identity_aliases,
-           oa_apply_type, oa_amount,
+           oa_expense_items, oa_apply_type, oa_amount,
            bank_amount, bank_direction,
            invoice_amount, invoice_total_with_tax, invoice_direction,
            invoice_source_links
@@ -1071,9 +1018,6 @@ canonical_group_members as materialized (
         row.column_values,
         row.external_etc_batch_id,
         row.oa_expense_items,
-        row.oa_source_aliases,
-        row.oa_exact_identity_aliases,
-        row.oa_external_identity_aliases,
         row.oa_apply_type,
         row.oa_amount,
         row.bank_amount,
@@ -1244,9 +1188,6 @@ relation_anomaly_members as materialized (
         member.row_type,
         member.row_id,
         member.oa_expense_items,
-        member.oa_source_aliases,
-        member.oa_exact_identity_aliases,
-        member.oa_external_identity_aliases,
         member.oa_apply_type,
         member.oa_amount,
         member.bank_amount,
@@ -1272,62 +1213,12 @@ relation_anomaly_members as materialized (
     where groups.group_kind = 'relation'
       and member.row_type in ('oa', 'bank', 'invoice')
 ),
-oa_exact_identity_aliases as materialized (
-    select distinct
-        member.internal_key,
-        member.row_id as oa_row_id,
-        alias.value
-    from relation_anomaly_members member
-    cross join lateral unnest(member.oa_exact_identity_aliases) alias(value)
-    where member.row_type = 'oa'
-      and nullif(btrim(alias.value), '') is not null
-),
-oa_source_identity_aliases as materialized (
-    select distinct
-        member.internal_key,
-        member.row_id as oa_row_id,
-        alias.value
-    from relation_anomaly_members member
-    cross join lateral jsonb_array_elements_text(member.oa_source_aliases) alias(value)
-    where member.row_type = 'oa'
-      and nullif(btrim(alias.value), '') is not null
-),
-oa_external_identity_aliases as materialized (
-    select distinct
-        member.internal_key,
-        member.row_id as oa_row_id,
-        alias.value
-    from relation_anomaly_members member
-    cross join lateral unnest(member.oa_external_identity_aliases) alias(value)
-    where member.row_type = 'oa'
-      and nullif(btrim(alias.value), '') is not null
-),
-oa_identity_aliases as materialized (
-    select internal_key, oa_row_id, value
-    from oa_exact_identity_aliases
-    union
-    select internal_key, oa_row_id, value
-    from oa_source_identity_aliases
-    union
-    select internal_key, oa_row_id, regexp_replace(value, '^oa-(exp|pay)-', '')
-    from oa_source_identity_aliases
-    union
-    select internal_key, oa_row_id, value
-    from oa_external_identity_aliases
-    union
-    select internal_key, oa_row_id, 'oa-exp-' || value
-    from oa_external_identity_aliases
-    union
-    select internal_key, oa_row_id, 'oa-pay-' || value
-    from oa_external_identity_aliases
-),
 oa_expense_items as materialized (
     select
         member.internal_key,
         member.case_id,
         member.row_id as oa_row_id,
         coalesce(item.value->>'id', item.value->>'expense_item_id') as item_id,
-        item.value->>'row_index' as row_index,
         case
             when replace(coalesce(
                 item.value->>'amount',
@@ -1365,14 +1256,6 @@ invoice_anomaly_facts as materialized (
         coalesce(member.invoice_total_with_tax, member.invoice_amount) as invoice_amount,
         source_link.source_expense_item_id,
         coalesce(
-            source_link.source_expense_row_index,
-            nullif(split_part(
-                split_part(source_link.source_expense_item_id, ':item:', 2),
-                ':',
-                1
-            ), '')
-        ) as source_expense_row_index,
-        coalesce(
             nullif(source_link.derived_from_oa_id, ''),
             nullif(split_part(source_link.source_expense_item_id, ':item:', 1), '')
         ) as source_parent_oa_id
@@ -1382,7 +1265,6 @@ invoice_anomaly_facts as materialized (
     left join lateral (
         select
             link.value->>'source_expense_item_id' as source_expense_item_id,
-            link.value->>'source_expense_row_index' as source_expense_row_index,
             link.value->>'derived_from_oa_id' as derived_from_oa_id
         from jsonb_array_elements(
             case when jsonb_typeof(member.invoice_source_links) = 'array'
@@ -1423,14 +1305,7 @@ unassigned_invoice_rows as materialized (
     from oa_expense_items expense
     join invoice_anomaly_facts invoice
       on invoice.internal_key = expense.internal_key
-     and invoice.source_parent_oa_id is not null
-     and exists (
-         select 1
-         from oa_identity_aliases alias
-         where alias.internal_key = expense.internal_key
-           and alias.oa_row_id = expense.oa_row_id
-           and alias.value = invoice.source_parent_oa_id
-     )
+     and invoice.source_parent_oa_id = expense.oa_row_id
     where not exists (
         select 1
         from normalized_invoice_item_links linked

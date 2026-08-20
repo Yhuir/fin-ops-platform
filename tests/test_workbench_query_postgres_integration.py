@@ -566,6 +566,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertNotIn("\ninvoice_item_candidates as materialized", exception_sql)
         self.assertNotIn("legacy_invoice_item_candidates", exception_sql)
         self.assertNotIn("normalized_invoice_anomaly_facts", exception_sql)
+        self.assertNotIn("oa_identity_aliases", exception_sql)
+        self.assertNotIn("oa_source_identity_aliases", exception_sql)
+        self.assertNotIn("oa_external_identity_aliases", exception_sql)
+        self.assertNotIn("source_expense_row_index", exception_sql)
         self.assertNotIn("expense_component_reach", exception_sql)
         self.assertNotIn("component_anomaly_items", exception_sql)
 
