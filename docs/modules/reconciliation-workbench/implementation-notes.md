@@ -1803,6 +1803,6 @@
 ## 2026-08-21 - 异常感叹号对比度与 Popover 点击闭环
 
 - 根因：异常按钮的 `#fff7e6` 背景与未配对关系带 `#fff8e6` 几乎同色；组件又让 HeroUI `onOpenChange`、hover 和 focus 直接竞争同一个 `open` 布尔值，hover 已打开时点击会被点击产生的 focus 再次打开。
-- 收口：共享 `WorkbenchAnomalyIndicator` 使用单一的 `idle / hover-open / hover-dismissed / click-open` 本地交互模式。hover/focus 临时打开；首次点击关闭并抑制当前停留周期的自动重开；再次点击持续打开；Escape/外部关闭回到 idle；鼠标真正离开后恢复下一次 hover。保留原 140ms 跨越延时和卸载清理，不新增全局 listener、timer 链或第二套 Popover。
+- 收口：共享 `WorkbenchAnomalyIndicator` 使用单一的 `idle / hover-open / hover-dismissed / click-open` 本地交互模式。hover/键盘 focus 临时打开；指针激活产生的 focus 不抢先改状态，Popover 也明确排除“点击自身 trigger”这一 outside-close，因此无先行 hover 的鼠标/触屏式点击也能独立开关；首次点击关闭并抑制当前停留周期的自动重开；再次点击持续打开；Escape/真正的外部关闭回到 idle；鼠标真正离开后恢复下一次 hover。保留原 140ms 跨越延时和卸载清理，不新增全局 listener、timer 链或第二套 Popover。
 - 视觉：28px 命中区不变，改为设计系统警示琥珀 `#8a4b00` 实心背景和白色 `CircleAlert`，hover/open 只逐级加深，无阴影、缩放或循环动画；键盘焦点轮廓保留。
 - 旧链删除：删除旧 `open` 布尔值、`onOpenChange={setOpen}` 和 hover/focus 无条件 `setOpen(true)` 并行路径，以及与关系带混色的浅色按钮样式；三个主表/抽屉调用方继续复用同一组件接口。无 API、业务状态、权限、数据库、备份、migration、read model、worker、cache、依赖或其它页面 I/O 变化。

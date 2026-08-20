@@ -29,7 +29,7 @@ export default function WorkbenchAnomalyIndicator({
 }: WorkbenchAnomalyIndicatorProps) {
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("idle");
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pointerInsideTriggerRef = useRef(false);
+  const pointerActivationRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
   const open = interactionMode === "hover-open" || interactionMode === "click-open";
@@ -57,7 +57,7 @@ export default function WorkbenchAnomalyIndicator({
     cancelClose();
     setInteractionMode((current) => {
       if (current === "hover-open" || current === "click-open") {
-        return pointerInsideTriggerRef.current ? "hover-dismissed" : "idle";
+        return "hover-dismissed";
       }
       return "click-open";
     });
@@ -90,23 +90,33 @@ export default function WorkbenchAnomalyIndicator({
         size="sm"
         variant="ghost"
         onFocus={() => {
+          if (pointerActivationRef.current) {
+            return;
+          }
           cancelClose();
           setInteractionMode((current) => current === "idle" ? "hover-open" : current);
         }}
         onHoverStart={() => {
-          pointerInsideTriggerRef.current = true;
           cancelClose();
           setInteractionMode((current) => current === "idle" ? "hover-open" : current);
         }}
         onHoverEnd={() => {
-          pointerInsideTriggerRef.current = false;
           if (interactionMode === "hover-dismissed") {
             setInteractionMode("idle");
           } else if (interactionMode === "hover-open") {
             scheduleClose();
           }
         }}
+        onPointerCancel={() => {
+          pointerActivationRef.current = false;
+        }}
+        onPointerDown={() => {
+          pointerActivationRef.current = true;
+        }}
         onPress={toggleFromTrigger}
+        onPressEnd={() => {
+          pointerActivationRef.current = false;
+        }}
       >
         <CircleAlert aria-hidden="true" size={16} strokeWidth={2.1} />
       </Button>
@@ -118,6 +128,7 @@ export default function WorkbenchAnomalyIndicator({
           isNonModal
           offset={6}
           placement="bottom end"
+          shouldCloseOnInteractOutside={(element) => !triggerRef.current?.contains(element)}
           triggerRef={triggerRef}
           onOpenChange={handleOpenChange}
           onMouseEnter={cancelClose}

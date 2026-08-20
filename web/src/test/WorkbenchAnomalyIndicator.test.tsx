@@ -30,6 +30,17 @@ function renderIndicator() {
 }
 
 describe("WorkbenchAnomalyIndicator", () => {
+  it("opens and closes from pointer clicks without a prior hover", async () => {
+    const user = userEvent.setup({ skipHover: true });
+    const trigger = renderIndicator();
+
+    await user.click(trigger);
+    expect(await screen.findByText("OA 流水一致，票少")).toBeVisible();
+
+    await user.click(trigger);
+    await waitFor(() => expect(screen.queryByText("OA 流水一致，票少")).not.toBeInTheDocument());
+  });
+
   it("dismisses a hover popover on the first click and reopens it on the second click", async () => {
     const user = userEvent.setup();
     const trigger = renderIndicator();
