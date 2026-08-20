@@ -1,5 +1,5 @@
-import { FilePlus2, Info } from "lucide-react";
-import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
+import { Eye, FilePlus2 } from "lucide-react";
+import { memo, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
 import { Button, Chip, Tooltip } from "@heroui/react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
@@ -184,6 +184,85 @@ function InvoiceEntryAction({ disabled, onPress }: { disabled: boolean; onPress:
   );
 }
 
+function RecordDetailTrigger({
+  ariaLabel,
+  tooltipLabel,
+  onOpenDetail,
+}: {
+  ariaLabel: string;
+  tooltipLabel: string;
+  onOpenDetail: () => void;
+}) {
+  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
+  const openTimerRef = useRef<number | null>(null);
+  const isFocusedRef = useRef(false);
+  const isHoveredRef = useRef(false);
+
+  const cancelScheduledOpen = () => {
+    if (openTimerRef.current !== null) {
+      window.clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  };
+  const scheduleOpen = () => {
+    cancelScheduledOpen();
+    openTimerRef.current = window.setTimeout(() => {
+      openTimerRef.current = null;
+      if (isFocusedRef.current || isHoveredRef.current) {
+        setIsTooltipOpen(true);
+      }
+    }, 250);
+  };
+  const closeWhenIdle = () => {
+    cancelScheduledOpen();
+    if (!isFocusedRef.current && !isHoveredRef.current) {
+      setIsTooltipOpen(false);
+    }
+  };
+
+  useEffect(() => cancelScheduledOpen, []);
+
+  return (
+    <Tooltip isOpen={isTooltipOpen} onOpenChange={setIsTooltipOpen}>
+      <Tooltip.Trigger
+        aria-label={ariaLabel}
+        className="workbench-detail-trigger"
+        onBlur={() => {
+          isFocusedRef.current = false;
+          closeWhenIdle();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onOpenDetail();
+        }}
+        onFocus={() => {
+          isFocusedRef.current = true;
+          scheduleOpen();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenDetail();
+        }}
+        onMouseEnter={() => {
+          isHoveredRef.current = true;
+          scheduleOpen();
+        }}
+        onMouseLeave={() => {
+          isHoveredRef.current = false;
+          closeWhenIdle();
+        }}
+      >
+        <Eye aria-hidden="true" size={15} strokeWidth={1.8} />
+      </Tooltip.Trigger>
+      <Tooltip.Content>{tooltipLabel}</Tooltip.Content>
+    </Tooltip>
+  );
+}
+
 export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   previousProps.zoneId === nextProps.zoneId
   && previousProps.paneId === nextProps.paneId
@@ -314,8 +393,6 @@ function renderCellValue(
     return renderBankNoteValue(
       value,
       row.tableValues.invoiceRelationStatus ?? "",
-      false,
-      onOpenDetail,
       row.bankTextFields,
       searchQuery,
     );
@@ -380,18 +457,11 @@ function renderOaApplicantValue(
       <span className="compound-cell-primary workbench-oa-applicant-line">
         <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
         {showInlineDetail ? (
-          <button
-            aria-label={`查看OA ${value} 详情`}
-            className="row-action-btn row-action-btn-inline row-action-btn-icon"
-            title="查看OA详情"
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenDetail();
-            }}
-          >
-            <Info aria-hidden="true" size={12} strokeWidth={2.2} />
-          </button>
+          <RecordDetailTrigger
+            ariaLabel={`查看OA ${value} 详情`}
+            onOpenDetail={onOpenDetail}
+            tooltipLabel="查看OA详情"
+          />
         ) : null}
       </span>
       <span className="compound-cell-secondary">
@@ -408,8 +478,6 @@ function renderOaApplicantValue(
 function renderBankNoteValue(
   value: string,
   relationStatus: string,
-  showInlineDetail: boolean,
-  onOpenDetail: () => void,
   bankTextFields: WorkbenchRecord["bankTextFields"] = [],
   searchQuery = "",
 ) {
@@ -440,20 +508,6 @@ function renderBankNoteValue(
       ) : (
         <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
       )}
-      {showInlineDetail ? (
-        <span className="inline-cell-action-row">
-          <button
-            className="row-action-btn row-action-btn-inline"
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenDetail();
-            }}
-          >
-            详情
-          </button>
-        </span>
-      ) : null}
     </span>
   );
 }
@@ -808,18 +862,11 @@ function renderBankCounterpartyValue(
       <span className="compound-cell-primary bank-counterparty-primary">
         <span className="cell-text-value cell-text-value-full">{highlightSearchText(counterparty, searchQuery)}</span>
         {showInlineDetail ? (
-          <button
-            aria-label={`查看银行流水 ${counterparty} 详情`}
-            className="row-action-btn row-action-btn-inline row-action-btn-icon"
-            title="查看银行流水详情"
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenDetail();
-            }}
-          >
-            <Info aria-hidden="true" size={12} strokeWidth={2.2} />
-          </button>
+          <RecordDetailTrigger
+            ariaLabel={`查看银行流水 ${counterparty} 详情`}
+            onOpenDetail={onOpenDetail}
+            tooltipLabel="查看银行流水详情"
+          />
         ) : null}
       </span>
       {hasTransactionTime ? (
@@ -934,18 +981,11 @@ function renderInvoiceIdentityValue(
       <span className="compound-cell-primary invoice-identity-primary">
         <span className="cell-text-value cell-text-value-full invoice-identity-no">{highlightSearchText(normalizedNo, searchQuery)}</span>
         {showInlineDetail ? (
-          <button
-            aria-label={`查看发票 ${normalizedNo} 详情`}
-            className="row-action-btn row-action-btn-inline row-action-btn-icon"
-            title="查看发票详情"
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenDetail();
-            }}
-          >
-            <Info aria-hidden="true" size={12} strokeWidth={2.2} />
-          </button>
+          <RecordDetailTrigger
+            ariaLabel={`查看发票 ${normalizedNo} 详情`}
+            onOpenDetail={onOpenDetail}
+            tooltipLabel="查看发票详情"
+          />
         ) : null}
       </span>
       {hasIssueDate ? (

@@ -468,12 +468,17 @@ describe("Workbench columns and inline actions", () => {
     expect(bankRow).toBeDefined();
     expect(pairedInvoiceRow).toBeDefined();
     expect(openInvoiceRow).toBeDefined();
-    expect(within(oaRow as HTMLElement).getByRole("button", { name: "查看OA 赵华 详情" })).toHaveClass("row-action-btn-icon");
-    expect(within(bankRow as HTMLElement).getByRole("button", { name: /查看银行流水 .* 详情/ })).toBeInTheDocument();
+    const oaDetail = within(oaRow as HTMLElement).getByRole("button", { name: "查看OA 赵华 详情" });
+    const bankDetail = within(bankRow as HTMLElement).getByRole("button", { name: /查看银行流水 .* 详情/ });
+    const pairedInvoiceDetail = within(pairedInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ });
+    const openInvoiceDetail = within(openInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ });
+    for (const detailTrigger of [oaDetail, bankDetail, pairedInvoiceDetail, openInvoiceDetail]) {
+      expect(detailTrigger).toHaveClass("workbench-detail-trigger");
+      expect(detailTrigger).not.toHaveClass("row-action-btn");
+      expect(detailTrigger).not.toHaveAttribute("title");
+    }
     expect(within(bankRow as HTMLElement).getByRole("button", { name: "更多操作" })).toBeInTheDocument();
     expect(within(bankRow as HTMLElement).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
-    expect(within(pairedInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
-    expect(within(openInvoiceRow as HTMLElement).getByRole("button", { name: /查看发票 .* 详情/ })).toBeInTheDocument();
     expect(within(openInvoiceRow as HTMLElement).queryByRole("button", { name: "更多操作" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "忽略" })).not.toBeInTheDocument();
   });

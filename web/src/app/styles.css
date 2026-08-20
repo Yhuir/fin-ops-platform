@@ -14384,14 +14384,6 @@ body.column-layout-dragging {
   gap: 4px;
 }
 
-.inline-cell-action-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 0;
-}
-
 .inline-meta-tag {
   display: inline-flex;
   align-items: center;
@@ -14866,7 +14858,6 @@ body.column-layout-dragging {
 
 .record-card-cell.column-content-centered .compound-cell-secondary,
 .record-card-cell.column-content-centered .compound-cell-tertiary,
-.record-card-cell.column-content-centered .inline-cell-action-row,
 .record-card-cell.column-money-centered .compound-cell-secondary,
 .record-card-cell.column-money-centered .money-cell-meta-row,
 .record-card-cell.column-money-centered .money-cell-value {
@@ -15524,17 +15515,45 @@ body.column-layout-dragging {
   line-height: 1;
 }
 
-.row-action-btn-inline {
-  min-height: 28px;
-  padding: 0 6px;
-  border-radius: 7px;
-  font-size: 12px;
-}
-
-.row-action-btn-icon {
+.workbench-detail-trigger {
+  display: inline-flex;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   min-width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--fp-text-secondary);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 120ms var(--ease-standard);
+}
+
+.workbench-detail-trigger:hover {
+  background: transparent;
+  color: var(--fp-accent);
+}
+
+.workbench-detail-trigger:active {
+  background: transparent;
+  color: var(--fp-accent-strong);
+}
+
+.workbench-detail-trigger:focus {
+  outline: none;
+}
+
+.workbench-detail-trigger:focus-visible,
+.workbench-detail-trigger[data-focus-visible="true"] {
+  outline: 2px solid var(--fp-accent);
+  outline-offset: 1px;
+  box-shadow: none;
 }
 
 .row-action-btn.primary {

@@ -30,6 +30,46 @@ async function expectVisibleAndUncovered(locator: Locator, label: string) {
   expect(result.isUncovered, `${label} should not be covered: ${JSON.stringify(result)}`).toBe(true);
 }
 
+async function expectTransparentDetailTrigger(page: Page, locator: Locator, tooltipLabel: string) {
+  await expect(locator).toBeVisible();
+  await locator.scrollIntoViewIfNeeded();
+  const before = await locator.boundingBox();
+  const defaultStyle = await locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderBottomWidth: style.borderBottomWidth,
+      borderLeftWidth: style.borderLeftWidth,
+      borderRightWidth: style.borderRightWidth,
+      borderTopWidth: style.borderTopWidth,
+      boxShadow: style.boxShadow,
+      height: style.height,
+      width: style.width,
+    };
+  });
+  expect(defaultStyle).toMatchObject({
+    backgroundColor: "rgba(0, 0, 0, 0)",
+    borderBottomWidth: "0px",
+    borderLeftWidth: "0px",
+    borderRightWidth: "0px",
+    borderTopWidth: "0px",
+    boxShadow: "none",
+    height: "28px",
+    width: "28px",
+  });
+
+  await locator.hover();
+  await expect(page.getByRole("tooltip", { name: tooltipLabel })).toBeVisible();
+  const after = await locator.boundingBox();
+  expect(after).toEqual(before);
+
+  await page.keyboard.press("Tab");
+  await locator.focus();
+  await expect(locator).toBeFocused();
+  await expect.poll(() => locator.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+  await expect.poll(() => locator.evaluate((element) => getComputedStyle(element).outlineWidth)).toBe("2px");
+}
+
 async function scrollPaneHorizontally(scrollbar: Locator) {
   await expect(scrollbar).toBeVisible();
   const scrollState = await scrollbar.evaluate((element) => {
@@ -411,6 +451,56 @@ test.describe("workbench large dataset browser flow", () => {
       (element) => element.scrollWidth - element.clientWidth - element.scrollLeft,
     )).toBe(0);
     await expectVisibleAndUncovered(confirmButton, "open zone confirm button after horizontal scroll");
+  });
+
+  test("uses one transparent detail trigger contract for OA, bank, and invoice without changing selection", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const workbenchWrites: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.includes("/api/workbench") && !["GET", "OPTIONS"].includes(request.method())) {
+        workbenchWrites.push(`${request.method()} ${url.pathname}`);
+      }
+    });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+
+    await page.goto("/");
+    const openZone = page.getByTestId("zone-unpaired");
+    const oaDetail = openZone.getByRole("button", { name: "查看OA 陈涛 详情" });
+    const bankDetail = openZone.getByRole("button", { name: "查看银行流水 智能工厂设备商 详情" });
+    const invoiceDetail = openZone.getByRole("button", { name: "查看发票 12561048 详情" });
+
+    await expectTransparentDetailTrigger(page, oaDetail, "查看OA详情");
+    const shellOpenMs = await oaDetail.evaluate(async (element) => {
+      const start = performance.now();
+      (element as HTMLElement).click();
+      while (!document.querySelector('[role="dialog"]')) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return performance.now() - start;
+    });
+    expect(shellOpenMs).toBeLessThan(100);
+    const oaDrawer = page.getByRole("dialog", { name: "OA详情" });
+    await expect(oaDrawer).toBeVisible();
+    expect(api.count("GET /api/workbench/rows/oa-o-202603-001")).toBe(1);
+    await oaDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
+
+    await expectTransparentDetailTrigger(page, bankDetail, "查看银行流水详情");
+    await bankDetail.click();
+    const bankDrawer = page.getByRole("dialog", { name: "银行流水详情" });
+    await expect(bankDrawer).toBeVisible();
+    expect(api.count("GET /api/workbench/rows/bk-o-202603-001")).toBe(1);
+    await bankDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
+
+    await expectTransparentDetailTrigger(page, invoiceDetail, "查看发票详情");
+    await invoiceDetail.click();
+    const invoiceDrawer = page.getByRole("dialog", { name: "发票详情" });
+    await expect(invoiceDrawer).toBeVisible();
+    expect(api.count("GET /api/workbench/rows/iv-o-202603-001")).toBe(1);
+    await invoiceDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
+
+    await expect(openZone.getByText("已选 1")).toHaveCount(0);
+    expect(workbenchWrites).toEqual([]);
   });
 
   test("stops automatic retries after a page failure and resumes only when the user retries", async ({ page }) => {

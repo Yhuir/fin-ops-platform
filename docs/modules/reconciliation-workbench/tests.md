@@ -542,3 +542,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 - `tests/test_workbench_page_query_repository.py::test_canonical_spine_defers_supporting_documents_to_page_hydration` 保护全量 anomaly candidate 不得重新扫描补充凭证表，同时保留完成态和进行中 OA 的原始费用项数组。
 - `tests/test_workbench_query_postgres_integration.py` 全量在 disposable PostgreSQL 运行，保护 initial/groups/detail、附件异常指纹以及已审阅 paired/unpaired 分区仍能真实解析并执行。
+
+## 2026-08-21 - 三栏详情触发器视觉与链路回归
+
+- `web/src/test/WorkbenchColumns.test.tsx` 保护 OA、银行流水和发票只使用共享的透明 `workbench-detail-trigger`，不再继承旧 `.row-action-btn` 方框样式、原生 `title` 或重复文本详情入口；`WorkbenchSelection.test.tsx` 继续保护按钮位于首行、点击不触发行选择且复用既有详情抽屉。
+- `web/e2e/workbench-large-scroll-flow.spec.ts` 在 Chromium 中检查三类按钮均为 28px、透明背景、零边框、零阴影，hover 显示 HeroUI Tooltip、键盘焦点显示 2px 可见轮廓且交互前后几何不变；逐一打开三类详情时每类恰好一次现有 GET、零 Workbench 写请求、零选择副作用，抽屉壳在页面内单调时钟下 `<100ms` 出现。
+- 该改动不改变 API response shape、权限、数据库、direct repository、read model、worker 或跨页面 I/O；业务核心、service、API、cache/worker 测试不适用，既有三栏、汇总行和详情错误态回归继续执行。

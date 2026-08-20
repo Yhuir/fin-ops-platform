@@ -455,7 +455,9 @@ describe("Workbench row selection and detail drawer", () => {
     const detailButton = within(oaRow).getByRole("button", { name: "查看OA 赵华 详情" });
     const applicantCell = detailButton.closest("[role='cell']") as HTMLElement;
 
-    expect(detailButton).toHaveClass("row-action-btn-icon");
+    expect(detailButton).toHaveClass("workbench-detail-trigger");
+    expect(detailButton).not.toHaveClass("row-action-btn");
+    expect(detailButton).not.toHaveAttribute("title");
     expect(within(oaRow).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();
     expect(within(applicantCell).getByText("2026-03-25")).toHaveClass("inline-meta-tag-datetime-date");
     expect(within(applicantCell).getByText("11:05")).toHaveClass("inline-meta-tag-datetime-time");
