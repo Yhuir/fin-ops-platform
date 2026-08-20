@@ -1799,3 +1799,10 @@
 - OA、银行流水、发票仍在各自首要身份行展示详情入口，但三处重复的白底描边 `Info` 方框统一收口为 `WorkbenchRecordCard` 内部私有的透明 `Eye` 触发器：28px 命中区、15px 图标、无背景/边框/阴影，仅用中性色到品牌色的 120ms 颜色反馈；键盘焦点保留 2px 可见轮廓，hover/focus 由现有 HeroUI Tooltip 提供明确文案。
 - 点击继续 `stopPropagation` 并调用原 `onOpenDetail(row)`，因此仍只走 `/api/workbench/rows/:id` 与现有 `DetailDrawer`，不改变行选择、relation、权限、请求字段或数据状态。组件保持文件内私有，不新增全局抽象或 Radix/Headless 依赖。
 - 删除三份旧按钮 JSX、`.row-action-btn-inline`、`.row-action-btn-icon`、不可达的银行备注文字“详情”分支及 `.inline-cell-action-row`；保留仍被其它合法行操作使用的基础 `.row-action-btn`。本次没有数据库、备份、migration、read model、worker、cache 或跨页面 I/O 变化，模块边界文档无需修改。
+
+## 2026-08-21 - 异常感叹号对比度与 Popover 点击闭环
+
+- 根因：异常按钮的 `#fff7e6` 背景与未配对关系带 `#fff8e6` 几乎同色；组件又让 HeroUI `onOpenChange`、hover 和 focus 直接竞争同一个 `open` 布尔值，hover 已打开时点击会被点击产生的 focus 再次打开。
+- 收口：共享 `WorkbenchAnomalyIndicator` 使用单一的 `idle / hover-open / hover-dismissed / click-open` 本地交互模式。hover/focus 临时打开；首次点击关闭并抑制当前停留周期的自动重开；再次点击持续打开；Escape/外部关闭回到 idle；鼠标真正离开后恢复下一次 hover。保留原 140ms 跨越延时和卸载清理，不新增全局 listener、timer 链或第二套 Popover。
+- 视觉：28px 命中区不变，改为设计系统警示琥珀 `#8a4b00` 实心背景和白色 `CircleAlert`，hover/open 只逐级加深，无阴影、缩放或循环动画；键盘焦点轮廓保留。
+- 旧链删除：删除旧 `open` 布尔值、`onOpenChange={setOpen}` 和 hover/focus 无条件 `setOpen(true)` 并行路径，以及与关系带混色的浅色按钮样式；三个主表/抽屉调用方继续复用同一组件接口。无 API、业务状态、权限、数据库、备份、migration、read model、worker、cache、依赖或其它页面 I/O 变化。

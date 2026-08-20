@@ -1,13 +1,12 @@
 import {
+  Button,
   Chip,
   Link,
   PopoverContent,
   PopoverDialog,
-  PopoverRoot,
-  PopoverTrigger,
 } from "@heroui/react";
 import { CircleAlert, ExternalLink } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { WorkbenchAnomalyItem } from "../../features/workbench/types";
 
@@ -20,14 +19,20 @@ type WorkbenchAnomalyIndicatorProps = {
 
 const HOVER_CLOSE_DELAY_MS = 140;
 
+type InteractionMode = "idle" | "hover-open" | "hover-dismissed" | "click-open";
+
 export default function WorkbenchAnomalyIndicator({
   anomalies,
   levelLabel,
   externalUrl,
   className = "",
 }: WorkbenchAnomalyIndicatorProps) {
-  const [open, setOpen] = useState(false);
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>("idle");
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pointerInsideTriggerRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
+  const open = interactionMode === "hover-open" || interactionMode === "click-open";
 
   const cancelClose = () => {
     if (closeTimerRef.current !== null) {
@@ -37,7 +42,25 @@ export default function WorkbenchAnomalyIndicator({
   };
   const scheduleClose = () => {
     cancelClose();
-    closeTimerRef.current = setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY_MS);
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      setInteractionMode((current) => current === "hover-open" ? "idle" : current);
+    }, HOVER_CLOSE_DELAY_MS);
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    cancelClose();
+    setInteractionMode(nextOpen ? "click-open" : "idle");
+  };
+
+  const toggleFromTrigger = () => {
+    cancelClose();
+    setInteractionMode((current) => {
+      if (current === "hover-open" || current === "click-open") {
+        return pointerInsideTriggerRef.current ? "hover-dismissed" : "idle";
+      }
+      return "click-open";
+    });
   };
 
   useEffect(() => () => {
@@ -54,37 +77,58 @@ export default function WorkbenchAnomalyIndicator({
   const ariaLabel = `${levelLabel}有 ${anomalies.length} 项异常，查看详情`;
 
   return (
-    <PopoverRoot isOpen={open} onOpenChange={setOpen}>
-      <PopoverTrigger
+    <>
+      <Button
+        ref={triggerRef}
         aria-label={ariaLabel}
+        aria-controls={open ? popoverId : undefined}
+        aria-expanded={open}
+        aria-haspopup="dialog"
         className={`workbench-anomaly-indicator__trigger${className ? ` ${className}` : ""}`}
         data-open={open ? "true" : "false"}
-        onClick={(event) => event.stopPropagation()}
+        isIconOnly
+        size="sm"
+        variant="ghost"
         onFocus={() => {
           cancelClose();
-          setOpen(true);
+          setInteractionMode((current) => current === "idle" ? "hover-open" : current);
         }}
-        onMouseEnter={() => {
+        onHoverStart={() => {
+          pointerInsideTriggerRef.current = true;
           cancelClose();
-          setOpen(true);
+          setInteractionMode((current) => current === "idle" ? "hover-open" : current);
         }}
-        onMouseLeave={scheduleClose}
-        onPointerDown={(event) => event.stopPropagation()}
+        onHoverEnd={() => {
+          pointerInsideTriggerRef.current = false;
+          if (interactionMode === "hover-dismissed") {
+            setInteractionMode("idle");
+          } else if (interactionMode === "hover-open") {
+            scheduleClose();
+          }
+        }}
+        onPress={toggleFromTrigger}
       >
         <CircleAlert aria-hidden="true" size={16} strokeWidth={2.1} />
-      </PopoverTrigger>
+      </Button>
       {open ? (
         <PopoverContent
           className="workbench-anomaly-popover"
           containerPadding={12}
+          isOpen={open}
           isNonModal
           offset={6}
           placement="bottom end"
+          triggerRef={triggerRef}
+          onOpenChange={handleOpenChange}
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <PopoverDialog aria-label={`${levelLabel}异常详情`} className="workbench-anomaly-popover__dialog">
+          <PopoverDialog
+            id={popoverId}
+            aria-label={`${levelLabel}异常详情`}
+            className="workbench-anomaly-popover__dialog"
+          >
             <div className="workbench-anomaly-popover__heading">
               <span>{levelLabel}异常</span>
               <span>{anomalies.length} 项</span>
@@ -129,7 +173,7 @@ export default function WorkbenchAnomalyIndicator({
           </PopoverDialog>
         </PopoverContent>
       ) : null}
-    </PopoverRoot>
+    </>
   );
 }
 

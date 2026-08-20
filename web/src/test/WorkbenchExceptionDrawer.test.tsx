@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -94,9 +94,14 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(screen.queryByText("三项不一致")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /人工金额判断/ })).not.toBeInTheDocument();
 
-    await user.hover(screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" }));
+    const indicator = screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" });
+    await user.hover(indicator);
     expect(await screen.findByText("三项不一致")).toBeVisible();
     expect(screen.getByText("OA 100.00 · 流水 90.00 · 发票 80.00")).toBeVisible();
+    await user.click(indicator);
+    await waitFor(() => expect(screen.queryByText("三项不一致")).not.toBeInTheDocument());
+    await user.click(indicator);
+    expect(await screen.findByText("三项不一致")).toBeVisible();
   });
 
   it("uses the shared three-pane grid and accepts the server classification without a manual gate", async () => {

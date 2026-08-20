@@ -60,6 +60,29 @@ test.describe("workbench exception browser flow", () => {
     await expect(unpairedZone.getByText("OA 流水一致，票少")).toHaveCount(0);
     await unpairedIndicator.hover();
     await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
+    const indicatorStyle = await unpairedIndicator.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        boxShadow: style.boxShadow,
+        color: style.color,
+        height: element.getBoundingClientRect().height,
+        width: element.getBoundingClientRect().width,
+      };
+    });
+    expect(indicatorStyle).toEqual({
+      backgroundColor: "rgb(111, 61, 0)",
+      boxShadow: "none",
+      color: "rgb(255, 255, 255)",
+      height: 28,
+      width: 28,
+    });
+    await unpairedIndicator.click();
+    await expect(page.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await page.waitForTimeout(180);
+    await expect(page.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await unpairedIndicator.click();
+    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(pairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
@@ -76,6 +99,10 @@ test.describe("workbench exception browser flow", () => {
     await expect(collapsedIndicator).toBeVisible();
     await expect(drawer.getByText("OA 流水一致，票少")).toHaveCount(0);
     await collapsedIndicator.hover();
+    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
+    await collapsedIndicator.click();
+    await expect(page.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await collapsedIndicator.click();
     await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
     await page.keyboard.press("Escape");
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
