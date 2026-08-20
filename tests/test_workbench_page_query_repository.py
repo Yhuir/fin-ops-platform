@@ -270,8 +270,7 @@ def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
 
     assert "relation_anomaly_members" in sql
-    assert "direct_invoice_item_links as materialized" in sql
-    assert "oa_identity_aliases as materialized" not in sql
+    assert "oa_identity_aliases as materialized" in sql
     assert "jsonb_typeof(member.invoice_source_links)" in sql
     assert "jsonb_agg" not in sql
     assert "jsonb_build_object" not in sql
@@ -304,14 +303,13 @@ def test_set_based_anomaly_query_uses_turnover_principal_for_exact_closure() -> 
     assert sql.count("member.bank_direction <> direction.direction") == 1
 
 
-def test_set_based_anomaly_query_requires_canonical_expense_ownership() -> None:
+def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases() -> None:
     canonical_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split())
     anomaly_sql = " ".join(_ANOMALY_STATE_CTES.split())
 
-    assert "expense.item_id = invoice.source_expense_item_id" in anomaly_sql
-    assert "invoice.source_parent_oa_id = expense.oa_row_id" in anomaly_sql
-    assert "source_identity_aliases" not in anomaly_sql
-    assert "workbench_oa_supporting_documents" not in canonical_sql
+    assert "source_identity_aliases" in anomaly_sql
+    assert "'Mongo文档ID'" in canonical_sql
+    assert "'oa-exp-' || value" in anomaly_sql
 
 
 def test_anomaly_query_reuses_canonical_source_facts_without_rescanning_sources() -> None:
