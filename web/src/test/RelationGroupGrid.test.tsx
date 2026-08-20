@@ -1093,12 +1093,12 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(thirdSegment).queryByRole("row", { name: /供应商1/ })).not.toBeInTheDocument();
   });
 
-  test("aligns exact multi-item reimbursement invoices and keeps parent selection identity", () => {
+  test("aligns exact multi-item reimbursement invoices and keeps parent selection identity", async () => {
     const selectRow = vi.fn();
     const missingAnomaly = {
       code: "oa_invoice_attachment_unparsed" as const,
-      label: "OA发票附件未解析",
-      displayLabel: "OA发票附件未解析",
+      label: "发票附件未解析",
+      displayLabel: "发票附件未解析",
       fingerprint: "c".repeat(64),
       comparisonUnitId: "oa-exp-413:item:0",
       sourceOaIds: ["oa-exp-413"],
@@ -1200,7 +1200,10 @@ describe("Workbench candidate grouping layout", () => {
     const missingInvoiceItem = screen.getByTestId(
       "candidate-group-segment-unpaired-row:oa-exp-413-oa-exp-413:item:0",
     );
-    expect(within(missingInvoiceItem).getByText("OA发票附件未解析")).toBeInTheDocument();
+    expect(within(missingInvoiceItem).queryByText("发票附件未解析")).not.toBeInTheDocument();
+    const missingInvoiceIndicator = within(missingInvoiceItem).getByRole("button", {
+      name: "该付款项有 1 项异常，查看详情",
+    });
     expect(within(missingInvoiceItem).getByRole("button", { name: "录入发票" })).toBeInTheDocument();
     const invoiceStatusCell = missingInvoiceItem.querySelector(".workbench-invoice-status-cell");
     expect(invoiceStatusCell).toBeInTheDocument();
@@ -1224,6 +1227,9 @@ describe("Workbench candidate grouping layout", () => {
     fireEvent.click(within(invoiceItem).getByText("曲靖项目"));
     expect(selectRow).toHaveBeenCalledTimes(1);
     expect(selectRow.mock.calls[0][0].id).toBe(parentOa.id);
+
+    fireEvent.mouseEnter(missingInvoiceIndicator);
+    expect(await screen.findByText("发票附件未解析")).toBeVisible();
   });
 
   test("expands same-project reimbursement items into independent comparison rows", () => {

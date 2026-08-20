@@ -5,22 +5,15 @@ from typing import Any
 import pytest
 
 from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.workbench_anomaly_review_service import (
     WorkbenchAnomalyReviewConflict,
     WorkbenchAnomalyReviewService,
 )
-from fin_ops_platform.services.postgres_repositories.workbench import (
-    PostgresWorkbenchRepository,
-)
 
 
 class GroupRepository:
-    def __init__(
-        self,
-        group: dict[str, object],
-        *,
-        source_scope_key: str = "2026-05",
-    ) -> None:
+    def __init__(self, group: dict[str, object], *, source_scope_key: str = "2026-05") -> None:
         self.group = group
         self.source_scope_key = source_scope_key
         self.calls: list[dict[str, object]] = []
@@ -48,9 +41,10 @@ def anomaly_group(*, blockers: list[str] | None = None) -> dict[str, object]:
         },
         "workbench_anomaly": {
             "fingerprint": "a" * 64,
+            "evidence_item_fingerprints": ["b" * 64, "c" * 64],
             "items": [
-                {"fingerprint": "b" * 64, "code": "oa_bank_amount_mismatch"},
-                {"fingerprint": "c" * 64, "code": "bank_invoice_amount_mismatch"},
+                {"fingerprint": "d" * 64, "code": "oa_bank_equal_invoice_more"},
+                {"fingerprint": "e" * 64, "code": "oa_invoice_attachment_unparsed"},
             ],
         },
         "oa_rows": [{"source_scope_key": "2026-05"}],
@@ -83,23 +77,24 @@ def payload(decision: str = "accept_paired") -> dict[str, object]:
         "group_id": "case:CASE-1",
         "fingerprint": "a" * 64,
         "decision": decision,
-        "review_classification_codes": [
-            "oa_bank_amount_mismatch",
-            "bank_invoice_amount_mismatch",
-        ],
-        "reviewed_item_fingerprints": ["c" * 64, "b" * 64],
     }
 
 
-def test_review_requires_every_current_anomaly_item() -> None:
+def test_review_uses_current_server_evidence_and_ignores_client_classification_fields() -> None:
     target, decisions, _groups = service(anomaly_group())
-    request = payload()
-    request["reviewed_item_fingerprints"] = ["b" * 64]
+    request = {
+        **payload(),
+        "reviewed_item_fingerprints": ["f" * 64],
+        "review_classification_codes": ["no_anomaly"],
+    }
 
-    with pytest.raises(ValueError, match="每一项"):
-        target.review(request, actor_id="reviewer")
+    target.review(request, actor_id="reviewer")
 
-    assert decisions.calls == []
+    assert decisions.calls[0]["evidence_item_fingerprints"] == ["b" * 64, "c" * 64]
+    assert decisions.calls[0]["detected_classification_codes"] == [
+        "oa_bank_equal_invoice_more",
+        "oa_invoice_attachment_unparsed",
+    ]
 
 
 def test_accept_paired_persists_auditable_review_for_anomaly_only_blocker() -> None:
@@ -114,19 +109,19 @@ def test_accept_paired_persists_auditable_review_for_anomaly_only_blocker() -> N
         "group_id": "case:CASE-1",
         "detail_key": None,
     }]
-    assert decisions.calls == [{
+    assert decisions.calls[0] == {
         "fingerprint": "a" * 64,
         "group_id": "case:CASE-1",
         "scope_key": "2026-05",
         "actor_id": "reviewer",
         "decision": "accept_paired",
         "note": "",
-        "review_classification_codes": [
-            "bank_invoice_amount_mismatch",
-            "oa_bank_amount_mismatch",
+        "detected_classification_codes": [
+            "oa_bank_equal_invoice_more",
+            "oa_invoice_attachment_unparsed",
         ],
-        "reviewed_item_fingerprints": ["b" * 64, "c" * 64],
-    }]
+        "evidence_item_fingerprints": ["b" * 64, "c" * 64],
+    }
 
 
 def test_accept_paired_cannot_bypass_other_relation_blockers() -> None:
@@ -150,47 +145,23 @@ def test_keep_unpaired_is_valid_even_when_other_blockers_exist() -> None:
     assert decisions.calls[0]["decision"] == "keep_unpaired"
 
 
-def test_legacy_paired_amount_anomaly_can_be_withdrawn_without_a_classification() -> None:
+def test_paired_anomaly_can_be_withdrawn_without_client_classification() -> None:
     group = anomaly_group()
     anomaly = group["workbench_anomaly"]
     assert isinstance(anomaly, dict)
     anomaly["review_decision"] = "accept_paired"
     target, decisions, _groups = service(group)
-    request = payload("keep_unpaired")
-    request["zone"] = "paired"
-    request["review_classification_codes"] = []
 
-    target.review(request, actor_id="reviewer")
+    target.review({**payload("keep_unpaired"), "zone": "paired"}, actor_id="reviewer")
 
     assert decisions.calls[0]["decision"] == "keep_unpaired"
-    assert decisions.calls[0]["review_classification_codes"] == []
 
 
 def test_review_rejects_stale_fingerprint() -> None:
     target, decisions, _groups = service(anomaly_group())
-    request = payload()
-    request["fingerprint"] = "d" * 64
 
     with pytest.raises(WorkbenchAnomalyReviewConflict, match="已变化"):
-        target.review(request, actor_id="reviewer")
-
-    assert decisions.calls == []
-
-
-def test_review_requires_one_manual_amount_classification_and_keeps_no_anomaly_exclusive() -> None:
-    target, decisions, _groups = service(anomaly_group())
-    request = payload()
-    request["review_classification_codes"] = []
-
-    with pytest.raises(ValueError, match="人工金额判断"):
-        target.review(request, actor_id="reviewer")
-
-    request["review_classification_codes"] = [
-        "no_anomaly",
-        "oa_bank_amount_mismatch",
-    ]
-    with pytest.raises(ValueError, match="不能与"):
-        target.review(request, actor_id="reviewer")
+        target.review({**payload(), "fingerprint": "f" * 64}, actor_id="reviewer")
 
     assert decisions.calls == []
 
@@ -201,14 +172,11 @@ def test_review_route_returns_stable_bad_request_contract() -> None:
         write_facade_provider=lambda: object(),
         anomaly_review_service=target,
     )
-    request = payload()
-    request["reviewed_item_fingerprints"] = []
 
-    status, result = routes.review_anomaly(request, actor_id="reviewer")
+    status, result = routes.review_anomaly({**payload(), "zone": "invalid"}, actor_id="reviewer")
 
     assert int(status) == 400
     assert result["error"] == "invalid_workbench_anomaly_review_request"
-    assert "每一项" in str(result["message"])
 
 
 def test_review_forwards_detail_key_and_persists_cross_month_decision_globally() -> None:
@@ -219,9 +187,11 @@ def test_review_forwards_detail_key_and_persists_cross_month_decision_globally()
         {"source_scope_key": "2026-04"},
     ]
     target, decisions, groups = service(group, source_scope_key="")
-    request = payload("keep_unpaired")
-    request["month"] = "all"
-    request["detail_key"] = "singleton:oa:OA-1"
+    request = {
+        **payload("keep_unpaired"),
+        "month": "all",
+        "detail_key": "singleton:oa:OA-1",
+    }
 
     result = target.review(request, actor_id="reviewer")
 
@@ -278,8 +248,6 @@ def test_repository_reads_latest_scoped_anomaly_review_and_excludes_it_from_lega
     review_connection = ReadRecordingConnection([{
         "fingerprint": "a" * 64,
         "resolution": "accept_paired",
-        "reviewed_item_fingerprints": ["b" * 64],
-        "review_classification_codes": ["oa_bank_amount_mismatch"],
         "note": "已核对",
         "updated_by": "reviewer",
         "updated_at": "2026-08-15T08:00:00+08:00",
@@ -290,8 +258,6 @@ def test_repository_reads_latest_scoped_anomaly_review_and_excludes_it_from_lega
 
     assert decisions["a" * 64] == {
         "decision": "accept_paired",
-        "reviewed_item_fingerprints": ["b" * 64],
-        "review_classification_codes": ["oa_bank_amount_mismatch"],
         "note": "已核对",
         "reviewed_by": "reviewer",
         "reviewed_at": "2026-08-15T08:00:00+08:00",
@@ -313,8 +279,8 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         actor_id="reviewer",
         decision="accept_paired",
         note="已核对",
-        review_classification_codes=["oa_bank_amount_mismatch"],
-        reviewed_item_fingerprints=["b" * 64],
+        detected_classification_codes=["oa_bank_equal_invoice_more"],
+        evidence_item_fingerprints=["b" * 64],
     )
     assert changed["changed"] is True
     assert any(
@@ -327,8 +293,8 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         "version": 1,
         "scope_month": "2026-05-01",
         "note": "已核对",
-        "reviewed_item_fingerprints": ["b" * 64],
-        "review_classification_codes": ["oa_bank_amount_mismatch"],
+        "evidence_item_fingerprints": ["b" * 64],
+        "detected_classification_codes": ["oa_bank_equal_invoice_more"],
     })
     unchanged = PostgresWorkbenchRepository(
         unchanged_connection
@@ -339,8 +305,8 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         actor_id="reviewer",
         decision="accept_paired",
         note="已核对",
-        review_classification_codes=["oa_bank_amount_mismatch"],
-        reviewed_item_fingerprints=["b" * 64],
+        detected_classification_codes=["oa_bank_equal_invoice_more"],
+        evidence_item_fingerprints=["b" * 64],
     )
     assert unchanged["changed"] is False
     assert unchanged_connection.execute_calls == []
@@ -352,21 +318,19 @@ def test_repository_promotes_an_existing_monthly_decision_to_global_scope() -> N
         "version": 1,
         "scope_month": "2026-05-01",
         "note": "已核对",
-        "reviewed_item_fingerprints": ["b" * 64],
-        "review_classification_codes": ["oa_bank_amount_mismatch"],
+        "evidence_item_fingerprints": ["b" * 64],
+        "detected_classification_codes": ["oa_bank_equal_invoice_more"],
     })
 
-    result = PostgresWorkbenchRepository(
-        connection
-    ).set_workbench_anomaly_review_decision(
+    result = PostgresWorkbenchRepository(connection).set_workbench_anomaly_review_decision(
         fingerprint="a" * 64,
         group_id="case:CASE-1",
         scope_key="all",
         actor_id="reviewer",
         decision="accept_paired",
         note="已核对",
-        review_classification_codes=["oa_bank_amount_mismatch"],
-        reviewed_item_fingerprints=["b" * 64],
+        detected_classification_codes=["oa_bank_equal_invoice_more"],
+        evidence_item_fingerprints=["b" * 64],
     )
 
     assert result["changed"] is True

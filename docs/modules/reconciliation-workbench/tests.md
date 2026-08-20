@@ -1,6 +1,15 @@
 # 关联台测试与验证
 
-日期：2026-08-20
+日期：2026-08-21
+
+## 2026-08-21 自动异常分类、感叹号定位与审阅闭环
+
+- Business core：`test_workbench_amount_check_service.py` 覆盖七种互斥三栏分类、分精度、净额/外部往来本金、方向未知/冲突不猜测、局部差异不生成第八类，以及附件缺失/未解析/待归属；精确单行与歧义 group scope 均有断言。
+- Service/repository/API：`test_workbench_anomaly_review_service.py` 保护服务端重取 canonical bundle 并自行持久化 evidence fingerprints/detected codes，忽略客户端旧人工字段；fingerprint、其他 blocker、跨月 scope、幂等和审计不变。`WorkbenchApi.test.ts` 保护 review request 不再发送人工分类或逐项 fingerprints。
+- Frontend interaction：`WorkbenchExceptionDrawer.test.tsx`、`RelationGroupGrid.test.tsx` 保护主表/抽屉复用同一三栏定位，默认只显示感叹号，hover/focus/click Popover 才展示 HeroUI Chip；折叠态不新增栏，展开态无重复 Chip、复选框或人工下拉，只读权限无 mutation。
+- E2E/regression：`workbench-exception-flow.spec.ts` 保护自动分类的接受、目标 bucket 单次重读、撤回及 1440/1024px 边界；权限套件保护 read-export/App Health blocked 下证据可见且零写入。`WorkbenchSelection.test.tsx` 保护写成功但重读失败不重复提交。
+- 性能与边界：分类为现有 group 内固定规模纯计算，前端定位为单次 Map/Set 遍历；未新增 API round-trip、逐行 I/O、表、migration、read model、worker、cache 或依赖。PostgreSQL candidate 仍在分页前计算，增加方向有效性条件以保持 summary/detail 一致。
+- 旧链删除：删除 `workbench_exception_classifier.py` 及其测试、客户端人工分类/逐项审阅状态、请求字段和旧 CSS；dead-code guard 将旧 classifier 列为禁止恢复模块。
 
 ## 2026-08-20 大批量确认/撤回与旧上下文扫描删除
 
@@ -29,7 +38,7 @@
 ## 2026-08-19 外部往来闭环、已接受异常与历史来源修复
 
 - Business core：`tests/test_workbench_amount_check_service.py` 保护 `turnover_manual_closure` 的 240000 收入 + 240000 支出闭环以付款本金侧和 OA 240000 比较且不误报，同时真实本金差异继续生成异常；普通付款关系仍使用支出减退款收入的净额。
-- Service/repository：`tests/test_workbench_relation_grouping.py` 保护 relation mode 传入统一金额判断，`accept_paired` chip 固定为 `已接受：<原异常>`；`test_invoice_expense_item_link_repair_service.py` 与 `test_postgres_repositories_core.py` 保护历史发票来源修复的精确 identity/总额、冲突拒绝、幂等、rollback manifest 和旧 `source_links` CAS。
+- Service/repository：`tests/test_workbench_relation_grouping.py` 继续保护 relation mode 传入统一金额判断；该轮曾要求 `accept_paired` Chip 增加 `已接受：` 前缀，此展示合同已由 2026-08-21 顶部口径取代，现改为原异常 Chip 与审阅信息分离。`test_invoice_expense_item_link_repair_service.py` 与 `test_postgres_repositories_core.py` 保护历史发票来源修复的精确 identity/总额、冲突拒绝、幂等、rollback manifest 和旧 `source_links` CAS。
 - Tool/audit：`test_import_audit_repair_ops.py` 保护 dry-run 零写；生产执行必须使用 dry-run 指纹、serializable transaction、advisory lock、operator/reason 和 `ops.operation_events` 审计，禁止直接 SQL 或页面 fallback。
 - Frontend：`WorkbenchApi.test.ts` 保护审阅元数据映射，`RelationGroupGrid.test.tsx` 与 `groupDisplayModel.test.ts` 保护“未解析 + 录入发票”跨整栏 HeroUI 状态操作区且无占位横杠；其它页面 API、read model、worker、cache 和依赖均不变。
 
@@ -39,9 +48,9 @@
 - Hydration/performance：compact 与 full/detail 都按 relation group 选最新决定并执行相同 relation freshness；full/detail 只读取当前可见 relation 的决定，删除 `WorkbenchCanonicalRowsBuilder` 对 month/all 全范围异常决定的隐式 fallback，不增加 SQL statement budget、read model、cache、worker、schema 或跨页面 I/O。
 - Regression：旧 fingerprint 在 relation 输入更新时间变化后继续失效；zone 一致性 fail-fast 保留，不以吞错、强制改区或兼容分支掩盖 SQL/Python 漂移。
 
-## 2026-08-16 异常抽屉紧凑布局回归
+## 2026-08-16 异常抽屉紧凑布局回归（审阅控件合同已于 2026-08-21 替代）
 
-- Frontend interaction：`WorkbenchExceptionDrawer.test.tsx` 保护折叠态只有三栏摘要与异常数量，展开后才显示完整证据、具体异常 chip、HeroUI 审阅复选框、人工金额判断和决定按钮；金额分类互斥、附件逐项审阅、只读权限、进入已配对与撤回合同不变。
+- Frontend interaction：该轮曾保护折叠/展开布局；其中逐项复选、人工金额判断和直接平铺 Chip 已在 2026-08-21 删除，现行合同见本文件顶部。
 - Browser E2E：`workbench-exception-flow.spec.ts` 保护 1440px 与 1024px 视口内抽屉和审阅区不越界，详情仍按点击惰性加载，accept/withdraw 后 bucket 重置为折叠态且链路仍只执行既有 API。
 - 非适用：本轮不改变业务金额判断、API DTO、repository、数据库、read model、worker、cache、权限或其它页面 I/O，因此不新增后端、迁移或跨页面数据测试；既有异常 Browser 主链和全量前端回归承担隔离验证。
 
@@ -76,7 +85,7 @@
 - Service layer：confirm/withdraw 继续走 `WorkbenchRelationCommandService` + UoW，保护 canonical revalidation、idempotency、history/audit、partial-failure rollback 与 immutable OA attachment/ETC 既有约束。未配对 active case 撤回必须要求 exact full active member set，并从最近 confirm history 的 `before_relations` 恢复上一稳定拓扑；在同一事务锁内重验 canonical member、restored case 与唯一 owner，历史不可证明或 owner 冲突时 fail closed，不做部分恢复。
 - API contract：继续复用 `confirm-link/preview -> confirm-link` 与 `withdraw-link/preview -> withdraw-link`；response shape、error envelope、权限和 `amount_check.requires_note`/`note` 字段不变。preview/submit 覆盖同栏人工关系、`requires_note=true` 时缺 note 拒绝/带 note 成功、材料不完整成功后仍 unpaired、两区 active case 可撤回、singleton 撤回拒绝、exact selection 400 和 topology/canonical/version drift 409。
 - Read model/cache/worker（历史当时合同）：当时覆盖 relation mutation 后 exact scope 与 generation；2026-08-13 起由 direct normal GET 和 page runtime 零引用合同替代，unpaired relation topology 恢复仍保持。
-- Frontend interaction：`WorkbenchSelection.test.tsx` / `WorkbenchZone.test.tsx` 保护关系确认/撤回；`WorkbenchExceptionDrawer.test.tsx` 保护 `未配对异常 n | 已配对异常 m`、逐项审阅、accept/keep/撤回、具体 chip 和只读权限。
+- Frontend interaction：`WorkbenchSelection.test.tsx` / `WorkbenchZone.test.tsx` 保护关系确认/撤回；`WorkbenchExceptionDrawer.test.tsx` 保护 `未配对异常 n | 已配对异常 m`、服务端证据 accept/keep/撤回、感叹号 Popover 和只读权限。旧逐项审阅合同已由本文件顶部 2026-08-21 口径取代。
 - End-to-end：`workbench-withdraw-flow.spec.ts` 承担 paired/unpaired active relation 撤回与上一稳定拓扑恢复；relation/network flows 承担同栏/跨栏 confirm、`requires_note` 路径、fresh 收敛与幂等；permissions/stale/exception flows 保护权限、non-fresh gate 和删除人工入口后系统异常链仍可用。覆盖映射以 `e2e-coverage.md` 的实际落地状态为准。
 - Regression：自动 matching exact-sum/证据/唯一性/资源保护与撤回 fingerprint 不放宽；paired/unpaired 完整性、520/13 张发票、OA attachment、ETC、no-OA、batch accounting、turnover 和下游 linked/unlinked 保持原合同。
 - 非适用：无 DB schema/migration/backfill、API response shape、read-model scope、worker topology 或新依赖变化，因此不新增迁移兼容、worker registry/manifest 或部署拓扑测试；用现有边界 guard 证明未扩散即可。
@@ -112,20 +121,20 @@
 
 - Business core：`tests/test_workbench_relation_grouping.py` 证明任何当前异常默认阻断已配对、`accept_paired` 只覆盖异常 blocker、`keep_unpaired` 与撤回保持未配对，历史 WEX 不再改变分组。
 - Service/read model/API：`tests/test_workbench_sql_runtime.py` 保护 v20 淘汰 v19 generation/cache、projection 丢弃 `exception_case`/`handled_exception`、source freshness 排除历史 exception table、搜索投影包含 OA `completed_at`；`tests/test_search_query.py` 和 `tests/test_workbench_routes.py` 保护金额及人民币符号数值等价与普通文本转义。
-- Frontend：`WorkbenchSelection.test.tsx` 与 `WorkbenchExceptionDrawer.test.tsx` 保护单 bucket 有界读取、逐项审阅、进入已配对、留在未配对、撤回与主区 canonical refetch。
-- E2E / regression：`workbench-exception-flow.spec.ts` 保护异常默认未配对、人工放行进入已配对、撤回同步返回未配对；权限套件验证 read-export 零 mutation。没有增加表、worker、queue、cache owner、依赖或并行 fallback。
+- Frontend：`WorkbenchSelection.test.tsx` 与 `WorkbenchExceptionDrawer.test.tsx` 保护单 bucket 有界读取、服务端分类决定、接受异常、留在未配对、撤回与主区 canonical refetch。
+- E2E / regression：`workbench-exception-flow.spec.ts` 保护异常默认未配对、接受风险进入已配对、撤回同步返回未配对；权限套件验证 read-export 零 mutation。没有增加表、worker、queue、cache owner、依赖或并行 fallback。
 
 ## 2026-08-05 OA/发票比较单元与附件缺失异常
 
 - Business core：`tests/test_workbench_amount_check_service.py` 保护日常报销逐 `source_expense_item_id` 比较全部显式绑定发票，覆盖 `290=145+145`、`405=350+55`、一项多发票差异只生成一个 anomaly item、无附件/附件未解析/待归属三类状态，以及“唯一单票落发票、一项多票落 OA 子项、组级流水—发票差异落流水而不误贴 55 元发票”；支付申请继续按关系组总额比较，缺金额不误报。
 - Service/API：`tests/test_workbench_relation_grouping.py` 保护 `workbench_anomaly.items[]` 和具体 pair chip；`tests/test_workbench_anomaly_review_service.py` 保护 exact item review、stale fingerprint、其他 blocker 与新 API；PostgreSQL integration 保护异常桶在分页前过滤及 SQL/Python fingerprint 一致。
-- Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行和附件占位；`WorkbenchApi.test.ts` 保护统一 anomaly DTO；抽屉/页面测试保护具体 chip、两个新 bucket、逐项审阅、流转与只读行为。
+- Frontend：`groupDisplayModel.test.ts` 保护显式 ownership 与金额判断解耦、组合发票同行和附件占位；`WorkbenchApi.test.ts` 保护统一 anomaly DTO；抽屉/页面测试保护感叹号 Popover、两个异常 bucket、服务端证据流转与只读行为。旧逐项审阅合同已由本文件顶部 2026-08-21 口径取代。
 
-## 2026-08-15 退款净额、历史附件归一与人工金额分类
+## 2026-08-15 退款净额、历史附件归一与人工金额分类（人工分类已于 2026-08-21 删除）
 
 - Business core：`tests/test_workbench_amount_check_service.py` 保护付款关系按同 relation 的 `1050 支出 - 35 退款收入 = 1015` 与 OA/五张发票 `1015` 比较，三种金额异常均为空；`tests/test_oa_attachment_invoice_linking.py` 保护历史 OA 子项 ID 通过唯一 parent + row index 归一，使 `350` 子付款项与 `150+100+100` 三张发票同带，歧义来源保持 fail closed。
-- Service/API：`tests/test_workbench_page_query_repository.py` 保护 SQL 异常候选分区同步使用净额而非 gross；`tests/test_workbench_anomaly_review_service.py` 保护金额异常必须提交 allowlist 人工分类、`无异常` 互斥、fingerprint/idempotency/persistence；`WorkbenchApi.test.ts` 保护 `review_classification_codes[]` 双向 DTO。
-- Frontend：`WorkbenchExceptionDrawer.test.tsx` 保护金额下拉多选、提交前禁用、`无异常` 互斥、已配对撤回沿用原人工分类及只读权限。没有新增 table、migration、read model、worker、queue、cache、逐行 I/O 或依赖。
+- Service/API：净额与历史附件归一合同继续有效；旧 allowlist 人工分类与 `review_classification_codes[]` DTO 已删除，现由服务端持久化 detected codes/evidence fingerprints。
+- Frontend：旧金额下拉、逐项复选和 `无异常` 人工覆盖已删除；现行自动分类交互见本文件顶部。仍未新增 table、migration、read model、worker、queue、cache、逐行 I/O 或依赖。
 
 ## 2026-08-15 OA附件发票多对多与子付款项定位
 
@@ -521,7 +530,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 ## 2026-08-20 - 附件异常审阅分区回归
 
-- `tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_anomaly_state_is_sql_compact_fingerprint_parity_and_keyset_bounded` 在真实 PostgreSQL 中同时构造“无 OA 附件”和“流水发票金额不一致”，验证 SQL/Python 指纹一致；人工确认后 combined initial 与 paired/unpaired groups 必须稳定分区且不返回 500。
+- `tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_anomaly_state_is_sql_compact_fingerprint_parity_and_keyset_bounded` 在真实 PostgreSQL 中同时构造“无 OA 附件”和三栏金额差异，验证 SQL/Python 指纹一致；服务端证据审阅后 combined initial 与 paired/unpaired groups 必须稳定分区且不返回 500。
 
 ## 2026-08-20 - 手工发票补足 OA 子付款项来源回归
 

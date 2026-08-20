@@ -103,10 +103,12 @@ test.describe("workbench read-export permission browser flow", () => {
     await expect(exceptionDrawer).toBeVisible();
     await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(exceptionDrawer.getByText("OA发票金额不一致").first()).toBeVisible();
+    await expect(exceptionDrawer.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toBeVisible();
     await expect(exceptionDrawer.getByRole("checkbox", { name: /确认已审阅/ })).toHaveCount(0);
     await expect(exceptionDrawer.getByRole("button", { name: /人工金额判断/ })).toHaveCount(0);
-    await expect(exceptionDrawer.getByRole("button", { name: "进入已配对" })).toHaveCount(0);
+    await expect(exceptionDrawer.getByRole("button", { name: "接受异常并进入已配对" })).toHaveCount(0);
     await expect(exceptionDrawer.getByRole("button", { name: "留在未配对" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);
@@ -189,15 +191,19 @@ test.describe("workbench App Health write-safety browser flow", () => {
     await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
     const unpairedZone = page.getByTestId("zone-unpaired");
     await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toBeVisible();
-    await expect(unpairedZone.getByText("OA发票金额不一致")).toBeVisible();
+    await expect(unpairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toBeVisible();
 
     await unpairedZone.getByRole("button", { name: /未配对异常 \d+ \| 已配对异常 \d+/ }).click();
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(exceptionDrawer).toBeVisible();
     await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
-    await expect(exceptionDrawer.getByText("OA发票金额不一致").first()).toBeVisible();
+    await expect(exceptionDrawer.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toBeVisible();
     await expect(exceptionDrawer.getByRole("checkbox", { name: /确认已审阅/ })).toHaveCount(0);
-    await expect(exceptionDrawer.getByRole("button", { name: "进入已配对" })).toHaveCount(0);
+    await expect(exceptionDrawer.getByRole("button", { name: "接受异常并进入已配对" })).toHaveCount(0);
     await expect(exceptionDrawer.getByRole("button", { name: "留在未配对" })).toHaveCount(0);
 
     expectNoWorkbenchMutationCalls(api);

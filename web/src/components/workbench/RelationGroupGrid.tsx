@@ -32,6 +32,7 @@ import {
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchPane } from "./ResizableTriPane";
 import RelationGroupCell from "./RelationGroupCell";
+import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
@@ -504,6 +505,23 @@ function RelationGroupGrid({
         const displaySegments = displayLayout?.segments ?? null;
         const segmentCount = displaySegments?.length ?? 0;
         const segmentedPaneIds = new Set(displayLayout?.segmentedPaneIds ?? []);
+        const visibleAnomalyFingerprints = new Set(
+          panes.flatMap((pane) => {
+            const paneId = pane.id as WorkbenchRecordType;
+            const visibleRows = displaySegments && segmentedPaneIds.has(paneId)
+              ? displaySegments.flatMap((segment) => segment.rows[paneId])
+              : paneRecords(paneId);
+            return visibleRows.flatMap((row) => [
+              ...(row.workbenchAnomalies ?? []).map((item) => item.fingerprint),
+              ...(row.expenseItems ?? []).flatMap((expenseItem) => (
+                expenseItem.workbenchAnomalies ?? []
+              )).map((item) => item.fingerprint),
+            ]);
+          }),
+        );
+        const groupLevelAnomalies = (group.workbenchAnomaly?.items ?? []).filter((item) => (
+          item.displayScope === "group" || !visibleAnomalyFingerprints.has(item.fingerprint)
+        ));
 
         if (displaySegments) {
           return (
@@ -628,6 +646,13 @@ function RelationGroupGrid({
                   {column.renderGroup(group)}
                 </div>
               ))}
+              {groupLevelAnomalies.length > 0 ? (
+                <WorkbenchAnomalyIndicator
+                  anomalies={groupLevelAnomalies}
+                  className="workbench-anomaly-indicator--group"
+                  levelLabel="该关联组"
+                />
+              ) : null}
             </div>
           );
         }
@@ -687,6 +712,13 @@ function RelationGroupGrid({
                 {column.renderGroup(group)}
               </div>
             ))}
+            {groupLevelAnomalies.length > 0 ? (
+              <WorkbenchAnomalyIndicator
+                anomalies={groupLevelAnomalies}
+                className="workbench-anomaly-indicator--group"
+                levelLabel="该关联组"
+              />
+            ) : null}
           </div>
         );
       })}

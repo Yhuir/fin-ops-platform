@@ -523,7 +523,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertTrue(str(anomaly.get("fingerprint") or ""))
         self.assertEqual(
             {str(item.get("code") or "") for item in anomaly.get("items") or []},
-            {"oa_invoice_attachment_absent", "bank_invoice_amount_mismatch"},
+            {"oa_invoice_attachment_absent", "oa_bank_equal_invoice_less"},
         )
         candidate_statement = next(
             statement
@@ -570,10 +570,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             actor_id="test-suite",
             decision="accept_paired",
             note="附件异常与金额异常均已复核",
-            review_classification_codes=["bank_invoice_amount_mismatch"],
-            reviewed_item_fingerprints=[
-                str(item["fingerprint"]) for item in anomaly["items"]
+            detected_classification_codes=[
+                str(item["code"]) for item in anomaly["items"]
             ],
+            evidence_item_fingerprints=list(anomaly["evidence_item_fingerprints"]),
         )
         accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
         self.assertEqual(accepted["summary"]["unpaired_exception_count"], 0)
@@ -726,6 +726,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             if group.get("detail_key") == "CASE-SHARED-36"
         )
         anomaly = mismatched_group["workbench_anomaly"]
+        self.assertEqual(anomaly["items"][0]["code"], "oa_bank_equal_invoice_less")
+        self.assertEqual(anomaly["items"][0]["display_scope"], "row")
+        self.assertEqual(anomaly["items"][0]["display_pane"], "invoice")
+        self.assertEqual(anomaly["items"][0]["display_row_id"], "invoice-shared-36")
         self.assertEqual(anomaly["items"][0]["source_expense_item_ids"], [
             "oa-shared-36:item:0",
             "oa-shared-36:item:1",
@@ -752,12 +756,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             actor_id="test-suite",
             decision="accept_paired",
             note="production-shape regression",
-            review_classification_codes=[
+            detected_classification_codes=[
                 str(item["code"]) for item in anomaly["items"]
             ],
-            reviewed_item_fingerprints=[
-                str(item["fingerprint"]) for item in anomaly["items"]
-            ],
+            evidence_item_fingerprints=list(anomaly["evidence_item_fingerprints"]),
         )
 
         accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
@@ -940,8 +942,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         anomaly_codes = {
             item["code"] for item in group["workbench_anomaly"]["items"]
         }
-        self.assertIn("oa_bank_amount_mismatch", anomaly_codes)
-        self.assertIn("oa_invoice_amount_mismatch", anomaly_codes)
+        self.assertEqual(anomaly_codes, {"bank_invoice_equal_oa_more"})
         self.assertNotIn("oa_invoice_attachment_absent", anomaly_codes)
         self.assertNotIn("oa_invoice_attachment_unparsed", anomaly_codes)
 
@@ -1185,19 +1186,17 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         anomaly_items = list(
             (priority_group.get("workbench_anomaly") or {}).get("items") or []
         )
-        self.assertNotIn(
-            "bank_invoice_amount_mismatch",
+        self.assertFalse(
             {
-                item.get("code")
-                for item in anomaly_items
-            },
-        )
-        self.assertNotIn(
-            "oa_invoice_amount_mismatch",
-            {
-                item.get("code")
-                for item in anomaly_items
-            },
+                "oa_bank_equal_invoice_more",
+                "oa_bank_equal_invoice_less",
+                "oa_invoice_equal_bank_more",
+                "oa_invoice_equal_bank_less",
+                "bank_invoice_equal_oa_less",
+                "bank_invoice_equal_oa_more",
+                "all_amounts_different",
+            }
+            & {item.get("code") for item in anomaly_items},
         )
 
     def test_typed_selection_accepts_cross_pane_same_text_id_and_untyped_fails_closed(self) -> None:

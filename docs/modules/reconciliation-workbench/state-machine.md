@@ -92,18 +92,18 @@ row detail GET 是纯读操作：按 typed identity 窄查 latest committed cano
 
 ```text
 无异常且 relation 完整                           -> paired
-任一金额对不等或附件异常                         -> unpaired / 未配对异常
-逐项已审阅 + 金额项已人工分类 --keep_unpaired-->  -> unpaired / 未配对异常
-逐项已审阅 + 金额项已人工分类
+三栏可比较且命中七分类，或存在明细/附件异常       -> unpaired / 未配对异常
+服务端重算当前 bundle --keep_unpaired-->          -> unpaired / 未配对异常
+服务端重算当前 bundle
   --accept_paired 且无其他 blocker-->             -> paired / 已配对异常
-已配对异常 --撤回--> keep_unpaired               -> unpaired / 未配对异常
+已配对异常 --撤回到未配对--> keep_unpaired        -> unpaired / 未配对异常
 成员/金额/附件状态变化 -> fingerprint 变化       -> 旧决定失效，重新回到未配对异常
 ```
 
-该状态机改变关联台的有效展示分区，但不修改 `app.workbench_pair_relations.status=active`、成员或 canonical 金额。下游页面仍消费同一正式关系，避免异常审阅污染已支付、成本和发票归属。金额异常提交前必须从 `OA流水金额不一致`、`OA发票金额不一致`、`流水发票金额不一致`、`无异常` 中选择一个或多个；`无异常` 与三种差异互斥。审阅只持久化 fingerprint-bound 决定、人工分类与 audit。
+该状态机改变关联台的有效展示分区，但不修改 `app.workbench_pair_relations.status=active`、成员或 canonical 金额。下游页面仍消费同一正式关系，避免异常审阅污染已支付、成本和发票归属。服务端在写入时重取 canonical detail，以当前 bundle 推导 evidence fingerprints 和 detected codes；客户端不得提交人工分类、逐项审阅结果或 actor。审阅只持久化 fingerprint-bound 决定、服务端证据摘要与 audit。
 
 异常决定的作用域取当前 canonical 组的成员月份：成员都在同一月时写入单月决定；同一关系跨多个自然月时写入全局决定并在各月视图复用。不得因为页面使用 `month=all` 或成员跨月而拒绝审阅，也不得拆成多个相互冲突的月度决定。
 
-只有当前 direct canonical descriptor 计算出的 `workbench_anomaly` 进入状态机；金额 item 必须是具体的三种 pair code，禁止恢复泛化“金额不一致”。系统检测 code 与人工 `review_classification_codes[]` 是不同事实：用户可以纠正分类，但不能覆盖或删除原始检测证据。历史 ignore/restore、WEX/row-ignore 不得改变分区、成员、抽屉或计数。
+只有当前 direct canonical descriptor 计算出的 `workbench_anomaly` 进入状态机；用户可见金额 item 严格是七种互斥三栏分类，子付款项局部差异只辅助定位已成立分类，不创建第八类。三栏不完整、金额无效、方向未知/冲突或总额完全一致时不得生成金额分类。历史人工分类字段、ignore/restore、WEX/row-ignore 不得改变分区、成员、抽屉或计数。
 
 未配对工具栏不提供第二套人工异常入口；右上统一入口显示 `未配对异常 n | 已配对异常 m`。

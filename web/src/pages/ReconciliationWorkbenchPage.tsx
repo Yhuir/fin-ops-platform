@@ -67,7 +67,6 @@ import type {
   WorkbenchOaSyncStatus,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
-  WorkbenchAnomalyReviewClassificationCode,
   WorkbenchRecord,
   WorkbenchRecordType,
   WorkbenchRelationPreview,
@@ -2149,8 +2148,6 @@ export default function ReconciliationWorkbenchPage() {
   const handleAnomalyReview = useCallback(async (
     group: WorkbenchRelationGroup,
     decision: "accept_paired" | "keep_unpaired",
-    reviewedItemFingerprints: string[],
-    reviewClassificationCodes: WorkbenchAnomalyReviewClassificationCode[],
   ) => {
     if (!ensureCanWriteWorkbench() || !group.workbenchAnomaly) {
       return;
@@ -2166,8 +2163,6 @@ export default function ReconciliationWorkbenchPage() {
           detailKey: group.detailKey,
           fingerprint: group.workbenchAnomaly!.fingerprint,
           decision,
-          reviewedItemFingerprints,
-          reviewClassificationCodes,
         });
         setMessage("异常处理已写入，正在重新读取关联台...");
         try {

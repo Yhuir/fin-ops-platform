@@ -471,11 +471,11 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=unpaired|paired`。bucket 必须等于 zone，返回该展示区内携带当前异常的关系组。过滤发生在 exact total/row counts 与 keyset 分页之前，不读 page generation 或 legacy WEX bucket。
 
-关系组可携带 additive `workbench_anomaly`：`{code="workbench_anomaly",fingerprint,review_decision="pending|accept_paired|keep_unpaired",reviewed_item_fingerprints[],review_classification_codes[],review_note,reviewed_by,reviewed_at,items[]}`。item code 支持三种具体金额差异与三种 OA 附件异常，并返回 `oa_total`、`bank_total`、`invoice_total`、`mismatch_pair`、`amount_delta` 及来源 IDs。付款方向 `bank_total` 是同一正式关系内支出减收入/退款的净额。缺失 bundle 表示当前关系无异常；禁止发布泛化 `金额不一致` 或旧 `oa_invoice_anomaly.state`。
+关系组可携带 additive `workbench_anomaly`：`{code="workbench_anomaly",fingerprint,review_decision="pending|accept_paired|keep_unpaired",review_note,reviewed_by,reviewed_at,items[]}`。用户可见 item code 支持七种互斥三栏金额分类和三种附件状态，并返回三栏 totals、`amount_delta`、来源 IDs 及 `display_scope/display_pane/display_row_id`。`display_scope=group` 使用 `display_pane=group` 且不伪造 row id。付款方向 `bank_total` 是同一正式关系内支出减收入/退款的净额。三栏缺失、金额无效、方向未知/冲突或三栏总额完全一致时不生成金额分类；费用子项局部差异只能辅助定位已成立的七分类，不额外生成第八种金额异常。缺失 bundle 表示当前关系无异常。
 
 OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
 
-`POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,detail_key?,fingerprint,decision,reviewed_item_fingerprints,review_classification_codes,note?}`；`detail_key` 在列表返回时原样回传，用于同一 `group_id` 的精确详情定位。`decision` 只允许 `accept_paired|keep_unpaired`，reviewed fingerprints 必须与当前 bundle items 精确相等。存在金额 item 时人工分类必须非空，可从三种金额差异中多选，或单独选择 `no_anomaly`；纯附件异常不得提交金额分类。系统检测 code 与人工分类分别保存。后端 actor 只来自 session；read-export 返回 403；非法 body 返回 400；fingerprint 漂移、zone 漂移或仍有其他 blocker 返回 409。幂等重复不重复写 audit。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。单月关系把决定绑定到该月；同一关系成员跨月时绑定全局作用域，使各月份视图读取同一决定。旧 amount-mismatch ignore/restore routes 返回 404。
+`POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,detail_key?,fingerprint,decision,note?}`；`detail_key` 在列表返回时原样回传，用于同一 `group_id` 的精确详情定位。`decision` 只允许 `accept_paired|keep_unpaired`。后端重取当前 canonical detail，并自行推导 evidence fingerprints 与 detected codes；客户端提交的旧人工分类、逐项 fingerprints 或 actor 不参与决定。session actor、权限、400/403/409、fingerprint/topology 冲突和幂等审计合同不变。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。单月关系把决定绑定到该月；跨月关系绑定全局作用域。旧人工分类与 amount-mismatch ignore/restore routes 不得恢复。
 
 `POST /api/no-oa-bank-batches/submit-selection`
 
@@ -881,7 +881,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 关系分区只允许 `paired` / `unpaired`：
 
-- `paired.groups[*]` 必须一一对应冻结要求已满足且无 pending/keep 异常，或当前异常已人工 `accept_paired` 的 active 正式关系；完整包含 relation 成员，具体异常 chip 不因放行消失。
+- `paired.groups[*]` 必须一一对应冻结要求已满足且无 pending/keep 异常，或当前服务端异常 bundle 已 `accept_paired` 的 active 正式关系；完整包含 relation 成员，感叹号与具体异常 Chip 不因接受风险而消失。
 - `unpaired.groups[*]` 可以是一个未被 active relation 占用的 canonical singleton，也可以是冻结要求未满足的 active relation group；后一种必须返回 `completion.is_complete=false` 和精确 `missing_row_types`，不能拆散 relation ownership。
 - 普通 relation 含 OA 但缺银行流水时必须位于 `unpaired`，并返回 `missing_row_types=["bank"]`；OA 附件发票 immutable binding 只表达 ownership，不等于付款链路完整。显式 batch-accounting/ETC batch relation 继续使用各自登记的完整性豁免。
 - `summary` 使用 `paired_count` / `unpaired_count`；不得返回 `open_count` 或把 candidate/decision 作为第三种关系状态。
@@ -907,7 +907,7 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 ]
 ```
 
-该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖。附件状态只以 `attachment_file_count` 和是否存在精确绑定到当前子付款项的可用正式发票判定：无附件且没有该正式发票来源证明时为“无OA附件”，有附件但没有解析出可用正式发票统一为“OA发票附件未解析”，不再输出或依赖旧解析失败计数。`oa_attachment_invoice` 与 `oa_expense_item_invoice` row 都返回去重后的 `source_expense_item_ids[]`；只有数组成员与 `expense_items[*].id` 精确相等时前端才可同带对齐。APP 内手工录入/选择发票不会改写 OA 原始附件数。同一发票连接多个付款项时前端把这些付款项与该发票渲染为一个连通展示段，发票不得复制。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
+该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖。附件状态只以 `attachment_file_count` 和是否存在精确绑定到当前子付款项的可用正式发票判定：无附件且没有该正式发票来源证明时为“发票附件缺失”，有附件但没有解析出可用正式发票为“发票附件未解析”。`oa_attachment_invoice` 与 `oa_expense_item_invoice` row 都返回去重后的 `source_expense_item_ids[]`；只有数组成员与 `expense_items[*].id` 精确相等时前端才可同带对齐。APP 内手工录入/选择发票不会改写 OA 原始附件数。同一发票连接多个付款项时前端把这些付款项与该发票渲染为一个连通展示段，发票不得复制。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
 
 ## 发票生命周期状态
 

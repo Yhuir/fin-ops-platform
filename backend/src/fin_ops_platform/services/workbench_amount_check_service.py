@@ -5,11 +5,27 @@ from hashlib import sha256
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_matches_oa
-from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row, normalize_invoice_kind_from_row
+from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row
 
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
+
+AMOUNT_DISPLAY_LABELS = {
+    "oa_bank_equal_invoice_more": "OA 流水一致，票多",
+    "oa_bank_equal_invoice_less": "OA 流水一致，票少",
+    "oa_invoice_equal_bank_more": "OA 发票一致，付多",
+    "oa_invoice_equal_bank_less": "OA 发票一致，付少",
+    "bank_invoice_equal_oa_less": "发票流水一致，OA 提少了",
+    "bank_invoice_equal_oa_more": "发票流水一致，OA 提多了",
+    "all_amounts_different": "三项不一致",
+}
+
+ATTACHMENT_DISPLAY_LABELS = {
+    "oa_invoice_attachment_absent": "发票附件缺失",
+    "oa_invoice_attachment_unparsed": "发票附件未解析",
+    "oa_invoice_attachment_unassigned": "发票待归属",
+}
 
 
 class WorkbenchAmountCheckService:
@@ -26,13 +42,13 @@ class WorkbenchAmountCheckService:
         if not oa_rows:
             return None
 
-        items = self._expense_item_anomalies(
+        evidence_items = self._expense_item_anomalies(
             oa_rows,
             invoice_rows,
             relation_id=relation_id,
         )
-        has_expense_items = items is not None
-        items = items or []
+        has_expense_items = evidence_items is not None
+        evidence_items = evidence_items or []
         amount_check = self.check(
             {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows},
             relation_mode=relation_mode,
@@ -49,44 +65,268 @@ class WorkbenchAmountCheckService:
         ):
             if any(self._amount(row) is None for row in pane_rows):
                 totals[pane] = None
-        for left, right, code in (
-            ("oa", "bank", "oa_bank_amount_mismatch"),
-            ("oa", "invoice", "oa_invoice_amount_mismatch"),
-            ("bank", "invoice", "bank_invoice_amount_mismatch"),
-        ):
-            if has_expense_items and code == "oa_invoice_amount_mismatch":
-                continue
-            left_total = totals[left]
-            right_total = totals[right]
-            if left_total is None or right_total is None or left_total == right_total:
-                continue
-            items.append(
-                self._anomaly_item(
-                    code=code,
-                    relation_id=relation_id,
-                    comparison_unit_id=str(relation_id or "").strip(),
-                    source_oa_ids=[self._row_id(row) for row in oa_rows],
-                    source_expense_item_ids=[],
-                    oa_total=totals["oa"],
-                    bank_total=totals["bank"],
-                    invoice_total=totals["invoice"],
-                    invoice_rows=invoice_rows,
-                    attachment_file_count=0,
-                    mismatch_pair=(left, right),
-                    display_scope="group",
-                    display_pane="bank" if "bank" in (left, right) else "oa",
-                    display_row_id="",
+        has_three_way_comparison = (
+            amount_check.get("status") != "unknown"
+            and amount_check.get("direction") in {"payment", "receipt"}
+            and all(totals[pane] is not None for pane in ("oa", "bank", "invoice"))
+        )
+        if has_three_way_comparison:
+            for left, right, code in (
+                ("oa", "bank", "oa_bank_amount_mismatch"),
+                ("oa", "invoice", "oa_invoice_amount_mismatch"),
+                ("bank", "invoice", "bank_invoice_amount_mismatch"),
+            ):
+                if has_expense_items and code == "oa_invoice_amount_mismatch":
+                    continue
+                left_total = totals[left]
+                right_total = totals[right]
+                if left_total == right_total:
+                    continue
+                evidence_items.append(
+                    self._anomaly_item(
+                        code=code,
+                        relation_id=relation_id,
+                        comparison_unit_id=str(relation_id or "").strip(),
+                        source_oa_ids=[self._row_id(row) for row in oa_rows],
+                        source_expense_item_ids=[],
+                        oa_total=totals["oa"],
+                        bank_total=totals["bank"],
+                        invoice_total=totals["invoice"],
+                        invoice_rows=invoice_rows,
+                        attachment_file_count=0,
+                        mismatch_pair=(left, right),
+                        display_scope="group",
+                        display_pane="bank" if "bank" in (left, right) else "oa",
+                        display_row_id="",
+                    )
                 )
+        classification = (
+            self._amount_classification(
+                totals,
+                direction=str(amount_check.get("direction") or "unknown"),
             )
-        if not items:
+            if has_three_way_comparison
+            else None
+        )
+        if classification is None:
+            evidence_items = [
+                item
+                for item in evidence_items
+                if item.get("code") != "oa_invoice_amount_mismatch"
+            ]
+        if not evidence_items:
             return None
         fingerprint_source = "\0".join(
-            [str(relation_id or "").strip(), *sorted(str(item["fingerprint"]) for item in items)]
+            [
+                str(relation_id or "").strip(),
+                *sorted(str(item["fingerprint"]) for item in evidence_items),
+            ]
         )
         return {
             "code": "workbench_anomaly",
             "fingerprint": sha256(fingerprint_source.encode("utf-8")).hexdigest(),
-            "items": items,
+            "items": self._display_items(
+                evidence_items,
+                relation_id=relation_id,
+                totals=totals,
+                classification=classification,
+                oa_rows=oa_rows,
+                bank_rows=bank_rows,
+                invoice_rows=invoice_rows,
+            ),
+            "evidence_item_fingerprints": sorted(
+                str(item["fingerprint"]) for item in evidence_items
+            ),
+        }
+
+    def _display_items(
+        self,
+        evidence_items: list[dict[str, Any]],
+        *,
+        relation_id: str,
+        totals: dict[str, Decimal | None],
+        classification: tuple[str, str] | None,
+        oa_rows: list[dict[str, Any]],
+        bank_rows: list[dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        attachment_items = [
+            self._display_item_from_evidence(item, label=ATTACHMENT_DISPLAY_LABELS[item["code"]])
+            for item in evidence_items
+            if item.get("code") in ATTACHMENT_DISPLAY_LABELS
+        ]
+        component_amount_items = [
+            item
+            for item in evidence_items
+            if item.get("code") == "oa_invoice_amount_mismatch"
+            and list(item.get("source_expense_item_ids") or [])
+        ]
+        if classification is None:
+            return attachment_items
+
+        code, implicated_pane = classification
+        placement = self._classification_placement(
+            code=code,
+            implicated_pane=implicated_pane,
+            component_amount_items=component_amount_items,
+            oa_rows=oa_rows,
+            bank_rows=bank_rows,
+            invoice_rows=invoice_rows,
+        )
+        evidence_fingerprints = sorted(str(item["fingerprint"]) for item in evidence_items)
+        display_fingerprint = sha256(
+            "\0".join(
+                [
+                    str(relation_id or "").strip(),
+                    "display",
+                    code,
+                    placement["display_scope"],
+                    placement["display_pane"],
+                    placement["display_row_id"],
+                    *evidence_fingerprints,
+                ]
+            ).encode("utf-8")
+        ).hexdigest()
+        return [
+            *attachment_items,
+            {
+                "code": code,
+                "label": AMOUNT_DISPLAY_LABELS[code],
+                "fingerprint": display_fingerprint,
+                "comparison_unit_id": str(relation_id or "").strip(),
+                "source_oa_ids": [self._row_id(row) for row in oa_rows if self._row_id(row)],
+                "source_expense_item_ids": placement["source_expense_item_ids"],
+                "oa_total": self._format_amount(totals["oa"]),
+                "bank_total": self._format_amount(totals["bank"]),
+                "invoice_total": self._format_amount(totals["invoice"]),
+                "amount_delta": self._format_amount(self._amount_delta({
+                    pane: amount
+                    for pane, amount in totals.items()
+                    if amount is not None
+                })),
+                "mismatch_pair": None,
+                "invoice_row_ids": [
+                    self._row_id(row) for row in invoice_rows if self._row_id(row)
+                ],
+                "attachment_file_count": 0,
+                **placement,
+            },
+        ]
+
+    @staticmethod
+    def _amount_classification(
+        totals: dict[str, Decimal | None],
+        *,
+        direction: str,
+    ) -> tuple[str, str] | None:
+        if direction not in {"payment", "receipt"}:
+            return None
+        oa_total = totals["oa"]
+        bank_total = totals["bank"]
+        invoice_total = totals["invoice"]
+        if oa_total is None or bank_total is None or invoice_total is None:
+            return None
+        if oa_total == bank_total == invoice_total:
+            return None
+        if oa_total == bank_total:
+            return (
+                "oa_bank_equal_invoice_more" if invoice_total > oa_total else "oa_bank_equal_invoice_less",
+                "invoice",
+            )
+        if oa_total == invoice_total:
+            return (
+                "oa_invoice_equal_bank_more" if bank_total > oa_total else "oa_invoice_equal_bank_less",
+                "bank",
+            )
+        if bank_total == invoice_total:
+            return (
+                "bank_invoice_equal_oa_less" if oa_total < bank_total else "bank_invoice_equal_oa_more",
+                "oa",
+            )
+        return "all_amounts_different", "group"
+
+    def _classification_placement(
+        self,
+        *,
+        code: str,
+        implicated_pane: str,
+        component_amount_items: list[dict[str, Any]],
+        oa_rows: list[dict[str, Any]],
+        bank_rows: list[dict[str, Any]],
+        invoice_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if code == "all_amounts_different":
+            return self._group_placement()
+
+        if implicated_pane == "invoice" and len(component_amount_items) == 1:
+            component = component_amount_items[0]
+            component_invoice_ids = list(component.get("invoice_row_ids") or [])
+            if (
+                len(invoice_rows) == 1
+                and component_invoice_ids == [self._row_id(invoice_rows[0])]
+            ):
+                return {
+                    "display_scope": "row",
+                    "display_pane": "invoice",
+                    "display_row_id": component_invoice_ids[0],
+                    "source_expense_item_ids": list(
+                        component.get("source_expense_item_ids") or []
+                    ),
+                }
+        if implicated_pane == "oa" and len(component_amount_items) == 1:
+            component = component_amount_items[0]
+            expense_ids = list(component.get("source_expense_item_ids") or [])
+            if len(expense_ids) == 1:
+                return {
+                    "display_scope": "expense_item",
+                    "display_pane": "oa",
+                    "display_row_id": expense_ids[0],
+                    "source_expense_item_ids": expense_ids,
+                }
+
+        pane_rows = {
+            "oa": oa_rows,
+            "bank": bank_rows,
+            "invoice": invoice_rows,
+        }[implicated_pane]
+        if len(pane_rows) == 1 and self._row_id(pane_rows[0]):
+            return {
+                "display_scope": "row",
+                "display_pane": implicated_pane,
+                "display_row_id": self._row_id(pane_rows[0]),
+                "source_expense_item_ids": [],
+            }
+        return self._group_placement()
+
+    @staticmethod
+    def _group_placement() -> dict[str, Any]:
+        return {
+            "display_scope": "group",
+            "display_pane": "group",
+            "display_row_id": "",
+            "source_expense_item_ids": [],
+        }
+
+    @staticmethod
+    def _placement_from_evidence(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "display_scope": str(item.get("display_scope") or "group"),
+            "display_pane": str(item.get("display_pane") or "group"),
+            "display_row_id": str(item.get("display_row_id") or ""),
+            "source_expense_item_ids": list(item.get("source_expense_item_ids") or []),
+        }
+
+    @staticmethod
+    def _display_item_from_evidence(
+        item: dict[str, Any],
+        *,
+        label: str,
+        code: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            **item,
+            "code": code or str(item["code"]),
+            "label": label,
         }
 
     def _expense_item_anomalies(
@@ -379,78 +619,6 @@ class WorkbenchAmountCheckService:
         except ValueError:
             return 0
 
-    def summarize(self, rows_by_type: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-        normalized_rows = {
-            "oa": list(rows_by_type.get("oa") or []),
-            "bank": list(rows_by_type.get("bank") or []),
-            "invoice": list(rows_by_type.get("invoice") or []),
-        }
-        oa_total = self._sum_amounts(normalized_rows["oa"]) or ZERO
-        bank_expense_rows: list[dict[str, Any]] = []
-        bank_income_rows: list[dict[str, Any]] = []
-        input_invoice_rows: list[dict[str, Any]] = []
-        output_invoice_rows: list[dict[str, Any]] = []
-        unknown_direction_row_ids: list[str] = []
-
-        for row in normalized_rows["bank"]:
-            direction = self._bank_direction(row)
-            if direction == "expense":
-                bank_expense_rows.append(row)
-            elif direction == "income":
-                bank_income_rows.append(row)
-            else:
-                unknown_direction_row_ids.append(self._row_id(row))
-
-        for row in normalized_rows["invoice"]:
-            direction = self._invoice_direction(row)
-            if direction == "input":
-                input_invoice_rows.append(row)
-            elif direction == "output":
-                output_invoice_rows.append(row)
-            else:
-                unknown_direction_row_ids.append(self._row_id(row))
-
-        bank_expense_total = self._sum_amounts(bank_expense_rows) or ZERO
-        bank_income_total = self._sum_amounts(bank_income_rows) or ZERO
-        input_invoice_total = self._sum_amounts(input_invoice_rows) or ZERO
-        output_invoice_total = self._sum_amounts(output_invoice_rows) or ZERO
-        has_unknown_direction = bool(unknown_direction_row_ids)
-
-        expense_relation = (
-            "unknown_direction"
-            if has_unknown_direction
-            else self._expense_relation(
-                has_oa=bool(normalized_rows["oa"]),
-                has_bank=bool(bank_expense_rows),
-                has_invoice=bool(input_invoice_rows),
-                oa_total=oa_total,
-                bank_total=bank_expense_total,
-                invoice_total=input_invoice_total,
-            )
-        )
-        income_relation = (
-            "unknown_direction"
-            if has_unknown_direction
-            else self._income_relation(
-                has_bank=bool(bank_income_rows),
-                has_invoice=bool(output_invoice_rows),
-                bank_total=bank_income_total,
-                invoice_total=output_invoice_total,
-            )
-        )
-
-        return {
-            "oa_total": self._format_amount(oa_total),
-            "bank_expense_total": self._format_amount(bank_expense_total),
-            "bank_income_total": self._format_amount(bank_income_total),
-            "input_invoice_total": self._format_amount(input_invoice_total),
-            "output_invoice_total": self._format_amount(output_invoice_total),
-            "expense_relation": expense_relation,
-            "income_relation": income_relation,
-            "has_unknown_direction": has_unknown_direction,
-            "unknown_direction_row_ids": unknown_direction_row_ids,
-        }
-
     def check(
         self,
         rows_by_type: dict[str, list[dict[str, Any]]],
@@ -665,99 +833,6 @@ class WorkbenchAmountCheckService:
                 return "payment"
             return None
         return None
-
-    def _bank_direction(self, row: dict[str, Any]) -> str | None:
-        debit_amount = self._decimal(row.get("debit_amount"))
-        credit_amount = self._decimal(row.get("credit_amount"))
-        if debit_amount is not None and debit_amount > ZERO:
-            return "expense"
-        if credit_amount is not None and credit_amount > ZERO:
-            return "income"
-        txn_direction = str(row.get("txn_direction") or row.get("direction") or "").lower()
-        if txn_direction in {"outflow", "expense", "payment", "pay", "支出", "付款"}:
-            return "expense"
-        if txn_direction in {"inflow", "income", "receipt", "receive", "收入", "收款"}:
-            return "income"
-        return None
-
-    def _invoice_direction(self, row: dict[str, Any]) -> str | None:
-        invoice_direction = str(row.get("invoice_direction") or "").lower()
-        invoice_kind = normalize_invoice_kind_from_row(row)
-        if invoice_direction in {"input", "expense"} or invoice_kind == "input":
-            return "input"
-        if invoice_direction in {"output", "income"} or invoice_kind == "output":
-            return "output"
-        return None
-
-    def _expense_relation(
-        self,
-        *,
-        has_oa: bool,
-        has_bank: bool,
-        has_invoice: bool,
-        oa_total: Decimal,
-        bank_total: Decimal,
-        invoice_total: Decimal,
-    ) -> str:
-        if has_oa and has_bank and has_invoice:
-            if oa_total == bank_total == invoice_total:
-                return "all_equal"
-            if oa_total == bank_total:
-                return (
-                    "oa_equals_bank_greater_than_input_invoice"
-                    if oa_total > invoice_total
-                    else "oa_equals_bank_less_than_input_invoice"
-                )
-            if oa_total == invoice_total:
-                return (
-                    "oa_equals_input_invoice_greater_than_bank"
-                    if oa_total > bank_total
-                    else "oa_equals_input_invoice_less_than_bank"
-                )
-            if bank_total == invoice_total:
-                return (
-                    "bank_equals_input_invoice_greater_than_oa"
-                    if bank_total > oa_total
-                    else "bank_equals_input_invoice_less_than_oa"
-                )
-            return "all_different"
-        if has_oa and has_bank:
-            if oa_total == bank_total:
-                return "oa_equals_bank_missing_input_invoice"
-            return "oa_greater_than_bank_missing_input_invoice" if oa_total > bank_total else "oa_less_than_bank_missing_input_invoice"
-        if has_oa and has_invoice:
-            if oa_total == invoice_total:
-                return "oa_equals_input_invoice_missing_bank"
-            return "oa_greater_than_input_invoice_missing_bank" if oa_total > invoice_total else "oa_less_than_input_invoice_missing_bank"
-        if has_bank and has_invoice:
-            if bank_total == invoice_total:
-                return "bank_equals_input_invoice_missing_oa"
-            return "bank_greater_than_input_invoice_missing_oa" if bank_total > invoice_total else "bank_less_than_input_invoice_missing_oa"
-        if has_oa:
-            return "only_oa"
-        if has_bank:
-            return "only_bank_expense"
-        if has_invoice:
-            return "only_input_invoice"
-        return "not_applicable"
-
-    def _income_relation(
-        self,
-        *,
-        has_bank: bool,
-        has_invoice: bool,
-        bank_total: Decimal,
-        invoice_total: Decimal,
-    ) -> str:
-        if has_bank and has_invoice:
-            if bank_total == invoice_total:
-                return "income_equals_invoice"
-            return "income_greater_than_invoice" if bank_total > invoice_total else "income_less_than_invoice"
-        if has_bank:
-            return "only_income_bank"
-        if has_invoice:
-            return "only_output_invoice"
-        return "not_applicable"
 
     def _amount(self, row: dict[str, Any]) -> Decimal | None:
         row_type = str(row.get("type", ""))

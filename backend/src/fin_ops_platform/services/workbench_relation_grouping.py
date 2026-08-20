@@ -265,21 +265,11 @@ class WorkbenchRelationGroupingService:
         group["can_withdraw"] = True
         if anomaly:
             anomaly["review_decision"] = decision
-            anomaly["reviewed_item_fingerprints"] = list(
-                (review or {}).get("reviewed_item_fingerprints") or []
-            ) if isinstance(review, dict) else []
-            anomaly["review_classification_codes"] = list(
-                (review or {}).get("review_classification_codes") or []
-            ) if isinstance(review, dict) else []
             anomaly["review_note"] = str((review or {}).get("note") or "") if isinstance(review, dict) else ""
             anomaly["reviewed_by"] = str((review or {}).get("reviewed_by") or "") if isinstance(review, dict) else ""
             anomaly["reviewed_at"] = (review or {}).get("reviewed_at") if isinstance(review, dict) else None
             for item in anomaly["items"]:
-                item["display_label"] = (
-                    f"已接受：{item['label']}"
-                    if accepted
-                    else item["label"]
-                )
+                item["display_label"] = item["label"]
             group["workbench_anomaly"] = anomaly
         if relation_amount_check is not None:
             group["amount_check"] = relation_amount_check

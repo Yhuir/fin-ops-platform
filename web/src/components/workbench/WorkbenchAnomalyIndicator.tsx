@@ -1,0 +1,162 @@
+import {
+  Chip,
+  Link,
+  PopoverContent,
+  PopoverDialog,
+  PopoverRoot,
+  PopoverTrigger,
+} from "@heroui/react";
+import { CircleAlert, ExternalLink } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import type { WorkbenchAnomalyItem } from "../../features/workbench/types";
+
+type WorkbenchAnomalyIndicatorProps = {
+  anomalies: WorkbenchAnomalyItem[];
+  levelLabel: string;
+  externalUrl?: string;
+  className?: string;
+};
+
+const HOVER_CLOSE_DELAY_MS = 140;
+
+export default function WorkbenchAnomalyIndicator({
+  anomalies,
+  levelLabel,
+  externalUrl,
+  className = "",
+}: WorkbenchAnomalyIndicatorProps) {
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => setOpen(false), HOVER_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+    }
+  }, []);
+
+  if (anomalies.length === 0) {
+    return null;
+  }
+
+  const review = anomalies.find((anomaly) => anomaly.reviewDecision === "accept_paired");
+  const ariaLabel = `${levelLabel}有 ${anomalies.length} 项异常，查看详情`;
+
+  return (
+    <PopoverRoot isOpen={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        aria-label={ariaLabel}
+        className={`workbench-anomaly-indicator__trigger${className ? ` ${className}` : ""}`}
+        data-open={open ? "true" : "false"}
+        onClick={(event) => event.stopPropagation()}
+        onFocus={() => {
+          cancelClose();
+          setOpen(true);
+        }}
+        onMouseEnter={() => {
+          cancelClose();
+          setOpen(true);
+        }}
+        onMouseLeave={scheduleClose}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <CircleAlert aria-hidden="true" size={16} strokeWidth={2.1} />
+      </PopoverTrigger>
+      {open ? (
+        <PopoverContent
+          className="workbench-anomaly-popover"
+          containerPadding={12}
+          isNonModal
+          offset={6}
+          placement="bottom end"
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <PopoverDialog aria-label={`${levelLabel}异常详情`} className="workbench-anomaly-popover__dialog">
+            <div className="workbench-anomaly-popover__heading">
+              <span>{levelLabel}异常</span>
+              <span>{anomalies.length} 项</span>
+            </div>
+            <ul className="workbench-anomaly-popover__list">
+              {anomalies.map((anomaly) => {
+                const detail = anomalyDetail(anomaly);
+                return (
+                  <li key={anomaly.fingerprint}>
+                    <Chip
+                      color={isAmountAnomaly(anomaly.code) ? "danger" : "warning"}
+                      size="sm"
+                      variant="soft"
+                    >
+                      <Chip.Label>{anomaly.displayLabel}</Chip.Label>
+                    </Chip>
+                    {detail ? <span>{detail}</span> : null}
+                  </li>
+                );
+              })}
+            </ul>
+            {review ? (
+              <div className="workbench-anomaly-popover__review">
+                已接受该异常风险
+                {review.reviewedBy ? ` · ${review.reviewedBy}` : ""}
+                {review.reviewedAt ? ` · ${review.reviewedAt}` : ""}
+                {review.reviewNote ? ` · ${review.reviewNote}` : ""}
+              </div>
+            ) : null}
+            {externalUrl ? (
+              <Link
+                className="workbench-anomaly-popover__link"
+                href={externalUrl}
+                rel="noopener noreferrer"
+                target="_blank"
+                onClick={(event) => event.stopPropagation()}
+              >
+                打开 OA
+                <ExternalLink aria-hidden="true" size={13} />
+              </Link>
+            ) : null}
+          </PopoverDialog>
+        </PopoverContent>
+      ) : null}
+    </PopoverRoot>
+  );
+}
+
+function isAmountAnomaly(code: string) {
+  return code === "oa_bank_equal_invoice_more"
+    || code === "oa_bank_equal_invoice_less"
+    || code === "oa_invoice_equal_bank_more"
+    || code === "oa_invoice_equal_bank_less"
+    || code === "bank_invoice_equal_oa_less"
+    || code === "bank_invoice_equal_oa_more"
+    || code === "all_amounts_different";
+}
+
+function anomalyDetail(anomaly: WorkbenchAnomalyItem) {
+  if (anomaly.code === "oa_invoice_attachment_absent") {
+    return "未发现可用发票附件";
+  }
+  if (anomaly.code === "oa_invoice_attachment_unparsed") {
+    return `已有 ${anomaly.attachmentFileCount} 个附件，尚未解析出正式发票`;
+  }
+  if (anomaly.code === "oa_invoice_attachment_unassigned") {
+    return "已解析发票尚未明确归属到付款项";
+  }
+  const totals = [
+    anomaly.oaTotal ? `OA ${anomaly.oaTotal}` : "",
+    anomaly.bankTotal ? `流水 ${anomaly.bankTotal}` : "",
+    anomaly.invoiceTotal ? `发票 ${anomaly.invoiceTotal}` : "",
+  ].filter(Boolean);
+  return totals.join(" · ");
+}

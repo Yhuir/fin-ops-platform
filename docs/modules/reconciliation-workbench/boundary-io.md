@@ -48,7 +48,7 @@ ReconciliationWorkbenchPage
 | canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment `source_links[]`、已提交 ETC business batch/link；同一发票在同一 OA 可携带多个子付款项来源边，direct DTO 去重发布 `source_expense_item_ids[]`，不得压回单值。ETC summary 把 canonical link 与 ETC business invoice 视为同一现代来源层：link 只覆盖相同发票身份，未桥接的 business 成员仍必须保留；只有完全没有现代来源时才回退 legacy submission。身份优先使用统一发票号命名空间，其次稳定 row id，禁止按“批次存在任意 link”淘汰其它成员或从 raw payload 猜 owner。 |
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
 | completion metadata | workbench-relations | 关系是否要求 OA/发票及 mode 豁免使用确认时持久化事实，不在 GET 中重跑当前规则。关系含 in-progress OA 时完整 case 保留在 `unpaired`。 |
-| anomaly decisions | workbench exception repository | 当前 canonical group 同时计算 OA—流水、OA—发票、流水—发票按分差异，并保留付款项—发票连通分量及 `absent / unparsed / unassigned` 附件状态。普通付款关系的流水金额按同一正式关系内 `支出合计 - 收入/退款合计` 计算净额；经外部往来款正式确认的 `turnover_manual_closure` 零差额闭环改用付款本金侧与 OA 比较，避免把同额归还收入抵减成零。该特例只读取 relation mode，不解析备注。金额异常只有在唯一来源边证明具体单票与具体子付款项时才定位到发票；一项多票落 OA 子付款项，组级/流水—发票差异落 OA 或流水，禁止复制到任意发票。任一异常默认阻断进入已配对区；人工决定绑定当前 bundle fingerprint，接受后 DTO 的 chip 文案统一加 `已接受：` 并携带审阅审计字段。 |
+| anomaly decisions | workbench exception repository | 当前 canonical group 在三栏金额完整、方向明确时自动归为七种互斥金额分类，并保留付款项—发票连通分量及 `absent / unparsed / unassigned` 附件状态；未知方向、冲突或缺栏不得猜测。普通付款关系按净额比较，`turnover_manual_closure` 仅按 canonical mode 使用付款本金侧。只有唯一来源能证明具体明细时才输出行级定位，否则输出 group scope。客户端只提交 group/bundle fingerprint 和决定；repository 持久化服务端推导的 evidence fingerprints、detected codes 与审计，禁止接收客户端人工分类。 |
 | OA 补充凭证 | `app.workbench_oa_supporting_documents` + `app.file_objects` | 支持点击选择或拖拽 JPG/JPEG/PNG/PDF，校验扩展名、文件签名和 25MB 单文件上限；以 `oa_row_id + expense_item_id` 精确关联，并以目标付款项 + 内容哈希保证重试幂等，可列表、内联预览、软删除。上传/删除请求把关系目标、文件名/类型/大小、可用性与成功/失败结果固化到 operation audit；只有仍有效的成功文件可从详情预览。它不是 canonical invoice，不写 `app.invoices`、import session、relation member、matching 或 read model。 |
 | OA 手工发票补录 | `POST /api/workbench/oa-invoice-supplements/manual` | 只接受当前用户完整的批量 manual import preview；确认全部发票、写 `oa_expense_item_invoice` 来源边并通过正式 relation command 创建/扩展目标 case，单事务同成同败；同一请求把最终 case、OA 子付款项及每张发票的号码、销购方、日期与金额快照固化到 operation audit。 |
 | 历史发票来源修复 | `import_audit_repair_ops` | 只允许运维显式提交 invoice ids、case、OA row、expense item 和精确价税合计；先只读 dry-run 生成来源指纹与 rollback manifest，execute 在 serializable 事务、advisory lock、旧 `source_links` CAS 和操作审计内仅追加缺失的 `oa_expense_item_invoice` 来源边。冲突来源、数量/总额漂移或重复 identity 整笔拒绝；不是页面运行时 fallback。 |
@@ -120,9 +120,9 @@ requested tenant/scope
 | combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。`invoice_inventory.inventory_etc_summary_batch_count` 只统计 `oa_submitted/manually_marked_submitted/closed` 的 distinct ETC external batch，不把 draft/withdrawn 历史状态计成已提交批次。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。 |
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
-| paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或全部当前异常已由用户完成人工分类并明确 `accept_paired` 的 active formal relation；chip 显示人工选择的具体金额分类或“无异常”，系统检测项仍保留作审计。 |
+| paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；感叹号与原始系统分类 Chip 仍保留，审阅审计只在 Popover 展示。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
-| OA expense/invoice display | 前端 | OA direct page DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`；summary hydration 保持原有窄字段投影，录入抽屉通过专用列表 API 读取权威补充凭证。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。只有附件数为零且没有通过 `oa_expense_item_invoice` 精确绑定到当前子付款项的正式发票时显示“无OA附件”；附件存在但未产生正式发票显示“OA发票附件未解析”和“录入发票”；已有父 OA 发票但缺子项来源显示“OA发票待归属”。APP 内正式发票来源边只补足归属证明，不改写 OA 原始附件数。补充凭证同行展示文件名与预览链接，但不得伪装成发票或进入金额合计；上传/删除成功后只局部更新当前子付款项，不触发关联台全量重读。 |
+| OA expense/invoice display | 前端 | OA direct page DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`；summary hydration 保持原有窄字段投影，录入抽屉通过专用列表 API 读取权威补充凭证。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零且无精确正式发票来源时为“发票附件缺失”；附件存在但未产生正式发票为“发票附件未解析”并保留“录入发票”；已有父 OA 发票但缺子项来源为“发票待归属”。这些分类不直接平铺，只通过对应明细的感叹号 Popover 展示。APP 内正式发票来源边只补足归属证明，不改写 OA 原始附件数。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
 | matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |
@@ -150,7 +150,7 @@ requested tenant/scope
 - mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。异常审阅把列表返回的可选 `detail_key` 原样提交以精确定位组；跨月关系写入全局决定，随后只读取决定对应的一个异常 bucket。
 - 保留 OA sync safety poll、全局 App Health 与 background jobs provider；它们不是 Workbench page read model，不能借本迁移删除。
 - OA 父记录的申请人栏始终显示时间 chip：有权威申请时间时只做原字符串格式化（包括移除 PostgreSQL `+08`/标准 offset 后缀，不做浏览器时区换算），缺失时明确显示“时间缺失”；日常报销子付款项不重复显示父 OA 申请人和时间。
-- OA 子付款项/附件发票同行只在当前页 DTO 内做纯函数图分组；禁止为此新增逐项 API、React effect、read model、worker 或页面缓存。异常 chip 的 OA 跳转使用普通 `<a target="_blank" rel="noopener noreferrer">`，禁止轮询或操纵 OA SPA DOM 自动点击详情。
+- OA 子付款项/附件发票同行只在当前页 DTO 内做纯函数图分组；禁止为此新增逐项 API、React effect、read model、worker 或页面缓存。共享异常感叹号组件通过 HeroUI `Link`（`target="_blank" rel="noopener noreferrer"`）打开 OA，禁止轮询或操纵 OA SPA DOM 自动点击详情。
 - 页面 rows 不写入 session storage/长期 cache。长列表继续分页；DOM virtualization 属于独立前端性能任务，不用 read-model 迁移夹带新框架。
 
 ## 统一详情展示合同

@@ -1,4 +1,4 @@
-import { CircleCheck, FilePlus2, FileWarning, Info } from "lucide-react";
+import { FilePlus2, Info } from "lucide-react";
 import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
 import { Button, Chip, Tooltip } from "@heroui/react";
 
@@ -14,7 +14,6 @@ import {
   parseWorkbenchAmountCents,
 } from "../../features/workbench/selectionModel";
 import type {
-  WorkbenchAnomalyItem,
   WorkbenchRecord,
   WorkbenchRecordType,
   WorkbenchSourceKind,
@@ -25,6 +24,7 @@ import { splitBankAccountLabel } from "../BankAccountValue";
 import RowActions, { type WorkbenchInlineAction } from "./RowActions";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
 import { FinanceStatusTag } from "../common/FinanceTable";
+import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 
 type WorkbenchRecordCardProps = {
   zoneId: "paired" | "unpaired";
@@ -68,9 +68,12 @@ function WorkbenchRecordCard({
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
   const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_flow_rule_batch_summary";
-  const attachmentStatusAnomaly = paneId === "invoice" && row.displayOnly
-    ? row.workbenchAnomalies?.find((anomaly) => isOaAttachmentStatus(anomaly.code))
-    : undefined;
+  const attachmentStatusAnomalies = paneId === "invoice" && row.displayOnly
+    ? row.workbenchAnomalies?.filter((anomaly) => isOaAttachmentStatus(anomaly.code)) ?? []
+    : [];
+  const hasUnparsedAttachment = attachmentStatusAnomalies.some(
+    (anomaly) => anomaly.code === "oa_invoice_attachment_unparsed",
+  );
   const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
@@ -91,12 +94,15 @@ function WorkbenchRecordCard({
       style={columnGridStyle}
       onClick={readOnly || row.displayOnly ? undefined : () => onSelectRow(row, zoneId)}
     >
-      {attachmentStatusAnomaly ? (
+      {attachmentStatusAnomalies.length > 0 ? (
         <div className="workbench-invoice-status-cell" role="cell">
           <div className="workbench-invoice-status-row">
-            {renderWorkbenchAnomalyChip(attachmentStatusAnomaly, row.externalUrl)}
-            {attachmentStatusAnomaly.code === "oa_invoice_attachment_unparsed"
-              && row.availableActions.includes("enter_invoice") ? (
+            <WorkbenchAnomalyIndicator
+              anomalies={attachmentStatusAnomalies}
+              externalUrl={row.externalUrl}
+              levelLabel="该付款项"
+            />
+            {hasUnparsedAttachment && row.availableActions.includes("enter_invoice") ? (
                 <InvoiceEntryAction
                   disabled={!canMutateData || readOnly}
                   onPress={() => onRowAction(row, "enter-invoice")}
@@ -117,16 +123,13 @@ function WorkbenchRecordCard({
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
               {columnIndex === 0 && row.workbenchAnomalies?.length ? (
-                <span className="workbench-anomaly-chip-row">
-                  {row.workbenchAnomalies.map((anomaly) => (
-                    <span key={anomaly.fingerprint}>
-                      {renderWorkbenchAnomalyChip(
-                        anomaly,
-                        isOaAttachmentStatus(anomaly.code) ? row.externalUrl : undefined,
-                      )}
-                    </span>
-                  ))}
-                </span>
+                <WorkbenchAnomalyIndicator
+                  anomalies={row.workbenchAnomalies}
+                  externalUrl={row.workbenchAnomalies.some((anomaly) => isOaAttachmentStatus(anomaly.code))
+                    ? row.externalUrl
+                    : undefined}
+                  levelLabel={`该${paneId === "oa" ? "OA" : paneId === "bank" ? "流水" : "发票"}`}
+                />
               ) : null}
             </div>
           </div>
@@ -862,7 +865,7 @@ function renderInvoicePartyValue(
         <span className="invoice-party-text-stack">
           {sourceKind === "oa_supporting_document" && externalUrl ? (
             <a
-              className="invoice-oa-anomaly-link cell-text-value cell-text-value-full"
+              className="invoice-oa-external-link cell-text-value cell-text-value-full"
               href={externalUrl}
               rel="noopener noreferrer"
               target="_blank"
@@ -886,81 +889,10 @@ function renderInvoicePartyValue(
   );
 }
 
-function renderWorkbenchAnomalyChip(
-  anomaly: WorkbenchAnomalyItem,
-  externalUrl?: string,
-) {
-  const accepted = anomaly.reviewDecision === "accept_paired";
-  const chip = (
-    <Chip
-      className="invoice-oa-anomaly-chip"
-      color={accepted ? "success" : anomaly.mismatchPair ? "danger" : "warning"}
-      size="sm"
-      title={anomalyTitle(anomaly)}
-      variant="soft"
-    >
-      {accepted
-        ? <CircleCheck aria-hidden="true" size={13} strokeWidth={1.9} />
-        : isOaAttachmentStatus(anomaly.code)
-          ? <FileWarning aria-hidden="true" size={13} strokeWidth={1.8} />
-          : null}
-      <Chip.Label>{anomaly.displayLabel}</Chip.Label>
-    </Chip>
-  );
-  if (!externalUrl) {
-    return chip;
-  }
-  return (
-    <a
-      aria-label={`${anomaly.displayLabel}，在新窗口打开 OA`}
-      className="invoice-oa-anomaly-link"
-      href={externalUrl}
-      rel="noopener noreferrer"
-      target="_blank"
-      onClick={(event) => event.stopPropagation()}
-    >
-      {chip}
-    </a>
-  );
-}
-
 function isOaAttachmentStatus(code: string) {
   return code === "oa_invoice_attachment_absent"
     || code === "oa_invoice_attachment_unparsed"
     || code === "oa_invoice_attachment_unassigned";
-}
-
-function anomalyTitle(anomaly: WorkbenchAnomalyItem) {
-  const review = anomaly.reviewDecision === "accept_paired"
-    ? [
-        "已人工接受该异常",
-        anomaly.reviewedBy ? `审核人 ${anomaly.reviewedBy}` : "",
-        anomaly.reviewedAt ? `审核时间 ${anomaly.reviewedAt}` : "",
-        anomaly.reviewNote ? `备注 ${anomaly.reviewNote}` : "",
-      ].filter(Boolean).join("；")
-    : "";
-  const withReview = (detail: string) => review ? `${review}；${detail}` : detail;
-  if (anomaly.code === "oa_invoice_attachment_absent") {
-    return withReview("OA子付款项没有附件");
-  }
-  if (anomaly.code === "oa_invoice_attachment_unparsed") {
-    return withReview(`OA子付款项已有 ${anomaly.attachmentFileCount} 个附件，但未解析出可用正式发票`);
-  }
-  if (anomaly.code === "oa_invoice_attachment_unassigned") {
-    return withReview("OA 已解析出发票，但缺少明确的子付款项来源");
-  }
-  const totals = {
-    oa: anomaly.oaTotal,
-    bank: anomaly.bankTotal,
-    invoice: anomaly.invoiceTotal,
-  };
-  const labels = { oa: "OA", bank: "流水", invoice: "发票" };
-  const pair = anomaly.mismatchPair;
-  if (!pair) {
-    return withReview(anomaly.displayLabel);
-  }
-  const scopeLabel = anomaly.displayScope === "group" ? "该关联组" : "";
-  return withReview(`${scopeLabel}${labels[pair[0]]} ${totals[pair[0]] ?? "—"} / ${labels[pair[1]]} ${totals[pair[1]] ?? "—"} / 差额 ${anomaly.amountDelta ?? "—"}`);
 }
 
 function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: string, taxAmount: string, searchQuery = "") {

@@ -3,16 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 
-WORKBENCH_AMOUNT_REVIEW_CLASSIFICATION_CODES = frozenset(
-    {
-        "oa_bank_amount_mismatch",
-        "oa_invoice_amount_mismatch",
-        "bank_invoice_amount_mismatch",
-    }
-)
-WORKBENCH_NO_ANOMALY_REVIEW_CLASSIFICATION = "no_anomaly"
-
-
 class WorkbenchAnomalyReviewConflict(ValueError):
     def __init__(self, message: str, *, code: str = "workbench_anomaly_changed") -> None:
         super().__init__(message)
@@ -32,20 +22,6 @@ class WorkbenchAnomalyReviewService:
         fingerprint = str(payload.get("fingerprint") or "").strip().lower()
         decision = str(payload.get("decision") or "").strip()
         note = str(payload.get("note") or "").strip()
-        review_classification_codes = sorted(
-            dict.fromkeys(
-                str(value or "").strip()
-                for value in list(payload.get("review_classification_codes") or [])
-                if str(value or "").strip()
-            )
-        )
-        reviewed_items = sorted(
-            dict.fromkeys(
-                str(value or "").strip().lower()
-                for value in list(payload.get("reviewed_item_fingerprints") or [])
-                if str(value or "").strip()
-            )
-        )
         if zone not in {"paired", "unpaired"}:
             raise ValueError("zone must be paired or unpaired.")
         if decision not in {"accept_paired", "keep_unpaired"}:
@@ -67,46 +43,20 @@ class WorkbenchAnomalyReviewService:
         anomaly = group.get("workbench_anomaly")
         if not isinstance(anomaly, dict) or str(anomaly.get("fingerprint") or "") != fingerprint:
             raise WorkbenchAnomalyReviewConflict("异常已变化或已消失，请刷新后重试。")
-        current_items = sorted(
-            str(item.get("fingerprint") or "").strip().lower()
-            for item in list(anomaly.get("items") or [])
-            if isinstance(item, dict) and str(item.get("fingerprint") or "").strip()
+        evidence_item_fingerprints = sorted(
+            str(value or "").strip().lower()
+            for value in list(anomaly.get("evidence_item_fingerprints") or [])
+            if str(value or "").strip()
         )
-        if reviewed_items != current_items:
-            raise ValueError("必须审阅当前异常中的每一项后才能提交判断。")
-        current_amount_codes = {
-            str(item.get("code") or "").strip()
-            for item in list(anomaly.get("items") or [])
-            if isinstance(item, dict)
-            and str(item.get("code") or "").strip()
-            in WORKBENCH_AMOUNT_REVIEW_CLASSIFICATION_CODES
-        }
-        allowed_classification_codes = {
-            *WORKBENCH_AMOUNT_REVIEW_CLASSIFICATION_CODES,
-            WORKBENCH_NO_ANOMALY_REVIEW_CLASSIFICATION,
-        }
-        unknown_classification_codes = sorted(
-            set(review_classification_codes) - allowed_classification_codes
+        detected_classification_codes = sorted(
+            {
+                str(item.get("code") or "").strip()
+                for item in list(anomaly.get("items") or [])
+                if isinstance(item, dict) and str(item.get("code") or "").strip()
+            }
         )
-        if unknown_classification_codes:
-            raise ValueError("人工金额判断包含不支持的类型。")
-        is_legacy_paired_withdrawal = (
-            decision == "keep_unpaired"
-            and str(anomaly.get("review_decision") or "").strip() == "accept_paired"
-        )
-        if (
-            current_amount_codes
-            and not review_classification_codes
-            and not is_legacy_paired_withdrawal
-        ):
-            raise ValueError("存在金额异常时必须选择人工金额判断。")
-        if not current_amount_codes and review_classification_codes:
-            raise ValueError("当前异常不包含需要人工判断的金额异常。")
-        if (
-            WORKBENCH_NO_ANOMALY_REVIEW_CLASSIFICATION in review_classification_codes
-            and len(review_classification_codes) > 1
-        ):
-            raise ValueError("无异常不能与金额不一致类型同时选择。")
+        if not evidence_item_fingerprints or not detected_classification_codes:
+            raise WorkbenchAnomalyReviewConflict("异常已变化或已消失，请刷新后重试。")
         if decision == "accept_paired":
             other_blockers = [
                 reason
@@ -144,8 +94,8 @@ class WorkbenchAnomalyReviewService:
             actor_id=actor_id,
             decision=decision,
             note=note,
-            review_classification_codes=review_classification_codes,
-            reviewed_item_fingerprints=reviewed_items,
+            detected_classification_codes=detected_classification_codes,
+            evidence_item_fingerprints=evidence_item_fingerprints,
         )
         return {**result, "affected_scope_keys": [decision_scope_key]}
 
@@ -188,8 +138,6 @@ class WorkbenchAnomalyReviewService:
 
 
 __all__ = [
-    "WORKBENCH_AMOUNT_REVIEW_CLASSIFICATION_CODES",
-    "WORKBENCH_NO_ANOMALY_REVIEW_CLASSIFICATION",
     "WorkbenchAnomalyReviewConflict",
     "WorkbenchAnomalyReviewService",
 ]

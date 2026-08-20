@@ -720,24 +720,27 @@ type WorkbenchAnomalyReviewDecision = "accept_paired" | "keep_unpaired" | null;
 function buildAmountMismatchWorkbenchGroup(decision: WorkbenchAnomalyReviewDecision) {
   const group = buildPairedWorkbenchGroup();
   const anomalyItem = {
-    code: "oa_invoice_amount_mismatch",
-    label: "OA发票金额不一致",
-    display_label: "OA发票金额不一致",
+    code: "oa_bank_equal_invoice_less",
+    label: "OA 流水一致，票少",
+    display_label: "OA 流水一致，票少",
     fingerprint: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     comparison_unit_id: "case:CASE-202603-101",
     oa_total: "58000.00",
+    bank_total: "58000.00",
     invoice_total: "57999.99",
     amount_delta: "0.01",
     invoice_row_ids: [group.invoice_rows[0].id],
     attachment_file_count: 0,
+    display_scope: "row",
+    display_pane: "invoice",
+    display_row_id: group.invoice_rows[0].id,
   };
   const anomaly = {
     code: "workbench_anomaly",
     fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     review_decision: decision,
-    reviewed_item_fingerprints: decision ? [anomalyItem.fingerprint] : [],
-    review_classification_codes: decision ? ["oa_invoice_amount_mismatch"] : [],
     review_note: decision === "accept_paired" ? "浏览器 E2E 已确认进入已配对" : "",
+    reviewed_by: decision === "accept_paired" ? "浏览器测试员" : "",
     items: [anomalyItem],
   };
   return {
@@ -10106,7 +10109,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const body = parseJsonBody(request.postData()) as {
         decision?: string;
         detail_key?: string;
-        review_classification_codes?: string[];
       };
       if (!body.detail_key) {
         return json(route, {
@@ -10124,7 +10126,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         changed: true,
         affected_scope_keys: ["2026-03"],
         message: workbenchAmountMismatchDecision === "accept_paired"
-          ? "异常已人工确认进入已配对。"
+          ? "异常已接受并进入已配对。"
           : "异常已保留在未配对。",
       });
     }

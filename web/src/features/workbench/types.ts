@@ -60,9 +60,13 @@ export type WorkbenchAmountCheck = {
 
 export type WorkbenchAnomalyItem = {
   code:
-    | "oa_bank_amount_mismatch"
-    | "oa_invoice_amount_mismatch"
-    | "bank_invoice_amount_mismatch"
+    | "oa_bank_equal_invoice_more"
+    | "oa_bank_equal_invoice_less"
+    | "oa_invoice_equal_bank_more"
+    | "oa_invoice_equal_bank_less"
+    | "bank_invoice_equal_oa_less"
+    | "bank_invoice_equal_oa_more"
+    | "all_amounts_different"
     | "oa_invoice_attachment_absent"
     | "oa_invoice_attachment_unparsed"
     | "oa_invoice_attachment_unassigned"
@@ -81,7 +85,7 @@ export type WorkbenchAnomalyItem = {
   invoiceRowIds: string[];
   attachmentFileCount: number;
   displayScope: "row" | "expense_item" | "group" | (string & {});
-  displayPane: WorkbenchRecordType;
+  displayPane: WorkbenchRecordType | "group";
   displayRowId?: string;
   reviewDecision?: "pending" | "accept_paired" | "keep_unpaired";
   reviewNote?: string;
@@ -89,18 +93,10 @@ export type WorkbenchAnomalyItem = {
   reviewedAt?: string;
 };
 
-export type WorkbenchAnomalyReviewClassificationCode =
-  | "oa_bank_amount_mismatch"
-  | "oa_invoice_amount_mismatch"
-  | "bank_invoice_amount_mismatch"
-  | "no_anomaly";
-
 export type WorkbenchAnomaly = {
   code: "workbench_anomaly" | (string & {});
   fingerprint: string;
   reviewDecision: "pending" | "accept_paired" | "keep_unpaired";
-  reviewedItemFingerprints: string[];
-  reviewClassificationCodes: WorkbenchAnomalyReviewClassificationCode[];
   reviewNote: string;
   reviewedBy: string;
   reviewedAt?: string;

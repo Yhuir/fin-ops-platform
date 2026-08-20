@@ -19,7 +19,6 @@ import type {
   WorkbenchAmountCheck,
   WorkbenchAnomaly,
   WorkbenchAnomalyItem,
-  WorkbenchAnomalyReviewClassificationCode,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
@@ -208,8 +207,6 @@ type ApiWorkbenchAnomaly = {
   code?: string | null;
   fingerprint?: string | null;
   review_decision?: string | null;
-  reviewed_item_fingerprints?: unknown[] | null;
-  review_classification_codes?: unknown[] | null;
   review_note?: string | null;
   reviewed_by?: string | null;
   reviewed_at?: string | null;
@@ -577,8 +574,6 @@ type WorkbenchAnomalyReviewPayload = {
   fingerprint: string;
   decision: "accept_paired" | "keep_unpaired";
   note?: string;
-  reviewedItemFingerprints: string[];
-  reviewClassificationCodes: WorkbenchAnomalyReviewClassificationCode[];
 };
 
 type ConfirmCashPassThroughPayload = {
@@ -907,15 +902,6 @@ function mapWorkbenchAnomaly(
     code: toDisplayValue(value.code, "workbench_anomaly") as WorkbenchAnomaly["code"],
     fingerprint,
     reviewDecision,
-    reviewedItemFingerprints: toStringList(value.reviewed_item_fingerprints),
-    reviewClassificationCodes: toStringList(value.review_classification_codes).filter(
-      (code): code is WorkbenchAnomalyReviewClassificationCode => (
-        code === "oa_bank_amount_mismatch"
-        || code === "oa_invoice_amount_mismatch"
-        || code === "bank_invoice_amount_mismatch"
-        || code === "no_anomaly"
-      ),
-    ),
     reviewNote,
     reviewedBy,
     reviewedAt,
@@ -1430,10 +1416,10 @@ function decorateWorkbenchAnomalies(
       });
       return;
     }
-    const paneRows = rows[item.displayPane] ?? [];
-    const targetRow = item.displayScope === "row" && item.displayRowId
-      ? paneRows.find((row) => row.id === item.displayRowId)
-      : paneRows[0];
+    if (item.displayScope !== "row" || !item.displayRowId || item.displayPane === "group") {
+      return;
+    }
+    const targetRow = rows[item.displayPane].find((row) => row.id === item.displayRowId);
     if (!targetRow) {
       return;
     }
@@ -1442,23 +1428,26 @@ function decorateWorkbenchAnomalies(
 }
 
 function anomalyLabel(code: string) {
-  if (code === "oa_bank_amount_mismatch") {
-    return "OA流水金额不一致";
-  }
-  if (code === "oa_invoice_amount_mismatch") {
-    return "OA发票金额不一致";
-  }
-  if (code === "bank_invoice_amount_mismatch") {
-    return "流水发票金额不一致";
+  const amountLabels: Record<string, string> = {
+    oa_bank_equal_invoice_more: "OA 流水一致，票多",
+    oa_bank_equal_invoice_less: "OA 流水一致，票少",
+    oa_invoice_equal_bank_more: "OA 发票一致，付多",
+    oa_invoice_equal_bank_less: "OA 发票一致，付少",
+    bank_invoice_equal_oa_less: "发票流水一致，OA 提少了",
+    bank_invoice_equal_oa_more: "发票流水一致，OA 提多了",
+    all_amounts_different: "三项不一致",
+  };
+  if (amountLabels[code]) {
+    return amountLabels[code];
   }
   if (code === "oa_invoice_attachment_absent") {
-    return "无OA附件";
+    return "发票附件缺失";
   }
   if (code === "oa_invoice_attachment_unparsed") {
-    return "OA发票附件未解析";
+    return "发票附件未解析";
   }
   if (code === "oa_invoice_attachment_unassigned") {
-    return "OA发票待归属";
+    return "发票待归属";
   }
   return "异常待审阅";
 }
@@ -3206,8 +3195,6 @@ export async function reviewWorkbenchAnomaly(
         fingerprint: payload.fingerprint,
         decision: payload.decision,
         note: payload.note,
-        reviewed_item_fingerprints: payload.reviewedItemFingerprints,
-        review_classification_codes: payload.reviewClassificationCodes,
       }),
     },
   );

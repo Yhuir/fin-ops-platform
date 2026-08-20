@@ -916,7 +916,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
                 "type": "bank",
                 "object_identity_key": "bank-1",
                 "amount": "100.00",
-                "direction": "expense",
+                "txn_direction": "expense",
             },
         }
         relation = {
@@ -939,7 +939,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(active_group["workbench_anomaly"]["review_decision"], "pending")
         self.assertEqual(
             {item["display_label"] for item in active_group["workbench_anomaly"]["items"]},
-            {"OA发票金额不一致", "流水发票金额不一致"},
+            {"OA 流水一致，票少"},
         )
         self.assertIn("anomaly_review_required", active_group["completion"]["blocking_reasons"])
         self.assertNotIn("amount_anomaly", active_group["invoice_rows"][0])
@@ -951,10 +951,6 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             anomaly_review_decisions={
                 fingerprint: {
                     "decision": "accept_paired",
-                    "reviewed_item_fingerprints": [
-                        item["fingerprint"]
-                        for item in active_group["workbench_anomaly"]["items"]
-                    ],
                     "reviewed_by": "reviewer",
                 }
             },
@@ -968,7 +964,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             {item["display_label"] for item in accepted_group["workbench_anomaly"]["items"]},
-            {"已接受：OA发票金额不一致", "已接受：流水发票金额不一致"},
+            {"OA 流水一致，票少"},
         )
 
     def test_uploaded_expense_item_without_parsed_invoice_is_an_active_group_exception(self) -> None:
@@ -1011,7 +1007,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["unpaired_exception_count"], 1)
         self.assertEqual(group["workbench_anomaly"]["review_decision"], "pending")
         self.assertEqual(item["code"], "oa_invoice_attachment_unparsed")
-        self.assertEqual(item["display_label"], "OA发票附件未解析")
+        self.assertEqual(item["display_label"], "发票附件未解析")
         self.assertEqual(item["source_expense_item_ids"], ["oa-1:item:0"])
         self.assertEqual(item["invoice_row_ids"], [])
 class WorkbenchRelationPreviewGroupingServiceTests(unittest.TestCase):

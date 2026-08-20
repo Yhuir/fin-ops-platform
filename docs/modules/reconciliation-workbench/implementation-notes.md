@@ -1,5 +1,15 @@
 # 关联台 实施记录
 
+## 2026-08-21 - 自动异常分类与共享三栏感叹号闭环
+
+- 产品收口：三栏完整且方向明确时由服务端自动归为七种互斥金额分类；局部付款项差异与“发票附件缺失 / 发票附件未解析 / 发票待归属”沿用同一异常 bundle。方向未知、冲突或缺栏不猜测。
+- 定位收口：主表与抽屉展开态共用 `RelationGroupGrid -> RelationGroupCell -> WorkbenchRecordCard`。唯一可证明目标时把一个感叹号放到对应明细；歧义或目标不可见时放在既有关联组边界右上角。抽屉折叠态把感叹号放在既有展开箭头前，不新增汇总栏、第四栏或额外行。
+- 交互收口：共享 `WorkbenchAnomalyIndicator` 复用 HeroUI Popover/Chip，支持 hover、focus、click、Escape 和 portal；页面默认不平铺异常 Tag/Chip。抽屉删除重复 Chip、逐项复选和人工金额下拉，动作只保留“留在未配对 / 接受异常并进入已配对 / 撤回到未配对”。
+- 服务端权威：review POST 只消费 fingerprint 与决定；服务端重取 canonical detail 并推导 evidence fingerprints/detected codes，旧客户端人工字段被忽略。接受风险只改变关联台分区，原异常感叹号与 Chip 保留，审阅审计在 Popover 单独显示。
+- 旧链删除：删除孤立 `workbench_exception_classifier.py` 及对应测试，并删除前端人工分类 state/types/API payload/CSS/E2E mock；不保留兼容分支。现行分类继续收口在 `WorkbenchAmountCheckService`，持久化继续复用 exception repository。
+- 性能与隔离：没有新增依赖、HTTP、数据库 schema、read model、worker、queue、cache 或逐项查询；SQL 分页前异常候选与 Python hydration 同时增加方向有效性条件。其它页面继续只消费 active formal relation，不读取异常审阅 DTO。
+- 数据安全：本次无 migration、无数据库备份、无生产数据修复；部署和生产核验不得删除主数据库。
+
 ## 2026-08-20 - canonical OA 审计来源对齐
 
 - 根因：关联台查询、selection 与 relation member lock 的 canonical OA 合同是同 tenant 的已完成 `app.oa_applications` 与进行中 `app.oa_pending_payment_admissions` 并集；Page Audit 与 unavailable-OA repair discovery 旧查询只读取前者，因而把合法进行中 OA 误报为 orphan。
@@ -54,7 +64,7 @@
 ## 2026-08-15 - 统一异常审阅与展示分区
 
 - 当前合同以 `workbench_anomaly` 为唯一自动异常 bundle，覆盖 OA—流水、OA—发票、流水—发票以及 OA 附件缺失/解析失败/待归属；旧 `oa_invoice_anomaly`、amount-mismatch ignore/restore service、routes 和前端动作已删除。
-- 异常默认阻断关联台进入已配对；逐项审阅后写 `accept_paired|keep_unpaired`。决定只改变关联台有效展示分区，不修改 active 正式关系或下游关系事实。数据或成员 fingerprint 变化后决定失效。
+- 异常默认阻断关联台进入已配对；服务端按当前证据写 `accept_paired|keep_unpaired`。决定只改变关联台有效展示分区，不修改 active 正式关系或下游关系事实。数据或成员 fingerprint 变化后决定失效。旧逐项审阅已由 2026-08-21 实施取代。
 - 抽屉只保留“未配对异常 / 已配对异常”，每次读取一个 bucket。accept/撤回后各执行一次 canonical direct GET 与一次目标 bucket GET；无新表、迁移、read model、worker、缓存或依赖。
 
 ## 2026-08-12 - generation retention 小批事务与专用超时

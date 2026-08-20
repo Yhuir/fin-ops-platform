@@ -5710,7 +5710,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/workbench_override_service.py",
             "backend/src/fin_ops_platform/services/workbench_exception_case_service.py",
             "backend/src/fin_ops_platform/services/workbench_exception_projection.py",
-            "backend/src/fin_ops_platform/services/workbench_exception_classifier.py",
             "backend/src/fin_ops_platform/services/workbench_exception_rules.py",
             "backend/src/fin_ops_platform/services/workbench_matching_orchestrator.py",
             "backend/src/fin_ops_platform/services/workbench_free_matching_engine.py",
@@ -5742,6 +5741,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
     def test_legacy_workbench_candidate_and_decision_modules_are_removed(self) -> None:
         removed_modules = {
+            "workbench_exception_classifier",
             "workbench_candidate_grouping",
             "workbench_candidate_match_service",
             "workbench_matching_rules",

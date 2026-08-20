@@ -964,14 +964,6 @@ class PostgresWorkbenchPageHydrationRepository:
                     jsonb_build_object(
                         'fingerprint', decision.fingerprint,
                         'decision', decision.resolution,
-                        'reviewed_item_fingerprints', coalesce(
-                            decision.raw_payload#>'{normalized_payload,reviewed_item_fingerprints}',
-                            '[]'::jsonb
-                        ),
-                        'review_classification_codes', coalesce(
-                            decision.raw_payload#>'{normalized_payload,review_classification_codes}',
-                            '[]'::jsonb
-                        ),
                         'note', coalesce(
                             decision.raw_payload#>>'{normalized_payload,note}',
                             ''
@@ -1472,10 +1464,6 @@ class PostgresWorkbenchPageHydrationRepository:
                    decision.resolution as decision_resolution,
                    decision.updated_by as decision_updated_by,
                    decision.updated_at as decision_updated_at,
-                   decision.raw_payload#>'{normalized_payload,reviewed_item_fingerprints}'
-                       as reviewed_item_fingerprints,
-                   decision.raw_payload#>'{normalized_payload,review_classification_codes}'
-                       as review_classification_codes,
                    decision.raw_payload#>>'{normalized_payload,note}' as decision_note
             from app.workbench_pair_relations relation
             left join lateral (
@@ -1534,12 +1522,6 @@ class PostgresWorkbenchPageHydrationRepository:
             ):
                 decisions[fingerprint] = {
                     "decision": resolution,
-                    "reviewed_item_fingerprints": text_list(
-                        row.get("reviewed_item_fingerprints")
-                    ),
-                    "review_classification_codes": text_list(
-                        row.get("review_classification_codes")
-                    ),
                     "note": str(row.get("decision_note") or ""),
                     "reviewed_by": str(row.get("decision_updated_by") or ""),
                     "reviewed_at": serialize_value(reviewed_at),

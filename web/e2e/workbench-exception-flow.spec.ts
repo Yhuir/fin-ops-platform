@@ -42,7 +42,7 @@ test.describe("workbench exception browser flow", () => {
     expect(loadMoreUrl?.searchParams.has("page")).toBe(false);
   });
 
-  test("reviews, accepts, and withdraws an exact-cent OA invoice amount mismatch", async ({ page }) => {
+  test("reviews, accepts, and withdraws an automatically classified exact-cent mismatch", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchAmountMismatchScenario: true,
@@ -53,29 +53,48 @@ test.describe("workbench exception browser flow", () => {
 
     const pairedZone = page.getByTestId("zone-paired");
     const unpairedZone = page.getByTestId("zone-unpaired");
-    await expect(unpairedZone.getByText("OA发票金额不一致")).toBeVisible();
-    await expect(pairedZone.getByText("OA发票金额不一致")).toHaveCount(0);
+    const unpairedIndicator = unpairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    });
+    await expect(unpairedIndicator).toBeVisible();
+    await expect(unpairedZone.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await unpairedIndicator.hover();
+    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(pairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toHaveCount(0);
     await page
       .getByTestId("zone-unpaired")
       .getByRole("button", { name: "未配对异常 1 | 已配对异常 0" })
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(drawer.getByText("异常", { exact: true }).first()).toBeVisible();
-    await expect(drawer.getByText("OA发票金额不一致").first()).toBeHidden();
-    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
-    await expect(drawer.getByText("OA发票金额不一致").first()).toBeVisible();
-    await drawer.getByRole("button", { name: /人工金额判断/ }).click();
-    await page.getByRole("option", { name: "OA发票金额不一致" }).click();
+    const collapsedIndicator = drawer.getByRole("button", {
+      name: "该关联组有 1 项异常，查看详情",
+    });
+    await expect(collapsedIndicator).toBeVisible();
+    await expect(drawer.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await collapsedIndicator.hover();
+    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
     await page.keyboard.press("Escape");
+    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
+    await expect(drawer.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: /人工金额判断/ })).toHaveCount(0);
+    await expect(drawer.getByRole("checkbox")).toHaveCount(0);
     const workbenchLoadsBeforeAccept = api.count("GET /api/workbench");
     const bucketLoadsBeforeAccept = api.count("GET /api/workbench/groups");
-    await drawer.getByRole("button", { name: "进入已配对" }).click();
+    await drawer.getByRole("button", { name: "接受异常并进入已配对" }).click();
 
     await expect(drawer.getByRole("radio", { name: "已配对异常" })).toHaveAttribute("aria-checked", "true");
-    await expect(drawer.getByText("OA发票金额不一致").first()).toBeHidden();
-    await expect(pairedZone.getByText("OA发票金额不一致")).toBeVisible();
-    await expect(unpairedZone.getByText("OA发票金额不一致")).toHaveCount(0);
+    await expect(pairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toBeVisible();
+    await expect(unpairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toHaveCount(0);
     expect(api.count("POST /api/workbench/exceptions/review")).toBe(1);
     expect(api.lastBody("POST /api/workbench/exceptions/review")).toMatchObject({
       month: "all",
@@ -83,8 +102,6 @@ test.describe("workbench exception browser flow", () => {
       group_id: "case:CASE-202603-101",
       fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       decision: "accept_paired",
-      reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
-      review_classification_codes: ["oa_invoice_amount_mismatch"],
     });
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeAccept + 1);
     expect(api.count("GET /api/workbench/groups")).toBe(bucketLoadsBeforeAccept + 1);
@@ -95,11 +112,15 @@ test.describe("workbench exception browser flow", () => {
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     const bucketLoadsBeforeWithdraw = api.count("GET /api/workbench/groups");
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
-    await drawer.getByRole("button", { name: "撤回" }).click();
+    await drawer.getByRole("button", { name: "撤回到未配对" }).click();
 
     await expect(drawer.getByRole("radio", { name: "未配对异常" })).toHaveAttribute("aria-checked", "true");
-    await expect(unpairedZone.getByText("OA发票金额不一致")).toBeVisible();
-    await expect(pairedZone.getByText("OA发票金额不一致")).toHaveCount(0);
+    await expect(unpairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toBeVisible();
+    await expect(pairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toHaveCount(0);
     expect(api.count("POST /api/workbench/exceptions/review")).toBe(2);
     expect(api.lastBody("POST /api/workbench/exceptions/review")).toMatchObject({
       month: "all",
@@ -107,8 +128,6 @@ test.describe("workbench exception browser flow", () => {
       group_id: "case:CASE-202603-101",
       fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       decision: "keep_unpaired",
-      reviewed_item_fingerprints: ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
-      review_classification_codes: ["oa_invoice_amount_mismatch"],
     });
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeWithdraw + 1);
     expect(api.count("GET /api/workbench/groups")).toBe(bucketLoadsBeforeWithdraw + 1);
@@ -144,15 +163,18 @@ test.describe("workbench exception browser flow", () => {
     expect(collapsedBox).not.toBeNull();
     expect(collapsedBox!.x).toBeGreaterThanOrEqual(0);
     expect(collapsedBox!.x + collapsedBox!.width).toBeLessThanOrEqual(1440);
-    await expect(drawer.getByText("OA发票金额不一致").first()).toBeHidden();
+    await expect(drawer.getByText("OA 流水一致，票少")).toHaveCount(0);
 
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     const review = drawer.getByRole("region", { name: "异常审阅" });
     await review.scrollIntoViewIfNeeded();
-    await expect(review.getByText("OA发票金额不一致").first()).toBeVisible();
-    await expect(review.getByRole("button", { name: /人工金额判断/ })).toBeVisible();
+    await expect(drawer.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toBeVisible();
+    await expect(review.getByRole("button", { name: /人工金额判断/ })).toHaveCount(0);
+    await expect(review.getByRole("checkbox")).toHaveCount(0);
     await expect(review.getByRole("button", { name: "留在未配对" })).toBeVisible();
-    await expect(review.getByRole("button", { name: "进入已配对" })).toBeVisible();
+    await expect(review.getByRole("button", { name: "接受异常并进入已配对" })).toBeVisible();
     const reviewBox = await review.boundingBox();
     expect(reviewBox).not.toBeNull();
     expect(reviewBox!.x).toBeGreaterThanOrEqual(collapsedBox!.x);
