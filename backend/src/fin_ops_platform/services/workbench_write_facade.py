@@ -241,7 +241,6 @@ class WorkbenchWriteFacade:
         next_case_id: Callable[[], str],
         normalize_row_ids: Callable[[list[object]], list[str]],
         relation_preview_selection: Callable[..., Any],
-        expand_confirm_link_row_ids_for_existing_context: Callable[..., list[str]],
         resolve_rows_for_amount_check: Callable[..., list[dict[str, object]]],
         merge_relation_snapshots: Callable[..., list[dict[str, object]]],
         synthetic_existing_case_relations: Callable[..., list[dict[str, object]]],
@@ -274,7 +273,6 @@ class WorkbenchWriteFacade:
         self._next_case_id = next_case_id
         self._normalize_row_ids = normalize_row_ids
         self._relation_preview_selection = relation_preview_selection
-        self._expand_confirm_link_row_ids_for_existing_context = expand_confirm_link_row_ids_for_existing_context
         self._resolve_rows_for_amount_check = resolve_rows_for_amount_check
         self._merge_relation_snapshots = merge_relation_snapshots
         self._synthetic_existing_case_relations = synthetic_existing_case_relations

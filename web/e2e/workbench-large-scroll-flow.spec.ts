@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 async function expectVisibleAndUncovered(locator: Locator, label: string) {
   await expect(locator).toBeVisible();
@@ -146,6 +147,39 @@ async function selectFilterOptionWithKeyboardWithoutPageShift({
 }
 
 test.describe("workbench large dataset browser flow", () => {
+  test("sends every member when more than twenty rows are selected for confirmation", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchLargeDataset: true,
+    });
+    await page.goto("/");
+
+    const openZone = page.getByTestId("zone-unpaired");
+    const gridBody = openZone.locator(".candidate-grid-body");
+    for (let pageIndex = 0; pageIndex < 2; pageIndex += 1) {
+      await gridBody.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+        element.dispatchEvent(new Event("scroll", { bubbles: true }));
+      });
+      await expect.poll(() => api.count("GET /api/workbench/groups")).toBe(pageIndex + 1);
+    }
+    const rows = openZone.locator('[data-testid^="candidate-group-unpaired-"] [role="row"]');
+    await expect(rows).toHaveCount(30);
+    for (let index = 0; index < 30; index += 1) {
+      await rows.nth(index).getByRole("cell").first().click({ force: true });
+    }
+    await expect(openZone.getByText("已选 30")).toBeVisible();
+
+    await openZone.getByRole("button", { name: "确认关联" }).click();
+    await expect(page.getByRole("dialog", { name: "确认关联" })).toBeVisible();
+
+    const previewBody = api.lastBody("POST /api/workbench/actions/confirm-link/preview");
+    expect(previewBody.row_ids).toHaveLength(30);
+    expect(previewBody.row_types).toHaveLength(30);
+    expect(new Set(previewBody.row_ids).size).toBe(30);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
   test("shows grouped bank, applicant, and project filters without overlapping long labels", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await installDeterministicApiMocks(page, {

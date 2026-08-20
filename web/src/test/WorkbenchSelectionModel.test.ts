@@ -138,4 +138,30 @@ describe("buildWorkbenchSelectionContext", () => {
     expect([...context.relatedRowIdentityKeySet]).toEqual(["oa\u001fshared-source-id"]);
     expect(context.summary).toMatchObject({ explicitTotal: 1, total: 2, oa: 1, bank: 1 });
   });
+
+  test("expands a large formal relation without truncating its members", () => {
+    const bankRows = Array.from({ length: 500 }, (_, index) => row(`bank-${index}`, "bank"));
+    const sourceGroup: WorkbenchRelationGroup = {
+      id: "case:large-relation",
+      groupType: "paired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      rows: {
+        oa: [],
+        bank: bankRows,
+        invoice: [],
+      },
+    };
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [bankRows[0]],
+      sourceGroups: [sourceGroup],
+      zoneId: "paired",
+    });
+
+    expect(context.includedRows).toHaveLength(500);
+    expect(context.includedRowIdentityKeys).toHaveLength(500);
+    expect(context.summary).toMatchObject({ explicitTotal: 1, total: 500, bank: 500 });
+  });
 });

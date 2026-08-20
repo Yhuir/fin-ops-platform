@@ -1,5 +1,12 @@
 # 关联台关系事实源 实施记录
 
+## 2026-08-20 - 大成员关系取消预览数量门槛并删除旧上下文扩展链
+
+- 根因：`WorkbenchQueryFacade` 在 repository 前把 preview selection 固定限制为 20 条，PostgreSQL selection 又按 OA `source_links` 扫描附件并以 100 条中止；因此一个合法 active relation 超过 20 个成员时，前端自动带入完整关系也会被错误拒绝。
+- 修复：删除 20/100 两个业务数量门槛，typed identity、非空、对齐、重复、canonical missing/ambiguous、exact active member set、preview fingerprint、版本与幂等门禁保持不变。preview repository 只水合所选成员和正式 relation descriptor 已证明的同组成员，不再执行附件来源广扫。
+- 旧代码清理：删除从未被 `WorkbenchWriteFacade` 调用的 `expand_confirm_link_row_ids_for_existing_context` 构造依赖、`server.py` helper 链、`WorkbenchConfirmLinkContextRelationReadPort`、`WorkbenchOaAttachmentContextRowIndex` 及其孤立测试；正式 submit 继续在 UoW 内按完整 typed selection 重读 canonical facts，不恢复兼容 fallback。
+- 边界与性能：不新增 API、表、migration、worker、read model、cache 或依赖；30/100/500 条 preview 传递、500 条前端 payload/selection、100 成员 relation confirm/withdraw 与幂等重放由测试覆盖。500 是性能样本，不是新上限。
+
 ## 2026-08-18 - Matching 银行分类收口到 canonical projection
 
 - `WorkbenchMatchingOrchestrator` 不再接收 `BankTransactionEffectiveCategoryProvider`，只消费 fact repository 返回的银行有效分类投影。
@@ -40,7 +47,7 @@ Workbench active-generation 原子发布仍保留，但发布完成不再产生 
 
 当前 Workbench 页面读取只消费 active generation 中已经发布的 canonical rows + active formal relations。此前 raw/full-payload 读取时执行的 OA invoice-offset 自动配对、OA 附件 relation repair、缺行补齐、grouped payload 二次关系/标签修补和 legacy row-detail fallback 已全部删除；它们不能再作为 relation 事实写入或展示 owner。
 
-OA 附件上下文仍在两个明确边界内保留：projection/matching 发布 canonical relation facts；用户确认关联时，`WorkbenchOaAttachmentContextRowIndex` 只索引同一 active generation 的 grouped rows 以扩展父 OA/附件 row ids。Settings reset 只复用窄 retention date/month parser。历史记录中关于保留 `WorkbenchApiRoutes` fallback、raw repair executor 或对应 read port 的描述均已由本条取代，不再是当前合同。
+OA 附件上下文只由 projection/matching 与正式 relation facts 表达；人工 preview/confirm 不再通过 grouped-row index 隐式扩展父 OA/附件 row ids。Settings reset 只复用窄 retention date/month parser。历史记录中关于保留 `WorkbenchOaAttachmentContextRowIndex`、confirm context read port、`WorkbenchApiRoutes` fallback 或 raw repair executor 的描述均已由 2026-08-20 当前条目取代，不再是当前合同。
 
 负向架构 guard 证明旧 service 文件、Application wrapper、legacy route class、raw row-index surface 和 read-time relation repair symbol 不得回流；当前 relation command、write facade、SQL projection、ETC relation cleanup 与其他页面共享 relation consumer 行为不变。
 

@@ -5,6 +5,12 @@ class WorkbenchDirectQueryUnavailable(RuntimeError):
     """A known retryable PostgreSQL failure prevented a complete direct query."""
 
 
+class WorkbenchRelationPreviewSelectionError(RuntimeError):
+    def __init__(self, *, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 _TRANSIENT_SQLSTATES = frozenset(
     {
         "53300",  # too_many_connections
@@ -66,6 +72,7 @@ def is_workbench_data_integrity_query_error(error: BaseException) -> bool:
 
 __all__ = [
     "WorkbenchDirectQueryUnavailable",
+    "WorkbenchRelationPreviewSelectionError",
     "is_workbench_data_integrity_query_error",
     "is_transient_postgres_query_error",
 ]

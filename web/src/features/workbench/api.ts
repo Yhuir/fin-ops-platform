@@ -1978,7 +1978,6 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   workbench_relation_not_found: "所选关联关系已不可用，请刷新后重新选择。",
   relation_preview_rows_missing: "关联预览无效，请刷新后重新选择。",
   relation_preview_rows_ambiguous: "所选关联台记录内容不一致，请刷新后重试。",
-  relation_preview_selection_too_large: "本次选择记录过多，请减少选择后重试。",
   workbench_anomaly_changed: "异常内容已变化，请刷新后重新审阅。",
   workbench_anomaly_review_blocked: "该关系仍有未解决的配对条件，不能进入已配对。",
   invalid_workbench_anomaly_review_request: "异常审阅信息无效，请刷新后重新审阅。",

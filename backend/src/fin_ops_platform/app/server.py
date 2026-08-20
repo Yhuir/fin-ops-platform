@@ -229,12 +229,6 @@ from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialService,
 )
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-from fin_ops_platform.services.oa_attachment_invoice_linking import (
-    oa_attachment_matches_oa,
-    oa_attachment_parent_oa_id,
-    oa_attachment_row_id_matches_oa,
-    oa_row_source_ids,
-)
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoicePromotionService,
 )
@@ -402,9 +396,6 @@ from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAm
 from fin_ops_platform.services.workbench_anomaly_review_service import (
     WorkbenchAnomalyReviewService,
 )
-from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port import (
-    WorkbenchConfirmLinkContextRelationReadPort,
-)
 from fin_ops_platform.services.workbench_etc_batch_link import (
     WORKBENCH_ETC_BATCH_LINK_VERSION,
     workbench_etc_summary_row_id,
@@ -426,9 +417,6 @@ from fin_ops_platform.services.workbench_invoice_supplement_service import (
     ManualInvoiceSupplementCommand,
     WorkbenchInvoiceSupplementError,
     WorkbenchInvoiceSupplementService,
-)
-from fin_ops_platform.services.workbench_oa_attachment_context_row_index import (
-    WorkbenchOaAttachmentContextRowIndex,
 )
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     SupportingDocumentUpload,
@@ -2394,7 +2382,6 @@ class Application:
             next_case_id=self._next_workbench_relation_case_id,
             normalize_row_ids=self._normalize_row_ids,
             relation_preview_selection=self._workbench_query_facade().relation_preview_selection,
-            expand_confirm_link_row_ids_for_existing_context=self._expand_confirm_link_row_ids_for_existing_context,
             resolve_rows_for_amount_check=self._resolve_rows_for_amount_check,
             merge_relation_snapshots=self._merge_relation_snapshots,
             synthetic_existing_case_relations=self._synthetic_existing_case_relations,
@@ -2491,11 +2478,6 @@ class Application:
 
     def _workbench_relation_source_version_provider(self) -> WorkbenchRelationSourceVersionProvider:
         return WorkbenchRelationSourceVersionProvider(self._workbench_pair_relation_service.snapshot)
-
-    def _workbench_confirm_link_context_relation_read_port(self) -> WorkbenchConfirmLinkContextRelationReadPort:
-        return WorkbenchConfirmLinkContextRelationReadPort(
-            self._workbench_relation_command_service()
-        )
 
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
         storage_backend = str(getattr(getattr(self, "_state_store", None), "storage_backend", "") or "").strip()
@@ -8605,15 +8587,6 @@ class Application:
     def _parse_oa_retention_date(value: object) -> datetime | None:
         return WorkbenchOaRetentionDateParser.parse(value)
 
-    @staticmethod
-    def _workbench_oa_attachment_context_row_index() -> WorkbenchOaAttachmentContextRowIndex:
-        return WorkbenchOaAttachmentContextRowIndex(
-            attachment_parent_oa_id=oa_attachment_parent_oa_id,
-            attachment_matches_oa=oa_attachment_matches_oa,
-            attachment_row_id_matches_oa=oa_attachment_row_id_matches_oa,
-            oa_source_ids=oa_row_source_ids,
-        )
-
     def _apply_pair_relation_to_row(self, row: dict[str, object], relation: dict[str, object]) -> dict[str, object]:
         payload = self._serialize_value(row)
         payload["case_id"] = str(relation.get("case_id", ""))
@@ -8889,256 +8862,6 @@ class Application:
                 month_hint=month,
             )
         return self._resolve_live_rows_direct(row_ids, month_hint=month)
-
-    def _expand_confirm_link_row_ids_for_existing_context(self, row_ids: list[str], *, month: str) -> list[str]:
-        expanded_row_ids = self._normalize_row_ids(row_ids)
-        seen = set(expanded_row_ids)
-        relation_read_port = self._workbench_confirm_link_context_relation_read_port()
-        active_relations = relation_read_port.active_relations_for_row_ids(expanded_row_ids)
-        selected_oa_source_ids = self._confirm_link_selected_oa_source_ids(
-            expanded_row_ids,
-            month=month,
-        )
-
-        def add(row_id: object) -> None:
-            normalized_row_id = str(row_id or "").strip()
-            if not normalized_row_id or normalized_row_id in seen:
-                return
-            seen.add(normalized_row_id)
-            expanded_row_ids.append(normalized_row_id)
-
-        for relation in active_relations:
-            for relation_row_id in list(relation.get("row_ids") or []):
-                if str(relation_row_id or "").strip() in selected_oa_source_ids:
-                    continue
-                add(relation_row_id)
-
-        has_selected_bank_context = any(
-            self._row_type_for_row_id(row_id) == "bank"
-            for row_id in expanded_row_ids
-        )
-        for context_row_id in self._canonical_oa_attachment_context_row_ids(
-            selected_row_ids=seen,
-            selected_oa_source_ids=selected_oa_source_ids,
-            has_selected_bank_context=has_selected_bank_context,
-            month_hint=month,
-        ):
-            add(context_row_id)
-        for group in self._canonical_existing_context_groups_for_row_ids(
-            expanded_row_ids,
-            month_hint=month,
-        ):
-            for context_row_id in self._confirm_link_context_row_ids_to_preserve(
-                group,
-                selected_row_ids=seen,
-                selected_oa_source_ids=selected_oa_source_ids,
-                has_selected_bank_context=has_selected_bank_context,
-            ):
-                add(context_row_id)
-        return expanded_row_ids
-
-    def _canonical_oa_attachment_context_row_ids(
-        self,
-        *,
-        selected_row_ids: set[str],
-        selected_oa_source_ids: set[str],
-        has_selected_bank_context: bool,
-        month_hint: str,
-    ) -> list[str]:
-        if not has_selected_bank_context:
-            return []
-        row_index = self._workbench_oa_attachment_context_row_index()
-        selection = self._workbench_query_facade().relation_preview_selection(
-            month_hint,
-            row_ids=sorted(selected_row_ids),
-        )
-        payload = (
-            selection.payload
-            if int(selection.status_code) == int(HTTPStatus.OK)
-            and isinstance(selection.payload, dict)
-            else {}
-        )
-        rows_by_id = {
-            str(row.get("id") or ""): row
-            for row in list(payload.get("rows") or [])
-            if isinstance(row, dict) and str(row.get("id") or "")
-        }
-        attachment_ids_by_oa_id = row_index.attachment_row_ids_by_oa_id(rows_by_id)
-        selected_attachment_ids = {
-            row_id
-            for row_id in selected_row_ids
-            if row_index.invoice_row_is_attachment_context(rows_by_id.get(row_id, {}))
-        }
-        result: list[str] = []
-        for oa_row_id, attachment_row_ids in sorted(attachment_ids_by_oa_id.items()):
-            if oa_row_id not in selected_oa_source_ids and selected_attachment_ids.isdisjoint(attachment_row_ids):
-                continue
-            result.append(oa_row_id)
-            result.extend(attachment_row_ids)
-        return self._normalize_row_ids(result) if result else []
-
-    def _confirm_link_selected_oa_source_ids(
-        self,
-        row_ids: list[str],
-        *,
-        month: str,
-    ) -> set[str]:
-        selected_oa_ids = {
-            str(row_id).strip()
-            for row_id in row_ids
-            if str(row_id).strip() and self._row_type_for_row_id(str(row_id).strip()) == "oa"
-        }
-        if not selected_oa_ids:
-            return set()
-        source_ids = set(selected_oa_ids)
-        for row_id in selected_oa_ids:
-            try:
-                row = self._resolve_live_rows_direct([row_id], month_hint=month)[0]
-            except (IndexError, KeyError):
-                continue
-            source_ids.update(oa_row_source_ids(row))
-        return source_ids
-
-    def _canonical_existing_context_groups_for_row_ids(
-        self,
-        row_ids: list[str],
-        *,
-        month_hint: str | None,
-    ) -> list[dict[str, object]]:
-        selected_row_ids = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
-        if not selected_row_ids:
-            return []
-
-        selection = self._workbench_query_facade().relation_preview_selection(
-            month_hint,
-            row_ids=sorted(selected_row_ids),
-        )
-        if (
-            int(selection.status_code) != int(HTTPStatus.OK)
-            or not isinstance(selection.payload, dict)
-        ):
-            return []
-        rows = [
-            dict(row)
-            for row in list(selection.payload.get("rows") or [])
-            if isinstance(row, dict)
-        ]
-        if not rows:
-            return []
-        return [
-            {
-                "oa_rows": [
-                    row for row in rows if str(row.get("type") or "") == "oa"
-                ],
-                "bank_rows": [
-                    row for row in rows if str(row.get("type") or "") == "bank"
-                ],
-                "invoice_rows": [
-                    row
-                    for row in rows
-                    if str(row.get("type") or "") == "invoice"
-                ],
-            }
-        ]
-
-    @staticmethod
-    def _workbench_group_preserves_existing_pair_context(group: dict[str, object]) -> bool:
-        reason = str(group.get("reason") or "").strip()
-        if reason in {"relation_snapshot", "oa_attachment_source_relation"}:
-            return True
-        group_type = str(group.get("group_type") or "").strip()
-        if group_type in {"", "unpaired", "selection", "processed_exception"}:
-            return False
-        if reason in {"selected_row", "selected_rows"}:
-            return False
-        return str(group.get("group_id") or "").startswith("case:")
-
-    def _confirm_link_context_row_ids_to_preserve(
-        self,
-        group: dict[str, object],
-        *,
-        selected_row_ids: set[str],
-        selected_oa_source_ids: set[str] | None = None,
-        has_selected_bank_context: bool,
-    ) -> list[str]:
-        if not self._workbench_group_preserves_existing_pair_context(group):
-            return []
-        if str(group.get("reason") or "").strip() == "relation_snapshot":
-            return [
-                str(row.get("id") or "").strip()
-                for row_key in ("oa_rows", "bank_rows", "invoice_rows")
-                for row in list(group.get(row_key) or [])
-                if isinstance(row, dict) and str(row.get("id") or "").strip()
-            ]
-
-        group_oa_rows = [row for row in list(group.get("oa_rows") or []) if isinstance(row, dict)]
-        group_invoice_rows = [row for row in list(group.get("invoice_rows") or []) if isinstance(row, dict)]
-        selected_oa_ids = {
-            row_id
-            for row_id in selected_row_ids
-            if self._row_type_for_row_id(row_id) == "oa"
-        }
-        if selected_oa_source_ids:
-            selected_oa_ids.update(selected_oa_source_ids)
-        selected_oa_attachment_invoice_rows = [
-            row
-            for row in group_invoice_rows
-            if str(row.get("id") or "").strip() in selected_row_ids
-            and str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
-        ]
-        has_selected_bank = any(
-            isinstance(row, dict) and str(row.get("id") or "").strip() in selected_row_ids
-            for row in list(group.get("bank_rows") or [])
-        )
-        if not (selected_oa_ids or selected_oa_attachment_invoice_rows) or not (
-            has_selected_bank or has_selected_bank_context
-        ):
-            return []
-
-        preserved_row_ids: list[str] = []
-
-        def preserve(row_id: object) -> None:
-            normalized_row_id = str(row_id or "").strip()
-            if (
-                not normalized_row_id
-                or normalized_row_id in selected_row_ids
-                or normalized_row_id in preserved_row_ids
-            ):
-                return
-            preserved_row_ids.append(normalized_row_id)
-
-        for row in group_invoice_rows:
-            row_id = str(row.get("id") or "").strip()
-            if not row_id or row_id in selected_row_ids:
-                continue
-            if self._invoice_row_belongs_to_selected_oa_attachment(row, selected_oa_ids):
-                preserve(row_id)
-        selected_oa_attachment_invoice_rows_without_selected_oa = [
-            row
-            for row in selected_oa_attachment_invoice_rows
-            if not self._invoice_row_belongs_to_selected_oa_attachment(row, selected_oa_ids)
-        ]
-        for row in group_oa_rows:
-            oa_row_id = str(row.get("id") or "").strip()
-            if not oa_row_id or oa_row_id in selected_row_ids:
-                continue
-            if any(
-                self._invoice_row_belongs_to_selected_oa_attachment(invoice_row, {oa_row_id})
-                for invoice_row in selected_oa_attachment_invoice_rows_without_selected_oa
-            ):
-                preserve(oa_row_id)
-        return preserved_row_ids
-
-    @staticmethod
-    def _invoice_row_belongs_to_selected_oa_attachment(
-        row: dict[str, object],
-        selected_oa_ids: set[str],
-    ) -> bool:
-        source_kind = str(row.get("source_kind") or "").strip()
-        if source_kind != "oa_attachment_invoice":
-            return False
-        row_id = str(row.get("id") or "").strip()
-        return any(oa_attachment_matches_oa(row, oa_row_id) or oa_attachment_row_id_matches_oa(row_id, oa_row_id) for oa_row_id in selected_oa_ids)
 
     @staticmethod
     def _rows_by_type(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:

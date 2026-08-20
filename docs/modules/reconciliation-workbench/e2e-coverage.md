@@ -19,6 +19,7 @@
 | `RECON-WB-E2E-013` | covered | `web/e2e/workbench-cash-special-flow.spec.ts` | paired 现金特殊处理写链路及 barrier |
 | `RECON-WB-E2E-014` | covered | `tests/test_search_query.py`、`tests/test_workbench_routes.py`、`tests/test_workbench_page_query_repository.py`、`tests/test_workbench_query_postgres_integration.py` | OA、流水、发票统一搜索只读取展示字段，支持 literal wildcard 转义、typed identity 与 direct PostgreSQL 实际查询 |
 | `RECON-WB-E2E-015` | covered | `tests/test_workbench_page_query_repository.py`、`web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchPaneFilter.test.ts`、`web/src/test/WorkbenchColumnFilterMenu.test.tsx`、`web/e2e/workbench-large-scroll-flow.spec.ts` | 三组 typed/grouped 候选、同一成员筛选语义、银行 canonical 标签与账户映射、前端交互、加宽菜单、长项目名换行和无重叠；鼠标选择、Tab/空格选择及 zone 查询完成后保持原 document 位置，菜单关闭后不发生页面导航 |
+| `RECON-WB-E2E-016` | local covered / production pending | `tests/test_workbench_direct_query_facade.py`、`tests/test_workbench_page_selection_repository.py`、`tests/test_workbench_relation_command_service.py`、`web/src/test/WorkbenchApi.test.ts`、`web/src/test/WorkbenchSelectionModel.test.ts`、`web/e2e/workbench-large-scroll-flow.spec.ts` | 30/100/500 selection 不截断；100 成员 confirm/withdraw 与幂等；浏览器 30 条 preview request 完整。生产 test-owned 大成员写闭环在本次发布后补充证据。 |
 
 “人工准入、关系级撤回、旧异常入口删除及内部转账统一写边界”的最终本地验证证据：全后端 4272 tests OK（65 项按外部 PostgreSQL 环境条件跳过）；撤回 command/pair/repository/UoW 专项 109 passed，no-OA/auth/routes/v2 相邻回归 185 passed；前端全量 Vitest 987 passed 且 production build 通过。默认 Chromium 全量 182 项中 181 项通过；唯一未通过项是与本需求无关的 OA 嵌入侧栏动画帧 P95 单次环境波动，该项独立重复运行 3/3 通过，本次关联台确认、撤回、权限、stale、异常入口相关 Browser 流程均通过。
 

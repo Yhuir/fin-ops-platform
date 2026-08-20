@@ -1217,10 +1217,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         app._workbench_query_facade = lambda: query_facade
         legacy_scan = AssertionError("confirm preview must not use the legacy full-payload row scan")
 
-        with (
-            patch.object(app, "_expand_confirm_link_row_ids_for_existing_context", side_effect=legacy_scan),
-            patch.object(app, "_resolve_rows_for_amount_check", side_effect=legacy_scan),
-        ):
+        with patch.object(app, "_resolve_rows_for_amount_check", side_effect=legacy_scan):
             response = self._post(
                 app,
                 "/api/workbench/actions/confirm-link/preview",

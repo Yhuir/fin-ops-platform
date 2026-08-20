@@ -194,6 +194,35 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
+  test("sends all members for large confirm and withdraw previews", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => (
+      new Response(
+        JSON.stringify({
+          operation: "confirm_link",
+          can_submit: true,
+          requires_note: false,
+          message: "",
+          before: { groups: [] },
+          after: { groups: [] },
+          amount_summary: {},
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    ));
+    const rowIds = Array.from({ length: 500 }, (_, index) => `invoice-${index}`);
+    const rowTypes = rowIds.map(() => "invoice" as const);
+
+    await previewWorkbenchConfirmLink({ month: "all", rowIds, rowTypes });
+    await previewWorkbenchWithdrawLink({ month: "all", rowIds, rowTypes });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    for (const call of fetchSpy.mock.calls) {
+      const body = JSON.parse(String(call[1]?.body));
+      expect(body.row_ids).toEqual(rowIds);
+      expect(body.row_types).toEqual(rowTypes);
+    }
+  });
+
   test("maps preview-only selection groups from their unpaired zone without widening page group types", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

@@ -134,11 +134,12 @@ requested tenant/scope
 
 - 页面是否可写只由 session/permission、global mutation block 和 OA sync safety gate 决定；不再存在 page read-model freshness/version gate。
 - 发票行只提供详情入口，不挂载逐行三点菜单。正式关联与撤回由区域顶部 selection action 负责；自动异常由右侧异常抽屉负责人工审阅。旧 `exception/preview`、`exception/apply`、`mark-exception`、`update-bank-exception`、`oa-bank-exception`、`cancel-exception`、`ignore-row` 和 `unignore-row` HTTP 入口均已退役并返回 `404`，禁止重新引入兼容分支。
-- preview 从 canonical typed selection 一次有界读取所选成员和必要 OA attachment context；不读取完整页面 payload。
+- preview 把全部 typed selection 一次交给 canonical repository；不设业务数量上限、不截断，也不读取完整页面 payload。repository 只水合 selected rows 与正式关系描述符已经证明的同组成员，不再扫描 OA `source_links` 或隐式补附件成员。
 - submit 在 relation UoW 内重读并锁定 canonical rows，验证 exact-set、case owner、版本、preview/topology fingerprint 和幂等。
 - deterministic matching 按 OA 的 exact `normalized_payload.etc_batch_id` 发现 submitted ETC batch，并在读取 fact batch 前把候选 OA 申请月份并入请求 scope；新建或补全正式关系时必须把 deterministic `etc-summary-*` 作为 `invoice` member，同步持久化 `etc_batch_link`。仅有 metadata 不构成完整关系；summary 已由其它 active relation 拥有时 fail closed。
 - confirm 接受至少两个不同 canonical 成员，允许同类型组合；仅 `amount_check.requires_note=true` 时要求备注。
 - withdraw 只接受一个完整可撤回 active relation 的精确成员集合，恢复最近一次确认前的稳定拓扑；当前与前序关系锁集合一次全局稳定排序后加锁。
+- 页面可以一次选择 20 条以上记录确认，也可以从 paired/unpaired 选择一个大成员关系并带入其全部成员撤回；多条互不相关 active relation 仍不得合并成一次撤回。
 - 写事务成功不 enqueue `workbench.read_model.refresh`。前端不应用本地 operation projection，不轮询 generation；direct refetch 失败时明确显示“写已提交、页面刷新失败”，不得重试 mutation。
 
 ## 前端请求拓扑

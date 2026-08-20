@@ -19,6 +19,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_query import
 )
 from fin_ops_platform.services.workbench_direct_query_errors import (
     WorkbenchDirectQueryUnavailable,
+    WorkbenchRelationPreviewSelectionError,
     is_workbench_data_integrity_query_error,
     is_transient_postgres_query_error,
 )
@@ -28,10 +29,6 @@ from fin_ops_platform.services.workbench_filter_options import (
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_row_identity import (
     workbench_row_identity_key,
-)
-from fin_ops_platform.services.workbench_relation_preview_policy import (
-    WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS,
-    WorkbenchRelationPreviewSelectionError,
 )
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
@@ -242,32 +239,6 @@ class PostgresWorkbenchPageSelectionRepository:
             not in selected_set
         )
 
-        oa_row_ids = [
-            row_id for row_type, row_id in matched_identities if row_type == "oa"
-        ]
-        attachment_ids = self._oa_attachment_context_ids(oa_row_ids)
-        if len(attachment_ids) > WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS:
-            raise WorkbenchRelationPreviewSelectionError(
-                code="relation_preview_context_too_large",
-                message="所选记录关联的上下文过多，请缩小选择范围后重试。",
-            )
-        extra_rows = PostgresWorkbenchPageHydrationRepository(
-            self._connection,
-            tenant_id=self._tenant_id,
-        ).hydrate_rows(
-            {"oa": set(), "bank": set(), "invoice": set(attachment_ids)},
-            require_exact=False,
-        )
-        context_rows = self._dedupe_rows(
-            [
-                *context_rows,
-                *(
-                    row
-                    for identity, row in extra_rows.items()
-                    if identity not in selected_set
-                ),
-            ]
-        )
         return {
             "scope_key": normalized_scope,
             "selected_row_ids": [row_id for _row_type, row_id in matched_identities],
@@ -1038,37 +1009,6 @@ class PostgresWorkbenchPageSelectionRepository:
             )
             result.append(service.apply_to_row(row))
         return result
-
-    def _oa_attachment_context_ids(self, oa_row_ids: list[str]) -> list[str]:
-        if not oa_row_ids:
-            return []
-        rows = self._connection.fetch_all(
-            f"""
-            select coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id
-            from app.invoices invoice
-            where {_VISIBLE_INVOICE_SQL}
-              and exists (
-                  select 1
-                  from jsonb_array_elements(
-                      case when jsonb_typeof(invoice.source_links) = 'array'
-                           then invoice.source_links else '[]'::jsonb end
-                  ) source_link
-                  where coalesce(
-                      source_link->>'derived_from_oa_id',
-                      source_link->>'source_oa_id',
-                      source_link->>'oa_row_id'
-                  ) = any(%s::text[])
-              )
-            order by row_id
-            limit %s
-            """,
-            (oa_row_ids, WORKBENCH_RELATION_PREVIEW_MAX_CONTEXT_ROWS + 1),
-        )
-        return [
-            str(row.get("row_id") or "")
-            for row in rows
-            if str(row.get("row_id") or "")
-        ]
 
     @classmethod
     def _selection_identities(

@@ -648,7 +648,6 @@ def _new_facade(
         next_case_id=lambda: "CASE-NEW",
         normalize_row_ids=normalize_row_ids,
         relation_preview_selection=relation_preview_selection or default_relation_preview_selection,
-        expand_confirm_link_row_ids_for_existing_context=lambda row_ids, **_: list(row_ids),
         resolve_rows_for_amount_check=resolved_amount_rows,
         merge_relation_snapshots=lambda before, synthetic: list(before) + list(synthetic),
         synthetic_existing_case_relations=lambda *_, **__: [],

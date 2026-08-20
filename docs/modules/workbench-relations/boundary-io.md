@@ -1,6 +1,6 @@
 # Workbench 正式关系边界与 I/O
 
-日期：2026-08-12
+日期：2026-08-20
 
 ## Owner
 
@@ -24,7 +24,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | active case validation | relation repository | 只按 canonical case id 读取一条 active relation，不加载 history；只供进入事务前的 scope/owner 校验，真正 mutation 仍在事务内加锁并加载相关 history |
 | active member overlap validation | relation repository | confirm 按目标 row ids/case ids 一次读取 active relations，不读取 cancelled relation 或 history；不得用通用 current+history snapshot 代替 |
 | withdraw command | owner API | paired/unpaired active case identity、完整 member set、preview id、expected versions、reason；preview 与 submit 都要求请求的 canonical member set 和该 case 当前完整 active member set 精确相等，子集、超集、跨 case 混选统一返回 `workbench_relation_exact_selection_required`。只允许关系级撤回；submit 按 canonical history 恢复上一可证明的稳定拓扑，不能从 row metadata/display group 猜测 predecessor。 |
-| confirm/withdraw preview rows | Workbench direct canonical selection owner | preview 只把 untrusted scope 与 typed row ids 交给有界 relation-preview selection port；返回 selected rows、必要 attachment context 与 preview fingerprint，不返回或依赖 page generation version。正式 relation command、repository adapter 和 UoW 不接收页面 DTO，并在事务内重读 canonical facts、active relation/version 与 idempotency。 |
+| confirm/withdraw preview rows | Workbench direct canonical selection owner | preview 只把 untrusted scope 与完整 typed row ids 交给 relation-preview selection port；业务层不设置成员数量上限，也不截断。repository 只返回 selected rows 与正式关系描述符已经证明的同组 context，不再按 OA `source_links` 扫描或隐式扩展附件成员；HTTP request body、statement timeout 等平台资源边界仍保留。正式 relation command、repository adapter 和 UoW 不接收页面 DTO，并在事务内重读 canonical facts、active relation/version 与 idempotency。 |
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
 | page scope proof request | Workbench / 银行明细页面 query boundary | `source_versions_for_scopes(scope_keys)` 通过 `workbench_relation_scope_summaries(...)` 一次读取全部 concrete month scope 的 published proof/current-effective dirty status，再用一次 bulk canonical expected-version I/O 比较；只 enqueue mismatch/missing 的 exact scopes。`all` 先一次枚举 canonical object、active relation 与已有 projection 月份，再执行相同批量 proof，禁止逐月 N+1 或持久化伪 `all` scope |
 | OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version。关系页或消费页下一次请求直接读取 canonical facts 与 active relation，不产生页面任务。 |
@@ -68,6 +68,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - confirm/withdraw preview 的 direct canonical selection 不是 relation fact source。preview route 可以用它构造 selection groups、金额与 OA alias；submit 必须丢弃该 DTO，并保留服务端 actor/tenant、preview identity、expected relation versions、canonical repository 与 UoW 原子写合同。
 - case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。withdraw preview fingerprint 必须覆盖 `operation_type`、current active relation 的 case/version/status/排序后 typed members、全部 after relations 的同结构 topology，以及选中的 confirm history identity（operation id/type/created at）；任一 topology/history 漂移都拒绝旧 preview。
 - Workbench 人工确认只要求 normalize 后至少 2 个不同 requested canonical row ids，并逐个精确解析为已支持类型；不得再用“至少两个 pane”“必须含银行”“材料完整”或金额相等作为通用 confirm gate。金额/方向检查继续输出既有 `amount_check.requires_note`，只有其为 `true` 时才要求 `note`；关系创建后由 reconciliation-workbench 完整性合同决定 `paired|unpaired`。该人工规则不进入 `FormalRelationPlan`，也不放宽任何自动匹配条件。
+- 人工 confirm/withdraw 的单个正式关系成员数没有业务上限；preview、submit、canonical revalidation、relation/history 持久化和 response 都必须保留完整 typed member set。性能通过集合式数组 I/O、固定 SQL 形状和一次关系级 mutation 控制，不能用静默截断、分页提交或拆成多条关系换取速度。
 - Workbench 人工确认不按 persisted/derived bank category 分流。mixed 或全 `internal_transfer` 银行选择必须复用同一 canonical revalidation、command 与 UoW；禁止在 facade 调用独立 no-OA batch submit callback，或返回 no-OA batch 专属 conflict/response。
 - paired/unpaired active relation 的关系级 withdraw 使用相同 preview/submit、exact full active member set、case lock、expected versions、topology fingerprint、idempotency 和 history 边界。恢复候选必须来自 current case 最近一次 confirm history 的 canonical `before_relations`。submit 在同一 UoW 内先锁 current active case/members，再按稳定顺序锁 predecessor case/members；随后按 current+restored scope 重载事实并重算 target topology，恢复前重验 canonical member 存在与类型、restored case 未被复用且每个成员只有唯一 active owner。缺 canonical 返回 `workbench_relation_canonical_member_missing`，case/owner 冲突返回 `workbench_relation_restore_conflict`。任一证明失败整笔回滚，不得恢复部分关系或隐藏 fallback。
 - OA source snapshot 发现某 OA 已不在 completed 或 admitted 集合时，通过 `remove_rows_from_active_relations` 从 relation 中移除该成员；剩余至少两个成员且无 immutable attachment parent binding 时保留同 case并追加 history，否则取消 relation。该清理不得直接 SQL、不得创建新 case。

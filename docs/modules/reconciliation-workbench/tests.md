@@ -2,6 +2,14 @@
 
 日期：2026-08-20
 
+## 2026-08-20 大批量确认/撤回与旧上下文扫描删除
+
+- Query/service：30/100/500 条 typed selection 必须完整到达 canonical repository；空输入、类型错位、重复 typed identity 与 unsupported type 仍 fail closed。500 是测试样本，不是业务上限。
+- Repository：500 条 selected rows 从正式 group descriptor 一次水合，OA `source_links` 附件扫描为零；同组 context 只来自正式 relation descriptor，不从页面 payload 或旧 helper 猜测。
+- Business core：100 成员 formal relation 覆盖 confirm、preview、exact-set withdraw、confirm/withdraw idempotent replay 和撤回后 active state 清空。
+- Frontend/E2E：500 成员 selection model/API payload 不截断；Chromium 场景加载并选择 30 条后只发一次 confirm preview，`row_ids`/`row_types` 均为 30。
+- Dead-code guard：`WorkbenchWriteFacade` 构造参数和 `Application` 不再暴露 confirm context expansion；孤立 read port/index/module/test 已删除，whole-repo runtime symbol scan 必须为零。
+
 ## 2026-08-20 submitted ETC summary 正式成员闭环
 
 - Business/service：`tests/test_workbench_matching_orchestrator.py` 保护新建关系与已有 OA/流水关系都加入精确 `etc-summary-*` invoice member；历史关系替换保留金额检查和差额说明，summary 已属于其它 active relation 时零写 fail closed；延迟 OA 申请月份会在 fact load 前并入同次 scope。

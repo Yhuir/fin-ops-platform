@@ -170,6 +170,28 @@ def test_relation_preview_preserves_ordered_typed_collision_selection() -> None:
     assert selection.query["row_types"] == ["bank", "invoice"]
 
 
+@pytest.mark.parametrize("row_count", [30, 100, 500])
+def test_relation_preview_forwards_large_typed_selection_without_a_numeric_cap(
+    row_count: int,
+) -> None:
+    selection = _SelectionRepository()
+    row_ids = [f"bank-{index}" for index in range(row_count)]
+    row_types = ["bank"] * row_count
+
+    result = WorkbenchQueryFacade(
+        repository=_Repository(),
+        selection_repository=selection,
+    ).relation_preview_selection(
+        "2026-07",
+        row_ids=row_ids,
+        row_types=row_types,
+    )
+
+    assert result.status_code == HTTPStatus.OK
+    assert selection.query["row_ids"] == row_ids
+    assert selection.query["row_types"] == row_types
+
+
 @pytest.mark.parametrize(
     ("row_ids", "row_types", "message"),
     [

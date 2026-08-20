@@ -6,15 +6,12 @@ from typing import Callable
 
 from fin_ops_platform.services.workbench_direct_query_errors import (
     WorkbenchDirectQueryUnavailable,
+    WorkbenchRelationPreviewSelectionError,
 )
 from fin_ops_platform.services.workbench_filter_options import (
     normalize_workbench_scope_key,
 )
 from fin_ops_platform.services.workbench_page_cursor import WorkbenchPageCursorError
-from fin_ops_platform.services.workbench_relation_preview_policy import (
-    WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS,
-    WorkbenchRelationPreviewSelectionError,
-)
 
 
 @dataclass(frozen=True)
@@ -243,17 +240,6 @@ class WorkbenchQueryFacade:
                 {
                     "error": "relation_preview_selection_required",
                     "message": "请至少选择一条工作台记录。",
-                    "scope_key": scope_key,
-                },
-            )
-        if len(normalized_row_ids) > WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS:
-            return WorkbenchQueryResult(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "relation_preview_selection_too_large",
-                    "message": (
-                        f"单次预览最多选择 {WORKBENCH_RELATION_PREVIEW_MAX_SELECTED_ROWS} 条记录。"
-                    ),
                     "scope_key": scope_key,
                 },
             )

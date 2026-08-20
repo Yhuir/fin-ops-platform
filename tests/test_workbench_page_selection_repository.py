@@ -7,7 +7,7 @@ import pytest
 from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
     PostgresWorkbenchPageSelectionRepository,
 )
-from fin_ops_platform.services.workbench_relation_preview_policy import (
+from fin_ops_platform.services.workbench_direct_query_errors import (
     WorkbenchRelationPreviewSelectionError,
 )
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
@@ -140,6 +140,65 @@ def test_transaction_revalidation_requires_row_types_and_maps_drift_to_conflict(
             row_types=["bank"],
         )
     assert caught.value.reason == "canonical_selection_changed"
+
+
+def test_large_preview_selection_uses_formal_group_members_without_oa_source_link_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row_ids = ["oa-large", *[f"invoice-{index}" for index in range(499)]]
+    row_types = ["oa", *(["invoice"] * 499)]
+    rows = [
+        {"id": row_id, "type": row_type}
+        for row_type, row_id in zip(row_types, row_ids, strict=True)
+    ]
+    descriptor = _descriptor(
+        positions=list(range(1, 501)),
+        row_types=row_types,
+        row_ids=row_ids,
+    )
+    descriptor["member_ids"] = list(row_ids)
+    descriptor["member_types"] = list(row_types)
+    connection = _Connection([])
+    repository = PostgresWorkbenchPageSelectionRepository(
+        connection, tenant_id="test-tenant"
+    )
+    monkeypatch.setattr(
+        repository,
+        "_selection_descriptors",
+        lambda **_kwargs: [descriptor],
+    )
+    monkeypatch.setattr(
+        repository,
+        "_validated_matches",
+        lambda **_kwargs: list(zip(row_types, row_ids, strict=True)),
+    )
+    monkeypatch.setattr(
+        "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
+        "PostgresWorkbenchPageHydrationRepository.hydrate_groups",
+        lambda *_args, **_kwargs: [
+            {
+                "oa_rows": rows[:1],
+                "bank_rows": [],
+                "invoice_rows": rows[1:],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
+        "PostgresWorkbenchPageHydrationRepository.hydrate_rows",
+        lambda *_args, **_kwargs: {},
+    )
+
+    result = repository._relation_preview_selection(
+        scope_key="all",
+        row_ids=row_ids,
+        row_types=row_types,
+    )
+
+    assert result["selected_row_ids"] == row_ids
+    assert result["selected_row_types"] == row_types
+    assert result["context_rows"] == []
+    assert connection.calls == []
 
 
 def test_completed_pending_oa_resolution_is_narrow_and_fails_closed() -> None:

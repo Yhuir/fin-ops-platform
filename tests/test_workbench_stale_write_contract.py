@@ -176,11 +176,20 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         self.assertEqual(payload["conflict"]["expected"], {"relation:CASE-OLD": 2})
         self.assertEqual(payload["conflict"]["actual"], {"relation:CASE-NEW": 5})
 
-    def test_relation_preview_selection_rejects_unbounded_client_input_before_repository(self) -> None:
+    def test_relation_preview_selection_accepts_large_typed_input_without_truncation(self) -> None:
+        captured: dict[str, object] = {}
+
         class Repository:
             @staticmethod
-            def get_workbench_relation_preview_selection(**_kwargs: object) -> dict[str, object]:
-                raise AssertionError("oversized selection must not reach the repository")
+            def get_workbench_relation_preview_selection(**kwargs: object) -> dict[str, object]:
+                captured.update(kwargs)
+                return {
+                    "selected_row_ids": list(kwargs["row_ids"]),
+                    "selected_row_types": list(kwargs["row_types"]),
+                    "selected_rows": [],
+                    "context_rows": [],
+                    "rows": [],
+                }
 
         facade = WorkbenchQueryFacade(
             repository=None,
@@ -188,14 +197,17 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
             scope_key_for_month=lambda month: str(month or "all"),
         )
 
+        row_ids = [f"row-{index}" for index in range(500)]
+        row_types = ["bank"] * len(row_ids)
         result = facade.relation_preview_selection(
             "all",
-            row_ids=[f"row-{index}" for index in range(21)],
-            row_types=["bank"] * 21,
+            row_ids=row_ids,
+            row_types=row_types,
         )
 
-        self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(result.payload["error"], "relation_preview_selection_too_large")
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(captured["row_ids"], row_ids)
+        self.assertEqual(captured["row_types"], row_types)
 
 
 if __name__ == "__main__":

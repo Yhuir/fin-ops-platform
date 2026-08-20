@@ -1,6 +1,13 @@
 # Workbench 正式关系测试
 
-日期：2026-08-12
+日期：2026-08-20
+
+## 大成员关系确认/撤回（专项）
+
+- Business core：`tests/test_workbench_relation_command_service.py::test_large_relation_confirm_and_withdraw_keep_all_members_and_idempotency` 以 100 个 typed members 证明 confirm、preview、exact-set withdraw 和同 key 重放均保留完整成员，撤回后 active relation 为空。
+- Service/repository：`tests/test_workbench_direct_query_facade.py` 覆盖 30/100/500 条完整转交；`tests/test_workbench_page_selection_repository.py` 证明 500 条 selection 只使用正式 group members，OA `source_links` 广扫为零。
+- Frontend/Browser：`WorkbenchApi.test.ts` 与 `WorkbenchSelectionModel.test.ts` 覆盖 500 条 payload/成员展开；`workbench-large-scroll-flow.spec.ts` 覆盖浏览器选择 30 条后 preview request 不截断。
+- Regression：空输入、typed 对齐、重复 identity、missing/ambiguous、stale preview、expected versions、权限和单关系 exact-set 合同继续由既有矩阵覆盖。
 
 ## 关系撤回事务安全闭环（专项已验证）
 

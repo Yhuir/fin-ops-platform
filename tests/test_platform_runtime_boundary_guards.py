@@ -5827,7 +5827,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             WorkbenchWriteFacade._withdraw_relation_preview_payload
         )
         forbidden_preview_scans = {
-            "_expand_confirm_link_row_ids_for_existing_context",
             "_resolve_rows_for_amount_check",
             "_resolve_live_rows_direct",
             "_withdraw_rows_and_after_relations",
@@ -5838,6 +5837,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if helper_name in preview_sources or helper_name in preview_projection_source
         ]
         self.assertEqual(violations, [])
+        self.assertFalse(
+            hasattr(
+                server_module.Application,
+                "_expand_confirm_link_row_ids_for_existing_context",
+            )
+        )
 
     def test_workbench_write_facade_does_not_restore_retired_exception_write_entrypoints(self) -> None:
         from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade
