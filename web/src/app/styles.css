@@ -20481,7 +20481,6 @@ body.column-layout-dragging {
   min-width: 0;
   max-width: 100%;
   min-height: 66px;
-  overflow: hidden;
   border-bottom: 1px solid var(--fp-border-subtle);
   background: var(--fp-surface);
   color: var(--fp-text);

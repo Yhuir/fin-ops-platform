@@ -4,7 +4,7 @@
 
 - 项目、费用类型、银行账户、主标签和子标签继续使用同一个 `CostExplorerList`；折叠态保持最低 66px 高度与单行省略，浏览器实测发生溢出时才显示 HeroUI `展开/折叠`。
 - 完整文字直接在当前条目内自然换行并撑高条目，不再创建 Popover、Dialog、Portal 或浮层定位；同一列表最多展开一个，左中栏状态互不影响，三栏工作区高度与相邻栏位置保持不变。
-- 删除成本统计列表专属 Popover 组件、隐藏 trigger、浮层样式及 Escape/点外部关闭合同。ResizeObserver 继续按列表复用并用 animation frame 合并测量；展开态保留已确认的溢出事实，折叠后再测量，不增加逐行 observer、API、依赖、数据库或跨页面 I/O。
+- 删除成本统计列表专属 Popover 组件、隐藏 trigger、浮层样式、固定条目裁切及 Escape/点外部关闭合同。ResizeObserver 继续按列表复用并用 animation frame 合并测量；展开态保留已确认的溢出事实，折叠后再测量，不增加逐行 observer、API、依赖、数据库或跨页面 I/O。
 
 ## 2026-08-20：无 OA 成本范围层级与有效项目边界
 
