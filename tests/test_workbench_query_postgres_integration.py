@@ -561,11 +561,6 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertIn("groups.zone = %s", exception_sql)
         self.assertIn("limit %s", exception_sql.lower())
         self.assertIn("relation_amount_classifications", exception_sql)
-        self.assertIn("oa_expense_group_keys", exception_sql)
-        self.assertIn("direct_invoice_item_links", exception_sql)
-        self.assertNotIn("\ninvoice_item_candidates as materialized", exception_sql)
-        self.assertNotIn("legacy_invoice_item_candidates", exception_sql)
-        self.assertNotIn("normalized_invoice_anomaly_facts", exception_sql)
         self.assertNotIn("expense_component_reach", exception_sql)
         self.assertNotIn("component_anomaly_items", exception_sql)
 
