@@ -1787,3 +1787,10 @@
 - 收口为单一职责：全量 SQL 只用三栏总额、成员 IDs 与附件状态生成稳定 review item fingerprints；已分页当前组继续由 `WorkbenchAmountCheckService` 在内存中构建连通分量并确定精确位置。金额、成员或附件状态变化仍使 review fingerprint 失效；单纯显示落点变化不再制造第二套审核业务身份。
 - 删除 `expense_component_reach`、component totals/items 和三组 pair mismatch fingerprint 旧 CTE，直接生成七类互斥 classification item；不增加 API、SQL round-trip、表、索引、migration、cache、read model、worker、依赖或 fallback，不改变其它页面 I/O。
 - 真实 disposable PostgreSQL integration 保护 SQL/Python fingerprint、accept 后 paired/unpaired 一致、共享发票来源去重以及旧递归 CTE 不得恢复；最终性能以新 release 激活后的相同 20 次、预热 2 次、并发 4 生产探针判定。
+
+## 2026-08-21 - 三栏金额方向与金额聚合合并
+
+- 第二轮生产探针仍显示 combined initial、paired、unpaired 和 filter-options 的并发 p95 约为 `1952/2054/1664/1432ms`，全部 HTTP 200，但尚未达到 `1000ms` 合同；连接获取仍低于 `0.1ms`，慢点继续位于同一条 direct PostgreSQL 查询。
+- 旧金额异常 SQL 先扫描关系成员生成 `relation_directions`，随后再按关系方向连接并重复扫描成员聚合三栏金额。现在一次 `relation_pane_rollups` 同时聚合候选方向、OA/流水/发票计数和收付分项金额，再在每关系一行的窄结果上选择方向与净额。
+- 删除 `relation_directions` 旧 CTE 与第二次成员扫描；七类互斥金额分类、收付反向抵扣、`turnover_manual_closure`、review fingerprint 和 API DTO 均不变。没有新增表、索引、migration、cache、read model、worker、依赖或其它页面 I/O。
+- 生产规模 disposable PostgreSQL 的 20 次、4 并发同库对比中，combined initial p95 从约 `197ms` 降到约 `162ms`；最终验收仍以该提交激活后的认证生产探针为准。
