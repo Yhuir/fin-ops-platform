@@ -42,7 +42,7 @@ function setLabelWidth(text: string, clientWidth: number, scrollWidth: number) {
 }
 
 async function measureOverflow() {
-  const listObserver = resizeObservers.find((observer) =>
+  const listObserver = [...resizeObservers].reverse().find((observer) =>
     [...observer.observedElements].some((element) => element.classList.contains("cost-explorer-list")));
   await act(async () => {
     listObserver?.callback([], listObserver);
@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
 });
 
-test("only overflowed labels expose a fixed-height HeroUI disclosure", async () => {
+test("shows HeroUI disclosure only for overflowed labels and expands content inline", async () => {
   const user = userEvent.setup();
   const { container, onSelect } = renderList();
   await measureOverflow();
@@ -88,11 +88,14 @@ test("only overflowed labels expose a fixed-height HeroUI disclosure", async () 
   const disclosures = screen.getAllByRole("button", { name: "展开项目名完整内容" });
   expect(disclosures).toHaveLength(2);
   const firstDisclosure = disclosures[0];
+  const firstItem = firstDisclosure.closest(".cost-explorer-item");
   expect(container.querySelector("button button")).toBeNull();
+  expect(firstItem).not.toHaveClass("is-expanded");
 
   await user.click(firstDisclosure);
-  const dialog = await screen.findByRole("dialog", { name: "项目名完整内容" });
-  expect(dialog).toHaveTextContent(rows[1].name);
+  expect(firstItem).toHaveClass("is-expanded");
+  expect(firstItem).toHaveTextContent(rows[1].name);
+  expect(screen.queryByRole("dialog", { name: "项目名完整内容" })).not.toBeInTheDocument();
   expect(onSelect).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "折叠项目名完整内容" })).toHaveAttribute(
     "aria-expanded",
@@ -100,45 +103,47 @@ test("only overflowed labels expose a fixed-height HeroUI disclosure", async () 
   );
 
   await user.click(screen.getByRole("button", { name: "折叠项目名完整内容" }));
-  await waitFor(() => expect(screen.queryByRole("dialog", { name: "项目名完整内容" })).not.toBeInTheDocument());
+  await waitFor(() => expect(firstItem).not.toHaveClass("is-expanded"));
 
   await user.click(screen.getByRole("button", { name: `选择项目名 ${rows[1].name}` }));
   expect(onSelect).toHaveBeenCalledWith(rows[1]);
 });
 
-test("keeps at most one full-text popover open and dismisses it with Escape", async () => {
+test("keeps at most one item expanded in each list", async () => {
   const user = userEvent.setup();
   renderList();
   await measureOverflow();
   const [firstDisclosure, secondDisclosure] = screen.getAllByRole("button", {
     name: "展开项目名完整内容",
   });
+  const firstItem = firstDisclosure.closest(".cost-explorer-item");
+  const secondItem = secondDisclosure.closest(".cost-explorer-item");
 
   await user.click(firstDisclosure);
-  expect(await screen.findByRole("dialog", { name: "项目名完整内容" })).toHaveTextContent(rows[1].name);
+  expect(firstItem).toHaveClass("is-expanded");
+  expect(secondItem).not.toHaveClass("is-expanded");
 
   await user.click(secondDisclosure);
-  const dialog = await screen.findByRole("dialog", { name: "项目名完整内容" });
-  expect(dialog).toHaveTextContent(rows[2].name);
-  expect(dialog).not.toHaveTextContent(rows[1].name);
-
-  await user.keyboard("{Escape}");
-  await waitFor(() => expect(screen.queryByRole("dialog", { name: "项目名完整内容" })).not.toBeInTheDocument());
+  expect(firstItem).not.toHaveClass("is-expanded");
+  expect(secondItem).toHaveClass("is-expanded");
+  expect(screen.getAllByRole("button", { name: "折叠项目名完整内容" })).toHaveLength(1);
 });
 
-test("removes the disclosure and closes its popover when the label stops overflowing", async () => {
+test("keeps an expanded label stable and remeasures it after folding", async () => {
   const user = userEvent.setup();
   renderList();
   await measureOverflow();
 
   await user.click(screen.getAllByRole("button", { name: "展开项目名完整内容" })[0]);
-  expect(await screen.findByRole("dialog", { name: "项目名完整内容" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "折叠项目名完整内容" })).toBeInTheDocument();
 
   setLabelWidth(rows[1].name, 460, 420);
   await measureOverflow();
+  expect(screen.getByRole("button", { name: "折叠项目名完整内容" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "折叠项目名完整内容" }));
 
   await waitFor(() => {
     expect(screen.getAllByRole("button", { name: "展开项目名完整内容" })).toHaveLength(1);
-    expect(screen.queryByRole("dialog", { name: "项目名完整内容" })).not.toBeInTheDocument();
   });
 });

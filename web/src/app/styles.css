@@ -20477,6 +20477,7 @@ body.column-layout-dragging {
 .cost-explorer-item {
   position: relative;
   width: 100%;
+  height: auto;
   min-width: 0;
   max-width: 100%;
   min-height: 66px;
@@ -20495,6 +20496,7 @@ body.column-layout-dragging {
   align-items: flex-start;
   gap: var(--fp-space-3);
   width: 100%;
+  height: auto;
   min-width: 0;
   max-width: 100%;
   min-height: 66px;
@@ -20532,7 +20534,7 @@ body.column-layout-dragging {
 .cost-explorer-item-disclosure {
   position: absolute;
   z-index: 2;
-  top: 50%;
+  top: 19px;
   right: var(--fp-space-2);
   display: inline-flex;
   width: 44px;
@@ -20542,7 +20544,6 @@ body.column-layout-dragging {
   padding: 0;
   align-items: center;
   justify-content: center;
-  transform: translateY(-50%);
   border: 1px solid transparent;
   border-radius: var(--fp-radius-sm);
   background: transparent;
@@ -20556,11 +20557,6 @@ body.column-layout-dragging {
     color var(--motion-fast) var(--ease-standard);
 }
 
-.cost-explorer-item-disclosure.is-anchor-hidden {
-  visibility: hidden;
-  pointer-events: none;
-}
-
 .cost-explorer-item-disclosure:hover,
 .cost-explorer-item-disclosure[aria-expanded="true"] {
   background: var(--fp-accent-soft);
@@ -20571,37 +20567,6 @@ body.column-layout-dragging {
   border-color: var(--fp-accent);
   outline: 2px solid color-mix(in srgb, var(--fp-accent) 28%, transparent);
   outline-offset: 1px;
-}
-
-.cost-explorer-text-popover {
-  width: min(420px, calc(100vw - 24px));
-  overflow: visible;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-}
-
-.cost-explorer-text-dialog {
-  max-height: min(240px, 45vh);
-  overflow: auto;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
-  background: var(--fp-surface);
-  box-shadow: var(--fp-shadow-popover);
-  padding: var(--fp-space-3);
-  outline: none;
-}
-
-.cost-explorer-text-dialog p {
-  margin: 0;
-  color: var(--fp-text-primary);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-  user-select: text;
-  white-space: normal;
 }
 
 .cost-explorer-item-main {
@@ -20619,6 +20584,13 @@ body.column-layout-dragging {
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cost-explorer-item.is-expanded .cost-explorer-item-main strong {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .cost-explorer-item-main span {

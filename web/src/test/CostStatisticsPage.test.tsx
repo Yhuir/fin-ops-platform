@@ -201,9 +201,11 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-item-select\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.cost-explorer-item-main strong\s*{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s);
+    expect(css).toMatch(/\.cost-explorer-item\.is-expanded \.cost-explorer-item-main strong\s*{[^}]*overflow:\s*visible[^}]*overflow-wrap:\s*anywhere[^}]*text-overflow:\s*clip[^}]*white-space:\s*normal/s);
     expect(css).toMatch(/\.cost-explorer-item\.active\s*{[^}]*box-shadow:\s*inset 0 0 0 1px/s);
-    expect(css).toMatch(/\.cost-explorer-item-disclosure\s*{[^}]*position:\s*absolute[^}]*min-height:\s*28px/s);
-    expect(css).toMatch(/\.cost-explorer-text-dialog\s*{[^}]*max-height:\s*min\(240px, 45vh\)[^}]*overflow:\s*auto/s);
+    expect(css).toMatch(/\.cost-explorer-item-disclosure\s*{[^}]*position:\s*absolute[^}]*top:\s*19px[^}]*min-height:\s*28px/s);
+    expect(css).not.toContain(".cost-explorer-text-popover");
+    expect(css).not.toContain(".cost-explorer-text-dialog");
     expect(css).not.toContain("height: max(560px, calc(100dvh - 240px))");
     expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*justify-content:\s*flex-end/s);
     expect(css).toMatch(/\.cost-view-scope-heading\s*{[^}]*min-height:\s*44px/s);
@@ -216,8 +218,11 @@ describe("Cost statistics page", () => {
     expect(pageSource).toContain("lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]");
     expect(pageSource).toContain("lg:grid-cols-[minmax(210px,0.82fr)_minmax(210px,0.82fr)_minmax(0,2.36fr)]");
     expect(pageSource).toContain("bg-[var(--fp-page)]");
-    ["Button", "Chip", "PopoverRoot", "PopoverTrigger", "PopoverContent", "PopoverDialog"].forEach((symbol) => {
+    ["Button", "Chip"].forEach((symbol) => {
       expect(listSource).toContain(symbol);
+    });
+    ["PopoverRoot", "PopoverTrigger", "PopoverContent", "PopoverDialog"].forEach((symbol) => {
+      expect(listSource).not.toContain(symbol);
     });
     expect(listSource).toContain("getPrimaryText");
     expect(listSource).not.toContain("renderPrimary");

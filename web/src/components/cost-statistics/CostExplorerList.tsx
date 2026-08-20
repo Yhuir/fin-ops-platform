@@ -1,11 +1,4 @@
-import {
-  Button,
-  Chip,
-  PopoverContent,
-  PopoverDialog,
-  PopoverRoot,
-  PopoverTrigger,
-} from "@heroui/react";
+import { Button, Chip } from "@heroui/react";
 import type { ReactNode } from "react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -69,6 +62,10 @@ export default function CostExplorerList<Row>({
       const nextOverflowedKeys = new Set<string>();
 
       for (const { key } of preparedItems) {
+        if (key === expandedKey) {
+          nextOverflowedKeys.add(key);
+          continue;
+        }
         const label = labelRefs.current.get(key);
         if (!label) {
           continue;
@@ -105,7 +102,7 @@ export default function CostExplorerList<Row>({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [preparedItems]);
+  }, [expandedKey, preparedItems]);
 
   return (
     <section aria-busy={loading} className="cost-explorer-lane">
@@ -131,7 +128,11 @@ export default function CostExplorerList<Row>({
             const expanded = expandedKey === key;
             return (
               <div
-                className={active ? "cost-explorer-item active" : "cost-explorer-item"}
+                className={[
+                  "cost-explorer-item",
+                  active ? "active" : "",
+                  expanded ? "is-expanded" : "",
+                ].filter(Boolean).join(" ")}
                 key={key}
               >
                 <Button
@@ -162,54 +163,16 @@ export default function CostExplorerList<Row>({
                   {renderMeta ? <div className="cost-explorer-item-meta">{renderMeta(item)}</div> : null}
                 </Button>
                 {overflowed ? (
-                  <>
-                    <PopoverRoot
-                      isOpen={expanded}
-                      onOpenChange={(open) => {
-                        setExpandedKey((current) => open ? key : current === key ? null : current);
-                      }}
-                    >
-                      <PopoverTrigger
-                        aria-expanded={expanded}
-                        aria-hidden={expanded || undefined}
-                        aria-label={`展开${title}完整内容`}
-                        className={expanded
-                          ? "cost-explorer-item-disclosure is-anchor-hidden"
-                          : "cost-explorer-item-disclosure"}
-                        tabIndex={expanded ? -1 : 0}
-                      >
-                        展开
-                      </PopoverTrigger>
-                      {expanded ? (
-                        <PopoverContent
-                          className="cost-explorer-text-popover"
-                          containerPadding={12}
-                          isNonModal
-                          offset={6}
-                          placement="right top"
-                        >
-                          <PopoverDialog
-                            aria-label={`${title}完整内容`}
-                            className="cost-explorer-text-dialog"
-                          >
-                            <p>{primaryText}</p>
-                          </PopoverDialog>
-                        </PopoverContent>
-                      ) : null}
-                    </PopoverRoot>
-                    {expanded ? (
-                      <Button
-                        aria-expanded="true"
-                        aria-label={`折叠${title}完整内容`}
-                        className="cost-explorer-item-disclosure"
-                        onPress={() => setExpandedKey(null)}
-                        size="sm"
-                        variant="tertiary"
-                      >
-                        折叠
-                      </Button>
-                    ) : null}
-                  </>
+                  <Button
+                    aria-expanded={expanded}
+                    aria-label={`${expanded ? "折叠" : "展开"}${title}完整内容`}
+                    className="cost-explorer-item-disclosure"
+                    onPress={() => setExpandedKey((current) => current === key ? null : key)}
+                    size="sm"
+                    variant="tertiary"
+                  >
+                    {expanded ? "折叠" : "展开"}
+                  </Button>
                 ) : null}
               </div>
             );

@@ -779,10 +779,11 @@ test.describe("cost statistics browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps large cost tables fresh, scrollable, and usable on narrow screens", async ({ page }) => {
+  test("keeps large cost tables fresh, scrollable, and usable on narrow screens", async ({ page }, testInfo) => {
     const browserErrors = collectBrowserErrors(page);
+    const recordLatency = createCostStatisticsLatencyRecorder(page, testInfo);
     await page.setViewportSize({ width: 390, height: 820 });
-    await installDeterministicApiMocks(page, {
+    const api = await installDeterministicApiMocks(page, {
       costStatisticsLargeDataset: true,
       sessionMode: "full_access",
     });
@@ -838,14 +839,32 @@ test.describe("cost statistics browser flow", () => {
     await expectVisibleAndUncovered(largeProject, "large cost project selector");
     const largeProjectItem = largeProject.locator("..");
     const collapsedProjectHeight = await largeProjectItem.evaluate((element) => element.getBoundingClientRect().height);
-    await largeProjectItem.getByRole("button", { name: "展开项目名完整内容" }).click();
-    const projectNameDialog = page.getByRole("dialog", { name: "项目名完整内容" });
-    await expect(projectNameDialog).toContainText("大型成本浏览器稳定性项目");
-    expect(await largeProjectItem.evaluate((element) => element.getBoundingClientRect().height)).toBe(
+    const explorerCallsBeforeProjectDisclosure = api.count("GET /api/cost-statistics/explorer");
+    await recordLatency({
+      operationId: "cost-statistics.expand-project-name-inline",
+      visibleLabel: "展开项目名完整内容",
+      actionType: "click",
+    }, async (mark) => {
+      await largeProjectItem.getByRole("button", { name: "展开项目名完整内容" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(largeProjectItem).toHaveClass(/is-expanded/));
+      await mark("finalSettledLatencyMs", expect(largeProjectItem.locator("strong")).toHaveCSS("white-space", "normal"));
+    });
+    await expect(largeProjectItem).toContainText("大型成本浏览器稳定性项目");
+    await expect(page.getByRole("dialog", { name: "项目名完整内容" })).toHaveCount(0);
+    expect(await largeProjectItem.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(
       collapsedProjectHeight,
     );
+    const expandedProjectTextStyle = await largeProjectItem.locator("strong").evaluate((element) => ({
+      overflow: getComputedStyle(element).overflow,
+      whiteSpace: getComputedStyle(element).whiteSpace,
+    }));
+    expect(expandedProjectTextStyle).toEqual({ overflow: "visible", whiteSpace: "normal" });
     await largeProjectItem.getByRole("button", { name: "折叠项目名完整内容" }).click();
-    await expect(projectNameDialog).toHaveCount(0);
+    await expect(largeProjectItem).not.toHaveClass(/is-expanded/);
+    expect(await largeProjectItem.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(
+      collapsedProjectHeight + 1,
+    );
+    expect(api.count("GET /api/cost-statistics/explorer")).toBe(explorerCallsBeforeProjectDisclosure);
     await largeProject.click();
     const largeExpenseType = page.getByRole("button", { name: /大型宽表费用类型-1/ }).first();
     await expectVisibleAndUncovered(largeExpenseType, "large cost expense type selector");
@@ -861,6 +880,49 @@ test.describe("cost statistics browser flow", () => {
     await expectHorizontalScroll(projectTableScroll, "large project-drilldown cost table");
     await expectInViewport(page.getByRole("columnheader", { name: "费用内容" }), "project-drilldown rightmost cost column");
     await expectVerticalScroll(projectTableScroll, "large project-drilldown cost table");
+
+    const bankExplorerResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/explorer")
+        && url.searchParams.get("view") === "bank"
+        && url.searchParams.get("scope") === "all"
+        && !url.searchParams.has("payment_account_label");
+    });
+    await page.getByRole("radio", { name: "按银行" }).click();
+    await bankExplorerResponsePromise;
+    const largeBankAccount = page.getByRole("button", { name: /招商银行 成本大数据测试账户 880001/ }).first();
+    await expectVisibleAndUncovered(largeBankAccount, "large cost bank selector");
+    const bankProjectsResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/explorer")
+        && url.searchParams.get("view") === "bank"
+        && url.searchParams.get("payment_account_label") === "招商银行 成本大数据测试账户 880001";
+    });
+    await largeBankAccount.click();
+    await bankProjectsResponsePromise;
+    const bankProject = page.getByRole("button", { name: /大型成本浏览器稳定性项目/ }).first();
+    await expectVisibleAndUncovered(bankProject, "large bank project selector");
+    const bankProjectItem = bankProject.locator("..");
+    const collapsedBankProjectHeight = await bankProjectItem.evaluate((element) => element.getBoundingClientRect().height);
+    const explorerCallsBeforeBankProjectDisclosure = api.count("GET /api/cost-statistics/explorer");
+    await recordLatency({
+      operationId: "cost-statistics.expand-bank-project-name-inline",
+      visibleLabel: "按银行展开项目名完整内容",
+      actionType: "click",
+    }, async (mark) => {
+      await bankProjectItem.getByRole("button", { name: "展开项目名完整内容" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(bankProjectItem).toHaveClass(/is-expanded/));
+      await mark("finalSettledLatencyMs", expect(bankProjectItem.locator("strong")).toHaveCSS("white-space", "normal"));
+    });
+    expect(await bankProjectItem.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(
+      collapsedBankProjectHeight,
+    );
+    await expect(page.getByRole("dialog", { name: "项目名完整内容" })).toHaveCount(0);
+    await bankProjectItem.getByRole("button", { name: "折叠项目名完整内容" }).click();
+    await expect(bankProjectItem).not.toHaveClass(/is-expanded/);
+    expect(api.count("GET /api/cost-statistics/explorer")).toBe(explorerCallsBeforeBankProjectDisclosure);
     expect(browserErrors).toEqual([]);
   });
 });

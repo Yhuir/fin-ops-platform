@@ -12,7 +12,7 @@
 | Runtime regression | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/scope/worker tests | 旧 Cost read-model 链路保持删除 |
 | OA 归一化 | `tests/test_mongo_oa_adapter.py` | 支付申请精确读取可配置 `category`、日常报销明细精确读取 `purposeType`、表单字段互不覆盖、空/未知值不伪造“其他” |
 | Settings | `tests/test_app_settings_service.py` | time/tag 默认 all 与独立 CAS、无 OA 项目数组默认空、稳定 ID/名称/至少一个标签/标签互斥、旧单项目配置一次性归一化、候选校验、历史标签不静默丢失 |
-| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx`、`CostExplorerList.test.tsx`、`CostEntryDetailPanel.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | 首次加载、五视图、`按费用类型`、成本明细、行级详情类型、本项净成本/OA 原额/支出原额/关系净支出、退款负数证据、两个独立规则抽屉、全选/清空、无 OA 主子标签层级/单层叶子/空项目禁存、多虚拟项目折叠编辑与互斥、只读权限、局部 loading/error/retry、搜索、自动分页、导出、长文本实际溢出检测、固定行高展开/折叠、单列表单 Popover、Escape/选择/尺寸变化关闭，以及时间选择器在桌面和窄内容区不压缩、不截断、不横向溢出 |
+| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx`、`CostExplorerList.test.tsx`、`CostEntryDetailPanel.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | 首次加载、五视图、`按费用类型`、成本明细、行级详情类型、本项净成本/OA 原额/支出原额/关系净支出、退款负数证据、两个独立规则抽屉、全选/清空、无 OA 主子标签层级/单层叶子/空项目禁存、多虚拟项目折叠编辑与互斥、只读权限、局部 loading/error/retry、搜索、自动分页、导出、长文本实际溢出检测、折叠态单行省略、条目内完整展开/折叠、同栏单项展开、展开不触发选择或 API、尺寸变化后重新测量，以及时间选择器在桌面和窄内容区不压缩、不截断、不横向溢出 |
 
 ## 候选发布门禁
 
