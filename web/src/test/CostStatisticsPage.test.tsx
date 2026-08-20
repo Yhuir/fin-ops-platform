@@ -197,7 +197,7 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.business-period-popover\s*{[^}]*width:\s*min\(340px,\s*calc\(100vw - 24px\)\)/s);
     expect(css).toMatch(/\.cost-time-workspace,\s*\.cost-explorer-grid\s*{[^}]*height:\s*var\(--cost-workspace-height\)/s);
     expect(css).toMatch(/\.cost-analysis-layout\.time-layout\s*{[^}]*grid-template-columns:\s*minmax\(190px, 15%\) minmax\(0, 1fr\)/s);
-    expect(css).toMatch(/\.cost-explorer-list\s*{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    expect(css).not.toMatch(/\.cost-explorer-list\s*{[^}]*(?:display:\s*grid|grid-template-columns:)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).not.toMatch(/\.cost-explorer-item\s*{[^}]*overflow:\s*hidden/s);
     expect(css).toMatch(/\.cost-explorer-item-select\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);

@@ -19811,7 +19811,6 @@ body.column-layout-dragging {
 
   .cost-explorer-grid .cost-explorer-list {
     min-height: 0;
-    align-content: start;
     overflow: auto;
   }
 
@@ -20469,9 +20468,7 @@ body.column-layout-dragging {
 .cost-explorer-list {
   --cost-explorer-disclosure-gutter: 52px;
 
-  display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .cost-explorer-item {
