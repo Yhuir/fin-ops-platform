@@ -312,14 +312,6 @@ def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases
     assert "'oa-exp-' || value" in anomaly_sql
 
 
-def test_canonical_spine_defers_supporting_documents_to_page_hydration() -> None:
-    canonical_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split())
-
-    assert "workbench_oa_supporting_documents" not in canonical_sql
-    assert "normalized_payload->'expense_items'" in canonical_sql
-    assert "source_payload->'expense_items'" in canonical_sql
-
-
 def test_anomaly_query_reuses_canonical_source_facts_without_rescanning_sources() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
 

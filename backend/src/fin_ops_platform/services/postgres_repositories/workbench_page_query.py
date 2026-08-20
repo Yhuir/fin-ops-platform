@@ -16,6 +16,7 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
+    oa_expense_items_with_supporting_documents_sql,
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )
@@ -577,9 +578,7 @@ oa_candidate_facts as materialized (
             'workflowStatus', 'completed'
         )) as column_values,
         null::text as external_etc_batch_id,
-        case when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
-             then oa.normalized_payload->'expense_items'
-             else '[]'::jsonb end as oa_expense_items,
+        {oa_expense_items_with_supporting_documents_sql("oa.row_id", "oa.normalized_payload->'expense_items'")} as oa_expense_items,
         case when jsonb_typeof(oa.normalized_payload->'source_aliases') = 'array'
              then oa.normalized_payload->'source_aliases'
              else '[]'::jsonb end as oa_source_aliases,
@@ -646,9 +645,7 @@ oa_candidate_facts as materialized (
             'workflowStatus', 'in_progress'
         )),
         null::text,
-        case when jsonb_typeof(admission.source_payload->'expense_items') = 'array'
-             then admission.source_payload->'expense_items'
-             else '[]'::jsonb end,
+        {oa_expense_items_with_supporting_documents_sql("admission.oa_id", "admission.source_payload->'expense_items'")},
         case when jsonb_typeof(admission.source_payload->'source_aliases') = 'array'
              then admission.source_payload->'source_aliases'
              else '[]'::jsonb end,
