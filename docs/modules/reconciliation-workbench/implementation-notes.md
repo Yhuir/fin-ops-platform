@@ -1779,3 +1779,11 @@
 - 生产只读核验确认目标 OA 原始附件数为 `0`，但六张正式发票的 canonical `source_links` 已全部通过 `oa_expense_item_invoice` 精确绑定到目标 OA 子付款项；数据修复 dry-run 的 `update_count=0`，因此不改生产数据。
 - 根因是 Workbench compact summary hydration 的旧来源过滤只保留 `oa_attachment_invoice`，在组装当前页时丢弃了手工录入/选择发票的子付款项来源，导致 Python 异常重算误报“无OA附件”。
 - 收口仍使用既有来源边：摘要 hydration 同时保留 `oa_attachment_invoice` 与 `oa_expense_item_invoice`；OA 原始 `attachment_file_count` 保持不变，真实 OA—流水及 OA—发票金额差异继续显示。删除单一附件来源过滤的旧行为，不新增 API、表、migration、read model、worker、cache、依赖或兼容分支。
+
+## 2026-08-21 - 异常审阅指纹与当前页定位计算分层
+
+- 新异常 UI 首次生产并发四请求采样全部返回 200，但 combined initial、groups 和 filter-options p95 约为 `3052/1760/1401ms`，未达到 `1000ms` 合同；App Health 显示连接获取 p95 约 `0.04ms`，主要耗时仍在 PostgreSQL SQL execute/fetch。
+- 根因是分页前的全量 anomaly spine 为每个关系递归构建费用项—发票连通分量。该连通分量只决定感叹号落在发票、OA 子付款项还是 group，不改变七种三栏分类、附件异常或 review 决定的业务对象。
+- 收口为单一职责：全量 SQL 只用三栏总额、成员 IDs 与附件状态生成稳定 review item fingerprints；已分页当前组继续由 `WorkbenchAmountCheckService` 在内存中构建连通分量并确定精确位置。金额、成员或附件状态变化仍使 review fingerprint 失效；单纯显示落点变化不再制造第二套审核业务身份。
+- 删除 `expense_component_reach`、component totals/items 和三组 pair mismatch fingerprint 旧 CTE，直接生成七类互斥 classification item；不增加 API、SQL round-trip、表、索引、migration、cache、read model、worker、依赖或 fallback，不改变其它页面 I/O。
+- 真实 disposable PostgreSQL integration 保护 SQL/Python fingerprint、accept 后 paired/unpaired 一致、共享发票来源去重以及旧递归 CTE 不得恢复；最终性能以新 release 激活后的相同 20 次、预热 2 次、并发 4 生产探针判定。

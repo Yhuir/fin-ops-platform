@@ -116,10 +116,25 @@ class WorkbenchAmountCheckService:
             ]
         if not evidence_items:
             return None
+        review_item_fingerprints = sorted(
+            str(item["fingerprint"])
+            for item in evidence_items
+            if item.get("code") in ATTACHMENT_DISPLAY_LABELS
+        )
+        if classification is not None:
+            review_item_fingerprints.append(
+                self._amount_review_fingerprint(
+                    relation_id=relation_id,
+                    code=classification[0],
+                    totals=totals,
+                    invoice_rows=invoice_rows,
+                )
+            )
+            review_item_fingerprints.sort()
         fingerprint_source = "\0".join(
             [
                 str(relation_id or "").strip(),
-                *sorted(str(item["fingerprint"]) for item in evidence_items),
+                *review_item_fingerprints,
             ]
         )
         return {
@@ -134,10 +149,33 @@ class WorkbenchAmountCheckService:
                 bank_rows=bank_rows,
                 invoice_rows=invoice_rows,
             ),
-            "evidence_item_fingerprints": sorted(
-                str(item["fingerprint"]) for item in evidence_items
-            ),
+            "evidence_item_fingerprints": review_item_fingerprints,
         }
+
+    def _amount_review_fingerprint(
+        self,
+        *,
+        relation_id: str,
+        code: str,
+        totals: dict[str, Decimal | None],
+        invoice_rows: list[dict[str, Any]],
+    ) -> str:
+        invoice_row_ids = sorted(
+            self._row_id(row) for row in invoice_rows if self._row_id(row)
+        )
+        source = "\0".join(
+            [
+                str(relation_id or "").strip(),
+                code,
+                str(relation_id or "").strip(),
+                self._format_amount(totals["oa"]) or "",
+                self._format_amount(totals["bank"]) or "",
+                self._format_amount(totals["invoice"]) or "",
+                "0",
+                *invoice_row_ids,
+            ]
+        )
+        return sha256(source.encode("utf-8")).hexdigest()
 
     def _display_items(
         self,

@@ -1452,122 +1452,6 @@ normalized_invoice_item_links as materialized (
       on expense.internal_key = invoice.internal_key
      and expense.item_id = invoice.canonical_expense_item_id
 ),
-expense_component_reach(internal_key, item_id, reachable_item_id) as (
-    select distinct
-        link.internal_key,
-        link.canonical_expense_item_id,
-        link.canonical_expense_item_id
-    from normalized_invoice_item_links link
-    union
-    select
-        reach.internal_key,
-        reach.item_id,
-        peer.canonical_expense_item_id
-    from expense_component_reach reach
-    join normalized_invoice_item_links current_link
-      on current_link.internal_key = reach.internal_key
-     and current_link.canonical_expense_item_id = reach.reachable_item_id
-    join normalized_invoice_item_links peer
-      on peer.internal_key = current_link.internal_key
-     and peer.invoice_row_id = current_link.invoice_row_id
-),
-expense_item_components as materialized (
-    select
-        reach.internal_key,
-        reach.item_id,
-        min(reach.reachable_item_id) as component_id
-    from expense_component_reach reach
-    group by reach.internal_key, reach.item_id
-),
-component_expense_totals as materialized (
-    select
-        component.internal_key,
-        min(expense.case_id) as case_id,
-        component.component_id,
-        count(*)::bigint as item_count,
-        count(*) filter (where expense.item_amount is null)::bigint as invalid_item_amount_count,
-        round(sum(expense.item_amount), 2) as oa_total,
-        sum(expense.attachment_file_count)::bigint as attachment_file_count,
-        string_agg(
-            encode(convert_to(expense.item_id, 'UTF8'), 'hex'),
-            '00' order by expense.item_id
-        ) as item_ids_hex
-    from expense_item_components component
-    join oa_expense_items expense
-      on expense.internal_key = component.internal_key
-     and expense.item_id = component.item_id
-    group by component.internal_key, component.component_id
-),
-component_invoice_rows as materialized (
-    select distinct
-        component.internal_key,
-        component.component_id,
-        invoice.invoice_row_id,
-        invoice.invoice_amount
-    from expense_item_components component
-    join normalized_invoice_item_links invoice
-      on invoice.internal_key = component.internal_key
-     and invoice.canonical_expense_item_id = component.item_id
-),
-component_invoice_totals as materialized (
-    select
-        invoice.internal_key,
-        invoice.component_id,
-        count(*)::bigint as invoice_count,
-        count(*) filter (where invoice.invoice_amount is null)::bigint as invalid_invoice_amount_count,
-        round(sum(invoice.invoice_amount), 2) as invoice_total,
-        string_agg(
-            encode(convert_to(invoice.invoice_row_id, 'UTF8'), 'hex'),
-            '00' order by invoice.invoice_row_id
-        ) as invoice_row_ids_hex
-    from component_invoice_rows invoice
-    group by invoice.internal_key, invoice.component_id
-),
-component_anomaly_items as materialized (
-    select
-        expense.internal_key,
-        expense.case_id,
-        encode(digest(
-            convert_to(expense.case_id, 'UTF8') || decode('00', 'hex') ||
-            convert_to('oa_invoice_amount_mismatch', 'UTF8') || decode('00', 'hex') ||
-            convert_to(
-                case when expense.item_count = 1
-                     then convert_from(decode(expense.item_ids_hex, 'hex'), 'UTF8')
-                     else 'expense-component:' || substring(
-                         encode(digest(decode(expense.item_ids_hex, 'hex'), 'sha256'), 'hex')
-                         from 1 for 24
-                     ) end,
-                'UTF8'
-            ) || decode('00', 'hex') ||
-            convert_to(
-                coalesce(to_char(
-                    expense.oa_total,
-                    'FM999999999999999999990.00'
-                ), ''),
-                'UTF8'
-            ) || decode('00', 'hex') ||
-            decode('00', 'hex') ||
-            convert_to(
-                coalesce(to_char(
-                    invoice.invoice_total,
-                    'FM999999999999999999990.00'
-                ), ''),
-                'UTF8'
-            ) || decode('00', 'hex') ||
-            convert_to(expense.attachment_file_count::text, 'UTF8') ||
-            decode('00', 'hex') || decode(invoice.invoice_row_ids_hex, 'hex'),
-            'sha256'
-        ), 'hex') as item_fingerprint
-    from component_expense_totals expense
-    join component_invoice_totals invoice
-      on invoice.internal_key = expense.internal_key
-     and invoice.component_id = expense.component_id
-    where expense.invalid_item_amount_count = 0
-      and invoice.invalid_invoice_amount_count = 0
-      and expense.oa_total is not null
-      and invoice.invoice_total is not null
-      and expense.oa_total <> invoice.invoice_total
-),
 unassigned_invoice_rows as materialized (
     select distinct
         expense.internal_key,
@@ -1760,9 +1644,24 @@ relation_comparison_totals as materialized (
         end as bank_total
     from relation_pane_totals totals
 ),
-relation_pair_mismatches as materialized (
-    select totals.*, 'oa_bank_amount_mismatch'::text as code,
-           totals.oa_total as left_total, totals.bank_total as right_total
+relation_amount_classifications as materialized (
+    select
+        totals.*,
+        case
+            when totals.oa_total = totals.bank_total then
+                case when totals.invoice_total > totals.oa_total
+                     then 'oa_bank_equal_invoice_more'
+                     else 'oa_bank_equal_invoice_less' end
+            when totals.oa_total = totals.invoice_total then
+                case when totals.bank_total > totals.oa_total
+                     then 'oa_invoice_equal_bank_more'
+                     else 'oa_invoice_equal_bank_less' end
+            when totals.bank_total = totals.invoice_total then
+                case when totals.oa_total < totals.bank_total
+                     then 'bank_invoice_equal_oa_less'
+                     else 'bank_invoice_equal_oa_more' end
+            else 'all_amounts_different'
+        end as code
     from relation_comparison_totals totals
     where totals.direction is not null
       and totals.oa_count > 0 and totals.bank_count > 0 and totals.invoice_count > 0
@@ -1774,43 +1673,12 @@ relation_pair_mismatches as materialized (
       and totals.oa_total is not null
       and totals.bank_total is not null
       and totals.invoice_total is not null
-      and totals.oa_total <> totals.bank_total
-    union all
-    select totals.*, 'oa_invoice_amount_mismatch',
-           totals.oa_total, totals.invoice_total
-    from relation_comparison_totals totals
-    where totals.direction is not null
-      and totals.oa_count > 0 and totals.bank_count > 0 and totals.invoice_count > 0
-      and totals.invalid_oa_amount_count = 0
-      and totals.invalid_bank_amount_count = 0
-      and totals.invalid_bank_direction_count = 0
-      and totals.invalid_invoice_amount_count = 0
-      and totals.invalid_invoice_direction_count = 0
-      and totals.oa_total is not null
-      and totals.bank_total is not null
-      and totals.invoice_total is not null
-      and totals.oa_total <> totals.invoice_total
-      and not exists (
-          select 1 from oa_expense_items expense
-          where expense.internal_key = totals.internal_key
+      and not (
+          totals.oa_total = totals.bank_total
+          and totals.bank_total = totals.invoice_total
       )
-    union all
-    select totals.*, 'bank_invoice_amount_mismatch',
-           totals.bank_total, totals.invoice_total
-    from relation_comparison_totals totals
-    where totals.direction is not null
-      and totals.oa_count > 0 and totals.bank_count > 0 and totals.invoice_count > 0
-      and totals.invalid_oa_amount_count = 0
-      and totals.invalid_bank_amount_count = 0
-      and totals.invalid_bank_direction_count = 0
-      and totals.invalid_invoice_amount_count = 0
-      and totals.invalid_invoice_direction_count = 0
-      and totals.oa_total is not null
-      and totals.bank_total is not null
-      and totals.invoice_total is not null
-      and totals.bank_total <> totals.invoice_total
 ),
-relation_pair_anomaly_items as materialized (
+relation_amount_anomaly_items as materialized (
     select
         totals.internal_key,
         totals.case_id,
@@ -1830,20 +1698,12 @@ relation_pair_anomaly_items as materialized (
                  else ''::bytea end,
             'sha256'
         ), 'hex') as item_fingerprint
-    from relation_pair_mismatches totals
+    from relation_amount_classifications totals
 ),
 all_anomaly_items as materialized (
     select * from expense_anomaly_items
     union all
-    select component.*
-    from component_anomaly_items component
-    where exists (
-        select 1
-        from relation_pair_mismatches pair
-        where pair.internal_key = component.internal_key
-    )
-    union all
-    select * from relation_pair_anomaly_items
+    select * from relation_amount_anomaly_items
 ),
 anomaly_fingerprints as materialized (
     select

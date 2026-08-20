@@ -560,6 +560,9 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertIn("groups.zone = %s", exception_sql)
         self.assertIn("limit %s", exception_sql.lower())
+        self.assertIn("relation_amount_classifications", exception_sql)
+        self.assertNotIn("expense_component_reach", exception_sql)
+        self.assertNotIn("component_anomaly_items", exception_sql)
 
         PostgresWorkbenchRepository(
             self.raw_connection
