@@ -1534,29 +1534,33 @@ unlinked_expense_anomaly_items as materialized (
 expense_anomaly_items as materialized (
     select * from unlinked_expense_anomaly_items
 ),
-relation_pane_rollups as materialized (
+relation_directions as materialized (
+    select
+        member.internal_key,
+        case
+            when count(distinct direction.value) = 1 then min(direction.value)
+            else null
+        end as direction
+    from relation_anomaly_members member
+    left join lateral (
+        select case
+            when member.row_type = 'oa'
+             and coalesce(member.oa_apply_type, '') like '%%收%%'
+             and coalesce(member.oa_apply_type, '') not like '%%付%%'
+                then 'receipt'
+            when member.row_type = 'oa' then 'payment'
+            when member.row_type = 'invoice' then member.invoice_direction
+            else null
+        end as value
+    ) direction on true
+    group by member.internal_key
+),
+relation_pane_totals as materialized (
     select
         member.internal_key,
         min(member.case_id) as case_id,
         min(member.relation_mode) as relation_mode,
-        count(distinct case
-            when member.row_type = 'oa'
-             and coalesce(member.oa_apply_type, '') like '%%收%%'
-             and coalesce(member.oa_apply_type, '') not like '%%付%%'
-                then 'receipt'
-            when member.row_type = 'oa' then 'payment'
-            when member.row_type = 'invoice' then member.invoice_direction
-            else null
-        end) as comparison_direction_count,
-        min(case
-            when member.row_type = 'oa'
-             and coalesce(member.oa_apply_type, '') like '%%收%%'
-             and coalesce(member.oa_apply_type, '') not like '%%付%%'
-                then 'receipt'
-            when member.row_type = 'oa' then 'payment'
-            when member.row_type = 'invoice' then member.invoice_direction
-            else null
-        end) as comparison_direction,
+        direction.direction,
         count(*) filter (where member.row_type = 'oa')::bigint as oa_count,
         count(*) filter (
             where member.row_type = 'oa'
@@ -1570,18 +1574,29 @@ relation_pane_rollups as materialized (
         count(*) filter (
             where member.row_type = 'bank' and member.bank_direction is null
         )::bigint as invalid_bank_direction_count,
-        count(*) filter (
-            where member.row_type = 'bank' and member.bank_direction is not null
-        )::bigint as directed_bank_count,
-        sum(member.bank_amount) filter (
-            where member.row_type = 'bank'
-        ) as all_bank_total,
-        sum(member.bank_amount) filter (
-            where member.row_type = 'bank' and member.bank_direction = 'payment'
-        ) as payment_bank_total,
-        sum(member.bank_amount) filter (
-            where member.row_type = 'bank' and member.bank_direction = 'receipt'
-        ) as receipt_bank_total,
+        round(case
+            when direction.direction is null then
+                sum(member.bank_amount) filter (where member.row_type = 'bank')
+            when count(*) filter (
+                where member.row_type = 'bank' and member.bank_direction is not null
+            ) = 0 then
+                sum(member.bank_amount) filter (where member.row_type = 'bank')
+            else coalesce(sum(member.bank_amount) filter (
+                where member.row_type = 'bank'
+                  and member.bank_direction = direction.direction
+            ), 0)
+        end, 2) as bank_gross_total,
+        round(case
+            when direction.direction is null then 0
+            when count(*) filter (
+                where member.row_type = 'bank' and member.bank_direction is not null
+            ) = 0 then 0
+            else coalesce(sum(member.bank_amount) filter (
+                where member.row_type = 'bank'
+                  and member.bank_direction in ('payment', 'receipt')
+                  and member.bank_direction <> direction.direction
+            ), 0)
+        end, 2) as bank_contra_total,
         count(*) filter (where member.row_type = 'invoice')::bigint as invoice_count,
         count(*) filter (
             where member.row_type = 'invoice'
@@ -1590,67 +1605,32 @@ relation_pane_rollups as materialized (
         count(*) filter (
             where member.row_type = 'invoice' and member.invoice_direction is null
         )::bigint as invalid_invoice_direction_count,
-        count(*) filter (
-            where member.row_type = 'invoice' and member.invoice_direction is not null
-        )::bigint as directed_invoice_count,
-        sum(coalesce(member.invoice_total_with_tax, member.invoice_amount)) filter (
-            where member.row_type = 'invoice'
-        ) as all_invoice_total,
-        sum(coalesce(member.invoice_total_with_tax, member.invoice_amount)) filter (
-            where member.row_type = 'invoice' and member.invoice_direction = 'payment'
-        ) as payment_invoice_total,
-        sum(coalesce(member.invoice_total_with_tax, member.invoice_amount)) filter (
-            where member.row_type = 'invoice' and member.invoice_direction = 'receipt'
-        ) as receipt_invoice_total,
+        round(case
+            when direction.direction is null then sum(coalesce(
+                member.invoice_total_with_tax,
+                member.invoice_amount
+            )) filter (where member.row_type = 'invoice')
+            when count(*) filter (
+                where member.row_type = 'invoice' and member.invoice_direction is not null
+            ) = 0 then sum(coalesce(
+                member.invoice_total_with_tax,
+                member.invoice_amount
+            )) filter (where member.row_type = 'invoice')
+            else coalesce(sum(coalesce(
+                member.invoice_total_with_tax,
+                member.invoice_amount
+            )) filter (
+                where member.row_type = 'invoice'
+                  and member.invoice_direction = direction.direction
+            ), 0)
+        end, 2) as invoice_total,
         string_agg(
             encode(convert_to(member.row_id, 'UTF8'), 'hex'),
             '00' order by member.row_id
         ) filter (where member.row_type = 'invoice') as invoice_row_ids_hex
     from relation_anomaly_members member
-    group by member.internal_key
-),
-relation_pane_totals as materialized (
-    select
-        rollup.internal_key,
-        rollup.case_id,
-        rollup.relation_mode,
-        case when rollup.comparison_direction_count = 1
-             then rollup.comparison_direction else null end as direction,
-        rollup.oa_count,
-        rollup.invalid_oa_amount_count,
-        rollup.oa_total,
-        rollup.bank_count,
-        rollup.invalid_bank_amount_count,
-        rollup.invalid_bank_direction_count,
-        round(case
-            when rollup.comparison_direction_count <> 1
-              or rollup.directed_bank_count = 0
-                then rollup.all_bank_total
-            when rollup.comparison_direction = 'receipt'
-                then coalesce(rollup.receipt_bank_total, 0)
-            else coalesce(rollup.payment_bank_total, 0)
-        end, 2) as bank_gross_total,
-        round(case
-            when rollup.comparison_direction_count <> 1
-              or rollup.directed_bank_count = 0
-                then 0
-            when rollup.comparison_direction = 'receipt'
-                then coalesce(rollup.payment_bank_total, 0)
-            else coalesce(rollup.receipt_bank_total, 0)
-        end, 2) as bank_contra_total,
-        rollup.invoice_count,
-        rollup.invalid_invoice_amount_count,
-        rollup.invalid_invoice_direction_count,
-        round(case
-            when rollup.comparison_direction_count <> 1
-              or rollup.directed_invoice_count = 0
-                then rollup.all_invoice_total
-            when rollup.comparison_direction = 'receipt'
-                then coalesce(rollup.receipt_invoice_total, 0)
-            else coalesce(rollup.payment_invoice_total, 0)
-        end, 2) as invoice_total,
-        rollup.invoice_row_ids_hex
-    from relation_pane_rollups rollup
+    join relation_directions direction on direction.internal_key = member.internal_key
+    group by member.internal_key, direction.direction
 ),
 relation_comparison_totals as materialized (
     select
