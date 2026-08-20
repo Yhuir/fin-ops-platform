@@ -30,6 +30,9 @@ from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canoni
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     list_oa_pending_payment_relation_visibility_gaps,
 )
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    COMPLETED_WORKFLOW_STATUS_SQL,
+)
 
 
 @dataclass(frozen=True)
@@ -566,7 +569,7 @@ def _turnover_ledger_direct_canonical_issues(
 def _bank_details_direct_canonical_issues(
     connection: Any,
     contract: PageAuditContract,
-    _tenant_id: str,
+    tenant_id: str,
     limit: int,
 ) -> list[AuditIssue]:
     code_prefix = contract.domain_key
@@ -634,7 +637,7 @@ def _bank_details_direct_canonical_issues(
             "同一银行流水同时存在于多个有效统一配对关系。",
         ),
         (
-            """
+            f"""
             /* check: canonical_relation_oa_member_exists */
             with members as (
                 select relation.case_id, relation.month_scope, member.row_id
@@ -647,10 +650,22 @@ def _bank_details_direct_canonical_issues(
                    to_char(member.month_scope, 'YYYY-MM') as scope_key,
                    member.row_id
             from members member
-            left join app.oa_applications source
-              on source.row_id = member.row_id
-             and source.status <> 'deleted'
-            where source.row_id is null
+            where (
+                select count(*)
+                from (
+                    select 1
+                    from app.oa_applications source
+                    where source.row_id = member.row_id
+                      and source.status <> 'deleted'
+                      and {COMPLETED_WORKFLOW_STATUS_SQL}
+                    union all
+                    select 1
+                    from app.oa_pending_payment_admissions admission
+                    where admission.tenant_id = %s
+                      and admission.oa_id = member.row_id
+                      and admission.workflow_status = 'in_progress'
+                ) source_candidates
+            ) <> 1
             order by member.case_id, member.row_id
             limit %s
             """,
@@ -713,11 +728,16 @@ def _bank_details_direct_canonical_issues(
     )
     issues: list[AuditIssue] = []
     for sql, code, message in queries:
+        params = (
+            (tenant_id, limit)
+            if code == f"{code_prefix}_canonical_relation_oa_member_missing"
+            else (limit,)
+        )
         issues.extend(
             _proof_query_issues(
                 connection,
                 sql=sql,
-                params=(limit,),
+                params=params,
                 code=code,
                 message=message,
             )

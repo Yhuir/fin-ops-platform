@@ -16,6 +16,7 @@ class _Connection:
         self.executed: list[tuple[str, tuple[object, ...]]] = []
         self.fetch_one_calls: list[str] = []
         self.fetch_all_calls: list[str] = []
+        self.fetch_all_params: list[tuple[object, ...]] = []
 
     @contextmanager
     def transaction(self):
@@ -39,9 +40,10 @@ class _Connection:
     def fetch_all(
         self,
         sql: str,
-        _params: tuple[object, ...] = (),
+        params: tuple[object, ...] = (),
     ) -> list[dict[str, object]]:
         self.fetch_all_calls.append(sql)
+        self.fetch_all_params.append(params)
         return list(self.issues)
 
 
@@ -68,6 +70,9 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         )
         self.assertEqual(len(connection.fetch_one_calls), 1)
         self.assertEqual(len(connection.fetch_all_calls), 1)
+        self.assertIn("app.oa_pending_payment_admissions", connection.fetch_all_calls[0])
+        self.assertIn("select count(*)", connection.fetch_all_calls[0])
+        self.assertEqual(connection.fetch_all_params[0][0], "default")
         self.assertTrue(
             all(
                 "read_model.cost_statistics" not in sql

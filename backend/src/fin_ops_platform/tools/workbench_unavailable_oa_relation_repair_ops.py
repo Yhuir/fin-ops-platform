@@ -9,6 +9,9 @@ import sys
 from typing import Any, TextIO
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    COMPLETED_WORKFLOW_STATUS_SQL,
+)
 from fin_ops_platform.tools.runtime_application import (
     build_tool_runtime_application,
     persist_workbench_pair_relations,
@@ -196,17 +199,40 @@ def _aligned_members(relation: dict[str, Any]) -> list[tuple[str, str]]:
     return list(zip(row_ids, row_types, strict=True))
 
 
-def _existing_oa_row_ids(connection: Any, oa_row_ids: list[str]) -> set[str]:
+def _existing_oa_row_ids(
+    connection: Any,
+    oa_row_ids: list[str],
+    *,
+    tenant_id: str = "default",
+) -> set[str]:
     if not oa_row_ids:
         return set()
     existing_rows = connection.fetch_all(
-        """
+        f"""
+        with canonical_oa_candidates as (
+            select row_id
+            from app.oa_applications oa
+            where oa.row_id = any(%s::text[])
+              and oa.status <> 'deleted'
+              and {COMPLETED_WORKFLOW_STATUS_SQL}
+            union all
+            select admission.oa_id as row_id
+            from app.oa_pending_payment_admissions admission
+            where admission.tenant_id = %s
+              and admission.oa_id = any(%s::text[])
+              and admission.workflow_status = 'in_progress'
+        ),
+        canonical_oa as (
+            select row_id
+            from canonical_oa_candidates
+            group by row_id
+            having count(*) = 1
+        )
         select row_id
-        from app.oa_applications
-        where row_id = any(%s::text[]) and status <> 'deleted'
+        from canonical_oa
         order by row_id
         """,
-        (oa_row_ids,),
+        (oa_row_ids, tenant_id, oa_row_ids),
     )
     return {
         str(row.get("row_id") or "").strip()

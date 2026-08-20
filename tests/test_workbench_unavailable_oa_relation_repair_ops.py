@@ -4,8 +4,14 @@ from fin_ops_platform.tools import workbench_unavailable_oa_relation_repair_ops 
 
 
 class FakeConnection:
-    def __init__(self, existing_oa_row_ids: list[str]) -> None:
+    def __init__(
+        self,
+        existing_oa_row_ids: list[str],
+        *,
+        pending_oa_row_ids: list[str] | None = None,
+    ) -> None:
         self.existing_oa_row_ids = set(existing_oa_row_ids)
+        self.pending_oa_row_ids = set(pending_oa_row_ids or [])
         self.fetch_count = 0
 
     def fetch_all(
@@ -15,11 +21,14 @@ class FakeConnection:
     ) -> list[dict[str, str]]:
         self.fetch_count += 1
         assert "from app.oa_applications" in sql
+        assert "from app.oa_pending_payment_admissions" in sql
+        assert params[1] == "default"
         requested = list(params[0])
+        canonical = self.existing_oa_row_ids ^ self.pending_oa_row_ids
         return [
             {"row_id": row_id}
             for row_id in requested
-            if row_id in self.existing_oa_row_ids
+            if row_id in canonical
         ]
 
 
@@ -84,6 +93,25 @@ def test_discovery_reads_canonical_oa_rows_once_and_returns_only_missing_cases()
     assert connection.fetch_count == 1
     assert [item["case_id"] for item in summaries] == ["case-1"]
     assert summaries[0]["fingerprint"]
+
+
+def test_discovery_accepts_unique_in_progress_admission_and_rejects_dual_source() -> None:
+    pending = _relation()
+    pending["case_id"] = "case-pending"
+    dual = _relation()
+    dual["case_id"] = "case-dual"
+    dual["row_ids"] = ["oa-dual", "bank-dual"]
+
+    summaries = repair._build_repair_summaries(
+        FakeConnection(
+            ["oa-dual"],
+            pending_oa_row_ids=["oa-missing", "oa-dual"],
+        ),
+        [pending, dual],
+    )
+
+    assert [item["case_id"] for item in summaries] == ["case-dual"]
+    assert summaries[0]["missing_oa_row_ids"] == ["oa-dual"]
 
 
 def test_execute_uses_relation_command_and_persist_boundary(monkeypatch) -> None:

@@ -86,6 +86,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 else:
                     self.assertIn("/* check: key_display_fields */", queried_sql)
                 self.assertNotIn("read_model.", queried_sql)
+                if domain_key == "bank_details":
+                    self.assertIn("select count(*)", queried_sql)
 
     def test_proof_checks_are_blocking_integrity_gates(self) -> None:
         report = audit_page_canonical_data.audit_page_canonical_data(
@@ -164,6 +166,13 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                 if check_name in sql
             )
             self.assertIn("source.status <> 'deleted'", source_sql)
+        oa_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "canonical_relation_oa_member_exists" in sql
+        )
+        self.assertIn("app.oa_pending_payment_admissions", oa_sql)
+        self.assertIn("admission.workflow_status = 'in_progress'", oa_sql)
 
     def test_invalid_noncanonical_etc_summary_remains_blocking_for_direct_pages(self) -> None:
         report = audit_page_canonical_data.audit_page_canonical_data(

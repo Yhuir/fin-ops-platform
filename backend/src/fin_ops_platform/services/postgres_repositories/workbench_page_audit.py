@@ -13,6 +13,9 @@ from fin_ops_platform.services.postgres_repositories.canonical_etc_summary_sql i
     CANONICAL_ETC_BATCH_CANDIDATES_SQL,
     WORKBENCH_RELATION_EXTERNAL_ETC_BATCH_ID_SQL,
 )
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    COMPLETED_WORKFLOW_STATUS_SQL,
+)
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
 
 
@@ -30,6 +33,7 @@ def audit_workbench_relation_display(
     with use_audit_snapshot(connection, audit_snapshot) as snapshot:
         issues = _canonical_relation_issues(
             snapshot.connection,
+            tenant_id=normalized_tenant_id,
             limit=normalized_limit + 1,
         )
         counts = _canonical_fact_counts(snapshot.connection)
@@ -52,6 +56,7 @@ def audit_workbench_relation_display(
             "audit_contract": {
                 "source_tables": [
                     "app.oa_applications",
+                    "app.oa_pending_payment_admissions",
                     "app.bank_transactions",
                     "app.invoices",
                     "app.etc_invoices",
@@ -72,7 +77,12 @@ def audit_workbench_relation_display(
         }
 
 
-def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssue]:
+def _canonical_relation_issues(
+    connection: Any,
+    *,
+    tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
     rows = connection.fetch_all(
         f"""
         /* check: canonical_relation_integrity */
@@ -208,8 +218,9 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
                        when nullif(member.row_id, '') is null then 'empty_relation_member_id'
                        when member.row_type in ('bank', 'bank_transaction') and bank.id is null
                            then 'missing_canonical_bank_member'
-                       when member.row_type = 'oa' and oa.id is null
-                           then 'missing_canonical_oa_member'
+                       when member.row_type = 'oa'
+                            and coalesce(canonical_oa.source_count, 0) <> 1
+                            then 'missing_canonical_oa_member'
                        when member.row_type in (
                            'invoice', 'formal_invoice', 'input', 'input_invoice',
                            'output', 'output_invoice'
@@ -221,9 +232,22 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
             left join app.bank_transactions bank
               on coalesce(bank.legacy_mongo_id, bank.id::text) = member.row_id
              and bank.status <> 'deleted'
-            left join app.oa_applications oa
-              on oa.row_id = member.row_id
-             and oa.status <> 'deleted'
+            left join lateral (
+                select count(*)::integer as source_count
+                from (
+                    select 1
+                    from app.oa_applications oa
+                    where oa.row_id = member.row_id
+                      and oa.status <> 'deleted'
+                      and {COMPLETED_WORKFLOW_STATUS_SQL}
+                    union all
+                    select 1
+                    from app.oa_pending_payment_admissions admission
+                    where admission.tenant_id = %s
+                      and admission.oa_id = member.row_id
+                      and admission.workflow_status = 'in_progress'
+                ) source_candidates
+            ) canonical_oa on member.row_type = 'oa'
             left join app.invoices invoice
               on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
              and invoice.status <> 'deleted'
@@ -338,7 +362,7 @@ def _canonical_relation_issues(connection: Any, *, limit: int) -> list[AuditIssu
         order by mismatch_kind, scope_key, subject_id, row_id
         limit %s
         """,
-        (TURNOVER_MANUAL_CLOSURE_RELATION_MODE, limit),
+        (TURNOVER_MANUAL_CLOSURE_RELATION_MODE, tenant_id, limit),
     )
     issues: list[AuditIssue] = []
     diagnostic_messages = {

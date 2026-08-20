@@ -11,9 +11,11 @@ class _Connection:
     def __init__(self, issues: list[dict[str, object]] | None = None) -> None:
         self.issues = list(issues or [])
         self.integrity_sql = ""
+        self.integrity_params: tuple[object, ...] = ()
 
-    def fetch_all(self, sql: str, _params: tuple[object, ...]) -> list[dict[str, object]]:
+    def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
         self.integrity_sql = sql
+        self.integrity_params = params
         return self.issues
 
     def fetch_one(self, _sql: str) -> dict[str, int]:
@@ -59,6 +61,10 @@ class WorkbenchPageAuditTests(unittest.TestCase):
         self.assertIn("submitted_etc_batch_relation_missing", connection.integrity_sql)
         self.assertIn("submitted_etc_batch_relation_member_missing", connection.integrity_sql)
         self.assertIn("member.row_id = batch.summary_row_id", connection.integrity_sql)
+        self.assertIn("app.oa_pending_payment_admissions", connection.integrity_sql)
+        self.assertIn("admission.workflow_status = 'in_progress'", connection.integrity_sql)
+        self.assertIn("canonical_oa.source_count", connection.integrity_sql)
+        self.assertEqual(connection.integrity_params[1], "default")
 
     def test_invalid_noncanonical_summary_member_remains_blocking(self) -> None:
         connection = _Connection(

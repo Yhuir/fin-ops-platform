@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-20 - canonical OA 审计来源对齐
+
+- 根因：关联台查询、selection 与 relation member lock 的 canonical OA 合同是同 tenant 的已完成 `app.oa_applications` 与进行中 `app.oa_pending_payment_admissions` 并集；Page Audit 与 unavailable-OA repair discovery 旧查询只读取前者，因而把合法进行中 OA 误报为 orphan。
+- 修复：Workbench、共享页面和成本统计 Audit，以及 unavailable-OA repair discovery，统一读取 completed + tenant in-progress 来源；repair discovery 对同一 ID 双源命中继续 fail closed，不生成删除计划。
+- 生产恢复：误移除成员只通过正式 Workbench confirm UoW 按原 case、完整 typed member preimage 与 expected version 恢复；不手写生产 SQL，不新增表、索引、缓存、fallback 或前端状态。
+- 数据安全：不删除 OA、银行流水、发票、relation history、备份或主数据库。
+
 ## 2026-08-20 - 大批量确认/撤回取消 20 条预览限制
 
 - 用户可在未配对区选择 20 条以上 canonical rows 进行一次确认，也可在 paired/unpaired 选择一个大成员 active relation，由 selection model 带入完整成员后一次预览和撤回。互不相关的多个 active relation 仍需分别撤回。

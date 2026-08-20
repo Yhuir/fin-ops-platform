@@ -10,6 +10,9 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     evaluate_audit_issues,
     use_audit_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    COMPLETED_WORKFLOW_STATUS_SQL,
+)
 
 COST_STATISTICS_AUDIT_DOMAIN_KEY = "cost_statistics"
 
@@ -26,7 +29,11 @@ def audit_cost_statistics_page(
     with use_audit_snapshot(connection, audit_snapshot) as snapshot:
         started_at = monotonic()
         summary = _summary(snapshot.connection)
-        issues = _canonical_relation_issues(snapshot.connection, limit=limit + 1)
+        issues = _canonical_relation_issues(
+            snapshot.connection,
+            tenant_id=normalized_tenant_id,
+            limit=limit + 1,
+        )
         evaluation = evaluate_audit_issues(issues, sample_limit=limit)
         summary.update(evaluation.summary)
         return {
@@ -52,6 +59,7 @@ def audit_cost_statistics_page(
                 "source_tables": [
                     "app.bank_transactions",
                     "app.oa_applications",
+                    "app.oa_pending_payment_admissions",
                     "app.workbench_pair_relations",
                     "app.bank_transaction_categories",
                     "app.bank_transaction_category_confirmations",
@@ -130,10 +138,11 @@ def _summary(connection: Any) -> dict[str, int]:
 def _canonical_relation_issues(
     connection: Any,
     *,
+    tenant_id: str,
     limit: int,
 ) -> list[AuditIssue]:
     rows = connection.fetch_all(
-        """
+        f"""
         /* check: cost_statistics_direct_canonical_relation_members */
         with cost_relations as (
             select case_id, row_ids, row_types
@@ -180,11 +189,22 @@ def _canonical_relation_issues(
                 )
             ) or (
                 member.row_type = 'oa'
-                and not exists (
-                    select 1
-                    from app.oa_applications oa
-                    where oa.row_id = member.row_id
-                )
+                and (
+                    select count(*)
+                    from (
+                        select 1
+                        from app.oa_applications oa
+                        where oa.row_id = member.row_id
+                          and oa.status <> 'deleted'
+                          and {COMPLETED_WORKFLOW_STATUS_SQL}
+                        union all
+                        select 1
+                        from app.oa_pending_payment_admissions admission
+                        where admission.tenant_id = %s
+                          and admission.oa_id = member.row_id
+                          and admission.workflow_status = 'in_progress'
+                    ) source_candidates
+                ) <> 1
             )
         )
         select code, subject_id, details
@@ -196,7 +216,7 @@ def _canonical_relation_issues(
         order by code, subject_id
         limit %s
         """,
-        (max(int(limit), 1),),
+        (tenant_id, max(int(limit), 1)),
     )
     return [
         AuditIssue(
