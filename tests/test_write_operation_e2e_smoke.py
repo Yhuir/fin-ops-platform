@@ -1669,7 +1669,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                     http_target_ms=1000,
                 )
 
-    def test_reversible_scenario_matches_registered_shape_consumers_and_bounded_rows(self) -> None:
+    def test_reversible_scenario_matches_registered_shape_consumers_and_explicit_rows(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "scenario.json"
             path.write_text(json.dumps([_raw_bank_invoice_scenario("bank-invoice", "shape-1")]), encoding="utf-8")
@@ -1689,6 +1689,28 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             {consumer.page_key for consumer in scenarios[0].checkpoints[0].consumers},
             set(_BANK_INVOICE_CONSUMER_PAGES),
         )
+
+    def test_test_owned_relation_scenario_accepts_thirty_unique_row_ids(self) -> None:
+        scenario = _raw_bank_invoice_scenario("large-bank-invoice", "large-shape")
+        row_ids = ["bank-test-1", *[f"invoice-test-{index}" for index in range(1, 30)]]
+        raw_checkpoints = [
+            *scenario["checkpoints"],  # type: ignore[index]
+            scenario["recovery_checkpoint"],
+        ]
+        for checkpoint in raw_checkpoints:
+            for step in checkpoint["steps"]:
+                if isinstance(step.get("json"), dict) and "row_ids" in step["json"]:
+                    step["json"]["row_ids"] = list(row_ids)
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            loaded = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        for checkpoint in (*loaded.checkpoints, loaded.recovery_checkpoint):
+            assert checkpoint is not None
+            for step in checkpoint.steps:
+                self.assertEqual(step.json_body["row_ids"], row_ids)
 
     def test_bank_turnover_scenario_uses_real_turnover_closure_contract(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -170,6 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-audit-file-object-link-count", type=int)
     parser.add_argument("--expected-bank-audit-payload-update-count", type=int)
     parser.add_argument("--expected-bank-audit-row-relink-count", type=int)
+    parser.add_argument("--expected-bank-audit-row-unlink-count", type=int)
     parser.add_argument("--operator-id")
     return parser
 
@@ -280,13 +281,14 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         args.expected_bank_audit_file_object_link_count,
         args.expected_bank_audit_payload_update_count,
         args.expected_bank_audit_row_relink_count,
+        args.expected_bank_audit_row_unlink_count,
     )
     if bank_audit_repair_requested and (
         any(value is None for value in bank_audit_expectations) or not args.operator_id
     ):
         raise SystemExit(
             "Bank import Audit contract repair requires exact file-object-link, "
-            "payload-update, and row-relink counts and --operator-id"
+            "payload-update, row-relink, and row-unlink counts and --operator-id"
         )
     if not bank_audit_repair_requested and any(
         value is not None for value in bank_audit_expectations
@@ -492,6 +494,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 args.expected_bank_audit_payload_update_count
             ),
             "expected_row_relink_count": args.expected_bank_audit_row_relink_count,
+            "expected_row_unlink_count": args.expected_bank_audit_row_unlink_count,
         }
         with connection.transaction() as transaction:
             transaction.execute(

@@ -4,7 +4,9 @@
 
 - 用户可在未配对区选择 20 条以上 canonical rows 进行一次确认，也可在 paired/unpaired 选择一个大成员 active relation，由 selection model 带入完整成员后一次预览和撤回。互不相关的多个 active relation 仍需分别撤回。
 - 后端删除 preview 20 条选择门槛与 100 条 OA 附件 context 门槛；保留 typed identity、重复校验、canonical missing/ambiguous、exact relation、stale preview、expected version 和幂等门禁。repository 不再按 `app.invoices.source_links` 做旧附件上下文扫描，减少一条与正式成员无关的 SQL I/O。
+- 撤回 preview 只执行一次 canonical relation selection，并从同一批 selected rows 构造 alias map 与 DTO；不再为 OA 成员重复做第二次全量 hydration。submit/UoW 的事务内重验保持不变。
 - 前端 API/selection DTO 不变，删除已不可达的“选择记录过多”错误映射；预览和 submit 均发送完整 row ids/types。当前不引入虚拟列表或新依赖，先以 30/100/500 样本和生产 SLO 量测；500 只是样本，不是上限。
+- 生产受控 write smoke 同步删除 test-owned relation `row_ids <= 20` 的旧工具门槛；非空、唯一、test-owned、`--apply`、approval、preimage、幂等与 topology recovery 门禁全部保留。
 - 删除未被当前 facade 使用的 server context expansion/helper/port/index 旧链，避免重新形成 preview DTO 到正式写成员的隐式扩展路径。不涉及数据库 schema、migration、备份或主数据库删除。
 
 ## 2026-08-20 - 未配对 ETC 批次详情精确定位闭环

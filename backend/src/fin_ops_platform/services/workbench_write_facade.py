@@ -1528,22 +1528,6 @@ class WorkbenchWriteFacade:
         relation_command = self._relation_command_service_for()
         if relation_command is None:
             return self._relation_command_unavailable_result()
-        try:
-            preview_relation = self._preview_withdraw_relation_via_command_service(
-                relation_command,
-                row_ids=row_ids,
-                row_types=row_types,
-                month=month,
-            )
-        except WorkbenchRelationCommandError as exc:
-            return self._relation_command_error_result(exc)
-        except _WorkbenchWritePersistenceError as exc:
-            return self._persistence_unavailable_result(str(exc))
-        except (TypeError, ValueError) as exc:
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_withdraw_link_preview_request", "message": str(exc)},
-            )
         selection_result = self._relation_preview_selection(
             month,
             row_ids=row_ids,
@@ -1559,12 +1543,30 @@ class WorkbenchWriteFacade:
             for row in list(selection_result.payload.get("rows") or [])
             if isinstance(row, dict)
         ]
+        row_id_aliases = self._withdraw_alias_map_from_rows(selected_rows)
+        try:
+            preview_relation = self._preview_withdraw_relation_via_command_service(
+                relation_command,
+                row_ids=row_ids,
+                row_types=row_types,
+                month=month,
+                row_id_aliases=row_id_aliases,
+            )
+        except WorkbenchRelationCommandError as exc:
+            return self._relation_command_error_result(exc)
+        except _WorkbenchWritePersistenceError as exc:
+            return self._persistence_unavailable_result(str(exc))
+        except (TypeError, ValueError) as exc:
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_withdraw_link_preview_request", "message": str(exc)},
+            )
         return WorkbenchWriteResult(
             HTTPStatus.OK,
             self._withdraw_relation_preview_payload(
                 preview_relation,
                 month=month,
-                alias_map=self._withdraw_alias_map_from_rows(selected_rows),
+                alias_map=row_id_aliases,
                 selected_rows=selected_rows,
             ),
         )

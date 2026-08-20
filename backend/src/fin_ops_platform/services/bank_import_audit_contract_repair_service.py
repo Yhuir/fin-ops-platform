@@ -13,6 +13,7 @@ from fin_ops_platform.services.import_preview_audit import (
     BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
 )
 from fin_ops_platform.services.postgres_repositories.bank_transaction_import_page_audit import (
+    TERMINAL_BATCH_STATUSES,
     bank_import_audit_count_expectations,
     formal_bank_import_files,
 )
@@ -27,6 +28,7 @@ def build_bank_import_audit_contract_repair_plan(
     expected_file_object_link_count: int,
     expected_payload_update_count: int,
     expected_row_relink_count: int,
+    expected_row_unlink_count: int,
 ) -> dict[str, Any]:
     files = list(snapshot.get("files") or [])
     batches = list(snapshot.get("batches") or [])
@@ -104,6 +106,11 @@ def build_bank_import_audit_contract_repair_plan(
         rows=rows,
         transactions=transactions,
     )
+    row_unlink_actions = _build_row_unlink_actions(
+        formal_files=formal_files,
+        batches=batches,
+        rows=rows,
+    )
 
     if len(file_object_link_actions) != int(expected_file_object_link_count):
         raise ValueError(
@@ -123,6 +130,12 @@ def build_bank_import_audit_contract_repair_plan(
             f"expected {int(expected_row_relink_count)}, "
             f"resolved {len(row_relink_actions)}."
         )
+    if len(row_unlink_actions) != int(expected_row_unlink_count):
+        raise ValueError(
+            "Bank import audit row-unlink count changed: "
+            f"expected {int(expected_row_unlink_count)}, "
+            f"resolved {len(row_unlink_actions)}."
+        )
     plan = {
         "operation": "bank_import_audit_contract_repair",
         "formal_file_count": len(formal_files),
@@ -130,6 +143,7 @@ def build_bank_import_audit_contract_repair_plan(
         "file_object_link_actions": file_object_link_actions,
         "payload_update_actions": payload_update_actions,
         "row_relink_actions": row_relink_actions,
+        "row_unlink_actions": row_unlink_actions,
     }
     plan["source_fingerprint"] = _fingerprint(plan)
     return plan
@@ -152,6 +166,7 @@ def public_bank_import_audit_contract_repair_report(
         "file_object_link_count": len(plan["file_object_link_actions"]),
         "payload_update_count": len(plan["payload_update_actions"]),
         "row_relink_count": len(plan["row_relink_actions"]),
+        "row_unlink_count": len(plan["row_unlink_actions"]),
         "file_object_link_file_ids": [
             action["file_id"] for action in plan["file_object_link_actions"]
         ],
@@ -169,8 +184,150 @@ def public_bank_import_audit_contract_repair_report(
             }
             for action in plan["row_relink_actions"]
         ],
+        "row_unlink_rows": [
+            {
+                "batch_id": action["batch_id"],
+                "row_id": action["row_id"],
+                "row_no": action["row_no"],
+                "decision": action["decision"],
+                "decision_reason": action["decision_reason"],
+                "before_linked_object_type": action[
+                    "before_linked_object_type"
+                ],
+                "before_linked_object_id": action["before_linked_object_id"],
+            }
+            for action in plan["row_unlink_actions"]
+        ],
         "completion": dict(completion or {}),
     }
+
+
+def _build_row_unlink_actions(
+    *,
+    formal_files: list[dict[str, Any]],
+    batches: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    formal_batch_ids = {
+        batch_id
+        for file_row in formal_files
+        for batch_id in (
+            _text(_normalized_payload(file_row).get("preview_batch_id")),
+            _text(_normalized_payload(file_row).get("batch_id")),
+        )
+        if batch_id
+    }
+    terminal_batches = {
+        _text(batch.get("batch_id")): batch
+        for batch in batches
+        if _text(batch.get("batch_id")) in formal_batch_ids
+        and _text(batch.get("batch_type")) == "bank_transaction"
+        and _text(batch.get("status")) in TERMINAL_BATCH_STATUSES
+    }
+    actions: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    for row in rows:
+        if (
+            _text(row.get("batch_id")) not in terminal_batches
+            or _text(row.get("decision")) != "suspected_duplicate"
+        ):
+            continue
+        before_linked_object_type = _text(row.get("linked_object_type"))
+        before_linked_object_id = _text(row.get("linked_object_id"))
+        before_raw_payload = deepcopy(_dict(row.get("raw_payload")))
+        normalized_payload = _normalized_payload(row)
+        payload_linked_object_type = _text(
+            normalized_payload.get("linked_object_type")
+        )
+        payload_linked_object_id = _text(normalized_payload.get("linked_object_id"))
+        typed_link_present = bool(
+            before_linked_object_type or before_linked_object_id
+        )
+        payload_link_present = bool(
+            payload_linked_object_type or payload_linked_object_id
+        )
+        if not typed_link_present and not payload_link_present:
+            continue
+        if (
+            _text(row.get("source_record_type")) != "bank_transaction"
+            or not _text(row.get("row_pk"))
+            or (
+                typed_link_present
+                and (
+                    before_linked_object_type != "bank_transaction"
+                    or not before_linked_object_id
+                )
+            )
+            or (
+                payload_link_present
+                and (
+                    payload_linked_object_type != "bank_transaction"
+                    or not payload_linked_object_id
+                )
+            )
+            or (
+                typed_link_present
+                and payload_link_present
+                and (
+                    before_linked_object_type != payload_linked_object_type
+                    or before_linked_object_id != payload_linked_object_id
+                )
+            )
+        ):
+            unresolved.append(
+                {
+                    "batch_id": _text(row.get("batch_id")),
+                    "row_id": _text(row.get("row_id")),
+                    "row_no": _int(row.get("row_no")),
+                    "row_pk_present": bool(_text(row.get("row_pk"))),
+                    "source_record_type": _text(row.get("source_record_type"))
+                    or "missing",
+                    "linked_object_type": before_linked_object_type or "missing",
+                    "linked_object_id_present": bool(before_linked_object_id),
+                    "payload_linked_object_type": payload_linked_object_type
+                    or "missing",
+                    "payload_linked_object_id_present": bool(
+                        payload_linked_object_id
+                    ),
+                }
+            )
+            continue
+        after_raw_payload = _clear_linked_object_fields(before_raw_payload)
+        batch = terminal_batches[_text(row.get("batch_id"))]
+        actions.append(
+            {
+                "row_pk": _text(row.get("row_pk")),
+                "row_id": _text(row.get("row_id")),
+                "batch_id": _text(row.get("batch_id")),
+                "before_batch_type": batch.get("batch_type"),
+                "before_batch_status": batch.get("status"),
+                "row_no": _int(row.get("row_no")),
+                "source_record_type": row.get("source_record_type"),
+                "source_unique_key": row.get("source_unique_key"),
+                "data_fingerprint": row.get("data_fingerprint"),
+                "decision": row.get("decision"),
+                "decision_reason": row.get("decision_reason"),
+                "before_linked_object_type": row.get("linked_object_type"),
+                "before_linked_object_id": row.get("linked_object_id"),
+                "before_payload_linked_object_type": payload_linked_object_type
+                or None,
+                "before_payload_linked_object_id": payload_linked_object_id or None,
+                "after_linked_object_type": None,
+                "after_linked_object_id": None,
+                "before_raw_payload": before_raw_payload,
+                "after_raw_payload": after_raw_payload,
+            }
+        )
+    if unresolved:
+        raise ValueError(
+            "Bank import suspected-duplicate rows contain an unsupported partial or "
+            "non-bank canonical link: "
+            + json.dumps(unresolved[:20], ensure_ascii=False, sort_keys=True)
+        )
+    return sorted(
+        actions,
+        key=lambda item: (item["batch_id"], item["row_no"], item["row_id"]),
+    )
 
 
 def _build_row_relink_actions(
@@ -381,6 +538,20 @@ def _rewrite_linked_object_id(
     normalized = rewritten.get("normalized_payload")
     target = normalized if isinstance(normalized, dict) else rewritten
     target["linked_object_id"] = linked_object_id
+    return rewritten
+
+
+def _clear_linked_object_fields(raw_payload: dict[str, Any]) -> dict[str, Any]:
+    rewritten = deepcopy(raw_payload)
+    normalized = rewritten.get("normalized_payload")
+    target = normalized if isinstance(normalized, dict) else rewritten
+    target["linked_object_type"] = None
+    target["linked_object_id"] = None
+    if target is not rewritten and (
+        "linked_object_type" in rewritten or "linked_object_id" in rewritten
+    ):
+        rewritten["linked_object_type"] = None
+        rewritten["linked_object_id"] = None
     return rewritten
 
 

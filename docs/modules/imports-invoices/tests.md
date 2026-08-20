@@ -27,6 +27,7 @@
 - 路由切换、卸载、重挂载、sessionStorage 恢复时不能丢失已选文件、预览结果或 in-flight preview 结果。
 - `preview_stale` 必须映射为重新预览提示，不能继续确认旧结果，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。
 - stale gate 必须逐行比较 decision、linked object type/id；duplicate/importable 汇总不变但 canonical invoice owner 调换时仍必须拒绝确认。
+- `suspected_duplicate` preview 可显示候选 invoice，但 confirm 后 terminal row 必须清空该非权威 link；created、status_updated、duplicate_skipped 的正式引用不能被清空。
 - confirm API/worker 入队失败必须错误可见，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。
 - 损坏 Excel 必须是 file-level `unrecognized_template`，不能让整个 preview 请求崩溃。
 - 含唯一 `发票基础信息` 的税务平台多 sheet 工作簿必须直接以其生成 canonical 发票，前置 `信息汇总表` 只能作为明细证据；表头畸形、重名或明细身份错配必须整文件 fail closed，不能回退首个可解析 sheet。没有该 sheet 的历史单 sheet `信息汇总表` 仍识别既有表头别名并跳过汇总页脚。

@@ -432,6 +432,9 @@ class ImportNormalizationService:
                         self._persist_updated_row(preview.batch.batch_type, row_result, normalized)
                     elif row_result.decision == ImportDecision.DUPLICATE_SKIPPED:
                         self._persist_duplicate_row(preview.batch.batch_type, row_result, normalized)
+                    elif row_result.decision == ImportDecision.SUSPECTED_DUPLICATE:
+                        row_result.linked_object_type = None
+                        row_result.linked_object_id = None
 
         preview.batch.success_count = self._count_decisions(preview.row_results, ImportDecision.CREATED, ImportDecision.STATUS_UPDATED)
         preview.batch.duplicate_count = self._count_decisions(preview.row_results, ImportDecision.DUPLICATE_SKIPPED)

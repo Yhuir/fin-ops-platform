@@ -637,7 +637,39 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(preview.row_results[0].counterparty_name, "Vendor A")
         self.assertEqual(preview.row_results[1].decision, ImportDecision.SUSPECTED_DUPLICATE)
         self.assertEqual(preview.row_results[1].identity_kind, "suspected")
+        self.assertEqual(preview.row_results[1].linked_object_type, "bank_transaction")
+        self.assertEqual(preview.row_results[1].linked_object_id, self.existing_transaction.id)
         self.assertEqual(preview.row_results[2].decision, ImportDecision.ERROR)
+
+    def test_confirm_import_clears_suspected_invoice_candidate_reference(self) -> None:
+        preview = self.service.preview_import(
+            batch_type=BatchType.OUTPUT_INVOICE,
+            source_name="invoice-weak-match-demo.json",
+            imported_by="user_finance_01",
+            rows=[
+                {
+                    "invoice_code": "",
+                    "invoice_no": "",
+                    "counterparty_name": "Acme Supplies",
+                    "amount": "66.00",
+                    "invoice_date": "2026-03-22",
+                    "invoice_status_from_source": "valid",
+                }
+            ],
+        )
+
+        row_result = preview.row_results[0]
+        self.assertEqual(row_result.decision, ImportDecision.SUSPECTED_DUPLICATE)
+        self.assertEqual(row_result.linked_object_type, "invoice")
+        self.assertEqual(row_result.linked_object_id, self.existing_invoice_without_unique.id)
+
+        batch = self.service.confirm_import(preview.id)
+
+        self.assertEqual(batch.status.value, "completed_with_errors")
+        self.assertEqual(row_result.decision, ImportDecision.SUSPECTED_DUPLICATE)
+        self.assertIsNone(row_result.linked_object_type)
+        self.assertIsNone(row_result.linked_object_id)
+        self.assertEqual(len(self.service.list_invoices()), 2)
 
     def test_invoice_placeholder_digital_number_does_not_mask_stable_code_number_key(self) -> None:
         preview = self.service.preview_import(
@@ -978,14 +1010,19 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(preview.row_results[0].decision, ImportDecision.SUSPECTED_DUPLICATE)
+        row_result = preview.row_results[0]
+        self.assertEqual(row_result.decision, ImportDecision.SUSPECTED_DUPLICATE)
+        self.assertEqual(row_result.linked_object_type, "bank_transaction")
+        self.assertEqual(row_result.linked_object_id, self.existing_transaction.id)
         batch = self.service.confirm_import(preview.id)
 
         self.assertEqual(batch.status.value, "completed_with_errors")
         self.assertEqual(
-            preview.row_results[0].decision,
+            row_result.decision,
             ImportDecision.SUSPECTED_DUPLICATE,
         )
+        self.assertIsNone(row_result.linked_object_type)
+        self.assertIsNone(row_result.linked_object_id)
         self.assertEqual(batch.suspected_duplicate_count, 1)
         self.assertEqual(len(self.service.list_transactions()), 1)
 
@@ -1022,6 +1059,10 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(updated.invoice_status_from_source, "cancelled")
         created = next(invoice for invoice in self.service.list_invoices() if invoice.invoice_no == "9010")
         self.assertEqual(created.counterparty.normalized_name, "created corp")
+        self.assertEqual(preview.row_results[0].linked_object_id, created.id)
+        self.assertEqual(preview.row_results[1].decision, ImportDecision.STATUS_UPDATED)
+        self.assertEqual(preview.row_results[1].linked_object_type, "invoice")
+        self.assertEqual(preview.row_results[1].linked_object_id, self.existing_invoice.id)
 
     def test_preview_import_preloads_invoice_identity_in_bulk(self) -> None:
         repository = BulkInvoiceIdentityRepository(invoices=[self.existing_invoice])
@@ -1163,6 +1204,11 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(confirmed.duplicate_count, 1)
         self.assertEqual(confirmed.success_count, 1)
         self.assertEqual(preview.row_results[1].decision, ImportDecision.DUPLICATE_SKIPPED)
+        self.assertEqual(preview.row_results[1].linked_object_type, "invoice")
+        self.assertEqual(
+            preview.row_results[1].linked_object_id,
+            preview.row_results[0].linked_object_id,
+        )
 
     def test_confirm_import_skips_duplicate_invoice_from_later_preview_batch(self) -> None:
         feb_preview = self.service.preview_import(

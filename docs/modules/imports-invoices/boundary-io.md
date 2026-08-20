@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-08-18
+日期：2026-08-20
 
 ## 模块化状态
 
@@ -48,7 +48,7 @@ preview/confirm/retry 都属于 canonical 导入写链，必须在 multipart/JSO
 
 preview 首次登记 `app.import_files` 时必须同时写入认证 username 到 `uploaded_by` 与 `raw_payload.normalized_payload.imported_by`，最终 session delta 必须保持同值；恢复、列出和放弃只使用该服务端 owner 事实。session/file/batch/canonical candidate ID 使用带业务前缀的 UUID，不使用进程内顺序号或“先查询再递增”的多 worker 竞态分配。
 
-file/session preview/retry 只允许通过当前 `session_id` 持久化该 session、files 与其 `preview_batch_id` 的精确 delta，且不得携带 canonical `invoices` / `transactions`；不得把进程内其它历史 session/batch 的 snapshot 写回 PostgreSQL。confirm 必须先通过 `save_import_delta` 在同一事务持久化所选 session、batch 与 canonical invoice 精确 delta，成功后才允许发布必要的 Workbench auto-matching 领域任务；普通 confirm 不发布 tax/read-model refresh。持久化失败时 batch 与 file/session 必须整体回滚，且领域任务发布数必须为零。
+file/session preview/retry 只允许通过当前 `session_id` 持久化该 session、files 与其 `preview_batch_id` 的精确 delta，且不得携带 canonical `invoices` / `transactions`；不得把进程内其它历史 session/batch 的 snapshot 写回 PostgreSQL。preview 的 `suspected_duplicate` 可保留候选 invoice 引用作为复核证据，confirm 后 terminal row 必须清空该非权威引用；`created`、`status_updated`、`duplicate_skipped` 的正式引用保持不变。confirm 必须先通过 `save_import_delta` 在同一事务持久化所选 session、batch 与 canonical invoice 精确 delta，成功后才允许发布必要的 Workbench auto-matching 领域任务；普通 confirm 不发布 tax/read-model refresh。持久化失败时 batch 与 file/session 必须整体回滚，且领域任务发布数必须为零。
 
 ## 输出 I/O
 

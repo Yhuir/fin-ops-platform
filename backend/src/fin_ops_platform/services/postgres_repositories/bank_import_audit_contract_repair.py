@@ -32,7 +32,10 @@ def apply_bank_import_audit_contract_repair(
         raise ValueError("Bank import audit contract repair requires an operator id.")
     connection.execute(
         "select set_config('fin_ops.correction_reason', %s, true)",
-        ("Repair proven bank import archive links and registered audit counts.",),
+        (
+            "Repair proven bank import archive links, registered audit counts, "
+            "and row link contracts.",
+        ),
     )
     connection.execute(
         "select set_config('fin_ops.actor_id', %s, true)",
@@ -95,10 +98,43 @@ def apply_bank_import_audit_contract_repair(
                 f"Import row {action['row_id']} canonical link changed after dry-run."
             )
         row_relink_count += affected
+    row_unlink_count = 0
+    for action in plan["row_unlink_actions"]:
+        affected = connection.execute(
+            _UNLINK_ROW_SQL,
+            (
+                json.dumps(
+                    action["after_raw_payload"], ensure_ascii=False, default=str
+                ),
+                action["row_pk"],
+                action["row_id"],
+                action["batch_id"],
+                action["row_no"],
+                action["source_record_type"],
+                action["decision"],
+                action["decision_reason"],
+                action["before_linked_object_type"],
+                action["before_linked_object_id"],
+                action["source_unique_key"],
+                action["data_fingerprint"],
+                json.dumps(
+                    action["before_raw_payload"], ensure_ascii=False, default=str
+                ),
+                action["before_batch_type"],
+                action["before_batch_status"],
+            ),
+        )
+        if affected != 1:
+            raise RuntimeError(
+                f"Import row {action['row_id']} suspected-duplicate link changed "
+                "after dry-run."
+            )
+        row_unlink_count += affected
     return {
         "file_object_link_count": linked_count,
         "payload_update_count": payload_count,
         "row_relink_count": row_relink_count,
+        "row_unlink_count": row_unlink_count,
     }
 
 
@@ -142,4 +178,35 @@ where id = %s::uuid
   and source_unique_key is not distinct from %s
   and data_fingerprint is not distinct from %s
   and raw_payload = %s::jsonb
+"""
+
+_UNLINK_ROW_SQL = """
+update app.import_batch_rows target
+set linked_object_type = null,
+    linked_object_id = null,
+    raw_payload = %s::jsonb
+where target.id = %s::uuid
+  and coalesce(target.legacy_mongo_id, target.id::text) = %s
+  and exists (
+      select 1
+      from app.import_batches batch
+      where batch.id = target.import_batch_id
+        and coalesce(batch.legacy_mongo_id, batch.id::text) = %s
+  )
+  and target.row_no = %s
+  and target.source_record_type is not distinct from %s
+  and target.decision = %s
+  and target.decision_reason is not distinct from %s
+  and target.linked_object_type is not distinct from %s
+  and target.linked_object_id is not distinct from %s
+  and target.source_unique_key is not distinct from %s
+  and target.data_fingerprint is not distinct from %s
+  and target.raw_payload = %s::jsonb
+  and exists (
+      select 1
+      from app.import_batches batch
+      where batch.id = target.import_batch_id
+        and batch.batch_type = %s
+        and batch.status = %s
+  )
 """

@@ -27,7 +27,7 @@
 - `preview_ready -> preview_stale`：确认前 audit 检测到底层事实变化。
 - `preview_ready -> queued`：至少一个 selected file 可确认，API 创建 idempotent background job。
 - `queued -> processing -> confirmed`：import worker 或 inline job 确认 selected files，持久化 import facts 与必要 Workbench matching 领域任务；不触发页面 read model fan-out，消费者访问时按 source version 收敛。
-- `suspected_duplicate -> completed_with_errors`：普通确认保留弱指纹疑似项且不写 canonical 流水；用户点击确认不构成绕过去重的授权。
+- `suspected_duplicate -> completed_with_errors`：普通确认保留弱指纹疑似项且不写 canonical 流水；preview 可携带候选引用供复核，terminal row 必须清空 `linked_object_type/id`，用户点击确认不构成绕过去重的授权。
 - `failed -> files_configured/previewing`：用户重试 session files 或重新预览。
 - `preview_ready -> reverted`：只有 session owner 可显式放弃；重复请求幂等。
 
@@ -97,6 +97,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-20 | 弱指纹终态引用与历史审计合同闭环 | confirm 仅在 preview 保留候选证据，terminal suspected row 清空 canonical 引用；历史正式银行行通过 exact-count/fingerprint/CAS 工具定点 unlink，不触碰 canonical 流水 | `tests/test_import_service.py`、`tests/test_bank_import_audit_contract_repair.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-08-11 | 服务端恢复、owner 隔离和显式放弃闭环 | 预览不再依赖单一浏览器 key；AppHealth 可区分待确认、队列、处理、完成、失败和放弃 | `tests/test_import_lifecycle_service.py`、`tests/test_import_file_api.py`、`web/src/test/ImportCenterPage.test.tsx` |
 | 2026-08-12 | 关闭普通 confirm 的弱指纹放行，并收紧生产受控重放 | 疑似流水不再被确认写入；受控重放只接受固定修复原因和同一 keeper 证据 | `tests/test_import_service.py`、`tests/test_import_file_service.py`、`tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-08-12 | 补齐现存 canonical owner 的受控重放证据 | 恢复 cohort 中仍合法存在的 created owner 按文件、行号、指纹和 canonical ID 冻结；弱身份重放只可跳过到该 owner，真正缺失行仍走正常创建 | `tests/test_import_file_service.py`、`tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |

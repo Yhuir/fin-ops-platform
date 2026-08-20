@@ -1,5 +1,12 @@
 # 银行流水导入 实施记录
 
+## 2026-08-20 - terminal suspected canonical 引用闭环
+
+- 根因：去重 preview 会为弱/多义命中保留 candidate ID；普通 confirm 已不创建 canonical 流水，但旧终态序列化仍把 transient candidate 写进 `app.import_batch_rows.linked_object_*` 与 normalized payload，违反 Page Audit 的 terminal decision 合同并持续制造阻断。
+- 修复：共享导入确认边界在终态只对 `suspected_duplicate` 清空候选引用；created、status_updated、duplicate_skipped 保持正式引用，银行与发票不建立第二条确认链。
+- 既有数据：候选 release 的银行 Audit repair planner 冻结 exact terminal bank rows，要求显式 unlink count、fingerprint、serializable advisory lock 和逐行 CAS；只清 typed/normalized link，不改 decision、reason、batch 计数或 canonical 流水。非银行、非终态、字段缺失或任何漂移整批零写。
+- 不新增表、migration、API、worker、read model、fallback 或数据库备份。
+
 ## 2026-08-14 - OA-first 成本隔离更正
 
 - 银行流水导入只新增银行事实；可以进入成本统计“按时间/按标签”，但没有完成 OA 与付款流水正式关系时，不得进入“按项目/按银行/按 OA 费用类型”。

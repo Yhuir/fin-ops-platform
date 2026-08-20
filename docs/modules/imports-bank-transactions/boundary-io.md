@@ -1,6 +1,6 @@
 # 银行流水导入模块边界与 I/O
 
-日期：2026-08-12
+日期：2026-08-20
 
 ## 模块化状态
 
@@ -25,13 +25,13 @@
 - 银行有官方参考号时默认使用 `bank-v3`：账户、官方参考号种类/值和业务字段指纹摘要共同形成强 identity。若既有 `bank-v3` 键冲突，但双方非空余额或币种明确证明是不同账单位置，只为该冲突事实生成确定性的 `bank-v4` statement-position 键；重放同一位置必须命中同一 `bank-v4`，不得穿透数据库 `source_unique_key` 唯一约束。若历史 canonical 行尚无 `bank-v4` 键，仅当账户、秒级交易时间、方向、金额、账后余额、币种六项全部存在且只命中一条时，才作为 legacy statement-position duplicate；多条命中进入 `suspected_duplicate`，缺字段不自动合并。历史 `bank-v2` 只在业务指纹一致、双方官方参考号存在唯一交集时迁移判重；缺失或多义证据进入 `suspected_duplicate`。没有官方参考号时业务字段指纹仍只产生人工复核。
 - `preview_stale` 不只比较汇总计数。confirm 前必须逐行比较 decision、linked object type 和 linked object id；即使总重复数/可导入数未变，只要任一行换了 canonical owner 也必须拒绝旧预览。错误只报告变化字段及数量，不输出业务值或内部 ID。
 - 一个银行文件的 preview/confirm 必须先对当前 canonical 事实做有界批量 identity preload：一次读取 canonical/fingerprint 候选，一次读取完整 statement-position 候选，再在内存中逐行决定并把本批新建事实写入同一批缓存；不得逐行查询数据库，同文件重复项也不得穿透 confirm。
-- 普通 confirm 不得把 `suspected_duplicate` 解释为用户授权新建。弱指纹命中必须保持未写入并使 batch 收敛为 `completed_with_errors`；只有稳定 canonical identity 才能自动跳过或新建。
+- 普通 confirm 不得把 `suspected_duplicate` 解释为用户授权新建。弱指纹命中必须保持未写入并使 batch 收敛为 `completed_with_errors`；preview 可暂存候选 canonical 引用用于复核，但 terminal row 的 `linked_object_type/id`（包括 normalized payload）必须清空。只有 `created`、`status_updated`、`duplicate_skipped` 可以保留正式 canonical 引用。
 - 在有界资源内验证 XLS/XLSX 签名与容器结构；文件声明的行数/借贷合计与解析结果不一致时禁止确认。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
 - 受控重放必须为新 session/file 生成新的归档对象登记；不得让新 `app.import_files` 复用旧 `stored_file_path` 却缺少 `file_object_id`。历史已存在的缺失链接只能由维护工具按唯一 storage URI、登记 SHA-256、对象大小和非 tombstone 生命周期证明后修复。
 - 受控重放的 `duplicate_skipped` 行可以保留原上传文件的 source key/fingerprint，同时引用旧 canonical 流水；page Audit 仅在登记 reason 属于三类受控重放、去重恢复工具写入的唯一 owner-reclassification reason，或普通确认的 canonical duplicate reason，且账户、秒级交易时间、方向、金额、账后余额完整相等时接受该引用。币种有值时必须相等；历史 canonical 币种为空时，仅接受 row 同为空，或银行解析器按既有合同补出的 `CNY`。owner-reclassification 与普通确认 reason 只属于历史 page Audit provenance，不进入受控重放 reason map；普通确认仍由正常 importer 决定，不获得重放覆盖能力。row 缺失但 canonical 有值、非 `CNY` 的单边缺失或显式值不同仍必须阻断。普通导入、前五项缺字段/漂移仍必须阻断。
 - 退休版本的普通确认 reason 仅允许证明“row 有 source key、canonical 缺 source key”的历史迁移形态：row/canonical 数据指纹必须非空且相等，该指纹在 canonical 流水池中必须只有一个 owner，同时账户、秒级交易时间、方向、金额和标准化对方名仍须相等。该 reason 不进入受控重放 provenance 集合或运行时 reason map；指纹多 owner、任一基础字段漂移或相反的 key 缺失形态继续阻断。
-- 历史正式 file/session audit 计数只允许从 durable `app.import_batch_rows` 重算；维护工具必须 dry-run 冻结精确 file-object link 数、payload update 数、row relink 数和 source fingerprint，execute 在 serializable transaction + advisory lock 下逐行 CAS，记录 operation audit。历史普通确认错误引用优先要求数据指纹、账户、秒级交易时间、方向、金额、余额、币种与标准化对方名全部一致；若历史 parser 造成 fingerprint 漂移，只允许以上严格 statement-position 与对方名在全库唯一命中时作为二级证据。零命中、多命中或任一严格字段缺失必须整批拒绝。不得扫描并改写其它 import 类型，也不得伪造缺失对象。
+- 历史正式 file/session audit 计数只允许从 durable `app.import_batch_rows` 重算；维护工具必须 dry-run 冻结精确 file-object link 数、payload update 数、row relink 数、terminal `suspected_duplicate` row unlink 数和 source fingerprint，execute 在 serializable transaction + advisory lock 下逐行 CAS，记录 operation audit。row unlink 只允许正式、终态、`source_record_type=bank_transaction` 且当前仍错误引用 `bank_transaction` 的行，并且只清空 typed link 与 normalized payload link；数量、行主键、batch/row、decision/reason、source key、fingerprint、旧 link 与原 payload 任一漂移必须整批拒绝。历史普通确认错误引用优先要求数据指纹、账户、秒级交易时间、方向、金额、余额、币种与标准化对方名全部一致；若历史 parser 造成 fingerprint 漂移，只允许以上严格 statement-position 与对方名在全库唯一命中时作为二级证据。零命中、多命中或任一严格字段缺失必须整批拒绝。不得扫描并改写其它 import 类型，也不得伪造缺失对象。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
 - `duplicate_skipped` 的受控重放 statement-position 审计失败时，admin-only issue 必须返回 decision/reason 登记状态、无业务原值的完整性标志和字段级 `mismatch_fields`，以区分未登记 reason、缺失位置与账户、时间、方向、金额、余额、币种漂移；不得只返回派生 source key 让生产门禁依赖推断。
 - 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 `freshness_targets` 与 `operation_barrier_targets` 固定为空，不要求当前写操作等待任意页面重建。

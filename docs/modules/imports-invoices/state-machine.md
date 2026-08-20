@@ -82,6 +82,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-20 | suspected duplicate 候选引用只保留到 preview | confirm 后 terminal suspected row 清空非权威 invoice 引用；created、status_updated、duplicate_skipped 保持正式引用 | `tests/test_import_service.py` |
 | 2026-08-14 | 新增单张发票人工录入并删除待找发票旧写链 | 可选附件识别只预填；服务端预览、重复校验、红蓝字金额和普通 confirm job 形成单一闭环；不自动绑定银行流水 | `tests/test_manual_invoice_entry_service.py`、`tests/test_import_file_api.py`、`web/src/test/ManualInvoiceEntryDrawer.test.tsx`、`web/src/test/ImportCenterPage.test.tsx` |
 | 2026-08-11 | 导入生命周期以服务端恢复并支持显式放弃 | 浏览器本地状态不再是唯一恢复入口；放弃的 preview 不再永久显示 pending，确认链仍复用既有 durable job/outbox | `tests/test_import_lifecycle_service.py`、`test_preview_session_can_be_recovered_and_discarded_before_confirm`、`ImportCenterPage.test.tsx` |
 | 2026-08-11 | 放弃状态 formal payload 原子闭环 | batch/file/session 的 canonical 列与 normalized payload 同时进入 `reverted`；历史精确 mismatch 通过指纹绑定工具修复，不扫描 canonical 发票 | `tests/test_import_lifecycle_service.py`、`tests/test_audit_invoice_import_page.py`、`tests/test_import_audit_repair_ops.py` |

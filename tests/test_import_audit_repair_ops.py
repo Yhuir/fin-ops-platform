@@ -950,11 +950,15 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
 
     def test_cli_bank_audit_contract_dry_run_uses_exact_counts(self) -> None:
         class Connection:
+            def __init__(self) -> None:
+                self.statements: list[str] = []
+
             @contextmanager
             def transaction(self):
                 yield self
 
-            def execute(self, _sql: str, _params: tuple = ()) -> int:
+            def execute(self, sql: str, _params: tuple = ()) -> int:
+                self.statements.append(sql)
                 return 0
 
         connection = Connection()
@@ -966,6 +970,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "file_object_link_actions": [{"file_id": "file-1"}],
             "payload_update_actions": [{"file_id": "file-2"}],
             "row_relink_actions": [],
+            "row_unlink_actions": [],
         }
         output = io.StringIO()
         with (
@@ -1000,6 +1005,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "1",
                     "--expected-bank-audit-row-relink-count",
                     "0",
+                    "--expected-bank-audit-row-unlink-count",
+                    "0",
                     "--operator-id",
                     "system_repair",
                 ],
@@ -1012,24 +1019,52 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=0,
+            expected_row_unlink_count=0,
         )
         self.assertFalse(json.loads(output.getvalue())["written"])
+        self.assertEqual(
+            connection.statements,
+            ["set transaction isolation level repeatable read read only"],
+        )
+
+    def test_cli_bank_audit_contract_requires_exact_row_unlink_count(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "row-unlink counts"):
+            import_audit_repair_ops.main(
+                [
+                    "--dry-run",
+                    "--repair-bank-audit-contract",
+                    "--expected-bank-audit-file-object-link-count",
+                    "0",
+                    "--expected-bank-audit-payload-update-count",
+                    "0",
+                    "--expected-bank-audit-row-relink-count",
+                    "0",
+                    "--operator-id",
+                    "system_repair",
+                ]
+            )
 
     def test_cli_bank_audit_contract_execute_rechecks_fingerprint_and_audits(self) -> None:
         class Transaction:
-            def execute(self, _sql: str, _params: tuple = ()) -> int:
+            def __init__(self, statements: list[str]) -> None:
+                self.statements = statements
+
+            def execute(self, sql: str, _params: tuple = ()) -> int:
+                self.statements.append(sql)
                 return 0
 
-            def fetch_one(self, _sql: str, _params: tuple = ()) -> dict[str, bool]:
+            def fetch_one(self, sql: str, _params: tuple = ()) -> dict[str, bool]:
+                self.statements.append(sql)
                 return {"locked": True}
 
         class Connection:
             def __init__(self) -> None:
                 self.commits = 0
+                self.statements: list[str] = []
 
             @contextmanager
             def transaction(self):
-                yield Transaction()
+                yield Transaction(self.statements)
                 self.commits += 1
 
         connection = Connection()
@@ -1041,6 +1076,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
             "file_object_link_actions": [{"file_id": "file-1"}],
             "payload_update_actions": [{"file_id": "file-2"}],
             "row_relink_actions": [],
+            "row_unlink_actions": [],
         }
         output = io.StringIO()
         audit_service = Mock()
@@ -1072,6 +1108,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "file_object_link_count": 1,
                     "payload_update_count": 1,
                     "row_relink_count": 0,
+                    "row_unlink_count": 0,
                 },
             ) as apply_repair,
             patch.object(
@@ -1092,6 +1129,8 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     "1",
                     "--expected-bank-audit-row-relink-count",
                     "0",
+                    "--expected-bank-audit-row-unlink-count",
+                    "0",
                     "--operator-id",
                     "system_repair",
                 ],
@@ -1103,9 +1142,108 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         self.assertEqual(build_plan.call_count, 2)
         apply_repair.assert_called_once()
         audit_service.record_action.assert_called_once()
+        self.assertEqual(
+            connection.statements,
+            [
+                "set transaction isolation level repeatable read read only",
+                "set transaction isolation level serializable",
+                "select pg_advisory_xact_lock("
+                "hashtext('fin_ops_bank_import_audit_contract_repair'))",
+            ],
+        )
+        self.assertEqual(
+            audit_service.record_action.call_args.kwargs["metadata"][
+                "row_unlink_count"
+            ],
+            0,
+        )
         report = json.loads(output.getvalue())
         self.assertTrue(report["written"])
         self.assertEqual(report["completion"]["file_object_link_count"], 1)
+
+    def test_cli_bank_audit_contract_execute_rejects_locked_fingerprint_drift(
+        self,
+    ) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+            def fetch_one(self, _sql: str, _params: tuple = ()) -> dict[str, bool]:
+                return {"locked": True}
+
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield Transaction()
+
+        def plan(fingerprint: str) -> dict[str, object]:
+            return {
+                "operation": "bank_import_audit_contract_repair",
+                "source_fingerprint": fingerprint,
+                "formal_file_count": 0,
+                "session_count": 0,
+                "file_object_link_actions": [],
+                "payload_update_actions": [],
+                "row_relink_actions": [],
+                "row_unlink_actions": [],
+            }
+
+        apply_repair = Mock()
+        audit_service = Mock()
+        with (
+            patch.object(
+                import_audit_repair_ops.PostgresSettings,
+                "from_env",
+                return_value=object(),
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "PostgresConnection",
+                return_value=Connection(),
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "load_bank_import_audit_contract_repair_snapshot",
+                return_value={},
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "build_bank_import_audit_contract_repair_plan",
+                side_effect=[plan("a" * 64), plan("b" * 64)],
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "apply_bank_import_audit_contract_repair",
+                apply_repair,
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "AuditTrailService",
+                return_value=audit_service,
+            ),
+            self.assertRaisesRegex(RuntimeError, "changed while acquiring"),
+        ):
+            import_audit_repair_ops.main(
+                [
+                    "--execute",
+                    "--expected-fingerprint",
+                    "a" * 64,
+                    "--repair-bank-audit-contract",
+                    "--expected-bank-audit-file-object-link-count",
+                    "0",
+                    "--expected-bank-audit-payload-update-count",
+                    "0",
+                    "--expected-bank-audit-row-relink-count",
+                    "0",
+                    "--expected-bank-audit-row-unlink-count",
+                    "0",
+                    "--operator-id",
+                    "system_repair",
+                ]
+            )
+
+        apply_repair.assert_not_called()
+        audit_service.record_action.assert_not_called()
 
     def test_cli_passes_exact_lifecycle_target_to_snapshot_loader(self) -> None:
         class Connection:

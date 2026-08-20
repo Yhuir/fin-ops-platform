@@ -38,7 +38,6 @@ DEFAULT_LIMIT = 2_000
 DEFAULT_RELATION_PREVIEW_SAMPLES = 1
 MAX_RELATION_PREVIEW_SAMPLES = 20
 RELATION_PREVIEW_TARGET_MS = 3_000.0
-MAX_TEST_OWNED_RELATION_ROW_IDS = 20
 MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE = 3
 MAX_PARALLEL_CONSUMER_PROBES = 16
 SYSTEM_AUDIT_PATH = "/api/operations/app-health/page-audit?page=app-health-operations"
@@ -2508,13 +2507,12 @@ def _validate_checkpoint_consumers_and_rows(
     if (
         not isinstance(row_ids, list)
         or not row_ids
-        or len(row_ids) > MAX_TEST_OWNED_RELATION_ROW_IDS
         or any(not isinstance(row_id, str) or not row_id.strip() for row_id in row_ids)
         or len(row_ids) != len(set(row_ids))
     ):
         raise ValueError(
-            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} requires 1.."
-            f"{MAX_TEST_OWNED_RELATION_ROW_IDS} explicit test-owned row_ids."
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} requires "
+            "non-empty unique explicit test-owned row_ids."
         )
     captured_names = {
         capture_name

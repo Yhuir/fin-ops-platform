@@ -1545,6 +1545,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
     def test_withdraw_preview_reads_one_bounded_selection_and_skips_legacy_row_scan(self) -> None:
         relation_command = _RecordingRelationCommandService()
         selection_calls: list[dict[str, object]] = []
+        direct_resolution_calls: list[list[str]] = []
 
         def bounded_selection(
             month: str | None,
@@ -1576,6 +1577,9 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         facade = _new_facade(
             relation_command_service=relation_command,
             relation_preview_selection=bounded_selection,
+            resolve_live_rows_direct=lambda row_ids, **_: direct_resolution_calls.append(
+                list(row_ids)
+            ),
             withdraw_rows_and_after_relations=lambda **_: (_ for _ in ()).throw(
                 AssertionError("withdraw preview must not use the legacy full-payload row scan")
             ),
@@ -1591,6 +1595,11 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(preview.status_code, HTTPStatus.OK)
         self.assertEqual(len(selection_calls), 1)
         self.assertEqual(selection_calls[0]["row_ids"], ["oa-1", "bank-1"])
+        self.assertEqual(direct_resolution_calls, [])
+        self.assertEqual(
+            relation_command.preview_withdraw_calls[0]["row_id_aliases"],
+            {"oa-1": "oa-1", "bank-1": "bank-1"},
+        )
 
     def test_withdraw_link_canonicalizes_legacy_oa_source_ids_and_drops_same_row_restore(self) -> None:
         relation_command = _RawOaAliasWithdrawRelationCommandService()

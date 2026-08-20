@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from fin_ops_platform.services.bank_import_audit_contract_repair_service import (
@@ -90,6 +91,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=0,
+            expected_row_unlink_count=0,
         )
 
         self.assertEqual(plan["formal_file_count"], 1)
@@ -121,6 +123,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
                 expected_row_relink_count=0,
+                expected_row_unlink_count=0,
             )
 
     def test_plan_fails_closed_on_archive_hash_mismatch(self) -> None:
@@ -133,6 +136,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
                 expected_row_relink_count=0,
+                expected_row_unlink_count=0,
             )
 
     def test_plan_requires_exact_action_counts(self) -> None:
@@ -142,6 +146,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 expected_file_object_link_count=2,
                 expected_payload_update_count=1,
                 expected_row_relink_count=0,
+                expected_row_unlink_count=0,
             )
 
     def test_plan_relinks_one_uniquely_proven_mislinked_confirm_row(self) -> None:
@@ -152,6 +157,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=1,
+            expected_row_unlink_count=0,
         )
 
         action = plan["row_relink_actions"][0]
@@ -177,6 +183,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
                 expected_row_relink_count=1,
+                expected_row_unlink_count=0,
             )
 
     def test_plan_uses_unique_strict_position_when_historical_fingerprint_drifted(
@@ -190,6 +197,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=1,
+            expected_row_unlink_count=0,
         )
 
         self.assertEqual(
@@ -207,6 +215,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=1,
+            expected_row_unlink_count=0,
         )
 
         action = plan["row_relink_actions"][0]
@@ -222,6 +231,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=1,
+            expected_row_unlink_count=0,
         )
         snapshot["rows"][0]["linked_object_id"] = first_plan["row_relink_actions"][0][
             "after_linked_object_id"
@@ -235,6 +245,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=0,
+            expected_row_unlink_count=0,
         )
 
         self.assertEqual(second_plan["row_relink_actions"], [])
@@ -255,6 +266,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
                 expected_row_relink_count=1,
+                expected_row_unlink_count=0,
             )
 
     def test_plan_fails_closed_when_strict_statement_evidence_is_missing(self) -> None:
@@ -267,6 +279,7 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
                 expected_row_relink_count=1,
+                expected_row_unlink_count=0,
             )
 
     def test_plan_fails_closed_when_counterparty_evidence_is_missing(self) -> None:
@@ -282,7 +295,197 @@ class BankImportAuditContractRepairPlanTests(unittest.TestCase):
                 expected_file_object_link_count=1,
                 expected_payload_update_count=1,
                 expected_row_relink_count=1,
+                expected_row_unlink_count=0,
             )
+
+    def test_plan_unlinks_terminal_suspected_duplicate_without_changing_decision(
+        self,
+    ) -> None:
+        snapshot = _suspected_link_snapshot()
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=1,
+        )
+
+        action = plan["row_unlink_actions"][0]
+        self.assertEqual(action["decision"], "suspected_duplicate")
+        self.assertEqual(action["decision_reason"], "weak_identity_match")
+        self.assertEqual(action["before_batch_type"], "bank_transaction")
+        self.assertEqual(action["before_batch_status"], "completed_with_errors")
+        self.assertEqual(
+            action["before_linked_object_type"], "bank_transaction"
+        )
+        self.assertEqual(action["before_linked_object_id"], "transaction-candidate")
+        self.assertIsNone(action["after_linked_object_type"])
+        self.assertIsNone(action["after_linked_object_id"])
+        normalized = action["after_raw_payload"]["normalized_payload"]
+        self.assertIsNone(normalized["linked_object_type"])
+        self.assertIsNone(normalized["linked_object_id"])
+        report = public_bank_import_audit_contract_repair_report(
+            plan,
+            mode="dry_run",
+            written=False,
+        )
+        self.assertEqual(report["row_unlink_count"], 1)
+        self.assertEqual(report["row_unlink_rows"][0]["row_id"], "row-suspected")
+
+    def test_plan_requires_exact_suspected_duplicate_unlink_count(self) -> None:
+        with self.assertRaisesRegex(ValueError, "row-unlink count changed"):
+            build_bank_import_audit_contract_repair_plan(
+                _suspected_link_snapshot(),
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=0,
+                expected_row_unlink_count=0,
+            )
+
+    def test_plan_suspected_duplicate_unlink_is_idempotent(self) -> None:
+        snapshot = _suspected_link_snapshot()
+        first_plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=1,
+        )
+        action = first_plan["row_unlink_actions"][0]
+        snapshot["rows"][0]["linked_object_type"] = None
+        snapshot["rows"][0]["linked_object_id"] = None
+        snapshot["rows"][0]["raw_payload"] = action["after_raw_payload"]
+
+        second_plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=0,
+        )
+
+        self.assertEqual(second_plan["row_unlink_actions"], [])
+
+    def test_plan_unlinks_suspected_candidate_present_only_in_raw_payload(
+        self,
+    ) -> None:
+        snapshot = _suspected_link_snapshot()
+        snapshot["rows"][0]["linked_object_type"] = None
+        snapshot["rows"][0]["linked_object_id"] = None
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=1,
+        )
+
+        action = plan["row_unlink_actions"][0]
+        self.assertIsNone(action["before_linked_object_type"])
+        self.assertIsNone(action["before_linked_object_id"])
+        self.assertEqual(
+            action["before_payload_linked_object_type"], "bank_transaction"
+        )
+        self.assertEqual(
+            action["before_payload_linked_object_id"], "transaction-candidate"
+        )
+        self.assertIsNone(
+            action["after_raw_payload"]["normalized_payload"][
+                "linked_object_type"
+            ]
+        )
+        self.assertIsNone(
+            action["after_raw_payload"]["normalized_payload"]["linked_object_id"]
+        )
+
+    def test_plan_fails_closed_when_typed_and_payload_candidate_links_differ(
+        self,
+    ) -> None:
+        snapshot = _suspected_link_snapshot()
+        snapshot["rows"][0]["raw_payload"]["normalized_payload"][
+            "linked_object_id"
+        ] = "transaction-other"
+
+        with self.assertRaisesRegex(
+            ValueError, "unsupported partial or non-bank"
+        ):
+            build_bank_import_audit_contract_repair_plan(
+                snapshot,
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=0,
+                expected_row_unlink_count=1,
+            )
+
+    def test_plan_fingerprint_changes_when_suspected_link_changes(self) -> None:
+        snapshot = _suspected_link_snapshot()
+        first_plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=1,
+        )
+        snapshot["rows"][0]["linked_object_id"] = "transaction-other"
+        snapshot["rows"][0]["raw_payload"]["normalized_payload"][
+            "linked_object_id"
+        ] = "transaction-other"
+
+        second_plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=1,
+        )
+
+        self.assertNotEqual(
+            first_plan["source_fingerprint"], second_plan["source_fingerprint"]
+        )
+
+    def test_plan_fails_closed_on_non_bank_suspected_duplicate_link(self) -> None:
+        snapshot = _suspected_link_snapshot()
+        snapshot["rows"][0]["linked_object_type"] = "invoice"
+
+        with self.assertRaisesRegex(ValueError, "unsupported partial or non-bank"):
+            build_bank_import_audit_contract_repair_plan(
+                snapshot,
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=0,
+                expected_row_unlink_count=1,
+            )
+
+    def test_plan_fails_closed_on_non_bank_suspected_duplicate_source_type(
+        self,
+    ) -> None:
+        snapshot = _suspected_link_snapshot()
+        snapshot["rows"][0]["source_record_type"] = "invoice"
+
+        with self.assertRaisesRegex(ValueError, "unsupported partial or non-bank"):
+            build_bank_import_audit_contract_repair_plan(
+                snapshot,
+                expected_file_object_link_count=1,
+                expected_payload_update_count=1,
+                expected_row_relink_count=0,
+                expected_row_unlink_count=1,
+            )
+
+    def test_plan_does_not_unlink_nonterminal_preview_candidate(self) -> None:
+        snapshot = _suspected_link_snapshot()
+        snapshot["batches"][0]["status"] = "pending"
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            snapshot,
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=0,
+        )
+
+        self.assertEqual(plan["row_unlink_actions"], [])
 
 
 class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
@@ -301,6 +504,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=0,
+            expected_row_unlink_count=0,
         )
 
         result = apply_bank_import_audit_contract_repair(
@@ -315,6 +519,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
                 "file_object_link_count": 1,
                 "payload_update_count": 1,
                 "row_relink_count": 0,
+                "row_unlink_count": 0,
             },
         )
         self.assertEqual(len(connection.calls), 4)
@@ -335,6 +540,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=0,
+            expected_row_unlink_count=0,
         )
 
         with self.assertRaisesRegex(RuntimeError, "archive link changed"):
@@ -359,6 +565,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=1,
+            expected_row_unlink_count=0,
         )
 
         result = apply_bank_import_audit_contract_repair(
@@ -392,6 +599,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=1,
+            expected_row_unlink_count=0,
         )
         connection = Connection()
 
@@ -421,6 +629,7 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
             expected_file_object_link_count=1,
             expected_payload_update_count=1,
             expected_row_relink_count=1,
+            expected_row_unlink_count=0,
         )
 
         with self.assertRaisesRegex(RuntimeError, "canonical link changed"):
@@ -429,6 +638,114 @@ class BankImportAuditContractRepairRepositoryTests(unittest.TestCase):
                 plan,
                 operator_id="system_repair",
             )
+
+    def test_apply_unlinks_suspected_duplicate_with_full_compare_and_swap(
+        self,
+    ) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        connection = Connection()
+        plan = build_bank_import_audit_contract_repair_plan(
+            _suspected_link_snapshot(),
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=1,
+        )
+
+        result = apply_bank_import_audit_contract_repair(
+            connection,
+            plan,
+            operator_id="system_repair",
+        )
+
+        self.assertEqual(result["row_unlink_count"], 1)
+        row_sql, row_params = next(
+            (sql, params)
+            for sql, params in connection.calls
+            if "set linked_object_type = null" in sql
+        )
+        self.assertEqual(row_params[2], "row-suspected")
+        self.assertEqual(row_params[3], "batch-1")
+        self.assertEqual(row_params[6], "suspected_duplicate")
+        self.assertEqual(row_params[7], "weak_identity_match")
+        self.assertEqual(row_params[8], "bank_transaction")
+        self.assertEqual(row_params[9], "transaction-candidate")
+        self.assertIsNone(
+            json.loads(row_params[0])["normalized_payload"]["linked_object_id"]
+        )
+        self.assertEqual(
+            row_params[-2:], ("bank_transaction", "completed_with_errors")
+        )
+        set_clause = row_sql.lower().split("where", 1)[0]
+        self.assertNotIn("decision =", set_clause)
+        self.assertNotIn("decision_reason =", set_clause)
+        self.assertNotIn("suspected_duplicate_count", row_sql.lower())
+        self.assertIn("batch.batch_type = %s", row_sql)
+        self.assertIn("batch.status = %s", row_sql)
+
+    def test_apply_rolls_back_when_row_unlink_compare_and_swap_misses(self) -> None:
+        class Connection:
+            def execute(self, sql: str, _params: tuple[object, ...] = ()) -> int:
+                if "set linked_object_type = null" in sql:
+                    return 0
+                return 1
+
+        plan = build_bank_import_audit_contract_repair_plan(
+            _suspected_link_snapshot(),
+            expected_file_object_link_count=1,
+            expected_payload_update_count=1,
+            expected_row_relink_count=0,
+            expected_row_unlink_count=1,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "link changed after dry-run"):
+            apply_bank_import_audit_contract_repair(
+                Connection(),
+                plan,
+                operator_id="system_repair",
+            )
+
+
+def _suspected_link_snapshot() -> dict[str, list[dict[str, object]]]:
+    snapshot = _snapshot()
+    snapshot["batches"][0]["status"] = "completed_with_errors"
+    snapshot["rows"] = [
+        {
+            "row_pk": "00000000-0000-0000-0000-000000000004",
+            "row_id": "row-suspected",
+            "batch_id": "batch-1",
+            "row_no": 1,
+            "source_record_type": "bank_transaction",
+            "source_unique_key": "bank-weak:row-1",
+            "data_fingerprint": "bank:weak-row-1",
+            "decision": "suspected_duplicate",
+            "decision_reason": "weak_identity_match",
+            "linked_object_type": "bank_transaction",
+            "linked_object_id": "transaction-candidate",
+            "identity_kind": "weak",
+            "account_no": "62220001",
+            "trade_time": "2026-07-01 10:00:00",
+            "direction": "outflow",
+            "amount": "100.00",
+            "counterparty_name": "供应商",
+            "raw_payload": {
+                "normalized_payload": {
+                    "balance": "900.00",
+                    "currency": "CNY",
+                    "linked_object_type": "bank_transaction",
+                    "linked_object_id": "transaction-candidate",
+                }
+            },
+        }
+    ]
+    return snapshot
 
 
 def _mislinked_snapshot() -> dict[str, list[dict[str, object]]]:
