@@ -8,7 +8,7 @@
 - Service/repository/API：`test_workbench_anomaly_review_service.py` 保护服务端重取 canonical bundle 并自行持久化 evidence fingerprints/detected codes，忽略客户端旧人工字段；fingerprint、其他 blocker、跨月 scope、幂等和审计不变。`WorkbenchApi.test.ts` 保护 review request 不再发送人工分类或逐项 fingerprints。
 - Frontend interaction：`WorkbenchExceptionDrawer.test.tsx`、`RelationGroupGrid.test.tsx` 保护主表/抽屉复用同一三栏定位，默认只显示感叹号，hover/focus/click Popover 才展示 HeroUI Chip；折叠态不新增栏，展开态无重复 Chip、复选框或人工下拉，只读权限无 mutation。
 - E2E/regression：`workbench-exception-flow.spec.ts` 保护自动分类的接受、目标 bucket 单次重读、撤回及 1440/1024px 边界；权限套件保护 read-export/App Health blocked 下证据可见且零写入。`WorkbenchSelection.test.tsx` 保护写成功但重读失败不重复提交。
-- 性能与边界：分类为现有 group 内固定规模纯计算，前端定位为单次 Map/Set 遍历；未新增 API round-trip、逐行 I/O、表、migration、read model、worker、cache 或依赖。PostgreSQL candidate 仍在分页前用三栏总额、成员和附件状态计算 review fingerprint，但不再为全量关系递归构建费用项—发票连通分量；该图只在已分页的当前组内存中用于感叹号定位。PostgreSQL integration 同时保护 SQL/Python fingerprint 一致、旧递归 CTE 缺席和 summary/detail 分区一致。
+- 性能与边界：分类为现有 group 内固定规模纯计算，前端定位为单次 Map/Set 遍历；未新增 API round-trip、逐行 I/O、表、migration、read model、worker、cache 或依赖。PostgreSQL candidate 仍在分页前用三栏总额、成员和附件状态计算 review fingerprint，但不再为全量关系递归构建费用项—发票连通分量；附件归属只扫描含 OA 费用项的关系组，并只接受 canonical `source_expense_item_id = expense_item_id`，旧父 OA 别名/行号猜测链不得恢复。该图只在已分页的当前组内存中用于感叹号定位。PostgreSQL integration 同时保护 SQL/Python fingerprint 一致、旧递归/别名候选 CTE 缺席和 summary/detail 分区一致。
 - 旧链删除：删除 `workbench_exception_classifier.py` 及其测试、客户端人工分类/逐项审阅状态、请求字段和旧 CSS；dead-code guard 将旧 classifier 列为禁止恢复模块。
 
 ## 2026-08-20 大批量确认/撤回与旧上下文扫描删除

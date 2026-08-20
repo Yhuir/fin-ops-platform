@@ -1353,6 +1353,10 @@ oa_expense_items as materialized (
           item.value->>'id', item.value->>'expense_item_id'
       )), '') is not null
 ),
+oa_expense_group_keys as materialized (
+    select distinct expense.internal_key
+    from oa_expense_items expense
+),
 invoice_anomaly_facts as materialized (
     select distinct
         member.internal_key,
@@ -1373,6 +1377,8 @@ invoice_anomaly_facts as materialized (
             nullif(split_part(source_link.source_expense_item_id, ':item:', 1), '')
         ) as source_parent_oa_id
     from relation_anomaly_members member
+    join oa_expense_group_keys expense_group
+      on expense_group.internal_key = member.internal_key
     left join lateral (
         select
             link.value->>'source_expense_item_id' as source_expense_item_id,
@@ -1391,54 +1397,14 @@ invoice_anomaly_facts as materialized (
     ) source_link on true
     where member.row_type = 'invoice'
 ),
-invoice_item_candidates as materialized (
-    select
-        invoice.internal_key,
-        invoice.invoice_row_id,
-        invoice.source_expense_item_id,
-        invoice.source_expense_row_index,
-        expense.item_id,
-        count(*) over (
-            partition by
-                invoice.internal_key,
-                invoice.invoice_row_id,
-                invoice.source_expense_item_id,
-                invoice.source_expense_row_index
-        ) as candidate_count
+direct_invoice_item_links as materialized (
+    select distinct
+        invoice.*,
+        expense.item_id as canonical_expense_item_id
     from invoice_anomaly_facts invoice
     join oa_expense_items expense
       on expense.internal_key = invoice.internal_key
-     and nullif(invoice.source_expense_item_id, '') is not null
-     and invoice.source_expense_row_index = expense.row_index
-     and exists (
-         select 1
-         from oa_identity_aliases alias
-         where alias.internal_key = expense.internal_key
-           and alias.oa_row_id = expense.oa_row_id
-           and alias.value = split_part(
-               invoice.source_expense_item_id,
-               ':item:',
-               1
-           )
-     )
-),
-normalized_invoice_anomaly_facts as materialized (
-    select
-        invoice.*,
-        coalesce(
-            (
-                select candidate.item_id
-                from invoice_item_candidates candidate
-                where candidate.internal_key = invoice.internal_key
-                  and candidate.invoice_row_id = invoice.invoice_row_id
-                  and candidate.source_expense_item_id is not distinct from invoice.source_expense_item_id
-                  and candidate.source_expense_row_index is not distinct from invoice.source_expense_row_index
-                  and candidate.candidate_count = 1
-                limit 1
-            ),
-            invoice.source_expense_item_id
-        ) as canonical_expense_item_id
-    from invoice_anomaly_facts invoice
+     and expense.item_id = invoice.source_expense_item_id
 ),
 normalized_invoice_item_links as materialized (
     select distinct
@@ -1447,10 +1413,7 @@ normalized_invoice_item_links as materialized (
         invoice.invoice_row_id,
         invoice.invoice_amount,
         invoice.canonical_expense_item_id
-    from normalized_invoice_anomaly_facts invoice
-    join oa_expense_items expense
-      on expense.internal_key = invoice.internal_key
-     and expense.item_id = invoice.canonical_expense_item_id
+    from direct_invoice_item_links invoice
 ),
 unassigned_invoice_rows as materialized (
     select distinct
@@ -1458,7 +1421,7 @@ unassigned_invoice_rows as materialized (
         expense.item_id,
         invoice.invoice_row_id
     from oa_expense_items expense
-    join normalized_invoice_anomaly_facts invoice
+    join invoice_anomaly_facts invoice
       on invoice.internal_key = expense.internal_key
      and invoice.source_parent_oa_id is not null
      and exists (
