@@ -1550,7 +1550,13 @@ unlinked_expense_anomaly_items as materialized (
     from unlinked_expense_items totals
 ),
 expense_anomaly_items as materialized (
-    select * from unlinked_expense_anomaly_items
+    select
+        item.internal_key,
+        item.case_id,
+        item.item_fingerprint,
+        null::text as exception_code,
+        true as has_document_anomaly
+    from unlinked_expense_anomaly_items item
 ),
 relation_directions as materialized (
     select
@@ -1715,22 +1721,34 @@ relation_amount_anomaly_items as materialized (
                  then decode('00', 'hex') || decode(totals.invoice_row_ids_hex, 'hex')
                  else ''::bytea end,
             'sha256'
-        ), 'hex') as item_fingerprint
+        ), 'hex') as item_fingerprint,
+        totals.code as exception_code,
+        false as has_document_anomaly
     from relation_amount_classifications totals
 ),
 all_anomaly_items as materialized (
-    select * from expense_anomaly_items
-    union all
-    select * from relation_amount_anomaly_items
-),
-document_anomaly_groups as materialized (
-    select distinct item.internal_key
+    select
+        item.internal_key,
+        item.case_id,
+        item.item_fingerprint,
+        item.exception_code,
+        item.has_document_anomaly
     from expense_anomaly_items item
+    union all
+    select
+        item.internal_key,
+        item.case_id,
+        item.item_fingerprint,
+        item.exception_code,
+        item.has_document_anomaly
+    from relation_amount_anomaly_items item
 ),
 anomaly_fingerprints as materialized (
     select
         item.internal_key,
         min(item.case_id) as case_id,
+        max(item.exception_code) as exception_code,
+        bool_or(item.has_document_anomaly) as has_document_anomaly,
         encode(digest(
             convert_to(min(item.case_id), 'UTF8') || decode('00', 'hex') ||
             decode(string_agg(
@@ -1747,8 +1765,8 @@ anomaly_states as materialized (
         anomaly.internal_key,
         anomaly.case_id,
         anomaly.fingerprint,
-        classification.code as exception_code,
-        document.internal_key is not null as has_document_anomaly,
+        anomaly.exception_code,
+        anomaly.has_document_anomaly,
         case
             when decision.fingerprint = anomaly.fingerprint
              and decision.updated_at >= groups.updated_at
@@ -1757,10 +1775,6 @@ anomaly_states as materialized (
         end as decision
     from anomaly_fingerprints anomaly
     join canonical_groups groups on groups.internal_key = anomaly.internal_key
-    left join relation_amount_classifications classification
-      on classification.internal_key = anomaly.internal_key
-    left join document_anomaly_groups document
-      on document.internal_key = anomaly.internal_key
     left join latest_anomaly_decisions decision
       on decision.group_id = anomaly.internal_key
 )
@@ -2524,37 +2538,23 @@ class PostgresWorkbenchPageQueryRepository:
             direction=direction,
         )
         order_sql = self._group_order_sql(direction)
-        rows = self._connection.fetch_all(
-            f"""
-            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
-            {search_ctes}
-            {_ANOMALY_STATE_CTES},
-            {_EFFECTIVE_GROUPS_CTES},
+        filtered_group_cte_name = "filtered_groups"
+        exception_query_cte_sql = ""
+        exception_filter_ctes_sql = ""
+        exception_select_sql = ""
+        exception_join_sql = ""
+        exception_params: list[Any] = []
+        if normalized_exception_bucket is not None:
+            filtered_group_cte_name = "base_filtered_groups"
+            exception_query_cte_sql = """
             exception_query as materialized (
                 select
                     nullif(%s::text, '') as exception_view,
                     nullif(%s::text, '') as requested_exception_code,
                     nullif(%s::text, '') as cursor_exception_code
             ),
-            base_filtered_groups as materialized (
-                select
-                    groups.*,
-                    min(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_max,
-                    min(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_max,
-                    min(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_max
-                from effective_groups groups
-                left join canonical_group_members member
-                  on member.internal_key = groups.internal_key
-                where {where_sql}
-                group by
-                    groups.internal_key, groups.detail_key, groups.group_kind,
-                    groups.zone, groups.member_ids, groups.member_types,
-                    groups.scope_month, groups.updated_at,
-                    groups.external_etc_batch_id, groups.missing_row_types
-            ),
+            """
+            exception_filter_ctes_sql = f"""
             exception_counts as materialized (
                 select
                     count(anomaly.internal_key)::bigint as exception_total,
@@ -2602,6 +2602,46 @@ class PostgresWorkbenchPageQueryRepository:
                         and anomaly.has_document_anomaly
                    )
             ),
+            """
+            exception_select_sql = """,
+                   exception_counts.*,
+                   selected_exception.exception_code as selected_exception_code"""
+            exception_join_sql = """
+            cross join exception_counts
+            cross join selected_exception
+            """
+            exception_params = [
+                normalized_exception_view,
+                normalized_exception_code,
+                cursor_exception_code,
+            ]
+        rows = self._connection.fetch_all(
+            f"""
+            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            {search_ctes}
+            {_ANOMALY_STATE_CTES},
+            {_EFFECTIVE_GROUPS_CTES},
+            {exception_query_cte_sql}
+            {filtered_group_cte_name} as materialized (
+                select
+                    groups.*,
+                    min(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_min,
+                    max(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_max,
+                    min(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_min,
+                    max(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_max,
+                    min(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_min,
+                    max(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_max
+                from effective_groups groups
+                left join canonical_group_members member
+                  on member.internal_key = groups.internal_key
+                where {where_sql}
+                group by
+                    groups.internal_key, groups.detail_key, groups.group_kind,
+                    groups.zone, groups.member_ids, groups.member_types,
+                    groups.scope_month, groups.updated_at,
+                    groups.external_etc_batch_id, groups.missing_row_types
+            ),
+            {exception_filter_ctes_sql}
             keyed_groups as materialized (
                 select filtered_groups.*,
                        ({sort_expression}) is null as sort_missing,
@@ -2636,13 +2676,11 @@ class PostgresWorkbenchPageQueryRepository:
                    exact_totals.total_count,
                    exact_row_counts.oa_count,
                    exact_row_counts.bank_count,
-                   exact_row_counts.invoice_count,
-                   exception_counts.*,
-                   selected_exception.exception_code as selected_exception_code
+                   exact_row_counts.invoice_count
+                   {exception_select_sql}
             from exact_totals
             cross join exact_row_counts
-            cross join exception_counts
-            cross join selected_exception
+            {exception_join_sql}
             left join page_groups on true
             order by page_groups.page_position nulls last
             """,
@@ -2650,9 +2688,7 @@ class PostgresWorkbenchPageQueryRepository:
                 [
                     *self._scope_params(normalized_scope),
                     *search_params,
-                    normalized_exception_view,
-                    normalized_exception_code,
-                    cursor_exception_code,
+                    *exception_params,
                     *where_params,
                     *cursor_params,
                     normalized_page_size + 1,

@@ -119,6 +119,7 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
     assert "exact_totals" in connection.sql
     assert "exact_row_counts" in connection.sql
     assert "filter_option_anomaly_groups" not in connection.sql
+    assert "exception_counts" not in connection.sql
     assert "offset" not in connection.sql.lower()
     assert "limit %s" in connection.sql.lower()
     decoded = decode_workbench_page_cursor(
@@ -423,6 +424,10 @@ def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     assert "digest(" in sql
     assert "anomaly_fingerprints" in sql
     assert "anomaly_states" in sql
+    assert "bool_or(item.has_document_anomaly)" in sql
+    assert "max(item.exception_code)" in sql
+    assert "document_anomaly_groups" not in sql
+    assert "left join relation_amount_classifications classification" not in sql
     assert "state" in sql
 
 
