@@ -52,7 +52,7 @@ ETC 批次在折叠态直接显示第一张真实发票，不显示汇总占位�
 - API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`
 - Direct page SQL：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_query.py`、`workbench_page_hydration.py`
 - 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`
-- 统一异常判断/审阅：`backend/src/fin_ops_platform/services/workbench_amount_check_service.py`、`workbench_anomaly_review_service.py`
+- 统一异常合同/判断/审阅：`backend/src/fin_ops_platform/services/workbench_anomaly_contract.py`、`workbench_amount_check_service.py`、`workbench_anomaly_review_service.py`
 - 匹配：`backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`
 - Matching I/O：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
 - 正式关系写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_uow.py`
@@ -64,6 +64,7 @@ ETC 批次在折叠态直接显示第一张真实发票，不显示汇总占位�
 - 任何当前异常默认把完整 active relation 留在 `unpaired`。服务端从当前 canonical bundle 推导分类与 evidence fingerprints，客户端只提交 fingerprint 和 `accept_paired|keep_unpaired`，不提交 actor、人工分类或逐项审阅结果。只有无其他完整性 blocker 时 `accept_paired` 才允许进入 `paired`；接受后保留感叹号与原异常 Chip，审阅审计在 Popover 单独展示。“撤回到未配对”写入 `keep_unpaired` 并同步移动主表关系。
 - 决定复用既有 exception case repository 的独立 `workbench_anomaly_review` scenario，按 bundle fingerprint 失效。旧人工异常分类器、金额 ignore/restore API、人工分类/复选 UI 和前端请求字段均已删除；历史记录、WEX/row-ignore 仅保留审计。
 - 页面只保留统一 `WorkbenchExceptionDrawer`，两个 bucket 固定为“未配对异常 / 已配对异常”；每次只读取当前 bucket。入口文案固定为 `未配对异常 n | 已配对异常 m`。
+- 每个 bucket 内再提供“金额异常 / 仅资料异常”两个互斥视图。金额视图显示七个服务端分类及唯一关系数，默认选中首个非零分类；仅资料视图只收纳没有金额分类的附件异常关系。金额与资料并存时关系只进入唯一金额分类，资料 Chip 仍在该关系 Popover 中显示；多个资料 item 不得把同一关系重复计数或重复返回。分类筛选只组织审阅队列，不自动触发付款、退款、补票或 OA 草稿。
 - 异常抽屉宽度固定为 `min(1740px, 96vw)`。折叠态只显示 OA、流水、发票三栏金额/数量摘要，并在展开箭头前显示一个感叹号；hover/focus 临时打开 HeroUI Popover，显示时点击感叹号立即关闭且在当前鼠标停留期间禁止自动重开，再次点击改为持续打开，鼠标真正离开后下一次 hover 恢复。展开态直接复用只读 `RelationGroupGrid`，所以感叹号与主表定位和交互完全一致；动作区只保留决定按钮。不得新增关系汇总栏、第四栏、重复 Chip、逐项复选框、人工金额下拉或原生 HTML 表单控件。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
 

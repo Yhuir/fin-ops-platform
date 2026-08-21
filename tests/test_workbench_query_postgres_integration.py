@@ -602,6 +602,349 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             )
         )
 
+    def test_exception_views_count_unique_relations_and_auto_select_first_amount_code(self) -> None:
+        fixtures = [
+            {
+                "fixture_id": "oa-bank-equal-invoice-more",
+                "oa_amount": 100,
+                "bank_amount": 100,
+                "invoice_amount": 120,
+                "has_document_anomaly": True,
+            },
+            {
+                "fixture_id": "oa-bank-equal-invoice-more-2",
+                "oa_amount": 100,
+                "bank_amount": 100,
+                "invoice_amount": 120,
+                "has_document_anomaly": False,
+            },
+            {
+                "fixture_id": "oa-bank-equal-invoice-less",
+                "oa_amount": 100,
+                "bank_amount": 100,
+                "invoice_amount": 80,
+                "has_document_anomaly": False,
+            },
+            {
+                "fixture_id": "oa-invoice-equal-bank-more",
+                "oa_amount": 100,
+                "bank_amount": 120,
+                "invoice_amount": 100,
+                "has_document_anomaly": False,
+            },
+            {
+                "fixture_id": "oa-invoice-equal-bank-less",
+                "oa_amount": 100,
+                "bank_amount": 80,
+                "invoice_amount": 100,
+                "has_document_anomaly": False,
+            },
+            {
+                "fixture_id": "bank-invoice-equal-oa-less",
+                "oa_amount": 80,
+                "bank_amount": 100,
+                "invoice_amount": 100,
+                "has_document_anomaly": False,
+            },
+            {
+                "fixture_id": "bank-invoice-equal-oa-more",
+                "oa_amount": 120,
+                "bank_amount": 100,
+                "invoice_amount": 100,
+                "has_document_anomaly": False,
+            },
+            {
+                "fixture_id": "all-amounts-different",
+                "oa_amount": 120,
+                "bank_amount": 100,
+                "invoice_amount": 80,
+                "has_document_anomaly": False,
+            },
+            {
+                "fixture_id": "document-only",
+                "oa_amount": 50,
+                "bank_amount": 50,
+                "invoice_amount": 50,
+                "has_document_anomaly": True,
+            },
+        ]
+        fixture_json = json.dumps(fixtures, ensure_ascii=False)
+        self.raw_connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount, currency,
+                normalized_payload, raw_payload
+            )
+            select
+                'source-' || fixture.fixture_id,
+                'payment_request',
+                '付款申请',
+                'oa-facet-' || fixture.fixture_id,
+                'active',
+                'completed',
+                '测试用户',
+                '2026-08-01'::date,
+                '2026-08-01'::date,
+                '异常分类测试',
+                fixture.oa_amount,
+                'CNY',
+                jsonb_build_object(
+                    'id', 'oa-facet-' || fixture.fixture_id,
+                    'month', '2026-08',
+                    'section', 'unpaired',
+                    'applicant', '测试用户',
+                    'project_name', '异常分类测试',
+                    'amount', fixture.oa_amount::text,
+                    'workflow_status', 'completed'
+                ) || case
+                    when fixture.has_document_anomaly then jsonb_build_object(
+                        'expense_items',
+                        jsonb_build_array(jsonb_build_object(
+                            'id', 'oa-facet-' || fixture.fixture_id || ':item:0',
+                            'amount', case
+                                when fixture.fixture_id = 'document-only'
+                                    then (fixture.oa_amount / 2)::text
+                                else fixture.oa_amount::text
+                            end,
+                            'attachment_file_count', '0'
+                        )) || case
+                            when fixture.fixture_id = 'document-only'
+                                then jsonb_build_array(jsonb_build_object(
+                                    'id', 'oa-facet-' || fixture.fixture_id || ':item:1',
+                                    'amount', (fixture.oa_amount / 2)::text,
+                                    'attachment_file_count', '0'
+                                ))
+                            else '[]'::jsonb
+                        end
+                    )
+                    else '{}'::jsonb
+                end,
+                '{}'::jsonb
+            from jsonb_to_recordset(%s::jsonb) as fixture(
+                fixture_id text,
+                oa_amount numeric,
+                bank_amount numeric,
+                invoice_amount numeric,
+                has_document_anomaly boolean
+            )
+            """,
+            (fixture_json,),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                trade_time, summary, raw_payload, status
+            )
+            select
+                'bank-facet-' || fixture.fixture_id,
+                '6222000011118106',
+                '基本户',
+                'outflow',
+                '异常分类测试供应商',
+                fixture.bank_amount,
+                -fixture.bank_amount,
+                '2026-08-02'::date,
+                '2026-08-01'::date,
+                '2026-08-02 10:00:00+08'::timestamptz,
+                '异常分类测试',
+                '{}'::jsonb,
+                'active'
+            from jsonb_to_recordset(%s::jsonb) as fixture(
+                fixture_id text,
+                oa_amount numeric,
+                bank_amount numeric,
+                invoice_amount numeric,
+                has_document_anomaly boolean
+            )
+            """,
+            (fixture_json,),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
+                amount, signed_amount, total_with_tax, status, workbench_visibility,
+                source_links, raw_payload
+            )
+            select
+                'invoice-facet-' || fixture.fixture_id,
+                'input',
+                'INV-FACET-' || fixture.fixture_id,
+                '2026-08-03'::date,
+                '2026-08-01'::date,
+                fixture.invoice_amount,
+                fixture.invoice_amount,
+                fixture.invoice_amount,
+                'active',
+                'visible',
+                '[]'::jsonb,
+                '{}'::jsonb
+            from jsonb_to_recordset(%s::jsonb) as fixture(
+                fixture_id text,
+                oa_amount numeric,
+                bank_amount numeric,
+                invoice_amount numeric,
+                has_document_anomaly boolean
+            )
+            """,
+            (fixture_json,),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            )
+            select
+                'CASE-FACET-' || fixture.fixture_id,
+                'manual_confirmed',
+                'active',
+                1,
+                '2026-08-01'::date,
+                array[
+                    'oa-facet-' || fixture.fixture_id,
+                    'bank-facet-' || fixture.fixture_id,
+                    'invoice-facet-' || fixture.fixture_id
+                ],
+                array['oa', 'bank', 'invoice'],
+                '{}'::jsonb,
+                '{}'::jsonb,
+                '{}'::jsonb
+            from jsonb_to_recordset(%s::jsonb) as fixture(
+                fixture_id text,
+                oa_amount numeric,
+                bank_amount numeric,
+                invoice_amount numeric,
+                has_document_anomaly boolean
+            )
+            """,
+            (fixture_json,),
+        )
+
+        self.connection.statements.clear()
+        amount_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-08",
+            zone="unpaired",
+            page_size=20,
+            exception_bucket="unpaired",
+            exception_view="amount",
+        )
+
+        self.assertEqual(amount_page["selected_exception_code"], "oa_bank_equal_invoice_more")
+        self.assertEqual(amount_page["total"], 2)
+        self.assertEqual(amount_page["exception_counts"], {
+            "total": 9,
+            "amount_total": 8,
+            "document_only": 1,
+            "by_code": {
+                "oa_bank_equal_invoice_more": 2,
+                "oa_bank_equal_invoice_less": 1,
+                "oa_invoice_equal_bank_more": 1,
+                "oa_invoice_equal_bank_less": 1,
+                "bank_invoice_equal_oa_less": 1,
+                "bank_invoice_equal_oa_more": 1,
+                "all_amounts_different": 1,
+            },
+        })
+        self.assertEqual(
+            {group["detail_key"] for group in amount_page["groups"]},
+            {
+                "CASE-FACET-oa-bank-equal-invoice-more",
+                "CASE-FACET-oa-bank-equal-invoice-more-2",
+            },
+        )
+        category_sql = [
+            statement
+            for statement in self.connection.statements
+            if statement["operation"] == "fetch_all"
+            and "exception_counts as materialized" in str(statement.get("raw_sql") or "")
+        ]
+        self.assertEqual(len(category_sql), 1)
+
+        explicit_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-08",
+            zone="unpaired",
+            page_size=20,
+            exception_bucket="unpaired",
+            exception_view="amount",
+            exception_code="all_amounts_different",
+        )
+        self.assertEqual(explicit_page["selected_exception_code"], "all_amounts_different")
+        self.assertEqual(explicit_page["total"], 1)
+        self.assertEqual(
+            explicit_page["groups"][0]["detail_key"],
+            "CASE-FACET-all-amounts-different",
+        )
+
+        document_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-08",
+            zone="unpaired",
+            page_size=20,
+            exception_bucket="unpaired",
+            exception_view="document_only",
+        )
+        self.assertIsNone(document_page["selected_exception_code"])
+        self.assertEqual(document_page["total"], 1)
+        self.assertEqual(len(document_page["groups"]), 1)
+        self.assertEqual(
+            document_page["groups"][0]["detail_key"],
+            "CASE-FACET-document-only",
+        )
+        self.assertEqual(
+            [
+                item["code"]
+                for item in document_page["groups"][0]["workbench_anomaly"]["items"]
+            ],
+            ["oa_invoice_attachment_absent", "oa_invoice_attachment_absent"],
+        )
+        self.assertEqual(document_page["exception_counts"], amount_page["exception_counts"])
+
+        cursor_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-08",
+            zone="unpaired",
+            page_size=1,
+            exception_bucket="unpaired",
+            exception_view="amount",
+        )
+        self.assertTrue(cursor_page["has_more"])
+        self.assertIsNotNone(cursor_page["next_cursor"])
+        review_repository = PostgresWorkbenchRepository(self.raw_connection)
+        for group in amount_page["groups"]:
+            anomaly = group["workbench_anomaly"]
+            review_repository.set_workbench_anomaly_review_decision(
+                fingerprint=str(anomaly["fingerprint"]),
+                group_id=str(group["group_id"]),
+                scope_key="2026-08",
+                actor_id="test-suite",
+                decision="accept_paired",
+                note="验证自动分类 cursor 固定分区",
+                detected_classification_codes=[
+                    str(item["code"]) for item in anomaly["items"]
+                ],
+                evidence_item_fingerprints=list(anomaly["evidence_item_fingerprints"]),
+            )
+        continued_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-08",
+            zone="unpaired",
+            page_size=1,
+            cursor=cursor_page["next_cursor"],
+            exception_bucket="unpaired",
+            exception_view="amount",
+        )
+        self.assertEqual(
+            continued_page["selected_exception_code"],
+            "oa_bank_equal_invoice_more",
+        )
+        self.assertEqual(continued_page["total"], 0)
+        self.assertEqual(continued_page["groups"], [])
+        self.assertEqual(
+            continued_page["exception_counts"]["by_code"]["oa_bank_equal_invoice_less"],
+            1,
+        )
+
     def test_shared_invoice_sources_are_counted_once_with_sql_fingerprint_parity(self) -> None:
         oa_payload = {
             "id": "oa-shared-36",

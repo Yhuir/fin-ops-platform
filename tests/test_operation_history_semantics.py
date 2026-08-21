@@ -71,6 +71,14 @@ class OperationHistorySemanticsTests(unittest.TestCase):
         self.assertEqual(semantics.action_label, "更新流水分类")
         self.assertEqual(semantics.object_label, "银行流水")
 
+    def test_workbench_anomaly_review_describes_system_classification(self) -> None:
+        semantics = operation_semantics("POST", "/api/workbench/exceptions/review")
+
+        self.assertEqual(semantics.action_code, "workbench.exception.review")
+        self.assertEqual(semantics.action_label, "审阅关联异常")
+        self.assertEqual(semantics.description, "记录系统识别关联异常的审阅与分区决定。")
+        self.assertNotIn("人工分类", semantics.description)
+
     def test_unknown_mutation_uses_bounded_page_fallback_without_raw_route(self) -> None:
         semantics = operation_semantics(
             "PATCH",

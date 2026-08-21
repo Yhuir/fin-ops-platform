@@ -232,6 +232,52 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                 self.assertEqual(status, HTTPStatus.OK)
                 self.assertEqual(facade.calls[0]["search"], "202")
 
+    def test_groups_normalizes_exception_view_and_code(self) -> None:
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+        status, _payload = routes.groups(
+            "2026-05",
+            zone="unpaired",
+            exception_bucket="unpaired",
+            exception_view=" amount ",
+            exception_code=" oa_bank_equal_invoice_more ",
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(facade.calls[0]["exception_view"], "amount")
+        self.assertEqual(
+            facade.calls[0]["exception_code"],
+            "oa_bank_equal_invoice_more",
+        )
+
+    def test_groups_rejects_invalid_exception_view_contract(self) -> None:
+        cases = (
+            {"exception_bucket": "paired"},
+            {"exception_bucket": "unpaired", "exception_view": "unknown"},
+            {
+                "exception_bucket": "unpaired",
+                "exception_view": "amount",
+                "exception_code": "unknown",
+            },
+            {"exception_view": "amount"},
+            {
+                "exception_bucket": "unpaired",
+                "exception_view": "document_only",
+                "exception_code": "oa_bank_equal_invoice_more",
+            },
+        )
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                facade = FakeWorkbenchQueryFacade()
+                routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+                status, payload = routes.groups("2026-05", zone="unpaired", **kwargs)
+
+                self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+                self.assertEqual(payload["error"], "invalid_workbench_groups_query")
+                self.assertEqual(facade.calls, [])
+
     def test_groups_rejects_search_longer_than_contract_limit(self) -> None:
         facade = FakeWorkbenchQueryFacade()
         routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)

@@ -791,7 +791,7 @@ def operation_semantics(method: str, route_path: str, *, page_key: str = "") -> 
             "审阅关联异常",
             "workbench_exception",
             "关联异常",
-            "记录关联异常的人工分类与流转决定。",
+            "记录系统识别关联异常的审阅与分区决定。",
         )
     for rule in _DYNAMIC_RULES:
         if rule.matches(normalized_method, normalized_path):

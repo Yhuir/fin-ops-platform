@@ -135,6 +135,21 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
         "/api/workbench/groups?month=all&zone=unpaired&page_size=10&detail_level=summary",
     ),
     HttpProbe(
+        "workbench_exceptions_unpaired_amount",
+        "/api/workbench/groups?month=all&zone=unpaired&page_size=10&detail_level=summary"
+        "&exception_bucket=unpaired&exception_view=amount",
+    ),
+    HttpProbe(
+        "workbench_exceptions_unpaired_document_only",
+        "/api/workbench/groups?month=all&zone=unpaired&page_size=10&detail_level=summary"
+        "&exception_bucket=unpaired&exception_view=document_only",
+    ),
+    HttpProbe(
+        "workbench_exceptions_paired_amount",
+        "/api/workbench/groups?month=all&zone=paired&page_size=10&detail_level=summary"
+        "&exception_bucket=paired&exception_view=amount",
+    ),
+    HttpProbe(
         "workbench_filter_options_all_paired",
         "/api/workbench/filter-options?month=all&zone=paired&pane=oa&facet=column&column=applicant&page_size=100",
     ),

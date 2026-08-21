@@ -39,6 +39,32 @@ def test_cursor_round_trip_is_bound_to_normalized_query_and_sort() -> None:
     assert decoded is not None
     assert decoded.value == "2026-07-31"
     assert decoded.group_key == "row:bank:txn-1"
+    assert decoded.partition is None
+
+
+def test_cursor_round_trip_preserves_an_integrity_checked_partition() -> None:
+    query_hash = workbench_query_hash(
+        {"scope_key": "all", "zone": "unpaired", "exception_view": "amount"}
+    )
+    encoded = encode_workbench_page_cursor(
+        WorkbenchPageCursor(
+            query_hash=query_hash,
+            sort="default:desc",
+            missing=False,
+            value="2026-07-31",
+            group_key="case:WB-1",
+            partition="oa_bank_equal_invoice_more",
+        )
+    )
+
+    decoded = decode_workbench_page_cursor(
+        encoded,
+        expected_query_hash=query_hash,
+        expected_sort="default:desc",
+    )
+
+    assert decoded is not None
+    assert decoded.partition == "oa_bank_equal_invoice_more"
 
 
 def test_cursor_rejects_tampering_and_cross_query_reuse() -> None:
@@ -73,17 +99,24 @@ def test_column_filter_normalization_is_allowlisted_bounded_and_keeps_missing() 
     result = normalize_workbench_column_filters(
         {
             "oa": {
-                "applicant": ["张三", "张三", WORKBENCH_FILTER_MISSING_VALUE],
+                "applicant": [
+                    "applicant:张三",
+                    "applicant:张三",
+                    f"applicant:{WORKBENCH_FILTER_MISSING_VALUE}",
+                ],
             },
-            "bank": {"amount": ["支出", "尾号1234"]},
+            "bank": {"amount": ["direction:支出", "account:尾号1234"]},
         }
     )
 
     assert result == {
         "oa": {
-            "applicant": [WORKBENCH_FILTER_MISSING_VALUE, "张三"],
+            "applicant": [
+                f"applicant:{WORKBENCH_FILTER_MISSING_VALUE}",
+                "applicant:张三",
+            ],
         },
-        "bank": {"amount": ["尾号1234", "支出"]},
+        "bank": {"amount": ["account:尾号1234", "direction:支出"]},
     }
     with pytest.raises(ValueError, match="unsupported panes"):
         normalize_workbench_column_filters(

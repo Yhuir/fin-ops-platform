@@ -1,9 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
-import type { WorkbenchAnomalyItem, WorkbenchRelationGroup } from "../features/workbench/types";
+import type {
+  WorkbenchAmountAnomalyCode,
+  WorkbenchAnomalyItem,
+  WorkbenchExceptionCounts,
+  WorkbenchExceptionView,
+  WorkbenchRelationGroup,
+} from "../features/workbench/types";
 
 const anomalyItems: WorkbenchAnomalyItem[] = [
   {
@@ -25,6 +31,21 @@ const anomalyItems: WorkbenchAnomalyItem[] = [
     displayRowId: "",
   },
 ];
+
+const exceptionCounts: WorkbenchExceptionCounts = {
+  total: 1,
+  amountTotal: 1,
+  documentOnly: 0,
+  byCode: {
+    oa_bank_equal_invoice_more: 0,
+    oa_bank_equal_invoice_less: 0,
+    oa_invoice_equal_bank_more: 0,
+    oa_invoice_equal_bank_less: 0,
+    bank_invoice_equal_oa_less: 0,
+    bank_invoice_equal_oa_more: 0,
+    all_amounts_different: 1,
+  },
+};
 
 function group(zone: "paired" | "unpaired"): WorkbenchRelationGroup {
   return {
@@ -51,6 +72,13 @@ function renderDrawer(
   onReviewAnomaly = vi.fn(),
   canMutateData = true,
   anomalyGroup = group(bucket),
+  options: {
+    view?: WorkbenchExceptionView;
+    selectedExceptionCode?: WorkbenchAmountAnomalyCode | null;
+    counts?: WorkbenchExceptionCounts | null;
+    onViewChange?: (view: WorkbenchExceptionView) => void;
+    onExceptionCodeChange?: (code: WorkbenchAmountAnomalyCode) => void;
+  } = {},
 ) {
   render(
     <WorkbenchExceptionDrawer
@@ -58,17 +86,25 @@ function renderDrawer(
       canMutateData={canMutateData}
       contentGeneration={1}
       error={null}
+      exceptionCounts={options.counts === undefined ? exceptionCounts : options.counts}
       groups={[anomalyGroup]}
       hasMore={false}
       loading={false}
       loadingMore={false}
       open
+      selectedExceptionCode={options.selectedExceptionCode === undefined
+        ? "all_amounts_different"
+        : options.selectedExceptionCode}
       total={1}
+      view={options.view ?? "amount"}
       onBucketChange={vi.fn()}
       onClose={vi.fn()}
+      onExceptionCodeChange={options.onExceptionCodeChange ?? vi.fn()}
       onEnsureGroupDetail={async (value) => value}
+      onInvoiceEntry={vi.fn()}
       onLoadMore={vi.fn()}
       onReviewAnomaly={onReviewAnomaly}
+      onViewChange={options.onViewChange ?? vi.fn()}
     />,
   );
 }
@@ -78,10 +114,31 @@ async function expandFirstGroup(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("WorkbenchExceptionDrawer", () => {
-  it("uses the unpaired and paired anomaly tab labels", () => {
+  it("uses status tabs, view counts, and seven compact server-classification entries", () => {
     renderDrawer("unpaired");
     expect(screen.getByText("未配对异常")).toBeInTheDocument();
     expect(screen.getByText("已配对异常")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "金额异常 1" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "仅资料异常 0" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "金额异常分类" }).querySelectorAll('[role="radio"]')).toHaveLength(7);
+    expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
+      "状态总计 1 项 · 当前 1 项",
+    );
+  });
+
+  it("reports view and amount-category changes through controlled HeroUI groups", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    const onExceptionCodeChange = vi.fn();
+    renderDrawer("unpaired", vi.fn(), true, group("unpaired"), {
+      onViewChange,
+      onExceptionCodeChange,
+    });
+
+    await user.click(screen.getByRole("radio", { name: "仅资料异常 0" }));
+    expect(onViewChange).toHaveBeenCalledWith("document_only");
+    await user.click(screen.getByRole("radio", { name: "OA 流水一致，票多 0" }));
+    expect(onExceptionCodeChange).toHaveBeenCalledWith("oa_bank_equal_invoice_more");
   });
 
   it("keeps the collapsed row to the three pane summary and reveals chips only in the popover", async () => {
@@ -91,17 +148,20 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(screen.getByText("OA · 0项")).toBeInTheDocument();
     expect(screen.getByText("流水 · 0项")).toBeInTheDocument();
     expect(screen.getByText("发票 · 0项")).toBeInTheDocument();
-    expect(screen.queryByText("三项不一致")).not.toBeInTheDocument();
+    const heading = screen.getByRole("button", { name: "展开异常明细" }).closest(".workbench-anomaly-drawer__heading");
+    expect(heading).not.toBeNull();
+    expect(heading).not.toHaveTextContent("三项不一致");
     expect(screen.queryByRole("button", { name: /人工金额判断/ })).not.toBeInTheDocument();
 
     const indicator = screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" });
     await user.hover(indicator);
-    expect(await screen.findByText("三项不一致")).toBeVisible();
-    expect(screen.getByText("OA 100.00 · 流水 90.00 · 发票 80.00")).toBeVisible();
+    const popover = await screen.findByRole("dialog", { name: "该关联组异常详情" });
+    expect(within(popover).getByText("三项不一致")).toBeVisible();
+    expect(within(popover).getByText("OA 100.00 · 流水 90.00 · 发票 80.00")).toBeVisible();
     await user.click(indicator);
-    await waitFor(() => expect(screen.queryByText("三项不一致")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "该关联组异常详情" })).not.toBeInTheDocument());
     await user.click(indicator);
-    expect(await screen.findByText("三项不一致")).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: "该关联组异常详情" })).toBeVisible();
   });
 
   it("uses the shared three-pane grid and accepts the server classification without a manual gate", async () => {
@@ -128,7 +188,8 @@ describe("WorkbenchExceptionDrawer", () => {
     renderDrawer("unpaired", vi.fn(), false);
 
     await user.hover(screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" }));
-    expect(await screen.findByText("三项不一致")).toBeVisible();
+    const popover = await screen.findByRole("dialog", { name: "该关联组异常详情" });
+    expect(within(popover).getByText("三项不一致")).toBeVisible();
     await user.keyboard("{Escape}");
     await expandFirstGroup(user);
     expect(screen.queryByRole("region", { name: "异常审阅" })).not.toBeInTheDocument();

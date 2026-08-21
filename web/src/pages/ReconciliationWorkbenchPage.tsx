@@ -60,8 +60,11 @@ import {
 } from "../features/workbench/selectionModel";
 import { resolveWorkbenchWriteGate } from "../features/workbench/writeGate";
 import type {
+  WorkbenchAmountAnomalyCode,
   WorkbenchRelationGroup,
   WorkbenchData,
+  WorkbenchExceptionCounts,
+  WorkbenchExceptionView,
   WorkbenchGroupsPageQuery,
   WorkbenchInitialPageResult,
   WorkbenchOaSyncStatus,
@@ -367,13 +370,21 @@ export default function ReconciliationWorkbenchPage() {
   const [workbenchSettings, setWorkbenchSettings] = useState<WorkbenchSettings | null>(null);
   const [exceptionDrawerOpen, setExceptionDrawerOpen] = useState(false);
   const [exceptionDrawerBucket, setExceptionDrawerBucket] = useState<"unpaired" | "paired">("unpaired");
+  const [exceptionDrawerView, setExceptionDrawerView] = useState<WorkbenchExceptionView>("amount");
+  const [exceptionDrawerRequestedCode, setExceptionDrawerRequestedCode] = useState<WorkbenchAmountAnomalyCode | null>(null);
+  const [exceptionDrawerSelectedCode, setExceptionDrawerSelectedCode] = useState<WorkbenchAmountAnomalyCode | null>(null);
+  const [exceptionDrawerCounts, setExceptionDrawerCounts] = useState<WorkbenchExceptionCounts | null>(null);
   const exceptionDrawerOpenRef = useRef(exceptionDrawerOpen);
   const exceptionDrawerBucketRef = useRef(exceptionDrawerBucket);
+  const exceptionDrawerViewRef = useRef(exceptionDrawerView);
+  const exceptionDrawerSelectedCodeRef = useRef(exceptionDrawerSelectedCode);
   exceptionDrawerOpenRef.current = exceptionDrawerOpen;
   exceptionDrawerBucketRef.current = exceptionDrawerBucket;
+  exceptionDrawerViewRef.current = exceptionDrawerView;
+  exceptionDrawerSelectedCodeRef.current = exceptionDrawerSelectedCode;
   const [exceptionDrawerGroups, setExceptionDrawerGroups] = useState<WorkbenchRelationGroup[]>([]);
-  const [exceptionDrawerPages, setExceptionDrawerPages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(
-    () => createInitialZonePages(),
+  const [exceptionDrawerPage, setExceptionDrawerPage] = useState<WorkbenchZonePageInfo>(
+    () => createInitialZonePageInfo("unpaired"),
   );
   const [pairedExceptionCount, setPairedExceptionCount] = useState(0);
   const [exceptionDrawerLoading, setExceptionDrawerLoading] = useState(false);
@@ -782,7 +793,8 @@ export default function ReconciliationWorkbenchPage() {
     setExceptionDrawerLoading(false);
     setExceptionDrawerLoadingMore(false);
     setExceptionDrawerGroups([]);
-    setExceptionDrawerPages(createInitialZonePages());
+    setExceptionDrawerPage(createInitialZonePageInfo(exceptionDrawerBucketRef.current));
+    setExceptionDrawerCounts(null);
 
     setWorkbenchData(workbenchPayload.data);
     setPairedExceptionCount(workbenchPayload.data.summary.pairedExceptionCount);
@@ -861,6 +873,8 @@ export default function ReconciliationWorkbenchPage() {
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setExceptionDrawerGroups([]);
+        setExceptionDrawerPage(createInitialZonePageInfo(exceptionDrawerBucketRef.current));
+        setExceptionDrawerCounts(null);
         setPairedExceptionCount(0);
         setLoadError(normalizedError.message);
         setIsLoading(false);
@@ -1468,7 +1482,11 @@ export default function ReconciliationWorkbenchPage() {
     setActionDialog((current) => (current?.phase === "result" ? null : current));
   };
 
-  const loadExceptionDrawer = useCallback(async (bucket: "unpaired" | "paired") => {
+  const loadExceptionDrawer = useCallback(async (
+    bucket: "unpaired" | "paired",
+    view: WorkbenchExceptionView,
+    exceptionCode: WorkbenchAmountAnomalyCode | null,
+  ) => {
     invalidateExceptionGroupDetailRequests();
     exceptionDrawerRequestRef.current?.abort();
     const controller = new AbortController();
@@ -1482,24 +1500,30 @@ export default function ReconciliationWorkbenchPage() {
       const result = await fetchWorkbenchExceptionGroups(
         WORKBENCH_VIEW_MONTH,
         bucket,
+        view,
+        view === "amount" ? exceptionCode ?? undefined : undefined,
         controller.signal,
       );
       if (controller.signal.aborted || exceptionDrawerRequestGenerationRef.current !== requestGeneration) {
         return false;
       }
       setExceptionDrawerGroups(result.groups);
-      const pages = createInitialZonePages();
-      pages[bucket] = result.page;
-      setExceptionDrawerPages(pages);
+      setExceptionDrawerPage(result.page);
+      setExceptionDrawerCounts(result.exceptionCounts ?? null);
+      setExceptionDrawerSelectedCode(view === "amount"
+        ? result.selectedExceptionCode ?? exceptionCode
+        : null);
       setExceptionDrawerContentGeneration((current) => current + 1);
-      const bucketTotal = result.page.total;
-      if (bucket === "paired") {
-        setPairedExceptionCount(bucketTotal);
-      } else {
-        setWorkbenchData((current) => current ? {
-          ...current,
-          summary: { ...current.summary, unpairedExceptionCount: bucketTotal },
-        } : current);
+      if (result.exceptionCounts) {
+        const bucketTotal = result.exceptionCounts.total;
+        if (bucket === "paired") {
+          setPairedExceptionCount(bucketTotal);
+        } else {
+          setWorkbenchData((current) => current ? {
+            ...current,
+            summary: { ...current.summary, unpairedExceptionCount: bucketTotal },
+          } : current);
+        }
       }
       return true;
     } catch (error) {
@@ -1520,12 +1544,12 @@ export default function ReconciliationWorkbenchPage() {
   }, [invalidateExceptionGroupDetailRequests]);
 
   const loadMoreExceptionDrawer = useCallback(async () => {
-    const zones = (["paired", "unpaired"] as const).filter((zone) => (
-      exceptionDrawerPages[zone].hasMore && exceptionDrawerPages[zone].nextCursor
-    ));
-    if (zones.length === 0 || exceptionDrawerLoadingMore) {
+    if (!exceptionDrawerPage.hasMore || !exceptionDrawerPage.nextCursor || exceptionDrawerLoadingMore) {
       return;
     }
+    const requestBucket = exceptionDrawerBucket;
+    const requestView = exceptionDrawerView;
+    const requestCode = requestView === "amount" ? exceptionDrawerRequestedCode : null;
     exceptionDrawerRequestRef.current?.abort();
     const controller = new AbortController();
     const requestGeneration = exceptionDrawerRequestGenerationRef.current + 1;
@@ -1534,29 +1558,29 @@ export default function ReconciliationWorkbenchPage() {
     setExceptionDrawerLoadingMore(true);
     setExceptionDrawerError(null);
     try {
-      const results = await Promise.all(zones.map((zone) => fetchWorkbenchGroupsPage(
+      const result = await fetchWorkbenchGroupsPage(
         WORKBENCH_VIEW_MONTH,
-        zone,
-        exceptionDrawerPages[zone].nextCursor,
+        requestBucket,
+        exceptionDrawerPage.nextCursor,
         WORKBENCH_GROUP_PAGE_SIZE,
         controller.signal,
-        { detailLevel: "summary", exceptionBucket: exceptionDrawerBucket },
-        exceptionDrawerPages[zone].page + 1,
-      )));
+        {
+          detailLevel: "summary",
+          exceptionBucket: requestBucket,
+          exceptionView: requestView,
+          ...(requestCode ? { exceptionCode: requestCode } : {}),
+        },
+        exceptionDrawerPage.page + 1,
+        { forceFresh: true },
+      );
       if (controller.signal.aborted || exceptionDrawerRequestGenerationRef.current !== requestGeneration) {
         return;
       }
-      setExceptionDrawerGroups((current) => mergeWorkbenchGroupsById(
-        current,
-        results.flatMap((result) => result.groups),
-      ));
-      setExceptionDrawerPages((current) => {
-        const next = { ...current };
-        results.forEach((result) => {
-          next[result.zone] = result.page;
-        });
-        return next;
-      });
+      setExceptionDrawerGroups((current) => mergeWorkbenchGroupsById(current, result.groups));
+      setExceptionDrawerPage(result.page);
+      if (result.exceptionCounts) {
+        setExceptionDrawerCounts(result.exceptionCounts);
+      }
     } catch (error) {
       if (!controller.signal.aborted && exceptionDrawerRequestGenerationRef.current === requestGeneration) {
         setExceptionDrawerError(error instanceof WorkbenchApiError ? error.message : "更多异常加载失败，请重试。");
@@ -1570,7 +1594,13 @@ export default function ReconciliationWorkbenchPage() {
         setExceptionDrawerLoadingMore(false);
       }
     }
-  }, [exceptionDrawerBucket, exceptionDrawerLoadingMore, exceptionDrawerPages]);
+  }, [
+    exceptionDrawerBucket,
+    exceptionDrawerLoadingMore,
+    exceptionDrawerPage,
+    exceptionDrawerRequestedCode,
+    exceptionDrawerView,
+  ]);
 
   const ensureExceptionGroupDetail = useCallback(async (group: WorkbenchRelationGroup) => {
     const requestBucket = exceptionDrawerBucketRef.current;
@@ -1641,27 +1671,62 @@ export default function ReconciliationWorkbenchPage() {
     return requestPromise;
   }, []);
 
+  const resetExceptionDrawerListState = useCallback((
+    bucket: "unpaired" | "paired",
+    clearCounts: boolean,
+  ) => {
+    exceptionDrawerRequestRef.current?.abort();
+    exceptionDrawerRequestRef.current = null;
+    exceptionDrawerRequestGenerationRef.current += 1;
+    invalidateExceptionGroupDetailRequests();
+    setExceptionDrawerGroups([]);
+    setExceptionDrawerPage(createInitialZonePageInfo(bucket));
+    if (clearCounts) {
+      setExceptionDrawerCounts(null);
+    }
+    setExceptionDrawerLoading(true);
+    setExceptionDrawerLoadingMore(false);
+    setExceptionDrawerError(null);
+    setExceptionDrawerContentGeneration((current) => current + 1);
+  }, [invalidateExceptionGroupDetailRequests]);
+
   const handleOpenExceptionDrawer = useCallback(() => {
     setExceptionDrawerOpen(true);
     setExceptionDrawerBucket("unpaired");
+    setExceptionDrawerView("amount");
+    setExceptionDrawerRequestedCode(null);
+    setExceptionDrawerSelectedCode(null);
+    setExceptionDrawerCounts(null);
   }, []);
 
   const handleExceptionDrawerBucketChange = useCallback((bucket: "unpaired" | "paired") => {
     if (bucket === exceptionDrawerBucket) {
       return;
     }
-    exceptionDrawerRequestRef.current?.abort();
-    exceptionDrawerRequestRef.current = null;
-    exceptionDrawerRequestGenerationRef.current += 1;
-    invalidateExceptionGroupDetailRequests();
-    setExceptionDrawerGroups([]);
-    setExceptionDrawerPages(createInitialZonePages());
-    setExceptionDrawerLoading(false);
-    setExceptionDrawerLoadingMore(false);
-    setExceptionDrawerError(null);
-    setExceptionDrawerContentGeneration((current) => current + 1);
+    resetExceptionDrawerListState(bucket, true);
+    setExceptionDrawerRequestedCode(null);
+    setExceptionDrawerSelectedCode(null);
     setExceptionDrawerBucket(bucket);
-  }, [exceptionDrawerBucket, invalidateExceptionGroupDetailRequests]);
+  }, [exceptionDrawerBucket, resetExceptionDrawerListState]);
+
+  const handleExceptionDrawerViewChange = useCallback((view: WorkbenchExceptionView) => {
+    if (view === exceptionDrawerView) {
+      return;
+    }
+    resetExceptionDrawerListState(exceptionDrawerBucket, false);
+    setExceptionDrawerRequestedCode(null);
+    setExceptionDrawerSelectedCode(null);
+    setExceptionDrawerView(view);
+  }, [exceptionDrawerBucket, exceptionDrawerView, resetExceptionDrawerListState]);
+
+  const handleExceptionDrawerCodeChange = useCallback((code: WorkbenchAmountAnomalyCode) => {
+    if (code === exceptionDrawerSelectedCode) {
+      return;
+    }
+    resetExceptionDrawerListState(exceptionDrawerBucket, false);
+    setExceptionDrawerRequestedCode(code);
+    setExceptionDrawerSelectedCode(code);
+  }, [exceptionDrawerBucket, exceptionDrawerSelectedCode, resetExceptionDrawerListState]);
 
   const handleCloseExceptionDrawer = useCallback(() => {
     exceptionDrawerRequestRef.current?.abort();
@@ -1677,12 +1742,18 @@ export default function ReconciliationWorkbenchPage() {
     if (!exceptionDrawerOpen) {
       return;
     }
-    void loadExceptionDrawer(exceptionDrawerBucket);
+    void loadExceptionDrawer(
+      exceptionDrawerBucket,
+      exceptionDrawerView,
+      exceptionDrawerRequestedCode,
+    );
     return () => exceptionDrawerRequestRef.current?.abort();
   }, [
     exceptionDrawerBucket,
     exceptionDrawerOpen,
+    exceptionDrawerRequestedCode,
     exceptionDrawerReloadGeneration,
+    exceptionDrawerView,
     loadExceptionDrawer,
   ]);
 
@@ -1774,6 +1845,9 @@ export default function ReconciliationWorkbenchPage() {
         openActionResultDialog("无法确定需要补录发票的 OA 子付款项，请刷新页面后重试。", "无法录入发票");
         return;
       }
+      if (exceptionDrawerOpenRef.current) {
+        handleCloseExceptionDrawer();
+      }
       setInvoiceEntryTarget({
         caseId: row.caseId ?? "",
         oaRowId: row.sourceOaId,
@@ -1843,6 +1917,7 @@ export default function ReconciliationWorkbenchPage() {
   }, [
     collectCaseRows,
     ensureCanWriteWorkbench,
+    handleCloseExceptionDrawer,
     openActionResultDialog,
     runBlockingAction,
     withdrawBankFlowRuleBatchSummaryRow,
@@ -2172,6 +2247,11 @@ export default function ReconciliationWorkbenchPage() {
         }
         const nextBucket = decision === "accept_paired" ? "paired" : "unpaired";
         exceptionDrawerOpenRef.current = true;
+        setExceptionDrawerRequestedCode(
+          exceptionDrawerViewRef.current === "amount"
+            ? exceptionDrawerSelectedCodeRef.current
+            : null,
+        );
         setExceptionDrawerBucket(nextBucket);
         setExceptionDrawerOpen(true);
         setExceptionDrawerReloadGeneration((current) => current + 1);
@@ -2457,17 +2537,25 @@ export default function ReconciliationWorkbenchPage() {
         canMutateData={canWriteWorkbench}
         contentGeneration={exceptionDrawerContentGeneration}
         error={exceptionDrawerError}
+        exceptionCounts={exceptionDrawerCounts}
         groups={exceptionDrawerGroups}
+        hasMore={exceptionDrawerPage.hasMore}
         loading={exceptionDrawerLoading}
+        loadingMore={exceptionDrawerLoadingMore}
         open={exceptionDrawerOpen}
         onBucketChange={handleExceptionDrawerBucketChange}
         onClose={handleCloseExceptionDrawer}
+        onExceptionCodeChange={handleExceptionDrawerCodeChange}
         onReviewAnomaly={handleAnomalyReview}
-        hasMore={exceptionDrawerPages.paired.hasMore || exceptionDrawerPages.unpaired.hasMore}
-        loadingMore={exceptionDrawerLoadingMore}
-        total={exceptionDrawerPages.paired.total + exceptionDrawerPages.unpaired.total}
         onEnsureGroupDetail={ensureExceptionGroupDetail}
+        onInvoiceEntry={(row) => {
+          void handleRowAction(row, "enter-invoice");
+        }}
         onLoadMore={loadMoreExceptionDrawer}
+        onViewChange={handleExceptionDrawerViewChange}
+        selectedExceptionCode={exceptionDrawerSelectedCode}
+        total={exceptionDrawerPage.total}
+        view={exceptionDrawerView}
       />
       {cashTicketPurchaseDialog ? (
         <CashTicketPurchaseModal

@@ -1065,13 +1065,28 @@ describe("workbench api bank amount mapping", () => {
           total: 0,
           has_more: false,
           next_cursor: null,
+          selected_exception_code: "oa_bank_equal_invoice_less",
+          exception_counts: {
+            total: 9,
+            amount_total: 7,
+            document_only: 2,
+            by_code: {
+              oa_bank_equal_invoice_more: 1,
+              oa_bank_equal_invoice_less: 2,
+              oa_invoice_equal_bank_more: 1,
+              oa_invoice_equal_bank_less: 1,
+              bank_invoice_equal_oa_less: 1,
+              bank_invoice_equal_oa_more: 1,
+              all_amounts_different: 0,
+            },
+          },
           groups: [],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
 
-    await fetchWorkbenchGroupsPage("all", "unpaired", "opaque-page-2", 25, undefined, {
+    const result = await fetchWorkbenchGroupsPage("all", "unpaired", "opaque-page-2", 25, undefined, {
       search: "供应商A",
       status: "unpaired",
       sourceKind: "bank_transaction",
@@ -1087,6 +1102,8 @@ describe("workbench api bank amount mapping", () => {
         bank: { mode: "month", month: "2026-04" },
       },
       exceptionBucket: "unpaired",
+      exceptionView: "amount",
+      exceptionCode: "oa_bank_equal_invoice_less",
     }, 2);
 
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
@@ -1104,6 +1121,23 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("sort")).toBe("bank:desc");
     expect(url.searchParams.get("detail_level")).toBe("summary");
     expect(url.searchParams.get("exception_bucket")).toBe("unpaired");
+    expect(url.searchParams.get("exception_view")).toBe("amount");
+    expect(url.searchParams.get("exception_code")).toBe("oa_bank_equal_invoice_less");
+    expect(result.selectedExceptionCode).toBe("oa_bank_equal_invoice_less");
+    expect(result.exceptionCounts).toEqual({
+      total: 9,
+      amountTotal: 7,
+      documentOnly: 2,
+      byCode: {
+        oa_bank_equal_invoice_more: 1,
+        oa_bank_equal_invoice_less: 2,
+        oa_invoice_equal_bank_more: 1,
+        oa_invoice_equal_bank_less: 1,
+        bank_invoice_equal_oa_less: 1,
+        bank_invoice_equal_oa_more: 1,
+        all_amounts_different: 0,
+      },
+    });
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
       bank: { amount: ["account:8106", "direction:expense"], counterparty: ["云南溯源科技有限公司"] },
     });

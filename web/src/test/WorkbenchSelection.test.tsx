@@ -1748,18 +1748,113 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(await screen.findByRole("button", { name: /未配对异常 51 \| 已配对异常 0/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
-    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent("10 / 51 项");
+    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
+      "状态总计 51 项 · 当前 10 / 51 项",
+    );
     await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
     await waitFor(() => expect(loadMoreStarted).toBe(true));
 
     await user.click(within(drawer).getByRole("radio", { name: "已配对异常" }));
     await waitFor(() => expect(loadMoreAborted).toBe(true));
-    expect(await within(drawer).findByText("当前没有已配对异常。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("当前没有金额异常。")).toBeInTheDocument();
 
     await user.click(within(drawer).getByRole("radio", { name: "未配对异常" }));
     const loadMoreButton = await within(drawer).findByRole("button", { name: "加载更多异常" });
     expect(loadMoreButton).toBeEnabled();
     expect(loadMoreButton).not.toHaveAttribute("aria-busy", "true");
+  });
+
+  test("uses server exception facets without replacing the bucket total with the filtered page total", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
+        payload as Record<string, unknown>,
+        "unpaired",
+      ),
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    expect(within(drawer).getByRole("radio", { name: "OA 流水一致，票少 1" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
+      "状态总计 1 项 · 当前 1 项",
+    );
+
+    await user.click(within(drawer).getByRole("radio", { name: "三项不一致 0" }));
+    expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
+    expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
+      "状态总计 1 项 · 当前 0 项",
+    );
+    const categoryRead = [...fetchMock.mock.calls].reverse().find(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups"
+        && url.searchParams.get("exception_code") === "all_amounts_different";
+    });
+    expect(categoryRead).toBeDefined();
+    expect(new URL(fetchPath(categoryRead![0]), "http://localhost").searchParams.get("exception_view")).toBe("amount");
+
+    await user.click(within(drawer).getByRole("radio", { name: "仅资料异常 0" }));
+    expect(await within(drawer).findByText("当前没有仅资料异常。")).toBeInTheDocument();
+    const documentRead = [...fetchMock.mock.calls].reverse().find(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups"
+        && url.searchParams.get("exception_view") === "document_only";
+    });
+    expect(documentRead).toBeDefined();
+    expect(new URL(fetchPath(documentRead![0]), "http://localhost").searchParams.has("exception_code")).toBe(false);
+  });
+
+  test("switching exception views aborts a stale amount-category request", async () => {
+    const user = userEvent.setup();
+    let categoryRequestStarted = false;
+    let categoryRequestAborted = false;
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withAmountMismatchGroups(
+        payload as Record<string, unknown>,
+        "unpaired",
+      ),
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      if (
+        url.pathname === "/api/workbench/groups"
+        && url.searchParams.get("exception_code") === "all_amounts_different"
+      ) {
+        categoryRequestStarted = true;
+        return new Promise<Response>((_, reject) => {
+          const rejectAsAborted = () => {
+            categoryRequestAborted = true;
+            reject(new DOMException("aborted", "AbortError"));
+          };
+          if (init?.signal?.aborted) {
+            rejectAsAborted();
+            return;
+          }
+          init?.signal?.addEventListener("abort", rejectAsAborted, { once: true });
+        });
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: /未配对异常 1 \| 已配对异常 0/ }));
+    const drawer = await screen.findByRole("dialog", { name: "异常处理" });
+    await user.click(within(drawer).getByRole("radio", { name: "三项不一致 0" }));
+    await waitFor(() => expect(categoryRequestStarted).toBe(true));
+    await user.click(within(drawer).getByRole("radio", { name: "仅资料异常 0" }));
+
+    await waitFor(() => expect(categoryRequestAborted).toBe(true));
+    expect(await within(drawer).findByText("当前没有仅资料异常。")).toBeInTheDocument();
+    expect(within(drawer).getByRole("radio", { name: "仅资料异常 0" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(within(drawer).queryByText("当前分类没有金额异常。")).not.toBeInTheDocument();
   });
 
   test("switching exception buckets aborts an expanded detail and keeps the paired bucket canonical", async () => {
@@ -1793,11 +1888,11 @@ describe("Workbench row selection and detail drawer", () => {
     await waitFor(() => expect(staleDetailSignal).not.toBeNull());
     await user.click(within(drawer).getByRole("radio", { name: "已配对异常" }));
     await waitFor(() => expect(staleDetailSignal?.aborted).toBe(true));
-    expect(await within(drawer).findByText("当前没有已配对异常。")).toBeInTheDocument();
+    expect(await within(drawer).findByText("当前没有金额异常。")).toBeInTheDocument();
 
     staleDetail.resolve(jsonResponse({}));
     await act(async () => Promise.resolve());
-    expect(within(drawer).getByText("当前没有已配对异常。")).toBeInTheDocument();
+    expect(within(drawer).getByText("当前没有金额异常。")).toBeInTheDocument();
     expect(within(drawer).queryByText("明细快照")).not.toBeInTheDocument();
   });
 

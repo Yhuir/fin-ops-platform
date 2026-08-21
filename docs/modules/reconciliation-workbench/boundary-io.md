@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-20
+日期：2026-08-21
 
 ## 职责
 
@@ -8,7 +8,7 @@
 
 - 通过 direct canonical API 读取 OA、银行流水、发票、ETC 批次和正式关系，并把当前提交事实划分为 `paired` / `unpaired`。
 - 提供同一只读快照内的首屏统计与两区首页、区域级搜索/筛选/排序、cursor 分页、filter options、group/row detail 和异常抽屉。
-- 提供人工正式关联、关系级撤回和异常人工审阅；撤回关系恢复最近一次确认前的稳定拓扑，撤回异常放行只改变展示分区。
+- 提供人工正式关联、关系级撤回和系统异常审阅；撤回关系恢复最近一次确认前的稳定拓扑，撤回异常放行只改变展示分区。
 - 对“OA发票附件未解析”提供一个右侧录入抽屉：补充凭证只关联当前 OA 子付款项且不进发票池；手工录入整批进入统一发票池并原子扩展当前正式关系。
 - 保持权限、审计、幂等、canonical member exact-set、preview fingerprint、relation/entity version 和稳定加锁顺序。
 - 写成功后由页面执行一次普通 direct GET，读取已提交事实；页面不等待 projection worker。
@@ -19,7 +19,7 @@
 - 不把 OA、银行流水、发票复制成新的统一写模型。
 - 不持久化自动候选、matching decision 或 `open/proposed` 关系状态。
 - 不根据金额、旧 `case_id`、UI metadata 或来源前缀在 route/前端本地推断正式关系。
-- 不提供人工创建异常、逐行“标记异常”或发票“忽略/恢复忽略”入口；异常只能由 canonical 规则产生，再由 `/api/workbench/exceptions/review` 进行人工分类与分区决定。历史人工异常和 ignore/restore 记录只用于审计展示。
+- 不提供人工创建异常、逐行“标记异常”或发票“忽略/恢复忽略”入口；异常只能由 canonical 规则产生，再由 `/api/workbench/exceptions/review` 进行审阅与分区决定。历史人工异常和 ignore/restore 记录只用于审计展示。
 - 不直接写 relation SQL、matching dirty-scope SQL 或 outbox SQL；写入必须进入对应 command/UoW。
 - 不拥有其它页面的读取副本；`workbench-matching` 是独立领域 worker。
 
@@ -52,7 +52,7 @@ ReconciliationWorkbenchPage
 | OA 补充凭证 | `app.workbench_oa_supporting_documents` + `app.file_objects` | 支持点击选择或拖拽 JPG/JPEG/PNG/PDF，校验扩展名、文件签名和 25MB 单文件上限；以 `oa_row_id + expense_item_id` 精确关联，并以目标付款项 + 内容哈希保证重试幂等，可列表、内联预览、软删除。上传/删除请求把关系目标、文件名/类型/大小、可用性与成功/失败结果固化到 operation audit；只有仍有效的成功文件可从详情预览。它不是 canonical invoice，不写 `app.invoices`、import session、relation member、matching 或 read model。 |
 | OA 手工发票补录 | `POST /api/workbench/oa-invoice-supplements/manual` | 只接受当前用户完整的批量 manual import preview；确认全部发票、写 `oa_expense_item_invoice` 来源边并通过正式 relation command 创建/扩展目标 case，单事务同成同败；同一请求把最终 case、OA 子付款项及每张发票的号码、销购方、日期与金额快照固化到 operation audit。 |
 | 历史发票来源修复 | `import_audit_repair_ops` | 只允许运维显式提交 invoice ids、case、OA row、expense item 和精确价税合计；先只读 dry-run 生成来源指纹与 rollback manifest，execute 在 serializable 事务、advisory lock、旧 `source_links` CAS 和操作审计内仅追加缺失的 `oa_expense_item_invoice` 来源边。冲突来源、数量/总额漂移或重复 identity 整笔拒绝；不是页面运行时 fallback。 |
-| list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`page_size` 和 opaque `cursor`。复合列只接受 `direction/account/bankTag`、`oaType/workflow/applicant`、`expenseType/project` 类型前缀；所有字符串和集合有界，SQL 参数化。 |
+| list query | Workbench API | `month`、`zone`、allowlisted sort、区域 search、column/time filters、可选 `exception_bucket`、`exception_view=amount|document_only`、七分类白名单 `exception_code`、`page_size` 和 opaque `cursor`。`exception_view` 必须与 bucket 同时使用，`exception_code` 只允许用于金额视图。复合列只接受 `direction/account/bankTag`、`oaType/workflow/applicant`、`expenseType/project` 类型前缀；所有字符串和集合有界，SQL 参数化。 |
 | write command | Workbench action routes | server-authenticated actor/tenant、canonical member exact-set、preview id/fingerprint、expected relation/entity versions、idempotency key。页面 read-model version 和 cursor 均不是写 CAS。 |
 
 ## Direct SQL 合同
@@ -84,10 +84,10 @@ requested tenant/scope
 
 - `GET /api/workbench` 在一个短 `REPEATABLE READ READ ONLY` transaction 内返回 summary、statistics、invoice inventory 与 paired/unpaired 各 10 组首页。精确 total 不变，后续使用 opaque cursor 自动续读。
 - 首屏 candidate spine 只构建一次；禁止依次执行 summary、paired count/page、unpaired count/page 六套重复 canonical CTE。
-- `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`。
+- `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`；异常 bucket 请求 additive 返回 `selected_exception_code` 与 `exception_counts={total,amount_total,document_only,by_code}`，`by_code` 固定包含七个 code（包括零值）。
 - compact summary group 保留组级 `amount_check`；每行不重复输出相同 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only metadata。ETC 发票栏首屏额外保留第一张真实 `source_kind=etc_invoice` 的窄行，隐藏 summary 锚点；其它发票只保留总数，用户展开时复用既有 group detail 一次加载全部成员。前端只把组级金额判断继承给可见行 chip，完整诊断仍由 detail I/O 提供。
 - `total` 和 row counts 是当前 query 的精确值；统计发生在 cursor 条件前。cursor 只减少深页排序/hydration，不能把 exact count 伪装成常数复杂度。
-- cursor 绑定 scope、zone、sort、search、filters、exception bucket 的规范化 query hash，并保存完整稳定排序 tuple 与 `group_key` tie-breaker。
+- cursor 绑定 scope、zone、sort、search、filters、exception bucket/view 和调用方显式请求的 exception code 的规范化 query hash，并保存完整稳定排序 tuple 与 `group_key` tie-breaker。首屏未传 code、由服务端自动选中首个非零分类时，opaque cursor 内部同时封存该 resolved code；后续 cursor 请求继续省略 code，服务端强制复用 cursor 分类，即使期间 counts 变化也不得切换分类。客户端不得把响应中的自动选中 code 回填为新的 query 条件。
 - cursor 是 opaque pagination boundary，不是 MVCC snapshot、read-model version、permission token 或写 CAS。跨 HTTP 请求采用 latest-committed 语义；并发写时页面在 mutation 成功后清空 cursor/selection 并重读首屏。
 - 禁止 OFFSET fallback 和客户端解析 cursor 内容。
 
@@ -104,7 +104,8 @@ requested tenant/scope
 
 ### 异常与详情
 
-- `/groups?exception_bucket=unpaired|paired` 在 SQL group spine 上应用 anomaly fingerprint 和人工决定，精确计数并有界分页；bucket 必须与 zone 相同，前端每次只读取当前 bucket，不得并行读取两区或 drain full-detail pages 后本地合并。
+- `/groups?exception_bucket=unpaired|paired` 在 SQL group spine 上应用 anomaly fingerprint 和审阅决定，精确计数并有界分页；bucket 必须与 zone 相同，前端每次只读取当前 bucket，不得并行读取两区或 drain full-detail pages 后本地合并。
+- `exception_view=amount` 按一个服务端权威金额 code 过滤；未显式传 `exception_code` 时按固定七分类顺序选择当前第一个非零 code。`exception_view=document_only` 只返回没有金额 code、但至少有一个 `absent|unparsed|unassigned` 附件异常的关系。金额与资料并存的关系只属于唯一金额分类；同一关系有多个资料 item 仍只计数和返回一次。`exception_counts` 基于当前 bucket 及其它 search/filter 条件计算，但不受当前 view/code 自身过滤影响；`page.total` 只表示当前筛选列表总数。
 - SQL 候选分区和分页后 Python hydration 必须复用相同的流水净额口径；`1050` 支出与同关系 `35` 退款收入的银行总额为 `1015`，不得先按 gross `1050` 分入异常区再在 DTO 层改正。
 - 历史 OA 附件 parent identity 必须在 SQL 候选分区与 hydration 两层都通过 OA 外部 identity + 明细 `row_index` 映射到当前 canonical 子付款项；不得让 summary/full 得出不同 zone，也不得按金额或展示顺序猜测。
 - group detail 按 active case/group typed owner 窄查；row detail 按 typed identity 与 active relation membership 窄查。
@@ -118,7 +119,7 @@ requested tenant/scope
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
 | combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。`invoice_inventory.inventory_etc_summary_batch_count` 只统计 `oa_submitted/manually_marked_submitted/closed` 的 distinct ETC external batch，不把 draft/withdrawn 历史状态计成已提交批次。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
-| zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。 |
+| zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。异常 bucket 请求 additive 返回服务端选中 code 和按唯一关系计算的双视图/七分类 counts。 |
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；感叹号与原始系统分类 Chip 仍保留，审阅审计只在 Popover 展示。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；关系本身不被删除或拆散。 |
@@ -147,7 +148,7 @@ requested tenant/scope
 - mount：一个 combined initial、权威 OA sync status、settings；不请求 `/api/workbench/refresh-status`。
 - query/filter/sort 变化：abort 上一请求，只重取受影响 zone 并清空该区 cursor；不重复读取 summary 和另一 zone。
 - pagination/filter options/detail：每个 owner single-flight 或 latest-wins，有界 payload。
-- mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。异常审阅把列表返回的可选 `detail_key` 原样提交以精确定位组；跨月关系写入全局决定，随后只读取决定对应的一个异常 bucket。
+- mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。异常审阅把列表返回的可选 `detail_key` 原样提交以精确定位组；跨月关系写入全局决定，随后只读取决定对应的一个异常 bucket，并保留当前异常 view/code。异常抽屉展开态默认仍是只读三栏，仅对具备写权限且确有未解析附件的记录开放既有 `enter-invoice` 动作；触发后先关闭异常抽屉再打开录票抽屉，禁止双 overlay/focus trap，不开放其它行级 mutation。
 - 保留 OA sync safety poll、全局 App Health 与 background jobs provider；它们不是 Workbench page read model，不能借本迁移删除。
 - OA 父记录的申请人栏始终显示时间 chip：有权威申请时间时只做原字符串格式化（包括移除 PostgreSQL `+08`/标准 offset 后缀，不做浏览器时区换算），缺失时明确显示“时间缺失”；日常报销子付款项不重复显示父 OA 申请人和时间。
 - OA 子付款项/附件发票同行只在当前页 DTO 内做纯函数图分组；禁止为此新增逐项 API、React effect、read model、worker 或页面缓存。共享异常感叹号组件通过 HeroUI `Link`（`target="_blank" rel="noopener noreferrer"`）打开 OA，禁止轮询或操纵 OA SPA DOM 自动点击详情。

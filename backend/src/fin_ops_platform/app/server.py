@@ -1662,6 +1662,8 @@ class Application:
                 column_filters=query.get("column_filters", [None])[0],
                 time_filters=query.get("time_filters", [None])[0],
                 exception_bucket=query.get("exception_bucket", [None])[0],
+                exception_view=query.get("exception_view", [None])[0],
+                exception_code=query.get("exception_code", [None])[0],
             )
             self._emit_workbench_api_metric(
                 endpoint="/api/workbench/groups",
@@ -3002,6 +3004,8 @@ class Application:
         column_filters: str | None = None,
         time_filters: str | None = None,
         exception_bucket: str | None = None,
+        exception_view: str | None = None,
+        exception_code: str | None = None,
     ) -> Response:
         status_code, payload = self._workbench_read_routes().groups(
             month,
@@ -3016,6 +3020,8 @@ class Application:
             column_filters=column_filters,
             time_filters=time_filters,
             exception_bucket=exception_bucket,
+            exception_view=exception_view,
+            exception_code=exception_code,
         )
         return self._json_response(status_code, payload)
 

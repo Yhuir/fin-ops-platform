@@ -21,6 +21,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_hydration im
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
 )
+from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
     normalize_workbench_column_filters,
@@ -139,6 +140,148 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
     )
     assert decoded is not None
     assert decoded.group_key == "row:bank:bank-2"
+
+
+def test_exception_amount_view_returns_additive_counts_and_auto_code_cursor() -> None:
+    selected_code = "oa_bank_equal_invoice_more"
+    metadata = {
+        "internal_key": "case:case-amount-1",
+        "detail_key": "case-amount-1",
+        "group_kind": "relation",
+        "member_ids": ["oa-1", "bank-1", "invoice-1"],
+        "member_types": ["oa", "bank", "invoice"],
+        "sort_missing": False,
+        "sort_value": "2026-07-02",
+        "total_count": 2,
+        "oa_count": 2,
+        "bank_count": 2,
+        "invoice_count": 2,
+        "exception_total": 4,
+        "amount_exception_total": 3,
+        "document_only_exception_total": 1,
+        "selected_exception_code": selected_code,
+        f"exception_count_{selected_code}": 2,
+        "exception_count_all_amounts_different": 1,
+    }
+    connection = _CountingQueryConnection([metadata, {**metadata, "internal_key": "case:more"}])
+    repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")
+    repository._hydrate_groups = lambda **kwargs: [  # type: ignore[method-assign]
+        {"group_id": str(row["internal_key"])} for row in kwargs["descriptors"]
+    ]
+
+    payload = repository._groups_page(
+        scope_key="2026-07",
+        zone="unpaired",
+        page_size=1,
+        exception_bucket="unpaired",
+        exception_view="amount",
+    )
+
+    assert payload["total"] == 2
+    assert payload["selected_exception_code"] == selected_code
+    assert payload["exception_counts"] == {
+        "total": 4,
+        "amount_total": 3,
+        "document_only": 1,
+        "by_code": {
+            code: (
+                2
+                if code == selected_code
+                else 1
+                if code == "all_amounts_different"
+                else 0
+            )
+            for code in AMOUNT_EXCEPTION_CODES
+        },
+    }
+    assert len(connection.calls) == 1
+    assert "base_filtered_groups" in connection.sql
+    assert "exception_counts" in connection.sql
+    assert "selected_exception" in connection.sql
+    assert payload["next_cursor"] is not None
+    decoded = decode_workbench_page_cursor(
+        payload["next_cursor"],
+        expected_query_hash=workbench_query_hash(
+            {
+                "scope_key": "2026-07",
+                "zone": "unpaired",
+                "status": None,
+                "source_kind": None,
+                "search": None,
+                "sort": "default:desc",
+                "column_filters": {},
+                "time_filters": {},
+                "exception_bucket": "unpaired",
+                "exception_view": "amount",
+            }
+        ),
+        expected_sort="default:desc",
+    )
+    assert decoded is not None
+    assert decoded.partition == selected_code
+
+    next_code = "oa_bank_equal_invoice_less"
+    connection.rows = [{
+        **metadata,
+        f"exception_count_{selected_code}": 0,
+        f"exception_count_{next_code}": 2,
+        "selected_exception_code": selected_code,
+    }]
+    continued = repository._groups_page(
+        scope_key="2026-07",
+        zone="unpaired",
+        page_size=1,
+        cursor=payload["next_cursor"],
+        exception_bucket="unpaired",
+        exception_view="amount",
+    )
+    assert continued["selected_exception_code"] == selected_code
+    assert selected_code in connection.params
+    assert "cursor_exception_code" in connection.sql
+    with pytest.raises(ValueError, match="cursor"):
+        repository._groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            page_size=1,
+            cursor=payload["next_cursor"],
+            exception_bucket="unpaired",
+            exception_view="amount",
+            exception_code=selected_code,
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"exception_bucket": "paired"}, "must match zone"),
+        ({"exception_bucket": "unpaired", "exception_view": "unknown"}, "exception_view"),
+        (
+            {
+                "exception_bucket": "unpaired",
+                "exception_view": "amount",
+                "exception_code": "unknown",
+            },
+            "exception_code",
+        ),
+        ({"exception_view": "amount"}, "requires exception_bucket"),
+        (
+            {
+                "exception_bucket": "unpaired",
+                "exception_view": "document_only",
+                "exception_code": "oa_bank_equal_invoice_more",
+            },
+            "requires exception_view=amount",
+        ),
+    ],
+)
+def test_exception_view_query_rejects_invalid_contract(
+    kwargs: dict[str, str],
+    message: str,
+) -> None:
+    repository = PostgresWorkbenchPageQueryRepository(_QueryConnection([]), tenant_id="test-tenant")
+
+    with pytest.raises(ValueError, match=message):
+        repository._groups_page(scope_key="2026-07", zone="unpaired", **kwargs)
 
 
 def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration() -> None:

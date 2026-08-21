@@ -5,6 +5,10 @@ from http import HTTPStatus
 from typing import Any, Callable
 
 from fin_ops_platform.services.search_query import canonicalize_money_search_query
+from fin_ops_platform.services.workbench_anomaly_contract import (
+    AMOUNT_EXCEPTION_CODES,
+    EXCEPTION_VIEWS,
+)
 from fin_ops_platform.services.workbench_filter_options import (
     normalize_workbench_filter_option_target,
     normalize_workbench_scope_key,
@@ -140,6 +144,8 @@ class WorkbenchReadApiRoutes:
         column_filters: str | None = None,
         time_filters: str | None = None,
         exception_bucket: str | None = None,
+        exception_view: str | None = None,
+        exception_code: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, object]]:
         try:
             current_month = normalize_workbench_scope_key(month)
@@ -167,6 +173,21 @@ class WorkbenchReadApiRoutes:
             normalized_exception_bucket = str(exception_bucket or "").strip() or None
             if normalized_exception_bucket not in {None, "unpaired", "paired"}:
                 raise ValueError("exception_bucket must be unpaired or paired.")
+            if (
+                normalized_exception_bucket is not None
+                and normalized_exception_bucket != normalized_zone
+            ):
+                raise ValueError("exception_bucket must match zone.")
+            normalized_exception_view = str(exception_view or "").strip() or None
+            if normalized_exception_view not in {None, *EXCEPTION_VIEWS}:
+                raise ValueError("exception_view must be amount or document_only.")
+            normalized_exception_code = str(exception_code or "").strip() or None
+            if normalized_exception_code not in {None, *AMOUNT_EXCEPTION_CODES}:
+                raise ValueError("exception_code must be a supported amount exception code.")
+            if normalized_exception_view is not None and normalized_exception_bucket is None:
+                raise ValueError("exception_view requires exception_bucket.")
+            if normalized_exception_code is not None and normalized_exception_view != "amount":
+                raise ValueError("exception_code requires exception_view=amount.")
             normalized_status = self._normalize_status(status)
             normalized_source_kind = self._normalize_source_kind(source_kind)
             normalized_sort = self._normalize_sort(sort)
@@ -189,6 +210,10 @@ class WorkbenchReadApiRoutes:
             "time_filters": normalized_time_filters,
             "exception_bucket": normalized_exception_bucket,
         }
+        if normalized_exception_view is not None:
+            kwargs["exception_view"] = normalized_exception_view
+        if normalized_exception_code is not None:
+            kwargs["exception_code"] = normalized_exception_code
         result = self._query_facade_provider().groups(current_month, **kwargs)
         return result.status_code, result.payload
 

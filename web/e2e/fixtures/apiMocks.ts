@@ -1532,6 +1532,62 @@ function workbenchSummary(
   };
 }
 
+const WORKBENCH_AMOUNT_EXCEPTION_CODES = [
+  "oa_bank_equal_invoice_more",
+  "oa_bank_equal_invoice_less",
+  "oa_invoice_equal_bank_more",
+  "oa_invoice_equal_bank_less",
+  "bank_invoice_equal_oa_less",
+  "bank_invoice_equal_oa_more",
+  "all_amounts_different",
+] as const;
+
+function workbenchExceptionProjection<T extends Record<string, unknown>>(
+  groups: T[],
+  view: string,
+  requestedCode: string,
+) {
+  const anomalyCodes = (group: T) => {
+    const anomaly = group.workbench_anomaly as { items?: Array<{ code?: string }> } | undefined;
+    return Array.isArray(anomaly?.items) ? anomaly.items.map((item) => item.code ?? "") : [];
+  };
+  const primaryAmountCode = (group: T) => WORKBENCH_AMOUNT_EXCEPTION_CODES.find((code) => (
+    anomalyCodes(group).includes(code)
+  ));
+  const amountGroups = groups.filter((group) => primaryAmountCode(group) !== undefined);
+  const documentOnlyGroups = groups.filter((group) => {
+    const codes = anomalyCodes(group);
+    return primaryAmountCode(group) === undefined
+      && codes.some((code) => code.startsWith("oa_invoice_attachment_"));
+  });
+  const byCode = Object.fromEntries(WORKBENCH_AMOUNT_EXCEPTION_CODES.map((code) => [
+    code,
+    amountGroups.filter((group) => primaryAmountCode(group) === code).length,
+  ]));
+  const selectedCode = view === "amount"
+    ? WORKBENCH_AMOUNT_EXCEPTION_CODES.find((code) => code === requestedCode)
+      ?? WORKBENCH_AMOUNT_EXCEPTION_CODES.find((code) => Number(byCode[code]) > 0)
+      ?? null
+    : null;
+  const selectedGroups = view === "amount"
+    ? selectedCode
+      ? amountGroups.filter((group) => primaryAmountCode(group) === selectedCode)
+      : []
+    : view === "document_only"
+      ? documentOnlyGroups
+      : groups;
+  return {
+    groups: selectedGroups,
+    selectedExceptionCode: selectedCode,
+    counts: {
+      total: amountGroups.length + documentOnlyGroups.length,
+      amount_total: amountGroups.length,
+      document_only: documentOnlyGroups.length,
+      by_code: byCode,
+    },
+  };
+}
+
 function workbenchGroupsPayload(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
@@ -1543,6 +1599,8 @@ function workbenchGroupsPayload(
   exceptionBucket = "",
   amountMismatchScenario = false,
   amountMismatchDecision: WorkbenchAnomalyReviewDecision = null,
+  exceptionView = "",
+  exceptionCode = "",
 ) {
   const allGroups = workbenchGroups(
     zone,
@@ -1556,7 +1614,7 @@ function workbenchGroupsPayload(
   const searchedGroups = normalizedSearch
     ? allGroups.filter((group) => workbenchGroupMatchesSearch(group, normalizedSearch))
     : allGroups;
-  const groups = searchedGroups.filter((group) => {
+  const exceptionGroups = searchedGroups.filter((group) => {
     if (exceptionBucket === "unpaired") {
       return "workbench_anomaly" in group && group.workbench_anomaly != null && zone === "unpaired";
     }
@@ -1565,8 +1623,12 @@ function workbenchGroupsPayload(
     }
     return true;
   });
+  const projection = exceptionBucket
+    ? workbenchExceptionProjection(exceptionGroups, exceptionView, exceptionCode)
+    : { groups: exceptionGroups, selectedExceptionCode: null, counts: null };
+  const groups = projection.groups;
   const boundedPageSize = Math.max(1, pageSize);
-  const cursorPrefix = `workbench:${zone}:`;
+  const cursorPrefix = `workbench:${zone}:${exceptionBucket}:${exceptionView}:${exceptionCode}:`;
   const start = parseWorkbenchCursor(cursor, cursorPrefix);
   const pageGroups = groups.slice(start, start + boundedPageSize);
   return {
@@ -1576,6 +1638,10 @@ function workbenchGroupsPayload(
     page_size: boundedPageSize,
     has_more: start + pageGroups.length < groups.length,
     next_cursor: nextWorkbenchCursor(cursorPrefix, start, boundedPageSize, groups.length),
+    ...(projection.counts ? {
+      selected_exception_code: projection.selectedExceptionCode,
+      exception_counts: projection.counts,
+    } : {}),
   };
 }
 
@@ -9555,6 +9621,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             bank_count: 0,
             invoice_count: 0,
             unpaired_count: 1,
+            unpaired_exception_count: 1,
+            paired_exception_count: 0,
           },
           invoice_inventory: {
             ...payload.invoice_inventory,
@@ -9885,19 +9953,27 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         const exceptionGroups = allExceptionGroups.filter((group) => (
           exceptionBucket === "paired"
             ? group.workbench_anomaly.review_decision === "accept_paired"
-            : group.workbench_anomaly.review_decision !== "accept_paired"
+                : group.workbench_anomaly.review_decision !== "accept_paired"
         ));
+        const projection = workbenchExceptionProjection(
+          exceptionGroups,
+          url.searchParams.get("exception_view") ?? "",
+          url.searchParams.get("exception_code") ?? "",
+        );
+        const filteredExceptionGroups = projection.groups;
         const boundedPageSize = Number.isFinite(requestedPageSize) ? Math.max(1, requestedPageSize) : 50;
-        const cursorPrefix = `workbench-exception:${zone}:${exceptionBucket}:`;
+        const cursorPrefix = `workbench-exception:${zone}:${exceptionBucket}:${url.searchParams.get("exception_view") ?? ""}:${url.searchParams.get("exception_code") ?? ""}:`;
         const offset = parseWorkbenchCursor(requestedCursor, cursorPrefix);
-        const groups = exceptionGroups.slice(offset, offset + boundedPageSize);
+        const groups = filteredExceptionGroups.slice(offset, offset + boundedPageSize);
         return json(route, {
           groups,
-          total: exceptionGroups.length,
-          row_counts: countWorkbenchRows(exceptionGroups),
+          total: filteredExceptionGroups.length,
+          row_counts: countWorkbenchRows(filteredExceptionGroups),
           page_size: boundedPageSize,
-          has_more: offset + groups.length < exceptionGroups.length,
-          next_cursor: nextWorkbenchCursor(cursorPrefix, offset, boundedPageSize, exceptionGroups.length),
+          has_more: offset + groups.length < filteredExceptionGroups.length,
+          next_cursor: nextWorkbenchCursor(cursorPrefix, offset, boundedPageSize, filteredExceptionGroups.length),
+          selected_exception_code: projection.selectedExceptionCode,
+          exception_counts: projection.counts,
         });
       }
       if (options.workbenchBankFlowRuleBatchScenario) {
@@ -9932,7 +10008,15 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         });
       }
       if (options.workbenchOaInvoiceUnparsedScenario) {
-        const groups = zone === "unpaired" ? [buildOaInvoiceUnparsedWorkbenchGroup()] : [];
+        const allGroups = zone === "unpaired" ? [buildOaInvoiceUnparsedWorkbenchGroup()] : [];
+        const projection = exceptionBucket
+          ? workbenchExceptionProjection(
+            allGroups,
+            url.searchParams.get("exception_view") ?? "",
+            url.searchParams.get("exception_code") ?? "",
+          )
+          : { groups: allGroups, selectedExceptionCode: null, counts: null };
+        const groups = projection.groups;
         return json(route, {
           ...workbenchGroupsPayload(
             zone,
@@ -9947,6 +10031,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           has_more: false,
           next_cursor: null,
           groups: groups.map(withWorkbenchDetailKey),
+          ...(projection.counts ? {
+            selected_exception_code: projection.selectedExceptionCode,
+            exception_counts: projection.counts,
+          } : {}),
         });
       }
       if (options.workbenchExplicitBankFanoutScenario) {
@@ -9979,6 +10067,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         exceptionBucket ?? "",
         options.workbenchAmountMismatchScenario === true,
         workbenchAmountMismatchDecision,
+        url.searchParams.get("exception_view") ?? "",
+        url.searchParams.get("exception_code") ?? "",
       ));
     }
 
@@ -9990,6 +10080,8 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         : workbenchAmountMismatchDecision !== "accept_paired";
       const sourceGroups = options.workbenchBankFlowRuleBatchScenario
         ? bankFlowRuleWorkbenchGroups(zone, relationConfirmed, true)
+        : options.workbenchOaInvoiceUnparsedScenario
+          ? zone === "unpaired" ? [buildOaInvoiceUnparsedWorkbenchGroup()] : []
         : options.workbenchExceptionDatasetSize
           ? exceptionDatasetMatchesZone
             ? buildAmountMismatchWorkbenchGroups(options.workbenchExceptionDatasetSize, workbenchAmountMismatchDecision)

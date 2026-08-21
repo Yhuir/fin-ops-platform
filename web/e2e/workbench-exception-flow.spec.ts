@@ -26,20 +26,57 @@ test.describe("workbench exception browser flow", () => {
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(drawer.getByText("10 / 51 项")).toBeVisible();
+    await expect(drawer.getByText("状态总计 51 项 · 当前 10 / 51 项")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(1);
     expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
+    expect(groupRequestUrls[0]?.searchParams.get("exception_view")).toBe("amount");
+    expect(groupRequestUrls[0]?.searchParams.has("exception_code")).toBe(false);
 
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await expect(drawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
     expect(api.count("GET /api/workbench/groups/detail")).toBe(1);
 
     await drawer.getByRole("button", { name: "加载更多异常" }).click();
-    await expect(drawer.getByText("20 / 51 项")).toBeVisible();
+    await expect(drawer.getByText("状态总计 51 项 · 当前 20 / 51 项")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(2);
     const loadMoreUrl = groupRequestUrls.find((url) => url.searchParams.has("cursor"));
     expect(loadMoreUrl?.searchParams.get("cursor")).toBeTruthy();
     expect(loadMoreUrl?.searchParams.has("page")).toBe(false);
+    expect(loadMoreUrl?.searchParams.get("exception_view")).toBe("amount");
+    expect(loadMoreUrl?.searchParams.has("exception_code")).toBe(false);
+
+    await drawer.getByRole("radio", { name: "三项不一致 0" }).click();
+    await expect(drawer.getByText("当前分类没有金额异常。")).toBeVisible();
+    const categoryUrl = [...groupRequestUrls].reverse().find((url) => (
+      url.searchParams.get("exception_code") === "all_amounts_different"
+    ));
+    expect(categoryUrl?.searchParams.get("exception_view")).toBe("amount");
+  });
+
+  test("keeps the existing invoice-entry action available in the document-only drawer", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchOaInvoiceUnparsedScenario: true,
+    });
+
+    await page.goto("/");
+    await page
+      .getByTestId("zone-unpaired")
+      .getByRole("button", { name: "未配对异常 1 | 已配对异常 0" })
+      .click();
+
+    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
+    await exceptionDrawer.getByRole("radio", { name: "仅资料异常 1" }).click();
+    await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).click();
+    const invoiceEntry = exceptionDrawer.getByRole("button", { name: "录入发票" });
+    await expect(invoiceEntry).toBeEnabled();
+    await expect(exceptionDrawer.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
+    await expect(exceptionDrawer.getByRole("checkbox")).toHaveCount(0);
+    await invoiceEntry.click();
+
+    await expect(exceptionDrawer).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "录入发票" })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
   });
 
   test("reviews, accepts, and withdraws an automatically classified exact-cent mismatch", async ({ page }) => {
@@ -97,13 +134,15 @@ test.describe("workbench exception browser flow", () => {
       name: "该关联组有 1 项异常，查看详情",
     });
     await expect(collapsedIndicator).toBeVisible();
-    await expect(drawer.getByText("OA 流水一致，票少")).toHaveCount(0);
+    const collapsedHeading = drawer.locator(".workbench-anomaly-drawer__heading").first();
+    await expect(collapsedHeading.getByText("OA 流水一致，票少")).toHaveCount(0);
     await collapsedIndicator.hover();
-    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
+    const collapsedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
+    await expect(collapsedPopover.getByText("OA 流水一致，票少")).toBeVisible();
     await collapsedIndicator.click();
-    await expect(page.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await expect(collapsedPopover).toHaveCount(0);
     await collapsedIndicator.click();
-    await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "该关联组异常详情" })).toBeVisible();
     await page.keyboard.press("Escape");
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await expect(drawer.getByRole("button", {
@@ -190,7 +229,7 @@ test.describe("workbench exception browser flow", () => {
     expect(collapsedBox).not.toBeNull();
     expect(collapsedBox!.x).toBeGreaterThanOrEqual(0);
     expect(collapsedBox!.x + collapsedBox!.width).toBeLessThanOrEqual(1440);
-    await expect(drawer.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await expect(drawer.locator(".workbench-anomaly-drawer__heading").getByText("OA 流水一致，票少")).toHaveCount(0);
 
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     const review = drawer.getByRole("region", { name: "异常审阅" });

@@ -22,6 +22,7 @@ class WorkbenchPageCursor:
     missing: bool
     value: str
     group_key: str
+    partition: str | None = None
 
 
 def workbench_query_hash(value: dict[str, Any]) -> str:
@@ -38,6 +39,8 @@ def encode_workbench_page_cursor(cursor: WorkbenchPageCursor) -> str:
         "k": cursor.value,
         "g": cursor.group_key,
     }
+    if cursor.partition is not None:
+        unsigned["p"] = cursor.partition
     payload = {**unsigned, "c": _cursor_checksum(unsigned)}
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
         "utf-8"
@@ -64,6 +67,8 @@ def decode_workbench_page_cursor(
     if not isinstance(payload, dict):
         raise WorkbenchPageCursorError("cursor is malformed.")
     unsigned = {key: payload.get(key) for key in ("v", "q", "s", "m", "k", "g")}
+    if "p" in payload:
+        unsigned["p"] = payload.get("p")
     checksum = str(payload.get("c") or "")
     if checksum != _cursor_checksum(unsigned):
         raise WorkbenchPageCursorError("cursor integrity check failed.")
@@ -77,12 +82,16 @@ def decode_workbench_page_cursor(
     group_key = str(unsigned["g"] or "").strip()
     if len(sort_value) > 128 or not group_key or len(group_key) > 512:
         raise WorkbenchPageCursorError("cursor sort key is invalid.")
+    partition = str(unsigned.get("p") or "").strip() or None
+    if partition is not None and len(partition) > 128:
+        raise WorkbenchPageCursorError("cursor partition is invalid.")
     return WorkbenchPageCursor(
         query_hash=str(unsigned["q"]),
         sort=str(unsigned["s"]),
         missing=unsigned["m"],
         value=sort_value,
         group_key=group_key,
+        partition=partition,
     )
 
 

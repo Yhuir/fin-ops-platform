@@ -19,6 +19,10 @@ import type {
   WorkbenchAmountCheck,
   WorkbenchAnomaly,
   WorkbenchAnomalyItem,
+  WorkbenchAmountAnomalyCode,
+  WorkbenchExceptionBucket,
+  WorkbenchExceptionCounts,
+  WorkbenchExceptionView,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
@@ -45,6 +49,11 @@ import type {
   WorkbenchAccessControl,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
+} from "./types";
+import {
+  WORKBENCH_AMOUNT_ANOMALY_CODES,
+  WORKBENCH_AMOUNT_ANOMALY_LABELS,
+  isWorkbenchAmountAnomalyCode,
 } from "./types";
 import type { ManualInvoiceEntryBatchPreview } from "../imports/types";
 import { apiUrl } from "../../app/runtime";
@@ -268,6 +277,13 @@ type ApiWorkbenchGroupsPayload = {
   row_counts?: Partial<Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">>;
   has_more: boolean;
   next_cursor?: string | null;
+  selected_exception_code?: string | null;
+  exception_counts?: {
+    total?: number | string | null;
+    amount_total?: number | string | null;
+    document_only?: number | string | null;
+    by_code?: Record<string, number | string | null> | null;
+  } | null;
   groups: ApiWorkbenchGroup[];
 };
 
@@ -1428,17 +1444,8 @@ function decorateWorkbenchAnomalies(
 }
 
 function anomalyLabel(code: string) {
-  const amountLabels: Record<string, string> = {
-    oa_bank_equal_invoice_more: "OA 流水一致，票多",
-    oa_bank_equal_invoice_less: "OA 流水一致，票少",
-    oa_invoice_equal_bank_more: "OA 发票一致，付多",
-    oa_invoice_equal_bank_less: "OA 发票一致，付少",
-    bank_invoice_equal_oa_less: "发票流水一致，OA 提少了",
-    bank_invoice_equal_oa_more: "发票流水一致，OA 提多了",
-    all_amounts_different: "三项不一致",
-  };
-  if (amountLabels[code]) {
-    return amountLabels[code];
+  if (isWorkbenchAmountAnomalyCode(code)) {
+    return WORKBENCH_AMOUNT_ANOMALY_LABELS[code];
   }
   if (code === "oa_invoice_attachment_absent") {
     return "发票附件缺失";
@@ -1697,6 +1704,23 @@ function mapWorkbenchZonePage(
     hasMore: payload.has_more === true,
     cursor,
     nextCursor,
+  };
+}
+
+function mapWorkbenchExceptionCounts(
+  value: ApiWorkbenchGroupsPayload["exception_counts"],
+): WorkbenchExceptionCounts | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return {
+    total: toCount(value.total),
+    amountTotal: toCount(value.amount_total),
+    documentOnly: toCount(value.document_only),
+    byCode: Object.fromEntries(WORKBENCH_AMOUNT_ANOMALY_CODES.map((code) => [
+      code,
+      toCount(value.by_code?.[code]),
+    ])) as WorkbenchExceptionCounts["byCode"],
   };
 }
 
@@ -2283,6 +2307,8 @@ function workbenchGroupsUrl(
   const columnFilters = stableJsonQueryParam(query.filtersByPaneAndColumn);
   const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
   const exceptionBucket = query.exceptionBucket;
+  const exceptionView = query.exceptionView;
+  const exceptionCode = query.exceptionCode;
   if (search) {
     params.set("search", search);
   }
@@ -2306,6 +2332,12 @@ function workbenchGroupsUrl(
   }
   if (exceptionBucket) {
     params.set("exception_bucket", exceptionBucket);
+  }
+  if (exceptionView) {
+    params.set("exception_view", exceptionView);
+  }
+  if (exceptionCode) {
+    params.set("exception_code", exceptionCode);
   }
   return `/api/workbench/groups?${params.toString()}`;
 }
@@ -2393,6 +2425,10 @@ export async function fetchWorkbenchGroupsPage(
     zone,
     groups: payload.groups.map((group) => mapGroup(group, zone)),
     page: mapWorkbenchZonePage(payload, zone, cursor, page),
+    selectedExceptionCode: isWorkbenchAmountAnomalyCode(payload.selected_exception_code)
+      ? payload.selected_exception_code
+      : undefined,
+    exceptionCounts: mapWorkbenchExceptionCounts(payload.exception_counts),
   };
 }
 
@@ -2448,11 +2484,15 @@ export async function fetchWorkbenchFilterOptions(
 
 export async function fetchWorkbenchExceptionGroups(
   month: string,
-  bucket: "unpaired" | "paired",
+  bucket: WorkbenchExceptionBucket,
+  view: WorkbenchExceptionView,
+  exceptionCode?: WorkbenchAmountAnomalyCode,
   signal?: AbortSignal,
 ): Promise<{
   groups: WorkbenchRelationGroup[];
   page: WorkbenchZonePageInfo;
+  selectedExceptionCode?: WorkbenchAmountAnomalyCode;
+  exceptionCounts?: WorkbenchExceptionCounts;
 }> {
   const result = await fetchWorkbenchGroupsPage(
     month,
@@ -2460,13 +2500,20 @@ export async function fetchWorkbenchExceptionGroups(
     null,
     WORKBENCH_GROUP_PAGE_SIZE,
     signal,
-    { detailLevel: "summary", exceptionBucket: bucket },
+    {
+      detailLevel: "summary",
+      exceptionBucket: bucket,
+      exceptionView: view,
+      ...(view === "amount" && exceptionCode ? { exceptionCode } : {}),
+    },
     1,
     { forceFresh: true },
   );
   return {
     groups: result.groups,
     page: result.page,
+    selectedExceptionCode: result.selectedExceptionCode,
+    exceptionCounts: result.exceptionCounts,
   };
 }
 

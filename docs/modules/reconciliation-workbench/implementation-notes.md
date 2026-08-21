@@ -1,5 +1,13 @@
 # 关联台 实施记录
 
+## 2026-08-21 - 异常抽屉七分类与仅资料队列闭环
+
+- 队列口径：每个未配对/已配对 bucket 内增加“金额异常 / 仅资料异常”两种互斥视图。金额视图按服务端七分类显示唯一关系数；仅资料视图只包含没有金额分类、但存在附件异常的关系。金额与资料并存时金额分类拥有该关系，资料 Chip 作为附属证据保留；多个异常 item 不复制关系。
+- API/SQL：`GET /api/workbench/groups` 增加白名单 `exception_view/exception_code`，并在既有 direct page SQL 同一 group spine 中返回 `selected_exception_code` 与完整 `exception_counts`。首屏未传 code 时按固定顺序选择第一个非零分类，并把 resolved code 封存在 opaque cursor；续页仍省略 code、由服务端复用 cursor 分类，避免并发变化串入另一分类。
+- 前端：统一异常抽屉使用紧凑 HeroUI 双视图与七分类计数筛选，只读取当前 bucket/view/code；删除旧的跨 bucket 加载更多和用当前分类 `page.total` 覆盖 bucket 总数的路径。展开态继续复用共享三栏；具备写权限时仅放开既有未解析附件“录入发票”，其它行级动作保持只读。
+- 旧链隔离：历史人工异常、WEX/row-ignore、旧 amount ignore/restore 继续只作审计，不进入 counts/filter；仍被 personal advance settlement/rollback 使用的 exception repository 能力保留，避免为清理名称而破坏现行业务。
+- 边界：分类筛选只组织审阅关系，不自动执行付款、退款、补票或创建 OA 草稿。不新增依赖、数据库表/索引/migration、read model、cache、worker、queue 或第二套读取链。本次无数据库备份；不涉及主数据库删除。
+
 ## 2026-08-21 - 自动异常分类与共享三栏感叹号闭环
 
 - 产品收口：三栏完整且方向明确时由服务端自动归为七种互斥金额分类；局部付款项差异与“发票附件缺失 / 发票附件未解析 / 发票待归属”沿用同一异常 bundle。方向未知、冲突或缺栏不猜测。

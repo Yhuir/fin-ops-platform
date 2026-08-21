@@ -313,6 +313,30 @@ class WorkbenchV2ApiTests(unittest.TestCase):
                 self.assertEqual(status, "400 Bad Request")
                 self.assertEqual(payload["error"], expected_error)
 
+    def test_workbench_groups_forwards_exception_view_contract_to_read_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+
+            status, payload = self._wsgi_get(
+                app,
+                "/api/workbench/groups",
+                "month=2026-05&zone=unpaired&exception_bucket=unpaired&exception_view=unknown",
+            )
+
+            self.assertEqual(status, "400 Bad Request")
+            self.assertEqual(payload["error"], "invalid_workbench_groups_query")
+            self.assertIn("exception_view", str(payload["message"]))
+
+            status, payload = self._wsgi_get(
+                app,
+                "/api/workbench/groups",
+                "month=2026-05&zone=unpaired&exception_bucket=paired",
+            )
+
+            self.assertEqual(status, "400 Bad Request")
+            self.assertEqual(payload["error"], "invalid_workbench_groups_query")
+            self.assertIn("match zone", str(payload["message"]))
+
     def _install_workbench_query_service(self, app: Application, query_service: WorkbenchQueryService) -> None:
         app._workbench_query_service = query_service
 

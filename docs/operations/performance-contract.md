@@ -1,6 +1,6 @@
 # 生产性能合同
 
-日期：2026-08-13
+日期：2026-08-21
 
 ## 目标与边界
 
@@ -59,6 +59,8 @@ visible client/session 的命名 access evidence，以 rolling 60-second unique 
 
 两个 tier 都必须覆盖 authenticated Workbench combined initial、paired/unpaired groups 和 filter-options，证明每个 blocking probe p95 `<=1000ms`、p99 `<=2000ms`、error `0`，并在同一窗口检查 HTTP active/peak requests、PostgreSQL pool/acquire/SQL、DB CPU/IO/temp spill 及 required worker 无饱和，同时证明 Workbench page event/cache/projection I/O 为零。派生 target 超过当前 probe 的有界 worker 上限 `8` 时不得静默截断，
 必须阻断并由批准的容量执行方案承接。
+
+默认 Workbench probe 还必须覆盖未配对金额异常首个非零分类、未配对仅资料异常和已配对金额异常；该通用探针只判 HTTP 状态、延迟、错误与传输大小，不解析业务 payload。发布后另用有界认证只读请求核对显式分类、cursor 第二页以及 `total=amount_total+document_only`、`amount_total=sum(by_code)`，只输出状态、耗时、计数不变量和重复 group id 数，不保存业务明细。异常 GET 不允许写 outbox、dirty scope、job、cache 或 read model。
 
 commit-to-visible 证据由现有 Playwright/Node 单一 `performance.now()` 时钟记录整数微秒：T1 在 mutation 2xx receipt 解析完成后开始，T2 为写成功后的正常 canonical GET 已包含精确 relation/decision identity，T3 为唯一 DOM identity 可见。报告只包含 `canonical_read_us`、`browser_render_us` 与 `receipt_to_dom_us`，且前两段之和
 严格等于 T1→T3 总耗时；窗口内没有 page refresh-status、generation 或 worker wait。隔离 prod-equivalent run 至少 100 个 test-owned、可逆样本才计算 p99；生产 run

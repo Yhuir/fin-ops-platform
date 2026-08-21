@@ -1232,6 +1232,96 @@ describe("Workbench candidate grouping layout", () => {
     expect(await screen.findByText("发票附件未解析")).toBeVisible();
   });
 
+  test("keeps only invoice entry enabled in a read-only grid when amount and document anomalies coexist", () => {
+    const documentAnomaly = {
+      code: "oa_invoice_attachment_unparsed" as const,
+      label: "发票附件未解析",
+      displayLabel: "发票附件未解析",
+      fingerprint: "e".repeat(64),
+      comparisonUnitId: "oa-mixed-anomaly:item:0",
+      sourceOaIds: ["oa-mixed-anomaly"],
+      sourceExpenseItemIds: ["oa-mixed-anomaly:item:0"],
+      invoiceRowIds: [],
+      attachmentFileCount: 1,
+      displayScope: "expense_item" as const,
+      displayPane: "oa" as const,
+      displayRowId: "oa-mixed-anomaly:item:0",
+    };
+    const amountAnomaly = {
+      code: "all_amounts_different" as const,
+      label: "三项不一致",
+      displayLabel: "三项不一致",
+      fingerprint: "f".repeat(64),
+      comparisonUnitId: "oa-mixed-anomaly",
+      sourceOaIds: ["oa-mixed-anomaly"],
+      sourceExpenseItemIds: [],
+      invoiceRowIds: [],
+      attachmentFileCount: 0,
+      displayScope: "group" as const,
+      displayPane: "group" as const,
+    };
+    const oaRow: WorkbenchRecord = {
+      ...createOaRecord("oa-mixed-anomaly", "赵敏", "55.00"),
+      expenseItems: [{
+        id: "oa-mixed-anomaly:item:0",
+        rowIndex: "0",
+        projectName: "设备采购项目",
+        amount: "55.00",
+        attachmentFileCount: 1,
+        workbenchAnomalies: [documentAnomaly],
+      }],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "row:oa-mixed-anomaly",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "canonical_unpaired",
+      rows: { oa: [oaRow], bank: [], invoice: [] },
+      workbenchAnomaly: {
+        code: "workbench_anomaly",
+        fingerprint: "a".repeat(64),
+        reviewDecision: "pending",
+        reviewNote: "",
+        reviewedBy: "",
+        items: [amountAnomaly, documentAnomaly],
+      },
+    };
+    const onRowAction = vi.fn();
+    const onSelectRow = vi.fn();
+
+    render(
+      <RelationGroupGrid
+        allowInvoiceEntryInReadOnly
+        canMutateData={false}
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={onRowAction}
+        onSelectRow={onSelectRow}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        readOnly
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="unpaired"
+      />,
+    );
+
+    const invoiceEntry = screen.getByRole("button", { name: "录入发票" });
+    expect(invoiceEntry).toBeEnabled();
+    fireEvent.click(invoiceEntry);
+    expect(onRowAction).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceExpenseItemIds: ["oa-mixed-anomaly:item:0"] }),
+      "enter-invoice",
+    );
+    fireEvent.click(screen.getByText("赵敏"));
+    expect(onSelectRow).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
+  });
+
   test("expands same-project reimbursement items into independent comparison rows", () => {
     const parentOa = {
       ...createOaRecord("oa-exp-same-project", "吴云江", "66.00"),

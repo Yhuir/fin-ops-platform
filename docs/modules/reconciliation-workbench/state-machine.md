@@ -1,6 +1,6 @@
 # 关联台状态机
 
-日期：2026-08-13
+日期：2026-08-21
 
 ## 页面关系状态
 
@@ -101,6 +101,8 @@ row detail GET 是纯读操作：按 typed identity 窄查 latest committed cano
 ```
 
 该状态机改变关联台的有效展示分区，但不修改 `app.workbench_pair_relations.status=active`、成员或 canonical 金额。下游页面仍消费同一正式关系，避免异常审阅污染已支付、成本和发票归属。服务端在写入时重取 canonical detail，以当前 bundle 推导 evidence fingerprints 和 detected codes；客户端不得提交人工分类、逐项审阅结果或 actor。审阅只持久化 fingerprint-bound 决定、服务端证据摘要与 audit。
+
+异常抽屉的筛选状态不创造新的业务状态：`bucket(unpaired|paired) -> view(amount|document_only) -> amount code`。金额分类由服务端保证每个关系最多一个；金额与资料并存时只进入该金额分类，资料只作为附属 evidence。没有金额分类且存在至少一个附件异常时才进入 `document_only`。一个关系无论含多少异常 item，在当前 bucket 内都只属于一个视图/分类并只计数一次；切换 bucket/view/code 必须取消旧请求并从新查询首页开始。
 
 异常决定的作用域取当前 canonical 组的成员月份：成员都在同一月时写入单月决定；同一关系跨多个自然月时写入全局决定并在各月视图复用。不得因为页面使用 `month=all` 或成员跨月而拒绝审阅，也不得拆成多个相互冲突的月度决定。
 

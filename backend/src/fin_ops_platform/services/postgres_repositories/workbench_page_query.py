@@ -36,8 +36,13 @@ from fin_ops_platform.services.workbench_direct_query_errors import (
     is_workbench_data_integrity_query_error,
     is_transient_postgres_query_error,
 )
+from fin_ops_platform.services.workbench_anomaly_contract import (
+    AMOUNT_EXCEPTION_CODES,
+    EXCEPTION_VIEWS,
+)
 from fin_ops_platform.services.workbench_page_cursor import (
     WorkbenchPageCursor,
+    WorkbenchPageCursorError,
     decode_workbench_page_cursor,
     encode_workbench_page_cursor,
     workbench_query_hash,
@@ -60,6 +65,16 @@ WORKBENCH_SOURCE_KINDS = frozenset(
         "oa_attachment_invoice",
         "etc_invoice_summary",
     }
+)
+
+_AMOUNT_EXCEPTION_COUNT_COLUMNS_SQL = ",\n                    ".join(
+    "count(*) filter (where anomaly.exception_code = "
+    f"'{code}')::bigint as exception_count_{code}"
+    for code in AMOUNT_EXCEPTION_CODES
+)
+_DEFAULT_AMOUNT_EXCEPTION_CODE_SQL = "\n".join(
+    f"when counts.exception_count_{code} > 0 then '{code}'"
+    for code in AMOUNT_EXCEPTION_CODES
 )
 
 _COMPOSITE_FILTER_OPTION_GROUPS = {
@@ -1708,6 +1723,10 @@ all_anomaly_items as materialized (
     union all
     select * from relation_amount_anomaly_items
 ),
+document_anomaly_groups as materialized (
+    select distinct item.internal_key
+    from expense_anomaly_items item
+),
 anomaly_fingerprints as materialized (
     select
         item.internal_key,
@@ -1728,6 +1747,8 @@ anomaly_states as materialized (
         anomaly.internal_key,
         anomaly.case_id,
         anomaly.fingerprint,
+        classification.code as exception_code,
+        document.internal_key is not null as has_document_anomaly,
         case
             when decision.fingerprint = anomaly.fingerprint
              and decision.updated_at >= groups.updated_at
@@ -1736,6 +1757,10 @@ anomaly_states as materialized (
         end as decision
     from anomaly_fingerprints anomaly
     join canonical_groups groups on groups.internal_key = anomaly.internal_key
+    left join relation_amount_classifications classification
+      on classification.internal_key = anomaly.internal_key
+    left join document_anomaly_groups document
+      on document.internal_key = anomaly.internal_key
     left join latest_anomaly_decisions decision
       on decision.group_id = anomaly.internal_key
 )
@@ -2405,6 +2430,8 @@ class PostgresWorkbenchPageQueryRepository:
         column_filters: Any = None,
         time_filters: Any = None,
         exception_bucket: str | None = None,
+        exception_view: str | None = None,
+        exception_code: str | None = None,
     ) -> dict[str, Any]:
         normalized_scope = self._scope_key(scope_key)
         normalized_zone = str(zone or "").strip()
@@ -2424,6 +2451,21 @@ class PostgresWorkbenchPageQueryRepository:
         normalized_exception_bucket = text(exception_bucket)
         if normalized_exception_bucket not in {None, "unpaired", "paired"}:
             raise ValueError("exception_bucket must be unpaired or paired.")
+        if (
+            normalized_exception_bucket is not None
+            and normalized_exception_bucket != normalized_zone
+        ):
+            raise ValueError("exception_bucket must match zone.")
+        normalized_exception_view = text(exception_view)
+        if normalized_exception_view not in {None, *EXCEPTION_VIEWS}:
+            raise ValueError("exception_view must be amount or document_only.")
+        normalized_exception_code = text(exception_code)
+        if normalized_exception_code not in {None, *AMOUNT_EXCEPTION_CODES}:
+            raise ValueError("exception_code must be a supported amount exception code.")
+        if normalized_exception_view is not None and normalized_exception_bucket is None:
+            raise ValueError("exception_view requires exception_bucket.")
+        if normalized_exception_code is not None and normalized_exception_view != "amount":
+            raise ValueError("exception_code requires exception_view=amount.")
         normalized_query = {
             "scope_key": normalized_scope,
             "zone": normalized_zone,
@@ -2435,12 +2477,23 @@ class PostgresWorkbenchPageQueryRepository:
             "time_filters": normalized_times,
             "exception_bucket": normalized_exception_bucket,
         }
+        if normalized_exception_view is not None:
+            normalized_query["exception_view"] = normalized_exception_view
+        if normalized_exception_code is not None:
+            normalized_query["exception_code"] = normalized_exception_code
         query_hash = workbench_query_hash(normalized_query)
         decoded_cursor = decode_workbench_page_cursor(
             cursor,
             expected_query_hash=query_hash,
             expected_sort=normalized_sort,
         )
+        cursor_exception_code = text(decoded_cursor.partition) if decoded_cursor else None
+        if cursor_exception_code is not None and (
+            normalized_exception_view != "amount"
+            or normalized_exception_code is not None
+            or cursor_exception_code not in AMOUNT_EXCEPTION_CODES
+        ):
+            raise WorkbenchPageCursorError("cursor exception partition is invalid.")
         search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
             prefix="groups",
             search=normalized_search,
@@ -2477,7 +2530,13 @@ class PostgresWorkbenchPageQueryRepository:
             {search_ctes}
             {_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
-            filtered_groups as materialized (
+            exception_query as materialized (
+                select
+                    nullif(%s::text, '') as exception_view,
+                    nullif(%s::text, '') as requested_exception_code,
+                    nullif(%s::text, '') as cursor_exception_code
+            ),
+            base_filtered_groups as materialized (
                 select
                     groups.*,
                     min(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_min,
@@ -2495,6 +2554,53 @@ class PostgresWorkbenchPageQueryRepository:
                     groups.zone, groups.member_ids, groups.member_types,
                     groups.scope_month, groups.updated_at,
                     groups.external_etc_batch_id, groups.missing_row_types
+            ),
+            exception_counts as materialized (
+                select
+                    count(anomaly.internal_key)::bigint as exception_total,
+                    count(*) filter (
+                        where anomaly.exception_code is not null
+                    )::bigint as amount_exception_total,
+                    count(*) filter (
+                        where anomaly.exception_code is null
+                          and anomaly.has_document_anomaly
+                    )::bigint as document_only_exception_total,
+                    {_AMOUNT_EXCEPTION_COUNT_COLUMNS_SQL}
+                from base_filtered_groups groups
+                left join anomaly_states anomaly
+                  on anomaly.internal_key = groups.internal_key
+            ),
+            selected_exception as materialized (
+                select case
+                    when query.exception_view is distinct from 'amount' then null
+                    when query.requested_exception_code is not null
+                        then query.requested_exception_code
+                    when query.cursor_exception_code is not null
+                        then query.cursor_exception_code
+                    {_DEFAULT_AMOUNT_EXCEPTION_CODE_SQL}
+                    else null
+                end as exception_code
+                from exception_counts counts
+                cross join exception_query query
+            ),
+            filtered_groups as materialized (
+                select groups.*
+                from base_filtered_groups groups
+                cross join exception_query query
+                cross join selected_exception selected
+                left join anomaly_states anomaly
+                  on anomaly.internal_key = groups.internal_key
+                where query.exception_view is null
+                   or (
+                        query.exception_view = 'amount'
+                        and selected.exception_code is not null
+                        and anomaly.exception_code = selected.exception_code
+                   )
+                   or (
+                        query.exception_view = 'document_only'
+                        and anomaly.exception_code is null
+                        and anomaly.has_document_anomaly
+                   )
             ),
             keyed_groups as materialized (
                 select filtered_groups.*,
@@ -2530,9 +2636,13 @@ class PostgresWorkbenchPageQueryRepository:
                    exact_totals.total_count,
                    exact_row_counts.oa_count,
                    exact_row_counts.bank_count,
-                   exact_row_counts.invoice_count
+                   exact_row_counts.invoice_count,
+                   exception_counts.*,
+                   selected_exception.exception_code as selected_exception_code
             from exact_totals
             cross join exact_row_counts
+            cross join exception_counts
+            cross join selected_exception
             left join page_groups on true
             order by page_groups.page_position nulls last
             """,
@@ -2540,6 +2650,9 @@ class PostgresWorkbenchPageQueryRepository:
                 [
                     *self._scope_params(normalized_scope),
                     *search_params,
+                    normalized_exception_view,
+                    normalized_exception_code,
+                    cursor_exception_code,
                     *where_params,
                     *cursor_params,
                     normalized_page_size + 1,
@@ -2547,6 +2660,9 @@ class PostgresWorkbenchPageQueryRepository:
             ),
         )
         metadata = rows[0] if rows else {}
+        resolved_exception_code = text(metadata.get("selected_exception_code"))
+        if resolved_exception_code not in AMOUNT_EXCEPTION_CODES:
+            resolved_exception_code = None
         descriptor_rows = [
             row for row in rows if str(row.get("internal_key") or "").strip()
         ]
@@ -2567,11 +2683,37 @@ class PostgresWorkbenchPageQueryRepository:
                     missing=bool(last.get("sort_missing")),
                     value=str(last.get("sort_value") or ""),
                     group_key=str(last.get("internal_key") or ""),
+                    partition=(
+                        resolved_exception_code
+                        if normalized_exception_view == "amount"
+                        and normalized_exception_code is None
+                        else None
+                    ),
                 )
             )
         oa_count = int_value(metadata.get("oa_count"), 0)
         bank_count = int_value(metadata.get("bank_count"), 0)
         invoice_count = int_value(metadata.get("invoice_count"), 0)
+        exception_payload: dict[str, Any] = {}
+        if normalized_exception_bucket is not None:
+            exception_payload = {
+                "selected_exception_code": resolved_exception_code,
+                "exception_counts": {
+                    "total": int_value(metadata.get("exception_total"), 0),
+                    "amount_total": int_value(
+                        metadata.get("amount_exception_total"),
+                        0,
+                    ),
+                    "document_only": int_value(
+                        metadata.get("document_only_exception_total"),
+                        0,
+                    ),
+                    "by_code": {
+                        code: int_value(metadata.get(f"exception_count_{code}"), 0)
+                        for code in AMOUNT_EXCEPTION_CODES
+                    },
+                },
+            }
         return {
             "month": normalized_scope,
             "scope_key": normalized_scope,
@@ -2587,6 +2729,7 @@ class PostgresWorkbenchPageQueryRepository:
             "has_more": has_more,
             "next_cursor": next_cursor,
             "groups": groups,
+            **exception_payload,
         }
 
     def _group_detail(

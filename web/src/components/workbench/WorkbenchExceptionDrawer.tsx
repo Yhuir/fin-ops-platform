@@ -11,13 +11,25 @@ import { useEffect, useRef, useState } from "react";
 import AppDrawer from "../common/AppDrawer";
 import { formatMoney } from "../../features/money";
 import { summarizeWorkbenchRows } from "../../features/workbench/selectionModel";
-import type { WorkbenchRecordType, WorkbenchRelationGroup } from "../../features/workbench/types";
+import {
+  WORKBENCH_AMOUNT_ANOMALY_CODES,
+  WORKBENCH_AMOUNT_ANOMALY_LABELS,
+  type WorkbenchAmountAnomalyCode,
+  type WorkbenchExceptionCounts,
+  type WorkbenchExceptionView,
+  type WorkbenchRecord,
+  type WorkbenchRecordType,
+  type WorkbenchRelationGroup,
+} from "../../features/workbench/types";
 import RelationGroupGrid from "./RelationGroupGrid";
 import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 
 type WorkbenchExceptionDrawerProps = {
   open: boolean;
   bucket: "unpaired" | "paired";
+  view: WorkbenchExceptionView;
+  selectedExceptionCode: WorkbenchAmountAnomalyCode | null;
+  exceptionCounts: WorkbenchExceptionCounts | null;
   contentGeneration: number;
   groups: WorkbenchRelationGroup[];
   loading: boolean;
@@ -27,8 +39,11 @@ type WorkbenchExceptionDrawerProps = {
   hasMore: boolean;
   canMutateData: boolean;
   onBucketChange: (bucket: "unpaired" | "paired") => void;
+  onViewChange: (view: WorkbenchExceptionView) => void;
+  onExceptionCodeChange: (code: WorkbenchAmountAnomalyCode) => void;
   onClose: () => void;
   onEnsureGroupDetail: (group: WorkbenchRelationGroup) => Promise<WorkbenchRelationGroup>;
+  onInvoiceEntry: (row: WorkbenchRecord) => void;
   onLoadMore: () => Promise<void> | void;
   onReviewAnomaly: (
     group: WorkbenchRelationGroup,
@@ -46,6 +61,9 @@ const DRAWER_DETAIL_COLUMNS = "minmax(320px, 1fr) 1px minmax(320px, 1fr) 1px min
 export default function WorkbenchExceptionDrawer({
   open,
   bucket,
+  view,
+  selectedExceptionCode,
+  exceptionCounts,
   contentGeneration,
   groups,
   loading,
@@ -55,8 +73,11 @@ export default function WorkbenchExceptionDrawer({
   hasMore,
   canMutateData,
   onBucketChange,
+  onViewChange,
+  onExceptionCodeChange,
   onClose,
   onEnsureGroupDetail,
+  onInvoiceEntry,
   onLoadMore,
   onReviewAnomaly,
 }: WorkbenchExceptionDrawerProps) {
@@ -78,7 +99,7 @@ export default function WorkbenchExceptionDrawer({
     setDetailLoadingIds(new Set());
     setDetailErrors({});
     setPendingGroupId(null);
-  }, [bucket, contentGeneration, open]);
+  }, [bucket, contentGeneration, open, selectedExceptionCode, view]);
 
   useEffect(() => {
     expandedKeys.forEach((key) => {
@@ -171,16 +192,73 @@ export default function WorkbenchExceptionDrawer({
             已配对异常
           </ToggleButton>
         </ToggleButtonGroup>
-        <span className="workbench-anomaly-drawer__count">
-          {visibleGroups.length < total ? `${visibleGroups.length} / ${total}` : total} 项
+        <span aria-live="polite" className="workbench-anomaly-drawer__count">
+          状态总计 {exceptionCounts?.total ?? 0} 项
+          <span aria-hidden="true"> · </span>
+          当前 {visibleGroups.length < total ? `${visibleGroups.length} / ${total}` : total} 项
         </span>
+      </div>
+
+      <div className="workbench-anomaly-drawer__filters">
+        <ToggleButtonGroup
+          aria-label="异常类型"
+          className="workbench-anomaly-drawer__view-segmented"
+          disallowEmptySelection
+          selectedKeys={new Set<Key>([view])}
+          selectionMode="single"
+          size="sm"
+          onSelectionChange={(keys) => {
+            const [next] = Array.from(keys);
+            if (next === "amount" || next === "document_only") {
+              onViewChange(next);
+            }
+          }}
+        >
+          <ToggleButton id="amount">金额异常 {exceptionCounts?.amountTotal ?? 0}</ToggleButton>
+          <ToggleButton id="document_only">
+            <ToggleButtonGroup.Separator />
+            仅资料异常 {exceptionCounts?.documentOnly ?? 0}
+          </ToggleButton>
+        </ToggleButtonGroup>
+        {view === "amount" ? (
+          <div className="workbench-anomaly-drawer__amount-filter-scroll">
+            <ToggleButtonGroup
+              aria-label="金额异常分类"
+              className="workbench-anomaly-drawer__amount-filters"
+              disallowEmptySelection
+              selectedKeys={selectedExceptionCode ? new Set<Key>([selectedExceptionCode]) : new Set<Key>()}
+              selectionMode="single"
+              size="sm"
+              onSelectionChange={(keys) => {
+                const [next] = Array.from(keys);
+                if (WORKBENCH_AMOUNT_ANOMALY_CODES.some((code) => code === next)) {
+                  onExceptionCodeChange(next as WorkbenchAmountAnomalyCode);
+                }
+              }}
+            >
+              {WORKBENCH_AMOUNT_ANOMALY_CODES.map((code, index) => (
+                <ToggleButton id={code} key={code}>
+                  {index > 0 ? <ToggleButtonGroup.Separator /> : null}
+                  <span>{WORKBENCH_AMOUNT_ANOMALY_LABELS[code]}</span>
+                  <strong>{exceptionCounts?.byCode[code] ?? 0}</strong>
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </div>
+        ) : null}
       </div>
 
       <div className="workbench-anomaly-drawer__content">
         {error ? <div className="detail-state-panel error">{error}</div> : null}
         {loading ? <div className="detail-state-panel">正在加载异常关系…</div> : null}
         {!loading && !error && visibleGroups.length === 0 ? (
-          <div className="detail-state-panel">当前没有{bucket === "unpaired" ? "未配对" : "已配对"}异常。</div>
+          <div className="detail-state-panel">
+            {view === "document_only"
+              ? "当前没有仅资料异常。"
+              : selectedExceptionCode
+                ? "当前分类没有金额异常。"
+                : "当前没有金额异常。"}
+          </div>
         ) : null}
         {!loading && visibleGroups.length > 0 ? (
           <DisclosureGroup
@@ -239,12 +317,17 @@ export default function WorkbenchExceptionDrawer({
                       {detailGroup ? (
                         <div className="workbench-anomaly-drawer__detail-grid">
                           <RelationGroupGrid
+                            allowInvoiceEntryInReadOnly={canMutateData}
                             canMutateData={false}
                             getRowState={() => "idle"}
                             groups={[detailGroup]}
                             hidePaneHeaders
                             onOpenDetail={() => undefined}
-                            onRowAction={() => undefined}
+                            onRowAction={(row, action) => {
+                              if (action === "enter-invoice") {
+                                onInvoiceEntry(row);
+                              }
+                            }}
                             onSelectRow={() => undefined}
                             panes={PANE_IDS.map((paneId) => ({
                               id: paneId,

@@ -8,7 +8,10 @@ import {
 import { CircleAlert, ExternalLink } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-import type { WorkbenchAnomalyItem } from "../../features/workbench/types";
+import {
+  isWorkbenchAmountAnomalyCode,
+  type WorkbenchAnomalyItem,
+} from "../../features/workbench/types";
 
 type WorkbenchAnomalyIndicatorProps = {
   anomalies: WorkbenchAnomalyItem[];
@@ -150,7 +153,7 @@ export default function WorkbenchAnomalyIndicator({
                 return (
                   <li key={anomaly.fingerprint}>
                     <Chip
-                      color={isAmountAnomaly(anomaly.code) ? "danger" : "warning"}
+                      color={isWorkbenchAmountAnomalyCode(anomaly.code) ? "danger" : "warning"}
                       size="sm"
                       variant="soft"
                     >
@@ -186,16 +189,6 @@ export default function WorkbenchAnomalyIndicator({
       ) : null}
     </>
   );
-}
-
-function isAmountAnomaly(code: string) {
-  return code === "oa_bank_equal_invoice_more"
-    || code === "oa_bank_equal_invoice_less"
-    || code === "oa_invoice_equal_bank_more"
-    || code === "oa_invoice_equal_bank_less"
-    || code === "bank_invoice_equal_oa_less"
-    || code === "bank_invoice_equal_oa_more"
-    || code === "all_amounts_different";
 }
 
 function anomalyDetail(anomaly: WorkbenchAnomalyItem) {

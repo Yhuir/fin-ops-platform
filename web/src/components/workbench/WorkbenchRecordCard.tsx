@@ -45,6 +45,7 @@ type WorkbenchRecordCardProps = {
   showWorkflowActions: boolean;
   canMutateData: boolean;
   readOnly?: boolean;
+  allowInvoiceEntryInReadOnly?: boolean;
   leadingControl?: ReactNode;
 };
 
@@ -64,6 +65,7 @@ function WorkbenchRecordCard({
   showWorkflowActions,
   canMutateData,
   readOnly = false,
+  allowInvoiceEntryInReadOnly = false,
   leadingControl,
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
@@ -104,7 +106,7 @@ function WorkbenchRecordCard({
             />
             {hasUnparsedAttachment && row.availableActions.includes("enter_invoice") ? (
                 <InvoiceEntryAction
-                  disabled={!canMutateData || readOnly}
+                  disabled={readOnly ? !allowInvoiceEntryInReadOnly : !canMutateData}
                   onPress={() => onRowAction(row, "enter-invoice")}
                 />
               ) : null}
@@ -276,6 +278,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.showWorkflowActions === nextProps.showWorkflowActions
   && previousProps.canMutateData === nextProps.canMutateData
   && previousProps.readOnly === nextProps.readOnly
+  && previousProps.allowInvoiceEntryInReadOnly === nextProps.allowInvoiceEntryInReadOnly
   && previousProps.leadingControl === nextProps.leadingControl
   && previousProps.onSelectRow === nextProps.onSelectRow
   && previousProps.onOpenDetail === nextProps.onOpenDetail

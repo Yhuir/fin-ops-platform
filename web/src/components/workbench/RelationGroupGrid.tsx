@@ -79,6 +79,7 @@ type RelationGroupGridProps = {
   ) => void;
   canMutateData: boolean;
   readOnly?: boolean;
+  allowInvoiceEntryInReadOnly?: boolean;
   hidePaneHeaders?: boolean;
 };
 
@@ -160,6 +161,7 @@ function RelationGroupGrid({
   onReorderPaneColumns = () => undefined,
   canMutateData,
   readOnly = false,
+  allowInvoiceEntryInReadOnly = false,
   hidePaneHeaders = false,
 }: RelationGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -569,6 +571,7 @@ function RelationGroupGrid({
                           showWorkflowActions={zoneId !== "unpaired"}
                           canMutateData={canMutateData}
                           readOnly={readOnly}
+                          allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
                           zoneId={zoneId}
                         />
                       </div>,
@@ -608,6 +611,7 @@ function RelationGroupGrid({
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
                       readOnly={readOnly}
+                      allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
                       zoneId={zoneId}
                     />
                   </div>,
@@ -696,6 +700,7 @@ function RelationGroupGrid({
                       showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
                       readOnly={readOnly}
+                      allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
                       zoneId={zoneId}
                     />
                   </div>
@@ -739,6 +744,7 @@ function RelationGroupGrid({
       <div ref={nextPageSentinelRef} aria-hidden="true" className="candidate-grid-end-sentinel" />
     </div>
   ), [
+    allowInvoiceEntryInReadOnly,
     canMutateData,
     columnsByPane,
     displayState,
@@ -756,6 +762,7 @@ function RelationGroupGrid({
     paneGridStyleByPane,
     panes,
     rowTemplateColumns,
+    readOnly,
     sourceGroupById,
     trailingColumns,
     togglePaneGroupExpansion,

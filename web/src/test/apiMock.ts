@@ -4912,8 +4912,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
       const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
-      const cursorPrefix = "mock-workbench-group:";
-      const offset = parseMockWorkbenchCursor(url.searchParams.get("cursor"), cursorPrefix);
       const mappedPayload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options));
       const payload = options.transformWorkbenchPayload
         ? options.transformWorkbenchPayload(cloneJson(mappedPayload)) as typeof mappedPayload
@@ -4923,7 +4921,18 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
       const timeFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("time_filters"));
       const exceptionBucket = url.searchParams.get("exception_bucket");
-      const groups = sortMockWorkbenchGroups(
+      const exceptionView = url.searchParams.get("exception_view");
+      const requestedExceptionCode = url.searchParams.get("exception_code");
+      const amountCodes = [
+        "oa_bank_equal_invoice_more",
+        "oa_bank_equal_invoice_less",
+        "oa_invoice_equal_bank_more",
+        "oa_invoice_equal_bank_less",
+        "bank_invoice_equal_oa_less",
+        "bank_invoice_equal_oa_more",
+        "all_amounts_different",
+      ] as const;
+      const baseGroups = sortMockWorkbenchGroups(
         payload[zone].groups.filter((group) => (
           mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)
           && (
@@ -4936,6 +4945,43 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         )),
         sort,
       );
+      const anomalyItems = (group: typeof baseGroups[number]) => {
+        const anomaly = (group as { workbench_anomaly?: { items?: Array<{ code?: string }> } }).workbench_anomaly;
+        return Array.isArray(anomaly?.items) ? anomaly.items : [];
+      };
+      const primaryAmountCode = (group: typeof baseGroups[number]) => amountCodes.find((code) => (
+        anomalyItems(group).some((item) => item.code === code)
+      ));
+      const amountGroups = baseGroups.filter((group) => primaryAmountCode(group) !== undefined);
+      const documentOnlyGroups = baseGroups.filter((group) => {
+        const codes = anomalyItems(group).map((item) => item.code);
+        return primaryAmountCode(group) === undefined
+          && codes.some((code) => code?.startsWith("oa_invoice_attachment_"));
+      });
+      const byCode = Object.fromEntries(amountCodes.map((code) => [
+        code,
+        amountGroups.filter((group) => primaryAmountCode(group) === code).length,
+      ]));
+      const selectedExceptionCode = exceptionView === "amount"
+        ? amountCodes.find((code) => code === requestedExceptionCode)
+          ?? amountCodes.find((code) => Number(byCode[code]) > 0)
+          ?? null
+        : null;
+      const cursorPrefix = [
+        "mock-workbench-group",
+        zone,
+        exceptionBucket ?? "",
+        exceptionView ?? "",
+        requestedExceptionCode ?? "",
+      ].join(":") + ":";
+      const offset = parseMockWorkbenchCursor(url.searchParams.get("cursor"), cursorPrefix);
+      const groups = exceptionView === "amount"
+        ? selectedExceptionCode
+          ? amountGroups.filter((group) => primaryAmountCode(group) === selectedExceptionCode)
+          : []
+        : exceptionView === "document_only"
+          ? documentOnlyGroups
+          : baseGroups;
       const rowCounts = countMockWorkbenchRows(groups);
       return {
         body: {
@@ -4945,6 +4991,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           page_size: pageSize,
           has_more: offset + pageSize < groups.length,
           next_cursor: nextMockWorkbenchCursor(cursorPrefix, offset, pageSize, groups.length),
+          ...(exceptionBucket ? {
+            selected_exception_code: selectedExceptionCode,
+            exception_counts: {
+              total: amountGroups.length + documentOnlyGroups.length,
+              amount_total: amountGroups.length,
+              document_only: documentOnlyGroups.length,
+              by_code: byCode,
+            },
+          } : {}),
         },
       };
     },

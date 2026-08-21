@@ -26,6 +26,7 @@ type RelationGroupCellProps = {
   showWorkflowActions: boolean;
   canMutateData: boolean;
   readOnly?: boolean;
+  allowInvoiceEntryInReadOnly?: boolean;
   leadingControl?: ReactNode;
 };
 
@@ -46,6 +47,7 @@ function RelationGroupCell({
   showWorkflowActions,
   canMutateData,
   readOnly = false,
+  allowInvoiceEntryInReadOnly = false,
   leadingControl,
 }: RelationGroupCellProps) {
   const isSingleRecord = records.length === 1;
@@ -90,6 +92,7 @@ function RelationGroupCell({
             showWorkflowActions={showWorkflowActions}
             canMutateData={canMutateData}
             readOnly={readOnly}
+            allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
             zoneId={zoneId}
           />
         ))}

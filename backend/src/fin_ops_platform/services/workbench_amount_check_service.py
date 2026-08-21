@@ -5,6 +5,7 @@ from hashlib import sha256
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_matches_oa
+from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row
 
 
@@ -20,6 +21,9 @@ AMOUNT_DISPLAY_LABELS = {
     "bank_invoice_equal_oa_more": "发票流水一致，OA 提多了",
     "all_amounts_different": "三项不一致",
 }
+
+if tuple(AMOUNT_DISPLAY_LABELS) != AMOUNT_EXCEPTION_CODES:
+    raise RuntimeError("Workbench amount exception labels must match the shared contract order.")
 
 ATTACHMENT_DISPLAY_LABELS = {
     "oa_invoice_attachment_absent": "发票附件缺失",

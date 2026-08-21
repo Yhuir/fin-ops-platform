@@ -58,15 +58,46 @@ export type WorkbenchAmountCheck = {
   requiresNote: boolean;
 };
 
+export const WORKBENCH_AMOUNT_ANOMALY_CODES = [
+  "oa_bank_equal_invoice_more",
+  "oa_bank_equal_invoice_less",
+  "oa_invoice_equal_bank_more",
+  "oa_invoice_equal_bank_less",
+  "bank_invoice_equal_oa_less",
+  "bank_invoice_equal_oa_more",
+  "all_amounts_different",
+] as const;
+
+export type WorkbenchAmountAnomalyCode = typeof WORKBENCH_AMOUNT_ANOMALY_CODES[number];
+
+export const WORKBENCH_AMOUNT_ANOMALY_LABELS: Record<WorkbenchAmountAnomalyCode, string> = {
+  oa_bank_equal_invoice_more: "OA 流水一致，票多",
+  oa_bank_equal_invoice_less: "OA 流水一致，票少",
+  oa_invoice_equal_bank_more: "OA 发票一致，付多",
+  oa_invoice_equal_bank_less: "OA 发票一致，付少",
+  bank_invoice_equal_oa_less: "发票流水一致，OA 提少了",
+  bank_invoice_equal_oa_more: "发票流水一致，OA 提多了",
+  all_amounts_different: "三项不一致",
+};
+
+export function isWorkbenchAmountAnomalyCode(value: unknown): value is WorkbenchAmountAnomalyCode {
+  return typeof value === "string"
+    && (WORKBENCH_AMOUNT_ANOMALY_CODES as readonly string[]).includes(value);
+}
+
+export type WorkbenchExceptionView = "amount" | "document_only";
+export type WorkbenchExceptionBucket = "unpaired" | "paired";
+
+export type WorkbenchExceptionCounts = {
+  total: number;
+  amountTotal: number;
+  documentOnly: number;
+  byCode: Record<WorkbenchAmountAnomalyCode, number>;
+};
+
 export type WorkbenchAnomalyItem = {
   code:
-    | "oa_bank_equal_invoice_more"
-    | "oa_bank_equal_invoice_less"
-    | "oa_invoice_equal_bank_more"
-    | "oa_invoice_equal_bank_less"
-    | "bank_invoice_equal_oa_less"
-    | "bank_invoice_equal_oa_more"
-    | "all_amounts_different"
+    | WorkbenchAmountAnomalyCode
     | "oa_invoice_attachment_absent"
     | "oa_invoice_attachment_unparsed"
     | "oa_invoice_attachment_unassigned"
@@ -370,7 +401,9 @@ export type WorkbenchGroupsPageQuery = {
   detailLevel?: "summary" | "full";
   filtersByPaneAndColumn?: Partial<Record<WorkbenchRecordType, Record<string, string[]>>>;
   timeFilterByPane?: Partial<Record<WorkbenchRecordType, { mode: "year"; year: string } | { mode: "month"; month: string }>>;
-  exceptionBucket?: "unpaired" | "paired";
+  exceptionBucket?: WorkbenchExceptionBucket;
+  exceptionView?: WorkbenchExceptionView;
+  exceptionCode?: WorkbenchAmountAnomalyCode;
 };
 
 export type WorkbenchFilterOption = {
@@ -456,6 +489,8 @@ export type WorkbenchGroupsPageResult = {
   zone: WorkbenchZoneId;
   groups: WorkbenchRelationGroup[];
   page: WorkbenchZonePageInfo;
+  selectedExceptionCode?: WorkbenchAmountAnomalyCode;
+  exceptionCounts?: WorkbenchExceptionCounts;
 };
 
 export type WorkbenchAccessRole = "full_access" | "read_export_only";

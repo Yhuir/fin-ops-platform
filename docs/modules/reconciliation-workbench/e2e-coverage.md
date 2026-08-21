@@ -1,6 +1,6 @@
 # 关联台 E2E 覆盖
 
-日期：2026-08-20
+日期：2026-08-21
 
 | Spec | 状态 | 证据 | 合同 |
 | --- | --- | --- | --- |
@@ -12,7 +12,7 @@
 | `RECON-WB-E2E-006` | covered | `web/e2e/workbench-stale-error-flow.spec.ts` | direct query 503/超时不伪装 empty，无 refresh-status/projection fallback；OA write-safety 独立保留 |
 | `RECON-WB-E2E-007` | covered | `web/e2e/workbench-network-recovery-flow.spec.ts` | 写失败不移动；写成功而 refetch 失败时明确提示并避免重复写入 |
 | `RECON-WB-E2E-008` | covered | `web/src/test/WorkbenchSelection.test.tsx`、`web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` 覆盖未配对工具栏精确文案“异常处理”不存在、read-export relation 动作禁用且统一抽屉写动作隐藏 | read-export/full/admin 的读取和 mutation gate；旧人工入口不存在 |
-| `RECON-WB-E2E-009` | covered | `tests/test_workbench_amount_check_service.py`、`tests/test_workbench_anomaly_review_service.py`、`tests/test_workbench_relation_grouping.py`、`tests/test_oa_attachment_invoice_linking.py`、`tests/test_invoice_expense_item_link_repair_service.py`、`tests/test_workbench_page_query_repository.py`、`web/e2e/workbench-exception-flow.spec.ts`、`web/src/test/groupDisplayModel.test.ts`、`web/src/test/RelationGroupGrid.test.tsx`、`web/src/test/WorkbenchExceptionDrawer.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` | 服务端七类金额判断、附件补充异常、异常默认未配对、普通退款净额与外部往来闭环本金比较无误报、历史附件/手工选票来源归一、具体行或既有关联组边界感叹号、HeroUI Popover Chip、服务端证据审阅、accept/keep/撤回、主区同步移动、空发票栏附件操作与旧人工分类/逐项审阅/ignore/restore 入口缺席 |
+| `RECON-WB-E2E-009` | covered | `tests/test_workbench_amount_check_service.py`、`tests/test_workbench_anomaly_review_service.py`、`tests/test_workbench_relation_grouping.py`、`tests/test_workbench_page_query_repository.py`、`tests/test_workbench_query_postgres_integration.py`、`tests/test_workbench_routes.py`、`tests/test_workbench_v2_api.py`、`tests/test_oa_attachment_invoice_linking.py`、`tests/test_invoice_expense_item_link_repair_service.py`、`web/e2e/workbench-exception-flow.spec.ts`、`web/src/test/groupDisplayModel.test.ts`、`web/src/test/RelationGroupGrid.test.tsx`、`web/src/test/WorkbenchExceptionDrawer.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchApi.test.ts` | 服务端七类金额判断、金额/仅资料互斥视图、按唯一关系计数、混合异常金额归属、默认分类 cursor、附件补充异常、异常默认未配对、普通退款净额与外部往来闭环本金比较无误报、历史附件/手工选票来源归一、具体行或既有关联组边界感叹号、HeroUI Popover Chip、服务端证据审阅、accept/keep/撤回、主区同步移动、受限录入发票与旧人工分类/逐项审阅/ignore/restore 入口缺席 |
 | `RECON-WB-E2E-010` | covered | `web/e2e/workbench-large-scroll-flow.spec.ts` | 首屏 10 组、滚动自动分页、失败停止/显式重试、跨未加载页全量搜索、详情、选择保持、三栏滚动，以及长筛选菜单内滚轮和键盘焦点不带动 document/三栏滚动 |
 | `RECON-WB-E2E-011` | covered | `web/e2e/workbench-network-recovery-flow.spec.ts` | 网络恢复、重试和幂等提交 |
 | `RECON-WB-E2E-012` | covered | `web/e2e/workbench-stale-error-flow.spec.ts`、`workbench-permissions-flow.spec.ts`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/WorkbenchWriteGate.test.ts` | App Health/OA dirty 写安全 gate、选择区禁用原因和权威 OA 状态恢复；无 page RM version gate |

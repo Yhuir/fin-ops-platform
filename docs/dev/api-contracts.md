@@ -469,11 +469,35 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ### Workbench OA/发票异常 API
 
-`GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=unpaired|paired`。bucket 必须等于 zone，返回该展示区内携带当前异常的关系组。过滤发生在 exact total/row counts 与 keyset 分页之前，不读 page generation 或 legacy WEX bucket。
+`GET /api/workbench/groups` 使用 month/zone/search/filter/sort/opaque-cursor 合同，并支持可选 `exception_bucket=unpaired|paired`。bucket 必须等于 zone，返回该展示区内携带当前异常的关系组。异常 bucket 可再传 `exception_view=amount|document_only`；金额视图可传七分类白名单 `exception_code`，其它 view 传 code 返回参数错误。过滤发生在 exact total/row counts 与 keyset 分页之前，不读 page generation 或 legacy WEX bucket。
+
+异常 bucket 响应 additive 返回：
+
+```json
+{
+  "selected_exception_code": "oa_bank_equal_invoice_less",
+  "exception_counts": {
+    "total": 8,
+    "amount_total": 7,
+    "document_only": 1,
+    "by_code": {
+      "oa_bank_equal_invoice_more": 1,
+      "oa_bank_equal_invoice_less": 1,
+      "oa_invoice_equal_bank_more": 1,
+      "oa_invoice_equal_bank_less": 1,
+      "bank_invoice_equal_oa_less": 1,
+      "bank_invoice_equal_oa_more": 1,
+      "all_amounts_different": 1
+    }
+  }
+}
+```
+
+`exception_counts` 基于当前 bucket 和其它 search/filter 条件按唯一关系计算，但不受当前 view/code 自身过滤影响；`page.total` 是当前筛选列表总数。金额与资料异常并存的关系只进入它的唯一金额分类，资料异常保留在同一 bundle；`document_only` 只包含没有金额分类但至少有一种附件异常的关系。多个资料 item 不增加关系计数。金额视图未显式传 code 时，服务端按固定七分类顺序选择首个非零分类并返回 `selected_exception_code`；这一自动结果不属于调用方 query，但会封存在 opaque cursor 内，后续请求继续省略 code 并由服务端强制复用该分类。显式点击分类后才把 code 写入新查询和新 cursor hash。
 
 关系组可携带 additive `workbench_anomaly`：`{code="workbench_anomaly",fingerprint,review_decision="pending|accept_paired|keep_unpaired",review_note,reviewed_by,reviewed_at,items[]}`。用户可见 item code 支持七种互斥三栏金额分类和三种附件状态，并返回三栏 totals、`amount_delta`、来源 IDs 及 `display_scope/display_pane/display_row_id`。`display_scope=group` 使用 `display_pane=group` 且不伪造 row id。付款方向 `bank_total` 是同一正式关系内支出减收入/退款的净额。三栏缺失、金额无效、方向未知/冲突或三栏总额完全一致时不生成金额分类；费用子项局部差异只能辅助定位已成立的七分类，不额外生成第八种金额异常。缺失 bundle 表示当前关系无异常。
 
-OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个比较单元展示：金额差异显示在该 item 的第一条绑定发票来源下；附件存在但零解析发票时合成不可选择的 display-only 发票栏占位，不能把它提交到任何 mutation API。
+OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前端只把异常 item 绑定到一个可证明的比较单元：`display_scope=row|expense_item` 时落到指定 pane/row 或 OA 子付款项；无法唯一证明、目标当前不可见或 `display_scope=group` 时落在既有关联组边界，不得塞到任意一张发票。附件未解析/缺失使用既有三栏状态操作区，不创建可选择的 synthetic canonical row，也不能把展示占位提交到 relation mutation。
 
 `POST /api/workbench/exceptions/review` 接受 `{month,zone,group_id,detail_key?,fingerprint,decision,note?}`；`detail_key` 在列表返回时原样回传，用于同一 `group_id` 的精确详情定位。`decision` 只允许 `accept_paired|keep_unpaired`。后端重取当前 canonical detail，并自行推导 evidence fingerprints 与 detected codes；客户端提交的旧人工分类、逐项 fingerprints 或 actor 不参与决定。session actor、权限、400/403/409、fingerprint/topology 冲突和幂等审计合同不变。成功后页面执行一次 canonical direct GET，并只读取目标异常 bucket；不修改正式关系、canonical 金额、附件或发票事实。单月关系把决定绑定到该月；跨月关系绑定全局作用域。旧人工分类与 amount-mismatch ignore/restore routes 不得恢复。
 
@@ -872,11 +896,11 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 - 该接口是 Workbench 唯一首屏读入口，在一个短生命 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 `month`、`scope_key`、`summary`、`statistics`、`invoice_inventory`、`paired` 和 `unpaired`。summary、精确计数和两区首页 keys 必须来自同一 candidate spine/snapshot，不得串行重建三次全 scope 事实。
 - 每区 shape 固定为 `groups,total,row_counts,page_size,has_more,next_cursor`。首屏 `page_size=10`，候选 SQL 返回 `page_size+1` keys 判定 `has_more`，再 set-based hydration 只完整装配当前页的 groups。精确 total 与跨未加载页搜索合同不变。
 - compact summary group 保留唯一的组级 `amount_check`；列表行不重复传输同一 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only `special_metadata`。前端可把组级金额判断继承到可见行用于 chip，完整行级诊断只由 detail 端点返回。
-- `GET /api/workbench/groups` 使用 `month,zone,search,filters,sort,cursor,page_size,exception_bucket` 的明确白名单合同。`cursor` 绑定 scope/zone/search/filter/sort 和上一行完整稳定排序 tuple，是不透明的 keyset 位置，不是读快照版本或写 CAS。不提供 `page/OFFSET` fallback。
+- `GET /api/workbench/groups` 使用 `month,zone,search,filters,sort,cursor,page_size,exception_bucket,exception_view,exception_code` 的明确白名单合同。`exception_bucket` 必须与 zone 相同；`exception_view` 必须与 bucket 同时使用，`exception_code` 只允许用于金额视图。`cursor` 绑定 scope/zone/search/filter/sort/异常筛选和上一行完整稳定排序 tuple，是不透明的 keyset 位置，不是读快照版本或写 CAS。不提供 `page/OFFSET` fallback；服务端自动选中的金额 code 封存在 cursor 中，不得由客户端在同一次分页链中回填，也不得在续页时重新自动选择。
 - `GET /api/workbench/filter-options` 提供 paired/unpaired 三栏完整表头候选。必填 `month`、`zone`、`pane`、`facet`；`facet=column` 时必填白名单 `column`，`facet=time_year` 时不传 column。可选 `option_search` 最长 100 字符，`page_size` 默认 100、最大 200，使用 opaque `cursor`；响应固定为 `options[{value,label,missing,group?}],page_size,has_more,next_cursor`，其中 `group` 只用于复合菜单分组展示。候选来自完整 eligible group domain，目标列自己的 filter（或目标 pane 自己的 time filter）在候选查询中移除，其余 search/filter 继续生效。
 - 复合列只接受带类型前缀的 option value：银行 `amount` 使用 `direction:`、`account:`、`bankTag:`；OA `applicant` 使用 `oaType:`、`workflow:`、`applicant:`；OA `projectName` 使用 `expenseType:`、`project:`。同一前缀多值 OR，不同前缀 AND；银行三类条件必须命中同一 bank member，OA 类型/流程/申请人必须命中同一 OA member，项目/费用类型必须命中同一 `expense_items[]` 元素。没有子项的 OA 才可使用顶层项目/费用类型。旧无前缀值返回参数错误，不保留并行兼容路径。
 - 银行账户候选/过滤以 `app.app_settings.bank_account_mappings` 对账号后四位的映射为展示事实；未配置时才保留现有银行前缀解析。`bankTag:` 候选和过滤复用 `PostgresBankDetailsCanonicalQueryRepository` 的 canonical 分类投影，并且只分类当前 eligible bank id 集合，不新增关联台标签规则、read model 或逐行查询。
-- `exception_bucket=unpaired|paired` 必须与请求 zone 相同，并在 PostgreSQL eligible group spine 上结合 fingerprint-bound anomaly decision 精确筛选/计数；异常抽屉一次只读当前 bucket，展开单组时再惰性读 detail。
+- `exception_bucket=unpaired|paired` 必须与请求 zone 相同，并在 PostgreSQL eligible group spine 上结合 fingerprint-bound anomaly decision 精确筛选/计数；异常抽屉一次只读当前 bucket/view/code，展开单组时再惰性读 detail。异常响应的 `by_code` 固定包含全部七个 code 与零值，`amount_total=sum(by_code)` 且 `total=amount_total+document_only`。
 - 旧独立 summary HTTP、`/api/workbench/refresh-status`、page Redis cache、refresh enqueue 和 generation/version 参数均不是当前 API。
 
 关系分区只允许 `paired` / `unpaired`：

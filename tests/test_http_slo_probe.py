@@ -27,6 +27,9 @@ class HttpSloProbeTests(unittest.TestCase):
                 "workbench_initial_all",
                 "workbench_groups_all_paired",
                 "workbench_groups_all_unpaired",
+                "workbench_exceptions_unpaired_amount",
+                "workbench_exceptions_unpaired_document_only",
+                "workbench_exceptions_paired_amount",
                 "workbench_filter_options_all_paired",
             },
         )
@@ -317,6 +320,9 @@ class HttpSloProbeTests(unittest.TestCase):
             "workbench_initial_all",
             "workbench_groups_all_paired",
             "workbench_groups_all_unpaired",
+            "workbench_exceptions_unpaired_amount",
+            "workbench_exceptions_unpaired_document_only",
+            "workbench_exceptions_paired_amount",
             "workbench_filter_options_all_paired",
             "operations_app_health_dashboard",
             "pending_invoices_rows",
@@ -349,6 +355,14 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("zone=unpaired", probe_paths["workbench_groups_all_unpaired"])
         self.assertIn("page_size=10", probe_paths["workbench_groups_all_unpaired"])
         self.assertIn("detail_level=summary", probe_paths["workbench_groups_all_unpaired"])
+        self.assertIn("exception_bucket=unpaired", probe_paths["workbench_exceptions_unpaired_amount"])
+        self.assertIn("exception_view=amount", probe_paths["workbench_exceptions_unpaired_amount"])
+        self.assertIn(
+            "exception_view=document_only",
+            probe_paths["workbench_exceptions_unpaired_document_only"],
+        )
+        self.assertIn("exception_bucket=paired", probe_paths["workbench_exceptions_paired_amount"])
+        self.assertIn("exception_view=amount", probe_paths["workbench_exceptions_paired_amount"])
         self.assertIn("column=applicant", probe_paths["workbench_filter_options_all_paired"])
         self.assertIn("page_size=100", probe_paths["workbench_filter_options_all_paired"])
         self.assertIn("page=1", probe_paths["pending_invoices_rows"])
