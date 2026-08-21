@@ -47,6 +47,7 @@ import type {
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
   WorkbenchAccessControl,
+  WorkbenchInvoiceExpenseItemAssignmentPayload,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
 } from "./types";
@@ -3138,6 +3139,25 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
     body: JSON.stringify(requestBody),
   });
   return mapWorkbenchActionResult(result);
+}
+
+export async function assignWorkbenchInvoiceExpenseItems(
+  payload: WorkbenchInvoiceExpenseItemAssignmentPayload,
+): Promise<void> {
+  await requestJson<unknown>("/api/workbench/actions/assign-invoice-expense-items", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      case_id: payload.caseId,
+      invoice_row_id: payload.invoiceRowId,
+      targets: payload.targets.map((target) => ({
+        oa_row_id: target.oaRowId,
+        expense_item_id: target.expenseItemId,
+      })),
+      anomaly_fingerprint: payload.anomalyFingerprint,
+      idempotency_key: payload.idempotencyKey,
+    }),
+  });
 }
 
 export async function previewWorkbenchConfirmLink(

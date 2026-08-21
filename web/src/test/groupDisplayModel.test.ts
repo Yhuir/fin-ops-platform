@@ -1,5 +1,6 @@
 import {
   buildWorkbenchGroupDisplayLayout,
+  buildWorkbenchInvoiceExpenseItemCandidates,
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
@@ -546,6 +547,100 @@ describe("groupDisplayModel time filter", () => {
     expect(layout?.segments.find(({ id }) => id.endsWith(":summary"))?.rows.invoice).toEqual([]);
     expect(layout?.segments.find(({ id }) => id.endsWith(":invoice:unassigned"))?.rows.invoice)
       .toEqual([unassignedInvoice]);
+  });
+
+  test("keeps an unowned manual invoice residual even when its amount exactly matches one OA item", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-manual", "66.00"),
+      expenseItems: [
+        { id: "item-manual-27", rowIndex: "0", projectName: "项目甲", amount: "27.05" },
+        { id: "item-manual-39", rowIndex: "1", projectName: "项目乙", amount: "38.95" },
+      ],
+    };
+    const manualInvoice = {
+      ...buildInvoiceRow("invoice-manual-27", "27.05"),
+      sourceOaId: parent.id,
+      tableValues: { grossAmount: "27.05" },
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:manual-unassigned-invoice",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "manual invoice without explicit ownership",
+      amountCheck: {
+        status: "matched",
+        direction: "expense",
+        bankAmount: "66.00",
+        oaAmount: "66.00",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
+      rows: { oa: [parent], bank: [], invoice: [manualInvoice] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+
+    expect(layout?.segments.find(({ id }) => id === "item-manual-27")?.rows.invoice).toEqual([]);
+    expect(layout?.segments.find(({ id }) => id.endsWith(":invoice:unassigned"))?.rows.invoice)
+      .toEqual([manualInvoice]);
+  });
+
+  test("uses explicit multi-item ownership to render one manual invoice once", () => {
+    const parent = {
+      ...buildOaRow("oa-exp-manual-shared", "66.00"),
+      expenseItems: [
+        { id: "item-manual-a", rowIndex: "0", projectName: "项目甲", amount: "27.05" },
+        { id: "item-manual-b", rowIndex: "1", projectName: "项目乙", amount: "38.95" },
+      ],
+    };
+    const manualInvoice = {
+      ...buildInvoiceRow("invoice-manual-shared", "66.00"),
+      sourceOaId: parent.id,
+      sourceExpenseItemIds: ["item-manual-a", "item-manual-b"],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:manual-shared-invoice",
+      groupType: "paired",
+      matchConfidence: "high",
+      reason: "manual invoice with explicit ownership",
+      rows: { oa: [parent], bank: [], invoice: [manualInvoice] },
+    };
+
+    const layout = buildWorkbenchGroupDisplayLayout(group);
+    const invoiceIds = layout?.segments.flatMap(({ rows }) => rows.invoice.map(({ id }) => id));
+
+    expect(layout?.segments.find(({ id }) => id === "item-manual-a+item-manual-b")?.rows.invoice)
+      .toEqual([manualInvoice]);
+    expect(invoiceIds).toEqual([manualInvoice.id]);
+  });
+
+  test("lists every OA expense item as an explicit assignment candidate without selecting by amount", () => {
+    const firstOa = {
+      ...buildOaRow("oa-candidate-a", "66.00"),
+      label: "日常报销 A",
+      expenseItems: [
+        { id: "item-a", rowIndex: "1", projectName: "项目甲", amount: "27.05" },
+        { id: "item-b", rowIndex: "2", projectName: "项目乙", amount: "38.95" },
+      ],
+    };
+    const secondOa = {
+      ...buildOaRow("oa-candidate-b", "10.00"),
+      label: "日常报销 B",
+      expenseItems: [{ id: "item-c", rowIndex: "1", projectName: "项目丙", amount: "10.00" }],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:candidates",
+      groupType: "paired",
+      matchConfidence: "high",
+      reason: "candidate list",
+      rows: { oa: [firstOa, secondOa], bank: [], invoice: [] },
+    };
+
+    expect(buildWorkbenchInvoiceExpenseItemCandidates(group)).toEqual([
+      expect.objectContaining({ key: "oa-candidate-a:item-a", amount: "27.05" }),
+      expect.objectContaining({ key: "oa-candidate-a:item-b", amount: "38.95" }),
+      expect.objectContaining({ key: "oa-candidate-b:item-c", amount: "10.00" }),
+    ]);
   });
 
   test("renders one display-only invoice placeholder for an uploaded item with no parsed invoice", () => {

@@ -31,6 +31,8 @@ class WorkbenchWriteUnitOfWorkContext:
     row_overrides: Any
     idempotency_store: Any
     canonical_query: Any | None
+    invoice_source_links: Any | None
+    operation_audit: Any | None
 
 
 class WorkbenchWriteUnitOfWork:
@@ -97,6 +99,8 @@ class WorkbenchWriteUnitOfWork:
                 row_overrides=repositories.row_overrides,
                 idempotency_store=idempotency_store,
                 canonical_query=getattr(repositories, "canonical_query", None),
+                invoice_source_links=getattr(repositories, "invoice_source_links", None),
+                operation_audit=getattr(repositories, "operation_audit", None),
             )
             handler_started_at = monotonic()
             handler_result = handler(context)

@@ -267,6 +267,15 @@ def _canonical_oa_expense_item_id_for_source(
     if oa_attachment_parent_oa_id(source_item_id) not in set(oa_row_source_ids(oa_row)):
         return ""
 
+    current_item_ids = {
+        str(item.get("id") or item.get("expense_item_id") or "").strip()
+        for item in list(oa_row.get("expense_items") or [])
+        if isinstance(item, dict)
+        and str(item.get("id") or item.get("expense_item_id") or "").strip()
+    }
+    if source_item_id in current_item_ids:
+        return source_item_id
+
     source_row_index = _first_field_value(source_row, "source_expense_row_index")
     if not source_row_index:
         parts = source_item_id.split(":item:", 1)

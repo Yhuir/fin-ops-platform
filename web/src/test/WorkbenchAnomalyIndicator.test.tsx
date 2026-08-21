@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import WorkbenchAnomalyIndicator from "../components/workbench/WorkbenchAnomalyIndicator";
 import type { WorkbenchAnomalyItem } from "../features/workbench/types";
@@ -81,5 +81,23 @@ describe("WorkbenchAnomalyIndicator", () => {
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByText("OA 流水一致，票少")).not.toBeInTheDocument());
+  });
+
+  it("runs a row-level resolution action once and closes the popover", async () => {
+    const user = userEvent.setup();
+    const onPress = vi.fn();
+    render(
+      <WorkbenchAnomalyIndicator
+        action={{ label: "选择 OA 明细", onPress }}
+        anomalies={[{ ...anomaly, code: "oa_invoice_attachment_unassigned", displayLabel: "发票待归属" }]}
+        levelLabel="该发票"
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: "该发票有 1 项异常，查看详情" }));
+    await user.click(await screen.findByRole("button", { name: "选择 OA 明细" }));
+
+    expect(onPress).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "选择 OA 明细" })).not.toBeInTheDocument());
   });
 });

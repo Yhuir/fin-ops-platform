@@ -1,4 +1,5 @@
 import type {
+  WorkbenchInvoiceExpenseItemCandidate,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
   WorkbenchRelationGroup,
@@ -201,14 +202,13 @@ export function buildWorkbenchGroupDisplayLayout(
   const expenseItemIds = new Set(
     segments.flatMap((segment) => segment.rows.oa.flatMap((row) => row.sourceExpenseItemIds ?? [])),
   );
-  const hasUnassignedOaAttachmentInvoices = hasExpenseClaimItems && group.rows.invoice.some((row) => (
-    row.sourceKind === "oa_attachment_invoice"
-    && !rowExpenseItemIds(row).some((itemId) => expenseItemIds.has(itemId))
+  const hasUnassignedInvoices = hasExpenseClaimItems && group.rows.invoice.some((row) => (
+    !rowExpenseItemIds(row).some((itemId) => expenseItemIds.has(itemId))
   ));
   const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
     !(paneId === "bank" && hasExpenseClaimItems && sourceGroup.rows.oa.length === 1)
     && (
-      (paneId === "invoice" && hasUnassignedOaAttachmentInvoices)
+      (paneId === "invoice" && hasUnassignedInvoices)
       || Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
         rowIds.length > 0 && rowIds.every((rowId) => displayRowsByPane[paneId].has(rowId))
       ))
@@ -441,7 +441,7 @@ function canUseAmountFallback(
   paneId: WorkbenchRecordType,
   row: WorkbenchRecord,
 ) {
-  if (paneId === "invoice" && row.sourceKind === "oa_attachment_invoice") {
+  if (paneId === "invoice" && group.rows.oa.some((oaRow) => (oaRow.expenseItems?.length ?? 0) > 0)) {
     return false;
   }
   const direction = group.amountCheck?.direction;
@@ -670,6 +670,40 @@ function shouldExpandExpenseClaim(parent: WorkbenchRecord, invoiceRows: Workbenc
 
 function rowExpenseItemIds(row: WorkbenchRecord) {
   return Array.from(new Set((row.sourceExpenseItemIds ?? []).map((itemId) => itemId.trim()).filter(Boolean)));
+}
+
+export function buildWorkbenchInvoiceExpenseItemCandidates(
+  group: WorkbenchRelationGroup,
+): WorkbenchInvoiceExpenseItemCandidate[] {
+  const seenKeys = new Set<string>();
+  return group.rows.oa.flatMap((oaRow) => (oaRow.expenseItems ?? []).flatMap((item) => {
+    const oaRowId = oaRow.id.trim();
+    const expenseItemId = item.id.trim();
+    const key = `${oaRowId}:${expenseItemId}`;
+    if (!oaRowId || !expenseItemId || seenKeys.has(key)) {
+      return [];
+    }
+    seenKeys.add(key);
+    const oaLabel = Array.from(new Set([
+      oaRow.label,
+      oaRow.tableValues.applicant,
+      oaRow.tableValues.applicationTime,
+    ].map((value) => value?.trim()).filter((value): value is string => (
+      Boolean(value) && value !== "--" && value !== "—"
+    )))).join(" · ");
+    return [{
+      key,
+      oaRowId,
+      oaLabel: oaLabel || oaRowId,
+      expenseItemId,
+      rowIndex: item.rowIndex,
+      projectName: item.projectName,
+      amount: item.amount,
+      expenseType: item.expenseType,
+      feeContent: item.feeContent,
+      feeDescription: item.feeDescription,
+    }];
+  }));
 }
 
 function expenseItemSummaryLabel(items: NonNullable<WorkbenchRecord["expenseItems"]>) {

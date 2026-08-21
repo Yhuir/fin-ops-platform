@@ -76,6 +76,10 @@ function WorkbenchRecordCard({
   const hasUnparsedAttachment = attachmentStatusAnomalies.some(
     (anomaly) => anomaly.code === "oa_invoice_attachment_unparsed",
   );
+  const unassignedInvoiceAnomaly = paneId === "invoice" && !row.displayOnly
+    ? row.workbenchAnomalies?.find((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")
+    : undefined;
+  const invoiceResolutionDisabled = readOnly ? !allowInvoiceEntryInReadOnly : !canMutateData;
   const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
@@ -127,6 +131,12 @@ function WorkbenchRecordCard({
               {columnIndex === 0 && row.workbenchAnomalies?.length ? (
                 <WorkbenchAnomalyIndicator
                   anomalies={row.workbenchAnomalies}
+                  action={unassignedInvoiceAnomaly ? {
+                    label: "选择 OA 明细",
+                    disabled: invoiceResolutionDisabled,
+                    disabledReason: "当前账号无归属权限",
+                    onPress: () => onRowAction(row, "assign-invoice-expense-items"),
+                  } : undefined}
                   externalUrl={row.workbenchAnomalies.some((anomaly) => isOaAttachmentStatus(anomaly.code))
                     ? row.externalUrl
                     : undefined}

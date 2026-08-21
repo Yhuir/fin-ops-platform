@@ -42,6 +42,8 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `确认已支付` | OA pending payment |
 | `确认拆分` | workbench candidate split |
 | `确认撤回` | withdraw confirmation |
+| `确认已审阅` | Workbench 已退役逐项人工审阅复选入口的防回流扫描关键词 |
+| `进入已配对` | Workbench 异常接受后进入已配对的通用动作关键词 |
 | `留在未配对` | Workbench 异常决定保持未配对 |
 | `接受异常并进入已配对` | Workbench 接受当前系统异常并进入已配对 |
 | `撤回到未配对` | Workbench 已配对异常撤回未配对 |
@@ -135,7 +137,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `pendingInvoices/api.ts` | `pending-invoices` | 待找发票规则、选择发票和收入状态写入口。 |
 | `tax/api.ts` | `tax-offset` | 税金计划保存和已认证发票导入。 |
 | `turnoverLedger/api.ts` | `turnover-ledger` | 外部往来标签、闭环、撤回和 extra 写入口。 |
-| `workbench/api.ts` | `reconciliation-workbench`, `settings` | 关联台 command、settings 保存和访问控制写入口。 |
+| `workbench/api.ts` | `reconciliation-workbench`, `settings` | 关联台 relation/异常/发票 OA 明细归属 command、settings 保存和访问控制写入口。 |
 
 后端兼容 `POST /api/workbench/exception/apply` 仍属于 `reconciliation-workbench` mutation 边界，用于既有自动异常/行级异常流程，不代表恢复已删除的未配对工具栏人工“异常处理”入口。其 actor 只来自服务端认证 session，request body 的 `actor` / `confirmed_by` 不属于身份或审计事实源。
 
@@ -187,7 +189,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 | Module | 写入口 | 当前状态 | 当前证据 | 下一步 |
 | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | manual confirm、paired/unpaired active-relation withdraw、异常接受进入已配对/留在未配对/撤回、行级忽略、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save；未配对工具栏人工“异常处理”已删除 | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对关系并打开统一异常抽屉，断言确认和关系级撤回禁用、未配对工具栏人工“异常处理”不存在、异常决定/撤回入口隐藏；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常审阅、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
+| `reconciliation-workbench` | manual confirm、paired/unpaired active-relation withdraw、异常接受进入已配对/留在未配对/撤回、待归属发票显式选择 OA 明细、行级忽略、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save；未配对工具栏人工“异常处理”已删除 | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对关系并打开统一异常抽屉，断言确认和关系级撤回禁用、未配对工具栏人工“异常处理”不存在、异常决定/撤回入口隐藏；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常审阅、发票明细归属、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
 | `bank-details` | 分类保存/清除、候选确认/撤回、人工待分类、自动标签规则保存/reapply | `covered-browser` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开自动标签规则抽屉并分别进入待确认分类和未匹配待分类状态，断言新增标签/reapply/保存禁用、待确认/待分类按钮禁用、分类菜单不打开、category-confirmation/category-assignment 零 mutation，并复跑 DOM 写控件候选扫描 | 新增批量分类或规则入口时补 read-export 零 mutation。 |
 | `imports-bank-transactions` | 文件选择、preview、confirm import、账户冲突确认 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖 full_access 主链路 | 新增清空/重试/批量导入 mutation 时补按钮矩阵。 |
 | `imports-invoices` | 文件选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |

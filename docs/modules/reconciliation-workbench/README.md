@@ -23,7 +23,7 @@
 
 银行“金额”是收支方向、银行账户、流水标签的分组复合菜单；OA“申请人”是 OA 类型、流程状态、申请人的分组复合菜单；OA“项目名称”是 OA 费用类型、项目名称的分组复合菜单。同组多值 OR、跨组 AND，且条件必须由同一 canonical member（项目/费用类型为同一费用明细）满足。项目菜单使用加宽、可换行且随内容增高的选项，不允许恢复固定行高造成的文字重叠。
 
-OA 附件状态固定为“无OA附件 / OA发票附件未解析 / OA发票待归属”。只有“未解析”显示“录入发票”，打开单一右侧抽屉并默认复用多张发票编辑器的上传识别/人工校正；补充凭证是次级模式且不进入发票池。新票创建或强身份既有票关联与当前 OA 子付款项、正式关系在同一事务闭环，疑似重复不得按金额猜测。显式 `oa_expense_item_invoice` 是有效展示归属，旧附件来源只保留审计。金额异常只在唯一来源证明具体单票时落该发票，否则落 OA 子项或 OA/流水组级位置。
+OA 附件状态固定为“发票附件缺失 / 发票附件未解析 / 发票待归属”。只有“未解析”显示“录入发票”，打开单一右侧抽屉并默认复用多张发票编辑器的上传识别/人工校正；补充凭证是次级模式且不进入发票池。active relation 含 OA 费用明细时，每张缺少有效费用明细来源边的 relation invoice 各生成一次行级“发票待归属”，默认让完整关系留在 `unpaired`；没有 OA 费用明细的关系不生成该异常。“发票待归属”通过感叹号内的“选择 OA 明细”打开独立抽屉，默认零选择并允许用户显式选择同关系内一项或多项，禁止按金额、名称或顺序推荐。显式 `oa_expense_item_invoice` 是有效展示归属，旧附件来源只保留审计。金额异常只在唯一来源证明具体单票时落该发票，否则落 OA 子项或 OA/流水组级位置。
 
 候选菜单使用紧凑的 HeroUI Popover/SearchField/Checkbox 布局并允许长标签自然换行。OA 申请事由直接显示完整文本，不再创建 hover 浮层，避免浮层测量导致表格滚动条抖动。
 
@@ -48,25 +48,26 @@ ETC 批次在折叠态直接显示第一张真实发票，不显示汇总占位�
 
 ## 代码入口
 
-- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`
-- API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`
+- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`、`WorkbenchInvoiceAssignmentDrawer.tsx`
+- API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`、`routes_workbench_actions.py`
 - Direct page SQL：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_query.py`、`workbench_page_hydration.py`
 - 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`
 - 统一异常合同/判断/审阅：`backend/src/fin_ops_platform/services/workbench_anomaly_contract.py`、`workbench_amount_check_service.py`、`workbench_anomaly_review_service.py`
 - 匹配：`backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`
 - Matching I/O：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
-- 正式关系写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_uow.py`
+- 正式关系与发票明细归属写入：`backend/src/fin_ops_platform/services/workbench_relation_command_service.py`、`workbench_invoice_expense_item_assignment_service.py`、`invoice_expense_item_links.py`、`workbench_uow.py`
 - 保留的独立 Worker：`backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py`、`workbench_relation_read_model_worker.py`
 
 ## 关联台异常合同
 
-- 系统只在 OA、流水、发票三栏金额完整且方向明确时自动输出七种互斥金额分类；方向未知、方向冲突、任一栏缺失或三栏总额完全一致时不得猜测。普通付款关系的银行侧使用同一 relation 内支出减退款收入的净额；`turnover_manual_closure` 继续只按 canonical mode 使用付款本金侧。日常报销的 OA—发票按 `source_expense_item_ids[]` 连通分量去重计算，局部差异只用于定位已成立的七分类，不创建第八种金额 Chip。附件状态只区分“发票附件缺失 / 发票附件未解析 / 发票待归属”。
+- 系统只在 OA、流水、发票三栏金额完整且方向明确时自动输出七种互斥金额分类；方向未知、方向冲突、任一栏缺失或三栏总额完全一致时不得猜测。普通付款关系的银行侧使用同一 relation 内支出减退款收入的净额；`turnover_manual_closure` 继续只按 canonical mode 使用付款本金侧。日常报销的 OA—发票按 `source_expense_item_ids[]` 连通分量去重计算，局部差异只用于定位已成立的七分类，不创建第八种金额 Chip。附件状态只区分“发票附件缺失 / 发票附件未解析 / 发票待归属”；后一种按无有效 item edge 的 relation invoice 逐票、逐行生成，不按费用明细重复，也不按金额推断 owner。
 - 任何当前异常默认把完整 active relation 留在 `unpaired`。服务端从当前 canonical bundle 推导分类与 evidence fingerprints，客户端只提交 fingerprint 和 `accept_paired|keep_unpaired`，不提交 actor、人工分类或逐项审阅结果。只有无其他完整性 blocker 时 `accept_paired` 才允许进入 `paired`；接受后保留感叹号与原异常 Chip，审阅审计在 Popover 单独展示。“撤回到未配对”写入 `keep_unpaired` 并同步移动主表关系。
 - 决定复用既有 exception case repository 的独立 `workbench_anomaly_review` scenario，按 bundle fingerprint 失效。旧人工异常分类器、金额 ignore/restore API、人工分类/复选 UI 和前端请求字段均已删除；历史记录、WEX/row-ignore 仅保留审计。
 - 页面只保留统一 `WorkbenchExceptionDrawer`，两个 bucket 固定为“未配对异常 / 已配对异常”；每次只读取当前 bucket。入口文案固定为 `未配对异常 n | 已配对异常 m`。
 - 每个 bucket 内再提供“金额异常 / 仅资料异常”两个互斥视图。金额视图显示七个服务端分类及唯一关系数，默认选中首个非零分类；仅资料视图只收纳没有金额分类的附件异常关系。金额与资料并存时关系只进入唯一金额分类，资料 Chip 仍在该关系 Popover 中显示；多个资料 item 不得把同一关系重复计数或重复返回。分类筛选只组织审阅队列，不自动触发付款、退款、补票或 OA 草稿。
 - 异常抽屉宽度固定为 `min(1740px, 96vw)`。折叠态只显示 OA、流水、发票三栏金额/数量摘要，并在展开箭头前显示一个感叹号；hover/focus 临时打开 HeroUI Popover，显示时点击感叹号立即关闭且在当前鼠标停留期间禁止自动重开，再次点击改为持续打开，鼠标真正离开后下一次 hover 恢复。展开态直接复用只读 `RelationGroupGrid`，所以感叹号与主表定位和交互完全一致；动作区只保留决定按钮。不得新增关系汇总栏、第四栏、重复 Chip、逐项复选框、人工金额下拉或原生 HTML 表单控件。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
+- “发票待归属”只允许在异常 Popover 中发起显式归属；提交重验 active case、invoice/OA 成员、费用明细、行级 anomaly fingerprint、幂等和 source-links CAS。既有不同或不完整的显式归属 fail closed，不允许静默覆盖。写成功后页面恰好一次 canonical 回读，不能本地删除异常、移动分区或拼装同行；关系成员与金额保持不变。
 
 ## 三栏纵向展示合同
 
@@ -76,7 +77,7 @@ ETC 批次在折叠态直接显示第一张真实发票，不显示汇总占位�
 - 单条银行流水/非 OA 来源发票与 OA 或费用子项金额按分精确相等且双方唯一时共享行轨，不再要求整栏完整覆盖。普通父 OA 下有两条或以上银行流水时，只有所有流水都带 canonical `sourceOaId`、当前显示包含完整组成且流水按分合计等于该 OA，才共享一个复合行轨；OA 只渲染一次，流水在轨内等分。显式 `sourceOaId` / `sourceExpenseItemIds[]` 优先；API 映射必须优先 canonical `source_oa_id` / `source_oa_row_id`，历史 `derived_from_oa_id` 只作兜底，不能覆盖 canonical ownership。OA 附件发票的同行只消费顶层 canonical `source_expense_item_ids[]`，原始 `source_links[]` 只作审计证据；OA 附件缺少 canonical 子付款项来源时进入独立待归属残余带，禁止按金额兜底。显式费用子项 ownership 不以金额相等为前提。其他来源缺少显式 ownership 时，只允许在同一完整 source group、方向已知且金额双方都唯一时做展示级精确金额兜底。
 - 同一费用子项下的所有显式绑定附件发票共享一个复合行轨；费用子项占满该轨高度，发票在轨内等分。即使合计金额不等，也保持同行并由异常 chip 表达差异。筛选后缺少任一组成发票时不建立部分复合同行。
 - 缺少 canonical ownership、合计不等、显示组成不完整的父 OA 级一对多，以及多对一、重复来源、重复金额、零/非法金额、方向未知或冲突，都不建立同行；无显式来源的 2～6 条金额即使合计相等也不做组合推断。已分段栏中的这些记录进入独立残余展示带，完全没有精确配对的栏继续按 group-level 占满整组高度。金额兜底不写 relation、不改变 membership、selection 或 action identity。
-- 多项目报销继续显示父 OA 摘要和费用子项；显式来源形成的付款项/发票连通分量同行，每张发票只渲染一次，未归属附件发票留在独立残余展示带且不得进入父摘要。缺失附件发票的展示位只显示一个原因明确的感叹号，不得再叠加历史 `未识别附件` 来源标签或直接平铺 Chip。空发票栏中的“感叹号 + 录入发票”使用一个跨整栏的 HeroUI 状态操作区，不渲染或保留占位横杠；按钮权限不足时保持禁用并解释原因。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
+- 多项目报销继续显示父 OA 摘要和费用子项；显式来源形成的付款项/发票连通分量同行，每张发票只渲染一次，未归属 relation invoice 留在独立残余展示带且不得进入父摘要。待归属发票在自身行只显示一个原因明确的感叹号，Popover 提供“选择 OA 明细”，不得同时显示“录入发票”；归属成功并完成 canonical 回读后，发票进入所选 OA 明细的同行带且待归属感叹号消失。缺失附件发票的展示位仍只显示一个原因明确的感叹号，不得叠加历史 `未识别附件` 来源标签或直接平铺 Chip；空发票栏中的“感叹号 + 录入发票”只属于“发票附件未解析”，使用一个跨整栏的 HeroUI 状态操作区，不渲染或保留占位横杠。按钮权限不足时保持禁用并解释原因。发票比较金额统一使用价税合计，银行流水使用当前方向金额。
 - 布局判断只消费已加载 DTO，是 `O(OA + bank + invoice)` 的 Map/Set 纯计算，不增加 HTTP、数据库、cache、worker、React state/effect、DOM 测量或依赖。
 
 ## 不变量

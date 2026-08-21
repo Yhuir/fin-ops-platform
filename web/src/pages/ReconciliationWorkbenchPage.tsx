@@ -9,6 +9,7 @@ import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
 import RelationPreviewTriPane from "../components/workbench/RelationPreviewTriPane";
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
+import WorkbenchInvoiceAssignmentDrawer from "../components/workbench/WorkbenchInvoiceAssignmentDrawer";
 import WorkbenchInvoiceEntryDrawer from "../components/workbench/WorkbenchInvoiceEntryDrawer";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
@@ -45,6 +46,7 @@ import { fetchBankFlowRuleBatchDetail, withdrawBankFlowRuleBatch } from "../feat
 import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
+  buildWorkbenchInvoiceExpenseItemCandidates,
   buildWorkbenchPaneRows,
   createEmptyWorkbenchZoneDisplayState,
   hasWorkbenchServerPageCriteria,
@@ -68,6 +70,7 @@ import type {
   WorkbenchExceptionView,
   WorkbenchGroupsPageQuery,
   WorkbenchInitialPageResult,
+  WorkbenchInvoiceExpenseItemAssignmentTarget,
   WorkbenchOaSyncStatus,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
@@ -406,11 +409,13 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerReloadGeneration, setExceptionDrawerReloadGeneration] = useState(0);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<WorkbenchOaInvoiceSupplementTarget | null>(null);
+  const [invoiceAssignmentTarget, setInvoiceAssignmentTarget] = useState<WorkbenchInvoiceExpenseItemAssignmentTarget | null>(null);
   const hasOaSyncRefreshBlockingInteraction = explicitSelectedPairedRows.length > 0
     || explicitSelectedOpenRows.length > 0
     || relationPreviewRequestKind !== null
     || relationPreviewDialog !== null
-    || invoiceEntryTarget !== null;
+    || invoiceEntryTarget !== null
+    || invoiceAssignmentTarget !== null;
   const hasOaSyncRefreshBlockingInteractionRef = useRef(hasOaSyncRefreshBlockingInteraction);
   useLayoutEffect(() => {
     hasOaSyncRefreshBlockingInteractionRef.current = hasOaSyncRefreshBlockingInteraction;
@@ -1865,7 +1870,11 @@ export default function ReconciliationWorkbenchPage() {
     openActionResultDialog(actionErrorMessage(error), "操作失败");
   }, [openActionResultDialog]);
 
-  const handleRowAction = useCallback(async (row: WorkbenchRecord, action: WorkbenchInlineAction) => {
+  const handleRowAction = useCallback(async (
+    row: WorkbenchRecord,
+    action: WorkbenchInlineAction,
+    group: WorkbenchRelationGroup,
+  ) => {
     if (action === "relation-status") {
       openActionResultDialog(`当前关联情况：${row.status}`, "关联情况");
       return;
@@ -1888,6 +1897,38 @@ export default function ReconciliationWorkbenchPage() {
         caseId: row.caseId ?? "",
         oaRowId: row.sourceOaId,
         expenseItemId,
+      });
+      return;
+    }
+
+    if (action === "assign-invoice-expense-items") {
+      const anomaly = row.workbenchAnomalies?.find(
+        (candidate) => candidate.code === "oa_invoice_attachment_unassigned",
+      );
+      const candidates = buildWorkbenchInvoiceExpenseItemCandidates(group);
+      const caseId = row.caseId
+        ?? group.rows.oa.find((candidate) => candidate.caseId)?.caseId
+        ?? group.rows.bank.find((candidate) => candidate.caseId)?.caseId
+        ?? "";
+      if (row.recordType !== "invoice" || !anomaly || !caseId || candidates.length === 0) {
+        openActionResultDialog(
+          "无法确定这张发票可归属的 OA 付款明细，请刷新页面后重试。",
+          "无法选择 OA 明细",
+        );
+        return;
+      }
+      if (exceptionDrawerOpenRef.current) {
+        handleCloseExceptionDrawer();
+      }
+      setInvoiceAssignmentTarget({
+        caseId,
+        invoiceRowId: row.id,
+        invoiceNo: row.tableValues.invoiceNo ?? row.label,
+        sellerName: row.tableValues.sellerName ?? row.counterparty,
+        amount: row.tableValues.grossAmount ?? row.amount,
+        anomalyFingerprint: anomaly.fingerprint,
+        idempotencyKey: crypto.randomUUID(),
+        candidates,
       });
       return;
     }
@@ -2584,8 +2625,11 @@ export default function ReconciliationWorkbenchPage() {
         onExceptionCodeChange={handleExceptionDrawerCodeChange}
         onReviewAnomaly={handleAnomalyReview}
         onEnsureGroupDetail={ensureExceptionGroupDetail}
-        onInvoiceEntry={(row) => {
-          void handleRowAction(row, "enter-invoice");
+        onInvoiceEntry={(row, group) => {
+          void handleRowAction(row, "enter-invoice", group);
+        }}
+        onInvoiceAssignment={(row, group) => {
+          void handleRowAction(row, "assign-invoice-expense-items", group);
         }}
         onLoadMore={loadMoreExceptionDrawer}
         onViewChange={handleExceptionDrawerViewChange}
@@ -2610,6 +2654,18 @@ export default function ReconciliationWorkbenchPage() {
           const reread = await rereadWorkbenchAfterCommit();
           if (!reread) {
             throw new Error("数据已保存，但关联台重新读取失败，请稍后刷新页面确认。");
+          }
+        }}
+      />
+      <WorkbenchInvoiceAssignmentDrawer
+        disabled={!canWriteWorkbench}
+        open={invoiceAssignmentTarget !== null}
+        target={invoiceAssignmentTarget}
+        onClose={() => setInvoiceAssignmentTarget(null)}
+        onCompleted={async () => {
+          const reread = await rereadWorkbenchAfterCommit();
+          if (!reread) {
+            throw new Error("归属已保存，但关联台重新读取失败，请稍后刷新页面确认。");
           }
         }}
       />

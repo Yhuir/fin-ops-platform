@@ -615,7 +615,15 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
             relation_id="CASE-UNASSIGNED",
         )
         assert unassigned is not None
-        self.assertEqual(unassigned["items"][0]["code"], "oa_invoice_attachment_unassigned")
+        unassigned_items = [
+            item
+            for item in unassigned["items"]
+            if item["code"] == "oa_invoice_attachment_unassigned"
+        ]
+        self.assertEqual(len(unassigned_items), 1)
+        self.assertEqual(unassigned_items[0]["display_scope"], "row")
+        self.assertEqual(unassigned_items[0]["display_row_id"], "invoice-38")
+        self.assertEqual(unassigned_items[0]["source_expense_item_ids"], [])
 
         unparsed = self.service.workbench_anomaly(
             {
@@ -644,6 +652,49 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
                     ],
                 },
                 relation_id="CASE-1",
+            )
+        )
+
+    def test_each_unowned_relation_invoice_yields_one_row_anomaly_not_one_per_item(self) -> None:
+        anomaly = self.service.workbench_anomaly(
+            {
+                "oa": [{
+                    **self._oa_row("30.00"),
+                    "id": "oa-1",
+                    "expense_items": [
+                        {"id": "item-1", "amount": "10.00", "attachment_file_count": "0"},
+                        {"id": "item-2", "amount": "20.00", "attachment_file_count": "0"},
+                    ],
+                }],
+                "invoice": [
+                    {**self._invoice_row("12.00"), "id": "invoice-a", "source_links": []},
+                    {**self._invoice_row("18.00"), "id": "invoice-b", "source_links": []},
+                ],
+            },
+            relation_id="CASE-ROW-UNASSIGNED",
+        )
+
+        assert anomaly is not None
+        unassigned = [
+            item
+            for item in anomaly["items"]
+            if item["code"] == "oa_invoice_attachment_unassigned"
+        ]
+        self.assertEqual(len(unassigned), 2)
+        self.assertEqual(
+            [item["display_row_id"] for item in unassigned],
+            ["invoice-a", "invoice-b"],
+        )
+        self.assertTrue(all(item["display_scope"] == "row" for item in unassigned))
+
+    def test_relation_without_oa_expense_items_does_not_create_unassigned_anomaly(self) -> None:
+        self.assertIsNone(
+            self.service.workbench_anomaly(
+                {
+                    "oa": [{**self._oa_row("30.00"), "id": "oa-1"}],
+                    "invoice": [{**self._invoice_row("30.00"), "id": "invoice-1"}],
+                },
+                relation_id="CASE-NO-EXPENSE-ITEMS",
             )
         )
 

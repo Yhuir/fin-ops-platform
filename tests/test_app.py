@@ -53,6 +53,10 @@ class AppTests(unittest.TestCase):
         ):
             self.assertNotIn(retired_route, payload["entrypoints"])
         self.assertIn("/api/workbench", payload["entrypoints"])
+        self.assertIn(
+            "/api/workbench/actions/assign-invoice-expense-items",
+            payload["entrypoints"],
+        )
         self.assertIn("/api/session/me", payload["entrypoints"])
         self.assertIn("/api/tax-offset", payload["entrypoints"])
         self.assertIn("/api/tax-offset/calculate", payload["entrypoints"])

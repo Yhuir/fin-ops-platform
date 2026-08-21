@@ -1226,6 +1226,42 @@ def test_invoice_expense_item_link_repair_requires_unchanged_source_links() -> N
         )
 
 
+def test_invoice_expense_item_link_repair_reports_the_actual_conflicting_invoice() -> None:
+    class SecondInvoiceChangedConnection:
+        def __init__(self) -> None:
+            self.invoice_update_count = 0
+
+        def execute(self, sql: str, _params: tuple = ()) -> int:
+            if "update app.invoices" not in sql.lower():
+                return 1
+            self.invoice_update_count += 1
+            return 1 if self.invoice_update_count == 1 else 0
+
+    connection = SecondInvoiceChangedConnection()
+    updates = [
+        {
+            "invoice_id": invoice_id,
+            "before_source_links": [],
+            "source_links": [{
+                "source_type": "oa_expense_item_invoice",
+                "source_expense_item_id": f"oa-1:item:{index}",
+            }],
+        }
+        for index, invoice_id in enumerate(("invoice-1", "invoice-2"))
+    ]
+
+    with pytest.raises(
+        RuntimeError,
+        match="Invoice invoice-2 changed after the repair plan was built",
+    ):
+        PostgresCoreRepository(connection).repair_invoice_expense_item_links(
+            connection,
+            updates,
+            operator_id="YNSYLP007",
+            reason="修复历史发票与 OA 子付款项来源关系",
+        )
+
+
 def test_invoice_header_fact_repair_snapshot_normalizes_postgres_date_to_month_key() -> None:
     from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
         load_invoice_header_fact_repair_snapshot,

@@ -1,6 +1,6 @@
 # 关联台状态机
 
-日期：2026-08-21
+日期：2026-08-22
 
 ## 页面关系状态
 
@@ -79,6 +79,21 @@ hidden/focus/visible             -> 不触发 Workbench business status I/O
 ```
 
 普通 writer 只提交 canonical facts/relation/version/audit/idempotency 与必要的独立领域任务。Workbench page 不拥有 queue、worker、generation、freshness polling 或 Redis payload cache；3 秒 OA status safety poll 只用于写门禁和触发 direct canonical reread。它不得在用户已选择记录、打开关系预览或正在录入发票时替换页面并清空交互；这些变化只折叠为一个 pending refresh，交互结束后执行一次。写成功后的 post-commit reread 仍优先执行并清空旧选择。OA sync、App Health、background jobs、`workbench_relation` 与 `workbench-matching` 保持各自 owner 合同。
+
+### 发票费用明细归属
+
+```text
+active relation 含 OA expense items + relation invoice 无有效 item edge
+  -> 发票行 `oa_invoice_attachment_unassigned`，完整关系留在 unpaired
+  -> 用户从感叹号显式选择同关系内 1～100 个 OA 明细（默认零选择）
+  -> 一个 POST：锁关系成员与 invoice source links，重验 item fingerprint / CAS / 幂等
+  -> 冲突或证据漂移：零写，保留当前页面事实并提示刷新
+  -> 成功：保留历史来源并追加精确 `oa_expense_item_invoice` 边
+  -> 恰好一次 canonical GET；前端不本地挪行
+  -> 待归属 item 消失，发票按显式 ownership 与所选 OA 明细同行；其它异常照常保留
+```
+
+该 action 不创建、拆分或修改正式关系成员，也不修改 OA、流水或发票金额。金额、项目名称和顺序不参与候选推荐或自动选择；已有不同或不完整显式归属必须 fail closed，精确相同 targets 重放为幂等成功。归属完成后关系是否进入 `paired` 只由下一次 canonical GET 的完整性与剩余异常决定。
 
 ## Row detail 读取状态
 

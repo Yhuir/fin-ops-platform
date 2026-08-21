@@ -37,7 +37,11 @@ type WorkbenchZoneProps = {
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
-  onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  onRowAction: (
+    row: WorkbenchRecord,
+    action: WorkbenchInlineAction,
+    group: WorkbenchRelationGroup,
+  ) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canMutateData: boolean;
   highlightedRowId?: string | null;

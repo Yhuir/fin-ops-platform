@@ -1,6 +1,15 @@
 # 关联台测试与验证
 
-日期：2026-08-21
+日期：2026-08-22
+
+## 2026-08-22 relation invoice 显式 OA 明细归属
+
+- Business core：`test_workbench_amount_check_service.py` 保护 relation 有 OA expense items 时，每张无有效 item edge 的 invoice 只产生一个 row-scoped `oa_invoice_attachment_unassigned`；不会按费用项重复，relation 没有 OA expense items 时不误报。`test_oa_attachment_invoice_linking.py` 继续保护显式 ownership 优先且旧附件来源保留。
+- Service/API：`test_workbench_invoice_expense_item_assignment_service.py` 覆盖显式一对多 targets、零金额推断、stale item fingerprint、重复 target、缺 idempotency key、不同或 malformed 既有显式边冲突零写，以及 exact targets 幂等 no-op；`test_workbench_invoice_expense_item_assignment_api.py` 覆盖 actor/tenant/request、稳定 409/503 映射与 operation semantics。
+- PostgreSQL/UoW：`test_workbench_query_postgres_integration.py::test_assign_invoice_expense_item_closes_document_only_anomaly_atomically` 保护 pending relation 从 unpaired 出发，写入保留旧来源、追加显式 edge、幂等 replay 只产生一次业务审计，并在下一次 canonical GET 消除该 document-only anomaly 后进入 paired；同文件继续锁定 SQL/Python fingerprint 与 no-expense-item 排除语义。
+- Frontend：`WorkbenchInvoiceAssignmentDrawer.test.tsx`、`WorkbenchAnomalyIndicator.test.tsx`、`RelationGroupGrid.test.tsx` 和 `WorkbenchSelection.test.tsx` 保护 Popover 内唯一“选择 OA 明细”、抽屉默认零选择/显式多选、权限与错误态、一个 POST + 恰好一次 canonical GET、零本地挪行，并在回读后让 27.05 发票与所选 27.05 OA 明细同行、移除对应待归属感叹号；待归属链路全程不显示“录入发票”。
+- Browser E2E / regression：`workbench-exception-flow.spec.ts` 保护异常抽屉先关闭再打开唯一归属抽屉；`workbench-relation-fanout.spec.ts` 保护真实浏览器中的 request DTO、单次回读、分区变化和 OA/发票同行。既有 confirm/withdraw、录票、七类金额异常、read-export 权限及跨页面回归继续执行。
+- Read model/cache/worker：本 action 只复用现有 canonical UoW、source-links CAS 与 direct GET，没有 schema、read model、worker、queue、cache 或后台刷新；现有 runtime boundary guards 继续禁止 Workbench page runtime 回流。
 
 ## 2026-08-21 异常抽屉双视图与七分类唯一关系队列
 
@@ -285,9 +294,12 @@ current runtime gate。
 - `tests/test_workbench_query_postgres_integration.py`
 - `tests/test_workbench_v2_api.py`
 - `tests/test_workbench_query_service.py`
+- `tests/test_workbench_invoice_expense_item_assignment_service.py`
+- `tests/test_workbench_invoice_expense_item_assignment_api.py`
 - `tests/test_postgres_migrations.py`
 - `web/src/test/RelationGroupGrid.test.tsx`
 - `web/src/test/WorkbenchApi.test.ts`
+- `web/src/test/WorkbenchInvoiceAssignmentDrawer.test.tsx`
 - `web/src/test/WorkbenchSelection.test.tsx`
 - `web/src/test/WorkbenchWriteGate.test.ts`
 - `web/src/test/WorkbenchZone.test.tsx`
@@ -301,6 +313,7 @@ current runtime gate。
 - paired/unpaired active relation 都可按关系级撤回；最近 confirm history 的 `before_relations` 是上一稳定拓扑恢复源，未配对 singleton、row `case_id` 和 display metadata 不能触发或决定恢复。
 - 装饰字段、输入顺序和旧 candidate/decision metadata 不改变 membership/group id。
 - OA 附件来源 alias 与 canonical OA row id 不同的情况下，正式关系 alignment 仍指向 canonical OA；复合行只按显式 source item + 唯一 row index 映射 canonical expense item id，且不修改 canonical 发票来源字段。
+- relation 有 OA expense items 时，每张无有效 item edge 的 relation invoice 恰好生成一个行级待归属异常并保持 unpaired；relation 没有 OA expense items 时不得误报。显式归属只接受同一 active case 的真实 OA item，默认零选择且禁止金额推断；不同或 malformed 旧显式边不得覆盖。成功只追加来源边，前端以一次 canonical 回读决定同行、异常与分区。
 - 同金额竞争、exact single 与 exact sum 竞争、duplicate reference、currency/direction mismatch、fuzzy/date-only evidence 均不写关系。
 - 显式引用跨全部历史；通用组合证据 365 天接受、366 天拒绝。日常报销申请人和银行对方户名的专用员工强证据 30 天接受、31 天拒绝，且不放宽通用公司对方户名最小长度。
 - 缺银行的 OA+附件发票 active relation 只有在一对多附件总额与唯一员工流水精确相等时才原 case 补全；多个同额候选、跨 case 重叠、完整三栏和人工撤回 exact member set 均零写。

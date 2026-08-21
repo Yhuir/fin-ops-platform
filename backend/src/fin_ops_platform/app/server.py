@@ -319,6 +319,9 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
     PostgresOAWorkflowRepository,
 )
+from fin_ops_platform.services.postgres_repositories.operations_audit import (
+    PostgresOperationsAuditRepository,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
     APP_SETTINGS_KEY,
     PostgresOpsTaxEtcRepository,
@@ -418,6 +421,9 @@ from fin_ops_platform.services.workbench_invoice_supplement_service import (
     ManualInvoiceSupplementCommand,
     WorkbenchInvoiceSupplementError,
     WorkbenchInvoiceSupplementService,
+)
+from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
+    WorkbenchInvoiceExpenseItemAssignmentService,
 )
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     SupportingDocumentUpload,
@@ -1086,6 +1092,9 @@ class Application:
         self._workbench_action_api_routes = WorkbenchActionApiRoutes(
             write_facade_provider=self._workbench_write_facade,
             anomaly_review_service=self._workbench_anomaly_review_service,
+            invoice_expense_item_assignment_service_provider=(
+                self._workbench_invoice_expense_item_assignment_service
+            ),
         )
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
@@ -1840,6 +1849,25 @@ class Application:
                 status=response.status_code,
             )
             return response
+        if (
+            method == "POST"
+            and route_path == "/api/workbench/actions/assign-invoice-expense-items"
+        ):
+            response = self._handle_api_workbench_assign_invoice_expense_items(
+                body,
+                request_id=request_id,
+                headers=headers,
+                access_session=access_session,
+            )
+            response.headers["X-Request-ID"] = request_id or "no-request-id"
+            self._emit_workbench_action_timing(
+                request_id=request_id or "no-request-id",
+                action_name="assign_invoice_expense_items",
+                phase="request_total",
+                duration_ms=self._duration_ms(request_started_at),
+                status=response.status_code,
+            )
+            return response
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link/preview":
             response = self._handle_api_workbench_confirm_link_preview(body)
             response.headers["X-Request-ID"] = request_id or "no-request-id"
@@ -2138,6 +2166,7 @@ class Application:
                 "/api/workbench/settings/data-reset/jobs/{job_id}",
                 "/api/workbench/rows/{row_id}",
                 "/api/workbench/actions/confirm-link",
+                "/api/workbench/actions/assign-invoice-expense-items",
                 "/api/workbench/actions/cancel-link",
                 "/api/workbench/actions/confirm-personal-advance-repayment",
                 "/api/tax-offset",
@@ -2564,6 +2593,32 @@ class Application:
             idempotency_store=idempotency_store,
         )
 
+    def _workbench_invoice_expense_item_assignment_unit_of_work(
+        self,
+    ) -> WorkbenchWriteUnitOfWork | None:
+        override = getattr(
+            self,
+            "_workbench_invoice_expense_item_assignment_uow_override",
+            None,
+        )
+        if override is not None:
+            return override
+        state_store = getattr(self, "_state_store", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
+            return None
+        connection = getattr(state_store, "_connection", None)
+        if connection is None:
+            return None
+        idempotency_store = self._workbench_write_idempotency_store(
+            "_workbench_invoice_expense_item_assignment_idempotency_store",
+            connection,
+        )
+        return WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=self._workbench_uow_repository_factory,
+            idempotency_store=idempotency_store,
+        )
+
     def _turnover_ledger_relation_extra_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         override = getattr(self, "_turnover_ledger_relation_extra_write_facade_override", None)
         if override is not None:
@@ -2950,6 +3005,8 @@ class Application:
                 transaction,
                 tenant_id=self._workbench_reconciliation_tenant_id(),
             ),
+            invoice_source_links=PostgresCoreRepository(transaction),
+            operation_audit=PostgresOperationsAuditRepository(transaction),
         )
 
     def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
@@ -4816,6 +4873,11 @@ class Application:
 
     @staticmethod
     def _workbench_timed_action_for_route(*, method: str, route_path: str) -> str | None:
+        if (
+            method == "POST"
+            and route_path == "/api/workbench/actions/assign-invoice-expense-items"
+        ):
+            return "assign_invoice_expense_items"
         if method == "POST" and route_path == "/api/workbench/actions/confirm-link":
             return "confirm_link"
         if method == "POST" and route_path == "/api/workbench/actions/cancel-link":
@@ -6227,6 +6289,67 @@ class Application:
             tenant_id=tenant_id,
         )
 
+    def _handle_api_workbench_assign_invoice_expense_items(
+        self,
+        body: str | None,
+        *,
+        request_id: str | None = None,
+        headers: dict[str, str] | None = None,
+        access_session: OARequestSession | None = None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        safety_error = self._workbench_oa_sync_safety_guard(payload)
+        if safety_error is not None:
+            return safety_error
+        auth_context = self._workbench_write_auth_context(headers, session=access_session)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, tenant_id = auth_context
+        raw_targets = payload.get("targets")
+        target_values = (
+            [value for value in raw_targets if isinstance(value, dict)]
+            if isinstance(raw_targets, list)
+            else []
+        )
+        evidence_target = {
+            "kind": "invoice_expense_item_assignment",
+            "title": f"发票 {str(payload.get('invoice_row_id') or '').strip()}",
+            "fields": [
+                {"label": "关联关系", "value": str(payload.get("case_id") or "").strip()},
+                {"label": "发票", "value": str(payload.get("invoice_row_id") or "").strip()},
+                {"label": "OA 明细数", "value": str(len(target_values))},
+            ],
+        }
+        _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target=evidence_target))
+        status, result = self._workbench_action_api_routes.assign_invoice_expense_items(
+            payload,
+            actor_id=actor_id,
+            tenant_id=tenant_id,
+            request_id=request_id or "no-request-id",
+        )
+        if int(status) >= 400:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=evidence_target,
+                    failure_code=str(result.get("error") or "invoice_expense_item_assignment_failed"),
+                    failure_message=str(result.get("message") or "发票明细归属失败。"),
+                )
+            )
+        else:
+            _REQUEST_AUDIT_EVIDENCE.set(
+                build_operation_evidence(
+                    target=evidence_target,
+                    changes=[{
+                        "label": "OA 明细归属",
+                        "before": "待归属",
+                        "after": f"已归属 {len(target_values)} 项",
+                    }],
+                )
+            )
+        return self._json_response(status, result)
+
     def _handle_api_workbench_confirm_link_preview(self, body: str | None) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
@@ -6294,6 +6417,9 @@ class Application:
             self._workbench_action_api_routes = WorkbenchActionApiRoutes(
                 write_facade_provider=self._workbench_write_facade,
                 anomaly_review_service=getattr(self, "_workbench_anomaly_review_service", None),
+                invoice_expense_item_assignment_service_provider=(
+                    self._workbench_invoice_expense_item_assignment_service
+                ),
             )
         result = self._workbench_action_api_routes.withdraw_link(
             payload,
@@ -7357,6 +7483,14 @@ class Application:
             ),
             restore_import_runtime=self._reload_file_import_runtime_state,
         )
+
+    def _workbench_invoice_expense_item_assignment_service(
+        self,
+    ) -> WorkbenchInvoiceExpenseItemAssignmentService:
+        unit_of_work = self._workbench_invoice_expense_item_assignment_unit_of_work()
+        if unit_of_work is None:
+            raise RuntimeError("Workbench invoice expense-item assignment requires PostgreSQL storage.")
+        return WorkbenchInvoiceExpenseItemAssignmentService(unit_of_work=unit_of_work)
 
     def _handle_workbench_manual_invoice_supplement(
         self,

@@ -240,6 +240,7 @@ class AuthGuardTests(unittest.TestCase):
 
     def test_readonly_export_user_is_rejected_before_all_formerly_unguarded_write_routes(self) -> None:
         write_routes = (
+            ("POST", "/api/workbench/actions/assign-invoice-expense-items"),
             ("POST", "/api/workbench/actions/confirm-cash-pass-through"),
             ("POST", "/api/workbench/actions/confirm-cash-ticket-purchase"),
             ("POST", "/api/workbench/actions/cancel-cash-special"),

@@ -23,6 +23,7 @@ from fin_ops_platform.services.import_file_service import (
     SourceControlEvidence,
 )
 from fin_ops_platform.services.import_preview_audit import ImportPreviewAuditCounts, ImportPreviewDuplicateGroup
+from fin_ops_platform.services.invoice_expense_item_links import InvoiceSourceLinksCasConflict
 from fin_ops_platform.services.imports import ImportPreview
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
 
@@ -1058,6 +1059,66 @@ class PostgresCoreRepository:
         operator_id: str,
         reason: str,
     ) -> dict[str, Any]:
+        """Backward-compatible repair CLI boundary."""
+
+        try:
+            return self.update_invoice_source_links_cas(
+                connection,
+                updates,
+                actor_id=operator_id,
+                reason=reason,
+            )
+        except InvoiceSourceLinksCasConflict as exc:
+            invoice_id = exc.invoice_id
+            raise InvoiceSourceLinksCasConflict(
+                f"Invoice {invoice_id or 'unknown'} changed after the repair plan was built.",
+                invoice_id=invoice_id,
+            ) from exc
+
+    def load_invoice_source_links_for_update(
+        self,
+        connection: Any,
+        *,
+        invoice_id: str,
+    ) -> dict[str, Any] | None:
+        rows = connection.fetch_all(
+            """
+            select
+                coalesce(legacy_mongo_id, id::text) as invoice_id,
+                coalesce(total_with_tax, amount) as invoice_total,
+                coalesce(source_links, '[]'::jsonb) as stored_source_links,
+                case
+                    when jsonb_typeof(source_links) = 'array' then source_links
+                    when jsonb_typeof(raw_payload->'source_links') = 'array'
+                        then raw_payload->'source_links'
+                    when jsonb_typeof(raw_payload->'normalized_payload'->'source_links') = 'array'
+                        then raw_payload->'normalized_payload'->'source_links'
+                    else '[]'::jsonb
+                end as source_links
+            from app.invoices
+            where coalesce(legacy_mongo_id, id::text) = %s
+              and status <> 'deleted'
+            order by id
+            for update
+            """,
+            (str(invoice_id or "").strip(),),
+        )
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise RuntimeError(f"Invoice identity is ambiguous: {invoice_id}")
+        return dict(rows[0])
+
+    def update_invoice_source_links_cas(
+        self,
+        connection: Any,
+        updates: list[dict[str, Any]],
+        *,
+        actor_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """Compare-and-swap canonical invoice provenance inside the caller transaction."""
+
         if updates:
             connection.execute(
                 "select set_config('fin_ops.correction_reason', %s, true)",
@@ -1065,7 +1126,7 @@ class PostgresCoreRepository:
             )
             connection.execute(
                 "select set_config('fin_ops.actor_id', %s, true)",
-                (operator_id,),
+                (actor_id,),
             )
         for update in updates:
             affected = connection.execute(
@@ -1083,8 +1144,10 @@ class PostgresCoreRepository:
                 ),
             )
             if affected != 1:
-                raise RuntimeError(
-                    f"Invoice {update['invoice_id']} changed after the repair plan was built."
+                invoice_id = str(update["invoice_id"])
+                raise InvoiceSourceLinksCasConflict(
+                    f"Invoice {invoice_id} source links changed before the write completed.",
+                    invoice_id=invoice_id,
                 )
         return {"written_invoice_count": len(updates)}
 

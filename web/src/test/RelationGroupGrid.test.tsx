@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { useState } from "react";
 
@@ -1316,6 +1317,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(onRowAction).toHaveBeenCalledWith(
       expect.objectContaining({ sourceExpenseItemIds: ["oa-mixed-anomaly:item:0"] }),
       "enter-invoice",
+      group,
     );
     fireEvent.click(screen.getByText("赵敏"));
     expect(onSelectRow).not.toHaveBeenCalled();
@@ -1343,6 +1345,96 @@ describe("Workbench candidate grouping layout", () => {
     expect(layout?.segments[0]?.rows.oa[0]?.tableValues.projectName).toBe("多个明细 · 2");
     expect(layout?.segments.slice(1).map((segment) => segment.rows.oa[0]?.amount)).toEqual(["33.00", "33.00"]);
     expect(layout?.segments.slice(1).map((segment) => segment.rows.oa[0]?.expenseType)).toEqual(["交通费", "住宿费"]);
+  });
+
+  test("offers explicit OA-item assignment only from the unassigned invoice anomaly", async () => {
+    const user = userEvent.setup();
+    const oaRow = {
+      ...createOaRecord("oa-exp-assignment", "赵敏", "66.00"),
+      expenseItems: [
+        { id: "item-assignment-a", rowIndex: "1", projectName: "项目甲", amount: "27.05", expenseType: "交通费" },
+        { id: "item-assignment-b", rowIndex: "2", projectName: "项目乙", amount: "38.95", expenseType: "住宿费" },
+      ],
+    };
+    const unassignedAnomaly = {
+      code: "oa_invoice_attachment_unassigned" as const,
+      label: "发票待归属",
+      displayLabel: "发票待归属",
+      fingerprint: "c".repeat(64),
+      comparisonUnitId: "case:CASE-MULTI-OA-ATTACHMENT",
+      sourceOaIds: [oaRow.id],
+      sourceExpenseItemIds: [],
+      invoiceRowIds: ["invoice-unassigned-manual"],
+      attachmentFileCount: 0,
+      displayScope: "row" as const,
+      displayPane: "invoice" as const,
+      displayRowId: "invoice-unassigned-manual",
+    };
+    const invoiceRow = {
+      ...createInvoiceRecord("invoice-unassigned-manual", "MANUAL-27-05"),
+      sourceOaId: oaRow.id,
+      workbenchAnomalies: [unassignedAnomaly],
+    };
+    const group: WorkbenchRelationGroup = {
+      id: "case:CASE-MULTI-OA-ATTACHMENT",
+      groupType: "unpaired",
+      matchConfidence: "high",
+      reason: "active relation",
+      rows: { oa: [oaRow], bank: [], invoice: [invoiceRow] },
+    };
+    const onRowAction = vi.fn();
+
+    const view = render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={onRowAction}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="unpaired"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "录入发票" })).not.toBeInTheDocument();
+    await user.hover(screen.getByRole("button", { name: "该发票有 1 项异常，查看详情" }));
+    await user.click(await screen.findByRole("button", { name: "选择 OA 明细" }));
+
+    expect(onRowAction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "invoice-unassigned-manual" }),
+      "assign-invoice-expense-items",
+      group,
+    );
+
+    view.rerender(
+      <RelationGroupGrid
+        canMutateData={false}
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={onRowAction}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        readOnly
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="unpaired"
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: "该发票有 1 项异常，查看详情" }));
+    expect(await screen.findByRole("button", { name: "选择 OA 明细" })).toBeDisabled();
   });
 
   test("keeps a partial attachment invoice source at group level inside a multi-OA group", () => {

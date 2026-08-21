@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  assignWorkbenchInvoiceExpenseItems,
   cancelWorkbenchCashSpecial,
   cancelWorkbenchLink,
   confirmWorkbenchCashPassThrough,
@@ -39,6 +40,42 @@ const workbenchPanes: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
 test("keeps the combined initial and subsequent group pages at a 10-group first screen", () => {
   expect(WORKBENCH_GROUP_PAGE_SIZE).toBe(10);
+});
+
+test("submits explicit invoice ownership through the dedicated command contract", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+
+  await assignWorkbenchInvoiceExpenseItems({
+    caseId: "CASE-1",
+    invoiceRowId: "invoice-27.05",
+    targets: [
+      { oaRowId: "oa-1", expenseItemId: "item-1" },
+      { oaRowId: "oa-1", expenseItemId: "item-2" },
+    ],
+    anomalyFingerprint: "a".repeat(64),
+    idempotencyKey: "assign-ownership-1",
+  });
+
+  expect(fetchSpy).toHaveBeenCalledWith(
+    "/api/workbench/actions/assign-invoice-expense-items",
+    expect.objectContaining({ method: "POST" }),
+  );
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+    case_id: "CASE-1",
+    invoice_row_id: "invoice-27.05",
+    targets: [
+      { oa_row_id: "oa-1", expense_item_id: "item-1" },
+      { oa_row_id: "oa-1", expense_item_id: "item-2" },
+    ],
+    anomaly_fingerprint: "a".repeat(64),
+    idempotency_key: "assign-ownership-1",
+  });
+  fetchSpy.mockRestore();
 });
 
 test("does not infer a safe OA write state when the status contract is missing", async () => {

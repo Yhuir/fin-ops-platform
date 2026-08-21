@@ -75,6 +75,90 @@ class PostgresWorkbenchPageSelectionRepository:
             )
         )
 
+    def get_canonical_rows_by_ids_in_current_transaction(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Hydrate exact canonical rows without opening a nested transaction."""
+
+        return self._canonical_rows_by_ids(row_ids=row_ids, row_types=row_types)
+
+    def get_oa_expense_items_by_row_ids_in_current_transaction(
+        self,
+        oa_row_ids: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Lock and return the current canonical expense items for exact OA rows."""
+
+        normalized_ids = [str(row_id or "").strip() for row_id in oa_row_ids]
+        if (
+            not normalized_ids
+            or any(not row_id for row_id in normalized_ids)
+            or len(set(normalized_ids)) != len(normalized_ids)
+        ):
+            raise ValueError("Canonical OA row ids must be non-empty and unique.")
+        rows = self._connection.fetch_all(
+            f"""
+            with requested as materialized (
+                select row_id, position::bigint
+                from unnest(%s::text[]) with ordinality
+                    as requested_row(row_id, position)
+            ),
+            completed as materialized (
+                select
+                    requested.position,
+                    oa.row_id,
+                    case
+                        when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
+                            then oa.normalized_payload->'expense_items'
+                        else '[]'::jsonb
+                    end as expense_items
+                from requested
+                join app.oa_applications oa on oa.row_id = requested.row_id
+                where oa.status <> 'deleted'
+                  and {_COMPLETED_OA_SQL}
+                for share of oa
+            ),
+            pending as materialized (
+                select
+                    requested.position,
+                    admission.oa_id as row_id,
+                    case
+                        when jsonb_typeof(admission.source_payload->'expense_items') = 'array'
+                            then admission.source_payload->'expense_items'
+                        else '[]'::jsonb
+                    end as expense_items
+                from requested
+                join app.oa_pending_payment_admissions admission
+                  on admission.oa_id = requested.row_id
+                where admission.tenant_id = %s
+                  and admission.workflow_status = 'in_progress'
+                for share of admission
+            )
+            select position, row_id, expense_items
+            from completed
+            union all
+            select position, row_id, expense_items
+            from pending
+            order by position
+            """,
+            (normalized_ids, self._tenant_id),
+        )
+        resolved_ids = [str(row.get("row_id") or "").strip() for row in rows]
+        if resolved_ids != normalized_ids:
+            raise ValueError("Canonical OA expense item source changed.")
+        result: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            row_id = str(row.get("row_id") or "").strip()
+            expense_items = row_payload(row, "expense_items")
+            if not isinstance(expense_items, list):
+                expense_items = []
+            result[row_id] = [
+                dict(item) for item in expense_items if isinstance(item, dict)
+            ]
+        return result
+
     def resolve_canonical_identity_type_candidates_in_current_transaction(
         self,
         row_ids: list[str],

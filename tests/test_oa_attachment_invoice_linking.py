@@ -118,6 +118,28 @@ def test_explicit_expense_item_binding_overrides_historical_attachment_source() 
     assert invoice["source_links"][0]["source_expense_item_id"] == "oa-exp-2201:item:3:old"
 
 
+def test_explicit_current_item_id_does_not_require_a_row_index() -> None:
+    oa_row = {
+        "id": "oa-1",
+        "type": "oa",
+        "expense_items": [{"id": "oa-1:item:0", "amount": "27.05"}],
+    }
+    invoice = {
+        "id": "invoice-27-05",
+        "type": "invoice",
+        "source_links": [{
+            "source_type": "oa_expense_item_invoice",
+            "derived_from_oa_id": "oa-1",
+            "source_expense_item_id": "oa-1:item:0",
+        }],
+    }
+
+    normalize_oa_attachment_expense_item_ids([oa_row, invoice])
+
+    assert invoice["source_expense_item_ids"] == ["oa-1:item:0"]
+    assert invoice["source_oa_row_id"] == "oa-1"
+
+
 def test_malformed_explicit_binding_does_not_fall_back_to_attachment_source() -> None:
     oa_row = {
         "id": "oa-exp-2201",

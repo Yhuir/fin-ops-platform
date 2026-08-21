@@ -155,6 +155,75 @@ test.describe("workbench relation browser flow", () => {
     await expect(page.getByText("OA 1 / 324.80")).toBeVisible();
   });
 
+  test("assigns a residual invoice through explicit OA-item ownership and canonical reread", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchInvoiceAssignmentScenario: true,
+    });
+
+    await page.goto("/");
+
+    const residualSegment = page.getByTestId(
+      "candidate-group-segment-unpaired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:invoice:unassigned",
+    );
+    await expect(residualSegment.getByText("云南天谷科技开发有限公司", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "录入发票" })).toHaveCount(0);
+
+    const anomalyTrigger = residualSegment.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    });
+    await anomalyTrigger.hover();
+    await page.getByRole("button", { name: "选择 OA 明细" }).click();
+
+    const drawer = page.getByRole("dialog", { name: "选择 OA 明细" });
+    await expect(drawer).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    const firstItem = drawer.getByRole("checkbox", { name: /^大理项目，27\.05，/ });
+    const secondItem = drawer.getByRole("checkbox", { name: /^曲靖项目，38\.95，/ });
+    await expect(firstItem).not.toBeChecked();
+    await expect(secondItem).not.toBeChecked();
+    await expect(drawer.getByRole("button", { name: "确认归属" })).toBeDisabled();
+
+    await drawer.getByText("大理项目", { exact: true }).click();
+    await expect(firstItem).toBeChecked();
+    const workbenchReadsBeforeSubmit = api.count("GET /api/workbench");
+    await drawer.getByRole("button", { name: "确认归属" }).click();
+
+    await expect(drawer).toBeHidden();
+    expect(api.count("POST /api/workbench/actions/assign-invoice-expense-items")).toBe(1);
+    expect(api.lastBody("POST /api/workbench/actions/assign-invoice-expense-items")).toMatchObject({
+      case_id: "CASE-E2E-INVOICE-ASSIGNMENT",
+      invoice_row_id: "invoice-e2e-unassigned-27-05",
+      targets: [{
+        oa_row_id: "oa-e2e-invoice-assignment",
+        expense_item_id: "oa-e2e-invoice-assignment:item:0",
+      }],
+      anomaly_fingerprint: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      idempotency_key: expect.any(String),
+    });
+    expect(api.count("GET /api/workbench")).toBe(workbenchReadsBeforeSubmit + 1);
+    await expect(residualSegment).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "该发票有 1 项异常，查看详情" })).toHaveCount(0);
+
+    const assignedSegment = page.getByTestId(
+      "candidate-group-segment-paired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:item:0",
+    );
+    const assignedOaPane = page.getByTestId(
+      "candidate-scroll-paired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:item:0-oa",
+    );
+    const assignedInvoicePane = page.getByTestId(
+      "candidate-scroll-paired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:item:0-invoice",
+    );
+    await expect(assignedSegment.getByText("云南天谷科技开发有限公司", { exact: true })).toBeVisible();
+    const [oaBox, invoiceBox] = await Promise.all([
+      assignedOaPane.boundingBox(),
+      assignedInvoicePane.boundingBox(),
+    ]);
+    expect(oaBox).not.toBeNull();
+    expect(invoiceBox).not.toBeNull();
+    expect(Math.abs((oaBox?.y ?? 0) - (invoiceBox?.y ?? 0))).toBeLessThanOrEqual(2);
+  });
+
   test("confirms a relation in workbench and reflects it in bank details", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",

@@ -38,7 +38,11 @@ type ResizableTriPaneProps = {
   highlightedRowId?: string | null;
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
-  onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  onRowAction: (
+    row: WorkbenchRecord,
+    action: WorkbenchInlineAction,
+    group: WorkbenchRelationGroup,
+  ) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canRequestNextPage?: boolean;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;

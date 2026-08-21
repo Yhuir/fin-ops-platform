@@ -1480,28 +1480,44 @@ normalized_invoice_item_links as materialized (
       on expense.internal_key = invoice.internal_key
      and expense.item_id = invoice.canonical_expense_item_id
 ),
-unassigned_invoice_rows as materialized (
+unassigned_relation_invoices as materialized (
     select distinct
-        expense.internal_key,
-        expense.item_id,
-        invoice.invoice_row_id
-    from oa_expense_items expense
-    join normalized_invoice_anomaly_facts invoice
-      on invoice.internal_key = expense.internal_key
-     and invoice.source_parent_oa_id is not null
-     and exists (
-         select 1
-         from oa_identity_aliases alias
-         where alias.internal_key = expense.internal_key
-           and alias.oa_row_id = expense.oa_row_id
-           and alias.value = invoice.source_parent_oa_id
-     )
-    where not exists (
+        invoice.internal_key,
+        invoice.case_id,
+        invoice.invoice_row_id,
+        invoice.invoice_amount
+    from normalized_invoice_anomaly_facts invoice
+    where exists (
+        select 1
+        from oa_expense_items expense
+        where expense.internal_key = invoice.internal_key
+    )
+      and not exists (
         select 1
         from normalized_invoice_item_links linked
         where linked.internal_key = invoice.internal_key
           and linked.invoice_row_id = invoice.invoice_row_id
     )
+),
+unassigned_invoice_anomaly_items as materialized (
+    select
+        invoice.internal_key,
+        invoice.case_id,
+        encode(digest(
+            convert_to(invoice.case_id, 'UTF8') || decode('00', 'hex') ||
+            convert_to('oa_invoice_attachment_unassigned', 'UTF8') || decode('00', 'hex') ||
+            convert_to(invoice.invoice_row_id, 'UTF8') || decode('00', 'hex') ||
+            decode('00', 'hex') ||
+            decode('00', 'hex') ||
+            convert_to(coalesce(to_char(
+                invoice.invoice_amount,
+                'FM999999999999999999990.00'
+            ), ''), 'UTF8') || decode('00', 'hex') ||
+            convert_to('0', 'UTF8') || decode('00', 'hex') ||
+            convert_to(invoice.invoice_row_id, 'UTF8'),
+            'sha256'
+        ), 'hex') as item_fingerprint
+    from unassigned_relation_invoices invoice
 ),
 unlinked_expense_items as materialized (
     select
@@ -1509,19 +1525,11 @@ unlinked_expense_items as materialized (
         expense.case_id,
         expense.item_id,
         expense.item_amount,
-        expense.attachment_file_count,
-        count(unassigned.invoice_row_id)::bigint as unassigned_invoice_count,
-        string_agg(
-            encode(convert_to(unassigned.invoice_row_id, 'UTF8'), 'hex'),
-            '00' order by unassigned.invoice_row_id
-        ) as invoice_row_ids_hex
+        expense.attachment_file_count
     from oa_expense_items expense
     left join normalized_invoice_item_links linked
       on linked.internal_key = expense.internal_key
      and linked.canonical_expense_item_id = expense.item_id
-    left join unassigned_invoice_rows unassigned
-      on unassigned.internal_key = expense.internal_key
-     and unassigned.item_id = expense.item_id
     where linked.invoice_row_id is null
     group by
         expense.internal_key,
@@ -1537,9 +1545,7 @@ unlinked_expense_anomaly_items as materialized (
         encode(digest(
             convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
             convert_to(
-                case when totals.unassigned_invoice_count > 0
-                     then 'oa_invoice_attachment_unassigned'
-                     when totals.attachment_file_count = 0
+                case when totals.attachment_file_count = 0
                      then 'oa_invoice_attachment_absent'
                      else 'oa_invoice_attachment_unparsed' end,
                 'UTF8'
@@ -1551,10 +1557,7 @@ unlinked_expense_anomaly_items as materialized (
             ), ''), 'UTF8') || decode('00', 'hex') ||
             decode('00', 'hex') ||
             decode('00', 'hex') ||
-            convert_to(totals.attachment_file_count::text, 'UTF8') ||
-            case when totals.unassigned_invoice_count > 0
-                 then decode('00', 'hex') || decode(totals.invoice_row_ids_hex, 'hex')
-                 else ''::bytea end,
+            convert_to(totals.attachment_file_count::text, 'UTF8'),
             'sha256'
         ), 'hex') as item_fingerprint
     from unlinked_expense_items totals
@@ -1567,6 +1570,14 @@ expense_anomaly_items as materialized (
         null::text as exception_code,
         true as has_document_anomaly
     from unlinked_expense_anomaly_items item
+    union all
+    select
+        item.internal_key,
+        item.case_id,
+        item.item_fingerprint,
+        null::text as exception_code,
+        true as has_document_anomaly
+    from unassigned_invoice_anomaly_items item
 ),
 relation_directions as materialized (
     select

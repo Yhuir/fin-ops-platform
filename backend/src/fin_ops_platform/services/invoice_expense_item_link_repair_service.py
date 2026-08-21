@@ -5,6 +5,12 @@ import hashlib
 import json
 from typing import Any
 
+from fin_ops_platform.services.invoice_expense_item_links import (
+    explicit_expense_item_links,
+    replace_explicit_expense_item_links,
+    source_links,
+)
+
 
 def build_invoice_expense_item_link_repair_plan(
     snapshot: list[dict[str, Any]],
@@ -38,33 +44,23 @@ def build_invoice_expense_item_link_repair_plan(
     if actual_total != authorized_total:
         raise ValueError("Invoice provenance repair total does not match the authorized total.")
 
-    intended_link = {
-        "source_type": "oa_expense_item_invoice",
-        "source_workbench_row_id": _text(oa_row_id),
-        "derived_from_oa_id": _text(oa_row_id),
-        "source_expense_item_id": _text(expense_item_id),
-        "source_relation_case_id": _text(case_id),
-        "entry_method": "historical_repair",
-    }
     source_snapshot = []
     updates = []
     for invoice_id in normalized_ids:
         row = rows_by_id[invoice_id]
-        source_links = [dict(link) for link in row.get("source_links") or [] if isinstance(link, dict)]
+        current_source_links = source_links(row.get("source_links"))
         source_snapshot.append(
             {
                 "invoice_id": invoice_id,
                 "digital_invoice_no": _text(row.get("digital_invoice_no")),
                 "total_with_tax": format(_money(row.get("total_with_tax")), "f"),
-                "source_links": source_links,
+                "source_links": current_source_links,
             }
         )
-        expense_links = [
-            link for link in source_links if _text(link.get("source_type")) == "oa_expense_item_invoice"
-        ]
+        expense_links = explicit_expense_item_links(current_source_links)
         if any(
-            _text(link.get("source_expense_item_id")) != intended_link["source_expense_item_id"]
-            or _text(link.get("derived_from_oa_id")) != intended_link["derived_from_oa_id"]
+            _text(link.get("source_expense_item_id")) != _text(expense_item_id)
+            or _text(link.get("derived_from_oa_id")) != _text(oa_row_id)
             for link in expense_links
         ):
             raise ValueError("Invoice provenance repair found a conflicting OA expense-item link.")
@@ -73,8 +69,13 @@ def build_invoice_expense_item_link_repair_plan(
         updates.append(
             {
                 "invoice_id": invoice_id,
-                "before_source_links": source_links,
-                "source_links": [*source_links, intended_link],
+                "before_source_links": current_source_links,
+                "source_links": replace_explicit_expense_item_links(
+                    current_source_links,
+                    case_id=case_id,
+                    targets=[(oa_row_id, expense_item_id)],
+                    entry_method="historical_repair",
+                ),
             }
         )
 

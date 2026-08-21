@@ -240,6 +240,87 @@ function withUnparsedAttachmentGroup(payload: Record<string, unknown>) {
   };
 }
 
+function withUnassignedInvoiceAssignmentGroup(
+  payload: Record<string, unknown>,
+  assigned: boolean,
+) {
+  const paired = payload.paired as { groups: TestWorkbenchApiGroup[] };
+  const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
+  const sourceGroup = [...paired.groups, ...unpaired.groups].find((group) => (
+    group.oa_rows.some((row) => row.id === "oa-exp-2035")
+  ));
+  const sourceOaRow = sourceGroup?.oa_rows.find((row) => row.id === "oa-exp-2035");
+  if (!sourceOaRow) {
+    throw new Error("Missing OA expense claim fixture for invoice assignment test.");
+  }
+  const sourceItems = Array.isArray(sourceOaRow.expense_items)
+    ? sourceOaRow.expense_items as Array<Record<string, unknown>>
+    : [];
+  const oaRow = {
+    ...sourceOaRow,
+    expense_items: sourceItems.map((item, index) => ({
+      ...item,
+      amount: index === 0 ? "27.05" : item.amount,
+    })),
+  };
+  const invoiceRow = {
+    id: "invoice-manual-unassigned-27.05",
+    type: "invoice",
+    case_id: "CASE-INVOICE-ASSIGNMENT",
+    source_oa_id: "oa-exp-2035",
+    ...(assigned ? { source_expense_item_ids: ["oa-exp-2035:item:0"] } : {}),
+    seller_tax_no: "91530112799862049E",
+    seller_name: "云南天谷科技开发有限公司",
+    buyer_tax_no: "915300007194052520",
+    buyer_name: "云南溯源科技有限公司",
+    issue_date: "2026-04-14",
+    amount: "26.26",
+    tax_rate: "3%",
+    tax_amount: "0.79",
+    total_with_tax: "27.05",
+    invoice_type: "进项普票",
+    invoice_bank_relation: { code: "manual_confirmed", label: "完全关联", tone: "success" },
+    available_actions: ["detail"],
+    detail_fields: { 发票号码: "2653700000268955191" },
+  };
+  const assignmentGroup = {
+    group_id: "case:CASE-INVOICE-ASSIGNMENT",
+    group_type: "relation",
+    zone: assigned ? "paired" : "unpaired",
+    match_confidence: "high",
+    reason: "active_formal_relation",
+    oa_rows: [{ ...oaRow, case_id: "CASE-INVOICE-ASSIGNMENT" }],
+    bank_rows: [],
+    invoice_rows: [invoiceRow],
+    ...(assigned ? {} : {
+      workbench_anomaly: {
+        code: "workbench_anomaly",
+        fingerprint: "a".repeat(64),
+        review_decision: "pending",
+        items: [{
+          code: "oa_invoice_attachment_unassigned",
+          label: "发票待归属",
+          display_label: "发票待归属",
+          fingerprint: "c".repeat(64),
+          comparison_unit_id: "case:CASE-INVOICE-ASSIGNMENT",
+          source_oa_ids: ["oa-exp-2035"],
+          source_expense_item_ids: [],
+          invoice_row_ids: [invoiceRow.id],
+          attachment_file_count: 0,
+          display_scope: "row",
+          display_pane: "invoice",
+          display_row_id: invoiceRow.id,
+        }],
+      },
+    }),
+  };
+  return {
+    ...payload,
+    paired: { ...paired, groups: assigned ? [assignmentGroup] : [] },
+    unpaired: { ...unpaired, groups: assigned ? [] : [assignmentGroup] },
+  };
+}
+
 function withTypedIdentityCollision(payload: Record<string, unknown>) {
   const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
   const replaceId = (row: Record<string, unknown>) => (
@@ -2768,6 +2849,86 @@ describe("Workbench row selection and detail drawer", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
     });
+  }, 8_000);
+
+  test("assigns an unowned invoice to explicit OA items and performs exactly one canonical reread", async () => {
+    const user = userEvent.setup();
+    let assigned = false;
+    const assignmentBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => withUnassignedInvoiceAssignmentGroup(payload, assigned),
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/assign-invoice-expense-items") {
+        assignmentBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        assigned = true;
+        return Promise.resolve(jsonResponse({ success: true }));
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const residualSegment = await within(unpairedZone).findByTestId(
+      "candidate-group-segment-unpaired-case:CASE-INVOICE-ASSIGNMENT-oa-exp-2035:invoice:unassigned",
+    );
+    expect(within(residualSegment).getByText("云南天谷科技开发有限公司")).toBeInTheDocument();
+
+    const anomalyTrigger = within(residualSegment).getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    });
+    await user.hover(anomalyTrigger);
+    await user.click(await screen.findByRole("button", { name: "选择 OA 明细" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "选择 OA 明细" });
+    const candidate = within(drawer).getByRole("checkbox", { name: /^曲靖维护项目，27\.05，/ });
+    expect(candidate).not.toBeChecked();
+    expect(within(drawer).getByRole("button", { name: "确认归属" })).toBeDisabled();
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/oa-sync/status"))).toHaveLength(2);
+    }, { timeout: 5_000 });
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
+
+    await user.click(candidate);
+    await user.click(within(drawer).getByRole("button", { name: "确认归属" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "选择 OA 明细" })).not.toBeInTheDocument());
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
+    });
+    expect(assignmentBodies).toEqual([{
+      case_id: "CASE-INVOICE-ASSIGNMENT",
+      invoice_row_id: "invoice-manual-unassigned-27.05",
+      targets: [{
+        oa_row_id: "oa-exp-2035",
+        expense_item_id: "oa-exp-2035:item:0",
+      }],
+      anomaly_fingerprint: "c".repeat(64),
+      idempotency_key: expect.any(String),
+    }]);
+    expect(screen.queryByRole("button", { name: "该发票有 1 项异常，查看详情" })).not.toBeInTheDocument();
+    const pairedZone = screen.getByTestId("zone-paired");
+    const assignedSegment = await within(pairedZone).findByTestId(
+      "candidate-group-segment-paired-case:CASE-INVOICE-ASSIGNMENT-oa-exp-2035:item:0",
+    );
+    expect(within(assignedSegment).getByText("云南天谷科技开发有限公司")).toBeInTheDocument();
   }, 8_000);
 
   test("workbench settings can manage allowed app accounts", async () => {

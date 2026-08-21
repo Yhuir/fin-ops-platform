@@ -4,7 +4,6 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any
 
-from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_matches_oa
 from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row
 
@@ -30,6 +29,55 @@ ATTACHMENT_DISPLAY_LABELS = {
     "oa_invoice_attachment_unparsed": "发票附件未解析",
     "oa_invoice_attachment_unassigned": "发票待归属",
 }
+
+
+def workbench_anomaly_evidence_fingerprint(
+    *,
+    relation_id: str,
+    code: str,
+    comparison_unit_id: str,
+    oa_total: str | None,
+    bank_total: str | None,
+    invoice_total: str | None,
+    attachment_file_count: int,
+    invoice_row_ids: list[str],
+) -> str:
+    """Return the canonical fingerprint shared by anomaly reads and writes."""
+
+    fingerprint_source = "\0".join(
+        [
+            str(relation_id or "").strip(),
+            str(code or "").strip(),
+            str(comparison_unit_id or "").strip(),
+            str(oa_total or ""),
+            str(bank_total or ""),
+            str(invoice_total or ""),
+            str(max(0, int(attachment_file_count))),
+            *sorted(str(value).strip() for value in invoice_row_ids if str(value).strip()),
+        ]
+    )
+    return sha256(fingerprint_source.encode("utf-8")).hexdigest()
+
+
+def unassigned_invoice_anomaly_fingerprint(
+    *,
+    relation_id: str,
+    invoice_row_id: str,
+    invoice_total: str | None,
+) -> str:
+    """Fingerprint one relation invoice that has no valid OA expense-item edge."""
+
+    normalized_invoice_id = str(invoice_row_id or "").strip()
+    return workbench_anomaly_evidence_fingerprint(
+        relation_id=relation_id,
+        code="oa_invoice_attachment_unassigned",
+        comparison_unit_id=normalized_invoice_id,
+        oa_total=None,
+        bank_total=None,
+        invoice_total=invoice_total,
+        attachment_file_count=0,
+        invoice_row_ids=[normalized_invoice_id],
+    )
 
 
 class WorkbenchAmountCheckService:
@@ -412,28 +460,37 @@ class WorkbenchAmountCheckService:
             for item_id in source_item_ids:
                 item_invoice_ids[item_id].add(invoice_id)
 
-        anomalies: list[dict[str, Any]] = []
+        anomalies: list[dict[str, Any]] = [
+            self._anomaly_item(
+                code="oa_invoice_attachment_unassigned",
+                relation_id=relation_id,
+                comparison_unit_id=self._row_id(invoice_row),
+                source_oa_ids=[],
+                source_expense_item_ids=[],
+                oa_total=None,
+                bank_total=None,
+                invoice_total=self._amount(invoice_row),
+                invoice_rows=[invoice_row],
+                attachment_file_count=0,
+                mismatch_pair=None,
+                display_scope="row",
+                display_pane="invoice",
+                display_row_id=self._row_id(invoice_row),
+            )
+            for invoice_row in sorted(
+                unassigned_invoice_rows,
+                key=self._row_id,
+            )
+        ]
         for expense_item_id, (oa_row, expense_item) in expense_by_id.items():
             if item_invoice_ids[expense_item_id]:
                 continue
             attachment_count = self._non_negative_int(expense_item.get("attachment_file_count"))
             source_oa_id = self._row_id(oa_row)
-            matching_unassigned_invoices = [
-                row
-                for row in unassigned_invoice_rows
-                if self._invoice_matches_oa(row, source_oa_id)
-            ]
             code = (
-                "oa_invoice_attachment_unassigned"
-                if matching_unassigned_invoices
-                else "oa_invoice_attachment_absent"
+                "oa_invoice_attachment_absent"
                 if attachment_count <= 0
                 else "oa_invoice_attachment_unparsed"
-            )
-            exact_invoice_id = (
-                self._row_id(matching_unassigned_invoices[0])
-                if len(matching_unassigned_invoices) == 1
-                else ""
             )
             anomalies.append(
                 self._anomaly_item(
@@ -445,12 +502,12 @@ class WorkbenchAmountCheckService:
                     oa_total=self._decimal(expense_item.get("amount")),
                     bank_total=None,
                     invoice_total=None,
-                    invoice_rows=matching_unassigned_invoices,
+                    invoice_rows=[],
                     attachment_file_count=attachment_count,
                     mismatch_pair=None,
-                    display_scope="row" if exact_invoice_id else "expense_item",
-                    display_pane="invoice" if exact_invoice_id else "oa",
-                    display_row_id=exact_invoice_id or expense_item_id,
+                    display_scope="expense_item",
+                    display_pane="oa",
+                    display_row_id=expense_item_id,
                 )
             )
 
@@ -567,22 +624,19 @@ class WorkbenchAmountCheckService:
             "oa_invoice_amount_mismatch": "OA发票金额不一致",
             "bank_invoice_amount_mismatch": "流水发票金额不一致",
         }[code]
-        fingerprint_source = "\0".join(
-            [
-                str(relation_id or "").strip(),
-                code,
-                comparison_unit_id,
-                self._format_amount(oa_total) or "",
-                self._format_amount(bank_total) or "",
-                self._format_amount(invoice_total) or "",
-                str(attachment_file_count),
-                *invoice_row_ids,
-            ]
-        )
         return {
             "code": code,
             "label": label,
-            "fingerprint": sha256(fingerprint_source.encode("utf-8")).hexdigest(),
+            "fingerprint": workbench_anomaly_evidence_fingerprint(
+                relation_id=relation_id,
+                code=code,
+                comparison_unit_id=comparison_unit_id,
+                oa_total=self._format_amount(oa_total),
+                bank_total=self._format_amount(bank_total),
+                invoice_total=self._format_amount(invoice_total),
+                attachment_file_count=attachment_file_count,
+                invoice_row_ids=invoice_row_ids,
+            ),
             "comparison_unit_id": comparison_unit_id,
             "source_oa_ids": [value for value in source_oa_ids if value],
             "source_expense_item_ids": [value for value in source_expense_item_ids if value],
@@ -645,30 +699,6 @@ class WorkbenchAmountCheckService:
             if source_item_id:
                 source_ids.append(source_item_id)
         return list(dict.fromkeys(source_ids))
-
-    @staticmethod
-    def _invoice_matches_oa(invoice_row: dict[str, Any], oa_row_id: str) -> bool:
-        source_links = [
-            source_link
-            for source_link in list(invoice_row.get("source_links") or [])
-            if isinstance(source_link, dict)
-        ]
-        explicit_links = [
-            source_link
-            for source_link in source_links
-            if str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
-        ]
-        effective_links = explicit_links or [
-            source_link
-            for source_link in source_links
-            if str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
-        ]
-        if effective_links:
-            return any(
-                oa_attachment_matches_oa(source_link, oa_row_id)
-                for source_link in effective_links
-            )
-        return oa_attachment_matches_oa(invoice_row, oa_row_id)
 
     @staticmethod
     def _non_negative_int(value: Any) -> int:

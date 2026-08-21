@@ -59,7 +59,11 @@ type RelationGroupGridProps = {
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
   onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
-  onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
+  onRowAction: (
+    row: WorkbenchRecord,
+    action: WorkbenchInlineAction,
+    group: WorkbenchRelationGroup,
+  ) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canRequestNextPage?: boolean;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
@@ -562,7 +566,7 @@ function RelationGroupGrid({
                           leadingControl={segmentIndex === 0 ? renderCollapseControls(paneId) : null}
                           searchQuery={displayState.searchQuery}
                           onOpenDetail={onOpenDetail}
-                          onRowAction={onRowAction}
+                          onRowAction={(row, action) => onRowAction(row, action, group)}
                           onSelectRow={onSelectRow}
                           paneId={paneId}
                           records={segment.rows[paneId]}
@@ -602,7 +606,7 @@ function RelationGroupGrid({
                       leadingControl={renderCollapseControls(paneId)}
                       searchQuery={displayState.searchQuery}
                       onOpenDetail={onOpenDetail}
-                      onRowAction={onRowAction}
+                      onRowAction={(row, action) => onRowAction(row, action, group)}
                       onSelectRow={onSelectRow}
                       paneId={paneId}
                       records={paneRecords(paneId)}
@@ -691,7 +695,7 @@ function RelationGroupGrid({
                       leadingControl={renderCollapseControls(paneId)}
                       searchQuery={displayState.searchQuery}
                       onOpenDetail={onOpenDetail}
-                      onRowAction={onRowAction}
+                      onRowAction={(row, action) => onRowAction(row, action, group)}
                       onSelectRow={onSelectRow}
                       paneId={paneId}
                       records={paneRecords(paneId)}

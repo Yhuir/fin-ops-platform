@@ -43,7 +43,8 @@ type WorkbenchExceptionDrawerProps = {
   onExceptionCodeChange: (code: WorkbenchAmountAnomalyCode) => void;
   onClose: () => void;
   onEnsureGroupDetail: (group: WorkbenchRelationGroup) => Promise<WorkbenchRelationGroup>;
-  onInvoiceEntry: (row: WorkbenchRecord) => void;
+  onInvoiceEntry: (row: WorkbenchRecord, group: WorkbenchRelationGroup) => void;
+  onInvoiceAssignment: (row: WorkbenchRecord, group: WorkbenchRelationGroup) => void;
   onLoadMore: () => Promise<void> | void;
   onReviewAnomaly: (
     group: WorkbenchRelationGroup,
@@ -84,6 +85,7 @@ export default function WorkbenchExceptionDrawer({
   onClose,
   onEnsureGroupDetail,
   onInvoiceEntry,
+  onInvoiceAssignment,
   onLoadMore,
   onReviewAnomaly,
 }: WorkbenchExceptionDrawerProps) {
@@ -339,9 +341,12 @@ export default function WorkbenchExceptionDrawer({
                             groups={[detailGroup]}
                             hidePaneHeaders
                             onOpenDetail={() => undefined}
-                            onRowAction={(row, action) => {
+                            onRowAction={(row, action, actionGroup) => {
                               if (action === "enter-invoice") {
-                                onInvoiceEntry(row);
+                                onInvoiceEntry(row, actionGroup);
+                              }
+                              if (action === "assign-invoice-expense-items") {
+                                onInvoiceAssignment(row, actionGroup);
                               }
                             }}
                             onSelectRow={() => undefined}

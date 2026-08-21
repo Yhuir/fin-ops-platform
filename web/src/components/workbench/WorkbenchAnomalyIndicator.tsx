@@ -18,6 +18,12 @@ type WorkbenchAnomalyIndicatorProps = {
   levelLabel: string;
   externalUrl?: string;
   className?: string;
+  action?: {
+    label: string;
+    disabled?: boolean;
+    disabledReason?: string;
+    onPress: () => void;
+  };
 };
 
 const HOVER_CLOSE_DELAY_MS = 140;
@@ -29,6 +35,7 @@ export default function WorkbenchAnomalyIndicator({
   levelLabel,
   externalUrl,
   className = "",
+  action,
 }: WorkbenchAnomalyIndicatorProps) {
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("idle");
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -170,6 +177,22 @@ export default function WorkbenchAnomalyIndicator({
                 {review.reviewedBy ? ` · ${review.reviewedBy}` : ""}
                 {review.reviewedAt ? ` · ${review.reviewedAt}` : ""}
                 {review.reviewNote ? ` · ${review.reviewNote}` : ""}
+              </div>
+            ) : null}
+            {action ? (
+              <div className="workbench-anomaly-popover__action">
+                <Button
+                  isDisabled={action.disabled}
+                  size="sm"
+                  variant="secondary"
+                  onPress={() => {
+                    setInteractionMode("idle");
+                    action.onPress();
+                  }}
+                >
+                  {action.label}
+                </Button>
+                {action.disabled && action.disabledReason ? <span>{action.disabledReason}</span> : null}
               </div>
             ) : null}
             {externalUrl ? (

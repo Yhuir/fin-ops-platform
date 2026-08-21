@@ -92,6 +92,32 @@ test.describe("workbench exception browser flow", () => {
     await expect(page.getByRole("dialog")).toHaveCount(1);
   });
 
+  test("hands an unassigned invoice from the exception drawer to one OA-item drawer", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchInvoiceAssignmentScenario: true,
+    });
+
+    await page.goto("/");
+    await page
+      .getByTestId("zone-unpaired")
+      .getByRole("button", { name: "未配对异常 1 | 已配对异常 0" })
+      .click();
+
+    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
+    await exceptionDrawer.getByRole("radio", { name: "仅资料异常 1" }).click();
+    await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).click();
+    const indicator = exceptionDrawer.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    });
+    await indicator.hover();
+    await page.getByRole("button", { name: "选择 OA 明细" }).click();
+
+    await expect(exceptionDrawer).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "选择 OA 明细" })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+  });
+
   test("reviews, accepts, and withdraws an automatically classified exact-cent mismatch", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",

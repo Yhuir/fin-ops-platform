@@ -137,6 +137,7 @@ type ApiMockOptions = {
   workbenchBankFlowRuleBatchScenario?: boolean;
   workbenchLargeDataset?: boolean;
   workbenchExplicitBankFanoutScenario?: boolean;
+  workbenchInvoiceAssignmentScenario?: boolean;
   workbenchOaExpenseItemsScenario?: boolean;
   workbenchOaInvoiceUnparsedScenario?: boolean;
   workbenchWithdrawSubmitDelayMs?: number;
@@ -915,6 +916,89 @@ function buildOaExpenseItemsWorkbenchGroup() {
       },
     ],
     can_withdraw: false,
+  };
+}
+
+function buildInvoiceAssignmentWorkbenchGroup(assigned: boolean) {
+  const rows = workbenchRows();
+  const caseId = "CASE-E2E-INVOICE-ASSIGNMENT";
+  const oaRowId = "oa-e2e-invoice-assignment";
+  const firstItemId = `${oaRowId}:item:0`;
+  const secondItemId = `${oaRowId}:item:1`;
+  const invoiceRowId = "invoice-e2e-unassigned-27-05";
+  return {
+    group_id: `case:${caseId}`,
+    group_type: "relation",
+    match_confidence: "high",
+    reason: "browser_e2e_invoice_expense_item_assignment",
+    oa_rows: [{
+      ...rows.oa,
+      id: oaRowId,
+      case_id: caseId,
+      applicant: "黄亮",
+      project_name: "大理项目；曲靖项目",
+      project_name_display: "多个项目",
+      project_names: ["大理项目", "曲靖项目"],
+      expense_items: [
+        {
+          id: firstItemId,
+          row_index: "0",
+          project_name: "大理项目",
+          expense_type: "交通费",
+          amount: "27.05",
+        },
+        {
+          id: secondItemId,
+          row_index: "1",
+          project_name: "曲靖项目",
+          expense_type: "住宿费",
+          amount: "38.95",
+        },
+      ],
+      apply_type: "日常报销",
+      amount: "66.00",
+      counterparty_name: "黄亮",
+      reason: "人工录入发票等待明确付款项归属",
+    }],
+    bank_rows: [],
+    invoice_rows: [{
+      ...rows.invoice,
+      id: invoiceRowId,
+      case_id: caseId,
+      source_oa_id: oaRowId,
+      ...(assigned ? { source_expense_item_ids: [firstItemId] } : {}),
+      seller_name: "云南天谷科技开发有限公司",
+      invoice_no: "2653700000268955191",
+      amount: "26.26",
+      tax_amount: "0.79",
+      total_with_tax: "27.05",
+      detail_fields: {
+        ...rows.invoice.detail_fields,
+        发票号码: "2653700000268955191",
+      },
+    }],
+    can_withdraw: true,
+    ...(assigned ? {} : {
+      workbench_anomaly: {
+        code: "workbench_anomaly",
+        fingerprint: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        review_decision: null,
+        items: [{
+          code: "oa_invoice_attachment_unassigned",
+          label: "发票待归属",
+          display_label: "发票待归属",
+          fingerprint: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          comparison_unit_id: `case:${caseId}`,
+          source_oa_ids: [oaRowId],
+          source_expense_item_ids: [],
+          invoice_row_ids: [invoiceRowId],
+          attachment_file_count: 0,
+          display_scope: "row",
+          display_pane: "invoice",
+          display_row_id: invoiceRowId,
+        }],
+      },
+    }),
   };
 }
 
@@ -8351,6 +8435,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     || options.workbenchInitialIncompleteRelation === true;
   let oaSyncRevision = 1;
   let workbenchAmountMismatchDecision: WorkbenchAnomalyReviewDecision = null;
+  let workbenchInvoiceAssignmentCommitted = false;
   let workbenchConfirmSubmitAttempts = 0;
   let workbenchMutationCommitted = false;
   let workbenchGroupsFailuresRemaining = options.workbenchGroupsFailuresBeforeSuccess ?? 0;
@@ -9597,6 +9682,39 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           return "";
         }
       };
+      if (options.workbenchInvoiceAssignmentScenario) {
+        const payload = workbenchInitialPayload(workbenchInvoiceAssignmentCommitted);
+        const groups = [withWorkbenchDetailKey(buildInvoiceAssignmentWorkbenchGroup(
+          workbenchInvoiceAssignmentCommitted,
+        ))];
+        const pairedGroups = workbenchInvoiceAssignmentCommitted ? groups : [];
+        const unpairedGroups = workbenchInvoiceAssignmentCommitted ? [] : groups;
+        return json(route, {
+          ...payload,
+          summary: {
+            ...payload.summary,
+            oa_count: 1,
+            bank_count: 0,
+            invoice_count: 1,
+            paired_count: pairedGroups.length,
+            unpaired_count: unpairedGroups.length,
+            paired_exception_count: 0,
+            unpaired_exception_count: unpairedGroups.length,
+          },
+          paired: {
+            ...payload.paired,
+            total: pairedGroups.length,
+            row_counts: countWorkbenchRows(pairedGroups),
+            groups: pairedGroups,
+          },
+          unpaired: {
+            ...payload.unpaired,
+            total: unpairedGroups.length,
+            row_counts: countWorkbenchRows(unpairedGroups),
+            groups: unpairedGroups,
+          },
+        });
+      }
       if (options.workbenchOaExpenseItemsScenario) {
         const payload = workbenchInitialPayload(relationConfirmed);
         const groups = relationConfirmed ? [] : [withWorkbenchDetailKey(buildOaExpenseItemsWorkbenchGroup())];
@@ -9983,6 +10101,31 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           exception_counts: projection.counts,
         });
       }
+      if (options.workbenchInvoiceAssignmentScenario) {
+        const assignmentZone: WorkbenchZone = workbenchInvoiceAssignmentCommitted ? "paired" : "unpaired";
+        const allGroups = zone === assignmentZone
+          ? [withWorkbenchDetailKey(buildInvoiceAssignmentWorkbenchGroup(workbenchInvoiceAssignmentCommitted))]
+          : [];
+        const projection = exceptionBucket
+          ? workbenchExceptionProjection(
+            allGroups,
+            url.searchParams.get("exception_view") ?? "",
+            url.searchParams.get("exception_code") ?? "",
+          )
+          : { groups: allGroups, selectedExceptionCode: null, counts: null };
+        return json(route, {
+          groups: projection.groups,
+          total: projection.groups.length,
+          row_counts: countWorkbenchRows(projection.groups),
+          page_size: Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
+          has_more: false,
+          next_cursor: null,
+          ...(projection.counts ? {
+            selected_exception_code: projection.selectedExceptionCode,
+            exception_counts: projection.counts,
+          } : {}),
+        });
+      }
       if (options.workbenchBankFlowRuleBatchScenario) {
         const bankFlowRuleConverged = options.bankFlowRuleWorkbenchConvergence
           && bankFlowRuleBatchStatus === "submitted";
@@ -10085,7 +10228,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const exceptionDatasetMatchesZone = zone === "paired"
         ? workbenchAmountMismatchDecision === "accept_paired"
         : workbenchAmountMismatchDecision !== "accept_paired";
-      const sourceGroups = options.workbenchBankFlowRuleBatchScenario
+      const sourceGroups = options.workbenchInvoiceAssignmentScenario
+        ? zone === (workbenchInvoiceAssignmentCommitted ? "paired" : "unpaired")
+          ? [buildInvoiceAssignmentWorkbenchGroup(workbenchInvoiceAssignmentCommitted)]
+          : []
+        : options.workbenchBankFlowRuleBatchScenario
         ? bankFlowRuleWorkbenchGroups(zone, relationConfirmed, true)
         : options.workbenchOaInvoiceUnparsedScenario
           ? zone === "unpaired" ? [buildOaInvoiceUnparsedWorkbenchGroup()] : []
@@ -10135,6 +10282,18 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/workbench/settings") {
       return json(route, workbenchSettingsPayload());
+    }
+
+    if (path === "/api/workbench/actions/assign-invoice-expense-items") {
+      workbenchInvoiceAssignmentCommitted = true;
+      workbenchMutationCommitted = true;
+      return json(route, {
+        success: true,
+        action: "assign_invoice_expense_items",
+        case_id: "CASE-E2E-INVOICE-ASSIGNMENT",
+        invoice_row_id: "invoice-e2e-unassigned-27-05",
+        source_expense_item_ids: ["oa-e2e-invoice-assignment:item:0"],
+      });
     }
 
     if (path === "/api/workbench/actions/confirm-link/preview") {

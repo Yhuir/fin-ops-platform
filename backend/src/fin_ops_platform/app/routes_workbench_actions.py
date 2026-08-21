@@ -7,6 +7,15 @@ from fin_ops_platform.services.workbench_anomaly_review_service import (
     WorkbenchAnomalyReviewConflict,
     WorkbenchAnomalyReviewService,
 )
+from fin_ops_platform.services.workbench_idempotency import (
+    WorkbenchIdempotencyFailed,
+    WorkbenchIdempotencyInProgress,
+    WorkbenchIdempotencyKeyConflict,
+)
+from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
+    WorkbenchInvoiceExpenseItemAssignmentError,
+)
+from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
 
 class WorkbenchActionApiRoutes:
@@ -17,9 +26,57 @@ class WorkbenchActionApiRoutes:
         *,
         write_facade_provider: Callable[[], Any],
         anomaly_review_service: WorkbenchAnomalyReviewService | None = None,
+        invoice_expense_item_assignment_service_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._write_facade_provider = write_facade_provider
         self._anomaly_review_service = anomaly_review_service
+        self._invoice_expense_item_assignment_service_provider = (
+            invoice_expense_item_assignment_service_provider
+        )
+
+    def assign_invoice_expense_items(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        tenant_id: str,
+        request_id: str,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        provider = self._invoice_expense_item_assignment_service_provider
+        if provider is None:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "invoice_expense_item_assignment_unavailable",
+                "message": "发票明细归属服务暂时不可用。",
+            }
+        try:
+            service = provider()
+        except RuntimeError:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "invoice_expense_item_assignment_unavailable",
+                "message": "发票明细归属服务暂时不可用。",
+            }
+        try:
+            result = service.assign(
+                payload,
+                actor_id=actor_id,
+                tenant_id=tenant_id,
+                request_id=request_id,
+            )
+        except WorkbenchInvoiceExpenseItemAssignmentError as exc:
+            return HTTPStatus(exc.status_code), {
+                "error": exc.code,
+                "message": exc.message,
+            }
+        except (
+            WorkbenchIdempotencyFailed,
+            WorkbenchIdempotencyInProgress,
+            WorkbenchIdempotencyKeyConflict,
+        ) as exc:
+            return HTTPStatus(exc.status_code), exc.to_response_payload()
+        except WorkbenchWriteConflict as exc:
+            conflict_payload = exc.to_response_payload()
+            return HTTPStatus(exc.status_code), dict(conflict_payload["payload"])
+        return HTTPStatus.OK, dict(result)
 
     def review_anomaly(
         self,

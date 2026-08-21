@@ -937,6 +937,25 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 `POST /api/workbench/oa-invoice-supplements/manual` 接收该用户完整 preview 的 `session_id`、全部 `file_ids`，以及精确 `case_id`、`oa_row_id`、`expense_item_id`。确认在一个业务事务内创建或复用 canonical invoice、追加 `oa_expense_item_invoice` 来源边并创建/扩展正式关系；任一步失败全部回滚。已有 `oa_attachment_invoice` 继续保留为审计来源，但只要存在显式 expense-item 来源边，展示和异常归属就只消费显式来源。成功返回最终 `case_id` 与 `invoice_row_ids[]`，页面随后只执行一次 canonical Workbench 回读。
 
+`POST /api/workbench/actions/assign-invoice-expense-items` 把已属于同一 active relation、但缺少有效费用明细来源边的一张 canonical invoice 显式归属到一个或多个 OA 费用明细。请求为：
+
+```json
+{
+  "case_id": "CASE-1",
+  "invoice_row_id": "invoice-1",
+  "targets": [
+    {"oa_row_id": "oa-1", "expense_item_id": "oa-1:item:0"}
+  ],
+  "anomaly_fingerprint": "<该发票行 oa_invoice_attachment_unassigned item fingerprint>",
+  "idempotency_key": "<client-generated key>"
+}
+```
+
+- `targets` 必须包含 1～100 个不重复目标；invoice、每个 OA 及其 expense item 必须仍属于请求中的同一 active case。服务端 actor/tenant 来自已认证 session，请求受 Workbench 写权限、global mutation block 与 OA sync safety gate 约束。
+- 服务端在一个 Workbench UoW 中锁定 relation members 与 invoice source links，并重验 canonical rows、现有显式/历史来源、item fingerprint、幂等键及 source-links CAS。金额、项目名称和展示顺序不参与归属判断。已有不同或不完整的显式 `oa_expense_item_invoice` 边、其它有效 item ownership、成员/item/fingerprint/CAS 漂移均返回冲突且零写；不得静默覆盖旧归属。
+- 成功返回 `200` 与 `success=true`、`changed`、`case_id`、`invoice_row_id`、排序后的 `targets`；实际写入时还返回 `previous_anomaly_fingerprint`。精确相同 targets 的幂等重放可返回 `changed=false`。写入只保留原有非显式来源并追加所选 `oa_expense_item_invoice` 边和 operation audit，不修改 relation topology 或 canonical amounts。
+- 前端成功后只执行一次 canonical Workbench GET；不得在浏览器本地删除异常、移动分区或拼装同行。失败不得自动重试 mutation。该 action 不新增 schema、read model、worker、queue 或 cache。
+
 ## 发票生命周期状态
 
 待找发票、进项发票使用情况、OA 待付款核对、销项发票收款情况和税金抵扣的 lifecycle 字段保持原响应 shape：

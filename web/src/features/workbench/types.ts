@@ -307,6 +307,43 @@ export type WorkbenchOaInvoiceSupplementTarget = {
   expenseItemId: string;
 };
 
+export type WorkbenchInvoiceExpenseItemCandidate = {
+  key: string;
+  oaRowId: string;
+  oaLabel: string;
+  expenseItemId: string;
+  rowIndex: string;
+  projectName: string;
+  amount: string;
+  expenseType?: string;
+  feeContent?: string;
+  feeDescription?: string;
+};
+
+export type WorkbenchInvoiceExpenseItemSelection = {
+  oaRowId: string;
+  expenseItemId: string;
+};
+
+export type WorkbenchInvoiceExpenseItemAssignmentTarget = {
+  caseId: string;
+  invoiceRowId: string;
+  invoiceNo: string;
+  sellerName: string;
+  amount: string;
+  anomalyFingerprint: string;
+  idempotencyKey: string;
+  candidates: WorkbenchInvoiceExpenseItemCandidate[];
+};
+
+export type WorkbenchInvoiceExpenseItemAssignmentPayload = {
+  caseId: string;
+  invoiceRowId: string;
+  targets: WorkbenchInvoiceExpenseItemSelection[];
+  anomalyFingerprint: string;
+  idempotencyKey: string;
+};
+
 export type WorkbenchOaSupportingDocument = {
   id: string;
   relationCaseId?: string;

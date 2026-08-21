@@ -11,7 +11,8 @@ export type WorkbenchInlineAction =
   | "confirm-cash-pass-through"
   | "confirm-cash-ticket-purchase"
   | "cancel-cash-special"
-  | "enter-invoice";
+  | "enter-invoice"
+  | "assign-invoice-expense-items";
 
 type RowActionsProps = {
   recordType: WorkbenchRecordType;

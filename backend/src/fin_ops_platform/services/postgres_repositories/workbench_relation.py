@@ -126,6 +126,37 @@ class PostgresWorkbenchRelationRepository:
         payload = row_payload(rows[0], "raw_payload")
         return dict(payload) if isinstance(payload, dict) else None
 
+    def load_active_workbench_pair_relation_by_case_id_for_update(
+        self,
+        case_id: str,
+    ) -> dict[str, Any] | None:
+        normalized_case_id = text(case_id)
+        if not normalized_case_id:
+            return None
+        rows = self._connection.fetch_all(
+            """
+            select case_id, relation_mode, row_ids, row_types, raw_payload, updated_at
+            from app.workbench_pair_relations
+            where case_id = %s
+              and status = 'active'
+            limit 1
+            for update
+            """,
+            (normalized_case_id,),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        payload = row_payload(row, "raw_payload")
+        return {
+            **(dict(payload) if isinstance(payload, dict) else {}),
+            "case_id": normalized_case_id,
+            "relation_mode": text(row.get("relation_mode")),
+            "row_ids": text_list(row.get("row_ids")),
+            "row_types": text_list(row.get("row_types")),
+            "updated_at": row.get("updated_at"),
+        }
+
     def load_active_bank_requirement_relations_for_tag_codes(
         self,
         tag_codes: list[str],

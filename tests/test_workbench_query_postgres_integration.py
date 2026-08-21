@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 import os
 import time
+from types import SimpleNamespace
 import unittest
 from typing import Any
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
     PostgresWorkbenchPageQueryRepository,
+)
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.operations_audit import (
+    PostgresOperationsAuditRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench import (
     PostgresWorkbenchRepository,
@@ -19,6 +24,16 @@ from fin_ops_platform.services.workbench_direct_query_errors import (
 from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
     PostgresWorkbenchPageSelectionRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+    PostgresWorkbenchIdempotencyRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
+)
+from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
+    WorkbenchInvoiceExpenseItemAssignmentService,
+)
+from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
 )
@@ -681,7 +696,40 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 for item in group["workbench_anomaly"]["items"]
             }
 
-        self.assertEqual(anomaly_codes(), {"oa_invoice_attachment_unparsed"})
+        self.assertEqual(
+            anomaly_codes(),
+            {"oa_invoice_attachment_unassigned", "oa_invoice_attachment_unparsed"},
+        )
+
+        self.raw_connection.execute(
+            """
+            update app.oa_applications
+            set normalized_payload = jsonb_set(
+                normalized_payload,
+                '{expense_items}',
+                '[]'::jsonb
+            )
+            where row_id = 'oa-direct-1'
+            """
+        )
+        no_expense_item_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="unpaired", exception_bucket="unpaired",
+        )
+        self.assertNotIn(
+            "CASE-DIRECT-1",
+            {item.get("detail_key") for item in no_expense_item_page["groups"]},
+        )
+        self.raw_connection.execute(
+            """
+            update app.oa_applications
+            set normalized_payload = jsonb_set(
+                normalized_payload,
+                '{expense_items}',
+                '[{"id":"oa-direct-1:item:0","amount":"100","attachment_file_count":"1"}]'::jsonb
+            )
+            where row_id = 'oa-direct-1'
+            """
+        )
         historical_link = [{
             "source_type": "oa_attachment_invoice",
             "derived_from_oa_id": "oa-direct-1",
@@ -692,7 +740,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             "update app.invoices set source_links = %s::jsonb where legacy_mongo_id = 'invoice-narrow-doc'",
             (json.dumps(historical_link, ensure_ascii=False),),
         )
-        self.assertEqual(anomaly_codes(), {"oa_invoice_attachment_unassigned"})
+        self.assertEqual(
+            anomaly_codes(),
+            {"oa_invoice_attachment_unassigned", "oa_invoice_attachment_unparsed"},
+        )
 
         explicit_link = {
             "source_type": "oa_expense_item_invoice",
@@ -712,6 +763,135 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             "CASE-DIRECT-1",
             {item.get("detail_key") for item in exception_page["groups"]},
         )
+
+    def test_assign_invoice_expense_item_closes_document_only_anomaly_atomically(self) -> None:
+        self.raw_connection.execute(
+            """
+            update app.oa_applications
+            set normalized_payload = jsonb_set(
+                normalized_payload,
+                '{expense_items,0,attachment_file_count}',
+                '"1"'::jsonb
+            )
+            where row_id = 'oa-direct-1';
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status,
+                workbench_visibility, source_links, raw_payload
+            ) values (
+                'invoice-assignment', 'input', 'INV-ASSIGNMENT', '2026-07-23',
+                '2026-07-01', 100, 100, 100, 'active', 'visible',
+                '[{"source_type":"manual_invoice_import","source_id":"manual-1"}]'::jsonb,
+                '{}'::jsonb
+            );
+            update app.workbench_pair_relations
+            set row_ids = array['oa-direct-1','bank-direct-1','invoice-assignment'],
+                row_types = array['oa','bank','invoice'],
+                special_metadata = '{"requires_oa":true,"requires_invoice":true}'::jsonb
+            where case_id = 'CASE-DIRECT-1'
+            """
+        )
+        before_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="unpaired", exception_bucket="unpaired",
+        )
+        before_group = next(
+            item for item in before_page["groups"]
+            if item.get("detail_key") == "CASE-DIRECT-1"
+        )
+        unassigned_item = next(
+            item for item in before_group["workbench_anomaly"]["items"]
+            if item.get("code") == "oa_invoice_attachment_unassigned"
+            and item.get("display_row_id") == "invoice-assignment"
+        )
+        canonical_expense_item_id = str(
+            before_group["oa_rows"][0]["expense_items"][0]["id"]
+        )
+
+        def repository_factory(transaction: object) -> SimpleNamespace:
+            workbench = PostgresWorkbenchRepository(transaction)
+            return SimpleNamespace(
+                pair_relations=PostgresWorkbenchRelationRepository(transaction),
+                exception_cases=workbench,
+                row_overrides=workbench,
+                canonical_query=PostgresWorkbenchPageSelectionRepository(
+                    transaction,
+                    tenant_id="default",
+                ),
+                invoice_source_links=PostgresCoreRepository(transaction),
+                operation_audit=PostgresOperationsAuditRepository(transaction),
+            )
+
+        service = WorkbenchInvoiceExpenseItemAssignmentService(
+            unit_of_work=WorkbenchWriteUnitOfWork(
+                connection=self.raw_connection,
+                repository_factory=repository_factory,
+                idempotency_store=PostgresWorkbenchIdempotencyRepository(
+                    self.raw_connection
+                ),
+            )
+        )
+        request = {
+            "case_id": "CASE-DIRECT-1",
+            "invoice_row_id": "invoice-assignment",
+            "targets": [{
+                "oa_row_id": "oa-direct-1",
+                "expense_item_id": canonical_expense_item_id,
+            }],
+            "anomaly_fingerprint": unassigned_item["fingerprint"],
+            "idempotency_key": "assignment-pg-1",
+        }
+        first = service.assign(
+            request,
+            actor_id="test-finance-user",
+            tenant_id="default",
+            request_id="assignment-request-1",
+        )
+        replay = service.assign(
+            request,
+            actor_id="test-finance-user",
+            tenant_id="default",
+            request_id="assignment-request-2",
+        )
+        noop = service.assign(
+            {**request, "idempotency_key": "assignment-pg-2"},
+            actor_id="test-finance-user",
+            tenant_id="default",
+            request_id="assignment-request-3",
+        )
+
+        self.assertEqual(replay, first)
+        self.assertTrue(first["success"])
+        self.assertFalse(noop["changed"])
+        source_row = self.raw_connection.fetch_one(
+            """
+            select source_links
+            from app.invoices
+            where legacy_mongo_id = 'invoice-assignment'
+            """
+        )
+        source_links = list((source_row or {}).get("source_links") or [])
+        self.assertEqual(source_links[0]["source_type"], "manual_invoice_import")
+        self.assertEqual(
+            source_links[1]["source_expense_item_id"],
+            canonical_expense_item_id,
+        )
+        business_audit = self.raw_connection.fetch_one(
+            """
+            select count(*)::integer as count
+            from audit.events
+            where event_type = 'workbench.invoice_expense_items.assigned'
+              and object_id = 'invoice-assignment'
+            """
+        )
+        self.assertEqual(int((business_audit or {}).get("count") or 0), 1)
+        after_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="paired",
+        )
+        after_group = next(
+            item for item in after_page["groups"]
+            if item.get("detail_key") == "CASE-DIRECT-1"
+        )
+        self.assertIsNone(after_group.get("workbench_anomaly"))
 
     def test_exception_views_count_unique_relations_and_auto_select_first_amount_code(self) -> None:
         fixtures = [

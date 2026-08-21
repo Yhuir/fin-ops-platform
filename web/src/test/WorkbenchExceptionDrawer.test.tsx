@@ -103,6 +103,7 @@ function renderDrawer(
       onClose={vi.fn()}
       onExceptionCodeChange={options.onExceptionCodeChange ?? vi.fn()}
       onEnsureGroupDetail={async (value) => value}
+      onInvoiceAssignment={vi.fn()}
       onInvoiceEntry={vi.fn()}
       onLoadMore={vi.fn()}
       onReviewAnomaly={onReviewAnomaly}

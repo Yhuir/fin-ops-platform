@@ -307,6 +307,13 @@ _EXACT_ROUTES = {
 
 
 _WORKBENCH_ACTIONS = {
+    "assign-invoice-expense-items": _semantic(
+        "workbench.invoice_expense_items.assign",
+        "归属发票 OA 明细",
+        "invoice_expense_item_assignment",
+        "发票 OA 明细归属",
+        "将关联关系中的一张发票归属到用户明确选择的 OA 明细。",
+    ),
     "confirm-link": _semantic(
         "workbench.relation.confirm", "确认关联", "workbench_relation", "关联关系", "将所选 OA、流水和发票确认关联。"
     ),
