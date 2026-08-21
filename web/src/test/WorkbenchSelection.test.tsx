@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -2455,6 +2457,83 @@ describe("Workbench row selection and detail drawer", () => {
       expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
       expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
     });
+  });
+
+  test("paired selection survives an OA revision while a deferred zone query is settling", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+          version: 1,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+          version: 2,
+        },
+      ],
+    });
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const pairedBankRow = await within(pairedZone).findByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+    const pairedInvoiceRow = within(pairedZone).getByRole("row", {
+      name: /91310000MA1K8A001X.*华东设备供应商/,
+    });
+
+    fireEvent.change(
+      within(pairedZone).getByRole("searchbox", { name: "搜索已配对区域" }),
+      { target: { value: "华东设备供应商" } },
+    );
+    await user.click(pairedBankRow);
+    await user.click(pairedInvoiceRow);
+
+    expect(within(pairedZone).getByText("已选 2")).toBeInTheDocument();
+    expect(pairedBankRow).toHaveAttribute("data-row-state", "selected");
+    expect(pairedInvoiceRow).toHaveAttribute("data-row-state", "selected");
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => (
+        fetchPath(input).startsWith("/api/oa-sync/status")
+      )).length).toBeGreaterThanOrEqual(2);
+    }, { timeout: 5_000 });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(fetchPath(input), "http://localhost");
+        return url.pathname === "/api/workbench/groups"
+          && url.searchParams.get("zone") === "paired"
+          && url.searchParams.get("search") === "华东设备供应商";
+      })).toBe(true);
+    });
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 250)));
+
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
+    expect(within(pairedZone).getByText("已选 2")).toBeInTheDocument();
+    expect(within(pairedZone).getByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    })).toHaveAttribute("data-row-state", "selected");
+    expect(within(pairedZone).getByRole("row", {
+      name: /91310000MA1K8A001X.*华东设备供应商/,
+    })).toHaveAttribute("data-row-state", "selected");
+  }, 8_000);
+
+  test("commits the OA interaction guard without writing shared refs during render", () => {
+    const source = readFileSync("src/pages/ReconciliationWorkbenchPage.tsx", "utf8");
+
+    expect(source).toMatch(
+      /useLayoutEffect\(\(\) => \{\s*hasOaSyncRefreshBlockingInteractionRef\.current = hasOaSyncRefreshBlockingInteraction;\s*\}, \[hasOaSyncRefreshBlockingInteraction\]\);/,
+    );
+    expect(source.match(/hasOaSyncRefreshBlockingInteractionRef\.current\s*=/g)).toHaveLength(1);
   });
 
   test("OA status transport failures fail closed until the visible retry succeeds", async () => {

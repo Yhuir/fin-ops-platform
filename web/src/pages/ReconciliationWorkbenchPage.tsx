@@ -1,5 +1,5 @@
 import { Button, Input, TextArea } from "@heroui/react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
 import AppDialog from "../components/common/AppDialog";
@@ -412,7 +412,9 @@ export default function ReconciliationWorkbenchPage() {
     || relationPreviewDialog !== null
     || invoiceEntryTarget !== null;
   const hasOaSyncRefreshBlockingInteractionRef = useRef(hasOaSyncRefreshBlockingInteraction);
-  hasOaSyncRefreshBlockingInteractionRef.current = hasOaSyncRefreshBlockingInteraction;
+  useLayoutEffect(() => {
+    hasOaSyncRefreshBlockingInteractionRef.current = hasOaSyncRefreshBlockingInteraction;
+  }, [hasOaSyncRefreshBlockingInteraction]);
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "pairedDisplayState",

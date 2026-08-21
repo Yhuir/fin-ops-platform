@@ -56,6 +56,46 @@ test.describe("workbench direct error browser flow", () => {
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
   });
 
+  test("keeps paired bank and invoice rows selected across OA sync during deferred search rendering", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchInitialRelationConfirmed: true,
+    });
+
+    await page.goto("/");
+
+    const pairedZone = page.getByTestId("zone-paired");
+    const pairedSearch = pairedZone.getByRole("searchbox", { name: "搜索已配对区域" });
+    const pairedGroup = page.getByTestId("candidate-group-paired-case:CASE-202603-101");
+    await expect(pairedGroup).toBeVisible();
+    await expect.poll(() => api.count("GET /api/oa-sync/status")).toBeGreaterThan(0);
+
+    await pairedSearch.pressSequentially("智能工厂", { delay: 0 });
+    const bankRow = pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ });
+    const invoiceRow = pairedGroup.getByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+    await bankRow.click();
+    await invoiceRow.getByRole("cell").first().click();
+    await expect(pairedZone.getByText("已选 2")).toBeVisible();
+    await expect(bankRow).toHaveAttribute("data-row-state", "selected");
+    await expect(invoiceRow).toHaveAttribute("data-row-state", "selected");
+
+    const workbenchLoadsBeforeSync = api.count("GET /api/workbench");
+    const oaStatusLoadsBeforeSync = api.count("GET /api/oa-sync/status");
+    api.advanceOaSyncRevision();
+    await expect.poll(
+      () => api.count("GET /api/oa-sync/status"),
+      { timeout: 5_000 },
+    ).toBeGreaterThan(oaStatusLoadsBeforeSync);
+    await page.waitForTimeout(250);
+
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync);
+    await expect(pairedZone.getByText("已选 2")).toBeVisible();
+    await expect(bankRow).toHaveAttribute("data-row-state", "selected");
+    await expect(invoiceRow).toHaveAttribute("data-row-state", "selected");
+  });
+
   test("keeps a relation preview open across OA sync and rereads once all interactions close", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
