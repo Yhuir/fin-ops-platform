@@ -1802,6 +1802,10 @@
 - canonical anomaly spine 改为直接读取原始 `expense_items[]`，当前页继续由既有 `PostgresWorkbenchPageHydrationRepository` 批量装配补充凭证。保留完整历史 OA/发票 identity alias 映射，不再把曾导致异常 bucket 500 的旧映射删除与本优化混用。
 - 不新增 SQL round-trip、API、表、索引、migration、cache、read model、worker、依赖或 fallback；查询职责和模块 I/O 不变。
 
+## 2026-08-21 - Filter-options 异常候选与 OA 申请人投影收窄
+
+- direct repository 仅收窄查询内部数据：filter-options 普通请求只计算会跨区的基础 paired 关系异常，unpaired 异常视图仍覆盖两区；OA 申请人只投影类型、流程和申请人文本。API DTO、异常规则和模块 I/O 不变，旧宽投影不保留。
+
 ## 2026-08-21 - 三栏详情入口去方框化
 
 - OA、银行流水、发票仍在各自首要身份行展示详情入口，但三处重复的白底描边 `Info` 方框统一收口为 `WorkbenchRecordCard` 内部私有的透明 `Eye` 触发器：28px 命中区、15px 图标、无背景/边框/阴影，仅用中性色到品牌色的 120ms 颜色反馈；键盘焦点保留 2px 可见轮廓，hover/focus 由现有 HeroUI Tooltip 提供明确文案。

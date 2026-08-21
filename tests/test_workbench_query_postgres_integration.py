@@ -507,6 +507,46 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             )
         )
 
+    def test_oa_applicant_filter_options_use_narrow_projection_without_semantic_loss(
+        self,
+    ) -> None:
+        self.raw_connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount,
+                currency, normalized_payload, raw_payload
+            ) values (
+                'oa-source-filter-unknown', 'travel_request', '差旅申请',
+                'oa-filter-unknown', 'active', 'completed', '',
+                '2026-07-18', '2026-07-01', '筛选项目', 10, 'CNY',
+                '{"id":"oa-filter-unknown","month":"2026-07","apply_type":"差旅申请","amount":"10"}'::jsonb,
+                '{}'::jsonb
+            )
+            """
+        )
+        self.connection.statements.clear()
+
+        payload = self.repository.get_workbench_filter_options(
+            scope_key="2026-07", zone="unpaired", pane="oa",
+            facet="column", column="applicant", page_size=100,
+        )
+
+        options = {option["value"]: option for option in payload["options"]}
+        self.assertEqual(options["oaType:差旅申请"]["label"], "差旅申请")
+        self.assertEqual(options["applicant:张三"]["label"], "张三")
+        self.assertTrue(options["applicant:__workbench_missing__"]["missing"])
+        statement = next(
+            item for item in self.connection.statements
+            if item["operation"] == "fetch_all"
+            and "as application_type" in str(item.get("raw_sql") or "")
+        )
+        projection_sql = str(statement["raw_sql"]).split(
+            "filtered_groups as materialized (", 1
+        )[1]
+        self.assertNotIn("distinct on (member.row_id)", projection_sql.lower())
+        self.assertNotIn("order by member.row_id", projection_sql.lower())
+
     def test_anomaly_state_is_sql_compact_fingerprint_parity_and_keyset_bounded(self) -> None:
         self.connection.statements.clear()
         initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
@@ -600,6 +640,77 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 group.get("detail_key") == "CASE-DIRECT-1"
                 for group in unpaired_after_review["groups"]
             )
+        )
+
+    def test_narrow_anomaly_rehydration_keeps_document_owner_semantics(self) -> None:
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status,
+                workbench_visibility, source_links, raw_payload
+            ) values (
+                'invoice-narrow-doc', 'input', 'INV-NARROW-DOC', '2026-07-23',
+                '2026-07-01', 100, 100, 100, 'active', 'visible',
+                '[]'::jsonb, '{}'::jsonb
+            );
+            update app.oa_applications
+            set normalized_payload = jsonb_set(
+                normalized_payload,
+                '{expense_items,0,attachment_file_count}',
+                '"1"'::jsonb
+            )
+            where row_id = 'oa-direct-1';
+            update app.workbench_pair_relations
+            set row_ids = array['oa-direct-1','bank-direct-1','invoice-narrow-doc'],
+                special_metadata = '{"requires_oa":true,"requires_invoice":true}'::jsonb
+            where case_id = 'CASE-DIRECT-1'
+            """
+        )
+
+        def anomaly_codes() -> set[str]:
+            page = self.repository.get_workbench_groups_page(
+                scope_key="2026-07", zone="unpaired", exception_bucket="unpaired",
+            )
+            group = next(
+                item for item in page["groups"]
+                if item.get("detail_key") == "CASE-DIRECT-1"
+            )
+            return {
+                str(item["code"])
+                for item in group["workbench_anomaly"]["items"]
+            }
+
+        self.assertEqual(anomaly_codes(), {"oa_invoice_attachment_unparsed"})
+        historical_link = [{
+            "source_type": "oa_attachment_invoice",
+            "derived_from_oa_id": "oa-direct-1",
+            "source_expense_item_id": "oa-direct-1:item:9:historical",
+            "source_expense_row_index": "9",
+        }]
+        self.raw_connection.execute(
+            "update app.invoices set source_links = %s::jsonb where legacy_mongo_id = 'invoice-narrow-doc'",
+            (json.dumps(historical_link, ensure_ascii=False),),
+        )
+        self.assertEqual(anomaly_codes(), {"oa_invoice_attachment_unassigned"})
+
+        explicit_link = {
+            "source_type": "oa_expense_item_invoice",
+            "derived_from_oa_id": "oa-direct-1",
+            "source_expense_item_id": "oa-direct-1:item:0",
+            "source_expense_row_index": "0",
+            "source_relation_case_id": "CASE-DIRECT-1",
+        }
+        self.raw_connection.execute(
+            "update app.invoices set source_links = %s::jsonb where legacy_mongo_id = 'invoice-narrow-doc'",
+            (json.dumps([*historical_link, explicit_link], ensure_ascii=False),),
+        )
+        exception_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="unpaired", exception_bucket="unpaired",
+        )
+        self.assertNotIn(
+            "CASE-DIRECT-1",
+            {item.get("detail_key") for item in exception_page["groups"]},
         )
 
     def test_exception_views_count_unique_relations_and_auto_select_first_amount_code(self) -> None:

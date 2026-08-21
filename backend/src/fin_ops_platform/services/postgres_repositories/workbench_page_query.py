@@ -1080,26 +1080,12 @@ canonical_groups as materialized (
 canonical_group_members as materialized (
     select
         groups.internal_key,
-        member.ordinality,
         member.row_id,
         member.row_type,
         row.source_kind,
-        row.scope_month,
         row.sort_date,
         row.column_values,
-        row.external_etc_batch_id,
-        row.oa_expense_items,
-        row.oa_source_aliases,
-        row.oa_exact_identity_aliases,
-        row.oa_external_identity_aliases,
-        row.oa_apply_type,
-        row.oa_amount,
-        row.bank_amount,
-        row.bank_direction,
-        row.invoice_amount,
-        row.invoice_total_with_tax,
-        row.invoice_direction,
-        row.invoice_source_links
+        row.oa_expense_items
     from canonical_groups groups
     cross join lateral unnest(groups.member_ids, groups.member_types)
       with ordinality as member(row_id, row_type, ordinality)
@@ -1261,27 +1247,31 @@ relation_anomaly_members as materialized (
         relation.relation_mode,
         member.row_type,
         member.row_id,
-        member.oa_expense_items,
-        member.oa_source_aliases,
-        member.oa_exact_identity_aliases,
-        member.oa_external_identity_aliases,
-        member.oa_apply_type,
-        member.oa_amount,
-        member.bank_amount,
-        member.bank_direction,
-        coalesce(member.invoice_amount, etc_total.invoice_total) as invoice_amount,
+        canonical_row.oa_expense_items,
+        canonical_row.oa_source_aliases,
+        canonical_row.oa_exact_identity_aliases,
+        canonical_row.oa_external_identity_aliases,
+        canonical_row.oa_apply_type,
+        canonical_row.oa_amount,
+        canonical_row.bank_amount,
+        canonical_row.bank_direction,
+        coalesce(canonical_row.invoice_amount, etc_total.invoice_total)
+            as invoice_amount,
         coalesce(
-            member.invoice_total_with_tax,
-            member.invoice_amount,
+            canonical_row.invoice_total_with_tax,
+            canonical_row.invoice_amount,
             etc_total.invoice_total
         ) as invoice_total_with_tax,
-        member.invoice_direction,
-        member.invoice_source_links
+        canonical_row.invoice_direction,
+        canonical_row.invoice_source_links
     from canonical_groups groups
     join scoped_relations relation
       on relation.case_id = groups.detail_key
     join canonical_group_members member
       on member.internal_key = groups.internal_key
+    join canonical_rows canonical_row
+      on canonical_row.pane = member.row_type
+     and canonical_row.row_id = member.row_id
     left join etc_summary_keys etc_key
       on member.row_type = 'invoice'
      and etc_key.row_id = member.row_id
@@ -1800,14 +1790,17 @@ anomaly_states as materialized (
 )
 """
 
-# A filter option can only be emitted by a group containing the target pane.
-# Keep the effective-group contract unchanged, while avoiding anomaly work for
-# groups that cannot contribute any option to the current request.
-_FILTER_OPTION_ANOMALY_STATE_CTES = f"""
+def _filter_option_anomaly_state_ctes(*, exception_bucket: str | None) -> str:
+    # Only relations can carry anomalies. Normal option reads need anomaly state
+    # only for base-paired relations that may move into the unpaired zone.
+    base_zone_sql = "" if exception_bucket == "unpaired" else "and groups.zone = 'paired'"
+    return f"""
 filter_option_anomaly_groups as materialized (
     select groups.*
     from canonical_groups groups
-    where exists (
+    where groups.group_kind = 'relation'
+      {base_zone_sql}
+      and exists (
         select 1
         from canonical_group_members target_member
         where target_member.internal_key = groups.internal_key
@@ -3291,6 +3284,7 @@ class PostgresWorkbenchPageQueryRepository:
                 column_filters=normalized_columns,
                 time_filters=normalized_times,
                 bank_tag_row_ids=bank_tag_row_ids,
+                exception_bucket=normalized_exception_bucket,
             )
         if normalized_facet == "time_year":
             value_sql = "to_char(member.sort_date, 'YYYY')"
@@ -3328,7 +3322,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_FILTER_OPTION_ANOMALY_STATE_CTES},
+            {_filter_option_anomaly_state_ctes(exception_bucket=normalized_exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select groups.internal_key
@@ -3430,6 +3424,7 @@ class PostgresWorkbenchPageQueryRepository:
         column_filters: dict[str, dict[str, list[str]]],
         time_filters: dict[str, dict[str, str]],
         bank_tag_row_ids: list[str] | None,
+        exception_bucket: str | None,
     ) -> dict[str, Any]:
         member_filter_sql, member_filter_params = self._target_member_filters(
             pane=pane,
@@ -3438,27 +3433,49 @@ class PostgresWorkbenchPageQueryRepository:
             alias="member",
             bank_tag_row_ids=bank_tag_row_ids,
         )
+        if pane == "oa" and column == "applicant":
+            member_projection_sql = f"""
+            select distinct
+                btrim(coalesce(member.column_values->>'applicationType', ''))
+                    as application_type,
+                btrim(coalesce(member.column_values->>'workflowStatus', ''))
+                    as workflow_status,
+                case
+                    when coalesce(
+                        nullif(btrim(member.column_values->>'applicant'), ''),
+                        ''
+                    ) = ''
+                        then '{WORKBENCH_FILTER_MISSING_VALUE}'
+                    else btrim(member.column_values->>'applicant')
+                end as applicant
+            """
+            member_order_sql = ""
+        else:
+            member_projection_sql = """
+            select distinct on (member.row_id)
+                member.row_id,
+                member.column_values,
+                member.oa_expense_items
+            """
+            member_order_sql = "order by member.row_id"
         rows = self._connection.fetch_all(
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_FILTER_OPTION_ANOMALY_STATE_CTES},
+            {_filter_option_anomaly_state_ctes(exception_bucket=exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select groups.internal_key
                 from effective_groups groups
                 where {where_sql}
             )
-            select distinct on (member.row_id)
-                member.row_id,
-                member.column_values,
-                member.oa_expense_items
+            {member_projection_sql}
             from canonical_group_members member
             join filtered_groups groups
               on groups.internal_key = member.internal_key
             where member.row_type = %s
               {member_filter_sql}
-            order by member.row_id
+            {member_order_sql}
             """,
             tuple(
                 [
@@ -3546,10 +3563,8 @@ class PostgresWorkbenchPageQueryRepository:
             add_option("workflow", "completed", "已完成")
             add_option("workflow", "in_progress", "进行中")
             for row in rows:
-                values = row.get("column_values")
-                values = values if isinstance(values, dict) else {}
-                add_option("oaType", values.get("applicationType"))
-                workflow = str(values.get("workflowStatus") or "").strip()
+                add_option("oaType", row.get("application_type"))
+                workflow = str(row.get("workflow_status") or "").strip()
                 if workflow:
                     add_option(
                         "workflow",
@@ -3559,11 +3574,14 @@ class PostgresWorkbenchPageQueryRepository:
                             workflow,
                         ),
                     )
-                applicant = str(values.get("applicant") or "").strip()
+                applicant = str(row.get("applicant") or "").strip()
+                applicant_missing = (
+                    not applicant or applicant == WORKBENCH_FILTER_MISSING_VALUE
+                )
                 add_option(
                     "applicant",
-                    applicant or WORKBENCH_FILTER_MISSING_VALUE,
-                    applicant or "未填写",
+                    WORKBENCH_FILTER_MISSING_VALUE if applicant_missing else applicant,
+                    "未填写" if applicant_missing else applicant,
                 )
         else:
             for row in rows:
@@ -3954,7 +3972,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_FILTER_OPTION_ANOMALY_STATE_CTES},
+            {_filter_option_anomaly_state_ctes(exception_bucket=exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
             filtered_groups as materialized (
                 select groups.internal_key

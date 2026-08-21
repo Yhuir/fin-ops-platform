@@ -553,6 +553,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `tests/test_workbench_page_query_repository.py::test_canonical_spine_defers_supporting_documents_to_page_hydration` 保护全量 anomaly candidate 不得重新扫描补充凭证表，同时保留完成态和进行中 OA 的原始费用项数组。
 - `tests/test_workbench_query_postgres_integration.py` 全量在 disposable PostgreSQL 运行，保护 initial/groups/detail、附件异常指纹以及已审阅 paired/unpaired 分区仍能真实解析并执行。
 
+## 2026-08-21 - Filter-options 候选与窄 DTO 回归
+
+- unit SQL-shape 与 disposable PostgreSQL 回归共同保护窄成员投影、typed anomaly rehydrate、paired→unpaired 候选、未知类型/流程、空申请人，以及附件 absent/unparsed/unassigned、显式费用项归属和已接受指纹语义。
+
 ## 2026-08-21 - 三栏详情触发器视觉与链路回归
 
 - `web/src/test/WorkbenchColumns.test.tsx` 保护 OA、银行流水和发票只使用共享的透明 `workbench-detail-trigger`，不再继承旧 `.row-action-btn` 方框样式、原生 `title` 或重复文本详情入口；`WorkbenchSelection.test.tsx` 继续保护按钮位于首行、点击不触发行选择且复用既有详情抽屉。

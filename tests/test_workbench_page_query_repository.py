@@ -478,6 +478,21 @@ def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     assert sql.count("coalesce(invoice.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'") == 1
 
 
+def test_page_members_are_narrow_and_anomalies_rehydrate_by_typed_identity() -> None:
+    spine_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.lower().split())
+    member_sql = spine_sql.split("canonical_group_members as materialized (", 1)[1]
+    anomaly_sql = " ".join(_ANOMALY_STATE_CTES.lower().split())
+    anomaly_members = anomaly_sql.split(
+        "relation_anomaly_members as materialized (", 1
+    )[1].split("oa_exact_identity_aliases as materialized (", 1)[0]
+
+    assert "row.oa_source_aliases" not in member_sql
+    assert "row.invoice_source_links" not in member_sql
+    assert "join canonical_rows canonical_row" in anomaly_members
+    assert "canonical_row.pane = member.row_type" in anomaly_members
+    assert "canonical_row.row_id = member.row_id" in anomaly_members
+
+
 def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
 
@@ -1129,13 +1144,9 @@ def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> 
     applicant_connection = _QueryConnection(
         [
             {
-                "row_id": "oa-1",
-                "column_values": {
-                    "applicationType": "支付申请",
-                    "workflowStatus": "completed",
-                    "applicant": "杨丽萍",
-                },
-                "oa_expense_items": [],
+                "application_type": "支付申请",
+                "workflow_status": "completed",
+                "applicant": "杨丽萍",
             }
         ]
     )
@@ -1184,6 +1195,11 @@ def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> 
     ]
     assert "from filter_option_anomaly_groups groups" in applicant_connection.sql
     assert applicant_connection.params[4] == "oa"
+    projection_sql = applicant_connection.sql.split(
+        "filtered_groups as materialized (", 1
+    )[1]
+    assert "distinct on (member.row_id)" not in projection_sql
+    assert "order by member.row_id" not in projection_sql
 
     project_repository = PostgresWorkbenchPageQueryRepository(
         _QueryConnection(
@@ -1241,7 +1257,62 @@ def test_plain_filter_options_also_narrow_anomalies_to_the_target_pane() -> None
         {"value": "云南供应商", "label": "云南供应商", "missing": False}
     ]
     assert "from filter_option_anomaly_groups groups" in connection.sql
+    assert "groups.group_kind = 'relation'" in connection.sql
+    assert "and groups.zone = 'paired'" in connection.sql
     assert connection.params[4] == "bank"
+
+
+def test_oa_applicant_options_keep_unknown_workflow_and_empty_applicant() -> None:
+    connection = _QueryConnection(
+        [
+            {
+                "application_type": "差旅申请",
+                "workflow_status": "returned",
+                "applicant": WORKBENCH_FILTER_MISSING_VALUE,
+            },
+            {
+                "application_type": "差旅申请",
+                "workflow_status": "returned",
+                "applicant": "--",
+            },
+            {
+                "application_type": "差旅申请",
+                "workflow_status": "returned",
+                "applicant": "—",
+            },
+        ]
+    )
+    payload = PostgresWorkbenchPageQueryRepository(
+        connection, tenant_id="test-tenant"
+    )._filter_options(
+        scope_key="all", zone="unpaired", pane="oa",
+        facet="column", column="applicant",
+    )
+
+    options = {option["value"]: option for option in payload["options"]}
+    assert options["oaType:差旅申请"]["label"] == "差旅申请"
+    assert options["workflow:returned"]["label"] == "returned"
+    assert options[f"applicant:{WORKBENCH_FILTER_MISSING_VALUE}"]["missing"] is True
+    assert "applicant:--" not in options
+    assert "applicant:—" not in options
+
+
+def test_unpaired_exception_options_scan_both_relation_base_zones() -> None:
+    connection = _QueryConnection(
+        [{"facet_value": "云南供应商", "facet_label": "云南供应商"}]
+    )
+    PostgresWorkbenchPageQueryRepository(
+        connection, tenant_id="test-tenant"
+    )._filter_options(
+        scope_key="all", zone="unpaired", pane="invoice",
+        facet="column", column="sellerName", exception_bucket=" unpaired ",
+    )
+
+    candidate_sql = connection.sql.split(
+        "filter_option_anomaly_groups as materialized (", 1
+    )[1].split("latest_anomaly_decisions as materialized (", 1)[0]
+    assert "groups.group_kind = 'relation'" in candidate_sql
+    assert "groups.zone = 'paired'" not in candidate_sql
 
 
 def test_project_and_expense_type_share_one_oa_expense_item() -> None:
