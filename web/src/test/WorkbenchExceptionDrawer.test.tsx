@@ -3,12 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import WorkbenchExceptionDrawer from "../components/workbench/WorkbenchExceptionDrawer";
-import type {
-  WorkbenchAmountAnomalyCode,
-  WorkbenchAnomalyItem,
-  WorkbenchExceptionCounts,
-  WorkbenchExceptionView,
-  WorkbenchRelationGroup,
+import {
+  WORKBENCH_AMOUNT_ANOMALY_CODES,
+  WORKBENCH_AMOUNT_ANOMALY_LABELS,
+  type WorkbenchAmountAnomalyCode,
+  type WorkbenchAnomalyItem,
+  type WorkbenchExceptionCounts,
+  type WorkbenchExceptionView,
+  type WorkbenchRelationGroup,
 } from "../features/workbench/types";
 
 const anomalyItems: WorkbenchAnomalyItem[] = [
@@ -120,10 +122,33 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(screen.getByText("已配对异常")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "金额异常 1" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "仅资料异常 0" })).toBeInTheDocument();
-    expect(screen.getByRole("radiogroup", { name: "金额异常分类" }).querySelectorAll('[role="radio"]')).toHaveLength(7);
+    const amountFilters = screen.getByRole("radiogroup", { name: "金额异常分类" });
+    const amountFilterOptions = within(amountFilters).getAllByRole("radio");
+    expect(amountFilterOptions).toHaveLength(7);
+    expect(amountFilterOptions.map((option) => option.getAttribute("aria-label"))).toEqual(
+      WORKBENCH_AMOUNT_ANOMALY_CODES.map((code) => (
+        `${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${exceptionCounts.byCode[code]}`
+      )),
+    );
+    expect(
+      Array.from(amountFilters.querySelectorAll(".workbench-anomaly-drawer__amount-family-label")).map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["OA = 流水", "OA = 发票", "流水 = 发票", "三项互异"]);
+    expect(document.querySelector(".workbench-anomaly-drawer__amount-filter-scroll")).not.toBeInTheDocument();
     expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
       "状态总计 1 项 · 当前 1 项",
     );
+  });
+
+  it("hides the amount classification group in the document-only view", () => {
+    renderDrawer("unpaired", vi.fn(), true, group("unpaired"), {
+      view: "document_only",
+      selectedExceptionCode: null,
+    });
+
+    expect(screen.getByRole("radio", { name: "仅资料异常 0" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("radiogroup", { name: "金额异常分类" })).not.toBeInTheDocument();
   });
 
   it("reports view and amount-category changes through controlled HeroUI groups", async () => {

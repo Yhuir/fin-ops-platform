@@ -57,6 +57,12 @@ const PANE_LABELS: Record<WorkbenchRecordType, string> = {
   bank: "流水",
   invoice: "发票",
 };
+const AMOUNT_RULE_FAMILY_START_LABELS: Partial<Record<WorkbenchAmountAnomalyCode, string>> = {
+  oa_bank_equal_invoice_more: "OA = 流水",
+  oa_invoice_equal_bank_more: "OA = 发票",
+  bank_invoice_equal_oa_less: "流水 = 发票",
+  all_amounts_different: "三项互异",
+};
 const DRAWER_DETAIL_COLUMNS = "minmax(320px, 1fr) 1px minmax(320px, 1fr) 1px minmax(320px, 1fr)";
 export default function WorkbenchExceptionDrawer({
   open,
@@ -221,30 +227,40 @@ export default function WorkbenchExceptionDrawer({
           </ToggleButton>
         </ToggleButtonGroup>
         {view === "amount" ? (
-          <div className="workbench-anomaly-drawer__amount-filter-scroll">
-            <ToggleButtonGroup
-              aria-label="金额异常分类"
-              className="workbench-anomaly-drawer__amount-filters"
-              disallowEmptySelection
-              selectedKeys={selectedExceptionCode ? new Set<Key>([selectedExceptionCode]) : new Set<Key>()}
-              selectionMode="single"
-              size="sm"
-              onSelectionChange={(keys) => {
-                const [next] = Array.from(keys);
-                if (WORKBENCH_AMOUNT_ANOMALY_CODES.some((code) => code === next)) {
-                  onExceptionCodeChange(next as WorkbenchAmountAnomalyCode);
-                }
-              }}
-            >
-              {WORKBENCH_AMOUNT_ANOMALY_CODES.map((code, index) => (
-                <ToggleButton id={code} key={code}>
-                  {index > 0 ? <ToggleButtonGroup.Separator /> : null}
-                  <span>{WORKBENCH_AMOUNT_ANOMALY_LABELS[code]}</span>
-                  <strong>{exceptionCounts?.byCode[code] ?? 0}</strong>
+          <ToggleButtonGroup
+            aria-label="金额异常分类"
+            className="workbench-anomaly-drawer__amount-filters"
+            disallowEmptySelection
+            selectedKeys={selectedExceptionCode ? new Set<Key>([selectedExceptionCode]) : new Set<Key>()}
+            selectionMode="single"
+            size="sm"
+            onSelectionChange={(keys) => {
+              const [next] = Array.from(keys);
+              if (WORKBENCH_AMOUNT_ANOMALY_CODES.some((code) => code === next)) {
+                onExceptionCodeChange(next as WorkbenchAmountAnomalyCode);
+              }
+            }}
+          >
+            {WORKBENCH_AMOUNT_ANOMALY_CODES.map((code) => {
+              const count = exceptionCounts?.byCode[code] ?? 0;
+              const familyLabel = AMOUNT_RULE_FAMILY_START_LABELS[code];
+              return (
+                <ToggleButton
+                  aria-label={`${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${count}`}
+                  id={code}
+                  key={code}
+                >
+                  {familyLabel ? (
+                    <span aria-hidden="true" className="workbench-anomaly-drawer__amount-family-label">
+                      {familyLabel}
+                    </span>
+                  ) : null}
+                  <span aria-hidden="true">{WORKBENCH_AMOUNT_ANOMALY_LABELS[code]}</span>
+                  <strong aria-hidden="true">{count}</strong>
                 </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
-          </div>
+              );
+            })}
+          </ToggleButtonGroup>
         ) : null}
       </div>
 

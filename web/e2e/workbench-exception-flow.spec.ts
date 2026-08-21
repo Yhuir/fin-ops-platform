@@ -3,6 +3,13 @@ import { expect, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
+const AMOUNT_RULE_FAMILY_TITLES = [
+  "OA = 流水",
+  "OA = 发票",
+  "流水 = 发票",
+  "三项互异",
+] as const;
+
 test.describe("workbench exception browser flow", () => {
   test("loads bounded anomaly summaries and fetches detail only after expansion", async ({ page }) => {
     const groupRequestUrls: URL[] = [];
@@ -66,7 +73,13 @@ test.describe("workbench exception browser flow", () => {
       .click();
 
     const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(
+      exceptionDrawer.locator(".workbench-anomaly-drawer__amount-filters"),
+    ).toBeVisible();
     await exceptionDrawer.getByRole("radio", { name: "仅资料异常 1" }).click();
+    await expect(
+      exceptionDrawer.locator(".workbench-anomaly-drawer__amount-filters"),
+    ).toHaveCount(0);
     await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).click();
     const invoiceEntry = exceptionDrawer.getByRole("button", { name: "录入发票" });
     await expect(invoiceEntry).toBeEnabled();
@@ -221,6 +234,40 @@ test.describe("workbench exception browser flow", () => {
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(drawer).toBeVisible();
+    const expectExceptionFilterLayout = async () => {
+      const exceptionType = drawer.getByRole("radiogroup", { name: "异常类型" });
+      const amountFilters = drawer.locator(".workbench-anomaly-drawer__amount-filters");
+
+      await expect(exceptionType).toBeVisible();
+      await expect(amountFilters).toBeVisible();
+      for (const title of AMOUNT_RULE_FAMILY_TITLES) {
+        await expect(amountFilters.getByText(title, { exact: true })).toBeVisible();
+      }
+      await expect(amountFilters.getByRole("radio")).toHaveCount(7);
+
+      await expect.poll(async () => {
+        const [exceptionTypeBox, amountFiltersBox] = await Promise.all([
+          exceptionType.boundingBox(),
+          amountFilters.boundingBox(),
+        ]);
+        if (!exceptionTypeBox || !amountFiltersBox) {
+          return Number.NEGATIVE_INFINITY;
+        }
+        return amountFiltersBox.y - (exceptionTypeBox.y + exceptionTypeBox.height);
+      }).toBeGreaterThanOrEqual(-1);
+
+      await expect.poll(async () => amountFilters.evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      )).toBeLessThanOrEqual(1);
+      await expect.poll(async () => drawer.evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      )).toBeLessThanOrEqual(1);
+      await expect.poll(async () => page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )).toBeLessThanOrEqual(1);
+    };
+
+    await expectExceptionFilterLayout();
     await expect.poll(async () => {
       const box = await drawer.boundingBox();
       return box ? box.x + box.width : Number.POSITIVE_INFINITY;
@@ -247,6 +294,7 @@ test.describe("workbench exception browser flow", () => {
     expect(reviewBox!.x + reviewBox!.width).toBeLessThanOrEqual(collapsedBox!.x + collapsedBox!.width);
 
     await page.setViewportSize({ width: 1024, height: 768 });
+    await expectExceptionFilterLayout();
     await expect.poll(async () => {
       const box = await drawer.boundingBox();
       return box ? box.x + box.width : Number.POSITIVE_INFINITY;
