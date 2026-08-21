@@ -244,6 +244,9 @@ test.describe("workbench exception browser flow", () => {
         await expect(amountFilters.getByText(title, { exact: true })).toBeVisible();
       }
       await expect(amountFilters.getByRole("radio")).toHaveCount(7);
+      await expect.poll(async () => amountFilters.evaluate(
+        (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+      )).toBe(4);
 
       await expect.poll(async () => {
         const [exceptionTypeBox, amountFiltersBox] = await Promise.all([
