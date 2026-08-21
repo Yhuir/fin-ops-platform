@@ -47,6 +47,7 @@
 - 页面必须先加载设置里的银行账户映射；每个文件都要选择对应账户后才能预览。
 - 文件识别银行/尾号与所选账户不一致时，预览可展示差异但确认必须 fail closed；前端和后端都不得提供“仍按所选账户导入”的绕过入口。
 - 预览使用 `/imports/files/preview`，通过 `file_overrides` 传递 `batch_type=bank_transaction`、`bank_mapping_id`、`bank_name`、`bank_short_name`、`last4`。
+- `preview_ready` 只表示文件解析完成。页面只把 `audit.confirmable_count > 0` 的银行文件送入确认；全部记录已存在且无疑似、错误或账户冲突时显示“无需导入”，不创建零变更 confirm/job。多文件预览只提交真正有可处理记录的文件。
 - 后端只保留一个 `bank_statement` 语义解析器：在前 60 行内定位表头，将明确别名归一为交易时间、金额、方向、对方、摘要等 canonical 字段；账号和账户名可从文件元数据读取，不要求出现在交易表头。
 - 无法确定核心字段时必须 fail closed，并返回候选列和缺失字段；页面通过 `/imports/files/retry` 提交 `field_mapping` 重新解析。人工映射按标准化表头签名保存在既有 import file 审计 payload 中，同结构文件后续复用，不新增模板表或另一条导入链。
 - 确认使用 `/imports/files/confirm`，返回 `202 Accepted` 和 background `job`；RabbitMQ/import worker 开启时还会返回 `import_job` / `event_id`。

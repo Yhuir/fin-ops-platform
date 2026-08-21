@@ -38,6 +38,7 @@ type MockApiOptions = {
   workbenchPrimaryDelayMs?: number;
   workbenchSettingsDelayMs?: number;
   importPreviewDelayMs?: number;
+  bankImportAllExisting?: boolean;
   etcImportPreviewDelayMs?: number;
   importConfirmPreviewStale?: boolean;
   etcImportConfirmPreviewStale?: boolean;
@@ -1205,22 +1206,23 @@ function mockBankNameAliasMatches(selectedAlias: string, detectedAlias: string) 
 function buildImportPreviewPayload(
   fileNames: string[],
   overrides: Array<Record<string, string | null | undefined>> = [],
+  bankImportAllExisting = false,
 ) {
   const knownFileNames = fileNames.filter((fileName) => fileName !== "README.md");
   const sessionAudit = {
-    original_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 14 : 9), 0),
-    unique_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 12 : 8), 0),
-    duplicate_count: knownFileNames.length,
-    duplicate_in_file_count: knownFileNames.length,
-    duplicate_across_files_count: Math.max(0, knownFileNames.length - 1),
-    existing_duplicate_count: 2,
-    importable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : 7), 0),
+    original_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 14 : bankImportAllExisting ? 48 : 9), 0),
+    unique_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 12 : bankImportAllExisting ? 48 : 8), 0),
+    duplicate_count: bankImportAllExisting ? knownFileNames.length * 48 : knownFileNames.length,
+    duplicate_in_file_count: bankImportAllExisting ? 0 : knownFileNames.length,
+    duplicate_across_files_count: bankImportAllExisting ? 0 : Math.max(0, knownFileNames.length - 1),
+    existing_duplicate_count: bankImportAllExisting ? knownFileNames.length * 48 : 2,
+    importable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : bankImportAllExisting ? 0 : 7), 0),
     update_count: 0,
     merge_count: 0,
     suspected_duplicate_count: knownFileNames.some((fileName) => fileName.includes("发票")) ? 1 : 0,
     error_count: knownFileNames.some((fileName) => fileName.includes("发票")) ? 1 : 0,
-    confirmable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : 7), 0),
-    skipped_count: knownFileNames.length + 2,
+    confirmable_count: knownFileNames.reduce((total, fileName) => total + (fileName.includes("发票") ? 11 : bankImportAllExisting ? 0 : 7), 0),
+    skipped_count: bankImportAllExisting ? knownFileNames.length * 48 : knownFileNames.length + 2,
   };
   return {
     session: {
@@ -1333,26 +1335,26 @@ function buildImportPreviewPayload(
         batch_type: batchType,
         status: "preview_ready",
         message: "模板识别成功。",
-        row_count: isInvoice ? 14 : 9,
-        success_count: isInvoice ? 12 : 8,
+        row_count: isInvoice ? 14 : bankImportAllExisting ? 48 : 9,
+        success_count: isInvoice ? 12 : bankImportAllExisting ? 0 : 8,
         error_count: isInvoice ? 1 : 0,
-        duplicate_count: 0,
+        duplicate_count: !isInvoice && bankImportAllExisting ? 48 : 0,
         suspected_duplicate_count: isInvoice ? 1 : 0,
         updated_count: 0,
         audit: {
-          original_count: isInvoice ? 14 : 9,
-          unique_count: isInvoice ? 12 : 8,
-          duplicate_count: 1,
-          duplicate_in_file_count: 1,
-          duplicate_across_files_count: index > 0 ? 1 : 0,
-          existing_duplicate_count: index === 0 ? 2 : 0,
-          importable_count: isInvoice ? 11 : 7,
+          original_count: isInvoice ? 14 : bankImportAllExisting ? 48 : 9,
+          unique_count: isInvoice ? 12 : bankImportAllExisting ? 48 : 8,
+          duplicate_count: !isInvoice && bankImportAllExisting ? 48 : 1,
+          duplicate_in_file_count: !isInvoice && bankImportAllExisting ? 0 : 1,
+          duplicate_across_files_count: !isInvoice && bankImportAllExisting ? 0 : index > 0 ? 1 : 0,
+          existing_duplicate_count: !isInvoice && bankImportAllExisting ? 48 : index === 0 ? 2 : 0,
+          importable_count: isInvoice ? 11 : bankImportAllExisting ? 0 : 7,
           update_count: 0,
           merge_count: 0,
           suspected_duplicate_count: isInvoice ? 1 : 0,
           error_count: isInvoice ? 1 : 0,
-          confirmable_count: isInvoice ? 11 : 7,
-          skipped_count: index === 0 ? 3 : 1,
+          confirmable_count: isInvoice ? 11 : bankImportAllExisting ? 0 : 7,
+          skipped_count: !isInvoice && bankImportAllExisting ? 48 : index === 0 ? 3 : 1,
         },
         preview_batch_id: `batch_import_${String(4444 + index)}`,
         batch_id: null,
@@ -7311,7 +7313,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         typeof rawOverrides === "string"
           ? (JSON.parse(rawOverrides) as Array<Record<string, string>>)
           : [];
-      latestImportSession = buildImportPreviewPayload(fileNames, overrides);
+      latestImportSession = buildImportPreviewPayload(fileNames, overrides, options.bankImportAllExisting === true);
       return { body: latestImportSession };
     },
     "/imports/files/confirm": ({ jsonBody }) => {

@@ -237,6 +237,35 @@ describe("Import pages", () => {
     });
   });
 
+  test("bank transaction import treats an all-existing preview as a completed no-op", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({ bankImportAllExisting: true });
+
+    renderAppAt("/imports/bank-transactions");
+
+    expect(await screen.findByRole("heading", { name: "银行流水导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传银行流水文件", "上传文件"), [
+      new File(["pingan-bank-demo"], "平安银行2026-08-01至2026-08-20交易明细.xlsx", {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        lastModified: 1,
+      }),
+    ]);
+    await user.selectOptions(
+      screen.getByLabelText("对应账户 平安银行2026-08-01至2026-08-20交易明细.xlsx"),
+      "bank_mapping_0093",
+    );
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+
+    expect(await screen.findByLabelText("本次识别 48")).toBeInTheDocument();
+    expect(screen.getByLabelText("本次将处理 0")).toBeInTheDocument();
+    expect(screen.getByLabelText("本次不处理 48")).toBeInTheDocument();
+    expect(screen.getByText("APP 内已存在 48")).toBeInTheDocument();
+    expect(screen.getByText("已检查 48 笔流水，全部已存在于 APP，无需重复导入。")).toBeInTheDocument();
+    expect(screen.getByLabelText("文件处理结果")).toHaveTextContent("无需导入");
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/imports/files/confirm")).toHaveLength(0);
+  });
+
   test("bank transaction import maps an unknown amount header and retries the same file", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

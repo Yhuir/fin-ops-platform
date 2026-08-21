@@ -10,6 +10,7 @@
 | `files_configured` | 每个银行流水文件都选择了银行账户映射。 | 前端 file selections + settings bank account mappings |
 | `previewing` | 正在调用 `/imports/files/preview`。 | 前端请求状态 |
 | `preview_ready` | 后端已创建 import session，文件级 preview 可确认。 | `FileImportSession.files[].status` |
+| `preview_no_changes` | 文件解析完成，但全部银行流水已存在，且没有疑似项、错误或账户冲突；无需创建确认任务。 | 前端基于 session/file audit 的只读派生状态 |
 | `reverted` | 用户在确认前显式放弃 preview，服务端已终结 session/file/pending batch。 | `app.import_files` + `app.import_batches`；不影响 canonical transaction |
 | `mapping_required` / `unrecognized_template` | 已定位银行表头但核心 canonical 字段不完整；后端返回候选列，等待用户补充映射，不生成可确认行。 | `FileImportSession.files[].mapping_fields` |
 | `file_error` / `unrecognized_template` | 文件损坏、无法定位表头或不是支持的文件类型；同 session 其他 ready 文件仍可确认。 | `FileImportService.preview_files` |
@@ -23,6 +24,7 @@
 
 - `files_selected -> files_configured`：银行流水模式下每个文件都选择有效银行账户映射。
 - `files_configured -> previewing -> preview_ready`：文件上传成功，后端能识别模板或保留文件级错误。
+- `preview_ready -> preview_no_changes`：`original_count > 0`、`confirmable_count=0`、`existing_duplicate_count=original_count`，且疑似、错误、账户冲突均为零；页面显示“无需导入”并保持零 confirm/job。
 - `previewing -> mapping_required -> preview_ready`：自动归一不完整时，用户提交当前文件的字段映射；后端重新校验并解析。相同标准化表头签名后续可直接复用已保存人工映射。
 - `preview_ready -> preview_stale`：确认前 audit 检测到底层事实变化。
 - `preview_ready -> queued`：至少一个 selected file 可确认，API 创建 idempotent background job。
@@ -38,6 +40,7 @@
 - 核心字段映射不完整、同一源列映射到多个互斥核心字段或映射列不存在时禁止产生 preview rows 和确认。
 - 银行流水页面禁止使用旧 `/imports/preview`、`/imports/confirm` JSON 状态流；页面 I/O 只能进入 file/session 状态机。
 - `preview_stale` 后禁止继续确认旧 session；必须重新预览。
+- `preview_no_changes` 禁止调用 confirm；多文件 session 只提交 `confirmable_count > 0` 的文件，不得把零变更文件送入后台 job。
 - unknown selected file id 必须返回 404，不得静默跳过。
 - 已有 idempotency key 的 confirm 不得创建重复 import job。
 - 任一银行流水 preview/retry 不得写回其它 session，更不得把其它进程已确认的发票或银行导入降级为 pending。
@@ -53,6 +56,7 @@
 | selected | 展示文件列表和每文件银行选择；清空/移除文件会清空 preview。 |
 | previewing | 预览按钮 loading，禁用重复预览和确认。 |
 | preview_ready | 展示 audit counts、文件状态、重复组、跳过明细、银行选择冲突；只允许确认 `preview_ready` 文件。 |
+| preview_no_changes | 保留真实的“本次将处理 0”和重复明细，文件显示“无需导入”，提示全部已存在，并禁用确认；账户冲突、疑似和错误状态优先，不得被该提示掩盖。 |
 | mapping required | 在当前文件下展示 HeroUI 字段选择；保存只重试该文件，成功后回到 `preview_ready`，失败保留映射草稿和明确错误。 |
 | account conflict blocked | 文件识别账号与用户选择账号冲突时显示明确警告并禁用确认；清空预览、改选正确账户、重新预览后才能进入 confirm。旧冲突确认弹窗已删除。 |
 | confirming | 确认按钮 loading；App Health `blocksMutations` 时禁止确认并提示重新进入。 |
@@ -97,6 +101,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-08-22 | 零新增预览语义闭环 | 全部银行流水已存在时不再显示“待确认”或创建零变更 job；混合文件只提交实际可处理文件，判重/API/数据库合同不变 | `ImportCenterPage.test.tsx`、`imports-bank-transactions-flow.spec.ts` |
 | 2026-08-20 | 弱指纹终态引用与历史审计合同闭环 | confirm 仅在 preview 保留候选证据，terminal suspected row 清空 canonical 引用；历史正式银行行通过 exact-count/fingerprint/CAS 工具定点 unlink，不触碰 canonical 流水 | `tests/test_import_service.py`、`tests/test_bank_import_audit_contract_repair.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-08-11 | 服务端恢复、owner 隔离和显式放弃闭环 | 预览不再依赖单一浏览器 key；AppHealth 可区分待确认、队列、处理、完成、失败和放弃 | `tests/test_import_lifecycle_service.py`、`tests/test_import_file_api.py`、`web/src/test/ImportCenterPage.test.tsx` |
 | 2026-08-12 | 关闭普通 confirm 的弱指纹放行，并收紧生产受控重放 | 疑似流水不再被确认写入；受控重放只接受固定修复原因和同一 keeper 证据 | `tests/test_import_service.py`、`tests/test_import_file_service.py`、`tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |

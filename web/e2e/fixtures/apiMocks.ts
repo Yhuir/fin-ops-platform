@@ -25,6 +25,7 @@ type ApiMockOptions = {
   appHealthWriteSafetyBlocked?: boolean;
   bankImportConfirmError?: boolean;
   bankImportConfirmPreviewStale?: boolean;
+  bankImportAllExisting?: boolean;
   bankImportDownstreamFanout?: boolean;
   bankImportIncludeCorruptFile?: boolean;
   bankImportNoAccountConflict?: boolean;
@@ -2059,7 +2060,7 @@ function inferImportScenarioFromPostData(postData: string | null): ImportScenari
 function importAudit(
   scenario: ImportScenario,
   imported = false,
-  options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean } = {},
+  options: { allExistingBankTransactions?: boolean; corruptBankFile?: boolean; corruptInvoiceFile?: boolean } = {},
 ) {
   if (scenario === "invoice") {
     if (options.corruptInvoiceFile) {
@@ -2112,6 +2113,23 @@ function importAudit(
       skipped_count: 2,
     };
   }
+  if (options.allExistingBankTransactions) {
+    return {
+      original_count: 48,
+      unique_count: 48,
+      duplicate_count: 48,
+      duplicate_in_file_count: 0,
+      duplicate_across_files_count: 0,
+      existing_duplicate_count: 48,
+      importable_count: 0,
+      update_count: 0,
+      merge_count: 0,
+      suspected_duplicate_count: 0,
+      error_count: 0,
+      confirmable_count: 0,
+      skipped_count: 48,
+    };
+  }
   return {
     original_count: 18,
     unique_count: 16,
@@ -2134,7 +2152,12 @@ function importPreviewFile(
   fileName: string,
   index: number,
   imported = false,
-  options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean; noBankAccountConflict?: boolean } = {},
+  options: {
+    allExistingBankTransactions?: boolean;
+    corruptBankFile?: boolean;
+    corruptInvoiceFile?: boolean;
+    noBankAccountConflict?: boolean;
+  } = {},
 ) {
   const sessionId = importSessionIds[scenario];
 
@@ -2323,26 +2346,26 @@ function importPreviewFile(
     batch_type: "bank_transaction",
     status: imported ? "confirmed" : "preview_ready",
     message: imported ? "已确认导入。" : "模板识别成功。",
-    row_count: 9,
-    success_count: 8,
+    row_count: options.allExistingBankTransactions ? 24 : 9,
+    success_count: options.allExistingBankTransactions ? 0 : 8,
     error_count: 0,
-    duplicate_count: 1,
+    duplicate_count: options.allExistingBankTransactions ? 24 : 1,
     suspected_duplicate_count: 0,
     updated_count: 0,
     audit: {
-      original_count: 9,
-      unique_count: 8,
-      duplicate_count: 1,
-      duplicate_in_file_count: 1,
-      duplicate_across_files_count: index > 0 ? 1 : 0,
-      existing_duplicate_count: index === 0 ? 2 : 0,
-      importable_count: imported ? 0 : 7,
+      original_count: options.allExistingBankTransactions ? 24 : 9,
+      unique_count: options.allExistingBankTransactions ? 24 : 8,
+      duplicate_count: options.allExistingBankTransactions ? 24 : 1,
+      duplicate_in_file_count: options.allExistingBankTransactions ? 0 : 1,
+      duplicate_across_files_count: options.allExistingBankTransactions ? 0 : index > 0 ? 1 : 0,
+      existing_duplicate_count: options.allExistingBankTransactions ? 24 : index === 0 ? 2 : 0,
+      importable_count: imported || options.allExistingBankTransactions ? 0 : 7,
       update_count: 0,
       merge_count: 0,
       suspected_duplicate_count: 0,
       error_count: 0,
-      confirmable_count: imported ? 0 : 7,
-      skipped_count: index === 0 ? 3 : 1,
+      confirmable_count: imported || options.allExistingBankTransactions ? 0 : 7,
+      skipped_count: options.allExistingBankTransactions ? 24 : index === 0 ? 3 : 1,
     },
     preview_batch_id: `bank_import_preview_e2e_${index + 1}`,
     batch_id: imported ? `bank_import_batch_e2e_${index + 1}` : null,
@@ -2461,7 +2484,12 @@ function importDuplicateGroups(
 function importSessionPayload(
   scenario: ImportScenario,
   imported = false,
-  options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean; noBankAccountConflict?: boolean } = {},
+  options: {
+    allExistingBankTransactions?: boolean;
+    corruptBankFile?: boolean;
+    corruptInvoiceFile?: boolean;
+    noBankAccountConflict?: boolean;
+  } = {},
 ) {
   const sessionId = importSessionIds[scenario];
   return {
@@ -9877,6 +9905,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         await new Promise((resolve) => setTimeout(resolve, options.bankImportPreviewDelayMs));
       }
       return json(route, importSessionPayload(latestImportScenario, false, {
+        allExistingBankTransactions: latestImportScenario === "bank" && options.bankImportAllExisting === true,
         corruptBankFile: latestImportScenario === "bank" && options.bankImportIncludeCorruptFile === true,
         corruptInvoiceFile: latestImportScenario === "invoice" && options.invoiceImportIncludeCorruptFile === true,
         noBankAccountConflict: options.bankImportNoAccountConflict,
@@ -9910,6 +9939,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       importConfirmed[latestImportScenario] = true;
       return json(route, importSessionPayload(latestImportScenario, true, {
+        allExistingBankTransactions: latestImportScenario === "bank" && options.bankImportAllExisting === true,
         corruptBankFile: latestImportScenario === "bank" && options.bankImportIncludeCorruptFile === true,
         corruptInvoiceFile: latestImportScenario === "invoice" && options.invoiceImportIncludeCorruptFile === true,
         noBankAccountConflict: options.bankImportNoAccountConflict,
@@ -9931,6 +9961,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === `/imports/files/sessions/${importSessionIds.bank}`) {
       return json(route, importSessionPayload("bank", importConfirmed.bank, {
+        allExistingBankTransactions: options.bankImportAllExisting === true,
         corruptBankFile: options.bankImportIncludeCorruptFile,
         noBankAccountConflict: options.bankImportNoAccountConflict,
       }));

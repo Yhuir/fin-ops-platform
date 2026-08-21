@@ -170,6 +170,27 @@ async function stageBankStatementFilesForPreview(
 }
 
 test.describe("bank transaction import browser flow", () => {
+  test("shows an all-existing bank preview as a no-op without creating an import job", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, {
+      bankImportAllExisting: true,
+      bankImportNoAccountConflict: true,
+      sessionMode: "full_access",
+    });
+
+    await previewBankStatementFiles(page, {
+      expectedAudit: { importable: 0, original: 48, skipped: 48 },
+    });
+
+    await expect(page.getByText("已检查 48 笔流水，全部已存在于 APP，无需重复导入。")).toBeVisible();
+    await expect(page.getByLabel("文件处理结果")).toContainText("无需导入");
+    await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    expect(api.count("POST /imports/files/preview")).toBe(1);
+    expect(api.count("POST /imports/files/confirm")).toBe(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
+  });
+
   test("previews and confirms bank statement files, then reflects the imported row in bank details", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {

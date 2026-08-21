@@ -170,8 +170,9 @@ function isZipFile(file: File) {
   return file.name.toLowerCase().endsWith(".zip");
 }
 
-function canConfirmFile(file: ImportFilePreview) {
-  return file.status === "preview_ready";
+function canConfirmFile(file: ImportFilePreview, mode: ImportWorkflowMode) {
+  return file.status === "preview_ready"
+    && (mode !== "bank_transaction" || fileAudit(file).confirmableCount > 0);
 }
 
 function statusLabel(status: string) {
@@ -399,6 +400,17 @@ function fileAudit(file: ImportFilePreview): ImportPreviewAuditCounts {
   return file.audit ?? legacyFileAudit(file);
 }
 
+function isAllExistingBankAudit(audit: ImportPreviewAuditCounts | null) {
+  return Boolean(
+    audit
+      && audit.originalCount > 0
+      && audit.confirmableCount === 0
+      && audit.existingDuplicateCount === audit.originalCount
+      && audit.suspectedDuplicateCount === 0
+      && audit.errorCount === 0,
+  );
+}
+
 function importSessionAudit(payload: ImportSessionPayload | null): ImportPreviewAuditCounts | null {
   if (!payload) {
     return null;
@@ -480,26 +492,32 @@ function ImportSummaryPanel({
   );
 }
 
-function ImportPreviewFileList({ files }: { files: ImportFilePreview[] }) {
+function ImportPreviewFileList({ files, mode }: { files: ImportFilePreview[]; mode: ImportWorkflowMode }) {
   if (files.length === 0) {
     return null;
   }
   return (
     <div aria-label="文件处理结果" className="import-workflow-result-list">
-      {files.map((file) => (
-        <div className="import-workflow-result-row" key={file.id}>
-          <div className="import-workflow-result-row__identity">
-            <span className="import-workflow-result-row__name" title={file.fileName}>{file.fileName}</span>
-            <span className="import-workflow-muted-text">
-              {batchTypeLabel(file.batchType)}{formatSelectedBankAccountLabel(file) ? ` · ${formatSelectedBankAccountLabel(file)}` : ""}
-            </span>
+      {files.map((file) => {
+        const isAllExisting = mode === "bank_transaction"
+          && file.status === "preview_ready"
+          && !file.bankSelectionConflict
+          && isAllExistingBankAudit(fileAudit(file));
+        return (
+          <div className="import-workflow-result-row" key={file.id}>
+            <div className="import-workflow-result-row__identity">
+              <span className="import-workflow-result-row__name" title={file.fileName}>{file.fileName}</span>
+              <span className="import-workflow-muted-text">
+                {batchTypeLabel(file.batchType)}{formatSelectedBankAccountLabel(file) ? ` · ${formatSelectedBankAccountLabel(file)}` : ""}
+              </span>
+            </div>
+            <FinanceStatusTag tone={file.status === "preview_ready" ? "success" : "warning"}>
+              {isAllExisting ? "无需导入" : statusLabel(file.status)}
+            </FinanceStatusTag>
+            {file.message ? <p className="import-workflow-result-row__message">{file.message}</p> : null}
           </div>
-          <FinanceStatusTag tone={file.status === "preview_ready" ? "success" : "warning"}>
-            {statusLabel(file.status)}
-          </FinanceStatusTag>
-          {file.message ? <p className="import-workflow-result-row__message">{file.message}</p> : null}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -946,8 +964,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     && !settingsLoading
     && !readyEtcTasksLoading;
   const confirmableFileIds = useMemo(
-    () => previewPayload?.files.filter(canConfirmFile).map((file) => file.id) ?? [],
-    [previewPayload],
+    () => previewPayload?.files.filter((file) => canConfirmFile(file, mode)).map((file) => file.id) ?? [],
+    [mode, previewPayload],
   );
   const etcBlockingIssues = useMemo(
     () => etcPreviewPayload?.reconciliationFilter?.blockingIssues ?? [],
@@ -973,7 +991,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     [missingEtcRequirementIssues],
   );
   const conflictingPreviewFiles = useMemo(
-    () => previewPayload?.files.filter((file) => canConfirmFile(file) && file.bankSelectionConflict) ?? [],
+    () => previewPayload?.files.filter((file) => file.status === "preview_ready" && file.bankSelectionConflict) ?? [],
     [previewPayload],
   );
   const canConfirm = canMutateData
@@ -1003,6 +1021,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     [previewPayload],
   );
   const previewAudit = useMemo(() => importSessionAudit(previewPayload), [previewPayload]);
+  const allBankTransactionsAlreadyExist = mode === "bank_transaction"
+    && conflictingPreviewFiles.length === 0
+    && isAllExistingBankAudit(previewAudit);
   const etcPreviewAudit = useMemo(() => etcAudit(etcPreviewPayload), [etcPreviewPayload]);
 
   const previewDetailRows = previewDetailPage?.rows ?? [];
@@ -1640,7 +1661,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                         setReviewDrawerOpen(true);
                       }}
                     />
-                    <ImportPreviewFileList files={previewPayload?.files ?? []} />
+                    {allBankTransactionsAlreadyExist ? (
+                      <ImportNotice tone="success">
+                        {`已检查 ${previewAudit?.originalCount ?? 0} 笔流水，全部已存在于 APP，无需重复导入。`}
+                      </ImportNotice>
+                    ) : null}
+                    <ImportPreviewFileList files={previewPayload?.files ?? []} mode={mode} />
                     {mappingRequiredFiles.map((file) => {
                       const values = { ...file.fieldMapping, ...(mappingDrafts[file.id] ?? {}) };
                       return (

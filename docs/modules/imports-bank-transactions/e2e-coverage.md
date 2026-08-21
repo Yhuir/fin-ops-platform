@@ -13,10 +13,11 @@
 | `IMPORT-BANK-E2E-007` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_bank_details_canonical_query.py`、write-operation impact tests | Browser 覆盖 confirm 返回空 targets、零 operation barrier/零 Workbench 页面请求；随后银行明细看到导入事实，成本统计“按时间”看到真实流水，同时“按项目”明确不产生无 OA 成本。后端证明写后零页面 job。 |
 | `IMPORT-BANK-E2E-008` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | Browser role matrix 覆盖 read-export 用户不能上传/预览/确认。 |
 | `IMPORT-BANK-E2E-009` | `external-risk` | `tests/test_write_operation_slo_audit.py`、`fin_ops_platform.tools.write_operation_slo_audit --operation bank_import_confirmed` staging gate | 本地契约测试要求银行确认只产生合同登记的关联台 refresh，不产生其它页面 job 或 unrelated dirty delta；随后访问银行明细、账户余额、成本统计的 canonical GET，并验证关联台 active-generation 收敛与读取延迟。真实 PostgreSQL、真实大文件与生产性能仍需生产验证。 |
+| `IMPORT-BANK-E2E-010` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | 48 笔全部已存在时保留真实 audit 统计，显示“无需导入”、禁用确认，并断言零 confirm、零 operation barrier；普通新增、账户冲突和损坏文件混合链保持原合同。 |
 
 ## Operation latency baseline
 
-`web/e2e/imports-bank-transactions-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开银行流水导入页、选择银行流水文件、选择银行账户映射、开始预览、阻止账户冲突确认、普通确认导入、损坏文件未导入项 tab、损坏文件混合导入确认、慢预览首个禁用反馈、preview stale 确认错误、confirm server error、导入后进入银行明细，以及进入成本统计验证导入流水只进入银行事实视图、不污染 OA 项目成本。
+`web/e2e/imports-bank-transactions-flow.spec.ts` 已接入 Playwright `operation-latency-*.json` 附件。本轮记录的操作覆盖：打开银行流水导入页、选择银行流水文件、选择银行账户映射、开始预览、全部已存在时零 confirm/job、阻止账户冲突确认、普通确认导入、损坏文件未导入项 tab、损坏文件混合导入确认、慢预览首个禁用反馈、preview stale 确认错误、confirm server error、导入后进入银行明细，以及进入成本统计验证导入流水只进入银行事实视图、不污染 OA 项目成本。
 
 ## 下一轮补测建议
 

@@ -30,6 +30,7 @@
 | --- | --- | --- |
 | 银行导入独立路由使用共享 `ImportWorkflowPage`，每个文件发送银行映射 override | covered | `bank transaction import uses the standalone route and sends bank mapping overrides`、`ImportsApi.test.ts` |
 | 页面展示 preview audit counts 和确认文案 | covered | `bank transaction import displays preview audit counts and confirm copy` |
+| 48 笔全部已存在时显示“无需导入”、禁用确认且不创建 confirm/job | covered | `bank transaction import treats an all-existing preview as a completed no-op`、`shows an all-existing bank preview as a no-op without creating an import job` |
 | 前端把 `preview_stale` 映射为“重新预览”提示 | covered | `file import confirm maps preview_stale to the refresh preview message` |
 | 损坏文件作为文件级错误，不中断整批预览 | covered | `test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch`、`test_preview_marks_corrupt_excel_as_file_level_error_instead_of_raising` |
 | 单一 `bank_statement` canonical 解析器识别现有银行 Excel 并保留原始文本字段 | covered | `test_preview_files_recognizes_bank_statement_templates`、`test_bank_file_parsers_preserve_real_excel_text_field_contracts` |
@@ -85,6 +86,7 @@
 | 2026-08-14 OA-first 成本隔离 | 银行流水导入后，流水可进入成本统计银行事实视图，但没有完成 OA 正式关系时不得进入按项目/银行/OA 费用类型。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | preview stale Browser 回归 | 预览后底层事实变化时，前端不得创建 import job、不得调用 operation barrier 或 Workbench 页面 API、不得显示成功。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | confirm 失败 Browser 回归 | 导入任务创建失败时，页面必须显示错误并保留 preview，不能误报“已确认导入”。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
+| 2026-08-22 全部已存在仍可确认 | `preview_ready` 但 `confirmable_count=0` 的银行文件不得继续显示“待确认”或进入 selected file IDs；页面保留真实 0、显示“无需导入”，且零 confirm/job。 | fixed by `ImportCenterPage.test.tsx`、`imports-bank-transactions-flow.spec.ts` |
 | 2026-08-11 生产重复删除授权漂移 | dry-run/execute 必须显式绑定精确重复删除数；候选数变化时在关系撤回、标签清理和流水删除前失败，并在 dry-run 输出官方参考号或余额/币种的逐对证据。 | fixed by `tests/test_bank_import_dedup_repair_service.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-08-20 普通确认终态残留候选引用 | `suspected_duplicate` 在 confirm 后必须保持未写入、batch 为 `completed_with_errors`，并清空 terminal row 的 typed/normalized canonical link；created、status_updated、duplicate_skipped 的正式引用保持不变。 | fixed by `tests/test_import_service.py` |
 | 2026-08-20 历史 terminal suspected row 阻断 Page Audit | 审计修复只接受正式终态银行行，按 exact count/fingerprint/serializable lock/CAS 清空 typed/normalized link；非银行、缺 source type、计数或任一行证据漂移时零写。 | fixed by `tests/test_bank_import_audit_contract_repair.py`、`tests/test_import_audit_repair_ops.py` |
@@ -102,6 +104,7 @@
 4. 损坏文件 + 正常文件混合上传 -> 损坏文件显示 file-level error 和未导入项明细 -> 正常文件仍可确认，confirm body 只包含正常文件 ID。
 5. 导入完成后进入银行明细和成本统计，确认 normal canonical GET 返回新账户余额及“按时间”导入流水；切换“按项目”后不得出现伪造的 OA 成本。
 6. Staging write-flow audit：真实银行流水确认后运行 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`，必须证明退休页面 refresh/dirty delta 为零；随后对银行明细、账户余额、关联台和成本统计执行只读结果与延迟验证。
+7. 全部流水已存在 -> 显示“无需导入”与真实 0 -> 确认禁用 -> confirm/job/operation barrier 均为零；账户冲突、疑似或解析错误不得被该状态掩盖。
 
 ## 现有验证命令
 
