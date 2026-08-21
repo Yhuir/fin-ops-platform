@@ -55,7 +55,11 @@ import {
   WORKBENCH_AMOUNT_ANOMALY_LABELS,
   isWorkbenchAmountAnomalyCode,
 } from "./types";
-import type { ManualInvoiceEntryBatchPreview } from "../imports/types";
+import { previewManualInvoicesAtEndpoint } from "../imports/api";
+import type {
+  ManualInvoiceEntryBatchPreview,
+  ManualInvoiceEntryValues,
+} from "../imports/types";
 import { apiUrl } from "../../app/runtime";
 import { ApiClientError, apiRequestJson } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
@@ -1543,6 +1547,15 @@ export async function confirmWorkbenchManualInvoiceSupplement(
       expense_item_id: target.expenseItemId,
     }),
   });
+}
+
+export async function previewWorkbenchManualInvoices(
+  values: ManualInvoiceEntryValues[],
+): Promise<ManualInvoiceEntryBatchPreview> {
+  return previewManualInvoicesAtEndpoint(
+    "/api/workbench/oa-invoice-supplements/manual/preview",
+    values,
+  );
 }
 
 function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchRelationGroup["rowCounts"] | undefined {

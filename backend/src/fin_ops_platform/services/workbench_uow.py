@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from time import monotonic
 from typing import Any, Callable
 
@@ -16,6 +17,9 @@ from fin_ops_platform.services.workbench_idempotency import (
 )
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,7 @@ class WorkbenchWriteUnitOfWork:
         handler: Callable[[WorkbenchWriteUnitOfWorkContext], dict[str, Any]],
     ) -> dict[str, Any]:
         uow_started_at = monotonic()
+        post_commit_callbacks: list[Callable[[], None]] = []
         idempotency = _idempotency_request_for(command)
         if idempotency is not None:
             existing = _idempotency_get(self._idempotency_store, idempotency)
@@ -76,9 +81,17 @@ class WorkbenchWriteUnitOfWork:
                         _raise_if_idempotency_in_progress(reserved_record, idempotency)
 
             repositories = self._repository_factory(transaction)
+            relation_repository = repositories.pair_relations
+            bind_post_commit = getattr(
+                relation_repository,
+                "bind_post_commit_callback_registrar",
+                None,
+            )
+            if callable(bind_post_commit):
+                bind_post_commit(post_commit_callbacks.append)
             context = WorkbenchWriteUnitOfWorkContext(
                 transaction=transaction,
-                pair_relations=repositories.pair_relations,
+                pair_relations=relation_repository,
                 etc_batch_links=getattr(repositories, "etc_batch_links", None),
                 exception_cases=repositories.exception_cases,
                 row_overrides=repositories.row_overrides,
@@ -116,13 +129,31 @@ class WorkbenchWriteUnitOfWork:
                     commit_started_at,
                     detail=f"outbox_count={len(outbox_event_ids)}",
                 )
+        post_commit_failures = 0
+        post_commit_started_at = monotonic()
+        for callback in post_commit_callbacks:
+            try:
+                callback()
+            except Exception:
+                post_commit_failures += 1
+                LOGGER.exception("Workbench post-commit runtime publication failed.")
+        if post_commit_callbacks:
             _emit_timing_if_available(
                 command,
-                "uow_total",
-                uow_started_at,
-                detail=f"outbox_count={len(outbox_event_ids)}",
+                "uow_post_commit",
+                post_commit_started_at,
+                detail=(
+                    f"callbacks={len(post_commit_callbacks)} "
+                    f"failures={post_commit_failures}"
+                ),
             )
-            return result
+        _emit_timing_if_available(
+            command,
+            "uow_total",
+            uow_started_at,
+            detail=f"outbox_count={len(outbox_event_ids)}",
+        )
+        return result
 
     def replay_committed(self, command: Any) -> dict[str, Any] | None:
         idempotency = _idempotency_request_for(command)

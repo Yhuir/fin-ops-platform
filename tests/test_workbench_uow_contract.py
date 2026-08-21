@@ -136,6 +136,34 @@ class _RepositoryPort:
         self.calls.append((operation, dict(payload)))
 
 
+class _PostCommitRepositoryPort(_RepositoryPort):
+    def __init__(self, name: str, transaction: object) -> None:
+        super().__init__(name, transaction)
+        self._registrar: Callable[[Callable[[], None]], None] | None = None
+
+    def bind_post_commit_callback_registrar(
+        self,
+        registrar: Callable[[Callable[[], None]], None],
+    ) -> None:
+        self._registrar = registrar
+
+    def register_post_commit_callback(self, callback: Callable[[], None]) -> bool:
+        if self._registrar is None:
+            return False
+        self._registrar(callback)
+        return True
+
+
+class _PostCommitRepositoryFactory(_RecordingRepositoryFactory):
+    def __call__(self, transaction: object) -> SimpleNamespace:
+        self.created_for_transactions.append(transaction)
+        return SimpleNamespace(
+            pair_relations=_PostCommitRepositoryPort("pair_relations", transaction),
+            exception_cases=_RepositoryPort("exception_cases", transaction),
+            row_overrides=_RepositoryPort("row_overrides", transaction),
+        )
+
+
 class _RecordingDirtyOutboxWriter:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
@@ -496,6 +524,55 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(writer.calls, [])
         self.assertEqual(result["source_versions"], {})
         self.assertEqual(result["outbox_event_ids"], [])
+
+    def test_relation_runtime_publication_runs_only_after_database_commit(self) -> None:
+        connection = _RecordingConnection()
+        factory = _PostCommitRepositoryFactory()
+        uow = self._new_uow(connection=connection, repository_factory=factory)
+        commit_counts_seen_by_callback: list[int] = []
+
+        def handler(ctx: object) -> dict[str, object]:
+            registered = ctx.pair_relations.register_post_commit_callback(
+                lambda: commit_counts_seen_by_callback.append(connection.commits)
+            )
+            self.assertTrue(registered)
+            self.assertEqual(commit_counts_seen_by_callback, [])
+            return {"case_id": "CASE-POST-COMMIT", "affected_scope_keys": ["2026-05"]}
+
+        result = self._run_uow(
+            uow,
+            _Command(action_name="confirm_link", scope_keys=["2026-05"]),
+            handler,
+        )
+
+        self.assertEqual(result["case_id"], "CASE-POST-COMMIT")
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(commit_counts_seen_by_callback, [1])
+
+    def test_relation_runtime_publication_is_discarded_when_database_rolls_back(self) -> None:
+        connection = _RecordingConnection()
+        factory = _PostCommitRepositoryFactory()
+        uow = self._new_uow(connection=connection, repository_factory=factory)
+        published: list[str] = []
+
+        def handler(ctx: object) -> dict[str, object]:
+            self.assertTrue(
+                ctx.pair_relations.register_post_commit_callback(
+                    lambda: published.append("runtime")
+                )
+            )
+            raise RuntimeError("forced persistence failure")
+
+        with self.assertRaisesRegex(RuntimeError, "forced persistence failure"):
+            self._run_uow(
+                uow,
+                _Command(action_name="confirm_link", scope_keys=["2026-05"]),
+                handler,
+            )
+
+        self.assertEqual(connection.commits, 0)
+        self.assertEqual(connection.rollbacks, 1)
+        self.assertEqual(published, [])
 
     def test_relation_write_uow_never_calls_batch_read_model_refresh_writer(self) -> None:
         connection = _RecordingConnection()

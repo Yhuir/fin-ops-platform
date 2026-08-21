@@ -309,6 +309,12 @@ class FileImportService:
             oa_form_id=oa_form_id,
         )
 
+    def invoice_matches_canonical_key(self, *, invoice_id: str, canonical_key: str) -> bool:
+        return self._import_service.invoice_matches_canonical_key(
+            invoice_id=invoice_id,
+            canonical_key=canonical_key,
+        )
+
     def preview_session_persistence_payload(self, session_id: str) -> dict[str, Any]:
         session = self._sessions[session_id]
         batch_ids = [

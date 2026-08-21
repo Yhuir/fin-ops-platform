@@ -520,6 +520,100 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(writer.calls, [])
         self.assertEqual(repository_factory.created_for_transactions, [connection.transaction_obj])
 
+    def test_confirm_link_uow_extends_immutable_oa_attachment_relation_with_note(self) -> None:
+        app = self._build_app()
+        open_rows = self._default_open_rows(app)
+        row_ids = [str(open_rows[row_type]["id"]) for row_type in ("oa", "bank", "invoice")]
+        row_types = ["oa", "bank", "invoice"]
+        rows_by_id = {str(row["id"]): dict(row) for row in open_rows.values()}
+        canonical_rows = {
+            row_id: {**rows_by_id[row_id], "pane": row_type}
+            for row_id, row_type in zip(row_ids, row_types, strict=True)
+        }
+
+        class CanonicalSelection:
+            @staticmethod
+            def get_canonical_rows_by_ids(
+                selected_row_ids: list[str], *, row_types: list[str] | None = None
+            ) -> dict[str, dict[str, object]]:
+                del row_types
+                return {
+                    row_id: dict(canonical_rows[row_id])
+                    for row_id in selected_row_ids
+                    if row_id in canonical_rows
+                }
+
+        app._workbench_page_selection_repository = CanonicalSelection()
+        app._resolve_rows_for_amount_check = lambda selected_row_ids, **_: [
+            {**rows_by_id[row_id], "id": row_id}
+            for row_id in selected_row_ids
+        ]
+        app._amount_check_for_rows_by_type = lambda _rows: {
+            "status": "mismatched",
+            "requires_note": True,
+            "oa_total": "140.00",
+            "bank_total": "140.00",
+            "invoice_total": "145.00",
+            "difference_amount": "5.00",
+        }
+        app._workbench_pair_relation_service.create_active_relation(
+            case_id="CASE-OA-ATTACHMENT",
+            row_ids=[row_ids[0], row_ids[2]],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-03",
+            special_metadata={
+                "formal_relation": {"relation_fingerprint": "oa-attachment:fixture"},
+                "oa_attachment_bindings": [
+                    {
+                        "parent_oa_row_id": row_ids[0],
+                        "invoice_row_ids": [row_ids[2]],
+                    }
+                ],
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+                "source": "oa_attachment_invoice",
+                "parent_oa_row_id": row_ids[0],
+            },
+        )
+        connection = _RecordingConnection()
+        persisted: list[dict[str, object]] = []
+        app._workbench_confirm_link_uow_override = WorkbenchWriteUnitOfWork(
+            connection=connection,
+            repository_factory=_RelationCommandRepositoryFactory(persisted, canonical_rows),
+            idempotency_store=InMemoryWorkbenchIdempotencyRepository(),
+        )
+
+        response = self._post(
+            app,
+            "/api/workbench/actions/confirm-link",
+            {
+                "month": "2026-03",
+                "row_ids": row_ids,
+                "row_types": row_types,
+                "case_id": "CASE-MANUAL-EXTENSION",
+                "note": "发票比 OA、流水多 5 元，确认关联。",
+                "idempotency_key": "confirm:immutable-extension",
+            },
+        )
+
+        self.assertEqual(response.status_code, HTTPStatus.OK, response.body)
+        active = app._workbench_pair_relation_service.active_relations_for_typed_rows(
+            row_ids,
+            row_types,
+        )
+        self.assertEqual([relation["case_id"] for relation in active], ["CASE-MANUAL-EXTENSION"])
+        metadata = active[0]["special_metadata"]
+        self.assertEqual(metadata["formal_relation"]["relation_fingerprint"], "oa-attachment:fixture")
+        self.assertEqual(
+            metadata["oa_attachment_bindings"],
+            [{"parent_oa_row_id": row_ids[0], "invoice_row_ids": [row_ids[2]]}],
+        )
+        self.assertTrue(metadata["contains_immutable_oa_attachment_binding"])
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(len(persisted), 1)
+
     def test_confirm_link_uow_replays_same_idempotency_key_without_duplicate_outbox(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)

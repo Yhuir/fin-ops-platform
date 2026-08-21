@@ -486,6 +486,44 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         self.assertNotIn("oa_invoice_attachment_absent", anomaly_codes)
         self.assertNotIn("oa_invoice_attachment_unparsed", anomaly_codes)
 
+    def test_explicit_invoice_item_binding_overrides_attachment_item_for_amount_checks(self) -> None:
+        invoice = {
+            "type": "invoice",
+            "id": "invoice-27-05",
+            "source_expense_item_ids": ["item-4-current"],
+            "source_links": [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_expense_item_id": "item-3",
+                },
+                {
+                    "source_type": "oa_expense_item_invoice",
+                    "source_expense_item_id": "item-4-written",
+                },
+            ],
+        }
+
+        self.assertEqual(self.service._source_expense_item_ids(invoice), ["item-4-current"])
+
+    def test_malformed_explicit_binding_does_not_fall_back_to_attachment_item(self) -> None:
+        invoice = {
+            "type": "invoice",
+            "id": "invoice-malformed-explicit",
+            "source_expense_item_ids": [],
+            "source_links": [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_expense_item_id": "item-3",
+                },
+                {
+                    "source_type": "oa_expense_item_invoice",
+                    "source_expense_item_id": "",
+                },
+            ],
+        }
+
+        self.assertEqual(self.service._source_expense_item_ids(invoice), [])
+
     def test_exact_single_invoice_mismatch_is_displayed_on_that_invoice(self) -> None:
         anomaly = self.service.workbench_anomaly(
             {

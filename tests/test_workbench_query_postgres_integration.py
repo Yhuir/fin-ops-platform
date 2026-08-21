@@ -1218,6 +1218,13 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         source_links = [
             {
+                "source_type": "oa_attachment_invoice",
+                "derived_from_oa_id": "oa-manual-2308",
+                "source_expense_item_id": "oa-manual-2308:item:9:historical",
+                "source_expense_row_index": "9",
+                "source_attachment_key": "historical-attachment.pdf",
+            },
+            {
                 "source_type": "oa_expense_item_invoice",
                 "entry_method": "manual_invoice_import",
                 "derived_from_oa_id": "oa-manual-2308",

@@ -178,12 +178,26 @@ def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None
     """
 
     oa_rows = [row for row in rows if str(row.get("type") or "").strip() == "oa"]
-    for invoice_row in (
-        row
-        for row in rows
-        if str(row.get("type") or "").strip() == "invoice"
-        and str(row.get("source_kind") or "").strip() == "oa_attachment_invoice"
-    ):
+    for invoice_row in (row for row in rows if str(row.get("type") or "").strip() == "invoice"):
+        source_links = [
+            source_link
+            for source_link in list(invoice_row.get("source_links") or [])
+            if isinstance(source_link, dict)
+        ]
+        has_explicit_source = any(
+            str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
+            for source_link in source_links
+        )
+        has_attachment_source = any(
+            str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
+            for source_link in source_links
+        )
+        if (
+            not has_explicit_source
+            and not has_attachment_source
+            and str(invoice_row.get("source_kind") or "").strip() != "oa_attachment_invoice"
+        ):
+            continue
         matches: set[tuple[str, tuple[str, ...]]] = set()
         for oa_row in oa_rows:
             canonical_item_ids = canonical_oa_expense_item_ids(
@@ -193,6 +207,9 @@ def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None
             if canonical_item_ids:
                 matches.add((str(oa_row.get("id") or "").strip(), tuple(canonical_item_ids)))
         if len(matches) != 1:
+            if has_explicit_source:
+                invoice_row["source_expense_item_ids"] = []
+                invoice_row.pop("source_expense_item_id", None)
             continue
         oa_row_id, canonical_item_ids = next(iter(matches))
         invoice_row["source_oa_id"] = oa_row_id
@@ -206,12 +223,19 @@ def canonical_oa_expense_item_ids(
     oa_row: dict[str, Any],
     invoice_row: dict[str, Any],
 ) -> list[str]:
-    source_rows = [
+    explicit_source_rows = [
+        source_link
+        for source_link in list(invoice_row.get("source_links") or [])
+        if isinstance(source_link, dict)
+        and str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
+    ]
+    attachment_source_rows = [
         source_link
         for source_link in list(invoice_row.get("source_links") or [])
         if isinstance(source_link, dict)
         and str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
     ]
+    source_rows = explicit_source_rows or attachment_source_rows
     if not source_rows:
         source_rows = [invoice_row]
 

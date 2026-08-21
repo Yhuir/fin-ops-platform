@@ -25,6 +25,12 @@ class OperationHistorySemanticsTests(unittest.TestCase):
             ),
             (
                 "POST",
+                "/api/workbench/oa-invoice-supplements/manual/preview",
+                "预览 OA 发票录入",
+                "OA 发票关联",
+            ),
+            (
+                "POST",
                 "/api/workbench/oa-invoice-supplements/documents",
                 "上传 OA 补充凭证",
                 "OA 补充凭证",

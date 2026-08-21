@@ -84,6 +84,71 @@ def test_normalizes_compact_hydration_external_identity_alias() -> None:
     assert invoice["source_oa_row_id"] == "oa-exp-2204"
 
 
+def test_explicit_expense_item_binding_overrides_historical_attachment_source() -> None:
+    oa_row = {
+        "id": "oa-exp-2201",
+        "type": "oa",
+        "expense_items": [
+            {"id": "oa-exp-2201:item:3:current", "row_index": "3"},
+            {"id": "oa-exp-2201:item:4:current", "row_index": "4"},
+        ],
+    }
+    invoice = {
+        "id": "invoice-27-05",
+        "type": "invoice",
+        "source_kind": "invoice",
+        "source_links": [
+            {
+                "source_type": "oa_attachment_invoice",
+                "source_expense_item_id": "oa-exp-2201:item:3:old",
+                "source_expense_row_index": "3",
+            },
+            {
+                "source_type": "oa_expense_item_invoice",
+                "source_expense_item_id": "oa-exp-2201:item:4:written",
+            },
+        ],
+        "source_expense_item_ids": ["oa-exp-2201:item:3:old"],
+    }
+
+    normalize_oa_attachment_expense_item_ids([oa_row, invoice])
+
+    assert invoice["source_expense_item_ids"] == ["oa-exp-2201:item:4:current"]
+    assert len(invoice["source_links"]) == 2
+    assert invoice["source_links"][0]["source_expense_item_id"] == "oa-exp-2201:item:3:old"
+
+
+def test_malformed_explicit_binding_does_not_fall_back_to_attachment_source() -> None:
+    oa_row = {
+        "id": "oa-exp-2201",
+        "type": "oa",
+        "expense_items": [
+            {"id": "oa-exp-2201:item:3:current", "row_index": "3"},
+        ],
+    }
+    invoice = {
+        "id": "invoice-malformed-explicit",
+        "type": "invoice",
+        "source_kind": "oa_attachment_invoice",
+        "source_links": [
+            {
+                "source_type": "oa_attachment_invoice",
+                "source_expense_item_id": "oa-exp-2201:item:3:old",
+                "source_expense_row_index": "3",
+            },
+            {
+                "source_type": "oa_expense_item_invoice",
+                "source_expense_item_id": "",
+            },
+        ],
+        "source_expense_item_ids": ["oa-exp-2201:item:3:old"],
+    }
+
+    normalize_oa_attachment_expense_item_ids([oa_row, invoice])
+
+    assert invoice["source_expense_item_ids"] == []
+
+
 def test_leaves_ambiguous_or_foreign_attachment_sources_unassigned() -> None:
     rows = [
         {

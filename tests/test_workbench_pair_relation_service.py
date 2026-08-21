@@ -314,6 +314,139 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
             True,
         )
 
+    def test_replace_extends_immutable_oa_attachment_relation_without_losing_metadata(self) -> None:
+        service = WorkbenchPairRelationService()
+        attachment = service.create_active_relation(
+            case_id="CASE-OA-ATTACHMENT",
+            row_ids=["oa-exp-2444", "inv_imported_0956"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-08",
+            special_metadata={
+                "source": "oa_attachment_invoice",
+                "formal_relation": {
+                    "origin": "system_deterministic",
+                    "relation_fingerprint": "oa-attachment:2444:0956",
+                },
+                "parent_oa_row_id": "oa-exp-2444",
+                "oa_attachment_bindings": [
+                    {
+                        "parent_oa_row_id": "oa-exp-2444",
+                        "invoice_row_ids": ["inv_imported_0956"],
+                    }
+                ],
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+            },
+        )
+
+        relation, _history = service.replace_with_confirmed_relation(
+            case_id="CASE-MANUAL-EXTENSION",
+            row_ids=["oa-exp-2444", "bank-140", "inv_imported_0956"],
+            row_types=["oa", "bank", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-08",
+            note="差额 5 元",
+            special_metadata={"paired_requirement_source": "bank_transaction_paired_policy"},
+            before_relations=[attachment],
+        )
+
+        metadata = relation["special_metadata"]
+        self.assertEqual(
+            metadata["formal_relation"]["relation_fingerprint"],
+            "oa-attachment:2444:0956",
+        )
+        self.assertEqual(
+            metadata["oa_attachment_bindings"],
+            [
+                {
+                    "parent_oa_row_id": "oa-exp-2444",
+                    "invoice_row_ids": ["inv_imported_0956"],
+                }
+            ],
+        )
+        self.assertTrue(metadata["contains_immutable_oa_attachment_binding"])
+        self.assertNotIn("immutable_oa_attachment_binding", metadata)
+        self.assertEqual(
+            metadata["paired_requirement_source"],
+            "bank_transaction_paired_policy",
+        )
+
+    def test_replace_same_attachment_members_preserves_top_level_immutable_metadata(self) -> None:
+        service = WorkbenchPairRelationService()
+        attachment = service.create_active_relation(
+            case_id="CASE-OA-ATTACHMENT",
+            row_ids=["oa-exp-2444", "inv_imported_0956"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-08",
+            special_metadata={
+                "source": "oa_attachment_invoice",
+                "parent_oa_row_id": "oa-exp-2444",
+                "oa_attachment_bindings": [
+                    {
+                        "parent_oa_row_id": "oa-exp-2444",
+                        "invoice_row_ids": ["inv_imported_0956"],
+                    }
+                ],
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+            },
+        )
+
+        relation, _history = service.replace_with_confirmed_relation(
+            case_id="CASE-OA-ATTACHMENT-REPLACED",
+            row_ids=["oa-exp-2444", "inv_imported_0956"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="finance",
+            month_scope="2026-08",
+            before_relations=[attachment],
+        )
+
+        metadata = relation["special_metadata"]
+        self.assertEqual(metadata["source"], "oa_attachment_invoice")
+        self.assertEqual(metadata["parent_oa_row_id"], "oa-exp-2444")
+        self.assertTrue(metadata["immutable_oa_attachment_binding"])
+        self.assertTrue(metadata["contains_immutable_oa_attachment_binding"])
+
+    def test_replace_rejects_dropping_member_from_immutable_oa_attachment_binding(self) -> None:
+        service = WorkbenchPairRelationService()
+        service.create_active_relation(
+            case_id="CASE-OA-ATTACHMENT",
+            row_ids=["oa-exp-2444", "inv_imported_0956"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-08",
+            special_metadata={
+                "oa_attachment_bindings": [
+                    {
+                        "parent_oa_row_id": "oa-exp-2444",
+                        "invoice_row_ids": ["inv_imported_0956"],
+                    }
+                ],
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "immutable_oa_attachment_binding"):
+            service.replace_with_confirmed_relation(
+                case_id="CASE-MANUAL-INVALID",
+                row_ids=["oa-exp-2444", "bank-140"],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                created_by="finance",
+                month_scope="2026-08",
+            )
+
+        self.assertIsNotNone(service.get_active_relation_by_case_id("CASE-OA-ATTACHMENT"))
+        self.assertIsNone(service.get_active_relation_by_case_id("CASE-MANUAL-INVALID"))
+
     def test_replace_with_confirmed_relation_does_not_persist_unowned_manual_history(self) -> None:
         service = WorkbenchPairRelationService()
 

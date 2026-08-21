@@ -6,8 +6,8 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
-  test("opens one OA invoice supplement drawer and switches to multi-invoice entry", async ({ page }) => {
-    await installDeterministicApiMocks(page, {
+  test("opens one OA invoice supplement drawer with invoice entry as the primary mode", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchOaInvoiceUnparsedScenario: true,
     });
@@ -15,22 +15,28 @@ test.describe("workbench relation browser flow", () => {
     await page.goto("/");
 
     const unpairedZone = page.getByTestId("zone-unpaired");
-    await expect(unpairedZone.getByText("OA发票附件未解析", { exact: true })).toBeVisible();
-    await expect(unpairedZone.getByText("OA发票附件缺失", { exact: true })).toHaveCount(0);
     await unpairedZone.getByRole("button", { name: "录入发票" }).click();
 
     const drawer = page.getByRole("dialog", { name: "录入发票" });
     await expect(drawer).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(1);
-    await expect(drawer.getByRole("tab", { name: "上传凭证" })).toHaveAttribute("aria-selected", "true");
-    await expect(drawer.getByText("不进入统一发票池", { exact: false })).toBeVisible();
-    await expect(drawer.getByText("尚未上传补充凭证。", { exact: true })).toBeVisible();
-
-    await drawer.getByRole("tab", { name: "手工录入" }).click();
+    const modeTabs = drawer.getByRole("tablist", { name: "录入方式" });
+    await expect(modeTabs.getByRole("tab").nth(0)).toHaveText("发票录入");
+    await expect(modeTabs.getByRole("tab").nth(1)).toHaveText("补充凭证");
+    await expect(modeTabs.getByRole("tab", { name: "发票录入" })).toHaveAttribute("aria-selected", "true");
+    await expect(modeTabs.getByRole("tab", { name: "补充凭证" })).toHaveAttribute("aria-selected", "false");
     await expect(drawer.getByRole("tab", { name: "新发票1" })).toBeVisible();
     await drawer.getByRole("button", { name: "添加发票" }).click();
     await expect(drawer.getByRole("tab", { name: "新发票2" })).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "录入发票池并关联" })).toBeDisabled();
+    await expect(drawer.getByRole("button", { name: "确认录入并关联" })).toBeDisabled();
+    await expect(drawer.getByRole("button", { name: "录入发票池并关联" })).toHaveCount(0);
+    expect(api.count("GET /api/workbench/oa-invoice-supplements/documents")).toBe(0);
+
+    await modeTabs.getByRole("tab", { name: "补充凭证" }).click();
+    await expect(modeTabs.getByRole("tab", { name: "补充凭证" })).toHaveAttribute("aria-selected", "true");
+    await expect(drawer.getByText("不进入统一发票池", { exact: false })).toBeVisible();
+    await expect(drawer.getByText("尚未上传补充凭证。", { exact: true })).toBeVisible();
+    expect(api.count("GET /api/workbench/oa-invoice-supplements/documents")).toBe(1);
   });
 
   test("aligns an explicitly owned bank fanout with its parent OA", async ({ page }) => {

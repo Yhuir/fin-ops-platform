@@ -15,6 +15,15 @@ from fin_ops_platform.services.postgres_repositories.workbench_idempotency impor
     PostgresWorkbenchIdempotencyRepository,
 )
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
+from fin_ops_platform.services.workbench_pair_relation_service import (
+    WorkbenchPairRelationService,
+)
+from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
+    WorkbenchRelationCommandRepositoryAdapter,
+)
+from fin_ops_platform.services.workbench_relation_command_service import (
+    WorkbenchRelationCommandService,
+)
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -178,6 +187,203 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
         self.assertEqual(history_count["count"], 26)
         self.assertEqual(sorted(active_snapshot["pair_relations"]), ["case-delta"])
         self.assertNotIn("pair_relation_history", active_snapshot)
+
+    def test_confirm_uow_extends_immutable_attachment_only_after_real_commit(self) -> None:
+        oa_row_id = f"oa-pg-confirm-{self.run_id}"
+        bank_row_id = f"bank-pg-confirm-{self.run_id}"
+        invoice_row_id = f"inv-pg-confirm-{self.run_id}"
+        attachment_case_id = f"CASE-OA-ATT-{self.run_id}"
+        confirmed_case_id = f"CASE-CONFIRMED-{self.run_id}"
+        note = "OA 与流水均为 140.00，发票为 145.00，差额 5.00，确认关联。"
+        amount_check = {
+            "status": "mismatched",
+            "requires_note": True,
+            "oa_total": "140.00",
+            "bank_total": "140.00",
+            "invoice_total": "145.00",
+            "difference_amount": "5.00",
+        }
+        attachment_metadata = {
+            "source": "oa_attachment_invoice",
+            "formal_relation": {
+                "origin": "system_deterministic",
+                "relation_fingerprint": f"oa-attachment:{self.run_id}",
+            },
+            "parent_oa_row_id": oa_row_id,
+            "oa_attachment_bindings": [
+                {
+                    "parent_oa_row_id": oa_row_id,
+                    "invoice_row_ids": [invoice_row_id],
+                }
+            ],
+            "immutable_oa_attachment_binding": True,
+            "contains_immutable_oa_attachment_binding": True,
+        }
+        self.connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, project_name, amount,
+                currency, normalized_payload, raw_payload
+            ) values (
+                %s, %s, '付款申请', %s, 'active', 'completed', '测试申请人',
+                '2026-08-17', '2026-08-01', '真实事务测试项目', 140, 'CNY',
+                '{}'::jsonb, '{}'::jsonb
+            )
+            """,
+            (f"source:{oa_row_id}", f"form:{oa_row_id}", oa_row_id),
+        )
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date,
+                txn_month, trade_time, summary, raw_payload, status
+            ) values (
+                %s, '6222000011119999', '基本户', 'outflow', '测试供应商',
+                140, -140, '2026-08-20', '2026-08-01',
+                '2026-08-20 14:21:11+08', '报销', '{}'::jsonb, 'active'
+            )
+            """,
+            (bank_row_id,),
+        )
+        self.connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, seller_name, amount, signed_amount,
+                total_with_tax, status, workbench_visibility, source_links,
+                raw_payload
+            ) values (
+                %s, 'input', %s, '2026-08-05', '2026-08-01', '测试供应商',
+                145, 145, 145, 'active', 'visible', '[]'::jsonb, '{}'::jsonb
+            )
+            """,
+            (invoice_row_id, f"INV-{self.run_id}"),
+        )
+
+        runtime_relations = WorkbenchPairRelationService()
+        attachment_relation = runtime_relations.create_active_relation(
+            case_id=attachment_case_id,
+            row_ids=[oa_row_id, invoice_row_id],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-08",
+            special_metadata=attachment_metadata,
+        )
+        PostgresWorkbenchRelationRepository(self.connection).save_workbench_pair_relation_delta(
+            {
+                "pair_relations": {attachment_case_id: attachment_relation},
+                "pair_relation_history": [],
+            },
+            changed_case_ids={attachment_case_id},
+        )
+
+        def repositories(transaction: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                pair_relations=PostgresWorkbenchRelationRepository(transaction),
+                exception_cases=None,
+                row_overrides=None,
+                canonical_query=None,
+            )
+
+        uow = WorkbenchWriteUnitOfWork(
+            connection=self.connection,
+            repository_factory=repositories,
+            idempotency_store=PostgresWorkbenchIdempotencyRepository(self.connection),
+        )
+        command = _CheckpointCommand(
+            action_name="confirm_link",
+            scope_keys=["2026-08"],
+            idempotency_key=f"confirm:{self.run_id}",
+            payload={
+                "case_id": confirmed_case_id,
+                "row_ids": [oa_row_id, bank_row_id, invoice_row_id],
+                "row_types": ["oa", "bank", "invoice"],
+                "note": note,
+            },
+            refresh_metadata={},
+            actor_id=self.actor_id,
+        )
+
+        def confirm(context: object) -> dict[str, object]:
+            relation_command = WorkbenchRelationCommandService(
+                relation_repository=WorkbenchRelationCommandRepositoryAdapter(
+                    pair_relation_service=runtime_relations,
+                    repository=context.pair_relations,
+                )
+            )
+            result = relation_command.confirm_relation(
+                case_id=confirmed_case_id,
+                row_ids=[oa_row_id, bank_row_id, invoice_row_id],
+                row_types=["oa", "bank", "invoice"],
+                relation_mode="manual_confirmed",
+                actor_id=self.actor_id,
+                month_scope="2026-08",
+                note=note,
+                amount_check=amount_check,
+                special_metadata={"paired_requirement_source": "bank_transaction_paired_policy"},
+                before_relations=[attachment_relation],
+                replace_existing=True,
+                history_operation_type="confirm_link",
+                tenant_id="default",
+            )
+            self.assertIsNotNone(
+                runtime_relations.get_active_relation_by_case_id(attachment_case_id)
+            )
+            self.assertIsNone(
+                runtime_relations.get_active_relation_by_case_id(confirmed_case_id)
+            )
+            return dict(result)
+
+        result = uow.run(command, confirm)
+
+        self.assertEqual(result["status"], "confirmed")
+        active_rows = self.connection.fetch_all(
+            """
+            select case_id, row_ids, row_types, note, amount_check, special_metadata
+            from app.workbench_pair_relations
+            where status = 'active' and row_ids && %s::text[]
+            order by case_id
+            """,
+            ([oa_row_id, bank_row_id, invoice_row_id],),
+        )
+        self.assertEqual(len(active_rows), 1)
+        self.assertEqual(active_rows[0]["case_id"], confirmed_case_id)
+        self.assertEqual(
+            active_rows[0]["row_ids"],
+            [oa_row_id, bank_row_id, invoice_row_id],
+        )
+        self.assertEqual(active_rows[0]["row_types"], ["oa", "bank", "invoice"])
+        self.assertEqual(active_rows[0]["note"], note)
+        self.assertEqual(active_rows[0]["amount_check"], amount_check)
+        persisted_metadata = active_rows[0]["special_metadata"]
+        self.assertEqual(
+            persisted_metadata["formal_relation"]["relation_fingerprint"],
+            f"oa-attachment:{self.run_id}",
+        )
+        self.assertEqual(
+            persisted_metadata["oa_attachment_bindings"],
+            [
+                {
+                    "parent_oa_row_id": oa_row_id,
+                    "invoice_row_ids": [invoice_row_id],
+                }
+            ],
+        )
+        self.assertTrue(
+            persisted_metadata["contains_immutable_oa_attachment_binding"]
+        )
+        runtime_relation = runtime_relations.get_active_relation_by_case_id(
+            confirmed_case_id
+        )
+        self.assertIsNotNone(runtime_relation)
+        assert runtime_relation is not None
+        self.assertEqual(runtime_relation["row_ids"], active_rows[0]["row_ids"])
+        self.assertIsNone(
+            runtime_relations.get_active_relation_by_case_id(attachment_case_id)
+        )
 
     def _run_checkpoint(
         self,

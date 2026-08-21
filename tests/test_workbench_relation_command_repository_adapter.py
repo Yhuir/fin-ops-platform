@@ -92,6 +92,16 @@ class CaptureRepository:
         return ["oa:oa-missing"]
 
 
+class DeferredCaptureRepository(CaptureRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.post_commit_callbacks: list[object] = []
+
+    def register_post_commit_callback(self, callback: object) -> bool:
+        self.post_commit_callbacks.append(callback)
+        return True
+
+
 class SnapshotBlockingPairRelationService(WorkbenchPairRelationService):
     def snapshot(self) -> dict[str, object]:
         raise AssertionError("changed-case apply must not rebuild the global snapshot")
@@ -417,6 +427,53 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
         self.assertEqual(
             [item["operation_type"] for item in current["pair_relation_history"]],
             ["old-1", "new-2"],
+        )
+
+    def test_delta_runtime_publication_waits_for_transaction_commit_callback(self) -> None:
+        pair_service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {
+                    "CASE-1": {
+                        "case_id": "CASE-1",
+                        "row_ids": ["bank-old"],
+                        "row_types": ["bank"],
+                        "status": "active",
+                    }
+                }
+            }
+        )
+        repository = DeferredCaptureRepository()
+        adapter = WorkbenchRelationCommandRepositoryAdapter(
+            pair_relation_service=pair_service,
+            repository=repository,
+        )
+        delta = {
+            "pair_relations": {
+                "CASE-1": {
+                    "case_id": "CASE-1",
+                    "row_ids": ["bank-new"],
+                    "row_types": ["bank"],
+                    "status": "active",
+                }
+            }
+        }
+
+        adapter.save_workbench_pair_relation_delta(delta, changed_case_ids=["CASE-1"])
+
+        self.assertEqual(repository.delta_saved[0]["changed_case_ids"], ["CASE-1"])
+        self.assertEqual(
+            pair_service.get_active_relation_by_case_id("CASE-1")["row_ids"],
+            ["bank-old"],
+        )
+        self.assertEqual(len(repository.post_commit_callbacks), 1)
+
+        callback = repository.post_commit_callbacks[0]
+        assert callable(callback)
+        callback()
+
+        self.assertEqual(
+            pair_service.get_active_relation_by_case_id("CASE-1")["row_ids"],
+            ["bank-new"],
         )
 
 

@@ -8,6 +8,7 @@ import {
   confirmWorkbenchManualInvoiceSupplement,
   deleteWorkbenchOaSupportingDocument,
   listWorkbenchOaSupportingDocuments,
+  previewWorkbenchManualInvoices,
   resolveWorkbenchActionErrorMessage,
   uploadWorkbenchOaSupportingDocuments,
 } from "../../features/workbench/api";
@@ -39,14 +40,18 @@ export default function WorkbenchInvoiceEntryDrawer({
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
-  const [mode, setMode] = useState<"upload" | "manual">("upload");
+  const [mode, setMode] = useState<"upload" | "manual">("manual");
   const [documents, setDocuments] = useState<WorkbenchOaSupportingDocument[]>([]);
   const [loading, setLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open || !target) return;
+    if (open) setMode("manual");
+  }, [open, target?.expenseItemId, target?.oaRowId]);
+
+  useEffect(() => {
+    if (!open || !target || mode !== "upload") return;
     let active = true;
     setDocuments([]);
     setLoading(true);
@@ -56,7 +61,7 @@ export default function WorkbenchInvoiceEntryDrawer({
       .catch((error) => { if (active) setErrorMessage(resolveWorkbenchActionErrorMessage(error, "补充凭证加载失败。")); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [open, target]);
+  }, [mode, open, target]);
 
   async function upload(files: File[]) {
     if (!target || files.length === 0 || loading) return;
@@ -123,13 +128,25 @@ export default function WorkbenchInvoiceEntryDrawer({
       <Tabs selectedKey={mode} onSelectionChange={(key) => setMode(String(key) as "upload" | "manual")}>
         <Tabs.ListContainer className="workbench-invoice-entry-drawer__mode-tabs-container">
           <Tabs.List aria-label="录入方式" className="workbench-invoice-entry-drawer__mode-tabs">
-            <Tabs.Tab id="upload">上传凭证</Tabs.Tab>
-            <Tabs.Tab id="manual">手工录入</Tabs.Tab>
+            <Tabs.Tab id="manual">发票录入</Tabs.Tab>
+            <Tabs.Tab id="upload">补充凭证</Tabs.Tab>
           </Tabs.List>
         </Tabs.ListContainer>
       </Tabs>
       {errorMessage ? <Alert className="manual-invoice-entry__notice manual-invoice-entry__notice--danger">{errorMessage}</Alert> : null}
-      {mode === "upload" ? (
+      {mode === "manual" && target ? (
+        <ManualInvoiceBatchEditor
+          disabled={disabled}
+          previewInvoices={previewWorkbenchManualInvoices}
+          submitLabel="确认录入并关联"
+          onCancel={onClose}
+          onSubmit={async (preview) => {
+            await confirmWorkbenchManualInvoiceSupplement(target, preview);
+            await onCompleted();
+            onClose();
+          }}
+        />
+      ) : mode === "upload" ? (
         <div className="workbench-supporting-documents">
           <label
             className="workbench-supporting-documents__upload"
@@ -155,7 +172,7 @@ export default function WorkbenchInvoiceEntryDrawer({
             />
           </label>
           <div className="workbench-supporting-documents__summary">
-            <p>补充凭证直接关联当前 OA 子付款项，不进入统一发票池。</p>
+            <p>仅补充报销证明材料，直接关联当前 OA 子付款项，不进入统一发票池，也不会参与发票配对。</p>
             {documents.length > 0 ? <Chip color="default" size="sm" variant="soft"><Chip.Label>{documents.length} 个文件</Chip.Label></Chip> : null}
           </div>
           <div className="workbench-supporting-documents__list">
@@ -170,17 +187,6 @@ export default function WorkbenchInvoiceEntryDrawer({
             ))}
           </div>
         </div>
-      ) : target ? (
-        <ManualInvoiceBatchEditor
-          disabled={disabled}
-          submitLabel="录入发票池并关联"
-          onCancel={onClose}
-          onSubmit={async (preview) => {
-            await confirmWorkbenchManualInvoiceSupplement(target, preview);
-            await onCompleted();
-            onClose();
-          }}
-        />
       ) : null}
     </AppDrawer>
   );

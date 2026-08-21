@@ -41,8 +41,9 @@ durable dirty scope
 
 ```text
 unpaired selection with >=2 distinct canonical members
-  -> preview locks canonical row set + expected versions
+  -> preview resolves the current canonical row set and amount evidence
   -> amount/direction mismatch requires existing note; completeness does not block create
+  -> submit/UoW re-resolves and locks the exact typed rows and active owners
   -> command/UoW creates active relation only
   -> current page performs exactly one normal direct canonical GET
   -> paired group when completion contract passes; otherwise same-case unpaired relation group
@@ -57,7 +58,7 @@ paired or unpaired active relation group
   -> previous groups are restored; members without a predecessor become unpaired singletons
 ```
 
-preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm|withdraw) -> idle`。进入 pending 必须在发出请求前同步完成，并在下一次 render 输出 spinner、busy label、disabled、`aria-disabled` 和 `aria-busy`；confirm 与 withdraw 不允许并行或重复请求。成功响应仅在发起时的 selection 和 scope 仍一致时打开正式 preview drawer，否则直接丢弃。preview 产生的 `preview_id`、canonical entity versions 和 fingerprint 是提交前置条件；页面 cursor 不是写 CAS。请求失败恢复入口并展示安全中文错误；该临时状态不改变 preview drawer 已有 submit/sync/load 状态机，也不会新增第三种正式页面关系状态。
+preview 请求本身只有一个页面级临时状态：`idle -> pending(confirm|withdraw) -> idle`。进入 pending 必须在发出请求前同步完成，并在下一次 render 输出 spinner、busy label、disabled、`aria-disabled` 和 `aria-busy`；confirm 与 withdraw 不允许并行或重复请求。成功响应仅在发起时的 selection 和 scope 仍一致时打开正式 preview drawer，否则直接丢弃。confirm 提交由同一 UoW 再次解析并锁定 exact typed selection；withdraw 的 `preview_id`、relation versions 和 fingerprint 是提交前置条件。页面 cursor 不是写 CAS。请求失败恢复入口并展示安全中文错误；服务端错误只显示安全文案和 request id，不泄漏内部异常。该临时状态不改变 preview drawer 已有 submit/sync/load 状态机，也不会新增第三种正式页面关系状态。
 
 人工确认允许同栏或跨栏成员，不再要求“银行 + OA/发票”；只有少于 2 个不同 canonical identity、成员不可用、active owner/version 冲突或非法 summary 才阻止进入预览/提交。Workbench 撤回若显式携带 row ids，preview 与 submit 都必须精确等于当前 active relation 的完整 typed member set；子集、超集、跨 case 混选或 case/rows 不一致返回 `workbench_relation_exact_selection_required`，不能自动补齐。case-only 撤回只保留给已证明 owner 的内部调用。旧 row `case_id` 不能让撤回后的 facts 继续同组；上一稳定拓扑只能由 canonical relation history 证明。恢复必须在同一事务锁内重新证明 canonical member 存在、restored case 没有被复用、每个成员只有唯一 active owner；缺 canonical 返回 `workbench_relation_canonical_member_missing`，case/owner 冲突返回 `workbench_relation_restore_conflict`，不允许部分恢复。没有 active relation 的行不能执行撤回。
 
@@ -70,11 +71,14 @@ route entry                      -> 一次 combined canonical GET
 query/filter/sort change         -> abort 旧请求，只重取受影响 zone 首页
 page cursor                      -> 绑定 query hash 的 keyset GET；不做 OFFSET fallback
 write committed                  -> 清空 selection/cursor，恰好一次 normal canonical GET
+OA sync changed + active selection/preview/editor
+                                -> 保留交互状态，只合并一个 pending canonical refresh
+active interaction closed       -> 消费 pending，恰好一次 normal canonical GET
 direct query unavailable/timeout -> 显示可重试读错误，不回退 projection/cache
 hidden/focus/visible             -> 不触发 Workbench business status I/O
 ```
 
-普通 writer 只提交 canonical facts/relation/version/audit/idempotency 与必要的独立领域任务。Workbench page 不拥有 queue、worker、generation、freshness polling 或 Redis payload cache；OA sync、App Health、background jobs、`workbench_relation` 与 `workbench-matching` 保持各自 owner 合同。
+普通 writer 只提交 canonical facts/relation/version/audit/idempotency 与必要的独立领域任务。Workbench page 不拥有 queue、worker、generation、freshness polling 或 Redis payload cache；3 秒 OA status safety poll 只用于写门禁和触发 direct canonical reread。它不得在用户已选择记录、打开关系预览或正在录入发票时替换页面并清空交互；这些变化只折叠为一个 pending refresh，交互结束后执行一次。写成功后的 post-commit reread 仍优先执行并清空旧选择。OA sync、App Health、background jobs、`workbench_relation` 与 `workbench-matching` 保持各自 owner 合同。
 
 ## Row detail 读取状态
 

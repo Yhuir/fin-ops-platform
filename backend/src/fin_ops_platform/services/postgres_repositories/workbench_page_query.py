@@ -1406,6 +1406,26 @@ invoice_anomaly_facts as materialized (
             link.value->>'type',
             link.value->>'source'
         ) in ('oa_attachment_invoice', 'oa_expense_item_invoice')
+          and (
+              coalesce(
+                  link.value->>'source_type',
+                  link.value->>'type',
+                  link.value->>'source'
+              ) = 'oa_expense_item_invoice'
+              or not exists (
+                  select 1
+                  from jsonb_array_elements(
+                      case when jsonb_typeof(member.invoice_source_links) = 'array'
+                           then member.invoice_source_links
+                           else '[]'::jsonb end
+                  ) explicit_link(value)
+                  where coalesce(
+                      explicit_link.value->>'source_type',
+                      explicit_link.value->>'type',
+                      explicit_link.value->>'source'
+                  ) = 'oa_expense_item_invoice'
+              )
+          )
     ) source_link on true
     where member.row_type = 'invoice'
 ),

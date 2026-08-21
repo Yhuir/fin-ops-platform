@@ -621,19 +621,25 @@ class WorkbenchAmountCheckService:
 
     @staticmethod
     def _source_expense_item_ids(row: dict[str, Any]) -> list[str]:
+        source_links = [
+            source_link
+            for source_link in list(row.get("source_links") or [])
+            if isinstance(source_link, dict)
+        ]
+        has_explicit_source = any(
+            str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
+            for source_link in source_links
+        )
         values = row.get("source_expense_item_ids")
         source_ids = [
             str(value).strip()
             for value in list(values or [])
             if str(value).strip()
         ] if isinstance(values, (list, tuple, set)) else []
-        for source_link in list(row.get("source_links") or []):
-            if not isinstance(source_link, dict):
-                continue
-            if str(source_link.get("source_type") or "").strip() not in {
-                "oa_attachment_invoice",
-                "oa_expense_item_invoice",
-            }:
+        if has_explicit_source:
+            return list(dict.fromkeys(source_ids))
+        for source_link in source_links:
+            if str(source_link.get("source_type") or "").strip() != "oa_attachment_invoice":
                 continue
             source_item_id = str(source_link.get("source_expense_item_id") or "").strip()
             if source_item_id:
@@ -642,17 +648,27 @@ class WorkbenchAmountCheckService:
 
     @staticmethod
     def _invoice_matches_oa(invoice_row: dict[str, Any], oa_row_id: str) -> bool:
-        if oa_attachment_matches_oa(invoice_row, oa_row_id):
-            return True
-        return any(
-            oa_attachment_matches_oa(source_link, oa_row_id)
+        source_links = [
+            source_link
             for source_link in list(invoice_row.get("source_links") or [])
             if isinstance(source_link, dict)
-            and str(source_link.get("source_type") or "").strip() in {
-                "oa_attachment_invoice",
-                "oa_expense_item_invoice",
-            }
-        )
+        ]
+        explicit_links = [
+            source_link
+            for source_link in source_links
+            if str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
+        ]
+        effective_links = explicit_links or [
+            source_link
+            for source_link in source_links
+            if str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
+        ]
+        if effective_links:
+            return any(
+                oa_attachment_matches_oa(source_link, oa_row_id)
+                for source_link in effective_links
+            )
+        return oa_attachment_matches_oa(invoice_row, oa_row_id)
 
     @staticmethod
     def _non_negative_int(value: Any) -> int:

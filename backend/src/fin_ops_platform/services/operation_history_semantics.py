@@ -222,7 +222,14 @@ _EXACT_ROUTES = {
         "录入并关联 OA 发票",
         "workbench_relation",
         "OA 发票关联",
-        "将手工录入的整批发票写入统一发票池并关联到指定 OA 子付款项。",
+        "创建或复用整批 canonical 发票，并关联到指定 OA 子付款项。",
+    ),
+    ("POST", "/api/workbench/oa-invoice-supplements/manual/preview"): _semantic(
+        "workbench.oa_invoice.manual_preview",
+        "预览 OA 发票录入",
+        "workbench_relation",
+        "OA 发票关联",
+        "校验待创建或待关联到 OA 子付款项的发票强身份。",
     ),
     ("POST", "/api/workbench/oa-invoice-supplements/documents"): _semantic(
         "workbench.oa_invoice.document_upload",

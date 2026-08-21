@@ -35,6 +35,8 @@ class ManualInvoiceImportPort(Protocol):
 
     def discard_session(self, *, session_id: str, imported_by: str) -> FileImportSession: ...
 
+    def invoice_matches_canonical_key(self, *, invoice_id: str, canonical_key: str) -> bool: ...
+
 
 class InvoiceDocumentRecognizerPort(Protocol):
     def recognize_uploaded_invoice(self, *, file_name: str, content: bytes) -> dict[str, str]: ...
@@ -89,6 +91,37 @@ class ManualInvoiceEntryService:
         payloads: list[dict[str, Any]],
         imported_by: str,
     ) -> ManualInvoiceEntryBatchPreview:
+        return self._preview_batch(
+            payloads=payloads,
+            imported_by=imported_by,
+            allow_existing_invoices=False,
+        )
+
+    def preview_workbench_batch(
+        self,
+        *,
+        payloads: list[dict[str, Any]],
+        imported_by: str,
+    ) -> ManualInvoiceEntryBatchPreview:
+        """Preview invoices for an explicit Workbench OA-item relation.
+
+        A strict canonical duplicate is linkable here because the caller will
+        attach that existing invoice to an exact OA expense item. Suspected
+        duplicates stay blocked so this path never guesses an invoice identity.
+        """
+        return self._preview_batch(
+            payloads=payloads,
+            imported_by=imported_by,
+            allow_existing_invoices=True,
+        )
+
+    def _preview_batch(
+        self,
+        *,
+        payloads: list[dict[str, Any]],
+        imported_by: str,
+        allow_existing_invoices: bool,
+    ) -> ManualInvoiceEntryBatchPreview:
         if not payloads:
             raise ManualInvoiceEntryError("manual_invoice_batch_empty", "请至少录入一张发票。")
         normalized_entries = [self._normalize_payload(payload) for payload in payloads]
@@ -118,6 +151,16 @@ class ManualInvoiceEntryService:
                 for file_item in session.files
                 for row_result in file_item.row_results
                 if row_result.decision != ImportDecision.CREATED
+                and not (
+                    allow_existing_invoices
+                    and row_result.decision == ImportDecision.DUPLICATE_SKIPPED
+                    and str(row_result.linked_object_type or "") == "invoice"
+                    and bool(str(row_result.linked_object_id or "").strip())
+                    and self._file_import_service.invoice_matches_canonical_key(
+                        invoice_id=str(row_result.linked_object_id or ""),
+                        canonical_key=str(row_result.source_unique_key or ""),
+                    )
+                )
             ),
             None,
         )

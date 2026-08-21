@@ -933,6 +933,10 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 该数组只包含复合行展示所需字段，不返回附件正文或把 item 变成独立 relation member。`fee_content` 与 `fee_description` 分别对应 OA 来源的“费用内容”与“费用说明”，不得互相覆盖。附件状态只以 `attachment_file_count` 和是否存在精确绑定到当前子付款项的可用正式发票判定：无附件且没有该正式发票来源证明时为“发票附件缺失”，有附件但没有解析出可用正式发票为“发票附件未解析”。`oa_attachment_invoice` 与 `oa_expense_item_invoice` row 都返回去重后的 `source_expense_item_ids[]`；只有数组成员与 `expense_items[*].id` 精确相等时前端才可同带对齐。APP 内手工录入/选择发票不会改写 OA 原始附件数。同一发票连接多个付款项时前端把这些付款项与该发票渲染为一个连通展示段，发票不得复制。父 OA 仍是唯一 action/selection ID，付款项不得独立确认、撤回或参与金额配对。
 
+`POST /api/workbench/oa-invoice-supplements/manual/preview` 接收与普通手工发票预览相同的 `invoices[]`。它只为用户从明确 OA 子付款项发起的录入生成完整 batch preview：新强身份发票返回 `created`；强身份唯一命中的现有 canonical invoice 可返回 `duplicate_skipped` 并在后续确认时复用；疑似重复、多个候选或身份不足必须整批失败，禁止按金额推断。普通 `/imports/invoices/manual/preview` 继续拒绝 duplicate，不因 Workbench 专用合同改变。
+
+`POST /api/workbench/oa-invoice-supplements/manual` 接收该用户完整 preview 的 `session_id`、全部 `file_ids`，以及精确 `case_id`、`oa_row_id`、`expense_item_id`。确认在一个业务事务内创建或复用 canonical invoice、追加 `oa_expense_item_invoice` 来源边并创建/扩展正式关系；任一步失败全部回滚。已有 `oa_attachment_invoice` 继续保留为审计来源，但只要存在显式 expense-item 来源边，展示和异常归属就只消费显式来源。成功返回最终 `case_id` 与 `invoice_row_ids[]`，页面随后只执行一次 canonical Workbench 回读。
+
 ## 发票生命周期状态
 
 待找发票、进项发票使用情况、OA 待付款核对、销项发票收款情况和税金抵扣的 lifecycle 字段保持原响应 shape：

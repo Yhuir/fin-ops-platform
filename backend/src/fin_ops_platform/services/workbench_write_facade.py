@@ -705,6 +705,7 @@ class WorkbenchWriteFacade:
         paired_policy_metadata: dict[str, object],
     ) -> WorkbenchWriteResult:
         action_name = "confirm_link"
+        failure_phase = "uow_enter"
         def emit_phase_timing(phase: str, started_at: float, detail: str | None = None) -> None:
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -734,6 +735,8 @@ class WorkbenchWriteFacade:
         )
 
         def handler(ctx: object) -> dict[str, object]:
+            nonlocal failure_phase
+            failure_phase = "transaction_context"
             transaction = getattr(ctx, "transaction", None)
             if transaction is None:
                 raise _WorkbenchWritePersistenceError("Workbench UoW context is missing transaction.")
@@ -754,6 +757,7 @@ class WorkbenchWriteFacade:
                 row_ids=row_ids,
                 row_types=row_types,
             )
+            failure_phase = "canonical_selection"
             canonical_identities = [
                 (
                     str(item.get("pane") or ""),
@@ -792,6 +796,7 @@ class WorkbenchWriteFacade:
             if external_etc_batch_ids:
                 transaction_metadata["external_etc_batch_id"] = external_etc_batch_ids[0]
             pair_relation_started_at = monotonic()
+            failure_phase = "relation_command"
             relation_command = self._relation_command_service_for(repository=getattr(ctx, "pair_relations", None))
             if relation_command is None:
                 raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
@@ -812,6 +817,7 @@ class WorkbenchWriteFacade:
                 request_id=request_id,
                 tenant_id=tenant_id,
             )
+            failure_phase = "handler_result"
             self._emit_timing_if_requested(
                 request_id=request_id,
                 action_name=action_name,
@@ -833,6 +839,7 @@ class WorkbenchWriteFacade:
 
         try:
             result = self._confirm_link_uow.run(command, handler)
+            failure_phase = "completed"
         except WorkbenchIdempotencyKeyConflict as exc:
             return WorkbenchWriteResult(HTTPStatus.CONFLICT, exc.to_response_payload())
         except WorkbenchIdempotencyInProgress as exc:
@@ -846,10 +853,12 @@ class WorkbenchWriteFacade:
             return self._relation_command_error_result(exc)
         except Exception:
             LOGGER.exception(
-                "Workbench confirm-link UoW failed.",
+                "Workbench confirm-link UoW failed at phase=%s.",
+                failure_phase,
                 extra={
                     "workbench_write": {
                         "action": action_name,
+                        "phase": failure_phase,
                         "case_id": resolved_case_id,
                         "row_count": len(row_ids),
                         "scope_count": len(changed_scope_keys),
@@ -1123,6 +1132,7 @@ class WorkbenchWriteFacade:
             "workbench_relation_active_row_conflict",
             "workbench_relation_canonical_member_missing",
             "workbench_relation_idempotency_conflict",
+            "workbench_relation_immutable_oa_attachment_binding",
             "workbench_relation_multiple_groups_selected",
             "workbench_relation_restore_conflict",
         }

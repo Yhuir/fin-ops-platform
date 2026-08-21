@@ -8,6 +8,7 @@ import {
   confirmWorkbenchManualInvoiceSupplement,
   deleteWorkbenchOaSupportingDocument,
   listWorkbenchOaSupportingDocuments,
+  previewWorkbenchManualInvoices,
   uploadWorkbenchOaSupportingDocuments,
   WorkbenchApiError,
 } from "../features/workbench/api";
@@ -15,8 +16,16 @@ import {
 const batchPreview = { fileIds: ["file-1"], importSession: { session: { id: "session-1" } } } as ManualInvoiceEntryBatchPreview;
 
 vi.mock("../components/imports/ManualInvoiceBatchEditor", () => ({
-  default: ({ onSubmit }: { onSubmit: (preview: ManualInvoiceEntryBatchPreview) => Promise<void> }) => (
-    <button type="button" onClick={() => { void onSubmit(batchPreview); }}>提交手工录入测试</button>
+  default: ({
+    onSubmit,
+    previewInvoices,
+  }: {
+    onSubmit: (preview: ManualInvoiceEntryBatchPreview) => Promise<void>;
+    previewInvoices: () => Promise<ManualInvoiceEntryBatchPreview>;
+  }) => (
+    <button type="button" onClick={() => {
+      void previewInvoices().then(onSubmit);
+    }}>提交发票录入测试</button>
   ),
 }));
 
@@ -27,6 +36,7 @@ vi.mock("../features/workbench/api", async () => {
     confirmWorkbenchManualInvoiceSupplement: vi.fn(),
     deleteWorkbenchOaSupportingDocument: vi.fn(),
     listWorkbenchOaSupportingDocuments: vi.fn(),
+    previewWorkbenchManualInvoices: vi.fn(),
     uploadWorkbenchOaSupportingDocuments: vi.fn(),
   };
 });
@@ -36,7 +46,7 @@ const target = { caseId: "CASE-1", oaRowId: "oa-1", expenseItemId: "oa-1:item:0"
 afterEach(() => vi.clearAllMocks());
 
 describe("WorkbenchInvoiceEntryDrawer", () => {
-  test("uses one drawer for supporting documents and manual invoice relation", async () => {
+  test("defaults to canonical invoice entry and keeps supporting documents secondary", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     const onCompleted = vi.fn();
@@ -54,6 +64,7 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
       contentUrl: "/documents/document-1/content",
     }]);
     vi.mocked(deleteWorkbenchOaSupportingDocument).mockResolvedValue();
+    vi.mocked(previewWorkbenchManualInvoices).mockResolvedValue(batchPreview);
     vi.mocked(confirmWorkbenchManualInvoiceSupplement).mockResolvedValue({ case_id: "CASE-1" });
 
     render(
@@ -67,9 +78,20 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
     );
 
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
-    expect(screen.getByRole("tab", { name: "上传凭证" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "手工录入" })).toBeInTheDocument();
-    expect(screen.getByText("补充凭证直接关联当前 OA 子付款项，不进入统一发票池。")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "发票录入" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "补充凭证" })).toBeInTheDocument();
+    expect(listWorkbenchOaSupportingDocuments).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "提交发票录入测试" }));
+    await waitFor(() => {
+      expect(previewWorkbenchManualInvoices).toHaveBeenCalledTimes(1);
+      expect(confirmWorkbenchManualInvoiceSupplement).toHaveBeenCalledWith(target, batchPreview);
+      expect(onCompleted).toHaveBeenCalledTimes(1);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    await user.click(screen.getByRole("tab", { name: "补充凭证" }));
+    expect(await screen.findByText("仅补充报销证明材料，直接关联当前 OA 子付款项，不进入统一发票池，也不会参与发票配对。")).toBeInTheDocument();
 
     const dropzoneText = await screen.findByText("拖拽文件到此处，或点击选择");
     const dropzone = dropzoneText.closest("label")!;
@@ -80,14 +102,6 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
     await waitFor(() => expect(uploadWorkbenchOaSupportingDocuments).toHaveBeenCalledWith(target, [file]));
     expect(await screen.findByRole("link", { name: "voucher.png" })).toHaveAttribute("href", "/documents/document-1/content");
     expect(onSupportingDocumentsChanged).toHaveBeenCalledWith(target, [expect.objectContaining({ id: "document-1" })]);
-
-    await user.click(screen.getByRole("tab", { name: "手工录入" }));
-    await user.click(screen.getByRole("button", { name: "提交手工录入测试" }));
-    await waitFor(() => {
-      expect(confirmWorkbenchManualInvoiceSupplement).toHaveBeenCalledWith(target, batchPreview);
-      expect(onCompleted).toHaveBeenCalledTimes(1);
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
   });
 
   test("shows a specific upload error instead of a generic failure", async () => {
@@ -107,6 +121,7 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
       />,
     );
 
+    await user.click(screen.getByRole("tab", { name: "补充凭证" }));
     const input = await screen.findByLabelText("上传 JPG、PNG 或 PDF 补充凭证") as HTMLInputElement;
     await user.upload(input, new File(["invalid"], "voucher.jpg", { type: "image/jpeg" }));
 

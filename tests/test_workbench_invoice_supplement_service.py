@@ -23,39 +23,59 @@ class _Recognizer:
 class _Connection:
     def __init__(self) -> None:
         self.transaction_count = 0
+        self.in_transaction = False
 
     @contextmanager
     def transaction(self):
         self.transaction_count += 1
-        yield object()
+        self.in_transaction = True
+        try:
+            yield object()
+        finally:
+            self.in_transaction = False
 
 
 class _RelationRepository:
     def __init__(self, existing: dict | None) -> None:
         self.existing = existing
+        self._post_commit_callback_registrar = None
 
     def load_active_workbench_pair_relation_by_case_id(self, case_id: str):
         return self.existing if self.existing and self.existing["case_id"] == case_id else None
 
+    def bind_post_commit_callback_registrar(self, registrar) -> None:
+        self._post_commit_callback_registrar = registrar
+
+    def register_post_commit_callback(self, callback) -> bool:
+        if self._post_commit_callback_registrar is None:
+            return False
+        self._post_commit_callback_registrar(callback)
+        return True
+
 
 class _RelationCommandService:
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(self, *, connection: _Connection, error: Exception | None = None) -> None:
+        self.connection = connection
         self.error = error
         self.calls: list[dict] = []
         self.runtime_state = {"before": True}
-        self.restores: list[dict] = []
+        self.repository = None
+        self.published_in_transaction: list[bool] = []
 
-    def runtime_snapshot(self):
-        return deepcopy(self.runtime_state)
-
-    def restore_runtime_snapshot(self, snapshot):
-        self.restores.append(deepcopy(snapshot))
-        self.runtime_state = deepcopy(snapshot)
+    def bind_repository(self, repository):
+        self.repository = repository
+        return self
 
     def confirm_relation(self, **kwargs):
         self.calls.append(kwargs)
         if self.error:
             raise self.error
+        def publish() -> None:
+            self.published_in_transaction.append(self.connection.in_transaction)
+            self.runtime_state = {"case_id": kwargs["case_id"]}
+
+        if not self.repository.register_post_commit_callback(publish):
+            publish()
         return {
             "changed_case_ids": [kwargs["case_id"]],
             "relation": {"case_id": kwargs["case_id"], "row_ids": kwargs["row_ids"]},
@@ -110,7 +130,7 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
             "amount_check": {},
             "note": "existing relation",
         })
-        self.relation_commands = _RelationCommandService()
+        self.relation_commands = _RelationCommandService(connection=self.connection)
         self.target_exists = True
         self.persisted: list[tuple[dict, dict]] = []
 
@@ -119,7 +139,7 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
             connection=self.connection,
             file_import_service=self.files,
             relation_repository_factory=lambda _transaction: self.relation_repository,
-            relation_command_service_factory=lambda _repository: self.relation_commands,
+            relation_command_service_factory=lambda repository: self.relation_commands.bind_repository(repository),
             target_exists=lambda _oa_row_id, _expense_item_id: self.target_exists,
             next_case_id=lambda: "CASE-NEW",
             persist_import_delta=lambda _transaction, imports, files: self.persisted.append((imports, files)),
@@ -155,7 +175,7 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         self.assertEqual(result["invoice_evidence_rows"][0]["normalized"]["seller_name"], "云南供应商有限公司")
         self.assertEqual(self.connection.transaction_count, 1)
         self.assertEqual(len(self.persisted), 1)
-        self.assertEqual(self.relation_commands.restores, [])
+        self.assertEqual(self.relation_commands.published_in_transaction, [False])
         self.assertEqual(self.import_restore_count, 0)
         for invoice in invoices:
             self.assertTrue(any(
@@ -168,6 +188,108 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         self.assertEqual(relation_call["row_ids"][2:], result["invoice_row_ids"])
         self.assertTrue(relation_call["replace_existing"])
 
+    def test_links_strict_existing_invoice_and_preserves_attachment_provenance(self) -> None:
+        existing_preview = ManualInvoiceEntryService(
+            file_import_service=self.files,
+            document_recognizer=_Recognizer(),
+        ).preview_batch(
+            payloads=[_invoice_payload("26117000001052654676", "27.05", "26.26", "0.79")],
+            imported_by="finance-user",
+        )
+        self.files.confirm_session(
+            session_id=existing_preview.session.id,
+            selected_file_ids=existing_preview.file_ids,
+        )
+        existing_invoice = self.imports.list_invoices()[0]
+        existing_invoice.source_links.append({
+            "source_type": "oa_attachment_invoice",
+            "derived_from_oa_id": "oa-405",
+            "source_expense_item_id": "oa-405:item:3:old",
+        })
+        link_preview = ManualInvoiceEntryService(
+            file_import_service=self.files,
+            document_recognizer=_Recognizer(),
+        ).preview_workbench_batch(
+            payloads=[_invoice_payload("26117000001052654676", "27.05", "26.26", "0.79")],
+            imported_by="finance-user",
+        )
+        self.session_id = link_preview.session.id
+        self.file_ids = tuple(link_preview.file_ids)
+
+        result = self._service().attach_manual_invoices(self._command())
+
+        self.assertEqual(result["invoice_row_ids"], [existing_invoice.id])
+        self.assertEqual(len(self.imports.list_invoices()), 1)
+        source_links = existing_invoice.source_links
+        self.assertTrue(any(
+            link.get("source_type") == "oa_attachment_invoice"
+            and link.get("source_expense_item_id") == "oa-405:item:3:old"
+            for link in source_links
+        ))
+        explicit_link = next(
+            link for link in source_links
+            if link.get("source_type") == "oa_expense_item_invoice"
+        )
+        self.assertEqual(explicit_link["source_expense_item_id"], "oa-405:item:1")
+        self.assertEqual(explicit_link["source_relation_case_id"], "CASE-405")
+        self.assertEqual(self.connection.transaction_count, 1)
+        self.assertEqual(len(self.persisted), 1)
+
+    def test_revalidates_strict_existing_invoice_identity_before_relation_write(self) -> None:
+        existing_preview = ManualInvoiceEntryService(
+            file_import_service=self.files,
+            document_recognizer=_Recognizer(),
+        ).preview_batch(
+            payloads=[_invoice_payload("26117000001052654676", "27.05", "26.26", "0.79")],
+            imported_by="finance-user",
+        )
+        self.files.confirm_session(
+            session_id=existing_preview.session.id,
+            selected_file_ids=existing_preview.file_ids,
+        )
+        link_preview = ManualInvoiceEntryService(
+            file_import_service=self.files,
+            document_recognizer=_Recognizer(),
+        ).preview_workbench_batch(
+            payloads=[_invoice_payload("26117000001052654676", "27.05", "26.26", "0.79")],
+            imported_by="finance-user",
+        )
+        self.session_id = link_preview.session.id
+        self.file_ids = tuple(link_preview.file_ids)
+        existing_invoice = self.imports.list_invoices()[0]
+        canonical_key = str(link_preview.session.files[0].row_results[0].source_unique_key)
+        existing_invoice.digital_invoice_no = None
+        existing_invoice.invoice_no = ""
+        existing_invoice.invoice_code = None
+        existing_invoice.source_unique_key = None
+        existing_invoice.seller_tax_no = None
+        existing_invoice.buyer_tax_no = None
+        degraded_identity = self.imports._object_identity_policy.identify_invoice(existing_invoice)
+        self.assertIsNone(degraded_identity.canonical_key)
+        self.assertIsNotNone(degraded_identity.suspected_key)
+        existing_invoice.data_fingerprint = degraded_identity.suspected_key
+        self.imports._invoice_unique_index.pop(canonical_key, None)
+        self.imports._invoice_fingerprint_index[str(degraded_identity.suspected_key)] = existing_invoice.id
+        self.assertIs(
+            self.imports.find_invoice_by_identity(suspected_key=degraded_identity.suspected_key),
+            existing_invoice,
+        )
+        self.assertFalse(self.files.invoice_matches_canonical_key(
+            invoice_id=existing_invoice.id,
+            canonical_key=canonical_key,
+        ))
+
+        with self.assertRaisesRegex(WorkbenchInvoiceSupplementError, "发票池状态已变化"):
+            self._service().attach_manual_invoices(self._command())
+
+        self.assertIsNone(existing_invoice.digital_invoice_no)
+        self.assertEqual(existing_invoice.invoice_no, "")
+        self.assertEqual(self.connection.transaction_count, 0)
+        self.assertEqual(self.import_restore_count, 0)
+        self.assertEqual(self.persisted, [])
+        self.assertEqual(self.relation_commands.calls, [])
+        self.assertEqual(self.relation_commands.published_in_transaction, [])
+
     def test_relation_failure_rolls_back_import_runtime_state(self) -> None:
         self.relation_commands.error = RuntimeError("relation failed")
 
@@ -177,7 +299,8 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         self.assertEqual(self.imports.list_invoices(), [])
         self.assertEqual(self.files.get_session(self.session_id).status, "preview_ready")
         self.assertEqual(self.import_restore_count, 1)
-        self.assertEqual(self.relation_commands.restores, [{"before": True}])
+        self.assertEqual(self.relation_commands.runtime_state, {"before": True})
+        self.assertEqual(self.relation_commands.published_in_transaction, [])
 
     def test_rejects_partial_batch_before_mutation(self) -> None:
         with self.assertRaisesRegex(WorkbenchInvoiceSupplementError, "必须一次提交本批次全部发票"):

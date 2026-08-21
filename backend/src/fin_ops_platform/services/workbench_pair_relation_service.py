@@ -340,9 +340,83 @@ class WorkbenchPairRelationService:
             normalized_row_types,
         )
         replacement_relation = {
+            "case_id": case_id,
             "row_ids": normalized_row_ids,
             "row_types": normalized_row_types,
+            "special_metadata": deepcopy(special_metadata) if isinstance(special_metadata, dict) else {},
         }
+        replacement_members = self._relation_member_entries(replacement_relation)
+        inherited_attachment_metadata: dict[str, Any] = {}
+        attachment_invoice_ids_by_parent: dict[str, list[str]] = {}
+        attachment_member_entries: set[tuple[str, str]] = set()
+        for active_relation in active_before_relations:
+            binding_relations = self._oa_attachment_binding_relations(active_relation)
+            if not binding_relations:
+                continue
+            preserved_replacement = self._preserve_oa_attachment_bindings(
+                [replacement_relation],
+                active_relation=active_relation,
+            )
+            if (
+                len(preserved_replacement) != 1
+                or self._relation_member_entries(preserved_replacement[0]) != replacement_members
+            ):
+                raise ValueError("immutable_oa_attachment_binding")
+
+            active_metadata = active_relation.get("special_metadata")
+            if isinstance(active_metadata, dict):
+                inherited_attachment_metadata.update(deepcopy(active_metadata))
+            for binding_relation in binding_relations:
+                binding_metadata = binding_relation.get("special_metadata")
+                binding_metadata = binding_metadata if isinstance(binding_metadata, dict) else {}
+                parent_oa_row_id = str(binding_metadata.get("parent_oa_row_id") or "").strip()
+                if not parent_oa_row_id:
+                    continue
+                invoice_row_ids = [
+                    str(row_id).strip()
+                    for row_id, row_type in zip(
+                        list(binding_relation.get("row_ids") or []),
+                        list(binding_relation.get("row_types") or []),
+                        strict=False,
+                    )
+                    if str(row_type).strip() == "invoice" and str(row_id).strip()
+                ]
+                if not invoice_row_ids:
+                    continue
+                known_invoice_ids = attachment_invoice_ids_by_parent.setdefault(parent_oa_row_id, [])
+                for invoice_row_id in invoice_row_ids:
+                    if invoice_row_id not in known_invoice_ids:
+                        known_invoice_ids.append(invoice_row_id)
+                attachment_member_entries.add((parent_oa_row_id, "oa"))
+                attachment_member_entries.update((invoice_row_id, "invoice") for invoice_row_id in invoice_row_ids)
+
+        resolved_special_metadata = {
+            **inherited_attachment_metadata,
+            **(deepcopy(special_metadata) if isinstance(special_metadata, dict) else {}),
+        }
+        if attachment_invoice_ids_by_parent:
+            resolved_special_metadata["contains_immutable_oa_attachment_binding"] = True
+            resolved_special_metadata["oa_attachment_bindings"] = [
+                {
+                    "parent_oa_row_id": parent_oa_row_id,
+                    "invoice_row_ids": invoice_row_ids,
+                }
+                for parent_oa_row_id, invoice_row_ids in sorted(attachment_invoice_ids_by_parent.items())
+            ]
+            if replacement_members == attachment_member_entries and len(attachment_invoice_ids_by_parent) == 1:
+                parent_oa_row_id = next(iter(attachment_invoice_ids_by_parent))
+                resolved_special_metadata.update(
+                    {
+                        "source": "oa_attachment_invoice",
+                        "immutable_oa_attachment_binding": True,
+                        "parent_oa_row_id": parent_oa_row_id,
+                    }
+                )
+            else:
+                if resolved_special_metadata.get("source") == "oa_attachment_invoice":
+                    resolved_special_metadata.pop("source", None)
+                resolved_special_metadata.pop("immutable_oa_attachment_binding", None)
+                resolved_special_metadata.pop("parent_oa_row_id", None)
         history_before_relations = (
             self._restorable_relation_snapshots(
                 self._mark_owned_before_relations_restorable(before_relations, active_before_relations),
@@ -367,7 +441,7 @@ class WorkbenchPairRelationService:
             created_at=timestamp,
             note=note,
             amount_check=amount_check,
-            special_metadata=special_metadata,
+            special_metadata=resolved_special_metadata,
             exception_case_id=exception_case_id,
             rule_version=rule_version,
             evidence=evidence,

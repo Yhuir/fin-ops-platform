@@ -558,3 +558,12 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `web/src/test/WorkbenchColumns.test.tsx` 保护 OA、银行流水和发票只使用共享的透明 `workbench-detail-trigger`，不再继承旧 `.row-action-btn` 方框样式、原生 `title` 或重复文本详情入口；`WorkbenchSelection.test.tsx` 继续保护按钮位于首行、点击不触发行选择且复用既有详情抽屉。
 - `web/e2e/workbench-large-scroll-flow.spec.ts` 在 Chromium 中检查三类按钮均为 28px、透明背景、零边框、零阴影，hover 显示 HeroUI Tooltip、键盘焦点显示 2px 可见轮廓且交互前后几何不变；逐一打开三类详情时每类恰好一次现有 GET、零 Workbench 写请求、零选择副作用，抽屉壳在页面内单调时钟下 `<100ms` 出现。
 - 该改动不改变 API response shape、权限、数据库、direct repository、read model、worker 或跨页面 I/O；业务核心、service、API、cache/worker 测试不适用，既有三栏、汇总行和详情错误态回归继续执行。
+
+## 2026-08-21 - 发票强身份复用、关系确认与后台回读闭环
+
+- Business core / service：`test_manual_invoice_entry_service.py` 保护普通手工预览继续拒绝 duplicate，Workbench 专用预览只允许强身份唯一既有票并拒绝 suspected duplicate；`test_workbench_invoice_supplement_service.py` 保护既有 27.05 canonical invoice 不重复创建、历史 attachment 来源保留、显式 expense-item 来源追加且关系在同一事务扩展。
+- API contract：`test_workbench_invoice_supplement_api.py` 与 `WorkbenchApi.test.ts` 保护专用 preview endpoint、完整 session/file target 透传和原全局导入 endpoint 不变；`WorkbenchInvoiceEntryDrawer.test.tsx` 保护抽屉默认进入发票录入，补充凭证降为次级且不预加载其列表。
+- Read/SQL parity：`test_oa_attachment_invoice_linking.py`、`test_workbench_amount_check_service.py` 和 `test_workbench_query_postgres_integration.py` 保护显式 `oa_expense_item_invoice` 优先于历史 attachment 归属，SQL/Python hydration 对齐，目标付款项不再显示附件异常和录入按钮。
+- Relation/UoW：`test_workbench_pair_relation_service.py`、`test_workbench_relation_command_service.py`、`test_workbench_uow_contract.py`、repository adapter tests 与 `test_workbench_write_characterization.py` 保护已有 immutable OA+invoice 加入流水时保留 formal/binding metadata，差额 note 提交成功，数据库 commit 后才发布 runtime delta，回滚不留半写。
+- Frontend interaction：`WorkbenchSelection.test.tsx` 保护 OA 状态变化发生在多选、preview request/drawer 或发票编辑期间时不清空用户交互；响应落地前再次检查竞态，全部交互结束后只补一次 canonical GET，post-commit 写成功仍只做一次强制回读。
+- Existing regression / performance：发票全局导入、补充凭证文件链、普通相等确认、withdraw、异常七分类、筛选分页与权限合同不变；所有新增处理均为固定项或当前页/当前关系有界操作，没有轮询加速、额外列表 N+1、read model、worker、Redis 或数据库 schema 变化。

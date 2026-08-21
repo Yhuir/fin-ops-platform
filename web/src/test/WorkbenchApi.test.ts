@@ -15,6 +15,7 @@ import {
   fetchWorkbenchRowDetail,
   importManualOaRows,
   previewWorkbenchConfirmLink,
+  previewWorkbenchManualInvoices,
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
@@ -80,6 +81,75 @@ test("maps supplemental evidence validation errors to an actionable message", as
   expect(resolveWorkbenchActionErrorMessage(captured, "fallback")).toBe(
     "文件内容与扩展名不一致，请重新选择有效文件。（请求编号：request-upload-1）",
   );
+});
+
+test("previews OA-item invoice entry through the dedicated create-or-link endpoint", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    values: [{
+      invoice_direction: "input",
+      invoice_nature: "blue",
+      seller_name: "云南天谷科技开发有限公司",
+      seller_tax_no: "91530112799862049E",
+      buyer_name: "云南溯源科技有限公司",
+      buyer_tax_no: "915300007194052520",
+      invoice_number: "2653700000268955191",
+      invoice_code: "",
+      invoice_date: "2026-04-14",
+      net_amount: "26.26",
+      tax_rate: "3",
+      tax_amount: "0.79",
+      total_with_tax: "27.05",
+    }],
+    file_ids: ["manual_file_existing_27_05"],
+    import_session: {
+      session: {
+        id: "manual_session_existing_27_05",
+        imported_by: "web_finance_user",
+        file_count: 1,
+        status: "awaiting_confirmation",
+        created_at: "2026-08-21T14:00:00+08:00",
+      },
+      files: [{
+        id: "manual_file_existing_27_05",
+        file_name: "发票录入",
+        template_code: "manual_invoice_entry",
+        batch_type: "input_invoice",
+        status: "preview_ready",
+        message: "命中已有发票",
+        row_count: 1,
+        success_count: 0,
+        error_count: 0,
+        duplicate_count: 1,
+        suspected_duplicate_count: 0,
+        updated_count: 0,
+        row_results: [],
+      }],
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+  const preview = await previewWorkbenchManualInvoices([{
+    invoiceDirection: "input",
+    invoiceNature: "blue",
+    sellerName: "云南天谷科技开发有限公司",
+    sellerTaxNo: "91530112799862049E",
+    buyerName: "云南溯源科技有限公司",
+    buyerTaxNo: "915300007194052520",
+    invoiceNumber: "2653700000268955191",
+    invoiceCode: "",
+    invoiceDate: "2026-04-14",
+    netAmount: "26.26",
+    taxRate: "3",
+    taxAmount: "0.79",
+    totalWithTax: "27.05",
+  }]);
+
+  expect(preview.fileIds).toEqual(["manual_file_existing_27_05"]);
+  expect(preview.importSession.files[0]?.duplicateCount).toBe(1);
+  expect(fetchSpy).toHaveBeenCalledWith(
+    "/api/workbench/oa-invoice-supplements/manual/preview",
+    expect.objectContaining({ method: "POST" }),
+  );
+  fetchSpy.mockRestore();
 });
 
 function createWorkbenchRow(paneId: WorkbenchRecordType, id: string, counterparty: string): WorkbenchRecord {

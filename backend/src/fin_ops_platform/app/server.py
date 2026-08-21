@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import re
 from contextvars import ContextVar
@@ -458,6 +459,9 @@ from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteRelationSpecialMetadataMutationPort,
     WorkbenchWriteResult,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 CASH_TURNOVER_TAG = "现金往来"
 
@@ -1926,6 +1930,12 @@ class Application:
             return self._handle_manual_invoice_recognize(body, headers)
         if method == "POST" and route_path == "/imports/invoices/manual/preview":
             return self._handle_manual_invoice_preview(body, imported_by=request_actor_id)
+        if method == "POST" and route_path == "/api/workbench/oa-invoice-supplements/manual/preview":
+            return self._handle_manual_invoice_preview(
+                body,
+                imported_by=request_actor_id,
+                link_existing_invoices=True,
+            )
         if method == "POST" and route_path == "/api/workbench/oa-invoice-supplements/manual":
             return self._handle_workbench_manual_invoice_supplement(
                 body,
@@ -2036,6 +2046,7 @@ class Application:
                 "/imports/files/sessions/{session_id}",
                 "/imports/invoices/manual/recognize",
                 "/imports/invoices/manual/preview",
+                "/api/workbench/oa-invoice-supplements/manual/preview",
                 "/api/workbench/oa-invoice-supplements/manual",
                 "/api/workbench/oa-invoice-supplements/documents",
                 "/api/workbench/oa-invoice-supplements/documents/{document_id}/content",
@@ -7283,23 +7294,36 @@ class Application:
         body: str | bytes | None,
         *,
         imported_by: str,
+        link_existing_invoices: bool = False,
     ) -> Response:
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
         try:
             payloads = payload.get("invoices") if isinstance(payload.get("invoices"), list) else []
-            preview = self._manual_invoice_entry_service.preview_batch(
+            preview_method = (
+                self._manual_invoice_entry_service.preview_workbench_batch
+                if link_existing_invoices
+                else self._manual_invoice_entry_service.preview_batch
+            )
+            preview = preview_method(
                 payloads=[item for item in payloads if isinstance(item, dict)],
                 imported_by=imported_by,
             )
             self._persist_import_preview_delta(preview.session.id)
         except ManualInvoiceEntryError as exc:
             return self._json_response(exc.status_code, {"error": exc.error, "message": exc.message})
-        except RuntimeError as exc:
+        except RuntimeError:
+            LOGGER.exception(
+                "Manual invoice preview unavailable.",
+                extra={"request_id": _REQUEST_AUDIT_REQUEST_ID.get()},
+            )
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "manual_invoice_preview_unavailable", "message": str(exc)},
+                {
+                    "error": "manual_invoice_preview_unavailable",
+                    "message": "发票录入预览暂时不可用，请稍后重试。",
+                },
             )
         return self._json_response(
             HTTPStatus.OK,
@@ -7404,17 +7428,22 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_manual_invoice_supplement", "message": str(exc)},
             )
-        except RuntimeError as exc:
+        except RuntimeError:
+            safe_message = "发票录入暂时不可用，请稍后重试。"
+            LOGGER.exception(
+                "Workbench manual invoice supplement unavailable.",
+                extra={"request_id": request_id},
+            )
             _REQUEST_AUDIT_EVIDENCE.set(
                 build_operation_evidence(
                     target=target,
                     failure_code="manual_invoice_supplement_unavailable",
-                    failure_message=str(exc),
+                    failure_message=safe_message,
                 )
             )
             return self._json_response(
                 HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "manual_invoice_supplement_unavailable", "message": str(exc)},
+                {"error": "manual_invoice_supplement_unavailable", "message": safe_message},
             )
         invoice_evidence_rows = list(result.pop("invoice_evidence_rows", []))
         invoice_summaries = [
@@ -7438,7 +7467,7 @@ class Application:
                     {
                         "label": "发票处理",
                         "before": "尚未录入",
-                        "after": f"{len(invoice_summaries)} 张已录入发票池并关联",
+                        "after": f"{len(invoice_summaries)} 张已创建或复用并关联",
                     }
                 ],
             )

@@ -6,7 +6,7 @@ import unittest
 import fitz
 from PIL import Image
 
-from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.manual_invoice_entry_service import (
@@ -131,6 +131,84 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
 
         self.assertEqual(
             self.file_import_service.list_active_sessions(imported_by="finance-user", mode="manual_invoice"),
+            [],
+        )
+
+    def test_workbench_preview_accepts_only_a_strict_existing_invoice_identity(self) -> None:
+        first = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
+        self.file_import_service.confirm_session(
+            session_id=first.session.id,
+            selected_file_ids=first.file_ids,
+        )
+
+        preview = self.service.preview_workbench_batch(
+            payloads=[payload()],
+            imported_by="finance-user",
+        )
+
+        row_result = preview.session.files[0].row_results[0]
+        self.assertEqual(row_result.decision.value, "duplicate_skipped")
+        self.assertEqual(row_result.linked_object_type, "invoice")
+        self.assertEqual(row_result.linked_object_id, self.import_service.list_invoices()[0].id)
+        self.assertEqual(preview.session.status, "preview_ready")
+
+    def test_workbench_preview_rejects_fingerprint_match_with_a_different_invoice_number(self) -> None:
+        first = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
+        self.file_import_service.confirm_session(
+            session_id=first.session.id,
+            selected_file_ids=first.file_ids,
+        )
+        existing_invoice_id = self.import_service.list_invoices()[0].id
+        preview_entries = self.file_import_service.preview_manual_invoice_entries
+
+        def fingerprint_fallback_preview(**kwargs):
+            session = preview_entries(**kwargs)
+            row_result = session.files[0].row_results[0]
+            row_result.decision = ImportDecision.DUPLICATE_SKIPPED
+            row_result.linked_object_type = "invoice"
+            row_result.linked_object_id = existing_invoice_id
+            return session
+
+        self.file_import_service.preview_manual_invoice_entries = fingerprint_fallback_preview  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(ManualInvoiceEntryError, "已存在于统一发票池"):
+            self.service.preview_workbench_batch(
+                payloads=[payload(invoice_number="26117000001052654675")],
+                imported_by="finance-user",
+            )
+
+        self.assertEqual(
+            self.file_import_service.list_active_sessions(
+                imported_by="finance-user",
+                mode="manual_invoice",
+            ),
+            [],
+        )
+
+    def test_workbench_preview_fails_closed_for_a_suspected_invoice_identity(self) -> None:
+        preview_entries = self.file_import_service.preview_manual_invoice_entries
+
+        def suspected_preview(**kwargs):
+            session = preview_entries(**kwargs)
+            row_result = session.files[0].row_results[0]
+            row_result.decision = ImportDecision.SUSPECTED_DUPLICATE
+            row_result.linked_object_type = "invoice"
+            row_result.linked_object_id = "invoice-candidate"
+            return session
+
+        self.file_import_service.preview_manual_invoice_entries = suspected_preview  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(ManualInvoiceEntryError, "高度相似"):
+            self.service.preview_workbench_batch(
+                payloads=[payload()],
+                imported_by="finance-user",
+            )
+
+        self.assertEqual(
+            self.file_import_service.list_active_sessions(
+                imported_by="finance-user",
+                mode="manual_invoice",
+            ),
             [],
         )
 

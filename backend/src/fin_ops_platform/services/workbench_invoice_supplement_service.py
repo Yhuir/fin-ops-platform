@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import logging
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import ImportDecision
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class WorkbenchInvoiceSupplementError(ValueError):
@@ -81,6 +85,24 @@ class WorkbenchInvoiceSupplementService:
                 "invalid_manual_invoice_supplement_session",
                 "仅允许关联手工录入发票批次。",
             )
+        if any(
+            row_result.decision == ImportDecision.DUPLICATE_SKIPPED
+            and (
+                str(row_result.linked_object_type or "") != "invoice"
+                or not str(row_result.linked_object_id or "").strip()
+                or not str(row_result.source_unique_key or "").strip()
+                or not self._file_import_service.invoice_matches_canonical_key(
+                    invoice_id=str(row_result.linked_object_id or ""),
+                    canonical_key=str(row_result.source_unique_key or ""),
+                )
+            )
+            for item in session.files
+            for row_result in item.row_results
+        ):
+            raise WorkbenchInvoiceSupplementError(
+                "manual_invoice_batch_changed",
+                "发票池状态已变化，整批未录入，请重新校验。",
+            )
         invoice_evidence_rows = [
             {
                 "record_key": item.id,
@@ -89,10 +111,33 @@ class WorkbenchInvoiceSupplementService:
             for item in session.files
         ]
 
-        runtime_relation_commands = self._relation_command_service_factory(None)
-        pair_snapshot = runtime_relation_commands.runtime_snapshot()
+        post_commit_callbacks: list[Callable[[], None]] = []
         try:
             with self._connection.transaction() as transaction:
+                relation_repository = self._relation_repository_factory(transaction)
+                bind_post_commit = getattr(
+                    relation_repository,
+                    "bind_post_commit_callback_registrar",
+                    None,
+                )
+                if not callable(bind_post_commit):
+                    raise RuntimeError(
+                        "Workbench invoice relation repository requires post-commit publication."
+                    )
+                bind_post_commit(post_commit_callbacks.append)
+                existing = None
+                requested_case_id = str(command.case_id or "").strip()
+                if requested_case_id:
+                    existing = relation_repository.load_active_workbench_pair_relation_by_case_id(
+                        requested_case_id
+                    )
+                if existing is not None and oa_row_id not in list(existing.get("row_ids") or []):
+                    raise WorkbenchInvoiceSupplementError(
+                        "manual_invoice_relation_oa_mismatch",
+                        "目标关联关系不包含该 OA 付款项。",
+                    )
+                case_id = str(existing.get("case_id") or "").strip() if existing else self._next_case_id()
+
                 confirmed = self._file_import_service.confirm_session(
                     session_id=session_id,
                     selected_file_ids=file_ids,
@@ -105,9 +150,19 @@ class WorkbenchInvoiceSupplementService:
                     for row_result in item.row_results
                 ]
                 if len(row_results) != len(file_ids) or any(
-                    row_result.decision != ImportDecision.CREATED
+                    row_result.decision not in {
+                        ImportDecision.CREATED,
+                        ImportDecision.DUPLICATE_SKIPPED,
+                    }
                     or str(row_result.linked_object_type or "") != "invoice"
                     or not str(row_result.linked_object_id or "").strip()
+                    or (
+                        row_result.decision == ImportDecision.DUPLICATE_SKIPPED
+                        and not self._file_import_service.invoice_matches_canonical_key(
+                            invoice_id=str(row_result.linked_object_id or ""),
+                            canonical_key=str(row_result.source_unique_key or ""),
+                        )
+                    )
                     for row_result in row_results
                 ):
                     raise WorkbenchInvoiceSupplementError(
@@ -120,6 +175,7 @@ class WorkbenchInvoiceSupplementService:
                     "source_workbench_row_id": oa_row_id,
                     "derived_from_oa_id": oa_row_id,
                     "source_expense_item_id": expense_item_id,
+                    "source_relation_case_id": case_id,
                     "entry_method": "manual",
                 }]
                 self._file_import_service.attach_source_links_to_invoices(
@@ -136,21 +192,6 @@ class WorkbenchInvoiceSupplementService:
                     dict(import_payload.get("imports") or {}),
                     dict(import_payload.get("file_imports") or {}),
                 )
-
-                relation_repository = self._relation_repository_factory(transaction)
-                existing = None
-                requested_case_id = str(command.case_id or "").strip()
-                if requested_case_id:
-                    existing = relation_repository.load_active_workbench_pair_relation_by_case_id(
-                        requested_case_id
-                    )
-                if existing is not None and oa_row_id not in list(existing.get("row_ids") or []):
-                    raise WorkbenchInvoiceSupplementError(
-                        "manual_invoice_relation_oa_mismatch",
-                        "目标关联关系不包含该 OA 付款项。",
-                    )
-
-                case_id = str(existing.get("case_id") or "").strip() if existing else self._next_case_id()
                 existing_row_ids = list(existing.get("row_ids") or []) if existing else [oa_row_id]
                 existing_row_types = list(existing.get("row_types") or []) if existing else ["oa"]
                 members = list(zip(existing_row_ids, existing_row_types, strict=True))
@@ -181,6 +222,13 @@ class WorkbenchInvoiceSupplementService:
                     history_operation_type="attach_manual_oa_invoices",
                     request_id=command.request_id,
                 )
+            for callback in post_commit_callbacks:
+                try:
+                    callback()
+                except Exception:
+                    LOGGER.exception(
+                        "Workbench invoice relation post-commit runtime publication failed."
+                    )
             return {
                 "status": "confirmed",
                 "case_id": case_id,
@@ -191,5 +239,4 @@ class WorkbenchInvoiceSupplementService:
             }
         except Exception:
             self._restore_import_runtime()
-            runtime_relation_commands.restore_runtime_snapshot(pair_snapshot)
             raise

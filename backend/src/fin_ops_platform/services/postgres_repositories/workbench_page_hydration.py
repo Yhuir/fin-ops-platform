@@ -790,13 +790,21 @@ class PostgresWorkbenchPageHydrationRepository:
                             '[]'::jsonb) as compact_links,
                         coalesce(jsonb_agg(to_jsonb(link.compact_link->>'source_expense_item_id') order by link.ordinality)
                             filter (
-                                where link.source_type in (
-                                    'oa_attachment_invoice',
-                                    'oa_expense_item_invoice'
+                                where (
+                                    link.source_type = 'oa_expense_item_invoice'
+                                    or (
+                                        not link.has_explicit_expense_link
+                                        and link.source_type = 'oa_attachment_invoice'
+                                    )
                                 )
                                   and nullif(link.compact_link->>'source_expense_item_id', '') is not null
                             ), '[]'::jsonb) as expense_item_ids,
-                        (array_agg(link.compact_link order by link.ordinality)
+                        (array_agg(
+                            link.compact_link
+                            order by
+                                case when link.source_type = 'oa_expense_item_invoice' then 0 else 1 end,
+                                link.ordinality
+                        )
                             filter (where link.source_type in (
                                 'oa_attachment_invoice',
                                 'oa_expense_item_invoice'
@@ -810,6 +818,12 @@ class PostgresWorkbenchPageHydrationRepository:
                                 source.value->>'type',
                                 source.value->>'source'
                             ) as source_type,
+                            bool_or(coalesce(
+                                source.value->>'source_type',
+                                source.value->>'type',
+                                source.value->>'source'
+                            ) = 'oa_expense_item_invoice') over ()
+                                as has_explicit_expense_link,
                             jsonb_strip_nulls(jsonb_build_object(
                                 'source_type', coalesce(
                                     source.value->>'source_type',

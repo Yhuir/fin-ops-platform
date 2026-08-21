@@ -33,6 +33,7 @@ import {
   fetchWorkbenchSettings,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
+  resolveWorkbenchActionErrorMessage,
   saveWorkbenchSettings,
   reviewWorkbenchAnomaly,
   withdrawWorkbenchLink,
@@ -164,7 +165,7 @@ function isWorkbenchZoneDisplayState(value: unknown): value is WorkbenchZoneDisp
 
 function actionErrorMessage(error: unknown) {
   if (error instanceof WorkbenchApiError) {
-    return error.message;
+    return resolveWorkbenchActionErrorMessage(error, "操作失败，请稍后重试。");
   }
   return "操作失败，请稍后重试。";
 }
@@ -405,6 +406,13 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerReloadGeneration, setExceptionDrawerReloadGeneration] = useState(0);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<WorkbenchOaInvoiceSupplementTarget | null>(null);
+  const hasOaSyncRefreshBlockingInteraction = explicitSelectedPairedRows.length > 0
+    || explicitSelectedOpenRows.length > 0
+    || relationPreviewRequestKind !== null
+    || relationPreviewDialog !== null
+    || invoiceEntryTarget !== null;
+  const hasOaSyncRefreshBlockingInteractionRef = useRef(hasOaSyncRefreshBlockingInteraction);
+  hasOaSyncRefreshBlockingInteractionRef.current = hasOaSyncRefreshBlockingInteraction;
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "pairedDisplayState",
@@ -625,7 +633,10 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   const refreshWorkbenchDataInBackground = useCallback((month: string) => {
-    if (postCommitRereadInFlightRef.current) {
+    if (
+      postCommitRereadInFlightRef.current
+      || hasOaSyncRefreshBlockingInteractionRef.current
+    ) {
       oaSyncRefreshPendingRef.current = true;
       return;
     }
@@ -634,6 +645,7 @@ export default function ReconciliationWorkbenchPage() {
       includeAuxiliary: false,
       zoneQueries: latestZoneServerPageQueriesRef.current,
       forceFresh: true,
+      deferForActiveInteraction: true,
     });
   }, []);
 
@@ -812,6 +824,7 @@ export default function ReconciliationWorkbenchPage() {
       zoneQueries?: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>;
       propagateError?: boolean;
       forceFresh?: boolean;
+      deferForActiveInteraction?: boolean;
     },
   ): Promise<WorkbenchInitialPageResult | null> {
     const requestSeq = loadRequestSeqRef.current + 1;
@@ -845,6 +858,14 @@ export default function ReconciliationWorkbenchPage() {
         { forceFresh: options?.forceFresh ?? false },
       );
       if (signal?.aborted || loadRequestSeqRef.current !== requestSeq) {
+        return null;
+      }
+      if (
+        options?.deferForActiveInteraction
+        && hasOaSyncRefreshBlockingInteractionRef.current
+      ) {
+        oaSyncRefreshPendingRef.current = true;
+        setIsRefreshing(false);
         return null;
       }
       applyWorkbenchInitialPageResult(workbenchPayload, resolvedZoneQueries);
@@ -894,8 +915,8 @@ export default function ReconciliationWorkbenchPage() {
     if (oaSyncRefreshTimeoutRef.current !== null) {
       window.clearTimeout(oaSyncRefreshTimeoutRef.current);
       oaSyncRefreshTimeoutRef.current = null;
-      oaSyncRefreshPendingRef.current = true;
     }
+    oaSyncRefreshPendingRef.current = false;
     postCommitRereadInFlightRef.current = true;
     try {
       return await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
@@ -1214,6 +1235,19 @@ export default function ReconciliationWorkbenchPage() {
       oaSyncRefreshPendingRef.current = false;
     };
   }, [active, pollOaSyncStatus]);
+
+  useEffect(() => {
+    if (
+      !active
+      || hasOaSyncRefreshBlockingInteraction
+      || postCommitRereadInFlightRef.current
+      || !oaSyncRefreshPendingRef.current
+    ) {
+      return;
+    }
+    oaSyncRefreshPendingRef.current = false;
+    scheduleOaSyncWorkbenchRefresh();
+  }, [active, hasOaSyncRefreshBlockingInteraction, scheduleOaSyncWorkbenchRefresh]);
 
   useEffect(() => {
     document.body.classList.add("workbench-page-mode");

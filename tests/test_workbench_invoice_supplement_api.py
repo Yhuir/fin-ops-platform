@@ -35,6 +35,24 @@ def _multipart_document() -> tuple[bytes, dict[str, str]]:
     return b"".join(chunks), {"Content-Type": f"multipart/form-data; boundary={boundary}"}
 
 
+def _manual_invoice_payload() -> dict[str, str]:
+    return {
+        "invoice_direction": "input",
+        "invoice_nature": "blue",
+        "seller_name": "云南供应商有限公司",
+        "seller_tax_no": "915300000000000001",
+        "buyer_name": "云南溯源科技有限公司",
+        "buyer_tax_no": "915300007194052520",
+        "invoice_number": "26117000001052654674",
+        "invoice_code": "",
+        "invoice_date": "2026-08-14",
+        "net_amount": "100.00",
+        "tax_rate": "13",
+        "tax_amount": "13.00",
+        "total_with_tax": "113.00",
+    }
+
+
 class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
     class _AuditRepository:
         def __init__(self) -> None:
@@ -84,6 +102,73 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
         evidence = completed["payload"]["metadata"]["evidence"]
         self.assertEqual(evidence["records"][0]["title"], "26117000001052654674")
         self.assertEqual(evidence["target"]["title"], "关联关系 CASE-1")
+
+    def test_workbench_preview_allows_linking_a_strict_existing_invoice(self) -> None:
+        app = build_local_state_application()
+        first = app._manual_invoice_entry_service.preview_batch(  # type: ignore[attr-defined]
+            payloads=[_manual_invoice_payload()],
+            imported_by="local",
+        )
+        app._file_import_service.confirm_session(  # type: ignore[attr-defined]
+            session_id=first.session.id,
+            selected_file_ids=first.file_ids,
+        )
+
+        response = app.handle_request(
+            "POST",
+            "/api/workbench/oa-invoice-supplements/manual/preview",
+            json.dumps({"invoices": [_manual_invoice_payload()]}),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["import_session"]["files"][0]["duplicate_count"], 1)
+        self.assertEqual(len(payload["file_ids"]), 1)
+
+    def test_workbench_preview_hides_internal_runtime_errors(self) -> None:
+        app = build_local_state_application()
+
+        with patch.object(
+            app._manual_invoice_entry_service,  # type: ignore[attr-defined]
+            "preview_workbench_batch",
+            side_effect=RuntimeError("postgres driver secret"),
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/oa-invoice-supplements/manual/preview",
+                json.dumps({"invoices": [_manual_invoice_payload()]}),
+            )
+
+        self.assertEqual(response.status_code, 503)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "manual_invoice_preview_unavailable")
+        self.assertEqual(payload["message"], "发票录入预览暂时不可用，请稍后重试。")
+        self.assertNotIn("postgres", response.body)
+
+    def test_manual_batch_endpoint_hides_internal_runtime_errors(self) -> None:
+        app = build_local_state_application()
+        service = SimpleNamespace(
+            attach_manual_invoices=Mock(side_effect=RuntimeError("database password leaked"))
+        )
+
+        with patch.object(app, "_workbench_invoice_supplement_service", return_value=service):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/oa-invoice-supplements/manual",
+                json.dumps({
+                    "session_id": "manual-session-1",
+                    "file_ids": ["file-1"],
+                    "case_id": "CASE-1",
+                    "oa_row_id": "oa-1",
+                    "expense_item_id": "oa-1:item:0",
+                }),
+            )
+
+        self.assertEqual(response.status_code, 503)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "manual_invoice_supplement_unavailable")
+        self.assertEqual(payload["message"], "发票录入暂时不可用，请稍后重试。")
+        self.assertNotIn("password", response.body)
 
     def test_document_endpoints_upload_list_preview_and_delete(self) -> None:
         app = build_local_state_application()

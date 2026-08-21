@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.services.postgres_repositories.common import (
     event_uuid,
@@ -20,6 +20,20 @@ from fin_ops_platform.services.workbench_row_identity import row_type_for_workbe
 class PostgresWorkbenchRelationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+        self._post_commit_callback_registrar: Callable[[Callable[[], None]], None] | None = None
+
+    def bind_post_commit_callback_registrar(
+        self,
+        registrar: Callable[[Callable[[], None]], None],
+    ) -> None:
+        self._post_commit_callback_registrar = registrar
+
+    def register_post_commit_callback(self, callback: Callable[[], None]) -> bool:
+        registrar = self._post_commit_callback_registrar
+        if registrar is None:
+            return False
+        registrar(callback)
+        return True
 
     def load_workbench_pair_relations(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select case_id as key, raw_payload from app.workbench_pair_relations order by case_id")

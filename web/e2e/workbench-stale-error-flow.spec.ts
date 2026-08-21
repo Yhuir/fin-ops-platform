@@ -23,6 +23,73 @@ async function openConfirmRelationPreview(page: Page) {
 }
 
 test.describe("workbench direct error browser flow", () => {
+  test("defers one OA canonical reread until a multi-row selection is cleared", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/");
+
+    const openZone = page.getByTestId("zone-unpaired");
+    await expect(openZone.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
+    await expect.poll(() => api.count("GET /api/oa-sync/status")).toBeGreaterThan(0);
+    await openZone.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
+    await expect(openZone.getByText("已选 2")).toBeVisible();
+
+    const workbenchLoadsBeforeSync = api.count("GET /api/workbench");
+    const oaStatusLoadsBeforeSync = api.count("GET /api/oa-sync/status");
+    api.advanceOaSyncRevision();
+    await expect.poll(
+      () => api.count("GET /api/oa-sync/status"),
+      { timeout: 5_000 },
+    ).toBeGreaterThan(oaStatusLoadsBeforeSync);
+    await page.waitForTimeout(250);
+
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync);
+    await expect(openZone.getByText("已选 2")).toBeVisible();
+
+    await openZone.getByRole("button", { name: "清空选择" }).click();
+    await expect.poll(() => api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
+    await expect(openZone.getByText("已选 0")).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
+  });
+
+  test("keeps a relation preview open across OA sync and rereads once all interactions close", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/");
+
+    const openZone = page.getByTestId("zone-unpaired");
+    const { previewDialog } = await openConfirmRelationPreview(page);
+    const workbenchLoadsBeforeSync = api.count("GET /api/workbench");
+    const oaStatusLoadsBeforeSync = api.count("GET /api/oa-sync/status");
+    api.advanceOaSyncRevision();
+    await expect.poll(
+      () => api.count("GET /api/oa-sync/status"),
+      { timeout: 5_000 },
+    ).toBeGreaterThan(oaStatusLoadsBeforeSync);
+    await page.waitForTimeout(250);
+
+    await expect(previewDialog).toBeVisible();
+    await expect(openZone.getByText("已选 3")).toBeVisible();
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync);
+
+    await previewDialog.getByRole("button", { name: "取消" }).click();
+    await expect(previewDialog).toHaveCount(0);
+    await expect(openZone.getByText("已选 3")).toBeVisible();
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync);
+
+    await openZone.getByRole("button", { name: "清空选择" }).click();
+    await expect.poll(() => api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
+    await expect(openZone.getByText("已选 0")).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
+  });
+
   test("blocks Workbench writes while OA sync is dirty", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",

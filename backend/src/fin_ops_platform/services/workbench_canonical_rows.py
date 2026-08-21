@@ -971,14 +971,21 @@ class WorkbenchCanonicalRowsBuilder:
             return None
         source_links = _list_of_dicts(row.get("source_links") if isinstance(row.get("source_links"), list) else detail_fields.get("source_links"))
         oa_attachment_source_link = _first_source_link(source_links, "oa_attachment_invoice")
+        explicit_expense_links = [
+            source_link
+            for source_link in source_links
+            if str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
+        ]
+        effective_expense_links = explicit_expense_links or [
+            source_link
+            for source_link in source_links
+            if str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
+        ]
+        effective_oa_source_link = effective_expense_links[0] if effective_expense_links else None
         source_expense_item_ids = list(dict.fromkeys(
             value
-            for source_link in source_links
-            if str(source_link.get("source_type") or "").strip() in {
-                "oa_attachment_invoice",
-                "oa_expense_item_invoice",
-            }
-            and (value := str(source_link.get("source_expense_item_id") or "").strip())
+            for source_link in effective_expense_links
+            if (value := str(source_link.get("source_expense_item_id") or "").strip())
         ))
         source_kind = OA_ATTACHMENT_INVOICE_SOURCE_KIND if oa_attachment_source_link is not None else "invoice"
         tags = _text_list(row.get("tags"))
@@ -1014,12 +1021,12 @@ class WorkbenchCanonicalRowsBuilder:
             "invoice_bank_relation": {"code": "pending_collection", "label": "待匹配流水", "tone": "warn"},
             "tags": tags,
             "source_links": source_links,
-            "derived_from_oa_id": _metadata_value(oa_attachment_source_link, detail_fields, "derived_from_oa_id"),
-            "source_workbench_row_id": _metadata_value(oa_attachment_source_link, detail_fields, "source_workbench_row_id"),
+            "derived_from_oa_id": _metadata_value(effective_oa_source_link, detail_fields, "derived_from_oa_id"),
+            "source_workbench_row_id": _metadata_value(effective_oa_source_link, detail_fields, "source_workbench_row_id"),
             "source_attachment_key": _metadata_value(oa_attachment_source_link, detail_fields, "source_attachment_key"),
             "source_attachment_name": _metadata_value(oa_attachment_source_link, detail_fields, "source_attachment_name"),
             "source_expense_item_ids": source_expense_item_ids,
-            "source_expense_row_index": _metadata_value(oa_attachment_source_link, detail_fields, "source_expense_row_index"),
+            "source_expense_row_index": _metadata_value(effective_oa_source_link, detail_fields, "source_expense_row_index"),
             "available_actions": ["detail", "confirm_link"],
             "summary_fields": {
                 "销方识别号": row.get("seller_tax_no") or "—",

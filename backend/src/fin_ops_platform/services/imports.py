@@ -540,6 +540,20 @@ class ImportNormalizationService:
                 return invoice
         raise KeyError(invoice_id)
 
+    def invoice_matches_canonical_key(self, *, invoice_id: str, canonical_key: str) -> bool:
+        normalized_invoice_id = str(invoice_id or "").strip()
+        normalized_canonical_key = str(canonical_key or "").strip()
+        if not normalized_invoice_id or not normalized_canonical_key:
+            return False
+        try:
+            invoice = self.get_invoice(normalized_invoice_id)
+        except KeyError:
+            return False
+        return (
+            self._object_identity_policy.identify_invoice(invoice).canonical_key
+            == normalized_canonical_key
+        )
+
     def list_counterparties(self) -> list[Counterparty]:
         return list(self._counterparties_by_normalized_name.values())
 

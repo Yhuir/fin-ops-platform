@@ -160,11 +160,21 @@ class WorkbenchRelationCommandRepositoryAdapter:
             if not callable(saver):
                 raise RuntimeError("relation repository does not expose changed-case delta persistence")
             saver(snapshot, changed_case_ids=normalized_case_ids)
-        self._pair_relation_service.apply_snapshot_delta(
-            snapshot,
-            changed_case_ids=normalized_case_ids,
-            replace_history=False,
-        )
+        runtime_snapshot = deepcopy(snapshot)
+
+        def publish_runtime_delta() -> None:
+            self._pair_relation_service.apply_snapshot_delta(
+                runtime_snapshot,
+                changed_case_ids=normalized_case_ids,
+                replace_history=False,
+            )
+
+        register_post_commit = getattr(self._repository, "register_post_commit_callback", None)
+        if callable(register_post_commit):
+            registered = register_post_commit(publish_runtime_delta)
+            if registered is not False:
+                return
+        publish_runtime_delta()
 
     def acquire_relation_member_locks(
         self,

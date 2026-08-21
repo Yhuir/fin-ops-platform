@@ -465,27 +465,39 @@ class WorkbenchRelationCommandService:
             )
 
         if replace_existing:
-            relation, history = pair_service.replace_with_confirmed_relation(
-                case_id=case_id,
-                row_ids=list(row_ids or []),
-                row_types=list(row_types or []),
-                relation_mode=mode,
-                created_by=relation_created_by or actor_id,
-                month_scope=month_scope,
-                created_at=occurred_at,
-                note=note,
-                amount_check=amount_check,
-                special_metadata=special_metadata,
-                operation_type=history_operation_type,
-                history_created_by=actor_id,
-                history_note=history_note,
-                exception_case_id=exception_case_id,
-                rule_version=rule_version,
-                evidence=evidence,
-                oa_exemption=oa_exemption,
-                display_tags=display_tags,
-                before_relations=before_relations,
-            )
+            try:
+                relation, history = pair_service.replace_with_confirmed_relation(
+                    case_id=case_id,
+                    row_ids=list(row_ids or []),
+                    row_types=list(row_types or []),
+                    relation_mode=mode,
+                    created_by=relation_created_by or actor_id,
+                    month_scope=month_scope,
+                    created_at=occurred_at,
+                    note=note,
+                    amount_check=amount_check,
+                    special_metadata=special_metadata,
+                    operation_type=history_operation_type,
+                    history_created_by=actor_id,
+                    history_note=history_note,
+                    exception_case_id=exception_case_id,
+                    rule_version=rule_version,
+                    evidence=evidence,
+                    oa_exemption=oa_exemption,
+                    display_tags=display_tags,
+                    before_relations=before_relations,
+                )
+            except ValueError as exc:
+                if str(exc) != "immutable_oa_attachment_binding":
+                    raise
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_immutable_oa_attachment_binding",
+                    IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE,
+                    payload={
+                        "case_id": str(case_id or ""),
+                        "row_ids": [str(row_id) for row_id in list(row_ids or [])],
+                    },
+                ) from exc
         else:
             relation = pair_service.create_active_relation(
                 case_id=case_id,

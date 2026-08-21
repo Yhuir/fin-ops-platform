@@ -147,6 +147,23 @@ def test_relation_delta_save_has_the_same_canonical_only_io_boundary() -> None:
     assert not any("job.read_model_dirty_scopes" in sql or "job.outbox_events" in sql for sql in all_sql)
 
 
+def test_relation_repository_registers_runtime_publication_with_uow_callback() -> None:
+    callbacks: list[object] = []
+    repository = PostgresWorkbenchRelationRepository(RecordingConnection())
+    repository.bind_post_commit_callback_registrar(callbacks.append)
+
+    published: list[str] = []
+    registered = repository.register_post_commit_callback(lambda: published.append("runtime"))
+
+    assert registered is True
+    assert published == []
+    assert len(callbacks) == 1
+    callback = callbacks[0]
+    assert callable(callback)
+    callback()
+    assert published == ["runtime"]
+
+
 def test_requirement_relation_load_attaches_canonical_bank_months_in_one_query() -> None:
     class RequirementLoadConnection(RecordingConnection):
         def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:

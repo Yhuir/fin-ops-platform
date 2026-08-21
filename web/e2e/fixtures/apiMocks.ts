@@ -8349,6 +8349,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   const requestBodies = new Map<string, Record<string, unknown>[]>();
   let relationConfirmed = options.workbenchInitialRelationConfirmed === true
     || options.workbenchInitialIncompleteRelation === true;
+  let oaSyncRevision = 1;
   let workbenchAmountMismatchDecision: WorkbenchAnomalyReviewDecision = null;
   let workbenchConfirmSubmitAttempts = 0;
   let workbenchMutationCommitted = false;
@@ -8527,7 +8528,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/oa-sync/status") {
-      return json(route, oaSyncPayload(options.oaSyncMode));
+      return json(route, {
+        ...oaSyncPayload(options.oaSyncMode),
+        version: oaSyncRevision,
+        last_synced_at: oaSyncRevision === 1
+          ? "2026-06-17T01:00:00Z"
+          : `2026-06-17T01:00:${String(oaSyncRevision - 1).padStart(2, "0")}Z`,
+      });
     }
 
     if (path === "/api/operation-barrier/status") {
@@ -10700,6 +10707,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     },
     recoverPendingInvoiceRows() {
       pendingInvoiceRowsFailuresRemaining = 0;
+    },
+    advanceOaSyncRevision() {
+      oaSyncRevision += 1;
     },
   };
 }

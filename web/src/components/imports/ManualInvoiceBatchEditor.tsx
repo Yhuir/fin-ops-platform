@@ -42,6 +42,7 @@ type ManualInvoiceBatchEditorProps = {
   submitLabel: string;
   onCancel: () => void;
   onSubmit: (preview: ManualInvoiceEntryBatchPreview) => Promise<void>;
+  previewInvoices?: (values: ManualInvoiceEntryValues[]) => Promise<ManualInvoiceEntryBatchPreview>;
 };
 
 function Field({ label, required = true, children }: { label: string; required?: boolean; children: ReactNode }) {
@@ -58,7 +59,13 @@ function formatPreviewValue(key: keyof ManualInvoiceEntryValues, value: string, 
   return value || "—";
 }
 
-export default function ManualInvoiceBatchEditor({ disabled = false, submitLabel, onCancel, onSubmit }: ManualInvoiceBatchEditorProps) {
+export default function ManualInvoiceBatchEditor({
+  disabled = false,
+  submitLabel,
+  onCancel,
+  onSubmit,
+  previewInvoices = previewManualInvoices,
+}: ManualInvoiceBatchEditorProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [entries, setEntries] = useState<Entry[]>([{ id: 1, values: { ...EMPTY_MANUAL_INVOICE_VALUES }, saved: false, fileName: "" }]);
@@ -112,7 +119,7 @@ export default function ManualInvoiceBatchEditor({ disabled = false, submitLabel
   async function submitBatch() {
     if (!allSaved || busy) return;
     setIsSubmitting(true); setErrorMessage(null);
-    try { await onSubmit(await previewManualInvoices(entries.map((entry) => entry.values))); }
+    try { await onSubmit(await previewInvoices(entries.map((entry) => entry.values))); }
     catch (error) { setErrorMessage(resolveImportApiErrorMessage(error, "整批录入失败，请核对后重试。")); }
     finally { setIsSubmitting(false); }
   }

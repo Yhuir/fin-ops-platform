@@ -62,6 +62,41 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
 
         self.assertEqual(context.exception.error_code, "workbench_relation_active_row_conflict")
 
+    def test_confirm_maps_immutable_attachment_member_drop_to_relation_conflict(self) -> None:
+        service = command_service()
+        service.confirm_relation(
+            case_id="CASE-OA-ATTACHMENT",
+            row_ids=["oa-exp-2444", "inv_imported_0956"],
+            row_types=["oa", "invoice"],
+            relation_mode="manual_confirmed",
+            actor_id="system:workbench-matching",
+            special_metadata={
+                "oa_attachment_bindings": [
+                    {
+                        "parent_oa_row_id": "oa-exp-2444",
+                        "invoice_row_ids": ["inv_imported_0956"],
+                    }
+                ],
+                "immutable_oa_attachment_binding": True,
+                "contains_immutable_oa_attachment_binding": True,
+            },
+        )
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.confirm_relation(
+                case_id="CASE-MANUAL-INVALID",
+                row_ids=["oa-exp-2444", "bank-140"],
+                row_types=["oa", "bank"],
+                relation_mode="manual_confirmed",
+                actor_id="finance",
+                replace_existing=True,
+            )
+
+        self.assertEqual(
+            context.exception.error_code,
+            "workbench_relation_immutable_oa_attachment_binding",
+        )
+
     def test_large_relation_confirm_and_withdraw_keep_all_members_and_idempotency(self) -> None:
         service = command_service()
         row_ids = [

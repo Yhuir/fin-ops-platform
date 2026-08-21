@@ -483,11 +483,18 @@ export async function recognizeManualInvoice(file: File): Promise<Partial<Manual
 export async function previewManualInvoices(
   values: ManualInvoiceEntryValues[],
 ): Promise<ManualInvoiceEntryBatchPreview> {
+  return previewManualInvoicesAtEndpoint("/imports/invoices/manual/preview", values);
+}
+
+export async function previewManualInvoicesAtEndpoint(
+  endpoint: string,
+  values: ManualInvoiceEntryValues[],
+): Promise<ManualInvoiceEntryBatchPreview> {
   const payload = await requestJson<{
     values: ApiManualInvoiceEntryValues[];
     file_ids: string[];
     import_session: ApiImportSessionPayload;
-  }>("/imports/invoices/manual/preview", {
+  }>(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ invoices: values.map(serializeManualInvoiceEntryValues) }),

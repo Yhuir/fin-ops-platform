@@ -192,6 +192,52 @@ function withAmountMismatchGroups(
   };
 }
 
+function withUnparsedAttachmentGroup(payload: Record<string, unknown>) {
+  const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
+  const sourceGroup = unpaired.groups.find((group) => (
+    group.oa_rows.some((row) => row.id === "oa-exp-2035")
+  ));
+  if (!sourceGroup) {
+    throw new Error("Missing OA expense claim fixture for invoice entry test.");
+  }
+  const group = {
+    ...sourceGroup,
+    workbench_anomaly: {
+      code: "workbench_anomaly",
+      fingerprint: "a".repeat(64),
+      review_decision: "pending",
+      items: [{
+        code: "oa_invoice_attachment_unparsed",
+        label: "发票附件未解析",
+        display_label: "发票附件未解析",
+        fingerprint: "b".repeat(64),
+        comparison_unit_id: "oa-exp-2035:item:0",
+        source_oa_ids: ["oa-exp-2035"],
+        source_expense_item_ids: ["oa-exp-2035:item:0"],
+        oa_total: "48.00",
+        invoice_row_ids: [],
+        attachment_file_count: 1,
+        display_scope: "expense_item",
+        display_pane: "oa",
+        display_row_id: "oa-exp-2035:item:0",
+      }],
+    },
+  };
+  const summary = payload.summary as Record<string, unknown>;
+  return {
+    ...payload,
+    summary: {
+      ...summary,
+      unpaired_count: 1,
+      unpaired_exception_count: 1,
+    },
+    unpaired: {
+      ...unpaired,
+      groups: [group],
+    },
+  };
+}
+
 function withTypedIdentityCollision(payload: Record<string, unknown>) {
   const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
   const replaceId = (row: Record<string, unknown>) => (
@@ -741,7 +787,7 @@ describe("Workbench row selection and detail drawer", () => {
     const errorDialog = await screen.findByRole("dialog", { name: "操作状态弹窗" });
     expect(within(errorDialog).getByText("操作失败")).toBeInTheDocument();
     expect(
-      within(errorDialog).getByText("关联台服务暂时不可用，请稍后重试。"),
+      within(errorDialog).getByText("关联台服务暂时不可用，请稍后重试。（请求编号：req-preview-safe）"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/INTERNAL ENGLISH SENTINEL/)).not.toBeInTheDocument();
     await user.click(within(errorDialog).getByRole("button", { name: "确定" }));
@@ -811,6 +857,39 @@ describe("Workbench row selection and detail drawer", () => {
         }),
       );
     });
+  });
+
+  test("amount mismatch submit failure keeps the note and exposes a safe request id", async () => {
+    const user = userEvent.setup();
+    const defaultFetch = installMockApiFetch();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/confirm-link") {
+        return jsonResponse({
+          error: "workbench_state_persistence_unavailable",
+          message: "INTERNAL ENGLISH SENTINEL: database details",
+          requestId: "req-confirm-safe",
+        }, 503);
+      }
+      return defaultFetch(input, init);
+    }));
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("row", { name: /林晨.*尾差设备商/ }));
+    await user.click(await screen.findByRole("row", { name: /2026-03-29.*尾差设备商/ }));
+    await user.click(await screen.findByRole("row", { name: /91330108MA27B4011E.*杭州溯源科技有限公司/ }));
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "确认关联" });
+    const note = within(dialog).getByRole("textbox", { name: "差额说明" });
+    await user.type(note, "发票税额尾差，财务已复核");
+    await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
+
+    expect(await within(dialog).findByText(
+      "关联台服务暂时不可用，请稍后重试。（请求编号：req-confirm-safe）",
+    )).toBeInTheDocument();
+    expect(note).toHaveValue("发票税额尾差，财务已复核");
+    expect(within(dialog).getByRole("button", { name: "重试确认" })).toBeEnabled();
+    expect(screen.queryByText(/INTERNAL ENGLISH SENTINEL/)).not.toBeInTheDocument();
   });
 
   test("confirm preview respects matched backend status for mixed bank directions", async () => {
@@ -2304,9 +2383,9 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
   });
 
-  test("real OA completion fields trigger one canonical reread and invalidate the old selection", async () => {
+  test("OA completion defers one canonical reread until the active selection is cleared", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({
+    const fetchMock = installMockApiFetch({
       appHealth: {
         status: "ok",
         generated_at: "2026-05-06T00:00:00+08:00",
@@ -2352,6 +2431,7 @@ describe("Workbench row selection and detail drawer", () => {
     const bankRow = await within(unpairedZone).findByRole("row", { name: /2026-03-28.*智能工厂设备商/ });
     await user.click(oaRow);
     await user.click(bankRow);
+    expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
 
     const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
     expect(confirmButton).toBeDisabled();
@@ -2360,16 +2440,21 @@ describe("Workbench row selection and detail drawer", () => {
     })).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
+      expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
       expect(within(unpairedZone).queryByRole("status", {
         name: "OA 正在同步，完成后将自动恢复关联操作。",
       })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
 
-    expect(confirmButton).toBeDisabled();
-    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
-    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
     expect(confirmButton).toBeEnabled();
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
+
+    await user.click(within(unpairedZone).getByRole("button", { name: "清空选择" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
+      expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
+    });
   });
 
   test("OA status transport failures fail closed until the visible retry succeeds", async () => {
@@ -2437,12 +2522,11 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
+    expect(await screen.findByText("关联台服务暂时不可用，请稍后重试。", undefined, { timeout: 4_500 })).toBeInTheDocument();
+
     await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
     await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
-    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
-    expect(confirmButton).toBeEnabled();
-
-    expect(await screen.findByText("关联台服务暂时不可用，请稍后重试。", undefined, { timeout: 4_500 })).toBeInTheDocument();
     expect(confirmButton).toBeDisabled();
     expect(within(unpairedZone).getByRole("status", {
       name: "关联台读取失败，请重新读取成功后再执行关联操作。",
@@ -2459,9 +2543,9 @@ describe("Workbench row selection and detail drawer", () => {
     expect(confirmButton).toBeEnabled();
   }, 8_000);
 
-  test("a canonical OA reread closes an open preview and invalidates its selection", async () => {
+  test("an open preview and its selection defer the canonical OA reread", async () => {
     const user = userEvent.setup();
-    installMockApiFetch({
+    const fetchMock = installMockApiFetch({
       workbenchOaSyncStatuses: [
         {
           status: "synced",
@@ -2483,12 +2567,128 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
     await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
     await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
-    expect(await screen.findByRole("dialog", { name: "确认关联" })).toBeInTheDocument();
+    const preview = await screen.findByRole("dialog", { name: "确认关联" });
 
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "确认关联" })).not.toBeInTheDocument();
-      expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
+      expect(fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/oa-sync/status"))).toHaveLength(2);
     }, { timeout: 5_000 });
+    expect(preview).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
+
+    await user.click(within(preview).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "确认关联" })).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
+
+    await user.click(within(unpairedZone).getByRole("button", { name: "清空选择" }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
+    });
+  }, 8_000);
+
+  test("an in-flight OA reread is deferred when a selection starts before the response applies", async () => {
+    const user = userEvent.setup();
+    let releaseBackgroundRead!: () => void;
+    const backgroundReadGate = new Promise<void>((resolve) => {
+      releaseBackgroundRead = resolve;
+    });
+    let initialReadCount = 0;
+    let backgroundReadReleased = false;
+    const fetchMock = installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const response = defaultFetch!(input, init);
+      if (!isWorkbenchInitialRequest(input)) {
+        return response;
+      }
+      initialReadCount += 1;
+      if (initialReadCount !== 2) {
+        return response;
+      }
+      return backgroundReadGate.then(async () => {
+        backgroundReadReleased = true;
+        return response;
+      });
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    await waitFor(() => expect(initialReadCount).toBe(2), { timeout: 5_000 });
+
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
+
+    releaseBackgroundRead();
+    await waitFor(() => expect(backgroundReadReleased).toBe(true));
+    await act(async () => Promise.resolve());
+
+    expect(initialReadCount).toBe(2);
+    expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
+
+    await user.click(within(unpairedZone).getByRole("button", { name: "清空选择" }));
+    await waitFor(() => expect(initialReadCount).toBe(3));
+    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 250)));
+    expect(initialReadCount).toBe(3);
+  }, 8_000);
+
+  test("invoice editing defers one canonical OA reread until the editor closes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: withUnparsedAttachmentGroup,
+      workbenchOaSyncStatuses: [
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T11:59:00+08:00",
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          last_synced_at: "2026-04-01T12:00:00+08:00",
+        },
+      ],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input).startsWith("/api/workbench/oa-invoice-supplements/documents?")) {
+        return Promise.resolve(jsonResponse({ documents: [] }));
+      }
+      return defaultFetch!(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("button", { name: "录入发票" }));
+    const editor = await screen.findByRole("dialog", { name: "录入发票" });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/oa-sync/status"))).toHaveLength(2);
+    }, { timeout: 5_000 });
+
+    expect(editor).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
+
+    await user.click(within(editor).getByRole("button", { name: "关闭录入发票" }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
+    });
   }, 8_000);
 
   test("workbench settings can manage allowed app accounts", async () => {
