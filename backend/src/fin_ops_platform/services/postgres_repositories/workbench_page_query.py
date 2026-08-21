@@ -2252,6 +2252,47 @@ class PostgresWorkbenchPageQueryRepository:
         }
 
     @staticmethod
+    def _filtered_groups_select_sql(
+        *,
+        where_sql: str,
+        normalized_sort: str,
+    ) -> str:
+        if normalized_sort == "default:desc":
+            return f"""
+                select
+                    groups.*,
+                    null::date as oa_sort_min,
+                    null::date as oa_sort_max,
+                    null::date as bank_sort_min,
+                    null::date as bank_sort_max,
+                    null::date as invoice_sort_min,
+                    null::date as invoice_sort_max
+                from effective_groups groups
+                where {where_sql}
+            """
+        return f"""
+            select
+                groups.*,
+                min(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_min,
+                max(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_max,
+                min(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_min,
+                max(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_max,
+                min(member.sort_date) filter (where member.row_type = 'invoice')
+                    as invoice_sort_min,
+                max(member.sort_date) filter (where member.row_type = 'invoice')
+                    as invoice_sort_max
+            from effective_groups groups
+            left join canonical_group_members member
+              on member.internal_key = groups.internal_key
+            where {where_sql}
+            group by
+                groups.internal_key, groups.detail_key, groups.group_kind,
+                groups.zone, groups.member_ids, groups.member_types,
+                groups.scope_month, groups.updated_at,
+                groups.external_etc_batch_id, groups.missing_row_types
+        """
+
+    @staticmethod
     def _initial_zone_ctes(prefix: str, plan: dict[str, Any]) -> str:
         if plan["uses_unfiltered_zone_counts"]:
             exact_totals_sql = f"""
@@ -2288,28 +2329,16 @@ class PostgresWorkbenchPageQueryRepository:
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
             """
+        filtered_groups_select_sql = (
+            PostgresWorkbenchPageQueryRepository._filtered_groups_select_sql(
+                where_sql=str(plan["where_sql"]),
+                normalized_sort=str(plan["sort"]),
+            )
+        )
         return f"""
             {plan['search_ctes']}
             {prefix}_filtered_groups as materialized (
-                select
-                    groups.*,
-                    min(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_max,
-                    min(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_max,
-                    min(member.sort_date) filter (where member.row_type = 'invoice')
-                        as invoice_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'invoice')
-                        as invoice_sort_max
-                from effective_groups groups
-                left join canonical_group_members member
-                  on member.internal_key = groups.internal_key
-                where {plan['where_sql']}
-                group by
-                    groups.internal_key, groups.detail_key, groups.group_kind,
-                    groups.zone, groups.member_ids, groups.member_types,
-                    groups.scope_month, groups.updated_at,
-                    groups.external_etc_batch_id, groups.missing_row_types
+                {filtered_groups_select_sql}
             ),
             {prefix}_keyed_groups as materialized (
                 select filtered.*,
@@ -2615,6 +2644,10 @@ class PostgresWorkbenchPageQueryRepository:
                 normalized_exception_code,
                 cursor_exception_code,
             ]
+        filtered_groups_select_sql = self._filtered_groups_select_sql(
+            where_sql=where_sql,
+            normalized_sort=normalized_sort,
+        )
         rows = self._connection.fetch_all(
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
@@ -2623,23 +2656,7 @@ class PostgresWorkbenchPageQueryRepository:
             {_EFFECTIVE_GROUPS_CTES},
             {exception_query_cte_sql}
             {filtered_group_cte_name} as materialized (
-                select
-                    groups.*,
-                    min(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'oa') as oa_sort_max,
-                    min(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'bank') as bank_sort_max,
-                    min(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_min,
-                    max(member.sort_date) filter (where member.row_type = 'invoice') as invoice_sort_max
-                from effective_groups groups
-                left join canonical_group_members member
-                  on member.internal_key = groups.internal_key
-                where {where_sql}
-                group by
-                    groups.internal_key, groups.detail_key, groups.group_kind,
-                    groups.zone, groups.member_ids, groups.member_types,
-                    groups.scope_month, groups.updated_at,
-                    groups.external_etc_batch_id, groups.missing_row_types
+                {filtered_groups_select_sql}
             ),
             {exception_filter_ctes_sql}
             keyed_groups as materialized (

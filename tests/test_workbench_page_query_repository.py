@@ -122,6 +122,11 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
     assert "exception_counts" not in connection.sql
     assert "offset" not in connection.sql.lower()
     assert "limit %s" in connection.sql.lower()
+    filtered_groups_sql = connection.sql.split(
+        "filtered_groups as materialized (", 1
+    )[1].split("keyed_groups as materialized (", 1)[0]
+    assert "left join canonical_group_members member" in filtered_groups_sql
+    assert "max(member.sort_date)" in filtered_groups_sql
     decoded = decode_workbench_page_cursor(
         payload["next_cursor"],
         expected_query_hash=workbench_query_hash(
@@ -141,6 +146,31 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
     )
     assert decoded is not None
     assert decoded.group_key == "row:bank:bank-2"
+
+
+def test_groups_page_default_sort_skips_member_sort_aggregation_but_keeps_exists_filters() -> None:
+    connection = _QueryConnection([])
+    repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")
+
+    payload = repository._groups_page(
+        scope_key="2026-07",
+        zone="unpaired",
+        source_kind="bank_transaction",
+        column_filters={
+            "oa": {"applicant": ["applicant:张三"]},
+        },
+    )
+
+    assert payload["groups"] == []
+    filtered_groups_sql = connection.sql.split(
+        "filtered_groups as materialized (", 1
+    )[1].split("keyed_groups as materialized (", 1)[0]
+    assert "from effective_groups groups" in filtered_groups_sql
+    assert "left join canonical_group_members member" not in filtered_groups_sql
+    assert "min(member.sort_date)" not in filtered_groups_sql
+    assert "null::date as oa_sort_min" in filtered_groups_sql
+    assert "exists (select 1 from canonical_group_members source_member" in filtered_groups_sql
+    assert "exists (select 1 from canonical_group_members filter_member" in filtered_groups_sql
 
 
 def test_exception_amount_view_returns_additive_counts_and_auto_code_cursor() -> None:
@@ -362,6 +392,16 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "paired_filtered_groups" in sql
     assert "unpaired_filtered_groups" in sql
     assert "overall_summary" in sql
+    paired_filtered_sql = sql.split(
+        "paired_filtered_groups as materialized (", 1
+    )[1].split("paired_keyed_groups as materialized (", 1)[0]
+    unpaired_filtered_sql = sql.split(
+        "unpaired_filtered_groups as materialized (", 1
+    )[1].split("unpaired_keyed_groups as materialized (", 1)[0]
+    assert "left join canonical_group_members member" not in paired_filtered_sql
+    assert "left join canonical_group_members member" not in unpaired_filtered_sql
+    assert "null::date as oa_sort_min" in paired_filtered_sql
+    assert "null::date as oa_sort_min" in unpaired_filtered_sql
     group_summary_sql = sql.split(
         "overall_group_summary as materialized (", 1
     )[1].split("overall_unique_members as materialized (", 1)[0]
@@ -399,6 +439,34 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     page_rows = connection.rows[1:]
     assert all("anomaly_members" not in row for row in page_rows)
     assert all("ignored_anomaly_fingerprints" not in row for row in page_rows)
+
+
+def test_initial_page_keeps_member_sort_aggregation_only_for_explicitly_sorted_zone() -> None:
+    connection = _CountingQueryConnection(
+        [{"record_zone": "metadata", "internal_key": None}]
+    )
+    repository = PostgresWorkbenchPageQueryRepository(connection, tenant_id="test-tenant")
+
+    payload = repository._initial_page(
+        scope_key="2026-07",
+        paired_query={"sort": "bank:desc"},
+        unpaired_query=None,
+    )
+
+    assert payload["paired"]["groups"] == []
+    assert payload["unpaired"]["groups"] == []
+    sql = connection.calls[0][0].lower()
+    paired_filtered_sql = sql.split(
+        "paired_filtered_groups as materialized (", 1
+    )[1].split("paired_keyed_groups as materialized (", 1)[0]
+    unpaired_filtered_sql = sql.split(
+        "unpaired_filtered_groups as materialized (", 1
+    )[1].split("unpaired_keyed_groups as materialized (", 1)[0]
+    assert "left join canonical_group_members member" in paired_filtered_sql
+    assert "max(member.sort_date)" in paired_filtered_sql
+    assert "left join canonical_group_members member" not in unpaired_filtered_sql
+    assert "min(member.sort_date)" not in unpaired_filtered_sql
+    assert "null::date as oa_sort_min" in unpaired_filtered_sql
 
 
 def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
