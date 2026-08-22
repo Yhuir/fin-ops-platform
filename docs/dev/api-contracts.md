@@ -914,7 +914,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 Workbench detail row payload 可包含可选对象身份字段：`object_identity`、`object_identity_key`、`object_identity_kind`、`object_identity_source`、`object_identity_confidence` 和 `identity_alias_rows`。这些字段用于 canonical 审计、跨区重复治理和详情解释；compact summary rows 不重复输出它们。前端动作仍以 typed canonical identity 和 preview proof 为准，不得用展示字段推测身份。
 
-Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`source_oa_row_id`、`derived_from_oa_id` 和 `oa_row_id`。这些字段是多 OA active relation 内做横向子分段的 canonical 事实证据；银行流水或发票行有确定归属时由 page hydration 批量组装，前端只消费这些字段做同源同排展示。无法确定归属时后端不得臆造 source OA，应通过 `special_metadata.row_alignment.unresolved_row_ids` 暴露。
+Workbench row payload 还可包含可选来源字段：单值兼容字段 `source_kind`、复数来源证据 `source_kinds[]`，以及 `source_oa_id`、`source_oa_row_id`、`derived_from_oa_id` 和 `oa_row_id`。`source_kinds[]` 从 canonical `source_links[]` 稳定去重得到，可同时包含 `manual_invoice_import`、`oa_attachment_invoice`、`oa_expense_item_invoice`；它只用于来源展示，未知值不得默认映射为人工导入。OA 来源字段是多 OA active relation 内做横向子分段的 canonical 事实证据；银行流水或发票行有确定归属时由 page hydration 批量组装，前端只消费 `source_oa_*` 与 `source_expense_item_ids[]` 做同源同排展示，不得用 `source_kind(s)`、金额或标签猜 owner。无法确定归属时后端不得臆造 source OA，应通过 `special_metadata.row_alignment.unresolved_row_ids` 暴露。
 
 日常报销 OA row 可以额外返回 `expense_items`：
 

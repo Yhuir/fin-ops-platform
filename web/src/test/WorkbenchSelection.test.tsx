@@ -337,7 +337,8 @@ function withCaseAuto0185InvoiceAssignmentGroup(
     throw new Error("Missing invoice assignment fixture rows for CASE-AUTO-0185.");
   }
   const caseId = "CASE-AUTO-0185";
-  const expenseItemId = "oa-exp-2035:item:0";
+  const oaRowId = "oa-exp-2413";
+  const expenseItemId = "oa-exp-2413:item:1:0a8ca0a3b508";
   const invoice = (id: string, sellerName: string, totalWithTax: string) => ({
     ...sourceInvoiceRow,
     id,
@@ -349,19 +350,52 @@ function withCaseAuto0185InvoiceAssignmentGroup(
     total_with_tax: totalWithTax,
     detail_fields: { 发票号码: id },
   });
-  const manualInvoice = invoice("inv_imported_0983", "济南有人物联网技术有限公司", "338.00");
+  const manualInvoice = {
+    ...invoice("inv_imported_0983", "济南有人物联网技术有限公司", "338.00"),
+    source_kind: "manual_invoice_import",
+    source_kinds: assigned
+      ? ["manual_invoice_import", "oa_expense_item_invoice"]
+      : ["manual_invoice_import"],
+    source_oa_id: oaRowId,
+    source_expense_item_ids: assigned ? [expenseItemId] : undefined,
+  };
   const group = {
     ...sourceGroup,
     group_id: `case:${caseId}`,
     oa_rows: [{
       ...sourceOaRow,
+      id: oaRowId,
       case_id: caseId,
-      amount: "531.92",
-      expense_items: [{ ...sourceItem, amount: "531.92" }],
+      amount: "1003.22",
+      expense_items: [
+        {
+          ...sourceItem,
+          id: "oa-exp-2413:item:0:70994fbdeb26",
+          row_index: "0",
+          project_name: "大理卷烟厂余热综合利用项目",
+          amount: "436.30",
+        },
+        {
+          ...sourceItem,
+          id: expenseItemId,
+          row_index: "1",
+          project_name: "昭通卷烟厂能源集中监控平台维护项目",
+          amount: "531.92",
+        },
+        {
+          ...sourceItem,
+          id: "oa-exp-2413:item:2:a2ac346d98b7",
+          row_index: "2",
+          project_name: "大理卷烟厂余热综合利用项目",
+          amount: "35.00",
+        },
+      ],
     }],
     invoice_rows: [{
       ...invoice("inv_imported_0985", "德力西（芜湖）网络科技有限公司", "193.92"),
       source_kind: "oa_attachment_invoice",
+      source_kinds: ["manual_invoice_import", "oa_attachment_invoice"],
+      source_oa_id: oaRowId,
       source_expense_item_ids: [expenseItemId],
     }, manualInvoice],
     ...(assigned ? {} : {
@@ -2946,14 +2980,14 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const expenseItemId = "oa-exp-2035:item:0";
+    const expenseItemId = "oa-exp-2413:item:1:0a8ca0a3b508";
     const itemSegmentTestId = `candidate-group-segment-unpaired-case:CASE-AUTO-0185-${expenseItemId}`;
     const explicitSegment = await within(unpairedZone).findByTestId(itemSegmentTestId);
     expect(within(explicitSegment).getByText("德力西（芜湖）网络科技有限公司")).toBeInTheDocument();
     expect(within(explicitSegment).getByText("193.92", { exact: true })).toBeInTheDocument();
     expect(within(explicitSegment).queryByText("济南有人物联网技术有限公司")).not.toBeInTheDocument();
     const residualSegment = await within(unpairedZone).findByTestId(
-      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2035:invoice:unassigned",
+      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2413:invoice:unassigned",
     );
     expect(within(residualSegment).getByText("济南有人物联网技术有限公司")).toBeInTheDocument();
     expect(within(residualSegment).getByText("338.00", { exact: true })).toBeInTheDocument();
@@ -2988,7 +3022,7 @@ describe("Workbench row selection and detail drawer", () => {
       case_id: "CASE-AUTO-0185",
       invoice_row_id: "inv_imported_0983",
       targets: [{
-        oa_row_id: "oa-exp-2035",
+        oa_row_id: "oa-exp-2413",
         expense_item_id: expenseItemId,
       }],
       anomaly_fingerprint: "c".repeat(64),
@@ -2996,7 +3030,7 @@ describe("Workbench row selection and detail drawer", () => {
     }]);
     expect(screen.queryByRole("button", { name: "该发票有 1 项异常，查看详情" })).not.toBeInTheDocument();
     expect(screen.queryByTestId(
-      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2035:invoice:unassigned",
+      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2413:invoice:unassigned",
     )).not.toBeInTheDocument();
     const pairedZone = screen.getByTestId("zone-paired");
     const assignedSegment = await within(pairedZone).findByTestId(

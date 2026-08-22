@@ -821,12 +821,17 @@ describe("Workbench columns and inline actions", () => {
     expect(within(pairedGroup).queryByText("发票类型")).not.toBeInTheDocument();
   });
 
-  test("renders invoice source tags under the direction tag line", () => {
-    const createInvoiceRow = (id: string, sourceKind?: string) => ({
+  test("renders every invoice source evidence once without inventing a manual-import source", () => {
+    const createInvoiceRow = (
+      id: string,
+      sourceKinds?: string[],
+      sourceKind?: string,
+    ) => ({
       id,
       caseId: `case:${id}`,
       recordType: "invoice" as const,
       sourceKind,
+      sourceKinds,
       label: "进项发票",
       status: "待人工核查",
       statusCode: "manual_review",
@@ -838,7 +843,7 @@ describe("Workbench columns and inline actions", () => {
       availableActions: ["detail"],
       detailFields: [],
       tableValues: {
-        sellerName: id === "inv-oa-source" ? "OA附件销方" : "人工导入销方",
+        sellerName: id === "inv-multi-source" ? "多来源销方" : "普通销方",
         sellerTaxId: "92532526MA6NTMA00H",
         invoiceType: "进项专票",
       },
@@ -853,7 +858,16 @@ describe("Workbench columns and inline actions", () => {
           onRowAction={() => {}}
           onSelectRow={() => {}}
           paneId="invoice"
-          row={createInvoiceRow("inv-oa-source", "oa_attachment_invoice")}
+          row={createInvoiceRow(
+            "inv-multi-source",
+            [
+              "oa_expense_item_invoice",
+              "manual_invoice_import",
+              "oa_attachment_invoice",
+              "manual_invoice_import",
+            ],
+            "oa_attachment_invoice",
+          )}
           rowState="idle"
           showWorkflowActions
           zoneId="unpaired"
@@ -865,7 +879,7 @@ describe("Workbench columns and inline actions", () => {
           onRowAction={() => {}}
           onSelectRow={() => {}}
           paneId="invoice"
-          row={createInvoiceRow("inv-manual-source")}
+          row={createInvoiceRow("inv-unknown-source", undefined, "unknown_invoice_source")}
           rowState="idle"
           showWorkflowActions
           zoneId="unpaired"
@@ -873,20 +887,20 @@ describe("Workbench columns and inline actions", () => {
       </div>,
     );
 
-    const oaRow = screen.getByRole("row", { name: /OA附件销方/ });
-    const manualRow = screen.getByRole("row", { name: /人工导入销方/ });
-    const oaSourceTag = within(oaRow).getByText("OA附件");
-    const manualSourceTag = within(manualRow).getByText("人工导入");
+    const multiSourceRow = screen.getByRole("row", { name: /多来源销方/ });
+    const unknownSourceRow = screen.getByRole("row", { name: /普通销方/ });
+    const chipRow = within(multiSourceRow).getByText("进").closest(".invoice-chip-row");
 
-    expect(oaSourceTag).toHaveClass("inline-meta-tag");
-    expect(manualSourceTag).toHaveClass("inline-meta-tag");
-    const oaChipRow = within(oaRow).getByText("进").closest(".invoice-chip-row");
-    const manualChipRow = within(manualRow).getByText("进").closest(".invoice-chip-row");
-
-    expect(oaChipRow).not.toBeNull();
-    expect(manualChipRow).not.toBeNull();
-    expect(oaSourceTag.closest(".invoice-chip-row")).toBe(oaChipRow);
-    expect(manualSourceTag.closest(".invoice-chip-row")).toBe(manualChipRow);
+    expect(chipRow).not.toBeNull();
+    for (const label of ["OA附件", "导入记录", "明细归属"]) {
+      const sourceTags = within(multiSourceRow).getAllByText(label);
+      expect(sourceTags).toHaveLength(1);
+      expect(sourceTags[0]).toHaveClass("inline-meta-tag");
+      expect(sourceTags[0].closest(".invoice-chip-row")).toBe(chipRow);
+    }
+    expect(within(multiSourceRow).queryByText("人工导入")).not.toBeInTheDocument();
+    expect(within(unknownSourceRow).queryByText("人工导入")).not.toBeInTheDocument();
+    expect(within(unknownSourceRow).getByText("进").closest(".invoice-chip-row")?.children).toHaveLength(1);
   });
 
   test("renders invoice number and issue date tag without the issue date filter menu", async () => {

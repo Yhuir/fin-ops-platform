@@ -239,6 +239,9 @@ class ImportRuntimeProcessorFactory:
         import_support = _RuntimeWorkerImportSupport(
             state_store=state_store,
             workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
+            oa_attachment_invoice_promotion_mode_provider=(
+                app_settings_service.get_oa_attachment_invoice_promotion_mode
+            ),
         )
         processing_service = ImportProcessingService(
             file_import_service=file_import_service,
@@ -247,7 +250,6 @@ class ImportRuntimeProcessorFactory:
             etc_reconciliation_task_service=etc_reconciliation_task_service,
             background_job_service=background_job_service,
             serialize_value=_serialize_value,
-            schedule_workbench_matching_scopes=import_support.schedule_workbench_matching_scopes,
             persist_confirmed_import_delta=import_support.persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
@@ -572,39 +574,37 @@ class _RuntimeWorkerImportSupport:
         *,
         state_store: Any,
         workbench_source_versions_provider: Callable[[], dict[str, object]],
+        oa_attachment_invoice_promotion_mode_provider: Callable[[], str],
     ) -> None:
         self._state_store = state_store
         self._workbench_source_versions_provider = workbench_source_versions_provider
-
-    def schedule_workbench_matching_scopes(
-        self,
-        scope_months: list[str],
-        *,
-        reason: str,
-    ) -> list[str]:
-        return self._mark_workbench_matching_months(scope_months, reason=reason)
+        self._oa_attachment_invoice_promotion_mode_provider = (
+            oa_attachment_invoice_promotion_mode_provider
+        )
 
     def persist_confirmed_import_delta(
         self,
         *,
         import_state_payload: dict[str, Any],
-    ) -> None:
+        scope_months: list[str],
+    ) -> dict[str, Any]:
         payload = dict(import_state_payload or {})
         if not payload or set(payload) - {"imports", "file_imports"}:
             raise ValueError("File import persistence requires only imports and file_imports payloads.")
-        persist = getattr(self._state_store, "save_import_delta", None)
+        persist = getattr(
+            self._state_store,
+            "save_confirmed_import_delta_with_oa_attachment_promotion",
+            None,
+        )
         if not callable(persist):
-            raise RuntimeError("File import confirmation requires the import delta persistence port.")
-        persist(payload)
-
-    def _mark_workbench_matching_months(self, scope_months: list[str], *, reason: str) -> list[str]:
-        months = [month for month in _dedupe_text(scope_months) if MONTH_SCOPE_RE.match(month)]
-        repository = getattr(self._state_store, "workbench_matching_queue_repository", None)
-        dirty_queue = WorkbenchReconciliationDirtyQueue(repository=repository)
-        return list(
-            dirty_queue.mark_dirty_expanded(
-                months,
-                reason=reason,
+            raise RuntimeError(
+                "File import confirmation requires the atomic import/promotion persistence port."
+            )
+        return dict(
+            persist(
+                payload,
+                scope_months=list(scope_months or []),
+                promotion_mode=self._oa_attachment_invoice_promotion_mode_provider(),
                 source_versions=self._workbench_source_versions_provider(),
             )
         )

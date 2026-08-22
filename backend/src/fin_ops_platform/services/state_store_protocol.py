@@ -175,6 +175,15 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def save_import_delta(self, payload: dict[str, Any]) -> None: ...
 
+    def save_confirmed_import_delta_with_oa_attachment_promotion(
+        self,
+        payload: dict[str, Any],
+        *,
+        scope_months: list[str],
+        promotion_mode: str,
+        source_versions: dict[str, object],
+    ) -> dict[str, Any]: ...
+
     def save_invoices(self, invoices: list[Any]) -> None: ...
 
     def save_invoice_etc_metadata(self, invoices: list[Any]) -> None: ...

@@ -105,6 +105,7 @@ type ApiWorkbenchRow = {
   id: string;
   type: WorkbenchRecordType;
   source_kind?: WorkbenchSourceKind | null;
+  source_kinds?: WorkbenchSourceKind[] | null;
   derived_from_oa_id?: string | null;
   source_oa_id?: string | null;
   source_oa_row_id?: string | null;
@@ -1249,6 +1250,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     exceptionCaseId: row.exception_case_id ?? undefined,
     recordType: row.type,
     sourceKind: row.source_kind ?? undefined,
+    sourceKinds: resolveWorkbenchRowSourceKinds(row),
     sourceOaId: resolveWorkbenchRowSourceOaId(row),
     sourceExpenseItemIds: resolveWorkbenchRowSourceExpenseItemIds(row),
     expenseItems: mapExpenseItems(row.expense_items),
@@ -1330,6 +1332,11 @@ function resolveWorkbenchRowSourceOaId(row: ApiWorkbenchRow) {
       ? row.source_links.flatMap((link) => [link.derived_from_oa_id, link.source_workbench_row_id])
       : []),
   );
+}
+
+function resolveWorkbenchRowSourceKinds(row: ApiWorkbenchRow) {
+  const sourceKinds = toStringList(row.source_kinds) as WorkbenchSourceKind[];
+  return sourceKinds.length > 0 ? sourceKinds : undefined;
 }
 
 function resolveWorkbenchRowSourceExpenseItemIds(row: ApiWorkbenchRow) {

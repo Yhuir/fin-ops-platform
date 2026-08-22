@@ -33,15 +33,15 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         ],
     )
 
-    def persist_confirmed_import_delta(**kwargs: object) -> None:
+    def persist_confirmed_import_delta(**kwargs: object) -> dict[str, object]:
         events.append("persist")
         persisted.append(dict(kwargs))
         if fail_persist:
             raise RuntimeError("persist failed")
-
-    def schedule_workbench_matching_scopes(*_args: object, **_kwargs: object) -> list[str]:
-        events.append("matching")
-        return ["2026-06"]
+        return {
+            "queued_matching_months": ["2026-06"],
+            "oa_attachment_invoice_promotion": {"reason_counts": {}},
+        }
 
     service = ImportProcessingService(
         file_import_service=SimpleNamespace(
@@ -54,7 +54,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         etc_reconciliation_task_service=SimpleNamespace(),
         background_job_service=SimpleNamespace(),
         serialize_value=lambda value: value,
-        schedule_workbench_matching_scopes=schedule_workbench_matching_scopes,
         persist_confirmed_import_delta=persist_confirmed_import_delta,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
@@ -85,10 +84,12 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         background_job_id="",
     )
 
-    assert events == ["persist", "matching"]
+    assert events == ["persist"]
     assert result["affected_months"] == ["2026-06"]
     assert result["queued_matching_months"] == ["2026-06"]
     assert persisted[0]["import_state_payload"] is import_state_payload
+    assert persisted[0]["scope_months"] == ["2026-06"]
+    assert result["oa_attachment_invoice_promotion"] == {"reason_counts": {}}
     assert result["affected_scope_keys"] == ["2026-06"]
 
 
@@ -117,7 +118,6 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
         ),
         background_job_service=SimpleNamespace(),
         serialize_value=lambda value: value,
-        schedule_workbench_matching_scopes=lambda *args, **kwargs: [],
         persist_confirmed_import_delta=lambda **kwargs: None,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: [],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],

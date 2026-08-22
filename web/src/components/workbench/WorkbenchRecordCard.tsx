@@ -7,7 +7,7 @@ import { formatMoney } from "../../features/money";
 import {
   compactWorkbenchBankAccountLabel,
   workbenchInvoiceFlowLabel,
-  workbenchInvoiceSourceLabel,
+  workbenchInvoiceSourceLabels,
 } from "../../features/workbench/groupDisplayModel";
 import {
   formatWorkbenchAmountCents,
@@ -426,6 +426,7 @@ function renderCellValue(
       value,
       row.tableValues.sellerTaxId ?? "",
       row.tableValues.invoiceType ?? "",
+      row.sourceKinds,
       row.sourceKind,
       row.externalUrl,
       searchQuery,
@@ -433,7 +434,15 @@ function renderCellValue(
   }
 
   if (paneId === "invoice" && column.key === "buyerName") {
-    return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "", undefined, undefined, searchQuery);
+    return renderInvoicePartyValue(
+      value,
+      row.tableValues.buyerTaxId ?? "",
+      "",
+      undefined,
+      undefined,
+      undefined,
+      searchQuery,
+    );
   }
 
   if (paneId === "invoice" && column.key === "issueDate") {
@@ -911,12 +920,13 @@ function renderInvoicePartyValue(
   value: string,
   taxId: string,
   invoiceType: string,
+  sourceKinds?: WorkbenchSourceKind[],
   sourceKind?: WorkbenchSourceKind,
   externalUrl?: string,
   searchQuery = "",
 ) {
   const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
-  const sourceLabel = flowLabel || sourceKind ? workbenchInvoiceSourceLabel(sourceKind) : null;
+  const sourceLabels = workbenchInvoiceSourceLabels(sourceKinds, sourceKind);
   const hasTaxId = taxId !== "--" && taxId !== "—" && taxId !== "";
 
   return (
@@ -935,12 +945,16 @@ function renderInvoicePartyValue(
             </a>
           ) : <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>}
           {hasTaxId ? <span className="cell-text-value cell-text-value-full cell-subtext-value">{highlightSearchText(taxId, searchQuery)}</span> : null}
-          {flowLabel || sourceLabel ? (
+          {flowLabel || sourceLabels.length > 0 ? (
             <span className="invoice-chip-row">
               {flowLabel ? (
                 <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{highlightSearchText(flowLabel, searchQuery)}</span>
               ) : null}
-              {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{highlightSearchText(sourceLabel, searchQuery)}</span> : null}
+              {sourceLabels.map((sourceLabel) => (
+                <span key={sourceLabel} className="inline-meta-tag invoice-source-tag">
+                  {highlightSearchText(sourceLabel, searchQuery)}
+                </span>
+              ))}
             </span>
           ) : null}
         </span>

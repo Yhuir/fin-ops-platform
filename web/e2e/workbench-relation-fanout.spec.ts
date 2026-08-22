@@ -155,7 +155,7 @@ test.describe("workbench relation browser flow", () => {
     await expect(page.getByText("OA 1 / 324.80")).toBeVisible();
   });
 
-  test("assigns a residual invoice through explicit OA-item ownership and canonical reread", async ({ page }) => {
+  test("rereads CASE-AUTO-0185 and aligns both invoices by explicit OA-item ownership", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchInvoiceAssignmentScenario: true,
@@ -163,10 +163,27 @@ test.describe("workbench relation browser flow", () => {
 
     await page.goto("/");
 
-    const residualSegment = page.getByTestId(
-      "candidate-group-segment-unpaired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:invoice:unassigned",
+    const explicitSegment = page.getByTestId(
+      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2413:item:1:0a8ca0a3b508",
     );
-    await expect(residualSegment.getByText("云南天谷科技开发有限公司", { exact: true })).toBeVisible();
+    const residualSegment = page.getByTestId(
+      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2413:invoice:unassigned",
+    );
+    const explicitInvoice = explicitSegment.getByRole("row", {
+      name: /德力西（芜湖）网络科技有限公司/,
+    });
+    const residualInvoice = residualSegment.getByRole("row", {
+      name: /济南有人物联网技术有限公司/,
+    });
+    await expect(explicitSegment.getByText("531.92", { exact: true })).toBeVisible();
+    await expect(explicitInvoice.getByText("193.92", { exact: true })).toBeVisible();
+    await expect(explicitInvoice.getByText("OA附件", { exact: true })).toHaveCount(1);
+    await expect(explicitInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(explicitInvoice.getByText("明细归属", { exact: true })).toHaveCount(0);
+    await expect(residualInvoice.getByText("338.00", { exact: true })).toBeVisible();
+    await expect(residualInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(residualInvoice.getByText("明细归属", { exact: true })).toHaveCount(0);
+    await expect(residualInvoice.getByText("人工导入", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "录入发票" })).toHaveCount(0);
 
     const anomalyTrigger = residualSegment.getByRole("button", {
@@ -178,25 +195,32 @@ test.describe("workbench relation browser flow", () => {
     const drawer = page.getByRole("dialog", { name: "选择 OA 明细" });
     await expect(drawer).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(1);
-    const firstItem = drawer.getByRole("checkbox", { name: /^大理项目，27\.05，/ });
-    const secondItem = drawer.getByRole("checkbox", { name: /^曲靖项目，38\.95，/ });
-    await expect(firstItem).not.toBeChecked();
-    await expect(secondItem).not.toBeChecked();
+    const targetItem = drawer.getByRole("checkbox", {
+      name: /^昭通卷烟厂能源集中监控平台系统维护采购项目，531\.92，/,
+    });
+    const otherItem = drawer.getByRole("checkbox", {
+      name: /^大理卷烟厂余热综合利用项目，436\.3，/,
+    });
+    await expect(targetItem).not.toBeChecked();
+    await expect(otherItem).not.toBeChecked();
     await expect(drawer.getByRole("button", { name: "确认归属" })).toBeDisabled();
 
-    await drawer.getByText("大理项目", { exact: true }).click();
-    await expect(firstItem).toBeChecked();
+    await drawer.getByText(
+      "昭通卷烟厂能源集中监控平台系统维护采购项目",
+      { exact: true },
+    ).click();
+    await expect(targetItem).toBeChecked();
     const workbenchReadsBeforeSubmit = api.count("GET /api/workbench");
     await drawer.getByRole("button", { name: "确认归属" }).click();
 
     await expect(drawer).toBeHidden();
     expect(api.count("POST /api/workbench/actions/assign-invoice-expense-items")).toBe(1);
     expect(api.lastBody("POST /api/workbench/actions/assign-invoice-expense-items")).toMatchObject({
-      case_id: "CASE-E2E-INVOICE-ASSIGNMENT",
-      invoice_row_id: "invoice-e2e-unassigned-27-05",
+      case_id: "CASE-AUTO-0185",
+      invoice_row_id: "inv_imported_0983",
       targets: [{
-        oa_row_id: "oa-e2e-invoice-assignment",
-        expense_item_id: "oa-e2e-invoice-assignment:item:0",
+        oa_row_id: "oa-exp-2413",
+        expense_item_id: "oa-exp-2413:item:1:0a8ca0a3b508",
       }],
       anomaly_fingerprint: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       idempotency_key: expect.any(String),
@@ -206,15 +230,29 @@ test.describe("workbench relation browser flow", () => {
     await expect(page.getByRole("button", { name: "该发票有 1 项异常，查看详情" })).toHaveCount(0);
 
     const assignedSegment = page.getByTestId(
-      "candidate-group-segment-paired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:item:0",
+      "candidate-group-segment-paired-case:CASE-AUTO-0185-oa-exp-2413:item:1:0a8ca0a3b508",
     );
     const assignedOaPane = page.getByTestId(
-      "candidate-scroll-paired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:item:0-oa",
+      "candidate-scroll-paired-case:CASE-AUTO-0185-oa-exp-2413:item:1:0a8ca0a3b508-oa",
     );
     const assignedInvoicePane = page.getByTestId(
-      "candidate-scroll-paired-case:CASE-E2E-INVOICE-ASSIGNMENT-oa-e2e-invoice-assignment:item:0-invoice",
+      "candidate-scroll-paired-case:CASE-AUTO-0185-oa-exp-2413:item:1:0a8ca0a3b508-invoice",
     );
-    await expect(assignedSegment.getByText("云南天谷科技开发有限公司", { exact: true })).toBeVisible();
+    const assignedAttachmentInvoice = assignedInvoicePane.getByRole("row", {
+      name: /德力西（芜湖）网络科技有限公司/,
+    });
+    const assignedManualInvoice = assignedInvoicePane.getByRole("row", {
+      name: /济南有人物联网技术有限公司/,
+    });
+    await expect(assignedSegment.getByText("531.92", { exact: true })).toBeVisible();
+    await expect(assignedInvoicePane.getByText("193.92", { exact: true })).toHaveCount(1);
+    await expect(assignedInvoicePane.getByText("338.00", { exact: true })).toHaveCount(1);
+    await expect(assignedAttachmentInvoice.getByText("OA附件", { exact: true })).toHaveCount(1);
+    await expect(assignedAttachmentInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(assignedAttachmentInvoice.getByText("明细归属", { exact: true })).toHaveCount(0);
+    await expect(assignedManualInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(assignedManualInvoice.getByText("明细归属", { exact: true })).toHaveCount(1);
+    await expect(assignedManualInvoice.getByText("OA附件", { exact: true })).toHaveCount(0);
     const [oaBox, invoiceBox] = await Promise.all([
       assignedOaPane.boundingBox(),
       assignedInvoicePane.boundingBox(),

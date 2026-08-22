@@ -1048,7 +1048,6 @@ class Application:
             etc_reconciliation_task_service=self._etc_reconciliation_task_service,
             background_job_service=self._background_job_service,
             serialize_value=self._serialize_value,
-            schedule_workbench_matching_scopes=self._schedule_workbench_matching_scopes,
             persist_confirmed_import_delta=self._persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
@@ -8345,27 +8344,7 @@ class Application:
                 if MONTH_SCOPE_RE.match(month):
                     months.add(month)
                     break
-        return cls._expand_workbench_matching_months(months)
-
-    @classmethod
-    def _expand_workbench_matching_months(cls, months: Iterable[str]) -> list[str]:
-        expanded: set[str] = set()
-        for month in months:
-            normalized_month = str(month or "").strip()
-            if not MONTH_SCOPE_RE.match(normalized_month):
-                continue
-            expanded.add(normalized_month)
-            expanded.add(cls._shift_month(normalized_month, -1))
-            expanded.add(cls._shift_month(normalized_month, 1))
-        return sorted(expanded)
-
-    @staticmethod
-    def _shift_month(month: str, delta: int) -> str:
-        current = datetime.strptime(f"{month}-01", "%Y-%m-%d")
-        month_index = current.year * 12 + current.month - 1 + delta
-        year = month_index // 12
-        resolved_month = month_index % 12 + 1
-        return f"{year:04d}-{resolved_month:02d}"
+        return sorted(months)
 
     def _tax_offset_scope_keys_for_import_preview(self, preview: object) -> list[str]:
         batch = getattr(preview, "batch", None)
@@ -8563,15 +8542,41 @@ class Application:
         self,
         *,
         import_state_payload: dict[str, object],
-    ) -> None:
+        scope_months: list[str],
+    ) -> dict[str, object]:
         if self._state_store is not None:
             payload = dict(import_state_payload or {})
             if not payload or set(payload) - {"imports", "file_imports"}:
                 raise ValueError("File import persistence requires only imports and file_imports payloads.")
-            persist = getattr(self._state_store, "save_import_delta", None)
+            persist = getattr(
+                self._state_store,
+                "save_confirmed_import_delta_with_oa_attachment_promotion",
+                None,
+            )
             if not callable(persist):
-                raise RuntimeError("File import confirmation requires the import delta persistence port.")
-            persist(payload)
+                raise RuntimeError(
+                    "File import confirmation requires the atomic import/promotion persistence port."
+                )
+            result = dict(
+                persist(
+                    payload,
+                    scope_months=list(scope_months or []),
+                    promotion_mode=(
+                        self._app_settings_service.get_oa_attachment_invoice_promotion_mode()
+                    ),
+                    source_versions=self._workbench_matching_source_versions(),
+                )
+            )
+            if str(getattr(self._state_store, "storage_backend", "") or "") != "postgres":
+                # The local development store has no transactional durable queue.
+                # Keep its in-process queue contract after the file snapshot is durable;
+                # PostgreSQL marks the same expanded scopes inside the UoW above.
+                result["queued_matching_months"] = self._mark_workbench_matching_dirty_scopes(
+                    list(scope_months or []),
+                    reason="import_file_confirm",
+                )
+            return result
+        return {"queued_matching_months": [], "oa_attachment_invoice_promotion": {}}
 
     def _persist_workbench_pair_relations(
         self,

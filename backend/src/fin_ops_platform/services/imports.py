@@ -2168,10 +2168,58 @@ class ImportNormalizationService:
 
     def _merge_invoice_from_normalized(self, invoice: Invoice, batch_id: str, normalized: dict[str, Any]) -> None:
         self._ensure_invoice_metadata_fields(invoice)
+        had_formal_import = any(
+            str(source_link.get("source_type") or "").strip() == "manual_invoice_import"
+            for source_link in invoice.source_links
+        )
         for tag in normalized.get("tags") or []:
             self._append_unique_tag(invoice.tags, str(tag))
         self._append_invoice_source_link(invoice, self._build_invoice_source_link(batch_id, normalized))
-        invoice.source_batch_id = batch_id
+        # The formal invoice export is authoritative over fields that may have
+        # originated from OA attachment parsing.  A later duplicate formal
+        # import only contributes provenance; it must not silently rewrite an
+        # already-formal canonical fact.
+        if not had_formal_import:
+            invoice.source_batch_id = batch_id
+            incoming_invoice_type = normalized.get("invoice_type")
+            if incoming_invoice_type not in (None, ""):
+                invoice.invoice_type = self._normalize_invoice_type_value(incoming_invoice_type)
+            counterparty_name = str(normalized.get("counterparty_name") or "").strip()
+            if counterparty_name:
+                invoice.counterparty = self._get_or_create_counterparty(counterparty_name)
+            for field_name in (
+                "invoice_no",
+                "invoice_code",
+                "digital_invoice_no",
+                "invoice_date",
+                "seller_tax_no",
+                "seller_name",
+                "buyer_tax_no",
+                "buyer_name",
+                "tax_rate",
+                "tax_classification_code",
+                "specific_business_type",
+                "taxable_item_name",
+                "specification_model",
+                "unit",
+                "invoice_source",
+                "invoice_kind",
+                "is_positive_invoice",
+                "risk_level",
+                "issuer",
+                "remark",
+                "project_id",
+            ):
+                incoming = normalized.get(field_name)
+                if incoming not in (None, ""):
+                    setattr(invoice, field_name, incoming)
+            invoice.amount = Decimal(normalized["amount"])
+            invoice.signed_amount = Decimal(
+                normalized.get("signed_amount") or normalized["amount"]
+            )
+            for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
+                incoming = normalized.get(field_name)
+                setattr(invoice, field_name, Decimal(incoming) if incoming not in (None, "") else None)
         if normalized.get("invoice_status_from_source"):
             invoice.invoice_status_from_source = normalized.get("invoice_status_from_source")
         for field_name in (

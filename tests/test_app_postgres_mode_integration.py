@@ -293,6 +293,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             import_state_payload={
                 "imports": app._import_service.persistence_snapshot_for_batches([batch_id]),
             },
+            scope_months=["2026-03"],
         )
 
         self.assertEqual(

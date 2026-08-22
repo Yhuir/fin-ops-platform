@@ -150,6 +150,7 @@ export type WorkbenchRecord = {
   exceptionCaseId?: string;
   recordType: WorkbenchRecordType;
   sourceKind?: WorkbenchSourceKind;
+  sourceKinds?: WorkbenchSourceKind[];
   sourceOaId?: string;
   sourceExpenseItemIds?: string[];
   externalUrl?: string;

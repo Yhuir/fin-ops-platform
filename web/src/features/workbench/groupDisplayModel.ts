@@ -1033,7 +1033,7 @@ function matchesWorkbenchRowText(row: WorkbenchRecord, normalizedQuery: string) 
       ...tableValues,
       ...bankTextValues,
       ...displayAliases,
-      ...(row.tags ?? []),
+      ...(row.tags ?? []).filter((tag) => tag !== "OA附件" && tag !== "人工导入"),
     ].join(" "),
   );
   return (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalizedQuery)
@@ -1049,8 +1049,10 @@ function workbenchRowDisplaySearchAliases(row: WorkbenchRecord) {
   if (row.recordType === "invoice") {
     const invoiceType = row.tableValues.invoiceType ?? "";
     const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
-    const sourceLabel = flowLabel || row.sourceKind ? workbenchInvoiceSourceLabel(row.sourceKind) : null;
-    return [flowLabel, sourceLabel].filter((value): value is string => Boolean(value));
+    return [
+      flowLabel,
+      ...workbenchInvoiceSourceLabels(row.sourceKinds, row.sourceKind),
+    ].filter((value): value is string => Boolean(value));
   }
   return [];
 }
@@ -1079,26 +1081,28 @@ export function workbenchInvoiceFlowLabel(invoiceType: string) {
   return null;
 }
 
-export function workbenchInvoiceSourceLabel(sourceKind: WorkbenchSourceKind | undefined) {
-  if (sourceKind === "etc_invoice_summary") {
-    return "ETC批次";
-  }
-  if (sourceKind === "etc_invoice") {
-    return "ETC";
-  }
-  if (sourceKind === "oa_attachment_invoice") {
-    return "OA附件";
-  }
-  if (sourceKind === "oa_attachment_payment_receipt") {
-    return "付款凭证";
-  }
-  if (sourceKind === "oa_supporting_document") {
-    return "补充凭证";
-  }
-  if (sourceKind === "oa_attachment_unknown") {
-    return null;
-  }
-  return "人工导入";
+export function workbenchInvoiceSourceLabels(
+  sourceKinds: WorkbenchSourceKind[] | undefined,
+  fallbackSourceKind?: WorkbenchSourceKind,
+) {
+  const kinds = new Set(
+    sourceKinds?.length ? sourceKinds : fallbackSourceKind ? [fallbackSourceKind] : [],
+  );
+  const labels: string[] = [];
+  const append = (sourceKind: WorkbenchSourceKind, label: string) => {
+    if (kinds.has(sourceKind)) {
+      labels.push(label);
+    }
+  };
+
+  append("oa_attachment_invoice", "OA附件");
+  append("manual_invoice_import", "导入记录");
+  append("oa_expense_item_invoice", "明细归属");
+  append("etc_invoice_summary", "ETC批次");
+  append("etc_invoice", "ETC");
+  append("oa_attachment_payment_receipt", "付款凭证");
+  append("oa_supporting_document", "补充凭证");
+  return labels;
 }
 
 function paneHasWorkbenchCriteria(state: WorkbenchZoneDisplayState, paneId: WorkbenchRecordType) {

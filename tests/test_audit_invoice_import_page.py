@@ -354,6 +354,31 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
         self.assertTrue(report["audit_contract"]["database_snapshot"])
         self.assertEqual(report["summary"]["invoice_import_job_count"], 1)
 
+    def test_downstream_oa_and_expense_item_links_do_not_corrupt_import_provenance_audit(self) -> None:
+        connection = FakeConnection()
+        connection.invoices[0]["source_links"].extend(
+            [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-exp-53192",
+                    "source_expense_item_id": "item-53192",
+                },
+                {
+                    "source_type": "oa_expense_item_invoice",
+                    "derived_from_oa_id": "oa-exp-53192",
+                    "source_expense_item_id": "item-53192",
+                },
+            ]
+        )
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertEqual(report["audit_status"]["integrity"], "pass")
+        self.assertNotIn(
+            "invoice_import_invoice_formal_payload_mismatch",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_formally_reverted_preview_batch_is_not_reported_as_invalid(self) -> None:
         connection = FakeConnection()
         connection.files[0]["status"] = "reverted"

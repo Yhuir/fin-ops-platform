@@ -16,6 +16,9 @@ from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
 )
+from fin_ops_platform.services.confirmed_invoice_import_uow import (
+    ConfirmedInvoiceImportUnitOfWork,
+)
 from fin_ops_platform.services.file_object_migration import verified_object_key_from_uri, write_verified_object
 from fin_ops_platform.services.object_storage import (
     ObjectStorageReadError,
@@ -1180,6 +1183,24 @@ class PostgresStateStore:
         self._core_repository.save_import_delta(
             normalized.get("imports") or {},
             normalized.get("file_imports") or {},
+        )
+
+    def save_confirmed_import_delta_with_oa_attachment_promotion(
+        self,
+        payload: dict[str, Any],
+        *,
+        scope_months: list[str],
+        promotion_mode: str,
+        source_versions: dict[str, object],
+    ) -> dict[str, Any]:
+        normalized = self._serialize_value(payload)
+        if not isinstance(normalized, dict) or not normalized or set(normalized) - {"imports", "file_imports"}:
+            raise ValueError("Import delta requires only imports and file_imports payloads.")
+        return ConfirmedInvoiceImportUnitOfWork(self._connection).execute(
+            normalized_payload=normalized,
+            scope_months=list(scope_months or []),
+            promotion_mode=promotion_mode,
+            source_versions=source_versions,
         )
 
     def save_workbench_overrides(self, workbench_overrides_snapshot: dict[str, Any], *, changed_row_ids: set[str] | None = None) -> None:

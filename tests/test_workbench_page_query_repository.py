@@ -20,6 +20,7 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_hydration im
 )
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
+    invoice_source_kinds,
 )
 from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_filter_options import (
@@ -33,6 +34,62 @@ from fin_ops_platform.services.workbench_page_cursor import (
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
+
+
+def test_invoice_source_kinds_are_stable_deduplicated_evidence_not_ownership() -> None:
+    assert invoice_source_kinds(
+        [
+            {"source_type": "oa_attachment_invoice"},
+            {"source_type": "custom_source"},
+            {"source_type": "manual_invoice_import"},
+            {"source_type": "oa_expense_item_invoice"},
+            {"source_type": "oa_attachment_invoice"},
+        ]
+    ) == [
+        "manual_invoice_import",
+        "oa_attachment_invoice",
+        "oa_expense_item_invoice",
+        "custom_source",
+    ]
+
+
+def test_invoice_source_kinds_keep_legacy_scalar_in_full_and_both_summary_dtos() -> None:
+    source_links = [
+        {"source_type": "oa_attachment_invoice", "source_expense_item_id": "item-1"},
+        {"source_type": "manual_invoice_import", "source_id": "file-1"},
+        {"source_type": "oa_expense_item_invoice", "source_expense_item_id": "item-1"},
+        {"source_type": "oa_attachment_invoice", "source_expense_item_id": "item-1"},
+    ]
+    full = WorkbenchCanonicalRowsBuilder(
+        connection=object()
+    )._invoice_row_from_sql({
+        "row_id": "invoice-1",
+        "invoice_type": "input",
+        "invoice_no": "26539150014000401220",
+        "invoice_date": "2026-06-29",
+        "amount": "145.00",
+        "total_with_tax": "145.00",
+        "source_links": source_links,
+        "raw_payload": {"normalized_payload": {}},
+        "tags": [],
+    })
+
+    assert full is not None
+    assert full["source_kind"] == "oa_attachment_invoice"
+    assert full["source_kinds"] == [
+        "manual_invoice_import",
+        "oa_attachment_invoice",
+        "oa_expense_item_invoice",
+    ]
+    for _route in ("initial", "groups"):
+        summary = PostgresWorkbenchPageHydrationRepository._compact_group({
+            "group_id": "unpaired:invoice:invoice-1",
+            "oa_rows": [],
+            "bank_rows": [],
+            "invoice_rows": [full],
+        })
+        assert summary["invoice_rows"][0]["source_kind"] == "oa_attachment_invoice"
+        assert summary["invoice_rows"][0]["source_kinds"] == full["source_kinds"]
 
 
 class _QueryConnection:

@@ -16,7 +16,6 @@ class ImportProcessingService:
         etc_reconciliation_task_service: Any,
         background_job_service: Any,
         serialize_value: Callable[[Any], Any],
-        schedule_workbench_matching_scopes: Callable[..., list[str]],
         persist_confirmed_import_delta: Callable[..., Any],
         workbench_matching_scope_months_for_import_file_session: Callable[[Any, list[str]], list[str]],
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
@@ -33,7 +32,6 @@ class ImportProcessingService:
         self._etc_reconciliation_task_service = etc_reconciliation_task_service
         self._background_job_service = background_job_service
         self._serialize_value = serialize_value
-        self._schedule_workbench_matching_scopes = schedule_workbench_matching_scopes
         self._persist_confirmed_import_delta = persist_confirmed_import_delta
         self._workbench_matching_scope_months_for_import_file_session = workbench_matching_scope_months_for_import_file_session
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
@@ -153,20 +151,24 @@ class ImportProcessingService:
                 session_id=session_id,
                 selected_file_ids=selected_file_ids,
             )
-            self._persist_confirmed_import_delta(
+            persistence_result = self._persist_confirmed_import_delta(
                 import_state_payload=import_state_payload,
+                scope_months=scope_months if confirmed_count else [],
             )
-            queued_matching_months: list[str] = []
-            if any(file.status == "confirmed" for file in confirmed_session.files):
-                queued_matching_months = list(self._schedule_workbench_matching_scopes(
-                    scope_months,
-                    reason="import_file_confirm",
-                ))
+            persistence_result = (
+                dict(persistence_result) if isinstance(persistence_result, dict) else {}
+            )
+            queued_matching_months = list(
+                persistence_result.get("queued_matching_months") or []
+            )
             result_summary = {
                 "confirmed": confirmed_count,
                 "selected": total,
                 "affected_months": scope_months,
                 "queued_matching_months": queued_matching_months,
+                "oa_attachment_invoice_promotion": dict(
+                    persistence_result.get("oa_attachment_invoice_promotion") or {}
+                ),
                 **self._write_result_envelope(
                     tax_offset_scope_keys=tax_offset_scope_keys,
                     bank_scope_keys=bank_scope_keys,

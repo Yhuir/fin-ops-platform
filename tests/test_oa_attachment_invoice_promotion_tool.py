@@ -100,8 +100,8 @@ class OAAttachmentInvoicePromotionToolTests(unittest.TestCase):
         candidates = _load_candidates(connection, oa_row_ids=["oa-exp-2321"])
 
         self.assertEqual(len(candidates), 1)
-        self.assertIn("context.oa_row_id = any", connection.last_sql)
-        self.assertEqual(connection.last_params, (["oa-exp-2321"],))
+        self.assertIn("app.row_id = any", connection.last_sql)
+        self.assertEqual(connection.last_params[-1], ["oa-exp-2321"])
 
 
 class FakeConnection:

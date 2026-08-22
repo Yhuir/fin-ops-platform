@@ -6,7 +6,7 @@ import {
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
   replaceWorkbenchSupportingDocuments,
-  workbenchInvoiceSourceLabel,
+  workbenchInvoiceSourceLabels,
   workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
@@ -616,12 +616,14 @@ describe("groupDisplayModel time filter", () => {
     const explicitInvoice = {
       ...buildAttachmentInvoiceRow("inv_imported_0985", oaRowId, "193.92"),
       caseId,
+      sourceKinds: ["manual_invoice_import", "oa_attachment_invoice"],
       sourceExpenseItemIds: [expenseItemId],
     };
     const unassignedInvoice = {
       ...buildInvoiceRow("inv_imported_0983", "338.00"),
       caseId,
       sourceKind: "manual_invoice_import" as const,
+      sourceKinds: ["manual_invoice_import"],
     };
     const buildCase = (invoice: WorkbenchRecord): WorkbenchRelationGroup => ({
       id: `case:${caseId}`,
@@ -646,6 +648,7 @@ describe("groupDisplayModel time filter", () => {
     const assignedInvoice: WorkbenchRecord = {
       ...unassignedInvoice,
       sourceOaId: oaRowId,
+      sourceKinds: ["manual_invoice_import", "oa_expense_item_invoice"],
       sourceExpenseItemIds: [expenseItemId],
     };
     const afterLayout = buildWorkbenchGroupDisplayLayout(buildCase(assignedInvoice));
@@ -766,7 +769,7 @@ describe("groupDisplayModel time filter", () => {
       workbenchAnomalies: [missingAnomaly],
     });
     expect(invoiceRows?.[0].externalUrl).toBeUndefined();
-    expect(workbenchInvoiceSourceLabel(invoiceRows?.[0].sourceKind)).toBeNull();
+    expect(workbenchInvoiceSourceLabels(invoiceRows?.[0].sourceKinds, invoiceRows?.[0].sourceKind)).toEqual([]);
   });
 
   test("patches supplemental evidence into the exact OA expense item for immediate display", () => {
@@ -999,13 +1002,28 @@ describe("groupDisplayModel time filter", () => {
     expect(workbenchRowMatchesUnifiedSearch(row, "建行 8106")).toBe(true);
   });
 
-  test("matches the rendered invoice source label", () => {
+  test("matches every rendered invoice source label without exposing the old fallback", () => {
     const row = {
       ...buildInvoiceRow("invoice-searchable-source", "100.00"),
       sourceKind: "oa_attachment_invoice" as const,
+      sourceKinds: [
+        "oa_expense_item_invoice",
+        "manual_invoice_import",
+        "oa_attachment_invoice",
+        "manual_invoice_import",
+      ],
     };
 
     expect(workbenchRowMatchesUnifiedSearch(row, "OA附件")).toBe(true);
+    expect(workbenchRowMatchesUnifiedSearch(row, "导入记录")).toBe(true);
+    expect(workbenchRowMatchesUnifiedSearch(row, "明细归属")).toBe(true);
+    expect(workbenchRowMatchesUnifiedSearch(row, "人工导入")).toBe(false);
+    expect(workbenchInvoiceSourceLabels(row.sourceKinds, row.sourceKind)).toEqual([
+      "OA附件",
+      "导入记录",
+      "明细归属",
+    ]);
+    expect(workbenchInvoiceSourceLabels(undefined, "unknown_invoice_source")).toEqual([]);
   });
 
   test("filters bank groups by year and month when bank pane is active", () => {

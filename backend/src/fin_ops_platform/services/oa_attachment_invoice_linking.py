@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 OA_SOURCE_ALIAS_FIELD_NAMES = (
     "id",
     "row_id",
@@ -42,6 +41,22 @@ def oa_attachment_parent_oa_id(source_id: object) -> str:
     if marker in value:
         return value.split(marker, 1)[0]
     return value
+
+
+def invoice_ownership_parent_oa_id(source_link: object) -> str:
+    """Return the parent OA for either inferred attachment or explicit item ownership."""
+
+    if not isinstance(source_link, dict):
+        return ""
+    if str(source_link.get("source_type") or "").strip() not in {
+        "oa_attachment_invoice",
+        "oa_expense_item_invoice",
+    }:
+        return ""
+    return oa_attachment_parent_oa_id(
+        source_link.get("derived_from_oa_id")
+        or source_link.get("source_expense_item_id")
+    )
 
 
 def oa_attachment_source_ids(row: dict[str, Any]) -> list[str]:

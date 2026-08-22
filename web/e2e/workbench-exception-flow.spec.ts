@@ -122,6 +122,7 @@ test.describe("workbench exception browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchAmountMismatchScenario: true,
+      workbenchMultiSourceScenario: true,
       workbenchInitialRelationConfirmed: true,
     });
 
@@ -133,6 +134,10 @@ test.describe("workbench exception browser flow", () => {
       name: "该发票有 1 项异常，查看详情",
     });
     await expect(unpairedIndicator).toBeVisible();
+    await expect(unpairedZone.getByText("OA附件", { exact: true })).toHaveCount(1);
+    await expect(unpairedZone.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(unpairedZone.getByText("明细归属", { exact: true })).toHaveCount(1);
+    await expect(unpairedZone.getByText("人工导入", { exact: true })).toHaveCount(0);
     await expect(unpairedZone.getByText("OA 流水一致，票少")).toHaveCount(0);
     await unpairedIndicator.hover();
     await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
@@ -187,6 +192,10 @@ test.describe("workbench exception browser flow", () => {
     await expect(drawer.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     })).toBeVisible();
+    await expect(drawer.getByText("OA附件", { exact: true })).toHaveCount(1);
+    await expect(drawer.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(drawer.getByText("明细归属", { exact: true })).toHaveCount(1);
+    await expect(drawer.getByText("人工导入", { exact: true })).toHaveCount(0);
     await expect(drawer.getByRole("button", { name: /人工金额判断/ })).toHaveCount(0);
     await expect(drawer.getByRole("checkbox")).toHaveCount(0);
     const workbenchLoadsBeforeAccept = api.count("GET /api/workbench");

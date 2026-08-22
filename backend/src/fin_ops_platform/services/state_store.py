@@ -1526,6 +1526,21 @@ class ApplicationStateStore:
             )
         self._save_local_pickle(current_payload)
 
+    def save_confirmed_import_delta_with_oa_attachment_promotion(
+        self,
+        payload: dict[str, Any],
+        *,
+        scope_months: list[str],
+        promotion_mode: str,
+        source_versions: dict[str, object],
+    ) -> dict[str, Any]:
+        del scope_months, promotion_mode, source_versions
+        self.save_import_delta(payload)
+        return {
+            "queued_matching_months": [],
+            "oa_attachment_invoice_promotion": {},
+        }
+
     def save_invoices(self, invoices: list[Any]) -> None:
         self._merge_import_invoices(invoices)
 

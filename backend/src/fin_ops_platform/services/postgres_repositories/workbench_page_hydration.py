@@ -21,6 +21,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
+    invoice_source_kinds,
 )
 
 # One relation lookup, one batch read per present canonical pane, one settings
@@ -731,6 +732,7 @@ class PostgresWorkbenchPageHydrationRepository:
                             when link_flags.has_oa_attachment then 'oa_attachment_invoice'
                             when link_flags.has_manual_import then 'manual_invoice_import'
                             else 'invoice' end,
+                        'source_kinds', link_flags.source_kinds,
                         'status', 'unpaired',
                         'invoice_type', invoice.invoice_type,
                         'invoice_no', invoice.invoice_no,
@@ -782,6 +784,20 @@ class PostgresWorkbenchPageHydrationRepository:
                             as has_oa_attachment,
                         bool_or(link.source_type = 'manual_invoice_import')
                             as has_manual_import,
+                        coalesce(
+                            jsonb_agg(
+                                to_jsonb(link.source_type)
+                                order by
+                                    case link.source_type
+                                        when 'manual_invoice_import' then 0
+                                        when 'oa_attachment_invoice' then 1
+                                        when 'oa_expense_item_invoice' then 2
+                                        else 3
+                                    end,
+                                    link.ordinality
+                            ) filter (where nullif(btrim(link.source_type), '') is not null),
+                            '[]'::jsonb
+                        ) as source_kinds,
                         coalesce(jsonb_agg(link.compact_link order by link.ordinality)
                             filter (where link.source_type in (
                                 'oa_attachment_invoice',
@@ -1235,6 +1251,13 @@ class PostgresWorkbenchPageHydrationRepository:
             payload = row_payload(source, "payload")
             payload = dict(payload) if isinstance(payload, dict) else {}
             if record_kind == "row":
+                if str(source.get("row_type") or "").strip() == "invoice":
+                    payload["source_kinds"] = invoice_source_kinds(
+                        [
+                            {"source_type": source_kind}
+                            for source_kind in list(payload.get("source_kinds") or [])
+                        ]
+                    )
                 identity = (
                     self._normalize_row_type(source.get("row_type")),
                     str(source.get("row_id") or "").strip(),

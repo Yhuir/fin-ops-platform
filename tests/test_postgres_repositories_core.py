@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-
 from fin_ops_platform.domain.enums import (
     BatchStatus,
     BatchType,
@@ -16,8 +15,271 @@ from fin_ops_platform.domain.enums import (
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatchRowResult, Invoice
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.invoice_expense_item_links import InvoiceSourceLinksCasConflict
 from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+
+
+def test_invoice_identity_lock_prefers_explicit_number_over_legacy_tax_key() -> None:
+    repository = PostgresCoreRepository(object())
+
+    assert repository._strong_invoice_identity_key({
+        "source_unique_key": "tax:SELLER:BUYER:2026-06-29:145.00",
+        "digital_invoice_no": "26539150014000401220",
+    }) == "26539150014000401220"
+
+
+def test_confirm_prepare_uses_fresh_formal_fields_and_preserves_all_manual_provenance() -> None:
+    class Transaction:
+        def execute(self, _sql: str, _params: tuple = ()) -> int:
+            return 1
+
+        def fetch_all(self, sql: str, _params: tuple = ()) -> list[dict[str, object]]:
+            assert "for update" in sql.lower()
+            return [{
+                "invoice_id": "invoice-1",
+                "invoice_type": "input",
+                "invoice_no": "26539150014000401220",
+                "digital_invoice_no": "26539150014000401220",
+                "source_unique_key": "26539150014000401220",
+                "invoice_date": "2026-06-29",
+                "counterparty_id": "cp-first",
+                "counterparty_name": "首批正式销方",
+                "seller_name": "首批正式销方",
+                "buyer_name": "正式购方",
+                "amount": "145.00",
+                "signed_amount": "145.00",
+                "written_off_amount": "0.00",
+                "tax_amount": None,
+                "total_with_tax": "145.00",
+                "currency": "CNY",
+                "legacy_source_batch_id": "batch-first",
+                "workbench_visibility": "visible",
+                "status": "pending",
+                "tags": ["formal"],
+                "raw_payload": {"normalized_payload": {
+                    "tax_classification_code": "FIRST-CODE",
+                    "invoice_kind": "first-formal-kind",
+                    "quantity": "2",
+                    "invoice_status_from_source": "valid",
+                }},
+                "source_links": [
+                    {"source_type": "manual_invoice_import", "source_id": "file-first"},
+                    {"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-1"},
+                    {
+                        "source_type": "oa_expense_item_invoice",
+                        "source_expense_item_id": "item-1",
+                    },
+                ],
+            }]
+
+    incoming = {
+        "id": "invoice-1",
+        "invoice_type": "input",
+        "invoice_no": "26539150014000401220",
+        "digital_invoice_no": "26539150014000401220",
+        "source_unique_key": "26539150014000401220",
+        "seller_name": "陈旧并发销方",
+        "amount": "999.00",
+        "tax_amount": "13.00",
+        "tax_classification_code": "STALE-CODE",
+        "invoice_kind": "stale-kind",
+        "quantity": "99",
+        "invoice_status_from_source": "cancelled",
+        "source_links": [
+            {"source_type": "manual_invoice_import", "source_id": "file-second"},
+        ],
+    }
+
+    PostgresCoreRepository(Transaction()).prepare_confirmed_invoice_upserts_in_transaction(
+        Transaction(),
+        imports_snapshot={"invoices": {"invoice-1": incoming}},
+    )
+
+    assert incoming["seller_name"] == "首批正式销方"
+    assert incoming["amount"] == "145.00"
+    assert incoming["tax_amount"] == "13.00"
+    assert incoming["tax_classification_code"] == "FIRST-CODE"
+    assert incoming["invoice_kind"] == "first-formal-kind"
+    assert incoming["quantity"] == "2"
+    assert incoming["invoice_status_from_source"] == "cancelled"
+    assert [
+        link["source_id"]
+        for link in incoming["source_links"]
+        if link["source_type"] == "manual_invoice_import"
+    ] == [
+        "file-first",
+        "file-second",
+    ]
+    assert [link["source_type"] for link in incoming["source_links"]] == [
+        "manual_invoice_import",
+        "oa_attachment_invoice",
+        "oa_expense_item_invoice",
+        "manual_invoice_import",
+    ]
+    persisted_payload = PostgresCoreRepository(Transaction())._invoice_payload_with_identity_values(
+        incoming,
+        source_unique_key="26539150014000401220",
+        data_fingerprint=None,
+    )
+    reloaded = PostgresCoreRepository(Transaction())._invoice_from_row({
+        "legacy_id": "invoice-1",
+        "invoice_type": "input",
+        "invoice_no": "26539150014000401220",
+        "amount": "145.00",
+        "signed_amount": "145.00",
+        "status": "pending",
+        "raw_payload": {"normalized_payload": persisted_payload},
+    })
+    assert [link["source_type"] for link in reloaded.source_links] == [
+        "manual_invoice_import",
+        "oa_attachment_invoice",
+        "oa_expense_item_invoice",
+        "manual_invoice_import",
+    ]
+    incoming_without_status = {
+        "id": "invoice-1",
+        "digital_invoice_no": "26539150014000401220",
+        "source_unique_key": "26539150014000401220",
+        "source_links": [
+            {"source_type": "manual_invoice_import", "source_id": "file-third"},
+        ],
+    }
+    PostgresCoreRepository(Transaction()).prepare_confirmed_invoice_upserts_in_transaction(
+        Transaction(),
+        imports_snapshot={"invoices": {"invoice-1": incoming_without_status}},
+    )
+    assert incoming_without_status["invoice_status_from_source"] == "valid"
+
+
+def test_first_formal_prepare_keeps_fresh_downstream_state_but_replaces_oa_ticket_fields() -> None:
+    class Transaction:
+        def execute(self, _sql: str, _params: tuple = ()) -> int:
+            return 1
+
+        def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict[str, object]]:
+            return [{
+                "invoice_id": "invoice-oa-first",
+                "invoice_type": "input",
+                "invoice_no": "26532000000000000912",
+                "digital_invoice_no": "26532000000000000912",
+                "source_unique_key": "26532000000000000912",
+                "seller_name": "OA识别销方",
+                "amount": "912.00",
+                "signed_amount": "912.00",
+                "written_off_amount": "312.00",
+                "oa_form_id": "oa-owner-1",
+                "etc_invoice_id": "etc-invoice-1",
+                "workbench_visibility": "hidden_after_etc_submission",
+                "status": "partially_reconciled",
+                "tags": ["OA附件", "ETC"],
+                "source_links": [{
+                    "source_type": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-owner-1",
+                }],
+                "raw_payload": {"normalized_payload": {
+                    "seller_name": "OA识别销方",
+                    "amount": "912.00",
+                    "written_off_amount": "312.00",
+                    "derived_from_oa_id": "oa-owner-1",
+                    "source_expense_item_id": "oa-owner-1:item:0",
+                    "etc_invoice_id": "etc-invoice-1",
+                    "etc_import_batch_id": "etc-import-1",
+                    "etc_submission_batch_id": "etc-submit-1",
+                    "etc_submission_status": "submitted",
+                    "workbench_visibility": "hidden_after_etc_submission",
+                    "status": "partially_reconciled",
+                    "invoice_status_from_source": "valid",
+                }},
+            }]
+
+    incoming = {
+        "id": "invoice-oa-first",
+        "invoice_type": "input",
+        "invoice_no": "26532000000000000912",
+        "digital_invoice_no": "26532000000000000912",
+        "source_unique_key": "26532000000000000912",
+        "seller_name": "Excel权威销方",
+        "amount": "1000.00",
+        "signed_amount": "1000.00",
+        "written_off_amount": "0.00",
+        "workbench_visibility": "visible",
+        "status": "pending",
+        "invoice_status_from_source": "cancelled",
+        "tags": ["人工导入"],
+        "source_links": [{
+            "source_type": "manual_invoice_import",
+            "source_id": "26532000000000000912",
+            "batch_id": "batch-formal-first",
+        }],
+    }
+
+    PostgresCoreRepository(Transaction()).prepare_confirmed_invoice_upserts_in_transaction(
+        Transaction(),
+        imports_snapshot={"invoices": {"invoice-oa-first": incoming}},
+    )
+
+    assert incoming["seller_name"] == "Excel权威销方"
+    assert incoming["amount"] == "1000.00"
+    assert incoming["written_off_amount"] == "312.00"
+    assert incoming["oa_form_id"] == "oa-owner-1"
+    assert incoming["source_expense_item_id"] == "oa-owner-1:item:0"
+    assert incoming["etc_invoice_id"] == "etc-invoice-1"
+    assert incoming["etc_import_batch_id"] == "etc-import-1"
+    assert incoming["etc_submission_batch_id"] == "etc-submit-1"
+    assert incoming["etc_submission_status"] == "submitted"
+    assert incoming["workbench_visibility"] == "hidden_after_etc_submission"
+    assert incoming["status"] == "partially_reconciled"
+    assert incoming["invoice_status_from_source"] == "cancelled"
+    assert incoming["tags"] == ["OA附件", "ETC", "人工导入"]
+    assert [link["source_type"] for link in incoming["source_links"]] == [
+        "oa_attachment_invoice",
+        "manual_invoice_import",
+    ]
+
+
+def test_locked_oa_promotion_rejects_two_distinct_active_oa_contexts() -> None:
+    class Transaction:
+        def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict[str, str]]:
+            return []
+
+    with pytest.raises(InvoiceSourceLinksCasConflict, match="context changed"):
+        PostgresCoreRepository._assert_single_active_oa_context(
+            Transaction(),
+            [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-1"}],
+            [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-2"}],
+            invoice_id="invoice-1",
+        )
+
+
+def test_locked_oa_promotion_rejects_explicit_owner_from_another_oa() -> None:
+    class Transaction:
+        def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict[str, str]]:
+            return []
+
+    with pytest.raises(InvoiceSourceLinksCasConflict, match="context changed"):
+        PostgresCoreRepository._assert_single_active_oa_context(
+            Transaction(),
+            [{
+                "source_type": "oa_expense_item_invoice",
+                "source_expense_item_id": "oa-1:item:0:explicit",
+            }],
+            [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-2"}],
+            invoice_id="invoice-1",
+        )
+
+
+def test_locked_oa_promotion_accepts_active_aliases_of_the_same_oa() -> None:
+    class Transaction:
+        def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict[str, str]]:
+            return [{"alias_row_id": "oa-ongoing", "canonical_row_id": "oa-completed"}]
+
+    PostgresCoreRepository._assert_single_active_oa_context(
+        Transaction(),
+        [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-ongoing"}],
+        [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-completed"}],
+        invoice_id="invoice-1",
+    )
 
 
 class CoreReadConnection:
@@ -762,6 +1024,75 @@ def test_invoice_read_prefers_canonical_legacy_id_over_stale_raw_payload_id() ->
     )
 
     assert matches[0].id == "invoice_duplicate_1"
+
+
+def test_invoice_read_prefers_structured_tags_and_source_links_over_stale_raw_payload() -> None:
+    structured_links = [
+        {"source_type": "manual_invoice_import", "source_id": "file-current"},
+        {
+            "source_type": "oa_expense_item_invoice",
+            "source_expense_item_id": "oa-owner-1:item:0:explicit",
+        },
+    ]
+    invoice = PostgresCoreRepository(object())._invoice_from_row({
+        "legacy_id": "invoice-structured-provenance",
+        "invoice_type": "input",
+        "invoice_no": "26532000000000000911",
+        "amount": "911.00",
+        "signed_amount": "911.00",
+        "status": "pending",
+        "tags": ["structured-tag"],
+        "source_links": structured_links,
+        "raw_payload": {
+            "normalized_payload": {
+                "tags": ["stale-raw-tag"],
+                "source_links": [
+                    {"source_type": "manual_invoice_import", "source_id": "file-current"}
+                ],
+            }
+        },
+    })
+
+    assert invoice.tags == ["structured-tag"]
+    assert invoice.source_links == structured_links
+
+
+def test_invoice_source_links_cas_updates_structured_and_raw_mirror_together() -> None:
+    class CasConnection:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple]] = []
+
+        def execute(self, sql: str, params: tuple = ()) -> int:
+            self.calls.append((" ".join(sql.lower().split()), params))
+            return 1
+
+    source_links = [
+        {"source_type": "manual_invoice_import", "source_id": "file-current"},
+        {
+            "source_type": "oa_expense_item_invoice",
+            "source_expense_item_id": "oa-owner-1:item:0:explicit",
+        },
+    ]
+    connection = CasConnection()
+
+    PostgresCoreRepository(connection).update_invoice_source_links_cas(
+        connection,
+        [{
+            "invoice_id": "invoice-structured-provenance",
+            "before_source_links": source_links,
+            "source_links": source_links,
+        }],
+        actor_id="tester",
+        reason="sync provenance mirror",
+    )
+
+    sql, params = connection.calls[-1]
+    assert "set source_links = %s, raw_payload = jsonb_set(" in sql
+    assert "jsonb_build_object('source_links', %s::jsonb)" in sql
+    assert params[0].obj == source_links
+    assert params[1].obj == source_links
+    assert params[2] == "invoice-structured-provenance"
+    assert params[3].obj == source_links
 
 
 class SubmittedEtcInvoiceIdentityConnection:

@@ -10,10 +10,10 @@ from fin_ops_platform.services.app_settings_service import (
     DEFAULT_OA_ATTACHMENT_INVOICE_PROMOTION_MODE,
     OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING,
     OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED,
+    OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
     OA_ATTACHMENT_INVOICE_PROMOTION_MODES,
 )
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_parent_oa_id
 from fin_ops_platform.services.invoice_attachment_recognition_service import (
     CREATE_INVOICE_AND_LINK,
     IGNORE,
@@ -21,6 +21,9 @@ from fin_ops_platform.services.invoice_attachment_recognition_service import (
     InvoiceAttachmentRecognitionService,
 )
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    invoice_ownership_parent_oa_id,
+)
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
 
@@ -68,6 +71,7 @@ class OAAttachmentInvoicePromotionService:
         apply: bool,
         example_limit: int = 10,
         ensure_matching: bool = False,
+        persist_matching_dirty: bool = True,
     ) -> dict[str, Any]:
         normalized_mode = self._normalize_mode(promotion_mode)
         if normalized_mode == OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED:
@@ -88,6 +92,10 @@ class OAAttachmentInvoicePromotionService:
             candidates,
             existing_invoices,
         )
+        conflicting_candidate_identity_keys = self._conflicting_candidate_identity_keys(
+            candidates,
+            oa_source_aliases=oa_source_aliases,
+        )
         initial_invoice_ids = {invoice.id for invoice in existing_invoices}
         import_service = ImportNormalizationService(existing_invoices=existing_invoices)
         recognition_service = InvoiceAttachmentRecognitionService(invoice_repository=import_service)
@@ -103,6 +111,18 @@ class OAAttachmentInvoicePromotionService:
             decision = recognition_service.decide(candidate.attachment_invoice)
             action = decision.action
             reason = decision.reason
+            if decision.identity_key in conflicting_candidate_identity_keys:
+                self._record(
+                    candidate,
+                    action=IGNORE,
+                    reason="source_context_conflict",
+                    identity_key=decision.identity_key,
+                    action_counts=action_counts,
+                    reason_counts=reason_counts,
+                    examples=examples,
+                    example_limit=example_limit,
+                )
+                continue
             if action == IGNORE:
                 self._record(
                     candidate,
@@ -207,7 +227,7 @@ class OAAttachmentInvoicePromotionService:
                 "save_invoices_and_mark_matching_dirty",
                 None,
             )
-            if callable(save_with_matching_dirty):
+            if persist_matching_dirty and callable(save_with_matching_dirty):
                 scope_months = self._matching_scope_months(
                     affected_candidates if affected_invoices else candidates
                 )
@@ -240,6 +260,78 @@ class OAAttachmentInvoicePromotionService:
             linked_invoice_ids=linked_invoice_ids,
             apply=apply,
         )
+
+    def promote_confirmed_invoice_identity_keys(
+        self,
+        canonical_keys: set[str],
+        *,
+        configured_mode: str,
+        parser_version: str,
+        cache_schema_version: str,
+        apply: bool = True,
+    ) -> dict[str, Any]:
+        """Reverse-link only current, fully bridged OA evidence for this import batch."""
+
+        requested_keys = {
+            key for key in (str(value or "").strip() for value in canonical_keys) if key
+        }
+        normalized_mode = self._normalize_mode(configured_mode)
+        if normalized_mode == OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED:
+            report = self.promote_candidates(
+                [],
+                promotion_mode=OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED,
+                apply=apply,
+                persist_matching_dirty=False,
+            )
+            report["reason_counts"] = (
+                {"promotion_disabled": len(requested_keys)} if requested_keys else {}
+            )
+            report["summary"]["requested_identity_count"] = len(requested_keys)
+            report["summary"]["matched_identity_count"] = 0
+            return report
+        if not requested_keys:
+            report = self.promote_candidates(
+                [],
+                promotion_mode=OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+                apply=apply,
+                persist_matching_dirty=False,
+            )
+            report["summary"].update(
+                {"requested_identity_count": 0, "matched_identity_count": 0}
+            )
+            return report
+
+        rows = self._invoice_repository.list_promotion_source_rows(
+            canonical_keys=requested_keys,
+            parser_version=parser_version,
+            cache_schema_version=cache_schema_version,
+        )
+        candidates = self.candidates_from_source_rows(rows)
+        matched_keys = {
+            identity_key
+            for candidate in candidates
+            if (identity_key := self.strong_identity_key(candidate.attachment_invoice))
+        }
+        report = self.promote_candidates(
+            candidates,
+            # Reverse promotion never creates a canonical fact, even when the
+            # global OA-first policy permits creation.
+            promotion_mode=OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
+            apply=apply,
+            persist_matching_dirty=False,
+        )
+        missing_count = len(requested_keys - matched_keys)
+        if missing_count:
+            reasons = Counter(report.get("reason_counts") or {})
+            reasons["no_current_bridged_attachment_candidate"] += missing_count
+            report["reason_counts"] = dict(sorted(reasons.items()))
+        report["summary"].update(
+            {
+                "requested_identity_count": len(requested_keys),
+                "matched_identity_count": len(requested_keys & matched_keys),
+            }
+        )
+        return report
 
     @staticmethod
     def candidates_from_records(records: list[Any]) -> list[OAAttachmentInvoiceCandidate]:
@@ -300,6 +392,84 @@ class OAAttachmentInvoicePromotionService:
                     )
                 )
         return candidates
+
+    @staticmethod
+    def candidates_from_source_rows(rows: list[dict[str, Any]]) -> list[OAAttachmentInvoiceCandidate]:
+        candidates: list[OAAttachmentInvoiceCandidate] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        row_id_service = ImportNormalizationService()
+        for row in rows:
+            invoices = row.get("invoices")
+            if not isinstance(invoices, list):
+                continue
+            raw_indexes = row.get("invoice_indexes")
+            invoice_indexes = raw_indexes if isinstance(raw_indexes, list) else []
+            cache_key = _clean_text(row.get("cache_source_attachment_key")) or ""
+            context = {key: row.get(key) for key in row if key not in {"invoices", "invoice_indexes"}}
+            oa_row_id = _clean_text(row.get("oa_row_id"))
+            oa_form_id = _clean_text(row.get("oa_application_id")) or oa_row_id
+            context_attachment_key = _clean_text(row.get("source_attachment_key"))
+            for offset, invoice_payload in enumerate(invoices):
+                if not isinstance(invoice_payload, dict):
+                    continue
+                invoice_index = (
+                    int(invoice_indexes[offset])
+                    if offset < len(invoice_indexes) and str(invoice_indexes[offset]).isdigit()
+                    else offset
+                )
+                attachment_invoice = dict(invoice_payload)
+                if context_attachment_key:
+                    attachment_invoice["source_attachment_key"] = context_attachment_key
+                else:
+                    attachment_invoice.setdefault("source_attachment_key", cache_key)
+                for key in (
+                    "source_expense_item_id",
+                    "source_expense_row_index",
+                    "source_attachment_name",
+                ):
+                    if value := _clean_text(row.get(key)):
+                        attachment_invoice[key] = value
+                source_workbench_row_id = (
+                    row_id_service.oa_attachment_invoice_row_id(
+                        oa_row_id,
+                        invoice_index,
+                        attachment_invoice,
+                    )
+                    if oa_row_id
+                    else None
+                )
+                candidate_key = (
+                    oa_row_id or "",
+                    source_workbench_row_id or "",
+                    _clean_text(attachment_invoice.get("source_attachment_key")) or "",
+                    _clean_text(attachment_invoice.get("source_expense_item_id")) or "",
+                )
+                if candidate_key in seen:
+                    continue
+                seen.add(candidate_key)
+                candidates.append(
+                    OAAttachmentInvoiceCandidate(
+                        cache_source_attachment_key=cache_key,
+                        invoice_index=invoice_index,
+                        attachment_invoice=attachment_invoice,
+                        oa_form_id=oa_form_id,
+                        oa_row_id=oa_row_id,
+                        source_workbench_row_id=source_workbench_row_id,
+                        context=context,
+                    )
+                )
+        return candidates
+
+    @staticmethod
+    def strong_identity_key(values: dict[str, Any]) -> str | None:
+        digital_invoice_no = _clean_text(values.get("digital_invoice_no"))
+        invoice_no = _clean_text(values.get("invoice_no"))
+        if not digital_invoice_no and invoice_no and invoice_no.isdigit() and len(invoice_no) == 20:
+            digital_invoice_no = invoice_no
+        if digital_invoice_no:
+            return digital_invoice_no
+        invoice_code = _clean_text(values.get("invoice_code"))
+        return f"{invoice_code}:{invoice_no}" if invoice_code and invoice_no else None
 
     def _load_existing_invoices(self, candidates: list[OAAttachmentInvoiceCandidate]) -> list[Invoice]:
         canonical_keys = {
@@ -363,11 +533,8 @@ class OAAttachmentInvoicePromotionService:
             existing_oa_id
             for invoice in existing_invoices
             for source_link in list(invoice.source_links or [])
-            if str(source_link.get("source_type") or "") == "oa_attachment_invoice"
             if (
-                existing_oa_id := _clean_text(
-                    oa_attachment_parent_oa_id(source_link.get("derived_from_oa_id"))
-                )
+                existing_oa_id := _clean_text(invoice_ownership_parent_oa_id(source_link))
             )
         )
         resolver = getattr(self._invoice_repository, "resolve_active_oa_source_aliases", None)
@@ -375,6 +542,27 @@ class OAAttachmentInvoicePromotionService:
             return {row_id: row_id for row_id in oa_row_ids}
         resolved = dict(resolver(oa_row_ids) or {})
         return {row_id: _clean_text(resolved.get(row_id)) or row_id for row_id in oa_row_ids}
+
+    @classmethod
+    def _conflicting_candidate_identity_keys(
+        cls,
+        candidates: list[OAAttachmentInvoiceCandidate],
+        *,
+        oa_source_aliases: dict[str, str],
+    ) -> set[str]:
+        oa_ids_by_identity: dict[str, set[str]] = {}
+        for candidate in candidates:
+            identity_key = cls.strong_identity_key(candidate.attachment_invoice)
+            incoming_oa_id = _clean_text(candidate.oa_row_id)
+            if not identity_key or not incoming_oa_id:
+                continue
+            canonical_oa_id = _clean_text(oa_source_aliases.get(incoming_oa_id)) or incoming_oa_id
+            oa_ids_by_identity.setdefault(identity_key, set()).add(canonical_oa_id)
+        return {
+            identity_key
+            for identity_key, canonical_oa_ids in oa_ids_by_identity.items()
+            if len(canonical_oa_ids) > 1
+        }
 
     @staticmethod
     def _has_source_context_conflict(
@@ -387,11 +575,7 @@ class OAAttachmentInvoicePromotionService:
         canonical_incoming_oa_id = _clean_text(oa_source_aliases.get(incoming_oa_id or ""))
         canonical_incoming_oa_id = canonical_incoming_oa_id or incoming_oa_id
         for source_link in list(invoice.source_links or []):
-            if str(source_link.get("source_type") or "") != "oa_attachment_invoice":
-                continue
-            existing_oa_id = _clean_text(
-                oa_attachment_parent_oa_id(source_link.get("derived_from_oa_id"))
-            )
+            existing_oa_id = _clean_text(invoice_ownership_parent_oa_id(source_link))
             canonical_existing_oa_id = _clean_text(oa_source_aliases.get(existing_oa_id or ""))
             canonical_existing_oa_id = canonical_existing_oa_id or existing_oa_id
             if (

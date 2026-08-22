@@ -655,15 +655,32 @@ def _invoice_formal_payload_issues(invoice: dict[str, Any]) -> list[AuditIssue]:
             "data_fingerprint": "data_fingerprint",
         },
     )
-    if _list(invoice.get("source_links")) != _list(payload.get("source_links")):
+    structured_import_links = _manual_invoice_import_links(invoice.get("source_links"))
+    payload_import_links = _manual_invoice_import_links(payload.get("source_links"))
+    if structured_import_links != payload_import_links:
         issues.append(
             _issue(
                 "invoice_import_invoice_formal_payload_mismatch",
                 _text(invoice.get("invoice_id")),
-                {"fields": {"source_links": {"structured": invoice.get("source_links"), "payload": payload.get("source_links")}}},
+                {
+                    "fields": {
+                        "manual_invoice_import_source_links": {
+                            "structured": structured_import_links,
+                            "payload": payload_import_links,
+                        }
+                    }
+                },
             )
         )
     return issues
+
+
+def _manual_invoice_import_links(value: Any) -> list[dict[str, Any]]:
+    return [
+        dict(link)
+        for link in _list(value)
+        if _text(_dict(link).get("source_type")) == "manual_invoice_import"
+    ]
 
 
 def _job_issues(

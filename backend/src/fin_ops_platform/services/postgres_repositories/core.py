@@ -23,14 +23,19 @@ from fin_ops_platform.services.import_file_service import (
     SourceControlEvidence,
 )
 from fin_ops_platform.services.import_preview_audit import ImportPreviewAuditCounts, ImportPreviewDuplicateGroup
-from fin_ops_platform.services.invoice_expense_item_links import InvoiceSourceLinksCasConflict
 from fin_ops_platform.services.imports import ImportPreview
+from fin_ops_platform.services.invoice_expense_item_links import InvoiceSourceLinksCasConflict
+from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    invoice_ownership_parent_oa_id,
+)
 from fin_ops_platform.services.postgres_repositories.common import jsonb as _jsonb
 
 
 class PostgresCoreRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+        self._invoice_identity_service = InvoiceIdentityService()
 
     def list_invoices_page(
         self,
@@ -928,6 +933,312 @@ class PostgresCoreRepository:
         self._save_imports_with_connection(transaction, imports_snapshot)
         self._save_file_imports_with_connection(transaction, file_imports_snapshot)
 
+    def prepare_confirmed_invoice_upserts_in_transaction(
+        self,
+        transaction: Any,
+        *,
+        imports_snapshot: dict[str, Any],
+    ) -> set[str]:
+        """Lock formal invoice identities and merge current provenance before UPSERT.
+
+        ``_save_invoice`` intentionally remains the generic snapshot writer.  This
+        narrow confirm path prevents its replacement semantics from erasing OA or
+        explicit expense-item edges that were appended after the import snapshot
+        was built.
+        """
+
+        raw_invoices = imports_snapshot.get("invoices")
+        if isinstance(raw_invoices, dict):
+            invoices = [item for item in raw_invoices.values() if isinstance(item, dict)]
+        elif isinstance(raw_invoices, list):
+            invoices = [item for item in raw_invoices if isinstance(item, dict)]
+        else:
+            invoices = []
+        keyed_invoices = [
+            (invoice, identity_key)
+            for invoice in invoices
+            if self._has_manual_invoice_import_link(invoice)
+            if (identity_key := self._strong_invoice_identity_key(invoice))
+        ]
+        identity_keys = sorted({identity_key for _invoice, identity_key in keyed_invoices})
+        if not identity_keys:
+            return set()
+        self.lock_invoice_identity_keys_in_transaction(transaction, identity_keys)
+        current_rows = transaction.fetch_all(
+            """
+            select coalesce(legacy_mongo_id, id::text) as invoice_id,
+                   invoice_type, invoice_no, invoice_code, digital_invoice_no,
+                   source_unique_key, data_fingerprint, invoice_date,
+                   counterparty_id, counterparty_name, seller_name, seller_tax_no,
+                   buyer_name, buyer_tax_no, amount, signed_amount, written_off_amount,
+                   tax_rate, tax_amount, total_with_tax, currency,
+                   legacy_source_batch_id, oa_form_id, etc_invoice_id,
+                   workbench_visibility, status, tags, source_links, raw_payload
+            from app.invoices
+            where source_unique_key = any(%s::text[])
+               or digital_invoice_no = any(%s::text[])
+               or concat_ws(':', nullif(invoice_code, ''), nullif(invoice_no, ''))
+                    = any(%s::text[])
+            order by created_at, id
+            for update
+            """,
+            (identity_keys, identity_keys, identity_keys),
+        )
+        current_by_key: dict[str, list[dict[str, Any]]] = {}
+        for row in current_rows or []:
+            key = self._strong_invoice_identity_key(row)
+            if key:
+                current_by_key.setdefault(key, []).append(row)
+        for invoice, identity_key in keyed_invoices:
+            matches = current_by_key.get(identity_key, [])
+            if len(matches) > 1:
+                raise InvoiceSourceLinksCasConflict(
+                    "Canonical invoice identity is ambiguous during import confirmation.",
+                    invoice_id=self._text(invoice.get("id")),
+                )
+            if not matches:
+                continue
+            current = matches[0]
+            incoming_id = self._text(invoice.get("id"))
+            current_id = self._text(current.get("invoice_id"))
+            if incoming_id != current_id:
+                raise InvoiceSourceLinksCasConflict(
+                    "Canonical invoice identity changed during import confirmation.",
+                    invoice_id=incoming_id,
+                )
+            current_raw_payload = current.get("raw_payload")
+            current_normalized = (
+                current_raw_payload.get("normalized_payload")
+                if isinstance(current_raw_payload, dict)
+                else None
+            )
+            current_normalized = (
+                current_normalized if isinstance(current_normalized, dict) else {}
+            )
+            current_source_status = current_normalized.get("invoice_status_from_source")
+            if (
+                invoice.get("invoice_status_from_source") in (None, "")
+                and current_source_status not in (None, "")
+            ):
+                invoice["invoice_status_from_source"] = current_source_status
+            if self._has_manual_invoice_import_link(current):
+                for field_name, value in current_normalized.items():
+                    if (
+                        field_name not in {
+                            "source_links",
+                            "tags",
+                            "invoice_status_from_source",
+                        }
+                        and value not in (None, "")
+                    ):
+                        invoice[field_name] = value
+                for field_name in (
+                    "invoice_type",
+                    "invoice_no",
+                    "invoice_code",
+                    "digital_invoice_no",
+                    "source_unique_key",
+                    "data_fingerprint",
+                    "invoice_date",
+                    "seller_name",
+                    "seller_tax_no",
+                    "buyer_name",
+                    "buyer_tax_no",
+                    "amount",
+                    "signed_amount",
+                    "tax_rate",
+                    "tax_amount",
+                    "total_with_tax",
+                    "currency",
+                ):
+                    current_value = current.get(field_name)
+                    if current_value not in (None, ""):
+                        invoice[field_name] = current_value
+                if current.get("source_unique_key"):
+                    invoice["data_fingerprint"] = None
+                if current.get("legacy_source_batch_id"):
+                    invoice["source_batch_id"] = current.get("legacy_source_batch_id")
+                if current.get("counterparty_id") or current.get("counterparty_name"):
+                    invoice["counterparty"] = {
+                        "id": current.get("counterparty_id"),
+                        "name": current.get("counterparty_name"),
+                    }
+            for field_name in (
+                "written_off_amount",
+                "oa_form_id",
+                "derived_from_oa_id",
+                "source_workbench_row_id",
+                "source_attachment_key",
+                "source_attachment_name",
+                "source_expense_item_id",
+                "source_expense_row_index",
+                "source_region_key",
+                "evidence_type",
+                "document_kind",
+                "etc_invoice_id",
+                "etc_import_batch_id",
+                "etc_submission_batch_id",
+                "etc_submission_status",
+                "workbench_visibility",
+                "status",
+            ):
+                current_value = current_normalized.get(field_name)
+                if current_value not in (None, ""):
+                    invoice[field_name] = current_value
+            for field_name in (
+                "written_off_amount",
+                "oa_form_id",
+                "etc_invoice_id",
+                "workbench_visibility",
+                "status",
+            ):
+                current_value = current.get(field_name)
+                if current_value not in (None, ""):
+                    invoice[field_name] = current_value
+            invoice["tags"] = self._stable_text_union(
+                current.get("tags"),
+                invoice.get("tags"),
+            )
+            invoice["source_links"] = self._stable_invoice_source_link_union(
+                current.get("source_links"),
+                invoice.get("source_links"),
+            )
+        return set(identity_keys)
+
+    @staticmethod
+    def lock_invoice_identity_keys_in_transaction(
+        transaction: Any,
+        identity_keys: list[str] | set[str],
+    ) -> None:
+        normalized_keys = sorted(
+            {str(key or "").strip() for key in identity_keys if str(key or "").strip()}
+        )
+        if not normalized_keys:
+            return
+        transaction.execute(
+            """
+            select pg_advisory_xact_lock(hashtextextended(identity_key, 0))
+            from unnest(%s::text[]) identity(identity_key)
+            order by identity_key
+            """,
+            (normalized_keys,),
+        )
+
+    def save_oa_attachment_invoices_in_transaction(
+        self,
+        transaction: Any,
+        invoices: list[Any],
+    ) -> None:
+        """Persist only OA enrichment on top of a freshly locked canonical row."""
+
+        incoming = self._iter_items(invoices)
+        keyed = [
+            (invoice, key)
+            for invoice in incoming
+            if (key := self._strong_invoice_identity_key(invoice))
+        ]
+        keys = sorted({key for _invoice, key in keyed})
+        self.lock_invoice_identity_keys_in_transaction(transaction, keys)
+        current_rows = transaction.fetch_all(
+            """
+            select id::text as postgres_id,
+                   coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   invoice_type, invoice_no, invoice_code, digital_invoice_no,
+                   source_unique_key, data_fingerprint, invoice_date, counterparty_id,
+                   counterparty_name, seller_name, seller_tax_no, buyer_name, buyer_tax_no,
+                   amount, signed_amount, written_off_amount, tax_rate, tax_amount,
+                   total_with_tax, currency, legacy_source_batch_id, oa_form_id,
+                   etc_invoice_id, workbench_visibility, status, tags, source_links,
+                   raw_payload
+            from app.invoices
+            where source_unique_key = any(%s::text[])
+               or digital_invoice_no = any(%s::text[])
+               or concat_ws(':', nullif(invoice_code, ''), nullif(invoice_no, ''))
+                    = any(%s::text[])
+            order by created_at, id
+            for update
+            """,
+            (keys, keys, keys),
+        ) if keys else []
+        current_by_key: dict[str, list[Invoice]] = {}
+        for row in current_rows or []:
+            current = self._invoice_from_row(row)
+            key = self._strong_invoice_identity_key(self._serialize(current))
+            if key:
+                current_by_key.setdefault(key, []).append(current)
+        to_save: list[dict[str, Any]] = []
+        for incoming_invoice, identity_key in keyed:
+            matches = current_by_key.get(identity_key, [])
+            if len(matches) > 1:
+                raise InvoiceSourceLinksCasConflict(
+                    "Canonical invoice identity is ambiguous during OA attachment promotion.",
+                    invoice_id=self._text(incoming_invoice.get("id")),
+                )
+            if not matches:
+                to_save.append(incoming_invoice)
+                continue
+            current = matches[0]
+            if current.id != self._text(incoming_invoice.get("id")):
+                raise InvoiceSourceLinksCasConflict(
+                    "Canonical invoice identity changed during OA attachment promotion.",
+                    invoice_id=self._text(incoming_invoice.get("id")),
+                )
+            self._assert_single_active_oa_context(
+                transaction,
+                current.source_links,
+                incoming_invoice.get("source_links"),
+                invoice_id=current.id,
+            )
+            current.tags = self._stable_text_union(current.tags, incoming_invoice.get("tags"))
+            current.source_links = self._stable_invoice_source_link_union(
+                current.source_links,
+                incoming_invoice.get("source_links"),
+            )
+            if not current.oa_form_id:
+                current.oa_form_id = self._text(incoming_invoice.get("oa_form_id"))
+            for field_name in (
+                "invoice_code",
+                "digital_invoice_no",
+                "invoice_date",
+                "seller_tax_no",
+                "seller_name",
+                "buyer_tax_no",
+                "buyer_name",
+                "tax_rate",
+                "tax_classification_code",
+                "specific_business_type",
+                "taxable_item_name",
+                "specification_model",
+                "unit",
+                "invoice_source",
+                "invoice_kind",
+                "is_positive_invoice",
+                "risk_level",
+                "issuer",
+                "remark",
+                "project_id",
+            ):
+                if getattr(current, field_name, None) in (None, ""):
+                    incoming_value = incoming_invoice.get(field_name)
+                    if incoming_value not in (None, ""):
+                        setattr(current, field_name, incoming_value)
+            for field_name in ("tax_amount", "total_with_tax", "quantity", "unit_price"):
+                if getattr(current, field_name, None) is None:
+                    incoming_value = incoming_invoice.get(field_name)
+                    if incoming_value not in (None, ""):
+                        setattr(current, field_name, Decimal(str(incoming_value)))
+            if not current.source_unique_key:
+                current.source_unique_key = self._text(
+                    incoming_invoice.get("source_unique_key")
+                ) or identity_key
+                if current.source_unique_key:
+                    current.data_fingerprint = None
+            to_save.append(self._serialize(current))
+        transaction.execute("select set_config('fin_ops.correction_reason', 'OA附件发票来源归并', true)")
+        transaction.execute("select set_config('fin_ops.actor_id', 'oa-attachment-promotion', true)")
+        for invoice in to_save:
+            self._save_invoice(transaction, invoice)
+
     def save_invoices(self, invoices: list[Any]) -> None:
         serialized_invoices = self._iter_items(invoices)
         if not serialized_invoices:
@@ -1133,11 +1444,27 @@ class PostgresCoreRepository:
                 """
                 update app.invoices
                 set source_links = %s,
+                    raw_payload = jsonb_set(
+                        case
+                            when jsonb_typeof(raw_payload) = 'object' then raw_payload
+                            else '{}'::jsonb
+                        end,
+                        '{normalized_payload}',
+                        (
+                            case
+                                when jsonb_typeof(raw_payload->'normalized_payload') = 'object'
+                                    then raw_payload->'normalized_payload'
+                                else '{}'::jsonb
+                            end
+                        ) || jsonb_build_object('source_links', %s::jsonb),
+                        true
+                    ),
                     updated_at = now()
                 where coalesce(legacy_mongo_id, id::text) = %s
                   and coalesce(source_links, '[]'::jsonb) = %s::jsonb
                 """,
                 (
+                    _jsonb(update["source_links"]),
                     _jsonb(update["source_links"]),
                     update["invoice_id"],
                     _jsonb(update["before_source_links"]),
@@ -1590,6 +1917,95 @@ class PostgresCoreRepository:
         data_fingerprint = None if source_unique_key else self._text(invoice.get("data_fingerprint"))
         return source_unique_key, data_fingerprint
 
+    def _strong_invoice_identity_key(self, invoice: dict[str, Any]) -> str | None:
+        return self._invoice_identity_service.canonical_key_for_mapping(invoice) or (
+            self._text(invoice.get("source_unique_key"))
+        )
+
+    @staticmethod
+    def _has_manual_invoice_import_link(invoice: dict[str, Any]) -> bool:
+        return any(
+            isinstance(link, dict)
+            and str(link.get("source_type") or "").strip() == "manual_invoice_import"
+            for link in list(invoice.get("source_links") or [])
+        )
+
+    @classmethod
+    def _assert_single_active_oa_context(
+        cls,
+        transaction: Any,
+        *source_link_values: Any,
+        invoice_id: str,
+    ) -> None:
+        oa_ids = {
+            oa_id
+            for value in source_link_values
+            for link in (value if isinstance(value, list) else [])
+            if isinstance(link, dict)
+            if (oa_id := cls._text(invoice_ownership_parent_oa_id(link)))
+        }
+        if len(oa_ids) <= 1:
+            return
+        rows = transaction.fetch_all(
+            """
+            select alias_row_id, canonical_row_id
+            from app.oa_source_aliases
+            where status = 'active'
+              and (
+                  alias_row_id = any(%s::text[])
+                  or canonical_row_id = any(%s::text[])
+              )
+            order by alias_row_id
+            """,
+            (sorted(oa_ids), sorted(oa_ids)),
+        )
+        canonical_by_id = {oa_id: oa_id for oa_id in oa_ids}
+        for row in rows or []:
+            alias_id = cls._text(row.get("alias_row_id"))
+            canonical_id = cls._text(row.get("canonical_row_id"))
+            if alias_id and canonical_id:
+                canonical_by_id[alias_id] = canonical_id
+                canonical_by_id[canonical_id] = canonical_id
+        if len({canonical_by_id.get(oa_id, oa_id) for oa_id in oa_ids}) > 1:
+            raise InvoiceSourceLinksCasConflict(
+                "Canonical invoice OA attachment context changed during promotion.",
+                invoice_id=invoice_id,
+            )
+
+    @classmethod
+    def _stable_text_union(cls, *values: Any) -> list[str]:
+        return cls._unique_texts([
+            item
+            for value in values
+            for item in (value if isinstance(value, (list, tuple, set)) else [])
+        ])
+
+    @classmethod
+    def _stable_invoice_source_link_union(cls, *values: Any) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[tuple[str, ...]] = set()
+        identity_fields = (
+            "source_type",
+            "source_id",
+            "batch_id",
+            "source_workbench_row_id",
+            "derived_from_oa_id",
+            "source_attachment_key",
+            "source_expense_item_id",
+            "source_relation_case_id",
+        )
+        for value in values:
+            for raw_link in value if isinstance(value, list) else []:
+                if not isinstance(raw_link, dict):
+                    continue
+                link = dict(raw_link)
+                identity = tuple(cls._text(link.get(field)) or "" for field in identity_fields)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                result.append(link)
+        return result
+
     def _invoice_payload_with_identity_values(
         self,
         invoice: dict[str, Any],
@@ -1725,6 +2141,18 @@ class PostgresCoreRepository:
     def _invoice_from_row(self, row: dict[str, Any]) -> Invoice:
         payload = self._row_payload(row)
         payload = payload if isinstance(payload, dict) else {}
+        structured_tags = row.get("tags")
+        tags = (
+            structured_tags
+            if isinstance(structured_tags, (list, tuple, set))
+            else payload.get("tags")
+        )
+        structured_source_links = row.get("source_links")
+        source_links = (
+            structured_source_links
+            if isinstance(structured_source_links, list)
+            else payload.get("source_links")
+        )
         counterparty_payload = payload.get("counterparty") if isinstance(payload.get("counterparty"), dict) else {}
         counterparty_name = self._text(counterparty_payload.get("name") or row.get("counterparty_name")) or "unknown"
         source_unique_key = self._text(payload.get("source_unique_key") or row.get("source_unique_key"))
@@ -1781,8 +2209,8 @@ class PostgresCoreRepository:
             department_id=self._text(payload.get("department_id")),
             source_batch_id=self._text(payload.get("source_batch_id") or row.get("legacy_source_batch_id")),
             oa_form_id=self._text(payload.get("oa_form_id") or row.get("oa_form_id")),
-            tags=self._text_list(payload.get("tags") or row.get("tags")),
-            source_links=list(payload.get("source_links") if isinstance(payload.get("source_links"), list) else row.get("source_links") or []),
+            tags=self._text_list(tags),
+            source_links=list(source_links if isinstance(source_links, list) else []),
             etc_invoice_id=self._text(payload.get("etc_invoice_id") or row.get("etc_invoice_id")),
             etc_import_batch_id=self._text(payload.get("etc_import_batch_id") or row.get("etc_import_batch_id")),
             etc_submission_batch_id=self._text(payload.get("etc_submission_batch_id") or row.get("etc_submission_batch_id")),

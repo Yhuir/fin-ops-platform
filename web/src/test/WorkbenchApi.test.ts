@@ -1082,6 +1082,12 @@ describe("workbench api bank amount mapping", () => {
                   total_with_tax: "99.00",
                   derived_from_oa_id: "legacy-oa:item:1",
                   source_oa_id: "oa-paired",
+                  source_kinds: [
+                    "manual_invoice_import",
+                    "oa_attachment_invoice",
+                    "oa_expense_item_invoice",
+                    "manual_invoice_import",
+                  ],
                   source_expense_item_ids: ["oa-paired:item:1"],
                   source_links: [{
                     source_type: "oa_attachment_invoice",
@@ -1145,6 +1151,11 @@ describe("workbench api bank amount mapping", () => {
       tableValues: { transactionTime: "2026-08-12 16:11:07" },
     });
     expect(group.rows.invoice[0].sourceOaId).toBe("oa-paired");
+    expect(group.rows.invoice[0].sourceKinds).toEqual([
+      "manual_invoice_import",
+      "oa_attachment_invoice",
+      "oa_expense_item_invoice",
+    ]);
     expect(group.rows.invoice[0].sourceExpenseItemIds).toEqual(["oa-paired:item:1"]);
     expect(group.workbenchAnomaly).toMatchObject({ reviewDecision: "accept_paired" });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });

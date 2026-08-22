@@ -131,6 +131,7 @@ type ApiMockOptions = {
   workbenchCashSpecialActions?: boolean;
   workbenchExceptionDatasetSize?: number;
   workbenchAmountMismatchScenario?: boolean;
+  workbenchMultiSourceScenario?: boolean;
   workbenchInitialIncompleteRelation?: boolean;
   workbenchInitialRelationConfirmed?: boolean;
   workbenchWithdrawPreviewDelayMs?: number;
@@ -922,11 +923,10 @@ function buildOaExpenseItemsWorkbenchGroup() {
 
 function buildInvoiceAssignmentWorkbenchGroup(assigned: boolean) {
   const rows = workbenchRows();
-  const caseId = "CASE-E2E-INVOICE-ASSIGNMENT";
-  const oaRowId = "oa-e2e-invoice-assignment";
-  const firstItemId = `${oaRowId}:item:0`;
-  const secondItemId = `${oaRowId}:item:1`;
-  const invoiceRowId = "invoice-e2e-unassigned-27-05";
+  const caseId = "CASE-AUTO-0185";
+  const oaRowId = "oa-exp-2413";
+  const targetItemId = "oa-exp-2413:item:1:0a8ca0a3b508";
+  const invoiceRowId = "inv_imported_0983";
   return {
     group_id: `case:${caseId}`,
     group_type: "relation",
@@ -937,47 +937,80 @@ function buildInvoiceAssignmentWorkbenchGroup(assigned: boolean) {
       id: oaRowId,
       case_id: caseId,
       applicant: "黄亮",
-      project_name: "大理项目；曲靖项目",
+      project_name: "大理卷烟厂余热综合利用项目；昭通卷烟厂能源集中监控平台系统维护采购项目",
       project_name_display: "多个项目",
-      project_names: ["大理项目", "曲靖项目"],
+      project_names: [
+        "大理卷烟厂余热综合利用项目",
+        "昭通卷烟厂能源集中监控平台系统维护采购项目",
+      ],
       expense_items: [
         {
-          id: firstItemId,
+          id: "oa-exp-2413:item:0:70994fbdeb26",
           row_index: "0",
-          project_name: "大理项目",
-          expense_type: "交通费",
-          amount: "27.05",
+          project_name: "大理卷烟厂余热综合利用项目",
+          expense_type: "设备货款及材料费",
+          amount: "436.30",
         },
         {
-          id: secondItemId,
+          id: targetItemId,
           row_index: "1",
-          project_name: "曲靖项目",
-          expense_type: "住宿费",
-          amount: "38.95",
+          project_name: "昭通卷烟厂能源集中监控平台系统维护采购项目",
+          expense_type: "设备货款及材料费",
+          amount: "531.92",
+        },
+        {
+          id: "oa-exp-2413:item:2:a2ac346d98b7",
+          row_index: "2",
+          project_name: "大理卷烟厂余热综合利用项目",
+          expense_type: "运费/邮费/杂费",
+          amount: "35.00",
         },
       ],
       apply_type: "日常报销",
-      amount: "66.00",
+      amount: "1003.22",
       counterparty_name: "黄亮",
-      reason: "人工录入发票等待明确付款项归属",
+      reason: "材料费；快递费",
     }],
     bank_rows: [],
-    invoice_rows: [{
-      ...rows.invoice,
-      id: invoiceRowId,
-      case_id: caseId,
-      source_oa_id: oaRowId,
-      ...(assigned ? { source_expense_item_ids: [firstItemId] } : {}),
-      seller_name: "云南天谷科技开发有限公司",
-      invoice_no: "2653700000268955191",
-      amount: "26.26",
-      tax_amount: "0.79",
-      total_with_tax: "27.05",
-      detail_fields: {
-        ...rows.invoice.detail_fields,
-        发票号码: "2653700000268955191",
+    invoice_rows: [
+      {
+        ...rows.invoice,
+        id: "inv_imported_0985",
+        case_id: caseId,
+        source_oa_id: oaRowId,
+        source_expense_item_ids: [targetItemId],
+        source_kinds: ["manual_invoice_import", "oa_attachment_invoice"],
+        seller_name: "德力西（芜湖）网络科技有限公司",
+        invoice_no: "26342000002457600976",
+        amount: "171.61",
+        tax_amount: "22.31",
+        total_with_tax: "193.92",
+        detail_fields: {
+          ...rows.invoice.detail_fields,
+          发票号码: "26342000002457600976",
+        },
       },
-    }],
+      {
+        ...rows.invoice,
+        id: invoiceRowId,
+        case_id: caseId,
+        source_kind: "manual_invoice_import",
+        source_kinds: assigned
+          ? ["manual_invoice_import", "oa_expense_item_invoice"]
+          : ["manual_invoice_import"],
+        source_oa_id: oaRowId,
+        ...(assigned ? { source_expense_item_ids: [targetItemId] } : {}),
+        seller_name: "济南有人物联网技术有限公司",
+        invoice_no: "26372000003804613486",
+        amount: "299.11",
+        tax_amount: "38.89",
+        total_with_tax: "338.00",
+        detail_fields: {
+          ...rows.invoice.detail_fields,
+          发票号码: "26372000003804613486",
+        },
+      },
+    ],
     can_withdraw: true,
     ...(assigned ? {} : {
       workbench_anomaly: {
@@ -1457,6 +1490,45 @@ function withWorkbenchDetailKey<T extends {
   };
 }
 
+const WORKBENCH_MULTI_SOURCE_KINDS = [
+  "oa_expense_item_invoice",
+  "manual_invoice_import",
+  "oa_attachment_invoice",
+  "manual_invoice_import",
+] as const;
+
+function withWorkbenchMultiSourceEvidence<T extends {
+  invoice_rows: Array<Record<string, unknown>>;
+}>(group: T) {
+  return {
+    ...group,
+    invoice_rows: group.invoice_rows.map((row) => ({
+      ...row,
+      source_kinds: [...WORKBENCH_MULTI_SOURCE_KINDS],
+    })),
+  };
+}
+
+function withWorkbenchMultiSourcePage<T extends {
+  groups: Array<{ invoice_rows: Array<Record<string, unknown>> }>;
+}>(payload: T) {
+  return {
+    ...payload,
+    groups: payload.groups.map(withWorkbenchMultiSourceEvidence),
+  };
+}
+
+function withWorkbenchMultiSourceInitialPayload<T extends {
+  paired: { groups: Array<{ invoice_rows: Array<Record<string, unknown>> }> };
+  unpaired: { groups: Array<{ invoice_rows: Array<Record<string, unknown>> }> };
+}>(payload: T) {
+  return {
+    ...payload,
+    paired: withWorkbenchMultiSourcePage(payload.paired),
+    unpaired: withWorkbenchMultiSourcePage(payload.unpaired),
+  };
+}
+
 function parseWorkbenchCursor(cursor: string | null, prefix: string) {
   if (!cursor?.startsWith(prefix)) {
     return 0;
@@ -1538,7 +1610,7 @@ function workbenchSearchableRowText(row: unknown) {
     }
   });
   if (Array.isArray(payload.tags)) {
-    values.push(...payload.tags);
+    values.push(...payload.tags.filter((tag) => tag !== "OA附件" && tag !== "人工导入"));
   }
   if (Array.isArray(payload.bank_text_fields)) {
     payload.bank_text_fields.forEach((field) => {
@@ -1574,15 +1646,26 @@ function workbenchRowDisplaySearchAliases(row: Record<string, unknown>) {
     const invoiceType = String(row.invoice_type ?? "").toLocaleLowerCase("zh-CN");
     if (invoiceType.includes("销") || invoiceType.includes("output") || invoiceType.includes("sale")) aliases.push("销");
     if (invoiceType.includes("进") || invoiceType.includes("input") || invoiceType.includes("purchase")) aliases.push("进");
-    const sourceKind = String(row.source_kind ?? "");
+    const sourceKinds = Array.isArray(row.source_kinds) && row.source_kinds.length > 0
+      ? row.source_kinds
+      : typeof row.source_kind === "string"
+        ? [row.source_kind]
+        : [];
+    const normalizedSourceKinds = new Set(sourceKinds.filter(
+      (sourceKind): sourceKind is string => typeof sourceKind === "string",
+    ));
     const sourceLabels: Record<string, string> = {
       etc_invoice_summary: "ETC批次",
       etc_invoice: "ETC",
       oa_attachment_invoice: "OA附件",
+      manual_invoice_import: "导入记录",
+      oa_expense_item_invoice: "明细归属",
       oa_attachment_payment_receipt: "付款凭证",
-      oa_attachment_unknown: "未识别附件",
+      oa_supporting_document: "补充凭证",
     };
-    if (invoiceType || sourceKind) aliases.push(sourceLabels[sourceKind] ?? "人工导入");
+    Object.entries(sourceLabels).forEach(([sourceKind, sourceLabel]) => {
+      if (normalizedSourceKinds.has(sourceKind)) aliases.push(sourceLabel);
+    });
   }
   return aliases;
 }
@@ -9723,7 +9806,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             ...payload.summary,
             oa_count: 1,
             bank_count: 0,
-            invoice_count: 1,
+            invoice_count: 2,
             paired_count: pairedGroups.length,
             unpaired_count: unpairedGroups.length,
             paired_exception_count: 0,
@@ -9889,9 +9972,12 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         options.workbenchAmountMismatchScenario === true,
         workbenchAmountMismatchDecision,
       );
-      return json(route, options.workbenchInitialIncompleteRelation && relationConfirmed
+      const resolvedPayload = options.workbenchInitialIncompleteRelation && relationConfirmed
         ? withIncompleteUnpairedRelation(payload)
-        : payload);
+        : payload;
+      return json(route, options.workbenchMultiSourceScenario
+        ? withWorkbenchMultiSourceInitialPayload(resolvedPayload)
+        : resolvedPayload);
     }
 
     if (path === "/imports/files/preview") {
@@ -10237,7 +10323,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
         ));
       }
-      return json(route, workbenchGroupsPayload(
+      const payload = workbenchGroupsPayload(
         zone,
         relationConfirmed,
         options.workbenchLargeDataset === true,
@@ -10250,7 +10336,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         workbenchAmountMismatchDecision,
         url.searchParams.get("exception_view") ?? "",
         url.searchParams.get("exception_code") ?? "",
-      ));
+      );
+      return json(route, options.workbenchMultiSourceScenario
+        ? withWorkbenchMultiSourcePage(payload)
+        : payload);
     }
 
     if (path === "/api/workbench/groups/detail") {
@@ -10279,10 +10368,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             options.workbenchAmountMismatchScenario === true,
             workbenchAmountMismatchDecision,
           );
-      const group = sourceGroups.find((candidate) => candidate.group_id === groupId);
-      if (!group) {
+      const sourceGroup = sourceGroups.find((candidate) => candidate.group_id === groupId);
+      if (!sourceGroup) {
         return json(route, { error: "workbench_group_not_found" }, 404);
       }
+      const group = options.workbenchMultiSourceScenario
+        ? withWorkbenchMultiSourceEvidence(sourceGroup)
+        : sourceGroup;
       const detailedGroup = withWorkbenchDetailKey(group);
       if (url.searchParams.get("detail_key") !== detailedGroup.detail_key) {
         return json(route, { error: "workbench_group_detail_key_required" }, 400);
@@ -10321,9 +10413,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, {
         success: true,
         action: "assign_invoice_expense_items",
-        case_id: "CASE-E2E-INVOICE-ASSIGNMENT",
-        invoice_row_id: "invoice-e2e-unassigned-27-05",
-        source_expense_item_ids: ["oa-e2e-invoice-assignment:item:0"],
+        case_id: "CASE-AUTO-0185",
+        invoice_row_id: "inv_imported_0983",
+        source_expense_item_ids: ["oa-exp-2413:item:1:0a8ca0a3b508"],
       });
     }
 

@@ -1572,6 +1572,83 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(invoice.source_links[0]["source_workbench_row_id"], "oa-att-inv-oa-exp-001-stable")
         self.assertEqual(invoice.source_links[0]["derived_from_oa_id"], "oa-exp-001")
 
+    def test_formal_import_overrides_oa_parsed_fields_once_and_preserves_oa_provenance(self) -> None:
+        created = self.service.upsert_oa_attachment_invoice(
+            {
+                "evidence_type": "tax_invoice",
+                "document_kind": "digital_invoice",
+                "digital_invoice_no": "26532000000141671939",
+                "seller_name": "OCR供应商",
+                "buyer_name": "云南溯源科技有限公司",
+                "issue_date": "2026-08-03",
+                "amount": "171.61",
+                "total_with_tax": "193.92",
+                "invoice_type": "销项发票",
+                "source_attachment_key": "attachment-key-19392",
+                "source_expense_item_id": "expense-item-53192",
+            },
+            oa_form_id="oa-form-53192",
+            oa_row_id="oa-exp-53192",
+            source_workbench_row_id="oa-att-inv-19392",
+            allow_create=True,
+        )
+        assert created is not None
+        self.assertEqual(created.invoice_type, InvoiceType.OUTPUT)
+
+        preview = self.service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="invoice.xlsx",
+            imported_by="finance",
+            rows=[
+                {
+                    "digital_invoice_no": "26532000000141671939",
+                    "counterparty_name": "正式供应商",
+                    "seller_name": "正式供应商",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_date": "2026-08-04",
+                    "amount": "193.92",
+                    "signed_amount": "193.92",
+                    "total_with_tax": "193.92",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+        self.service.confirm_import(preview.id)
+
+        merged = self.service.get_invoice(created.id)
+        self.assertEqual(merged.invoice_type, InvoiceType.INPUT)
+        self.assertEqual(merged.amount, Decimal("193.92"))
+        self.assertEqual(merged.invoice_date, "2026-08-04")
+        self.assertEqual(merged.seller_name, "正式供应商")
+        self.assertEqual(
+            [link["source_type"] for link in merged.source_links],
+            ["oa_attachment_invoice", "manual_invoice_import"],
+        )
+
+        duplicate = self.service.preview_import(
+            batch_type=BatchType.OUTPUT_INVOICE,
+            source_name="duplicate.xlsx",
+            imported_by="finance",
+            rows=[
+                {
+                    "digital_invoice_no": "26532000000141671939",
+                    "counterparty_name": "后来错误值",
+                    "seller_name": "后来错误值",
+                    "buyer_name": "云南溯源科技有限公司",
+                    "invoice_date": "2026-08-05",
+                    "amount": "999.99",
+                    "total_with_tax": "999.99",
+                    "invoice_status_from_source": "正常",
+                }
+            ],
+        )
+        self.service.confirm_import(duplicate.id)
+
+        self.assertEqual(merged.amount, Decimal("193.92"))
+        self.assertEqual(merged.seller_name, "正式供应商")
+        self.assertEqual(merged.invoice_type, InvoiceType.INPUT)
+        self.assertEqual(len(merged.source_links), 3)
+
     def test_oa_attachment_invoice_upsert_merges_existing_canonical_invoice(self) -> None:
         first = self.service.upsert_oa_attachment_invoice(
             {

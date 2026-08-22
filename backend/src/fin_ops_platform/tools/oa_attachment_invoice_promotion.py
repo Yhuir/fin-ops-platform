@@ -7,7 +7,6 @@ import sys
 from typing import Any, Sequence, TextIO
 
 from fin_ops_platform.services.app_settings_service import OA_ATTACHMENT_INVOICE_PROMOTION_CREATE_MISSING
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoiceCandidate,
     OAAttachmentInvoicePromotionService,
@@ -93,67 +92,7 @@ def _load_candidates(
     rows = PostgresOAAttachmentInvoiceRepository(connection).list_promotion_source_rows(
         oa_row_ids=oa_row_ids,
     )
-    candidates: list[OAAttachmentInvoiceCandidate] = []
-    seen_candidates: set[tuple[str, str, str, str]] = set()
-    row_id_service = ImportNormalizationService()
-    for row in rows:
-        invoices = row.get("invoices")
-        if not isinstance(invoices, list):
-            continue
-        cache_key = _clean_text(row.get("cache_source_attachment_key"))
-        context = {key: row.get(key) for key in row.keys() if key != "invoices"}
-        oa_row_id = _clean_text(row.get("oa_row_id"))
-        oa_form_id = _clean_text(row.get("oa_application_id")) or oa_row_id
-        context_attachment_key = _clean_text(row.get("source_attachment_key"))
-        for index, invoice_payload in enumerate(invoices):
-            if not isinstance(invoice_payload, dict):
-                continue
-            attachment_invoice = dict(invoice_payload)
-            if context_attachment_key:
-                attachment_invoice["source_attachment_key"] = context_attachment_key
-            else:
-                attachment_invoice.setdefault("source_attachment_key", cache_key)
-            for key in (
-                "source_expense_item_id",
-                "source_expense_row_index",
-                "source_attachment_name",
-            ):
-                value = _clean_text(row.get(key))
-                if value:
-                    attachment_invoice[key] = value
-            source_workbench_row_id = (
-                row_id_service.oa_attachment_invoice_row_id(oa_row_id, index, attachment_invoice)
-                if oa_row_id
-                else None
-            )
-            candidate_key = (
-                oa_row_id or "",
-                source_workbench_row_id or "",
-                _clean_text(attachment_invoice.get("source_attachment_key")) or "",
-                _clean_text(attachment_invoice.get("source_expense_item_id")) or "",
-            )
-            if candidate_key in seen_candidates:
-                continue
-            seen_candidates.add(candidate_key)
-            candidates.append(
-                OAAttachmentInvoiceCandidate(
-                    cache_source_attachment_key=cache_key or "",
-                    invoice_index=index,
-                    attachment_invoice=attachment_invoice,
-                    oa_form_id=oa_form_id,
-                    oa_row_id=oa_row_id,
-                    source_workbench_row_id=source_workbench_row_id,
-                    context=context,
-                )
-            )
-    return candidates
-
-
-def _clean_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+    return OAAttachmentInvoicePromotionService.candidates_from_source_rows(rows)
 
 
 def _candidate_fingerprint(candidates: list[OAAttachmentInvoiceCandidate]) -> str:

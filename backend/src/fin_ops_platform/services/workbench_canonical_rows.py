@@ -50,6 +50,32 @@ from fin_ops_platform.services.workbench_row_identity import (
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 ETC_BATCH_TAG = "ETC批量提交"
+INVOICE_SOURCE_KIND_ORDER = (
+    "manual_invoice_import",
+    "oa_attachment_invoice",
+    "oa_expense_item_invoice",
+)
+
+
+def invoice_source_kinds(source_links: object) -> list[str]:
+    first_seen: list[str] = []
+    seen: set[str] = set()
+    for source_link in list(source_links or []):
+        if not isinstance(source_link, dict):
+            continue
+        source_kind = str(
+            source_link.get("source_type")
+            or source_link.get("type")
+            or source_link.get("source")
+            or ""
+        ).strip()
+        if source_kind and source_kind not in seen:
+            seen.add(source_kind)
+            first_seen.append(source_kind)
+    return [
+        *[source_kind for source_kind in INVOICE_SOURCE_KIND_ORDER if source_kind in seen],
+        *[source_kind for source_kind in first_seen if source_kind not in INVOICE_SOURCE_KIND_ORDER],
+    ]
 
 
 def _bank_settings_source_versions(settings_payload: object) -> dict[str, object]:
@@ -1002,6 +1028,7 @@ class WorkbenchCanonicalRowsBuilder:
             "id": row_id,
             "type": "invoice",
             "source_kind": source_kind,
+            "source_kinds": invoice_source_kinds(source_links),
             "status": "unpaired",
             "case_id": None,
             "invoice_type": row.get("invoice_type"),

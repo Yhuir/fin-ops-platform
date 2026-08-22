@@ -252,6 +252,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         app._persist_confirmed_import_delta(
             import_state_payload={"imports": {}, "file_imports": {}},
+            scope_months=[],
         )
 
     def test_db_dirty_queue_write_path_marks_scope_instead_of_inline_matching(self) -> None:
