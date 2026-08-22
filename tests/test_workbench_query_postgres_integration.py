@@ -764,33 +764,75 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             {item.get("detail_key") for item in exception_page["groups"]},
         )
 
-    def test_assign_invoice_expense_item_closes_document_only_anomaly_atomically(self) -> None:
+    def test_case_auto_0185_assignment_closes_document_only_anomaly_atomically(self) -> None:
+        expense_item_ids = [
+            "oa-direct-1:item:0",
+            "oa-direct-1:item:1",
+            "oa-direct-1:item:2",
+        ]
+        expense_items = [
+            {"id": expense_item_ids[0], "row_index": "0", "amount": "436.30", "attachment_file_count": "4"},
+            {"id": expense_item_ids[1], "row_index": "1", "amount": "531.92", "attachment_file_count": "2"},
+            {"id": expense_item_ids[2], "row_index": "2", "amount": "35.00", "attachment_file_count": "1"},
+        ]
         self.raw_connection.execute(
             """
             update app.oa_applications
-            set normalized_payload = jsonb_set(
-                normalized_payload,
-                '{expense_items,0,attachment_file_count}',
-                '"1"'::jsonb
-            )
-            where row_id = 'oa-direct-1';
-            insert into app.invoices(
-                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
-                invoice_month, amount, signed_amount, total_with_tax, status,
-                workbench_visibility, source_links, raw_payload
-            ) values (
-                'invoice-assignment', 'input', 'INV-ASSIGNMENT', '2026-07-23',
-                '2026-07-01', 100, 100, 100, 'active', 'visible',
-                '[{"source_type":"manual_invoice_import","source_id":"manual-1"}]'::jsonb,
-                '{}'::jsonb
-            );
+            set amount = 1003.22,
+                normalized_payload = normalized_payload ||
+                    jsonb_build_object('amount', '1003.22', 'expense_items', %s::jsonb)
+            where row_id = 'oa-direct-1'
+            """,
+            (json.dumps(expense_items, ensure_ascii=False),),
+        )
+        self.raw_connection.execute(
+            """
+            select set_config('fin_ops.correction_reason', 'CASE-AUTO-0185 test fixture', false);
+            select set_config('fin_ops.actor_id', 'test-suite', false);
+            update app.bank_transactions
+            set amount = 1003.22, signed_amount = -1003.22
+            where legacy_mongo_id = 'bank-direct-1';
             update app.workbench_pair_relations
-            set row_ids = array['oa-direct-1','bank-direct-1','invoice-assignment'],
-                row_types = array['oa','bank','invoice'],
+            set row_ids = array[
+                    'oa-direct-1','bank-direct-1','invoice-assignment-90',
+                    'invoice-assignment-58','invoice-assignment-43',
+                    'invoice-assignment-24530','invoice-assignment-19392',
+                    'invoice-assignment','invoice-assignment-35'
+                ],
+                row_types = array['oa','bank','invoice','invoice','invoice','invoice','invoice','invoice','invoice'],
                 special_metadata = '{"requires_oa":true,"requires_invoice":true}'::jsonb
             where case_id = 'CASE-DIRECT-1'
             """
         )
+        invoice_fixtures = [
+            ("invoice-assignment-90", "90.00", expense_item_ids[0], "0"),
+            ("invoice-assignment-58", "58.00", expense_item_ids[0], "0"),
+            ("invoice-assignment-43", "43.00", expense_item_ids[0], "0"),
+            ("invoice-assignment-24530", "245.30", expense_item_ids[0], "0"),
+            ("invoice-assignment-19392", "193.92", expense_item_ids[1], "1"),
+            ("invoice-assignment", "338.00", None, None),
+            ("invoice-assignment-35", "35.00", expense_item_ids[2], "2"),
+        ]
+        for invoice_id, amount, expense_item_id, row_index in invoice_fixtures:
+            source_links = [{"source_type": "manual_invoice_import", "source_id": invoice_id}]
+            if expense_item_id:
+                source_links.append({
+                    "source_type": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-direct-1",
+                    "source_expense_item_id": expense_item_id,
+                    "source_expense_row_index": row_index,
+                })
+            self.raw_connection.execute(
+                """
+                insert into app.invoices(
+                    legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                    invoice_month, amount, signed_amount, total_with_tax, status,
+                    workbench_visibility, source_links, raw_payload
+                ) values (%s, 'input', %s, '2026-07-23', '2026-07-01',
+                          %s, %s, %s, 'active', 'visible', %s::jsonb, '{}'::jsonb)
+                """,
+                (invoice_id, f"INV-{invoice_id}", amount, amount, amount, json.dumps(source_links)),
+            )
         before_page = self.repository.get_workbench_groups_page(
             scope_key="2026-07", zone="unpaired", exception_bucket="unpaired",
         )
@@ -798,13 +840,56 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             item for item in before_page["groups"]
             if item.get("detail_key") == "CASE-DIRECT-1"
         )
+        before_invoice_rows = {row["id"]: row for row in before_group["invoice_rows"]}
+        self.assertEqual(len(before_group["oa_rows"]), 1)
+        self.assertEqual(len(before_group["bank_rows"]), 1)
+        self.assertEqual(len(before_invoice_rows), 7)
+        self.assertEqual(
+            {
+                key: before_group["amount_check"][key]
+                for key in ("status", "oa_total", "bank_total", "invoice_total")
+            },
+            {
+                "status": "matched",
+                "oa_total": "1003.22",
+                "bank_total": "1003.22",
+                "invoice_total": "1003.22",
+            },
+        )
+        self.assertEqual(
+            before_invoice_rows["invoice-assignment-19392"]["source_expense_item_ids"],
+            [expense_item_ids[1]],
+        )
+        self.assertEqual(
+            before_invoice_rows["invoice-assignment"]["source_expense_item_ids"],
+            [],
+        )
         unassigned_item = next(
             item for item in before_group["workbench_anomaly"]["items"]
             if item.get("code") == "oa_invoice_attachment_unassigned"
             and item.get("display_row_id") == "invoice-assignment"
         )
-        canonical_expense_item_id = str(
-            before_group["oa_rows"][0]["expense_items"][0]["id"]
+        self.assertEqual(unassigned_item["display_scope"], "row")
+        self.assertEqual(unassigned_item["display_pane"], "invoice")
+        self.assertEqual(unassigned_item["invoice_total"], "338.00")
+        canonical_expense_item_id = next(
+            str(item["id"])
+            for item in before_group["oa_rows"][0]["expense_items"]
+            if item.get("amount") == "531.92"
+        )
+        relation_before = self.raw_connection.fetch_one(
+            """
+            select case_id, relation_mode, status, version, month_scope, row_ids, row_types
+            from app.workbench_pair_relations where case_id = 'CASE-DIRECT-1'
+            """
+        )
+        invoice_facts_before = self.raw_connection.fetch_all(
+            """
+            select legacy_mongo_id, invoice_no, amount, signed_amount, total_with_tax
+            from app.invoices
+            where legacy_mongo_id in ('invoice-assignment-19392', 'invoice-assignment')
+            order by legacy_mongo_id
+            """
         )
 
         def repository_factory(transaction: object) -> SimpleNamespace:
@@ -892,6 +977,37 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             if item.get("detail_key") == "CASE-DIRECT-1"
         )
         self.assertIsNone(after_group.get("workbench_anomaly"))
+        self.assertEqual(after_group["amount_check"], before_group["amount_check"])
+        self.assertEqual(
+            self.raw_connection.fetch_one(
+                """
+                select case_id, relation_mode, status, version, month_scope, row_ids, row_types
+                from app.workbench_pair_relations where case_id = 'CASE-DIRECT-1'
+                """
+            ),
+            relation_before,
+        )
+        self.assertEqual(
+            self.raw_connection.fetch_all(
+                """
+                select legacy_mongo_id, invoice_no, amount, signed_amount, total_with_tax
+                from app.invoices
+                where legacy_mongo_id in ('invoice-assignment-19392', 'invoice-assignment')
+                order by legacy_mongo_id
+                """
+            ),
+            invoice_facts_before,
+        )
+        after_invoice_rows = {row["id"]: row for row in after_group["invoice_rows"]}
+        self.assertEqual(len(after_invoice_rows), 7)
+        self.assertEqual(
+            after_invoice_rows["invoice-assignment-19392"]["source_expense_item_ids"],
+            [canonical_expense_item_id],
+        )
+        self.assertEqual(
+            after_invoice_rows["invoice-assignment"]["source_expense_item_ids"],
+            [canonical_expense_item_id],
+        )
 
     def test_exception_views_count_unique_relations_and_auto_select_first_amount_code(self) -> None:
         fixtures = [

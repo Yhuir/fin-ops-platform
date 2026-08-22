@@ -321,6 +321,67 @@ function withUnassignedInvoiceAssignmentGroup(
   };
 }
 
+function withCaseAuto0185InvoiceAssignmentGroup(
+  payload: Record<string, unknown>,
+  assigned: boolean,
+) {
+  const base = withUnassignedInvoiceAssignmentGroup(payload, assigned);
+  const sourceZone = assigned ? base.paired : base.unpaired;
+  const sourceGroup = sourceZone.groups[0];
+  const sourceOaRow = sourceGroup?.oa_rows[0];
+  const sourceInvoiceRow = sourceGroup?.invoice_rows[0];
+  const sourceItem = Array.isArray(sourceOaRow?.expense_items)
+    ? sourceOaRow.expense_items[0] as Record<string, unknown>
+    : null;
+  if (!sourceGroup || !sourceOaRow || !sourceInvoiceRow || !sourceItem) {
+    throw new Error("Missing invoice assignment fixture rows for CASE-AUTO-0185.");
+  }
+  const caseId = "CASE-AUTO-0185";
+  const expenseItemId = "oa-exp-2035:item:0";
+  const invoice = (id: string, sellerName: string, totalWithTax: string) => ({
+    ...sourceInvoiceRow,
+    id,
+    case_id: caseId,
+    seller_name: sellerName,
+    amount: totalWithTax,
+    tax_rate: "0%",
+    tax_amount: "0.00",
+    total_with_tax: totalWithTax,
+    detail_fields: { 发票号码: id },
+  });
+  const manualInvoice = invoice("inv_imported_0983", "济南有人物联网技术有限公司", "338.00");
+  const group = {
+    ...sourceGroup,
+    group_id: `case:${caseId}`,
+    oa_rows: [{
+      ...sourceOaRow,
+      case_id: caseId,
+      amount: "531.92",
+      expense_items: [{ ...sourceItem, amount: "531.92" }],
+    }],
+    invoice_rows: [{
+      ...invoice("inv_imported_0985", "德力西（芜湖）网络科技有限公司", "193.92"),
+      source_kind: "oa_attachment_invoice",
+      source_expense_item_ids: [expenseItemId],
+    }, manualInvoice],
+    ...(assigned ? {} : {
+      workbench_anomaly: {
+        ...sourceGroup.workbench_anomaly,
+        items: sourceGroup.workbench_anomaly?.items.map((item) => ({
+          ...item,
+          comparison_unit_id: `case:${caseId}`,
+          invoice_row_ids: [manualInvoice.id],
+          display_row_id: manualInvoice.id,
+        })),
+      },
+    }),
+  };
+  return {
+    ...base,
+    [assigned ? "paired" : "unpaired"]: { ...sourceZone, groups: [group] },
+  };
+}
+
 function withTypedIdentityCollision(payload: Record<string, unknown>) {
   const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
   const replaceId = (row: Record<string, unknown>) => (
@@ -2851,12 +2912,12 @@ describe("Workbench row selection and detail drawer", () => {
     });
   }, 8_000);
 
-  test("assigns an unowned invoice to explicit OA items and performs exactly one canonical reread", async () => {
+  test("rereads CASE-AUTO-0185 once and aligns the assigned 338 invoice with the existing 193.92 invoice", async () => {
     const user = userEvent.setup();
     let assigned = false;
     const assignmentBodies: Array<Record<string, unknown>> = [];
     const fetchMock = installMockApiFetch({
-      transformWorkbenchPayload: (payload) => withUnassignedInvoiceAssignmentGroup(payload, assigned),
+      transformWorkbenchPayload: (payload) => withCaseAuto0185InvoiceAssignmentGroup(payload, assigned),
       workbenchOaSyncStatuses: [
         {
           status: "synced",
@@ -2885,19 +2946,29 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const expenseItemId = "oa-exp-2035:item:0";
+    const itemSegmentTestId = `candidate-group-segment-unpaired-case:CASE-AUTO-0185-${expenseItemId}`;
+    const explicitSegment = await within(unpairedZone).findByTestId(itemSegmentTestId);
+    expect(within(explicitSegment).getByText("德力西（芜湖）网络科技有限公司")).toBeInTheDocument();
+    expect(within(explicitSegment).getByText("193.92", { exact: true })).toBeInTheDocument();
+    expect(within(explicitSegment).queryByText("济南有人物联网技术有限公司")).not.toBeInTheDocument();
     const residualSegment = await within(unpairedZone).findByTestId(
-      "candidate-group-segment-unpaired-case:CASE-INVOICE-ASSIGNMENT-oa-exp-2035:invoice:unassigned",
+      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2035:invoice:unassigned",
     );
-    expect(within(residualSegment).getByText("云南天谷科技开发有限公司")).toBeInTheDocument();
+    expect(within(residualSegment).getByText("济南有人物联网技术有限公司")).toBeInTheDocument();
+    expect(within(residualSegment).getByText("338.00", { exact: true })).toBeInTheDocument();
+    expect(within(unpairedZone).getAllByText("德力西（芜湖）网络科技有限公司")).toHaveLength(1);
+    expect(within(unpairedZone).getAllByText("济南有人物联网技术有限公司")).toHaveLength(1);
 
     const anomalyTrigger = within(residualSegment).getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     });
     await user.hover(anomalyTrigger);
+    expect(await screen.findByText("发票待归属")).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "选择 OA 明细" }));
 
     const drawer = await screen.findByRole("dialog", { name: "选择 OA 明细" });
-    const candidate = within(drawer).getByRole("checkbox", { name: /^曲靖维护项目，27\.05，/ });
+    const candidate = within(drawer).getByRole("checkbox", { name: /531\.92/ });
     expect(candidate).not.toBeChecked();
     expect(within(drawer).getByRole("button", { name: "确认归属" })).toBeDisabled();
 
@@ -2914,21 +2985,31 @@ describe("Workbench row selection and detail drawer", () => {
       expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
     });
     expect(assignmentBodies).toEqual([{
-      case_id: "CASE-INVOICE-ASSIGNMENT",
-      invoice_row_id: "invoice-manual-unassigned-27.05",
+      case_id: "CASE-AUTO-0185",
+      invoice_row_id: "inv_imported_0983",
       targets: [{
         oa_row_id: "oa-exp-2035",
-        expense_item_id: "oa-exp-2035:item:0",
+        expense_item_id: expenseItemId,
       }],
       anomaly_fingerprint: "c".repeat(64),
       idempotency_key: expect.any(String),
     }]);
     expect(screen.queryByRole("button", { name: "该发票有 1 项异常，查看详情" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId(
+      "candidate-group-segment-unpaired-case:CASE-AUTO-0185-oa-exp-2035:invoice:unassigned",
+    )).not.toBeInTheDocument();
     const pairedZone = screen.getByTestId("zone-paired");
     const assignedSegment = await within(pairedZone).findByTestId(
-      "candidate-group-segment-paired-case:CASE-INVOICE-ASSIGNMENT-oa-exp-2035:item:0",
+      `candidate-group-segment-paired-case:CASE-AUTO-0185-${expenseItemId}`,
     );
-    expect(within(assignedSegment).getByText("云南天谷科技开发有限公司")).toBeInTheDocument();
+    const assignedInvoicePane = within(pairedZone).getByTestId(
+      `candidate-scroll-paired-case:CASE-AUTO-0185-${expenseItemId}-invoice`,
+    );
+    expect(within(assignedSegment).getByText("德力西（芜湖）网络科技有限公司")).toBeInTheDocument();
+    expect(within(assignedSegment).getByText("济南有人物联网技术有限公司")).toBeInTheDocument();
+    expect(within(assignedInvoicePane).getAllByRole("row")).toHaveLength(2);
+    expect(within(pairedZone).getAllByText("德力西（芜湖）网络科技有限公司")).toHaveLength(1);
+    expect(within(pairedZone).getAllByText("济南有人物联网技术有限公司")).toHaveLength(1);
   }, 8_000);
 
   test("workbench settings can manage allowed app accounts", async () => {

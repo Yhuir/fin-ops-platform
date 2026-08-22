@@ -585,6 +585,82 @@ describe("groupDisplayModel time filter", () => {
       .toEqual([manualInvoice]);
   });
 
+  test("moves only the assigned CASE-AUTO-0185 invoice beside the 531.92 item after canonical refetch", () => {
+    const caseId = "CASE-AUTO-0185";
+    const oaRowId = "oa-exp-2413";
+    const expenseItemId = "oa-exp-2413:item:1:0a8ca0a3b508";
+    const parent = {
+      ...buildOaRow(oaRowId, "1003.22"),
+      caseId,
+      expenseItems: [
+        {
+          id: "oa-exp-2413:item:0:70994fbdeb26",
+          rowIndex: "0",
+          projectName: "大理卷烟厂余热综合利用项目",
+          amount: "436.30",
+        },
+        {
+          id: expenseItemId,
+          rowIndex: "1",
+          projectName: "昭通卷烟厂能源集中监控平台维护项目",
+          amount: "531.92",
+        },
+        {
+          id: "oa-exp-2413:item:2:a2ac346d98b7",
+          rowIndex: "2",
+          projectName: "大理卷烟厂余热综合利用项目",
+          amount: "35.00",
+        },
+      ],
+    };
+    const explicitInvoice = {
+      ...buildAttachmentInvoiceRow("inv_imported_0985", oaRowId, "193.92"),
+      caseId,
+      sourceExpenseItemIds: [expenseItemId],
+    };
+    const unassignedInvoice = {
+      ...buildInvoiceRow("inv_imported_0983", "338.00"),
+      caseId,
+      sourceKind: "manual_invoice_import" as const,
+    };
+    const buildCase = (invoice: WorkbenchRecord): WorkbenchRelationGroup => ({
+      id: `case:${caseId}`,
+      groupType: "unpaired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      rows: {
+        oa: [parent],
+        bank: [],
+        invoice: [explicitInvoice, invoice],
+      },
+    });
+
+    const beforeLayout = buildWorkbenchGroupDisplayLayout(buildCase(unassignedInvoice));
+    const beforeItemSegment = beforeLayout?.segments.find(({ id }) => id === expenseItemId);
+    const beforeResidual = beforeLayout?.segments.find(({ id }) => id === `case:${caseId}:invoice:residual`);
+
+    expect(beforeItemSegment?.rows.invoice.map(({ id }) => id)).toEqual([explicitInvoice.id]);
+    expect(beforeResidual?.rows.invoice.map(({ id }) => id)).toEqual([unassignedInvoice.id]);
+
+    const assignedInvoice: WorkbenchRecord = {
+      ...unassignedInvoice,
+      sourceOaId: oaRowId,
+      sourceExpenseItemIds: [expenseItemId],
+    };
+    const afterLayout = buildWorkbenchGroupDisplayLayout(buildCase(assignedInvoice));
+    const afterItemSegment = afterLayout?.segments.find(({ id }) => id === expenseItemId);
+    const renderedInvoiceIds = afterLayout?.segments.flatMap(({ rows }) => rows.invoice.map(({ id }) => id));
+
+    expect(afterItemSegment?.rows.invoice.map(({ id }) => id)).toEqual([
+      explicitInvoice.id,
+      assignedInvoice.id,
+    ]);
+    expect(renderedInvoiceIds).toHaveLength(2);
+    expect(new Set(renderedInvoiceIds)).toEqual(new Set([explicitInvoice.id, assignedInvoice.id]));
+    expect(afterLayout?.segments.some(({ id }) => id.includes("invoice:residual"))).toBe(false);
+  });
+
   test("uses explicit multi-item ownership to render one manual invoice once", () => {
     const parent = {
       ...buildOaRow("oa-exp-manual-shared", "66.00"),
