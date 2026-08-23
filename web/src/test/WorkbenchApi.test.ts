@@ -15,6 +15,7 @@ import {
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
   importManualOaRows,
+  listWorkbenchOaSupportingDocumentGallery,
   previewWorkbenchConfirmLink,
   previewWorkbenchManualInvoices,
   previewWorkbenchWithdrawLink,
@@ -117,6 +118,49 @@ test("maps supplemental evidence validation errors to an actionable message", as
   expect(captured).toBeInstanceOf(WorkbenchApiError);
   expect(resolveWorkbenchActionErrorMessage(captured, "fallback")).toBe(
     "文件内容与扩展名不一致，请重新选择有效文件。（请求编号：request-upload-1）",
+  );
+});
+
+test("reads the supporting document gallery through one bounded cursor page", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+    documents: [{
+      id: "00000000-0000-4000-8000-000000000001",
+      relation_case_id: "CASE-1",
+      oa_row_id: "oa-1",
+      expense_item_id: "oa-1:item:0",
+      file_name: "voucher.pdf",
+      content_type: "application/pdf",
+      sha256: "sha",
+      size_bytes: 1024,
+      created_by: "finance-user",
+      created_at: "2026-08-23T08:00:00+08:00",
+      content_url: "/api/documents/1/content",
+      thumbnail_url: "/api/documents/1/thumbnail",
+    }],
+    page_size: 9,
+    has_more: true,
+    next_cursor: "cursor-2",
+  }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  const controller = new AbortController();
+
+  const page = await listWorkbenchOaSupportingDocumentGallery({
+    cursor: "cursor-1",
+    signal: controller.signal,
+  });
+
+  expect(page).toEqual({
+    documents: [expect.objectContaining({
+      id: "00000000-0000-4000-8000-000000000001",
+      createdBy: "finance-user",
+      thumbnailUrl: "/api/documents/1/thumbnail",
+    })],
+    pageSize: 9,
+    hasMore: true,
+    nextCursor: "cursor-2",
+  });
+  expect(fetchSpy).toHaveBeenCalledWith(
+    "/api/workbench/oa-invoice-supplements/gallery?page_size=9&cursor=cursor-1",
+    expect.objectContaining({ signal: controller.signal }),
   );
 });
 

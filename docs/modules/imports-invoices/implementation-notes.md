@@ -1,5 +1,13 @@
 # 发票导入 实施记录
 
+## 2026-08-23 - 补充凭证统一只读画廊
+
+- 目标：在发票导入页提供所有 active Workbench 补充凭证的统一查看入口，按上传日期分组、3×3 首屏并支持图片/PDF原文件预览。
+- 边界：发票导入页只消费 Workbench owner 的 metadata/thumbnail/content GET；不新增表、文件存储、Read Model、worker、queue、上传或删除路径。
+- 性能：新增 `(created_at desc,id desc) where active` 部分索引，列表固定 9 条 keyset page、无 count/offset/blob；缩略图按需生成并私有缓存。
+- 旧链路：全仓扫描确认 scoped upload/list/delete/content 仍有正式调用，予以保留；新旧列表复用同一 DTO mapper、service、repository 和 file store，没有兼容 fallback。
+- 测试：后端 service/repository/API/migration，前端 API、抽屉交互、只读权限和发票导入页回归；生产性能与链路证据在部署后记录。
+
 ## 2026-08-14 - 单张发票录入统一导入闭环
 
 - 新入口位于发票导入页；HeroUI 紧凑抽屉承载可选 JPG/JPEG/PNG/PDF 单文件点击/拖拽识别和全部可编辑字段，最终使用只读确认弹窗。

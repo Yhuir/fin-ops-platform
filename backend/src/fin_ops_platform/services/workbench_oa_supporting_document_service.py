@@ -1,14 +1,27 @@
 from __future__ import annotations
 
+from base64 import b64decode, urlsafe_b64encode
 from dataclasses import dataclass
+from datetime import datetime
 from hashlib import sha256
+import json
 from pathlib import Path
 from typing import Any, Callable
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+from fin_ops_platform.services.untrusted_document_policy import (
+    DocumentLimits,
+    UntrustedDocumentError,
+    inspect_untrusted_document,
+    render_document_thumbnail,
+)
 
 
 MAX_SUPPORTING_DOCUMENT_BYTES = 25 * 1024 * 1024
+MAX_GALLERY_PAGE_SIZE = 9
+SUPPORTING_DOCUMENT_THUMBNAIL_EDGE = 360
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".pdf"}
+SUPPORTING_DOCUMENT_LIMITS = DocumentLimits(max_bytes=MAX_SUPPORTING_DOCUMENT_BYTES)
 
 
 class WorkbenchOaSupportingDocumentError(ValueError):
@@ -136,6 +149,27 @@ class WorkbenchOaSupportingDocumentService:
             )
         ]
 
+    def gallery(self, *, page_size: int = MAX_GALLERY_PAGE_SIZE, cursor: str = "") -> dict[str, Any]:
+        if not isinstance(page_size, int) or page_size < 1 or page_size > MAX_GALLERY_PAGE_SIZE:
+            raise WorkbenchOaSupportingDocumentError(
+                "supporting_document_page_size_invalid",
+                f"每次只能读取 1 至 {MAX_GALLERY_PAGE_SIZE} 个补充凭证。",
+            )
+        cursor_created_at, cursor_id = _decode_gallery_cursor(cursor)
+        rows = self._repository.list_active_page(
+            cursor_created_at=cursor_created_at,
+            cursor_id=cursor_id,
+            limit=page_size + 1,
+        )
+        has_more = len(rows) > page_size
+        page_rows = rows[:page_size]
+        return {
+            "documents": [self._present(document) for document in page_rows],
+            "page_size": page_size,
+            "has_more": has_more,
+            "next_cursor": _encode_gallery_cursor(page_rows[-1]) if has_more and page_rows else None,
+        }
+
     def content(self, document_id: str) -> tuple[dict[str, Any], bytes]:
         document = self._repository.get_active(str(document_id or "").strip())
         if document is None:
@@ -147,6 +181,26 @@ class WorkbenchOaSupportingDocumentService:
             str(document.get("storage_uri") or "")
         )
         return document, content
+
+    def thumbnail(self, document_id: str) -> tuple[dict[str, Any], bytes]:
+        document, content = self.content(document_id)
+        try:
+            validated = inspect_untrusted_document(
+                file_name=str(document.get("original_filename") or "document"),
+                content=content,
+                allowed_kinds=frozenset({"jpeg", "png", "pdf"}),
+                limits=SUPPORTING_DOCUMENT_LIMITS,
+            )
+            thumbnail = render_document_thumbnail(
+                document=validated,
+                max_edge=SUPPORTING_DOCUMENT_THUMBNAIL_EDGE,
+            )
+        except (UntrustedDocumentError, OSError, ValueError, RuntimeError):
+            raise WorkbenchOaSupportingDocumentError(
+                "supporting_document_preview_unavailable",
+                "补充凭证缩略图暂时无法生成，请打开原文件查看。",
+            ) from None
+        return document, thumbnail
 
     def delete(self, document_id: str, *, actor_id: str) -> dict[str, Any]:
         document = self._repository.get_active(str(document_id or "").strip())
@@ -213,4 +267,45 @@ class WorkbenchOaSupportingDocumentService:
             "created_by": document.get("created_by"),
             "created_at": document.get("created_at"),
             "content_url": f"/api/workbench/oa-invoice-supplements/documents/{document_id}/content",
+            "thumbnail_url": f"/api/workbench/oa-invoice-supplements/documents/{document_id}/thumbnail",
         }
+
+
+def _encode_gallery_cursor(document: dict[str, Any]) -> str:
+    payload = json.dumps(
+        {
+            "created_at": str(document.get("created_at") or ""),
+            "id": str(document.get("id") or ""),
+            "v": 1,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_gallery_cursor(cursor: str) -> tuple[str | None, str | None]:
+    value = str(cursor or "").strip()
+    if not value:
+        return None, None
+    try:
+        if len(value) > 512:
+            raise ValueError("cursor too long")
+        padding = "=" * (-len(value) % 4)
+        raw = b64decode(value + padding, altchars=b"-_", validate=True)
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("v") != 1:
+            raise ValueError("unsupported cursor")
+        created_at = str(payload.get("created_at") or "")
+        document_id = str(payload.get("id") or "")
+        parsed_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        if parsed_at.tzinfo is None:
+            raise ValueError("cursor timestamp must include a timezone")
+        UUID(document_id)
+    except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
+        raise WorkbenchOaSupportingDocumentError(
+            "supporting_document_cursor_invalid",
+            "补充凭证分页位置无效，请重新打开列表。",
+        ) from None
+    return created_at, document_id

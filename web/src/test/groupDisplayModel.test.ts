@@ -802,8 +802,10 @@ describe("groupDisplayModel time filter", () => {
       contentType: "image/png",
       sha256: "sha",
       sizeBytes: 128,
+      createdBy: "finance-user",
       createdAt: "2026-08-19T01:00:00+08:00",
       contentUrl: "/api/documents/document-1/content",
+      thumbnailUrl: "/api/documents/document-1/thumbnail",
     }];
 
     const [updated] = replaceWorkbenchSupportingDocuments(

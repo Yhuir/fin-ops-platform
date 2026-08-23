@@ -1969,6 +1969,8 @@ class Application:
                 actor_id=request_actor_id,
                 request_id=request_id,
             )
+        if method == "GET" and route_path == "/api/workbench/oa-invoice-supplements/gallery":
+            return self._handle_workbench_supporting_document_gallery(query)
         if method == "POST" and route_path == "/api/workbench/oa-invoice-supplements/documents":
             return self._handle_workbench_supporting_document_upload(
                 body,
@@ -1980,6 +1982,9 @@ class Application:
         if method == "GET" and route_path.startswith("/api/workbench/oa-invoice-supplements/documents/") and route_path.endswith("/content"):
             document_id = route_path.removesuffix("/content").rsplit("/", 1)[-1]
             return self._handle_workbench_supporting_document_content(document_id)
+        if method == "GET" and route_path.startswith("/api/workbench/oa-invoice-supplements/documents/") and route_path.endswith("/thumbnail"):
+            document_id = route_path.removesuffix("/thumbnail").rsplit("/", 1)[-1]
+            return self._handle_workbench_supporting_document_thumbnail(document_id)
         if method == "DELETE" and route_path.startswith("/api/workbench/oa-invoice-supplements/documents/"):
             document_id = route_path.rsplit("/", 1)[-1]
             return self._handle_workbench_supporting_document_delete(
@@ -7711,6 +7716,32 @@ class Application:
             )
         return self._json_response(HTTPStatus.OK, {"documents": documents})
 
+    def _handle_workbench_supporting_document_gallery(self, query: dict[str, list[str]]) -> Response:
+        raw_page_size = str((query.get("page_size") or ["9"])[0] or "9")
+        try:
+            page_size = int(raw_page_size)
+        except ValueError:
+            page_size = 0
+        try:
+            payload = self._workbench_oa_supporting_document_service().gallery(
+                page_size=page_size,
+                cursor=str((query.get("cursor") or [""])[0] or ""),
+            )
+        except WorkbenchOaSupportingDocumentError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error, "message": exc.message},
+            )
+        except RuntimeError:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "supporting_document_unavailable",
+                    "message": "补充凭证列表暂时不可用，请稍后重试。",
+                },
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
     def _handle_workbench_supporting_document_content(self, document_id: str) -> Response:
         try:
             document, content = self._workbench_oa_supporting_document_service().content(document_id)
@@ -7723,6 +7754,27 @@ class Application:
                 "Content-Type": str(document.get("content_type") or "application/octet-stream"),
                 "Content-Disposition": f'inline; filename="{_build_ascii_download_name(str(document.get("original_filename") or "document"))}"',
                 "Cache-Control": "private, max-age=60",
+            },
+        )
+
+    def _handle_workbench_supporting_document_thumbnail(self, document_id: str) -> Response:
+        try:
+            document, content = self._workbench_oa_supporting_document_service().thumbnail(document_id)
+        except WorkbenchOaSupportingDocumentError as exc:
+            status = (
+                HTTPStatus.NOT_FOUND
+                if exc.error == "supporting_document_not_found"
+                else HTTPStatus.UNPROCESSABLE_ENTITY
+            )
+            return self._json_response(status, {"error": exc.error, "message": exc.message})
+        sha = str(document.get("content_sha256") or "")
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=content,
+            headers={
+                "Content-Type": "image/jpeg",
+                "Cache-Control": "private, max-age=86400, immutable",
+                "ETag": f'"{sha}-thumbnail-v1"',
             },
         )
 

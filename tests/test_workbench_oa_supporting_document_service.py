@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 import unittest
+from uuid import UUID
+
+import fitz
+from PIL import Image
 
 from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
     PostgresWorkbenchOaSupportingDocumentRepository,
@@ -69,6 +74,19 @@ class _Repository:
 
     def list_active(self, *, oa_row_id: str, expense_item_id: str):
         return [row for row in self.rows.values() if row["status"] == "active" and row["oa_row_id"] == oa_row_id and row["expense_item_id"] == expense_item_id]
+
+    def list_active_page(self, *, cursor_created_at, cursor_id, limit):
+        rows = sorted(
+            (row for row in self.rows.values() if row["status"] == "active"),
+            key=lambda row: (row["created_at"], row["id"]),
+            reverse=True,
+        )
+        if cursor_created_at is not None and cursor_id is not None:
+            rows = [
+                row for row in rows
+                if (row["created_at"], row["id"]) < (cursor_created_at, cursor_id)
+            ]
+        return rows[:limit]
 
     def get_active(self, document_id: str):
         row = self.rows.get(document_id)
@@ -200,6 +218,81 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         self.assertEqual(len(self.repository.rows), 1)
         self.assertEqual(len(self.store.contents), 1)
 
+    def test_gallery_uses_stable_cursor_pages_and_only_returns_metadata(self) -> None:
+        for index in range(11):
+            document_id = f"00000000-0000-4000-8000-{index + 1:012d}"
+            self.repository.rows[document_id] = {
+                "id": document_id,
+                "relation_case_id": f"CASE-{index}",
+                "oa_row_id": f"oa-{index}",
+                "expense_item_id": f"oa-{index}:item:0",
+                "original_filename": f"voucher-{index}.pdf",
+                "content_type": "application/pdf",
+                "content_sha256": f"sha-{index}",
+                "size_bytes": 10 + index,
+                "created_by": "finance-user",
+                "created_at": f"2026-08-{index + 1:02d}T08:00:00+08:00",
+                "status": "active",
+            }
+
+        first = self.service.gallery()
+        second = self.service.gallery(cursor=first["next_cursor"])
+
+        self.assertEqual(len(first["documents"]), 9)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(len(second["documents"]), 2)
+        self.assertFalse(second["has_more"])
+        self.assertIsNone(second["next_cursor"])
+        self.assertEqual(first["documents"][0]["file_name"], "voucher-10.pdf")
+        self.assertEqual(second["documents"][-1]["file_name"], "voucher-0.pdf")
+        self.assertNotIn("content", first["documents"][0])
+        self.assertEqual(
+            first["documents"][0]["thumbnail_url"],
+            "/api/workbench/oa-invoice-supplements/documents/00000000-0000-4000-8000-000000000011/thumbnail",
+        )
+
+    def test_gallery_rejects_invalid_cursor_and_unbounded_page_size(self) -> None:
+        with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "分页位置无效"):
+            self.service.gallery(cursor="not-a-cursor")
+        with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "1 至 9"):
+            self.service.gallery(page_size=10)
+
+    def test_thumbnail_renders_image_and_pdf_without_changing_original_content(self) -> None:
+        image_buffer = BytesIO()
+        Image.new("RGBA", (800, 400), (255, 0, 0, 128)).save(image_buffer, format="PNG")
+        pdf = fitz.open()
+        pdf.new_page(width=595, height=842)
+        pdf_bytes = pdf.tobytes()
+        pdf.close()
+
+        for document_id, file_name, content, content_type in (
+            ("00000000-0000-4000-8000-000000000001", "voucher.png", image_buffer.getvalue(), "image/png"),
+            ("00000000-0000-4000-8000-000000000002", "voucher.pdf", pdf_bytes, "application/pdf"),
+        ):
+            storage_uri = f"store://{document_id}"
+            self.store.contents[storage_uri] = content
+            self.repository.rows[document_id] = {
+                "id": document_id,
+                "relation_case_id": "CASE-1",
+                "oa_row_id": "oa-1",
+                "expense_item_id": "oa-1:item:0",
+                "original_filename": file_name,
+                "content_type": content_type,
+                "content_sha256": hashlib.sha256(content).hexdigest(),
+                "size_bytes": len(content),
+                "created_by": "finance-user",
+                "created_at": "2026-08-23T10:00:00+08:00",
+                "storage_uri": storage_uri,
+                "status": "active",
+            }
+
+            _document, thumbnail = self.service.thumbnail(document_id)
+
+            with Image.open(BytesIO(thumbnail)) as rendered:
+                self.assertEqual(rendered.format, "JPEG")
+                self.assertLessEqual(max(rendered.size), 360)
+            self.assertEqual(self.store.contents[storage_uri], content)
+
     def test_batch_failure_removes_documents_created_earlier_in_the_request(self) -> None:
         self.repository.fail_on_create = 2
 
@@ -249,6 +342,34 @@ class PostgresWorkbenchOaSupportingDocumentRepositoryTests(unittest.TestCase):
             "on conflict (oa_row_id, expense_item_id, content_sha256) where status = 'active' do nothing",
             connection.sql,
         )
+
+    def test_gallery_page_query_is_keyset_bounded_and_active_only(self) -> None:
+        class _Connection:
+            def __init__(self) -> None:
+                self.sql = ""
+                self.params = ()
+
+            def fetch_all(self, sql, params):
+                self.sql = " ".join(sql.split()).lower()
+                self.params = params
+                return []
+
+        connection = _Connection()
+        cursor_id = "00000000-0000-4000-8000-000000000009"
+
+        rows = PostgresWorkbenchOaSupportingDocumentRepository(connection).list_active_page(
+            cursor_created_at="2026-08-23T10:00:00+08:00",
+            cursor_id=cursor_id,
+            limit=10,
+        )
+
+        self.assertEqual(rows, [])
+        self.assertIn("document.status = 'active'", connection.sql)
+        self.assertIn("file.tombstoned_at is null", connection.sql)
+        self.assertIn("(document.created_at, document.id) < (%s::timestamptz, %s::uuid)", connection.sql)
+        self.assertIn("order by document.created_at desc, document.id desc limit %s", connection.sql)
+        self.assertEqual(connection.params, ("2026-08-23T10:00:00+08:00", cursor_id, 10))
+        UUID(cursor_id)
 
 
 if __name__ == "__main__":

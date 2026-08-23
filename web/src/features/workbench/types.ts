@@ -354,8 +354,17 @@ export type WorkbenchOaSupportingDocument = {
   contentType: string;
   sha256: string;
   sizeBytes: number;
+  createdBy: string;
   createdAt: string;
   contentUrl: string;
+  thumbnailUrl: string;
+};
+
+export type WorkbenchOaSupportingDocumentGalleryPage = {
+  documents: WorkbenchOaSupportingDocument[];
+  pageSize: number;
+  hasMore: boolean;
+  nextCursor: string | null;
 };
 
 export type WorkbenchAmountSummaryTotals = {

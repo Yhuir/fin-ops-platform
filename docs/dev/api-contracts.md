@@ -937,6 +937,10 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 
 `POST /api/workbench/oa-invoice-supplements/manual` 接收该用户完整 preview 的 `session_id`、全部 `file_ids`，以及精确 `case_id`、`oa_row_id`、`expense_item_id`。确认在一个业务事务内创建或复用 canonical invoice、追加 `oa_expense_item_invoice` 来源边并创建/扩展正式关系；任一步失败全部回滚。已有 `oa_attachment_invoice` 继续保留为审计来源，但只要存在显式 expense-item 来源边，展示和异常归属就只消费显式来源。成功返回最终 `case_id` 与 `invoice_row_ids[]`，页面随后只执行一次 canonical Workbench 回读。
 
+`GET /api/workbench/oa-invoice-supplements/gallery?page_size=9&cursor=...` 是补充凭证 owner 的全局只读列表。`page_size` 为 `1..9`，opaque cursor 绑定上一页末尾 `(created_at,id)`；响应为 `documents,page_size,has_more,next_cursor`，不返回 total、文件二进制或 raw payload。document 输出 `id,relation_case_id,oa_row_id,expense_item_id,file_name,content_type,sha256,size_bytes,created_by,created_at,content_url,thumbnail_url`。只列出 active 且 file object 未 tombstone 的记录。
+
+`GET /api/workbench/oa-invoice-supplements/documents/{id}/thumbnail` 返回有界 JPEG 缩略图：图片按最长边 360px 缩放，PDF 只渲染第一页；返回私有 immutable cache 与内容 SHA ETag。缩略图失败返回 `422 supporting_document_preview_unavailable`，客户端必须降级为文件类型图标；原文件仍由既有 `/content` 端点内联返回。两个 GET 都不产生业务写、queue、matching 或 read-model I/O。
+
 `POST /api/workbench/actions/assign-invoice-expense-items` 把已属于同一 active relation、但缺少有效费用明细来源边的一张 canonical invoice 显式归属到一个或多个 OA 费用明细。请求为：
 
 ```json

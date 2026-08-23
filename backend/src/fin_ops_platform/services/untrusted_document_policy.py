@@ -102,6 +102,48 @@ def inspect_untrusted_document(
     )
 
 
+def render_document_thumbnail(*, document: ValidatedDocument, max_edge: int = 360) -> bytes:
+    """Render a bounded JPEG thumbnail from a document that already passed inspection."""
+    if not isinstance(max_edge, int) or max_edge < 1 or max_edge > 1_024:
+        raise UntrustedDocumentError("document_thumbnail_size_invalid")
+    try:
+        if document.kind in {"jpeg", "png"}:
+            with Image.open(BytesIO(document.content), formats=("JPEG", "PNG")) as source:
+                source.load()
+                image = ImageOps.exif_transpose(source)
+                image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+                if image.mode in {"RGBA", "LA"} or "transparency" in image.info:
+                    rgba = image.convert("RGBA")
+                    rgb = Image.new("RGB", rgba.size, "white")
+                    rgb.paste(rgba, mask=rgba.getchannel("A"))
+                else:
+                    rgb = image.convert("RGB")
+        elif document.kind == "pdf":
+            pdf = fitz.open(stream=document.content, filetype="pdf")
+            try:
+                page = pdf.load_page(0)
+                longest_edge = max(float(page.rect.width), float(page.rect.height))
+                if longest_edge <= 0:
+                    raise UntrustedDocumentError("document_pdf_invalid")
+                scale = min(2.0, max_edge / longest_edge)
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                rgb = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+            finally:
+                pdf.close()
+        else:
+            raise UntrustedDocumentError("document_thumbnail_not_supported")
+
+        output = BytesIO()
+        rgb.save(output, format="JPEG", quality=82, optimize=True)
+        return output.getvalue()
+    except UntrustedDocumentError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+        raise UntrustedDocumentError("document_image_too_large") from None
+    except Exception:
+        raise UntrustedDocumentError("document_thumbnail_invalid") from None
+
+
 def normalize_image_for_ocr(*, content: bytes, limits: DocumentLimits) -> bytes:
     detected_kind = _detect_image_kind(content)
     if detected_kind is None:

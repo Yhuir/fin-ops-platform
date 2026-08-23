@@ -1,5 +1,5 @@
 import { Alert, Button, Chip, ListBox, Select, Tabs } from "@heroui/react";
-import { ArrowLeft, FilePlus2, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react";
+import { ArrowLeft, FilePlus2, Files, RefreshCw, Search, Trash2, UploadCloud } from "lucide-react";
 import { type DragEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
@@ -19,6 +19,7 @@ import {
 import AppDrawer from "../common/AppDrawer";
 import PageScaffold from "../common/PageScaffold";
 import ManualInvoiceEntryDrawer from "./ManualInvoiceEntryDrawer";
+import SupportingDocumentGalleryDrawer from "./SupportingDocumentGalleryDrawer";
 import {
   confirmImportFiles,
   discardImportSession,
@@ -766,6 +767,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [mappingRetryingFileId, setMappingRetryingFileId] = useState<string | null>(null);
   const [isDiscarding, setIsDiscarding] = useState(false);
   const [manualInvoiceEntryOpen, setManualInvoiceEntryOpen] = useState(false);
+  const [supportingDocumentGalleryOpen, setSupportingDocumentGalleryOpen] = useState(false);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
   const mountedRef = useRef(false);
 
@@ -1413,6 +1415,17 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 发票录入
               </Button>
             ) : null}
+            {mode === "invoice" ? (
+              <Button
+                onPress={() => setSupportingDocumentGalleryOpen(true)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <Files aria-hidden="true" size={16} />
+                补充凭证
+              </Button>
+            ) : null}
             <Button
               isDisabled={isPreviewing || isConfirming || isDiscarding || isRefreshingContext || settingsLoading || readyEtcTasksLoading}
               onPress={handleRefresh}
@@ -1707,12 +1720,18 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       </PageScaffold>
 
       {mode === "invoice" ? (
-        <ManualInvoiceEntryDrawer
-          disabled={!canMutateData || healthStatus.blocksMutations}
-          onClose={() => setManualInvoiceEntryOpen(false)}
-          onImportAccepted={handleManualInvoiceImportAccepted}
-          open={manualInvoiceEntryOpen}
-        />
+        <>
+          <ManualInvoiceEntryDrawer
+            disabled={!canMutateData || healthStatus.blocksMutations}
+            onClose={() => setManualInvoiceEntryOpen(false)}
+            onImportAccepted={handleManualInvoiceImportAccepted}
+            open={manualInvoiceEntryOpen}
+          />
+          <SupportingDocumentGalleryDrawer
+            onClose={() => setSupportingDocumentGalleryOpen(false)}
+            open={supportingDocumentGalleryOpen}
+          />
+        </>
       ) : null}
 
       <AppDrawer

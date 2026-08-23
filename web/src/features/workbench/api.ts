@@ -50,6 +50,7 @@ import type {
   WorkbenchInvoiceExpenseItemAssignmentPayload,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
+  WorkbenchOaSupportingDocumentGalleryPage,
 } from "./types";
 import {
   WORKBENCH_AMOUNT_ANOMALY_CODES,
@@ -1486,8 +1487,10 @@ type ApiWorkbenchOaSupportingDocument = {
   content_type?: string | null;
   sha256?: string | null;
   size_bytes?: string | number | null;
+  created_by?: string | null;
   created_at?: string | null;
   content_url?: string | null;
+  thumbnail_url?: string | null;
 };
 
 function mapSupportingDocument(document: ApiWorkbenchOaSupportingDocument): WorkbenchOaSupportingDocument {
@@ -1500,8 +1503,37 @@ function mapSupportingDocument(document: ApiWorkbenchOaSupportingDocument): Work
     contentType: toDisplayValue(document.content_type, "application/octet-stream"),
     sha256: toDisplayValue(document.sha256, ""),
     sizeBytes: toCount(document.size_bytes),
+    createdBy: toDisplayValue(document.created_by, ""),
     createdAt: toDisplayValue(document.created_at, ""),
     contentUrl: toDisplayValue(document.content_url, ""),
+    thumbnailUrl: toDisplayValue(document.thumbnail_url, ""),
+  };
+}
+
+export const WORKBENCH_SUPPORTING_DOCUMENT_GALLERY_PAGE_SIZE = 9;
+
+export async function listWorkbenchOaSupportingDocumentGallery({
+  cursor = "",
+  signal,
+}: {
+  cursor?: string;
+  signal?: AbortSignal;
+} = {}): Promise<WorkbenchOaSupportingDocumentGalleryPage> {
+  const query = new URLSearchParams({
+    page_size: String(WORKBENCH_SUPPORTING_DOCUMENT_GALLERY_PAGE_SIZE),
+  });
+  if (cursor) query.set("cursor", cursor);
+  const payload = await requestJson<{
+    documents?: ApiWorkbenchOaSupportingDocument[];
+    page_size?: number | null;
+    has_more?: boolean | null;
+    next_cursor?: string | null;
+  }>(`/api/workbench/oa-invoice-supplements/gallery?${query.toString()}`, { signal });
+  return {
+    documents: (payload.documents ?? []).map(mapSupportingDocument),
+    pageSize: toCount(payload.page_size) || WORKBENCH_SUPPORTING_DOCUMENT_GALLERY_PAGE_SIZE,
+    hasMore: payload.has_more === true,
+    nextCursor: toDisplayValue(payload.next_cursor, "") || null,
   };
 }
 

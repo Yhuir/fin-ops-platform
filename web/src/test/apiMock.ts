@@ -4865,6 +4865,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         templates: templateRegistry,
       },
     }),
+    "/api/workbench/oa-invoice-supplements/gallery": () => ({
+      body: {
+        documents: [],
+        page_size: 9,
+        has_more: false,
+        next_cursor: null,
+      },
+    }),
     "/api/workbench": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       if (options.workbenchErrorMonths?.includes(month)) {

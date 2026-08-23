@@ -1,6 +1,14 @@
 # 关联台测试与验证
 
-日期：2026-08-22
+日期：2026-08-23
+
+## 2026-08-23 补充凭证全局只读画廊
+
+- Service/repository：`test_workbench_oa_supporting_document_service.py` 覆盖 active-only metadata page、稳定 `(created_at,id)` cursor、1～9 page size、列表不含二进制，以及 JPG/PNG/PDF 缩略图不改原文件；repository 测试锁定 keyset predicate、部分索引排序和 `limit=page_size+1`。
+- API contract：`test_workbench_invoice_supplement_api.py` 覆盖 gallery shape、非法 page size、JPEG thumbnail、ETag/private immutable cache，并回归 scoped upload/list/content/delete。
+- Frontend：`SupportingDocumentGalleryDrawer.test.tsx` 覆盖打开前零请求、九卡首屏、加载更多、同抽屉 PDF 预览和空状态；`ImportCenterPage.test.tsx` 覆盖 invoice-only 入口与 read-only 可见；`WorkbenchApi.test.ts` 覆盖 cursor/DTO mapper。
+- Read model/worker：不适用。gallery GET 只读 owner repository/file store，不 enqueue、不访问 matching/read-model/worker/cache；migration 只新增 active 时间游标部分索引。
+- Regression：现有 `WorkbenchInvoiceEntryDrawer.test.tsx` 继续保护补充凭证上传/删除和正式发票录入，`groupDisplayModel.test.ts` 继续保护当前 OA 明细内局部展示，没有删除现役 scoped 链路。
 
 ## 2026-08-22 relation invoice 显式 OA 明细归属
 

@@ -6,6 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from fin_ops_platform.services.audit import AuditTrailService
+from fin_ops_platform.services.workbench_oa_supporting_document_service import (
+    WorkbenchOaSupportingDocumentError,
+)
 
 from tests.app_test_support import build_local_state_application
 
@@ -224,6 +227,61 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
         self.assertEqual(content.headers["Content-Type"], "application/pdf")
         self.assertEqual(deleted.status_code, 200)
         service.delete.assert_called_once()
+
+    def test_document_gallery_and_thumbnail_are_read_only_and_bounded(self) -> None:
+        app = build_local_state_application()
+        document = {
+            "id": "00000000-0000-4000-8000-000000000001",
+            "file_name": "voucher.pdf",
+            "content_type": "application/pdf",
+            "content_sha256": "abc123",
+        }
+        service = SimpleNamespace(
+            gallery=Mock(return_value={
+                "documents": [document],
+                "page_size": 9,
+                "has_more": False,
+                "next_cursor": None,
+            }),
+            thumbnail=Mock(return_value=(document, b"\xff\xd8\xffthumbnail")),
+        )
+
+        with patch.object(app, "_workbench_oa_supporting_document_service", return_value=service):
+            gallery = app.handle_request(
+                "GET",
+                "/api/workbench/oa-invoice-supplements/gallery?page_size=9&cursor=cursor-1",
+            )
+            thumbnail = app.handle_request(
+                "GET",
+                "/api/workbench/oa-invoice-supplements/documents/00000000-0000-4000-8000-000000000001/thumbnail",
+            )
+
+        self.assertEqual(gallery.status_code, 200)
+        self.assertFalse(json.loads(gallery.body)["has_more"])
+        service.gallery.assert_called_once_with(page_size=9, cursor="cursor-1")
+        self.assertEqual(thumbnail.status_code, 200)
+        self.assertEqual(thumbnail.headers["Content-Type"], "image/jpeg")
+        self.assertEqual(thumbnail.headers["Cache-Control"], "private, max-age=86400, immutable")
+        self.assertEqual(thumbnail.headers["ETag"], '"abc123-thumbnail-v1"')
+
+    def test_document_gallery_rejects_invalid_page_size(self) -> None:
+        app = build_local_state_application()
+        service = SimpleNamespace(
+            gallery=Mock(side_effect=WorkbenchOaSupportingDocumentError(
+                "supporting_document_page_size_invalid",
+                "每次只能读取 1 至 9 个补充凭证。",
+            )),
+        )
+
+        with patch.object(app, "_workbench_oa_supporting_document_service", return_value=service):
+            response = app.handle_request(
+                "GET",
+                "/api/workbench/oa-invoice-supplements/gallery?page_size=all",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.body)["error"], "supporting_document_page_size_invalid")
+        service.gallery.assert_called_once_with(page_size=0, cursor="")
 
     def test_document_upload_persists_target_file_and_preview_evidence(self) -> None:
         app = build_local_state_application()

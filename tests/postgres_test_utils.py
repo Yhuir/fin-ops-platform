@@ -163,6 +163,7 @@ EXPECTED_MIGRATION_FILES = [
     "0149_remove_read_model_runtime.sql",
     "0150_workbench_oa_supporting_documents.sql",
     "0151_workbench_matching_worker_idempotency_grant.sql",
+    "0152_workbench_supporting_document_gallery_index.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (

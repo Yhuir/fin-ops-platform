@@ -19,6 +19,7 @@ from fin_ops_platform.services.untrusted_document_policy import (
     DocumentLimits,
     UntrustedDocumentError,
     inspect_untrusted_document,
+    render_document_thumbnail,
 )
 
 
@@ -49,6 +50,36 @@ class UntrustedDocumentPolicyTests(unittest.TestCase):
 
         self.assertEqual(document.kind, "png")
         self.assertTrue((document.ocr_content or b"").startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_valid_image_and_pdf_render_bounded_jpeg_thumbnails(self) -> None:
+        for file_name, content, kind in (
+            ("invoice.png", _image_bytes(), "png"),
+            ("invoice.pdf", _pdf_bytes(), "pdf"),
+        ):
+            with self.subTest(kind=kind):
+                document = inspect_untrusted_document(
+                    file_name=file_name,
+                    content=content,
+                    allowed_kinds=frozenset({kind}),
+                    limits=DocumentLimits(max_bytes=1024 * 1024),
+                )
+
+                thumbnail = render_document_thumbnail(document=document, max_edge=64)
+
+                with Image.open(BytesIO(thumbnail)) as image:
+                    self.assertEqual(image.format, "JPEG")
+                    self.assertLessEqual(max(image.size), 64)
+
+    def test_thumbnail_rejects_invalid_bounds(self) -> None:
+        document = inspect_untrusted_document(
+            file_name="invoice.png",
+            content=_image_bytes(),
+            allowed_kinds=frozenset({"png"}),
+            limits=DocumentLimits(max_bytes=1024 * 1024),
+        )
+
+        with self.assertRaisesRegex(UntrustedDocumentError, "document_thumbnail_size_invalid"):
+            render_document_thumbnail(document=document, max_edge=0)
 
     def test_extension_signature_mismatch_and_unknown_binary_are_rejected(self) -> None:
         for file_name, content in (

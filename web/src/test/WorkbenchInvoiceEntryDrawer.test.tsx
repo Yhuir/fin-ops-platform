@@ -60,8 +60,10 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
       contentType: "image/png",
       sha256: "sha",
       sizeBytes: 12,
+      createdBy: "finance-user",
       createdAt: "2026-08-18",
       contentUrl: "/documents/document-1/content",
+      thumbnailUrl: "/documents/document-1/thumbnail",
     }]);
     vi.mocked(deleteWorkbenchOaSupportingDocument).mockResolvedValue();
     vi.mocked(previewWorkbenchManualInvoices).mockResolvedValue(batchPreview);

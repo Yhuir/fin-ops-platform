@@ -163,6 +163,7 @@ EXPECTED_MIGRATIONS = [
     "0149_remove_read_model_runtime.sql",
     "0150_workbench_oa_supporting_documents.sql",
     "0151_workbench_matching_worker_idempotency_grant.sql",
+    "0152_workbench_supporting_document_gallery_index.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -322,7 +323,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 152)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 153)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -339,11 +340,16 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
 
     def test_workbench_supporting_documents_have_exact_item_lookup_and_file_ownership(self) -> None:
         sql = (MIGRATIONS_DIR / "0150_workbench_oa_supporting_documents.sql").read_text(encoding="utf-8").lower()
+        gallery_sql = (
+            MIGRATIONS_DIR / "0152_workbench_supporting_document_gallery_index.sql"
+        ).read_text(encoding="utf-8").lower()
 
         self.assertIn("create table if not exists app.workbench_oa_supporting_documents", sql)
         self.assertIn("file_object_id uuid not null references app.file_objects(id)", sql)
         self.assertIn("oa_row_id, expense_item_id, content_sha256", sql)
         self.assertIn("where status = 'active'", sql)
+        self.assertIn("(created_at desc, id desc)", gallery_sql)
+        self.assertIn("where status = 'active'", gallery_sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
         sql = (

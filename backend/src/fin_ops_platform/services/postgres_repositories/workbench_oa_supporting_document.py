@@ -88,6 +88,38 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
             (oa_row_id, expense_item_id),
         )]
 
+    def list_active_page(
+        self,
+        *,
+        cursor_created_at: str | None,
+        cursor_id: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        cursor_predicate = ""
+        params: tuple[Any, ...] = ()
+        if cursor_created_at is not None and cursor_id is not None:
+            cursor_predicate = (
+                "and (document.created_at, document.id) "
+                "< (%s::timestamptz, %s::uuid)"
+            )
+            params = (cursor_created_at, cursor_id)
+        return [dict(row) for row in self._connection.fetch_all(
+            f"""
+            select document.id::text as id, document.relation_case_id, document.oa_row_id,
+                   document.expense_item_id, document.original_filename,
+                   document.content_type, document.content_sha256, document.size_bytes,
+                   document.created_by, document.created_at::text
+            from app.workbench_oa_supporting_documents document
+            join app.file_objects file on file.id = document.file_object_id
+            where document.status = 'active'
+              and file.tombstoned_at is null
+              {cursor_predicate}
+            order by document.created_at desc, document.id desc
+            limit %s
+            """,
+            (*params, limit),
+        )]
+
     def get_active(self, document_id: str) -> dict[str, Any] | None:
         row = self._connection.fetch_one(
             """

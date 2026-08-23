@@ -315,6 +315,12 @@ describe("Import pages", () => {
     expectProjectImportShell();
     const invoiceUploadInput = expectProjectUploadZone("上传发票文件");
     const manualEntryButton = screen.getByRole("button", { name: "发票录入" });
+    const supportingDocumentButton = screen.getByRole("button", { name: "补充凭证" });
+    await user.click(supportingDocumentButton);
+    expect(await screen.findByRole("dialog", { name: "补充凭证" })).toBeInTheDocument();
+    expect(await screen.findByText("暂无补充凭证")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭补充凭证" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "补充凭证" })).not.toBeInTheDocument());
     await user.click(manualEntryButton);
     expect(await screen.findByRole("dialog", { name: "发票录入" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭发票录入" }));
@@ -367,6 +373,7 @@ describe("Import pages", () => {
 
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "发票录入" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "补充凭证" })).toBeInTheDocument();
   });
 
   test("invoice import with no declared targets completes without probing Workbench", async () => {

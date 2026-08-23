@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-23 - 补充凭证全局只读分页与缩略图
+
+- 在既有 `app.workbench_oa_supporting_documents` owner 上增加 active-only 全局 metadata query 和按需 thumbnail；未建立第二表、第二文件存储、Read Model、worker 或 cache owner。
+- Repository 使用 `(created_at,id)` keyset 和 `page_size + 1`，migration 只增加部分索引；列表不读取文件内容，原文件只在用户预览时通过既有 content API 获取。
+- 缩略图复用共享不可信文档校验，图片保持方向并缩放，PDF 只渲染第一页；生成失败由前端文件类型图标降级，不影响列表。
+- 旧代码扫描确认按 OA 子付款项的上传、列表、软删除和 content 都仍是正式链路，不能删除；本次复用并扩展现有 service/repository，未保留并行 fallback。
+
 ## 2026-08-21 - 异常抽屉七分类与仅资料队列闭环
 
 - 队列口径：每个未配对/已配对 bucket 内增加“金额异常 / 仅资料异常”两种互斥视图。金额视图按服务端七分类显示唯一关系数；仅资料视图只包含没有金额分类、但存在附件异常的关系。金额与资料并存时金额分类拥有该关系，资料 Chip 作为附属证据保留；多个异常 item 不复制关系。

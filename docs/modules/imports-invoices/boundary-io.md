@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-08-20
+日期：2026-08-23
 
 ## 模块化状态
 
@@ -28,6 +28,7 @@
 - 不直接处理页面 read model projection。
 - 不直接维护进项使用、销项收款或待找发票业务规则。
 - 不绕过 import preview audit。
+- 不拥有补充凭证元数据、文件对象、上传或软删除；统一查看只调用关联台 owner 的只读 gallery/content API。
 
 ## 输入 I/O
 
@@ -41,6 +42,7 @@
 | 预览恢复/放弃 | `GET /imports/files/sessions?mode=invoice`、`POST /imports/files/discard` | 服务端仅列出当前认证用户的活跃预览。放弃校验 owner 并事务化终结 file/session/pending batch；已确认或已创建活跃/成功 job 时拒绝。 |
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。发票行输出发票号码、开票日期、销方、购方、金额、税额、价税合计等用户复核字段；不得套用银行账户/交易方向字段。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 有持久化 preview session 时精确重读 `/imports/files/sessions/{session_id}`；保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |
+| 补充凭证统一查看 | `GET /api/workbench/oa-invoice-supplements/gallery` | 仅在发票导入页抽屉打开后按 9 条 cursor page 读取 active 元数据；图片/PDF 缩略图 lazy load，点击后读取既有 content API。零 mutation、零 import session、零 relation/matching/read-model/worker I/O。 |
 | Job event | import job queue | 后台可恢复处理；相同 import idempotency key 只接受相同 request fingerprint。瞬时失败归还 pending 并由 durable outbox 重试，达到最大次数才终态失败；用户再次确认同一请求时，terminal failed/partial job 必须原子复用原 job id 并重新 queued/pending，禁止新建冲突 job；活跃 processing lease 不得被并发 worker 接管。 |
 | Background job progress | background job repository | 只按 canonical `job_id` 单行更新；禁止全量回写历史 background job snapshot，历史 raw payload 的旧 id 不得污染发票导入事务。 |
 
@@ -75,7 +77,8 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 | 层 | 文件或目录 |
 | --- | --- |
 | Frontend page | `web/src/pages/imports/ImportInvoicesPage.tsx` |
-| Frontend components | `web/src/components/imports/ImportWorkflowPage.tsx`、`ManualInvoiceEntryDrawer.tsx`、`ManualInvoiceBatchEditor.tsx` |
+| Frontend components | `web/src/components/imports/ImportWorkflowPage.tsx`、`ManualInvoiceEntryDrawer.tsx`、`ManualInvoiceBatchEditor.tsx`、`SupportingDocumentGalleryDrawer.tsx` |
+| Cross-module read client | `web/src/features/workbench/api.ts`、`types.ts`；补充凭证 owner 仍在 reconciliation-workbench |
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `manual_invoice_entry_service.py`、`oa_attachment_invoice_service.py`、`import_file_service.py`、`imports.py`、`workbench_invoice_supplement_service.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py`、`import_lifecycle_service.py` |
@@ -104,6 +107,8 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - `tests/test_workbench_invoice_supplement_api.py`
 - `tests/test_import_lifecycle_service.py`
 - `web/src/test/ImportCenterPage.test.tsx`
+- `web/src/test/SupportingDocumentGalleryDrawer.test.tsx`
+- `web/src/test/WorkbenchApi.test.ts`
 - `web/e2e/imports-invoices-flow.spec.ts`
 
 ## 当前缺口和删除条件
