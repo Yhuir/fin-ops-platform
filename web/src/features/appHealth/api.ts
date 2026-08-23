@@ -8,8 +8,7 @@ import type {
   OperationsDashboardPayload,
   BankImportWithdrawalPayload,
   OperationsImportHistoryPayload,
-  PageAuditPageKey,
-  PageAuditPayload,
+  AppHealthSystemAuditPayload,
 } from "./types";
 
 async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -132,12 +131,9 @@ export async function withdrawBankTransactionImport(
   }
 }
 
-export async function fetchPageAudit<T extends PageAuditPayload = PageAuditPayload>(
-  pageKey: PageAuditPageKey,
-  signal?: AbortSignal,
-): Promise<T> {
-  return requestJson<T>(
-    `/api/operations/app-health/page-audit?page=${encodeURIComponent(pageKey)}`,
+export async function fetchAppHealthSystemAudit(signal?: AbortSignal): Promise<AppHealthSystemAuditPayload> {
+  return requestJson<AppHealthSystemAuditPayload>(
+    "/api/operations/app-health/page-audit?page=app-health-operations",
     signal,
   );
 }

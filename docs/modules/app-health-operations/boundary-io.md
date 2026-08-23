@@ -6,7 +6,7 @@
 
 - 聚合 session、OA sync、background jobs、四个 required worker、PostgreSQL 通用 outbox 和依赖状态。
 - 展示 HTTP/DB request timing、import inventory、operation audit。
-- 编排只读 canonical page/system audit。
+- 编排只读 canonical page proof / System Audit；前端只允许 App Health 发起固定 System Audit，业务页面不暴露 Audit 控件。
 - Admin-only；不直接修改 business facts。
 
 ## 输入
@@ -23,7 +23,7 @@
 
 - `/api/app-health`：bounded global status。
 - `/api/operations/app-health-dashboard`：admin-only inventory/performance/runtime DTO。
-- `/api/operations/app-health/page-audit`：page/system integrity proof 与 bounded issue samples。
+- `/api/operations/app-health/page-audit`：后端 page proof dispatch 与前端唯一 System Audit 的 bounded report。
 - `/health`、`/health/ready`、`/metrics`：liveness/readiness/Prometheus。
 
 输出不包含旧 projection registry、scope/readiness 或 freshness summary。Queue 只显示 PostgreSQL 通用 event types，

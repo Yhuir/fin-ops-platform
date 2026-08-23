@@ -35,7 +35,6 @@
 - `backend/src/fin_ops_platform/services/postgres_repositories/oa_applicant_credentials.py`
 - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
 - `backend/src/fin_ops_platform/services/app_status_domain_registry.py`
-- `backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
 
 ## 当前边界
 

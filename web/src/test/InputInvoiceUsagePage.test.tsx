@@ -202,29 +202,6 @@ function installInputInvoiceUsageFetch(
         headers: { "Content-Type": "application/json" },
       });
     }
-    if (
-      url.pathname === "/api/operations/app-health/page-audit"
-      && url.searchParams.get("page") === "input-invoice-usage"
-    ) {
-      return new Response(JSON.stringify({
-        overall_status: "pass",
-        audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
-        audit_contract: {
-          database_snapshot: true,
-          snapshot_consistency: "repeatable_read_read_only",
-          proof_availability: "ready",
-          contract_revision: "page-audit-contract.v9",
-        },
-        summary: {
-          blocking_issue_sample_count: 0,
-          issue_sample_count: 0,
-        },
-        issues: [],
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
     if (url.pathname.startsWith("/api/input-invoice-usage/rows/") && url.pathname.endsWith("/relation-details")) {
       const kind = url.searchParams.get("kind") ?? "oa";
       const title = kind === "bank" ? "银行流水关联明细" : kind === "invoice" ? "发票关联明细" : "OA关联明细";
@@ -556,25 +533,6 @@ describe("Input invoice usage page", () => {
     expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("keyword")).toBe("已支付");
     expect(rowsRequests(fetchMock).every((url) => url.searchParams.get("page_size") !== "1")).toBe(true);
     expect(within(page).getByLabelText("进项发票使用情况数据统计")).toHaveTextContent("进项发票787张");
-  });
-
-  test("admin can run title audit icon and see data relation freshness result", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installInputInvoiceUsageFetch();
-
-    renderAuthenticatedAppAt("/input-invoice-usage", { session: { canAdminAccess: true } });
-
-    const page = await screen.findByTestId("input-invoice-usage-page");
-    const auditButton = await within(page).findByRole("button", { name: "Audit 进项发票使用情况" });
-    await user.click(auditButton);
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/operations/app-health/page-audit?page=input-invoice-usage"))).toBe(true);
-    });
-    const status = await within(page).findByText(/Audit 通过/);
-    expect(status).toHaveTextContent("已登记 App 内部合同一致");
-    expect(status).toHaveTextContent("已登记配对证明一致");
-    expect(status).toHaveTextContent("Fresh");
   });
 
   test("adds sidebar route and renders the project dense table contract", async () => {

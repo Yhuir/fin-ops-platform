@@ -1,20 +1,20 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { fetchPageAudit } from "../features/appHealth/api";
+import { fetchAppHealthSystemAudit } from "../features/appHealth/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("app health page business audit API", () => {
-  test("requests the dedicated page audit endpoint with the page key", async () => {
+describe("app health System Audit API", () => {
+  test("requests only the centralized System Audit endpoint", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      expect(url).toContain("/api/operations/app-health/page-audit?page=bank-details");
+      expect(url).toContain("/api/operations/app-health/page-audit?page=app-health-operations");
       return new Response(JSON.stringify({
-        mode: "page-canonical-data-audit",
-        page_key: "bank-details",
-        domain_key: "bank_details",
+        mode: "app-health-system-audit",
+        page_key: "app-health-operations",
+        domain_key: "app_health_operations",
         overall_status: "pass",
         audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
         summary: {
@@ -29,13 +29,13 @@ describe("app health page business audit API", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const payload = await fetchPageAudit("bank-details");
+    const payload = await fetchAppHealthSystemAudit();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(payload).toMatchObject({
-      mode: "page-canonical-data-audit",
-      page_key: "bank-details",
-      domain_key: "bank_details",
+      mode: "app-health-system-audit",
+      page_key: "app-health-operations",
+      domain_key: "app_health_operations",
       overall_status: "pass",
     });
   });

@@ -25,7 +25,7 @@
 - 查询/导出合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_export.py`、`oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py`
 - 命令：`oa_pending_payment_command_service.py`、`workbench_relation_command_service.py`
 - Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_admission.py`、`oa_projection.py`
-- Audit：`postgres_repositories/page_business_audit.py`、`web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx`
+- System Audit 子页 proof：`postgres_repositories/page_business_audit.py`；OA 待付款页面不展示 Audit 控件。
 
 ## 当前有效读链路
 

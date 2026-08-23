@@ -146,7 +146,6 @@ describe("Import pages", () => {
     });
 
     expect(await screen.findByRole("heading", { name: "银行流水导入" }, { timeout: ROUTE_RENDER_TIMEOUT })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Audit 银行流水导入" })).toBeInTheDocument();
     expectProjectImportShell();
     const bankUploadInput = expectProjectUploadZone("上传银行流水文件");
     expect(screen.queryByRole("dialog", { name: "银行流水导入" })).not.toBeInTheDocument();
@@ -395,7 +394,7 @@ describe("Import pages", () => {
     expect(requestedPaths).not.toContain("/api/workbench");
   });
 
-  test("invoice import exposes the unified Audit only to administrators", async () => {
+  test("invoice import does not expose a page Audit control", async () => {
     installMockApiFetch({ sessionAccessTier: "admin" });
 
     const { unmount } = renderAppAt("/imports/invoices", {
@@ -405,7 +404,8 @@ describe("Import pages", () => {
       },
     });
 
-    expect(await screen.findByRole("button", { name: "Audit 发票导入" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Audit 发票导入" })).not.toBeInTheDocument();
     unmount();
 
     installMockApiFetch({ sessionAccessTier: "full_access" });
@@ -618,13 +618,14 @@ describe("Import pages", () => {
     expect(screen.getByRole("button", { name: "开始预览" })).toBeDisabled();
   });
 
-  test("ETC invoice import exposes the unified Audit only to administrators", async () => {
+  test("ETC invoice import does not expose a page Audit control", async () => {
     installMockApiFetch({ sessionAccessTier: "admin" });
     const { unmount } = renderAppAt("/imports/etc-invoices", {
       session: { accessTier: "admin", canAdminAccess: true },
     });
 
-    expect(await screen.findByRole("button", { name: "Audit ETC发票导入" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Audit ETC发票导入" })).not.toBeInTheDocument();
     unmount();
 
     installMockApiFetch({ sessionAccessTier: "full_access" });

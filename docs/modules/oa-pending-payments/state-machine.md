@@ -141,22 +141,15 @@ validate actor/tenant/payload/idempotency
 
 重复提交必须幂等；多个 active owner、版本冲突或正式关系冲突不得半写。历史 pending relation/claim 不参与运行时。
 
-## Audit 状态
+## System Audit 子页 proof
 
-页面 Audit icon 只在管理员点击时执行一次 operations Audit：
+OA 待付款页面不展示 Audit 控件。管理员在 App Health 运行 System Audit 时，后端在同一只读 snapshot 中执行本模块 proof：
 
 - 校验 canonical relation member 存在性和 active identity 唯一性。
 - 独立计算 active OA+outflow 期望关系集，并与页面 canonical consumer 对照。
 - 关系存在但页面遗漏、没有 outflow、支付状态错误或 relation member 缺失时，Audit 必须返回 blocking integrity issue。
 
-| Audit 结果 | 页面文案 |
-| --- | --- |
-| pass + proof ready + repeatable-read snapshot | `Audit 通过 · App 内部数据一致` |
-| audit freshness/queue not ready | `Audit 校验中 · 新数据正在生成` |
-| integrity issues | `Audit 未通过 · 发现 N 个一致性问题` |
-| request/proof error | `Audit 无法完成 · 请查看诊断` |
-
-Audit 不调用 operation barrier、不轮询，也不作为 rows 正确性的 gate。全局 Audit 仍登记旧 OA readiness 的清理属于主控 HANDOFF。
+该 proof 不调用 operation barrier、不轮询，也不作为 rows 正确性的 gate；它只向 System Audit 返回结构化 integrity/queue 结果和有界问题样本。
 
 ## 禁止状态与回流
 

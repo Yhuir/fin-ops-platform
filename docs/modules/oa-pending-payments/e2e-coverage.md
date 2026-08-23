@@ -12,7 +12,7 @@
 | `OA-PENDING-E2E-006` | covered locally | confirm-paid flow、command/API/component tests | 写回、冲突、失败、写后 GET；真实 MySQL+PG 待统一验证 |
 | `OA-PENDING-E2E-007` | covered locally | bank-link flow、command/relation tests | formal relation、唯一 case 扩展、自动写回、冲突 |
 | `OA-PENDING-E2E-008` | covered conditionally | `test_oa_pending_payment_postgres_integration.py` | active -> withdrawn 后 direct GET；需 `FIN_OPS_TEST_DATABASE_URL` |
-| `OA-PENDING-E2E-009` | covered | `OaPendingPaymentAuditIcon.test.tsx` | 单次 Audit、中文文案、无 barrier |
+| `OA-PENDING-E2E-009` | covered | `tests/test_page_audit_registry.py`、`tests/test_app_health_api.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` | 页面无分散 Audit 控件；System Audit 子页 proof 只读且无 barrier |
 | `OA-PENDING-E2E-010` | covered | `oa-pending-payments-flow.spec.ts`、`OaPendingPaymentsPage.test.tsx` | 1024×420/608 视口、首次宽度、操作区、Escape/焦点、零写请求 |
 | `OA-PENDING-E2E-011` | covered | query/API/PostgreSQL integration、`OaPendingPaymentsPage.test.tsx`、`oa-pending-payments-flow.spec.ts` | 双事实源 OA-only XLSX、来源选择、权限、下载、审计、零 rows refresh/写请求；真实 PG 本地按环境 conditional |
 

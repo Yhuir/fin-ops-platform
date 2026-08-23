@@ -2,7 +2,6 @@ import { Button } from "@heroui/react";
 import { Download } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
@@ -16,7 +15,6 @@ import OaReverseWorkspaceDrawer, { type OaReversePreviewRequest } from "../compo
 import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
-import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
@@ -148,7 +146,6 @@ function normalizeFilterValue(filter: {
 
 export default function InputInvoiceUsagePage() {
   const { active, activationGeneration } = useOptionalPageActivation("input-invoice-usage");
-  const { canAdminAccess } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "input-invoice-usage",
     stateKey: "query",
@@ -433,15 +430,8 @@ export default function InputInvoiceUsagePage() {
           { label: "反提 OA 批次", value: visibleStatistics?.oaReverseBatchCount, unit: "批" },
         ]}
       />
-      {canAdminAccess ? (
-        <PageBusinessAuditIcon
-          ariaLabel="Audit 进项发票使用情况"
-          label="进项发票使用情况"
-          pageKey="input-invoice-usage"
-        />
-      ) : null}
     </div>
-  ), [canAdminAccess, loading, visibleStatistics]);
+  ), [loading, visibleStatistics]);
   return (
     <>
       <div className="input-invoice-usage-page" data-testid="input-invoice-usage-page">

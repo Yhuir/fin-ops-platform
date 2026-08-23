@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import PageScaffold from "../components/common/PageScaffold";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import QuerySearch from "../components/common/QuerySearch";
@@ -169,7 +168,7 @@ function readPersistedTagVersion() {
 export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
   const [statusFilters, setStatusFilters] = useState<StatusFilterSelection[]>(DEFAULT_STATUS_FILTERS);
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
@@ -643,13 +642,6 @@ export default function PendingInvoicesPage() {
           { label: "已关联销项票的流水", value: statistics?.linkedOutputInvoiceTransactionCount, unit: "笔" },
         ]}
       />
-      {canAdminAccess ? (
-        <PageBusinessAuditIcon
-          ariaLabel="Audit 待找发票"
-          pageKey="pending-invoices"
-          label="待找发票"
-        />
-      ) : null}
     </div>
   );
 

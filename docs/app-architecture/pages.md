@@ -59,7 +59,7 @@ OA role/permission 不反向决定 App tier。
 ## App Status
 
 Domain registry 为每页映射 route、业务 job 和外部依赖。全局状态展示 session、OA sync、jobs、四个 worker、
-queue 和 dependency health；页面 audit 直接验证 canonical snapshot 的完整性与关系一致性。
+queue 和 dependency health；业务页面不展示 Audit 控件，App Health System Audit 集中验证 canonical snapshot 的完整性与关系一致性。
 
 ## 维护要求
 

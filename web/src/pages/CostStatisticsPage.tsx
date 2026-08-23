@@ -8,7 +8,6 @@ import {
 import { useNavigate } from "react-router-dom";
 
 import BusinessPeriodPicker from "../components/common/BusinessPeriodPicker";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
@@ -339,7 +338,7 @@ export default function CostStatisticsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("cost-statistics");
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const defaultMonthBounds = buildMonthDateBounds(DEFAULT_MONTH);
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
     pageKey: "cost-statistics",
@@ -1603,13 +1602,6 @@ export default function CostStatisticsPage() {
           { label: "成本明细", value: visibleStatistics?.costTransactionCount, unit: "条" },
         ]}
       />
-      {canAdminAccess ? (
-        <PageBusinessAuditIcon
-          ariaLabel="Audit 成本统计"
-          pageKey="cost-statistics"
-          label="成本统计"
-        />
-      ) : null}
     </div>
   );
 

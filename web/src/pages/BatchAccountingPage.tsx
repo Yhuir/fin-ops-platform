@@ -15,7 +15,6 @@ import {
   FinanceTableRow,
 } from "../components/common/FinanceTable";
 import PageScaffold from "../components/common/PageScaffold";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import QuerySearch from "../components/common/QuerySearch";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
@@ -220,7 +219,7 @@ function AmountMismatchWarning({
 export default function BatchAccountingPage() {
   const { active, activationGeneration } = useOptionalPageActivation("batch-accounting");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const [bankYear, setBankYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
@@ -643,18 +642,9 @@ export default function BatchAccountingPage() {
     }
   };
 
-  const titleAccessory = canAdminAccess ? (
-    <PageBusinessAuditIcon
-      ariaLabel="Audit 日常报销批量账务管理"
-      pageKey="batch-accounting"
-      label="日常报销批量账务管理"
-    />
-  ) : null;
-
   return (
     <PageScaffold
       title="日常报销批量账务管理"
-      titleAccessory={titleAccessory}
       actions={(
         <div className="batch-accounting-page-actions">
           <Button className="batch-accounting-page-action" onPress={handleOpenTagRules} size="sm" variant="outline">

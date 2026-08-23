@@ -5,7 +5,6 @@ import { Download, RefreshCw } from "lucide-react";
 import AppDrawer from "../components/common/AppDrawer";
 import { FinanceTablePagination } from "../components/common/FinanceTable";
 import PageScaffold from "../components/common/PageScaffold";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
 import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
@@ -323,7 +322,7 @@ function tagSubLabel(tag: TurnoverLedgerTagDefinition) {
 export default function TurnoverLedgerPage() {
   const { active, activationGeneration } = useOptionalPageActivation("turnover-ledger");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [page, setPage] = useState(1);
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
@@ -1005,13 +1004,6 @@ export default function TurnoverLedgerPage() {
           { label: "已关联发票的流水", value: visibleStatistics?.linkedInvoiceTransactionCount, unit: "笔" },
         ]}
       />
-      {canAdminAccess ? (
-        <PageBusinessAuditIcon
-          ariaLabel="Audit 外部往来款管理"
-          pageKey="turnover-ledger"
-          label="外部往来款管理"
-        />
-      ) : null}
     </div>
   );
 

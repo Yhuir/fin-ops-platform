@@ -139,7 +139,6 @@ describe("ETC ticket management page", () => {
       pageSource.includes("DisclosureGroup") && pageSource.includes("EtcDisclosureSection") ? null : "ETC workflow should use collapsible HeroUI sections",
       pageSource.includes("ToggleButtonGroup") ? null : "ETC status switcher should use HeroUI ToggleButtonGroup",
       pageSource.includes("fullWidth") ? null : "ETC status switcher should use the native full-width layout",
-      pageSource.includes('pageKey="etc-tickets"') ? null : "ETC page should expose the unified page Audit control",
     ].filter(Boolean);
 
     expect({

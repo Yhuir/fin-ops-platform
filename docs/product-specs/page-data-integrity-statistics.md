@@ -17,8 +17,8 @@
 
 ## 数据边界
 
-- 每个页面的统计只能来自该页面自己的主查询、已发布 read model 或 direct-canonical 页面查询；不得调用 Page Audit、跨页统计 API 或统一事实源来补数。
-- 统一事实源只由独立 Page Audit 读取，用于将 canonical expected set 与页面投影、关系成员和统计结果进行对账。Audit 不进入页面热路径。
+- 每个页面的统计只能来自该页面自己的 direct-canonical 主查询；不得调用 Audit、跨页统计 API 或统一事实源来补数。
+- 页面不展示独立 Audit 按钮，也不发起 Page Audit 请求。App Health 的 System Audit 在后台 registry 边界内编排各页面 canonical proof，用于将 expected set、关系成员和统计结果进行对账；它不进入业务页面热路径。
 - 统计覆盖该页面未应用月份、搜索、筛选、排序和分页前的完整数据范围。改变这些查询条件时，标题统计不变化。
 - 数量按页面合同中的业务身份去重。折叠组、关系行和当前分页行数不得冒充 OA、流水或发票数量。
 
@@ -27,14 +27,12 @@
 - 只显示笔数、条数、张数、组数、批数等数量，不显示金额。
 - 数字使用完整十进制和千分位分隔符，不使用“万”等缩写。
 - 标题同行只展示最核心的三项；关联台可展示 OA、流水、进项、销项四项。其余完整性和配对关系指标放在简洁 Popover 中。
-- 所有拥有页面访问权限的用户都能看到统计；Page Audit 仍保持管理员权限边界。
-- 合法空集显示 `0`。完整范围 freshness 无法证明、投影缺失、schema/source version 不匹配或刷新失败时显示不可用值 `—`，不得用旧数或假 `0` 兜底。
+- 所有拥有页面访问权限的用户都能看到统计；System Audit 只在管理员可见的 App Health 运维页执行。
+- 合法空集显示 `0`。direct-canonical 查询失败或返回字段不可用时显示不可用值 `—`，不得用旧数或假 `0` 兜底。
 
-## Freshness 与对账
+## 直读与对账
 
-- read model 页面必须把全期间统计与对应 parent/all-scope 发布版本、dirty/outbox 状态及缓存版本绑定；页面局部 scope fresh 不代表全期间统计 fresh。
-- non-fresh 统计返回 `null`，并通过现有刷新网关进入 durable queue；请求线程不得同步重建，也不得直接写 queue 表。
-- direct-canonical 页面在同一主查询边界内计算未筛选统计，不新增浏览器请求。
-- 生产验收必须同时满足：页面主响应 fresh、统计恒等式成立、筛选前后统计逐字段一致、相关 Page Audit fresh/pass、durable queue 无阻塞任务。
+- 所有页面都在同一 direct-canonical 主查询边界内计算未筛选统计，不新增浏览器请求，也不依赖 projection、freshness、dirty scope、refresh worker 或 Redis。
+- 生产验收必须同时满足：页面主响应成功、统计恒等式成立、筛选前后统计逐字段一致、App Health System Audit 的内部合同通过、通用 outbox 与 required worker 无阻塞问题。
 
 常用恒等式包括：流水总数等于支出加收入；已分类加未分类、已关联加未关联分别等于流水总数；已付款加未付款等于 OA 总数；已找到加待找及页面明确排除状态应符合该页面状态合同。每个模块可在自己的 boundary I/O 中补充更具体的恒等式。

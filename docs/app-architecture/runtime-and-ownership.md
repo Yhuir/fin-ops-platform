@@ -53,7 +53,7 @@ Worker 不依赖 HTTP/Application response，不拥有页面 DTO，也不创建�
 ## App Status
 
 全局状态只聚合 session、OA sync、background jobs、四个 worker、通用 queue 和外部依赖。页面数据是否正确由
-canonical page/system audit 证明，不再由 projection freshness/status 表推导。App Health polling 是运维状态
+App Health System Audit 编排的 canonical page proof 证明，不再由 projection freshness/status 表推导。App Health polling 是运维状态
 通道，不是业务页面刷新总线。
 
 ## 性能

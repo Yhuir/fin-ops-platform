@@ -66,12 +66,12 @@
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复；恢复只写回原 tombstone 或精确缺失成员，不创建第二个业务批次，不直接写页面投影；成员修复完成后通过 historical ETC repair runtime port 执行 official lifecycle，并仅按共享消费者合同 enqueue 精确月份的 `workbench_relation`，不得投递已退役的 page `workbench` event 或 `all` scope |
 | Completed import job consumption | background job progress / current page load | ETC 发票导入 job 完成后当前可见页执行一次普通 canonical GET；其它页面不被写后强制重建。 |
 | 前端刷新提示 | `etcBusinessBatchUpdated` / `invoiceFactUpdated` | 事件仅允许刷新当前可见且订阅该领域的页面；hidden 页面忽略且不重放。事件不是 freshness 事实源，也不得触发其它页面重建 |
-| Audit proof report | 统一页面 Audit UI | 输出 canonical expected-set、结构化展示字段、批次/任务/文件/发票/导入/提交内部 typed edge、统一发票桥和 durable import queue 证明；不宣称 shared Workbench relation 或外部 ETC/OA 完整性 |
+| Audit proof report | App Health System Audit 子页结果 | 输出 canonical expected-set、结构化展示字段、批次/任务/文件/发票/导入/提交内部 typed edge、统一发票桥和 durable import queue 证明；ETC 页面不展示 Audit 控件；不宣称 shared Workbench relation 或外部 ETC/OA 完整性 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 页面 Audit：`etc-tickets` 是直接 canonical 页面；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整、pending draft/submission 完整、submitted/not-submitted 占用闭合；creating 的停留时长不参与判定。not-submitted 批次保留的是历史成员；发票已由另一个可见批次合法接管时，旧批次不再要求它保持 `unsubmitted`，当前 owner 自己的 submitted/owner/submission 规则负责闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。
+- System Audit 子页 proof：`etc-tickets` 是直接 canonical 页面；ETC 页面不展示 Audit 控件。proof 额外证明三 bucket 互斥/计数同口径、creating attempt 完整、pending draft/submission 完整、submitted/not-submitted 占用闭合；creating 的停留时长不参与判定。not-submitted 批次保留的是历史成员；发票已由另一个可见批次合法接管时，旧批次不再要求它保持 `unsubmitted`，当前 owner 自己的 submitted/owner/submission 规则负责闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，proof 把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。
 - 影响消费者：关联台 direct canonical API、`workbench_relation` 以及 invoice lifecycle、税金、成本等 direct-canonical 页面；关联台页面自身没有 refresh consumer。
 - ETC 导入逻辑上影响 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等页面，但普通完成结果不携带这些 barrier targets；页面访问时自行收敛。
 - Worker：import/runtime handler 只负责 durable 领域任务；ETC 页面没有 read model

@@ -259,7 +259,7 @@ export type OperationsDashboardPayload = {
   };
 };
 
-export type InputInvoiceUsageAuditStatus = "pass" | "issues_found" | string;
+export type PageAuditOverallStatus = "pass" | "issues_found" | string;
 
 export type PageAuditPageKey =
   | "reconciliation-workbench"
@@ -275,6 +275,7 @@ export type PageAuditPageKey =
   | "input-invoice-usage"
   | "output-invoice-collections"
   | "settings"
+  | "operation-history"
   | "app-health-operations"
   | "imports.bank-transactions"
   | "imports.invoices"
@@ -302,14 +303,6 @@ export type PageAuditSummary = {
   issue_sample_limit_per_code?: number | null;
   issue_samples_truncated?: boolean;
   detected_issue_code_count?: number | null;
-};
-
-export type InputInvoiceUsageAuditSummary = PageAuditSummary & {
-  active_input_invoice_count?: number | null;
-};
-
-export type OutputInvoiceCollectionAuditSummary = PageAuditSummary & {
-  active_output_invoice_count?: number | null;
 };
 
 export type PageAuditIssue = {
@@ -348,19 +341,11 @@ export type PageAuditPayload = {
   domain_key?: string;
   label?: string;
   generated_at?: string;
-  overall_status?: InputInvoiceUsageAuditStatus;
+  overall_status?: PageAuditOverallStatus;
   audit_status?: PageAuditStatus;
   summary?: PageAuditSummary;
   issues?: PageAuditIssue[];
   audit_contract?: PageAuditContract;
-};
-
-export type InputInvoiceUsageAuditPayload = PageAuditPayload & {
-  summary?: InputInvoiceUsageAuditSummary;
-};
-
-export type OutputInvoiceCollectionAuditPayload = PageAuditPayload & {
-  summary?: OutputInvoiceCollectionAuditSummary;
 };
 
 export type AppHealthSystemAuditPayload = PageAuditPayload & {

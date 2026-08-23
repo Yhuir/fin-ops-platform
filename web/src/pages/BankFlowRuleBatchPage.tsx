@@ -6,7 +6,6 @@ import AppDialog from "../components/common/AppDialog";
 import AppDrawer from "../components/common/AppDrawer";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import {
   FinanceTable,
   FinanceTableBody,
@@ -129,7 +128,7 @@ function mutationErrorMessage(caught: unknown, fallback: string) {
 export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { active, activationGeneration } = useOptionalPageActivation("bank-flow-rule-batches");
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<BankFlowRuleBatchStatusBucket>("unsubmitted");
   const [payload, setPayload] = useState<BankFlowRuleBatchesResponse>(EMPTY_BATCHES);
@@ -699,19 +698,9 @@ export default function BankFlowRuleBatchPage() {
     setBatchPage(Math.max(1, nextPage));
   };
 
-  const titleAccessory = canAdminAccess ? (
-    <PageBusinessAuditIcon
-      auditContextKey={`${month}:${bucket}:${batchPage}:${refreshToken}`}
-      ariaLabel="Audit 流水规则批量处理"
-      pageKey="bank-flow-rule-batches"
-      label="流水规则批量处理"
-    />
-  ) : null;
-
   return (
     <PageScaffold
       title="流水规则批量处理"
-      titleAccessory={titleAccessory}
       actions={(
         <div className="bank-flow-rule-batches-actions">
           <Button

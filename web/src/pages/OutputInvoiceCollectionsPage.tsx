@@ -1,7 +1,6 @@
 import { Button } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
@@ -13,7 +12,6 @@ import OutputInvoiceCollectionsTable from "../components/outputInvoiceCollection
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
-import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   downloadOutputInvoiceCollectionExport,
   fetchOutputInvoiceCollectionBankTransactionDetail,
@@ -132,7 +130,6 @@ function normalizeFilter(filter: {
 
 export default function OutputInvoiceCollectionsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("output-invoice-collections");
-  const { canAdminAccess } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "output-invoice-collections",
     stateKey: "query",
@@ -281,11 +278,8 @@ export default function OutputInvoiceCollectionsPage() {
         ]}
         loading={loading}
       />
-      {canAdminAccess ? (
-        <PageBusinessAuditIcon ariaLabel="Audit 销项发票收款情况" label="销项发票收款情况" pageKey="output-invoice-collections" />
-      ) : null}
     </div>
-  ), [canAdminAccess, loading, statistics]);
+  ), [loading, statistics]);
 
   const actions = (
     <div className="output-invoice-collections-actions">

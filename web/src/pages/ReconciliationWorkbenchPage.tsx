@@ -3,7 +3,6 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 
 import AppDrawer from "../components/common/AppDrawer";
 import AppDialog from "../components/common/AppDialog";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
@@ -271,7 +270,7 @@ export default function ReconciliationWorkbenchPage() {
   const { setWorkbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
   const { runOperation } = useGlobalOperationOverlay();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("reconciliation-workbench");
   const {
     detailRow,
@@ -2537,14 +2536,6 @@ export default function ReconciliationWorkbenchPage() {
                     { label: "缺发票关系组", value: statistics?.missingInvoiceGroupCount, unit: "组", tone: "warning" },
                   ]}
                 />
-                {canAdminAccess ? (
-                <PageBusinessAuditIcon
-                  ariaLabel="Audit 关联台"
-                  pageKey="reconciliation-workbench"
-                  label="关联台"
-                  auditContextKey={`${WORKBENCH_VIEW_MONTH}:${canonicalEpoch}`}
-                />
-                ) : null}
               </div>
             </div>
           </div>

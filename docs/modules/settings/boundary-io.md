@@ -87,7 +87,7 @@
 | Backend service | `app_settings_service.py`、`oa_draft_prefill.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Repository | `postgres_repositories/oa_applicant_credentials.py`、`postgres_repositories/ops_tax_etc.py`；`0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只修复 `bank_flow_rule_batch_tag_rules` 的 formal/raw 镜像一致性，不改变 canonical rule value；`0135_batch_accounting_tag_selection.sql` 只初始化缺失的批量账务选择，并在同一 SQL 保持 formal/raw normalized mirror 相等 |
 | Audit proof owner | `postgres_repositories/settings_page_audit.py`、`page_audit_registry.py`、`postgres_repositories/operations_audit.py` |
-| Lifecycle | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
+| Lifecycle / status | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`；无 read-model registry |
 | Tests | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_role_sync_service.py`、`tests/test_permissions_write_entry_inventory.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/Settings*.test.*`、`web/e2e/permissions-role-matrix.spec.ts` |
 
 ## 依赖方向

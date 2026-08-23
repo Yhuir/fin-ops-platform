@@ -48,9 +48,10 @@ class ReadModelRuntimeRemovalTests(unittest.TestCase):
     def test_http_and_frontend_contracts_have_no_projection_freshness_fields(self) -> None:
         http_probe = (BACKEND / "tools/http_slo_probe.py").read_text(encoding="utf-8")
         page_audit_types = (REPO_ROOT / "web/src/features/appHealth/types.ts").read_text(encoding="utf-8")
-        page_audit_icon = (REPO_ROOT / "web/src/components/common/PageAuditIcon.tsx").read_text(encoding="utf-8")
+        app_health_api = (REPO_ROOT / "web/src/features/appHealth/api.ts").read_text(encoding="utf-8")
+        app_health_page = (REPO_ROOT / "web/src/pages/AppHealthOperationsPage.tsx").read_text(encoding="utf-8")
 
-        for source in (http_probe, page_audit_types, page_audit_icon):
+        for source in (http_probe, page_audit_types, app_health_api, app_health_page):
             self.assertNotIn("registered_read_model", source)
             self.assertNotIn("read_model_status", source)
             self.assertNotIn("refresh_enqueued", source)

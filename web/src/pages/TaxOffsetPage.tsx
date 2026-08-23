@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { Alert, Button } from "@heroui/react";
 
 import PageScaffold from "../components/common/PageScaffold";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
@@ -61,7 +60,7 @@ function PageNote({ message, tone }: { message: string; tone: "info" | "success"
 export default function TaxOffsetPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("tax-offset");
   const currentMonthSession = usePageSessionState({
     pageKey: "tax-offset",
@@ -340,13 +339,6 @@ export default function TaxOffsetPage() {
           { label: "未选择", value: visibleStatistics?.unselectedInvoiceCount, unit: "张" },
         ]}
       />
-      {canAdminAccess ? (
-        <PageBusinessAuditIcon
-          ariaLabel="Audit 税金抵扣"
-          pageKey="tax-offset"
-          label="税金抵扣"
-        />
-      ) : null}
     </div>
   );
 

@@ -17,7 +17,7 @@ import {
 } from "../components/common/FinanceTable";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
-import { fetchAppHealthDashboard, fetchImportHistory, fetchPageAudit, withdrawBankTransactionImport } from "../features/appHealth/api";
+import { fetchAppHealthDashboard, fetchAppHealthSystemAudit, fetchImportHistory, withdrawBankTransactionImport } from "../features/appHealth/api";
 import type {
   AppHealthSystemAuditPayload,
   OperationsDashboardEndpointPerformance,
@@ -761,7 +761,7 @@ export default function AppHealthOperationsPage() {
     auditInFlightRef.current = controller;
     setAuditLoading(true);
     try {
-      const nextPayload = await fetchPageAudit<AppHealthSystemAuditPayload>("app-health-operations", controller.signal);
+      const nextPayload = await fetchAppHealthSystemAudit(controller.signal);
       setAuditPayload(nextPayload);
       if (nextPayload.page_projection) {
         setPayload(nextPayload.page_projection);

@@ -484,47 +484,6 @@ function setDocumentVisibility(state: DocumentVisibilityState) {
 }
 
 describe("Workbench row selection and detail drawer", () => {
-  test("shows the unified page Audit control to admins", async () => {
-    installMockApiFetch();
-    renderAuthenticatedAppAt("/", { session: { canAdminAccess: true } });
-
-    expect(await screen.findByRole("heading", { name: "关联台" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Audit 关联台" })).toBeInTheDocument();
-  });
-
-  test("invalidates a visible Audit proof after a newer canonical page is installed", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch({
-      workbenchOaSyncStatuses: [
-        {
-          status: "synced",
-          message: "OA 已同步",
-          dirty_scopes: [],
-          changed_scopes: [],
-          last_synced_at: "2026-04-01T11:59:00+08:00",
-          version: 1,
-        },
-        {
-          status: "synced",
-          message: "OA 已同步",
-          dirty_scopes: [],
-          changed_scopes: ["all"],
-          last_synced_at: "2026-04-01T12:00:00+08:00",
-          version: 2,
-        },
-      ],
-    });
-    renderAuthenticatedAppAt("/", { session: { canAdminAccess: true } });
-
-    await screen.findByRole("row", { name: /陈涛.*智能工厂设备商/ });
-    await user.click(screen.getByRole("button", { name: "Audit 关联台" }));
-    expect(await screen.findByText(/已登记 App 内部合同一致/)).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(screen.queryByText(/已登记 App 内部合同一致/)).not.toBeInTheDocument();
-    }, { timeout: 4_500 });
-  }, 6_000);
-
   test("clicking an open row toggles multi-selection without opening the detail drawer", async () => {
     const user = userEvent.setup();
     installMockApiFetch();

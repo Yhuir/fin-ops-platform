@@ -37,8 +37,8 @@
 | OA facts export audit | OA pending read route | read-export/full/admin 成功下载后记录 `oa_pending_payment_source_export_downloaded`；只接收 session actor、来源、数量和文件名，不接收 OA 行内容。 |
 | Workbench exception compatibility command | `POST /api/workbench/exception/apply` | 兼容 API 继续保留自动异常/行级异常能力，但 route 的 actor 只来自已认证 session；body `actor` / `confirmed_by` 不能覆盖业务或审计身份。删除未配对工具栏人工“异常处理”不等于删除该后端兼容能力。 |
 | Data reset audit | Settings request repository / settings-maintenance worker | queued 与 receipt 消费/job/outbox 同事务；started/success/partial/failed 由 worker durable audit 记录。actor 来自 admin session，reason 必填，记录 request/job/action/fingerprint/receipt，不记录 OA 密码。 |
-| Page Audit request | admin session + registered frontend page key | `PAGE_AUDIT_REGISTRY` 全覆盖校验；18 页只允许有限 executor；未实现 proof fail closed，不动态选择函数。`operation-history` 只检查覆盖点与 append-only 数据库保护，不触发业务写。 |
-| App Health system Audit request | admin session + `page=app-health-operations` | 只读；由 system owner 在一个 caller-owned PostgreSQL snapshot 内编排其余 17 页 proof。权限边界只授权读取，不授予 refresh、repair、写 read model 或生产修复能力 |
+| Page proof dispatch | System Audit + registered page key | `PAGE_AUDIT_REGISTRY` 全覆盖校验；18 页只允许有限 executor；未实现 proof fail closed，不动态选择函数。业务页面没有 Audit 控件或通用前端调用；`operation-history` proof 只检查覆盖点与 append-only 数据库保护，不触发业务写。 |
+| App Health System Audit request | admin session + `page=app-health-operations` | 唯一前端 Audit 入口，只读；由 system owner 在一个 caller-owned PostgreSQL snapshot 内编排其余 17 页 proof。权限边界只授权读取，不授予 refresh、repair 或生产修复能力 |
 | Operation history request | 005 管理员 session + filter/cursor/operation key | 只读取最近 `audit.coverage_started` 之后的 `audit.events`；列表按 request 聚合，详情只输出业务投影；非管理员 403；不输出 secret/raw payload/内部 ID，不触发 read model。 |
 | External evidence registration/revocation | 运维 CLI + manifest/artifact + `--apply --actor --reason` | 无 HTTP/UI 入口；API/worker/readonly DB role 只有 select，apply 使用受控 migrator/operator role。service 校验完整 manifest 和 artifact，repository 原子 append/revoke 并写 `audit.events`。dry-run 不连接数据库；生产 apply 需要独立发布/运维授权。 |
 
@@ -50,7 +50,7 @@
 | Access decision | global policy / module-owned guard | 同一 evaluator 的 admin/full/read/denied 结果，ACL 删除后下一次请求立即生效，provider failure fail closed |
 | ACL audit record | `audit.events` | 记录 mutation id、actor、server request id、before/after version/outcome 与 changed username hashes；不泄露 secret/完整 ACL |
 | Audit record | `audit.events` | 所有受保护写 API 先写 requested 事件；失败则业务写不执行。完成事件记录 HTTP 结果；业务服务事件继续记录领域前后值且不泄露 secret。 |
-| Page/System Audit report | admin API consumer | 必须保留 proof availability、contract revision、snapshot、integrity/freshness/queue 和 external evidence 边界；权限通过不等于数据证明通过 |
+| System Audit report | App Health admin UI / release gate | 必须保留 proof availability、contract revision、snapshot、integrity/freshness/queue 和 external evidence 边界；权限通过不等于数据证明通过 |
 | External evidence audit record | audit store/operator | 记录 evidence id/domain/fingerprint、actor、reason 与 register/revoke 动作；不得记录 manifest item 原文、credential 或 secret。 |
 
 ## 持久化与投影
@@ -70,6 +70,7 @@
 | Frontend session | `web/src/features/session/api.ts`、`web/src/contexts/SessionContext.tsx` |
 | Frontend gates | `web/src/components/auth/SessionGate.tsx`、`useSessionPermissions()`、`useOptionalSessionPermissions()` |
 | App health | `web/src/contexts/AppHealthStatusContext.tsx` |
+| System Audit frontend | `web/src/pages/AppHealthOperationsPage.tsx`、`web/src/features/appHealth/api.ts`；业务页不得重新引入通用 Page Audit 组件或 page-key 调用 |
 | Tests | `tests/test_auth_guard.py`、`tests/test_permissions_write_entry_inventory.py`、`tests/test_audit*.py`、`web/e2e/permissions-role-matrix.spec.ts` |
 
 ## 依赖方向

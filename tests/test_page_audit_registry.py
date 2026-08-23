@@ -13,9 +13,8 @@ from fin_ops_platform.services.page_audit_registry import (
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE_REGISTRY_PATH = ROOT / "web" / "src" / "app" / "pageRegistry.tsx"
-INPUT_PAGE_PATH = ROOT / "web" / "src" / "pages" / "InputInvoiceUsagePage.tsx"
-OUTPUT_PAGE_PATH = ROOT / "web" / "src" / "pages" / "OutputInvoiceCollectionsPage.tsx"
 APP_HEALTH_PAGE_PATH = ROOT / "web" / "src" / "pages" / "AppHealthOperationsPage.tsx"
+APP_HEALTH_API_PATH = ROOT / "web" / "src" / "features" / "appHealth" / "api.ts"
 SYSTEM_AUDIT_PATH = (
     ROOT
     / "backend"
@@ -86,14 +85,22 @@ class PageAuditRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsupported page audit page"):
             page_audit_registration("unknown")
 
-    def test_invoice_pages_do_not_call_specialized_audit_clients(self) -> None:
-        input_source = INPUT_PAGE_PATH.read_text(encoding="utf-8")
-        output_source = OUTPUT_PAGE_PATH.read_text(encoding="utf-8")
+    def test_business_pages_do_not_expose_distributed_audit_controls(self) -> None:
+        business_ui_files = [
+            *sorted((ROOT / "web" / "src" / "pages").rglob("*.tsx")),
+            *sorted((ROOT / "web" / "src" / "components").rglob("*.tsx")),
+        ]
+        business_ui_source = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in business_ui_files
+            if path != APP_HEALTH_PAGE_PATH
+        )
 
-        self.assertIn('pageKey="input-invoice-usage"', input_source)
-        self.assertIn('pageKey="output-invoice-collections"', output_source)
-        self.assertNotIn("fetchInputInvoiceUsageAudit", input_source)
-        self.assertNotIn("fetchOutputInvoiceCollectionAudit", output_source)
+        self.assertNotIn("PageBusinessAuditIcon", business_ui_source)
+        self.assertNotIn("PageAuditIcon", business_ui_source)
+        self.assertNotIn('ariaLabel="Audit ', business_ui_source)
+        self.assertFalse((ROOT / "web" / "src" / "components" / "common" / "PageAuditIcon.tsx").exists())
+        self.assertFalse((ROOT / "web" / "src" / "components" / "common" / "PageBusinessAuditIcon.tsx").exists())
 
     def test_specialized_invoice_audit_http_paths_are_removed_from_runtime(self) -> None:
         forbidden = (
@@ -113,12 +120,16 @@ class PageAuditRegistryTests(unittest.TestCase):
     def test_app_health_legacy_input_invoice_audit_panel_is_removed(self) -> None:
         source = APP_HEALTH_PAGE_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('fetchPageAudit<AppHealthSystemAuditPayload>("app-health-operations"', source)
+        api_source = APP_HEALTH_API_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("fetchAppHealthSystemAudit", source)
         self.assertIn("AppHealthSystemAuditPanel", source)
+        self.assertIn("fetchAppHealthSystemAudit", api_source)
+        self.assertIn('page-audit?page=app-health-operations', api_source)
+        self.assertNotIn("fetchPageAudit", api_source)
         self.assertNotIn("InputInvoiceUsageAuditPanel", source)
         self.assertNotIn("runInputUsageAudit", source)
         self.assertNotIn("inputUsageAudit", source)
-        self.assertNotIn('fetchPageAudit("input-invoice-usage"', source)
 
     def test_system_audit_uses_exact_external_evidence_owner_without_legacy_classifier(self) -> None:
         source = SYSTEM_AUDIT_PATH.read_text(encoding="utf-8")

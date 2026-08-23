@@ -21,7 +21,6 @@ import {
   FinanceTableHeader,
   FinanceTableRow,
 } from "../components/common/FinanceTable";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import BusinessPeriodPicker, { nearbyBusinessYears } from "../components/common/BusinessPeriodPicker";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
@@ -1413,7 +1412,7 @@ function BankTextCell({ value }: { value: string }) {
 export default function BankDetailsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const selectedAccountSession = usePageSessionState<string | null>({
     pageKey: "bank-details",
     stateKey: "selectedAccountKey",
@@ -2100,13 +2099,6 @@ export default function BankDetailsPage() {
           { label: "未关联", value: visibleStatistics?.unlinkedTransactionCount, unit: "笔", tone: "warning" },
         ]}
       />
-      {canAdminAccess ? (
-        <PageBusinessAuditIcon
-          ariaLabel="Audit 银行明细"
-          pageKey="bank-details"
-          label="银行明细"
-        />
-      ) : null}
     </div>
   );
 

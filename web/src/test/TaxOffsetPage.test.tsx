@@ -75,13 +75,13 @@ function operationBarrierRequests(fetchMock: ReturnType<typeof installMockApiFet
 }
 
 describe("Tax offset workbench", () => {
-  test("shows the unified page Audit control to admins", async () => {
+  test("does not expose a page Audit control to admins", async () => {
     window.history.pushState({}, "", "/tax-offset");
     installMockApiFetch({ sessionAccessTier: "admin" });
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "税金抵扣计划与试算" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Audit 税金抵扣" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Audit 税金抵扣" })).not.toBeInTheDocument();
   });
 
   test("keeps tax offset premium visual polish scoped to project primitives", () => {

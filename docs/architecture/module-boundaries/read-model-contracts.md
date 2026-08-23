@@ -60,4 +60,4 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 仅包含�
 - `tests/test_read_model_runtime_removal.py` 验证删除面、四个 worker、API/frontend/deploy/migration合同。
 - 页面 API、service、repository、frontend interaction 和跨页业务回归全部通过。
 - 全仓 active source/deploy scan 不存在旧入口；生产 migration 后 schema/worker/event 负向审计通过。
-- 生产 canonical page audit、HTTP p95/p99、health-ready、queue/worker 和可逆写链 smoke 共同形成发布证据。
+- 生产 App Health System Audit、HTTP p95/p99、health-ready、queue/worker 和可逆写链 smoke 共同形成发布证据。

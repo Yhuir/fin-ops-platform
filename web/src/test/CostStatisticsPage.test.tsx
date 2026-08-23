@@ -506,30 +506,6 @@ describe("Cost statistics page", () => {
     expect(within(drawer).getByRole("checkbox", { name: /材料费/ })).toBeDisabled();
   });
 
-  test("admin can run the cost statistics title audit icon", async () => {
-    window.history.pushState({}, "", "/cost-statistics");
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-    renderCostStatisticsPage({
-      ...staticSession,
-      session: {
-        ...defaultSession,
-        canAdminAccess: true,
-      },
-    });
-
-    expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Audit 成本统计" }));
-
-    expect(
-      await screen.findByText("Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 已登记配对证明一致 · 外部来源未证明 · Fresh"),
-    ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/operations/app-health/page-audit?page=cost-statistics",
-      expect.any(Object),
-    );
-  });
-
   test("project view drills down from project to expense type to transaction from left to right", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();

@@ -287,7 +287,6 @@ describe("Settings page", () => {
 
     const settingsPage = await screen.findByTestId("settings-page");
     const tree = await screen.findByRole("tree", { name: "设置分类" });
-    expect(screen.getByRole("button", { name: "Audit 设置" })).toBeInTheDocument();
     await user.click(within(tree).getByRole("treeitem", { name: /OA申请人凭据/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "OA申请人凭据" });

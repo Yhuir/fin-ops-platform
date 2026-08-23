@@ -128,12 +128,11 @@
 - 权限隐藏/禁用写操作。
 - link/writeback 成功后当前 rows GET；失败反馈与重试。
 - 晚响应不能覆盖新 query。
-- Audit 单次读取且不调用 page operation barrier。
+- 页面不展示 Audit 控件；System Audit 子页 proof 不调用 page operation barrier。
 
 入口：
 
 - `web/src/test/OaPendingPaymentsPage.test.tsx`
-- `web/src/test/OaPendingPaymentAuditIcon.test.tsx`
 
 ### 6. End-to-end business flow：适用
 
@@ -206,8 +205,7 @@ pytest -q \
   tests/test_oa_pending_payment_postgres_integration.py
 
 cd web && npm test -- --run \
-  src/test/OaPendingPaymentsPage.test.tsx \
-  src/test/OaPendingPaymentAuditIcon.test.tsx
+  src/test/OaPendingPaymentsPage.test.tsx
 
 cd web && npm run build
 ```

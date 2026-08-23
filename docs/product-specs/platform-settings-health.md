@@ -13,38 +13,37 @@
 - ACL semantic no-op 不写 PostgreSQL、不写 audit、不调用 OA；真实变化使用版本冲突保护并同步 OA 三类角色，失败按补偿合同返回明确错误。
 - `finops:app:view` 只定位 OA 菜单；OA 仅接收 canonical ACL 到 `finops_read_export` / `finops_full_access` / `finops_admin` 三类专用角色的严格投影。历史非专用菜单绑定由部署做 exact-target 清理/回滚，不属于页面写入。
 - 该 ACL 链路不新增 read model、worker、dirty scope、Redis 或第二缓存；自动化证据锁定每次非管理员判断最多一次 snapshot 读取、普通设置保存零 OA I/O 和 ACL no-op 零外部 I/O；生产延迟只记录实测，不在本文预告通过。
-- 规则配置变化如果影响业务判定，必须触发对应 dirty scope。
+- 规则配置变化如果影响异步任务，必须发布对应的 durable domain event；direct-canonical 页面在下一次正常 GET 读取新事实。
 
 ## 数据重置入口
 
 数据重置是高风险操作：
 
 - 需要权限、确认、审计、影响范围和回滚说明。
-- 必须考虑 PostgreSQL 数据、对象存储、read model、Redis 缓存和后台任务。
-- 重置后不能让页面展示旧缓存或旧 read model 为 fresh。
+- 必须考虑 PostgreSQL 数据、对象存储、durable outbox 和后台任务。
+- 重置后页面必须通过正常 canonical GET 读取新事实，不能展示进程内旧 payload。
 
 ## App Health
 
 App Health 用于展示运行状态和后台任务：
 
-- read model freshness/stale/refreshing。
 - durable queue、worker heartbeat、job failure。
-- cache 状态、SSE/轮询状态和必要的重试入口。
-- 关联台 generation 统计和关键页面可用性。
+- API/数据库请求耗时、依赖状态和有界轮询状态。
+- canonical 数据 inventory、最近导入历史和集中式 System Audit。
 
 ## Global Runtime Status Plane
 
-左上角 App Status Icon 使用全局运行状态平面，不读取当前页面组件状态，也不随路由切换变化。全局状态只由后端 runtime facts 变化驱动：后台任务、read model freshness、dirty scope、outbox、worker heartbeat、依赖状态、会话和权限。
+左上角 App Status Icon 使用全局运行状态平面，不读取当前页面组件状态，也不随路由切换变化。全局状态只由后端 runtime facts 变化驱动：后台任务、outbox、worker heartbeat、依赖状态、会话和权限。
 
 颜色语义：
 
-- 绿色：所有页面数据域 ready/loaded/synced；登记的 read model 由 `read_model.app_status_readiness` 证明为 `fresh`，direct canonical 页面由 normal GET/Audit 与依赖状态证明可读；同时无 queued/running/attention 后台任务且关键依赖正常。
-- 黄色：任一页面数据域 loading/refreshing/stale，任一后台任务 queued/running/failed/partial_success 未确认，或存在非阻断运行告警。
-- 红色：会话失效、权限不可用、App Health/API 不可达、关键依赖失败，或关键 read model failed/unavailable。
+- 绿色：会话和关键依赖正常、required worker ready、通用 outbox 无 backlog，且没有 queued/running/attention 后台任务。
+- 黄色：任一后台任务 queued/running/failed/partial_success 未确认、outbox backlog、worker stale，或存在非阻断运行告警。
+- 红色：会话失效、权限不可用、App Health/API/PostgreSQL 不可达、关键依赖失败，或 required worker missing/mismatch/unavailable。
 
-hover 面板是只读全局状态面板，展示后台任务进度、所有页面数据域状态、最后更新时间和跳转入口。它不执行重试、确认、取消或修复动作；这些动作仍在后台任务详情或 App Health 运维页完成。
+hover 面板是只读全局状态面板，展示后台任务进度、worker/queue 摘要、业务域状态、最后更新时间和跳转入口。它不执行重试、确认、取消或修复动作；这些动作仍在后台任务详情或 App Health 运维页完成。
 
-read model 空业务结果可以是绿色，但必须有 readiness scope 记录证明该 scope 已加载并 fresh；不能因为 projection 表为空、dirty scope 为空或 worker 没有报错就推断为 ready。schema/source version mismatch、首次缺失 readiness、readiness reader unavailable 都必须显式进入黄色或红色。
+页面合法空集由各自 canonical API 合同决定，不由 App Status 猜测。App Status 只证明运行基础设施状态；页面数据完整性由 App Health System Audit 的只读 snapshot 证明，二者都不能替代外部银行/OA/发票/ETC 来源完整性证据。
 
 ## 后台任务
 

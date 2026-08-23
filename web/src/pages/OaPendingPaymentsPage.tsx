@@ -9,7 +9,6 @@ import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
-import OaPendingPaymentAuditIcon from "../components/oaPendingPayments/OaPendingPaymentAuditIcon";
 import OaPendingPaymentExportDrawer from "../components/oaPendingPayments/OaPendingPaymentExportDrawer";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
@@ -73,7 +72,7 @@ function normalizeSummary(summary: OaPendingPaymentSummary | undefined, fallback
 }
 
 export default function OaPendingPaymentsPage() {
-  const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { canMutateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("oa-pending-payments");
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
@@ -331,7 +330,6 @@ export default function OaPendingPaymentsPage() {
           { label: "已关联进项票的 OA", value: statistics?.linked_input_invoice_oa_count, unit: "条" },
         ]}
       />
-      {canAdminAccess ? <OaPendingPaymentAuditIcon /> : null}
     </div>
   );
 

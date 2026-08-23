@@ -13,13 +13,10 @@
 - 运行时调用链：`docs/app-architecture/runtime-and-ownership.md`
 - 前端业务刷新边界：`web/src/app/PageRouteHost.tsx`、`web/src/contexts/PageRuntimeContext.tsx`
 - 后端 HTTP 分发：`backend/src/fin_ops_platform/app/server.py`、`backend/src/fin_ops_platform/app/routes_*.py`
-- 派生数据生命周期：`backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
-- Read model freshness：`backend/src/fin_ops_platform/services/read_model_query_gateway.py`
-- Read model refresh 入队：`backend/src/fin_ops_platform/services/read_model_refresh_gateway.py`
 - Durable queue：`backend/src/fin_ops_platform/services/runtime_queue.py`
 - Worker registry：`backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 - App Status domain registry：`backend/src/fin_ops_platform/services/app_status_domain_registry.py`
-- App Status read model registry：`backend/src/fin_ops_platform/services/app_status_read_model_registry.py`
+- 已退役 read model 防回归：`docs/architecture/module-boundaries/read-model-contracts.md`、`tests/test_read_model_runtime_removal.py`
 
 ## 页面/API/后端 Owner Map
 
@@ -121,7 +118,7 @@
 | Business core | `TurnoverLedgerService`、`TurnoverRelationService`、`TurnoverLedgerExtraService` | deterministic 不是已闭环；人工闭环必须同组、同对方、同语义、一收一支、零差额 |
 | Write boundary | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、write adapters | stale precondition、idempotency、rollback、canonical relation/category/event/audit 必须在同一写边界内被保护；普通写必须零 read-model queue I/O |
 | Read model worker | `TurnoverLedgerReadModelRefreshService`、`TurnoverLedgerSqlProjectionBuilder` | projection 不得保存半成品；worker 必须 complete dirty scope |
-| App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `turnover_ledger` domain 必须绑定 `turnover-ledger` worker 和 `turnover_ledger.read_model.refresh` |
+| App Status | `app_status_domain_registry.py` | `turnover_ledger` 只登记 direct-canonical route；不绑定 read model 或专用 worker |
 
 `turnover-ledger` 写入与访问时收敛：
 
@@ -152,7 +149,7 @@
 | Tag selection | `NoOaBankBatchTagSelectionService` / `AppSettingsService` | tag selection version、inactive selected cleanup、auto-tag rules labels 即时反映 |
 | Write target contract | `NoOaBankBatchApplicationService` + `NoOaBankBatchService` + Workbench relation writer；由 `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_no_oa_bank_batch_workbench_integration.py` 和 Workbench UoW tests 保护 | no-OA batch 状态、Workbench pair relation、audit 与 durable refresh 由各真实 owner 协作；不存在未接入生产的平行 Bankdetail UoW |
 | Read model worker | `NoOaBankBatchReadModelRefreshService` | stale source version event 不得 rebuild/overwrite；worker 必须 complete dirty scope |
-| App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `no_oa_bank_batches` domain 必须绑定 `no-oa-bank-batch` worker 和 `no_oa_bank_batch.read_model.refresh` |
+| App Status | 无独立 domain entry | 当前无 no-OA 页面；不得恢复 read model 或专用 worker 作为隐藏状态源 |
 
 `no-oa-bank-batches` 写入与访问时收敛：
 
@@ -307,7 +304,7 @@
 | Receipt service | `OutputInvoiceCollectionReceiptService` | preview/create/void/reissue/settings、正式收据幂等、状态冲突、真实 history |
 | Read model worker | `InvoiceUsageCollectionReadModelRefreshService` | `output_invoice_collection.read_model.refresh`、all scope fan-out、source_versions、dirty scope complete |
 | Source versions | `output_invoice_collection_source_versions()` | lifecycle policy、status rules、receipt schema、OA projection sync 变更必须让旧 rows stale |
-| App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | domain/read model/worker/job 注册不同步会让页面 busy/blocked 状态误判 |
+| App Status | `app_status_domain_registry.py` | `output_invoice_collections` 只登记 direct-canonical route；不绑定 read model 或专用 worker |
 
 `output-invoice-collections` 写入 fan-out：
 
@@ -420,31 +417,27 @@
 | Frontend global status | `web/src/components/shell/AppStatusIndicator.tsx`、`AppHealthStatusContext` | 状态必须来自全局 `app_status`；路由切换不改变 icon；admin 才显示运维入口 |
 | Frontend API mappers | `web/src/features/appHealth/api.ts`、`web/src/features/appStatus/api.ts` | malformed payload 不得默认 green；有界轮询/BroadcastChannel 只传播后端 snapshot |
 | HTTP routes | `server.py` `/api/app-health*`、`/api/operations/app-health-dashboard`、统一 `/api/operations/app-health/page-audit` | auth guard、polling contract、dashboard cache、admin-only、`app_status` response shape、页面审计只读/fail-closed report shape |
-| Overview service | `AppStatusOverviewService` | green/yellow/red 优先级、readiness missing、critical failed/unavailable、worker/dependency/job/domain 映射 |
-| Runtime repository | `RuntimeMonitoringRepository` | dirty scopes/outbox/workers/readiness/RabbitMQ/API metrics 聚合；runtime unavailable 不能空 green |
-| Registries | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`runtime_worker_registry.py` | 新页面/read model/worker/job/dependency 漏同步会让全局状态误判 |
-| Readiness tools | `app_status_readiness_backfill.py`、runtime queue ops | 只能从真实 projection 计算 readiness；dead letter resolve 必须检查 fresh readiness 和 active dirty scope |
+| Overview service | `AppStatusOverviewService` | green/yellow/red 优先级、worker/outbox unavailable、dependency/job/domain 映射 |
+| Runtime repository | `RuntimeMonitoringRepository` | outbox/workers/API metrics 聚合；runtime unavailable 不能空 green |
+| Registries | `app_status_domain_registry.py`、`app_status_job_registry.py`、`app_status_dependency_registry.py`、`runtime_worker_registry.py` | 新页面/worker/job/dependency 漏同步会让全局状态误判 |
+| 删除合同 | `tests/test_read_model_runtime_removal.py` | 已退役 read model/readiness/dirty scope/runtime registry 不得恢复 |
 
 `app-health-operations` 状态 fan-in / fan-out：
 
 | Runtime fact 来源 | App Status 结果 | 受影响体验 |
 | --- | --- | --- |
-| `read_model.app_status_readiness` fresh | domain ready/fresh | App Status 可 green；页面可把 read model 当 fresh |
-| registry read model 缺 readiness | domain missing busy/yellow | 对应页面不能把空 projection 当 ready |
-| critical read model failed/unavailable | domain blocked/red | 对应页面提示不可用，App Status 指向 AppHealth |
-| `job.read_model_dirty_scopes` pending/processing/stale | domain busy/yellow | 页面展示 refreshing/stale，而不是旧数据 fresh |
-| `job.outbox_events` backlog/failed/dead_lettered | domain busy/blocked 或 attention | worker/read model 收敛风险可见 |
+| `job.outbox_events` backlog/failed/dead_lettered | domain busy/blocked 或 attention | 异步任务收敛风险可见 |
 | worker heartbeat missing/stale/mismatch | domain busy/blocked | 依赖该 worker 的页面不能假设任务会完成 |
 | background job queued/running/attention | overall/domain busy/yellow | 导入、数据重置、ETC 等任务进度出现在全局状态 |
-| dependency missing/unavailable | blocked/red 或 degraded | session/OA/Postgres/RabbitMQ/Redis 依赖异常可见 |
+| dependency missing/unavailable | blocked/red 或 degraded | session/OA/PostgreSQL 依赖异常可见 |
 | dashboard metrics refresh failure | dashboard stale warning | 运维仍可看上一份 payload，但不能当 fresh 指标 |
 
 关键回归保护：
 
-- `tests/test_app_health_api.py` 保护 `/api/app-health` polling snapshot、dashboard admin-only、进项使用审计 admin-only/只读 report、dirty scopes、jobs、dependencies、cache stale after error。
-- `tests/test_app_status_overview_service.py` 保护 registry 一致性、状态优先级、readiness missing/failed、worker missing、runtime unavailable 和 API contract。
-- `tests/test_runtime_monitoring.py` 保护 queue backlog、failed jobs、stale dirty scopes、RabbitMQ、worker metrics 和 mismatch。
-- `tests/test_app_status_readiness_backfill.py`、`tests/test_runtime_queue_ops.py` 保护 readiness 不伪造 fresh、dead letter resolve 前置条件。
+- `tests/test_app_health_api.py` 保护 `/api/app-health` polling snapshot、dashboard/System Audit admin-only、jobs、dependencies 和 cache stale after error。
+- `tests/test_app_status_overview_service.py` 保护 registry 一致性、状态优先级、worker missing、runtime unavailable 和 API contract。
+- `tests/test_runtime_monitoring.py` 保护 queue backlog、failed jobs、worker metrics 和 mismatch。
+- `tests/test_read_model_runtime_removal.py` 保护 read model/readiness/dirty scope 不回流。
 - `tests/test_runtime_worker_registry.py`、`tests/test_deploy_runtime_examples.py` 保护 worker manifest、env examples 和 deploy runtime 配置。
 - `web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/AppStatusApi.test.ts`、`web/src/test/AppHealthStatusContext.test.tsx`、`web/src/test/AppHealthBroadcast.test.tsx` 保护 dashboard、global icon、mapper、有界轮询和跨 tab sync。
 

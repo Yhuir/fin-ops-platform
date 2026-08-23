@@ -26,7 +26,6 @@ import {
   FinanceTablePagination,
   FinanceTableRow,
 } from "../components/common/FinanceTable";
-import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
@@ -1920,11 +1919,6 @@ export default function EtcTicketManagementPage() {
         }
         actions={
           <>
-            <PageBusinessAuditIcon
-              ariaLabel="Audit ETC票据管理"
-              label="ETC票据管理"
-              pageKey="etc-tickets"
-            />
             <Button
               className="etc-secondary-action"
               onPress={() => setOaPrefillOpen(true)}
