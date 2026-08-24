@@ -39,6 +39,12 @@ test.describe("销项发票收款情况", () => {
     await expect(table.getByText("已被红冲")).toBeVisible();
     await expect(table.getByText("已冲销蓝票")).toBeVisible();
     await expect(table.getByRole("button", { name: "红蓝票 · 2" })).toHaveCount(2);
+    const blueInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0001/ });
+    const redInvoiceRow = table.getByRole("row", { name: /XSFP-E2E-0002/ });
+    await expect(blueInvoiceRow.getByText("蓝字", { exact: true })).toBeVisible();
+    await expect(redInvoiceRow.getByText("红字", { exact: true })).toBeVisible();
+    await expect(blueInvoiceRow.locator(".output-invoice-collections-tag-row").first()).toHaveText(/2026-05-02蓝字红蓝票 · 2/);
+    await expect(redInvoiceRow.locator(".output-invoice-collections-tag-row").first()).toHaveText(/2026-05-06红字红蓝票 · 2/);
     const multiBankRow = table.getByRole("row", { name: /XSFP-E2E-0003/ });
     const statusCell = multiBankRow.locator(".output-invoice-collections-table-cell--status");
     await expect(multiBankRow.getByText("已收款")).toBeVisible();

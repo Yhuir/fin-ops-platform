@@ -156,6 +156,7 @@ async function requestExportBlob(url: string, init: RequestInit = {}): Promise<O
 
 function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["invoice"] {
   const raw = objectValue(rawValue);
+  const isPositiveInvoice = stringValue(camelOrSnake(raw, "isPositiveInvoice", "is_positive_invoice")).trim();
   return {
     id: stringValue(raw.id),
     displayNo: stringValue(camelOrSnake(raw, "displayNo", "display_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no")),
@@ -173,6 +174,7 @@ function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["row
     taxAmount: stringValue(camelOrSnake(raw, "taxAmount", "tax_amount")),
     specificBusinessType: stringValue(camelOrSnake(raw, "specificBusinessType", "specific_business_type")),
     taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
+    polarity: isPositiveInvoice === "是" ? "blue" : isPositiveInvoice === "否" ? "red" : "unknown",
   };
 }
 

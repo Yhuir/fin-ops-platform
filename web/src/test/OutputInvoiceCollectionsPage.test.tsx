@@ -14,6 +14,7 @@ function collectionStatusRow({
   collectedAmount,
   pendingAmount,
   bankRelationCount = 0,
+  isPositiveInvoice = "是",
 }: {
   id: string;
   displayNo: string;
@@ -24,6 +25,7 @@ function collectionStatusRow({
   collectedAmount: string;
   pendingAmount: string;
   bankRelationCount?: number;
+  isPositiveInvoice?: "是" | "否";
 }) {
   const hasBank = bankRelationCount > 0;
   const invoiceId = `invoice-${id}`;
@@ -46,6 +48,7 @@ function collectionStatusRow({
       tax_amount: "0.00",
       specific_business_type: "技术服务",
       taxable_item_name: "生产生活服务",
+      is_positive_invoice: isPositiveInvoice,
     },
     collection_status: {
       code: statusCode,
@@ -106,6 +109,7 @@ const rowsPayload = {
         tax_amount: "20984.07",
         specific_business_type: "技术服务",
         taxable_item_name: "系统建设服务",
+        is_positive_invoice: "是",
       },
       collection_status: {
         code: "reversed_by_red",
@@ -193,6 +197,7 @@ const rowsPayload = {
         tax_amount: "-20984.07",
         specific_business_type: "技术服务",
         taxable_item_name: "系统建设服务",
+        is_positive_invoice: "否",
       },
       collection_status: {
         code: "reverses_blue",
@@ -267,6 +272,7 @@ const rowsPayload = {
       statusReason: "红字发票尚未形成唯一、确定的蓝字发票配对关系。",
       collectedAmount: "0.00",
       pendingAmount: "0.00",
+      isPositiveInvoice: "否",
     }),
   ],
   statistics: {
@@ -360,6 +366,17 @@ describe("销项发票收款情况", () => {
     expect(within(table).getByText("已被红冲")).toBeVisible();
     expect(within(table).getByText("已冲销蓝票")).toBeVisible();
     expect(within(table).getByRole("button", { name: "红蓝票 · 2" })).toBeVisible();
+
+    const blueRow = within(table).getByRole("row", { name: /XSFP-BLUE-001/ });
+    const redRow = within(table).getByRole("row", { name: /XSFP-RED-001/ });
+    expect(within(blueRow).getByText("蓝字")).toHaveClass("output-invoice-collections-table-tag--info");
+    expect(within(redRow).getByText("红字")).toHaveClass("output-invoice-collections-table-tag--danger");
+    const blueInvoiceTags = within(blueRow).getByText("2026-07-08").closest(".output-invoice-collections-tag-row");
+    expect(Array.from(blueInvoiceTags?.children ?? []).map((child) => child.textContent)).toEqual([
+      "2026-07-08",
+      "蓝字",
+      "红蓝票 · 2",
+    ]);
 
     expect(screen.queryByText("OA", { selector: "th" })).not.toBeInTheDocument();
     expect(screen.queryByText("收据", { selector: "th" })).not.toBeInTheDocument();

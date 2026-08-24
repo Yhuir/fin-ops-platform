@@ -23,6 +23,7 @@
 - relation details、export 和 OA reverse preview 不回退旧 page repository。
 - OA 详情按 rows DTO 的 canonical `oa.id` 直接读取 completed/in-progress OA projection；测试必须禁止把该 id 送入发票使用行 hash 查询。
 - OA summary 从 completed/in-progress canonical source 输出 `workflowStatus`；OA 申请人总览列不显示流程状态，单条和多条 OA 详情只读取 `workflowStatus`，不得回退 relation `status/section`。
+- 支付状态 chip 按 canonical `paymentStatus.code` 映射颜色：`paid` 为成功色、`waiting_payment` 为警示色、`pending` 为中性色；现金往来和三种冲销状态使用信息色，未知 code 保守显示中性色，不按中文 label 推断。
 - OA reverse preview 必须区分 `permissions.canCreateDraft` 写能力与顶层 `canCreateDraft` 当前集合业务状态；多销方整组不可创建时，选择同一销方子集仍可触发精确 re-preview 并创建。
 - OA reverse 候选表只保留选择、发票号码、销方、价税合计和 OA 关联列；开票日期在发票号码单元格内以 chip 展示，禁用通用说明不占据抽屉头部。
 - 写成功响应不含 operation barrier；当前页面随后执行 GET。
@@ -81,3 +82,7 @@ cd web && npm run build
 
 - `tests/test_invoice_usage_collection_canonical_query.py` 使用生产真实字符串金额，锁定 canonical OA 详情输出 `120.00`。
 - `tests/test_input_invoice_usage_api.py` 继续覆盖详情 API 成功/失败映射；生产验收补充真实关联 OA 点击、drawer 内容和无 500 验证。
+
+## 2026-08-25 支付状态 chip 颜色回归
+
+- `web/src/test/InputInvoiceUsagePage.test.tsx` 锁定“已付款/待处理/待付款”分别使用 success/neutral/warning，防止再次回退为统一 warning 色。

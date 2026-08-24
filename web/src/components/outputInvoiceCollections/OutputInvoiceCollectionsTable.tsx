@@ -226,6 +226,7 @@ function DataRow({
   const bankRelationTarget = relationListTarget(row, "bank");
   const statusCode = row.collectionStatus.code || "pending_collection";
   const showCollectionAmounts = ["pending_collection", "partial_collected", "collected"].includes(statusCode);
+  const polarity = invoicePolarityPresentation(row.invoice.polarity);
 
   return (
     <FinanceTableRow className="output-invoice-collections-table-row" id={row.id} textValue={displayInvoiceNo(row)}>
@@ -239,6 +240,7 @@ function DataRow({
         </span>
         <span className="output-invoice-collections-tag-row">
           <FinanceTag>{dateOnly(row.invoice.issueDate)}</FinanceTag>
+          <FinanceTag tone={polarity.tone}>{polarity.label}</FinanceTag>
           {invoiceRelationTarget ? (
             <RelationButton
               label={`红蓝票 · ${row.invoiceRelations.relationCount}`}
@@ -388,7 +390,7 @@ function EmptyValue() {
   return <span className="output-invoice-collections-empty-value">—</span>;
 }
 
-function FinanceTag({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "success" }) {
+function FinanceTag({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "info" | "success" | "danger" }) {
   return <span className={`output-invoice-collections-table-tag output-invoice-collections-table-tag--${tone}`}>{children}</span>;
 }
 
@@ -464,4 +466,10 @@ function displayInvoiceNo(row: OutputInvoiceCollectionRow) {
 function dateOnly(value: string) {
   if (!value) return "日期为空";
   return value.includes("T") ? value.split("T")[0] : value;
+}
+
+function invoicePolarityPresentation(polarity: OutputInvoiceCollectionRow["invoice"]["polarity"]) {
+  if (polarity === "blue") return { label: "蓝字", tone: "info" as const };
+  if (polarity === "red") return { label: "红字", tone: "danger" as const };
+  return { label: "票面类型未知", tone: "neutral" as const };
 }

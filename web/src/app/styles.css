@@ -4742,10 +4742,10 @@ textarea {
   color: var(--fp-success);
 }
 
-.output-invoice-collections-table-tag--warning {
-  border-color: color-mix(in srgb, var(--fp-warning) 32%, var(--fp-border));
-  background: var(--fp-warning-soft);
-  color: var(--fp-warning);
+.output-invoice-collections-table-tag--danger {
+  border-color: color-mix(in srgb, var(--fp-danger) 32%, var(--fp-border));
+  background: var(--fp-danger-soft);
+  color: var(--fp-danger);
 }
 
 .output-invoice-collections-table-action {

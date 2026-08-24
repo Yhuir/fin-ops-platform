@@ -667,6 +667,44 @@ describe("Input invoice usage page", () => {
     });
   });
 
+  test("distinguishes paid, pending, and waiting-payment status chips by canonical code", async () => {
+    const statusRows = [
+      { code: "paid", label: "已付款", tone: "success" },
+      { code: "pending", label: "待处理", tone: "neutral" },
+      { code: "waiting_payment", label: "待付款", tone: "warning" },
+    ].map((status, index) => ({
+      ...rowsPayload.rows[0],
+      id: `usage-status-row-${index + 1}`,
+      invoice: {
+        ...rowsPayload.rows[0].invoice,
+        id: `usage-status-invoice-${index + 1}`,
+        displayNo: `SD-STATUS-${index + 1}`,
+      },
+      paymentStatus: {
+        code: status.code,
+        label: status.label,
+        reason: "",
+      },
+    }));
+    installInputInvoiceUsageFetch({
+      ...rowsPayload,
+      rows: statusRows,
+      pagination: { page: 1, pageSize: 20, total: statusRows.length },
+    });
+
+    renderAuthenticatedAppAt("/input-invoice-usage");
+
+    const page = await screen.findByTestId("input-invoice-usage-page");
+    for (const status of [
+      { label: "已付款", tone: "success" },
+      { label: "待处理", tone: "neutral" },
+      { label: "待付款", tone: "warning" },
+    ]) {
+      expect(await within(page).findByText(status.label, { selector: ".input-invoice-usage-tag" }))
+        .toHaveClass(`input-invoice-usage-tag--${status.tone}`);
+    }
+  });
+
   test("clears persisted keyword search and reloads all input invoice usage rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch();

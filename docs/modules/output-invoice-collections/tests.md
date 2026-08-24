@@ -30,6 +30,7 @@
 - 状态内容布局不得改变 HeroUI `Table.Cell` 的原生 `table-cell` 行为；多条收入流水撑高整行时，状态背景必须覆盖完整行高。
 - 表格保持有界内部滚动，HeroUI 分页位于 FinanceTable footer；范围选择与搜索保持同一紧凑行且不重叠。
 - 状态筛选后的 `/rows` 仍返回六种完整状态候选；前端交互测试锁定同一 table DOM 节点，防止恢复整表 skeleton/unmount 刷新。
+- 发票号码单元格按 API 已有 `isPositiveInvoice` 展示蓝字/红字 chip；顺序固定为开票日期、票面极性、红蓝票关系，前端不得用金额或关系状态反推极性。
 
 ## 主要测试入口
 

@@ -1,5 +1,11 @@
 # 销项发票收款情况 实施记录
 
+## 2026-08-25 - 发票号码列展示票面极性
+
+- 前端 mapper 保留 canonical rows 已有的 `isPositiveInvoice`，映射为蓝字/红字；字段异常时明确显示“票面类型未知”，不使用金额正负、收款状态或红蓝票关系猜测。
+- 发票号码列 chip 顺序固定为开票日期 -> 蓝字/红字 -> 红蓝票关系；删除未被组件使用的 output warning tag 样式并替换为红字 danger 样式。
+- 不改变七个只读 API、后端状态计算、正式关系、数据库、read model、worker 或请求数量；Vitest 与 Chromium E2E 覆盖颜色和顺序。
+
 ## 2026-08-16 - 发票与关系详情统一公开字段视图
 
 - 详情删除页面私有大卡片/grid renderer，复用共享 HeroUI `AppDrawer`、`Chip`、`StatePanel` 和 800px 紧凑分区 label/value 视图。

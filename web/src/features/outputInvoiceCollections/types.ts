@@ -54,6 +54,7 @@ export type OutputInvoiceCollectionInvoiceSummary = {
   taxAmount: string;
   specificBusinessType: string;
   taxableItemName: string;
+  polarity: "blue" | "red" | "unknown";
 };
 
 export type OutputInvoiceCollectionStatus = {

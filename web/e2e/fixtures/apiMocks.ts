@@ -6322,6 +6322,7 @@ function outputInvoiceCollectionRowsPayload(
         tax_amount: "698.81",
         specific_business_type: "信息技术服务",
         taxable_item_name: "浏览器 e2e 销项收款服务",
+        is_positive_invoice: "是",
       },
       collection_status: {
         code: "reversed_by_red",
@@ -6380,6 +6381,7 @@ function outputInvoiceCollectionRowsPayload(
         tax_amount: "-698.81",
         specific_business_type: "红字发票",
         taxable_item_name: "浏览器 e2e 红字发票",
+        is_positive_invoice: "否",
       },
       collection_status: {
         code: "reverses_blue",
@@ -6425,6 +6427,7 @@ function outputInvoiceCollectionRowsPayload(
         tax_amount: "57,737.66",
         specific_business_type: "技术服务",
         taxable_item_name: "生产生活服务",
+        is_positive_invoice: "是",
       },
       collection_status: {
         code: "collected",
@@ -6498,6 +6501,7 @@ function outputInvoiceCollectionRowsPayload(
         tax_amount: "7,540.00",
         specific_business_type: "导入发票",
         taxable_item_name: "发票导入 e2e 销项服务",
+        is_positive_invoice: "是",
       },
       collection_status: {
         code: "pending_collection",

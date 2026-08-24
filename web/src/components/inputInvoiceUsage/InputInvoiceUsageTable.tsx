@@ -52,6 +52,18 @@ type InputInvoiceUsageTableProps = {
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 
+type TagTone = "neutral" | "warning" | "info" | "success";
+
+const paymentStatusToneByCode: Record<string, TagTone> = {
+  paid: "success",
+  waiting_payment: "warning",
+  pending: "neutral",
+  cash_turnover: "info",
+  offset_zhou_jieying: "info",
+  offset_liu_shugang_no_pay: "info",
+  offset_wei_dailian: "info",
+};
+
 function displayInvoiceNo(row: InputInvoiceUsageRow) {
   const invoice = row.invoice;
   if (invoice.displayNo) {
@@ -68,6 +80,10 @@ function dateOnly(value: string) {
     return "日期为空";
   }
   return value.includes("T") ? value.split("T")[0] : value;
+}
+
+function paymentStatusTone(code: string): TagTone {
+  return paymentStatusToneByCode[code] ?? "neutral";
 }
 
 function classNames(...values: Array<string | false | undefined>) {
@@ -277,7 +293,7 @@ function Tag({
   className,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "warning" | "info" | "success";
+  tone?: TagTone;
   className?: string;
 }) {
   return (
@@ -536,7 +552,7 @@ export default function InputInvoiceUsageTable({
                     />
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--payment input-invoice-usage-table-cell--strong-separator input-invoice-usage-payment-cell" columnRole="status">
-                    <Tag tone="warning">{row.paymentStatus.label || "待处理"}</Tag>
+                    <Tag tone={paymentStatusTone(row.paymentStatus.code)}>{row.paymentStatus.label || "待处理"}</Tag>
                   </FinanceTableCell>
                   <FinanceTableCell className="input-invoice-usage-table-cell input-invoice-usage-table-cell--strong-separator" columnRole="identity">
                     {oa ? (

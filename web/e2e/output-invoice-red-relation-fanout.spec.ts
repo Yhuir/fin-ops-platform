@@ -13,6 +13,8 @@ test.describe("销项发票自动红蓝票关系", () => {
     const redRow = page.getByRole("row", { name: /XSFP-E2E-0002/ });
     await expect(blueRow.getByText("已被红冲")).toBeVisible();
     await expect(redRow.getByText("已冲销蓝票")).toBeVisible();
+    await expect(blueRow.getByText("蓝字", { exact: true })).toBeVisible();
+    await expect(redRow.getByText("红字", { exact: true })).toBeVisible();
 
     const detailResponse = page.waitForResponse((response) =>
       response.url().includes("/api/output-invoice-collections/rows/output-collection-row-e2e-001/relation-details")
