@@ -58,11 +58,13 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
                 source_attachment_key, filename, normalized_payload
             )
             select id, 'source-current', 'daily-expense', 'attachment-0',
-                   'owned-attachment-0', 'invoice-0.pdf', '{}'::jsonb
+                   'owned-attachment-0', 'invoice-0.pdf',
+                   '{"source_expense_item_id":"oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb","source_expense_row_index":"91"}'::jsonb
             from canonical_oa
             union all
             select id, 'source-current', 'daily-expense', 'attachment-1',
-                   'owned-attachment-1', 'invoice-1.pdf', '{}'::jsonb
+                   'owned-attachment-1', 'invoice-1.pdf',
+                   '{"source_expense_item_id":"oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2","source_expense_row_index":"90"}'::jsonb
             from canonical_oa;
 
             insert into app.oa_attachment_invoice_cache(
@@ -78,11 +80,11 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
             ) values
                 (
                     'cache-attachment-0', 'owned-attachment-0', 'invoice',
-                    'oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2', '0', 'invoice-0.pdf'
+                    'oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb', '91', 'invoice-0.pdf'
                 ),
                 (
                     'cache-attachment-1', 'owned-attachment-1', 'invoice',
-                    'oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb', '1', 'invoice-1.pdf'
+                    'oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2', '90', 'invoice-1.pdf'
                 );
 
             insert into app.invoices(
@@ -94,13 +96,13 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
                     'inv_imported_0898', 'input', 'invoice-0898', 'invoice-0898',
                     '2026-07-02', '2026-07-01', 145, 145, 'CNY', 'visible', 'pending',
                     array['OA附件'],
-                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:0:d91d8bb509c9","source_expense_row_index":"0","source_attachment_key":"cache-attachment-0"}]'::jsonb
+                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:0:d91d8bb509c9","source_expense_row_index":"40","source_attachment_key":"cache-attachment-0"}]'::jsonb
                 ),
                 (
                     'inv_imported_0899', 'input', 'invoice-0899', 'invoice-0899',
                     '2026-07-02', '2026-07-01', 145, 145, 'CNY', 'visible', 'pending',
                     array['OA附件'],
-                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:1:a48a5229fa61","source_expense_row_index":"1","source_attachment_key":"cache-attachment-1"}]'::jsonb
+                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:1:a48a5229fa61","source_expense_row_index":"41","source_attachment_key":"cache-attachment-1"}]'::jsonb
                 );
             """,
         )
@@ -117,7 +119,18 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
                 where alias_row_id = 'oa-exp-2327';
                 """,
             ),
-            "oa-exp-2327|oa-exp-6a86a63777bca2d0c5f62d07|active|system:migration:0153|oa-source-alias-attachment-identity-repair-v2",
+            "oa-exp-2327|oa-exp-6a86a63777bca2d0c5f62d07|active|system:migration:0153|oa-source-alias-attachment-identity-repair-v3",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                """
+                select jsonb_array_length(raw_payload->'item_mappings')
+                from app.oa_source_aliases
+                where alias_row_id = 'oa-exp-2327';
+                """,
+            ),
+            "2",
         )
 
 

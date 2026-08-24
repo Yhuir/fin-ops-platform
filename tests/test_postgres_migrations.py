@@ -366,8 +366,13 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("v_expected_legacy_item_ids", sql)
         self.assertIn("v_expected_current_item_ids", sql)
         self.assertIn("invoice.workbench_visibility = 'visible'", sql)
-        self.assertIn("bridge.source_expense_row_index = invoice.source_expense_row_index", sql)
+        self.assertIn("current_item.source_expense_item_id = bridge.owned_expense_item_id", sql)
+        self.assertIn("attachment.normalized_payload->>'source_expense_item_id'", sql)
         self.assertIn("bridge.source_expense_item_id in (", sql)
+        self.assertNotIn(
+            "bridge.source_expense_row_index = invoice.source_expense_row_index",
+            sql,
+        )
         self.assertIn("matched_invoice_attachment_count <> 2", sql)
         self.assertIn("cardinality(invoice_attachment_key_hashes) <> 2", sql)
         self.assertIn("verified_attachment_identity_migration", sql)
