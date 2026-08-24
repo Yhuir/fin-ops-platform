@@ -16,6 +16,8 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     PostgresWorkbenchPageHydrationRepository,
+)
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )

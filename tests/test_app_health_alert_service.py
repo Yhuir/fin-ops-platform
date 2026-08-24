@@ -7,6 +7,48 @@ from fin_ops_platform.services.app_health_alert_service import AppHealthAlertSer
 
 
 class AppHealthAlertServiceTests(unittest.TestCase):
+    def test_failed_matching_scope_creates_critical_alert_and_recovers(self) -> None:
+        service = AppHealthAlertService()
+
+        failed = service.evaluate(
+            {
+                "oa_sync": {"dirty_scopes": []},
+                "metrics": {},
+                "workbench_matching": {
+                    "status": "stale",
+                    "matching_dirty_scopes": [
+                        {
+                            "scope_month": "2026-08",
+                            "status": "failed",
+                            "last_error": "Invalid canonical fact date",
+                        }
+                    ],
+                },
+                "background_jobs": {"jobs": []},
+                "dependencies": {},
+                "session": {"status": "authenticated"},
+            }
+        )
+
+        self.assertEqual(len(failed["active"]), 1)
+        self.assertEqual(failed["active"][0]["kind"], "workbench_matching_scope_failed")
+        self.assertEqual(failed["active"][0]["scope"], "2026-08")
+        self.assertEqual(failed["active"][0]["severity"], "critical")
+
+        recovered = service.evaluate(
+            {
+                "oa_sync": {"dirty_scopes": []},
+                "metrics": {},
+                "workbench_matching": {"status": "ready", "matching_dirty_scopes": []},
+                "background_jobs": {"jobs": []},
+                "dependencies": {},
+                "session": {"status": "authenticated"},
+            }
+        )
+
+        self.assertEqual(recovered["active"], [])
+        self.assertEqual(recovered["recent_recovered"][0]["kind"], "workbench_matching_scope_failed")
+
     def test_dirty_scope_warning_and_critical_thresholds(self) -> None:
         service = AppHealthAlertService()
 

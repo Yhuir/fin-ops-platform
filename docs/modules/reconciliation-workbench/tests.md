@@ -598,3 +598,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - Relation/UoW：`test_workbench_pair_relation_service.py`、`test_workbench_relation_command_service.py`、`test_workbench_uow_contract.py`、repository adapter tests 与 `test_workbench_write_characterization.py` 保护已有 immutable OA+invoice 加入流水时保留 formal/binding metadata，差额 note 提交成功，数据库 commit 后才发布 runtime delta，回滚不留半写。
 - Frontend interaction：`WorkbenchSelection.test.tsx` 保护 OA 状态变化发生在多选、preview request/drawer 或发票编辑期间时不清空用户交互；响应落地前再次检查竞态，全部交互结束后只补一次 canonical GET，post-commit 写成功仍只做一次强制回读。
 - Existing regression / performance：发票全局导入、补充凭证文件链、普通相等确认、withdraw、异常七分类、筛选分页与权限合同不变；所有新增处理均为固定项或当前页/当前关系有界操作，没有轮询加速、额外列表 N+1、read model、worker、Redis 或数据库 schema 变化。
+
+## 2026-08-24 - 进行中 OA 自动正式关系闭环
+
+- Business core / repository：`tests/test_workbench_formal_relation_repository.py` 保护 in-progress payment OA 与强证据流水进入同一 fact batch，并生成唯一 `strong_evidence_exact_closure`；可选日期占位值回退权威日期，权威日期无效时按 row id fail closed。
+- Service / transaction：`tests/test_oa_pending_payment_source_snapshot_repository.py` 保护 admission/completed OA 匹配相关变化与 matching dirty scope 同事务提交，队列写失败整体回滚，payment-status-only 更新零 matching I/O。
+- App Health regression：`tests/test_app_health_alert_service.py`、`tests/test_app_status_overview_service.py` 保护 failed scope 显式告警、stale matching 不再显示 Workbench ready，同时不设置全局写门禁。
+- API/UI/Read model 不适用：本次不改变 HTTP response shape、页面组件或页面 read model；既有 Workbench direct API、OA pending API 和页面回归继续保护其它页面链路。

@@ -13,6 +13,9 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLE
 from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
     oa_source_aliases_sql,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
+    pending_oa_application_date_sql,
+)
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_SOURCE_ALIAS_FIELD_NAMES,
     oa_row_source_alias_map,
@@ -54,7 +57,16 @@ _WITHDRAW_EVENTS = frozenset(
 )
 _SINGLE_MEMBER_CLAIM_RELATION_MODES = frozenset({"bank_flow_rule_batch", "no_oa_bank_batch"})
 _OA_SOURCE_ALIASES_SQL = oa_source_aliases_sql("oa", "oa.normalized_payload")
-_OA_DATE_PLACEHOLDERS = frozenset({"-", "--", "—", "－"})
+_PENDING_OA_APPLICATION_DATE_SQL = pending_oa_application_date_sql("admission")
+_PENDING_OA_SOURCE_ALIASES_SQL = """array(
+    select distinct payload_alias.value
+    from jsonb_array_elements_text(
+        case when jsonb_typeof(admission.source_payload->'source_aliases') = 'array'
+             then admission.source_payload->'source_aliases'
+             else '[]'::jsonb end
+    ) payload_alias(value)
+    where nullif(btrim(payload_alias.value), '') is not null
+)"""
 
 
 class PostgresWorkbenchFormalRelationFactRepository:
@@ -73,6 +85,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
         start_date, end_date = _composite_window(normalized_scopes)
         oa_rows = self._connection.fetch_all(
             f"""
+            with canonical_oa_rows as (
             select
                 oa.row_id as canonical_object_identity,
                 oa.row_id,
@@ -95,9 +108,48 @@ class PostgresWorkbenchFormalRelationFactRepository:
               and """
             + COMPLETED_WORKFLOW_STATUS_SQL
             + """
-            order by oa.row_id
+            union all
+            select
+                admission.oa_id as canonical_object_identity,
+                admission.oa_id as row_id,
+                admission.amount,
+                coalesce(nullif(admission.source_payload->>'currency', ''), 'CNY') as currency,
+                coalesce(
+                    """
+            + _PENDING_OA_APPLICATION_DATE_SQL
+            + """,
+                    (admission.scope_key || '-01')::date
+                ) as fact_date,
+                null::timestamptz as approved_at,
+                coalesce(
+                    nullif(admission.source_payload->>'workflow_no', ''),
+                    nullif(admission.source_payload->>'relation_code', '')
+                ) as workflow_no,
+                nullif(admission.source_payload->>'project_id', '') as project_id,
+                coalesce(admission.project_name_display, admission.project_name) as project_name,
+                admission.applicant,
+                'active'::text as status,
+                'in_progress'::text as workflow_status,
+                admission.source_payload as normalized_payload,
+                """
+            + _PENDING_OA_SOURCE_ALIASES_SQL
+            + """ as source_aliases,
+                admission.updated_at as source_version
+            from app.oa_pending_payment_admissions admission
+            where admission.tenant_id = 'default'
+              and admission.workflow_status = 'in_progress'
+              and coalesce(
+                    """
+            + _PENDING_OA_APPLICATION_DATE_SQL
+            + """,
+                    (admission.scope_key || '-01')::date
+                  ) between %s::date and %s::date
+            )
+            select *
+            from canonical_oa_rows
+            order by row_id
             """,
-            (start_date, end_date),
+            (start_date, end_date, start_date, end_date),
         )
         bank_rows = self._connection.fetch_all(
             """
@@ -637,10 +689,11 @@ def _oa_fact(
             payload.get("submitted_at"),
             payload.get("modified_time"),
             payload.get("modifiedTime"),
-            row.get("fact_date"),
         )
+        if fact_date is None:
+            fact_date = _authoritative_oa_fact_date(row)
     else:
-        fact_date = _date_value(row.get("fact_date"))
+        fact_date = _authoritative_oa_fact_date(row)
     return FormalRelationFact(
         row_type="oa",
         canonical_object_identity=_required_identity(row),
@@ -1028,10 +1081,22 @@ def _oa_fact_date(*values: Any) -> date | None:
         if value is None:
             continue
         normalized = str(value).strip()
-        if not normalized or normalized in _OA_DATE_PLACEHOLDERS:
+        if not normalized:
             continue
-        return _date_value(value)
+        try:
+            return _date_value(value)
+        except ValueError:
+            continue
     return None
+
+
+def _authoritative_oa_fact_date(row: dict[str, Any]) -> date | None:
+    try:
+        return _date_value(row.get("fact_date"))
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid canonical OA fact date for {_required_row_id(row)}: {row.get('fact_date')}."
+        ) from exc
 
 
 def _bank_direction(value: Any, signed_amount: Any) -> str:

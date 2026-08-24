@@ -16,6 +16,12 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
     is_completed_workflow_status,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
+)
+from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
+
+
 OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION = 1
 
 
@@ -284,6 +290,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 - current_oa_row_ids
             )
             cleanup_results: list[dict[str, object]] = []
+            relation_cleanup_scopes: set[str] = set()
             if unavailable_oa_row_ids:
                 relation_command_service = self._relation_command_service_for_transaction(transaction)
                 cleanup_result = relation_command_service.remove_rows_from_active_relations(
@@ -301,6 +308,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 if list(normalized_cleanup_result.get("changed_case_ids") or []) and not cleanup_affected_scopes:
                     cleanup_affected_scopes.update(replaced_scopes)
                 oa_pending_payment_changed_scopes.update(cleanup_affected_scopes)
+                relation_cleanup_scopes.update(cleanup_affected_scopes)
 
             source_signatures: dict[str, str] = {}
             for scope in sorted(
@@ -326,6 +334,49 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     payload=payload,
                 )
                 source_signatures[scope] = str(payload["source_signature"])
+
+            matching_changed_scopes = {
+                *changed_admission_scopes,
+                *completed_projection_changed_scopes,
+                *relation_cleanup_scopes,
+            }
+            matching_scope_months = {
+                month
+                for scope in matching_changed_scopes
+                if (month := _month(scope))
+            }
+            if "all" in matching_changed_scopes:
+                matching_scope_months.update(
+                    scope
+                    for scope, _oa_id in {*old_admissions, *new_admissions}
+                    if _month(scope)
+                )
+                matching_scope_months.update(
+                    month
+                    for status in [*old_statuses.values(), *new_statuses.values()]
+                    if (month := _month(status.get("scope_month")))
+                )
+                matching_scope_months.update(
+                    month
+                    for record in normalized_completed_records
+                    if (month := _month(record.month))
+                )
+            expanded_matching_months = sorted(
+                {
+                    expanded
+                    for month in matching_scope_months
+                    for expanded in expand_scope_month_window(month)
+                }
+            )
+            if expanded_matching_months:
+                PostgresWorkbenchMatchingQueueRepository.mark_workbench_matching_dirty_scopes_in_transaction(
+                    transaction=transaction,
+                    tenant_id=normalized_tenant_id,
+                    scope_months=expanded_matching_months,
+                    reason="oa_pending_payment_source_changed",
+                    source_versions={},
+                    debounce_seconds=0,
+                )
 
             return OaPendingPaymentSourceSnapshotResult(
                 completed_projection_changed_scopes=tuple(

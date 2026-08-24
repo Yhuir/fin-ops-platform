@@ -25,6 +25,7 @@
 - 普通 dashboard refresh：清除上一份本地 Audit 结果，避免历史 snapshot 冒充当前状态。
 - 业务/财务/导入/设置页：管理员身份下也没有 Audit 按钮；页面仍只执行本模块原有 canonical API 链路。
 - App Status：worker `working` 不计问题；stale/missing/mismatch/unavailable 与 queue pending/processing/failed/backlog 按后端状态机展示；不存在 read-model summary。
+- Workbench matching：stale/rebuilding/error 把 Workbench domain 标为 busy；failed dirty scope 产生 critical alert；两者都不恢复旧 matching BackgroundJob 或阻断全局写入。
 - Dashboard/SLO：inventory、导入历史、请求 p95/p99、DB/SQL/连接指标保持有界；错误响应、HTML fallback、零样本和超时不得通过。
 
 ## 七类测试适用性

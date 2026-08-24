@@ -41,6 +41,16 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertIn("delete from app.oa_pending_payment_admissions", executed_sql)
         self.assertIn("insert into app.oa_pending_payment_admissions", executed_sql)
         self.assertIn("insert into app.oa_sync_watermarks", executed_sql)
+        matching_writes = [
+            params
+            for sql, params in connection.transaction_handle.executions
+            if "insert into job.workbench_matching_dirty_scopes" in sql
+        ]
+        self.assertEqual(len(matching_writes), 5)
+        self.assertEqual(
+            [str(params[1])[:7] for params in matching_writes],
+            ["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"],
+        )
         self.assertNotIn("job.read_model_dirty_scopes", executed_sql)
         self.assertNotIn("job.outbox_events", executed_sql)
 
@@ -166,6 +176,28 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.completed_projection_changed_scopes, ())
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
+        executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
+        self.assertNotIn("job.workbench_matching_dirty_scopes", executed_sql)
+
+    def test_matching_dirty_write_failure_rolls_back_the_oa_snapshot(self) -> None:
+        connection = FakeConnection(fail_execute_contains="job.workbench_matching_dirty_scopes")
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "matching dirty write failed"):
+            repository.replace_authoritative_snapshot(
+                scope_key="2026-06",
+                completed_projection_records=[],
+                admission_records=[
+                    _oa("oa-pay-row-1", "2026-06", workflow_status="in_progress", flow_id="flow-1")
+                ],
+                payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
+            )
+
+        self.assertFalse(connection.committed)
+        self.assertTrue(connection.rolled_back)
 
     def test_removed_completed_only_scope_uses_old_watermark_and_reports_shared_projection_change(self) -> None:
         connection = FakeConnection(watermark_rows=[_watermark("2026-05")])
@@ -314,11 +346,13 @@ class FakeTransaction:
         admission_rows: list[dict[str, object]],
         watermark_rows: list[dict[str, object]],
         application_delete_results: list[list[dict[str, object]]],
+        fail_execute_contains: str | None = None,
     ) -> None:
         self.status_rows = list(status_rows)
         self.admission_rows = list(admission_rows)
         self.watermark_rows = list(watermark_rows)
         self.application_delete_results = [list(rows) for rows in application_delete_results]
+        self.fail_execute_contains = fail_execute_contains
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
     def fetch_one(self, sql: str, _params: tuple[object, ...]) -> dict[str, object] | None:
@@ -341,6 +375,8 @@ class FakeTransaction:
         raise AssertionError(f"Unexpected query: {sql}")
 
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        if self.fail_execute_contains and self.fail_execute_contains in sql:
+            raise RuntimeError("matching dirty write failed")
         self.executions.append((sql, params))
 
 
@@ -367,12 +403,14 @@ class FakeConnection:
         admission_rows: list[dict[str, object]] | None = None,
         watermark_rows: list[dict[str, object]] | None = None,
         application_delete_results: list[list[dict[str, object]]] | None = None,
+        fail_execute_contains: str | None = None,
     ) -> None:
         self.transaction_handle = FakeTransaction(
             status_rows=list(status_rows or []),
             admission_rows=list(admission_rows or []),
             watermark_rows=list(watermark_rows or []),
             application_delete_results=list(application_delete_results or []),
+            fail_execute_contains=fail_execute_contains,
         )
         self.transaction_count = 0
         self.committed = False

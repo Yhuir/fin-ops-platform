@@ -129,7 +129,7 @@ requested tenant/scope
 | OA expense/invoice display | 前端 | OA direct page DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`；summary hydration 保持原有窄字段投影，录入抽屉通过专用列表 API 读取权威补充凭证。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零且无精确正式发票来源时为“发票附件缺失”；附件存在但未产生正式发票为“发票附件未解析”并保留“录入发票”；同 relation 存在 OA expense items、但发票没有有效 item edge 时为 row-scoped“发票待归属”并只保留“选择 OA 明细”。这些分类不直接平铺，只通过对应明细的感叹号 Popover 展示。APP 内正式发票来源边只补足归属证明，不改写 OA 原始附件数。显式归属后的同行由下一次 canonical DTO 的 `source_expense_item_ids[]` 决定，前端不得本地挪行。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
-| matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；页面 GET 不触发 matching。 |
+| matching dirty scope | `workbench-matching` | 会改变确定性正式关系的 canonical write 继续标记精确月份；OA authoritative snapshot 对 admission/completed OA 的匹配相关变化在同一事务标记实际月份及前后各两个月，payment-status-only 变化不触发；页面 GET 不触发 matching。 |
 
 - `workbench-matching` 的运行事实仅来自 `job.workbench_matching_dirty_scopes`、worker heartbeat 和错误字段；它不是 Workbench 页面 read model，也不创建 `workbench_matching` BackgroundJob 或全局页面进度。
 - Page Audit 对每个已提交 ETC external batch 独立检查正式 OA 的 `normalized_payload.etc_batch_id` 与 active relation：缺 OA 输出 `submitted_etc_batch_oa_missing` warning，有 OA 但未挂入关系输出 `submitted_etc_batch_relation_missing` warning，只有 metadata marker 但 exact `etc-summary-*` invoice member 未进入关系输出 `submitted_etc_batch_relation_member_missing` warning；active relation 的无效 canonical 成员仍是 error。只有 marker 与真实成员同时存在才算 ETC 归属闭合，warning 用于暴露可修复链路缺口，不把未配对事实伪装成完整关系。
@@ -142,6 +142,7 @@ requested tenant/scope
 - submit 在 relation UoW 内重读并锁定 canonical rows，验证 exact-set、case owner、版本、preview/topology fingerprint 和幂等。
 - invoice assignment 在独立 action UoW 内锁定并重验 active relation、typed members、OA expense items 和 invoice source links；只在当前 row anomaly fingerprint 与 CAS 均一致时追加明确 targets。成功不修改 relation topology；既有不同或 malformed 显式边不能被删除、替换或隐藏。
 - deterministic matching 按 OA 的 exact `normalized_payload.etc_batch_id` 发现 submitted ETC batch，并在读取 fact batch 前把候选 OA 申请月份并入请求 scope；新建或补全正式关系时必须把 deterministic `etc-summary-*` 作为 `invoice` member，同步持久化 `etc_batch_link`。仅有 metadata 不构成完整关系；summary 已由其它 active relation 拥有时 fail closed。
+- deterministic matching 的 OA fact 输入同时读取 completed `app.oa_applications` 与 in-progress `app.oa_pending_payment_admissions`；两类事实共用 canonical 申请日期 SQL，缺失的可选日期回退权威申请日期，权威日期无效时按 OA row id fail closed。不得恢复只匹配 completed OA 的旧输入链，也不得把 payment status 当作匹配事实。
 - confirm 接受至少两个不同 canonical 成员，允许同类型组合；仅 `amount_check.requires_note=true` 时要求备注。
 - withdraw 只接受一个完整可撤回 active relation 的精确成员集合，恢复最近一次确认前的稳定拓扑；当前与前序关系锁集合一次全局稳定排序后加锁。
 - 页面可以一次选择 20 条以上记录确认，也可以从 paired/unpaired 选择一个大成员关系并带入其全部成员撤回；多条互不相关 active relation 仍不得合并成一次撤回。

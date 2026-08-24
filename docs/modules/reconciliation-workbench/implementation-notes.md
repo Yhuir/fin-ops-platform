@@ -1832,3 +1832,11 @@
 - 收口：共享 `WorkbenchAnomalyIndicator` 使用单一的 `idle / hover-open / hover-dismissed / click-open` 本地交互模式。hover/键盘 focus 临时打开；指针激活产生的 focus 不抢先改状态，Popover 也明确排除“点击自身 trigger”这一 outside-close，因此无先行 hover 的鼠标/触屏式点击也能独立开关；首次点击关闭并抑制当前停留周期的自动重开；再次点击持续打开；Escape/真正的外部关闭回到 idle；鼠标真正离开后恢复下一次 hover。保留原 140ms 跨越延时和卸载清理，不新增全局 listener、timer 链或第二套 Popover。
 - 视觉：28px 命中区不变，改为设计系统警示琥珀 `#8a4b00` 实心背景和白色 `CircleAlert`，hover/open 只逐级加深，无阴影、缩放或循环动画；键盘焦点轮廓保留。
 - 旧链删除：删除旧 `open` 布尔值、`onOpenChange={setOpen}` 和 hover/focus 无条件 `setOpen(true)` 并行路径，以及与关系带混色的浅色按钮样式；三个主表/抽屉调用方继续复用同一组件接口。无 API、业务状态、权限、数据库、备份、migration、read model、worker、cache、依赖或其它页面 I/O 变化。
+
+## 2026-08-24 - 进行中 OA 未进入自动匹配的根因收口
+
+- 真实根因有两层：正式匹配 fact repository 旧查询只读取 completed `app.oa_applications`，没有读取页面已展示的 in-progress `app.oa_pending_payment_admissions`；同时历史 OA 的可选日期占位值 `—` 会让整个月份 worker 失败。目标 300 元 OA 与流水本身已满足现有强证据规则，无需新增账号或模糊文本规则。
+- 收口：同一 set-based OA SQL 读取 completed 与 in-progress canonical facts，共用独立的 pending OA 日期 SQL 边界；可选日期无效时回退权威申请日期，仅权威日期无效才 fail closed。OA authoritative snapshot 的 admission/completed 变化在原业务事务内标记实际月份及前后各两个月，matching rule version 提升以自动重试旧 failed/completed scope。
+- 运维真实状态：failed matching scope 产生 critical alert；stale/rebuilding/error 会把 Workbench domain 标为 busy，但不阻断全局写入、不恢复已退役 BackgroundJob，也不把 direct page 伪装成 read model。
+- 旧链删除：不恢复历史 pending relation/claim 运行时，不新增第二套 worker、cache、read model、轮询或 fallback；日期 SQL 从页面 hydration 文件移到共享 PostgreSQL helper，避免匹配仓储反向依赖页面实现。
+- 数据安全：无 migration、无数据库备份、无业务数据直接修补、无主数据库删除操作；关系由现有 deterministic worker 幂等写入。

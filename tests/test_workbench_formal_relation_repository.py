@@ -18,6 +18,7 @@ class FakeConnection:
         self,
         *,
         oa_rows: list[dict[str, object]] | None = None,
+        pending_oa_rows: list[dict[str, object]] | None = None,
         bank_rows: list[dict[str, object]] | None = None,
         invoice_rows: list[dict[str, object]] | None = None,
         historical_oa_rows: list[dict[str, object]] | None = None,
@@ -31,6 +32,7 @@ class FakeConnection:
         category_projection_rows: list[dict[str, object]] | None = None,
     ) -> None:
         self.oa_rows = list(oa_rows or [])
+        self.pending_oa_rows = list(pending_oa_rows or [])
         self.bank_rows = list(bank_rows or [])
         self.invoice_rows = list(invoice_rows or [])
         self.historical_oa_rows = list(historical_oa_rows or [])
@@ -73,6 +75,8 @@ class FakeConnection:
         if "from app.workbench_pair_relation_history" in normalized:
             return list(self.history_rows)
         historical = "= any(%s::text[])" in normalized
+        if "from app.oa_applications" in normalized and "from app.oa_pending_payment_admissions" in normalized:
+            return [*self.oa_rows, *self.pending_oa_rows]
         if "from app.oa_applications" in normalized:
             return list(self.historical_oa_rows if historical else self.oa_rows)
         if "from app.bank_transactions" in normalized:
@@ -137,6 +141,31 @@ def bank_row(
         "bank_text_fields": [],
         "raw_payload": {},
         "source_version": datetime(2026, 5, 8, tzinfo=timezone.utc),
+    }
+
+
+def pending_oa_row(row_id: str = "oa-pay-1") -> dict[str, object]:
+    return {
+        "canonical_object_identity": row_id,
+        "row_id": row_id,
+        "amount": Decimal("300.00"),
+        "currency": "CNY",
+        "fact_date": date(2026, 8, 19),
+        "approved_at": None,
+        "workflow_no": "PAY-348808",
+        "project_id": None,
+        "project_name": "红塔烟草维修项目",
+        "applicant": "杨丽萍",
+        "status": "active",
+        "workflow_status": "in_progress",
+        "normalized_payload": {
+            "apply_type": "支付申请",
+            "counterparty_name": "国义招标股份有限公司云南分公司",
+            "reason": "电子采购平台 348808 招标文件费",
+            "detail_fields": {"收款账号": "871903360910105"},
+        },
+        "source_aliases": [],
+        "source_version": datetime(2026, 8, 19, tzinfo=timezone.utc),
     }
 
 
@@ -350,7 +379,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.facts[0].fact_date, date(2026, 5, 7))
 
-    def test_daily_reimbursement_keeps_non_placeholder_date_validation_strict(self) -> None:
+    def test_daily_reimbursement_skips_invalid_optional_date_and_uses_authoritative_date(self) -> None:
         connection = FakeConnection(
             oa_rows=[
                 oa_row(
@@ -362,10 +391,46 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
             ]
         )
 
-        with self.assertRaisesRegex(ValueError, "Invalid canonical fact date"):
-            PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(
-                ["2026-05"]
-            )
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(
+            ["2026-05"]
+        )
+
+        self.assertEqual(result.facts[0].fact_date, date(2026, 5, 7))
+
+    def test_invalid_authoritative_oa_date_identifies_the_canonical_row(self) -> None:
+        invalid = oa_row("oa-invalid-date", payload={"apply_type": "支付申请"})
+        invalid["fact_date"] = "not-a-date"
+
+        with self.assertRaisesRegex(ValueError, "oa-invalid-date"):
+            PostgresWorkbenchFormalRelationFactRepository(
+                FakeConnection(oa_rows=[invalid])
+            ).load_batch(["2026-05"])
+
+    def test_in_progress_payment_application_and_bank_form_one_exact_relation_plan(self) -> None:
+        bank = bank_row(
+            "txn-imported-348808",
+            counterparty="国义招标股份有限公司云南分公司",
+        )
+        bank.update(
+            {
+                "amount": Decimal("300.00"),
+                "signed_amount": Decimal("-300.00"),
+                "fact_date": date(2026, 8, 19),
+                "remark": "电子采购平台348808招标文件费",
+            }
+        )
+        connection = FakeConnection(
+            pending_oa_rows=[pending_oa_row()],
+            bank_rows=[bank],
+        )
+
+        batch = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-08"])
+        result = WorkbenchFreeMatchingEngine().plan_relations(batch)
+
+        self.assertEqual({fact.member_key for fact in batch.facts}, {("oa", "oa-pay-1"), ("bank", "txn-imported-348808")})
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].rule_code, "strong_evidence_exact_closure")
+        self.assertIn("app.oa_pending_payment_admissions", connection.queries[0][0])
 
     def test_explicit_reference_uses_one_bounded_historical_lookup_per_target_type(self) -> None:
         source_links = [

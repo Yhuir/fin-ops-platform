@@ -68,6 +68,10 @@ class AppStatusOverviewService:
             )
             for domain in self._domains
         ]
+        self._apply_workbench_matching_status(
+            domains,
+            app_health_snapshot.get("workbench_matching"),
+        )
         overall = self._overall_payload(
             session=session,
             domains=domains,
@@ -91,6 +95,25 @@ class AppStatusOverviewService:
             "background_tasks": tasks,
             "alerts": self._active_alerts(app_health_snapshot.get("alerts")),
         }
+
+    @staticmethod
+    def _apply_workbench_matching_status(domains: list[dict[str, Any]], payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        status = str(payload.get("status") or "").strip().lower()
+        if status not in {"stale", "rebuilding", "error"}:
+            return
+        domain = next((item for item in domains if item.get("key") == "workbench"), None)
+        if domain is None:
+            return
+        domain["level"] = "busy"
+        domain["status"] = status
+        domain["reason"] = "关联台自动匹配待恢复" if status in {"stale", "error"} else "关联台自动匹配处理中"
+        details = list(domain.get("details") or [])
+        last_error = str(payload.get("last_matching_error") or "").strip()
+        if last_error:
+            details.append(last_error)
+        domain["details"] = list(dict.fromkeys(detail for detail in details if detail))
 
     def _runtime_summary_payload(
         self,

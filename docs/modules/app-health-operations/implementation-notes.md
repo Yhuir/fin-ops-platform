@@ -606,3 +606,9 @@
 - 修复：导入/API 重试只标记 matching dirty months 并返回 `queued_matching_months`；删除两处 BackgroundJob 创建链和 job registry 映射。App Health、App Status 与前端 active-job mapper 均排除该退休类型；迁移 `0148` 只把历史 active 假任务更新为 `superseded`，保留审计记录，不删除业务数据。
 - 边界：关联台页面继续通过 direct canonical API 读取；真实 `workbench-matching` worker、dirty/retry/processing/failed scope 和错误诊断继续保留。其他导入/重置/维护后台任务的全局进度不变。
 - 测试：覆盖导入仅调度 dirty scope、历史匹配 job 不进入 active/attention/App Status、全局顶部不渲染旧文案、其他导入进度仍显示，以及迁移无 delete/drop。
+
+## 2026-08-24 - 关联台匹配失败状态显式化
+
+- matching worker 的真实状态仍只来自 `job.workbench_matching_dirty_scopes`，不恢复 2026-08-14 已删除的 `workbench_matching` BackgroundJob。
+- failed scope 现在生成 critical alert；matching stale/rebuilding/error 会把 Workbench domain 从 ready 覆盖为 busy，避免 required worker heartbeat 正常时误报全绿。
+- 该状态只用于运维诊断，不阻断全局 mutation；没有新增 API 字段、数据库表、migration、worker、cache 或页面轮询。

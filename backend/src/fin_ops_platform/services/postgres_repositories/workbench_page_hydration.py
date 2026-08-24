@@ -22,6 +22,10 @@ from fin_ops_platform.services.postgres_repositories.common import (
 from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
     oa_source_aliases_sql,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
+    pending_oa_application_date_sql,
+    pending_oa_application_time_sql,
+)
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
@@ -32,26 +36,6 @@ from fin_ops_platform.services.workbench_canonical_rows import (
 # budget is independent of page/member count; a higher count is a regression.
 WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 8
 WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 2
-
-
-def pending_oa_application_time_sql(alias: str) -> str:
-    """Return the canonical pending-OA application time SQL expression."""
-
-    return f"""coalesce(
-        nullif(btrim({alias}.source_payload#>>'{{detail_fields,申请时间}}'), ''),
-        nullif(btrim({alias}.source_payload#>>'{{detail_fields,申请日期}}'), ''),
-        nullif(btrim({alias}.source_payload->>'application_time'), ''),
-        nullif(btrim({alias}.source_payload->>'application_date'), '')
-    )"""
-
-
-def pending_oa_application_date_sql(alias: str) -> str:
-    application_time = pending_oa_application_time_sql(alias)
-    return f"""case
-        when ({application_time}) ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}'
-        then substring(({application_time}) from 1 for 10)::date
-        else null::date
-    end"""
 
 
 def oa_source_identity_aliases_sql(source_payload: str) -> str:

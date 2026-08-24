@@ -125,6 +125,28 @@ class AppHealthAlertService:
         dependencies = snapshot.get("dependencies") if isinstance(snapshot.get("dependencies"), dict) else {}
         session = snapshot.get("session") if isinstance(snapshot.get("session"), dict) else {}
 
+        matching_entries = (
+            workbench.get("matching_dirty_scopes")
+            if isinstance(workbench.get("matching_dirty_scopes"), list)
+            else []
+        )
+        for entry in matching_entries:
+            if not isinstance(entry, dict) or str(entry.get("status") or "").strip().lower() != "failed":
+                continue
+            scope = str(entry.get("scope_month") or "").strip() or "unknown"
+            error = str(entry.get("last_error") or "").strip()
+            message = f"关联台自动匹配月份 {scope} 处理失败。"
+            if error:
+                message = f"{message} {error}"
+            self._put_alert(
+                alerts,
+                kind="workbench_matching_scope_failed",
+                severity="critical",
+                scope=scope,
+                message=message,
+                now=now,
+            )
+
         dirty_scope_ages = metrics.get("dirty_scope_age_seconds")
         if not isinstance(dirty_scope_ages, dict):
             dirty_scope_ages = {}

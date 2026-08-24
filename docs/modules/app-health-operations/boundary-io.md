@@ -4,7 +4,7 @@
 
 ## 职责
 
-- 聚合 session、OA sync、background jobs、四个 required worker、PostgreSQL 通用 outbox 和依赖状态。
+- 聚合 session、OA sync、background jobs、四个 required worker、PostgreSQL 通用 outbox、Workbench matching dirty scopes 和依赖状态。
 - 展示 HTTP/DB request timing、import inventory、operation audit。
 - 编排只读 canonical page proof / System Audit；前端只允许 App Health 发起固定 System Audit，业务页面不暴露 Audit 控件。
 - Admin-only；不直接修改 business facts。
@@ -16,6 +16,7 @@
 | Health/dependency state | app health services |
 | Worker registry/heartbeat | runtime worker registry/repository |
 | PostgreSQL queue metrics | runtime monitoring repository |
+| Workbench matching scopes | `job.workbench_matching_dirty_scopes`；只读 status/last_error |
 | API/DB timing | request metrics collector |
 | Canonical audit | page audit repositories，一个 caller-owned read-only snapshot |
 
@@ -28,6 +29,8 @@
 
 输出不包含旧 projection registry、scope/readiness 或 freshness summary。Queue 只显示 PostgreSQL 通用 event types，
 缺少必要字段时必须标记 unavailable，不能伪造 queue healthy。
+
+`workbench_matching.status=stale|rebuilding|error` 必须把 Workbench domain 标为 busy/yellow；failed scope 产生 critical alert 并携带 scope 与错误。该诊断不阻断全局写入，也不创建已退役的 `workbench_matching` BackgroundJob。
 
 ## 禁止边界
 

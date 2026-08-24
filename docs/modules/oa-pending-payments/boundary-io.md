@@ -56,6 +56,7 @@
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
 | canonical status reconcile | PostgreSQL | 外部写回成功或 already-paid 后幂等记录 payment-status snapshot；混合关系写回金额只合计 outflow |
 | formal relation mutation | PostgreSQL | 只调用 `WorkbenchRelationCommandService`；扩展唯一 active case 时保留原 case 和发票成员，冲突或多个 owner fail closed |
+| matching dirty scopes | `job.workbench_matching_dirty_scopes` | admission 或 completed OA canonical snapshot 发生匹配相关变化时，在同一业务事务中标记实际月份及前后各两个月；仅 payment-status 变化不触发匹配。 |
 | Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
 | table frame | frontend | 与进项发票使用情况、销项发票收款情况、待找发票共用 `finance-page-table-frame` 有界高度和 contained 内部滚动；本页工具栏仍占用 frame 的独立首行 |
 
@@ -85,7 +86,7 @@
 
 | 事实变化 | 支持入口 | 页面可见性 |
 | --- | --- | --- |
-| external OA/admission/payment status | OA integration authoritative snapshot | PostgreSQL commit 后下一次页面 GET 可见；请求热路径不访问外部源 |
+| external OA/admission/payment status | OA integration authoritative snapshot | PostgreSQL commit 后下一次页面 GET 可见；admission/completed OA 变化在同一事务标记 matching dirty scopes，payment-status-only 更新不标记；请求热路径不访问外部源 |
 | Workbench confirm/withdraw | Workbench UoW | active canonical relation commit 后下一次页面 GET 可见 |
 | in-progress OA relation create/extend | OA pending command -> Workbench relation UoW | formal owner transaction commit 后下一次页面 GET 可见；无 promotion 阶段 |
 | admission terminal cleanup | OA source snapshot -> Workbench relation command | OA 不再属于 completed 或 admitted 时，从 active case 移除该 OA；剩余成员仍构成有效组则保留原 case，否则取消 relation |

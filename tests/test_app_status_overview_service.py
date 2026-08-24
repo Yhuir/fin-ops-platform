@@ -17,13 +17,43 @@ class FakeSession:
 
 def healthy_dependencies() -> dict[str, dict[str, object]]:
     return {
+        "oa_identity": {"status": "available"},
+        "oa_sync": {"status": "available"},
+        "background_jobs": {"status": "available"},
+        "state_store": {"status": "available"},
         "postgres": {"status": "ready"},
         "redis": {"status": "ready"},
-        "oa": {"status": "ready"},
+        "object_storage": {"status": "available"},
+        "oa_mongo": {"status": "available"},
     }
 
 
 class AppStatusOverviewServiceTests(unittest.TestCase):
+    def test_stale_matching_scope_overrides_ready_worker_without_blocking_writes(self) -> None:
+        payload = AppStatusOverviewService().build_overview(
+            session=FakeSession(),
+            active_jobs=[],
+            attention_jobs=[],
+            worker_statuses={"workbench-matching": {"status": "ready", "required": True}},
+            outbox_statuses={},
+            app_health_snapshot={
+                "generated_at": "2026-08-24T10:00:00+08:00",
+                "dependencies": healthy_dependencies(),
+                "alerts": {"active": []},
+                "workbench_matching": {
+                    "status": "stale",
+                    "last_matching_error": "Invalid canonical fact date",
+                },
+            },
+        )
+
+        workbench = next(domain for domain in payload["domains"] if domain["key"] == "workbench")
+        self.assertEqual(workbench["level"], "busy")
+        self.assertEqual(workbench["status"], "stale")
+        self.assertIn("Invalid canonical fact date", workbench["details"])
+        self.assertEqual(payload["overall"]["level"], "busy")
+        self.assertFalse(payload["overall"]["blocks_mutations"])
+
     def test_overview_contains_only_worker_and_queue_runtime_summary(self) -> None:
         service = AppStatusOverviewService(domains=APP_STATUS_DOMAIN_REGISTRY)
         payload = service.build_overview(
