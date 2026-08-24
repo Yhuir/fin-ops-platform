@@ -5,18 +5,26 @@ do $$
 declare
     v_alias_row_id constant text := 'oa-exp-2327';
     v_canonical_row_id constant text := 'oa-exp-6a86a63777bca2d0c5f62d07';
-    v_expected_item_ids constant text[] := array[
+    v_expected_legacy_item_ids constant text[] := array[
         'oa-exp-2327:item:0:d91d8bb509c9',
         'oa-exp-2327:item:1:a48a5229fa61'
+    ]::text[];
+    v_expected_current_item_ids constant text[] := array[
+        'oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2',
+        'oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb'
     ]::text[];
     canonical_count integer;
     alias_application_count integer;
     existing_alias_count integer;
     existing_canonical_row_id text;
     existing_status text;
+    invoice_source_link_count integer;
+    matched_invoice_attachment_count integer;
+    current_item_ids text[];
     bridge_item_ids text[];
     bridge_row_indexes text[];
     attachment_key_hashes text[];
+    invoice_attachment_key_hashes text[];
     invoice_ids text[];
     invoice_item_ids text[];
     invoice_row_indexes text[];
@@ -67,6 +75,19 @@ begin
         where oa.row_id = v_canonical_row_id
           and oa.status <> 'deleted'
     ),
+    current_items as materialized (
+        select
+            item.row_id as source_expense_item_id,
+            expected.source_expense_row_index
+        from app.oa_application_items item
+        join canonical_oa oa on oa.id = item.oa_application_id
+        join (
+            values
+                ('oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2'::text, '0'::text),
+                ('oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb'::text, '1'::text)
+        ) expected(source_expense_item_id, source_expense_row_index)
+          on expected.source_expense_item_id = item.row_id
+    ),
     owned_attachments as materialized (
         select attachment.source_attachment_key
         from app.oa_attachments attachment
@@ -83,7 +104,6 @@ begin
         from owned_attachments owned
         join app.oa_attachment_invoice_cache_sources source
           on source.source_attachment_key = owned.source_attachment_key
-        where source.source_expense_item_id = any(v_expected_item_ids)
         union
         select distinct
             source.source_expense_item_id,
@@ -94,10 +114,9 @@ begin
         from owned_attachments owned
         join app.oa_attachment_invoice_cache_sources source
           on source.cache_source_attachment_key = owned.source_attachment_key
-        where source.source_expense_item_id = any(v_expected_item_ids)
     ),
     invoice_sources as materialized (
-        select distinct
+        select
             coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id,
             source_link.value->>'source_expense_item_id' as source_expense_item_id,
             source_link.value->>'source_expense_row_index' as source_expense_row_index,
@@ -110,45 +129,66 @@ begin
             end
         ) source_link(value)
         where invoice.status <> 'deleted'
+          and invoice.workbench_visibility = 'visible'
+          and invoice.legacy_mongo_id in ('inv_imported_0898', 'inv_imported_0899')
           and source_link.value->>'source_type' = 'oa_attachment_invoice'
-          and source_link.value->>'source_expense_item_id' = any(v_expected_item_ids)
-          and exists (
-              select 1
-              from bridge_sources bridge
-              where source_link.value->>'source_attachment_key' in (
-                  bridge.owned_attachment_key,
-                  bridge.source_attachment_key,
-                  bridge.cache_source_attachment_key
-              )
-          )
+          and source_link.value->>'source_expense_item_id' = any(v_expected_legacy_item_ids)
+          and nullif(source_link.value->>'source_attachment_key', '') is not null
+    ),
+    matched_evidence as materialized (
+        select distinct
+            invoice.invoice_id,
+            invoice.source_expense_item_id as invoice_expense_item_id,
+            invoice.source_expense_row_index,
+            invoice.source_attachment_key as invoice_attachment_key,
+            current_item.source_expense_item_id as current_expense_item_id,
+            bridge.source_expense_item_id as bridge_expense_item_id,
+            bridge.owned_attachment_key
+        from invoice_sources invoice
+        join current_items current_item
+          on current_item.source_expense_row_index = invoice.source_expense_row_index
+        join bridge_sources bridge
+          on bridge.source_expense_row_index = invoice.source_expense_row_index
+         and invoice.source_attachment_key in (
+             bridge.owned_attachment_key,
+             bridge.source_attachment_key,
+             bridge.cache_source_attachment_key
+         )
+         and bridge.source_expense_item_id in (
+             invoice.source_expense_item_id,
+             current_item.source_expense_item_id
+         )
     )
     select
         coalesce(array(
-            select distinct bridge.source_expense_item_id
-            from bridge_sources bridge
-            order by bridge.source_expense_item_id
+            select distinct item.source_expense_item_id
+            from current_items item
+            order by item.source_expense_item_id
         ), array[]::text[]),
         coalesce(array(
-            select distinct bridge.source_expense_row_index
-            from bridge_sources bridge
-            where nullif(bridge.source_expense_row_index, '') is not null
-            order by bridge.source_expense_row_index
+            select distinct evidence.bridge_expense_item_id
+            from matched_evidence evidence
+            order by evidence.bridge_expense_item_id
         ), array[]::text[]),
         coalesce(array(
-            select distinct encode(digest(key.value, 'sha256'), 'hex')
-            from bridge_sources bridge
-            cross join lateral unnest(array[
-                bridge.owned_attachment_key,
-                bridge.source_attachment_key,
-                bridge.cache_source_attachment_key
-            ]) key(value)
-            where nullif(key.value, '') is not null
-            order by encode(digest(key.value, 'sha256'), 'hex')
+            select distinct evidence.source_expense_row_index
+            from matched_evidence evidence
+            order by evidence.source_expense_row_index
         ), array[]::text[]),
         coalesce(array(
-            select distinct source.invoice_id
+            select distinct encode(digest(evidence.owned_attachment_key, 'sha256'), 'hex')
+            from matched_evidence evidence
+            order by encode(digest(evidence.owned_attachment_key, 'sha256'), 'hex')
+        ), array[]::text[]),
+        coalesce(array(
+            select distinct encode(digest(source.source_attachment_key, 'sha256'), 'hex')
             from invoice_sources source
-            order by source.invoice_id
+            order by encode(digest(source.source_attachment_key, 'sha256'), 'hex')
+        ), array[]::text[]),
+        coalesce(array(
+            select distinct evidence.invoice_id
+            from matched_evidence evidence
+            order by evidence.invoice_id
         ), array[]::text[]),
         coalesce(array(
             select distinct source.source_expense_item_id
@@ -160,29 +200,44 @@ begin
             from invoice_sources source
             where nullif(source.source_expense_row_index, '') is not null
             order by source.source_expense_row_index
-        ), array[]::text[])
+        ), array[]::text[]),
+        (select count(*)::integer from invoice_sources),
+        (
+            select count(*)::integer
+            from (
+                select distinct evidence.invoice_id, evidence.owned_attachment_key
+                from matched_evidence evidence
+            ) matched_attachment
+        )
     into
+        current_item_ids,
         bridge_item_ids,
         bridge_row_indexes,
         attachment_key_hashes,
+        invoice_attachment_key_hashes,
         invoice_ids,
         invoice_item_ids,
-        invoice_row_indexes;
+        invoice_row_indexes,
+        invoice_source_link_count,
+        matched_invoice_attachment_count;
 
-    if bridge_item_ids <> v_expected_item_ids then
-        raise exception '0153: attachment bridge item identities do not match reviewed evidence';
+    if current_item_ids <> v_expected_current_item_ids then
+        raise exception '0153: current OA item identities do not match reviewed evidence';
     end if;
-    if invoice_item_ids <> bridge_item_ids then
-        raise exception '0153: invoice and attachment bridge item identities disagree';
+    if invoice_source_link_count <> 2
+       or invoice_item_ids <> v_expected_legacy_item_ids then
+        raise exception '0153: historical invoice source identities do not match reviewed evidence';
     end if;
     if bridge_row_indexes <> array['0', '1']::text[]
-       or invoice_row_indexes <> bridge_row_indexes then
+       or invoice_row_indexes <> bridge_row_indexes
+       or matched_invoice_attachment_count <> 2 then
         raise exception '0153: invoice and attachment bridge row indexes disagree';
     end if;
     if invoice_ids <> array['inv_imported_0898', 'inv_imported_0899']::text[] then
         raise exception '0153: canonical invoice identities do not match reviewed evidence';
     end if;
-    if cardinality(attachment_key_hashes) < 2 then
+    if cardinality(attachment_key_hashes) <> 2
+       or cardinality(invoice_attachment_key_hashes) <> 2 then
         raise exception '0153: exact attachment key evidence is incomplete';
     end if;
 
@@ -192,10 +247,12 @@ begin
                 '|',
                 v_alias_row_id,
                 v_canonical_row_id,
+                array_to_string(current_item_ids, ','),
                 array_to_string(bridge_item_ids, ','),
                 array_to_string(bridge_row_indexes, ','),
                 array_to_string(invoice_ids, ','),
-                array_to_string(attachment_key_hashes, ',')
+                array_to_string(attachment_key_hashes, ','),
+                array_to_string(invoice_attachment_key_hashes, ',')
             ),
             'sha256'
         ),
@@ -225,11 +282,13 @@ begin
         'system:migration:0153',
         now(),
         jsonb_build_object(
-            'contract', 'oa-source-alias-attachment-identity-repair-v1',
+            'contract', 'oa-source-alias-attachment-identity-repair-v2',
+            'current_item_count', cardinality(current_item_ids),
             'bridge_item_count', cardinality(bridge_item_ids),
             'invoice_count', cardinality(invoice_ids),
             'row_indexes', bridge_row_indexes,
-            'attachment_key_hashes', attachment_key_hashes
+            'attachment_key_hashes', attachment_key_hashes,
+            'invoice_attachment_key_hashes', invoice_attachment_key_hashes
         ),
         now()
     );

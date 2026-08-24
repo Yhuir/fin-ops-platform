@@ -336,7 +336,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         )
         sql = "\n".join(statements)
         self.assertIn("from app.oa_applications", sql)
-        self.assertIn("where row_id = any(%s::text[])", sql)
+        self.assertIn("where oa.row_id = any(%s::text[])", sql)
         self.assertIn("from app.oa_pending_payment_admissions", sql)
         self.assertNotIn("encode(digest(", sql)
         self.assertNotIn("from app.invoices", sql)
