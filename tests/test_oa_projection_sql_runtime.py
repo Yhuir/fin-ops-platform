@@ -208,6 +208,9 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         executed_sql = connection.executed[0][0]
         self.assertIn("from app.oa_application_items item", executed_sql)
         self.assertIn("from app.oa_attachments attachment", executed_sql)
+        self.assertIn("join app.oa_attachment_invoice_cache_sources cache_source", executed_sql)
+        self.assertIn("cache_source.source_attachment_key = attachment.source_attachment_key", executed_sql)
+        self.assertIn("cache_source.cache_source_attachment_key = attachment.source_attachment_key", executed_sql)
         self.assertIn("from app.oa_source_aliases alias_row", executed_sql)
         self.assertIn("alias_row.status = 'active'", executed_sql)
 

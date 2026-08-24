@@ -600,6 +600,9 @@ def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases
     assert "'oa-exp-' || value" in anomaly_sql
     assert "from app.oa_application_items item" in canonical_sql
     assert "from app.oa_attachments attachment" in canonical_sql
+    assert "join app.oa_attachment_invoice_cache_sources cache_source" in canonical_sql
+    assert "cache_source.source_attachment_key = attachment.source_attachment_key" in canonical_sql
+    assert "cache_source.cache_source_attachment_key = attachment.source_attachment_key" in canonical_sql
     assert "from app.oa_source_aliases alias_row" in canonical_sql
 
 
@@ -805,6 +808,9 @@ def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> No
     assert "oa.normalized_payload->'detail_fields'->>'Mongo文档ID'" in connection.sql
     assert "from app.oa_application_items item" in connection.sql
     assert "from app.oa_attachments attachment" in connection.sql
+    assert "join app.oa_attachment_invoice_cache_sources cache_source" in connection.sql
+    assert "cache_source.source_attachment_key = attachment.source_attachment_key" in connection.sql
+    assert "cache_source.cache_source_attachment_key = attachment.source_attachment_key" in connection.sql
     assert "from app.oa_source_aliases alias_row" in connection.sql
     assert "oa.normalized_payload->>'expense_type'" in connection.sql
     assert "admission.source_payload->>'expense_type'" in connection.sql

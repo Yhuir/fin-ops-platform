@@ -46,6 +46,26 @@ def oa_source_aliases_sql(application_alias: str, source_payload: str) -> str:
             from app.oa_attachments attachment
             where attachment.oa_application_id = {application_alias}.id
             union all
+            select split_part(
+                nullif(cache_source.source_expense_item_id, ''),
+                ':item:',
+                1
+            )
+            from app.oa_attachments attachment
+            join app.oa_attachment_invoice_cache_sources cache_source
+              on cache_source.source_attachment_key = attachment.source_attachment_key
+            where attachment.oa_application_id = {application_alias}.id
+            union all
+            select split_part(
+                nullif(cache_source.source_expense_item_id, ''),
+                ':item:',
+                1
+            )
+            from app.oa_attachments attachment
+            join app.oa_attachment_invoice_cache_sources cache_source
+              on cache_source.cache_source_attachment_key = attachment.source_attachment_key
+            where attachment.oa_application_id = {application_alias}.id
+            union all
             select alias_row.alias_row_id
             from app.oa_source_aliases alias_row
             where alias_row.canonical_row_id = {application_alias}.row_id
