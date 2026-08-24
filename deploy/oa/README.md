@@ -164,6 +164,7 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 - Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。
 - 不通过恢复旧 worker/env、重建旧 projection、手写 SQL 或删 queue 行解阻。
 - repair 工具必须先 dry-run，绑定 source fingerprint、精确计数、operator 和 reason；任何漂移在写前失败。银行 Audit terminal suspected link 修复还必须显式提供 `--expected-bank-audit-row-unlink-count`，只允许候选 release 按计划逐行 CAS 清空该引用。
+- 历史 OA 身份只允许通过 `oa-source-alias-repair` 修复：必须指定 exact alias/canonical row id、bridge/invoice 计数并先 dry-run；工具只接受 attachment key bridge + 旧 item ID + row index 一致的证据，execute 绑定 fingerprint 后写一条 active alias，禁止把 cache bridge 放回 Workbench 页面热查询。
 
 本次 runtime 退役不创建数据库备份。如果独立数据修复明确创建 task-specific recovery artifact，完成验证后按
 工具合同删除该 artifact；禁止删除主数据库。

@@ -3,7 +3,7 @@
 ## 2026-08-24 - OA 历史附件归属别名与来源 Chip 收口
 
 - 根因：canonical OA 身份迁移后，附件发票仍正确保留旧 OA/子付款项来源，当前 OA 则使用新的 canonical row/item ID；两者的物理附件身份桥仍在 `app.oa_attachment_invoice_cache_sources`，但页面与 matching 只读 payload、owned item/attachment parent 和显式 alias，漏读了这条既有权威桥。同一 OA 在不同读取链得到不完整 alias 集合，历史 OA附件发票无法按 `row_index` 归属当前子付款项。
-- 修复：candidate、summary hydration、formal matching 与 full/detail row-id OA projection 共用一个 set-based OA source alias SQL 边界，合并 payload aliases、owned item/attachment parent identity、indexed attachment cache identity bridge 与 active `app.oa_source_aliases`。full/detail 直接在既有 row-id 查询中携带 aliases，不增加 SQL statement；不增加金额、项目、文件名或顺序 fallback，不新增 API、表、索引、read model、worker、cache 或依赖。
+- 修复：candidate、summary hydration、formal matching 与 full/detail row-id OA projection 共用一个 set-based OA source alias SQL 边界，合并 payload aliases、owned item/attachment parent identity 与 active `app.oa_source_aliases`。full/detail 直接在既有 row-id 查询中携带 aliases，不增加 SQL statement；历史 cache bridge 只用于受控 alias dry-run/repair，禁止进入页面热查询。不增加金额、项目、文件名或顺序 fallback，不新增 API、表、索引、read model、worker、cache 或依赖。
 - 展示：canonical `source_kinds[]` 继续保留全部 provenance；页面主来源只显示“OA附件”或“人工导入”，“明细归属”独立保留，删除旧“导入记录”来源 Chip 与搜索别名。
 - 数据安全：本次不修改 canonical 发票/OA/source links，不创建数据库备份，不删除主数据库；生产是否需要修复数据只在部署后以权威 API 事实判断。
 
