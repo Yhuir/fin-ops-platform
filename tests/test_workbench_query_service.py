@@ -550,6 +550,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                     relation_code="pending_match",
                     relation_label="待找流水与发票",
                     relation_tone="warn",
+                    source_aliases=["oa-exp-historical-001"],
                 )
             ]
         )
@@ -558,6 +559,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         row_record = service.get_row_record("oa-real-lookup-001", month_hint="all")
 
         self.assertEqual(row_record["applicant"], "刘际涛")
+        self.assertEqual(row_record["source_aliases"], ["oa-exp-historical-001"])
         self.assertFalse(adapter.list_all_called)
 
     def test_refreshes_oa_rows_for_month_and_preserves_manual_relation_state(self) -> None:

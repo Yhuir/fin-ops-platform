@@ -518,6 +518,7 @@ class WorkbenchQueryService:
             "project_name": project_name,
             "project_name_display": project_name_display,
             "project_names": list(project_names),
+            "source_aliases": list(getattr(record, "source_aliases", []) or []),
             "expense_items": self._workbench_expense_items(record),
             "expense_type": record.expense_type,
             "expense_content": record.expense_content,

@@ -182,6 +182,35 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("'completed'", connection.executed[0][0])
         self.assertIn("'已完成'", connection.executed[0][0])
 
+    def test_postgres_oa_workflow_row_lookup_enriches_source_aliases_in_one_statement(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAWorkflowRepository
+
+        payload = asdict(oa_record(row_id="oa-exp-current"))
+        payload["source_aliases"] = ["oa-exp-payload-alias"]
+        connection = OAProjectionConnection(
+            rows=[
+                {
+                    "row_id": "oa-exp-current",
+                    "month": "2026-05",
+                    "workflow_status": "completed",
+                    "normalized_payload": payload,
+                    "raw_payload": {"normalized_payload": payload},
+                }
+            ]
+        )
+
+        records = PostgresOAWorkflowRepository(connection).list_application_records_by_row_ids(
+            ["oa-exp-current"]
+        )
+
+        self.assertEqual(records[0].source_aliases, ["oa-exp-payload-alias"])
+        self.assertEqual(len(connection.executed), 1)
+        executed_sql = connection.executed[0][0]
+        self.assertIn("from app.oa_application_items item", executed_sql)
+        self.assertIn("from app.oa_attachments attachment", executed_sql)
+        self.assertIn("from app.oa_source_aliases alias_row", executed_sql)
+        self.assertIn("alias_row.status = 'active'", executed_sql)
+
     def test_postgres_oa_projection_repository_normalizes_only_the_legacy_open_section(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 

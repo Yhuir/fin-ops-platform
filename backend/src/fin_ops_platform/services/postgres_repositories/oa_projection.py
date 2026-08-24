@@ -18,6 +18,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
 from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_bridge import (
     reconcile_oa_attachment_cache_identity_sources,
 )
+from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
+    oa_source_aliases_sql,
+)
 
 OA_PROJECTION_SYNC_VERSION = "2026-08-18-workflow-number-v9"
 COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
@@ -34,6 +37,7 @@ COMPLETED_WORKFLOW_STATUS_SQL = (
     "(workflow_status is null or workflow_status = '' "
     "or workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'))"
 )
+_OA_WORKFLOW_SOURCE_ALIASES_SQL = oa_source_aliases_sql("oa", "oa.normalized_payload")
 
 
 def is_completed_workflow_status(value: Any) -> bool:
@@ -1090,12 +1094,16 @@ class PostgresOAWorkflowRepository:
         if not normalized_row_ids:
             return []
         records = self._records(
-            """
+            f"""
             with workflow_facts as (
-                select row_id, 'completed'::text as workflow_status,
-                       normalized_payload, raw_payload, 0 as source_priority
-                from app.oa_applications
-                where row_id = any(%s::text[])
+                select oa.row_id, 'completed'::text as workflow_status,
+                       oa.normalized_payload || jsonb_build_object(
+                           'source_aliases',
+                           to_jsonb({_OA_WORKFLOW_SOURCE_ALIASES_SQL})
+                       ) as normalized_payload,
+                       oa.raw_payload, 0 as source_priority
+                from app.oa_applications oa
+                where oa.row_id = any(%s::text[])
                   and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
                 union all
                 select admission.oa_id as row_id, 'in_progress'::text as workflow_status,

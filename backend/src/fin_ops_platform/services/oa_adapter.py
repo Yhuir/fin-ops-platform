@@ -44,6 +44,7 @@ class OAApplicationRecord:
     tags: list[str] = field(default_factory=list)
     project_name_display: str | None = None
     project_names: list[str] = field(default_factory=list)
+    source_aliases: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

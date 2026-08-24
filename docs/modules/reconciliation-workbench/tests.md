@@ -4,7 +4,7 @@
 
 ## 2026-08-24 OA附件历史归属与来源标签回归
 
-- Repository/SQL：`tests/test_workbench_page_query_repository.py` 保护 candidate 与 summary hydration 都读取 payload、owned item/attachment 和 active OA source alias；`tests/test_oa_attachment_invoice_linking.py` 以两个历史 parent 子付款项证明按 `row_index` 精确映射当前 canonical items。
+- Repository/SQL：`tests/test_workbench_page_query_repository.py` 保护 candidate 与 summary hydration 都读取 payload、owned item/attachment 和 active OA source alias；`tests/test_oa_projection_sql_runtime.py` 与 `tests/test_workbench_query_service.py` 保护 full/detail 的既有 row-id 查询在单条 statement 内携带同一 alias 集合；`tests/test_oa_attachment_invoice_linking.py` 以两个历史 parent 子付款项证明按 `row_index` 精确映射当前 canonical items。
 - Frontend：`web/src/test/groupDisplayModel.test.ts` 与 `WorkbenchColumns.test.tsx` 保护 OA附件优先、人工导入其次、明细归属独立，以及旧“导入记录”搜索/Chip 不再出现；Browser fanout/exception specs 保护主表和异常抽屉一致。
 - Regression：不改变 API DTO、canonical `source_links[]`、relation membership、数据库 schema、read model、worker 或其它页面导入历史标签。
 
