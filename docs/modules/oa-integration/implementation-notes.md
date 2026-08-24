@@ -3,9 +3,9 @@
 ## 2026-08-24 - 历史附件身份的显式 OA alias 修复边界
 
 - 根因：旧 OA row 已退出 canonical projection，但其附件发票来源仍按不可变 provenance 保留旧 parent/item ID；当前 canonical OA 保有相同物理附件。页面运行时缺少显式 alias 时必须 fail closed，不能把金额、项目或 row index 当成 OA 身份证明。
-- 决策：删除未安装到现有 root helper、因而不可达的通用 alias repair 工具，改由 `0153_oa_source_alias_attachment_identity_repair.sql` 对唯一已审阅案例做一次性修复。迁移精确限定旧/新 OA、旧/新两组 item 与两张 canonical 发票，用发票不可变旧 provenance 的附件键，经 indexed cache source bridge，连接到当前 OA 外键持有的物理附件；当前子付款项归属优先由 attachment `normalized_payload.source_expense_item_id` 证明，历史 payload 缺该字段时由同一 owned attachment 的 indexed bridge current-item occurrence 证明。bridge item 允许等于旧 item 或当前 item，因为 item ID 含规范化内容指纹、跨 OA 版本并不稳定。生产首次迁移证明 `source_expense_row_index` 在 OA 生命周期重投后会变化，因此它不再承担身份门禁；第二次迁移证明存量 attachment payload 并非全部带 item ID，因此不能把新字段覆盖率误当业务归属。每张发票必须唯一命中一份当前 owned attachment，且两份附件必须覆盖精确两条当前 item；当前 OA 其它附件/凭证 bridge 不参与该 alias 事实的计数，禁止退化为金额、名称、row index 或顺序猜测。
+- 决策：删除未安装到现有 root helper、因而不可达的通用 alias repair 工具，改由 `0153_oa_source_alias_attachment_identity_repair.sql` 对唯一已审阅案例做一次性修复。迁移精确限定旧/新 OA、旧/新两组 item 与两张 canonical 发票：旧侧要求 canonical invoice 的不可变 OA provenance；新侧要求当前 item `attachment_invoices` 的数电号码或“代码+号码”强身份、当前附件键，并要求该附件键确实由当前 OA 持有且 attachment payload 回指同一当前 item。生产迁移已证明 `source_expense_row_index` 跨 OA 生命周期会变化，且该案例没有 current attachment 的 cache-source bridge，因此两者都不再承担身份门禁。两张发票必须按强号码唯一覆盖两条当前 item 与两份当前 owned attachment；禁止退化为金额、名称、row index、顺序或历史 cache bridge 猜测。
 - 写入：只在 canonical OA 唯一存在、旧 OA 已退出 canonical projection、alias 无冲突时写一条 `app.oa_source_aliases.status='active'` 审计事实；无目标数据的新库 no-op，证据不一致 fail closed。迁移不改 OA、发票、source links、relation 或表结构，不创建数据库备份。
-- 性能：cache bridge 禁止加入 Workbench 页面热查询；运行时继续走 indexed active alias。迁移发现、强证据条件和禁止更新/删除核心事实由 `tests/test_postgres_migrations.py` 覆盖；`tests/test_oa_source_alias_repair_postgres_integration.py` 在真实 PostgreSQL 中刻意让旧 provenance、bridge 与当前附件的 row index 全部不一致，只允许物理附件所有权链完成跨版本映射。
+- 性能：一次性迁移不进入 Workbench 页面热查询；运行时继续走 indexed active alias。迁移发现、强证据条件和禁止更新/删除核心事实由 `tests/test_postgres_migrations.py` 覆盖；`tests/test_oa_source_alias_repair_postgres_integration.py` 在真实 PostgreSQL 中让旧/新 item 顺序交叉、附件键完全不同且 row index 全部不一致，只允许强发票身份与当前附件所有权闭环完成映射。
 
 ## 2026-08-18 - OA 流程单号投影
 

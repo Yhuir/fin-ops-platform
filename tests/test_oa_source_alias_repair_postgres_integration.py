@@ -41,16 +41,19 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
                 returning id
             ), current_items as (
                 insert into app.oa_application_items(
-                    oa_application_id, oa_source_id, form_id, row_id, item_type, item_no, amount
+                    oa_application_id, oa_source_id, form_id, row_id, item_type,
+                    item_no, amount, normalized_payload
                 )
                 select id, 'source-current', 'daily-expense',
                        'oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2',
-                       'expense', '0', 145
+                       'expense', '0', 145,
+                       '{"attachment_invoices":[{"digital_invoice_no":"26539148197001672842","source_attachment_key":"current-attachment-1","source_expense_row_index":"90"}]}'::jsonb
                 from canonical_oa
                 union all
                 select id, 'source-current', 'daily-expense',
                        'oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb',
-                       'expense', '1', 145
+                       'expense', '1', 145,
+                       '{"attachment_invoices":[{"digital_invoice_no":"26539150014000411615","source_attachment_key":"current-attachment-0","source_expense_row_index":"91"}]}'::jsonb
                 from canonical_oa
             )
             insert into app.oa_attachments(
@@ -58,51 +61,33 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
                 source_attachment_key, filename, normalized_payload
             )
             select id, 'source-current', 'daily-expense', 'attachment-0',
-                   'owned-attachment-0', 'invoice-0.pdf',
+                   'current-attachment-0', 'invoice-0.pdf',
                    '{"source_expense_item_id":"oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb","source_expense_row_index":"91"}'::jsonb
             from canonical_oa
             union all
             select id, 'source-current', 'daily-expense', 'attachment-1',
-                   'owned-attachment-1', 'invoice-1.pdf',
-                   '{}'::jsonb
+                   'current-attachment-1', 'invoice-1.pdf',
+                   '{"source_expense_item_id":"oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2","source_expense_row_index":"90"}'::jsonb
             from canonical_oa;
 
-            insert into app.oa_attachment_invoice_cache(
-                source_attachment_key, parser_version, cache_schema_version,
-                parsed_at, evidences, invoices, artifacts
-            ) values
-                ('cache-attachment-0', 'test', 'test', now(), '[]', '[]', '[]'),
-                ('cache-attachment-1', 'test', 'test', now(), '[]', '[]', '[]');
-
-            insert into app.oa_attachment_invoice_cache_sources(
-                cache_source_attachment_key, source_attachment_key, source_kind,
-                source_expense_item_id, source_expense_row_index, source_attachment_name
-            ) values
-                (
-                    'cache-attachment-0', 'owned-attachment-0', 'invoice',
-                    'oa-exp-6a86a63777bca2d0c5f62d07:item:1:32417101b6eb', '91', 'invoice-0.pdf'
-                ),
-                (
-                    'cache-attachment-1', 'owned-attachment-1', 'invoice',
-                    'oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2', '90', 'invoice-1.pdf'
-                );
-
             insert into app.invoices(
-                legacy_mongo_id, invoice_type, invoice_no, source_unique_key,
+                legacy_mongo_id, invoice_type, invoice_no, digital_invoice_no, source_unique_key,
                 invoice_date, invoice_month, amount, signed_amount, currency,
                 workbench_visibility, status, tags, source_links
             ) values
                 (
-                    'inv_imported_0898', 'input', 'invoice-0898', 'invoice-0898',
+                    'inv_imported_0898', 'input', '26539150014000411615',
+                    '26539150014000411615', 'invoice-0898',
                     '2026-07-02', '2026-07-01', 145, 145, 'CNY', 'visible', 'pending',
                     array['OA附件'],
-                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:0:d91d8bb509c9","source_expense_row_index":"40","source_attachment_key":"cache-attachment-0"}]'::jsonb
+                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:0:d91d8bb509c9","source_expense_row_index":"40","source_attachment_key":"old-attachment-0"}]'::jsonb
                 ),
                 (
-                    'inv_imported_0899', 'input', 'invoice-0899', 'invoice-0899',
+                    'inv_imported_0899', 'input', '26539148197001672842',
+                    '26539148197001672842', 'invoice-0899',
                     '2026-07-02', '2026-07-01', 145, 145, 'CNY', 'visible', 'pending',
                     array['OA附件'],
-                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:1:a48a5229fa61","source_expense_row_index":"41","source_attachment_key":"cache-attachment-1"}]'::jsonb
+                    '[{"source_type":"oa_attachment_invoice","source_expense_item_id":"oa-exp-2327:item:1:a48a5229fa61","source_expense_row_index":"41","source_attachment_key":"old-attachment-1"}]'::jsonb
                 );
             """,
         )
@@ -119,7 +104,7 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
                 where alias_row_id = 'oa-exp-2327';
                 """,
             ),
-            "oa-exp-2327|oa-exp-6a86a63777bca2d0c5f62d07|active|system:migration:0153|oa-source-alias-attachment-identity-repair-v3",
+            "oa-exp-2327|oa-exp-6a86a63777bca2d0c5f62d07|active|system:migration:0153|oa-source-alias-attachment-identity-repair-v4",
         )
         self.assertEqual(
             fetch_scalar(
