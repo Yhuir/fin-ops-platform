@@ -892,13 +892,14 @@ describe("Workbench columns and inline actions", () => {
     const chipRow = within(multiSourceRow).getByText("进").closest(".invoice-chip-row");
 
     expect(chipRow).not.toBeNull();
-    for (const label of ["OA附件", "导入记录", "明细归属"]) {
+    for (const label of ["OA附件", "明细归属"]) {
       const sourceTags = within(multiSourceRow).getAllByText(label);
       expect(sourceTags).toHaveLength(1);
       expect(sourceTags[0]).toHaveClass("inline-meta-tag");
       expect(sourceTags[0].closest(".invoice-chip-row")).toBe(chipRow);
     }
     expect(within(multiSourceRow).queryByText("人工导入")).not.toBeInTheDocument();
+    expect(within(multiSourceRow).queryByText("导入记录")).not.toBeInTheDocument();
     expect(within(unknownSourceRow).queryByText("人工导入")).not.toBeInTheDocument();
     expect(within(unknownSourceRow).getByText("进").closest(".invoice-chip-row")?.children).toHaveLength(1);
   });

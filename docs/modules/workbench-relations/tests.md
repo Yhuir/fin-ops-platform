@@ -44,7 +44,7 @@
 - `tests/test_workbench_idempotency_contract.py`
 - `tests/test_workbench_relation_sql_projection.py`
 - `tests/test_workbench_relation_read_facade.py`
-- `tests/test_workbench_formal_relation_repository.py`（含 OA/流水/发票人民币币种别名统一进入 `CNY` matching bucket）
+- `tests/test_workbench_formal_relation_repository.py`（含 OA/流水/发票人民币币种别名统一进入 `CNY` matching bucket、日常报销日期占位符跳过、OA owned/active source alias 归一）
 - `tests/test_workbench_matching_orchestrator.py`
 - `tests/test_workbench_formal_relation_repository.py` 额外保护 matching 银行分类只使用一次有界 canonical projection，且缺失分类行在进入 UoW 前失败。
 - `tests/test_workbench_relation_grouping.py`

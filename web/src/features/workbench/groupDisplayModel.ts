@@ -1095,8 +1095,11 @@ export function workbenchInvoiceSourceLabels(
     }
   };
 
-  append("oa_attachment_invoice", "OA附件");
-  append("manual_invoice_import", "导入记录");
+  if (kinds.has("oa_attachment_invoice")) {
+    labels.push("OA附件");
+  } else if (kinds.has("manual_invoice_import")) {
+    labels.push("人工导入");
+  }
   append("oa_expense_item_invoice", "明细归属");
   append("etc_invoice_summary", "ETC批次");
   append("etc_invoice", "ETC");

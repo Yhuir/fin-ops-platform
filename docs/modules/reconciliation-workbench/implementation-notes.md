@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-24 - OA 历史附件归属别名与来源 Chip 收口
+
+- 根因：formal matching 已读取 canonical OA owned item/attachment 的历史 parent identity，但 direct page candidate 与 summary hydration 只读取 payload 内 `source_aliases`，同一 OA 在三条读取链得到不同 alias 集合，导致历史 OA附件发票无法按 `row_index` 归属当前子付款项。
+- 修复：三个 repository 消费方共用一个 set-based OA source alias SQL 边界，合并 payload aliases、owned item/attachment parent identity 与 active `app.oa_source_aliases`；不增加金额、项目或顺序 fallback，不新增 API、表、索引、read model、worker、cache 或依赖。
+- 展示：canonical `source_kinds[]` 继续保留全部 provenance；页面主来源只显示“OA附件”或“人工导入”，“明细归属”独立保留，删除旧“导入记录”来源 Chip 与搜索别名。
+- 数据安全：本次不修改 canonical 发票/OA/source links，不创建数据库备份，不删除主数据库；生产是否需要修复数据只在部署后以权威 API 事实判断。
+
 ## 2026-08-23 - 补充凭证全局只读分页与缩略图
 
 - 在既有 `app.workbench_oa_supporting_documents` owner 上增加 active-only 全局 metadata query 和按需 thumbnail；未建立第二表、第二文件存储、Read Model、worker 或 cache owner。

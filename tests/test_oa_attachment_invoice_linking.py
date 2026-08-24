@@ -84,6 +84,72 @@ def test_normalizes_compact_hydration_external_identity_alias() -> None:
     assert invoice["source_oa_row_id"] == "oa-exp-2204"
 
 
+def test_normalizes_historical_parent_aliases_for_multiple_current_expense_items() -> None:
+    oa_row = {
+        "id": "oa-exp-current",
+        "type": "oa",
+        "source_aliases": ["oa-exp-historical"],
+        "expense_items": [
+            {
+                "id": "oa-exp-current:item:0:current-a",
+                "expense_item_id": "oa-exp-current:item:0:current-a",
+                "row_index": "0",
+            },
+            {
+                "id": "oa-exp-current:item:1:current-b",
+                "expense_item_id": "oa-exp-current:item:1:current-b",
+                "row_index": "1",
+            },
+        ],
+    }
+    invoices = [
+        {
+            "id": "invoice-a",
+            "type": "invoice",
+            "source_kind": "oa_attachment_invoice",
+            "source_links": [
+                {
+                    "source_type": "manual_invoice_import",
+                    "source_id": "batch-import-a",
+                },
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_expense_item_id": "oa-exp-historical:item:0:old-a",
+                    "source_expense_row_index": "0",
+                },
+            ],
+        },
+        {
+            "id": "invoice-b",
+            "type": "invoice",
+            "source_kind": "oa_attachment_invoice",
+            "source_links": [
+                {
+                    "source_type": "manual_invoice_import",
+                    "source_id": "batch-import-b",
+                },
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_expense_item_id": "oa-exp-historical:item:1:old-b",
+                    "source_expense_row_index": "1",
+                },
+            ],
+        },
+    ]
+
+    normalize_oa_attachment_expense_item_ids([oa_row, *invoices])
+
+    assert invoices[0]["source_expense_item_ids"] == [
+        "oa-exp-current:item:0:current-a"
+    ]
+    assert invoices[1]["source_expense_item_ids"] == [
+        "oa-exp-current:item:1:current-b"
+    ]
+    assert {invoice["source_oa_row_id"] for invoice in invoices} == {
+        "oa-exp-current"
+    }
+
+
 def test_explicit_expense_item_binding_overrides_historical_attachment_source() -> None:
     oa_row = {
         "id": "oa-exp-2201",

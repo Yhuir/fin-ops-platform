@@ -10,6 +10,9 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 )
 from fin_ops_platform.services.postgres_repositories.common import row_payload, text
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
+from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
+    oa_source_aliases_sql,
+)
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_SOURCE_ALIAS_FIELD_NAMES,
     oa_row_source_alias_map,
@@ -50,30 +53,8 @@ _WITHDRAW_EVENTS = frozenset(
     }
 )
 _SINGLE_MEMBER_CLAIM_RELATION_MODES = frozenset({"bank_flow_rule_batch", "no_oa_bank_batch"})
-_OA_OWNED_SOURCE_ALIASES_SQL = """
-array(
-    select distinct source_alias.parent_oa_id
-    from (
-        select split_part(nullif(item.normalized_payload->>'source_expense_item_id', ''), ':item:', 1)
-                   as parent_oa_id
-        from app.oa_application_items item
-        where item.oa_application_id = oa.id
-        union all
-        select split_part(nullif(attachment.normalized_payload->>'source_expense_item_id', ''), ':item:', 1)
-        from app.oa_attachments attachment
-        where attachment.oa_application_id = oa.id
-        union all
-        select split_part(nullif(attachment.normalized_payload->>'derived_from_oa_id', ''), ':item:', 1)
-        from app.oa_attachments attachment
-        where attachment.oa_application_id = oa.id
-        union all
-        select split_part(nullif(attachment.normalized_payload->>'source_oa_id', ''), ':item:', 1)
-        from app.oa_attachments attachment
-        where attachment.oa_application_id = oa.id
-    ) source_alias
-    where nullif(source_alias.parent_oa_id, '') is not null
-)
-"""
+_OA_SOURCE_ALIASES_SQL = oa_source_aliases_sql("oa", "oa.normalized_payload")
+_OA_DATE_PLACEHOLDERS = frozenset({"-", "--", "—", "－"})
 
 
 class PostgresWorkbenchFormalRelationFactRepository:
@@ -106,7 +87,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 oa.status,
                 oa.workflow_status,
                 oa.normalized_payload,
-                {_OA_OWNED_SOURCE_ALIASES_SQL} as source_aliases,
+                {_OA_SOURCE_ALIASES_SQL} as source_aliases,
                 greatest(oa.updated_at, oa.synced_at) as source_version
             from app.oa_applications oa
             where coalesce(oa.application_date, oa.scope_month) between %s::date and %s::date
@@ -511,7 +492,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 oa.status,
                 oa.workflow_status,
                 oa.normalized_payload,
-                {_OA_OWNED_SOURCE_ALIASES_SQL} as source_aliases,
+                {_OA_SOURCE_ALIASES_SQL} as source_aliases,
                 greatest(oa.updated_at, oa.synced_at) as source_version
             from app.oa_applications oa
             where (
@@ -533,7 +514,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
                         where source_alias.field_name = any(%s::text[])
                           and source_alias.field_value = any(%s::text[])
                     )
-                    or {_OA_OWNED_SOURCE_ALIASES_SQL} && %s::text[]
+                    or {_OA_SOURCE_ALIASES_SQL} && %s::text[]
               )
               and oa.status <> 'deleted'
               and """
@@ -645,25 +626,21 @@ def _oa_fact(
         ),
         project_references=(row.get("project_id"), payload.get("project_no")),
     )
-    fact_date_value = row.get("fact_date")
+    fact_date: date | None
     if "日常报销" in apply_type:
         evidence = tuple(sorted({*evidence, *_employee_reimbursement_evidence(row.get("applicant"))}))
-        fact_date_value = next(
-            (
-                value
-                for value in (
-                    payload.get("completed_at"),
-                    detail.get("审批完成时间"),
-                    summary.get("审批完成时间"),
-                    row.get("approved_at"),
-                    payload.get("submitted_at"),
-                    payload.get("modified_time"),
-                    payload.get("modifiedTime"),
-                )
-                if value not in (None, "")
-            ),
-            fact_date_value,
+        fact_date = _oa_fact_date(
+            payload.get("completed_at"),
+            detail.get("审批完成时间"),
+            summary.get("审批完成时间"),
+            row.get("approved_at"),
+            payload.get("submitted_at"),
+            payload.get("modified_time"),
+            payload.get("modifiedTime"),
+            row.get("fact_date"),
         )
+    else:
+        fact_date = _date_value(row.get("fact_date"))
     return FormalRelationFact(
         row_type="oa",
         canonical_object_identity=_required_identity(row),
@@ -671,7 +648,7 @@ def _oa_fact(
         amount_minor=_minor_units(row.get("amount")),
         currency=_canonical_currency(row.get("currency")),
         direction=direction,
-        fact_date=_date_value(fact_date_value),
+        fact_date=fact_date,
         evidence_keys=evidence,
         references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
@@ -1044,6 +1021,17 @@ def _date_value(value: Any) -> date | None:
         return date.fromisoformat(str(value)[:10])
     except ValueError as exc:
         raise ValueError(f"Invalid canonical fact date: {value}.") from exc
+
+
+def _oa_fact_date(*values: Any) -> date | None:
+    for value in values:
+        if value is None:
+            continue
+        normalized = str(value).strip()
+        if not normalized or normalized in _OA_DATE_PLACEHOLDERS:
+            continue
+        return _date_value(value)
+    return None
 
 
 def _bank_direction(value: Any, signed_amount: Any) -> str:

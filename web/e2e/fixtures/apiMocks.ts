@@ -1654,11 +1654,14 @@ function workbenchRowDisplaySearchAliases(row: Record<string, unknown>) {
     const normalizedSourceKinds = new Set(sourceKinds.filter(
       (sourceKind): sourceKind is string => typeof sourceKind === "string",
     ));
+    if (normalizedSourceKinds.has("oa_attachment_invoice")) {
+      aliases.push("OA附件");
+    } else if (normalizedSourceKinds.has("manual_invoice_import")) {
+      aliases.push("人工导入");
+    }
     const sourceLabels: Record<string, string> = {
       etc_invoice_summary: "ETC批次",
       etc_invoice: "ETC",
-      oa_attachment_invoice: "OA附件",
-      manual_invoice_import: "导入记录",
       oa_expense_item_invoice: "明细归属",
       oa_attachment_payment_receipt: "付款凭证",
       oa_supporting_document: "补充凭证",

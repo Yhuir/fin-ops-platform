@@ -178,12 +178,13 @@ test.describe("workbench relation browser flow", () => {
     await expect(explicitSegment.getByText("531.92", { exact: true })).toBeVisible();
     await expect(explicitInvoice.getByText("193.92", { exact: true })).toBeVisible();
     await expect(explicitInvoice.getByText("OA附件", { exact: true })).toHaveCount(1);
-    await expect(explicitInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(explicitInvoice.getByText("人工导入", { exact: true })).toHaveCount(0);
+    await expect(explicitInvoice.getByText("导入记录", { exact: true })).toHaveCount(0);
     await expect(explicitInvoice.getByText("明细归属", { exact: true })).toHaveCount(0);
     await expect(residualInvoice.getByText("338.00", { exact: true })).toBeVisible();
-    await expect(residualInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(residualInvoice.getByText("人工导入", { exact: true })).toHaveCount(1);
+    await expect(residualInvoice.getByText("导入记录", { exact: true })).toHaveCount(0);
     await expect(residualInvoice.getByText("明细归属", { exact: true })).toHaveCount(0);
-    await expect(residualInvoice.getByText("人工导入", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "录入发票" })).toHaveCount(0);
 
     const anomalyTrigger = residualSegment.getByRole("button", {
@@ -248,9 +249,11 @@ test.describe("workbench relation browser flow", () => {
     await expect(assignedInvoicePane.getByText("193.92", { exact: true })).toHaveCount(1);
     await expect(assignedInvoicePane.getByText("338.00", { exact: true })).toHaveCount(1);
     await expect(assignedAttachmentInvoice.getByText("OA附件", { exact: true })).toHaveCount(1);
-    await expect(assignedAttachmentInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(assignedAttachmentInvoice.getByText("人工导入", { exact: true })).toHaveCount(0);
+    await expect(assignedAttachmentInvoice.getByText("导入记录", { exact: true })).toHaveCount(0);
     await expect(assignedAttachmentInvoice.getByText("明细归属", { exact: true })).toHaveCount(0);
-    await expect(assignedManualInvoice.getByText("导入记录", { exact: true })).toHaveCount(1);
+    await expect(assignedManualInvoice.getByText("人工导入", { exact: true })).toHaveCount(1);
+    await expect(assignedManualInvoice.getByText("导入记录", { exact: true })).toHaveCount(0);
     await expect(assignedManualInvoice.getByText("明细归属", { exact: true })).toHaveCount(1);
     await expect(assignedManualInvoice.getByText("OA附件", { exact: true })).toHaveCount(0);
     const [oaBox, invoiceBox] = await Promise.all([

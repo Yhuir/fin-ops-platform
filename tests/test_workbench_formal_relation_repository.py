@@ -331,6 +331,42 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertNotIn("read_model.workbench_candidate_matches", sql)
         self.assertNotIn("read_model.workbench_reconciliation_decisions", sql)
 
+    def test_daily_reimbursement_skips_placeholder_completion_dates(self) -> None:
+        connection = FakeConnection(
+            oa_rows=[
+                oa_row(
+                    payload={
+                        "apply_type": "日常报销",
+                        "detail_fields": {"审批完成时间": "—"},
+                    },
+                    fact_date=date(2026, 5, 7),
+                )
+            ]
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(
+            ["2026-05"]
+        )
+
+        self.assertEqual(result.facts[0].fact_date, date(2026, 5, 7))
+
+    def test_daily_reimbursement_keeps_non_placeholder_date_validation_strict(self) -> None:
+        connection = FakeConnection(
+            oa_rows=[
+                oa_row(
+                    payload={
+                        "apply_type": "日常报销",
+                        "detail_fields": {"审批完成时间": "not-a-date"},
+                    }
+                )
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "Invalid canonical fact date"):
+            PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(
+                ["2026-05"]
+            )
+
     def test_explicit_reference_uses_one_bounded_historical_lookup_per_target_type(self) -> None:
         source_links = [
             {
@@ -432,6 +468,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
             {("oa", "oa-exp-2206")},
         )
         self.assertIn("from app.oa_attachments attachment", connection.queries[0][0])
+        self.assertIn("from app.oa_source_aliases alias_row", connection.queries[0][0])
 
     def test_historical_oa_source_alias_lookup_is_exact_and_canonicalized(self) -> None:
         source_alias = "6a0ee8613bb8164165d8c61a"

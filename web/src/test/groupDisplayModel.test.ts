@@ -1004,7 +1004,7 @@ describe("groupDisplayModel time filter", () => {
     expect(workbenchRowMatchesUnifiedSearch(row, "建行 8106")).toBe(true);
   });
 
-  test("matches every rendered invoice source label without exposing the old fallback", () => {
+  test("uses one primary invoice source label while keeping ownership evidence separate", () => {
     const row = {
       ...buildInvoiceRow("invoice-searchable-source", "100.00"),
       sourceKind: "oa_attachment_invoice" as const,
@@ -1015,15 +1015,23 @@ describe("groupDisplayModel time filter", () => {
         "manual_invoice_import",
       ],
     };
+    const manualRow = {
+      ...buildInvoiceRow("invoice-searchable-manual-source", "100.00"),
+      sourceKind: "manual_invoice_import" as const,
+      sourceKinds: ["manual_invoice_import" as const],
+    };
 
     expect(workbenchRowMatchesUnifiedSearch(row, "OA附件")).toBe(true);
-    expect(workbenchRowMatchesUnifiedSearch(row, "导入记录")).toBe(true);
+    expect(workbenchRowMatchesUnifiedSearch(row, "导入记录")).toBe(false);
     expect(workbenchRowMatchesUnifiedSearch(row, "明细归属")).toBe(true);
     expect(workbenchRowMatchesUnifiedSearch(row, "人工导入")).toBe(false);
+    expect(workbenchRowMatchesUnifiedSearch(manualRow, "人工导入")).toBe(true);
     expect(workbenchInvoiceSourceLabels(row.sourceKinds, row.sourceKind)).toEqual([
       "OA附件",
-      "导入记录",
       "明细归属",
+    ]);
+    expect(workbenchInvoiceSourceLabels(manualRow.sourceKinds, manualRow.sourceKind)).toEqual([
+      "人工导入",
     ]);
     expect(workbenchInvoiceSourceLabels(undefined, "unknown_invoice_source")).toEqual([]);
   });

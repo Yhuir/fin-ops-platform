@@ -19,6 +19,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
     without_keys,
 )
+from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
+    oa_source_aliases_sql,
+)
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
@@ -496,7 +499,7 @@ class PostgresWorkbenchPageHydrationRepository:
                                      else '[]'::jsonb end
                             ) with ordinality as item(value, ordinality)
                         ), '[]'::jsonb),
-                        'source_aliases', oa.normalized_payload->'source_aliases',
+                        'source_aliases', to_jsonb(__COMPLETED_OA_SOURCE_ALIASES_SQL__),
                         'source_identity_aliases', __COMPLETED_OA_SOURCE_IDENTITY_ALIASES_SQL__,
                         'oa_row_id', oa.normalized_payload->>'oa_row_id',
                         'oa_id', oa.normalized_payload->>'oa_id',
@@ -1222,6 +1225,10 @@ class PostgresWorkbenchPageHydrationRepository:
             .replace(
                 "__PENDING_OA_APPLICATION_DATE_SQL__",
                 pending_oa_application_date_sql("admission"),
+            )
+            .replace(
+                "__COMPLETED_OA_SOURCE_ALIASES_SQL__",
+                oa_source_aliases_sql("oa", "oa.normalized_payload"),
             )
             .replace(
                 "__COMPLETED_OA_SOURCE_IDENTITY_ALIASES_SQL__",

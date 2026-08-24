@@ -19,6 +19,9 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_hydration im
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )
+from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
+    oa_source_aliases_sql,
+)
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
 )
@@ -595,9 +598,7 @@ oa_candidate_facts as materialized (
         case when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
              then oa.normalized_payload->'expense_items'
              else '[]'::jsonb end as oa_expense_items,
-        case when jsonb_typeof(oa.normalized_payload->'source_aliases') = 'array'
-             then oa.normalized_payload->'source_aliases'
-             else '[]'::jsonb end as oa_source_aliases,
+        to_jsonb({oa_source_aliases_sql("oa", "oa.normalized_payload")}) as oa_source_aliases,
         array_remove(array[
             oa.row_id,
             oa.normalized_payload->>'oa_row_id',

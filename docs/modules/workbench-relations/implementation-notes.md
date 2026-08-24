@@ -1,5 +1,11 @@
 # 关联台关系事实源 实施记录
 
+## 2026-08-24 - 日常报销匹配日期占位符隔离
+
+- 根因：日常报销优先取 `审批完成时间`，历史数据中的明确占位符 `—` 被当作日期送入严格解析，导致整个月份 matching job 失败。
+- 修复：只在日常报销日期候选选择边界跳过空值和明确横线占位符，随后继续按完成时间、审批时间、提交/修改时间、canonical 申请日期顺序取首个真实值；其它非法日期仍 fail closed。
+- 性能与边界：没有放宽 matching 规则、关系写入门禁或日期 parser，没有增加数据库 I/O、兼容分支、migration、worker 或依赖。
+
 ## 2026-08-20 - 大成员关系取消预览数量门槛并删除旧上下文扩展链
 
 - 根因：`WorkbenchQueryFacade` 在 repository 前把 preview selection 固定限制为 20 条，PostgreSQL selection 又按 OA `source_links` 扫描附件并以 100 条中止；因此一个合法 active relation 超过 20 个成员时，前端自动带入完整关系也会被错误拒绝。
