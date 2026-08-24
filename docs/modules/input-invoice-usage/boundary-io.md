@@ -46,7 +46,7 @@
 | --- | --- | --- |
 | `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`payment_status` 候选排除自身状态条件后聚合，并按规则字典补齐零数量状态，选择状态不得缩减候选词表 |
 | relation/details | drawer | row/invoice/bank 按 canonical id 定向读取，不存在返回 404；OA 详情按 canonical OA id 返回 `detailAvailable=true|false`，不可用时保持 200 的既有 drawer 合同 |
-| OA 申请人列 | frontend | 使用 HeroUI 原生 chip 显示真实申请类型与“已完成/进行中”；不得从 linked/unlinked 关系状态推断流程状态 |
+| OA 申请人列与详情 | frontend | 总览只显示申请人、申请类型、多 OA 数量和合计金额，不显示流程状态；单条 OA 详情和多 OA 关联详情使用 canonical `workflowStatus` 显示“已完成/进行中”，不得读取或回退 linked/unlinked/unpaired 关系状态 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |
 | OA reverse preview/command | OA reverse drawer | preview 只读 canonical snapshot，并分别返回 `permissions.canCreateDraft` 写能力与当前整组 `canCreateDraft` 业务可创建状态；前端对当前勾选集合只做同一非空销方的轻量可用性判断，提交前必须按精确发票集合重新 preview，并以新 preview 的权限、业务状态和 hash 为准。命令只写 canonical facts；候选金额展示与本地搜索都使用无千分位文本。OA payload 动态写目标申请人、当天日期、所选总额和唯一销方，申请事由只显示发票数/发票号码，内部 reverse batch ID 仅保留结构化字段。 |
 | write result | 页面 | 不含 refresh target/barrier；页面成功后重跑当前 GET |

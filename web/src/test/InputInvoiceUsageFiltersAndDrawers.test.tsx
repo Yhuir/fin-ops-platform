@@ -19,6 +19,7 @@ import PaymentStatusRulesDrawer, {
 } from "../components/inputInvoiceUsage/PaymentStatusRulesDrawer";
 import {
   createInputInvoiceUsageOaReverseDraftFromSelection,
+  fetchInputInvoiceUsageOaDetail,
   fetchInputInvoiceUsageRowRelationDetail,
   fetchInputInvoiceUsageOaReverseStagedDrafts,
   fetchInputInvoiceUsageOaReverseSubmittedHistory,
@@ -289,6 +290,28 @@ describe("InputInvoiceUsageDetailDrawer", () => {
 });
 
 describe("Input invoice usage workflow drawers", () => {
+  test("OA detail mapper uses canonical workflow status and ignores legacy relation status", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      oaId: "oa-completed",
+      detailAvailable: true,
+      applicantName: "樊祖芳",
+      workflowStatus: "completed",
+      status: "unpaired",
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+
+    const detail = await fetchInputInvoiceUsageOaDetail("oa-completed");
+
+    expect(detail.sections[0].fields).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "流程状态", value: "completed" }),
+    ]));
+    expect(detail.sections[0].fields).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: "unpaired" }),
+    ]));
+  });
+
   test("relation detail mapper renders the direct canonical relation response", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -300,7 +323,7 @@ describe("Input invoice usage workflow drawers", () => {
         kind: "oa",
         title: "OA关联明细",
         relationCount: 1,
-        summaries: [{ applicantName: "樊祖芳", amount: "100.00" }],
+        summaries: [{ applicantName: "樊祖芳", amount: "100.00", workflowStatus: "completed", status: "unpaired" }],
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -322,6 +345,7 @@ describe("Input invoice usage workflow drawers", () => {
     expect(detail.sections[0].fields).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "申请人", value: "樊祖芳" }),
       expect.objectContaining({ label: "金额", value: "100.00" }),
+      expect.objectContaining({ label: "流程状态", value: "completed" }),
     ]));
   });
 

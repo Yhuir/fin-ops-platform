@@ -658,7 +658,7 @@ def _oa_detail(record: Any | None, *, oa_id: str) -> dict[str, Any]:
         "applicationType": record.apply_type,
         "projectName": record.project_name_display or record.project_name,
         "workflowNo": record.case_id or "",
-        "status": record.section,
+        "workflowStatus": str(getattr(record, "workflow_status", "") or ""),
         "amount": _money(record.amount),
         "month": record.month,
         "reason": record.reason,

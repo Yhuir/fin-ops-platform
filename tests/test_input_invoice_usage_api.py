@@ -170,8 +170,18 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertIn("rules", json.loads(rules_response.body))
         self.assertEqual(json.loads(invoice_response.body)["id"], "inv-detail")
         self.assertEqual(json.loads(bank_response.body)["id"], "bank-detail")
-        self.assertTrue(json.loads(oa_response.body)["detailAvailable"])
-        self.assertEqual(json.loads(relation_response.body)["kind"], "oa")
+        oa_payload = json.loads(oa_response.body)
+        relation_payload = json.loads(relation_response.body)
+        self.assertTrue(oa_payload["detailAvailable"])
+        self.assertEqual(oa_payload["workflowStatus"], "completed")
+        self.assertNotIn("status", oa_payload)
+        self.assertEqual(relation_payload["kind"], "oa")
+        self.assertEqual(
+            next(field for field in relation_payload["sections"][0]["fields"] if field["label"] == "流程状态")[
+                "value"
+            ],
+            "completed",
+        )
 
     def test_rows_and_relation_details_return_multi_relation_totals_for_oa_bank_and_invoice(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -235,6 +245,12 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(bank_detail_response.status_code, 200)
         self.assertEqual(invoice_detail_response.status_code, 200)
         self.assertEqual(len(json.loads(oa_detail_response.body)["summaries"]), 2)
+        oa_detail_payload = json.loads(oa_detail_response.body)
+        self.assertEqual(
+            [summary["workflowStatus"] for summary in oa_detail_payload["summaries"]],
+            ["completed", "completed"],
+        )
+        self.assertTrue(all("status" not in summary for summary in oa_detail_payload["summaries"]))
         self.assertEqual(len(json.loads(bank_detail_response.body)["summaries"]), 2)
         self.assertEqual(len(json.loads(invoice_detail_response.body)["summaries"]), 2)
 
@@ -1126,6 +1142,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
             relation_code="in_progress",
             relation_label="进行中",
             relation_tone="success",
+            workflow_status="completed",
         )
 
     @staticmethod

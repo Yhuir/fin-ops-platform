@@ -16,7 +16,6 @@ import { formatDateTimeText } from "../../features/dateTime";
 import ExpandableCellText from "./ExpandableCellText";
 import InputInvoiceUsageFilterMenu from "./InputInvoiceUsageFilterMenu";
 import type { InputInvoiceUsageFilterValue } from "./InputInvoiceUsageFilterMenu";
-import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
 import {
   EmptyValue,
   FinanceStatusTag,
@@ -561,7 +560,6 @@ export default function InputInvoiceUsageTable({
                         </div>
                         <div className="input-invoice-usage-tag-row">
                           <FinanceStatusTag>{oa.applicationType || "类型为空"}</FinanceStatusTag>
-                          <OaWorkflowStatusChip status={oa.workflowStatus} />
                           {row.oa.hasMultiple && oa.amount ? (
                             <Tag tone="info">{`合计 ${formatMoney(oa.amount)}`}</Tag>
                           ) : null}

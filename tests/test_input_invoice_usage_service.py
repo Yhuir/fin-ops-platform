@@ -554,6 +554,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         )
 
         row = service.list_rows()["rows"][0]
+        oa_relation_detail = service.row_relation_details(row["id"], kind="oa")
         relation_detail = service.row_relation_details(row["id"], kind="bank")
 
         self.assertEqual(row["oa"]["primaryOaId"], "oa-exact")
@@ -561,6 +562,17 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
         self.assertTrue(row["oa"]["hasMultiple"])
         self.assertEqual(row["oa"]["detailMode"], "list")
         self.assertEqual([summary["oaId"] for summary in row["oa"]["summaries"]], ["oa-exact", "oa-small"])
+        self.assertEqual(
+            [summary["workflowStatus"] for summary in row["oa"]["summaries"]],
+            ["completed", "completed"],
+        )
+        self.assertNotIn("status", row["oa"]["summaries"][0])
+        self.assertEqual(
+            next(field for field in oa_relation_detail["sections"][0]["fields"] if field["label"] == "流程状态")[
+                "value"
+            ],
+            "completed",
+        )
         self.assertEqual(row["bankTransactions"]["primaryBankTransactionId"], "bank-exact")
         self.assertEqual(
             [summary["bankTransactionId"] for summary in relation_detail["summaries"]], ["bank-exact", "bank-old"]
@@ -978,6 +990,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
             relation_code="in_progress",
             relation_label="进行中",
             relation_tone="success",
+            workflow_status="completed",
         )
 
     @staticmethod

@@ -127,18 +127,24 @@ const rowsPayload = {
         reason: "规则不能自动闭环，需要财务复核后处理",
       },
       oa: {
-        primary: {
-          id: "oa-001",
-          applicant: "樊祖芳",
-          applicationType: "支付申请",
-          workflowStatus: "completed",
-          projectName: "云南省内项目名称很长很长需要换行显示并可展开",
-          detailAvailable: true,
-        },
+        primaryOaId: "oa-001",
+        applicantName: "樊祖芳",
+        applicationType: "支付申请",
+        projectName: "云南省内项目名称很长很长需要换行显示并可展开",
+        amount: "12345.67",
+        detailAvailable: true,
         relationCount: 1,
         hasMultiple: false,
         detailMode: "single",
-        summaries: [],
+        summaries: [{
+          oaId: "oa-001",
+          applicantName: "樊祖芳",
+          applicationType: "支付申请",
+          workflowStatus: "completed",
+          projectName: "云南省内项目名称很长很长需要换行显示并可展开",
+          amount: "12345.67",
+          detailAvailable: true,
+        }],
       },
       bank: {
         primary: {
@@ -596,7 +602,8 @@ describe("Input invoice usage page", () => {
     expect(within(invoiceCell as HTMLElement).queryByText("详情")).not.toBeInTheDocument();
     const oaCell = firstRowCells[5] as HTMLElement;
     expect(within(oaCell).getByText("樊祖芳")).toBeInTheDocument();
-    expect(within(oaCell).getByLabelText("OA流程状态：已完成")).toBeInTheDocument();
+    expect(within(oaCell).queryByLabelText(/OA流程状态/)).not.toBeInTheDocument();
+    expect(within(oaCell).queryByText("状态未知")).not.toBeInTheDocument();
     expect(within(oaCell).getByRole("button", { name: "查看OA 樊祖芳 详情" })).toBeInTheDocument();
     expect(within(oaCell).queryByText("详情")).not.toBeInTheDocument();
     expect(within(page).queryByText("规则不能自动闭环，需要财务复核后处理")).not.toBeInTheDocument();

@@ -345,7 +345,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         record = OAApplicationRecord(
             id="oa-detail-1",
             month="2026-05",
-            section="已完成",
+            section="未配对",
             case_id="OA-001",
             applicant="申请人",
             project_name="项目名称",
@@ -356,6 +356,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             relation_code="completed",
             relation_label="已完成",
             relation_tone="success",
+            workflow_status="completed",
         )
         repository = RecordingInputDetailRepository(record)
         service = InputInvoiceUsageCanonicalQueryService(
@@ -369,6 +370,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertTrue(detail["detailAvailable"])
         self.assertEqual(detail["oaId"], "oa-detail-1")
         self.assertEqual(detail["workflowNo"], "OA-001")
+        self.assertEqual(detail["workflowStatus"], "completed")
+        self.assertNotIn("status", detail)
 
     def test_invalid_month_fails_before_opening_a_snapshot(self) -> None:
         connection = RecordingConnection()

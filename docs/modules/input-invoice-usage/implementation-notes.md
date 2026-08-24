@@ -1,5 +1,11 @@
 # 进项发票使用情况 实施记录
 
+## 2026-08-24 - OA 流程状态展示边界修复
+
+- OA 申请人总览列移除流程状态 chip，只保留申请人、申请类型、多 OA 数量和合计金额；多 OA 场景不再生成无依据的“状态未知”。
+- 单条 OA 详情与多 OA 关联详情统一读取 canonical `workflowStatus`；删除 `status/section` 关系状态回退和 completed 默认值，避免把“未配对”误当作 OA 流程状态。
+- 不修改 OA 同步、正式关系、匹配规则、数据库、read model 或 worker；共享 OA 状态 chip 保留给确实需要展示流程状态的其他页面。
+
 ## 2026-08-16 - OA、流水与发票详情统一公开字段视图
 
 - 三类详情删除模块私有嵌套 FinanceTable/grid renderer，复用共享 HeroUI `AppDrawer`、`Chip`、`StatePanel` 和紧凑分区 label/value 视图，抽屉统一为 800px。

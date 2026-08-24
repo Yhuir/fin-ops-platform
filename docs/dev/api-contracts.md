@@ -1013,7 +1013,7 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 - 支付状态列表只展示状态标签；规则原因和自动闭环解释不在列表行内展示。
 - rows summary 中的 `invoiceCount` 按唯一进项发票 ID 统计，用于页面表头展示“进项票 N”。`pagination.total` 是表格行数/配对组行数；同一 linked relation 下多张进项发票折叠到一行时，`invoiceCount` 必须计入所有 `invoiceRelations.summaries` 成员。
 - rows 中 `oa`、`bankTransactions` 和 `invoiceRelations` 都可以携带 `relationCount`、`hasMultiple`、`detailMode`、`relationStatus` 和 `summaries`。同一 linked relation 下多条 OA、银行流水或进项发票必须聚合为一条发票使用情况行，金额字段返回各自合计；前端用 `detailMode=list` 显示 `+N` 并通过 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。
-- rows 的每条 OA summary 必须返回 canonical `workflowStatus=completed|in_progress`；OA 申请人列使用 HeroUI chip 显示真实申请类型和“已完成/进行中”，不得从 relation status 推断流程状态。
+- rows 的每条 OA summary 必须返回 canonical `workflowStatus=completed|in_progress`；OA 申请人总览列只显示申请人、真实申请类型、多 OA 数量和合计金额，不显示流程状态。单条 OA 详情与多 OA 关联详情只使用 `workflowStatus` 显示“已完成/进行中”，不得从 relation `status/section` 推断流程状态。
 - `relationStatus="linked"` 是唯一已关联关系状态；没有 active relation 的行按未关联处理。历史 `relationStatus="candidate"` 只作为旧 payload 兼容值，调用方必须归入未关联/非证明口径，不得展示独立“候选 OA”筛选，也不得参与支付状态、已支付判断或 confirmed relation 判断。
 - `/rows/{row_id}/relation-details` 按 `row_id` 在 canonical snapshot 中定向读取并展开 summaries；不存在返回 404。不得回退页面 read model、全量 live rebuild 或返回 202 refreshing。
 - 反提 OA 工作流按 `preview -> one-step create OA draft -> staged draft -> user submission confirmation -> submitted history / local rollback` 推进。前端只暴露 `创建 OA 草稿` 一个创建动作；后端可以继续保存内部 batch，但不得把 `创建本地批次` 作为用户概念暴露。创建 OA 草稿只表示外部 OA 草稿已生成，状态为 `oa_draft_created`，该状态在 UI 中展示为 `暂存`，不得直接等同于已提交 OA 流程。

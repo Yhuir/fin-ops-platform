@@ -170,7 +170,7 @@ function mapOa(rawValue: unknown): InputInvoiceUsageRowsResponse["rows"][number]
   const id = stringValue(raw.id ?? camelOrSnake(raw, "oaId", "oa_id") ?? camelOrSnake(raw, "primaryOaId", "primary_oa_id"));
   const applicant = stringValue(raw.applicant ?? camelOrSnake(raw, "applicantName", "applicant_name"));
   const applicationType = stringValue(camelOrSnake(raw, "applicationType", "application_type"));
-  const workflowStatus = stringValue(camelOrSnake(raw, "workflowStatus", "workflow_status")) || "unknown";
+  const workflowStatus = stringValue(camelOrSnake(raw, "workflowStatus", "workflow_status"));
   const projectName = stringValue(camelOrSnake(raw, "projectName", "project_name"));
   const amount = stringValue(raw.amount);
   if (!id && !applicant && !applicationType && !projectName && !amount) {
@@ -466,7 +466,7 @@ function mapOaDetailResponse(payload: unknown): InputInvoiceUsageDetailResponse 
       detailField("OA类型", camelOrSnake(raw, "applicationType", "application_type")),
       detailField("项目名称", camelOrSnake(raw, "projectName", "project_name")),
       detailField("OA单号", camelOrSnake(raw, "workflowNo", "workflow_no")),
-      detailField("流程状态", camelOrSnake(raw, "workflowStatus", "workflow_status") ?? raw.status),
+      detailField("流程状态", camelOrSnake(raw, "workflowStatus", "workflow_status")),
       detailField("金额", raw.amount),
       detailField("事由", raw.reason),
       detailField("对方户名", camelOrSnake(raw, "counterpartyName", "counterparty_name")),
@@ -530,7 +530,7 @@ function relationSummarySection(kind: string, item: unknown, index: number) {
     detailField("OA类型", camelOrSnake(raw, "applicationType", "application_type")),
     detailField("项目名称", camelOrSnake(raw, "projectName", "project_name")),
     detailField("金额", raw.amount),
-    detailField("流程状态", camelOrSnake(raw, "workflowStatus", "workflow_status") ?? raw.status),
+    detailField("流程状态", camelOrSnake(raw, "workflowStatus", "workflow_status")),
   ]);
 }
 
