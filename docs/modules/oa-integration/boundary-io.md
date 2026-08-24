@@ -40,7 +40,7 @@
 | OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 手动同步、附件解析版本变化和 projection 版本变化都必须入 durable queue；HTTP 进程不得 inline sync、自行轮询 Mongo 或承担附件发票 canonical promotion |
 | OA attachment/import | `untrusted_document_policy.py`、OA attachment services | 下载后的附件必须先统一校验后缀、签名、类型和资源上限，再进入 PDF/DOCX/JPEG/PNG 解析或 OCR；图片只允许 JPEG/PNG 并先规范化，DOCX 内嵌图片逐个走同一边界。未知二进制、伪装后缀、PSD 和超限文件 fail closed，禁止 raw bytes OCR。单文件逐页保留解析 segment；同一子付款项允许绑定多张正式发票，同一物理附件也允许在同一 OA 的多个子付款项保留多条来源边。解析 cache 以 OA 内物理附件身份去重，重复出现只解析一次，输出再绑定当前 expense item；识别结果必须保留 attachment、expense item 与 OA row 来源并可追踪。铁路电子客票由现有 `railway_e_ticket_invoice` 模板解析并通过正式发票准入；`票价: ¥145.00` 后紧邻长电子客票号时，金额只允许读取两位小数，禁止把客票号吞入金额。安全边界版本包含在 parser cache version 中，旧 cache 自动失效并在正常精确解析时重建；不得在普通发布时触发全历史重放。 |
 | ETC OA attachment upload response | `HttpEtcOAClient` | 外部 upload adapter 在返回 ETC service 前把同源或 OA 内部 absolute `/fileManager/` / `/profile/` 地址归一为根相对路径；已有根相对路径与 opaque file id 保持不变，未知 absolute host/path fail closed。业务 service、页面和 Nginx 不得各自实现 URL 修补 |
-| OA source alias | canonical OA row 的 `row_id`、`normalized_payload` 显式身份字段，以及该 OA 通过 FK 拥有的 `app.oa_application_items` / `app.oa_attachments` 来源付款项身份；`app.oa_source_aliases`。历史身份修复可在页面外只读核对 owned attachment 与 indexed `app.oa_attachment_invoice_cache_sources` 的 exact key bridge | Mongo 文档 ID、OA/流程请求 ID、来源付款项 parent ID 与 canonical row id 必须由同一纯函数生成确定性 alias map；同一 alias 指向多个 canonical row 时 fail closed。cache bridge 只用于 fingerprint-guarded dry-run/repair，禁止加入页面热查询，也不得按金额、文件名、申请人、项目或顺序猜测。`app.oa_source_aliases` 仍只允许 `active` alias 参与 runtime canonicalization |
+| OA source alias | canonical OA row 的 `row_id`、`normalized_payload` 显式身份字段，以及该 OA 通过 FK 拥有的 `app.oa_application_items` / `app.oa_attachments` 来源付款项身份；`app.oa_source_aliases`。已审阅历史身份只能由一次性 fail-closed 迁移核对 owned attachment 与 indexed `app.oa_attachment_invoice_cache_sources` 的 exact key bridge | Mongo 文档 ID、OA/流程请求 ID、来源付款项 parent ID 与 canonical row id 必须由同一纯函数生成确定性 alias map；同一 alias 指向多个 canonical row 时 fail closed。cache bridge 只用于已知案例的迁移时证据校验，禁止加入页面热查询，也不得按金额、文件名、申请人、项目或顺序猜测。`app.oa_source_aliases` 仍只允许 `active` alias 参与 runtime canonicalization |
 
 ## 输出 I/O
 
@@ -66,7 +66,7 @@
 - OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection；真实变化记录写完 item/attachment 后，在同一事务按 OA row ids 执行一次 indexed identity bridge，再由 Worker 主链路只对 `completed_projection_changed_scopes` 内的 completed records 提升已解析正式附件发票到 canonical invoice pool，随后记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`。cache 保存入口按 cache key 复用同一 bridge，因此 OA facts/cache 任一到达顺序都闭环。设置页人工精确刷新在同一 service 边界同步提升所选 completed records。两条入口复用同一强身份、冲突、模式和批量持久化合同，不允许 route/Application 私有 promotion。自动同步只在 canonical 发票真实变化时把发票写入与 matching dirty 原子提交；管理员精确刷新即使 canonical 发票不变也显式补发 matching reconciliation，但保持零 invoice rewrite。周期性相同输入必须是零 bridge/promotion 调用、零 projection/invoice rewrite、零重复 dirty；`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
 - `OA_PROJECTION_SYNC_VERSION=2026-08-18-workflow-number-v9` 触发一次存量重投，继续确保支付申请 `category -> expense_type`、历史日常报销 `purposeType -> expense_type`、item/source binding 与 `fee_content` / `fee_description` 符合当前合同，并把 adapter 权威 `detail_fields.OA单号` 写入 `app.oa_applications.workflow_no`；重投仍由 durable `oa.sync` worker 执行且必须幂等，不允许直接修补 PostgreSQL normalized payload。
 - External system：OA Mongo / OA app。
-- Repository：`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`postgres_repositories/oa_source_alias_repair.py`、`oa_applicant_credentials.py`。
+- Repository：`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`oa_applicant_credentials.py`。
 
 ## 文件范围
 
@@ -74,8 +74,8 @@
 | --- | --- |
 | Auth/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts`；runtime 只接受真实 OA token，不提供 synthetic dev/test identity |
 | Menu projection | `backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
-| Deployment verification / repair | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`backend/src/fin_ops_platform/tools/oa_source_alias_repair_ops.py`、`deploy/oa/bin/finops-deploy-control.sh` |
-| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`postgres_repositories/oa_source_alias_repair.py`、`runtime_worker_registry.py` |
+| Deployment verification / repair | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`backend/src/fin_ops_platform/postgres/migrations/0153_oa_source_alias_attachment_identity_repair.sql`、`deploy/oa/bin/finops-deploy-control.sh` |
+| Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`runtime_worker_registry.py` |
 | OA services | `oa_identity_service.py`、`oa_manual_import_service.py`、`oa_attachment_invoice_service.py`、`oa_attachment_invoice_promotion_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Related routes | `routes_oa_pending_payments.py`、`routes_etc.py`、`routes_input_invoice_usage_oa_reverse.py`、`server.py` |
 | Related modules | OA pending payments、ETC、input invoice usage、settings、permissions |

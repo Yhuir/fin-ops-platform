@@ -58,9 +58,6 @@ commands:
                                       auto-select frontend/runtime/ACL gate and activate exact release
   workbench-audit-identity <release-name> [args]
                                       run Workbench object identity audit using runtime env
-  oa-source-alias-repair <release-name> --alias-row-id ID --canonical-row-id ID --expected-bridge-count N --expected-invoice-count N --dry-run
-  oa-source-alias-repair <release-name> --alias-row-id ID --canonical-row-id ID --expected-bridge-count N --expected-invoice-count N --execute --expected-fingerprint <sha256>
-                                      activate one exact historical OA identity alias after bounded evidence review
   workbench-requirement-repair <release-name> --dry-run
   workbench-requirement-repair <release-name> --execute --expected-fingerprint <sha256>
   workbench-requirement-repair <release-name> --rollback-dry-run --expected-fingerprint <sha256>
@@ -1615,33 +1612,6 @@ workbench_audit_identity() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_object_identity "$@"
 }
 
-oa_source_alias_repair() {
-  local release="${1:-}"
-  [[ -n "$release" ]] || die "oa-source-alias-repair requires release name"
-  shift
-  [[ "$#" -ge 9 ]] || die "oa-source-alias-repair requires exact OA ids, evidence counts and mode"
-  [[ "${1:-}" == "--alias-row-id" && "${2:-}" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid OA alias row id"
-  [[ "${3:-}" == "--canonical-row-id" && "${4:-}" =~ ^[A-Za-z0-9._:-]+$ ]] || die "invalid canonical OA row id"
-  [[ "${5:-}" == "--expected-bridge-count" && "${6:-}" =~ ^[1-9][0-9]*$ ]] || die "invalid expected bridge count"
-  [[ "${7:-}" == "--expected-invoice-count" && "${8:-}" =~ ^[1-9][0-9]*$ ]] || die "invalid expected invoice count"
-  case "${9:-}" in
-    --dry-run)
-      [[ "$#" -eq 9 ]] || die "oa-source-alias-repair only permits dry-run or fingerprint-guarded execute"
-      ;;
-    --execute)
-      [[ "$#" -eq 11 && "${10:-}" == "--expected-fingerprint" && "${11:-}" =~ ^[0-9a-f]{64}$ ]] || \
-        die "oa-source-alias-repair only permits dry-run or fingerprint-guarded execute"
-      ;;
-    *)
-      die "oa-source-alias-repair only permits dry-run or fingerprint-guarded execute"
-      ;;
-  esac
-  local src
-  src="$(release_src "$release")"
-  assert_runtime_env_contract
-  run_with_runtime_env "$src" -m fin_ops_platform.tools.oa_source_alias_repair_ops "$@"
-}
-
 workbench_requirement_repair() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "workbench-requirement-repair requires release name"
@@ -3061,10 +3031,6 @@ case "$cmd" in
   workbench-audit-identity)
     shift
     workbench_audit_identity "$@"
-    ;;
-  oa-source-alias-repair)
-    shift
-    oa_source_alias_repair "$@"
     ;;
   workbench-requirement-repair)
     shift

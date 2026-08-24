@@ -3,9 +3,9 @@
 ## 2026-08-24 - 历史附件身份的显式 OA alias 修复边界
 
 - 根因：旧 OA row 已退出 canonical projection，但其附件发票来源仍按不可变 provenance 保留旧 parent/item ID；当前 canonical OA 保有相同物理附件。页面运行时缺少显式 alias 时必须 fail closed，不能把金额、项目或 row index 当成 OA 身份证明。
-- 决策：新增页面外的 `oa-source-alias-repair` 运维入口。dry-run 只对一个 alias/canonical pair 窄查当前 OA owned attachments、indexed cache source bridge 与 canonical 发票 `oa_attachment_invoice` source links；三者必须按 exact attachment key、旧 item ID 和 row index 一致，计数必须与操作员批准值相同。
-- 写入：execute 必须绑定 dry-run SHA-256，只在 canonical OA 唯一存在、旧 OA 已退出 canonical projection、alias 无冲突时写一条 `app.oa_source_aliases.status='active'` 审计事实。页面和 matching 仍只消费 active alias；repair 不改 OA、发票、source links、relation 或主数据库结构，不创建数据库备份。
-- 性能：cache bridge 禁止加入 Workbench 页面热查询；运行时继续走 indexed active alias。测试由 `tests/test_oa_source_alias_repair_ops.py` 与 deploy-control 固定参数 guard 覆盖。
+- 决策：删除未安装到现有 root helper、因而不可达的通用 alias repair 工具，改由 `0153_oa_source_alias_attachment_identity_repair.sql` 对唯一已审阅案例做一次性修复。迁移窄查当前 OA owned attachments、indexed cache source bridge 与两张指定 canonical 发票的 `oa_attachment_invoice` source links；三者必须按 exact attachment key、两条指定旧 item ID 和 row index `0/1` 完全一致。
+- 写入：只在 canonical OA 唯一存在、旧 OA 已退出 canonical projection、alias 无冲突时写一条 `app.oa_source_aliases.status='active'` 审计事实；无目标数据的新库 no-op，证据不一致 fail closed。迁移不改 OA、发票、source links、relation 或表结构，不创建数据库备份。
+- 性能：cache bridge 禁止加入 Workbench 页面热查询；运行时继续走 indexed active alias。迁移发现、强证据条件和禁止更新/删除核心事实由 `tests/test_postgres_migrations.py` 覆盖。
 
 ## 2026-08-18 - OA 流程单号投影
 

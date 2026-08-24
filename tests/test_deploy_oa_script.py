@@ -512,14 +512,6 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("workbench-matching-retry only permits dry-run or fingerprint-guarded execute", script)
         self.assertIn("fin_ops_platform.tools.workbench_matching_scope_retry_ops", script)
 
-    def test_oa_source_alias_repair_is_exact_and_fingerprint_guarded(self) -> None:
-        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
-
-        self.assertIn("oa-source-alias-repair <release-name> --alias-row-id ID", script)
-        self.assertIn("--expected-bridge-count N --expected-invoice-count N --dry-run", script)
-        self.assertIn("oa-source-alias-repair only permits dry-run or fingerprint-guarded execute", script)
-        self.assertIn("fin_ops_platform.tools.oa_source_alias_repair_ops", script)
-
     def test_deploy_control_script_uses_canonical_etc_finops_secret_contract(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
 
