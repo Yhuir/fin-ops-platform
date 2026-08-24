@@ -201,3 +201,8 @@
 - 复用既有 `OAAttachmentInvoicePromotionService`，通过生产已批准的 `finops-deploy-control workbench-rehydrate <release> --promote-oa-attachment-invoices` 固定维护入口调用 exact release 代码，不要求 root helper 自更新，也不新增任意 SQL/shell 入口。
 - dry-run 输出候选 SHA-256 fingerprint；apply 必须携带相同 fingerprint 和显式确认参数，候选变化时 fail closed。
 - 身份桥恢复只写缺失或变化的强身份行，重复执行候选与应用数均为 0；保留人工导入来源证据，不覆盖规范发票身份。
+# 2026-08-24 - Migration 失败必须终止 release 激活
+
+- 生产演练发现 `release_gate_activate` 通过 `if ! (activate_release ...)` 调用激活函数时，Bash 条件上下文会使函数内部单独的 migrator 非零退出继续向后执行；因此 0153 证据拒绝后 binary 仍被激活，虽然 schema 保持 0152 且没有半写数据。
+- 最小修复在 `run_schema_migrations` 调用点显式 `|| die`，迁移失败立即终止候选激活并进入既有 rollback/forward-repair 状态机；不新增 profile、skip、fallback 或第二部署入口。
+- 回归由 `tests/test_deploy_oa_script.py::DeployOAScriptTest::test_activation_stops_immediately_when_schema_migration_fails` 保护调用顺序与显式失败传播。

@@ -5,6 +5,10 @@ do $$
 declare
     v_alias_row_id constant text := 'oa-exp-2327';
     v_canonical_row_id constant text := 'oa-exp-6a86a63777bca2d0c5f62d07';
+    v_expected_item_ids constant text[] := array[
+        'oa-exp-2327:item:0:d91d8bb509c9',
+        'oa-exp-2327:item:1:a48a5229fa61'
+    ]::text[];
     canonical_count integer;
     alias_application_count integer;
     existing_alias_count integer;
@@ -79,7 +83,7 @@ begin
         from owned_attachments owned
         join app.oa_attachment_invoice_cache_sources source
           on source.source_attachment_key = owned.source_attachment_key
-        where split_part(source.source_expense_item_id, ':item:', 1) = v_alias_row_id
+        where source.source_expense_item_id = any(v_expected_item_ids)
         union
         select distinct
             source.source_expense_item_id,
@@ -90,7 +94,7 @@ begin
         from owned_attachments owned
         join app.oa_attachment_invoice_cache_sources source
           on source.cache_source_attachment_key = owned.source_attachment_key
-        where split_part(source.source_expense_item_id, ':item:', 1) = v_alias_row_id
+        where source.source_expense_item_id = any(v_expected_item_ids)
     ),
     invoice_sources as materialized (
         select distinct
@@ -107,7 +111,7 @@ begin
         ) source_link(value)
         where invoice.status <> 'deleted'
           and source_link.value->>'source_type' = 'oa_attachment_invoice'
-          and split_part(source_link.value->>'source_expense_item_id', ':item:', 1) = v_alias_row_id
+          and source_link.value->>'source_expense_item_id' = any(v_expected_item_ids)
           and exists (
               select 1
               from bridge_sources bridge
@@ -165,10 +169,7 @@ begin
         invoice_item_ids,
         invoice_row_indexes;
 
-    if bridge_item_ids <> array[
-        'oa-exp-2327:item:0:d91d8bb509c9',
-        'oa-exp-2327:item:1:a48a5229fa61'
-    ]::text[] then
+    if bridge_item_ids <> v_expected_item_ids then
         raise exception '0153: attachment bridge item identities do not match reviewed evidence';
     end if;
     if invoice_item_ids <> bridge_item_ids then

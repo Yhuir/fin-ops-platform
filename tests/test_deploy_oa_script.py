@@ -1096,6 +1096,19 @@ class DeployOAScriptTest(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("previous_git_commit", rejected.stderr)
 
+    def test_activation_stops_immediately_when_schema_migration_fails(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        activate = script.split("activate_release() {", 1)[1].split("\n}\n", 1)[0]
+
+        self.assertIn(
+            'run_schema_migrations "$src" || die "schema migration failed; candidate was not activated"',
+            activate,
+        )
+        self.assertLess(
+            activate.index("run_schema_migrations"),
+            activate.rindex("write_api_dropin"),
+        )
+
     def test_release_gate_uses_postgres_runtime_without_automatic_business_write(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
         checkpoint = script.split("release_gate_checkpoint() {", 1)[1].split(

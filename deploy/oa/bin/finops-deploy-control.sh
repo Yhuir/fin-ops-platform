@@ -2241,7 +2241,7 @@ activate_release() {
     status
     return 0
   fi
-  run_schema_migrations "$src"
+  run_schema_migrations "$src" || die "schema migration failed; candidate was not activated"
   assert_settings_access_control_database_guard "$src"
   sync_python_envs "$src"
   run_workbench_direct_compatibility_preflight \

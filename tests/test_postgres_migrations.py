@@ -363,6 +363,8 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("inv_imported_0899", sql)
         self.assertIn("source.source_attachment_key = owned.source_attachment_key", sql)
         self.assertIn("source.cache_source_attachment_key = owned.source_attachment_key", sql)
+        self.assertIn("source.source_expense_item_id = any(v_expected_item_ids)", sql)
+        self.assertIn("source_link.value->>'source_expense_item_id' = any(v_expected_item_ids)", sql)
         self.assertIn("invoice_item_ids <> bridge_item_ids", sql)
         self.assertIn("verified_attachment_identity_migration", sql)
         self.assertIn("system:migration:0153", sql)
