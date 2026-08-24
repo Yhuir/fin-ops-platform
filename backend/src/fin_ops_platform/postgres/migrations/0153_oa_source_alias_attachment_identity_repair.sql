@@ -96,10 +96,6 @@ begin
         from app.oa_attachments attachment
         join canonical_oa oa on oa.id = attachment.oa_application_id
         where nullif(btrim(attachment.source_attachment_key), '') is not null
-          and nullif(
-                btrim(attachment.normalized_payload->>'source_expense_item_id'),
-                ''
-              ) is not null
     ),
     bridge_sources as materialized (
         select distinct
@@ -121,6 +117,21 @@ begin
         from owned_attachments owned
         join app.oa_attachment_invoice_cache_sources source
           on source.cache_source_attachment_key = owned.source_attachment_key
+    ),
+    current_attachment_items as materialized (
+        select distinct
+            owned.source_attachment_key as owned_attachment_key,
+            item.source_expense_item_id as current_expense_item_id
+        from owned_attachments owned
+        join current_items item
+          on item.source_expense_item_id = owned.source_expense_item_id
+        union
+        select distinct
+            bridge.owned_attachment_key,
+            item.source_expense_item_id
+        from bridge_sources bridge
+        join current_items item
+          on item.source_expense_item_id = bridge.source_expense_item_id
     ),
     invoice_sources as materialized (
         select
@@ -146,7 +157,7 @@ begin
             invoice.invoice_id,
             invoice.source_expense_item_id as invoice_expense_item_id,
             invoice.source_attachment_key as invoice_attachment_key,
-            current_item.source_expense_item_id as current_expense_item_id,
+            current_item.current_expense_item_id,
             bridge.source_expense_item_id as bridge_expense_item_id,
             bridge.owned_attachment_key
         from invoice_sources invoice
@@ -156,11 +167,11 @@ begin
              bridge.source_attachment_key,
              bridge.cache_source_attachment_key
          )
-        join current_items current_item
-          on current_item.source_expense_item_id = bridge.owned_expense_item_id
+        join current_attachment_items current_item
+          on current_item.owned_attachment_key = bridge.owned_attachment_key
         where bridge.source_expense_item_id in (
              invoice.source_expense_item_id,
-             current_item.source_expense_item_id
+             current_item.current_expense_item_id
          )
     )
     select
@@ -248,7 +259,13 @@ begin
     if matched_current_item_ids <> v_expected_current_item_ids
        or matched_invoice_attachment_count <> 2
        or cardinality(evidence_mappings) <> 2 then
-        raise exception '0153: invoice and current attachment ownership disagree';
+        raise exception
+            '0153: invoice and current attachment ownership disagree; current_items=%, bridge_items=%, matched_current_items=%, matched_attachments=%, mappings=%',
+            current_item_ids,
+            bridge_item_ids,
+            matched_current_item_ids,
+            matched_invoice_attachment_count,
+            cardinality(evidence_mappings);
     end if;
     if invoice_ids <> array['inv_imported_0898', 'inv_imported_0899']::text[] then
         raise exception '0153: canonical invoice identities do not match reviewed evidence';

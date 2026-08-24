@@ -64,7 +64,7 @@ class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
             union all
             select id, 'source-current', 'daily-expense', 'attachment-1',
                    'owned-attachment-1', 'invoice-1.pdf',
-                   '{"source_expense_item_id":"oa-exp-6a86a63777bca2d0c5f62d07:item:0:f45376305de2","source_expense_row_index":"90"}'::jsonb
+                   '{}'::jsonb
             from canonical_oa;
 
             insert into app.oa_attachment_invoice_cache(
