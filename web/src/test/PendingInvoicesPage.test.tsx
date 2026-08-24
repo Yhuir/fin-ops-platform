@@ -1022,7 +1022,7 @@ describe("Pending invoices page", () => {
     expect(css).toMatch(/\.pending-invoices-table-shell\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden/s);
     expect(css).toMatch(/\.finance-table--contained \.finance-table__scroll\s*{[^}]*overflow:\s*auto;[^}]*overscroll-behavior:\s*contain/s);
     expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*transition:\s*background-color var\(--motion-fast\)/s);
-    expect(css).toMatch(/\.pending-invoices-table-cell\s*{[^}]*user-select:\s*text/s);
+    expect(css).not.toMatch(/\.pending-invoices-table-cell\s*{[^}]*user-select:\s*text/s);
     expect(css).toMatch(/\.pending-invoices-sort-button\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).not.toMatch(/\.pending-invoices-sort-button\s*{[^}]*pointer-events:\s*none/s);
     expect(css).toMatch(/\.pending-invoices-selection-toolbar\s*{[^}]*display:\s*inline-flex;[^}]*min-height:\s*30px/s);

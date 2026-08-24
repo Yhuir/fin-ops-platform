@@ -478,6 +478,7 @@ export default function PendingInvoicesTable({
           </div>
         )}
         minWidth={1380}
+        selectableText
         scrollMode="contained"
         scrollRef={tableWrapRef}
       >

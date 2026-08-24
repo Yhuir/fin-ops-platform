@@ -1,5 +1,14 @@
 # Finance Table System 实施记录
 
+## 2026-08-24 - 财务业务文本原生拖选与复制闭环
+
+- 目标：让待找发票、进项发票使用、销项收款、OA 待付款和成本统计中的业务文本都可用鼠标拖选并复制，同时不误触发详情、项目切换或写请求。
+- 影响范围：共享 `FinanceTable` 文本选择合同、五个页面 wrapper、成本统计可点击行/项目项、共享 CSS 与浏览器回归；不改变查询、API、权限、read model、worker、数据库或业务状态。
+- 关键决策：新增显式 `selectableText` opt-in，把 HeroUI grid cell 的焦点接管兼容封装在共享单元格边界；按钮、链接、输入和复选框继续保持控件语义。成本项目/首列不再用整块原生按钮包裹业务文本，改为 selection-aware 的键盘可操作 trigger。删除待找发票页面私有 `user-select` 旧补丁，不新增依赖或兼容链路。
+- 文档影响：更新本模块 README、boundary I/O、Spec-first E2E 合同、覆盖矩阵和测试矩阵；模块业务 I/O、依赖方向与 read model contract 不变。
+- 测试覆盖：共享 opt-in/default、成本项目点击与键盘行为、真实 Chromium 坐标级 mouse down/move/up、clipboard 一致性，以及零 mutation、零误开 dialog、零项目误切换。覆盖五个用户报告页面。
+- 未测风险：确定性浏览器数据可证明交互合同，不等同于生产超大数据量的完整人工逐单元格拖选；发布后以只读生产 smoke 和页面/接口性能验证闭环。
+
 ## 2026-08-10 - 全局字体与密度合同收敛
 
 - 目标：消除生产页面中的 10–11px 业务字、非标准字重和未加载字体假设，让共享表格与页面继承同一套可读、紧凑的 Ledger Calm 基线。

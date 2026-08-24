@@ -200,7 +200,8 @@ describe("Cost statistics page", () => {
     expect(css).not.toMatch(/\.cost-explorer-list\s*{[^}]*(?:display:\s*grid|grid-template-columns:)/s);
     expect(css).toMatch(/\.cost-explorer-item\s*{[^}]*min-height:\s*66px[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).not.toMatch(/\.cost-explorer-item\s*{[^}]*overflow:\s*hidden/s);
-    expect(css).toMatch(/\.cost-explorer-item-select\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).toMatch(/\.cost-explorer-item-content\s*{[^}]*min-height:\s*66px[^}]*padding:\s*11px var\(--fp-space-3\)[^}]*user-select:\s*text[^}]*transition:[^}]*var\(--motion-fast\)/s);
+    expect(css).not.toContain(".cost-explorer-item-select");
     expect(css).toMatch(/\.cost-explorer-item-main strong\s*{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s);
     expect(css).toMatch(/\.cost-explorer-item\.is-expanded \.cost-explorer-item-main strong\s*{[^}]*overflow:\s*visible[^}]*overflow-wrap:\s*anywhere[^}]*text-overflow:\s*clip[^}]*white-space:\s*normal/s);
     expect(css).toMatch(/\.cost-explorer-item\.active\s*{[^}]*box-shadow:\s*inset 0 0 0 1px/s);

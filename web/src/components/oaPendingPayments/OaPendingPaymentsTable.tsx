@@ -193,6 +193,7 @@ export default function OaPendingPaymentsTable({
           />
         )}
         minWidth={1320}
+        selectableText
         scrollMode="contained"
         scrollRef={tableWrapRef}
       >

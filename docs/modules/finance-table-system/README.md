@@ -31,6 +31,7 @@
 - 需要分页的页面把 HeroUI 页容量选择器与 `FinanceTablePagination` 放进同一个表格 footer；不得在表格外再维护第二个原生 select/button 分页块。
 - 非关联台生产表格必须使用共享 `FinanceTable`。关联台 `PaneTable` 与详情表是当前唯一冻结例外，其独立高性能滚动合同由 Workbench 模块负责。
 - 表格 migration 不能删除旧页面的导出、确认、刷新、筛选、选择、右侧详情抽屉或现有分页语义。
+- 页面需要允许复制业务文本时，显式启用 `FinanceTable selectableText`。共享层负责原生鼠标拖选，并隔离 HeroUI grid cell 的焦点接管；按钮、链接、输入框和复选框仍保持原交互，不纳入拖选目标。
 
 ## 主要使用点
 
@@ -51,6 +52,7 @@
 - `web/src/test/useFinanceTableSession.test.tsx`
 - `web/src/test/MuiContainment.test.ts`
 - `web/src/test/CommonPlatformComponents.test.tsx`
+- `web/e2e/finance-table-text-selection.spec.ts`
 - 页面级表格测试：`BankDetailsPage.test.tsx`、`TaxOffsetPage.test.tsx`、`InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx`、`OaPendingPaymentsPage.test.tsx`、`CostStatisticsPage.test.tsx`、`TurnoverLedgerPage.test.tsx`、`AppHealthOperationsPage.test.tsx`、`ImportCenterPage.test.tsx`。
 
 ## 维护触发器

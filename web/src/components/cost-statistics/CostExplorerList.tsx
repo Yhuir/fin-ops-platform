@@ -2,6 +2,8 @@ import { Button, Chip } from "@heroui/react";
 import type { ReactNode } from "react";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { hasSelectedTextWithin } from "./textSelection";
+
 function sameKeys(left: Set<string>, right: Set<string>) {
   if (left.size !== right.size) {
     return false;
@@ -135,16 +137,27 @@ export default function CostExplorerList<Row>({
                 ].filter(Boolean).join(" ")}
                 key={key}
               >
-                <Button
+                <div
                   aria-label={`选择${title} ${primaryText}`}
                   aria-pressed={active}
-                  className="cost-explorer-item-select"
-                  onPress={() => {
+                  className="cost-explorer-item-content"
+                  onClick={(event) => {
+                    if (hasSelectedTextWithin(event.currentTarget)) {
+                      return;
+                    }
                     setExpandedKey(null);
                     onSelect(item);
                   }}
-                  size="sm"
-                  variant="tertiary"
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") {
+                      return;
+                    }
+                    event.preventDefault();
+                    setExpandedKey(null);
+                    onSelect(item);
+                  }}
+                  role="button"
+                  tabIndex={0}
                 >
                   <div className="cost-explorer-item-main">
                     <strong
@@ -161,12 +174,13 @@ export default function CostExplorerList<Row>({
                     {renderSecondary ? <span>{renderSecondary(item)}</span> : null}
                   </div>
                   {renderMeta ? <div className="cost-explorer-item-meta">{renderMeta(item)}</div> : null}
-                </Button>
+                </div>
                 {overflowed ? (
                   <Button
                     aria-expanded={expanded}
                     aria-label={`${expanded ? "折叠" : "展开"}${title}完整内容`}
                     className="cost-explorer-item-disclosure"
+                    onClick={(event) => event.stopPropagation()}
                     onPress={() => setExpandedKey((current) => current === key ? null : key)}
                     size="sm"
                     variant="tertiary"

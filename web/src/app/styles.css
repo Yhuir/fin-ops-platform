@@ -8406,7 +8406,6 @@ textarea {
   font-size: 12px;
   line-height: 1.3;
   overflow-wrap: anywhere;
-  user-select: text;
   vertical-align: middle;
   transition: background-color var(--motion-fast) var(--ease-standard);
 }
@@ -10761,6 +10760,30 @@ textarea {
   border-bottom: 1px solid var(--fp-border-subtle);
   padding: var(--fp-table-cell-padding-y) var(--fp-table-cell-padding-x);
   vertical-align: middle;
+}
+
+.finance-table--selectable-text :where(.finance-table__column, .finance-table__cell),
+.finance-table--selectable-text :where(.finance-table__column, .finance-table__cell) :where(span, div, strong, small) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.finance-table--selectable-text :where(.finance-table__column, .finance-table__cell) :where(
+  button,
+  button *,
+  a,
+  a *,
+  input,
+  input *,
+  select,
+  select *,
+  textarea,
+  textarea *,
+  [role="checkbox"],
+  [role="checkbox"] *
+) {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .finance-table__row:last-child .finance-table__cell {
@@ -19909,6 +19932,7 @@ body.column-layout-dragging {
 }
 
 .cost-table-row-trigger {
+  display: inline-block;
   width: 100%;
   padding: 0;
   border: 0;
@@ -19918,6 +19942,8 @@ body.column-layout-dragging {
   font-weight: 700;
   text-align: left;
   cursor: pointer;
+  -webkit-user-select: text;
+  user-select: text;
   transition:
     color var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-out-quart);
@@ -20692,7 +20718,7 @@ body.column-layout-dragging {
     box-shadow var(--motion-fast) var(--ease-standard);
 }
 
-.cost-explorer-item-select {
+.cost-explorer-item-content {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -20708,10 +20734,12 @@ body.column-layout-dragging {
   color: inherit;
   text-align: left;
   cursor: pointer;
+  -webkit-user-select: text;
+  user-select: text;
   transition: transform var(--motion-fast) var(--ease-out-quart);
 }
 
-.cost-explorer-item-select {
+.cost-explorer-item-content {
   padding-right: calc(var(--fp-space-3) + var(--cost-explorer-disclosure-gutter));
 }
 
@@ -20723,8 +20751,13 @@ body.column-layout-dragging {
   background: var(--fp-surface-raised);
 }
 
-.cost-explorer-item-select:active {
+.cost-explorer-item-content:active {
   transform: translateY(1px);
+}
+
+.cost-explorer-item-content:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--fp-accent) 38%, transparent);
+  outline-offset: -2px;
 }
 
 .cost-explorer-item.active {

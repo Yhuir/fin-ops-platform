@@ -21,6 +21,7 @@
 | Tax tables | `TaxOffsetPage.test.tsx`、`TaxApi.test.ts` | 发票选择、认证导入预览、税金表格、loading/error、导入反馈 |
 | Invoice usage / pending / collections tables | `InputInvoiceUsagePage.test.tsx`、`PendingInvoicesPage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts` | header filter Portal、sort、pagination、read model refreshing/stale、export drawers |
 | OA / turnover / cost tables | `OaPendingPaymentsPage.test.tsx`、`TurnoverLedgerPage.test.tsx`、`CostStatisticsPage.test.tsx` | grouped table、详情 dialog/drawer、export dialog、stale disable、large layout CSS |
+| Native text selection | `FinanceTable.test.tsx`、`CostExplorerList.test.tsx`、`web/e2e/finance-table-text-selection.spec.ts`、`web/e2e/pending-invoices-fanout.spec.ts` | 显式 opt-in、真实鼠标拖选、clipboard 内容、拖选不触发业务动作、交互控件保持可用、页面私有旧补丁不回归 |
 | Import preview tables | `ImportCenterPage.test.tsx`、`EtcTicketManagementPage.test.tsx` | preview stale/error、行级状态 tag、确认前预览 |
 | App Health tables | `AppHealthOperationsPage.test.tsx` | runtime dashboard 只读表、admin-only、unknown 不等于 0 |
 
@@ -41,6 +42,7 @@
 | read model refreshing/stale 表格状态 | 已覆盖于具体页面 | `BankDetailsPage.test.tsx`、`InputInvoiceUsagePage.test.tsx`、`OutputInvoiceCollectionsPage.test.tsx`、`PendingInvoicesPage.test.tsx`、`TurnoverLedgerPage.test.tsx` |
 | 固定高度、内部滚动、sticky 表头、相邻栏滚动隔离 | 已覆盖共享合同与页面 CSS，2026-08-10 补强 | `FinanceTable.test.tsx`、`TableAlignmentStyles.test.ts`、`FinanceTableMigration.test.ts`、页面级 tests |
 | 非关联台原生表格旧路径删除 | 已覆盖，2026-08-10 新增 | `FinanceTableMigration.test.ts` |
+| 五个财务页面业务文本真实拖选/复制且无误操作 | 已覆盖，2026-08-24 新增 | `web/e2e/finance-table-text-selection.spec.ts`、`web/e2e/pending-invoices-fanout.spec.ts` |
 
 ## 七类测试适用性
 
@@ -50,7 +52,7 @@
 | 2. Service-layer tests | 不适用 | N/A | 本模块不触碰后端 service、repository、audit 或状态写入。 |
 | 3. API contract tests | 间接适用 | 各页面 `*Api.test.ts` / `*Page.test.tsx` | 表格 query params、pagination、sort、filters、export contract 由页面/API 模块负责；共享 primitive 不发 HTTP。 |
 | 4. Read model/cache/background job tests | 间接适用 | 页面级 refreshing/stale tests | 表格只展示 read model 状态；freshness 来源仍由页面 API 和 read model 模块负责。 |
-| 5. Frontend component and interaction tests | 适用，已补 | `FinanceTable.test.tsx`、`FinanceTableMigration.test.ts`、`useFinanceTableSession.test.tsx`、`MuiContainment.test.ts`、页面级 tests、`web/e2e/finance-table-system-flow.spec.ts` | 覆盖共享 primitive、contained scroll/sticky header、session hook、旧 MUI/DataGrid/原生表格删除防回归、页面级筛选/排序/分页/导出/状态。 |
+| 5. Frontend component and interaction tests | 适用，已补 | `FinanceTable.test.tsx`、`FinanceTableMigration.test.ts`、`useFinanceTableSession.test.tsx`、`MuiContainment.test.ts`、页面级 tests、`web/e2e/finance-table-system-flow.spec.ts`、`web/e2e/finance-table-text-selection.spec.ts` | 覆盖共享 primitive、contained scroll/sticky header、session hook、原生文本拖选/复制、交互控件隔离、旧 MUI/DataGrid/原生表格删除防回归、页面级筛选/排序/分页/导出/状态。 |
 | 6. End-to-end business-flow integration tests | 间接适用 | 具体页面/业务流 tests | 本模块不承载业务链路；端到端链路在导入、关联台、发票、成本、税金等模块保护。 |
 | 7. Existing feature regression tests | 适用，已补 | 同上 | 新增共享 primitive 回归测试；页面级旧表格功能由各模块继续保护。 |
 
@@ -64,6 +66,7 @@
 | 2026-07-05 | 防止旧 MUI/DataGrid runtime、provider/theme 和 `useMuiDataGridPageSession` 回归污染 Finance Table session 边界 | `MuiContainment.test.ts` |
 | 2026-08-10 | 防止表格滚动带动整页、表头随内容滚走、相邻栏互相影响，以及非关联台旧原生表格回归 | `FinanceTable.test.tsx`、`TableAlignmentStyles.test.ts`、`FinanceTableMigration.test.ts` |
 | 2026-08-10 | 防止固定表头内的筛选菜单被内部滚动容器裁切或拦截点击 | `web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts` |
+| 2026-08-24 | 防止 HeroUI grid cell 在鼠标拖选时把焦点转移到首个子控件，导致带信息按钮/复选框的业务单元格无法形成选区；同时防止整项按钮吞掉成本统计文本选择 | `FinanceTable.test.tsx`、`CostExplorerList.test.tsx`、`web/e2e/finance-table-text-selection.spec.ts`、`web/e2e/pending-invoices-fanout.spec.ts` |
 
 ## 关键 smoke flows
 
@@ -98,6 +101,11 @@ cd web && npm test -- --run \
   src/test/ImportCenterPage.test.tsx
 
 cd web && npx playwright test e2e/finance-table-system-flow.spec.ts --project=chromium
+
+cd web && npx playwright test \
+  e2e/finance-table-text-selection.spec.ts \
+  e2e/pending-invoices-fanout.spec.ts \
+  --project=chromium
 
 bash scripts/verify.sh docs
 ```

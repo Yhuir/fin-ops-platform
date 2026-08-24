@@ -13,6 +13,7 @@ import {
   FinanceTableRow,
   type FinanceTableColumnRole,
 } from "../common/FinanceTable";
+import { hasSelectedTextWithin } from "./textSelection";
 
 export type CostStatisticsAmountCell = {
   amount: string;
@@ -104,6 +105,7 @@ export default function CostStatisticsTable<Row extends object>({
         ariaLabel={ariaLabel}
         className={fitContainer ? "cost-finance-table cost-finance-table--fit" : "cost-finance-table"}
         minWidth={fitContainer ? "100%" : Math.max(720, minWidth)}
+        selectableText
         scrollMode="contained"
         scrollRef={scrollRef}
       >
@@ -140,7 +142,16 @@ export default function CostStatisticsTable<Row extends object>({
                 key={rowKey}
                 className={onRowClick ? "cost-table-row cost-table-row--clickable" : "cost-table-row"}
                 id={rowKey}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onClick={onRowClick ? (event) => {
+                  const target = event.target instanceof Element ? event.target : null;
+                  if (target?.closest("button, a, input, select, textarea, [role='checkbox']")) {
+                    return;
+                  }
+                  if (hasSelectedTextWithin(event.currentTarget)) {
+                    return;
+                  }
+                  onRowClick(row);
+                } : undefined}
                 textValue={rowKey}
               >
                 {columns.map((column, columnIndex) => {
@@ -148,17 +159,27 @@ export default function CostStatisticsTable<Row extends object>({
                   const renderedContent = renderTableCellContent(content);
                   const cellText = column.getTextValue?.(row) ?? getCellText(content);
                   const cellContent = columnIndex === 0 && onRowClick ? (
-                    <button
+                    <span
                       aria-label={getRowActionLabel ? getRowActionLabel(row) : "查看行详情"}
                       className="cost-table-row-trigger"
                       onClick={(event) => {
                         event.stopPropagation();
-                        onRowClick(row);
+                        if (!hasSelectedTextWithin(event.currentTarget)) {
+                          onRowClick(row);
+                        }
                       }}
-                      type="button"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onRowClick(row);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
                     >
                       {renderedContent}
-                    </button>
+                    </span>
                   ) : renderedContent;
 
                   return (

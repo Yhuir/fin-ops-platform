@@ -3,6 +3,7 @@ import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder } from "./fixtures/operationLatency";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
+import { dragSelectVisibleText } from "./fixtures/textSelection";
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 function createPendingInvoicesLatencyRecorder(page: Page, testInfo: TestInfo) {
@@ -34,7 +35,7 @@ test.describe("pending invoices browser flow", () => {
       visibleLabel: "智能工厂设备商",
       actionType: "select",
     }, async (mark) => {
-      await counterpartyName.selectText();
+      await dragSelectVisibleText(page, counterpartyName);
       await mark("finalSettledLatencyMs", expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toContain("智能工厂设备"));
     });
 

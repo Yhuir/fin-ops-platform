@@ -1,5 +1,6 @@
 import { Chip, Pagination, Table, Tooltip } from "@heroui/react";
-import type { CSSProperties, ReactNode, Ref } from "react";
+import { createContext, useContext } from "react";
+import type { ComponentProps, CSSProperties, MouseEventHandler, PointerEventHandler, ReactNode, Ref } from "react";
 
 import { formatMoney } from "../../features/money";
 
@@ -20,6 +21,33 @@ export type FinanceTone = "neutral" | "info" | "success" | "warning" | "danger";
 
 type FinanceTableStyle = CSSProperties & {
   "--finance-table-min-width"?: string;
+};
+
+const FinanceTableTextSelectionContext = createContext(false);
+
+function isInteractiveTableTarget(eventTarget: EventTarget) {
+  const target = eventTarget instanceof Element ? eventTarget : null;
+  return Boolean(target?.closest("button, a, input, select, textarea, [role='checkbox']"));
+}
+
+const keepNativeTextSelectionOnPointerDown: PointerEventHandler<HTMLTableCellElement> = (event) => {
+  if (isInteractiveTableTarget(event.target)) return;
+  event.stopPropagation();
+};
+
+const keepNativeTextSelectionOnMouseDown: MouseEventHandler<HTMLTableCellElement> = (event) => {
+  if (isInteractiveTableTarget(event.target)) return;
+  const cell = event.currentTarget;
+  const tabIndex = cell.getAttribute("tabindex");
+  if (tabIndex !== null) {
+    cell.removeAttribute("tabindex");
+    requestAnimationFrame(() => {
+      if (cell.isConnected && !cell.hasAttribute("tabindex")) {
+        cell.setAttribute("tabindex", tabIndex);
+      }
+    });
+  }
+  event.stopPropagation();
 };
 
 function cx(...values: Array<string | undefined | false>) {
@@ -48,6 +76,7 @@ type FinanceTableProps = {
   footer?: ReactNode;
   className?: string;
   minWidth?: number | string;
+  selectableText?: boolean;
   scrollMode?: "natural" | "contained";
   scrollRef?: Ref<HTMLDivElement>;
 };
@@ -58,6 +87,7 @@ export function FinanceTable({
   footer,
   className,
   minWidth = 720,
+  selectableText = false,
   scrollMode = "natural",
   scrollRef,
 }: FinanceTableProps) {
@@ -66,14 +96,21 @@ export function FinanceTable({
   };
 
   return (
-    <Table className={cx("finance-table", scrollMode === "contained" && "finance-table--contained", className)}>
-      <Table.ScrollContainer ref={scrollRef} className="finance-table__scroll">
-        <Table.Content aria-label={ariaLabel} className="finance-table__content" style={style}>
-          {children}
-        </Table.Content>
-      </Table.ScrollContainer>
-      {footer ? <Table.Footer className="finance-table__footer">{footer}</Table.Footer> : null}
-    </Table>
+    <FinanceTableTextSelectionContext.Provider value={selectableText}>
+      <Table className={cx(
+        "finance-table",
+        scrollMode === "contained" && "finance-table--contained",
+        selectableText && "finance-table--selectable-text",
+        className,
+      )}>
+        <Table.ScrollContainer ref={scrollRef} className="finance-table__scroll">
+          <Table.Content aria-label={ariaLabel} className="finance-table__content" style={style}>
+            {children}
+          </Table.Content>
+        </Table.ScrollContainer>
+        {footer ? <Table.Footer className="finance-table__footer">{footer}</Table.Footer> : null}
+      </Table>
+    </FinanceTableTextSelectionContext.Provider>
   );
 }
 
@@ -115,10 +152,11 @@ type FinanceTableCellProps = {
   textValue?: string;
   dataTestId?: string;
   dataHighlight?: string;
-  onClick?: () => void;
+  onClick?: MouseEventHandler<HTMLTableCellElement>;
 };
 
 export function FinanceTableCell({ children, columnRole, className, dataHighlight, dataTone, dataTestId, onClick, textValue }: FinanceTableCellProps) {
+  const selectableText = useContext(FinanceTableTextSelectionContext);
   return (
     <Table.Cell
       className={cx("finance-table__cell", className)}
@@ -127,6 +165,8 @@ export function FinanceTableCell({ children, columnRole, className, dataHighligh
       data-highlight={dataHighlight}
       data-tone={dataTone}
       onClick={onClick}
+      onMouseDown={selectableText ? keepNativeTextSelectionOnMouseDown : undefined}
+      onPointerDown={selectableText ? keepNativeTextSelectionOnPointerDown : undefined}
       textValue={textValue}
     >
       {children}
@@ -142,7 +182,7 @@ type FinanceTableRowProps = {
   id?: string | number;
   className?: string;
   dataCertifiedHighlighted?: boolean;
-  onClick?: () => void;
+  onClick?: ComponentProps<typeof Table.Row>["onClick"];
   textValue?: string;
   dataTestId?: string;
   dataHighlight?: string;

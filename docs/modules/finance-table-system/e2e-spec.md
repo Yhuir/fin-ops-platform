@@ -24,6 +24,7 @@
 | `FIN-TABLE-E2E-008` | table session 只保存轻量 UI 状态，并按 page/state/user/columnsVersion 隔离；不保存 rows/read model payload。 | P1 |
 | `FIN-TABLE-E2E-009` | 代表性大表格在真实 Chromium 中无 console/page error，关键右侧列可读。 | P0 |
 | `FIN-TABLE-E2E-010` | 页面 wrapper 可以保留自身业务差异；共享 primitive 测试不能替代每页筛选/排序/导出/状态测试。 | P0 |
+| `FIN-TABLE-E2E-011` | 启用复制合同的表格中，业务文本可通过真实鼠标拖选并复制；拖选不打开详情、不切换成本项目、不发 mutation，交互控件仍保持原行为。 | P0 |
 
 ## 数据状态
 

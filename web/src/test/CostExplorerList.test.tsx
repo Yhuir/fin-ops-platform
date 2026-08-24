@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
@@ -127,6 +127,34 @@ test("keeps at most one item expanded in each list", async () => {
   expect(firstItem).not.toHaveClass("is-expanded");
   expect(secondItem).toHaveClass("is-expanded");
   expect(screen.getAllByRole("button", { name: "折叠项目名完整内容" })).toHaveLength(1);
+});
+
+test("does not activate an item when a mouse drag leaves selected text", async () => {
+  const { onSelect } = renderList();
+  const item = screen.getByRole("button", { name: `选择项目名 ${rows[1].name}` });
+  const label = screen.getByText(rows[1].name, { selector: "strong" });
+  const range = document.createRange();
+  range.selectNodeContents(label);
+  window.getSelection()?.removeAllRanges();
+  window.getSelection()?.addRange(range);
+
+  fireEvent.click(item);
+
+  expect(onSelect).not.toHaveBeenCalled();
+  window.getSelection()?.removeAllRanges();
+});
+
+test("keeps project selection keyboard accessible", async () => {
+  const user = userEvent.setup();
+  const { onSelect } = renderList();
+  const item = screen.getByRole("button", { name: `选择项目名 ${rows[1].name}` });
+
+  item.focus();
+  await user.keyboard("{Enter}");
+  expect(onSelect).toHaveBeenNthCalledWith(1, rows[1]);
+
+  await user.keyboard(" ");
+  expect(onSelect).toHaveBeenNthCalledWith(2, rows[1]);
 });
 
 test("keeps an expanded label stable and remeasures it after folding", async () => {

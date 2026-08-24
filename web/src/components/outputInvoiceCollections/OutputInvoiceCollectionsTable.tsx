@@ -128,6 +128,7 @@ export default function OutputInvoiceCollectionsTable({
           />
         )}
         minWidth={1240}
+        selectableText
         scrollMode="contained"
       >
         <FinanceTableHeader>

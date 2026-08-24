@@ -37,6 +37,40 @@ describe("FinanceTable shared primitives", () => {
     expect(table.closest(".finance-table__scroll")).toBeInTheDocument();
   });
 
+  test("enables native business-text selection only when a table opts in", () => {
+    const { rerender } = render(
+      <FinanceTable ariaLabel="默认表格">
+        <FinanceTableHeader>
+          <FinanceTableColumn id="name" isRowHeader>名称</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          <FinanceTableRow id="row-1" textValue="默认行">
+            <FinanceTableCell columnRole="identity" textValue="默认行">默认行</FinanceTableCell>
+          </FinanceTableRow>
+        </FinanceTableBody>
+      </FinanceTable>,
+    );
+
+    expect(screen.getByRole("grid", { name: "默认表格" }).closest(".finance-table"))
+      .not.toHaveClass("finance-table--selectable-text");
+
+    rerender(
+      <FinanceTable ariaLabel="可选择表格" selectableText>
+        <FinanceTableHeader>
+          <FinanceTableColumn id="name" isRowHeader>名称</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          <FinanceTableRow id="row-1" textValue="可选择行">
+            <FinanceTableCell columnRole="identity" textValue="可选择行">可选择行</FinanceTableCell>
+          </FinanceTableRow>
+        </FinanceTableBody>
+      </FinanceTable>,
+    );
+
+    expect(screen.getByRole("grid", { name: "可选择表格" }).closest(".finance-table"))
+      .toHaveClass("finance-table--selectable-text");
+  });
+
   test("clamps pagination display to valid ranges and disables unavailable navigation", () => {
     const onPageChange = vi.fn();
 

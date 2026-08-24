@@ -14,6 +14,7 @@
 | `FIN-TABLE-E2E-008` | `covered` | `web/src/test/useFinanceTableSession.test.tsx`、`web/src/test/PageSessionStateContext.test.tsx`、`web/src/test/MuiContainment.test.ts` | 覆盖 table session 保存/恢复、columnsVersion 清理、user/page/state 隔离，并防止旧 MUI/DataGrid session hook/test 回归。 |
 | `FIN-TABLE-E2E-009` | `covered` | `web/e2e/finance-table-system-flow.spec.ts`、`web/e2e/drawer-motion.spec.ts`、页面级 Playwright smoke | 覆盖真实 Chromium 代表性宽表，以及 modal/persistent drawer viewport motion、focus/inert、tax rail 折叠生命周期和严格 console/page error 捕获。 |
 | `FIN-TABLE-E2E-010` | `covered` | 各页面 `e2e-coverage.md`、页面级 Vitest / Playwright | 页面 wrapper 的业务差异由页面模块覆盖；本模块记录共享边界而不替代页面 Spec。 |
+| `FIN-TABLE-E2E-011` | `covered` | `web/src/test/FinanceTable.test.tsx`、`web/src/test/CostExplorerList.test.tsx`、`web/e2e/finance-table-text-selection.spec.ts`、`web/e2e/pending-invoices-fanout.spec.ts` | 真实 Chromium 使用坐标级 mouse down/move/up 生成原生选区并读取 clipboard；覆盖待找发票、进项发票、销项收款、OA 待付款和成本统计，同时断言零 mutation、零误开 dialog、零项目误切换。 |
 
 ## 缺口分类
 

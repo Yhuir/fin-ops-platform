@@ -417,6 +417,7 @@ export default function InputInvoiceUsageTable({
           </div>
         )}
         minWidth={1480}
+        selectableText
         scrollMode="contained"
         scrollRef={tableWrapRef}
       >
