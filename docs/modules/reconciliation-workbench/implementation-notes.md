@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-26 - OA 与外部往来款闭环金额口径统一
+
+- 根因：关联台 confirm preview/submit 把所有人工关系硬编码为 `manual_confirmed`，即使所选银行成员已由 canonical 分类证明为完整外部往来收支闭环，也仍按普通付款净额 `支出-收入` 计算，导致 `200000 OA + 200000 收入 + 200000 支出` 被误报差额 `200000`。
+- 修复：既有银行分类批量投影携带 role/action/family；关联台只对 OA + 完整显式 external-turnover 闭环复用 `TurnoverRelationService` 校验，并通过同一 relation command/UoW 写 `turnover_manual_closure`、evidence 和专属 history。金额按 OA 同方向本金侧比较。普通付款、单边或非零差额选择保持原合同，结构化字段残缺明确失败，不增加 SQL、表、read model、worker 或文本兜底。
+- 旧链删除：删除 confirm preview/submit 对 `manual_confirmed` 的无条件硬编码；不保留并行金额计算或兼容分支。
+
 ## 2026-08-25 - 三栏统一搜索收口到 direct canonical query
 
 - 根因：前端搜索参数已经发送到 `/api/workbench/groups`，但 completed OA 的 SQL allowlist 只含申请人、父项目和 workflow no，漏掉页面实际展示的对方户名与子付款项；流水和发票 allowlist 同时混有不可见 `project_id/counterparty_name`，且遗漏展示账户、税率/税额和来源 Chip。浏览器还保留一套只对已加载页过滤的 matcher，服务端未命中的 OA 会被错误显示为 0 条，形成双事实源漂移。

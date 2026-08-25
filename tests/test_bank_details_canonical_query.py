@@ -600,6 +600,61 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertIn("tenant-workbench", params)
         self.assertEqual(sql.count("%s"), len(params))
 
+    def test_workbench_category_projection_includes_canonical_turnover_semantics(self) -> None:
+        definition = {
+            "code": "external_turnover",
+            "label": "归还借款",
+            "status": "active",
+            "priority": 1,
+            "output_primary_label": "外部往来款付款",
+            "output_sub_label": "归还借款",
+            "output_third_label": "个人往来",
+            "turnover_role": "external_turnover",
+            "turnover_action_type": "repaid",
+            "turnover_family": "personal",
+            "rules": {"match_fields": ["summary_text"], "contains_any": ["归还借款"]},
+        }
+
+        class Transaction:
+            def fetch_all(
+                self,
+                _sql: str,
+                _params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                return [
+                    {
+                        "row_id": "bank-turnover-1",
+                        "amount": Decimal("100000.00"),
+                        "direction": "expense",
+                        "confirmation_id": "confirmation-turnover-1",
+                        "confirmed_category_code": "external_turnover",
+                        "confirmation_version": 1,
+                        "confirmation_raw_payload": {
+                            "normalized_payload": {
+                                "category_primary_label": "外部往来款付款",
+                                "category_sub_label": "归还借款",
+                                "category_third_label": "个人往来",
+                                "turnover_role": "external_turnover",
+                                "turnover_action_type": "repaid",
+                                "turnover_family": "personal",
+                            }
+                        },
+                        "auto_resolution_status": "needs_confirmation",
+                        "matched_definitions": [],
+                    }
+                ]
+
+        projections = PostgresBankDetailsCanonicalQueryRepository.workbench_category_projection_rows(
+            Transaction(),
+            settings={"bank_transaction_tags": {"definitions": [definition]}},
+            transaction_ids=["bank-turnover-1"],
+            tenant_id="tenant-workbench",
+        )
+
+        self.assertEqual(projections["bank-turnover-1"]["turnover_role"], "external_turnover")
+        self.assertEqual(projections["bank-turnover-1"]["turnover_action_type"], "repaid")
+        self.assertEqual(projections["bank-turnover-1"]["turnover_family"], "personal")
+
     def test_turnover_selection_reads_exact_canonical_rows_with_bank_version(self) -> None:
         class Transaction:
             def __init__(self) -> None:

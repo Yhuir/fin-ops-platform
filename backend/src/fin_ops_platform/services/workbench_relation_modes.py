@@ -4,13 +4,14 @@ from copy import deepcopy
 from typing import Any
 
 
+MANUAL_CONFIRMED_RELATION_MODE = "manual_confirmed"
 TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
 OUTPUT_INVOICE_REVERSAL_RELATION_MODE = "output_invoice_reversal"
 
 
 VALID_WORKBENCH_RELATION_MODES = frozenset(
     {
-        "manual_confirmed",
+        MANUAL_CONFIRMED_RELATION_MODE,
         "normal_match",
         "oa_exempt",
         "pending_invoice_attach_existing_invoice",

@@ -4,6 +4,7 @@ import importlib
 import json
 import unittest
 from http import HTTPStatus
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
@@ -24,6 +25,45 @@ def _flatten_groups(groups: list[dict[str, object]], record_type: str) -> list[d
 
 def _json_response(response) -> dict[str, object]:
     return json.loads(response.body)
+
+
+class _LocalWithdrawUoW:
+    """Runs the write handler through the same transaction-bound selection contract as production."""
+
+    def __init__(self, app: Application) -> None:
+        self._app = app
+
+    @staticmethod
+    def replay_committed(_command: object) -> None:
+        return None
+
+    def run(self, command: object, handler: object) -> dict[str, object]:
+        row_ids = list(getattr(command, "row_ids"))
+        row_types = list(getattr(command, "row_types"))
+        rows_by_id = self._app._workbench_page_selection_repository.get_canonical_rows_by_ids(
+            row_ids,
+            row_types=row_types,
+        )
+        canonical_rows = [
+            {
+                **dict(rows_by_id[row_id]),
+                "row_id": row_id,
+                "pane": row_type,
+            }
+            for row_id, row_type in zip(row_ids, row_types, strict=True)
+        ]
+        canonical_query = SimpleNamespace(
+            load_validated_workbench_relation_selection_in_current_transaction=(
+                lambda **_: canonical_rows
+            )
+        )
+        return handler(
+            SimpleNamespace(
+                transaction=object(),
+                pair_relations=None,
+                canonical_query=canonical_query,
+            )
+        )
 
 
 class WorkbenchStaleWriteContractTests(unittest.TestCase):
@@ -66,6 +106,7 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
         app._emit_workbench_action_timing = lambda **kwargs: None
         app._oa_sync_status_payload = lambda: {"status": "ready", "dirty_scopes": []}
         install_direct_workbench_selection_repository(app)
+        app._workbench_withdraw_link_uow_override = _LocalWithdrawUoW(app)
         return app
 
     def _default_open_row_ids(self, app: Application) -> list[str]:

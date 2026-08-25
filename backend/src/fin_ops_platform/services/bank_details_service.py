@@ -352,6 +352,9 @@ class BankDetailsService:
             "category_path": effective_path,
             "category_source": effective_source,
             "category_version": manual_category["category_version"],
+            "turnover_role": effective_category.get("turnover_role"),
+            "turnover_action_type": effective_category.get("turnover_action_type"),
+            "turnover_family": effective_category.get("turnover_family"),
             **relation_tags,
         }
 

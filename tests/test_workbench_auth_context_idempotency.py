@@ -8,10 +8,12 @@ from unittest.mock import patch
 from fin_ops_platform.app.auth import OARequestSession
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
     WorkbenchIdempotencyInProgress,
 )
+from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_grouping import (
@@ -444,6 +446,13 @@ class _NoActiveRelationCommandService:
             payload={"row_ids": list(kwargs.get("row_ids") or [])},
         )
 
+    def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
+        raise WorkbenchRelationCommandError(
+            "workbench_relation_not_found",
+            "Workbench relation is not active or does not exist.",
+            payload={"row_ids": list(kwargs.get("row_ids") or [])},
+        )
+
 
 class _BankInvoiceWithdrawRelationCommandService(_RecordingRelationCommandService):
     def preview_withdraw_relation(self, **kwargs: object) -> dict[str, object]:
@@ -708,6 +717,202 @@ def _session() -> OARequestSession:
 
 
 class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
+    @staticmethod
+    def _external_turnover_closure_rows() -> list[dict[str, object]]:
+        shared = {
+            "category_code": "external_turnover",
+            "category_primary_label": "外部往来款付款",
+            "category_third_label": "个人往来",
+            "turnover_role": "external_turnover",
+            "turnover_family": "personal",
+            "counterparty_name": "房克丽",
+        }
+        return [
+            {
+                "id": "oa-turnover-200000",
+                "type": "oa",
+                "apply_type": "支付申请",
+                "amount": "200000.00",
+                "counterparty_name": "房克丽",
+            },
+            {
+                **shared,
+                "id": "bank-turnover-income-1",
+                "type": "bank",
+                "debit_amount": "",
+                "credit_amount": "100000.00",
+                "turnover_action_type": "pending_repayment",
+            },
+            {
+                **shared,
+                "id": "bank-turnover-income-2",
+                "type": "bank",
+                "debit_amount": "",
+                "credit_amount": "100000.00",
+                "turnover_action_type": "pending_repayment",
+            },
+            {
+                **shared,
+                "id": "bank-turnover-expense-1",
+                "type": "bank",
+                "debit_amount": "100000.00",
+                "credit_amount": "",
+                "turnover_action_type": "repaid",
+            },
+            {
+                **shared,
+                "id": "bank-turnover-expense-2",
+                "type": "bank",
+                "debit_amount": "100000.00",
+                "credit_amount": "",
+                "turnover_action_type": "repaid",
+            },
+        ]
+
+    def test_confirm_preview_and_submit_use_canonical_turnover_closure_mode(self) -> None:
+        rows = self._external_turnover_closure_rows()
+        rows_by_id = {str(row["id"]): row for row in rows}
+        row_ids = list(rows_by_id)
+        row_types = [str(rows_by_id[row_id]["type"]) for row_id in row_ids]
+        relation_command = _RecordingRelationCommandService()
+        amount_service = WorkbenchAmountCheckService()
+        preview_relations: list[dict[str, object]] = []
+
+        def relation_groups(
+            relations: list[dict[str, object]], **_: object
+        ) -> list[dict[str, object]]:
+            preview_relations.extend(deepcopy(relations))
+            return []
+
+        facade = _new_facade(
+            confirm_uow=_HandlerCallingUoW(canonical_rows=rows_by_id),
+            relation_command_service=relation_command,
+            pair_relation_service=WorkbenchPairRelationService(),
+            live_rows=rows,
+            relation_groups=relation_groups,
+            resolve_rows_for_amount_check=lambda selected_row_ids, **_: [
+                dict(rows_by_id[row_id]) for row_id in selected_row_ids
+            ],
+            amount_check_for_rows_by_type=lambda rows_by_type, **kwargs: amount_service.check(
+                rows_by_type, **kwargs
+            ),
+            bank_flow_rule_tag_rules_payload=lambda: {
+                "version": 1,
+                "requirements_by_tag_code": {
+                    "external_turnover": {
+                        "requires_oa": True,
+                        "requires_invoice": False,
+                    }
+                },
+            },
+        )
+
+        preview = facade.preview_confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": row_ids,
+                "row_types": row_types,
+            }
+        )
+        confirmed = facade.confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": row_ids,
+                "row_types": row_types,
+                "case_id": "CASE-TURNOVER-WORKBENCH-200000",
+                "idempotency_key": "confirm:turnover-workbench:200000",
+            },
+            actor_id="oa-user-1",
+            tenant_id="default",
+        )
+
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
+        preview_amount = preview.payload["amount_summary"]
+        self.assertEqual(preview_amount["status"], "matched")
+        self.assertEqual(preview_amount["oa_total"], "200000.00")
+        self.assertEqual(preview_amount["bank_total"], "200000.00")
+        self.assertEqual(preview_amount["bank_gross_total"], "200000.00")
+        self.assertEqual(preview_amount["bank_contra_total"], "200000.00")
+        self.assertEqual(preview_amount["bank_net_total"], "0.00")
+        self.assertEqual(preview_amount["amount_delta"], "0.00")
+        self.assertFalse(preview.payload["requires_note"])
+        self.assertEqual(preview_relations[-1]["relation_mode"], "turnover_manual_closure")
+
+        self.assertEqual(confirmed.status_code, HTTPStatus.OK)
+        self.assertEqual(len(relation_command.confirm_calls), 1)
+        call = relation_command.confirm_calls[0]
+        self.assertEqual(call["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(call["history_operation_type"], "turnover_manual_closure_confirm")
+        self.assertEqual(call["amount_check"], preview_amount["before"])
+        self.assertEqual(call["display_tags"], ["外部往来款手动闭环"])
+        self.assertEqual(
+            call["special_metadata"]["turnover_closure_bank_row_ids"],
+            row_ids[1:],
+        )
+        self.assertEqual(call["evidence"]["source"], "reconciliation_workbench")
+
+    def test_confirm_preview_rejects_incomplete_canonical_turnover_semantics(self) -> None:
+        rows = self._external_turnover_closure_rows()
+        rows[1].pop("turnover_action_type")
+        row_ids = [str(row["id"]) for row in rows]
+        row_types = [str(row["type"]) for row in rows]
+        amount_service = WorkbenchAmountCheckService()
+        facade = _new_facade(
+            live_rows=rows,
+            amount_check_for_rows_by_type=lambda rows_by_type, **kwargs: amount_service.check(
+                rows_by_type, **kwargs
+            ),
+        )
+
+        result = facade.preview_confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": row_ids,
+                "row_types": row_types,
+            }
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(result.payload["error"], "invalid_confirm_link_preview_request")
+        self.assertIn("外部往来款结构化分类不完整", result.payload["message"])
+
+    def test_confirm_preview_keeps_single_sided_turnover_payment_on_normal_amount_rule(self) -> None:
+        rows = [
+            row
+            for row in self._external_turnover_closure_rows()
+            if str(row["id"]).startswith(("oa-", "bank-turnover-expense-"))
+        ]
+        row_ids = [str(row["id"]) for row in rows]
+        row_types = [str(row["type"]) for row in rows]
+        amount_service = WorkbenchAmountCheckService()
+        preview_relations: list[dict[str, object]] = []
+
+        def relation_groups(
+            relations: list[dict[str, object]], **_: object
+        ) -> list[dict[str, object]]:
+            preview_relations.extend(deepcopy(relations))
+            return []
+
+        facade = _new_facade(
+            live_rows=rows,
+            relation_groups=relation_groups,
+            amount_check_for_rows_by_type=lambda rows_by_type, **kwargs: amount_service.check(
+                rows_by_type, **kwargs
+            ),
+        )
+
+        result = facade.preview_confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": row_ids,
+                "row_types": row_types,
+            }
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["amount_summary"]["status"], "matched")
+        self.assertEqual(preview_relations[-1]["relation_mode"], "manual_confirmed")
+
     def test_confirm_link_command_uses_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
         facade = _new_facade(confirm_uow=uow)
@@ -1550,7 +1755,10 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
     def test_withdraw_link_preview_and_submit_delegate_to_relation_command_service(self) -> None:
         relation_command = _RecordingRelationCommandService()
-        facade = _new_facade(relation_command_service=relation_command)
+        facade = _new_facade(
+            withdraw_uow=_HandlerCallingUoW(),
+            relation_command_service=relation_command,
+        )
 
         preview = facade.preview_withdraw_link(
             {
@@ -1574,18 +1782,16 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(preview.status_code, HTTPStatus.OK)
         self.assertEqual(submit.status_code, HTTPStatus.OK)
-        self.assertEqual(len(relation_command.preview_withdraw_calls), 2)
+        self.assertEqual(len(relation_command.preview_withdraw_calls), 1)
         self.assertEqual(relation_command.preview_withdraw_calls[0]["row_ids"], ["oa-1", "bank-1"])
         self.assertEqual(relation_command.preview_withdraw_calls[0]["month_scope"], "2026-05")
-        self.assertEqual(relation_command.preview_withdraw_calls[1]["row_ids"], ["oa-1", "bank-1"])
-        self.assertEqual(relation_command.preview_withdraw_calls[1]["month_scope"], "2026-05")
         self.assertEqual(len(relation_command.withdraw_calls), 1)
-        self.assertEqual(relation_command.withdraw_calls[0]["case_id"], "CASE-1")
+        self.assertEqual(relation_command.withdraw_calls[0]["case_id"], "")
         self.assertEqual(relation_command.withdraw_calls[0]["row_ids"], ["oa-1", "bank-1"])
         self.assertEqual(relation_command.withdraw_calls[0]["preview_id"], "withdraw_relation:CASE-1:3")
         self.assertEqual(relation_command.withdraw_calls[0]["operation_type"], "withdraw_relation")
         self.assertEqual(relation_command.withdraw_calls[0]["expected_versions"], {"relation:CASE-1": 3})
-        self.assertEqual(relation_command.withdraw_calls[0]["idempotency_key"], "withdraw:1")
+        self.assertIsNone(relation_command.withdraw_calls[0]["idempotency_key"])
 
     def test_withdraw_preview_reads_one_bounded_selection_and_skips_legacy_row_scan(self) -> None:
         relation_command = _RecordingRelationCommandService()
@@ -1734,6 +1940,15 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             return live_rows, list(kwargs.get("after_relations") or []), list(active_relation.get("row_ids") or [])
 
         facade = _new_facade(
+            withdraw_uow=_HandlerCallingUoW(
+                canonical_rows={
+                    str(row["id"]): {
+                        **dict(row),
+                        "pane": str(row["type"]),
+                    }
+                    for row in live_rows
+                }
+            ),
             relation_command_service=relation_command,
             live_rows=live_rows,
             scope_keys_for_row_ids=lambda **_: {"all"},
@@ -1882,6 +2097,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
     def test_withdraw_link_rejects_standalone_rows_without_active_relation(self) -> None:
         facade = _new_facade(
+            withdraw_uow=_HandlerCallingUoW(),
             relation_command_service=_NoActiveRelationCommandService(),
             live_rows=[
                 {"id": "oa-standalone", "type": "oa", "amount": "100.00"},

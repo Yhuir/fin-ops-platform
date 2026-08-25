@@ -1,6 +1,6 @@
 # 外部往来款管理测试矩阵
 
-日期：2026-08-18
+日期：2026-08-26
 
 ## 影响面
 
@@ -31,6 +31,7 @@
 - 旧 `read_model.turnover_ledger_rows` 中的错误行不能改变 direct query。
 - direct GET 不读 dirty/outbox，不 enqueue，不返回 freshness/version 字段。
 - 完整、同业务语义且现金差额和业务余额都为零的 canonical active case，使该 case 的 flow rows 显示 `cash_closure_linked=true`。
+- 上述 active case 可以由外部往来页确认，也可以由关联台在 OA + 完整 canonical external-turnover 选择通过同一 Turnover validator 后创建；来源入口不改变本页重新证明现金差额与业务余额的合同。
 - active case 余额非零时显示 `cash_pair_linked=true` / `paired_unsettled=true`，待还/待收按业务类型和余额正负翻转。
 - 不同 active case 的正负余额不互相抵消；无 active relation 的零余额组不显示闭环；mode/source 不单独构成闭环证据。
 - summary、family summary 和 group 的 `closed_amount` 固定为 `0.00`。

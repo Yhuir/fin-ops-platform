@@ -8,7 +8,11 @@ import re
 from time import monotonic
 from typing import Any, Callable
 
-MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
+from fin_ops_platform.services.bank_turnover_tag_semantics import EXTERNAL_TURNOVER_ROLE
+from fin_ops_platform.services.turnover_relation_service import (
+    TurnoverRelationService,
+    TurnoverRelationValidationError,
+)
 from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyFailed,
     WorkbenchIdempotencyInProgress,
@@ -16,7 +20,11 @@ from fin_ops_platform.services.workbench_idempotency import (
 )
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_alias_map
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-from fin_ops_platform.services.workbench_relation_modes import workbench_relations_have_same_row_set
+from fin_ops_platform.services.workbench_relation_modes import (
+    MANUAL_CONFIRMED_RELATION_MODE,
+    TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+    workbench_relations_have_same_row_set,
+)
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
@@ -25,6 +33,7 @@ from fin_ops_platform.services.workbench_stale_precondition import assert_workbe
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
 
+MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 LOGGER = logging.getLogger(__name__)
 _IDEMPOTENCY_FROM_PAYLOAD = object()
 
@@ -71,6 +80,13 @@ class _WorkbenchConfirmLinkCommand:
     tenant_id: str = "default"
     actor_id: str = "system"
     timing_emit: Callable[[str, float, str | None], None] | None = None
+
+
+@dataclass(frozen=True)
+class _WorkbenchConfirmPlan:
+    relation_mode: str
+    amount_check: dict[str, object]
+    turnover_closure: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -250,7 +266,7 @@ class WorkbenchWriteFacade:
         resolve_live_rows_direct: Callable[..., list[dict[str, object]]],
         relation_groups: Callable[..., list[dict[str, object]]],
         withdraw_rows_and_after_relations: Callable[..., tuple[list[dict[str, object]], list[dict[str, object]], list[str]]],
-        amount_check_for_rows_by_type: Callable[[dict[str, list[dict[str, object]]]], dict[str, object]],
+        amount_check_for_rows_by_type: Callable[..., dict[str, object]],
         transaction_amount_for_row_id: Callable[[str], object],
         save_exception_cases_snapshot: Callable[[], None],
         persist_pair_relations: Callable[..., None],
@@ -365,7 +381,21 @@ class WorkbenchWriteFacade:
         rows = selected_rows
         row_types = requested_row_types
         rows_by_type = self._rows_by_type(rows)
-        amount_check = self._amount_check_for_rows_by_type(rows_by_type)
+        try:
+            confirm_plan = self._confirm_plan_for_rows(
+                rows_by_type,
+                actor_id="system",
+                note=None,
+            )
+        except ValueError as exc:
+            return WorkbenchWriteResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_confirm_link_preview_request",
+                    "message": str(exc),
+                },
+            )
+        amount_check = confirm_plan.amount_check
         if is_active_selection:
             if blocked_message:
                 return WorkbenchWriteResult(
@@ -391,20 +421,27 @@ class WorkbenchWriteFacade:
 
         before_groups = self._relation_groups(before_relations, selected_rows=rows, ungrouped_selected_rows="separate")
         case_id = str(payload.get("case_id") or "preview:confirm")
+        paired_policy_metadata = self._bank_transaction_paired_policy_metadata(
+            row_ids=row_ids,
+            row_types=row_types,
+            selected_rows=rows,
+            amount_check=amount_check,
+        )
         after_relation = {
             "case_id": case_id,
             "row_ids": row_ids,
             "row_types": row_types,
             "status": "active",
-            "relation_mode": "manual_confirmed",
+            "relation_mode": confirm_plan.relation_mode,
             "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
             "amount_check": amount_check,
-            "special_metadata": self._bank_transaction_paired_policy_metadata(
-                row_ids=row_ids,
-                row_types=row_types,
-                selected_rows=rows,
-                amount_check=amount_check,
-            ),
+            "special_metadata": {
+                **paired_policy_metadata,
+                **self._turnover_closure_special_metadata(
+                    confirm_plan,
+                    affected_scope_keys=self._normalize_operation_scope_keys([month]),
+                ),
+            },
         }
         after_groups = self._relation_groups([after_relation], selected_rows=rows)
         requires_note = bool(amount_check.get("requires_note"))
@@ -553,7 +590,12 @@ class WorkbenchWriteFacade:
                 minimum_rows=2,
             )
             rows_by_type = self._rows_by_type(selected_rows)
-            amount_check = self._amount_check_for_rows_by_type(rows_by_type)
+            confirm_plan = self._confirm_plan_for_rows(
+                rows_by_type,
+                actor_id=_normalize_actor_id(actor_id),
+                note=note,
+            )
+            amount_check = confirm_plan.amount_check
         except KeyError as exc:
             row_id = str(exc.args[0] if exc.args else "").strip()
             return WorkbenchWriteResult(
@@ -612,6 +654,13 @@ class WorkbenchWriteFacade:
             row_ids=row_ids,
             month_scope=month,
         )
+        relation_special_metadata = {
+            **paired_policy_metadata,
+            **self._turnover_closure_special_metadata(
+                confirm_plan,
+                affected_scope_keys=changed_scope_keys,
+            ),
+        }
         changed_case_ids = [
             *[str(relation.get("case_id", "")) for relation in before_relations if str(relation.get("case_id", "")).strip()],
             resolved_case_id,
@@ -627,11 +676,11 @@ class WorkbenchWriteFacade:
                 row_types=row_types,
                 resolved_case_id=resolved_case_id,
                 note=note,
-                amount_check=amount_check,
+                confirm_plan=confirm_plan,
                 selected_rows=selected_rows,
                 history_before_relations=history_before_relations,
                 changed_scope_keys=changed_scope_keys,
-                paired_policy_metadata=paired_policy_metadata,
+                relation_special_metadata=relation_special_metadata,
             )
 
         previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
@@ -641,18 +690,16 @@ class WorkbenchWriteFacade:
             try:
                 command_result = self._confirm_relation_via_command_service(
                     relation_command,
-                    payload=payload,
                     case_id=resolved_case_id,
                     row_ids=row_ids,
                     row_types=row_types,
                     actor_id=actor_id,
                     month=month,
                     note=note,
-                    amount_check=amount_check,
+                    confirm_plan=confirm_plan,
                     history_before_relations=history_before_relations,
                     idempotency_key=self._idempotency_key_from_payload(payload),
-                    selected_rows=selected_rows,
-                    paired_policy_metadata=paired_policy_metadata,
+                    relation_special_metadata=relation_special_metadata,
                     request_id=request_id,
                     tenant_id=tenant_id,
                 )
@@ -710,11 +757,11 @@ class WorkbenchWriteFacade:
         row_types: list[str],
         resolved_case_id: str,
         note: str,
-        amount_check: dict[str, object],
+        confirm_plan: _WorkbenchConfirmPlan,
         selected_rows: list[dict[str, object]],
         history_before_relations: list[dict[str, object]],
         changed_scope_keys: list[str],
-        paired_policy_metadata: dict[str, object],
+        relation_special_metadata: dict[str, object],
     ) -> WorkbenchWriteResult:
         action_name = "confirm_link"
         failure_phase = "uow_enter"
@@ -805,7 +852,7 @@ class WorkbenchWriteFacade:
                     expected={"external_etc_batch_count": 1},
                     actual={"external_etc_batch_ids": external_etc_batch_ids},
                 )
-            transaction_metadata = dict(paired_policy_metadata)
+            transaction_metadata = dict(relation_special_metadata)
             if external_etc_batch_ids:
                 transaction_metadata["external_etc_batch_id"] = external_etc_batch_ids[0]
             pair_relation_started_at = monotonic()
@@ -815,18 +862,16 @@ class WorkbenchWriteFacade:
                 raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
             self._confirm_relation_via_command_service(
                 relation_command,
-                payload=payload,
                 case_id=resolved_case_id,
                 row_ids=row_ids,
                 row_types=row_types,
                 actor_id=actor_id,
                 month=month,
                 note=note,
-                amount_check=amount_check,
+                confirm_plan=confirm_plan,
                 history_before_relations=history_before_relations,
                 idempotency_key=None,
-                selected_rows=selected_rows,
-                paired_policy_metadata=transaction_metadata,
+                relation_special_metadata=transaction_metadata,
                 request_id=request_id,
                 tenant_id=tenant_id,
             )
@@ -846,7 +891,7 @@ class WorkbenchWriteFacade:
                 "affected_row_ids": list(row_ids),
                 "affected_months": list(changed_scope_keys),
                 "affected_scope_keys": list(changed_scope_keys),
-                "amount_check": amount_check,
+                "amount_check": confirm_plan.amount_check,
                 "message": f"已确认 {len(row_ids)} 条记录关联。",
             }
 
@@ -889,41 +934,160 @@ class WorkbenchWriteFacade:
         self,
         relation_command: Any,
         *,
-        payload: dict[str, object],
         case_id: str,
         row_ids: list[str],
         row_types: list[str],
         actor_id: str | None,
         month: str,
         note: str,
-        amount_check: dict[str, object],
+        confirm_plan: _WorkbenchConfirmPlan,
         history_before_relations: list[dict[str, object]],
         idempotency_key: str | None,
-        selected_rows: list[dict[str, object]],
-        paired_policy_metadata: dict[str, object],
+        relation_special_metadata: dict[str, object],
         request_id: str | None,
         tenant_id: str | None,
     ) -> dict[str, object]:
         confirm_relation = getattr(relation_command, "confirm_relation", None)
         if not callable(confirm_relation):
             raise _WorkbenchWritePersistenceError("relation command service must expose confirm_relation.")
-        return confirm_relation(
-            case_id=case_id,
-            row_ids=list(row_ids),
-            row_types=list(row_types),
-            relation_mode="manual_confirmed",
-            actor_id=_normalize_actor_id(actor_id),
-            month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-            note=note,
-            amount_check=dict(amount_check or {}),
-            special_metadata=dict(paired_policy_metadata or {}),
-            idempotency_key=idempotency_key,
-            before_relations=list(history_before_relations),
-            replace_existing=True,
-            history_operation_type="confirm_link",
-            request_id=request_id,
-            tenant_id=tenant_id,
+        command_payload: dict[str, object] = {
+            "case_id": case_id,
+            "row_ids": list(row_ids),
+            "row_types": list(row_types),
+            "relation_mode": confirm_plan.relation_mode,
+            "actor_id": _normalize_actor_id(actor_id),
+            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            "note": note,
+            "amount_check": dict(confirm_plan.amount_check),
+            "special_metadata": dict(relation_special_metadata),
+            "idempotency_key": idempotency_key,
+            "before_relations": list(history_before_relations),
+            "replace_existing": True,
+            "history_operation_type": (
+                "turnover_manual_closure_confirm"
+                if confirm_plan.turnover_closure is not None
+                else "confirm_link"
+            ),
+            "request_id": request_id,
+            "tenant_id": tenant_id,
+        }
+        if confirm_plan.turnover_closure is not None:
+            command_payload.update(
+                {
+                    "evidence": self._turnover_closure_evidence(confirm_plan),
+                    "display_tags": ["外部往来款手动闭环"],
+                }
+            )
+        return confirm_relation(**command_payload)
+
+    def _confirm_plan_for_rows(
+        self,
+        rows_by_type: dict[str, list[dict[str, object]]],
+        *,
+        actor_id: str,
+        note: str | None,
+    ) -> _WorkbenchConfirmPlan:
+        bank_rows = list(rows_by_type.get("bank") or [])
+        if (
+            not rows_by_type.get("oa")
+            or len(bank_rows) < 2
+            or any(
+                str(row.get("turnover_role") or "").strip() != EXTERNAL_TURNOVER_ROLE
+                for row in bank_rows
+            )
+        ):
+            return _WorkbenchConfirmPlan(
+                relation_mode=MANUAL_CONFIRMED_RELATION_MODE,
+                amount_check=self._amount_check_for_rows_by_type(rows_by_type),
+            )
+
+        required_fields = (
+            "category_code",
+            "turnover_action_type",
+            "turnover_family",
+            "counterparty_name",
         )
+        incomplete_row_ids = [
+            str(row.get("id") or row.get("row_id") or "").strip()
+            for row in bank_rows
+            if any(not str(row.get(field) or "").strip() for field in required_fields)
+        ]
+        if incomplete_row_ids:
+            raise ValueError(
+                "外部往来款结构化分类不完整，请先修复流水分类后重试："
+                + ", ".join(incomplete_row_ids)
+            )
+
+        bank_row_ids = [
+            str(row.get("id") or row.get("row_id") or "").strip()
+            for row in bank_rows
+        ]
+        try:
+            closure = TurnoverRelationService(
+                bank_rows=[dict(row) for row in bank_rows]
+            ).preview_zero_difference_closure(
+                bank_row_ids,
+                actor=actor_id,
+                note=note,
+            )
+        except TurnoverRelationValidationError as exc:
+            if exc.error_code in {
+                "single_sided_relation",
+                "turnover_closure_amount_mismatch",
+            }:
+                return _WorkbenchConfirmPlan(
+                    relation_mode=MANUAL_CONFIRMED_RELATION_MODE,
+                    amount_check=self._amount_check_for_rows_by_type(rows_by_type),
+                )
+            raise ValueError(f"外部往来款闭环选择无效：{exc}") from exc
+
+        return _WorkbenchConfirmPlan(
+            relation_mode=TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+            amount_check=self._amount_check_for_rows_by_type(
+                rows_by_type,
+                relation_mode=TURNOVER_MANUAL_CLOSURE_RELATION_MODE,
+            ),
+            turnover_closure=dict(closure),
+        )
+
+    @staticmethod
+    def _turnover_closure_special_metadata(
+        confirm_plan: _WorkbenchConfirmPlan,
+        *,
+        affected_scope_keys: list[str],
+    ) -> dict[str, object]:
+        closure = confirm_plan.turnover_closure
+        if closure is None:
+            return {}
+        evidence = closure.get("evidence")
+        closure_mode = (
+            str(evidence.get("closure_mode") or "").strip()
+            if isinstance(evidence, dict)
+            else ""
+        )
+        return {
+            "source": "reconciliation_workbench",
+            "turnover_closure_mode": closure_mode,
+            "turnover_closure_relation_id": str(closure.get("relation_id") or ""),
+            "turnover_closure_bank_row_ids": list(closure.get("bank_row_ids") or []),
+            "turnover_closure_principal_row_ids": list(closure.get("principal_row_ids") or []),
+            "turnover_closure_settlement_row_ids": list(closure.get("settlement_row_ids") or []),
+            "turnover_closure_affected_months": list(affected_scope_keys),
+        }
+
+    @staticmethod
+    def _turnover_closure_evidence(
+        confirm_plan: _WorkbenchConfirmPlan,
+    ) -> dict[str, object]:
+        closure = dict(confirm_plan.turnover_closure or {})
+        return {
+            "source": "reconciliation_workbench",
+            "bank_row_ids": list(closure.get("bank_row_ids") or []),
+            "principal_row_ids": list(closure.get("principal_row_ids") or []),
+            "settlement_row_ids": list(closure.get("settlement_row_ids") or []),
+            "turnover_relation_id": str(closure.get("relation_id") or ""),
+            "turnover_closure": dict(closure.get("evidence") or {}),
+        }
 
     @staticmethod
     def _confirm_link_response_payload(result: dict[str, object]) -> dict[str, object]:
@@ -1601,7 +1765,6 @@ class WorkbenchWriteFacade:
         actor_id: str | None = None,
         tenant_id: str | None = None,
     ) -> WorkbenchWriteResult:
-        action_name = "withdraw_link"
         try:
             month = str(payload["month"])
             row_ids, row_types = self._typed_selection_from_payload(payload)
@@ -1657,112 +1820,7 @@ class WorkbenchWriteFacade:
                     HTTPStatus.BAD_REQUEST,
                     {"error": "invalid_withdraw_link_request", "message": str(exc)},
                 )
-        selection_result = self._relation_preview_selection(
-            month,
-            row_ids=row_ids,
-            row_types=row_types,
-        )
-        if selection_result.status_code != HTTPStatus.OK:
-            return WorkbenchWriteResult(
-                HTTPStatus(selection_result.status_code),
-                dict(selection_result.payload),
-            )
-        selected_rows = [
-            dict(row)
-            for row in list(selection_result.payload.get("rows") or [])
-            if isinstance(row, dict)
-        ]
-        try:
-            row_id_aliases = self._withdraw_alias_map_from_rows(selected_rows)
-        except ValueError:
-            return self._withdraw_alias_conflict_result()
-        try:
-            preview = self._preview_withdraw_relation_via_command_service(
-                relation_command,
-                row_ids=row_ids,
-                row_types=row_types,
-                month=month,
-                row_id_aliases=row_id_aliases,
-            )
-            active_relation = dict(preview.get("active_relation") or {})
-            case_id = str(active_relation.get("case_id") or "").strip()
-            if not case_id:
-                raise ValueError("active relation case_id is required.")
-            previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
-            result = self._withdraw_relation_via_command_service(
-                relation_command,
-                payload=payload,
-                case_id=case_id,
-                actor_id=actor_id,
-                reason=note,
-                row_id_aliases=row_id_aliases,
-                row_ids=row_ids,
-                row_types=row_types,
-            )
-        except WorkbenchRelationCommandError as exc:
-            return self._relation_command_error_result(exc)
-        except _WorkbenchWritePersistenceError as exc:
-            return self._persistence_unavailable_result(str(exc))
-        except (TypeError, ValueError, KeyError) as exc:
-            return WorkbenchWriteResult(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_withdraw_link_request", "message": str(exc)},
-            )
-        changed_case_ids = list(result.get("changed_case_ids") or [case_id])
-        affected_row_ids = self._canonicalize_withdraw_row_ids(
-            list(result.get("affected_row_ids") or row_ids),
-            alias_map=row_id_aliases,
-        )
-        restored_relations = self._canonicalize_withdraw_relations(
-            list(result.get("restored_relations") or []),
-            alias_map=row_id_aliases,
-        )
-        restored_relations = self._withdraw_restored_relations_excluding_active(
-            restored_relations,
-            active_relation=self._canonical_withdraw_active_relation(
-                preview=preview,
-                active_relation=active_relation,
-                alias_map=row_id_aliases,
-            ),
-        )
-        changed_scope_keys = self._withdraw_changed_scope_keys(
-            month=month,
-            active_relation=active_relation,
-            preview={
-                **preview,
-                "affected_months": result.get("affected_months") or [],
-            },
-            affected_row_ids=affected_row_ids,
-            alias_map=row_id_aliases,
-        )
-        try:
-            self._schedule_pair_relation_persist(
-                changed_case_ids=changed_case_ids,
-                request_id=request_id,
-                action_name=action_name,
-            )
-        except Exception:
-            self._restore_pair_relation_snapshot(
-                previous_pair_snapshot,
-                changed_case_ids=changed_case_ids,
-            )
-            return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
-        return WorkbenchWriteResult(
-            HTTPStatus.OK,
-            {
-                "success": True,
-                "operation": "withdraw_link",
-                "action": "withdraw_link",
-                "month": month,
-                "case_id": case_id,
-                "changed_scopes": changed_scope_keys,
-                "affected_months": changed_scope_keys,
-                "affected_scope_keys": changed_scope_keys,
-                "affected_row_ids": affected_row_ids,
-                "restored_relations": restored_relations,
-                "message": "已撤回 1 组关联。",
-            },
-        )
+        return self._persistence_unavailable_result("关联台撤回事务暂时不可用，请稍后重试。")
 
     def _withdraw_link_replay_if_committed(
         self,

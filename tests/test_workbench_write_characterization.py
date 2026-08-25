@@ -271,9 +271,11 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         return str(self._default_open_rows(app)["invoice"]["id"])
 
     def _canonical_rows(self, app: Application) -> dict[str, dict[str, object]]:
+        rows = app._workbench_query_service.get_workbench("2026-03")["unpaired"]
         return {
             str(row["id"]): {**row, "pane": row_type}
-            for row_type, row in self._default_open_rows(app).items()
+            for row_type in ("oa", "bank", "invoice")
+            for row in rows[row_type]
         }
 
     def _post(self, app: Application, path: str, payload: dict[str, object]):
@@ -1147,6 +1149,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
     def test_duplicate_withdraw_link_after_display_only_history_returns_not_found_current_behavior(self) -> None:
         app = self._build_app()
+        _, _, persisted = self._install_withdraw_link_uow(app)
         row_ids = self._default_open_row_ids(app)
 
         with self._suppress_background_persistence(app) as pair_relation_persist:
@@ -1171,10 +1174,12 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             [entry["operation_type"] for entry in app._workbench_pair_relation_service.list_history()],
             ["confirm_link", "withdraw_link"],
         )
-        self.assertEqual(pair_relation_persist.call_count, 2)
+        self.assertEqual(pair_relation_persist.call_count, 1)
+        self.assertEqual(len(persisted), 1)
 
     def test_withdraw_link_enqueues_zero_derived_lifecycle_events(self) -> None:
         app = self._build_app()
+        self._install_withdraw_link_uow(app)
         row_ids = self._default_open_row_ids(app)
 
         with patch.object(app, "_schedule_workbench_pair_relation_persist"):
@@ -1451,6 +1456,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
     def test_withdraw_full_unpaired_relation_restores_previous_stable_topology(self) -> None:
         app = self._build_app()
+        self._install_withdraw_link_uow(app)
         bank_rows = [
             dict(row)
             for row in app._workbench_query_service.get_workbench("2026-03")["unpaired"]["bank"][:2]
@@ -1514,6 +1520,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
     def test_stale_withdraw_preview_withdraws_current_relation_without_restoring_same_row_set(self) -> None:
         app = self._build_app()
+        self._install_withdraw_link_uow(app)
         row_ids = self._default_open_row_ids(app)
 
         with self._suppress_background_persistence(app):
@@ -1542,6 +1549,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
     def test_withdraw_submit_with_stale_preview_expected_versions_rejects_replacement_relation(self) -> None:
         app = self._build_app()
+        self._install_withdraw_link_uow(app)
         row_ids = self._default_open_row_ids(app)
 
         with self._suppress_background_persistence(app) as pair_relation_persist:
@@ -1582,6 +1590,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
     def test_withdraw_link_does_not_call_removed_read_model_scheduler(self) -> None:
         app = self._build_app()
+        self._install_withdraw_link_uow(app)
         row_ids = self._default_open_row_ids(app)
 
         with patch.object(app, "_schedule_workbench_pair_relation_persist"):

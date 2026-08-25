@@ -1,6 +1,11 @@
 # 关联台测试与验证
 
-日期：2026-08-25
+日期：2026-08-26
+
+## 2026-08-26 OA + 外部往来完整闭环金额
+
+- Business core / service：`tests/test_workbench_auth_context_idempotency.py` 覆盖 `200000 OA + 2×100000 收入 + 2×100000 支出` 的 preview/submit，断言同方向本金 `200000`、净额 `0`、差额 `0`、无需备注，并持久化 `turnover_manual_closure` evidence/history；单边外部往来选择继续走普通人工金额规则，结构化 action 缺失时 fail closed。
+- Canonical query / performance：`tests/test_bank_details_canonical_query.py` 证明 Workbench 在既有一次批量分类查询中取得 turnover role/action/family，不增加逐行 I/O。
 
 ## 2026-08-25 三栏统一搜索展示字段对齐
 

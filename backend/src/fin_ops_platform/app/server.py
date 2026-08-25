@@ -9098,8 +9098,16 @@ class Application:
                 rows_by_type[row_type].append(row)
         return rows_by_type
 
-    def _amount_check_for_rows_by_type(self, rows_by_type: dict[str, list[dict[str, object]]]) -> dict[str, object]:
-        amount_check = self._workbench_amount_check_service.check(rows_by_type)
+    def _amount_check_for_rows_by_type(
+        self,
+        rows_by_type: dict[str, list[dict[str, object]]],
+        *,
+        relation_mode: str = "",
+    ) -> dict[str, object]:
+        amount_check = self._workbench_amount_check_service.check(
+            rows_by_type,
+            relation_mode=relation_mode,
+        )
         if (
             amount_check.get("status") == "unknown"
             and amount_check.get("oa_total") is None

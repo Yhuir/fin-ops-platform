@@ -216,6 +216,15 @@ class PostgresBankDetailsCanonicalQueryRepository:
                 "category_label_path": list(row.get("effective_category_label_path") or []),
                 "category_source": row.get("effective_category_source"),
                 "category_resolution_status": row.get("category_resolution_status") or "unmatched",
+                **{
+                    key: row.get(key)
+                    for key in (
+                        "turnover_role",
+                        "turnover_action_type",
+                        "turnover_family",
+                    )
+                    if row.get(key)
+                },
             }
             for row in list(payload.get("rows") or [])
             if str(row.get("id") or "")

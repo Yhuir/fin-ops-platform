@@ -1,6 +1,11 @@
 # Workbench 正式关系测试
 
-日期：2026-08-20
+日期：2026-08-26
+
+## OA + 外部往来闭环模式选择
+
+- `tests/test_workbench_auth_context_idempotency.py` 证明 preview 与 submit 共用一个 canonical confirm plan：完整 OA + external-turnover 双边零差额选择写 `turnover_manual_closure`、专属 evidence/history，并以 OA 同方向本金侧核对；单边选择保留 `manual_confirmed`，结构化 action 缺失零写失败。
+- `tests/test_bank_details_canonical_query.py` 保护 role/action/family 在既有批量分类投影中返回；没有新 repository、SQL round-trip、read model 或 worker。
 
 ## 大成员关系确认/撤回（专项）
 
