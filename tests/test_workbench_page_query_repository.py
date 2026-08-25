@@ -478,7 +478,20 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "select summary_unpaired_count::bigint as total_count" in sql
     assert "where member.in_paired and member.row_type = 'oa'" in sql
     assert "where member.in_unpaired and member.row_type = 'oa'" in sql
+    assert "paired_oa_count::bigint as oa_count" in sql
+    assert "paired_bank_count::bigint as bank_count" in sql
+    assert "paired_invoice_count::bigint as invoice_count" in sql
+    assert "unpaired_oa_count::bigint as oa_count" in sql
+    assert "unpaired_bank_count::bigint as bank_count" in sql
+    assert "unpaired_invoice_count::bigint as invoice_count" in sql
+    assert sql.count("from overall_unique_members member") == 1
     assert "invoice_inventory" in sql
+    invoice_inventory_sql = sql.split(
+        "invoice_inventory as materialized (", 1
+    )[1].split("batch_inventory as materialized (", 1)[0]
+    assert invoice_inventory_sql.count("jsonb_array_elements(") == 1
+    assert "source_flags.has_manual_import" in invoice_inventory_sql
+    assert "source_flags.has_oa_attachment" in invoice_inventory_sql
     assert WORKBENCH_GROUP_PAGE_SIZE == 10
     assert connection.calls[0][1].count(WORKBENCH_GROUP_PAGE_SIZE + 1) == 2
     assert [row["internal_key"] for row in hydrated_batches[0]] == [
@@ -488,7 +501,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert payload["summary"]["unpaired_exception_count"] == 0
     assert payload["summary"]["paired_exception_count"] == 0
     assert "anomaly_states" in sql
-    assert "anomaly_counts" in sql
+    assert "anomaly_counts as materialized" not in sql
+    assert "left join anomaly_states anomaly" in group_summary_sql
     assert payload["summary"]["paired_count"] == 1
     assert payload["invoice_inventory"]["system_total"] == 2
     assert payload["paired"]["groups"][0]["detail_key"] == "case-1"
@@ -528,11 +542,17 @@ def test_initial_page_keeps_member_sort_aggregation_only_for_explicitly_sorted_z
 
 def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.lower().split())
+    visible_invoice_sql = sql.split(
+        "visible_invoice_facts as materialized (", 1
+    )[1].split("scoped_source_keys as materialized (", 1)[0]
 
     assert sql.count("visible_invoice_facts as materialized") == 1
     assert sql.count("from visible_invoice_facts invoice") == 3
     assert sql.count("join visible_invoice_facts invoice") == 1
     assert sql.count("coalesce(invoice.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'") == 1
+    assert visible_invoice_sql.count("jsonb_array_elements(") == 1
+    assert "source_flags.has_direct_oa_attachment" in visible_invoice_sql
+    assert "source_flags.has_manual_import" in visible_invoice_sql
 
 
 def test_page_members_are_narrow_and_anomalies_rehydrate_by_typed_identity() -> None:

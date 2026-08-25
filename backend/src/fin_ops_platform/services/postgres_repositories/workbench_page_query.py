@@ -349,31 +349,10 @@ requested_settings as materialized (
 visible_invoice_facts as materialized (
     select
         coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
-        case when exists (
-            select 1
-            from jsonb_array_elements(
-                case when jsonb_typeof(invoice.source_links) = 'array'
-                     then invoice.source_links else '[]'::jsonb end
-            ) source_link
-            where coalesce(
-                source_link->>'source_type', source_link->>'type', source_link->>'source'
-            ) = 'oa_attachment_invoice'
-        ) then 'oa_attachment_invoice'
-        when exists (
-            select 1
-            from jsonb_array_elements(
-                case
-                    when jsonb_typeof(invoice.source_links) = 'array'
-                        then invoice.source_links
-                    when jsonb_typeof(invoice.raw_payload->'source_links') = 'array'
-                        then invoice.raw_payload->'source_links'
-                    else '[]'::jsonb
-                end
-            ) source_link
-            where coalesce(
-                source_link->>'source_type', source_link->>'type', source_link->>'source'
-            ) = 'manual_invoice_import'
-        ) then 'manual_invoice_import'
+        case when coalesce(source_flags.has_direct_oa_attachment, false)
+            then 'oa_attachment_invoice'
+        when coalesce(source_flags.has_manual_import, false)
+            then 'manual_invoice_import'
         else 'invoice' end as source_kind,
         invoice.invoice_month,
         invoice.invoice_date,
@@ -391,18 +370,7 @@ visible_invoice_facts as materialized (
             when lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
                  ('input', 'input_invoice', 'in_invoice', 'purchase', 'purchase_invoice', 'payable')
                  or coalesce(invoice.invoice_type, '') like '%%进项%%'
-                 or exists (
-                    select 1
-                    from jsonb_array_elements(
-                        case when jsonb_typeof(invoice.source_links) = 'array'
-                             then invoice.source_links else '[]'::jsonb end
-                    ) source_link(value)
-                    where coalesce(
-                        source_link.value->>'source_type',
-                        source_link.value->>'type',
-                        source_link.value->>'source'
-                    ) = 'oa_attachment_invoice'
-                 )
+                 or coalesce(source_flags.has_direct_oa_attachment, false)
                 then 'payment'
             else null
         end as invoice_direction,
@@ -416,6 +384,31 @@ visible_invoice_facts as materialized (
             else 'row:' || coalesce(invoice.legacy_mongo_id, invoice.id::text)
         end as hard_identity
     from app.invoices invoice
+    left join lateral (
+        select
+            bool_or(
+                jsonb_typeof(invoice.source_links) = 'array'
+                and coalesce(
+                    source_link.value->>'source_type',
+                    source_link.value->>'type',
+                    source_link.value->>'source'
+                ) = 'oa_attachment_invoice'
+            ) as has_direct_oa_attachment,
+            bool_or(coalesce(
+                source_link.value->>'source_type',
+                source_link.value->>'type',
+                source_link.value->>'source'
+            ) = 'manual_invoice_import') as has_manual_import
+        from jsonb_array_elements(
+            case
+                when jsonb_typeof(invoice.source_links) = 'array'
+                    then invoice.source_links
+                when jsonb_typeof(invoice.raw_payload->'source_links') = 'array'
+                    then invoice.raw_payload->'source_links'
+                else '[]'::jsonb
+            end
+        ) source_link(value)
+    ) source_flags on true
     where {_VISIBLE_INVOICE_SQL}
 ),
 {_ETC_SUMMARY_IDENTITY_CTES},
@@ -2228,8 +2221,18 @@ class PostgresWorkbenchPageQueryRepository:
                     count(*) filter (where 'bank' = any(groups.missing_row_types))::bigint
                         as missing_bank_group_count,
                     count(*) filter (where 'invoice' = any(groups.missing_row_types))::bigint
-                        as missing_invoice_group_count
+                        as missing_invoice_group_count,
+                    count(*) filter (
+                        where groups.zone = 'unpaired'
+                          and anomaly.internal_key is not null
+                    )::bigint as unpaired_exception_count,
+                    count(*) filter (
+                        where groups.zone = 'paired'
+                          and anomaly.internal_key is not null
+                    )::bigint as paired_exception_count
                 from effective_groups groups
+                left join anomaly_states anomaly
+                  on anomaly.internal_key = groups.internal_key
             ),
             overall_unique_members as materialized (
                 select
@@ -2281,7 +2284,16 @@ class PostgresWorkbenchPageQueryRepository:
                     )::bigint as paired_bank_count,
                     count(*) filter (
                         where member.in_paired and member.row_type = 'invoice'
-                    )::bigint as paired_invoice_count
+                    )::bigint as paired_invoice_count,
+                    count(*) filter (
+                        where member.in_unpaired and member.row_type = 'oa'
+                    )::bigint as unpaired_oa_count,
+                    count(*) filter (
+                        where member.in_unpaired and member.row_type = 'bank'
+                    )::bigint as unpaired_bank_count,
+                    count(*) filter (
+                        where member.in_unpaired and member.row_type = 'invoice'
+                    )::bigint as unpaired_invoice_count
                 from overall_unique_members member
             ),
             overall_summary as materialized (
@@ -2294,18 +2306,9 @@ class PostgresWorkbenchPageQueryRepository:
             invoice_inventory as materialized (
                 select
                     count(*)::bigint as inventory_system_total,
-                    count(*) filter (where exists (
-                        select 1
-                        from jsonb_array_elements(
-                            case when jsonb_typeof(invoice.source_links) = 'array'
-                                 then invoice.source_links else '[]'::jsonb end
-                        ) source_link
-                        where coalesce(
-                            source_link->>'source_type',
-                            source_link->>'type',
-                            source_link->>'source'
-                        ) = 'manual_invoice_import'
-                    ))::bigint as inventory_manual_import_total,
+                    count(*) filter (
+                        where coalesce(source_flags.has_manual_import, false)
+                    )::bigint as inventory_manual_import_total,
                     count(*) filter (
                         where coalesce(invoice.workbench_visibility, 'visible')
                             <> 'hidden_after_etc_submission'
@@ -2317,20 +2320,28 @@ class PostgresWorkbenchPageQueryRepository:
                         where nullif(invoice.etc_invoice_id, '') is not null
                            or invoice.tags && array['ETC', 'etc', 'etc_invoice']::text[]
                     )::bigint as inventory_extra_etc_total,
-                    count(*) filter (where exists (
-                        select 1
-                        from jsonb_array_elements(
-                            case when jsonb_typeof(invoice.source_links) = 'array'
-                                 then invoice.source_links else '[]'::jsonb end
-                        ) source_link
-                        where coalesce(
-                            source_link->>'source_type',
-                            source_link->>'type',
-                            source_link->>'source'
-                        ) = 'oa_attachment_invoice'
-                    ))::bigint as inventory_oa_attachment_total
+                    count(*) filter (
+                        where coalesce(source_flags.has_oa_attachment, false)
+                    )::bigint as inventory_oa_attachment_total
                 from app.invoices invoice
                 cross join requested_scope scope
+                left join lateral (
+                    select
+                        bool_or(coalesce(
+                            source_link.value->>'source_type',
+                            source_link.value->>'type',
+                            source_link.value->>'source'
+                        ) = 'manual_invoice_import') as has_manual_import,
+                        bool_or(coalesce(
+                            source_link.value->>'source_type',
+                            source_link.value->>'type',
+                            source_link.value->>'source'
+                        ) = 'oa_attachment_invoice') as has_oa_attachment
+                    from jsonb_array_elements(
+                        case when jsonb_typeof(invoice.source_links) = 'array'
+                             then invoice.source_links else '[]'::jsonb end
+                    ) source_link(value)
+                ) source_flags on true
                 where invoice.status <> 'deleted'
                   and (scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month)
             ),
@@ -2347,24 +2358,11 @@ class PostgresWorkbenchPageQueryRepository:
                 where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
                   and (scope.scope_key = 'all' or batch.scope_month = scope.scope_month)
             ),
-            anomaly_counts as materialized (
-                select
-                    count(*) filter (
-                        where groups.zone = 'unpaired'
-                    )::bigint as unpaired_exception_count,
-                    count(*) filter (
-                        where groups.zone = 'paired'
-                    )::bigint as paired_exception_count
-                from anomaly_states anomaly
-                join effective_groups groups
-                  on groups.internal_key = anomaly.internal_key
-            ),
             page_metadata as materialized (
                 select *
                 from overall_summary
                 cross join invoice_inventory
                 cross join batch_inventory
-                cross join anomaly_counts
             )
             select
                 'metadata'::text as record_zone,
@@ -2590,16 +2588,10 @@ class PostgresWorkbenchPageQueryRepository:
             """
             exact_row_counts_sql = f"""
                 select
-                    count(*) filter (
-                        where member.in_{prefix} and member.row_type = 'oa'
-                    )::bigint as oa_count,
-                    count(*) filter (
-                        where member.in_{prefix} and member.row_type = 'bank'
-                    )::bigint as bank_count,
-                    count(*) filter (
-                        where member.in_{prefix} and member.row_type = 'invoice'
-                    )::bigint as invoice_count
-                from overall_unique_members member
+                    {prefix}_oa_count::bigint as oa_count,
+                    {prefix}_bank_count::bigint as bank_count,
+                    {prefix}_invoice_count::bigint as invoice_count
+                from overall_member_summary
             """
         else:
             exact_totals_sql = f"""
@@ -2681,6 +2673,8 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as missing_oa_group_count,
                 null::bigint as missing_bank_group_count,
                 null::bigint as missing_invoice_group_count,
+                null::bigint as unpaired_exception_count,
+                null::bigint as paired_exception_count,
                 null::bigint as expense_transaction_count,
                 null::bigint as income_transaction_count,
                 null::bigint as input_invoice_count,
@@ -2688,15 +2682,16 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as paired_oa_count,
                 null::bigint as paired_bank_count,
                 null::bigint as paired_invoice_count,
+                null::bigint as unpaired_oa_count,
+                null::bigint as unpaired_bank_count,
+                null::bigint as unpaired_invoice_count,
                 null::bigint as inventory_system_total,
                 null::bigint as inventory_manual_import_total,
                 null::bigint as inventory_workbench_visible_total,
                 null::bigint as inventory_hidden_submitted_etc_total,
                 null::bigint as inventory_extra_etc_total,
                 null::bigint as inventory_oa_attachment_total,
-                null::bigint as inventory_etc_summary_batch_count,
-                null::bigint as unpaired_exception_count,
-                null::bigint as paired_exception_count
+                null::bigint as inventory_etc_summary_batch_count
             from {prefix}_exact_totals totals
             cross join {prefix}_exact_row_counts row_counts
             left join {prefix}_page_groups page on true
