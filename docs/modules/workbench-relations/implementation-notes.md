@@ -4836,3 +4836,11 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 生产 v2 收敛任务排除候选后，暴露 `CASE-AUTO-0001` 等旧正式关系没有 payload `month_scope`；原 handler 只信该历史字段，因此在任何关系写入前正确地整批失败。问题不是规则、页面缓存或队列，而是旧 payload 与当前 exact-scope 合同之间的存量差异。
 - repository 现在在变化 tag proof 的同一次有界查询中，以 relation `row_ids` 批量关联 canonical `app.bank_transactions`，返回全部非删除银行成员的 `txn_month`。handler 只接受这些 canonical 月份；一条跨月关系刷新所有精确月份，零月份或非法月份仍整批零写，绝不降级为 `all`，也不把历史 payload scope 当事实源。
 - migration 0147 仅在 v2 已失败时创建确定性的 v3 job/event；全新部署不会产生额外任务。v3 成功后才 supersede v2，并复用同一 relation updater、history、精确 read model gateway 与 matching dirty 边界。
+
+## 2026-08-25 - 撤回提交 OA alias 与事务事实统一
+
+- 真实原因：preview 使用 bounded canonical selection 的完整行构建 OA alias；submit 却在 relation UoW 事务外再次调用 live-row resolver。该扫描失败时旧 `_withdraw_selected_row_alias_map(...)` 静默退化为 requested ID 自映射，并以 `setdefault` first-wins 处理 source alias。于是合法 preview 与 submit 可能使用不同 OA 身份集合，最终被 relation preview fingerprint 判为 `workbench_write_conflict`。
+- 最小修复：withdraw submit 通过 `load_validated_workbench_relation_selection_in_current_transaction(...)` 在当前 UoW 事务内一次完成 exact typed source 校验和完整 canonical 行水合；Facade 只从该结果复用既有 `oa_row_source_alias_map(...)` 严格构建 alias，再执行 relation command。
+- 旧链删除：删除 `_withdraw_selected_row_alias_map(...)`、事务外 submit alias 扫描、异常后的 ID 自映射以及 alias first-wins；preview 和非 UoW 测试适配路径也只消费 bounded canonical selection，不恢复全页面或 live-row 扫描。
+- 冲突合同：一个 source alias 指向多个 canonical OA 时返回 `409 workbench_write_conflict / canonical_selection_ambiguous`，整笔零写；前端按结构化 reason 输出安全中文原因和 request id，不展示原始后端异常。
+- 性能：confirm 继续使用只返回 identity/source descriptor 的窄事务校验；只有 withdraw submit 使用完整行水合，因此不为 confirm 热链增加查询。withdraw 移除事务外第二次 OA 扫描，alias 解析为已选行上的线性内存操作。

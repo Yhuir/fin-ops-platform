@@ -73,11 +73,12 @@ class _CanonicalSelectionRepository:
     def validate_workbench_relation_selection_in_current_transaction(
         self,
         *,
+        action: str,
         scope_key: str,
         row_ids: list[str],
         row_types: list[str],
     ) -> list[dict[str, object]]:
-        del scope_key
+        del action, scope_key
         return [
             {
                 **dict(self._rows[row_id]),
@@ -87,6 +88,21 @@ class _CanonicalSelectionRepository:
             for row_id, row_type in zip(row_ids, row_types, strict=True)
             if row_id in self._rows
         ]
+
+    def load_validated_workbench_relation_selection_in_current_transaction(
+        self,
+        *,
+        action: str,
+        scope_key: str,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, object]]:
+        return self.validate_workbench_relation_selection_in_current_transaction(
+            action=action,
+            scope_key=scope_key,
+            row_ids=row_ids,
+            row_types=row_types,
+        )
 
 
 class _FixtureTypedSelectionRepository:

@@ -192,10 +192,70 @@ class PostgresWorkbenchPageSelectionRepository:
     def validate_workbench_relation_selection_in_current_transaction(
         self,
         *,
+        action: str,
         scope_key: str,
         row_ids: list[str],
         row_types: list[str],
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
+        source_rows, matches = self._validated_relation_selection_source_rows(
+            action=action,
+            scope_key=scope_key,
+            row_ids=row_ids,
+            row_types=row_types,
+        )
+        result: list[dict[str, Any]] = []
+        for source, (row_type, row_id) in zip(source_rows, matches, strict=True):
+            result.append({
+                "row_id": row_id,
+                "pane": row_type,
+                "source_kind": str(source.get("source_kind") or row_type),
+                "external_etc_batch_id": str(source.get("external_etc_batch_id") or ""),
+            })
+        return result
+
+    def load_validated_workbench_relation_selection_in_current_transaction(
+        self,
+        *,
+        action: str,
+        scope_key: str,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> list[dict[str, Any]]:
+        source_rows, matches = self._validated_relation_selection_source_rows(
+            action=action,
+            scope_key=scope_key,
+            row_ids=row_ids,
+            row_types=row_types,
+        )
+        try:
+            canonical_rows = self._hydrate_canonical_rows_from_source_rows(source_rows)
+        except (KeyError, ValueError) as error:
+            raise WorkbenchWriteConflict(
+                action=action,
+                reason="canonical_selection_changed",
+                expected={"row_ids": row_ids, "row_types": row_types},
+                actual={"error": "canonical_rows_unavailable"},
+            ) from error
+        result: list[dict[str, Any]] = []
+        for source, (row_type, row_id) in zip(source_rows, matches, strict=True):
+            row = dict(canonical_rows[row_id])
+            row.update({
+                "row_id": row_id,
+                "pane": row_type,
+                "source_kind": str(source.get("source_kind") or row_type),
+                "external_etc_batch_id": str(source.get("external_etc_batch_id") or ""),
+            })
+            result.append(row)
+        return result
+
+    def _validated_relation_selection_source_rows(
+        self,
+        *,
+        action: str,
+        scope_key: str,
+        row_ids: list[str],
+        row_types: list[str],
+    ) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
         identities = self._selection_identities(row_ids=row_ids, row_types=row_types)
         try:
             source_rows = self._resolve_source_descriptors(
@@ -211,7 +271,7 @@ class PostgresWorkbenchPageSelectionRepository:
                 raise ValueError("Canonical Workbench selection changed.")
         except ValueError as error:
             raise WorkbenchWriteConflict(
-                action="confirm_link",
+                action=action,
                 reason="canonical_selection_changed",
                 expected={
                     "row_ids": [row_id for _row_type, row_id in identities],
@@ -219,17 +279,7 @@ class PostgresWorkbenchPageSelectionRepository:
                 },
                 actual={"error": "relation_preview_rows_missing"},
             ) from error
-        result: list[dict[str, str]] = []
-        for source, (row_type, row_id) in zip(source_rows, matches, strict=True):
-            result.append({
-                "row_id": row_id,
-                "pane": row_type,
-                "source_kind": str(source.get("source_kind") or row_type),
-                "external_etc_batch_id": str(
-                    source.get("external_etc_batch_id") or ""
-                ),
-            })
-        return result
+        return source_rows, matches
 
     def _in_snapshot(
         self,
@@ -676,6 +726,12 @@ class PostgresWorkbenchPageSelectionRepository:
             row_types=row_types,
             scope_key="all",
         )
+        return self._hydrate_canonical_rows_from_source_rows(source_rows)
+
+    def _hydrate_canonical_rows_from_source_rows(
+        self,
+        source_rows: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
         identities = [
             (str(row.get("row_type") or ""), str(row.get("row_id") or ""))
             for row in source_rows

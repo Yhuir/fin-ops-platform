@@ -14,7 +14,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
 )
-from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_ids
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_alias_map
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_modes import workbench_relations_have_same_row_set
 from fin_ops_platform.services.workbench_relation_requirements import (
@@ -312,16 +312,6 @@ class WorkbenchWriteFacade:
                 },
             )
 
-        before_relations = self._relation_read_snapshot_port.active_relations_for_typed_rows(
-            row_ids,
-            requested_row_types,
-        )
-        is_active_selection, withdraw_preview, blocked_message = self._active_relation_withdraw_preview(
-            before_relations=before_relations,
-            selected_row_ids=row_ids,
-            selected_row_types=requested_row_types,
-            month=month,
-        )
         selection_result = self._relation_preview_selection(
             month,
             row_ids=row_ids,
@@ -353,6 +343,25 @@ class WorkbenchWriteFacade:
                     "message": str(exc),
                 },
             )
+        before_relations = self._relation_read_snapshot_port.active_relations_for_typed_rows(
+            row_ids,
+            requested_row_types,
+        )
+        try:
+            (
+                is_active_selection,
+                withdraw_preview,
+                blocked_message,
+                row_id_aliases,
+            ) = self._active_relation_withdraw_preview(
+                before_relations=before_relations,
+                selected_rows=selected_rows,
+                selected_row_ids=row_ids,
+                selected_row_types=requested_row_types,
+                month=month,
+            )
+        except ValueError:
+            return self._withdraw_alias_conflict_result()
         rows = selected_rows
         row_types = requested_row_types
         rows_by_type = self._rows_by_type(rows)
@@ -371,8 +380,7 @@ class WorkbenchWriteFacade:
             assert withdraw_preview is not None
             preview_payload = self._withdraw_relation_preview_payload(
                 withdraw_preview,
-                month=month,
-                alias_map=self._withdraw_alias_map_from_rows(rows),
+                alias_map=row_id_aliases,
                 selected_rows=rows,
             )
             preview_payload["message"] = (
@@ -422,24 +430,26 @@ class WorkbenchWriteFacade:
         self,
         *,
         before_relations: list[dict[str, object]],
+        selected_rows: list[dict[str, object]],
         selected_row_ids: list[str],
         selected_row_types: list[str],
         month: str,
-    ) -> tuple[bool, dict[str, object] | None, str | None]:
+    ) -> tuple[bool, dict[str, object] | None, str | None, dict[str, str]]:
         if not before_relations:
-            return False, None, None
+            return False, None, None, {}
         if len(before_relations) > 1:
-            return False, None, None
+            return False, None, None, {}
         active_relation = dict(before_relations[0])
         active_row_ids = [str(row_id).strip() for row_id in list(active_relation.get("row_ids") or [])]
         active_row_types = [str(row_type).strip() for row_type in list(active_relation.get("row_types") or [])]
         if len(active_row_ids) != len(active_row_types):
-            return True, None, "所选关系成员类型已损坏，请联系管理员。"
+            return True, None, "所选关系成员类型已损坏，请联系管理员。", {}
         selected_identities = list(zip(selected_row_types, selected_row_ids, strict=True))
         active_identities = list(zip(active_row_types, active_row_ids, strict=True))
         if not selected_identities or set(selected_identities) != set(active_identities):
-            return False, None, None
+            return False, None, None, {}
 
+        row_id_aliases = self._withdraw_alias_map_from_rows(selected_rows)
         relation_command = self._relation_command_service_for()
         if relation_command is not None:
             try:
@@ -448,19 +458,21 @@ class WorkbenchWriteFacade:
                     row_ids=selected_row_ids,
                     row_types=selected_row_types,
                     month=month,
+                    row_id_aliases=row_id_aliases,
                 )
             except WorkbenchRelationCommandError as exc:
                 return (
                     True,
                     None,
                     str(exc) or "所选记录已确认关联，但撤回预览暂时不可用。",
+                    row_id_aliases,
                 )
-            return True, preview, None
+            return True, preview, None, row_id_aliases
 
         try:
             preview = self._relation_read_snapshot_port.preview_withdraw_for_row_ids(selected_row_ids)
         except Exception:
-            return True, None, "所选记录已确认关联，但撤回预览暂时不可用。"
+            return True, None, "所选记录已确认关联，但撤回预览暂时不可用。", row_id_aliases
         active_relation = dict(preview.get("active_relation") or active_relation)
         preview_payload = {
             "operation": "withdraw_link",
@@ -476,7 +488,7 @@ class WorkbenchWriteFacade:
                 str(active_relation.get("case_id") or ""): active_relation.get("version", 1)
             },
         }
-        return True, preview_payload, None
+        return True, preview_payload, None, row_id_aliases
 
     def _blocked_confirm_preview_payload(
         self,
@@ -753,6 +765,7 @@ class WorkbenchWriteFacade:
                     "confirm-link UoW requires transaction-bound canonical selection validation."
                 )
             canonical_selection = validate_selection(
+                action=action_name,
                 scope_key=month,
                 row_ids=row_ids,
                 row_types=row_types,
@@ -1055,6 +1068,7 @@ class WorkbenchWriteFacade:
         active_relation: dict[str, object],
         preview: dict[str, object],
         affected_row_ids: list[str],
+        alias_map: dict[str, str],
     ) -> list[str]:
         changed_scope_keys = self._normalize_operation_scope_keys(
             list(preview.get("affected_months") or [])
@@ -1072,29 +1086,25 @@ class WorkbenchWriteFacade:
         if changed_scope_keys:
             return changed_scope_keys
 
-        try:
-            alias_map = self._withdraw_selected_row_alias_map(affected_row_ids, month=month)
-            before_relations = [
-                self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
-                for relation in list(preview.get("before_relations") or [])
-                if isinstance(relation, dict)
-            ]
-            canonical_active_relation = before_relations[0] if before_relations else self._canonicalize_withdraw_relation(
-                active_relation,
-                alias_map=alias_map,
-            )
-            canonical_after_relations = [
-                self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
-                for relation in list(preview.get("after_relations") or [])
-                if isinstance(relation, dict)
-            ]
-            rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
-                active_relation=canonical_active_relation,
-                after_relations=canonical_after_relations,
-                month=month,
-            )
-        except (TypeError, ValueError, IndexError, KeyError):
-            return []
+        before_relations = [
+            self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
+            for relation in list(preview.get("before_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        canonical_active_relation = before_relations[0] if before_relations else self._canonicalize_withdraw_relation(
+            active_relation,
+            alias_map=alias_map,
+        )
+        canonical_after_relations = [
+            self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
+            for relation in list(preview.get("after_relations") or [])
+            if isinstance(relation, dict)
+        ]
+        rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
+            active_relation=canonical_active_relation,
+            after_relations=canonical_after_relations,
+            month=month,
+        )
         return self._operation_scope_keys_for_rows_and_row_ids(
             month=month,
             rows=rows,
@@ -1553,7 +1563,10 @@ class WorkbenchWriteFacade:
             for row in list(selection_result.payload.get("rows") or [])
             if isinstance(row, dict)
         ]
-        row_id_aliases = self._withdraw_alias_map_from_rows(selected_rows)
+        try:
+            row_id_aliases = self._withdraw_alias_map_from_rows(selected_rows)
+        except ValueError:
+            return self._withdraw_alias_conflict_result()
         try:
             preview_relation = self._preview_withdraw_relation_via_command_service(
                 relation_command,
@@ -1575,7 +1588,6 @@ class WorkbenchWriteFacade:
             HTTPStatus.OK,
             self._withdraw_relation_preview_payload(
                 preview_relation,
-                month=month,
                 alias_map=row_id_aliases,
                 selected_rows=selected_rows,
             ),
@@ -1626,15 +1638,6 @@ class WorkbenchWriteFacade:
             return self._relation_command_unavailable_result()
         if self._withdraw_link_uow is not None:
             try:
-                alias_started_at = monotonic()
-                row_id_aliases = self._withdraw_selected_row_alias_map(row_ids, month=month)
-                self._emit_timing_if_requested(
-                    request_id=request_id,
-                    action_name="withdraw_link",
-                    phase="withdraw_alias_map",
-                    started_at=alias_started_at,
-                    detail=f"row_count={len(row_ids)}",
-                )
                 return self._withdraw_link_with_uow_from_row_ids(
                     payload=payload,
                     request_id=request_id,
@@ -1644,7 +1647,6 @@ class WorkbenchWriteFacade:
                     row_ids=row_ids,
                     row_types=row_types,
                     note=note,
-                    row_id_aliases=row_id_aliases,
                 )
             except WorkbenchRelationCommandError as exc:
                 return self._relation_command_error_result(exc)
@@ -1655,8 +1657,26 @@ class WorkbenchWriteFacade:
                     HTTPStatus.BAD_REQUEST,
                     {"error": "invalid_withdraw_link_request", "message": str(exc)},
                 )
+        selection_result = self._relation_preview_selection(
+            month,
+            row_ids=row_ids,
+            row_types=row_types,
+        )
+        if selection_result.status_code != HTTPStatus.OK:
+            return WorkbenchWriteResult(
+                HTTPStatus(selection_result.status_code),
+                dict(selection_result.payload),
+            )
+        selected_rows = [
+            dict(row)
+            for row in list(selection_result.payload.get("rows") or [])
+            if isinstance(row, dict)
+        ]
         try:
-            row_id_aliases = self._withdraw_selected_row_alias_map(row_ids, month=month)
+            row_id_aliases = self._withdraw_alias_map_from_rows(selected_rows)
+        except ValueError:
+            return self._withdraw_alias_conflict_result()
+        try:
             preview = self._preview_withdraw_relation_via_command_service(
                 relation_command,
                 row_ids=row_ids,
@@ -1691,14 +1711,10 @@ class WorkbenchWriteFacade:
         changed_case_ids = list(result.get("changed_case_ids") or [case_id])
         affected_row_ids = self._canonicalize_withdraw_row_ids(
             list(result.get("affected_row_ids") or row_ids),
-            selected_row_ids=row_ids,
-            month=month,
             alias_map=row_id_aliases,
         )
         restored_relations = self._canonicalize_withdraw_relations(
             list(result.get("restored_relations") or []),
-            selected_row_ids=row_ids,
-            month=month,
             alias_map=row_id_aliases,
         )
         restored_relations = self._withdraw_restored_relations_excluding_active(
@@ -1717,6 +1733,7 @@ class WorkbenchWriteFacade:
                 "affected_months": result.get("affected_months") or [],
             },
             affected_row_ids=affected_row_ids,
+            alias_map=row_id_aliases,
         )
         try:
             self._schedule_pair_relation_persist(
@@ -1800,7 +1817,6 @@ class WorkbenchWriteFacade:
         row_ids: list[str],
         row_types: list[str],
         note: str,
-        row_id_aliases: dict[str, str] | None = None,
     ) -> WorkbenchWriteResult:
         action_name = "withdraw_link"
         def emit_phase_timing(phase: str, started_at: float, detail: str | None = None) -> None:
@@ -1837,16 +1853,17 @@ class WorkbenchWriteFacade:
             if relation_command is None:
                 raise _WorkbenchWritePersistenceError("workbench_relation_command_unavailable")
             canonical_query = getattr(ctx, "canonical_query", None)
-            validate_selection = getattr(
+            load_selection = getattr(
                 canonical_query,
-                "validate_workbench_relation_selection_in_current_transaction",
+                "load_validated_workbench_relation_selection_in_current_transaction",
                 None,
             )
-            if not callable(validate_selection):
+            if not callable(load_selection):
                 raise _WorkbenchWritePersistenceError(
-                    "withdraw-link UoW requires transaction-bound canonical selection validation."
+                    "withdraw-link UoW requires transaction-bound canonical selection loading."
                 )
-            canonical_selection = validate_selection(
+            canonical_selection = load_selection(
+                action=action_name,
                 scope_key=month,
                 row_ids=row_ids,
                 row_types=row_types,
@@ -1867,6 +1884,23 @@ class WorkbenchWriteFacade:
                         "row_types": [row_type for row_type, _row_id in canonical_identities],
                     },
                 )
+            alias_started_at = monotonic()
+            try:
+                row_id_aliases = self._withdraw_alias_map_from_rows(canonical_selection)
+            except ValueError as error:
+                raise WorkbenchWriteConflict(
+                    action=action_name,
+                    reason="canonical_selection_ambiguous",
+                    expected={"row_ids": row_ids, "row_types": row_types},
+                    actual={"error": "oa_source_alias_ambiguous"},
+                ) from error
+            self._emit_timing_if_requested(
+                request_id=request_id,
+                action_name=action_name,
+                phase="withdraw_alias_map",
+                started_at=alias_started_at,
+                detail=f"row_count={len(row_ids)}",
+            )
             pair_relation_started_at = monotonic()
             result = self._withdraw_relation_via_command_service(
                 relation_command,
@@ -1891,14 +1925,10 @@ class WorkbenchWriteFacade:
             postprocess_started_at = monotonic()
             affected_row_ids = self._canonicalize_withdraw_row_ids(
                 list(result.get("affected_row_ids") or before_relation.get("row_ids") or row_ids),
-                selected_row_ids=row_ids,
-                month=month,
                 alias_map=row_id_aliases,
             )
             restored_relations = self._canonicalize_withdraw_relations(
                 list(result.get("restored_relations") or []),
-                selected_row_ids=row_ids,
-                month=month,
                 alias_map=row_id_aliases,
             )
             if before_relation:
@@ -1918,6 +1948,7 @@ class WorkbenchWriteFacade:
                     active_relation=before_relation,
                     preview={"affected_months": result.get("affected_months") or []},
                     affected_row_ids=affected_row_ids,
+                    alias_map=row_id_aliases,
                 )
             self._emit_timing_if_requested(
                 request_id=request_id,
@@ -1983,7 +2014,7 @@ class WorkbenchWriteFacade:
         row_ids: list[str],
         row_types: list[str],
         month: str,
-        row_id_aliases: dict[str, str] | None = None,
+        row_id_aliases: dict[str, str],
     ) -> dict[str, object]:
         preview_withdraw_relation = getattr(relation_command, "preview_withdraw_relation", None)
         if not callable(preview_withdraw_relation):
@@ -1993,9 +2024,7 @@ class WorkbenchWriteFacade:
                 row_ids=list(row_ids),
                 row_types=list(row_types),
                 month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
-                row_id_aliases=row_id_aliases
-                if row_id_aliases is not None
-                else self._withdraw_selected_row_alias_map(row_ids, month=month),
+                row_id_aliases=row_id_aliases,
             )
             or {}
         )
@@ -2046,20 +2075,10 @@ class WorkbenchWriteFacade:
         self,
         preview: dict[str, object],
         *,
-        month: str,
         selected_rows: list[dict[str, object]],
-        alias_map: dict[str, str] | None = None,
+        alias_map: dict[str, str],
     ) -> dict[str, object]:
         can_submit = bool(preview.get("can_submit", True))
-        selected_row_ids = [
-            str(row_id)
-            for row_id in list(preview.get("selected_row_ids") or [])
-            if str(row_id).strip()
-        ]
-        selected_alias_map = alias_map if alias_map is not None else self._withdraw_selected_row_alias_map(
-            selected_row_ids,
-            month=month,
-        )
         before_relations = [
             dict(relation)
             for relation in list(preview.get("before_relations") or [])
@@ -2075,15 +2094,11 @@ class WorkbenchWriteFacade:
         ]
         before_relations = self._canonicalize_withdraw_relations(
             before_relations,
-            selected_row_ids=selected_row_ids,
-            month=month,
-            alias_map=selected_alias_map,
+            alias_map=alias_map,
         )
         after_relations = self._canonicalize_withdraw_relations(
             after_relations,
-            selected_row_ids=selected_row_ids,
-            month=month,
-            alias_map=selected_alias_map,
+            alias_map=alias_map,
         )
         active_relation = before_relations[0] if before_relations else {}
         if can_submit:
@@ -2119,7 +2134,7 @@ class WorkbenchWriteFacade:
             "restored_relations": after_relations,
             "active_relation": self._canonicalize_withdraw_relation(
                 dict(preview.get("active_relation") or {}),
-                alias_map=selected_alias_map,
+                alias_map=alias_map,
             ),
             "submit_expected_versions": dict(preview.get("submit_expected_versions") or {}),
         }
@@ -2165,33 +2180,40 @@ class WorkbenchWriteFacade:
         rows: list[dict[str, object]],
     ) -> dict[str, str]:
         alias_map: dict[str, str] = {}
+        oa_rows: list[dict[str, object]] = []
         for row in rows:
             row_id = str(row.get("id") or row.get("row_id") or "").strip()
             if not row_id:
-                continue
+                raise ValueError("Canonical Workbench row identity is required for withdrawal.")
             alias_map[row_id] = row_id
-            if str(row.get("type") or "").strip() != "oa":
-                continue
-            for source_id in oa_row_source_ids(row):
-                alias = str(source_id or "").strip()
-                if alias:
-                    alias_map.setdefault(alias, row_id)
+            if str(row.get("type") or row.get("pane") or "").strip() == "oa":
+                oa_rows.append(row)
+        for alias, canonical in oa_row_source_alias_map(oa_rows).items():
+            prior = alias_map.setdefault(alias, canonical)
+            if prior != canonical:
+                raise ValueError(
+                    f"Workbench row alias {alias} resolves to multiple canonical rows."
+                )
         return alias_map
+
+    @staticmethod
+    def _withdraw_alias_conflict_result() -> WorkbenchWriteResult:
+        conflict = WorkbenchWriteConflict(
+            action="withdraw_link",
+            reason="canonical_selection_ambiguous",
+            actual={"error": "oa_source_alias_ambiguous"},
+        )
+        response = conflict.to_response_payload()
+        return WorkbenchWriteResult(HTTPStatus.CONFLICT, dict(response["payload"]))
 
     def _canonicalize_withdraw_relations(
         self,
         relations: list[object],
         *,
-        selected_row_ids: list[str],
-        month: str,
-        alias_map: dict[str, str] | None = None,
+        alias_map: dict[str, str],
     ) -> list[dict[str, object]]:
-        resolved_alias_map = alias_map if alias_map is not None else self._withdraw_selected_row_alias_map(
-            selected_row_ids,
-            month=month,
-        )
         return [
-            self._canonicalize_withdraw_relation(dict(relation), alias_map=resolved_alias_map)
+            self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
             for relation in list(relations or [])
             if isinstance(relation, dict)
         ]
@@ -2242,53 +2264,17 @@ class WorkbenchWriteFacade:
         self,
         row_ids: list[object],
         *,
-        selected_row_ids: list[str],
-        month: str,
-        alias_map: dict[str, str] | None = None,
+        alias_map: dict[str, str],
     ) -> list[str]:
-        resolved_alias_map = alias_map if alias_map is not None else self._withdraw_selected_row_alias_map(
-            selected_row_ids,
-            month=month,
-        )
         normalized: list[str] = []
         for row_id in list(row_ids or []):
             value = str(row_id or "").strip()
             if not value:
                 continue
-            canonical = resolved_alias_map.get(value, value)
+            canonical = alias_map.get(value, value)
             if canonical not in normalized:
                 normalized.append(canonical)
         return normalized
-
-    def _withdraw_selected_row_alias_map(self, selected_row_ids: list[str], *, month: str) -> dict[str, str]:
-        normalized_selected_row_ids = [
-            str(row_id or "").strip()
-            for row_id in list(selected_row_ids or [])
-            if str(row_id or "").strip()
-        ]
-        alias_map = {row_id: row_id for row_id in normalized_selected_row_ids}
-        if not normalized_selected_row_ids:
-            return alias_map
-        if all(row_type_for_workbench_row_id(row_id, unknown="") != "oa" for row_id in normalized_selected_row_ids):
-            return alias_map
-        try:
-            selected_rows = self._resolve_live_rows_direct(normalized_selected_row_ids, month_hint=month)
-        except Exception:
-            return alias_map
-        for row in list(selected_rows or []):
-            if not isinstance(row, dict):
-                continue
-            row_id = str(row.get("id") or row.get("row_id") or "").strip()
-            if not row_id:
-                continue
-            alias_map[row_id] = row_id
-            if str(row.get("type") or "").strip() != "oa":
-                continue
-            for source_id in oa_row_source_ids(row):
-                alias = str(source_id or "").strip()
-                if alias:
-                    alias_map.setdefault(alias, row_id)
-        return alias_map
 
     @staticmethod
     def _canonicalize_withdraw_relation(

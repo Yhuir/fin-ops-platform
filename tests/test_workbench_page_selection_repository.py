@@ -129,17 +129,129 @@ def test_transaction_revalidation_requires_row_types_and_maps_drift_to_conflict(
 
     with pytest.raises(ValueError, match="align"):
         repository.validate_workbench_relation_selection_in_current_transaction(
+            action="withdraw_link",
             scope_key="2026-07",
             row_ids=["bank-1"],
             row_types=[],
         )
     with pytest.raises(WorkbenchWriteConflict) as caught:
         repository.validate_workbench_relation_selection_in_current_transaction(
+            action="withdraw_link",
             scope_key="2026-07",
             row_ids=["bank-1"],
             row_types=["bank"],
         )
+    assert caught.value.action == "withdraw_link"
     assert caught.value.reason == "canonical_selection_changed"
+
+
+def test_transaction_revalidation_returns_hydrated_canonical_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection(
+        [],
+        responses=[[_source(1, "oa", "oa-exp-2156")]],
+    )
+    repository = PostgresWorkbenchPageSelectionRepository(
+        connection, tenant_id="test-tenant"
+    )
+
+    monkeypatch.setattr(
+        "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
+        "PostgresWorkbenchPageHydrationRepository.hydrate_rows",
+        lambda *_args, **_kwargs: {
+            ("oa", "oa-exp-2156"): {
+                "id": "oa-exp-2156",
+                "type": "oa",
+                "detail_fields": {"OA单号": "2156"},
+            }
+        },
+    )
+
+    rows = repository.load_validated_workbench_relation_selection_in_current_transaction(
+        action="withdraw_link",
+        scope_key="2026-07",
+        row_ids=["oa-exp-2156"],
+        row_types=["oa"],
+    )
+
+    assert rows == [
+        {
+            "id": "oa-exp-2156",
+            "type": "oa",
+            "detail_fields": {"OA单号": "2156"},
+            "row_id": "oa-exp-2156",
+            "pane": "oa",
+            "source_kind": "oa",
+            "external_etc_batch_id": "",
+        }
+    ]
+    assert len(connection.calls) == 1
+
+
+def test_transaction_validation_keeps_confirm_on_narrow_source_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection(
+        [],
+        responses=[[_source(1, "bank", "bank-1")]],
+    )
+    repository = PostgresWorkbenchPageSelectionRepository(
+        connection, tenant_id="test-tenant"
+    )
+    monkeypatch.setattr(
+        "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
+        "PostgresWorkbenchPageHydrationRepository.hydrate_rows",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("confirm selection validation must not hydrate full rows")
+        ),
+    )
+
+    rows = repository.validate_workbench_relation_selection_in_current_transaction(
+        action="confirm_link",
+        scope_key="2026-07",
+        row_ids=["bank-1"],
+        row_types=["bank"],
+    )
+
+    assert rows == [
+        {
+            "row_id": "bank-1",
+            "pane": "bank",
+            "source_kind": "bank_transaction",
+            "external_etc_batch_id": "",
+        }
+    ]
+    assert len(connection.calls) == 1
+
+
+def test_transaction_selection_load_fails_closed_when_hydration_loses_a_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _Connection(
+        [],
+        responses=[[_source(1, "oa", "oa-exp-2156")]],
+    )
+    repository = PostgresWorkbenchPageSelectionRepository(
+        connection, tenant_id="test-tenant"
+    )
+    monkeypatch.setattr(
+        "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
+        "PostgresWorkbenchPageHydrationRepository.hydrate_rows",
+        lambda *_args, **_kwargs: {},
+    )
+
+    with pytest.raises(WorkbenchWriteConflict) as caught:
+        repository.load_validated_workbench_relation_selection_in_current_transaction(
+            action="withdraw_link",
+            scope_key="2026-07",
+            row_ids=["oa-exp-2156"],
+            row_types=["oa"],
+        )
+
+    assert caught.value.action == "withdraw_link"
+    assert caught.value.reason == "canonical_selection_changed"
+    assert caught.value.actual == {"error": "canonical_rows_unavailable"}
 
 
 def test_large_preview_selection_uses_formal_group_members_without_oa_source_link_scan(

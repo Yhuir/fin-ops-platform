@@ -118,7 +118,17 @@ class _RecordingUoW:
                                 strict=True,
                             )
                         ]
-                    )
+                    ),
+                    "load_validated_workbench_relation_selection_in_current_transaction": staticmethod(
+                        lambda **_: [
+                            {"pane": row_type, "row_id": row_id, "type": row_type}
+                            for row_type, row_id in zip(
+                                list(getattr(command, "row_types")),
+                                list(getattr(command, "row_ids")),
+                                strict=True,
+                            )
+                        ]
+                    ),
                 },
             )()
             ctx = type(
@@ -209,7 +219,10 @@ class _HandlerCallingUoW:
             {
                 "validate_workbench_relation_selection_in_current_transaction": staticmethod(
                     lambda **_: canonical_rows
-                )
+                ),
+                "load_validated_workbench_relation_selection_in_current_transaction": staticmethod(
+                    lambda **_: canonical_rows
+                ),
             },
         )()
         ctx = type(
@@ -1284,26 +1297,53 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertNotIn("operation_projection", result.payload)
         self.assertNotIn("freshness_targets", result.payload)
 
-    def test_withdraw_link_uow_submit_reuses_alias_map_in_postprocess(self) -> None:
-        resolve_calls: list[dict[str, object]] = []
+    def test_withdraw_link_uow_submit_builds_oa_aliases_from_transaction_selection(self) -> None:
+        relation_command = _RawOaAliasWithdrawRelationCommandService()
+        selected_row_ids = [
+            relation_command.canonical_oa_row_id,
+            relation_command.bank_row_id,
+            relation_command.invoice_row_id,
+        ]
 
-        def resolve_live_rows_direct(row_ids: list[str], **kwargs: object) -> list[dict[str, object]]:
-            resolve_calls.append({"row_ids": list(row_ids), **kwargs})
-            return [
-                {"id": "oa-1", "type": "oa", "summary_fields": {"申请日期": "2026-05-10"}},
-                {"id": "bank-1", "type": "bank", "trade_time": "2026-05-10 10:00:00"},
-            ]
+        def forbidden_live_rows(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+            raise AssertionError("withdraw submit must not resolve OA aliases outside the UoW transaction")
 
+        canonical_rows = {
+            relation_command.canonical_oa_row_id: {
+                "type": "oa",
+                "detail_fields": {
+                    "Mongo文档ID": "69fab21659b12d7d42a50a45",
+                    "OA单号": "2156",
+                },
+            },
+            relation_command.bank_row_id: {"type": "bank"},
+            relation_command.invoice_row_id: {"type": "invoice"},
+        }
         facade = _new_facade(
-            withdraw_uow=_RecordingUoW(),
-            relation_command_service=_RecordingRelationCommandService(),
-            resolve_live_rows_direct=resolve_live_rows_direct,
+            withdraw_uow=_HandlerCallingUoW(canonical_rows=canonical_rows),
+            relation_command_service=relation_command,
+            live_rows=[
+                {"id": row_id, **dict(row)}
+                for row_id, row in canonical_rows.items()
+            ],
+            resolve_live_rows_direct=forbidden_live_rows,
         )
 
+        preview = facade.preview_withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": selected_row_ids,
+                "row_types": ["oa", "bank", "invoice"],
+            }
+        )
         result = facade.withdraw_link(
             {
                 "month": "2026-05",
-                "row_ids": ["oa-1", "bank-1"],
+                "row_ids": selected_row_ids,
+                "row_types": ["oa", "bank", "invoice"],
+                "operation_type": "withdraw_relation",
+                "preview_id": preview.payload["preview_id"],
+                "expected_versions": preview.payload["submit_expected_versions"],
                 "idempotency_key": "withdraw:single-alias-map",
             },
             request_id="req-withdraw-single-alias-map",
@@ -1311,8 +1351,13 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             tenant_id="default",
         )
 
+        self.assertEqual(preview.status_code, HTTPStatus.OK)
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(resolve_calls, [{"row_ids": ["oa-1", "bank-1"], "month_hint": "2026-05"}])
+        self.assertEqual(
+            relation_command.withdraw_calls[0]["row_id_aliases"][relation_command.raw_oa_row_id],
+            relation_command.canonical_oa_row_id,
+        )
+        self.assertEqual(result.payload["affected_row_ids"], selected_row_ids)
 
     def test_withdraw_link_bank_invoice_submit_does_not_resolve_live_rows_for_metadata(self) -> None:
         class _BankInvoiceWithdrawRelationCommandService(_RecordingRelationCommandService):
@@ -1600,6 +1645,66 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             relation_command.preview_withdraw_calls[0]["row_id_aliases"],
             {"oa-1": "oa-1", "bank-1": "bank-1"},
         )
+
+    def test_withdraw_preview_rejects_ambiguous_oa_source_aliases(self) -> None:
+        rows = [
+            {
+                "id": "oa-exp-first",
+                "type": "oa",
+                "detail_fields": {"OA单号": "shared-oa-number"},
+            },
+            {
+                "id": "oa-exp-second",
+                "type": "oa",
+                "detail_fields": {"OA单号": "shared-oa-number"},
+            },
+        ]
+        facade = _new_facade(
+            relation_command_service=_RecordingRelationCommandService(),
+            live_rows=rows,
+        )
+
+        result = facade.preview_withdraw_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-exp-first", "oa-exp-second"],
+                "row_types": ["oa", "oa"],
+            }
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(result.payload["error"], "workbench_write_conflict")
+        self.assertEqual(result.payload["conflict"]["action"], "withdraw_link")
+        self.assertEqual(result.payload["conflict"]["reason"], "canonical_selection_ambiguous")
+
+    def test_confirm_preview_does_not_apply_withdraw_alias_gate_to_unlinked_rows(self) -> None:
+        rows = [
+            {
+                "id": "oa-exp-first",
+                "type": "oa",
+                "detail_fields": {"OA单号": "shared-oa-number"},
+            },
+            {
+                "id": "oa-exp-second",
+                "type": "oa",
+                "detail_fields": {"OA单号": "shared-oa-number"},
+            },
+        ]
+        facade = _new_facade(
+            relation_command_service=_RecordingRelationCommandService(),
+            live_rows=rows,
+        )
+
+        result = facade.preview_confirm_link(
+            {
+                "month": "2026-05",
+                "row_ids": ["oa-exp-first", "oa-exp-second"],
+                "row_types": ["oa", "oa"],
+            }
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["operation"], "confirm_link")
 
     def test_withdraw_link_canonicalizes_legacy_oa_source_ids_and_drops_same_row_restore(self) -> None:
         relation_command = _RawOaAliasWithdrawRelationCommandService()

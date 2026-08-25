@@ -2077,9 +2077,34 @@ function requestIdFromPayload(payload: unknown) {
   ).trim();
 }
 
-function resolveWorkbenchApiErrorMessage(status: number, code: string) {
+const WORKBENCH_WRITE_CONFLICT_REASON_MESSAGES: Record<string, string> = {
+  canonical_selection_changed: "所选 OA、流水或发票已变化，请刷新后重新预览。",
+  canonical_selection_ambiguous: "所选 OA 身份存在歧义，无法安全撤回；请刷新后重新选择。",
+  stale_relation_identity: "关联关系成员已变化，请刷新后重新预览。",
+  stale_relation_version: "关联关系版本已更新，请刷新后重新预览。",
+  stale_row_status: "所选记录状态已变化，请刷新后重新预览。",
+};
+
+function workbenchConflictReasonFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const conflict = (payload as { conflict?: unknown }).conflict;
+  if (!conflict || typeof conflict !== "object") {
+    return "";
+  }
+  return String((conflict as { reason?: unknown }).reason ?? "").trim();
+}
+
+function resolveWorkbenchApiErrorMessage(status: number, code: string, payload: unknown) {
   if (WORKBENCH_API_ERROR_MESSAGES[code]) {
     return WORKBENCH_API_ERROR_MESSAGES[code];
+  }
+  if (code === "workbench_write_conflict") {
+    const reason = workbenchConflictReasonFromPayload(payload);
+    if (WORKBENCH_WRITE_CONFLICT_REASON_MESSAGES[reason]) {
+      return WORKBENCH_WRITE_CONFLICT_REASON_MESSAGES[reason];
+    }
   }
   if (status === 401) {
     return "登录状态已失效，请重新登录。";
@@ -2133,7 +2158,7 @@ export function resolveWorkbenchActionErrorMessage(error: unknown, fallback: str
 
 function createWorkbenchApiError(error: ApiClientError) {
   const requestId = requestIdFromPayload(error.payload);
-  const safeMessage = resolveWorkbenchApiErrorMessage(error.status, error.code);
+  const safeMessage = resolveWorkbenchApiErrorMessage(error.status, error.code, error.payload);
   return new WorkbenchApiError(
     safeMessage,
     {

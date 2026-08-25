@@ -604,6 +604,27 @@ describe("workbench api bank amount mapping", () => {
     await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.not.toThrow("RAW BACKEND SENTINEL");
   });
 
+  test.each([
+    ["canonical_selection_changed", "所选 OA、流水或发票已变化，请刷新后重新预览。"],
+    ["canonical_selection_ambiguous", "所选 OA 身份存在歧义，无法安全撤回；请刷新后重新选择。"],
+    ["stale_relation_identity", "关联关系成员已变化，请刷新后重新预览。"],
+    ["stale_relation_version", "关联关系版本已更新，请刷新后重新预览。"],
+  ])("maps workbench_write_conflict reason %s precisely", async (reason, expectedMessage) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "workbench_write_conflict",
+          message: "RAW BACKEND SENTINEL",
+          conflict: { action: "withdraw_link", reason },
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.toThrow(expectedMessage);
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.not.toThrow("RAW BACKEND SENTINEL");
+  });
+
   test("never exposes a non-JSON response body", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("RAW PARSER SENTINEL", {
