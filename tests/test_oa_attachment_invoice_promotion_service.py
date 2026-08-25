@@ -22,6 +22,9 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
     PostgresOAAttachmentInvoiceRepository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_bridge import (
+    reconcile_oa_attachment_cache_identity_sources,
+)
 
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -440,6 +443,39 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
             },
         )
 
+    def test_structured_expense_item_owner_overrides_stale_nested_attachment_owner(self) -> None:
+        payload = _attachment(
+            "26532000000000000035",
+            "35.00",
+            "oa-exp-old:item:7:stale",
+            "invoice.pdf",
+        )
+        payload["source_expense_row_index"] = "7"
+
+        candidates = OAAttachmentInvoicePromotionService.candidates_from_records([
+            SimpleNamespace(
+                id="oa-exp-current",
+                month="2026-07",
+                attachment_invoices=[],
+                attachment_evidences=[],
+                expense_items=[{
+                    "expense_item_id": "oa-exp-current:item:0:current",
+                    "row_index": "0",
+                    "attachment_invoices": [payload],
+                }],
+            )
+        ])
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(
+            candidates[0].attachment_invoice["source_expense_item_id"],
+            "oa-exp-current:item:0:current",
+        )
+        self.assertEqual(
+            candidates[0].attachment_invoice["source_expense_row_index"],
+            "0",
+        )
+
     def test_links_one_invoice_to_multiple_expense_items_in_the_same_oa(self) -> None:
         first = _attachment("26532000000000000036", "36.00", "item-18-a", "shared.pdf")
         second = {**first, "source_expense_item_id": "item-18-b", "source_expense_row_index": "1"}
@@ -590,6 +626,13 @@ class PostgresOAAttachmentInvoiceRepositoryTests(unittest.TestCase):
         self.assertIn("matched.invoice_payload->>'source_attachment_key'", sql)
         self.assertIn("matched.invoice_payload->>'source_expense_item_id'", sql)
         self.assertIn("join proven_contexts context", sql.lower())
+        self.assertIn("source.source_kind = 'attachment_identity_invoice'", sql)
+        self.assertIn("join app.oa_application_items item", sql)
+        self.assertIn("from app.oa_attachments exact_attachment", sql)
+        self.assertIn("exact_app.status <> 'deleted'", sql)
+        self.assertIn("app.status <> 'deleted'", sql)
+        self.assertIn("item.row_id as source_expense_item_id", sql)
+        self.assertNotIn("source.source_kind <> 'cache_key'", sql)
         self.assertNotIn("having count(*)", sql.lower())
         self.assertNotIn("min(source_expense_item_id)", sql.lower())
         self.assertEqual(
@@ -696,21 +739,40 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         )
         self.connection.execute(
             """
+            insert into app.oa_application_items(
+                oa_application_id, oa_source_id, form_id, row_id,
+                item_no, normalized_payload
+            )
+            select id, oa_source_id, form_id,
+                   row_id || ':item:0:' || right(row_id, 1),
+                   '0', '{"row_index":"0"}'::jsonb
+            from app.oa_applications
+            """
+        )
+        self.connection.execute(
+            """
             insert into app.oa_attachments(
                 oa_application_id, oa_source_id, form_id, row_id,
-                source_attachment_key, filename
+                source_attachment_key, filename, normalized_payload
             )
-            select id, oa_source_id, form_id, row_id,
-                   case row_id
-                       when 'oa-a' then 'attachment-a'
-                       when 'oa-b' then 'attachment-b'
-                       else 'attachment-c'
-                   end,
-                   case row_id
+            select app.id, app.oa_source_id, app.form_id, item.row_id,
+                   'attachment-' || right(app.row_id, 1),
+                   case app.row_id
                        when 'oa-b' then 'invoice-b.pdf'
                        else 'invoice-a.pdf'
-                   end
-            from app.oa_applications
+                   end,
+                   jsonb_build_object(
+                       'source_expense_item_id', item.row_id,
+                       'source_expense_row_index', '0',
+                       'source_attachment_name',
+                       case app.row_id
+                           when 'oa-b' then 'invoice-b.pdf'
+                           else 'invoice-a.pdf'
+                       end
+                   )
+            from app.oa_applications app
+            join app.oa_application_items item
+              on item.oa_application_id = app.id
             """
         )
         self.connection.execute(
@@ -730,6 +792,8 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
                         "document_kind":"digital_invoice",
                         "digital_invoice_no":"26532000000000000901",
                         "invoice_no":"26532000000000000901",
+                        "issue_date":"2026-06-01",
+                        "total_with_tax":"901.00",
                         "source_attachment_key":"attachment-a",
                         "source_attachment_name":"invoice-a.pdf",
                         "source_expense_item_id":"oa-a:item:0:a"
@@ -739,6 +803,8 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
                         "document_kind":"digital_invoice",
                         "digital_invoice_no":"26532000000000000902",
                         "invoice_no":"26532000000000000902",
+                        "issue_date":"2026-06-02",
+                        "total_with_tax":"902.00",
                         "source_attachment_key":"attachment-b",
                         "source_attachment_name":"invoice-b.pdf",
                         "source_expense_item_id":"oa-b:item:0:b"
@@ -764,6 +830,17 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         )
         repository = PostgresOAAttachmentInvoiceRepository(self.connection)
 
+        raw_only_rows = repository.list_promotion_source_rows(
+            canonical_keys={"26532000000000000901", "26532000000000000902"},
+            parser_version="parser-current",
+            cache_schema_version="schema-current",
+        )
+        self.assertEqual(raw_only_rows, [])
+
+        reconcile_oa_attachment_cache_identity_sources(
+            self.connection,
+            cache_source_attachment_keys=["cache-two-invoices"],
+        )
         rows = repository.list_promotion_source_rows(
             canonical_keys={"26532000000000000901", "26532000000000000902"},
             parser_version="parser-current",
@@ -782,6 +859,36 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
                 "26532000000000000901": ("oa-a", "oa-a:item:0:a"),
                 "26532000000000000902": ("oa-b", "oa-b:item:0:b"),
             },
+        )
+
+        # A stale nested owner must not win once the same occurrence still has
+        # an exact current attachment key.  The second bridged attachment is a
+        # valid context for the other occurrence in this cache, not this one.
+        self.connection.execute(
+            """
+            update app.oa_attachment_invoice_cache
+            set invoices = jsonb_set(
+                jsonb_set(
+                    invoices,
+                    '{0,source_expense_item_id}',
+                    to_jsonb('oa-b:item:0:b'::text)
+                ),
+                '{0,source_attachment_name}',
+                to_jsonb('invoice-b.pdf'::text)
+            )
+            where source_attachment_key = 'cache-two-invoices'
+            """
+        )
+        exact_owner_rows = repository.list_promotion_source_rows(
+            canonical_keys={"26532000000000000901"},
+            parser_version="parser-current",
+            cache_schema_version="schema-current",
+        )
+        self.assertEqual(len(exact_owner_rows), 1)
+        self.assertEqual(exact_owner_rows[0]["oa_row_id"], "oa-a")
+        self.assertEqual(
+            exact_owner_rows[0]["source_expense_item_id"],
+            "oa-a:item:0:a",
         )
 
         self.connection.execute(
@@ -808,17 +915,17 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
             )
             """
         )
-        ambiguous_rows = repository.list_promotion_source_rows(
+        current_rows = repository.list_promotion_source_rows(
             canonical_keys={"26532000000000000901", "26532000000000000902"},
             parser_version="parser-current",
             cache_schema_version="schema-current",
         )
 
-        ambiguous_invoice_numbers = [
-            row["invoices"][0]["digital_invoice_no"] for row in ambiguous_rows
+        current_invoice_numbers = [
+            row["invoices"][0]["digital_invoice_no"] for row in current_rows
         ]
-        self.assertEqual(ambiguous_invoice_numbers.count("26532000000000000901"), 2)
-        self.assertEqual(ambiguous_invoice_numbers.count("26532000000000000902"), 1)
+        self.assertEqual(current_invoice_numbers.count("26532000000000000901"), 1)
+        self.assertEqual(current_invoice_numbers.count("26532000000000000902"), 1)
         report = OAAttachmentInvoicePromotionService(
             invoice_repository=repository,
         ).promote_confirmed_invoice_identity_keys(
@@ -835,12 +942,15 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
             """
         )
 
-        self.assertEqual(report["summary"]["affected_invoice_count"], 0)
-        self.assertEqual(
-            report["reason_counts"],
-            {"source_context_conflict": 2},
-        )
-        self.assertEqual(persisted["source_links"], [])
+        oa_links = [
+            link
+            for link in persisted["source_links"]
+            if link.get("source_type") == "oa_attachment_invoice"
+        ]
+        self.assertEqual(report["summary"]["affected_invoice_count"], 1)
+        self.assertEqual(len(oa_links), 1)
+        self.assertEqual(oa_links[0]["derived_from_oa_id"], "oa-a")
+        self.assertEqual(oa_links[0]["source_expense_item_id"], "oa-a:item:0:a")
 
     def test_reverse_cache_keeps_all_same_oa_expense_item_contexts(self) -> None:
         invoice_no = "26532000000000000910"
@@ -855,23 +965,50 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         )
         self.connection.execute(
             """
-            insert into app.oa_attachments(
+            insert into app.oa_application_items(
                 oa_application_id, oa_source_id, form_id, row_id,
-                source_attachment_key, filename
+                item_no, normalized_payload
             )
-            select id, oa_source_id, form_id, row_id,
-                   'attachment-shared', 'invoice-shared.pdf'
-            from app.oa_applications
-            where row_id = 'oa-shared'
+            select id, oa_source_id, form_id, 'oa-shared:item:0',
+                   '0', '{"row_index":"0"}'::jsonb
+            from app.oa_applications where row_id = 'oa-shared'
+            union all
+            select id, oa_source_id, form_id, 'oa-shared:item:1',
+                   '1', '{"row_index":"1"}'::jsonb
+            from app.oa_applications where row_id = 'oa-shared'
             """
         )
-        attachment_invoice = _attachment(
+        self.connection.execute(
+            """
+            insert into app.oa_attachments(
+                oa_application_id, oa_source_id, form_id, row_id,
+                source_attachment_key, filename, normalized_payload
+            )
+            select app.id, app.oa_source_id, app.form_id, item.row_id,
+                   'attachment-shared-' || item.item_no,
+                   'invoice-shared.pdf',
+                   jsonb_build_object(
+                       'source_expense_item_id', item.row_id,
+                       'source_expense_row_index', item.item_no,
+                       'source_attachment_name', 'invoice-shared.pdf',
+                       'physical_source_attachment_key', 'physical-shared'
+                   )
+            from app.oa_applications app
+            join app.oa_application_items item on item.oa_application_id = app.id
+            where app.row_id = 'oa-shared'
+            """
+        )
+        first_attachment_invoice = _attachment(
             invoice_no,
             "910.00",
             "oa-shared:item:0",
             "invoice-shared.pdf",
         )
-        attachment_invoice["source_attachment_key"] = "attachment-shared"
+        first_attachment_invoice["source_attachment_key"] = "attachment-shared-0"
+        second_attachment_invoice = dict(first_attachment_invoice)
+        second_attachment_invoice["source_attachment_key"] = "attachment-shared-1"
+        second_attachment_invoice["source_expense_item_id"] = "oa-shared:item:1"
+        second_attachment_invoice["source_expense_row_index"] = "1"
         self.connection.execute(
             """
             insert into app.oa_attachment_invoice_cache(
@@ -881,7 +1018,7 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
                 'cache-shared-invoice', 'parser-current', 'schema-current', now(), %s::jsonb
             )
             """,
-            (json.dumps([attachment_invoice]),),
+            (json.dumps([first_attachment_invoice, second_attachment_invoice]),),
         )
         self.connection.execute(
             """
@@ -890,14 +1027,18 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
                 source_expense_item_id, source_expense_row_index, source_attachment_name
             ) values
                 (
-                    'cache-shared-invoice', 'attachment-shared', 'invoice',
+                    'cache-shared-invoice', 'attachment-shared-0', 'invoice',
                     'oa-shared:item:0', '0', 'invoice-shared.pdf'
                 ),
                 (
-                    'cache-shared-invoice', 'attachment-shared', 'attachment_identity_invoice',
+                    'cache-shared-invoice', 'attachment-shared-1', 'invoice',
                     'oa-shared:item:1', '1', 'invoice-shared.pdf'
                 )
             """
+        )
+        reconcile_oa_attachment_cache_identity_sources(
+            self.connection,
+            cache_source_attachment_keys=["cache-shared-invoice"],
         )
         manual_link = {
             "source_type": "manual_invoice_import",

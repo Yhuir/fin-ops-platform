@@ -90,6 +90,384 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(sum(fact.amount_minor for fact in batch.facts), 170_949)
         self.assertEqual(identities(groups), {fact.member_key for fact in batch.facts})
 
+    def test_unique_oa_attachment_item_owner_forms_one_unpaired_display_group(self) -> None:
+        rows = {
+            "oa-owner": {
+                "id": "oa-owner",
+                "type": "oa",
+                "object_identity_key": "oa-owner",
+                "source_aliases": ["oa-historical"],
+                "expense_items": [
+                    {
+                        "id": "oa-owner:item:0:current",
+                        "row_index": "0",
+                    }
+                ],
+            },
+            **{
+                f"invoice-{index}": {
+                    "id": f"invoice-{index}",
+                    "type": "invoice",
+                    "object_identity_key": f"invoice-{index}",
+                    "source_kind": "oa_attachment_invoice",
+                    "source_links": [
+                        {
+                            "source_type": "oa_attachment_invoice",
+                            "source_expense_item_id": "oa-owner:item:0:current",
+                            "source_expense_row_index": "0",
+                        }
+                    ],
+                    "source_expense_item_ids": ["oa-owner:item:0:current"],
+                }
+                for index in (1, 2)
+            },
+        }
+
+        payload = self.service.group_payload(
+            "2026-06",
+            rows_by_id=rows,
+            active_relations=[],
+        )
+
+        self.assertEqual(payload["summary"]["unpaired_count"], 1)
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(group["group_type"], "unpaired")
+        self.assertEqual(group["reason"], "oa_attachment_item_owner")
+        self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-owner"])
+        self.assertEqual(
+            [row["id"] for row in group["invoice_rows"]],
+            ["invoice-1", "invoice-2"],
+        )
+        self.assertTrue(group["group_id"].startswith("source-owned:oa:"))
+
+    def test_source_owner_in_active_relation_adds_display_only_invoice(self) -> None:
+        rows = {
+            "oa-owner": {
+                "id": "oa-owner",
+                "type": "oa",
+                "object_identity_key": "oa-owner",
+                "available_actions": ["detail", "view_relation"],
+                "expense_items": [
+                    {"id": "oa-owner:item:0:current", "row_index": "0"}
+                ],
+            },
+            "bank-1": {
+                "id": "bank-1",
+                "type": "bank",
+                "object_identity_key": "bank-1",
+                "available_actions": ["detail", "cancel_link"],
+            },
+            "invoice-1": {
+                "id": "invoice-1",
+                "type": "invoice",
+                "object_identity_key": "invoice-1",
+                "source_kind": "oa_attachment_invoice",
+                "source_links": [
+                    {
+                        "source_type": "oa_expense_item_invoice",
+                        "source_expense_item_id": "oa-owner:item:0:current",
+                    }
+                ],
+                "source_expense_item_ids": ["oa-owner:item:0:current"],
+                "available_actions": ["detail", "confirm_link"],
+            },
+        }
+        relation = {
+            "case_id": "CASE-OWNER",
+            "row_ids": ["oa-owner", "bank-1"],
+            "row_types": ["oa", "bank"],
+            "status": "active",
+            "version": 7,
+            "special_metadata": {"requires_invoice": False},
+        }
+        original_rows = deepcopy(rows)
+        original_relation = deepcopy(relation)
+
+        baseline = self.service.group_payload(
+            "2026-06",
+            rows_by_id={key: value for key, value in rows.items() if key != "invoice-1"},
+            active_relations=[relation],
+        )
+        payload = self.service.group_payload(
+            "2026-06",
+            rows_by_id=rows,
+            active_relations=[relation],
+        )
+
+        relation_group = next(
+            group
+            for zone in ("paired", "unpaired")
+            for group in payload[zone]["groups"]
+            if group.get("case_id") == "CASE-OWNER"
+        )
+        baseline_group = next(
+            group
+            for zone in ("paired", "unpaired")
+            for group in baseline[zone]["groups"]
+            if group.get("case_id") == "CASE-OWNER"
+        )
+        self.assertEqual(relation_group["case_id"], "CASE-OWNER")
+        self.assertEqual(
+            [row["id"] for row in relation_group["invoice_rows"]],
+            ["invoice-1"],
+        )
+        self.assertEqual(
+            relation_group["invoice_rows"][0]["workbench_membership_role"],
+            "source_owned_display",
+        )
+        self.assertEqual(
+            relation_group["formal_member_ids"],
+            ["oa-owner", "bank-1"],
+        )
+        self.assertEqual(relation_group["formal_member_types"], ["oa", "bank"])
+        self.assertEqual(relation_group["display_only_member_ids"], ["invoice-1"])
+        self.assertEqual(relation_group["relation_version"], 7)
+        self.assertEqual(
+            relation_group["invoice_rows"][0]["available_actions"],
+            ["detail"],
+        )
+        self.assertNotIn("case_id", relation_group["invoice_rows"][0])
+        self.assertNotIn("relation_mode", relation_group["invoice_rows"][0])
+        self.assertEqual(
+            relation_group["oa_rows"][0]["available_actions"],
+            baseline_group["oa_rows"][0]["available_actions"],
+        )
+        self.assertEqual(
+            relation_group["bank_rows"][0]["available_actions"],
+            baseline_group["bank_rows"][0]["available_actions"],
+        )
+        self.assertEqual(
+            relation_group["can_withdraw"],
+            baseline_group["can_withdraw"],
+        )
+        self.assertEqual(relation_group["completion"], baseline_group["completion"])
+        self.assertEqual(
+            relation_group.get("workbench_anomaly"),
+            baseline_group.get("workbench_anomaly"),
+        )
+        self.assertEqual(
+            payload["summary"]["unpaired_count"],
+            baseline["summary"]["unpaired_count"],
+        )
+        self.assertEqual(rows, original_rows)
+        self.assertEqual(relation, original_relation)
+
+    def test_incomplete_multi_link_source_ownership_fails_closed(self) -> None:
+        rows = {
+            "oa-owner": {
+                "id": "oa-owner",
+                "type": "oa",
+                "object_identity_key": "oa-owner",
+                "expense_items": [
+                    {"id": "oa-owner:item:0:current", "row_index": "0"}
+                ],
+            },
+            "invoice-1": {
+                "id": "invoice-1",
+                "type": "invoice",
+                "object_identity_key": "invoice-1",
+                "source_kind": "oa_attachment_invoice",
+                "source_links": [
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "source_expense_item_id": "oa-owner:item:0:current",
+                    },
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "source_expense_item_id": "oa-owner:item:9:missing",
+                    },
+                ],
+            },
+        }
+
+        payload = self.service.group_payload(
+            "2026-06",
+            rows_by_id=rows,
+            active_relations=[],
+        )
+
+        self.assertEqual(payload["summary"]["unpaired_count"], 2)
+        self.assertTrue(
+            all(
+                group["reason"] == "no_active_relation"
+                for group in payload["unpaired"]["groups"]
+            )
+        )
+
+    def test_conflicting_current_item_identity_aliases_fail_closed(self) -> None:
+        rows = {
+            "oa-owner": {
+                "id": "oa-owner",
+                "type": "oa",
+                "object_identity_key": "oa-owner",
+                "expense_items": [
+                    {
+                        "id": "oa-owner:item:0:current",
+                        "row_id": "oa-owner:item:0:current",
+                        "expense_item_id": "oa-owner:item:0:stale",
+                    }
+                ],
+            },
+            "invoice-1": {
+                "id": "invoice-1",
+                "type": "invoice",
+                "object_identity_key": "invoice-1",
+                "source_kind": "oa_attachment_invoice",
+                "source_links": [
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "source_expense_item_id": "oa-owner:item:0:current",
+                    }
+                ],
+            },
+        }
+
+        payload = self.service.group_payload(
+            "2026-06",
+            rows_by_id=rows,
+            active_relations=[],
+        )
+
+        self.assertEqual(payload["summary"]["unpaired_count"], 2)
+        self.assertTrue(
+            all(
+                group["reason"] == "no_active_relation"
+                for group in payload["unpaired"]["groups"]
+            )
+        )
+
+    def test_ambiguous_item_owner_fails_closed_to_singletons(self) -> None:
+        shared_item = "oa-shared:item:0:current"
+        rows = {
+            oa_id: {
+                "id": oa_id,
+                "type": "oa",
+                "object_identity_key": oa_id,
+                "source_aliases": ["oa-shared"],
+                "expense_items": [{"id": shared_item, "row_index": "0"}],
+            }
+            for oa_id in ("oa-a", "oa-b")
+        }
+        rows["invoice-1"] = {
+            "id": "invoice-1",
+            "type": "invoice",
+            "object_identity_key": "invoice-1",
+            "source_kind": "oa_attachment_invoice",
+            "source_links": [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_expense_item_id": "oa-shared:item:0:old",
+                    "source_expense_row_index": "0",
+                }
+            ],
+            "source_expense_item_ids": ["oa-shared:item:0:old"],
+        }
+
+        payload = self.service.group_payload(
+            "2026-06",
+            rows_by_id=rows,
+            active_relations=[],
+        )
+
+        self.assertEqual(payload["summary"]["unpaired_count"], 3)
+        self.assertTrue(
+            all(
+                group["reason"] == "no_active_relation"
+                for group in payload["unpaired"]["groups"]
+            )
+        )
+
+    def test_historical_alias_and_row_index_do_not_create_source_ownership(self) -> None:
+        rows = {
+            "oa-a": {
+                "id": "oa-a",
+                "type": "oa",
+                "object_identity_key": "oa-a",
+                "source_aliases": ["oa-historical"],
+                "expense_items": [
+                    {"id": "oa-a:item:0:current", "row_index": "0"}
+                ],
+            },
+            "oa-b": {
+                "id": "oa-b",
+                "type": "oa",
+                "object_identity_key": "oa-b",
+                "source_aliases": ["oa-historical"],
+                "expense_items": [
+                    {"id": "oa-b:item:0:current", "row_index": "0"}
+                ],
+            },
+            "invoice-1": {
+                "id": "invoice-1",
+                "type": "invoice",
+                "object_identity_key": "invoice-1",
+                "source_kind": "oa_attachment_invoice",
+                "source_links": [
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "derived_from_oa_id": "oa-historical",
+                        "source_expense_item_id": "oa-historical:item:0:old",
+                        "source_expense_row_index": "0",
+                    }
+                ],
+            },
+        }
+
+        payload = self.service.group_payload(
+            "2026-06",
+            rows_by_id=rows,
+            active_relations=[],
+        )
+
+        self.assertEqual(payload["summary"]["unpaired_count"], 3)
+        self.assertTrue(
+            all(
+                group["reason"] == "no_active_relation"
+                for group in payload["unpaired"]["groups"]
+            )
+        )
+
+    def test_single_historical_alias_row_index_does_not_promote_current_item_owner(
+        self,
+    ) -> None:
+        rows = {
+            "oa-current": {
+                "id": "oa-current",
+                "type": "oa",
+                "object_identity_key": "oa-current",
+                "source_aliases": ["oa-historical"],
+                "expense_items": [
+                    {"id": "oa-current:item:0:current", "row_index": "0"}
+                ],
+            },
+            "invoice-legacy": {
+                "id": "invoice-legacy",
+                "type": "invoice",
+                "object_identity_key": "invoice-legacy",
+                "source_kind": "oa_attachment_invoice",
+                "source_links": [
+                    {
+                        "source_type": "oa_attachment_invoice",
+                        "derived_from_oa_id": "oa-historical",
+                        "source_expense_item_id": "oa-historical:item:0:old",
+                        "source_expense_row_index": "0",
+                    }
+                ],
+            },
+        }
+
+        payload = self.service.group_payload(
+            "2026-06",
+            rows_by_id=rows,
+            active_relations=[],
+        )
+
+        self.assertEqual(payload["summary"]["unpaired_count"], 2)
+        self.assertEqual(
+            {group["reason"] for group in payload["unpaired"]["groups"]},
+            {"no_active_relation"},
+        )
+
     def test_partition_is_exact_and_candidate_metadata_cannot_merge_rows(self) -> None:
         rows = {
             "oa-a": {"id": "oa-a", "type": "oa", "object_identity_key": "oa-a", "candidate_key": "same"},

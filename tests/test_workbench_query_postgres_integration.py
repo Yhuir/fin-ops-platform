@@ -2160,6 +2160,471 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             [("invoice", "invoice-august-owner")],
         )
 
+    def test_oa_attachment_source_owner_groups_are_readable_and_formal_safe(self) -> None:
+        self.raw_connection.execute(
+            """
+            with inserted_oa as (
+                insert into app.oa_applications(
+                    oa_source_id, form_id, form_type, row_id, status,
+                    workflow_status, applicant, application_date, scope_month,
+                    project_name, amount, currency, normalized_payload, raw_payload
+                ) values (
+                    'oa-source-owned-unpaired', 'daily-expense', '日常报销',
+                    'oa-source-owned-unpaired', 'active', 'completed', '测试员',
+                    '2026-06-20', '2026-06-01', '来源归属未关联', 290, 'CNY',
+                    '{"source_aliases":["oa-source-owned-historical"],"expense_items":[{"id":"oa-source-owned-unpaired:item:0:current","row_index":"0","amount":"290"}]}'::jsonb,
+                    '{}'::jsonb
+                ) returning id
+            )
+            insert into app.oa_application_items(
+                oa_application_id, oa_source_id, form_id, row_id, item_type,
+                item_no, amount, normalized_payload, raw_payload
+            )
+            select id, 'oa-source-owned-unpaired', 'daily-expense',
+                   'oa-source-owned-unpaired:item:0:current', 'expense', '0',
+                   290, '{"row_index":"0"}'::jsonb, '{}'::jsonb
+            from inserted_oa
+            """
+        )
+        source_links = json.dumps(
+            [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-source-owned-historical",
+                    "source_expense_item_id": (
+                        "oa-source-owned-unpaired:item:0:current"
+                    ),
+                    "source_expense_row_index": "0",
+                }
+            ],
+            ensure_ascii=False,
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status,
+                workbench_visibility, source_links, raw_payload
+            ) values
+                (
+                    'invoice-source-owned-145-a', 'input',
+                    'SOURCE-OWNED-INV-145-A', '2026-07-20', '2026-07-01',
+                    145, 145, 145, 'active', 'visible', %s::jsonb, '{}'::jsonb
+                ),
+                (
+                    'invoice-source-owned-145-b', 'input',
+                    'SOURCE-OWNED-INV-145-B', '2026-07-20', '2026-07-01',
+                    145, 145, 145, 'active', 'visible', %s::jsonb, '{}'::jsonb
+                )
+            """,
+            (source_links, source_links),
+        )
+        incomplete_source_links = json.dumps(
+            [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_expense_item_id": (
+                        "oa-source-owned-unpaired:item:0:current"
+                    ),
+                },
+                {
+                    "source_type": "oa_attachment_invoice",
+                },
+            ],
+            ensure_ascii=False,
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status,
+                workbench_visibility, source_links, raw_payload
+            ) values (
+                'invoice-source-owner-incomplete', 'input',
+                'INCOMPLETE-SOURCE-OWNER', '2026-07-20', '2026-07-01',
+                17, 17, 17, 'active', 'visible', %s::jsonb, '{}'::jsonb
+            )
+            """,
+            (incomplete_source_links,),
+        )
+        self.raw_connection.execute(
+            """
+            with inserted_oa as (
+                insert into app.oa_applications(
+                    oa_source_id, form_id, form_type, row_id, status,
+                    workflow_status, applicant, application_date, scope_month,
+                    project_name, amount, currency, normalized_payload, raw_payload
+                ) values (
+                    'oa-source-owned-second', 'daily-expense', '日常报销',
+                    'oa-source-owned-second', 'active', 'completed', '第二测试员',
+                    '2026-07-19', '2026-07-01', '第二来源归属未关联', 88, 'CNY',
+                    '{"expense_items":[{"id":"oa-source-owned-second:item:0","row_index":"0","amount":"88"}]}'::jsonb,
+                    '{}'::jsonb
+                ) returning id
+            )
+            insert into app.oa_application_items(
+                oa_application_id, oa_source_id, form_id, row_id, item_type,
+                item_no, amount, normalized_payload, raw_payload
+            )
+            select id, 'oa-source-owned-second', 'daily-expense',
+                   'oa-source-owned-second:item:0', 'expense', '0', 88,
+                   '{"row_index":"0"}'::jsonb, '{}'::jsonb
+            from inserted_oa
+            """
+        )
+        second_source_link = json.dumps(
+            [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-source-owned-second",
+                    "source_expense_item_id": "oa-source-owned-second:item:0",
+                    "source_expense_row_index": "0",
+                }
+            ],
+            ensure_ascii=False,
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status,
+                workbench_visibility, source_links, raw_payload
+            ) values (
+                'invoice-source-owned-second', 'input',
+                'SOURCE-OWNED-INV-SECOND', '2026-07-19', '2026-07-01',
+                88, 88, 88, 'active', 'visible', %s::jsonb, '{}'::jsonb
+            )
+            """,
+            (second_source_link,),
+        )
+
+        unpaired = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="SOURCE-OWNED-INV-145",
+        )
+
+        self.assertEqual(unpaired["total"], 1, unpaired)
+        source_group = unpaired["groups"][0]
+        self.assertEqual(
+            [row["id"] for row in source_group["oa_rows"]],
+            ["oa-source-owned-unpaired"],
+        )
+        self.assertEqual(
+            {row["id"] for row in source_group["invoice_rows"]},
+            {"invoice-source-owned-145-a", "invoice-source-owned-145-b"},
+        )
+        incomplete_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="INCOMPLETE-SOURCE-OWNER",
+        )
+        self.assertEqual(incomplete_page["total"], 1, incomplete_page)
+        self.assertEqual(incomplete_page["groups"][0]["oa_rows"], [])
+        self.assertEqual(
+            [row["id"] for row in incomplete_page["groups"][0]["invoice_rows"]],
+            ["invoice-source-owner-incomplete"],
+        )
+        source_detail = self.repository.get_workbench_group_detail(
+            scope_key="2026-07",
+            zone="unpaired",
+            group_id=str(source_group["group_id"]),
+            detail_key=str(source_group["detail_key"]),
+        )
+        self.assertIsNotNone(source_detail)
+        assert source_detail is not None
+        self.assertEqual(
+            {row["id"] for row in source_detail["group"]["invoice_rows"]},
+            {"invoice-source-owned-145-a", "invoice-source-owned-145-b"},
+        )
+        all_source_page = self.repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="unpaired",
+            search="SOURCE-OWNED-INV-145",
+        )
+        self.assertEqual(all_source_page["total"], 1, all_source_page)
+        all_source_group = all_source_page["groups"][0]
+        self.assertEqual(
+            {row["id"] for row in all_source_group["invoice_rows"]},
+            {"invoice-source-owned-145-a", "invoice-source-owned-145-b"},
+        )
+        all_source_detail = self.repository.get_workbench_group_detail(
+            scope_key="all",
+            zone="unpaired",
+            group_id=str(all_source_group["group_id"]),
+            detail_key=str(all_source_group["detail_key"]),
+        )
+        self.assertIsNotNone(all_source_detail)
+        assert all_source_detail is not None
+        self.assertEqual(
+            {row["id"] for row in all_source_detail["group"]["invoice_rows"]},
+            {"invoice-source-owned-145-a", "invoice-source-owned-145-b"},
+        )
+        filtered_source = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="SOURCE-OWNED-INV-145",
+            source_kind="oa_attachment_invoice",
+            column_filters={
+                "oa": {"applicant": ["applicant:测试员"]},
+            },
+        )
+        self.assertEqual(filtered_source["total"], 1, filtered_source)
+        cursor_first = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="SOURCE-OWNED-INV",
+            page_size=1,
+        )
+        self.assertEqual(cursor_first["total"], 2, cursor_first)
+        self.assertTrue(cursor_first["has_more"])
+        self.assertIsNotNone(cursor_first["next_cursor"])
+        cursor_second = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="SOURCE-OWNED-INV",
+            page_size=1,
+            cursor=cursor_first["next_cursor"],
+        )
+        self.assertEqual(cursor_second["total"], 2, cursor_second)
+        self.assertFalse(cursor_second["has_more"])
+        self.assertNotEqual(
+            cursor_first["groups"][0]["group_id"],
+            cursor_second["groups"][0]["group_id"],
+        )
+        source_row_detail = self.repository.get_workbench_row_detail(
+            scope_key="2026-07",
+            row_id="invoice-source-owned-145-a",
+            row_type="invoice",
+        )
+        self.assertIsNotNone(source_row_detail)
+        assert source_row_detail is not None
+        self.assertEqual(
+            source_row_detail["row"]["id"],
+            "invoice-source-owned-145-a",
+        )
+
+        self.raw_connection.execute(
+            """
+            with inserted_oa as (
+                insert into app.oa_applications(
+                    oa_source_id, form_id, form_type, row_id, status,
+                    workflow_status, applicant, application_date, scope_month,
+                    project_name, amount, currency, normalized_payload, raw_payload
+                ) values (
+                    'oa-source-display', 'payment-request', '支付申请',
+                    'oa-source-display', 'active', 'completed', '展示归属测试员',
+                    '2026-07-21', '2026-07-01', '展示归属正式关系', 300, 'CNY',
+                    '{"expense_items":[{"id":"oa-source-display:item:0","row_index":"0","amount":"300"}]}'::jsonb,
+                    '{}'::jsonb
+                ) returning id
+            )
+            insert into app.oa_application_items(
+                oa_application_id, oa_source_id, form_id, row_id, item_type,
+                item_no, amount, normalized_payload, raw_payload
+            )
+            select id, 'oa-source-display', 'payment-request',
+                   'oa-source-display:item:0', 'expense', '0', 300,
+                   '{"row_index":"0"}'::jsonb, '{}'::jsonb
+            from inserted_oa;
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                trade_time, summary, raw_payload, status
+            ) values (
+                'bank-source-display', '6222000011118109', '基本户', 'outflow',
+                'SOURCE DISPLAY OWNER BANK', 300, -300, '2026-07-21',
+                '2026-07-01', '2026-07-21 10:00:00+08', '展示归属',
+                '{}'::jsonb, 'active'
+            );
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'CASE-SOURCE-DISPLAY', 'manual_confirmed', 'active', 9,
+                '2026-07-01', array['oa-source-display','bank-source-display'],
+                array['oa','bank'], '{}'::jsonb,
+                '{"requires_oa":true,"requires_invoice":false}'::jsonb,
+                '{}'::jsonb
+            )
+            """
+        )
+        baseline_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="SOURCE DISPLAY OWNER BANK",
+        )
+        self.assertEqual(baseline_page["total"], 1, baseline_page)
+        baseline_group = baseline_page["groups"][0]
+        relation_before = self.raw_connection.fetch_one(
+            """
+            select row_ids, row_types, version
+            from app.workbench_pair_relations
+            where case_id = 'CASE-SOURCE-DISPLAY'
+            """
+        )
+        display_link = json.dumps(
+            [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-source-display",
+                    "source_expense_item_id": "oa-source-display:item:0",
+                    "source_expense_row_index": "0",
+                }
+            ],
+            ensure_ascii=False,
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status,
+                workbench_visibility, source_links, raw_payload
+            ) values (
+                'invoice-source-display', 'input', 'SOURCE-DISPLAY-INVOICE',
+                '2026-07-21', '2026-07-01', 300, 300, 300, 'active',
+                'visible', %s::jsonb, '{}'::jsonb
+            )
+            """,
+            (display_link,),
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status,
+                workbench_visibility, source_links, raw_payload
+            ) values (
+                'invoice-source-display-cross-month', 'input',
+                'SOURCE-DISPLAY-CROSS-MONTH', '2026-08-02', '2026-08-01',
+                50, 50, 50, 'active', 'visible', %s::jsonb, '{}'::jsonb
+            )
+            """,
+            (display_link,),
+        )
+
+        display_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            search="SOURCE-DISPLAY-INVOICE",
+        )
+
+        self.assertEqual(display_page["total"], 1, display_page)
+        display_group = display_page["groups"][0]
+        self.assertEqual(display_group["detail_key"], "CASE-SOURCE-DISPLAY")
+        self.assertEqual(
+            display_group["formal_member_ids"],
+            ["oa-source-display", "bank-source-display"],
+        )
+        self.assertEqual(display_group["formal_member_types"], ["oa", "bank"])
+        self.assertEqual(
+            display_group["invoice_rows"][0]["workbench_membership_role"],
+            "source_owned_display",
+        )
+        self.assertEqual(
+            display_group["completion"],
+            baseline_group["completion"],
+        )
+        self.assertEqual(
+            display_group.get("workbench_anomaly"),
+            baseline_group.get("workbench_anomaly"),
+        )
+        self.assertEqual(display_group["can_withdraw"], baseline_group["can_withdraw"])
+        relation_after = self.raw_connection.fetch_one(
+            """
+            select row_ids, row_types, version
+            from app.workbench_pair_relations
+            where case_id = 'CASE-SOURCE-DISPLAY'
+            """
+        )
+        self.assertEqual(relation_after, relation_before)
+
+        self.connection.statements.clear()
+        display_detail = self.repository.get_workbench_group_detail(
+            scope_key="2026-07",
+            zone="unpaired",
+            group_id=str(display_group["group_id"]),
+            detail_key=str(display_group["detail_key"]),
+        )
+        self.assertIsNotNone(display_detail)
+        assert display_detail is not None
+        detail_group = display_detail["group"]
+        self.assertEqual(
+            detail_group["formal_member_ids"],
+            ["oa-source-display", "bank-source-display"],
+        )
+        self.assertEqual(detail_group["formal_member_types"], ["oa", "bank"])
+        self.assertEqual(detail_group["relation_version"], 9)
+        self.assertEqual(detail_group["completion"], baseline_group["completion"])
+        self.assertEqual(
+            detail_group.get("workbench_anomaly"),
+            baseline_group.get("workbench_anomaly"),
+        )
+        self.assertEqual(detail_group["can_withdraw"], baseline_group["can_withdraw"])
+        self.assertEqual(
+            {row["id"] for row in detail_group["invoice_rows"]},
+            {"invoice-source-display", "invoice-source-display-cross-month"},
+        )
+        self.assertTrue(
+            all(
+                row["workbench_membership_role"] == "source_owned_display"
+                and row["available_actions"] == ["detail"]
+                for row in detail_group["invoice_rows"]
+            )
+        )
+        concrete_target_queries = [
+            statement
+            for statement in self.connection.statements
+            if statement["operation"] == "fetch_all"
+            and "requested_target as" in str(statement.get("raw_sql") or "").lower()
+        ]
+        self.assertEqual(len(concrete_target_queries), 1)
+        all_display_page = self.repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="unpaired",
+            search="SOURCE DISPLAY OWNER BANK",
+        )
+        self.assertEqual(all_display_page["total"], 1, all_display_page)
+        all_display_group = all_display_page["groups"][0]
+        self.assertEqual(
+            {row["id"] for row in all_display_group["invoice_rows"]},
+            {"invoice-source-display", "invoice-source-display-cross-month"},
+        )
+        self.connection.statements.clear()
+        all_display_detail = self.repository.get_workbench_group_detail(
+            scope_key="all",
+            zone="unpaired",
+            group_id=str(all_display_group["group_id"]),
+            detail_key=str(all_display_group["detail_key"]),
+        )
+        self.assertIsNotNone(all_display_detail)
+        assert all_display_detail is not None
+        self.assertEqual(
+            {
+                row["id"]
+                for row in all_display_detail["group"]["invoice_rows"]
+            },
+            {"invoice-source-display", "invoice-source-display-cross-month"},
+        )
+        target_queries = [
+            statement
+            for statement in self.connection.statements
+            if statement["operation"] == "fetch_all"
+            and "requested_target as" in str(statement.get("raw_sql") or "").lower()
+        ]
+        self.assertEqual(len(target_queries), 1)
+        target_sql = str(target_queries[0]["raw_sql"]).lower()
+        self.assertIn(
+            "invoice.invoice_month = invoice_scope.scope_month",
+            target_sql,
+        )
+        self.assertNotIn(
+            "scope.scope_key = 'all' or invoice.invoice_month",
+            target_sql,
+        )
+        self.assertNotIn("scoped_source_keys", target_sql)
+        self.assertNotIn("canonical_groups as materialized", target_sql)
+
     def test_statement_count_is_page_size_independent_and_emits_timings(self) -> None:
         statement_counts: list[int] = []
         for page_size in (50, 100):

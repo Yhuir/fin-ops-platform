@@ -22,6 +22,7 @@ STANDARD_WRITE_E2E_SCENARIO="${FINOPS_STANDARD_WRITE_E2E_SCENARIO:-/opt/fin-ops/
 RELEASE_GATE_EVIDENCE_ROOT="${FINOPS_RELEASE_GATE_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/release-gates}"
 SCHEMA_COMPATIBILITY_EVIDENCE_ROOT="${FINOPS_SCHEMA_COMPATIBILITY_EVIDENCE_ROOT:-/opt/fin-ops/runtime-smoke/schema-compatibility}"
 SETTINGS_ACL_EVIDENCE_ROOT="${FINOPS_SETTINGS_ACL_EVIDENCE_ROOT:-/opt/fin-ops/evidence}"
+readonly IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT="/opt/fin-ops/runtime-smoke/import-audit-repair-artifacts"
 SETTINGS_ACL_CONTRACT="settings-access-control-v1"
 LEGACY_ADMIN_ENV="FIN_OPS_""ADMIN_USERNAMES"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
@@ -105,7 +106,9 @@ commands:
                                       run the fixed production relation runner; admin token is read from stdin
   settings-normalize <release-name> [--dry-run|--execute]
                                       normalize App settings through the canonical service/repository boundary
-  import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>] [--retire-etc-session-id <id> ...] [--normalize-reverted-batch-id <id> ...] [--discover-recover-import-job-id <id>] [--recover-import-job-id <id> --recover-event-id <id> --recover-background-job-id <id> --recover-session-id <id> --recover-file-id <id> ...] [--repair-bank-source <session>=<file,...> ... --expected-bank-target-count <n> --expected-bank-protected-count <n> --expected-bank-duplicate-delete-count <n> --expected-bank-replay-create-count <n> --expected-bank-replay-repaired-duplicate-count <n> --operator-id <id> [--cleanup-related-bank-duplicates --expected-bank-category-cleanup-count <n> --expected-bank-workbench-withdraw-count <n> --expected-bank-workbench-transaction-id <id>]]
+  import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>] [--repair-all-oa-attachment-invoice-links --rollback-manifest-path <fixed-root/path> --operator-id <id> --reason <text>] [--retire-etc-session-id <id> ...] [--normalize-reverted-batch-id <id> ...] [--discover-recover-import-job-id <id>] [--recover-import-job-id <id> --recover-event-id <id> --recover-background-job-id <id> --recover-session-id <id> --recover-file-id <id> ...] [--repair-bank-source <session>=<file,...> ... --expected-bank-target-count <n> --expected-bank-protected-count <n> --expected-bank-duplicate-delete-count <n> --expected-bank-replay-create-count <n> --expected-bank-replay-repaired-duplicate-count <n> --operator-id <id> [--cleanup-related-bank-duplicates --expected-bank-category-cleanup-count <n> --expected-bank-workbench-withdraw-count <n> --expected-bank-workbench-transaction-id <id>]]
+  import-audit-repair-artifact-delete <artifact-name> <rollback-manifest-fingerprint>
+                                      verify and delete one task-scoped rollback artifact
                                       repair strict import facts through the canonical PostgreSQL boundary
   bank-transaction-category-repair <release-name> [--dry-run|--apply --operator <actor> --expected-candidate-count <count>]
                                       repair proven historical manual category clears through the canonical writer
@@ -2203,10 +2206,64 @@ import_audit_repair() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "import-audit-repair requires release name"
   shift
+  [[ -z "${FINOPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT:-}" ]] \
+    || die "import Audit repair artifact root override is not supported"
   local src
   src="$(release_src "$release")"
   assert_runtime_env_contract
-  run_with_runtime_env "$src" -m fin_ops_platform.tools.import_audit_repair_ops "$@"
+  [[ ! -L "$IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT" ]] \
+    || die "import Audit repair artifact root must not be a symlink"
+  install -d -m 0700 -o root -g root "$IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT"
+  (
+    export FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT="$IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT"
+    run_with_runtime_env "$src" -m fin_ops_platform.tools.import_audit_repair_ops "$@"
+  )
+}
+
+import_audit_repair_artifact_delete() {
+  local artifact_name="${1:-}" expected_fingerprint="${2:-}"
+  [[ -z "${FINOPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT:-}" ]] \
+    || die "import Audit repair artifact root override is not supported"
+  [[ "$artifact_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.json$ ]] \
+    || die "import Audit repair artifact name must be a safe .json filename"
+  [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ ]] \
+    || die "import Audit repair artifact delete requires a lowercase SHA-256 fingerprint"
+  [[ $# -le 2 ]] \
+    || die "import-audit-repair-artifact-delete accepts only artifact name and fingerprint"
+
+  local artifact_path actual_fingerprint
+  artifact_path="$IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT/$artifact_name"
+  [[ -d "$IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT" && ! -L "$IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT" ]] \
+    || die "import Audit repair artifact root is unavailable"
+  [[ "$(stat -c '%U:%a' "$IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT")" == "root:700" ]] \
+    || die "import Audit repair artifact root must be root-owned with mode 0700"
+  [[ -f "$artifact_path" && ! -L "$artifact_path" ]] \
+    || die "import Audit repair artifact is unavailable"
+  [[ "$(stat -c '%U:%a:%h' "$artifact_path")" == "root:600:1" ]] \
+    || die "import Audit repair artifact must be root-owned, mode 0600, with one hard link"
+  actual_fingerprint="$($API_PYTHON - "$artifact_path" <<'PY'
+import hashlib
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+if not isinstance(manifest, dict):
+    raise SystemExit("rollback manifest must be a JSON object")
+encoded = json.dumps(
+    manifest,
+    ensure_ascii=False,
+    sort_keys=True,
+    default=str,
+).encode("utf-8")
+print(hashlib.sha256(encoded).hexdigest())
+PY
+)"
+  [[ "$actual_fingerprint" == "$expected_fingerprint" ]] \
+    || die "import Audit repair artifact fingerprint mismatch"
+  rm -f -- "$artifact_path"
+  printf '{"status":"deleted","artifact_name":"%s","rollback_manifest_fingerprint":"%s"}\n' \
+    "$artifact_name" "$expected_fingerprint"
 }
 
 bank_transaction_category_repair() {
@@ -3111,6 +3168,10 @@ case "$cmd" in
   import-audit-repair)
     shift
     import_audit_repair "$@"
+    ;;
+  import-audit-repair-artifact-delete)
+    shift
+    import_audit_repair_artifact_delete "$@"
     ;;
   bank-transaction-category-repair)
     shift

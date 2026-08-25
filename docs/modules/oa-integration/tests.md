@@ -142,3 +142,10 @@ Nightly CI 应至少覆盖：
 - 真实 OA 菜单角色同步、同域 cookie、iframe 下载/跳转、Nginx 代理行为需要部署环境验证。
 - 真实 Postgres/RabbitMQ/Redis/systemd worker drain 和 App Status heartbeat 需要运行环境验证。
 - 全页面全角色矩阵成本高，当前由代表性 API/UI 权限测试和 `permissions-and-audit` 模块统一覆盖。
+
+## 2026-08-25 - OA 附件当前子付款项归属回归
+
+- Business core：`tests/test_oa_attachment_invoice_promotion_service.py` 保护结构化 current item 覆盖嵌套历史 owner，并继续保护同一 OA 多 item、跨 OA fail closed 与既有 provenance 合并。
+- Repository/service：`tests/test_oa_projection_sql_runtime.py` 保护 projection 覆盖 stale owner 且保留其它 parser 字段；`tests/test_postgres_repositories_boundaries.py` 与 `tests/test_oa_pending_payment_postgres_integration.py` 保护 bridge 的 OA scope → affected cache keys → parsed occurrence 级 unique current attachment owner → scoped cleanup。覆盖 raw stale source 零 promotion、exact current bridge 可 promotion、同 OA 单 occurrence 多 attachment owner fail closed、同物理附件多个 item occurrence 全保留，以及新增第二 OA owner 删除旧派生边但无关 key/`updated_at` 不变。
+- 运维修复闭环：`tests/test_invoice_expense_item_link_repair_service.py`、`tests/test_import_audit_repair_ops.py` 覆盖全量分类、visible-only 写入、hidden protection、legacy item-only parent 推导、同 OA 多 item/显式子集补齐、跨 OA ambiguity/conflict、fingerprint、固定 `0700` root 内 `O_EXCL/O_NOFOLLOW + 0600` 私有 rollback artifact、路径逃逸拒绝与 stdout 脱敏、serializable/advisory/CAS、原子审计和重复执行零写；deploy helper 测试锁定按 manifest fingerprint 精确删除 artifact 的受控入口。
+- API、前端、read model/worker：不适用；没有改变 HTTP/页面合同，也没有新增 read model、cache、queue 或 worker。现有 Workbench direct query 与跨页面回归负责证明消费链不受污染。

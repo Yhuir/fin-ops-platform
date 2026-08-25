@@ -164,6 +164,7 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 - Forward-only migration 已执行：禁止自动回滚，保持 maintenance 并 forward repair。
 - 不通过恢复旧 worker/env、重建旧 projection、手写 SQL 或删 queue 行解阻。
 - repair 工具必须先 dry-run，绑定 source fingerprint、精确计数、operator 和 reason；任何漂移在写前失败。银行 Audit terminal suspected link 修复还必须显式提供 `--expected-bank-audit-row-unlink-count`，只允许候选 release 按计划逐行 CAS 清空该引用。
+- OA 附件发票当前子付款项全量审计/修复复用固定 helper：`import-audit-repair <release> --dry-run --repair-all-oa-attachment-invoice-links --rollback-manifest-path /opt/fin-ops/runtime-smoke/import-audit-repair-artifacts/<task>.json`；artifact 路径只能位于 helper 硬编码的 root-owned `0700` 目录，helper 明确拒绝通过环境变量重定向该目录，文件以 `O_EXCL/O_NOFOLLOW` 创建且权限固定为 `0600`。CLI 模块直调同样必须显式配置受控 artifact root，缺失时失败关闭。执行必须复用同一 artifact 并追加 dry-run fingerprint、operator 与 reason。报告只输出 artifact 指纹与恢复条数；验证幂等和页面闭环后，使用 `import-audit-repair-artifact-delete <task>.json <rollback-manifest-fingerprint>` 校验指纹并精确删除该任务 artifact。不得删除平台 PITR、组织级备份或主数据库。
 - 已审阅的历史 OA 身份迁移通过一次性、fail-closed 数据迁移修复；迁移只接受 exact attachment key bridge、旧 item ID、row index 和指定 canonical 发票完全一致的证据。运行时只读取 indexed active alias，禁止把 cache bridge 放回 Workbench 页面热查询。
 
 本次 runtime 退役不创建数据库备份。如果独立数据修复明确创建 task-specific recovery artifact，完成验证后按

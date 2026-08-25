@@ -351,9 +351,14 @@ class OAAttachmentInvoicePromotionService:
                         continue
                     invoice = dict(attachment_invoice)
                     if expense_item_id:
-                        invoice.setdefault("source_expense_item_id", expense_item_id)
-                    if expense_row_index:
-                        invoice.setdefault("source_expense_row_index", expense_row_index)
+                        # The outer expense item is the current canonical owner.
+                        # Parsed attachment payloads may retain a historical item
+                        # identity, so they must not override this structured fact.
+                        invoice["source_expense_item_id"] = expense_item_id
+                        if expense_row_index:
+                            invoice["source_expense_row_index"] = expense_row_index
+                        else:
+                            invoice.pop("source_expense_row_index", None)
                     invoices.append(invoice)
             if not invoices:
                 invoices = [

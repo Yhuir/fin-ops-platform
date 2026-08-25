@@ -28,6 +28,15 @@ OA_ATTACHMENT_EVIDENCE_SOURCE_KINDS = {
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
+def _canonical_expense_item_id(item: dict[str, Any]) -> str:
+    identities = {
+        str(item.get(field_name) or "").strip()
+        for field_name in ("id", "row_id", "expense_item_id")
+        if str(item.get(field_name) or "").strip()
+    }
+    return next(iter(identities)) if len(identities) == 1 else ""
+
+
 class WorkbenchQueryService:
     def __init__(
         self,
@@ -560,7 +569,7 @@ class WorkbenchQueryService:
     ) -> list[dict[str, str]]:
         result: list[dict[str, str]] = []
         for item in cls._expense_items(record):
-            item_id = str(item.get("expense_item_id") or "").strip()
+            item_id = _canonical_expense_item_id(item)
             if not item_id:
                 continue
             result.append(

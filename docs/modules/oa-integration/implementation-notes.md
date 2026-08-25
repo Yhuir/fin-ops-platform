@@ -211,6 +211,15 @@
   - `bash scripts/verify.sh docs`
 - 未测风险：真实 OA 登录/RSA/openssl、目标申请人账号状态、OA 草稿页面、真实 OA Mongo 历史字段/附件/性能、同域 cookie/iframe/Nginx 下载、真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain。
 - 后续事项：发布前按 `tests.md` 的关键 smoke flows 做 staging/生产前验证；继续主控闭环到 `data-safety-reset`。
+
+## 2026-08-25 - OA 附件当前子付款项归属闭环
+
+- 根因：部分历史附件解析 payload 保留旧 expense item identity；promotion/projection 曾让嵌套旧字段覆盖当前结构化 item，identity bridge 也未在每次重算时证明 current item 存在、current OA owner 唯一并清理失效派生边。结果是 canonical 发票虽然有 `oa_attachment_invoice` provenance，关联台仍可能无法把它稳定放回当前 OA 子付款项。
+- 运行时收口：OA projection 与 promotion 始终以外层结构化 item id/row index 为当前权威 owner，保留其它 parser 字段；identity bridge 先把 OA row scope 收敛为受影响 cache keys，只对这些 keys 全局证明唯一 current OA owner 并清理失效派生边。跨 OA 多 owner fail closed；同一 canonical OA 多 item 继续合法。
+- 复发源收口：raw cache `source_kind=invoice/evidence/artifact` 只保留 parser occurrence，不再直接授权 reverse promotion。promotion 只消费 `attachment_identity_invoice`，并集合式复核 current application、attachment 和 item 后输出当前 item/row index/name。bridge 的唯一性改为“每个 parsed attachment occurrence 唯一 current attachment owner”，同一 OA 内多个 owner 也 fail closed；同一物理附件以不同 occurrence key 归属多个 item 时继续完整保留。
+- 存量修复：复用 `import_audit_repair_ops` 增加全量 OA attachment ownership 模式。它扫描全部非删除 OA provenance 发票，只允许 visible canonical 发票在强发票 identity + 当前 attachment owner 同时成立时追加 `oa_expense_item_invoice`；保留原附件来源，不写 alias、不写 relation case。hidden duplicate、unresolved、跨 OA ambiguous/conflict 只报告零写。
+- 数据安全：dry-run 产生 source fingerprint，并通过显式 `--rollback-manifest-path` 在 helper 固定的 root-owned `0700` 目录内以 `O_EXCL + O_NOFOLLOW + 0600` 写 scoped rollback artifact；普通 stdout 只含 rollback fingerprint/count 与哈希化 lineage，不输出原始 source links、附件 key 或 OA/item parent。execute 在 serializable transaction + advisory lock 中重读 source fingerprint，并在锁内再次验证同一私有 rollback artifact fingerprint，以 source-links CAS 更新并与 `audit.events` 同事务提交。幂等和页面闭环验证后，固定 helper 只按安全文件名和 manifest fingerprint 精确删除该 artifact。重复执行零写；不新增 migration、表、read model、worker、cache 或数据库备份，不删除主数据库。
+- 性能：运行时 bridge I/O 绑定受影响 cache keys；存量审计/修复是显式运维命令，不进入 HTTP、同步周期或页面热路径。
 ## 2026-07-28 - 日常报销付款明细存量重投合同
 
 - 目标：确保历史日常报销与新数据都保留稳定付款明细 identity，并让 OA 附件证据可显式回指对应付款项。

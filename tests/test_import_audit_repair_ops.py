@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import stat
+import tempfile
 import unittest
 from contextlib import contextmanager
 from copy import deepcopy
@@ -21,6 +24,9 @@ from fin_ops_platform.services.import_audit_repair_service import (
 from fin_ops_platform.services.invoice_header_fact_repair_service import (
     INVOICE_HEADER_REPAIR_FACTS,
     INVOICE_HEADER_REPAIR_SOURCE_SHA256,
+)
+from fin_ops_platform.services.invoice_expense_item_link_repair_service import (
+    build_oa_attachment_invoice_link_audit_plan,
 )
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     _FAILED_IMPORT_FILE_SQL,
@@ -157,6 +163,42 @@ def _invoice_header_repair_snapshot() -> list[dict[str, object]]:
             "raw_payload": {"normalized_payload": {}},
         }
         for index, fact in enumerate(INVOICE_HEADER_REPAIR_FACTS, start=1)
+    ]
+
+
+def _oa_attachment_invoice_link_audit_snapshot() -> list[dict[str, object]]:
+    return [
+        {
+            "invoice_id": "invoice-oa-1",
+            "workbench_visibility": "visible",
+            "invoice_identity_hash": "identity-hash",
+            "source_links": [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "derived_from_oa_id": "oa-exp-old",
+                    "source_expense_item_id": "oa-exp-old:item:0:old",
+                    "source_attachment_key": "legacy-attachment-key",
+                }
+            ],
+            "attachment_edges": [
+                {
+                    "source_oa_row_id": "oa-exp-old",
+                    "source_expense_item_id": "oa-exp-old:item:0:old",
+                    "source_attachment_key_hash": "legacy-attachment-hash",
+                    "oa_row_id": None,
+                    "expense_item_id": None,
+                    "is_current_owner": False,
+                }
+            ],
+            "explicit_edges": [],
+            "strong_candidates": [
+                {
+                    "oa_row_id": "oa-exp-current",
+                    "expense_item_id": "oa-exp-current:item:0:current",
+                    "attachment_key_hashes": ["current-attachment-hash"],
+                }
+            ],
+        }
     ]
 
 
@@ -626,6 +668,14 @@ class FailedImportRecoveryTests(unittest.TestCase):
 
 
 class ImportAuditRepairPlanTests(unittest.TestCase):
+    def _configure_private_artifact_root(self, artifact_root: str) -> None:
+        environment = patch.dict(
+            os.environ,
+            {"FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT": artifact_root},
+        )
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def test_canonical_bank_audit_accepts_strict_v3_to_v2_reference_match(self) -> None:
         self.assertIn("rows.data_fingerprint = bank_transaction.data_fingerprint", _FAILED_IMPORT_FILE_SQL)
         self.assertIn("'normalized_row'->>'account_detail_no'", _FAILED_IMPORT_FILE_SQL)
@@ -2108,46 +2158,393 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                 "source_links": [],
             }
         ]
+        with tempfile.TemporaryDirectory() as task_dir:
+            self._configure_private_artifact_root(task_dir)
+            manifest_path = os.path.join(task_dir, "rollback.json")
+            with (
+                patch.object(
+                    import_audit_repair_ops.PostgresSettings,
+                    "from_env",
+                    return_value=object(),
+                ),
+                patch.object(
+                    import_audit_repair_ops,
+                    "PostgresConnection",
+                    return_value=connection,
+                ),
+                patch.object(
+                    import_audit_repair_ops,
+                    "load_invoice_expense_item_link_repair_snapshot",
+                    return_value=snapshot,
+                ) as load_snapshot,
+                patch.object(
+                    import_audit_repair_ops.PostgresCoreRepository,
+                    "repair_invoice_expense_item_links",
+                ) as apply_repair,
+            ):
+                result = import_audit_repair_ops.main(
+                    [
+                        "--dry-run",
+                        "--repair-invoice-expense-link-id",
+                        "invoice-1",
+                        "--repair-invoice-expense-link-case-id",
+                        "CASE-AUTO-0102",
+                        "--repair-invoice-expense-link-oa-row-id",
+                        "oa-exp-1992",
+                        "--repair-invoice-expense-link-item-id",
+                        "oa-exp-1992:item:0:cceb2198c025",
+                        "--expected-invoice-expense-link-total",
+                        "2038.02",
+                        "--operator-id",
+                        "YNSYLP007",
+                        "--reason",
+                        "修复历史发票与 OA 子付款项来源关系",
+                        "--rollback-manifest-path",
+                        manifest_path,
+                    ],
+                    stdout=output,
+                )
+            self.assertEqual(stat.S_IMODE(os.stat(manifest_path).st_mode), 0o600)
+            with open(manifest_path, encoding="utf-8") as handle:
+                private_manifest = json.load(handle)
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 0)
+        self.assertEqual(report["operation"], "invoice_expense_item_link_repair")
+        self.assertEqual(report["update_count"], 1)
+        self.assertNotIn("rollback_manifest", report)
+        self.assertEqual(report["rollback_restore_count"], 1)
+        self.assertEqual(len(private_manifest["restore_invoice_source_links"]), 1)
+        self.assertNotIn("invoice-1", output.getvalue())
+        load_snapshot.assert_called_once()
+        apply_repair.assert_not_called()
+
+    def test_cli_invoice_expense_item_link_repair_requires_private_manifest_path(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(SystemExit, "rollback-manifest-path"):
+            import_audit_repair_ops.main(
+                ["--dry-run", "--repair-all-oa-attachment-invoice-links"]
+            )
+
+    def test_private_rollback_manifest_is_0600_and_tamper_evident(self) -> None:
+        plan = build_oa_attachment_invoice_link_audit_plan(
+            _oa_attachment_invoice_link_audit_snapshot()
+        )
+        with tempfile.TemporaryDirectory() as task_dir:
+            self._configure_private_artifact_root(task_dir)
+            manifest_path = os.path.join(task_dir, "rollback.json")
+            import_audit_repair_ops._write_private_rollback_manifest(
+                manifest_path,
+                plan,
+            )
+
+            self.assertEqual(stat.S_IMODE(os.stat(manifest_path).st_mode), 0o600)
+            import_audit_repair_ops._verify_private_rollback_manifest(
+                manifest_path,
+                plan,
+            )
+            with open(manifest_path, "w", encoding="utf-8") as handle:
+                json.dump({"source_fingerprint": plan["source_fingerprint"]}, handle)
+            with self.assertRaisesRegex(RuntimeError, "does not match"):
+                import_audit_repair_ops._verify_private_rollback_manifest(
+                    manifest_path,
+                    plan,
+                )
+
+    def test_private_rollback_manifest_fails_closed_without_configured_root(self) -> None:
+        plan = build_oa_attachment_invoice_link_audit_plan(
+            _oa_attachment_invoice_link_audit_snapshot()
+        )
+        with tempfile.TemporaryDirectory() as task_dir, patch.dict(
+            os.environ,
+            {"FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT": ""},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "must be configured"):
+                import_audit_repair_ops._write_private_rollback_manifest(
+                    os.path.join(task_dir, "rollback.json"),
+                    plan,
+                )
+
+    def test_private_rollback_manifest_is_confined_to_configured_root(self) -> None:
+        plan = build_oa_attachment_invoice_link_audit_plan(
+            _oa_attachment_invoice_link_audit_snapshot()
+        )
+        with tempfile.TemporaryDirectory() as task_dir:
+            artifact_root = os.path.join(task_dir, "artifacts")
+            os.mkdir(artifact_root, mode=0o700)
+            allowed_path = os.path.join(artifact_root, "oa-links-20260825.json")
+            outside_path = os.path.join(task_dir, "outside.json")
+            with patch.dict(
+                os.environ,
+                {"FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT": artifact_root},
+            ):
+                import_audit_repair_ops._write_private_rollback_manifest(
+                    allowed_path,
+                    plan,
+                )
+                with self.assertRaisesRegex(RuntimeError, "configured artifact root"):
+                    import_audit_repair_ops._write_private_rollback_manifest(
+                        outside_path,
+                        plan,
+                    )
+                with self.assertRaisesRegex(RuntimeError, "safe JSON file"):
+                    import_audit_repair_ops._write_private_rollback_manifest(
+                        os.path.join(artifact_root, "../escape.json"),
+                        plan,
+                    )
+                nested_dir = os.path.join(artifact_root, "nested")
+                os.mkdir(nested_dir)
+                with self.assertRaisesRegex(RuntimeError, "safe JSON file"):
+                    import_audit_repair_ops._write_private_rollback_manifest(
+                        os.path.join(nested_dir, "../normalized-escape.json"),
+                        plan,
+                    )
+
+    def test_private_rollback_manifest_rejects_insecure_configured_root(self) -> None:
+        plan = build_oa_attachment_invoice_link_audit_plan(
+            _oa_attachment_invoice_link_audit_snapshot()
+        )
+        with tempfile.TemporaryDirectory() as task_dir:
+            artifact_root = os.path.join(task_dir, "artifacts")
+            os.mkdir(artifact_root, mode=0o755)
+            manifest_path = os.path.join(artifact_root, "oa-links-20260825.json")
+            with (
+                patch.dict(
+                    os.environ,
+                    {"FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT": artifact_root},
+                ),
+                self.assertRaisesRegex(RuntimeError, "owned 0700 directory"),
+            ):
+                import_audit_repair_ops._write_private_rollback_manifest(
+                    manifest_path,
+                    plan,
+                )
+
+    def test_cli_full_oa_attachment_invoice_link_audit_dry_run_is_read_only(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        snapshot = _oa_attachment_invoice_link_audit_snapshot()
+        with tempfile.TemporaryDirectory() as task_dir:
+            self._configure_private_artifact_root(task_dir)
+            manifest_path = os.path.join(task_dir, "rollback.json")
+            with (
+                patch.object(
+                    import_audit_repair_ops.PostgresSettings,
+                    "from_env",
+                    return_value=object(),
+                ),
+                patch.object(
+                    import_audit_repair_ops,
+                    "PostgresConnection",
+                    return_value=connection,
+                ),
+                patch.object(
+                    import_audit_repair_ops,
+                    "load_oa_attachment_invoice_link_audit_snapshot",
+                    return_value=snapshot,
+                ) as load_snapshot,
+                patch.object(
+                    import_audit_repair_ops.PostgresCoreRepository,
+                    "repair_invoice_expense_item_links",
+                ) as apply_repair,
+            ):
+                result = import_audit_repair_ops.main(
+                    [
+                        "--dry-run",
+                        "--repair-all-oa-attachment-invoice-links",
+                        "--rollback-manifest-path",
+                        manifest_path,
+                    ],
+                    stdout=output,
+                )
+            self.assertEqual(stat.S_IMODE(os.stat(manifest_path).st_mode), 0o600)
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            report["operation"],
+            "oa_attachment_invoice_expense_item_link_audit_repair",
+        )
+        self.assertEqual(report["audited_invoice_count"], 1)
+        self.assertEqual(report["classification_counts"]["repairable"], 1)
+        self.assertEqual(report["update_count"], 1)
+        self.assertNotIn("rollback_manifest", report)
+        self.assertEqual(report["rollback_restore_count"], 1)
+        self.assertNotIn("legacy-attachment-key", output.getvalue())
+        load_snapshot.assert_called_once()
+        apply_repair.assert_not_called()
+
+    def test_cli_full_oa_attachment_invoice_link_repair_is_locked_atomic_and_audited(
+        self,
+    ) -> None:
+        class Transaction:
+            def __init__(self, statements: list[str]) -> None:
+                self.statements = statements
+
+            def execute(self, sql: str, _params: tuple = ()) -> int:
+                self.statements.append(sql)
+                return 0
+
+            def fetch_one(self, sql: str, _params: tuple = ()) -> dict[str, bool]:
+                self.statements.append(sql)
+                return {"locked": True}
+
+        class Connection:
+            def __init__(self) -> None:
+                self.commits = 0
+                self.statements: list[str] = []
+
+            @contextmanager
+            def transaction(self):
+                yield Transaction(self.statements)
+                self.commits += 1
+
+        snapshot = _oa_attachment_invoice_link_audit_snapshot()
+        repair_plan = build_oa_attachment_invoice_link_audit_plan(snapshot)
+        fingerprint = repair_plan["source_fingerprint"]
+        task_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(task_dir.cleanup)
+        self._configure_private_artifact_root(task_dir.name)
+        manifest_path = os.path.join(task_dir.name, "rollback.json")
+        import_audit_repair_ops._write_private_rollback_manifest(
+            manifest_path,
+            repair_plan,
+        )
+        connection = Connection()
+        output = io.StringIO()
+        audit_service = Mock()
         with (
             patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
             patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
             patch.object(
                 import_audit_repair_ops,
-                "load_invoice_expense_item_link_repair_snapshot",
+                "load_oa_attachment_invoice_link_audit_snapshot",
                 return_value=snapshot,
             ) as load_snapshot,
             patch.object(
                 import_audit_repair_ops.PostgresCoreRepository,
                 "repair_invoice_expense_item_links",
+                return_value={"written_invoice_count": 1},
             ) as apply_repair,
+            patch.object(
+                import_audit_repair_ops,
+                "AuditTrailService",
+                return_value=audit_service,
+            ),
         ):
             result = import_audit_repair_ops.main(
                 [
-                    "--dry-run",
-                    "--repair-invoice-expense-link-id",
-                    "invoice-1",
-                    "--repair-invoice-expense-link-case-id",
-                    "CASE-AUTO-0102",
-                    "--repair-invoice-expense-link-oa-row-id",
-                    "oa-exp-1992",
-                    "--repair-invoice-expense-link-item-id",
-                    "oa-exp-1992:item:0:cceb2198c025",
-                    "--expected-invoice-expense-link-total",
-                    "2038.02",
+                    "--execute",
+                    "--expected-fingerprint",
+                    fingerprint,
+                    "--repair-all-oa-attachment-invoice-links",
                     "--operator-id",
-                    "YNSYLP007",
+                    "system_repair",
                     "--reason",
-                    "修复历史发票与 OA 子付款项来源关系",
+                    "修复 OA 附件发票当前子付款项归属",
+                    "--rollback-manifest-path",
+                    manifest_path,
                 ],
                 stdout=output,
             )
 
         report = json.loads(output.getvalue())
         self.assertEqual(result, 0)
-        self.assertEqual(report["operation"], "invoice_expense_item_link_repair")
-        self.assertEqual(report["update_count"], 1)
-        load_snapshot.assert_called_once()
+        self.assertEqual(connection.commits, 2)
+        self.assertEqual(load_snapshot.call_count, 2)
+        apply_repair.assert_called_once()
+        repaired_update = apply_repair.call_args.args[1][0]
+        self.assertEqual(repaired_update["source_links"][0]["source_type"], "oa_attachment_invoice")
+        self.assertNotIn("source_relation_case_id", repaired_update["source_links"][1])
+        audit_service.record_action.assert_called_once()
+        self.assertEqual(
+            connection.statements,
+            [
+                "set transaction isolation level repeatable read read only",
+                "set transaction isolation level serializable",
+                "select pg_advisory_xact_lock("
+                "hashtext('fin_ops_oa_attachment_invoice_link_repair'))",
+            ],
+        )
+        self.assertTrue(report["written"])
+        self.assertEqual(report["completion"]["written_invoice_count"], 1)
+
+    def test_cli_full_oa_attachment_invoice_link_repair_rejects_locked_drift(self) -> None:
+        class Transaction:
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+            def fetch_one(self, _sql: str, _params: tuple = ()) -> dict[str, bool]:
+                return {"locked": True}
+
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield Transaction()
+
+        snapshot = _oa_attachment_invoice_link_audit_snapshot()
+        changed_snapshot = deepcopy(snapshot)
+        changed_snapshot[0]["source_links"][0]["source_attachment_key"] = "changed-key"
+        changed_snapshot[0]["attachment_edges"][0][
+            "source_attachment_key_hash"
+        ] = "changed-hash"
+        fingerprint = build_oa_attachment_invoice_link_audit_plan(snapshot)[
+            "source_fingerprint"
+        ]
+        repair_plan = build_oa_attachment_invoice_link_audit_plan(snapshot)
+        task_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(task_dir.cleanup)
+        self._configure_private_artifact_root(task_dir.name)
+        manifest_path = os.path.join(task_dir.name, "rollback.json")
+        import_audit_repair_ops._write_private_rollback_manifest(
+            manifest_path,
+            repair_plan,
+        )
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(
+                import_audit_repair_ops,
+                "PostgresConnection",
+                return_value=Connection(),
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "load_oa_attachment_invoice_link_audit_snapshot",
+                side_effect=[snapshot, changed_snapshot],
+            ),
+            patch.object(
+                import_audit_repair_ops.PostgresCoreRepository,
+                "repair_invoice_expense_item_links",
+            ) as apply_repair,
+            patch.object(import_audit_repair_ops, "AuditTrailService") as audit_service,
+            self.assertRaisesRegex(RuntimeError, "acquiring the write lock"),
+        ):
+            import_audit_repair_ops.main(
+                [
+                    "--execute",
+                    "--expected-fingerprint",
+                    fingerprint,
+                    "--repair-all-oa-attachment-invoice-links",
+                    "--operator-id",
+                    "system_repair",
+                    "--reason",
+                    "修复 OA 附件发票当前子付款项归属",
+                    "--rollback-manifest-path",
+                    manifest_path,
+                ]
+            )
+
         apply_repair.assert_not_called()
+        audit_service.return_value.record_action.assert_not_called()
 
 
 if __name__ == "__main__":

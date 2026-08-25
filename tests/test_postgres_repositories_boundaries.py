@@ -2,22 +2,22 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-import pytest
 
+import pytest
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
     BankFlowRuleBatchCanonicalQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.bank_relation_requirement_recalculation import (
     PostgresBankRelationRequirementRecalculationRequestRepository,
 )
+from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.state_store_protocol import (
     SettingsAccessControlCommitOutcomeUnknown,
     SettingsAccessControlVersionConflict,
 )
-from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
-from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
-from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
 class TransactionRecorder:
@@ -997,6 +997,23 @@ def test_ops_tax_etc_attachment_cache_save_updates_source_lookup_rows() -> None:
     )
     assert "('attachment_identity_' || source.source_kind)" in executed_sql
     assert "from app.oa_attachments attachment" in executed_sql
+    assert "join app.oa_application_items item" in executed_sql
+    assert "target_attachment_sources as" in executed_sql
+    assert "app.row_id = any(scope.oa_row_ids)" in executed_sql
+    assert "oa_affected_cache_keys as" in executed_sql
+    assert "affected_cache_keys as" in executed_sql
+    assert "join affected_cache_keys affected" in executed_sql
+    assert "unique_identity_owners as" in executed_sql
+    assert "cache.parsed_source_attachment_key = attachment.source_attachment_key" in executed_sql
+    assert "from attachment_sources exact_attachment" in executed_sql
+    assert "having count(distinct (" in executed_sql
+    assert "oa_application_id," in executed_sql
+    assert "source_attachment_key," in executed_sql
+    assert "source_expense_item_id" in executed_sql
+    assert "app.status <> 'deleted'" in executed_sql
+    assert "discarded_invalid_identity_sources as" in executed_sql
+    assert "existing.source_kind like 'attachment_identity_%%'" in executed_sql
+    assert "existing.cache_source_attachment_key = affected.cache_source_attachment_key" in executed_sql
     assert any(
         params == (False, [], True, ["cache-key-1"])
         for sql, params in connection.executed

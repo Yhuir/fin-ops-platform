@@ -27,13 +27,17 @@ def explicit_expense_item_links(value: Any) -> list[dict[str, Any]]:
 def replace_explicit_expense_item_links(
     value: Any,
     *,
-    case_id: str,
+    case_id: str | None,
     targets: Iterable[tuple[str, str]],
     entry_method: str,
 ) -> list[dict[str, Any]]:
-    """Replace only explicit item ownership edges and preserve all other provenance."""
+    """Replace explicit ownership edges while preserving all other provenance.
 
-    normalized_case_id = _required_text(case_id, "case_id")
+    ``case_id`` is intentionally optional for verified source-identity repairs:
+    an ownership edge must not invent a Workbench presentation or formal relation id.
+    """
+
+    normalized_case_id = _text(case_id)
     normalized_entry_method = _required_text(entry_method, "entry_method")
     normalized_targets = sorted(
         {
@@ -51,17 +55,18 @@ def replace_explicit_expense_item_links(
         for item in source_links(value)
         if _text(item.get("source_type")) != EXPLICIT_EXPENSE_ITEM_SOURCE_TYPE
     ]
-    assigned = [
-        {
+    assigned = []
+    for oa_row_id, expense_item_id in normalized_targets:
+        link = {
             "source_type": EXPLICIT_EXPENSE_ITEM_SOURCE_TYPE,
             "source_workbench_row_id": oa_row_id,
             "derived_from_oa_id": oa_row_id,
             "source_expense_item_id": expense_item_id,
-            "source_relation_case_id": normalized_case_id,
             "entry_method": normalized_entry_method,
         }
-        for oa_row_id, expense_item_id in normalized_targets
-    ]
+        if normalized_case_id:
+            link["source_relation_case_id"] = normalized_case_id
+        assigned.append(link)
     return [*preserved, *assigned]
 
 

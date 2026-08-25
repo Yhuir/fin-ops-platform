@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import unittest
 from dataclasses import replace
 from io import BytesIO
 from types import SimpleNamespace
-import unittest
-
-from openpyxl import load_workbook
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.oa_pending_payment_query_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_bridge import (
+    reconcile_oa_attachment_cache_identity_sources,
+)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     PostgresOaPendingPaymentQueryRepository,
 )
@@ -25,6 +26,8 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
     WorkbenchRelationCommandService,
 )
+from openpyxl import load_workbook
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -118,6 +121,379 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
                 )["count"]
             ),
             1,
+        )
+
+    def test_attachment_identity_bridge_fails_closed_for_multiple_current_owners(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, row_id, status, scope_month
+            ) values (
+                'ambiguous-source-a', 'ambiguous-form-a',
+                'oa-ambiguous-a', 'completed', '2026-05-01'
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.oa_application_items(
+                oa_application_id, oa_source_id, form_id, row_id
+            )
+            select id, oa_source_id, form_id, 'shared-current-item'
+            from app.oa_applications
+            where row_id = 'oa-ambiguous-a'
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.oa_attachments(
+                oa_application_id, oa_source_id, form_id, row_id,
+                source_attachment_key, filename, normalized_payload
+            )
+            select
+                id,
+                oa_source_id,
+                form_id,
+                'shared-current-item',
+                row_id || ':attachment',
+                'invoice.pdf',
+                jsonb_build_object(
+                    'source_expense_item_id', 'shared-current-item',
+                    'source_expense_row_index', '0',
+                    'source_attachment_name', 'invoice.pdf'
+                )
+            from app.oa_applications
+            where row_id = 'oa-ambiguous-a'
+            """
+        )
+        PostgresOpsTaxEtcRepository(self.connection).save_oa_attachment_invoice_cache_entry(
+            "ambiguous-cache-key",
+            {
+                "parser_version": "integration-v1",
+                "cache_schema_version": "integration-v1",
+                "invoices": [{
+                    "source_attachment_key": "ambiguous-cache-key",
+                    "source_expense_item_id": "shared-current-item",
+                    "source_expense_row_index": "0",
+                    "source_attachment_name": "invoice.pdf",
+                    "evidence_type": "tax_invoice",
+                    "digital_invoice_no": "26534000000060092012",
+                    "total_with_tax": "100.00",
+                }],
+                "evidences": [],
+                "artifacts": [],
+            },
+        )
+
+        self.assertEqual(
+            int(
+                self.connection.fetch_one(
+                    """
+                    select count(*)::int as count
+                    from app.oa_attachment_invoice_cache_sources
+                    where cache_source_attachment_key = 'ambiguous-cache-key'
+                      and source_kind = 'attachment_identity_invoice'
+                    """
+                )["count"]
+            ),
+            1,
+        )
+
+        self.connection.execute(
+            """
+            with inserted_app as (
+                insert into app.oa_applications(
+                    oa_source_id, form_id, row_id, status, scope_month
+                ) values (
+                    'unrelated-source', 'unrelated-form',
+                    'oa-unrelated', 'completed', '2026-05-01'
+                )
+                returning id, oa_source_id, form_id, row_id
+            ), inserted_item as (
+                insert into app.oa_application_items(
+                    oa_application_id, oa_source_id, form_id, row_id
+                )
+                select id, oa_source_id, form_id, 'unrelated-current-item'
+                from inserted_app
+            )
+            insert into app.oa_attachments(
+                oa_application_id, oa_source_id, form_id, row_id,
+                source_attachment_key, filename, normalized_payload
+            )
+            select
+                id,
+                oa_source_id,
+                form_id,
+                'unrelated-current-item',
+                'unrelated-actual-attachment',
+                'unrelated.pdf',
+                jsonb_build_object(
+                    'source_expense_item_id', 'unrelated-current-item',
+                    'source_expense_row_index', '0',
+                    'source_attachment_name', 'unrelated.pdf'
+                )
+            from inserted_app
+            """
+        )
+        PostgresOpsTaxEtcRepository(self.connection).save_oa_attachment_invoice_cache_entry(
+            "unrelated-cache-key",
+            {
+                "parser_version": "integration-v1",
+                "cache_schema_version": "integration-v1",
+                "invoices": [{
+                    "source_attachment_key": "unrelated-cache-key",
+                    "source_expense_item_id": "unrelated-current-item",
+                    "source_expense_row_index": "0",
+                    "source_attachment_name": "unrelated.pdf",
+                    "evidence_type": "tax_invoice",
+                    "digital_invoice_no": "26534000000060092013",
+                    "total_with_tax": "100.00",
+                }],
+                "evidences": [],
+                "artifacts": [],
+            },
+        )
+        unrelated_before = self.connection.fetch_one(
+            """
+            select source_attachment_key, source_expense_item_id,
+                   source_expense_row_index, source_attachment_name, updated_at
+            from app.oa_attachment_invoice_cache_sources
+            where cache_source_attachment_key = 'unrelated-cache-key'
+              and source_kind = 'attachment_identity_invoice'
+            """
+        )
+        self.assertIsNotNone(unrelated_before)
+
+        self.connection.execute(
+            """
+            with inserted_app as (
+                insert into app.oa_applications(
+                    oa_source_id, form_id, row_id, status, scope_month
+                ) values (
+                    'ambiguous-source-b', 'ambiguous-form-b',
+                    'oa-ambiguous-b', 'completed', '2026-05-01'
+                )
+                returning id, oa_source_id, form_id, row_id
+            ), inserted_item as (
+                insert into app.oa_application_items(
+                    oa_application_id, oa_source_id, form_id, row_id
+                )
+                select id, oa_source_id, form_id, 'shared-current-item'
+                from inserted_app
+            )
+            insert into app.oa_attachments(
+                oa_application_id, oa_source_id, form_id, row_id,
+                source_attachment_key, filename, normalized_payload
+            )
+            select
+                id,
+                oa_source_id,
+                form_id,
+                'shared-current-item',
+                row_id || ':attachment',
+                'invoice.pdf',
+                jsonb_build_object(
+                    'source_expense_item_id', 'shared-current-item',
+                    'source_expense_row_index', '0',
+                    'source_attachment_name', 'invoice.pdf'
+                )
+            from inserted_app
+            """
+        )
+        reconcile_oa_attachment_cache_identity_sources(
+            self.connection,
+            oa_row_ids=["oa-ambiguous-b"],
+        )
+
+        self.assertEqual(
+            int(
+                self.connection.fetch_one(
+                    """
+                    select count(*)::int as count
+                    from app.oa_attachment_invoice_cache_sources
+                    where cache_source_attachment_key = 'ambiguous-cache-key'
+                      and source_kind = 'attachment_identity_invoice'
+                    """
+                )["count"]
+            ),
+            0,
+        )
+        unrelated_after = self.connection.fetch_one(
+            """
+            select source_attachment_key, source_expense_item_id,
+                   source_expense_row_index, source_attachment_name, updated_at
+            from app.oa_attachment_invoice_cache_sources
+            where cache_source_attachment_key = 'unrelated-cache-key'
+              and source_kind = 'attachment_identity_invoice'
+            """
+        )
+        self.assertEqual(unrelated_after, unrelated_before)
+
+    def test_attachment_identity_bridge_fails_closed_for_multiple_owners_in_same_oa(self) -> None:
+        self.connection.execute(
+            """
+            with inserted_app as (
+                insert into app.oa_applications(
+                    oa_source_id, form_id, row_id, status, scope_month
+                ) values (
+                    'same-oa-ambiguous-source', 'same-oa-ambiguous-form',
+                    'oa-same-ambiguous', 'completed', '2026-05-01'
+                )
+                returning id, oa_source_id, form_id
+            ), inserted_item as (
+                insert into app.oa_application_items(
+                    oa_application_id, oa_source_id, form_id, row_id,
+                    item_no, normalized_payload
+                )
+                select id, oa_source_id, form_id, 'same-oa-shared-item',
+                       '0', '{"row_index":"0"}'::jsonb
+                from inserted_app
+                returning oa_application_id, oa_source_id, form_id, row_id
+            )
+            insert into app.oa_attachments(
+                oa_application_id, oa_source_id, form_id, row_id,
+                source_attachment_key, filename, normalized_payload
+            )
+            select item.oa_application_id, item.oa_source_id, item.form_id, item.row_id,
+                   source.key, 'same-name.pdf',
+                   jsonb_build_object(
+                       'source_expense_item_id', item.row_id,
+                       'source_expense_row_index', '0',
+                       'source_attachment_name', 'same-name.pdf'
+                   )
+            from inserted_item item
+            cross join (values ('same-oa-attachment-a'), ('same-oa-attachment-b')) source(key)
+            """
+        )
+
+        PostgresOpsTaxEtcRepository(self.connection).save_oa_attachment_invoice_cache_entry(
+            "same-oa-ambiguous-cache",
+            {
+                "parser_version": "integration-v1",
+                "cache_schema_version": "integration-v1",
+                "invoices": [{
+                    "source_attachment_key": "non-current-parser-occurrence",
+                    "source_expense_item_id": "same-oa-shared-item",
+                    "source_expense_row_index": "0",
+                    "source_attachment_name": "same-name.pdf",
+                    "evidence_type": "tax_invoice",
+                    "digital_invoice_no": "26534000000060092014",
+                    "total_with_tax": "100.00",
+                }],
+                "evidences": [],
+                "artifacts": [],
+            },
+        )
+
+        self.assertEqual(
+            int(
+                self.connection.fetch_one(
+                    """
+                    select count(*)::int as count
+                    from app.oa_attachment_invoice_cache_sources
+                    where cache_source_attachment_key = 'same-oa-ambiguous-cache'
+                      and source_kind = 'attachment_identity_invoice'
+                    """
+                )["count"]
+            ),
+            0,
+        )
+
+    def test_attachment_identity_bridge_preserves_distinct_same_oa_item_occurrences(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, row_id, status, scope_month
+            ) values (
+                'same-physical-source', 'same-physical-form',
+                'oa-same-physical', 'completed', '2026-05-01'
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.oa_application_items(
+                oa_application_id, oa_source_id, form_id, row_id,
+                item_no, normalized_payload
+            )
+            select id, oa_source_id, form_id, 'same-physical-item-0',
+                   '0', '{"row_index":"0"}'::jsonb
+            from app.oa_applications where row_id = 'oa-same-physical'
+            union all
+            select id, oa_source_id, form_id, 'same-physical-item-1',
+                   '1', '{"row_index":"1"}'::jsonb
+            from app.oa_applications where row_id = 'oa-same-physical'
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.oa_attachments(
+                oa_application_id, oa_source_id, form_id, row_id,
+                source_attachment_key, filename, normalized_payload
+            )
+            select app.id, app.oa_source_id, app.form_id, item.row_id,
+                   'same-physical-occurrence-' || item.item_no,
+                   'same-physical.pdf',
+                   jsonb_build_object(
+                       'source_expense_item_id', item.row_id,
+                       'source_expense_row_index', item.item_no,
+                       'source_attachment_name', 'same-physical.pdf',
+                       'physical_source_attachment_key', 'one-physical-file'
+                   )
+            from app.oa_applications app
+            join app.oa_application_items item on item.oa_application_id = app.id
+            where app.row_id = 'oa-same-physical'
+            """
+        )
+
+        PostgresOpsTaxEtcRepository(self.connection).save_oa_attachment_invoice_cache_entry(
+            "same-physical-cache",
+            {
+                "parser_version": "integration-v1",
+                "cache_schema_version": "integration-v1",
+                "invoices": [
+                    {
+                        "source_attachment_key": "same-physical-occurrence-0",
+                        "source_expense_item_id": "same-physical-item-0",
+                        "source_expense_row_index": "0",
+                        "source_attachment_name": "same-physical.pdf",
+                        "evidence_type": "tax_invoice",
+                        "digital_invoice_no": "26534000000060092015",
+                        "total_with_tax": "100.00",
+                    },
+                    {
+                        "source_attachment_key": "same-physical-occurrence-1",
+                        "source_expense_item_id": "same-physical-item-1",
+                        "source_expense_row_index": "1",
+                        "source_attachment_name": "same-physical.pdf",
+                        "evidence_type": "tax_invoice",
+                        "digital_invoice_no": "26534000000060092015",
+                        "total_with_tax": "100.00",
+                    },
+                ],
+                "evidences": [],
+                "artifacts": [],
+            },
+        )
+
+        identity_rows = self.connection.fetch_all(
+            """
+            select source_attachment_key, source_expense_item_id
+            from app.oa_attachment_invoice_cache_sources
+            where cache_source_attachment_key = 'same-physical-cache'
+              and source_kind = 'attachment_identity_invoice'
+            order by source_attachment_key
+            """
+        )
+        self.assertEqual(
+            [
+                (row["source_attachment_key"], row["source_expense_item_id"])
+                for row in identity_rows
+            ],
+            [
+                ("same-physical-occurrence-0", "same-physical-item-0"),
+                ("same-physical-occurrence-1", "same-physical-item-1"),
+            ],
         )
 
     def test_canonical_page_query_observes_active_relation_changes_without_read_model_refresh(self) -> None:

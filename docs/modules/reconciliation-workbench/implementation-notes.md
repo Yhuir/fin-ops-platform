@@ -1,5 +1,13 @@
 # 关联台 实施记录
 
+## 2026-08-25 - OA 附件发票当前付款项展示归属闭环
+
+- 根因：canonical 发票已经保留 OA 附件 provenance，但没有正式 relation 的 OA 与其发票仍各自显示为 singleton；旧展示归一又允许历史 parent alias/`row_index` 先把 stale item 改成当前 item，若直接拿来分组会把“历史位置相同”误当成当前 ownership。列表 SQL、Python hydration 与 full/detail 对 OA `expense_items` 的 ID key 口径也不完全一致。
+- 分组：主列表与 hydration 都在任何历史 normalize 前读取 untouched source links，只接受 `source_expense_item_id` 精确命中当前 OA item。显式 `oa_expense_item_invoice` 优先；没有显式边时才接受当前 `oa_attachment_invoice`。缺 item、一个发票多 OA、多 owner、或发票已属于其它 active relation 均保持 singleton/fail closed，不按金额、项目、附件名、alias 或 row index 猜测。
+- 正式关系隔离：无 active relation 的 owner OA 与来源发票形成一个 source-owned `unpaired` 展示组；OA 已在 active relation 时，发票仅作为 `source_owned_display` 带入。display-only 发票不进入数据库 `row_ids/row_types`、formal member DTO、version、completion、anomaly、can-withdraw 或正式成员 actions，不产生 relation 写入。
+- 查询与详情：exact-current ownership 在 search/filter/count/cursor/LIMIT 前一次 set-based 计算；`scope=all` source-owned group 与 relation detail 在同一目标 SQL 内，先以目标 OA 的 current item 集合发现 exact source-owned 发票月份，再用有限月份集合水合展示成员，无 N+1、无第二 statement 或 cache fallback。OA item 的 `id / row_id / expense_item_id` 只有在全部非空值唯一一致时才接受；冲突值 fail closed，使 SQL、Python grouping 与 DTO 使用同一 current identity。
+- 边界：不新增 API、数据库表、migration、read model、worker、cache、依赖或前端状态；历史 alias/row-index normalize 仅保留给既有异常/单元格对齐，不再拥有分组权。
+
 ## 2026-08-24 - OA 历史附件归属别名与来源 Chip 收口
 
 - 根因：canonical OA 身份迁移后，附件发票仍正确保留旧 OA/子付款项来源，当前 OA 则使用新的 canonical row/item ID；两者的物理附件身份桥仍在 `app.oa_attachment_invoice_cache_sources`，但页面与 matching 只读 payload、owned item/attachment parent 和显式 alias，漏读了这条既有权威桥。同一 OA 在不同读取链得到不完整 alias 集合，历史 OA附件发票无法按 `row_index` 归属当前子付款项。

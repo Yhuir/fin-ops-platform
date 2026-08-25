@@ -507,6 +507,66 @@ class BulkOAAdapter:
 
 
 class WorkbenchQueryServiceTests(unittest.TestCase):
+    def test_workbench_expense_items_accept_current_canonical_id_key(self) -> None:
+        class _Record:
+            expense_items = [
+                {
+                    "id": "oa-current:item:0",
+                    "row_index": "0",
+                    "project_name": "当前项目",
+                    "amount": "145.00",
+                }
+            ]
+
+        self.assertEqual(
+            WorkbenchQueryService._workbench_expense_items(_Record()),
+            [
+                {
+                    "id": "oa-current:item:0",
+                    "row_index": "0",
+                    "project_name": "当前项目",
+                    "amount": "145.00",
+                    "expense_type": "",
+                    "fee_content": "",
+                    "fee_description": "",
+                    "attachment_file_count": "0",
+                }
+            ],
+        )
+
+    def test_workbench_expense_items_reject_conflicting_identity_aliases(self) -> None:
+        class _Record:
+            expense_items = [
+                {
+                    "id": "oa-current:item:0",
+                    "row_id": "oa-current:item:0",
+                    "expense_item_id": "oa-stale:item:0",
+                    "amount": "145.00",
+                },
+                {
+                    "id": "oa-current:item:1",
+                    "row_id": "oa-current:item:1",
+                    "expense_item_id": "oa-current:item:1",
+                    "amount": "88.00",
+                },
+            ]
+
+        self.assertEqual(
+            WorkbenchQueryService._workbench_expense_items(_Record()),
+            [
+                {
+                    "id": "oa-current:item:1",
+                    "row_index": "",
+                    "project_name": "—",
+                    "amount": "88.00",
+                    "expense_type": "",
+                    "fee_content": "",
+                    "fee_description": "",
+                    "attachment_file_count": "0",
+                }
+            ],
+        )
+
     def test_workbench_core_rejects_legacy_open_section(self) -> None:
         self.assertEqual(WorkbenchQueryService._normalize_workbench_section("paired"), "paired")
         self.assertEqual(WorkbenchQueryService._normalize_workbench_section("unpaired"), "unpaired")

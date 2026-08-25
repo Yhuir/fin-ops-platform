@@ -96,6 +96,7 @@ Blocking issue 包含：
   禁止因为全量 dry-run 同时发现其它历史关系变化就直接无范围执行 `--execute`。执行后必须复跑对象身份审计，
   修复提交后直接重读受影响页面 API，并复跑对象身份与 relation display 审计。
 - OA lifecycle/migration alias 修复优先写入 `app.oa_source_aliases`，并以 `active` 状态受控启用；禁止为了让审计通过而删除 `app.oa_applications`、`app.oa_attachments` 或 `app.oa_attachment_invoice_cache*`。
+- OA attachment canonical 发票缺少当前子付款项 ownership 时，使用既有 `import_audit_repair_ops --repair-all-oa-attachment-invoice-links` 先 dry-run 全量分类，再以报告 fingerprint 受控 execute。dry-run 必须通过 `--rollback-manifest-path` 在生产 helper 硬编码且禁止环境重定向的 root-owned `0700` artifact 目录中，以 `O_EXCL/O_NOFOLLOW + 0600` 创建任务级恢复文件；CLI 直调若未显式配置受控 artifact root 必须失败关闭。公开 stdout 只允许 manifest fingerprint、恢复条数和哈希化 finding。execute 在锁内验证同一 artifact，结束后重跑 dry-run 必须 `update_count=0`，再调用 `import-audit-repair-artifact-delete` 按 manifest fingerprint 精确删除该任务文件。自动写仅限 visible canonical 发票，必须同时具备强发票 identity 与当前 attachment owner；同一 canonical OA 多 item 可集合化补齐，跨 OA/多义/冲突/hidden duplicate 零写。工具只追加 `oa_expense_item_invoice` 并保留原 `oa_attachment_invoice` provenance，不写 OA alias、relation case 或 formal relation。
 - 修复或发布后必须重读受影响 Workbench scope，再重新执行审计命令，确认 `blocking_issue_count=0`。
 - relation display 不一致只能通过正式 relation command 或专用 repair 工具修复 canonical facts；禁止恢复或手改已退役投影。
 

@@ -293,6 +293,35 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(app_insert[0][4], "structured")
         self.assertEqual(app_insert[0][6], "completed")
 
+    def test_structured_item_owner_overrides_stale_nested_attachment_identity(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        record = oa_record_with_structured_attachments()
+        nested_invoice = record.expense_items[0]["attachment_invoices"][0]
+        nested_invoice["source_expense_item_id"] = "oa-exp-historical:item:9:stale"
+        nested_invoice["source_expense_row_index"] = "9"
+        nested_invoice["parser_detail"] = "preserved"
+        connection = OAProjectionWriteConnection()
+
+        PostgresOAProjectionRepository(connection).upsert_application_records(
+            [record],
+            scope_key="2026-05",
+        )
+
+        attachment_insert = next(
+            params
+            for sql, params in connection.executed
+            if "insert into app.oa_attachments" in sql
+            and params[4] == "oa-exp-structured:invoice:1"
+        )
+        payload = attachment_insert[9].obj
+        self.assertEqual(
+            payload["source_expense_item_id"],
+            "oa-exp-structured:item:1",
+        )
+        self.assertEqual(payload["source_expense_row_index"], "0")
+        self.assertEqual(payload["parser_detail"], "preserved")
+
     def test_postgres_oa_projection_repository_does_not_use_internal_identity_as_workflow_number(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 

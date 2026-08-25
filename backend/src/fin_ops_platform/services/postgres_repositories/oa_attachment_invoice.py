@@ -141,33 +141,91 @@ class PostgresOAAttachmentInvoiceRepository:
                        attachment.oa_application_id::text as oa_application_id,
                        coalesce(app.oa_source_id, attachment.oa_source_id) as oa_source_id,
                        app.row_id as oa_row_id,
-                       source.source_expense_item_id,
-                       source.source_expense_row_index,
-                       source.source_attachment_key,
-                       source.source_attachment_name,
+                       item.row_id as source_expense_item_id,
+                       coalesce(
+                           nullif(btrim(attachment.normalized_payload->>'source_expense_row_index'), ''),
+                           nullif(btrim(item.normalized_payload->>'row_index'), ''),
+                           nullif(btrim(item.item_no), '')
+                       ) as source_expense_row_index,
+                       attachment.source_attachment_key,
+                       coalesce(
+                           nullif(btrim(coalesce(
+                               attachment.normalized_payload->>'source_attachment_name',
+                               attachment.normalized_payload->>'attachment_name',
+                               attachment.normalized_payload->>'fileName',
+                               attachment.normalized_payload->>'filename'
+                           )), ''),
+                           nullif(btrim(attachment.filename), '')
+                       ) as source_attachment_name,
                        to_char(app.scope_month, 'YYYY-MM') as month
                 from matched_invoices matched
                 join app.oa_attachment_invoice_cache_sources source
                   on source.cache_source_attachment_key = matched.cache_source_attachment_key
+                 and source.source_kind = 'attachment_identity_invoice'
                 join app.oa_attachments attachment
                   on attachment.source_attachment_key = source.source_attachment_key
                 join app.oa_applications app
                   on app.id = attachment.oa_application_id
-                where source.source_kind <> 'cache_key'
-                  and nullif(btrim(source.source_expense_item_id), '') is not null
-                  and nullif(btrim(source.source_attachment_key), '') is not null
+                 and app.status <> 'deleted'
+                join app.oa_application_items item
+                  on item.oa_application_id = attachment.oa_application_id
+                 and item.row_id = nullif(
+                        btrim(attachment.normalized_payload->>'source_expense_item_id'),
+                        ''
+                     )
+                 and item.row_id = nullif(btrim(source.source_expense_item_id), '')
+                where nullif(btrim(attachment.source_attachment_key), '') is not null
+                  and coalesce(
+                        nullif(btrim(coalesce(
+                            attachment.normalized_payload->>'source_attachment_name',
+                            attachment.normalized_payload->>'attachment_name',
+                            attachment.normalized_payload->>'fileName',
+                            attachment.normalized_payload->>'filename'
+                        )), ''),
+                        nullif(btrim(attachment.filename), '')
+                      ) is not null
                   and (
                        nullif(btrim(matched.invoice_payload->>'source_attachment_key'), '')
-                           = source.source_attachment_key
+                           = attachment.source_attachment_key
                        or (
-                            nullif(btrim(matched.invoice_payload->>'source_expense_item_id'), '')
-                                = source.source_expense_item_id
+                            not exists (
+                                select 1
+                                from app.oa_attachments exact_attachment
+                                join app.oa_applications exact_app
+                                  on exact_app.id = exact_attachment.oa_application_id
+                                 and exact_app.status <> 'deleted'
+                                join app.oa_application_items exact_item
+                                  on exact_item.oa_application_id = exact_attachment.oa_application_id
+                                 and exact_item.row_id = nullif(
+                                        btrim(
+                                            exact_attachment.normalized_payload
+                                                ->>'source_expense_item_id'
+                                        ),
+                                        ''
+                                     )
+                                where exact_attachment.source_attachment_key = nullif(
+                                    btrim(
+                                        matched.invoice_payload->>'source_attachment_key'
+                                    ),
+                                    ''
+                                )
+                            )
+                        and nullif(btrim(matched.invoice_payload->>'source_expense_item_id'), '')
+                                = item.row_id
                         and nullif(btrim(coalesce(
                                 matched.invoice_payload->>'source_attachment_name',
                                 matched.invoice_payload->>'attachment_name',
                                 matched.invoice_payload->>'fileName',
                                 matched.invoice_payload->>'filename'
-                            )), '') = source.source_attachment_name
+                            )), '') = coalesce(
+                                nullif(btrim(coalesce(
+                                    attachment.normalized_payload->>'source_attachment_name',
+                                    attachment.normalized_payload->>'attachment_name',
+                                    attachment.normalized_payload->>'fileName',
+                                    attachment.normalized_payload->>'filename'
+                                )), ''),
+                                nullif(btrim(attachment.filename), '')
+                            )
                        )
                   )
                   {oa_filter_sql}

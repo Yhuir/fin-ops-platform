@@ -694,6 +694,27 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("request error not found in the bounded journal window", script)
         self.assertIn("settings-normalize <release-name> [--dry-run|--execute]", script)
         self.assertIn("import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>]", script)
+        self.assertIn(
+            "--repair-all-oa-attachment-invoice-links --rollback-manifest-path "
+            "<fixed-root/path> --operator-id <id> --reason <text>",
+            script,
+        )
+        self.assertIn("import-audit-repair-artifact-delete <artifact-name>", script)
+        self.assertIn(
+            'readonly IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT="/opt/fin-ops/runtime-smoke/'
+            'import-audit-repair-artifacts"',
+            script,
+        )
+        self.assertNotIn(
+            'IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT="${FINOPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT',
+            script,
+        )
+        self.assertEqual(
+            script.count("import Audit repair artifact root override is not supported"),
+            2,
+        )
+        self.assertIn("import_audit_repair_artifact_delete()", script)
+        self.assertIn("root-owned, mode 0600, with one hard link", script)
         self.assertIn("bank-transaction-category-repair <release-name>", script)
         self.assertIn("settings_normalize()", script)
         self.assertIn("import_audit_repair()", script)

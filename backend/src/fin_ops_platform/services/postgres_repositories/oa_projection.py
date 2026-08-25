@@ -585,8 +585,15 @@ class PostgresOAProjectionRepository:
             if not isinstance(raw, dict):
                 return
             payload = dict(serialize_value(raw))
-            payload.setdefault("source_expense_item_id", source_expense_item_id)
-            payload.setdefault("source_expense_row_index", source_expense_row_index)
+            if source_expense_item_id not in (None, ""):
+                # The containing structured item is the current owner.  Keep
+                # unrelated parser fields, but never let a stale nested owner
+                # survive an authoritative OA projection refresh.
+                payload["source_expense_item_id"] = source_expense_item_id
+                if source_expense_row_index not in (None, ""):
+                    payload["source_expense_row_index"] = source_expense_row_index
+                else:
+                    payload.pop("source_expense_row_index", None)
             source_key = text(
                 payload.get("source_attachment_key")
                 or payload.get("attachment_key")

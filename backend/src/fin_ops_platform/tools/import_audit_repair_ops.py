@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import re
+import stat
 import sys
 from collections.abc import Sequence
 from contextlib import contextmanager
@@ -28,7 +32,9 @@ from fin_ops_platform.services.import_audit_repair_service import (
 )
 from fin_ops_platform.services.invoice_expense_item_link_repair_service import (
     build_invoice_expense_item_link_repair_plan,
+    build_oa_attachment_invoice_link_audit_plan,
     public_invoice_expense_item_link_repair_report,
+    public_oa_attachment_invoice_link_audit_report,
 )
 from fin_ops_platform.services.invoice_header_fact_repair_service import (
     INVOICE_HEADER_REPAIR_FACTS,
@@ -60,6 +66,7 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
     load_import_audit_repair_snapshot,
     load_invoice_expense_item_link_repair_snapshot,
     load_invoice_header_fact_repair_snapshot,
+    load_oa_attachment_invoice_link_audit_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
@@ -123,6 +130,105 @@ class _ActiveTransactionConnection(PostgresTransaction):
         yield self._transaction
 
 
+def _rollback_manifest_fingerprint(manifest: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_private_rollback_manifest_path(path: str) -> None:
+    artifact_root = str(
+        os.environ.get("FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT") or ""
+    ).strip()
+    if not artifact_root:
+        raise RuntimeError(
+            "Rollback manifest artifact root must be configured before reading or writing an artifact."
+        )
+    normalized_root = os.path.abspath(artifact_root)
+    normalized_path = os.path.abspath(path)
+    artifact_name = os.path.basename(normalized_path)
+    if (
+        not os.path.isabs(path)
+        or path != normalized_path
+        or os.path.dirname(normalized_path) != normalized_root
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.json", artifact_name)
+    ):
+        raise RuntimeError(
+            "Rollback manifest path must be one safe JSON file inside the configured artifact root."
+        )
+    root_stat = os.lstat(normalized_root)
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or stat.S_ISLNK(root_stat.st_mode)
+        or stat.S_IMODE(root_stat.st_mode) != 0o700
+        or root_stat.st_uid != os.geteuid()
+    ):
+        raise RuntimeError(
+            "Rollback manifest artifact root must be an owned 0700 directory."
+        )
+
+
+def _write_private_rollback_manifest(path: str, plan: dict[str, Any]) -> None:
+    _validate_private_rollback_manifest_path(path)
+    manifest = dict(plan["rollback_manifest"])
+    expected_fingerprint = str(plan["rollback_manifest_fingerprint"])
+    if _rollback_manifest_fingerprint(manifest) != expected_fingerprint:
+        raise RuntimeError("Rollback manifest changed before artifact creation.")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    file_descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(file_descriptor, 0o600)
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            file_descriptor = -1
+            json.dump(
+                manifest,
+                handle,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _verify_private_rollback_manifest(path: str, plan: dict[str, Any]) -> None:
+    _validate_private_rollback_manifest_path(path)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    file_descriptor = os.open(path, flags)
+    with os.fdopen(file_descriptor, "r", encoding="utf-8") as handle:
+        artifact_stat = os.fstat(handle.fileno())
+        if not stat.S_ISREG(artifact_stat.st_mode):
+            raise RuntimeError("Rollback manifest artifact must be a regular file.")
+        if stat.S_IMODE(artifact_stat.st_mode) != 0o600:
+            raise RuntimeError("Rollback manifest artifact must have mode 0600.")
+        if artifact_stat.st_uid != os.geteuid() or artifact_stat.st_nlink != 1:
+            raise RuntimeError(
+                "Rollback manifest artifact must be owned by the current user with one hard link."
+            )
+        manifest = json.load(handle)
+    if not isinstance(manifest, dict):
+        raise RuntimeError("Rollback manifest artifact must contain one JSON object.")
+    if _rollback_manifest_fingerprint(manifest) != plan["rollback_manifest_fingerprint"]:
+        raise RuntimeError("Rollback manifest artifact does not match the current repair plan.")
+    if manifest.get("source_fingerprint") != plan["source_fingerprint"]:
+        raise RuntimeError("Rollback manifest artifact has the wrong source fingerprint.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Repair strict import Audit facts from durable App evidence.")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -166,6 +272,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repair-invoice-expense-link-oa-row-id")
     parser.add_argument("--repair-invoice-expense-link-item-id")
     parser.add_argument("--expected-invoice-expense-link-total")
+    parser.add_argument("--repair-all-oa-attachment-invoice-links", action="store_true")
+    parser.add_argument("--rollback-manifest-path")
     parser.add_argument("--reason")
     parser.add_argument("--expected-bank-audit-file-object-link-count", type=int)
     parser.add_argument("--expected-bank-audit-payload-update-count", type=int)
@@ -199,6 +307,21 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
     bank_audit_repair_requested = bool(args.repair_bank_audit_contract)
     invoice_header_repair_requested = bool(args.repair_invoice_header_source_sha256)
     invoice_expense_link_repair_requested = bool(args.repair_invoice_expense_link_id)
+    oa_attachment_invoice_link_repair_requested = bool(
+        args.repair_all_oa_attachment_invoice_links
+    )
+    rollback_repair_requested = (
+        invoice_expense_link_repair_requested
+        or oa_attachment_invoice_link_repair_requested
+    )
+    if rollback_repair_requested and not args.rollback_manifest_path:
+        raise SystemExit(
+            "Invoice expense-item link repair requires --rollback-manifest-path."
+        )
+    if args.rollback_manifest_path and not rollback_repair_requested:
+        raise SystemExit(
+            "--rollback-manifest-path requires an invoice expense-item link repair mode."
+        )
     specialized_repair_count = sum(
         bool(value)
         for value in (
@@ -208,6 +331,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             bank_audit_repair_requested,
             invoice_header_repair_requested,
             invoice_expense_link_repair_requested,
+            oa_attachment_invoice_link_repair_requested,
         )
     )
     if specialized_repair_count > 1:
@@ -223,6 +347,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
         or bank_audit_repair_requested
         or invoice_header_repair_requested
         or invoice_expense_link_repair_requested
+        or oa_attachment_invoice_link_repair_requested
     ) and (
         args.batch_id or args.retire_etc_session_id or args.normalize_reverted_batch_id
     ):
@@ -264,7 +389,31 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "Invoice expense-item link repair requires case, OA row, expense item, "
             "expected total, operator, and reason."
         )
-    if not invoice_expense_link_repair_requested and any(
+    if oa_attachment_invoice_link_repair_requested and any(
+        value is not None
+        for value in (
+            args.repair_invoice_expense_link_case_id,
+            args.repair_invoice_expense_link_oa_row_id,
+            args.repair_invoice_expense_link_item_id,
+            args.expected_invoice_expense_link_total,
+        )
+    ):
+        raise SystemExit(
+            "Full OA attachment invoice repair derives targets from canonical evidence; "
+            "targeted link values are not allowed."
+        )
+    if (
+        oa_attachment_invoice_link_repair_requested
+        and args.execute
+        and (not args.operator_id or not args.reason)
+    ):
+        raise SystemExit(
+            "Full OA attachment invoice repair execute requires operator and reason."
+        )
+    if not (
+        invoice_expense_link_repair_requested
+        or oa_attachment_invoice_link_repair_requested
+    ) and any(
         value is not None
         for value in (
             args.repair_invoice_expense_link_case_id,
@@ -333,6 +482,81 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             "--cleanup-related-bank-duplicates"
         )
     connection = PostgresConnection(PostgresSettings.from_env())
+    if oa_attachment_invoice_link_repair_requested:
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            plan = build_oa_attachment_invoice_link_audit_plan(
+                load_oa_attachment_invoice_link_audit_snapshot(transaction)
+            )
+        if args.dry_run:
+            _write_private_rollback_manifest(args.rollback_manifest_path, plan)
+            report = public_oa_attachment_invoice_link_audit_report(
+                plan,
+                mode="dry_run",
+                written=False,
+            )
+        else:
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError(
+                    "OA attachment invoice ownership changed after dry-run; rerun dry-run."
+                )
+            _verify_private_rollback_manifest(args.rollback_manifest_path, plan)
+            with connection.transaction() as transaction:
+                transaction.execute("set transaction isolation level serializable")
+                transaction.fetch_one(
+                    "select pg_advisory_xact_lock("
+                    "hashtext('fin_ops_oa_attachment_invoice_link_repair'))"
+                )
+                locked_plan = build_oa_attachment_invoice_link_audit_plan(
+                    load_oa_attachment_invoice_link_audit_snapshot(transaction)
+                )
+                if locked_plan["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError(
+                        "OA attachment invoice ownership changed while acquiring the write lock."
+                    )
+                _verify_private_rollback_manifest(
+                    args.rollback_manifest_path,
+                    locked_plan,
+                )
+                completion = PostgresCoreRepository(
+                    transaction
+                ).repair_invoice_expense_item_links(
+                    transaction,
+                    list(locked_plan["updates"]),
+                    operator_id=args.operator_id,
+                    reason=args.reason,
+                )
+                AuditTrailService(
+                    PostgresOperationsAuditRepository(transaction)
+                ).record_action(
+                    actor_id=args.operator_id,
+                    action="oa_attachment_invoice_expense_item_link_repair",
+                    entity_type="invoice_expense_item_link_audit",
+                    entity_id=locked_plan["source_fingerprint"],
+                    metadata={
+                        "event_type": "operation.completed",
+                        "page_key": "reconciliation_workbench",
+                        "operation_location": "import_audit_repair_ops",
+                        "reason": args.reason,
+                        "outcome": "success",
+                        "source_fingerprint": locked_plan["source_fingerprint"],
+                        "audited_invoice_count": locked_plan["audited_invoice_count"],
+                        "attachment_edge_count": locked_plan["attachment_edge_count"],
+                        "classification_counts": locked_plan["classification_counts"],
+                        **completion,
+                    },
+                )
+            report = public_oa_attachment_invoice_link_audit_report(
+                locked_plan,
+                mode="execute",
+                written=True,
+                completion=completion,
+            )
+        print(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str),
+            file=stdout,
+        )
+        return 0
     if invoice_expense_link_repair_requested:
         plan_kwargs = {
             "invoice_ids": args.repair_invoice_expense_link_id,
@@ -351,6 +575,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 **plan_kwargs,
             )
         if args.dry_run:
+            _write_private_rollback_manifest(args.rollback_manifest_path, plan)
             report = public_invoice_expense_item_link_repair_report(
                 plan,
                 mode="dry_run",
@@ -361,6 +586,7 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 raise RuntimeError(
                     "Invoice expense-item links changed after dry-run; rerun dry-run."
                 )
+            _verify_private_rollback_manifest(args.rollback_manifest_path, plan)
             with connection.transaction() as transaction:
                 transaction.execute("set transaction isolation level serializable")
                 transaction.fetch_one(
@@ -378,6 +604,10 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                     raise RuntimeError(
                         "Invoice expense-item links changed while acquiring the write lock."
                     )
+                _verify_private_rollback_manifest(
+                    args.rollback_manifest_path,
+                    locked_plan,
+                )
                 completion = PostgresCoreRepository(
                     transaction
                 ).repair_invoice_expense_item_links(

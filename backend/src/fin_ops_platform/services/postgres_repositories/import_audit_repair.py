@@ -23,6 +23,14 @@ def load_invoice_expense_item_link_repair_snapshot(
     )
 
 
+def load_oa_attachment_invoice_link_audit_snapshot(
+    connection: Any,
+) -> list[dict[str, Any]]:
+    """Load all active OA-attachment invoices and current ownership evidence in one query."""
+
+    return connection.fetch_all(_OA_ATTACHMENT_INVOICE_LINK_AUDIT_SQL)
+
+
 def load_invoice_header_fact_repair_snapshot(
     connection: Any,
     *,
@@ -39,6 +47,306 @@ def load_invoice_header_fact_repair_snapshot(
         """,
         (digital_invoice_numbers,),
     )
+
+
+_OA_ATTACHMENT_INVOICE_LINK_AUDIT_SQL = """
+with invoice_facts as materialized (
+    select
+        coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id,
+        invoice.digital_invoice_no,
+        invoice.invoice_code,
+        invoice.invoice_no,
+        invoice.workbench_visibility,
+        invoice.source_links,
+        case
+            when nullif(btrim(invoice.digital_invoice_no), '') is not null
+                then concat('digital:', btrim(invoice.digital_invoice_no))
+            when coalesce(invoice.invoice_no, '') ~ '^[0-9]{20}$'
+                then concat('digital:', invoice.invoice_no)
+            when nullif(btrim(invoice.invoice_code), '') is not null
+             and nullif(btrim(invoice.invoice_no), '') is not null
+                then concat(
+                    'code-number:',
+                    btrim(invoice.invoice_code),
+                    ':',
+                    btrim(invoice.invoice_no)
+                )
+            else null
+        end as invoice_identity
+    from app.invoices invoice
+    where invoice.status <> 'deleted'
+      and exists (
+          select 1
+          from jsonb_array_elements(
+              case
+                  when jsonb_typeof(invoice.source_links) = 'array'
+                      then invoice.source_links
+                  else '[]'::jsonb
+              end
+          ) source_link(value)
+          where source_link.value->>'source_type' = 'oa_attachment_invoice'
+      )
+),
+current_owned_evidence as materialized (
+    select distinct
+        application.row_id as oa_row_id,
+        application.row_id as canonical_oa_row_id,
+        item.row_id as expense_item_id,
+        case
+            when nullif(btrim(evidence.value->>'digital_invoice_no'), '') is not null
+                then concat('digital:', btrim(evidence.value->>'digital_invoice_no'))
+            when coalesce(evidence.value->>'invoice_no', '') ~ '^[0-9]{20}$'
+                then concat('digital:', evidence.value->>'invoice_no')
+            when nullif(btrim(evidence.value->>'invoice_code'), '') is not null
+             and nullif(btrim(evidence.value->>'invoice_no'), '') is not null
+                then concat(
+                    'code-number:',
+                    btrim(evidence.value->>'invoice_code'),
+                    ':',
+                    btrim(evidence.value->>'invoice_no')
+                )
+            else null
+        end as invoice_identity,
+        encode(digest(evidence.value->>'source_attachment_key', 'sha256'), 'hex')
+            as source_attachment_key_hash
+    from app.oa_application_items item
+    join app.oa_applications application
+      on application.id = item.oa_application_id
+     and application.status <> 'deleted'
+    left join app.oa_source_aliases candidate_alias
+      on candidate_alias.alias_row_id = application.row_id
+     and candidate_alias.status = 'active'
+    cross join lateral jsonb_array_elements(
+        case
+            when jsonb_typeof(item.normalized_payload->'attachment_invoices') = 'array'
+                then item.normalized_payload->'attachment_invoices'
+            else '[]'::jsonb
+        end
+    ) evidence(value)
+    join app.oa_attachments attachment
+      on attachment.oa_application_id = item.oa_application_id
+     and attachment.source_attachment_key = evidence.value->>'source_attachment_key'
+     and nullif(btrim(attachment.normalized_payload->>'source_expense_item_id'), '')
+            = item.row_id
+    where nullif(btrim(item.row_id), '') is not null
+      and nullif(btrim(evidence.value->>'source_attachment_key'), '') is not null
+      and candidate_alias.id is null
+),
+audit_rows as materialized (
+    select
+        invoice.invoice_id,
+        invoice.workbench_visibility,
+        invoice.source_links,
+        case
+            when invoice.invoice_identity is null then null
+            else encode(digest(invoice.invoice_identity, 'sha256'), 'hex')
+        end as invoice_identity_hash,
+        attachment_edges.items as attachment_edges,
+        explicit_edges.items as explicit_edges,
+        strong_candidates.items as strong_candidates
+    from invoice_facts invoice
+    join lateral (
+        select jsonb_agg(
+            jsonb_build_object(
+                'source_oa_row_id', edge.source_oa_row_id,
+                'source_oa_row_id_hash', case
+                    when edge.raw_source_oa_row_id is null then null
+                    else encode(digest(edge.raw_source_oa_row_id, 'sha256'), 'hex')
+                end,
+                'source_expense_item_id', edge.source_expense_item_id,
+                'source_attachment_key_hash', edge.source_attachment_key_hash,
+                'source_parent_is_active', source_parent_application.id is not null,
+                'source_parent_canonical_oa_row_id', source_parent_application.row_id,
+                'oa_row_id', owner_application.row_id,
+                'canonical_oa_row_id', owner_canonical_application.row_id,
+                'expense_item_id', owner_item.row_id,
+                'is_current_owner', (
+                    owner_item.id is not null
+                    and owner_canonical_application.id is not null
+                    and (
+                        edge.source_oa_row_id is null
+                        or (
+                            source_parent_application.id is not null
+                            and source_parent_application.row_id = owner_canonical_application.row_id
+                        )
+                    )
+                )
+            )
+            order by edge.ordinality
+        ) as items
+        from (
+            select
+                source_link.ordinality,
+                source_parent.raw_source_oa_row_id,
+                split_part(source_parent.raw_source_oa_row_id, ':item:', 1)
+                    as source_oa_row_id,
+                nullif(btrim(source_link.value->>'source_expense_item_id'), '')
+                    as source_expense_item_id,
+                case
+                    when nullif(btrim(source_link.value->>'source_attachment_key'), '') is null
+                        then null
+                    else encode(
+                        digest(source_link.value->>'source_attachment_key', 'sha256'),
+                        'hex'
+                    )
+                end as source_attachment_key_hash
+            from jsonb_array_elements(
+                case
+                    when jsonb_typeof(invoice.source_links) = 'array'
+                        then invoice.source_links
+                    else '[]'::jsonb
+                end
+            ) with ordinality source_link(value, ordinality)
+            cross join lateral (
+                select nullif(
+                    btrim(coalesce(
+                        source_link.value->>'derived_from_oa_id',
+                        source_link.value->>'oa_row_id',
+                        source_link.value->>'source_oa_row_id',
+                        case
+                            when source_link.value->>'source_expense_item_id' like '%%:item:%%'
+                                then split_part(
+                                    source_link.value->>'source_expense_item_id',
+                                    ':item:',
+                                    1
+                                )
+                            else null
+                        end
+                    )),
+                    ''
+                ) as raw_source_oa_row_id
+            ) source_parent
+            where source_link.value->>'source_type' = 'oa_attachment_invoice'
+        ) edge
+        left join app.oa_application_items owner_item
+          on owner_item.row_id = edge.source_expense_item_id
+        left join app.oa_applications owner_application
+          on owner_application.id = owner_item.oa_application_id
+         and owner_application.status <> 'deleted'
+        left join app.oa_source_aliases owner_alias
+          on owner_alias.alias_row_id = owner_application.row_id
+         and owner_alias.status = 'active'
+        left join app.oa_applications owner_canonical_application
+          on owner_canonical_application.row_id = coalesce(
+              owner_alias.canonical_row_id,
+              owner_application.row_id
+          )
+         and owner_canonical_application.status <> 'deleted'
+        left join app.oa_source_aliases source_parent_alias
+          on source_parent_alias.alias_row_id = edge.source_oa_row_id
+         and source_parent_alias.status = 'active'
+        left join app.oa_applications source_parent_application
+          on source_parent_application.row_id = coalesce(
+              source_parent_alias.canonical_row_id,
+              edge.source_oa_row_id
+          )
+         and source_parent_application.status <> 'deleted'
+    ) attachment_edges on true
+    left join lateral (
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'oa_row_id', owner_application.row_id,
+                    'canonical_oa_row_id', owner_canonical_application.row_id,
+                    'expense_item_id', owner_item.row_id,
+                    'is_current_owner', (
+                        owner_item.id is not null
+                        and owner_canonical_application.id is not null
+                        and source_canonical_application.id is not null
+                        and source_canonical_application.row_id = owner_canonical_application.row_id
+                    )
+                )
+                order by source_link.ordinality
+            ),
+            '[]'::jsonb
+        ) as items
+        from (
+            select
+                source.ordinality,
+                split_part(
+                    nullif(
+                        btrim(coalesce(
+                            source.value->>'derived_from_oa_id',
+                            source.value->>'source_workbench_row_id'
+                        )),
+                        ''
+                    ),
+                    ':item:',
+                    1
+                ) as source_oa_row_id,
+                nullif(btrim(source.value->>'source_expense_item_id'), '')
+                    as source_expense_item_id
+            from jsonb_array_elements(
+                case
+                    when jsonb_typeof(invoice.source_links) = 'array'
+                        then invoice.source_links
+                    else '[]'::jsonb
+                end
+            ) with ordinality source(value, ordinality)
+            where source.value->>'source_type' = 'oa_expense_item_invoice'
+        ) source_link
+        left join app.oa_application_items owner_item
+          on owner_item.row_id = source_link.source_expense_item_id
+        left join app.oa_applications owner_application
+          on owner_application.id = owner_item.oa_application_id
+         and owner_application.status <> 'deleted'
+        left join app.oa_source_aliases owner_alias
+          on owner_alias.alias_row_id = owner_application.row_id
+         and owner_alias.status = 'active'
+        left join app.oa_applications owner_canonical_application
+          on owner_canonical_application.row_id = coalesce(
+              owner_alias.canonical_row_id,
+              owner_application.row_id
+          )
+         and owner_canonical_application.status <> 'deleted'
+        left join app.oa_source_aliases source_alias
+          on source_alias.alias_row_id = source_link.source_oa_row_id
+         and source_alias.status = 'active'
+        left join app.oa_applications source_canonical_application
+          on source_canonical_application.row_id = coalesce(
+              source_alias.canonical_row_id,
+              source_link.source_oa_row_id
+          )
+         and source_canonical_application.status <> 'deleted'
+    ) explicit_edges on true
+    left join lateral (
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'oa_row_id', candidate.oa_row_id,
+                    'canonical_oa_row_id', candidate.canonical_oa_row_id,
+                    'expense_item_id', candidate.expense_item_id,
+                    'attachment_key_hashes', candidate.attachment_key_hashes
+                )
+                order by candidate.oa_row_id, candidate.expense_item_id
+            ),
+            '[]'::jsonb
+        ) as items
+        from (
+            select
+                evidence.oa_row_id,
+                evidence.canonical_oa_row_id,
+                evidence.expense_item_id,
+                array_agg(distinct evidence.source_attachment_key_hash order by evidence.source_attachment_key_hash)
+                    as attachment_key_hashes
+            from current_owned_evidence evidence
+            where invoice.invoice_identity is not null
+              and evidence.invoice_identity = invoice.invoice_identity
+            group by evidence.oa_row_id, evidence.canonical_oa_row_id, evidence.expense_item_id
+        ) candidate
+    ) strong_candidates on true
+)
+select
+    invoice_id,
+    workbench_visibility,
+    source_links,
+    invoice_identity_hash,
+    coalesce(attachment_edges, '[]'::jsonb) as attachment_edges,
+    coalesce(explicit_edges, '[]'::jsonb) as explicit_edges,
+    coalesce(strong_candidates, '[]'::jsonb) as strong_candidates
+from audit_rows
+order by invoice_id
+"""
 
 
 def load_import_audit_repair_snapshot(

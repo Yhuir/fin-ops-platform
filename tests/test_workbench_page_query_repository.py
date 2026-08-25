@@ -530,7 +530,7 @@ def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.lower().split())
 
     assert sql.count("visible_invoice_facts as materialized") == 1
-    assert sql.count("from visible_invoice_facts invoice") == 2
+    assert sql.count("from visible_invoice_facts invoice") == 3
     assert sql.count("join visible_invoice_facts invoice") == 1
     assert sql.count("coalesce(invoice.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'") == 1
 
@@ -629,6 +629,59 @@ def test_canonical_spine_rolls_relation_members_once_for_zone_evaluation() -> No
     assert "array_agg(member.row_type order by member.ordinality)" in sql
     assert "in_progress_oa_relation_ids as materialized" in sql
     assert "when in_progress_oa.relation_id is not null then 'unpaired'" in sql
+
+
+def test_source_owner_resolution_precedes_group_filters_counts_and_cursor_limit() -> None:
+    spine_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split()).lower()
+
+    owner_index = spine_sql.index("scoped_invoice_unique_owners as materialized")
+    placement_index = spine_sql.index("source_owned_invoice_placements as materialized")
+    source_group_index = spine_sql.index("source_owned_unpaired_groups as materialized")
+    group_index = spine_sql.index("canonical_groups as materialized")
+    member_index = spine_sql.index("canonical_group_members as materialized")
+    assert owner_index < placement_index < source_group_index < group_index < member_index
+    assert "or not exists ( select 1 from jsonb_array_elements(" in spine_sql
+    assert "= 'oa_expense_item_invoice'" in spine_sql
+    assert "having bool_and(resolution.resolved_oa_row_id is not null)" in spine_sql
+    assert "count(distinct resolution.resolved_oa_row_id) = 1" in spine_sql
+    assert "having count(distinct owner_relation.case_id) <= 1" in spine_sql
+    assert "invoice_relation.row_type = 'invoice'" in spine_sql
+    assert "source_owned_invoice_placements placement" in spine_sql
+    assert "source.source_expense_item_id = item.current_item_id" in spine_sql
+    assert "count(distinct item_identity.value)" in spine_sql
+    assert "source_parent_oa_id" not in spine_sql
+    assert "current_row_index" not in spine_sql
+    assert "from app.oa_attachment_invoice_cache" not in spine_sql
+
+    connection = _QueryConnection([])
+    repository = PostgresWorkbenchPageQueryRepository(
+        connection,
+        tenant_id="test-tenant",
+    )
+    repository._groups_page(
+        scope_key="2026-07",
+        zone="unpaired",
+        page_size=2,
+    )
+    page_sql = connection.sql.lower()
+    assert page_sql.index("source_owned_unpaired_groups as materialized") < page_sql.index(
+        "filtered_groups as materialized"
+    )
+    assert page_sql.index("filtered_groups as materialized") < page_sql.index(
+        "page_groups as materialized"
+    )
+    assert page_sql.index("page_groups as materialized") < page_sql.rindex("limit %s")
+
+
+def test_relation_anomaly_members_use_only_formal_relation_members() -> None:
+    sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
+    relation_members_sql = sql.split(
+        "relation_anomaly_members as materialized (", 1
+    )[1].split("oa_exact_identity_aliases as materialized (", 1)[0]
+
+    assert "join all_active_relation_members member" in relation_members_sql
+    assert "join canonical_group_members member" not in relation_members_sql
+    assert "member.relation_id = relation.id" in relation_members_sql
 
 
 def test_compact_summary_removes_repeated_internal_row_metadata() -> None:
@@ -837,6 +890,264 @@ def test_detail_queries_are_typed_and_bounded_without_full_scope_spine() -> None
         group_id="unpaired:bank:digest",
     ) is None
     assert connection.calls == []
+
+
+def test_oa_invoice_and_relation_details_use_one_target_bounded_set_query() -> None:
+    connection = _CountingQueryConnection([])
+    repository = PostgresWorkbenchPageQueryRepository(
+        connection,
+        tenant_id="test-tenant",
+    )
+
+    assert repository._row_group_descriptors(
+        scope_key="2026-07",
+        row_id="invoice-1",
+        row_type="invoice",
+    ) == []
+    assert repository._relation_descriptor_for_case(
+        scope_key="2026-07",
+        case_id="CASE-1",
+    ) == []
+
+    assert len(connection.calls) == 2
+    for sql, params in connection.calls:
+        lowered = sql.lower()
+        assert "requested_target as" in lowered
+        assert "target_source_candidates as materialized" in lowered
+        assert "target_relation_seeds as materialized" in lowered
+        assert "target_owner_oa_ids as materialized" in lowered
+        assert "target_owner_item_ids as materialized" in lowered
+        assert "target_source_owned_invoice_months as materialized" in lowered
+        assert "target_invoice_scope_months as materialized" in lowered
+        assert lowered.index("target_source_owned_invoice_months as materialized") < lowered.index(
+            "target_invoice_scope_months as materialized"
+        )
+        assert "scope.scope_key = 'all'" in lowered
+        assert "target.case_id is not null" in lowered
+        assert "count(distinct item_identity.value)" in lowered
+        assert "scoped_invoice_facts as materialized" in lowered
+        assert "invoice.invoice_month = invoice_scope.scope_month" in lowered
+        assert "scope.scope_key = 'all' or invoice.invoice_month" not in lowered
+        assert "source_owned_invoice_placements as materialized" in lowered
+        assert "relation.row_ids as formal_member_ids" in lowered
+        assert "relation.normalized_row_types as formal_member_types" in lowered
+        assert "relation.version as relation_version" in lowered
+        assert "scoped_source_keys" not in lowered
+        assert "canonical_groups as materialized" not in lowered
+        assert "canonical_group_members" not in lowered
+        assert "oa_attachment_invoice_cache" not in lowered
+        assert "limit 4" in lowered
+        assert params[:4] == (
+            "2026-07",
+            "2026-07",
+            "2026-07-01",
+            "test-tenant",
+        )
+
+
+def test_source_owned_group_detail_accepts_oa_anchor_inside_multi_member_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detail_key = "v1:2026-07:oa:" + "oa-owner".encode().hex()
+    connection = _QueryConnection(
+        [
+            {
+                "internal_key": "source-owned:oa:oa-owner",
+                "detail_key": detail_key,
+                "group_kind": "unpaired",
+                "zone": "unpaired",
+                "member_ids": ["oa-owner", "invoice-1"],
+                "member_types": ["oa", "invoice"],
+                "formal_member_ids": [],
+                "formal_member_types": [],
+                "scope_month": "2026-07-01",
+            }
+        ]
+    )
+    repository = PostgresWorkbenchPageQueryRepository(
+        connection,
+        tenant_id="test-tenant",
+    )
+    monkeypatch.setattr(
+        repository,
+        "_hydrate_groups",
+        lambda **_kwargs: [
+            {
+                "group_id": "source-owned:oa:digest",
+                "zone": "unpaired",
+                "oa_rows": [{"id": "oa-owner", "type": "oa"}],
+                "bank_rows": [],
+                "invoice_rows": [{"id": "invoice-1", "type": "invoice"}],
+            }
+        ],
+    )
+
+    detail = repository._group_detail(
+        scope_key="2026-07",
+        zone="unpaired",
+        group_id="source-owned:oa:digest",
+        detail_key=detail_key,
+    )
+
+    assert detail is not None
+    assert detail["group"]["invoice_rows"][0]["id"] == "invoice-1"
+    assert "requested_target as" in connection.sql.lower()
+
+
+def test_full_hydration_restores_source_owned_members_with_one_set_read() -> None:
+    class _Hydration:
+        calls: list[dict[str, set[str]]] = []
+
+        def hydrate_rows(
+            self,
+            typed_row_ids: dict[str, set[str]],
+        ) -> dict[tuple[str, str], dict[str, Any]]:
+            self.calls.append(typed_row_ids)
+            return {
+                ("invoice", "invoice-1"): {
+                    "id": "invoice-1",
+                    "type": "invoice",
+                    "object_identity_key": "invoice:1",
+                    "status": "unpaired",
+                }
+            }
+
+    descriptor = {
+        "internal_key": "source-owned:oa:oa-owner",
+        "detail_key": "v1:2026-07:oa:" + "oa-owner".encode().hex(),
+        "group_kind": "unpaired",
+        "member_ids": ["oa-owner", "invoice-1"],
+        "member_types": ["oa", "invoice"],
+    }
+    owner_singleton = {
+        "group_id": "unpaired:oa:old-digest",
+        "group_type": "unpaired",
+        "zone": "unpaired",
+        "oa_rows": [
+            {
+                "id": "oa-owner",
+                "type": "oa",
+                "object_identity_key": "oa:owner",
+                "status": "unpaired",
+            }
+        ],
+        "bank_rows": [],
+        "invoice_rows": [],
+    }
+    hydration = _Hydration()
+
+    restored = PostgresWorkbenchPageQueryRepository._restore_descriptor_owned_members(
+        descriptors=[descriptor],
+        groups=[owner_singleton],
+        hydration=hydration,  # type: ignore[arg-type]
+    )
+
+    assert hydration.calls == [
+        {"oa": set(), "bank": set(), "invoice": {"invoice-1"}}
+    ]
+    assert restored[0]["group_id"].startswith("source-owned:oa:")
+    assert restored[0]["reason"] == "oa_attachment_item_owner"
+    assert restored[0]["row_counts"] == {
+        "oa": 1,
+        "bank": 0,
+        "invoice": 1,
+        "rows": 2,
+    }
+    assert restored[0]["invoice_rows"][0]["id"] == "invoice-1"
+    assert owner_singleton["invoice_rows"] == []
+
+
+def test_full_hydration_restores_relation_display_without_formal_state_pollution() -> None:
+    class _Hydration:
+        calls: list[dict[str, set[str]]] = []
+
+        def hydrate_rows(
+            self,
+            typed_row_ids: dict[str, set[str]],
+        ) -> dict[tuple[str, str], dict[str, Any]]:
+            self.calls.append(typed_row_ids)
+            return {
+                ("invoice", "invoice-display"): {
+                    "id": "invoice-display",
+                    "type": "invoice",
+                    "object_identity_key": "invoice:display",
+                    "case_id": "stale-case",
+                    "relation_mode": "stale-mode",
+                    "relation_amount_check": {"status": "stale"},
+                    "available_actions": ["confirm_relation", "withdraw"],
+                }
+            }
+
+    descriptor = {
+        "internal_key": "case:CASE-1",
+        "detail_key": "CASE-1",
+        "group_kind": "relation",
+        "member_ids": ["oa-1", "bank-1", "invoice-display"],
+        "member_types": ["oa", "bank", "invoice"],
+        "formal_member_ids": ["oa-1", "bank-1"],
+        "formal_member_types": ["oa", "bank"],
+        "relation_version": 7,
+    }
+    relation_group = {
+        "group_id": "case:CASE-1",
+        "group_type": "relation",
+        "zone": "unpaired",
+        "status": "unpaired",
+        "case_id": "CASE-1",
+        "formal_member_ids": ["oa-1", "bank-1"],
+        "formal_member_types": ["oa", "bank"],
+        "completion": {
+            "is_complete": False,
+            "blocking_reasons": ["anomaly_review_required"],
+        },
+        "workbench_anomaly": {"fingerprint": "formal-only"},
+        "can_withdraw": True,
+        "oa_rows": [
+            {
+                "id": "oa-1",
+                "type": "oa",
+                "object_identity_key": "oa:1",
+                "available_actions": ["detail", "withdraw"],
+            }
+        ],
+        "bank_rows": [
+            {
+                "id": "bank-1",
+                "type": "bank",
+                "object_identity_key": "bank:1",
+                "available_actions": ["detail", "withdraw"],
+            }
+        ],
+        "invoice_rows": [],
+    }
+    hydration = _Hydration()
+
+    restored = PostgresWorkbenchPageQueryRepository._restore_descriptor_owned_members(
+        descriptors=[descriptor],
+        groups=[relation_group],
+        hydration=hydration,  # type: ignore[arg-type]
+    )[0]
+
+    assert hydration.calls == [
+        {"oa": set(), "bank": set(), "invoice": {"invoice-display"}}
+    ]
+    assert restored["formal_member_ids"] == ["oa-1", "bank-1"]
+    assert restored["formal_member_types"] == ["oa", "bank"]
+    assert restored["relation_version"] == 7
+    assert restored["completion"] == relation_group["completion"]
+    assert restored["workbench_anomaly"] == relation_group["workbench_anomaly"]
+    assert restored["can_withdraw"] is True
+    assert restored["oa_rows"][0]["available_actions"] == ["detail", "withdraw"]
+    assert restored["bank_rows"][0]["available_actions"] == ["detail", "withdraw"]
+    assert restored["display_only_member_ids"] == ["invoice-display"]
+    display = restored["invoice_rows"][0]
+    assert display["workbench_membership_role"] == "source_owned_display"
+    assert display["source_owner_case_id"] == "CASE-1"
+    assert display["available_actions"] == ["detail"]
+    assert "case_id" not in display
+    assert "relation_mode" not in display
+    assert "relation_amount_check" not in display
+    assert relation_group["invoice_rows"] == []
 
 
 def test_page_hydration_enforces_fixed_statement_budget(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -20,6 +20,15 @@ LEGACY_CANDIDATE_CASE_PREFIXES = ("candidate:", "decision:", "temp:")
 BANK_FLOW_RULE_BATCH_COLLAPSE_THRESHOLD = 3
 
 
+def _canonical_expense_item_id(item: dict[str, Any]) -> str:
+    identities = {
+        str(item.get(field_name) or "").strip()
+        for field_name in ("id", "row_id", "expense_item_id")
+        if str(item.get(field_name) or "").strip()
+    }
+    return next(iter(identities)) if len(identities) == 1 else ""
+
+
 class WorkbenchRelationGroupingService:
     """Project canonical rows into the exact active-relation/unpaired partition.
 
@@ -38,6 +47,16 @@ class WorkbenchRelationGroupingService:
         canonical_rows, display_rows = self._normalize_rows(rows_by_id)
         relations = self._normalize_relations(active_relations)
         ownership = self._active_ownership(relations, canonical_rows)
+        source_owners = self._raw_source_owner_assignments(
+            canonical_rows,
+            ownership=ownership,
+        )
+        # OA attachment ownership is a display grouping fact, not a formal
+        # relation.  Normalize the immutable source item identities against
+        # the current OA rows for anomaly/cell alignment only. Source-owned
+        # placement above deliberately uses the untouched exact item edges;
+        # historical parent/row-index normalization must never create a group.
+        normalize_oa_attachment_expense_item_ids(list(canonical_rows.values()))
 
         relation_groups = [
             self._relation_group(
@@ -48,15 +67,21 @@ class WorkbenchRelationGroupingService:
             )
             for relation in relations
         ]
+        source_owned_groups, source_owned_ids = self._source_owned_unpaired_groups(
+            canonical_rows,
+            ownership=ownership,
+            relation_groups=relation_groups,
+            source_owners=source_owners,
+        )
         relation_groups = [group for group in relation_groups if self._group_member_count(group)]
         paired_groups = [group for group in relation_groups if group["zone"] == "paired"]
-
         unpaired_groups = [
             *[group for group in relation_groups if group["zone"] == "unpaired"],
+            *source_owned_groups,
             *[
                 self._unpaired_group(row)
                 for row_id, row in sorted(canonical_rows.items(), key=self._row_sort_key)
-                if row_id not in ownership
+                if row_id not in ownership and row_id not in source_owned_ids
             ],
         ]
 
@@ -263,6 +288,12 @@ class WorkbenchRelationGroupingService:
         group["relation_mode"] = relation_mode
         group["case_id"] = case_id
         group["can_withdraw"] = True
+        group["formal_member_ids"] = list(relation["row_ids"])
+        group["formal_member_types"] = [
+            str(rows_by_id[row_id]["type"]) for row_id in relation["row_ids"]
+        ]
+        if relation.get("version") is not None:
+            group["relation_version"] = relation["version"]
         if anomaly:
             anomaly["review_decision"] = decision
             anomaly["review_note"] = str((review or {}).get("note") or "") if isinstance(review, dict) else ""
@@ -317,6 +348,178 @@ class WorkbenchRelationGroupingService:
         if str(display_row.get("source_kind") or "").strip() == "etc_invoice_summary":
             self._apply_display_summary(group, [display_row], zone="unpaired")
         return group
+
+    def _source_owned_unpaired_groups(
+        self,
+        rows_by_id: dict[str, dict[str, Any]],
+        *,
+        ownership: dict[str, str],
+        relation_groups: list[dict[str, Any]],
+        source_owners: dict[str, str],
+    ) -> tuple[list[dict[str, Any]], set[str]]:
+        """Co-locate uniquely owned OA attachment invoices without pairing them.
+
+        The item binding is immutable source provenance.  It may shape an
+        unpaired display partition or decorate an owner's active relation, but
+        it never changes the relation's formal member set.  Ambiguous,
+        incomplete, or already-related ownership remains on the singleton path.
+        """
+
+        invoices_by_oa: dict[str, list[dict[str, Any]]] = {}
+        for row_id, owner_id in source_owners.items():
+            row = rows_by_id[row_id]
+            invoices_by_oa.setdefault(owner_id, []).append(row)
+
+        groups_by_case = {
+            str(group.get("case_id") or ""): group
+            for group in relation_groups
+            if str(group.get("case_id") or "")
+        }
+        unpaired_invoices_by_oa: dict[str, list[dict[str, Any]]] = {}
+        for owner_id, invoice_rows in invoices_by_oa.items():
+            owner_case_id = ownership.get(owner_id)
+            if not owner_case_id:
+                unpaired_invoices_by_oa[owner_id] = invoice_rows
+                continue
+            relation_group = groups_by_case.get(owner_case_id)
+            if relation_group is None:
+                continue
+            display_rows = []
+            for invoice_row in sorted(
+                invoice_rows,
+                key=lambda row: str(row.get("object_identity_key") or row.get("id") or ""),
+            ):
+                display_row = deepcopy(invoice_row)
+                display_row["status"] = str(relation_group["zone"])
+                display_row["workbench_membership_role"] = "source_owned_display"
+                display_row["source_owner_case_id"] = owner_case_id
+                display_row["available_actions"] = ["detail"]
+                display_rows.append(display_row)
+            relation_group["invoice_rows"].extend(display_rows)
+            relation_group["display_only_member_ids"] = sorted({
+                *(
+                    str(value)
+                    for value in list(
+                        relation_group.get("display_only_member_ids") or []
+                    )
+                ),
+                *(str(row["id"]) for row in display_rows),
+            })
+
+        groups: list[dict[str, Any]] = []
+        grouped_ids: set[str] = set()
+        grouped_ids.update(
+            str(row["id"])
+            for owner_id, invoice_rows in invoices_by_oa.items()
+            if owner_id in ownership
+            for row in invoice_rows
+        )
+        for oa_id in sorted(unpaired_invoices_by_oa):
+            oa_row = rows_by_id[oa_id]
+            invoice_rows = sorted(
+                unpaired_invoices_by_oa[oa_id],
+                key=lambda row: str(row.get("object_identity_key") or row.get("id") or ""),
+            )
+            resolved_rows = [
+                self._unpaired_row(oa_row),
+                *(self._unpaired_row(row) for row in invoice_rows),
+            ]
+            digest = sha256(
+                f"oa\0{oa_row['object_identity_key']}".encode("utf-8")
+            ).hexdigest()[:24]
+            groups.append(
+                self._base_group(
+                    group_id=f"source-owned:oa:{digest}",
+                    group_type="unpaired",
+                    reason="oa_attachment_item_owner",
+                    zone="unpaired",
+                    rows=resolved_rows,
+                )
+            )
+            grouped_ids.add(oa_id)
+            grouped_ids.update(str(row["id"]) for row in invoice_rows)
+        return groups, grouped_ids
+
+    @classmethod
+    def _raw_source_owner_assignments(
+        cls,
+        rows_by_id: dict[str, dict[str, Any]],
+        *,
+        ownership: dict[str, str],
+    ) -> dict[str, str]:
+        """Resolve source display owners only from untouched exact item edges."""
+
+        oa_rows = {
+            row_id: row
+            for row_id, row in rows_by_id.items()
+            if str(row.get("type") or "") == "oa"
+        }
+        assignments: dict[str, str] = {}
+        for row_id, row in rows_by_id.items():
+            if str(row.get("type") or "") != "invoice" or row_id in ownership:
+                continue
+            source_kinds = {
+                str(value or "").strip()
+                for value in list(row.get("source_kinds") or [])
+            }
+            source_kinds.add(str(row.get("source_kind") or "").strip())
+            if not source_kinds.intersection(
+                {"oa_attachment_invoice", "oa_expense_item_invoice"}
+            ):
+                continue
+            owner_id = cls._unique_source_owner(row, oa_rows=oa_rows)
+            if owner_id:
+                assignments[row_id] = owner_id
+        return assignments
+
+    @staticmethod
+    def _unique_source_owner(
+        invoice_row: dict[str, Any],
+        *,
+        oa_rows: dict[str, dict[str, Any]],
+    ) -> str:
+        source_links = [
+            link
+            for link in list(invoice_row.get("source_links") or [])
+            if isinstance(link, dict)
+        ]
+        explicit_links = [
+            link
+            for link in source_links
+            if str(link.get("source_type") or "").strip()
+            == "oa_expense_item_invoice"
+        ]
+        attachment_links = [
+            link
+            for link in source_links
+            if str(link.get("source_type") or "").strip()
+            == "oa_attachment_invoice"
+        ]
+        effective_links: list[dict[str, Any]] = explicit_links or attachment_links
+        if not effective_links:
+            return ""
+
+        resolved_owners: set[str] = set()
+        for source_link in effective_links:
+            source_item_id = str(
+                source_link.get("source_expense_item_id") or ""
+            ).strip()
+            if not source_item_id:
+                return ""
+            matches = {
+                oa_id
+                for oa_id, oa_row in oa_rows.items()
+                if source_item_id
+                in {
+                    _canonical_expense_item_id(item)
+                    for item in list(oa_row.get("expense_items") or [])
+                    if isinstance(item, dict)
+                }
+            }
+            if len(matches) != 1:
+                return ""
+            resolved_owners.update(matches)
+        return next(iter(resolved_owners)) if len(resolved_owners) == 1 else ""
 
     @staticmethod
     def _unpaired_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -504,8 +707,16 @@ class WorkbenchRelationGroupingService:
         relation_members = self._member_identities(
             [group for group in [*paired_groups, *unpaired_groups] if group.get("group_type") == "relation"]
         )
+        display_only = {
+            (str(row["type"]), str(row["object_identity_key"]))
+            for group in [*paired_groups, *unpaired_groups]
+            if group.get("group_type") == "relation"
+            for row in group.get("invoice_rows") or []
+            if str(row.get("workbench_membership_role") or "")
+            == "source_owned_display"
+        }
         if (
-            relation_members != active
+            relation_members - display_only != active
             or paired.intersection(unpaired)
             or paired.union(unpaired) != canonical
         ):

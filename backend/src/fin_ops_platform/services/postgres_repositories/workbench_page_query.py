@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from typing import Any, TypeVar
 
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -125,6 +127,35 @@ def _anomaly_invoice_source_links_sql(invoice_alias: str) -> str:
             ) = 'array'
                 then {invoice_alias}.raw_payload->'normalized_payload'->'source_links'
             else '[]'::jsonb
+        end
+    """
+
+
+def _canonical_oa_item_id_sql(item_value: str) -> str:
+    """Return one current item identity, rejecting conflicting aliases."""
+
+    identity_values = (
+        f"nullif(btrim({item_value}->>'id'), '')",
+        f"nullif(btrim({item_value}->>'row_id'), '')",
+        f"nullif(btrim({item_value}->>'expense_item_id'), '')",
+    )
+    return f"""
+        case
+            when (
+                select count(distinct item_identity.value)
+                from (values
+                    ({identity_values[0]}),
+                    ({identity_values[1]}),
+                    ({identity_values[2]})
+                ) item_identity(value)
+                where item_identity.value is not null
+            ) = 1
+            then coalesce(
+                {identity_values[0]},
+                {identity_values[1]},
+                {identity_values[2]}
+            )
+            else null
         end
     """
 
@@ -422,6 +453,111 @@ scoped_source_keys as materialized (
     cross join etc_summary_identity_guard summary_guard
     where summary_guard.guard = 1
 ),
+scoped_invoice_ownership_links as materialized (
+    select
+        invoice.row_id as invoice_row_id,
+        source_link.ordinality as source_ordinality,
+        coalesce(
+            source_link.value->>'source_type',
+            source_link.value->>'type',
+            source_link.value->>'source'
+        ) as source_type,
+        nullif(btrim(source_link.value->>'source_expense_item_id'), '')
+            as source_expense_item_id
+    from visible_invoice_facts invoice
+    join scoped_source_keys source_key
+      on source_key.row_type = 'invoice'
+     and source_key.row_id = invoice.row_id
+    cross join lateral jsonb_array_elements(invoice.invoice_source_links)
+      with ordinality source_link(value, ordinality)
+    where coalesce(
+        source_link.value->>'source_type',
+        source_link.value->>'type',
+        source_link.value->>'source'
+    ) in ('oa_attachment_invoice', 'oa_expense_item_invoice')
+      and (
+          coalesce(
+              source_link.value->>'source_type',
+              source_link.value->>'type',
+              source_link.value->>'source'
+          ) = 'oa_expense_item_invoice'
+          or not exists (
+              select 1
+              from jsonb_array_elements(invoice.invoice_source_links) explicit_link(value)
+              where coalesce(
+                  explicit_link.value->>'source_type',
+                  explicit_link.value->>'type',
+                  explicit_link.value->>'source'
+              ) = 'oa_expense_item_invoice'
+          )
+      )
+),
+current_oa_item_facts as materialized (
+    select distinct
+        oa.row_id as oa_row_id,
+        item.row_id as current_item_id
+    from scoped_invoice_ownership_links source
+    join app.oa_application_items item
+      on item.row_id = source.source_expense_item_id
+    join app.oa_applications oa on oa.id = item.oa_application_id
+    where oa.status <> 'deleted'
+      and nullif(btrim(item.row_id), '') is not null
+    union all
+    select distinct
+        admission.oa_id,
+        current_item.current_item_id
+    from app.oa_pending_payment_admissions admission
+    cross join requested_scope scope
+    cross join lateral jsonb_array_elements(
+        case when jsonb_typeof(admission.source_payload->'expense_items') = 'array'
+             then admission.source_payload->'expense_items'
+             else '[]'::jsonb end
+    ) item(value)
+    cross join lateral (
+        select {_canonical_oa_item_id_sql('item.value')} as current_item_id
+    ) current_item
+    where admission.tenant_id = scope.tenant_id
+      and admission.workflow_status = 'in_progress'
+      and current_item.current_item_id is not null
+      and exists (
+          select 1
+          from scoped_invoice_ownership_links source
+          where source.source_expense_item_id = current_item.current_item_id
+      )
+),
+scoped_invoice_item_owner_candidates as materialized (
+    select distinct
+        source.invoice_row_id,
+        source.source_ordinality,
+        item.oa_row_id,
+        item.current_item_id
+    from scoped_invoice_ownership_links source
+    join current_oa_item_facts item
+      on source.source_expense_item_id = item.current_item_id
+),
+scoped_invoice_link_owner_resolutions as materialized (
+    select
+        source.invoice_row_id,
+        source.source_ordinality,
+        case when count(distinct (
+            candidate.oa_row_id,
+            candidate.current_item_id
+        )) = 1 then min(candidate.oa_row_id) end as resolved_oa_row_id
+    from scoped_invoice_ownership_links source
+    left join scoped_invoice_item_owner_candidates candidate
+      on candidate.invoice_row_id = source.invoice_row_id
+     and candidate.source_ordinality = source.source_ordinality
+    group by source.invoice_row_id, source.source_ordinality
+),
+scoped_invoice_unique_owners as materialized (
+    select
+        resolution.invoice_row_id,
+        min(resolution.resolved_oa_row_id) as oa_row_id
+    from scoped_invoice_link_owner_resolutions resolution
+    group by resolution.invoice_row_id
+    having bool_and(resolution.resolved_oa_row_id is not null)
+       and count(distinct resolution.resolved_oa_row_id) = 1
+),
 all_active_relations as materialized (
     select
         relation.id,
@@ -444,6 +580,10 @@ all_active_relations as materialized (
           or relation.row_ids && array(
               select source_key.row_id
               from scoped_source_keys source_key
+          )::text[]
+          or relation.row_ids && array(
+              select owner.oa_row_id
+              from scoped_invoice_unique_owners owner
           )::text[]
       )
 ),
@@ -545,6 +685,14 @@ scoped_relation_ids as materialized (
              and source_key.row_id = member.row_id
             where member.relation_id = relation.id
        )
+       or exists (
+            select 1
+            from all_active_relation_members member
+            join scoped_invoice_unique_owners owner
+              on member.row_type = 'oa'
+             and member.row_id = owner.oa_row_id
+            where member.relation_id = relation.id
+       )
 ),
 scoped_relations as materialized (
     select
@@ -561,6 +709,9 @@ needed_keys as materialized (
     select member.row_type, member.row_id
     from all_active_relation_members member
     join scoped_relation_ids selected on selected.id = member.relation_id
+    union
+    select 'oa'::text, owner.oa_row_id
+    from scoped_invoice_unique_owners owner
 ),
 oa_candidate_facts as materialized (
     select
@@ -981,6 +1132,48 @@ relation_member_guard as materialized (
     select 1 / case when count(*) = 0 then 1 else 0 end as guard
     from missing_relation_members
 ),
+source_owned_invoice_placements as materialized (
+    select
+        owner.invoice_row_id,
+        owner.oa_row_id,
+        case when count(distinct owner_relation.case_id) = 1
+             then min(owner_relation.case_id) end as owner_relation_case_id
+    from scoped_invoice_unique_owners owner
+    join canonical_rows invoice
+      on invoice.pane = 'invoice'
+     and invoice.row_id = owner.invoice_row_id
+    join canonical_rows oa
+      on oa.pane = 'oa'
+     and oa.row_id = owner.oa_row_id
+    left join all_active_relation_members owner_relation
+      on owner_relation.row_type = 'oa'
+     and owner_relation.row_id = owner.oa_row_id
+    where not exists (
+        select 1
+        from all_active_relation_members invoice_relation
+        where invoice_relation.row_type = 'invoice'
+          and invoice_relation.row_id = owner.invoice_row_id
+    )
+      and not exists (
+          select 1
+          from app.workbench_row_overrides override
+          where override.status = 'active'
+            and (
+                (override.row_type = 'oa' and override.row_id = owner.oa_row_id)
+                or (
+                    override.row_type = 'invoice'
+                    and override.row_id = owner.invoice_row_id
+                )
+            )
+            and coalesce(
+                (override.override_payload->>'ignored')::boolean,
+                override.override_payload->>'status' = 'ignored',
+                false
+            )
+      )
+    group by owner.invoice_row_id, owner.oa_row_id
+    having count(distinct owner_relation.case_id) <= 1
+),
 relation_groups as materialized (
     select
         'case:' || relation.case_id as internal_key,
@@ -1006,8 +1199,18 @@ relation_groups as materialized (
                  ) and not ('invoice' = any(relation.normalized_row_types)) then 'unpaired'
             else 'paired'
         end as zone,
-        relation.row_ids as member_ids,
-        relation.normalized_row_types as member_types,
+        relation.row_ids || coalesce((
+            select array_agg(
+                placement.invoice_row_id order by placement.invoice_row_id
+            )::text[]
+            from source_owned_invoice_placements placement
+            where placement.owner_relation_case_id = relation.case_id
+        ), array[]::text[]) as member_ids,
+        relation.normalized_row_types || coalesce((
+            select array_agg('invoice'::text order by placement.invoice_row_id)::text[]
+            from source_owned_invoice_placements placement
+            where placement.owner_relation_case_id = relation.case_id
+        ), array[]::text[]) as member_types,
         relation.month_scope as scope_month,
         relation.updated_at,
         relation.external_etc_batch_id,
@@ -1040,6 +1243,38 @@ relation_groups as materialized (
     cross join relation_member_guard
     where relation_member_guard.guard = 1
 ),
+source_owned_unpaired_groups as materialized (
+    select
+        'source-owned:oa:' || placement.oa_row_id as internal_key,
+        'v1:' || to_char(
+            coalesce(scope.scope_month, max(invoice.scope_month), oa.scope_month),
+            'YYYY-MM'
+        ) || ':oa:' || encode(convert_to(placement.oa_row_id, 'UTF8'), 'hex')
+            as detail_key,
+        'unpaired'::text as group_kind,
+        'unpaired'::text as zone,
+        array[placement.oa_row_id]::text[] || array_agg(
+            placement.invoice_row_id order by placement.invoice_row_id
+        )::text[] as member_ids,
+        array['oa']::text[] || array_agg(
+            'invoice'::text order by placement.invoice_row_id
+        )::text[] as member_types,
+        coalesce(scope.scope_month, max(invoice.scope_month), oa.scope_month)
+            as scope_month,
+        greatest(oa.updated_at, max(invoice.updated_at)) as updated_at,
+        null::text as external_etc_batch_id,
+        array[]::text[] as missing_row_types
+    from source_owned_invoice_placements placement
+    join canonical_rows oa
+      on oa.pane = 'oa'
+     and oa.row_id = placement.oa_row_id
+    join canonical_rows invoice
+      on invoice.pane = 'invoice'
+     and invoice.row_id = placement.invoice_row_id
+    cross join requested_scope scope
+    where placement.owner_relation_case_id is null
+    group by placement.oa_row_id, oa.scope_month, oa.updated_at, scope.scope_month
+),
 unpaired_groups as materialized (
     select
         'row:' || row.pane || ':' || row.row_id as internal_key,
@@ -1064,6 +1299,29 @@ unpaired_groups as materialized (
       )
       and not exists (
           select 1
+          from source_owned_invoice_placements placement
+          where placement.invoice_row_id = row.row_id
+             or (
+                 placement.owner_relation_case_id is null
+                 and placement.oa_row_id = row.row_id
+             )
+      )
+      and (
+          row.pane <> 'oa'
+          or exists (
+              select 1
+              from scoped_source_keys source_key
+              where source_key.row_type = 'oa'
+                and source_key.row_id = row.row_id
+          )
+          or exists (
+              select 1
+              from source_owned_invoice_placements placement
+              where placement.oa_row_id = row.row_id
+          )
+      )
+      and not exists (
+          select 1
           from app.workbench_row_overrides override
           where override.status = 'active'
             and override.row_type = row.pane
@@ -1077,6 +1335,8 @@ unpaired_groups as materialized (
 ),
 canonical_groups as materialized (
     select * from relation_groups
+    union all
+    select * from source_owned_unpaired_groups
     union all
     select * from unpaired_groups
 ),
@@ -1130,8 +1390,9 @@ latest_anomaly_decisions as materialized (
 relation_anomaly_etc_requests as materialized (
     select distinct summary.external_batch_id
     from canonical_groups groups
-    join canonical_group_members member
-      on member.internal_key = groups.internal_key
+    join scoped_relations relation on relation.case_id = groups.detail_key
+    join all_active_relation_members member
+      on member.relation_id = relation.id
     join etc_summary_keys summary on summary.row_id = member.row_id
     where groups.group_kind = 'relation'
       and member.row_type = 'invoice'
@@ -1270,8 +1531,8 @@ relation_anomaly_members as materialized (
     from canonical_groups groups
     join scoped_relations relation
       on relation.case_id = groups.detail_key
-    join canonical_group_members member
-      on member.internal_key = groups.internal_key
+    join all_active_relation_members member
+      on member.relation_id = relation.id
     join canonical_rows canonical_row
       on canonical_row.pane = member.row_type
      and canonical_row.row_id = member.row_id
@@ -1337,7 +1598,7 @@ oa_expense_items as materialized (
         member.internal_key,
         member.case_id,
         member.row_id as oa_row_id,
-        coalesce(item.value->>'id', item.value->>'expense_item_id') as item_id,
+        current_item.current_item_id as item_id,
         item.value->>'row_index' as row_index,
         case
             when replace(coalesce(
@@ -1359,10 +1620,11 @@ oa_expense_items as materialized (
         end as attachment_file_count
     from relation_anomaly_members member
     cross join lateral jsonb_array_elements(member.oa_expense_items) item(value)
+    cross join lateral (
+        select {_canonical_oa_item_id_sql('item.value')} as current_item_id
+    ) current_item
     where member.row_type = 'oa'
-      and nullif(btrim(coalesce(
-          item.value->>'id', item.value->>'expense_item_id'
-      )), '') is not null
+      and current_item.current_item_id is not null
 ),
 invoice_anomaly_facts as materialized (
     select distinct
@@ -2856,11 +3118,19 @@ class PostgresWorkbenchPageQueryRepository:
         descriptor = rows[0]
         if not relation_case_id:
             descriptor_scope = str(descriptor.get("scope_month") or "")[:7]
+            descriptor_member_ids = text_list(descriptor.get("member_ids"))
+            descriptor_member_types = text_list(descriptor.get("member_types"))
             if (
                 str(descriptor.get("detail_key") or "") != normalized_detail_key
                 or descriptor_scope != detail_scope
-                or text_list(descriptor.get("member_ids")) != [detail_row_id]
-                or text_list(descriptor.get("member_types")) != [detail_row_type]
+                or (detail_row_type, detail_row_id)
+                not in set(
+                    zip(
+                        descriptor_member_types,
+                        descriptor_member_ids,
+                        strict=True,
+                    )
+                )
             ):
                 return None
         groups = self._hydrate_groups(
@@ -2937,47 +3207,11 @@ class PostgresWorkbenchPageQueryRepository:
         scope_key: str,
         case_id: str,
     ) -> list[dict[str, Any]]:
-        return self._connection.fetch_all(
-            f"""
-            with requested_scope as (
-                select
-                    %s::text as scope_key,
-                    case when %s::text = 'all' then null else %s::date end as scope_month,
-                    %s::text as tenant_id
-            ),
-            selected_relation as materialized (
-                select relation.*
-                from app.workbench_pair_relations relation
-                cross join requested_scope scope
-                where relation.status = 'active'
-                  and relation.case_id = %s
-                  and (
-                      scope.scope_key = 'all'
-                      or relation.month_scope = scope.scope_month
-                      or {self._relation_has_scoped_member_sql('relation')}
-                  )
-                limit 2
-            )
-            select
-                'case:' || relation.case_id as internal_key,
-                relation.case_id as detail_key,
-                'relation'::text as group_kind,
-                null::text as zone,
-                relation.row_ids as member_ids,
-                array(
-                    select {self._normalized_member_type_sql('member.row_type')}
-                    from unnest(relation.row_types) with ordinality
-                        as member(row_type, ordinality)
-                    order by member.ordinality
-                )::text[] as member_types,
-                relation.month_scope as scope_month,
-                relation.updated_at,
-                {_RELATION_EXTERNAL_BATCH_SQL} as external_etc_batch_id,
-                array[]::text[] as missing_row_types
-            from selected_relation relation
-            order by relation.case_id
-            """,
-            tuple([*self._scope_params(scope_key), case_id]),
+        return self._target_group_descriptors(
+            scope_key=scope_key,
+            row_id="",
+            row_type="",
+            case_id=case_id,
         )
 
     def _row_group_descriptors(
@@ -2988,37 +3222,61 @@ class PostgresWorkbenchPageQueryRepository:
         row_type: str | None,
     ) -> list[dict[str, Any]]:
         normalized_type = str(row_type or "").strip().lower()
-        type_clause = "and target.row_type = %s" if normalized_type else ""
-        params: list[Any] = [
-            *self._scope_params(scope_key),
-            row_id,
-            row_id,
-            row_id,
-            row_id,
-            row_id,
-        ]
-        if normalized_type:
-            params.append(normalized_type)
+        return self._target_group_descriptors(
+            scope_key=scope_key,
+            row_id=row_id,
+            row_type=normalized_type,
+            case_id="",
+        )
+
+    def _target_group_descriptors(
+        self,
+        *,
+        scope_key: str,
+        row_id: str,
+        row_type: str,
+        case_id: str,
+    ) -> list[dict[str, Any]]:
+        """Resolve one row/case without rebuilding the all-scope page spine.
+
+        OA attachment ownership is evaluated once for invoices in the requested
+        source month.  The query cardinality is independent of the number of
+        returned relation members and never issues a per-member lookup.
+        """
+
+        normalized_row_id = str(row_id or "").strip()
+        normalized_row_type = str(row_type or "").strip().lower()
+        normalized_case_id = str(case_id or "").strip()
         return self._connection.fetch_all(
             f"""
             with requested_scope as (
                 select
                     %s::text as scope_key,
-                    case when %s::text = 'all' then null else %s::date end as scope_month,
+                    case when %s::text = 'all'
+                         then null else %s::date end as scope_month,
                     %s::text as tenant_id
+            ),
+            requested_target as (
+                select
+                    nullif(%s::text, '') as row_id,
+                    nullif(%s::text, '') as row_type,
+                    nullif(%s::text, '') as case_id
             ),
             {_ETC_SUMMARY_IDENTITY_CTES},
             target_source_candidates as materialized (
                 select
                     'oa'::text as row_type,
                     oa.row_id,
-                    coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date)
-                        as scope_month,
+                    coalesce(
+                        oa.scope_month,
+                        date_trunc('month', oa.application_date)::date
+                    ) as scope_month,
                     oa.updated_at,
                     null::text as external_etc_batch_id
-                from app.oa_applications oa
-                where oa.row_id = %s
-                  and oa.status <> 'deleted'
+                from requested_target target
+                join app.oa_applications oa
+                  on target.row_type = 'oa' and oa.row_id = target.row_id
+                where oa.status <> 'deleted'
                   and {_COMPLETED_OA_SQL}
                 union all
                 select
@@ -3027,10 +3285,12 @@ class PostgresWorkbenchPageQueryRepository:
                     (admission.scope_key || '-01')::date,
                     admission.updated_at,
                     null::text
-                from app.oa_pending_payment_admissions admission
-                where admission.tenant_id = (select tenant_id from requested_scope)
+                from requested_target target
+                cross join requested_scope scope
+                join app.oa_pending_payment_admissions admission
+                  on target.row_type = 'oa' and admission.oa_id = target.row_id
+                where admission.tenant_id = scope.tenant_id
                   and admission.workflow_status = 'in_progress'
-                  and admission.oa_id = %s
                 union all
                 select
                     'bank'::text,
@@ -3038,9 +3298,11 @@ class PostgresWorkbenchPageQueryRepository:
                     bank.txn_month,
                     bank.updated_at,
                     null::text
-                from app.bank_transactions bank
-                where coalesce(bank.legacy_mongo_id, bank.id::text) = %s
-                  and bank.status <> 'deleted'
+                from requested_target target
+                join app.bank_transactions bank
+                  on target.row_type = 'bank'
+                 and coalesce(bank.legacy_mongo_id, bank.id::text) = target.row_id
+                where bank.status <> 'deleted'
                 union all
                 select
                     'invoice'::text,
@@ -3048,9 +3310,11 @@ class PostgresWorkbenchPageQueryRepository:
                     invoice.invoice_month,
                     invoice.updated_at,
                     null::text
-                from app.invoices invoice
-                where coalesce(invoice.legacy_mongo_id, invoice.id::text) = %s
-                  and {_VISIBLE_INVOICE_SQL}
+                from requested_target target
+                join app.invoices invoice
+                  on target.row_type = 'invoice'
+                 and coalesce(invoice.legacy_mongo_id, invoice.id::text) = target.row_id
+                where {_VISIBLE_INVOICE_SQL}
                 union all
                 select
                     'invoice'::text,
@@ -3058,10 +3322,11 @@ class PostgresWorkbenchPageQueryRepository:
                     summary.scope_month,
                     summary.updated_at,
                     summary.external_batch_id
-                from etc_summary_keys summary
+                from requested_target target
+                join etc_summary_keys summary
+                  on target.row_type = 'invoice' and summary.row_id = target.row_id
                 cross join etc_summary_identity_guard guard
-                where summary.row_id = %s
-                  and guard.guard = 1
+                where guard.guard = 1
             ),
             target_oa_duplicate_ids as materialized (
                 select target.row_id
@@ -3078,65 +3343,528 @@ class PostgresWorkbenchPageQueryRepository:
                 select target.*
                 from target_source_candidates target
                 cross join target_integrity_guard guard
-                where guard.guard = 1
-                  {type_clause}
-            ),
-            target_relations as materialized (
-                select distinct relation.*
-                from app.workbench_pair_relations relation
                 cross join requested_scope scope
-                join target_sources target on exists (
-                    select 1
-                    from unnest(relation.row_ids, relation.row_types)
-                        with ordinality as member(member_id, member_type, ordinality)
-                    where member.member_id = target.row_id
-                      and {self._normalized_member_type_sql('member.member_type')}
-                          = target.row_type
-                )
-                where relation.status = 'active'
+                where guard.guard = 1
                   and (
                       scope.scope_key = 'all'
-                      or relation.month_scope = scope.scope_month
-                      or {self._relation_has_scoped_member_sql('relation')}
+                      or target.scope_month = scope.scope_month
                   )
             ),
-            relation_descriptors as (
+            target_relation_seeds as materialized (
+                select relation.*
+                from app.workbench_pair_relations relation
+                cross join requested_target target
+                where relation.status = 'active'
+                  and (
+                      relation.case_id = target.case_id
+                      or exists (
+                          select 1
+                          from unnest(
+                              relation.row_ids,
+                              relation.row_types
+                          ) member(row_id, row_type)
+                          where member.row_id = target.row_id
+                            and {self._normalized_member_type_sql('member.row_type')}
+                                = target.row_type
+                      )
+                  )
+            ),
+            target_owner_oa_ids as materialized (
+                select source.row_id as oa_row_id
+                from target_sources source
+                where source.row_type = 'oa'
+                union
+                select member.row_id
+                from target_relation_seeds relation
+                cross join lateral unnest(
+                    relation.row_ids,
+                    relation.row_types
+                ) member(row_id, row_type)
+                where {self._normalized_member_type_sql('member.row_type')} = 'oa'
+            ),
+            target_owner_item_ids as materialized (
+                select distinct
+                    owner.oa_row_id,
+                    item.row_id as current_item_id
+                from target_owner_oa_ids owner
+                join app.oa_applications oa on oa.row_id = owner.oa_row_id
+                join app.oa_application_items item
+                  on item.oa_application_id = oa.id
+                where oa.status <> 'deleted'
+                  and nullif(btrim(item.row_id), '') is not null
+                union all
+                select distinct
+                    admission.oa_id,
+                    current_item.current_item_id
+                from target_owner_oa_ids owner
+                cross join requested_scope scope
+                join app.oa_pending_payment_admissions admission
+                  on admission.oa_id = owner.oa_row_id
+                cross join lateral jsonb_array_elements(
+                    case when jsonb_typeof(
+                        admission.source_payload->'expense_items'
+                    ) = 'array'
+                    then admission.source_payload->'expense_items'
+                    else '[]'::jsonb end
+                ) item(value)
+                cross join lateral (
+                    select {_canonical_oa_item_id_sql('item.value')}
+                        as current_item_id
+                ) current_item
+                where admission.tenant_id = scope.tenant_id
+                  and admission.workflow_status = 'in_progress'
+                  and current_item.current_item_id is not null
+            ),
+            target_source_owned_invoice_months as materialized (
+                select distinct invoice.invoice_month as scope_month
+                from requested_target target
+                cross join requested_scope scope
+                join app.invoices invoice on true
+                cross join lateral jsonb_array_elements(
+                    {_anomaly_invoice_source_links_sql('invoice')}
+                ) source_link(value)
+                join target_owner_item_ids owner
+                  on owner.current_item_id = nullif(
+                      btrim(source_link.value->>'source_expense_item_id'),
+                      ''
+                  )
+                where (
+                    scope.scope_key = 'all'
+                    or target.case_id is not null
+                )
+                  and {_VISIBLE_INVOICE_SQL}
+                  and coalesce(
+                      source_link.value->>'source_type',
+                      source_link.value->>'type',
+                      source_link.value->>'source'
+                  ) in ('oa_attachment_invoice', 'oa_expense_item_invoice')
+                  and (
+                      coalesce(
+                          source_link.value->>'source_type',
+                          source_link.value->>'type',
+                          source_link.value->>'source'
+                      ) = 'oa_expense_item_invoice'
+                      or not exists (
+                          select 1
+                          from jsonb_array_elements(
+                              {_anomaly_invoice_source_links_sql('invoice')}
+                          ) explicit_link(value)
+                          where coalesce(
+                              explicit_link.value->>'source_type',
+                              explicit_link.value->>'type',
+                              explicit_link.value->>'source'
+                          ) = 'oa_expense_item_invoice'
+                      )
+                  )
+            ),
+            target_invoice_scope_months as materialized (
+                select scope.scope_month
+                from requested_scope scope
+                where scope.scope_month is not null
+                union
+                select source.scope_month from target_sources source
+                union
+                select relation.month_scope from target_relation_seeds relation
+                union
+                select source.scope_month
+                from target_source_owned_invoice_months source
+            ),
+            scoped_invoice_facts as materialized (
+                select
+                    coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
+                    invoice.invoice_month as scope_month,
+                    invoice.updated_at,
+                    {_anomaly_invoice_source_links_sql('invoice')}
+                        as invoice_source_links
+                from requested_target target
+                cross join target_invoice_scope_months invoice_scope
+                join app.invoices invoice
+                  on invoice.invoice_month = invoice_scope.scope_month
+                where (
+                    target.case_id is not null
+                    or target.row_type in ('oa', 'invoice')
+                )
+                  and {_VISIBLE_INVOICE_SQL}
+            ),
+            scoped_invoice_ownership_links as materialized (
+                select
+                    invoice.row_id as invoice_row_id,
+                    source_link.ordinality as source_ordinality,
+                    nullif(
+                        btrim(source_link.value->>'source_expense_item_id'),
+                        ''
+                    ) as source_expense_item_id
+                from scoped_invoice_facts invoice
+                cross join lateral jsonb_array_elements(
+                    invoice.invoice_source_links
+                ) with ordinality source_link(value, ordinality)
+                where coalesce(
+                    source_link.value->>'source_type',
+                    source_link.value->>'type',
+                    source_link.value->>'source'
+                ) in ('oa_attachment_invoice', 'oa_expense_item_invoice')
+                  and (
+                      coalesce(
+                          source_link.value->>'source_type',
+                          source_link.value->>'type',
+                          source_link.value->>'source'
+                      ) = 'oa_expense_item_invoice'
+                      or not exists (
+                          select 1
+                          from jsonb_array_elements(
+                              invoice.invoice_source_links
+                          ) explicit_link(value)
+                          where coalesce(
+                              explicit_link.value->>'source_type',
+                              explicit_link.value->>'type',
+                              explicit_link.value->>'source'
+                          ) = 'oa_expense_item_invoice'
+                      )
+                  )
+            ),
+            current_oa_item_facts as materialized (
+                select distinct
+                    oa.row_id as oa_row_id,
+                    item.row_id as current_item_id
+                from scoped_invoice_ownership_links source
+                join app.oa_application_items item
+                  on item.row_id = source.source_expense_item_id
+                join app.oa_applications oa
+                  on oa.id = item.oa_application_id
+                where oa.status <> 'deleted'
+                  and nullif(btrim(item.row_id), '') is not null
+                union all
+                select distinct
+                    admission.oa_id,
+                    current_item.current_item_id
+                from app.oa_pending_payment_admissions admission
+                cross join requested_scope scope
+                cross join lateral jsonb_array_elements(
+                    case when jsonb_typeof(
+                        admission.source_payload->'expense_items'
+                    ) = 'array'
+                    then admission.source_payload->'expense_items'
+                    else '[]'::jsonb end
+                ) item(value)
+                cross join lateral (
+                    select {_canonical_oa_item_id_sql('item.value')}
+                        as current_item_id
+                ) current_item
+                where admission.tenant_id = scope.tenant_id
+                  and admission.workflow_status = 'in_progress'
+                  and current_item.current_item_id is not null
+                  and exists (
+                      select 1
+                      from scoped_invoice_ownership_links source
+                      where source.source_expense_item_id =
+                          current_item.current_item_id
+                  )
+            ),
+            scoped_invoice_item_owner_candidates as materialized (
+                select distinct
+                    source.invoice_row_id,
+                    source.source_ordinality,
+                    item.oa_row_id,
+                    item.current_item_id
+                from scoped_invoice_ownership_links source
+                join current_oa_item_facts item
+                  on source.source_expense_item_id = item.current_item_id
+            ),
+            scoped_invoice_link_owner_resolutions as materialized (
+                select
+                    source.invoice_row_id,
+                    source.source_ordinality,
+                    case when count(distinct (
+                        candidate.oa_row_id,
+                        candidate.current_item_id
+                    )) = 1 then min(candidate.oa_row_id) end
+                        as resolved_oa_row_id
+                from scoped_invoice_ownership_links source
+                left join scoped_invoice_item_owner_candidates candidate
+                  on candidate.invoice_row_id = source.invoice_row_id
+                 and candidate.source_ordinality = source.source_ordinality
+                group by source.invoice_row_id, source.source_ordinality
+            ),
+            scoped_invoice_unique_owners as materialized (
+                select
+                    resolution.invoice_row_id,
+                    min(resolution.resolved_oa_row_id) as oa_row_id
+                from scoped_invoice_link_owner_resolutions resolution
+                group by resolution.invoice_row_id
+                having bool_and(resolution.resolved_oa_row_id is not null)
+                   and count(distinct resolution.resolved_oa_row_id) = 1
+            ),
+            relevant_active_relations as materialized (
+                select relation.*
+                from app.workbench_pair_relations relation
+                cross join requested_target target
+                where relation.status = 'active'
+                  and (
+                      relation.case_id = target.case_id
+                      or relation.row_ids && array(
+                          select source.row_id from target_sources source
+                      )::text[]
+                      or relation.row_ids && array(
+                          select owner.oa_row_id
+                          from scoped_invoice_unique_owners owner
+                          union
+                          select owner.invoice_row_id
+                          from scoped_invoice_unique_owners owner
+                      )::text[]
+                  )
+            ),
+            relevant_active_relation_members as materialized (
+                select
+                    relation.id as relation_id,
+                    relation.case_id,
+                    member.ordinality,
+                    member.row_id,
+                    {self._normalized_member_type_sql('member.row_type')}
+                        as row_type
+                from relevant_active_relations relation
+                cross join lateral unnest(
+                    relation.row_ids,
+                    relation.row_types
+                ) with ordinality member(row_id, row_type, ordinality)
+            ),
+            target_formal_relation_ids as materialized (
+                select distinct relation.id as relation_id
+                from relevant_active_relations relation
+                cross join requested_target target
+                where relation.case_id = target.case_id
+                   or exists (
+                       select 1
+                       from relevant_active_relation_members member
+                       join target_sources source
+                         on source.row_type = member.row_type
+                        and source.row_id = member.row_id
+                       where member.relation_id = relation.id
+                   )
+            ),
+            target_source_owner as materialized (
+                select owner.*
+                from scoped_invoice_unique_owners owner
+                cross join requested_target target
+                where (
+                    target.row_type = 'invoice'
+                    and owner.invoice_row_id = target.row_id
+                ) or (
+                    target.row_type = 'oa'
+                    and owner.oa_row_id = target.row_id
+                )
+            ),
+            target_owner_relation_resolution as materialized (
+                select
+                    owner.oa_row_id,
+                    count(distinct member.relation_id) as relation_count,
+                    case when count(distinct member.relation_id) = 1
+                         then min(member.relation_id::text)::uuid end
+                        as relation_id
+                from target_source_owner owner
+                left join relevant_active_relation_members member
+                  on member.row_type = 'oa'
+                 and member.row_id = owner.oa_row_id
+                group by owner.oa_row_id
+            ),
+            selected_relation_ids as materialized (
+                select relation_id from target_formal_relation_ids
+                union
+                select owner_relation.relation_id
+                from target_owner_relation_resolution owner_relation
+                where owner_relation.relation_count = 1
+                  and not exists (
+                      select 1 from target_formal_relation_ids
+                  )
+            ),
+            selected_relations as materialized (
+                select relation.*,
+                       array(
+                           select {self._normalized_member_type_sql('member.row_type')}
+                           from unnest(relation.row_types) with ordinality
+                               member(row_type, ordinality)
+                           order by member.ordinality
+                       )::text[] as normalized_row_types
+                from relevant_active_relations relation
+                join selected_relation_ids selected
+                  on selected.relation_id = relation.id
+            ),
+            source_owned_invoice_placements as materialized (
+                select
+                    owner.invoice_row_id,
+                    owner.oa_row_id,
+                    case when count(distinct owner_relation.case_id) = 1
+                         then min(owner_relation.case_id) end
+                        as owner_relation_case_id
+                from scoped_invoice_unique_owners owner
+                left join relevant_active_relation_members owner_relation
+                  on owner_relation.row_type = 'oa'
+                 and owner_relation.row_id = owner.oa_row_id
+                where not exists (
+                    select 1
+                    from relevant_active_relation_members invoice_relation
+                    where invoice_relation.row_type = 'invoice'
+                      and invoice_relation.row_id = owner.invoice_row_id
+                )
+                  and not exists (
+                      select 1
+                      from app.workbench_row_overrides override
+                      where override.status = 'active'
+                        and (
+                            (
+                                override.row_type = 'oa'
+                                and override.row_id = owner.oa_row_id
+                            )
+                            or (
+                                override.row_type = 'invoice'
+                                and override.row_id = owner.invoice_row_id
+                            )
+                        )
+                        and coalesce(
+                            (override.override_payload->>'ignored')::boolean,
+                            override.override_payload->>'status' = 'ignored',
+                            false
+                        )
+                  )
+                group by owner.invoice_row_id, owner.oa_row_id
+                having count(distinct owner_relation.case_id) <= 1
+            ),
+            relation_descriptors as materialized (
                 select
                     'case:' || relation.case_id as internal_key,
                     relation.case_id as detail_key,
                     'relation'::text as group_kind,
                     null::text as zone,
-                    relation.row_ids as member_ids,
-                    array(
-                        select {self._normalized_member_type_sql('member.row_type')}
-                        from unnest(relation.row_types) with ordinality
-                            as member(row_type, ordinality)
-                        order by member.ordinality
-                    )::text[] as member_types,
+                    relation.row_ids || coalesce((
+                        select array_agg(
+                            placement.invoice_row_id
+                            order by placement.invoice_row_id
+                        )::text[]
+                        from source_owned_invoice_placements placement
+                        where placement.owner_relation_case_id = relation.case_id
+                    ), array[]::text[]) as member_ids,
+                    relation.normalized_row_types || coalesce((
+                        select array_agg(
+                            'invoice'::text order by placement.invoice_row_id
+                        )::text[]
+                        from source_owned_invoice_placements placement
+                        where placement.owner_relation_case_id = relation.case_id
+                    ), array[]::text[]) as member_types,
+                    relation.row_ids as formal_member_ids,
+                    relation.normalized_row_types as formal_member_types,
                     relation.month_scope as scope_month,
                     relation.updated_at,
+                    relation.version as relation_version,
                     {_RELATION_EXTERNAL_BATCH_SQL} as external_etc_batch_id,
                     array[]::text[] as missing_row_types
-                from target_relations relation
+                from selected_relations relation
+                cross join requested_scope scope
+                where scope.scope_key = 'all'
+                   or relation.month_scope = scope.scope_month
+                   or {self._relation_has_scoped_member_sql('relation')}
+                   or exists (
+                       select 1
+                       from source_owned_invoice_placements placement
+                       where placement.owner_relation_case_id = relation.case_id
+                   )
             ),
-            singleton_descriptors as (
+            source_owner_targets as materialized (
+                select source.row_id as oa_row_id
+                from target_sources source
+                where source.row_type = 'oa'
+                union
+                select owner.oa_row_id from target_source_owner owner
+            ),
+            source_owner_facts as materialized (
                 select
-                    'row:' || target.row_type || ':' || target.row_id as internal_key,
+                    owner.oa_row_id,
+                    coalesce(
+                        oa.scope_month,
+                        date_trunc('month', oa.application_date)::date
+                    ) as scope_month,
+                    oa.updated_at
+                from source_owner_targets owner
+                join app.oa_applications oa on oa.row_id = owner.oa_row_id
+                where oa.status <> 'deleted'
+                  and {_COMPLETED_OA_SQL}
+                union all
+                select
+                    owner.oa_row_id,
+                    (admission.scope_key || '-01')::date,
+                    admission.updated_at
+                from source_owner_targets owner
+                cross join requested_scope scope
+                join app.oa_pending_payment_admissions admission
+                  on admission.oa_id = owner.oa_row_id
+                where admission.tenant_id = scope.tenant_id
+                  and admission.workflow_status = 'in_progress'
+            ),
+            source_owned_descriptors as materialized (
+                select
+                    'source-owned:oa:' || owner.oa_row_id as internal_key,
+                    'v1:' || to_char(coalesce(
+                        scope.scope_month,
+                        max(invoice.scope_month),
+                        owner.scope_month
+                    ), 'YYYY-MM') || ':oa:' || encode(
+                        convert_to(owner.oa_row_id, 'UTF8'), 'hex'
+                    ) as detail_key,
+                    'unpaired'::text as group_kind,
+                    'unpaired'::text as zone,
+                    array[owner.oa_row_id]::text[] || array_agg(
+                        placement.invoice_row_id
+                        order by placement.invoice_row_id
+                    )::text[] as member_ids,
+                    array['oa']::text[] || array_agg(
+                        'invoice'::text order by placement.invoice_row_id
+                    )::text[] as member_types,
+                    array[]::text[] as formal_member_ids,
+                    array[]::text[] as formal_member_types,
+                    coalesce(
+                        scope.scope_month,
+                        max(invoice.scope_month),
+                        owner.scope_month
+                    ) as scope_month,
+                    greatest(owner.updated_at, max(invoice.updated_at))
+                        as updated_at,
+                    null::bigint as relation_version,
+                    null::text as external_etc_batch_id,
+                    array[]::text[] as missing_row_types
+                from source_owner_facts owner
+                join source_owned_invoice_placements placement
+                  on placement.oa_row_id = owner.oa_row_id
+                 and placement.owner_relation_case_id is null
+                join scoped_invoice_facts invoice
+                  on invoice.row_id = placement.invoice_row_id
+                cross join requested_scope scope
+                where not exists (select 1 from selected_relations)
+                group by
+                    owner.oa_row_id,
+                    owner.scope_month,
+                    owner.updated_at,
+                    scope.scope_month
+            ),
+            singleton_descriptors as materialized (
+                select
+                    'row:' || target.row_type || ':' || target.row_id
+                        as internal_key,
                     'v1:' || to_char(target.scope_month, 'YYYY-MM') || ':' ||
-                        target.row_type || ':' ||
-                        encode(convert_to(target.row_id, 'UTF8'), 'hex') as detail_key,
+                        target.row_type || ':' || encode(
+                            convert_to(target.row_id, 'UTF8'), 'hex'
+                        ) as detail_key,
                     'unpaired'::text as group_kind,
                     'unpaired'::text as zone,
                     array[target.row_id]::text[] as member_ids,
                     array[target.row_type]::text[] as member_types,
+                    array[]::text[] as formal_member_ids,
+                    array[]::text[] as formal_member_types,
                     target.scope_month,
                     target.updated_at,
+                    null::bigint as relation_version,
                     target.external_etc_batch_id,
                     array[]::text[] as missing_row_types
                 from target_sources target
-                cross join requested_scope scope
-                where (scope.scope_key = 'all' or target.scope_month = scope.scope_month)
-                  and not exists (select 1 from target_relations)
+                where not exists (select 1 from selected_relations)
+                  and not exists (select 1 from source_owned_descriptors)
                   and not exists (
                       select 1
                       from app.workbench_row_overrides override
@@ -3152,11 +3880,20 @@ class PostgresWorkbenchPageQueryRepository:
             )
             select * from relation_descriptors
             union all
+            select * from source_owned_descriptors
+            union all
             select * from singleton_descriptors
             order by group_kind, internal_key
             limit 4
             """,
-            tuple(params),
+            tuple(
+                [
+                    *self._scope_params(scope_key),
+                    normalized_row_id,
+                    normalized_row_type,
+                    normalized_case_id,
+                ]
+            ),
         )
 
     @staticmethod
@@ -3769,14 +4506,241 @@ class PostgresWorkbenchPageQueryRepository:
         descriptors: list[dict[str, Any]],
         detail_level: str,
     ) -> list[dict[str, Any]]:
-        return PostgresWorkbenchPageHydrationRepository(
+        hydration = PostgresWorkbenchPageHydrationRepository(
             self._connection,
             tenant_id=self._tenant_id,
-        ).hydrate_groups(
+        )
+        groups = hydration.hydrate_groups(
             scope_key=month,
             descriptors=descriptors,
             detail_level=detail_level,
         )
+        if detail_level == "summary":
+            return groups
+        return self._restore_descriptor_owned_members(
+            descriptors=descriptors,
+            groups=groups,
+            hydration=hydration,
+        )
+
+    @classmethod
+    def _restore_descriptor_owned_members(
+        cls,
+        *,
+        descriptors: list[dict[str, Any]],
+        groups: list[dict[str, Any]],
+        hydration: PostgresWorkbenchPageHydrationRepository,
+    ) -> list[dict[str, Any]]:
+        """Restore SQL-proven source-owned display membership in full DTOs.
+
+        Older canonical OA DTOs can omit current expense-item identifiers, so
+        the pure grouping service cannot always rediscover exact-current ownership
+        already proven by the bounded descriptor query. Restore only descriptor
+        members missing from the hydrated group, in one set read. Relation state
+        continues to come exclusively from its formal persisted members.
+        """
+
+        if len(descriptors) != len(groups):
+            raise RuntimeError(
+                "Workbench descriptor hydration returned an unexpected group count."
+            )
+
+        missing_by_descriptor: list[list[tuple[str, str]]] = []
+        missing_ids: dict[str, set[str]] = {
+            "oa": set(),
+            "bank": set(),
+            "invoice": set(),
+        }
+        for descriptor, group in zip(descriptors, groups, strict=True):
+            expected = cls._descriptor_member_pairs(descriptor)
+            actual = {
+                (str(row.get("type") or ""), str(row.get("id") or ""))
+                for row in cls._group_rows(group)
+                if str(row.get("type") or "") and str(row.get("id") or "")
+            }
+            missing = [member for member in expected if member not in actual]
+            missing_by_descriptor.append(missing)
+            for row_type, row_id in missing:
+                missing_ids[row_type].add(row_id)
+
+        missing_rows = (
+            hydration.hydrate_rows(missing_ids)
+            if any(missing_ids.values())
+            else {}
+        )
+        restored: list[dict[str, Any]] = []
+        for descriptor, group, missing in zip(
+            descriptors,
+            groups,
+            missing_by_descriptor,
+            strict=True,
+        ):
+            if str(descriptor.get("group_kind") or "") == "relation":
+                restored.append(
+                    cls._restore_relation_display_members(
+                        descriptor=descriptor,
+                        group=group,
+                        missing=missing,
+                        missing_rows=missing_rows,
+                    )
+                )
+                continue
+            if not missing:
+                restored.append(group)
+                continue
+            if str(descriptor.get("internal_key") or "").startswith(
+                "source-owned:oa:"
+            ):
+                restored.append(
+                    cls._restore_source_owned_unpaired_group(
+                        descriptor=descriptor,
+                        group=group,
+                        missing_rows=missing_rows,
+                    )
+                )
+                continue
+            raise RuntimeError(
+                "Workbench full hydration omitted a formal descriptor member."
+            )
+        return restored
+
+    @staticmethod
+    def _descriptor_member_pairs(
+        descriptor: dict[str, Any],
+    ) -> list[tuple[str, str]]:
+        member_ids = text_list(descriptor.get("member_ids"))
+        member_types = text_list(descriptor.get("member_types"))
+        if len(member_ids) != len(member_types) or not member_ids:
+            raise ValueError(
+                "Canonical Workbench page descriptor has invalid typed members."
+            )
+        pairs = list(zip(member_types, member_ids, strict=True))
+        if any(row_type not in {"oa", "bank", "invoice"} for row_type, _ in pairs):
+            raise ValueError(
+                "Canonical Workbench page descriptor has unsupported row type."
+            )
+        return pairs
+
+    @classmethod
+    def _restore_source_owned_unpaired_group(
+        cls,
+        *,
+        descriptor: dict[str, Any],
+        group: dict[str, Any],
+        missing_rows: dict[tuple[str, str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        expected = cls._descriptor_member_pairs(descriptor)
+        hydrated = {
+            (str(row.get("type") or ""), str(row.get("id") or "")): row
+            for row in cls._group_rows(group)
+            if str(row.get("type") or "") and str(row.get("id") or "")
+        }
+        hydrated.update(missing_rows)
+        owner_ids = [row_id for row_type, row_id in expected if row_type == "oa"]
+        invoice_ids = [
+            row_id for row_type, row_id in expected if row_type == "invoice"
+        ]
+        if len(owner_ids) != 1 or not invoice_ids or any(
+            member not in hydrated for member in expected
+        ):
+            raise RuntimeError(
+                "Workbench source-owned descriptor has invalid or missing members."
+            )
+
+        rows: list[dict[str, Any]] = []
+        for member in expected:
+            row = deepcopy(hydrated[member])
+            row["status"] = "unpaired"
+            rows.append(row)
+        owner = next(row for row in rows if str(row.get("type") or "") == "oa")
+        identity = str(owner.get("object_identity_key") or "").strip()
+        if not identity:
+            raise RuntimeError("Workbench source owner is missing canonical identity.")
+        digest = sha256(f"oa\0{identity}".encode()).hexdigest()[:24]
+        payload = {
+            "group_id": f"source-owned:oa:{digest}",
+            "group_type": "unpaired",
+            "match_confidence": "none",
+            "reason": "oa_attachment_item_owner",
+            "zone": "unpaired",
+            "status": "unpaired",
+            "oa_rows": [row for row in rows if row["type"] == "oa"],
+            "bank_rows": [row for row in rows if row["type"] == "bank"],
+            "invoice_rows": [row for row in rows if row["type"] == "invoice"],
+            "detail_key": str(descriptor.get("detail_key") or ""),
+        }
+        return PostgresWorkbenchPageHydrationRepository._with_group_counts(payload)
+
+    @classmethod
+    def _restore_relation_display_members(
+        cls,
+        *,
+        descriptor: dict[str, Any],
+        group: dict[str, Any],
+        missing: list[tuple[str, str]],
+        missing_rows: dict[tuple[str, str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        formal_ids = text_list(group.get("formal_member_ids"))
+        formal_types = text_list(group.get("formal_member_types"))
+        if len(formal_ids) != len(formal_types) or not formal_ids:
+            raise RuntimeError(
+                "Workbench relation hydration is missing its formal member set."
+            )
+        descriptor_formal_ids = text_list(descriptor.get("formal_member_ids"))
+        descriptor_formal_types = text_list(descriptor.get("formal_member_types"))
+        if (descriptor_formal_ids or descriptor_formal_types) and (
+            descriptor_formal_ids != formal_ids
+            or descriptor_formal_types != formal_types
+        ):
+            raise RuntimeError(
+                "Workbench relation descriptor disagrees with formal membership."
+            )
+        descriptor_version = descriptor.get("relation_version")
+        group_version = group.get("relation_version")
+        if (
+            descriptor_version is not None
+            and group_version is not None
+            and str(descriptor_version) != str(group_version)
+        ):
+            raise RuntimeError(
+                "Workbench relation descriptor disagrees with relation version."
+            )
+        formal = set(zip(formal_types, formal_ids, strict=True))
+        if any(
+            row_type != "invoice" or (row_type, row_id) in formal
+            for row_type, row_id in missing
+        ):
+            raise RuntimeError(
+                "Workbench relation hydration omitted a formal descriptor member."
+            )
+
+        payload = deepcopy(group)
+        if descriptor_version is not None:
+            payload["relation_version"] = descriptor_version
+        case_id = str(payload.get("case_id") or descriptor.get("detail_key") or "")
+        display_ids = {
+            str(value)
+            for value in list(payload.get("display_only_member_ids") or [])
+            if str(value)
+        }
+        for member in missing:
+            source = missing_rows.get(member)
+            if not isinstance(source, dict):
+                raise RuntimeError(
+                    "Workbench display-only invoice changed during hydration."
+                )
+            row = deepcopy(source)
+            row["status"] = str(payload.get("zone") or "unpaired")
+            row.pop("case_id", None)
+            row.pop("relation_mode", None)
+            row.pop("relation_amount_check", None)
+            row["workbench_membership_role"] = "source_owned_display"
+            row["source_owner_case_id"] = case_id
+            row["available_actions"] = ["detail"]
+            payload["invoice_rows"].append(row)
+            display_ids.add(str(row["id"]))
+        payload["display_only_member_ids"] = sorted(display_ids)
+        return PostgresWorkbenchPageHydrationRepository._with_group_counts(payload)
 
     @staticmethod
     def _normalized_member_type_sql(expression: str) -> str:

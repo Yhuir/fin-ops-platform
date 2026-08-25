@@ -1,6 +1,13 @@
 # 关联台测试与验证
 
-日期：2026-08-24
+日期：2026-08-25
+
+## 2026-08-25 OA 附件发票 current-item 展示分组
+
+- Business core：`tests/test_workbench_relation_grouping.py` 保护 OA 附件发票只按 current canonical expense item 的精确 ownership 分组；历史 `row_index`、旧 alias 和金额相等均不能充当归属，`id / row_id / expense_item_id` 冲突时 fail closed。一个附件 occurrence 合法归属同一 OA 多个明细时保留全部精确分组，跨 OA 或无 current owner 时保持未归属。
+- Repository / pagination：`tests/test_workbench_page_query_repository.py` 保护 current item owner 在搜索、筛选、分区、计数、游标和 `LIMIT` 之前由单条 set-based SQL 得出；目标详情先由目标 OA current items 发现 exact source-owned 发票月份，再沿有限月份集合水合，不增加逐行查询、full-scope spine 或 cache fallback。
+- PostgreSQL E2E：`tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_oa_attachment_source_owner_groups_are_readable_and_formal_safe` 保护未配对 OA、流水和 OA 附件发票按 source owner 同行；`scope=all` source-owned detail 与 relation detail 完整携带跨月 display-only 发票。已有正式关系时，附件发票仍不进入正式成员、版本、完成度、异常、撤回或写操作。
+- Query DTO / regression：`tests/test_workbench_query_service.py` 保护 expense item ID 只读取定义字段 `id / row_id / expense_item_id`，仅接受唯一一致非空值；source-owned 分组不改变既有 API DTO、正式 relation membership、confirm/withdraw 或其它页面链路。
 
 ## 2026-08-24 OA附件历史归属与来源标签回归
 
