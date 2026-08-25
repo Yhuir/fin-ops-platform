@@ -75,6 +75,11 @@ from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
+_PRODUCTION_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT = (
+    "/opt/fin-ops/runtime-smoke/import-audit-repair-artifacts"
+)
+
+
 def _build_bank_repair_state_store(connection: PostgresConnection) -> PostgresStateStore:
     object_storage_settings = ObjectStorageSettings.from_env()
     state_store_kwargs: dict[str, object] = {
@@ -140,15 +145,41 @@ def _rollback_manifest_fingerprint(manifest: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _validate_private_rollback_manifest_path(path: str) -> None:
-    artifact_root = str(
+def _ensure_private_artifact_root(path: str, *, expected_uid: int) -> None:
+    parent = os.path.dirname(path)
+    parent_stat = os.lstat(parent)
+    if (
+        not stat.S_ISDIR(parent_stat.st_mode)
+        or stat.S_ISLNK(parent_stat.st_mode)
+        or parent_stat.st_uid != expected_uid
+        or stat.S_IMODE(parent_stat.st_mode) & 0o022
+    ):
+        raise RuntimeError(
+            "Rollback manifest artifact parent must be an owned non-writable directory."
+        )
+    try:
+        os.mkdir(path, mode=0o700)
+    except FileExistsError:
+        pass
+
+
+def _private_artifact_root() -> str:
+    configured_root = str(
         os.environ.get("FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT") or ""
     ).strip()
-    if not artifact_root:
+    if configured_root:
+        return os.path.abspath(configured_root)
+    if os.geteuid() != 0:
         raise RuntimeError(
             "Rollback manifest artifact root must be configured before reading or writing an artifact."
         )
-    normalized_root = os.path.abspath(artifact_root)
+    production_root = _PRODUCTION_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT
+    _ensure_private_artifact_root(production_root, expected_uid=0)
+    return production_root
+
+
+def _validate_private_rollback_manifest_path(path: str) -> None:
+    normalized_root = _private_artifact_root()
     normalized_path = os.path.abspath(path)
     artifact_name = os.path.basename(normalized_path)
     if (

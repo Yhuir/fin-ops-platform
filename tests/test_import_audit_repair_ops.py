@@ -2256,15 +2256,56 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         plan = build_oa_attachment_invoice_link_audit_plan(
             _oa_attachment_invoice_link_audit_snapshot()
         )
-        with tempfile.TemporaryDirectory() as task_dir, patch.dict(
-            os.environ,
-            {"FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT": ""},
+        with (
+            tempfile.TemporaryDirectory() as task_dir,
+            patch.dict(
+                os.environ,
+                {"FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT": ""},
+            ),
+            patch.object(import_audit_repair_ops.os, "geteuid", return_value=1000),
         ):
             with self.assertRaisesRegex(RuntimeError, "must be configured"):
                 import_audit_repair_ops._write_private_rollback_manifest(
                     os.path.join(task_dir, "rollback.json"),
                     plan,
                 )
+
+    def test_private_artifact_root_bootstrap_creates_owned_0700_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as task_dir:
+            production_root = os.path.join(task_dir, "artifacts")
+            import_audit_repair_ops._ensure_private_artifact_root(
+                production_root,
+                expected_uid=os.geteuid(),
+            )
+
+            self.assertEqual(stat.S_IMODE(os.stat(production_root).st_mode), 0o700)
+
+    def test_private_artifact_root_uses_fixed_production_root_for_legacy_helper(
+        self,
+    ) -> None:
+        production_root = "/fixed/private/import-audit-repair-artifacts"
+        with (
+            patch.dict(
+                os.environ,
+                {"FIN_OPS_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT": ""},
+            ),
+            patch.object(import_audit_repair_ops.os, "geteuid", return_value=0),
+            patch.object(
+                import_audit_repair_ops,
+                "_PRODUCTION_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT",
+                production_root,
+            ),
+            patch.object(
+                import_audit_repair_ops,
+                "_ensure_private_artifact_root",
+            ) as ensure_root,
+        ):
+            self.assertEqual(
+                import_audit_repair_ops._private_artifact_root(),
+                production_root,
+            )
+
+        ensure_root.assert_called_once_with(production_root, expected_uid=0)
 
     def test_private_rollback_manifest_is_confined_to_configured_root(self) -> None:
         plan = build_oa_attachment_invoice_link_audit_plan(
