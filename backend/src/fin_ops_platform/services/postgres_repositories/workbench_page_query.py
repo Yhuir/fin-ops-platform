@@ -950,6 +950,25 @@ requested_invoice_hard_identities as materialized (
       on needed.row_type = 'invoice'
      and needed.row_id = invoice.row_id
 ),
+active_invoice_relation_members as materialized (
+    select distinct member.row_id
+    from app.workbench_pair_relations relation
+    cross join lateral unnest(relation.row_ids, relation.row_types)
+        as member(row_id, row_type)
+    where relation.status = 'active'
+      and cardinality(relation.row_ids) = cardinality(relation.row_types)
+      and case lower(member.row_type)
+            when 'invoice_record' then 'invoice'
+            when 'formal_invoice' then 'invoice'
+            when 'input' then 'invoice'
+            when 'input_invoice' then 'invoice'
+            when 'output' then 'invoice'
+            when 'output_invoice' then 'invoice'
+            when 'etc_summary' then 'invoice'
+            when 'etc_invoice_summary' then 'invoice'
+            else lower(member.row_type)
+          end = 'invoice'
+),
 invoice_candidates as materialized (
     select
         invoice.row_id,
@@ -966,30 +985,7 @@ invoice_candidates as materialized (
             'issueDate', invoice.invoice_date::text
         )) as column_values,
         invoice.hard_identity,
-        exists (
-            select 1
-            from app.workbench_pair_relations owner_relation
-            where owner_relation.status = 'active'
-              and cardinality(owner_relation.row_ids) = cardinality(owner_relation.row_types)
-              and owner_relation.row_ids @> array[invoice.row_id]::text[]
-              and exists (
-                  select 1
-                  from unnest(owner_relation.row_ids, owner_relation.row_types)
-                       as owner_member(row_id, row_type)
-                  where owner_member.row_id = invoice.row_id
-                    and case lower(owner_member.row_type)
-                            when 'invoice_record' then 'invoice'
-                            when 'formal_invoice' then 'invoice'
-                            when 'input' then 'invoice'
-                            when 'input_invoice' then 'invoice'
-                            when 'output' then 'invoice'
-                            when 'output_invoice' then 'invoice'
-                            when 'etc_summary' then 'invoice'
-                            when 'etc_invoice_summary' then 'invoice'
-                            else lower(owner_member.row_type)
-                        end = 'invoice'
-              )
-        ) as active_relation_member,
+        active_member.row_id is not null as active_relation_member,
         null::text as external_etc_batch_id,
         '[]'::jsonb as oa_expense_items,
         '[]'::jsonb as oa_source_aliases,
@@ -1006,6 +1002,8 @@ invoice_candidates as materialized (
     from visible_invoice_facts invoice
     join requested_invoice_hard_identities requested
       on requested.hard_identity = invoice.hard_identity
+    left join active_invoice_relation_members active_member
+      on active_member.row_id = invoice.row_id
 ),
 ranked_invoices as materialized (
     select candidate.*,
@@ -1167,6 +1165,19 @@ source_owned_invoice_placements as materialized (
     group by owner.invoice_row_id, owner.oa_row_id
     having count(distinct owner_relation.case_id) <= 1
 ),
+source_owned_relation_placement_rollups as materialized (
+    select
+        placement.owner_relation_case_id,
+        array_agg(
+            placement.invoice_row_id order by placement.invoice_row_id
+        )::text[] as invoice_row_ids,
+        array_agg(
+            'invoice'::text order by placement.invoice_row_id
+        )::text[] as invoice_row_types
+    from source_owned_invoice_placements placement
+    where placement.owner_relation_case_id is not null
+    group by placement.owner_relation_case_id
+),
 relation_groups as materialized (
     select
         'case:' || relation.case_id as internal_key,
@@ -1192,18 +1203,14 @@ relation_groups as materialized (
                  ) and not ('invoice' = any(relation.normalized_row_types)) then 'unpaired'
             else 'paired'
         end as zone,
-        relation.row_ids || coalesce((
-            select array_agg(
-                placement.invoice_row_id order by placement.invoice_row_id
-            )::text[]
-            from source_owned_invoice_placements placement
-            where placement.owner_relation_case_id = relation.case_id
-        ), array[]::text[]) as member_ids,
-        relation.normalized_row_types || coalesce((
-            select array_agg('invoice'::text order by placement.invoice_row_id)::text[]
-            from source_owned_invoice_placements placement
-            where placement.owner_relation_case_id = relation.case_id
-        ), array[]::text[]) as member_types,
+        relation.row_ids || coalesce(
+            placement_rollup.invoice_row_ids,
+            array[]::text[]
+        ) as member_ids,
+        relation.normalized_row_types || coalesce(
+            placement_rollup.invoice_row_types,
+            array[]::text[]
+        ) as member_types,
         relation.month_scope as scope_month,
         relation.updated_at,
         relation.external_etc_batch_id,
@@ -1233,6 +1240,8 @@ relation_groups as materialized (
     from scoped_relations relation
     left join in_progress_oa_relation_ids in_progress_oa
       on in_progress_oa.relation_id = relation.id
+    left join source_owned_relation_placement_rollups placement_rollup
+      on placement_rollup.owner_relation_case_id = relation.case_id
     cross join relation_member_guard
     where relation_member_guard.guard = 1
 ),

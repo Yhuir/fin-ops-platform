@@ -555,6 +555,27 @@ def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     assert "source_flags.has_manual_import" in visible_invoice_sql
 
 
+def test_canonical_spine_rolls_active_invoice_relation_members_once() -> None:
+    sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.lower().split())
+    active_member_sql = sql.split(
+        "active_invoice_relation_members as materialized (", 1
+    )[1].split("invoice_candidates as materialized (", 1)[0]
+    invoice_candidate_sql = sql.split(
+        "invoice_candidates as materialized (", 1
+    )[1].split("ranked_invoices as materialized (", 1)[0]
+
+    assert sql.count("active_invoice_relation_members as materialized") == 1
+    assert "select distinct member.row_id" in active_member_sql
+    assert "relation.status = 'active'" in active_member_sql
+    assert "cardinality(relation.row_ids) = cardinality(relation.row_types)" in active_member_sql
+    assert "cross join lateral unnest(relation.row_ids, relation.row_types)" in active_member_sql
+    assert "when 'etc_invoice_summary' then 'invoice'" in active_member_sql
+    assert "left join active_invoice_relation_members active_member" in invoice_candidate_sql
+    assert "active_member.row_id is not null as active_relation_member" in invoice_candidate_sql
+    assert "from app.workbench_pair_relations owner_relation" not in invoice_candidate_sql
+    assert "owner_relation.row_ids @> array[invoice.row_id]" not in invoice_candidate_sql
+
+
 def test_page_members_are_narrow_and_anomalies_rehydrate_by_typed_identity() -> None:
     spine_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.lower().split())
     member_sql = spine_sql.split("canonical_group_members as materialized (", 1)[1]
@@ -649,6 +670,24 @@ def test_canonical_spine_rolls_relation_members_once_for_zone_evaluation() -> No
     assert "array_agg(member.row_type order by member.ordinality)" in sql
     assert "in_progress_oa_relation_ids as materialized" in sql
     assert "when in_progress_oa.relation_id is not null then 'unpaired'" in sql
+
+
+def test_canonical_spine_rolls_source_owned_relation_placements_once() -> None:
+    sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split()).lower()
+    rollup_sql = sql.split(
+        "source_owned_relation_placement_rollups as materialized (", 1
+    )[1].split("relation_groups as materialized (", 1)[0]
+    relation_group_sql = sql.split(
+        "relation_groups as materialized (", 1
+    )[1].split("source_owned_unpaired_groups as materialized (", 1)[0]
+
+    assert "group by placement.owner_relation_case_id" in rollup_sql
+    assert "array_agg( placement.invoice_row_id order by placement.invoice_row_id )" in rollup_sql
+    assert "array_agg( 'invoice'::text order by placement.invoice_row_id )" in rollup_sql
+    assert "left join source_owned_relation_placement_rollups placement_rollup" in relation_group_sql
+    assert "placement_rollup.invoice_row_ids" in relation_group_sql
+    assert "placement_rollup.invoice_row_types" in relation_group_sql
+    assert "select array_agg" not in relation_group_sql
 
 
 def test_source_owner_resolution_precedes_group_filters_counts_and_cursor_limit() -> None:
