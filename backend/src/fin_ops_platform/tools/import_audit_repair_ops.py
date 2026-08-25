@@ -260,12 +260,96 @@ def _verify_private_rollback_manifest(path: str, plan: dict[str, Any]) -> None:
         raise RuntimeError("Rollback manifest artifact has the wrong source fingerprint.")
 
 
+def _delete_private_rollback_manifest_artifact(
+    artifact_name: str,
+    *,
+    expected_fingerprint: str,
+) -> dict[str, str]:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.json", artifact_name):
+        raise RuntimeError("Rollback manifest artifact name must be one safe JSON filename.")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_fingerprint):
+        raise RuntimeError(
+            "Rollback manifest artifact delete requires a lowercase SHA-256 fingerprint."
+        )
+
+    artifact_root = _private_artifact_root()
+    artifact_path = os.path.join(artifact_root, artifact_name)
+    _validate_private_rollback_manifest_path(artifact_path)
+    root_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    root_flags |= getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    root_descriptor = os.open(artifact_root, root_flags)
+    try:
+        root_stat = os.fstat(root_descriptor)
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or stat.S_IMODE(root_stat.st_mode) != 0o700
+            or root_stat.st_uid != os.geteuid()
+        ):
+            raise RuntimeError(
+                "Rollback manifest artifact root must be an owned 0700 directory."
+            )
+        artifact_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        artifact_flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            artifact_descriptor = os.open(
+                artifact_name,
+                artifact_flags,
+                dir_fd=root_descriptor,
+            )
+        except OSError as error:
+            raise RuntimeError("Rollback manifest artifact is unavailable.") from error
+        with os.fdopen(artifact_descriptor, "r", encoding="utf-8") as handle:
+            artifact_stat = os.fstat(handle.fileno())
+            if not stat.S_ISREG(artifact_stat.st_mode):
+                raise RuntimeError("Rollback manifest artifact must be a regular file.")
+            if stat.S_IMODE(artifact_stat.st_mode) != 0o600:
+                raise RuntimeError("Rollback manifest artifact must have mode 0600.")
+            if artifact_stat.st_uid != os.geteuid() or artifact_stat.st_nlink != 1:
+                raise RuntimeError(
+                    "Rollback manifest artifact must be owned by the current user with one hard link."
+                )
+            manifest = json.load(handle)
+        if not isinstance(manifest, dict):
+            raise RuntimeError("Rollback manifest artifact must contain one JSON object.")
+        if _rollback_manifest_fingerprint(manifest) != expected_fingerprint:
+            raise RuntimeError("Rollback manifest artifact fingerprint mismatch.")
+        current_stat = os.stat(
+            artifact_name,
+            dir_fd=root_descriptor,
+            follow_symlinks=False,
+        )
+        if (current_stat.st_dev, current_stat.st_ino) != (
+            artifact_stat.st_dev,
+            artifact_stat.st_ino,
+        ):
+            raise RuntimeError("Rollback manifest artifact changed before deletion.")
+        os.unlink(artifact_name, dir_fd=root_descriptor)
+        os.fsync(root_descriptor)
+    finally:
+        os.close(root_descriptor)
+    return {
+        "status": "deleted",
+        "artifact_name": artifact_name,
+        "rollback_manifest_fingerprint": expected_fingerprint,
+    }
+
+
+def _argument_is_set(value: object) -> bool:
+    if value is None or value is False:
+        return False
+    if isinstance(value, (str, list, tuple, dict, set)) and not value:
+        return False
+    return True
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Repair strict import Audit facts from durable App evidence.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--execute", action="store_true")
+    mode.add_argument("--delete-rollback-manifest-artifact")
     parser.add_argument("--expected-fingerprint")
+    parser.add_argument("--expected-rollback-manifest-fingerprint")
     parser.add_argument("--batch-id")
     parser.add_argument("--file-id")
     parser.add_argument("--retire-etc-session-id", action="append", default=[])
@@ -317,6 +401,40 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
+    if args.delete_rollback_manifest_artifact:
+        if not args.expected_rollback_manifest_fingerprint:
+            raise SystemExit(
+                "--delete-rollback-manifest-artifact requires "
+                "--expected-rollback-manifest-fingerprint"
+            )
+        allowed_delete_arguments = {
+            "dry_run",
+            "execute",
+            "delete_rollback_manifest_artifact",
+            "expected_rollback_manifest_fingerprint",
+        }
+        if any(
+            _argument_is_set(value)
+            for name, value in vars(args).items()
+            if name not in allowed_delete_arguments
+        ):
+            raise SystemExit(
+                "Rollback manifest artifact deletion cannot be combined with repair arguments."
+            )
+        report = _delete_private_rollback_manifest_artifact(
+            args.delete_rollback_manifest_artifact,
+            expected_fingerprint=args.expected_rollback_manifest_fingerprint,
+        )
+        print(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True),
+            file=stdout,
+        )
+        return 0
+    if args.expected_rollback_manifest_fingerprint:
+        raise SystemExit(
+            "--expected-rollback-manifest-fingerprint requires "
+            "--delete-rollback-manifest-artifact"
+        )
     if args.execute and not args.expected_fingerprint:
         raise SystemExit("--execute requires --expected-fingerprint from a dry run")
     if bool(args.batch_id) != bool(args.file_id):

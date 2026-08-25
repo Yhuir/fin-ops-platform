@@ -2362,6 +2362,143 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
                     plan,
                 )
 
+    def test_cli_private_rollback_manifest_delete_verifies_fingerprint_and_unlinks_exact_file(
+        self,
+    ) -> None:
+        manifest = {
+            "source_fingerprint": "source-fingerprint",
+            "restore_invoice_source_links": [],
+        }
+        expected_fingerprint = import_audit_repair_ops._rollback_manifest_fingerprint(
+            manifest
+        )
+        with tempfile.TemporaryDirectory() as task_dir:
+            self._configure_private_artifact_root(task_dir)
+            artifact_name = "oa-links-delete.json"
+            artifact_path = os.path.join(task_dir, artifact_name)
+            with open(artifact_path, "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle)
+            os.chmod(artifact_path, 0o600)
+            output = io.StringIO()
+
+            result = import_audit_repair_ops.main(
+                [
+                    "--delete-rollback-manifest-artifact",
+                    artifact_name,
+                    "--expected-rollback-manifest-fingerprint",
+                    expected_fingerprint,
+                ],
+                stdout=output,
+            )
+
+            self.assertEqual(result, 0)
+            self.assertFalse(os.path.exists(artifact_path))
+            self.assertEqual(
+                json.loads(output.getvalue()),
+                {
+                    "status": "deleted",
+                    "artifact_name": artifact_name,
+                    "rollback_manifest_fingerprint": expected_fingerprint,
+                },
+            )
+
+    def test_cli_private_rollback_manifest_delete_preserves_file_on_fingerprint_mismatch(
+        self,
+    ) -> None:
+        manifest = {"source_fingerprint": "source-fingerprint"}
+        with tempfile.TemporaryDirectory() as task_dir:
+            self._configure_private_artifact_root(task_dir)
+            artifact_path = os.path.join(task_dir, "oa-links-preserved.json")
+            with open(artifact_path, "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle)
+            os.chmod(artifact_path, 0o600)
+
+            with self.assertRaisesRegex(RuntimeError, "fingerprint mismatch"):
+                import_audit_repair_ops.main(
+                    [
+                        "--delete-rollback-manifest-artifact",
+                        "oa-links-preserved.json",
+                        "--expected-rollback-manifest-fingerprint",
+                        "0" * 64,
+                    ]
+                )
+
+            self.assertTrue(os.path.isfile(artifact_path))
+
+    def test_cli_private_rollback_manifest_delete_rejects_repair_arguments(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "cannot be combined"):
+            import_audit_repair_ops.main(
+                [
+                    "--delete-rollback-manifest-artifact",
+                    "oa-links-delete.json",
+                    "--expected-rollback-manifest-fingerprint",
+                    "0" * 64,
+                    "--operator-id",
+                    "system_repair",
+                ]
+            )
+
+    def test_cli_private_rollback_manifest_delete_rejects_hard_linked_artifact(
+        self,
+    ) -> None:
+        manifest = {"source_fingerprint": "source-fingerprint"}
+        expected_fingerprint = import_audit_repair_ops._rollback_manifest_fingerprint(
+            manifest
+        )
+        with tempfile.TemporaryDirectory() as task_dir:
+            self._configure_private_artifact_root(task_dir)
+            artifact_path = os.path.join(task_dir, "oa-links-hardlink.json")
+            second_path = os.path.join(task_dir, "oa-links-hardlink-copy.json")
+            with open(artifact_path, "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle)
+            os.chmod(artifact_path, 0o600)
+            os.link(artifact_path, second_path)
+
+            with self.assertRaisesRegex(RuntimeError, "one hard link"):
+                import_audit_repair_ops.main(
+                    [
+                        "--delete-rollback-manifest-artifact",
+                        "oa-links-hardlink.json",
+                        "--expected-rollback-manifest-fingerprint",
+                        expected_fingerprint,
+                    ]
+                )
+
+            self.assertTrue(os.path.isfile(artifact_path))
+            self.assertTrue(os.path.isfile(second_path))
+
+    def test_cli_private_rollback_manifest_delete_rejects_symlink_artifact(
+        self,
+    ) -> None:
+        manifest = {"source_fingerprint": "source-fingerprint"}
+        expected_fingerprint = import_audit_repair_ops._rollback_manifest_fingerprint(
+            manifest
+        )
+        with tempfile.TemporaryDirectory() as task_parent:
+            artifact_root = os.path.join(task_parent, "artifacts")
+            os.mkdir(artifact_root, mode=0o700)
+            self._configure_private_artifact_root(artifact_root)
+            target_path = os.path.join(task_parent, "outside.json")
+            with open(target_path, "w", encoding="utf-8") as handle:
+                json.dump(manifest, handle)
+            os.chmod(target_path, 0o600)
+            artifact_name = "oa-links-symlink.json"
+            artifact_path = os.path.join(artifact_root, artifact_name)
+            os.symlink(target_path, artifact_path)
+
+            with self.assertRaisesRegex(RuntimeError, "artifact is unavailable"):
+                import_audit_repair_ops.main(
+                    [
+                        "--delete-rollback-manifest-artifact",
+                        artifact_name,
+                        "--expected-rollback-manifest-fingerprint",
+                        expected_fingerprint,
+                    ]
+                )
+
+            self.assertTrue(os.path.islink(artifact_path))
+            self.assertTrue(os.path.isfile(target_path))
+
     def test_cli_full_oa_attachment_invoice_link_audit_dry_run_is_read_only(self) -> None:
         class Connection:
             @contextmanager
