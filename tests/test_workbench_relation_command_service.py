@@ -145,6 +145,76 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertTrue(withdraw_replay["idempotent_replay"])
         self.assertEqual(service.active_relations_for_row_ids(row_ids), [])
 
+    def test_withdraw_restores_same_case_predecessor_through_command_boundary(self) -> None:
+        predecessor = {
+            "case_id": "CASE-SAME",
+            "row_ids": ["oa-1", "invoice-1"],
+            "row_types": ["oa", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 1,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active = {
+            "case_id": "CASE-SAME",
+            "row_ids": ["oa-1", "bank-1", "invoice-1"],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-05",
+            "version": 3,
+        }
+        pair_service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {"CASE-SAME": active},
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-command-same-case",
+                        "operation_type": "confirm_link",
+                        "before_relations": [predecessor],
+                        "after_relations": [active],
+                    }
+                ],
+            }
+        )
+        service = WorkbenchRelationCommandService(
+            relation_repository=WorkbenchRelationCommandRepositoryAdapter(
+                pair_relation_service=pair_service,
+                save_repository=False,
+            )
+        )
+        row_ids = list(active["row_ids"])
+        row_types = list(active["row_types"])
+
+        preview = service.preview_withdraw_relation(
+            row_ids=row_ids,
+            row_types=row_types,
+            month_scope="2026-05",
+        )
+        withdraw_kwargs = {
+            "case_id": "CASE-SAME",
+            "actor_id": "finance",
+            "row_ids": row_ids,
+            "row_types": row_types,
+            "idempotency_key": "withdraw:same-case",
+            "preview_id": preview["preview_id"],
+            "operation_type": preview["operation_type"],
+            "expected_versions": preview["submit_expected_versions"],
+        }
+        withdrawn = service.withdraw_relation(**withdraw_kwargs)
+        replay = service.withdraw_relation(**withdraw_kwargs)
+
+        self.assertTrue(preview["can_submit"])
+        self.assertEqual(preview["after_relations"][0]["case_id"], "CASE-SAME")
+        self.assertEqual(withdrawn["restored_relations"][0]["version"], 5)
+        self.assertIsNone(service.get_active_relation_by_row_id("bank-1"))
+        self.assertEqual(
+            service.get_active_relation_by_row_id("oa-1")["row_ids"],
+            ["oa-1", "invoice-1"],
+        )
+        self.assertTrue(replay["idempotent_replay"])
+
 
 if __name__ == "__main__":
     unittest.main()

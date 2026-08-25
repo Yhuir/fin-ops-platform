@@ -1660,6 +1660,18 @@ class WorkbenchRelationCommandService:
                 "Workbench relation is not active or does not exist.",
                 payload={"row_ids": list(active_relation.get("row_ids") or [])},
             ) from exc
+        except ValueError as exc:
+            reason = str(exc)
+            if reason not in {
+                "workbench_relation_restore_case_reused",
+                "workbench_relation_restore_owner_conflict",
+            }:
+                raise
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_restore_conflict",
+                "Previous Workbench relation topology can no longer be restored safely.",
+                payload={"reason": reason},
+            ) from exc
         active_relation = deepcopy(preview["active_relation"])
         after_relations = [
             deepcopy(relation)
@@ -2158,9 +2170,12 @@ class WorkbenchRelationCommandService:
             for row_id in list(before_relation.get("row_ids") or [])
             if str(row_id).strip()
         ]
-        provisional = pair_service.preview_withdraw_for_active_relation(
-            before_relation,
+        provisional = self._preview_withdraw_relation_from_pair_service(
+            pair_service,
+            row_ids=before_row_ids,
+            month_scope=str(before_relation.get("month_scope") or "all"),
             row_id_aliases=row_id_aliases,
+            active_relation=before_relation,
         )
         provisional_after = [
             deepcopy(relation)
@@ -2242,18 +2257,6 @@ class WorkbenchRelationCommandService:
                 locked_row_ids,
                 row_types=locked_row_types,
             )
-        try:
-            locked_pair_service.assert_restored_relations_available(
-                active_relation=locked_before,
-                restored_relations=locked_after,
-                row_id_aliases=row_id_aliases,
-            )
-        except ValueError as exc:
-            raise WorkbenchRelationCommandError(
-                "workbench_relation_restore_conflict",
-                "Previous Workbench relation topology can no longer be restored safely.",
-                payload={"reason": str(exc)},
-            ) from exc
         return locked_pair_service, deepcopy(locked_before), locked_preview
 
     @staticmethod

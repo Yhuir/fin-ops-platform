@@ -625,6 +625,27 @@ describe("workbench api bank amount mapping", () => {
     await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.not.toThrow("RAW BACKEND SENTINEL");
   });
 
+  test.each([
+    ["workbench_relation_restore_case_reused", "历史关联关系身份已被占用，无法安全撤回。"],
+    ["workbench_relation_restore_owner_conflict", "历史关联成员已被其他关系占用，无法安全撤回。"],
+    ["invalid_restored_member_type", "历史关联关系成员类型无效，无法安全撤回。"],
+    ["unknown_restore_conflict", "历史关联关系已发生冲突，无法安全撤回。"],
+  ])("maps relation restore conflict reason %s precisely", async (reason, expectedMessage) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "workbench_relation_restore_conflict",
+          message: "RAW BACKEND SENTINEL",
+          reason,
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.toThrow(expectedMessage);
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", null, 50)).rejects.not.toThrow("RAW BACKEND SENTINEL");
+  });
+
   test("never exposes a non-JSON response body", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("RAW PARSER SENTINEL", {

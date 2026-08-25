@@ -2085,6 +2085,12 @@ const WORKBENCH_WRITE_CONFLICT_REASON_MESSAGES: Record<string, string> = {
   stale_row_status: "所选记录状态已变化，请刷新后重新预览。",
 };
 
+const WORKBENCH_RELATION_RESTORE_CONFLICT_REASON_MESSAGES: Record<string, string> = {
+  workbench_relation_restore_case_reused: "历史关联关系身份已被占用，无法安全撤回。",
+  workbench_relation_restore_owner_conflict: "历史关联成员已被其他关系占用，无法安全撤回。",
+  invalid_restored_member_type: "历史关联关系成员类型无效，无法安全撤回。",
+};
+
 function workbenchConflictReasonFromPayload(payload: unknown) {
   if (!payload || typeof payload !== "object") {
     return "";
@@ -2096,6 +2102,13 @@ function workbenchConflictReasonFromPayload(payload: unknown) {
   return String((conflict as { reason?: unknown }).reason ?? "").trim();
 }
 
+function topLevelReasonFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  return String((payload as { reason?: unknown }).reason ?? "").trim();
+}
+
 function resolveWorkbenchApiErrorMessage(status: number, code: string, payload: unknown) {
   if (WORKBENCH_API_ERROR_MESSAGES[code]) {
     return WORKBENCH_API_ERROR_MESSAGES[code];
@@ -2105,6 +2118,11 @@ function resolveWorkbenchApiErrorMessage(status: number, code: string, payload: 
     if (WORKBENCH_WRITE_CONFLICT_REASON_MESSAGES[reason]) {
       return WORKBENCH_WRITE_CONFLICT_REASON_MESSAGES[reason];
     }
+  }
+  if (code === "workbench_relation_restore_conflict") {
+    const reason = topLevelReasonFromPayload(payload);
+    return WORKBENCH_RELATION_RESTORE_CONFLICT_REASON_MESSAGES[reason]
+      ?? "历史关联关系已发生冲突，无法安全撤回。";
   }
   if (status === 401) {
     return "登录状态已失效，请重新登录。";

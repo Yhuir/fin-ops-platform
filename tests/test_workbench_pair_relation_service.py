@@ -769,6 +769,57 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         self.assertEqual(restored["case_id"], "CASE-PARTIAL")
         self.assertEqual(restored["version"], 2)
 
+    def test_withdraw_restores_same_case_historical_predecessor_topology(self) -> None:
+        predecessor = {
+            "case_id": "CASE-SAME",
+            "row_ids": ["oa-001", "invoice-001"],
+            "row_types": ["oa", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-04",
+            "version": 1,
+            "special_metadata": {"restorable_on_withdraw": True},
+        }
+        active = {
+            "case_id": "CASE-SAME",
+            "row_ids": ["oa-001", "bank-001", "invoice-001"],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "month_scope": "2026-04",
+            "version": 3,
+        }
+        service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {"CASE-SAME": active},
+                "pair_relation_history": [
+                    {
+                        "operation_id": "hist-same-case-restore",
+                        "operation_type": "confirm_link",
+                        "before_relations": [predecessor],
+                        "after_relations": [active],
+                    }
+                ],
+            }
+        )
+
+        preview = service.preview_withdraw_for_active_relation(active)
+        restored, history = service.withdraw_latest_for_active_relation(
+            active,
+            created_by="finance",
+        )
+
+        self.assertEqual(preview["after_relations"], [predecessor])
+        self.assertEqual(restored[0]["case_id"], "CASE-SAME")
+        self.assertEqual(restored[0]["row_ids"], ["oa-001", "invoice-001"])
+        self.assertEqual(restored[0]["version"], 5)
+        self.assertEqual(history["after_relations"][0]["version"], 5)
+        self.assertIsNone(service.get_active_relation_by_row_id("bank-001"))
+        self.assertEqual(
+            service.get_active_relation_by_row_id("oa-001")["case_id"],
+            "CASE-SAME",
+        )
+
     def test_withdraw_restored_relation_version_advances_past_existing_topology_version(self) -> None:
         previous = {
             "case_id": "CASE-PARTIAL",

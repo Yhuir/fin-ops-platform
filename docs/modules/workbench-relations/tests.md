@@ -18,10 +18,12 @@
 
 - Exact selection：`test_preview_withdraw_relation_requires_exact_active_member_set`、`test_withdraw_relation_case_and_explicit_rows_must_identify_same_exact_relation` 和显式空 rows 回归，保护 preview/submit 的 exact full active typed member set；错误码为 `workbench_relation_exact_selection_required`。
 - Transaction restore：`test_withdraw_relation_rejects_missing_canonical_restored_member`、`test_withdraw_relation_rejects_reused_predecessor_case`、cancelled predecessor case reuse 与 `test_withdraw_relation_rejects_restored_member_owned_by_another_active_case`，保护事务锁内 canonical/case/unique-owner 重验并在冲突时零写。
+- Same-case predecessor：`test_withdraw_restores_same_case_historical_predecessor_topology` 与 `test_withdraw_restores_same_case_predecessor_through_command_boundary` 保护最近 confirm history 的 predecessor 沿用当前 case identity 时，preview 可提交、submit 原子取消当前 topology 并以单调 version 恢复历史 topology；被移除成员释放 owner，同 key 重放不产生第二次写。无关 case 复用规则保持不变。
+- Preview/submit parity：pair service 在生成恢复计划时即执行 case/owner 校验，command 的加锁前后预览均走同一错误映射；删除无人调用的 `fallback_after_relations` 和 submit-only 二次校验，避免“预览可撤回、提交才 409”的规则分叉。
 - Version / fingerprint：`test_withdraw_restored_relation_version_advances_past_existing_topology_version`、create/cancel 的 version=`1/2` 断言，以及 `test_withdraw_preview_fingerprint_changes_with_topology_and_history_identity`，保护 topology version 单调推进与 preview 绑定 current/after topology + confirm-history identity。
 - Locks / idempotency：`test_relation_member_lock_includes_case_identity_and_persisted_members_in_stable_order` 保护 case/member 稳定锁顺序；`test_withdraw_relation_replays_same_idempotency_key_without_second_save` 保护重放零第二次 save。
 - API / actor regression：`test_relation_restore_state_conflicts_map_to_http_conflict` 保护 exact selection→400、canonical/restore drift→409；`test_exception_apply_uses_authenticated_actor_instead_of_client_payload` 保护兼容 exception apply 只使用认证 actor。`internal_transfer` 人工确认继续统一走 relation UoW，独立 no-OA API 保留。
-- 当前结果：上述变化所在 direct/UoW/repository 专项共 `106 passed`，后端 lint 与 diff-check 通过；本节不声称本轮已重跑全后端、Browser、生产发布或真实数据库并发场景。
+- 当前结果：本节中的历史验证数字只描述当时执行记录；每次实现须在交付报告中列出本轮实际重跑的测试、Browser、部署与生产验证结果。
 
 ## 人工 confirm-link 内部转账旧分流删除（已验证）
 
