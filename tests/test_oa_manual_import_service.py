@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import unittest
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -94,7 +93,6 @@ class RecordingOAAdapter:
     def __init__(self, records: list[OAApplicationRecord]) -> None:
         self.records_by_id = {record.id: record for record in records}
         self.search_calls: list[dict[str, object]] = []
-        self.refresh_calls: list[list[str]] = []
 
     def search_application_records(self, **kwargs):
         self.search_calls.append(dict(kwargs))
@@ -109,30 +107,6 @@ class RecordingOAAdapter:
 
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
         return [self.records_by_id[row_id] for row_id in row_ids if row_id in self.records_by_id]
-
-    def refresh_application_record_attachments(self, row_ids: list[str]) -> list[OAApplicationRecord]:
-        self.refresh_calls.append(list(row_ids))
-        refreshed: list[OAApplicationRecord] = []
-        for row_id in row_ids:
-            record = self.records_by_id.get(row_id)
-            if record is None:
-                continue
-            invoice = {"invoice_no": "REFRESHED", "attachment_name": "new.pdf"}
-            refreshed_record = replace(
-                record,
-                attachment_invoices=[invoice],
-                attachment_file_count=2,
-                expense_items=[
-                    {
-                        **dict(record.expense_items[0]),
-                        "attachment_file_count": "2",
-                        "attachment_invoices": [invoice],
-                    }
-                ],
-            )
-            self.records_by_id[row_id] = refreshed_record
-            refreshed.append(refreshed_record)
-        return refreshed
 
     @staticmethod
     def _form_type(record: OAApplicationRecord) -> str:
@@ -150,33 +124,6 @@ class RecordingWorkbenchQueryService:
 
     def sync_oa_row_ids(self, row_ids: list[str]) -> None:
         self.synced_row_ids.append(list(row_ids))
-
-
-class RecordingAttachmentInvoicePromoter:
-    def __init__(self) -> None:
-        self.row_ids: list[str] = []
-        self.ensure_matching = False
-
-    def promote_records(
-        self,
-        records: list[OAApplicationRecord],
-        *,
-        ensure_matching: bool = False,
-    ) -> dict[str, object]:
-        self.row_ids = [record.id for record in records]
-        self.ensure_matching = ensure_matching
-        return {
-            "summary": {
-                "cache_candidate_count": len(records),
-                "affected_invoice_count": len(records),
-            }
-        }
-
-
-class FailingRefreshAdapter(RecordingOAAdapter):
-    def refresh_application_record_attachments(self, row_ids: list[str]) -> list[OAApplicationRecord]:
-        self.refresh_calls.append(list(row_ids))
-        raise RuntimeError("download timeout")
 
 
 class FailingWorkbenchQueryService(RecordingWorkbenchQueryService):
@@ -319,92 +266,10 @@ class OAManualImportServiceTests(unittest.TestCase):
         self.assertEqual(first["failed"], [{"row_id": "oa-pay-2048", "code": "not_completed", "message": "流程未完成，不能导入"}])
         self.assertEqual(second["imported"], [])
         self.assertEqual(second["already_imported"], ["oa-exp-1981"])
-        self.assertEqual(adapter.refresh_calls, [["oa-exp-1981"], ["oa-exp-1981"]])
+        self.assertFalse(hasattr(service, "refresh_attachments"))
         self.assertEqual(workbench.synced_row_ids, [["oa-exp-1981"], ["oa-exp-1981"]])
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], ["oa-exp-1981"])
         self.assertEqual(first["rows"][0]["application_date"], "2025-12-23")
-
-    def test_refresh_attachments_is_targeted_to_selected_row_ids(self) -> None:
-        adapter = RecordingOAAdapter([oa_record("oa-exp-1981", invoices=[])])
-        promoter = RecordingAttachmentInvoicePromoter()
-        service = OAManualImportService(
-            state_store=MemoryManualImportStore(),
-            oa_adapter=adapter,
-            workbench_query_service=RecordingWorkbenchQueryService(),
-            attachment_invoice_promoter=promoter,
-        )
-
-        payload = service.refresh_attachments(["oa-exp-1981", "missing"])
-
-        self.assertEqual(adapter.refresh_calls, [["oa-exp-1981", "missing"]])
-        self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-1981")
-        self.assertEqual(payload["rows"][0]["importable_invoice_count"], 1)
-        self.assertEqual(payload["errors"], [{"row_id": "missing", "code": "not_found", "message": "OA row_id 不存在"}])
-        self.assertEqual(promoter.row_ids, ["oa-exp-1981"])
-        self.assertTrue(promoter.ensure_matching)
-        self.assertEqual(payload["promotion_summary"], {"cache_candidate_count": 1, "affected_invoice_count": 1})
-
-    def test_refresh_attachments_does_not_promote_in_progress_records(self) -> None:
-        promoter = RecordingAttachmentInvoicePromoter()
-        service = OAManualImportService(
-            state_store=MemoryManualImportStore(),
-            oa_adapter=RecordingOAAdapter([oa_record("oa-exp-progress", invoices=[], status="进行中")]),
-            workbench_query_service=RecordingWorkbenchQueryService(),
-            attachment_invoice_promoter=promoter,
-        )
-
-        payload = service.refresh_attachments(["oa-exp-progress"])
-
-        self.assertEqual(promoter.row_ids, [])
-        self.assertEqual(payload["promotion_summary"], {})
-        self.assertEqual(
-            payload["errors"],
-            [
-                {
-                    "row_id": "oa-exp-progress",
-                    "code": "not_completed",
-                    "message": "流程未完成，不能刷新附件",
-                }
-            ],
-        )
-
-    def test_refresh_attachments_reports_canonical_promotion_failure(self) -> None:
-        class FailingPromoter:
-            def promote_records(
-                self,
-                records: list[OAApplicationRecord],
-                *,
-                ensure_matching: bool = False,
-            ) -> dict[str, object]:
-                raise RuntimeError(f"database unavailable for {len(records)} record")
-
-        service = OAManualImportService(
-            state_store=MemoryManualImportStore(),
-            oa_adapter=RecordingOAAdapter([oa_record("oa-exp-1981", invoices=[])]),
-            workbench_query_service=RecordingWorkbenchQueryService(),
-            attachment_invoice_promoter=FailingPromoter(),
-        )
-
-        payload = service.refresh_attachments(["oa-exp-1981"])
-
-        self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-1981")
-        self.assertEqual(payload["errors"][0]["code"], "attachment_promotion_failed")
-        self.assertIn("database unavailable", payload["errors"][0]["message"])
-
-    def test_refresh_attachments_returns_structured_errors_when_parser_fails(self) -> None:
-        adapter = FailingRefreshAdapter([oa_record("oa-exp-1981", invoices=[])])
-        service = OAManualImportService(
-            state_store=MemoryManualImportStore(),
-            oa_adapter=adapter,
-            workbench_query_service=RecordingWorkbenchQueryService(),
-        )
-
-        payload = service.refresh_attachments(["oa-exp-1981"])
-
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["errors"][0]["row_id"], "oa-exp-1981")
-        self.assertEqual(payload["errors"][0]["code"], "attachment_refresh_failed")
-        self.assertIn("download timeout", payload["errors"][0]["message"])
 
     def test_import_does_not_persist_marker_when_sync_fails(self) -> None:
         store = MemoryManualImportStore()

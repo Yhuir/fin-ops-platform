@@ -49,6 +49,14 @@
 - 允许流转：admin 保存目标 OA 申请人账号密码后 `unconfigured -> configured`；admin 删除后回到 `unconfigured`。
 - 禁止流转：非 admin 维护凭据；列表、settings payload、日志、错误响应暴露密码、密文或 token。
 
+### OA 精确附件刷新
+
+- 事实源：`job.outbox_events(event_type='oa.sync')`；payload 显式为 `operation=refresh_attachments + row_ids`。
+- 状态：`queued -> processing -> done`，失败为 `failed/dead_lettered`。
+- POST 只返回 202/event id；页面轮询同资源状态，并且只有 terminal `done` 才用 worker result 更新附件/可导入发票计数。
+- 缺失、非完成态、OCR/解析/promotion 失败必须显示真实错误；禁止返回旧 PostgreSQL projection 伪造成功。
+- 新刷新开始或页面卸载时取消旧轮询；Settings 不执行 Mongo/OCR/promotion，不新增第二种 worker event。
+
 ### 数据重置
 
 - 支持动作：`reset_bank_transactions`、`reset_invoices`、`reset_oa_and_rebuild`。
@@ -71,8 +79,7 @@
 - loading：settings payload、credential list、active data reset job 并行加载时展示加载态，不能误显示可保存状态。
 - empty：无手工项目、无凭据、无 pending invoice 规则时显示空状态，但保留创建入口。
 - error：settings save、凭据保存、data reset job、active job 恢复失败必须展示可理解错误。
-- job progress：设置页自身不是 read model 页面；只有显式 data reset job 展示
-  queued/running/failed/succeeded。普通规则保存没有下游 refreshing。
+- job progress：设置页自身不是 read model 页面；显式 data reset job 展示 queued/running/failed/succeeded，OA 精确附件刷新展示 queued/processing/done/failed/dead-lettered。普通规则保存没有下游 refreshing。
 - permission disabled/hidden：readonly/full access 非 admin 不显示高风险 credential/reset 入口；API 仍必须二次校验。
 - credential form：密码只存在于当前表单；保存成功后清空；列表只展示目标 OA 申请人、OA 登录账号和配置状态。
 - reset dialog：必须有动作说明、影响范围、确认密码、运行中 job progress、失败状态和重进恢复。
@@ -85,6 +92,7 @@
 - Workbench stale scan 只由 matching worker 启动，不属于 API 生命周期；API 初始化不得执行 reset recovery、historical reconcile 或 maintenance。
 - settings save 只等待 canonical settings transaction；data reset 单独展示 durable job
   状态，不用 read-model barrier 伪装 job 完成。
+- OA 精确附件刷新只复用 `oa.sync` durable queue/status，不写 read-model queue，不等待 operation barrier；worker terminal result 才是解析完成事实。
 - 失败恢复：
   - settings 保存失败不得产生半写入 audit 或半更新规则。
   - data reset 失败必须保留可诊断 job 状态，不泄露密码。

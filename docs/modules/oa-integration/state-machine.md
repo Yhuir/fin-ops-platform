@@ -46,6 +46,18 @@
 - worker 依赖 Flask/Application/session/header。
 - RabbitMQ transport 被当作 read model 事实源。
 
+### 精确附件刷新
+
+| 状态 | 触发/合同 | 下一状态 |
+| --- | --- | --- |
+| `queued` | Settings mutation gate 校验 row IDs 为存在且 completed 的 canonical OA 后，登记 `oa.sync(operation=refresh_attachments)`；POST 返回 202/event id | `processing` |
+| `processing` | OA worker 只对 event 中 row IDs 强制下载/解析附件，定向 upsert projection，复用统一 promotion 且 `ensure_matching=true` | `done`、`failed`、`dead_lettered` |
+| `done` | durable `runtime_result` 含逐 row 附件/发票计数、promotion summary 与 affected scopes；前端此时才更新行 | 终态 |
+| `failed` | 来源记录缺失、非完成态、附件/OCR/promotion 或持久化失败 | durable retry 或 `dead_lettered`；返回真实错误，不读取旧投影冒充成功 |
+| `dead_lettered` | bounded retry 已用尽 | 终态，需人工处理 |
+
+精确刷新不新增 worker/event type，不执行普通 all/month sync 的 stale deletion，也不允许 HTTP 进程持有 Mongo adapter、OCR 或 promoter。重复刷新必须保持 canonical 发票和来源边幂等，同时允许再次补发 matching reconciliation。
+
 ## OA Applicant Credential 状态
 
 | 状态 | 含义 | 允许流转 |
@@ -104,7 +116,7 @@
 - loading：session bootstrap、OA 待付款 rows/filter/detail、进项 OA reverse preview/draft、ETC business batch detail/action、settings credentials/manual search 加载中。
 - empty：无 OA rows、无凭据、无手动导入记录、无可导入 OA 搜索结果。
 - error：OA session/OA login/Mongo/API structured error 必须可见，不吞掉。
-- syncing：显式 OA sync job 运行时展示任务进度；业务页面不伪造 read-model refreshing。
+- syncing：显式 OA sync job 运行时展示任务进度；精确附件刷新展示 queued/processing/done/failed，并在组件卸载或新刷新开始时取消旧轮询；业务页面不伪造 read-model refreshing。
 - permission disabled/hidden：只读用户隐藏写入，full access 隐藏 admin-only，admin 才能维护 OA applicant credentials。
 
 ## Canonical Projection / Worker 状态

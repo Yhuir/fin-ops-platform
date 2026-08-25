@@ -37,6 +37,7 @@ import type {
   WorkbenchZoneId,
   WorkbenchZonePageInfo,
   OaManualAttachmentRefreshResult,
+  OaManualAttachmentRefreshStatus,
   OaManualImportList,
   OaManualImportRemovalResult,
   OaManualImportResult,
@@ -63,7 +64,7 @@ import type {
   ManualInvoiceEntryValues,
 } from "../imports/types";
 import { apiUrl } from "../../app/runtime";
-import { ApiClientError, apiRequestJson } from "../apiClient";
+import { ApiClientError, apiRequestJson, type ApiRequestJsonOptions } from "../apiClient";
 import { mapBankTransactionTagDictionary } from "../pendingInvoices/api";
 import { readOATokenCookie } from "../session/api";
 import type { BankTransactionTagDictionary, PendingInvoiceTagGroups } from "../pendingInvoices/types";
@@ -749,14 +750,37 @@ type ApiAffectedScopeEnvelope = {
 };
 
 type ApiOaManualAttachmentRefreshResult = ApiAffectedScopeEnvelope & {
-  rows?: Array<{
-    row_id?: string | null;
-    attachment_file_count?: number | null;
-    importable_invoice_count?: number | null;
-    unrecognized_attachment_count?: number | null;
-  }> | null;
-  errors?: Array<Record<string, unknown>> | null;
+  event_id?: string | null;
+  status?: string | null;
+  row_ids?: string[] | null;
 };
+
+type ApiOaManualAttachmentRefreshRow = {
+  row_id?: string | null;
+  attachment_file_count?: number | null;
+  importable_invoice_count?: number | null;
+  unrecognized_attachment_count?: number | null;
+};
+
+type ApiOaManualAttachmentRefreshError = {
+  row_id?: unknown;
+  code?: unknown;
+  message?: unknown;
+};
+
+type ApiOaManualAttachmentRefreshStatus = ApiAffectedScopeEnvelope & {
+  event_id?: string | null;
+  status?: string | null;
+  row_ids?: string[] | null;
+  error?: string | null;
+  result?: {
+    rows?: ApiOaManualAttachmentRefreshRow[] | null;
+    errors?: ApiOaManualAttachmentRefreshError[] | null;
+    promotion_summary?: Record<string, unknown> | null;
+  } | null;
+};
+
+const oaManualAttachmentRefreshRequestTimeoutMs = 15_000;
 
 type ApiOaManualImportResult = ApiAffectedScopeEnvelope & {
   imported?: string[] | null;
@@ -2176,7 +2200,9 @@ export function resolveWorkbenchActionErrorMessage(error: unknown, fallback: str
 
 function createWorkbenchApiError(error: ApiClientError) {
   const requestId = requestIdFromPayload(error.payload);
-  const safeMessage = resolveWorkbenchApiErrorMessage(error.status, error.code, error.payload);
+  const safeMessage = error.code === "request_timeout"
+    ? error.message
+    : resolveWorkbenchApiErrorMessage(error.status, error.code, error.payload);
   return new WorkbenchApiError(
     safeMessage,
     {
@@ -2199,9 +2225,13 @@ function withWorkbenchAuthHeaders(headers?: HeadersInit) {
   return nextHeaders;
 }
 
-async function requestJson<T>(url: string, init: RequestInit = {}) {
+async function requestJson<T>(
+  url: string,
+  init: RequestInit = {},
+  options: ApiRequestJsonOptions = {},
+) {
   try {
-    return await apiRequestJson<T>(url, init);
+    return await apiRequestJson<T>(url, init, options);
   } catch (error) {
     if (error instanceof ApiClientError) {
       throw createWorkbenchApiError(error);
@@ -2895,18 +2925,22 @@ export async function deleteOaApplicantCredential(targetApplicantCode: string): 
 export async function searchManualOaImports(
   filters: OaManualSearchFilters,
   signal?: AbortSignal,
+  requestOptions: ApiRequestJsonOptions = {},
 ): Promise<OaManualSearchResult> {
   const query = buildManualSearchQuery(filters);
   const payload = await requestJson<ApiOaManualSearchResult>(
     `/api/workbench/settings/oa/manual-search?${query}`,
     { method: "GET", signal },
+    requestOptions,
   );
   return mapOaManualSearchResult(payload);
 }
 
 export async function refreshManualOaImportAttachments(
   rowIds: string[],
+  signal?: AbortSignal,
 ): Promise<OaManualAttachmentRefreshResult> {
+  const expectedRowIds = requireUniqueStringArray(rowIds, "OA 附件刷新 row_ids");
   const payload = await requestJson<ApiOaManualAttachmentRefreshResult>(
     "/api/workbench/settings/oa/manual-search/refresh-attachments",
     {
@@ -2914,18 +2948,117 @@ export async function refreshManualOaImportAttachments(
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ row_ids: rowIds }),
+      body: JSON.stringify({ row_ids: expectedRowIds }),
+      signal,
+    },
+    {
+      timeoutMs: oaManualAttachmentRefreshRequestTimeoutMs,
+      timeoutMessage: "OA 附件刷新请求超时，请确认任务状态后再重试。",
     },
   );
+  const eventId = requireNonEmptyString(payload.event_id, "OA 附件刷新任务 event_id");
+  const status = toDisplayValue(payload.status, "");
+  if (status !== "queued" && status !== "pending") {
+    throw new Error(`OA 附件刷新任务状态无效：${status || "空"}`);
+  }
+  const returnedRowIds = requireUniqueStringArray(payload.row_ids, "OA 附件刷新响应 row_ids");
+  if (!sameStringSet(returnedRowIds, expectedRowIds)) {
+    throw new Error("OA 附件刷新响应 row_ids 与请求不一致");
+  }
   return {
-    rows: (payload.rows ?? []).map((row) => ({
-      rowId: toDisplayValue(row.row_id, ""),
-      attachmentFileCount: toCount(row.attachment_file_count),
-      importableInvoiceCount: toCount(row.importable_invoice_count),
-      unrecognizedAttachmentCount: toCount(row.unrecognized_attachment_count),
-    })).filter((row) => row.rowId.length > 0),
-    errors: payload.errors ?? [],
+    eventId,
+    status,
+    rowIds: returnedRowIds,
     ...mapAffectedScopeEnvelope(payload),
+  };
+}
+
+export async function getManualOaImportAttachmentRefreshStatus(
+  eventId: string,
+  expectedRowIds: string[],
+  signal?: AbortSignal,
+): Promise<OaManualAttachmentRefreshStatus> {
+  const requestedEventId = eventId.trim();
+  if (!requestedEventId) {
+    throw new Error("OA 附件刷新 event_id 不能为空");
+  }
+  const normalizedExpectedRowIds = requireUniqueStringArray(expectedRowIds, "OA 附件刷新 row_ids");
+  const payload = await requestJson<ApiOaManualAttachmentRefreshStatus>(
+    `/api/workbench/settings/oa/manual-search/refresh-attachments/${encodeURIComponent(requestedEventId)}`,
+    { method: "GET", signal },
+    {
+      timeoutMs: oaManualAttachmentRefreshRequestTimeoutMs,
+      timeoutMessage: "OA 附件刷新状态查询超时，后台任务状态尚未确认。",
+    },
+  );
+  const normalizedEventId = requireNonEmptyString(payload.event_id, "OA 附件刷新状态 event_id");
+  if (normalizedEventId !== requestedEventId) {
+    throw new Error("OA 附件刷新状态 event_id 与请求不一致");
+  }
+  const status = toDisplayValue(payload.status, "");
+  if (!["pending", "processing", "done", "failed", "dead_lettered"].includes(status)) {
+    throw new Error(`OA 附件刷新状态无效：${status || "空"}`);
+  }
+  const returnedRowIds = requireUniqueStringArray(payload.row_ids, "OA 附件刷新状态 row_ids");
+  if (!sameStringSet(returnedRowIds, normalizedExpectedRowIds)) {
+    throw new Error("OA 附件刷新状态 row_ids 与请求不一致");
+  }
+  const error = payload.error === null || payload.error === undefined
+    ? ""
+    : requireNonEmptyString(payload.error, "OA 附件刷新状态 error");
+  if ((status === "failed" || status === "dead_lettered") && !error) {
+    throw new Error("OA 附件刷新失败状态缺少错误原因");
+  }
+  const result = payload.result;
+  let mappedResult: OaManualAttachmentRefreshStatus["result"] = null;
+  if (status === "done") {
+    if (!result || !Array.isArray(result.rows) || !Array.isArray(result.errors)) {
+      throw new Error("OA 附件刷新完成结果缺少 rows 或 errors");
+    }
+    if (!result.promotion_summary || typeof result.promotion_summary !== "object" || Array.isArray(result.promotion_summary)) {
+      throw new Error("OA 附件刷新完成结果缺少 promotion_summary");
+    }
+    const rows = result.rows.map((row) => ({
+      rowId: requireNonEmptyString(row.row_id, "OA 附件刷新结果 row_id"),
+      attachmentFileCount: requireNonNegativeInteger(
+        row.attachment_file_count,
+        "OA 附件刷新结果 attachment_file_count",
+      ),
+      importableInvoiceCount: requireNonNegativeInteger(
+        row.importable_invoice_count,
+        "OA 附件刷新结果 importable_invoice_count",
+      ),
+      unrecognizedAttachmentCount: requireNonNegativeInteger(
+        row.unrecognized_attachment_count,
+        "OA 附件刷新结果 unrecognized_attachment_count",
+      ),
+    }));
+    if (!sameStringSet(rows.map((row) => row.rowId), normalizedExpectedRowIds)) {
+      throw new Error("OA 附件刷新完成结果 rows 与请求不一致");
+    }
+    const errors = result.errors.map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        throw new Error("OA 附件刷新完成结果 errors 格式无效");
+      }
+      return {
+        rowId: requireNonEmptyString(item.row_id, "OA 附件刷新结果 error.row_id"),
+        code: requireNonEmptyString(item.code, "OA 附件刷新结果 error.code"),
+        message: requireNonEmptyString(item.message, "OA 附件刷新结果 error.message"),
+      };
+    });
+    mappedResult = {
+      rows,
+      errors,
+      promotionSummary: result.promotion_summary,
+    };
+  }
+  return {
+    eventId: normalizedEventId,
+    status: status as OaManualAttachmentRefreshStatus["status"],
+    rowIds: returnedRowIds,
+    affectedScopeKeys: mapAffectedScopeEnvelope(payload).affectedScopeKeys,
+    error,
+    result: mappedResult,
   };
 }
 
@@ -3144,6 +3277,41 @@ function cleanScopeList(value: unknown) {
   return Array.isArray(value)
     ? Array.from(new Set(value.map((scope) => String(scope).trim()).filter(Boolean)))
     : [];
+}
+
+function requireNonEmptyString(value: unknown, label: string) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} 缺失或格式无效`);
+  }
+  return value.trim();
+}
+
+function requireUniqueStringArray(value: unknown, label: string) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${label} 必须是非空数组`);
+  }
+  const normalized = value.map((item) => requireNonEmptyString(item, label));
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error(`${label} 不能包含重复项`);
+  }
+  return normalized;
+}
+
+function sameStringSet(left: string[], right: string[]) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return left.length === right.length
+    && leftSet.size === left.length
+    && rightSet.size === right.length
+    && leftSet.size === rightSet.size
+    && Array.from(leftSet).every((item) => rightSet.has(item));
+}
+
+function requireNonNegativeInteger(value: unknown, label: string) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} 必须是非负整数`);
+  }
+  return value;
 }
 
 export async function createWorkbenchSettingsProject(

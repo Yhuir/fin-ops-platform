@@ -13,7 +13,6 @@ from fin_ops_platform.services.mongo_oa_adapter import (
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
-
 SUPPORTED_FORM_TYPES = [OA_IMPORT_FORM_TYPE_PAYMENT, OA_IMPORT_FORM_TYPE_EXPENSE]
 SUPPORTED_STATUSES = [OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS]
 
@@ -38,12 +37,10 @@ class OAManualImportService:
         state_store: ManualOAImportStateStore,
         oa_adapter: object,
         workbench_query_service: object,
-        attachment_invoice_promoter: object | None = None,
     ) -> None:
         self._state_store = state_store
         self._oa_adapter = oa_adapter
         self._workbench_query_service = workbench_query_service
-        self._attachment_invoice_promoter = attachment_invoice_promoter
 
     def search(
         self,
@@ -110,62 +107,6 @@ class OAManualImportService:
             "page_size": page_size,
         }
 
-    def refresh_attachments(self, row_ids: list[str]) -> dict[str, object]:
-        normalized_row_ids = self._dedupe_row_ids(row_ids)
-        refresh = getattr(self._oa_adapter, "refresh_application_record_attachments", None)
-        try:
-            if callable(refresh):
-                refreshed_records = list(refresh(normalized_row_ids))
-            else:
-                refreshed_records = self._records_by_row_ids(normalized_row_ids)
-        except Exception as exc:
-            return {
-                "rows": [],
-                "errors": [
-                    self._error(row_id, "attachment_refresh_failed", self._failure_message(exc, "附件解析刷新失败"))
-                    for row_id in normalized_row_ids
-                ],
-            }
-        records_by_id = {record.id: record for record in refreshed_records}
-        rows = [
-            self._record_to_attachment_summary(records_by_id[row_id])
-            for row_id in normalized_row_ids
-            if row_id in records_by_id
-        ]
-        errors = [
-            self._error(row_id, "not_found", "OA row_id 不存在")
-            for row_id in normalized_row_ids
-            if row_id not in records_by_id
-        ]
-        errors.extend(
-            self._error(record.id, "not_completed", "流程未完成，不能刷新附件")
-            for record in refreshed_records
-            if self._record_status(record) != OA_IMPORT_STATUS_COMPLETED
-        )
-        completed_records = [
-            record
-            for record in refreshed_records
-            if self._record_status(record) == OA_IMPORT_STATUS_COMPLETED
-        ]
-        promotion_summary: dict[str, object] = {}
-        if self._attachment_invoice_promoter is not None and completed_records:
-            try:
-                promotion = self._attachment_invoice_promoter.promote_records(
-                    completed_records,
-                    ensure_matching=True,
-                )
-                promotion_summary = dict((promotion or {}).get("summary") or {})
-            except Exception as exc:
-                errors.extend(
-                    self._error(
-                        record.id,
-                        "attachment_promotion_failed",
-                        self._failure_message(exc, "附件发票写入统一发票池失败"),
-                    )
-                    for record in completed_records
-                )
-        return {"rows": rows, "errors": errors, "promotion_summary": promotion_summary}
-
     def import_row_ids(self, row_ids: list[str], *, actor_id: str) -> dict[str, object]:
         normalized_row_ids = self._dedupe_row_ids(row_ids)
         try:
@@ -192,31 +133,6 @@ class OAManualImportService:
                 continue
             importable_row_ids.append(row_id)
 
-        refreshed_records_by_id: dict[str, OAApplicationRecord] = {}
-        if importable_row_ids:
-            refresh = getattr(self._oa_adapter, "refresh_application_record_attachments", None)
-            try:
-                refreshed_records = (
-                    list(refresh(importable_row_ids))
-                    if callable(refresh)
-                    else self._records_by_row_ids(importable_row_ids)
-                )
-            except Exception as exc:
-                failed.extend(
-                    self._error(row_id, "attachment_refresh_failed", self._failure_message(exc, "附件解析刷新失败"))
-                    for row_id in importable_row_ids
-                )
-                importable_row_ids = []
-                refreshed_records = []
-            refreshed_records_by_id = {record.id: record for record in refreshed_records}
-            missing_after_refresh = [row_id for row_id in importable_row_ids if row_id not in refreshed_records_by_id]
-            if missing_after_refresh:
-                failed.extend(
-                    self._error(row_id, "not_found", "OA row_id 不存在")
-                    for row_id in missing_after_refresh
-                )
-                importable_row_ids = [row_id for row_id in importable_row_ids if row_id in refreshed_records_by_id]
-
         store_result = {"imported": [], "already_imported": []}
         if importable_row_ids:
             sync = getattr(self._workbench_query_service, "sync_oa_row_ids", None)
@@ -238,9 +154,9 @@ class OAManualImportService:
                             "operation": "manual_oa_import",
                             "row_ids": importable_row_ids,
                             "attachment_summaries": [
-                                self._record_to_attachment_summary(refreshed_records_by_id[row_id])
+                                self._record_to_attachment_summary(records_by_id[row_id])
                                 for row_id in importable_row_ids
-                                if row_id in refreshed_records_by_id
+                                if row_id in records_by_id
                             ],
                         },
                     )
@@ -252,9 +168,9 @@ class OAManualImportService:
                     importable_row_ids = []
 
         rows = [
-            self._record_to_search_row(refreshed_records_by_id[row_id])
+            self._record_to_search_row(records_by_id[row_id])
             for row_id in importable_row_ids
-            if row_id in refreshed_records_by_id
+            if row_id in records_by_id
         ]
         return {
             "imported": list(store_result.get("imported") or []),
@@ -313,13 +229,11 @@ class OAManualImportService:
 
     def _records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
         list_by_ids = getattr(self._oa_adapter, "list_application_records_by_row_ids", None)
-        if callable(list_by_ids):
-            return list(list_by_ids(row_ids))
-        list_all = getattr(self._oa_adapter, "list_all_application_records", None)
-        if not callable(list_all):
-            return []
-        records_by_id = {record.id: record for record in list(list_all())}
-        return [records_by_id[row_id] for row_id in row_ids if row_id in records_by_id]
+        if not callable(list_by_ids):
+            raise RuntimeError(
+                "OA manual import adapter must expose list_application_records_by_row_ids()."
+            )
+        return list(list_by_ids(row_ids))
 
     def _record_to_search_row(self, record: OAApplicationRecord) -> dict[str, object]:
         status = self._record_status(record)

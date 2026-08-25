@@ -14,6 +14,7 @@ import {
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
   fetchWorkbenchRowDetail,
+  getManualOaImportAttachmentRefreshStatus,
   importManualOaRows,
   listWorkbenchOaSupportingDocumentGallery,
   previewWorkbenchConfirmLink,
@@ -1861,33 +1862,183 @@ describe("workbench OA manual import affected scopes", () => {
   };
 
   test("maps attachment refresh affected scopes", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          rows: [
-            {
-              row_id: "oa-exp-1981",
-              attachment_file_count: 3,
-              importable_invoice_count: 2,
-              unrecognized_attachment_count: 1,
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            event_id: "refresh-event-1",
+            status: "queued",
+            row_ids: ["oa-exp-1981"],
+            ...targetEnvelope,
+          }),
+          { status: 202, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            event_id: "refresh-event-1",
+            status: "done",
+            row_ids: ["oa-exp-1981"],
+            result: {
+              rows: [
+                {
+                  row_id: "oa-exp-1981",
+                  attachment_file_count: 3,
+                  importable_invoice_count: 2,
+                  unrecognized_attachment_count: 1,
+                },
+              ],
+              errors: [],
+              promotion_summary: { affected_invoice_count: 1 },
             },
-          ],
-          errors: [],
-          ...targetEnvelope,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+            ...targetEnvelope,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
 
-    const result = await refreshManualOaImportAttachments(["oa-exp-1981"]);
+    const request = await refreshManualOaImportAttachments(["oa-exp-1981"]);
+    const result = await getManualOaImportAttachmentRefreshStatus(request.eventId, request.rowIds);
 
-    expect(result.rows[0]).toMatchObject({
+    expect(request).toMatchObject({
+      eventId: "refresh-event-1",
+      status: "queued",
+      rowIds: ["oa-exp-1981"],
+    });
+    expect(result.result?.rows[0]).toMatchObject({
       rowId: "oa-exp-1981",
       attachmentFileCount: 3,
       importableInvoiceCount: 2,
       unrecognizedAttachmentCount: 1,
     });
     expect(result.affectedScopeKeys).toEqual(["2025-12", "active:2025-12", "all:2025-12"]);
+  });
+
+  test("rejects malformed or mismatched attachment refresh terminal results", async () => {
+    const basePayload = {
+      event_id: "refresh-event-1",
+      status: "done",
+      row_ids: ["oa-exp-1981"],
+      result: {
+        rows: [
+          {
+            row_id: "oa-exp-1981",
+            importable_invoice_count: 2,
+            unrecognized_attachment_count: 0,
+          },
+        ],
+        errors: [],
+        promotion_summary: {},
+      },
+      ...targetEnvelope,
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(basePayload)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...basePayload,
+        event_id: "other-event",
+        result: {
+          ...basePayload.result,
+          rows: [{ ...basePayload.result.rows[0], attachment_file_count: 2 }],
+        },
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        ...basePayload,
+        result: {
+          ...basePayload.result,
+          rows: [{
+            row_id: "other-row",
+            attachment_file_count: 2,
+            importable_invoice_count: 2,
+            unrecognized_attachment_count: 0,
+          }],
+        },
+      })));
+
+    await expect(getManualOaImportAttachmentRefreshStatus(
+      "refresh-event-1",
+      ["oa-exp-1981"],
+    )).rejects.toThrow("attachment_file_count");
+    await expect(getManualOaImportAttachmentRefreshStatus(
+      "refresh-event-1",
+      ["oa-exp-1981"],
+    )).rejects.toThrow("event_id 与请求不一致");
+    await expect(getManualOaImportAttachmentRefreshStatus(
+      "refresh-event-1",
+      ["oa-exp-1981"],
+    )).rejects.toThrow("rows 与请求不一致");
+  });
+
+  test("rejects duplicate refresh result rows and each incomplete row-error field", async () => {
+    const validRow = {
+      row_id: "oa-exp-1981",
+      attachment_file_count: 2,
+      importable_invoice_count: 2,
+      unrecognized_attachment_count: 0,
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        event_id: "refresh-event-1",
+        status: "done",
+        row_ids: ["oa-exp-1981", "oa-exp-2002"],
+        result: {
+          rows: [validRow, validRow],
+          errors: [],
+          promotion_summary: {},
+        },
+        ...targetEnvelope,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        event_id: "refresh-event-1",
+        status: "done",
+        row_ids: ["oa-exp-1981"],
+        result: {
+          rows: [validRow],
+          errors: [{ row_id: "", code: "attachment_parse_failed", message: "OCR 失败" }],
+          promotion_summary: {},
+        },
+        ...targetEnvelope,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        event_id: "refresh-event-1",
+        status: "done",
+        row_ids: ["oa-exp-1981"],
+        result: {
+          rows: [validRow],
+          errors: [{ row_id: "oa-exp-1981", code: "", message: "OCR 失败" }],
+          promotion_summary: {},
+        },
+        ...targetEnvelope,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        event_id: "refresh-event-1",
+        status: "done",
+        row_ids: ["oa-exp-1981"],
+        result: {
+          rows: [validRow],
+          errors: [{ row_id: "oa-exp-1981", code: "attachment_parse_failed", message: "" }],
+          promotion_summary: {},
+        },
+        ...targetEnvelope,
+      })));
+
+    await expect(getManualOaImportAttachmentRefreshStatus(
+      "refresh-event-1",
+      ["oa-exp-1981", "oa-exp-2002"],
+    )).rejects.toThrow("rows 与请求不一致");
+    await expect(getManualOaImportAttachmentRefreshStatus(
+      "refresh-event-1",
+      ["oa-exp-1981"],
+    )).rejects.toThrow("error.row_id");
+    await expect(getManualOaImportAttachmentRefreshStatus(
+      "refresh-event-1",
+      ["oa-exp-1981"],
+    )).rejects.toThrow("error.code");
+    await expect(getManualOaImportAttachmentRefreshStatus(
+      "refresh-event-1",
+      ["oa-exp-1981"],
+    )).rejects.toThrow("error.message");
   });
 
   test("maps import and delete affected scopes", async () => {

@@ -7,19 +7,56 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import (
-    build_local_state_application as build_application,
-    configure_access_control,
-)
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
+
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+)
+from tests.app_test_support import (
+    configure_access_control,
+)
 from tests.test_oa_manual_import_service import (
     MemoryManualImportStore,
-    RecordingAttachmentInvoicePromoter,
     RecordingOAAdapter,
     RecordingWorkbenchQueryService,
     oa_record,
 )
+
+
+class RecordingAttachmentRefreshRequestService:
+    def __init__(self) -> None:
+        self.requests: list[tuple[list[str], str]] = []
+
+    def request(self, row_ids: list[str], *, actor_id: str) -> dict[str, object]:
+        self.requests.append((list(row_ids), actor_id))
+        return {
+            "event_id": "refresh-event-1",
+            "status": "queued",
+            "row_ids": list(row_ids),
+            "affected_scope_keys": ["2025-12"],
+        }
+
+    def status(self, event_id: str) -> dict[str, object]:
+        return {
+            "event_id": event_id,
+            "status": "done",
+            "row_ids": ["oa-exp-1981"],
+            "affected_scope_keys": ["2025-12"],
+            "result": {
+                "rows": [
+                    {
+                        "row_id": "oa-exp-1981",
+                        "attachment_file_count": 2,
+                        "importable_invoice_count": 1,
+                        "unrecognized_attachment_count": 1,
+                    }
+                ],
+                "errors": [],
+                "promotion_summary": {"affected_invoice_count": 1},
+                "affected_scope_keys": ["2025-12"],
+            },
+        }
 
 
 class OAManualImportApiTests(unittest.TestCase):
@@ -33,7 +70,7 @@ class OAManualImportApiTests(unittest.TestCase):
         adapter: RecordingOAAdapter,
         store: MemoryManualImportStore | None = None,
         workbench: RecordingWorkbenchQueryService | None = None,
-        promoter: RecordingAttachmentInvoicePromoter | None = None,
+        refresh_request_service: RecordingAttachmentRefreshRequestService | None = None,
     ) -> Application:
         app = build_application(data_dir=Path(self._temp_dir.name))
         self.addCleanup(app.close)
@@ -42,7 +79,9 @@ class OAManualImportApiTests(unittest.TestCase):
             state_store=store or MemoryManualImportStore(),
             oa_adapter=adapter,
             workbench_query_service=workbench or RecordingWorkbenchQueryService(),
-            attachment_invoice_promoter=promoter,
+        )
+        app._oa_attachment_refresh_request_service = (
+            refresh_request_service or RecordingAttachmentRefreshRequestService()
         )
         return app
 
@@ -99,11 +138,11 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(oversize_page.status_code, 400)
         self.assertEqual(json.loads(oversize_page.body)["error"], "invalid_oa_manual_search_request")
 
-    def test_refresh_endpoint_returns_counts_and_invalidates_affected_scopes(self) -> None:
-        promoter = RecordingAttachmentInvoicePromoter()
+    def test_refresh_endpoint_queues_targeted_worker_and_exposes_status(self) -> None:
+        refresh_request_service = RecordingAttachmentRefreshRequestService()
         app = self._build_app_with_service(
             adapter=RecordingOAAdapter([oa_record("oa-exp-1981", month="2025-12", invoices=[])]),
-            promoter=promoter,
+            refresh_request_service=refresh_request_service,
         )
 
         response = app.handle_request(
@@ -112,13 +151,43 @@ class OAManualImportApiTests(unittest.TestCase):
             json.dumps({"row_ids": ["oa-exp-1981"]}),
         )
 
-        self.assertEqual(response.status_code, 200)
+        status_response = app.handle_request(
+            "GET",
+            "/api/workbench/settings/oa/manual-search/refresh-attachments/refresh-event-1",
+        )
+
+        self.assertEqual(response.status_code, 202)
         payload = json.loads(response.body)
-        self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-1981")
-        self.assertEqual(payload["rows"][0]["importable_invoice_count"], 1)
-        self.assertEqual(payload["promotion_summary"]["affected_invoice_count"], 1)
-        self.assertEqual(promoter.row_ids, ["oa-exp-1981"])
+        self.assertEqual(payload["event_id"], "refresh-event-1")
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(refresh_request_service.requests[0][0], ["oa-exp-1981"])
         self._assert_oa_manual_targets(payload, month="2025-12")
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = json.loads(status_response.body)
+        self.assertEqual(status_payload["status"], "done")
+        self.assertEqual(status_payload["result"]["rows"][0]["importable_invoice_count"], 1)
+
+    def test_refresh_endpoint_rejects_non_string_and_oversized_batches(self) -> None:
+        refresh_request_service = RecordingAttachmentRefreshRequestService()
+        app = self._build_app_with_service(
+            adapter=RecordingOAAdapter([oa_record("oa-exp-1981")]),
+            refresh_request_service=refresh_request_service,
+        )
+
+        non_string = app.handle_request(
+            "POST",
+            "/api/workbench/settings/oa/manual-search/refresh-attachments",
+            json.dumps({"row_ids": [1981]}),
+        )
+        oversized = app.handle_request(
+            "POST",
+            "/api/workbench/settings/oa/manual-search/refresh-attachments",
+            json.dumps({"row_ids": [f"oa-{index}" for index in range(21)]}),
+        )
+
+        self.assertEqual(non_string.status_code, 400)
+        self.assertEqual(oversized.status_code, 400)
+        self.assertEqual(refresh_request_service.requests, [])
 
     def test_import_endpoint_imports_completed_rejects_in_progress_and_is_idempotent(self) -> None:
         adapter = RecordingOAAdapter(
@@ -184,7 +253,8 @@ class OAManualImportApiTests(unittest.TestCase):
             headers = {"Authorization": "Bearer readonly-token"}
 
             with (
-                patch.object(app._oa_manual_import_service, "refresh_attachments") as refresh_attachments,
+                patch.object(app._oa_attachment_refresh_request_service, "request") as refresh_attachments,
+                patch.object(app._oa_attachment_refresh_request_service, "status") as refresh_status,
                 patch.object(app._oa_manual_import_service, "import_row_ids") as import_row_ids,
                 patch.object(app._oa_manual_import_service, "remove_manual_import") as remove_manual_import,
             ):
@@ -192,6 +262,11 @@ class OAManualImportApiTests(unittest.TestCase):
                     "POST",
                     "/api/workbench/settings/oa/manual-search/refresh-attachments",
                     body=json.dumps({"row_ids": ["oa-exp-1981"]}),
+                    headers=headers,
+                )
+                refresh_status_response = app.handle_request(
+                    "GET",
+                    "/api/workbench/settings/oa/manual-search/refresh-attachments/00000000-0000-0000-0000-000000000001",
                     headers=headers,
                 )
                 import_response = app.handle_request(
@@ -209,11 +284,14 @@ class OAManualImportApiTests(unittest.TestCase):
 
         self.assertEqual(refresh_response.status_code, 403)
         self.assertEqual(json.loads(refresh_response.body)["error"], "permission_denied")
+        self.assertEqual(refresh_status_response.status_code, 403)
+        self.assertEqual(json.loads(refresh_status_response.body)["error"], "permission_denied")
         self.assertEqual(import_response.status_code, 403)
         self.assertEqual(json.loads(import_response.body)["error"], "permission_denied")
         self.assertEqual(delete_response.status_code, 403)
         self.assertEqual(json.loads(delete_response.body)["error"], "permission_denied")
         refresh_attachments.assert_not_called()
+        refresh_status.assert_not_called()
         import_row_ids.assert_not_called()
         remove_manual_import.assert_not_called()
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], ["oa-exp-1981"])

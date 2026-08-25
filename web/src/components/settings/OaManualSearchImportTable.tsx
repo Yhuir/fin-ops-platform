@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppChrome } from "../../contexts/AppChromeContext";
 import { formatMoney } from "../../features/money";
 import {
+  getManualOaImportAttachmentRefreshStatus,
   importManualOaRows,
   refreshManualOaImportAttachments,
   searchManualOaImports,
@@ -30,6 +31,9 @@ const statusOptions = [
 ];
 
 const oaImportCompletionStatusMs = 1200;
+const oaAttachmentRefreshPollIntervalMs = 1_000;
+const oaAttachmentRefreshObservationTimeoutMs = 120_000;
+const oaAttachmentRefreshDetailRequestTimeoutMs = 15_000;
 const oaImportPendingStages = [
   { delayMs: 250, percent: 35, label: "解析 OA 附件发票" },
   { delayMs: 900, percent: 70, label: "同步到关联台" },
@@ -83,6 +87,33 @@ function pageCount(total: number, pageSize: number) {
   return Math.max(1, Math.ceil(total / pageSize));
 }
 
+function waitForAttachmentRefreshPoll(signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("OA attachment refresh polling aborted", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      window.clearTimeout(timeoutId);
+      reject(new DOMException("OA attachment refresh polling aborted", "AbortError"));
+    };
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, oaAttachmentRefreshPollIntervalMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function attachmentRefreshErrorMessage(errors: Array<{ message: string }>) {
+  const suffix = errors.length > 1 ? `（另有 ${errors.length - 1} 条错误）` : "";
+  return `${errors[0].message}${suffix}`;
+}
+
 export default function OaManualSearchImportTable() {
   const { setWorkbenchStatus } = useAppChrome();
   const [query, setQuery] = useState("");
@@ -101,8 +132,13 @@ export default function OaManualSearchImportTable() {
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState("");
+  const [refreshMessage, setRefreshMessage] = useState("");
   const pendingStatusTimeoutsRef = useRef<Array<ReturnType<typeof window.setTimeout>>>([]);
   const completionStatusTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const attachmentRefreshAbortRef = useRef<AbortController | null>(null);
+  const attachmentRefreshObservationTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const importInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const selectedList = useMemo(() => Object.values(selectedRows), [selectedRows]);
   const importablePageRows = rows.filter((row) => row.canImport);
@@ -130,6 +166,13 @@ export default function OaManualSearchImportTable() {
     if (completionStatusTimeoutRef.current !== null) {
       window.clearTimeout(completionStatusTimeoutRef.current);
       completionStatusTimeoutRef.current = null;
+    }
+  }
+
+  function clearAttachmentRefreshObservationTimeout() {
+    if (attachmentRefreshObservationTimeoutRef.current !== null) {
+      window.clearTimeout(attachmentRefreshObservationTimeoutRef.current);
+      attachmentRefreshObservationTimeoutRef.current = null;
     }
   }
 
@@ -163,9 +206,16 @@ export default function OaManualSearchImportTable() {
     }, oaImportCompletionStatusMs);
   }
 
-  useEffect(() => () => {
-    clearOaImportStatusTimers();
-    setWorkbenchStatus(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearAttachmentRefreshObservationTimeout();
+      attachmentRefreshAbortRef.current?.abort();
+      attachmentRefreshAbortRef.current = null;
+      clearOaImportStatusTimers();
+      setWorkbenchStatus(null);
+    };
   }, [setWorkbenchStatus]);
 
   async function runSearch(targetPage = 0, targetPageSize = pageSize) {
@@ -226,45 +276,122 @@ export default function OaManualSearchImportTable() {
   }
 
   async function handleRefresh(row: OaManualSearchRow) {
+    if (attachmentRefreshAbortRef.current || importInFlightRef.current || row.status !== "completed") {
+      return;
+    }
+    const controller = new AbortController();
+    let observationTimedOut = false;
+    attachmentRefreshAbortRef.current = controller;
     setBusyRowId(row.rowId);
     setError("");
+    setRefreshMessage("已进入 OA 附件解析队列");
     try {
-      const result = await refreshManualOaImportAttachments([row.rowId]);
-      const updatedCounts = result.rows[0];
-      if (updatedCounts) {
-        const updateRow = (candidate: OaManualSearchRow) =>
-          candidate.rowId === updatedCounts.rowId
-            ? {
-              ...candidate,
-              attachmentFileCount: updatedCounts.attachmentFileCount,
-              importableInvoiceCount: updatedCounts.importableInvoiceCount,
-              unrecognizedAttachmentCount: updatedCounts.unrecognizedAttachmentCount,
-            }
-            : candidate;
-        setRows((current) => current.map(updateRow));
-        setSelectedRows((current) => Object.fromEntries(
-          Object.entries(current).map(([rowId, selectedRow]) => [rowId, updateRow(selectedRow)]),
-        ));
+      const request = await refreshManualOaImportAttachments([row.rowId], controller.signal);
+      attachmentRefreshObservationTimeoutRef.current = window.setTimeout(() => {
+        observationTimedOut = true;
+        attachmentRefreshObservationTimeoutRef.current = null;
+        controller.abort();
+      }, oaAttachmentRefreshObservationTimeoutMs);
+      let status = await getManualOaImportAttachmentRefreshStatus(
+        request.eventId,
+        request.rowIds,
+        controller.signal,
+      );
+      while (status.status === "pending" || status.status === "processing") {
+        setRefreshMessage(status.status === "processing" ? "正在重新解析 OA 附件" : "等待 OA 附件解析");
+        await waitForAttachmentRefreshPoll(controller.signal);
+        status = await getManualOaImportAttachmentRefreshStatus(
+          request.eventId,
+          request.rowIds,
+          controller.signal,
+        );
       }
-      if (result.errors.length > 0) {
-        setError("部分附件刷新失败");
+      clearAttachmentRefreshObservationTimeout();
+      if (status.status !== "done") {
+        throw new Error(status.error || "OA 附件刷新失败");
       }
+      if (!status.result || status.result.rows.length === 0) {
+        throw new Error("OA 附件刷新完成，但结果缺少附件计数");
+      }
+      if (status.result.errors.length > 0) {
+        throw new Error(attachmentRefreshErrorMessage(status.result.errors));
+      }
+      const refreshed = await searchManualOaImports({
+        query: row.rowId,
+        formTypes: [row.formType],
+        statuses: ["completed"],
+        dateFrom: "",
+        dateTo: "",
+        page: 0,
+        pageSize: 1,
+      }, controller.signal, {
+        timeoutMs: oaAttachmentRefreshDetailRequestTimeoutMs,
+        timeoutMessage: "OA 附件刷新已完成，但最新 OA 明细查询超时。",
+      });
+      const refreshedRow = refreshed.rows.find((candidate) => candidate.rowId === row.rowId);
+      const refreshSummary = status.result.rows.find((candidate) => candidate.rowId === row.rowId);
+      if (!refreshedRow || !refreshSummary) {
+        throw new Error("OA 附件刷新完成，但无法读取最新 OA 明细");
+      }
+      if (
+        refreshedRow.attachmentFileCount !== refreshSummary.attachmentFileCount
+        || refreshedRow.importableInvoiceCount !== refreshSummary.importableInvoiceCount
+        || refreshedRow.unrecognizedAttachmentCount !== refreshSummary.unrecognizedAttachmentCount
+      ) {
+        throw new Error("OA 附件刷新结果与最新 OA 投影不一致");
+      }
+      if (controller.signal.aborted || !mountedRef.current) {
+        return;
+      }
+      setRows((current) => mergeUpdatedRows(current, [refreshedRow]));
+      setSelectedRows((current) => Object.fromEntries(
+        Object.entries(current).map(([rowId, selectedRow]) => [
+          rowId,
+          rowId === refreshedRow.rowId ? refreshedRow : selectedRow,
+        ]),
+      ));
+      setRefreshMessage("OA 附件刷新完成");
     } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : "附件刷新失败");
+      if (observationTimedOut) {
+        if (mountedRef.current) {
+          setError("");
+          setRefreshMessage("OA 附件解析仍在后台进行，请稍后重新搜索查看结果");
+        }
+        return;
+      }
+      if (isAbortError(refreshError)) {
+        return;
+      }
+      if (mountedRef.current) {
+        setRefreshMessage("");
+        setError(refreshError instanceof Error ? refreshError.message : "附件刷新失败");
+      }
     } finally {
-      setBusyRowId(null);
+      clearAttachmentRefreshObservationTimeout();
+      if (attachmentRefreshAbortRef.current === controller) {
+        attachmentRefreshAbortRef.current = null;
+        if (mountedRef.current) {
+          setBusyRowId(null);
+        }
+      }
     }
   }
 
   async function handleImportSelected() {
-    if (selectedImportableRows.length === 0) {
+    if (
+      selectedImportableRows.length === 0
+      || importInFlightRef.current
+      || attachmentRefreshAbortRef.current
+    ) {
       return;
     }
+    importInFlightRef.current = true;
     clearOaImportStatusTimers();
     publishOaImportStatus(10, "准备导入已选 OA");
     scheduleOaImportPendingStages();
     setIsImporting(true);
     setError("");
+    setRefreshMessage("");
     try {
       const result = await importManualOaRows(selectedImportableRows.map((row) => row.rowId));
       publishOaImportStatus(95, "更新搜索结果");
@@ -286,6 +413,7 @@ export default function OaManualSearchImportTable() {
       setError(reason);
       publishOaImportError(`OA导入失败：${reason}`);
     } finally {
+      importInFlightRef.current = false;
       setIsImporting(false);
     }
   }
@@ -388,7 +516,7 @@ export default function OaManualSearchImportTable() {
         </Button>
         <Button
           className="settings-primary-button"
-          isDisabled={selectedImportableRows.length === 0 || isImporting}
+          isDisabled={selectedImportableRows.length === 0 || isImporting || busyRowId !== null}
           onPress={() => void handleImportSelected()}
           size="sm"
           variant="primary"
@@ -398,6 +526,7 @@ export default function OaManualSearchImportTable() {
       </div>
 
       {error ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{error}</div> : null}
+      {refreshMessage ? <div className="settings-inline-alert" role="status">{refreshMessage}</div> : null}
 
       <div className="settings-native-table-shell settings-native-table-shell--scroll">
         <FinanceTable ariaLabel="OA全量搜索导入结果" className="settings-native-table oa-manual-import__table" minWidth={1680} scrollMode="contained">
@@ -490,7 +619,7 @@ export default function OaManualSearchImportTable() {
                       <Button
                         aria-label={`刷新 OA ${oaDisplayLabel(row)} 附件解析`}
                         className="settings-icon-button"
-                        isDisabled={busyRowId === row.rowId}
+                        isDisabled={busyRowId !== null || isImporting || row.status !== "completed"}
                         isIconOnly
                         onPress={() => void handleRefresh(row)}
                         size="sm"

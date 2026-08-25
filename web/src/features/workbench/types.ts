@@ -662,14 +662,36 @@ export type OaManualImportRemovalResult = {
 };
 
 export type OaManualAttachmentRefreshResult = {
-  rows: Array<{
-    rowId: string;
-    attachmentFileCount: number;
-    importableInvoiceCount: number;
-    unrecognizedAttachmentCount: number;
-  }>;
-  errors: Array<Record<string, unknown>>;
+  eventId: string;
+  status: "queued" | "pending";
+  rowIds: string[];
   affectedScopeKeys: string[];
+};
+
+export type OaManualAttachmentRefreshRow = {
+  rowId: string;
+  attachmentFileCount: number;
+  importableInvoiceCount: number;
+  unrecognizedAttachmentCount: number;
+};
+
+export type OaManualAttachmentRefreshError = {
+  rowId: string;
+  code: string;
+  message: string;
+};
+
+export type OaManualAttachmentRefreshStatus = {
+  eventId: string;
+  status: "pending" | "processing" | "done" | "failed" | "dead_lettered";
+  rowIds: string[];
+  affectedScopeKeys: string[];
+  error: string;
+  result: {
+    rows: OaManualAttachmentRefreshRow[];
+    errors: OaManualAttachmentRefreshError[];
+    promotionSummary: Record<string, unknown>;
+  } | null;
 };
 
 export type OaManualSearchFilters = {

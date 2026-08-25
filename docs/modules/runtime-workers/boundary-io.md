@@ -8,7 +8,7 @@
 
 | Instance | Worker kind | 输入 | 责任 |
 | --- | --- | --- | --- |
-| `oa-sync` | `oa-sync` | `oa.sync` | OA integration 同步 |
+| `oa-sync` | `oa-sync` | `oa.sync` | OA integration 普通 month/all 同步，以及显式 `operation=refresh_attachments` 的 selected-row 精确附件重解析；后者不执行 stale snapshot deletion |
 | `workbench-matching` | `workbench-matching` | PostgreSQL matching dirty scopes | 正式关系候选计算 |
 | `import` | `import-job` | `import.process.requested` | 文件导入后台处理 |
 | `settings-maintenance` | `settings-maintenance` | settings maintenance events | 数据重置与关系要求重算 |
@@ -23,6 +23,8 @@
 - Matching worker 的银行有效分类由 formal-relation fact repository 对计划 IDs 一次批量读取 canonical SQL 分类投影；worker 不装载 category snapshot，不组装 Python effective-category provider。
 - 每个 job/event 必须有 bounded retry、lease、idempotency 和结构化失败证据。
 - API route 只 enqueue 已登记任务；worker 不读取 HTTP cookie/header，不构造 response，不依赖 `Application`。
+- OA 精确附件刷新复用 `oa.sync`，不新增 event/worker；worker 独占 Mongo 下载、OCR、定向 projection upsert、promotion 和 matching reconciliation。API 只读取受控 durable status/result，不得恢复同步 fallback。
+- `oa.sync(operation=refresh_attachments)` 的 pending/processing/failed 状态由专用 event status 接口和通用队列指标观测，不得计入全量 `oa_projection` freshness、App Health 全局 OA 状态或发布 readiness；单条修复失败不能污染全量 OA 健康结论。
 
 ## 输出 I/O
 

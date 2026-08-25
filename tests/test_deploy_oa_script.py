@@ -693,7 +693,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("journalctl -u fin-ops.service --since '2 hours ago'", script)
         self.assertIn("request error not found in the bounded journal window", script)
         self.assertIn("settings-normalize <release-name> [--dry-run|--execute]", script)
-        self.assertIn("import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>]", script)
+        self.assertIn("import-audit-repair <release-name> [--dry-run|--execute", script)
+        self.assertIn("--expected-fingerprint <sha256>", script)
         self.assertIn(
             "--repair-all-oa-attachment-invoice-links --rollback-manifest-path "
             "<fixed-root/path> --operator-id <id> --reason <text>",

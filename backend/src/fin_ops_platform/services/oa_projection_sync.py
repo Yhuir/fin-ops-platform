@@ -6,12 +6,16 @@ from datetime import datetime
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_attachment_refresh_request_service import (
+    REFRESH_ATTACHMENTS_OPERATION,
+)
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_repositories.oa_projection import is_completed_workflow_status
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
-
 MONTH_FORMAT = "%Y-%m"
+TARGETED_ATTACHMENT_FAILURE_STATUSES = frozenset({"download_failed", "parse_failed"})
+
 
 class OAProjectionSyncService:
     def __init__(
@@ -36,12 +40,123 @@ class OAProjectionSyncService:
         self._pending_payment_source_snapshot_repository = pending_payment_source_snapshot_repository
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
+        if event.payload.get("operation") == REFRESH_ATTACHMENTS_OPERATION:
+            try:
+                return self._run_targeted_attachment_refresh(event)
+            except Exception as exc:
+                self._record_failed_sync_run(
+                    scope_key="targeted",
+                    error=exc,
+                    sync_type="oa_attachment_refresh",
+                )
+                raise
         scope_key = self._event_scope_key(event)
         try:
             return self._run_sync(scope_key)
         except Exception as exc:
             self._record_failed_sync_run(scope_key=scope_key, error=exc)
             raise
+
+    def _run_targeted_attachment_refresh(self, event: RuntimeQueueEvent) -> dict[str, Any]:
+        row_ids = _targeted_refresh_row_ids(event.payload.get("row_ids"))
+        expected_scope_keys = _targeted_refresh_scope_keys(
+            event.payload.get("affected_scope_keys")
+        )
+        refresh = getattr(self._source_adapter, "refresh_application_record_attachments", None)
+        if not callable(refresh):
+            raise RuntimeError(
+                "OA sync source adapter must expose refresh_application_record_attachments()."
+            )
+        upsert_targeted = getattr(
+            self._projection_repository,
+            "upsert_targeted_application_records",
+            None,
+        )
+        if not callable(upsert_targeted):
+            raise RuntimeError(
+                "OA attachment refresh requires targeted projection upserts."
+            )
+        promote_records = getattr(self._attachment_invoice_promoter, "promote_records", None)
+        if not callable(promote_records):
+            raise RuntimeError("OA attachment refresh requires the attachment invoice promoter.")
+        refreshed_records = list(refresh(row_ids))
+        if any(not isinstance(record, OAApplicationRecord) for record in refreshed_records):
+            raise RuntimeError("OA attachment refresh source returned an invalid record.")
+        records_by_id = {record.id: record for record in refreshed_records}
+        if len(records_by_id) != len(refreshed_records):
+            raise RuntimeError("OA attachment refresh source returned duplicate row_ids.")
+        missing_row_ids = [row_id for row_id in row_ids if row_id not in records_by_id]
+        if missing_row_ids:
+            raise RuntimeError(
+                f"OA attachment refresh source did not return row_ids: {', '.join(missing_row_ids)}"
+            )
+        unexpected_row_ids = sorted(set(records_by_id) - set(row_ids))
+        if unexpected_row_ids:
+            raise RuntimeError(
+                f"OA attachment refresh source returned unrequested row_ids: {', '.join(unexpected_row_ids)}"
+            )
+        selected_records = [records_by_id[row_id] for row_id in row_ids]
+        in_progress_row_ids = [record.id for record in selected_records if not _is_completed_workflow(record)]
+        if in_progress_row_ids:
+            raise RuntimeError(
+                f"OA attachment refresh requires completed workflows: {', '.join(in_progress_row_ids)}"
+            )
+        failed_parse_row_ids = _targeted_attachment_failure_row_ids(selected_records)
+        if failed_parse_row_ids:
+            raise RuntimeError(
+                "OA attachment refresh failed to download or parse attachments for row_ids: "
+                + ", ".join(failed_parse_row_ids)
+            )
+        records_by_scope: dict[str, list[OAApplicationRecord]] = {}
+        for record in selected_records:
+            scope_key = str(record.month or "").strip()
+            if not self._is_month_scope(scope_key):
+                raise RuntimeError(f"OA attachment refresh row {record.id} has an invalid month.")
+            records_by_scope.setdefault(scope_key, []).append(record)
+        affected_scope_keys = sorted(records_by_scope)
+        if affected_scope_keys != expected_scope_keys:
+            raise RuntimeError(
+                "OA attachment refresh source scopes changed after enqueue."
+            )
+        upserted_count = 0
+        for scope_key, records in records_by_scope.items():
+            upserted_count += int(
+                upsert_targeted(records, scope_key=scope_key)
+            )
+        promotion = promote_records(
+            selected_records,
+            ensure_matching=True,
+        )
+        if not isinstance(promotion, dict):
+            raise RuntimeError("OA attachment invoice promoter returned an invalid result.")
+        promotion_summary = dict(promotion.get("summary") or {})
+        result = {
+            "sync_type": "oa_attachment_refresh",
+            "operation": REFRESH_ATTACHMENTS_OPERATION,
+            "status": "succeeded",
+            "row_ids": row_ids,
+            "rows": [_attachment_summary(record) for record in selected_records],
+            "errors": [],
+            "promotion_summary": promotion_summary,
+            "affected_scope_keys": affected_scope_keys,
+            "upserted_count": upserted_count,
+            "removed_stale_completed_count": 0,
+            "removed_non_completed_count": 0,
+        }
+        record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
+        if callable(record_sync_run):
+            record_sync_run(
+                {
+                    "sync_type": "oa_attachment_refresh",
+                    "scope_key": ",".join(affected_scope_keys),
+                    "status": "succeeded",
+                    "scanned_count": len(selected_records),
+                    "upserted_count": upserted_count,
+                    "skipped_count": max(0, len(selected_records) - upserted_count),
+                    "error_count": 0,
+                }
+            )
+        return result
 
     def _run_sync(self, scope_key: str) -> dict[str, Any]:
         cutoff_month = self._retention_cutoff_month()
@@ -162,14 +277,20 @@ class OAProjectionSyncService:
             return {"summary": {}}
         return dict(self._attachment_invoice_promoter.promote_records(completed_records) or {})
 
-    def _record_failed_sync_run(self, *, scope_key: str, error: Exception) -> None:
+    def _record_failed_sync_run(
+        self,
+        *,
+        scope_key: str,
+        error: Exception,
+        sync_type: str = "oa_projection",
+    ) -> None:
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if not callable(record_sync_run):
             return
         try:
             record_sync_run(
                 {
-                    "sync_type": "oa_projection",
+                    "sync_type": sync_type,
                     "scope_key": scope_key,
                     "status": "failed",
                     "scanned_count": 0,
@@ -394,3 +515,73 @@ def _is_invoice_attachment_payload(value: Any) -> bool:
 
 def _is_completed_workflow(record: OAApplicationRecord) -> bool:
     return is_completed_workflow_status(getattr(record, "workflow_status", ""))
+
+
+def _targeted_refresh_row_ids(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("OA attachment refresh payload.row_ids must be an array.")
+    if any(not isinstance(item, str) for item in value):
+        raise ValueError("OA attachment refresh payload.row_ids must contain strings only.")
+    row_ids = list(dict.fromkeys(row_id for item in value if (row_id := item.strip())))
+    if not row_ids:
+        raise ValueError("OA attachment refresh payload.row_ids must not be empty.")
+    return row_ids
+
+
+def _targeted_refresh_scope_keys(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("OA attachment refresh payload.affected_scope_keys must be an array.")
+    if any(not isinstance(item, str) for item in value):
+        raise ValueError(
+            "OA attachment refresh payload.affected_scope_keys must contain strings only."
+        )
+    scope_keys = sorted(
+        dict.fromkeys(scope_key for item in value if (scope_key := item.strip()))
+    )
+    if not scope_keys or any(not OAProjectionSyncService._is_month_scope(key) for key in scope_keys):
+        raise ValueError(
+            "OA attachment refresh payload.affected_scope_keys must contain valid months."
+        )
+    return scope_keys
+
+
+def _targeted_attachment_failure_row_ids(
+    records: list[OAApplicationRecord],
+) -> list[str]:
+    failed_row_ids: list[str] = []
+    for record in records:
+        artifacts = list(record.attachment_artifacts or [])
+        artifacts.extend(
+            artifact
+            for item in list(record.expense_items or [])
+            if isinstance(item, dict)
+            for artifact in list(item.get("attachment_artifacts") or [])
+        )
+        if any(
+            isinstance(artifact, dict)
+            and str(artifact.get("parse_status") or "").strip().lower()
+            in TARGETED_ATTACHMENT_FAILURE_STATUSES
+            for artifact in artifacts
+        ):
+            failed_row_ids.append(record.id)
+    return failed_row_ids
+
+
+def _attachment_summary(record: OAApplicationRecord) -> dict[str, object]:
+    attachment_file_count = max(
+        int(record.attachment_file_count or 0),
+        len(record.attachment_artifacts),
+        len(record.attachment_invoices),
+    )
+    importable_invoice_count = len(
+        [invoice for invoice in record.attachment_invoices if isinstance(invoice, dict)]
+    )
+    return {
+        "row_id": record.id,
+        "attachment_file_count": attachment_file_count,
+        "importable_invoice_count": importable_invoice_count,
+        "unrecognized_attachment_count": max(
+            0,
+            attachment_file_count - importable_invoice_count,
+        ),
+    }

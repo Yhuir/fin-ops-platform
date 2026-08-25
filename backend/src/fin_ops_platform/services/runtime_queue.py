@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresTransaction
+
 PRIORITY_VALUES = {"low", "normal", "high", "urgent"}
 
 
@@ -320,6 +321,62 @@ class RuntimeQueueRepository:
                 where id = %s
                 """,
                 (event_id,),
+            )
+        return _event_from_row(row) if row is not None else None
+
+    def get_event_status(self, event_id: str) -> dict[str, Any] | None:
+        """Read the durable status/result fields needed by a bounded API status contract."""
+        with self._connection.transaction() as transaction:
+            row = transaction.fetch_one(
+                """
+                select
+                    id::text as event_id,
+                    event_type,
+                    status,
+                    payload,
+                    last_error,
+                    raw_payload -> 'runtime_result' as runtime_result
+                from job.outbox_events
+                where id = %s
+                """,
+                (event_id,),
+            )
+        return dict(row) if row is not None else None
+
+    def get_active_event_by_dedupe_key(
+        self,
+        dedupe_key: str,
+        *,
+        tenant_id: str = "default",
+    ) -> RuntimeQueueEvent | None:
+        """Return the current pending/processing event for an exact idempotency key."""
+        with self._connection.transaction() as transaction:
+            row = transaction.fetch_one(
+                """
+                select
+                    id::text as event_id,
+                    tenant_id,
+                    event_type,
+                    aggregate_type,
+                    aggregate_id,
+                    scope_type,
+                    scope_key,
+                    dedupe_key,
+                    payload,
+                    attempts,
+                    status,
+                    schema_version,
+                    source_version,
+                    priority,
+                    trace_id
+                from job.outbox_events
+                where tenant_id = %s
+                  and dedupe_key = %s
+                  and status in ('pending', 'processing')
+                order by created_at desc, id desc
+                limit 1
+                """,
+                (tenant_id, dedupe_key),
             )
         return _event_from_row(row) if row is not None else None
 

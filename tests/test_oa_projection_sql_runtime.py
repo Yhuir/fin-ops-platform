@@ -274,6 +274,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("insert into app.oa_application_items", executed_sql)
         self.assertIn("delete from app.oa_attachments", executed_sql)
         self.assertIn("insert into app.oa_attachments", executed_sql)
+        self.assertIn("insert into app.oa_sync_watermarks", executed_sql)
         self.assertIn("('attachment_identity_' || source.source_kind)", executed_sql)
         identity_bridge_calls = [
             params
@@ -292,6 +293,24 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         app_insert = [params for sql, params in connection.executed if "insert into app.oa_applications" in sql]
         self.assertEqual(app_insert[0][4], "structured")
         self.assertEqual(app_insert[0][6], "completed")
+
+    def test_targeted_oa_projection_upsert_does_not_advance_full_scope_watermark(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import (
+            PostgresOAProjectionRepository,
+        )
+
+        connection = OAProjectionWriteConnection()
+        repository = PostgresOAProjectionRepository(connection)
+
+        count = repository.upsert_targeted_application_records(
+            [oa_record_with_structured_attachments()],
+            scope_key="2026-05",
+        )
+
+        self.assertEqual(count, 1)
+        executed_sql = "\n".join(sql for sql, _params in connection.executed)
+        self.assertIn("insert into app.oa_applications", executed_sql)
+        self.assertNotIn("insert into app.oa_sync_watermarks", executed_sql)
 
     def test_structured_item_owner_overrides_stale_nested_attachment_identity(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -451,6 +470,20 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["oa_count"], 1)
         self.assertEqual(payload["unpaired"]["oa"][0]["id"], "oa-pay-001")
         self.assertEqual(payload["oa_status"], {"code": "ready", "message": "OA projection ready"})
+
+    def test_projection_adapter_targeted_lookup_has_no_list_all_fallback(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import (
+            PostgresOAProjectionAdapter,
+        )
+
+        class ProjectionRepository:
+            def list_all_application_records(self) -> list[OAApplicationRecord]:
+                raise AssertionError("targeted lookup must not enumerate all OA records")
+
+        adapter = PostgresOAProjectionAdapter(ProjectionRepository())
+
+        with self.assertRaisesRegex(RuntimeError, "targeted row reads"):
+            adapter.list_application_records_by_row_ids(["oa-1"])
 
     def test_oa_sync_worker_persists_projection_and_marks_downstream_scopes_dirty(self) -> None:
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -139,13 +139,32 @@ function successfulImportResponse() {
   }));
 }
 
-function installFetchMock({ manualImportResponse }: { manualImportResponse?: Promise<Response> } = {}) {
+function installFetchMock({
+  manualImportResponse,
+  refreshStatusSequence,
+}: {
+  manualImportResponse?: Promise<Response>;
+  refreshStatusSequence?: Array<Record<string, unknown>>;
+} = {}) {
+  let refreshStatusIndex = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === "/api/workbench/settings/oa/manual-search") {
+      const exactRefreshRow = url.searchParams.get("q") === "oa-exp-1981";
+      const responseRows = exactRefreshRow
+        ? [{
+          ...searchRows[0],
+          importable_invoice_count: 2,
+          unrecognized_attachment_count: 0,
+          items: [{
+            ...searchRows[0].items[0],
+            importable_invoice_count: 2,
+          }],
+        }]
+        : searchRows;
       return new Response(JSON.stringify({
-        rows: searchRows,
-        total: 2,
+        rows: responseRows,
+        total: responseRows.length,
         page: Number(url.searchParams.get("page") ?? 0),
         page_size: Number(url.searchParams.get("page_size") ?? 20),
       }));
@@ -153,16 +172,37 @@ function installFetchMock({ manualImportResponse }: { manualImportResponse?: Pro
     if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
       expect(init?.method).toBe("POST");
       return new Response(JSON.stringify({
-        rows: [
-          {
-            row_id: "oa-exp-1981",
-            attachment_file_count: 2,
-            importable_invoice_count: 2,
-            unrecognized_attachment_count: 0,
-          },
-        ],
-        errors: [],
-      }));
+        event_id: "refresh-event-1",
+        status: "queued",
+        row_ids: ["oa-exp-1981"],
+        affected_scope_keys: ["2025-12"],
+      }), { status: 202 });
+    }
+    if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments/refresh-event-1") {
+      expect(init?.method).toBe("GET");
+      const defaultStatus = {
+        event_id: "refresh-event-1",
+        status: "done",
+        row_ids: ["oa-exp-1981"],
+        affected_scope_keys: ["2025-12"],
+        result: {
+          rows: [
+            {
+              row_id: "oa-exp-1981",
+              attachment_file_count: 2,
+              importable_invoice_count: 2,
+              unrecognized_attachment_count: 0,
+            },
+          ],
+          errors: [],
+          promotion_summary: { affected_invoice_count: 1 },
+        },
+      };
+      const status = refreshStatusSequence?.[
+        Math.min(refreshStatusIndex, refreshStatusSequence.length - 1)
+      ] ?? defaultStatus;
+      refreshStatusIndex += 1;
+      return new Response(JSON.stringify(status));
     }
     if (url.pathname === "/api/workbench/settings/oa/manual-imports") {
       expect(init?.method).toBe("POST");
@@ -218,6 +258,7 @@ describe("OaManualSearchImportTable", () => {
     const completedRow = await screen.findByRole("row", { name: "1981" });
     const inProgressRow = screen.getByRole("row", { name: "2001" });
     expect(within(inProgressRow).getByLabelText("选择 OA 2001")).toBeDisabled();
+    expect(within(inProgressRow).getByLabelText("刷新 OA 2001 附件解析")).toBeDisabled();
     expect(inProgressRow).toHaveTextContent("流程未完成");
 
     await user.click(within(completedRow).getByLabelText("选择 OA 1981"));
@@ -231,8 +272,10 @@ describe("OaManualSearchImportTable", () => {
 
     await user.click(screen.getByRole("button", { name: "刷新 OA 1981 附件解析" }));
     expect(await screen.findByText("预计发票 2 张")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("OA 附件刷新完成");
     expect(completedRow).toHaveTextContent("2");
     expect(completedRow).toHaveTextContent("0");
+    expect(screen.getByRole("row", { name: "2025-12-23" })).toHaveTextContent("2");
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/operation-barrier/status")).toHaveLength(0);
 
     await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
@@ -251,16 +294,261 @@ describe("OaManualSearchImportTable", () => {
     expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeDisabled();
   });
 
+  test("polls processing refreshes to completion without allowing a second submission", async () => {
+    const user = userEvent.setup();
+    const doneStatus = {
+      event_id: "refresh-event-1",
+      status: "done",
+      row_ids: ["oa-exp-1981"],
+      affected_scope_keys: ["2025-12"],
+      result: {
+        rows: [{
+          row_id: "oa-exp-1981",
+          attachment_file_count: 2,
+          importable_invoice_count: 2,
+          unrecognized_attachment_count: 0,
+        }],
+        errors: [],
+        promotion_summary: { affected_invoice_count: 1 },
+      },
+    };
+    const fetchMock = installFetchMock({
+      refreshStatusSequence: [{
+        event_id: "refresh-event-1",
+        status: "processing",
+        row_ids: ["oa-exp-1981"],
+        affected_scope_keys: ["2025-12"],
+      }, doneStatus],
+    });
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(within(await screen.findByRole("row", { name: "1981" })).getByLabelText("选择 OA 1981"));
+    const refreshButton = await screen.findByRole("button", { name: "刷新 OA 1981 附件解析" });
+    const importButton = screen.getByRole("button", { name: "导入已选OA项" });
+    await user.click(refreshButton);
+
+    expect(await screen.findByText("正在重新解析 OA 附件")).toBeInTheDocument();
+    expect(refreshButton).toBeDisabled();
+    expect(importButton).toBeDisabled();
+    await user.click(refreshButton);
+    await user.click(importButton);
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/workbench/settings/oa/manual-imports"
+    ))).toHaveLength(0);
+    expect(await screen.findByText("OA 附件刷新完成", {}, { timeout: 2_500 })).toBeInTheDocument();
+    expect(importButton).toBeEnabled();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/workbench/settings/oa/manual-search/refresh-attachments"
+    ))).toHaveLength(1);
+  });
+
+  test("stops observing a pending refresh at the client deadline without marking the task failed", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock({
+      refreshStatusSequence: [{
+        event_id: "refresh-event-1",
+        status: "pending",
+        row_ids: ["oa-exp-1981"],
+        affected_scope_keys: ["2025-12"],
+      }],
+    });
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const refreshButton = await screen.findByRole("button", { name: "刷新 OA 1981 附件解析" });
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(refreshButton);
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("等待 OA 附件解析");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("OA 附件解析仍在后台进行");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(refreshButton).toBeEnabled();
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/workbench/settings/oa/manual-search/refresh-attachments"
+    ))).toHaveLength(1);
+    const statusCallCount = fetchMock.mock.calls.filter(([input]) => (
+      String(input).includes("/refresh-attachments/refresh-event-1")
+    )).length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input).includes("/refresh-attachments/refresh-event-1")
+    ))).toHaveLength(statusCallCount);
+  });
+
+  test("times out a hung refresh status request and restores the refresh action", async () => {
+    const user = userEvent.setup();
+    let statusSignal: AbortSignal | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/workbench/settings/oa/manual-search") {
+        return new Response(JSON.stringify({ rows: searchRows, total: 2, page: 0, page_size: 20 }));
+      }
+      if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
+        return new Response(JSON.stringify({
+          event_id: "refresh-event-1",
+          status: "queued",
+          row_ids: ["oa-exp-1981"],
+          affected_scope_keys: ["2025-12"],
+        }), { status: 202 });
+      }
+      if (url.pathname.endsWith("/refresh-attachments/refresh-event-1")) {
+        statusSignal = init?.signal ?? null;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("timed out", "AbortError"));
+          }, { once: true });
+        });
+      }
+      throw new Error(`Unhandled fetch ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const refreshButton = await screen.findByRole("button", { name: "刷新 OA 1981 附件解析" });
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(refreshButton);
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(statusSignal?.aborted).toBe(true);
+    expect(screen.getByRole("alert")).toHaveTextContent("OA 附件刷新状态查询超时");
+    expect(refreshButton).toBeEnabled();
+  });
+
+  test("keeps existing counts and shows the durable failure reason", async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      refreshStatusSequence: [{
+        event_id: "refresh-event-1",
+        status: "failed",
+        row_ids: ["oa-exp-1981"],
+        affected_scope_keys: ["2025-12"],
+        error: "OCR 推理失败",
+      }],
+    });
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    const completedRow = await screen.findByRole("row", { name: "1981" });
+    await user.click(within(completedRow).getByLabelText("刷新 OA 1981 附件解析"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("OCR 推理失败");
+    expect(completedRow).toHaveTextContent("1");
+  });
+
+  test("aborts an in-flight refresh request when the component unmounts", async () => {
+    const user = userEvent.setup();
+    const postDeferred = deferredResponse();
+    let refreshSignal: AbortSignal | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/workbench/settings/oa/manual-search") {
+        return new Response(JSON.stringify({ rows: searchRows, total: 2, page: 0, page_size: 20 }));
+      }
+      if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
+        refreshSignal = init?.signal ?? null;
+        return new Promise<Response>((resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+          void postDeferred.promise.then(resolve);
+        });
+      }
+      throw new Error(`Unhandled fetch ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(await screen.findByRole("button", { name: "刷新 OA 1981 附件解析" }));
+    view.unmount();
+
+    expect(refreshSignal?.aborted).toBe(true);
+    postDeferred.resolve(new Response(JSON.stringify({
+      event_id: "refresh-event-1",
+      status: "queued",
+      row_ids: ["oa-exp-1981"],
+      affected_scope_keys: ["2025-12"],
+    }), { status: 202 }));
+    await Promise.resolve();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("refresh-event-1"))).toBe(false);
+  });
+
+  test("aborts an in-flight refresh status request when the component unmounts", async () => {
+    const user = userEvent.setup();
+    let statusSignal: AbortSignal | null = null;
+    let markStatusStarted!: () => void;
+    const statusStarted = new Promise<void>((resolve) => {
+      markStatusStarted = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/workbench/settings/oa/manual-search") {
+        return new Response(JSON.stringify({ rows: searchRows, total: 2, page: 0, page_size: 20 }));
+      }
+      if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
+        return new Response(JSON.stringify({
+          event_id: "refresh-event-1",
+          status: "queued",
+          row_ids: ["oa-exp-1981"],
+          affected_scope_keys: ["2025-12"],
+        }), { status: 202 });
+      }
+      if (url.pathname.endsWith("/refresh-attachments/refresh-event-1")) {
+        statusSignal = init?.signal ?? null;
+        markStatusStarted();
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+        });
+      }
+      throw new Error(`Unhandled fetch ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const view = renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(await screen.findByRole("button", { name: "刷新 OA 1981 附件解析" }));
+    await statusStarted;
+    view.unmount();
+
+    expect(statusSignal?.aborted).toBe(true);
+  });
+
   test("keeps staged OA import progress out of the global shell status mark", async () => {
     const user = userEvent.setup();
     const importDeferred = deferredResponse();
-    installFetchMock({ manualImportResponse: importDeferred.promise });
+    const fetchMock = installFetchMock({ manualImportResponse: importDeferred.promise });
     renderTable({ withSidebar: true });
 
     await user.click(screen.getByRole("button", { name: "搜索" }));
     const completedRow = await screen.findByRole("row", { name: "1981" });
     await user.click(within(completedRow).getByLabelText("选择 OA 1981"));
     await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
+
+    const refreshButton = within(completedRow).getByLabelText("刷新 OA 1981 附件解析");
+    expect(refreshButton).toBeDisabled();
+    await user.click(refreshButton);
+    expect(fetchMock.mock.calls.filter(([input]) => (
+      String(input) === "/api/workbench/settings/oa/manual-search/refresh-attachments"
+    ))).toHaveLength(0);
 
     await waitFor(() => {
       expect(screen.queryByRole("status", { name: "OA导入 10%：准备导入已选 OA" })).not.toBeInTheDocument();

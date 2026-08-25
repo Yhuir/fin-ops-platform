@@ -230,6 +230,13 @@
 - 失败语义：RapidOCR 是部署必需依赖，不保留 optional import；初始化或推理异常显式抛出 `OAAttachmentOCRRuntimeError`，使 `oa.sync` 失败重试且不写 current cache。只有 OCR 正常执行但确实无文本时才返回空证据，禁止把运行时故障永久缓存成 `no_evidence`。
 - 性能：文本已形成正式发票 identity 的页面不初始化 OCR；人工上传在首张识别成功后停止；OA 只对未识别页 OCR，不对整个 PDF 无条件重复 OCR。
 - 数据迁移：无 schema migration、无直接 SQL 业务修补、无数据库备份。生产修复复用现有 canonical UUID，并由既有 promotion 幂等追加带 `source_expense_item_id` 的 `oa_attachment_invoice` 来源；既有人工/审计形成的 `oa_expense_item_invoice` 显式归属边只保留，不由普通 promotion 伪造。
+
+## 2026-08-26 - 设置页 OA 精确附件刷新迁入 worker
+
+- 根因：HTTP 侧 `OAManualImportService` 运行时注入的是 PostgreSQL projection adapter，却用动态能力探测调用 Mongo-only refresh；能力不存在时静默重读旧 projection，仍返回 200 和旧计数，形成“刷新成功但没有下载/OCR/重解析”的假成功。手动导入入口还有同一旧 fallback。
+- 边界：删除两处动态 refresh/fallback 和 HTTP 侧 promoter。Settings route 只通过 `OAAttachmentRefreshRequestService` 校验 row IDs、登记现有 `oa.sync(operation=refresh_attachments)` 并读取受控 durable status/result；Mongo 下载、强制 parser reparse、定向 projection upsert、promotion 和 matching reconciliation 全部由既有 OA worker 执行。
+- 合同：POST 返回 202/event id，GET 返回 `pending/processing/done/failed/dead_lettered`。只有 `done` 才携带逐 row 计数和 promotion summary；缺记录、非完成态、OCR/解析/promotion 失败均显式失败，禁止回退普通全量 sync、旧 projection 或第二套解析。
+- 数据与性能：精确 operation 只处理选中 rows，不执行 stale deletion，不新增 event type、worker、表、migration、数据库备份或页面 read model；重复执行保持 canonical invoice/source link 幂等，并显式补发 matching reconciliation。
 ## 2026-07-28 - 日常报销付款明细存量重投合同
 
 - 目标：确保历史日常报销与新数据都保留稳定付款明细 identity，并让 OA 附件证据可显式回指对应付款项。

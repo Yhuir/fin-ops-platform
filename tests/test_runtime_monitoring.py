@@ -115,6 +115,8 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertNotIn("read_models", summary)
         self.assertNotIn("dirty_scopes", summary)
         self.assertEqual(executed_sql.count("ready_outbox_snapshot"), 1)
+        self.assertIn("payload->>'operation'", executed_sql)
+        self.assertIn("refresh_attachments", executed_sql)
         self.assertNotIn("read_model", executed_sql)
 
     def test_readiness_blockers_only_reject_current_platform_failures(self) -> None:
@@ -190,6 +192,14 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             {"oa-sync", "workbench-matching", "import", "settings-maintenance"},
         )
         self.assertNotIn("retired-worker", snapshot["worker_statuses"])
+
+        app_status_sql = " ".join(
+            sql.lower()
+            for sql, _params in repository._connection.calls
+            if "from job.outbox_events" in sql.lower()
+        )
+        self.assertIn("payload->>'operation'", app_status_sql)
+        self.assertIn("refresh_attachments", app_status_sql)
 
 
 if __name__ == "__main__":

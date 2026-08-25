@@ -96,9 +96,36 @@ class PostgresOAProjectionRepository:
         self._connection = connection
 
     def upsert_application_records(self, records: list[OAApplicationRecord], *, scope_key: str) -> int:
+        return self._upsert_application_records(
+            records,
+            scope_key=scope_key,
+            advance_full_scope_watermark=True,
+        )
+
+    def upsert_targeted_application_records(
+        self,
+        records: list[OAApplicationRecord],
+        *,
+        scope_key: str,
+    ) -> int:
+        """Upsert exact OA rows without declaring the whole month projection fresh."""
+        return self._upsert_application_records(
+            records,
+            scope_key=scope_key,
+            advance_full_scope_watermark=False,
+        )
+
+    def _upsert_application_records(
+        self,
+        records: list[OAApplicationRecord],
+        *,
+        scope_key: str,
+        advance_full_scope_watermark: bool,
+    ) -> int:
         normalized_records = [record for record in list(records or []) if isinstance(record, OAApplicationRecord)]
         if not normalized_records:
-            self._record_watermark(scope_key=scope_key, status="succeeded", upserted_count=0)
+            if advance_full_scope_watermark:
+                self._record_watermark(scope_key=scope_key, status="succeeded", upserted_count=0)
             return 0
 
         changed_count = 0
@@ -201,12 +228,13 @@ class PostgresOAProjectionRepository:
                     oa_row_ids=changed_row_ids,
                 )
             self._migrate_legacy_row_references(connection, self._legacy_row_id_alias_pairs(normalized_records))
-            self._record_watermark(
-                scope_key=scope_key,
-                status="succeeded",
-                upserted_count=changed_count,
-                connection=connection,
-            )
+            if advance_full_scope_watermark:
+                self._record_watermark(
+                    scope_key=scope_key,
+                    status="succeeded",
+                    upserted_count=changed_count,
+                    connection=connection,
+                )
 
         run_in_transaction(self._connection, write)
         return changed_count
@@ -1199,10 +1227,11 @@ class PostgresOAProjectionAdapter:
 
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
         list_by_ids = getattr(self._repository, "list_application_records_by_row_ids", None)
-        if callable(list_by_ids):
-            return list(list_by_ids(row_ids))
-        wanted = {str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()}
-        return [record for record in self.list_all_application_records() if record.id in wanted]
+        if not callable(list_by_ids):
+            raise RuntimeError(
+                "PostgreSQL OA projection repository must expose targeted row reads."
+            )
+        return list(list_by_ids(row_ids))
 
     def list_available_months(self) -> list[str]:
         list_months = getattr(self._repository, "list_available_months", None)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import unittest
-
-from psycopg.types.json import Jsonb
+from datetime import datetime, timezone
 
 from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.runtime_queue import (
@@ -12,6 +10,7 @@ from fin_ops_platform.services.runtime_queue import (
     RuntimeQueueRepository,
     RuntimeQueueSettings,
 )
+from psycopg.types.json import Jsonb
 
 
 class FakeTransaction:
@@ -391,6 +390,59 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("runtime_result", normalized_sql)
         self.assertEqual(params[0], {"ok": True})
         self.assertEqual(params[1:], ("event-1", "worker-1"))
+
+    def test_get_event_status_reads_durable_result_without_mutation(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                {
+                    "event_id": "event-1",
+                    "event_type": "oa.sync",
+                    "status": "done",
+                    "payload": {"operation": "refresh_attachments"},
+                    "last_error": None,
+                    "runtime_result": {"rows": []},
+                }
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        result = repository.get_event_status("event-1")
+
+        self.assertEqual(result["runtime_result"], {"rows": []})
+        _, sql, params = transaction.calls[0]
+        self.assertIn("raw_payload -> 'runtime_result'", sql)
+        self.assertEqual(params, ("event-1",))
+
+    def test_get_active_event_by_dedupe_key_reads_pending_or_processing_event(self) -> None:
+        transaction = FakeTransaction(
+            rows=[
+                event_row(
+                    event_id="active-event",
+                    event_type="oa.sync",
+                    status="processing",
+                    dedupe_key="oa.sync:refresh_attachments:identity",
+                )
+            ]
+        )
+        repository = RuntimeQueueRepository(FakeConnection(transaction))
+
+        event = repository.get_active_event_by_dedupe_key(
+            "oa.sync:refresh_attachments:identity",
+            tenant_id="tenant-a",
+        )
+
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual(event.event_id, "active-event")
+        self.assertEqual(event.status, "processing")
+        _, sql, params = transaction.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("status in ('pending', 'processing')", normalized_sql)
+        self.assertIn("order by created_at desc", normalized_sql)
+        self.assertEqual(
+            params,
+            ("tenant-a", "oa.sync:refresh_attachments:identity"),
+        )
 
     def test_complete_returns_false_when_worker_lock_does_not_match(self) -> None:
         transaction = FakeTransaction(rows=[None])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
@@ -14,6 +15,193 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class OaProjectionSyncServiceTests(unittest.TestCase):
+    def test_targeted_attachment_refresh_updates_only_selected_completed_rows(self) -> None:
+        selected = replace(
+            _oa("oa-selected", "2026-06", workflow_status="completed"),
+            attachment_file_count=2,
+            attachment_invoices=[{"invoice_no": "001"}],
+        )
+        unselected = _oa("oa-unselected", "2026-06", workflow_status="completed")
+        source = FakeSourceAdapter(
+            months=["2026-06"],
+            records_by_month={"2026-06": [selected, unselected]},
+        )
+        repository = FakeProjectionRepository()
+        promoter = FakeAttachmentInvoicePromoter()
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=repository,
+            attachment_invoice_promoter=promoter,
+        )
+
+        result = service.handle_runtime_event(_targeted_event(["oa-selected"]))
+
+        self.assertEqual(source.refresh_calls, [["oa-selected"]])
+        self.assertEqual([record.id for record in repository.saved_records], ["oa-selected"])
+        self.assertEqual(repository.targeted_scopes, ["2026-06"])
+        self.assertEqual(repository.stale_completed_scopes, [])
+        self.assertEqual(repository.non_completed_scopes, [])
+        self.assertEqual(promoter.completed_records, [selected])
+        self.assertTrue(promoter.ensure_matching)
+        self.assertEqual(result["rows"][0]["importable_invoice_count"], 1)
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["affected_scope_keys"], ["2026-06"])
+
+    def test_targeted_attachment_refresh_fails_when_source_omits_a_row(self) -> None:
+        source = FakeSourceAdapter(months=[], records_by_month={})
+        repository = FakeProjectionRepository()
+        promoter = FakeAttachmentInvoicePromoter()
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=repository,
+            attachment_invoice_promoter=promoter,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "did not return row_ids"):
+            service.handle_runtime_event(_targeted_event(["missing"]))
+
+        self.assertEqual(repository.saved_records, [])
+        self.assertEqual(promoter.call_count, 0)
+
+    def test_targeted_attachment_refresh_fails_for_in_progress_row(self) -> None:
+        source = FakeSourceAdapter(
+            months=["2026-06"],
+            records_by_month={
+                "2026-06": [_oa("oa-progress", "2026-06", workflow_status="in_progress")]
+            },
+        )
+        repository = FakeProjectionRepository()
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=repository,
+            attachment_invoice_promoter=FakeAttachmentInvoicePromoter(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "requires completed workflows"):
+            service.handle_runtime_event(_targeted_event(["oa-progress"]))
+
+        self.assertEqual(repository.saved_records, [])
+
+    def test_targeted_attachment_refresh_fails_without_source_capability(self) -> None:
+        service = OAProjectionSyncService(
+            source_adapter=SimpleNamespace(),
+            projection_repository=FakeProjectionRepository(),
+            attachment_invoice_promoter=FakeAttachmentInvoicePromoter(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "must expose refresh_application_record_attachments"):
+            service.handle_runtime_event(_targeted_event(["oa-1"]))
+
+    def test_targeted_attachment_refresh_propagates_ocr_failure_for_worker_retry(self) -> None:
+        class FailingOcrSource:
+            def refresh_application_record_attachments(
+                self,
+                row_ids: list[str],
+            ) -> list[OAApplicationRecord]:
+                raise RuntimeError(f"ocr_inference_failed:{','.join(row_ids)}")
+
+        repository = FakeProjectionRepository()
+        service = OAProjectionSyncService(
+            source_adapter=FailingOcrSource(),
+            projection_repository=repository,
+            attachment_invoice_promoter=FakeAttachmentInvoicePromoter(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "ocr_inference_failed"):
+            service.handle_runtime_event(_targeted_event(["oa-1"]))
+
+        self.assertEqual(repository.saved_records, [])
+        self.assertEqual(repository.sync_runs[-1]["status"], "failed")
+        self.assertEqual(
+            repository.sync_runs[-1]["sync_type"],
+            "oa_attachment_refresh",
+        )
+
+    def test_targeted_attachment_refresh_rejects_scope_drift_before_write(self) -> None:
+        source = FakeSourceAdapter(
+            months=["2026-07"],
+            records_by_month={
+                "2026-07": [_oa("oa-moved", "2026-07", workflow_status="completed")]
+            },
+        )
+        repository = FakeProjectionRepository()
+        promoter = FakeAttachmentInvoicePromoter()
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=repository,
+            attachment_invoice_promoter=promoter,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "source scopes changed"):
+            service.handle_runtime_event(_targeted_event(["oa-moved"]))
+
+        self.assertEqual(repository.saved_records, [])
+        self.assertEqual(repository.targeted_scopes, [])
+        self.assertEqual(promoter.call_count, 0)
+
+    def test_targeted_attachment_refresh_rejects_artifact_processing_failure(self) -> None:
+        selected = replace(
+            _oa("oa-failed", "2026-06", workflow_status="completed"),
+            attachment_artifacts=[{"parse_status": "download_failed"}],
+        )
+        source = FakeSourceAdapter(
+            months=["2026-06"],
+            records_by_month={"2026-06": [selected]},
+        )
+        repository = FakeProjectionRepository()
+        promoter = FakeAttachmentInvoicePromoter()
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=repository,
+            attachment_invoice_promoter=promoter,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "failed to download or parse"):
+            service.handle_runtime_event(_targeted_event(["oa-failed"]))
+
+        self.assertEqual(repository.saved_records, [])
+        self.assertEqual(promoter.call_count, 0)
+
+    def test_targeted_attachment_refresh_accepts_non_invoice_attachment_evidence(self) -> None:
+        selected = replace(
+            _oa("oa-no-evidence", "2026-06", workflow_status="completed"),
+            attachment_file_count=1,
+            attachment_artifacts=[{"parse_status": "no_evidence"}],
+        )
+        source = FakeSourceAdapter(
+            months=["2026-06"],
+            records_by_month={"2026-06": [selected]},
+        )
+        repository = FakeProjectionRepository()
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=repository,
+            attachment_invoice_promoter=FakeAttachmentInvoicePromoter(),
+        )
+
+        result = service.handle_runtime_event(_targeted_event(["oa-no-evidence"]))
+
+        self.assertEqual(result["rows"][0]["unrecognized_attachment_count"], 1)
+        self.assertEqual([record.id for record in repository.saved_records], ["oa-no-evidence"])
+
+    def test_targeted_attachment_refresh_validates_promoter_before_source_io(self) -> None:
+        source = FakeSourceAdapter(
+            months=["2026-06"],
+            records_by_month={
+                "2026-06": [_oa("oa-1", "2026-06", workflow_status="completed")]
+            },
+        )
+        service = OAProjectionSyncService(
+            source_adapter=source,
+            projection_repository=FakeProjectionRepository(),
+            attachment_invoice_promoter=SimpleNamespace(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "requires the attachment invoice promoter"):
+            service.handle_runtime_event(_targeted_event(["oa-1"]))
+
+        self.assertEqual(source.refresh_calls, [])
+
     def test_payment_status_source_and_postgres_snapshot_must_be_configured_together(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be configured together"):
             OAProjectionSyncService(
@@ -373,6 +561,19 @@ class FakeSourceAdapter:
             else self._records_by_month
         )
         self.last_retention_cutoff_month: str | None = None
+        self.refresh_calls: list[list[str]] = []
+
+    def refresh_application_record_attachments(
+        self,
+        row_ids: list[str],
+    ) -> list[OAApplicationRecord]:
+        self.refresh_calls.append(list(row_ids))
+        records_by_id = {
+            record.id: record
+            for records in self._records_by_month.values()
+            for record in records
+        }
+        return [records_by_id[row_id] for row_id in row_ids if row_id in records_by_id]
 
     def load_sync_application_batch(
         self,
@@ -409,9 +610,20 @@ class FakeProjectionRepository:
         self.stale_completed_scopes: list[str] = []
         self.non_completed_scopes: list[str] = []
         self.sync_runs: list[dict[str, object]] = []
+        self.targeted_scopes: list[str] = []
 
     def upsert_application_records(self, records: list[OAApplicationRecord], *, scope_key: str) -> int:
-        self.saved_records = list(records)
+        self.saved_records.extend(records)
+        return len(records)
+
+    def upsert_targeted_application_records(
+        self,
+        records: list[OAApplicationRecord],
+        *,
+        scope_key: str,
+    ) -> int:
+        self.targeted_scopes.append(scope_key)
+        self.saved_records.extend(records)
         return len(records)
 
     def prune_records_before(self, cutoff_month: str) -> list[str]:
@@ -445,10 +657,17 @@ class FakeAttachmentInvoicePromoter:
     def __init__(self) -> None:
         self.completed_records: list[OAApplicationRecord] = []
         self.call_count = 0
+        self.ensure_matching = False
 
-    def promote_records(self, records: list[OAApplicationRecord]) -> dict[str, object]:
+    def promote_records(
+        self,
+        records: list[OAApplicationRecord],
+        *,
+        ensure_matching: bool = False,
+    ) -> dict[str, object]:
         self.call_count += 1
         self.completed_records = list(records)
+        self.ensure_matching = ensure_matching
         return {
             "summary": {
                 "cache_candidate_count": 5,
@@ -538,6 +757,18 @@ def _event(scope_key: str) -> RuntimeQueueEvent:
         payload={"scope_key": scope_key},
         attempts=1,
         status="processing",
+    )
+
+
+def _targeted_event(row_ids: list[str]) -> RuntimeQueueEvent:
+    event = _event("2026-06")
+    return replace(
+        event,
+        payload={
+            "operation": "refresh_attachments",
+            "row_ids": row_ids,
+            "affected_scope_keys": ["2026-06"],
+        },
     )
 
 

@@ -1,6 +1,6 @@
 # 设置模块边界与 I/O
 
-日期：2026-07-22
+日期：2026-08-26
 
 ## 模块化状态
 
@@ -39,6 +39,7 @@
 | OA 草稿预填 GET/PUT | ETC 票据、进项发票使用页面 | 两个独立 family 均允许已授权账号读取，只有 admin 可保存；PUT 只接受 `expected_version + configuration`，校验 OA 真实枚举 code、项目和申请事由模板 token |
 | OA canonical username | normalized ACL snapshot / OA `sys_user.user_name` | 共享 casefold key 负责比较与去重并保留 canonical spelling；collision、跨 tier overlap、控制字符和 protected admin 输入在 OA I/O 前失败 |
 | OA credentials | settings/OA credential API | secret 不进入日志 |
+| OA 精确附件刷新 | `POST /api/workbench/settings/oa/manual-search/refresh-attachments` | mutation gate 后只把 canonical completed row IDs 登记为现有 `oa.sync(operation=refresh_attachments)` durable event；Settings route 不访问 Mongo、不执行 OCR/promotion、不以旧 projection 返回成功。 |
 | 数据重置 preview/request | settings data reset dialogs | preview 只返回服务端 count/fingerprint 与恢复凭证状态。request 必须携带原因、同一 fingerprint/receipt、稳定 `idempotency_key` 并通过同身份 OA 登录复核；生产 PostgreSQL 在同一事务消费 receipt、写 job、durable outbox 与 queued audit，禁止 route 先存 job 再单独入队。 |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=settings` | 管理员只读；同一 repeatable-read snapshot，禁止 secret/provider/reset mutation I/O |
 
@@ -54,7 +55,7 @@
 | OA target / compensation | `OARoleSyncService` | 只替换三个专用角色 members；目标失败 502 且零 app write，PG 失败最多一次恢复旧 snapshot，无法确认则 503 inconsistent |
 | Reset job | process-owned `BackgroundJobService` / app health | 可查询、可恢复；OA reset 的 runtime service reload 必须复用同一 background-job owner，禁止在任务执行中替换实例、双写同一 job store 或把当前任务误标为进程重启中断。只有应用进程首次启动/真正重启才创建 owner 并执行 interrupted-job recovery。job `completed` 只证明清理和 durable lifecycle 登记完成；OA `rebuild_status` 在下游 fresh 前必须是 `pending`。 |
 | Affected scope/version | 调用页面 | 普通保存只返回业务 version 和信息性 affected scopes；不写页面 refresh queue |
-| OA manual import result envelope | 设置页 | 返回精确 affected scopes，`freshness_targets` 与 `operation_barrier_targets` 为空；后续业务页面 normal GET 读取 canonical facts |
+| OA manual import / attachment refresh result | 设置页 | manual import 返回精确 affected scopes；附件刷新 POST 返回 202/event id，GET 返回受控 durable status，只有 `done` 才含逐 row 计数、promotion summary 和 affected scopes。`freshness_targets` 与 `operation_barrier_targets` 为空；后续业务页面 normal GET 读取 canonical facts。 |
 | 银行账户映射只读 payload | cost statistics canonical query | `AppSettingsService.get_cost_statistics_source_settings_payload()` 一次输出 `bank_account_mappings` 与 `bank_transaction_tags`；下游不得直接读取设置页前端状态 |
 | 成本统计按标签/按时间规则 payload | cost_statistics query/filter route | `get/update_cost_statistics_time_tag_selection*` 输出独立 schema/version、`mode=all|custom` 和 stable tag codes；默认 all 自动包含后续新标签。候选由成本统计 route 合并完整标签字典、历史 observed code 与“未标记流水”。设置 owner 只做归一化、CAS、持久化和 audit，不读取 OA 关系 |
 | 成本统计无 OA 范围 payload | cost_statistics query/filter route | `get/update_cost_statistics_no_oa_projects*` 输出独立 schema/version 与 `projects[{id,display_name,tag_codes}]`，默认空数组；服务端强制项目 ID/名称唯一和标签全局互斥。实际候选由成本统计 route 从 canonical 无 active OA 支出计算并作为 `allowed_tag_codes` 传入；成本计算时仍逐条检查 active OA 保护。设置 owner 不判断流水是否无 OA，不写成本统计 read model、不入队 dirty scope |
@@ -70,8 +71,7 @@
 - 影响正式关系：只由 settings-maintenance 任务按变化标签重算精确关系要求并标记 matching domain scope；
   设置模块不广播“全部 read model”，关联台页面下一次 normal GET 直接读取设置与 canonical facts。
 - OA 手工导入只提交 canonical OA facts、audit 和信息性 affected scopes；管理员精确
-  `refresh-attachments` 由 OA integration owner 在附件 promotion 边界补发 bounded matching scope，
-  settings route 不自行构造或重复入队；OA 待付款、
+  `refresh-attachments` 由 Settings request service 精确登记一次现有 OA durable event，OA integration worker 在附件 promotion 边界补发 bounded matching scope；settings route 不访问外部 OA/Mongo、不 inline OCR/promotion，也不重复入队 matching；OA 待付款、
   税金抵扣、成本统计和关联台等 direct 页面在下一次 normal GET 读取最新事实；
   `workbench_relation` 是否刷新由其 owner 的显式合同决定。
 - Services：`AppSettingsService`、`SettingsDataResetService`、OA applicant credentials。`AppSettingsService.get_cost_statistics_source_settings_payload()` 是成本统计读取银行账户映射与自动标签字典的受控 read port；time/tag 与 no-OA 两套设置分别使用独立 get/update port、version 和 audit，由成本统计 route 注入实际候选并暴露给两个独立抽屉；Turnover Ledger 本地 UoW 只能通过领域化 tag-selection state/commit/restore 端口进入 Settings owner。
@@ -84,7 +84,7 @@
 | Frontend components | `web/src/components/settings/*`、`web/src/components/common/OaDraftPrefillDrawer.tsx`；无调用方的旧 `WorkbenchSettingsModal.tsx` 已删除 |
 | Frontend API | `web/src/features/workbench/api.ts`、`web/src/features/oaDraftPrefill.ts`；普通 mapper/serializer 与专用 versioned client 分离 |
 | Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 与 session/runtime ports 组装 |
-| Backend service | `app_settings_service.py`、`oa_draft_prefill.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
+| Backend service | `app_settings_service.py`、`oa_draft_prefill.py`、`oa_role_sync_service.py`、`settings_data_reset_service.py`、`oa_attachment_refresh_request_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Repository | `postgres_repositories/oa_applicant_credentials.py`、`postgres_repositories/ops_tax_etc.py`；`0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只修复 `bank_flow_rule_batch_tag_rules` 的 formal/raw 镜像一致性，不改变 canonical rule value；`0135_batch_accounting_tag_selection.sql` 只初始化缺失的批量账务选择，并在同一 SQL 保持 formal/raw normalized mirror 相等 |
 | Audit proof owner | `postgres_repositories/settings_page_audit.py`、`page_audit_registry.py`、`postgres_repositories/operations_audit.py` |
 | Lifecycle / status | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`；无 read-model registry |
@@ -94,7 +94,7 @@
 
 - 允许依赖：settings/data reset service、credential repository、background job service 和 normalized ACL 的 OA role-sync port。
 - 必须通过：普通 settings service、专用 ACL command/CAS critical section 和 explicit reset job API；permissions evaluator 只通过 Settings snapshot provider 读取 ACL。
-- 禁止绕过：generic settings/Workbench modal/OA 管理后台新增 ACL 写入口；OA role/permission/env 反向授予 APP tier；前端直接保存 secret；settings API 直接清库、直接写/同步查询 read model、调用 Workbench 全页 builder 或自行/重复入队 matching dirty scope。精确 `refresh-attachments` 只委托 OA integration promotion owner 的 bounded reconciliation 合同。
+- 禁止绕过：generic settings/Workbench modal/OA 管理后台新增 ACL 写入口；OA role/permission/env 反向授予 APP tier；前端直接保存 secret；settings API 直接清库、直接写/同步查询 read model、调用 Workbench 全页 builder 或自行/重复入队 matching dirty scope。精确 `refresh-attachments` 只登记 OA integration owner 的 existing durable operation；不得恢复 HTTP Mongo/OCR/promoter、动态能力探测或旧 projection success fallback。
 
 ## 测试与验证
 

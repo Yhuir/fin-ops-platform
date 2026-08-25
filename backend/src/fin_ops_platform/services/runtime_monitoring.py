@@ -73,6 +73,10 @@ class RuntimeMonitoringRepository:
               max(updated_at)::text as updated_at
             from job.outbox_events
             where status in ('pending', 'processing', 'failed', 'dead_lettered')
+              and not (
+                event_type = 'oa.sync'
+                and coalesce(payload->>'operation', '') = 'refresh_attachments'
+              )
             group by event_type, 2, 3, 4
             """
         )
@@ -183,6 +187,10 @@ class RuntimeMonitoringRepository:
                      created_at, attempts, last_error
               from job.outbox_events
               where status <> 'done'
+                and not (
+                  event_type = 'oa.sync'
+                  and coalesce(payload->>'operation', '') = 'refresh_attachments'
+                )
             ),
             queue_counts as (
               select status, count(*)::bigint as count

@@ -10,8 +10,8 @@ from pymongo.errors import PyMongoError
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
 from fin_ops_platform.services.app_settings_service import (
     AccessControlSyncInconsistentError,
-    AppSettingsService,
     AppSettingsPersistenceError,
+    AppSettingsService,
     AppSettingsValidationError,
 )
 from fin_ops_platform.services.background_job_service import BackgroundJobAccessError, BackgroundJobNotFoundError
@@ -22,23 +22,29 @@ from fin_ops_platform.services.oa_applicant_credentials import (
     OaApplicantCredentialService,
     OaApplicantCredentialValidationError,
 )
-from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
+from fin_ops_platform.services.oa_attachment_refresh_request_service import (
+    OAAttachmentRefreshEventNotFoundError,
+    OAAttachmentRefreshRequestError,
+    OAAttachmentRefreshRowNotCompletedError,
+    OAAttachmentRefreshRowNotFoundError,
+)
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
     INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
 )
-from fin_ops_platform.services.settings_data_reset_service import (
-    RESET_BANK_TRANSACTIONS_ACTION,
-    RESET_INVOICES_ACTION,
-    RESET_OA_AND_REBUILD_ACTION,
-    SettingsDataResetService,
-)
+from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
 from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
     SettingsDataResetAlreadyActive,
     SettingsDataResetIdempotencyConflict,
     SettingsDataResetRecoveryUnavailable,
 )
 from fin_ops_platform.services.settings_data_reset_request import SettingsDataResetEnqueueError
+from fin_ops_platform.services.settings_data_reset_service import (
+    RESET_BANK_TRANSACTIONS_ACTION,
+    RESET_INVOICES_ACTION,
+    RESET_OA_AND_REBUILD_ACTION,
+    SettingsDataResetService,
+)
 from fin_ops_platform.services.state_store_protocol import SettingsAccessControlVersionConflict
 
 JsonResponse = Callable[[HTTPStatus, object], Any]
@@ -63,6 +69,7 @@ class SettingsApiRoutes:
         background_job_service_provider: ServiceProvider,
         oa_applicant_credential_service_provider: Callable[[], OaApplicantCredentialService],
         oa_manual_import_service_provider: ServiceProvider,
+        oa_attachment_refresh_request_service_provider: ServiceProvider,
         resolve_read_session: SessionResolver,
         resolve_admin_session: SessionResolver,
         verify_reset_oa_password: Callable[[OARequestSession | None, str], Any | None],
@@ -85,6 +92,9 @@ class SettingsApiRoutes:
         self._background_job_service_provider = background_job_service_provider
         self._oa_applicant_credential_service_provider = oa_applicant_credential_service_provider
         self._oa_manual_import_service_provider = oa_manual_import_service_provider
+        self._oa_attachment_refresh_request_service_provider = (
+            oa_attachment_refresh_request_service_provider
+        )
         self._resolve_read_session = resolve_read_session
         self._resolve_admin_session = resolve_admin_session
         self._verify_reset_oa_password = verify_reset_oa_password
@@ -137,6 +147,11 @@ class SettingsApiRoutes:
             return self.oa_manual_search(query)
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-search/refresh-attachments":
             return self.oa_manual_search_refresh_attachments(body, headers)
+        if method == "GET" and route_path.startswith(
+            "/api/workbench/settings/oa/manual-search/refresh-attachments/"
+        ):
+            event_id = unquote(route_path.rsplit("/", 1)[-1])
+            return self.oa_manual_search_refresh_status(event_id, headers)
         if method == "GET" and route_path == "/api/workbench/settings/oa/manual-imports":
             return self.oa_manual_imports()
         if method == "POST" and route_path == "/api/workbench/settings/oa/manual-imports":
@@ -505,20 +520,72 @@ class SettingsApiRoutes:
         return self._json_response(HTTPStatus.OK, payload)
 
     def oa_manual_search_refresh_attachments(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        _session, auth_error = self._resolve_settings_mutation_session(headers)
+        session, auth_error = self._resolve_settings_mutation_session(headers)
         if auth_error is not None:
             return auth_error
-        service = self._oa_manual_import_service_or_response()
+        service = self._oa_attachment_refresh_request_service_or_response()
         if not self._is_service_available(service):
             return service
         payload, error = self._load_json_body(body)
         if error is not None:
             return error
-        row_ids, row_ids_error = self._parse_oa_manual_import_row_ids(payload)
+        row_ids, row_ids_error = self._parse_oa_manual_import_row_ids(payload, max_count=20)
         if row_ids_error is not None:
             return row_ids_error
-        result = service.refresh_attachments(row_ids)
-        self._add_manual_import_affected_scopes(result, row_ids=row_ids)
+        actor_id = actor_id_for_session(session) if session is not None else "workbench_settings"
+        try:
+            result = service.request(row_ids, actor_id=actor_id or "workbench_settings")
+        except OAAttachmentRefreshRowNotFoundError as exc:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": exc.code, "message": str(exc)},
+            )
+        except OAAttachmentRefreshRowNotCompletedError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": exc.code, "message": str(exc)},
+            )
+        except OAAttachmentRefreshRequestError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": exc.code,
+                    "message": str(exc),
+                },
+            )
+        except RuntimeError:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_attachment_refresh_unavailable",
+                    "message": "OA 附件刷新队列暂时不可用，请稍后重试。",
+                },
+            )
+        return self._json_response(HTTPStatus.ACCEPTED, result)
+
+    def oa_manual_search_refresh_status(
+        self,
+        event_id: str,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        _session, auth_error = self._resolve_settings_mutation_session(headers)
+        if auth_error is not None:
+            return auth_error
+        service = self._oa_attachment_refresh_request_service_or_response()
+        if not self._is_service_available(service):
+            return service
+        try:
+            result = service.status(event_id)
+        except OAAttachmentRefreshEventNotFoundError as exc:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": exc.code, "message": str(exc)},
+            )
+        except OAAttachmentRefreshRequestError as exc:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": exc.code, "message": str(exc)},
+            )
         return self._json_response(HTTPStatus.OK, result)
 
     def oa_manual_imports(self) -> Any:
@@ -933,9 +1000,25 @@ class SettingsApiRoutes:
             )
         return service
 
+    def _oa_attachment_refresh_request_service_or_response(self) -> Any:
+        service = self._oa_attachment_refresh_request_service_provider()
+        if service is None:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_attachment_refresh_unavailable",
+                    "message": "OA 附件刷新队列服务不可用。",
+                },
+            )
+        return service
+
     @staticmethod
     def _is_service_available(value: Any) -> bool:
-        return callable(getattr(value, "search", None)) or callable(getattr(value, "list_manual_imports", None))
+        return (
+            callable(getattr(value, "search", None))
+            or callable(getattr(value, "list_manual_imports", None))
+            or callable(getattr(value, "request", None))
+        )
 
     def _parse_oa_manual_search_pagination(
         self,
@@ -958,7 +1041,12 @@ class SettingsApiRoutes:
             {"error": "invalid_oa_manual_search_request", "message": message},
         )
 
-    def _parse_oa_manual_import_row_ids(self, payload: dict[str, object]) -> tuple[list[str], Any | None]:
+    def _parse_oa_manual_import_row_ids(
+        self,
+        payload: dict[str, object],
+        *,
+        max_count: int | None = None,
+    ) -> tuple[list[str], Any | None]:
         row_ids = payload.get("row_ids")
         if not isinstance(row_ids, list):
             return [], self._json_response(
@@ -968,7 +1056,15 @@ class SettingsApiRoutes:
         normalized: list[str] = []
         seen: set[str] = set()
         for row_id in row_ids:
-            text = str(row_id or "").strip()
+            if not isinstance(row_id, str):
+                return [], self._json_response(
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "error": "invalid_oa_manual_import_request",
+                        "message": "row_ids must contain strings only.",
+                    },
+                )
+            text = row_id.strip()
             if not text or text in seen:
                 continue
             normalized.append(text)
@@ -977,6 +1073,14 @@ class SettingsApiRoutes:
             return [], self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_oa_manual_import_request", "message": "row_ids is required."},
+            )
+        if max_count is not None and len(normalized) > max_count:
+            return [], self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_oa_manual_import_request",
+                    "message": f"row_ids must contain at most {max_count} unique items.",
+                },
             )
         return normalized, None
 

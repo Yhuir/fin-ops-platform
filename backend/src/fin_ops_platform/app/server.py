@@ -108,9 +108,6 @@ from fin_ops_platform.services.bank_details_relation_tag_projection_service impo
 )
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
-from fin_ops_platform.services.postgres_repositories.bank_relation_requirement_recalculation import (
-    PostgresBankRelationRequirementRecalculationRequestRepository,
-)
 from fin_ops_platform.services.bank_import_withdrawal_service import (
     BankImportWithdrawalConflict,
     BankImportWithdrawalService,
@@ -161,7 +158,6 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
 )
 from fin_ops_platform.services.health_payload_compaction import compact_ready_payload
-from fin_ops_platform.services.runtime_monitoring import readiness_blockers
 from fin_ops_platform.services.historical_etc_repair_service import HistoricalEtcRepairService
 from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile
@@ -170,10 +166,6 @@ from fin_ops_platform.services.import_lifecycle_service import ImportLifecycleSe
 from fin_ops_platform.services.import_preview_audit import ImportPreviewStaleError
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.manual_invoice_entry_service import (
-    ManualInvoiceEntryError,
-    ManualInvoiceEntryService,
-)
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     InputInvoiceUsageCanonicalQueryService,
 )
@@ -204,6 +196,10 @@ from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
+from fin_ops_platform.services.manual_invoice_entry_service import (
+    ManualInvoiceEntryError,
+    ManualInvoiceEntryService,
+)
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
@@ -233,6 +229,10 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_inv
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoicePromotionService,
 )
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+from fin_ops_platform.services.oa_attachment_refresh_request_service import (
+    OAAttachmentRefreshRequestService,
+)
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
     INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
@@ -261,7 +261,6 @@ from fin_ops_platform.services.operation_history_evidence import (
 from fin_ops_platform.services.operation_history_semantics import operation_semantics
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
-from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
@@ -289,15 +288,18 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection
 from fin_ops_platform.services.postgres_repositories.bank_import_withdrawal import (
     PostgresBankImportWithdrawalRepository,
 )
+from fin_ops_platform.services.postgres_repositories.bank_relation_requirement_recalculation import (
+    PostgresBankRelationRequirementRecalculationRequestRepository,
+)
 from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
     input_invoice_usage_oa_reverse_statistics_snapshot,
 )
-from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     PostgresInputInvoiceUsageQueryRepository,
     PostgresOutputInvoiceCollectionQueryRepository,
@@ -334,6 +336,7 @@ from fin_ops_platform.services.postgres_repositories.tax_offset import (
     PostgresTaxOffsetCanonicalRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
     PostgresWorkbenchOaSupportingDocumentRepository,
 )
@@ -343,12 +346,12 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_query import
 from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
     PostgresWorkbenchPageSelectionRepository,
 )
-from fin_ops_platform.services.postgres_repositories.workbench_idempotency import PostgresWorkbenchIdempotencyRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.runtime_bootstrap import RuntimeRepositoryContext
+from fin_ops_platform.services.runtime_monitoring import readiness_blockers
 from fin_ops_platform.services.seeds import build_demo_seed
 from fin_ops_platform.services.settings_data_reset_request import SettingsDataResetRequestService
 from fin_ops_platform.services.settings_data_reset_service import (
@@ -417,20 +420,20 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
 from fin_ops_platform.services.workbench_idempotency import (
     InMemoryWorkbenchIdempotencyRepository,
 )
+from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
+    WorkbenchInvoiceExpenseItemAssignmentService,
+)
 from fin_ops_platform.services.workbench_invoice_supplement_service import (
     ManualInvoiceSupplementCommand,
     WorkbenchInvoiceSupplementError,
     WorkbenchInvoiceSupplementService,
 )
-from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
-    WorkbenchInvoiceExpenseItemAssignmentService,
-)
+from fin_ops_platform.services.workbench_oa_retention_date_parser import WorkbenchOaRetentionDateParser
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     SupportingDocumentUpload,
     WorkbenchOaSupportingDocumentError,
     WorkbenchOaSupportingDocumentService,
 )
-from fin_ops_platform.services.workbench_oa_retention_date_parser import WorkbenchOaRetentionDateParser
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_pair_relation_display_policy import (
     WorkbenchPairRelationDisplayPolicy,
@@ -465,7 +468,6 @@ from fin_ops_platform.services.workbench_write_facade import (
     WorkbenchWriteRelationSpecialMetadataMutationPort,
     WorkbenchWriteResult,
 )
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -913,20 +915,21 @@ class Application:
                 state_store=self._state_store,
                 oa_adapter=oa_adapter,
                 workbench_query_service=self._workbench_query_service,
-                attachment_invoice_promoter=(
-                    OAAttachmentInvoicePromotionService(
-                        invoice_repository=(
-                            PostgresOAAttachmentInvoiceRepository(state_connection)
-                            if has_postgres
-                            else import_fact_repository
-                        ),
-                        promotion_mode_provider=self._app_settings_service.get_oa_attachment_invoice_promotion_mode,
-                    )
-                    if import_fact_repository is not None
-                    else None
-                ),
             )
             if self._state_store is not None and oa_adapter is not None
+            else None
+        )
+        queue_repository = getattr(
+            getattr(self, "_runtime_repositories", None),
+            "queue_repository",
+            None,
+        )
+        self._oa_attachment_refresh_request_service = (
+            OAAttachmentRefreshRequestService(
+                queue_repository=queue_repository,
+                workflow_reader=oa_workflow_adapter,
+            )
+            if queue_repository is not None and oa_workflow_adapter is not None
             else None
         )
         self._live_workbench_service = LiveWorkbenchService(
@@ -2163,6 +2166,7 @@ class Application:
                 "/api/workbench/settings",
                 "/api/workbench/settings/oa/manual-search",
                 "/api/workbench/settings/oa/manual-search/refresh-attachments",
+                "/api/workbench/settings/oa/manual-search/refresh-attachments/{event_id}",
                 "/api/workbench/settings/oa/manual-imports",
                 "/api/workbench/settings/data-reset/preview",
                 "/api/workbench/settings/data-reset/jobs",
@@ -5215,6 +5219,11 @@ class Application:
             background_job_service_provider=lambda: self._background_job_service,
             oa_applicant_credential_service_provider=self._oa_applicant_credential_service,
             oa_manual_import_service_provider=lambda: getattr(self, "_oa_manual_import_service", None),
+            oa_attachment_refresh_request_service_provider=lambda: getattr(
+                self,
+                "_oa_attachment_refresh_request_service",
+                None,
+            ),
             resolve_read_session=lambda headers: self._resolve_fin_ops_read_session(
                 headers,
                 denied_message="当前账户没有访问设置页面权限。",
