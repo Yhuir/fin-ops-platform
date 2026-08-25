@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import os
 from pathlib import Path
@@ -11,20 +12,8 @@ from urllib.request import Request, urlopen
 from zipfile import BadZipFile, ZipFile
 import xml.etree.ElementTree as ET
 
-try:
-    import fitz
-except Exception:  # pragma: no cover - optional dependency fallback
-    fitz = None
-
-try:
-    import pdfplumber
-except Exception:  # pragma: no cover - optional dependency fallback
-    pdfplumber = None
-
-try:
-    from rapidocr_onnxruntime import RapidOCR
-except Exception:  # pragma: no cover - optional dependency fallback
-    RapidOCR = None
+import fitz
+from rapidocr_onnxruntime import RapidOCR
 
 from fin_ops_platform.services.imports import clean_string
 from fin_ops_platform.services.untrusted_document_policy import (
@@ -38,16 +27,19 @@ from fin_ops_platform.services.object_identity_policy import FinancialObjectIden
 
 
 INVOICE_CODE_RE = re.compile(r"发票代码:([0-9A-Za-z]+)")
-INVOICE_NO_RE = re.compile(r"发票号码:([0-9A-Za-z]+)")
+INVOICE_NO_RE = re.compile(r"发票号码:([0-9A-Za-z]{6,20})(?![0-9A-Za-z])")
 LOOSE_INVOICE_CODE_RE = re.compile(r"发票代码[:：]?([0-9A-Za-z]{8,20})")
-LOOSE_INVOICE_NO_RE = re.compile(r"发票号码[:：]?([0-9A-Za-z]{6,20})")
+LOOSE_INVOICE_NO_RE = re.compile(r"发票号码[:：]?([0-9A-Za-z]{6,20})(?![0-9A-Za-z])")
 ISSUE_DATE_RE = re.compile(r"开票日期:(\d{4})年(\d{2})月(\d{2})日")
 DIGITAL_INVOICE_NO_RE = re.compile(r"(?<![0-9A-Z])([0-9]{20})(?![0-9A-Z])")
 LOOSE_ISSUE_DATE_RE = re.compile(r"(\d{4})年(\d{2})月(\d{2})日")
 TOTALS_RE = re.compile(r"合计¥([0-9]+(?:\.\d+)?)¥([0-9]+(?:\.\d+)?)")
-TOTAL_WITH_TAX_RE = re.compile(r"价税合计.*?¥([0-9]+(?:\.\d+)?)")
-CURRENCY_AMOUNT_RE = re.compile(r"[¥Y]\s*([0-9]+(?:\.\d+)?)")
-SMALL_TOTAL_RE = re.compile(r"[（(]?小写[)）]?[^0-9]{0,8}([0-9]+(?:[.,，][0-9]{2})?)")
+TOTAL_WITH_TAX_RE = re.compile(r"价税合计.*?¥([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))")
+CURRENCY_AMOUNT_RE = re.compile(r"[¥Y]\s*([0-9]+\.[0-9]{2}|[0-9]+(?![0-9.]))")
+SMALL_TOTAL_RE = re.compile(
+    r"[（(]?小写[)）]?[^0-9]{0,8}"
+    r"([0-9]+[.,，][0-9]{2}|[0-9]+(?![0-9.,，]))"
+)
 TAX_RATE_RE = re.compile(r"(?<![0-9])([0-9]{1,2}(?:\.\d{1,2})?%)(?![0-9])")
 TAX_ID_RE = re.compile(r"([0-9A-Z]{15,25})")
 NAME_LABEL_RE = re.compile(r"(?:名称|称):")
@@ -61,8 +53,12 @@ SUPPORTED_DOCX_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 
 
+class OAAttachmentOCRRuntimeError(RuntimeError):
+    """The required OCR runtime failed and the attachment must not be cached."""
+
+
 class OAAttachmentInvoiceService:
-    PARSER_VERSION = "2026-08-16-railway-ticket-amount-v2"
+    PARSER_VERSION = "2026-08-26-pdf-page-representation-v3"
 
     def __init__(
         self,
@@ -76,7 +72,6 @@ class OAAttachmentInvoiceService:
         self._timeout_seconds = max(float(timeout_seconds), 1.0)
         self._max_download_bytes = max(int(max_download_bytes), 1024 * 1024)
         self._ocr_engine: Any | None = None
-        self._ocr_engine_unavailable = False
 
     def parse_files(self, files: list[dict[str, object]]) -> list[dict[str, str]]:
         return [
@@ -100,36 +95,15 @@ class OAAttachmentInvoiceService:
             limits=OA_ATTACHMENT_LIMITS,
         )
         if document.kind == "pdf":
-            for segment in self._extract_pdf_text_segments(document):
+            for segment in self._extract_pdf_evidence_text_segments(
+                document,
+                stop_after_first_invoice=True,
+            ):
                 if evidence := self._first_invoice_evidence(segment):
                     return evidence
-            return self._recognize_first_invoice_from_pdf_images(document)
+            return {}
         extracted_text = self._extract_image_text(document)
         return self._first_invoice_evidence(extracted_text) or {}
-
-    def _recognize_first_invoice_from_pdf_images(self, document: ValidatedDocument) -> dict[str, str]:
-        if fitz is None:
-            return {}
-        try:
-            pdf = fitz.open(stream=document.content, filetype="pdf")
-        except Exception:
-            return {}
-        try:
-            for page in pdf:
-                try:
-                    pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-                    normalized_image = normalize_image_for_ocr(
-                        content=pixmap.tobytes("png"),
-                        limits=OA_ATTACHMENT_LIMITS,
-                    )
-                except (UntrustedDocumentError, ValueError):
-                    continue
-                extracted_text = "\n".join(self._run_image_ocr(normalized_image)).strip()
-                if evidence := self._first_invoice_evidence(extracted_text):
-                    return evidence
-        finally:
-            pdf.close()
-        return {}
 
     def _first_invoice_evidence(self, extracted_text: str) -> dict[str, str] | None:
         if not clean_string(extracted_text):
@@ -188,6 +162,8 @@ class OAAttachmentInvoiceService:
                 suffix,
                 file_name or Path(file_path).name,
             )
+        except OAAttachmentOCRRuntimeError:
+            raise
         except UntrustedDocumentError as exc:
             base_result["parse_status"] = "parse_failed"
             base_result["parse_error"] = exc.code
@@ -286,7 +262,7 @@ class OAAttachmentInvoiceService:
             limits=OA_ATTACHMENT_LIMITS,
         )
         if document.kind == "pdf":
-            return self._extract_pdf_text_segments(document)
+            return self._extract_pdf_evidence_text_segments(document)
         if document.kind == "docx":
             return self._extract_docx_text_segments(document)
         return [self._extract_image_text(document)]
@@ -328,20 +304,44 @@ class OAAttachmentInvoiceService:
             return None
         return content
 
-    def _extract_pdf_text(self, content: bytes) -> str:
-        document = inspect_untrusted_document(
-            file_name="attachment.pdf",
-            content=content,
-            allowed_kinds=frozenset({"pdf"}),
-            limits=OA_ATTACHMENT_LIMITS,
-        )
-        return "\n".join(self._extract_pdf_text_segments(document)).strip()
+    def _extract_pdf_evidence_text_segments(
+        self,
+        document: ValidatedDocument,
+        *,
+        stop_after_first_invoice: bool = False,
+    ) -> list[str]:
+        segments: list[str] = []
+        pdf = fitz.open(stream=document.content, filetype="pdf")
+        try:
+            for page_index in range(document.pdf_page_count):
+                page = pdf[page_index]
+                extracted_text = self._extract_pdf_page_text(page)
 
-    def _extract_pdf_text_segments(self, document: ValidatedDocument) -> list[str]:
-        segments = self._extract_pdf_text_segments_with_pdfplumber(document)
-        if segments:
-            return segments
-        return self._extract_pdf_text_segments_with_fitz(document)
+                if clean_string(extracted_text):
+                    segments.append(extracted_text)
+                    if self._first_invoice_evidence(extracted_text) is not None:
+                        if stop_after_first_invoice:
+                            return segments
+                        continue
+
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                normalized_image = normalize_image_for_ocr(
+                    content=pixmap.tobytes("png"),
+                    limits=OA_ATTACHMENT_LIMITS,
+                )
+                ocr_text = "\n".join(self._run_image_ocr(normalized_image)).strip()
+                if not clean_string(ocr_text):
+                    continue
+                segments.append(ocr_text)
+                if stop_after_first_invoice and self._first_invoice_evidence(ocr_text) is not None:
+                    return segments
+        finally:
+            pdf.close()
+        return segments
+
+    @staticmethod
+    def _extract_pdf_page_text(page: fitz.Page) -> str:
+        return clean_string(page.get_text() or "")
 
     def _extract_image_text(self, document: ValidatedDocument) -> str:
         lines = self._run_image_ocr(document.ocr_content or b"")
@@ -397,69 +397,12 @@ class OAAttachmentInvoiceService:
                 segments.append(image_text)
         return segments
 
-    @staticmethod
-    def _extract_pdf_text_with_pdfplumber(content: bytes) -> str:
-        document = inspect_untrusted_document(
-            file_name="attachment.pdf",
-            content=content,
-            allowed_kinds=frozenset({"pdf"}),
-            limits=OA_ATTACHMENT_LIMITS,
-        )
-        return "\n".join(
-            OAAttachmentInvoiceService._extract_pdf_text_segments_with_pdfplumber(document)
-        ).strip()
-
-    @staticmethod
-    def _extract_pdf_text_segments_with_pdfplumber(document: ValidatedDocument) -> list[str]:
-        if pdfplumber is None:
-            return []
-        try:
-            with pdfplumber.open(BytesIO(document.content)) as pdf:
-                return [
-                    text
-                    for page in pdf.pages[: document.pdf_page_count]
-                    if (text := clean_string(page.extract_text() or ""))
-                ]
-        except Exception:
-            return []
-
-    @staticmethod
-    def _extract_pdf_text_with_fitz(content: bytes) -> str:
-        document = inspect_untrusted_document(
-            file_name="attachment.pdf",
-            content=content,
-            allowed_kinds=frozenset({"pdf"}),
-            limits=OA_ATTACHMENT_LIMITS,
-        )
-        return "\n".join(
-            OAAttachmentInvoiceService._extract_pdf_text_segments_with_fitz(document)
-        ).strip()
-
-    @staticmethod
-    def _extract_pdf_text_segments_with_fitz(document: ValidatedDocument) -> list[str]:
-        if fitz is None:
-            return []
-        try:
-            pdf = fitz.open(stream=document.content, filetype="pdf")
-        except Exception:
-            return []
-        try:
-            return [
-                text
-                for page in pdf
-                if (text := clean_string(page.get_text() or ""))
-            ]
-        finally:
-            pdf.close()
-
     def _run_image_ocr(self, content: bytes) -> list[str]:
         engine = self._get_ocr_engine()
-        if engine is None:
-            return []
         try:
             result, _ = engine(content)
-        except Exception:
-            return []
+        except Exception as exc:
+            raise OAAttachmentOCRRuntimeError("ocr_inference_failed") from exc
         if not result:
             return []
         lines: list[str] = []
@@ -471,16 +414,13 @@ class OAAttachmentInvoiceService:
                 lines.append(text)
         return lines
 
-    def _get_ocr_engine(self) -> Any | None:
+    def _get_ocr_engine(self) -> Any:
         if self._ocr_engine is not None:
             return self._ocr_engine
-        if self._ocr_engine_unavailable or RapidOCR is None:
-            return None
         try:
             self._ocr_engine = RapidOCR()
-        except Exception:
-            self._ocr_engine_unavailable = True
-            return None
+        except Exception as exc:
+            raise OAAttachmentOCRRuntimeError("ocr_initialization_failed") from exc
         return self._ocr_engine
 
     def _invoice_to_evidence(self, invoice: dict[str, str]) -> dict[str, str]:
@@ -912,7 +852,7 @@ class OAAttachmentInvoiceService:
         totals_match = TOTALS_RE.search(compact_text)
         total_with_tax = self._normalize_amount_text(self._match_text(TOTAL_WITH_TAX_RE, compact_text))
         if totals_match is not None and total_with_tax:
-            return (
+            return self._validated_amount_summary(
                 self._normalize_amount_text(totals_match.group(1)),
                 self._normalize_amount_text(totals_match.group(2)),
                 total_with_tax,
@@ -921,7 +861,7 @@ class OAAttachmentInvoiceService:
         currency_amounts = CURRENCY_AMOUNT_RE.findall(compact_text)
         if len(currency_amounts) >= 3:
             net_amount, tax_amount, total_amount = currency_amounts[-3:]
-            return (
+            return self._validated_amount_summary(
                 self._normalize_amount_text(net_amount),
                 self._normalize_amount_text(tax_amount),
                 self._normalize_amount_text(total_amount),
@@ -932,7 +872,7 @@ class OAAttachmentInvoiceService:
                 tax_amount, net_amount = currency_amounts[-2:]
                 total_amount = self._normalize_amount_text(small_total_match.group(1))
                 if total_amount:
-                    return (
+                    return self._validated_amount_summary(
                         self._normalize_amount_text(net_amount),
                         self._normalize_amount_text(tax_amount),
                         total_amount,
@@ -941,6 +881,19 @@ class OAAttachmentInvoiceService:
         if railway_ticket_amount:
             return (railway_ticket_amount, "0.00", railway_ticket_amount)
         return None
+
+    @staticmethod
+    def _validated_amount_summary(
+        net_amount: str,
+        tax_amount: str,
+        total_with_tax: str,
+    ) -> tuple[str, str, str] | None:
+        try:
+            if Decimal(net_amount) + Decimal(tax_amount) != Decimal(total_with_tax):
+                return None
+        except InvalidOperation:
+            return None
+        return (net_amount, tax_amount, total_with_tax)
 
     def _extract_railway_ticket_amount(self, compact_text: str, currency_amounts: list[str]) -> str:
         if "电子客票" not in compact_text and "铁路" not in compact_text:

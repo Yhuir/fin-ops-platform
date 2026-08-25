@@ -1,11 +1,15 @@
 from io import BytesIO
 import unittest
 from zipfile import ZipFile
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import fitz
 from PIL import Image
 
-from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+from fin_ops_platform.services.oa_attachment_invoice_service import (
+    OAAttachmentInvoiceService,
+    OAAttachmentOCRRuntimeError,
+)
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 
@@ -279,7 +283,32 @@ def _build_image(*, format_name: str) -> bytes:
 
 VALID_PNG = _build_image(format_name="PNG")
 VALID_JPEG = _build_image(format_name="JPEG")
-VALID_PDF = _build_image(format_name="PDF")
+
+
+def _build_pdf_with_blank_pages(page_count: int) -> bytes:
+    document = fitz.open()
+    try:
+        for _ in range(page_count):
+            document.new_page(width=400, height=240)
+        return document.tobytes()
+    finally:
+        document.close()
+
+
+def _digital_invoice_text(invoice_no: str) -> str:
+    return f"""
+电子发票（普通发票）
+下载次数：1
+国家税务总局统一发票监制章 {invoice_no}
+开票日期：2026年06月01日
+名称：云南溯源科技有限公司
+统一社会信用代码/纳税人识别号：915300007194052520
+名称：周口艾艺美拉科技有限公司
+统一社会信用代码/纳税人识别号：91411600MA00000001
+合计¥25.49¥3.31
+价税合计（小写）¥28.80
+13%
+"""
 
 
 def _build_docx_with_media(*media_contents: bytes) -> bytes:
@@ -394,14 +423,16 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
             "26539148631000016633",
             "26539148631000016634",
         )
+        pdf_bytes = _build_pdf_with_blank_pages(2)
 
         with (
-            patch.object(service, "_download_content", return_value=VALID_PDF),
+            patch.object(service, "_download_content", return_value=pdf_bytes),
             patch.object(
                 service,
-                "_extract_pdf_text_segments",
-                return_value=[RAILWAY_E_TICKET_TEXT, return_ticket],
+                "_extract_pdf_page_text",
+                side_effect=[RAILWAY_E_TICKET_TEXT, return_ticket],
             ),
+            patch.object(service, "_run_image_ocr") as image_ocr,
         ):
             invoices = service.parse_files([file_entry])
 
@@ -410,6 +441,100 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
             ["26539148631000016633", "26539148631000016634"],
         )
         self.assertTrue(all(invoice["attachment_name"] == "往返火车票.pdf" for invoice in invoices))
+        image_ocr.assert_not_called()
+
+    def test_parse_file_result_ocr_recovers_only_unrecognized_pdf_page_and_dedupes_all_pages(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {
+            "fileName": "报销发票.pdf",
+            "filePath": "/报销发票.pdf",
+            "suffix": "pdf",
+        }
+        first_invoice_text = _digital_invoice_text("26322000000128086591")
+        malformed_text = _digital_invoice_text("126412000001978430971").replace(
+            "国家税务总局统一发票监制章 ",
+            "发票号码：",
+        )
+        recovered_invoice_text = _digital_invoice_text("26412000001978430971")
+        pdf_bytes = _build_pdf_with_blank_pages(3)
+        ocr_calls: list[bytes] = []
+
+        def fake_ocr(content: bytes) -> list[str]:
+            ocr_calls.append(content)
+            return recovered_invoice_text.splitlines()
+
+        with (
+            patch.object(service, "_download_content", return_value=pdf_bytes),
+            patch.object(
+                service,
+                "_extract_pdf_page_text",
+                side_effect=[first_invoice_text, malformed_text, first_invoice_text],
+            ),
+            patch.object(service, "_run_image_ocr", side_effect=fake_ocr),
+        ):
+            result = service.parse_file_result(file_entry)
+
+        self.assertEqual(result["parse_status"], "parsed")
+        self.assertEqual(
+            [evidence["invoice_no"] for evidence in result["evidences"]],
+            ["26322000000128086591", "26412000001978430971"],
+        )
+        self.assertEqual(
+            {
+                key: result["evidences"][1][key]
+                for key in ("net_amount", "tax_amount", "total_with_tax")
+            },
+            {
+                "net_amount": "25.49",
+                "tax_amount": "3.31",
+                "total_with_tax": "28.80",
+            },
+        )
+        self.assertEqual(len(ocr_calls), 1)
+
+    def test_parse_invoice_text_does_not_truncate_adjacent_counter_from_digital_invoice_number(self) -> None:
+        service = OAAttachmentInvoiceService()
+
+        invoice = service._parse_invoice_text(_digital_invoice_text("126412000001978430971"))
+
+        self.assertIsNone(invoice)
+
+    def test_parse_invoice_text_rejects_labeled_21_digit_invoice_number(self) -> None:
+        service = OAAttachmentInvoiceService()
+        extracted_text = _digital_invoice_text("126412000001978430971").replace(
+            "国家税务总局统一发票监制章 ",
+            "发票号码：",
+        )
+
+        invoice = service._parse_invoice_text(extracted_text)
+
+        self.assertIsNone(invoice)
+
+    def test_parse_invoice_text_stops_total_before_following_numeric_field(self) -> None:
+        service = OAAttachmentInvoiceService()
+        extracted_text = _digital_invoice_text("26412000001978430971").replace(
+            "13%",
+            "915300007194052520",
+        )
+
+        invoice = service._parse_invoice_text(extracted_text)
+
+        self.assertIsNotNone(invoice)
+        assert invoice is not None
+        self.assertEqual(invoice["net_amount"], "25.49")
+        self.assertEqual(invoice["tax_amount"], "3.31")
+        self.assertEqual(invoice["total_with_tax"], "28.80")
+
+    def test_parse_invoice_text_does_not_truncate_incomplete_decimal_total(self) -> None:
+        service = OAAttachmentInvoiceService()
+        extracted_text = _digital_invoice_text("26412000001978430971").replace(
+            "¥28.80",
+            "¥25.5",
+        )
+
+        invoice = service._parse_invoice_text(extracted_text)
+
+        self.assertIsNone(invoice)
 
     def test_parse_files_skips_image_attachment_when_ocr_returns_empty_text(self) -> None:
         service = OAAttachmentInvoiceService()
@@ -443,6 +568,22 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
 
         self.assertEqual(result["parse_status"], "ocr_empty")
         self.assertEqual(result["evidences"], [])
+
+    def test_parse_file_result_does_not_cache_ocr_runtime_failure_as_no_evidence(self) -> None:
+        service = OAAttachmentInvoiceService()
+        file_entry = {
+            "fileName": "invoice-image.jpg",
+            "filePath": "/invoice-image.jpg",
+            "suffix": "jpg",
+        }
+        failing_engine = Mock(side_effect=RuntimeError("runtime unavailable"))
+
+        with (
+            patch.object(service, "_download_content", return_value=VALID_JPEG),
+            patch.object(service, "_get_ocr_engine", return_value=failing_engine),
+            self.assertRaisesRegex(OAAttachmentOCRRuntimeError, "ocr_inference_failed"),
+        ):
+            service.parse_file_result(file_entry)
 
     def test_parse_file_result_reports_download_failed_status(self) -> None:
         service = OAAttachmentInvoiceService()

@@ -220,6 +220,16 @@
 - 存量修复：复用 `import_audit_repair_ops` 增加全量 OA attachment ownership 模式。它扫描全部非删除 OA provenance 发票，只允许 visible canonical 发票在强发票 identity + 当前 attachment owner 同时成立时追加 `oa_expense_item_invoice`；保留原附件来源，不写 alias、不写 relation case。hidden duplicate、unresolved、跨 OA ambiguous/conflict 只报告零写。
 - 数据安全：dry-run 产生 source fingerprint，并通过显式 `--rollback-manifest-path` 在 helper 固定的 root-owned `0700` 目录内以 `O_EXCL + O_NOFOLLOW + 0600` 写 scoped rollback artifact；普通 stdout 只含 rollback fingerprint/count 与哈希化 lineage，不输出原始 source links、附件 key 或 OA/item parent。execute 在 serializable transaction + advisory lock 中重读 source fingerprint，并在锁内再次验证同一私有 rollback artifact fingerprint，以 source-links CAS 更新并与 `audit.events` 同事务提交。幂等和页面闭环验证后，固定 helper 只按安全文件名和 manifest fingerprint 精确删除该 artifact。重复执行零写；不新增 migration、表、read model、worker、cache 或数据库备份，不删除主数据库。
 - 性能：运行时 bridge I/O 绑定受影响 cache keys；存量审计/修复是显式运维命令，不进入 HTTP、同步周期或页面热路径。
+
+## 2026-08-26 - OA PDF 按页文本/OCR 识别链路收口
+
+- 生产根因：目标 `oa-exp-2246` 的 28.80 正式 PDF 已稳定归属第二条子付款项，但 PDF 文本层把“下载次数 1”和 20 位发票号码拼成连续 21 位数字。严格身份规则正确拒绝该号码；旧 OA 主链只解析 PDF 文本，而人工录入入口另有页面 OCR，因此 OA cache 长期为 `no_evidence`，现有人工导入 canonical 发票也无法获得 OA attachment/item provenance。
+- 运行时收口：`OAAttachmentInvoiceService` 只保留一个 PDF evidence representation 边界。每页先解析文本；只有该页未形成正式发票强 identity 时，才以既有 2 倍渲染和统一图片安全策略 OCR 同页。OA `parse_file_result` 收集全部页面并按正式 identity 去重；人工上传识别复用同一边界并在首个正式发票证据后停止。
+- 旧链路删除：删除人工上传专用 `_recognize_first_invoice_from_pdf_images` 分叉；不新增第二 parser、号码截断、页面/Workbench fallback、read model、worker、表或 API。
+- 身份与安全：带或不带“发票号码”标签的连续 21 位数字都不合法，禁止截断、去掉首位或末位猜测发票号；价税合计按发票货币固定两位小数分界，并验证 `未税金额 + 税额 = 价税合计`，不能把下一行税率、税号或其它数字字段拼成伪金额。付款截图和无正式证据图片继续不进入统一发票池。parser version 升级使旧 cache 失效，历史重算只通过既有 durable `oa.sync` / 精确附件刷新与 promotion 边界执行。
+- 失败语义：RapidOCR 是部署必需依赖，不保留 optional import；初始化或推理异常显式抛出 `OAAttachmentOCRRuntimeError`，使 `oa.sync` 失败重试且不写 current cache。只有 OCR 正常执行但确实无文本时才返回空证据，禁止把运行时故障永久缓存成 `no_evidence`。
+- 性能：文本已形成正式发票 identity 的页面不初始化 OCR；人工上传在首张识别成功后停止；OA 只对未识别页 OCR，不对整个 PDF 无条件重复 OCR。
+- 数据迁移：无 schema migration、无直接 SQL 业务修补、无数据库备份。生产修复复用现有 canonical UUID，并由既有 promotion 幂等追加带 `source_expense_item_id` 的 `oa_attachment_invoice` 来源；既有人工/审计形成的 `oa_expense_item_invoice` 显式归属边只保留，不由普通 promotion 伪造。
 ## 2026-07-28 - 日常报销付款明细存量重投合同
 
 - 目标：确保历史日常报销与新数据都保留稳定付款明细 identity，并让 OA 附件证据可显式回指对应付款项。

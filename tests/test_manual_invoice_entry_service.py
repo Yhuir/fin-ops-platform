@@ -46,6 +46,32 @@ def payload(**overrides: str) -> dict[str, str]:
     return values
 
 
+def _build_pdf_with_blank_pages(page_count: int) -> bytes:
+    document = fitz.open()
+    try:
+        for _ in range(page_count):
+            document.new_page(width=400, height=240)
+        return document.tobytes()
+    finally:
+        document.close()
+
+
+def _digital_invoice_text(invoice_no: str) -> str:
+    return f"""
+电子发票（普通发票）
+下载次数：1
+国家税务总局统一发票监制章 {invoice_no}
+开票日期：2026年08月14日
+名称：云南溯源科技有限公司
+统一社会信用代码/纳税人识别号：915300007194052520
+名称：云南供应商有限公司
+统一社会信用代码/纳税人识别号：915300000000000001
+合计¥100.00¥13.00
+价税合计（小写）¥113.00
+13%
+"""
+
+
 class ManualInvoiceEntryServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.import_service = ImportNormalizationService()
@@ -279,37 +305,47 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
 
 
 class UploadedInvoiceRecognitionTests(unittest.TestCase):
-    def test_image_pdf_ocr_stops_after_first_recognized_invoice_page(self) -> None:
-        document = fitz.open()
-        for _ in range(2):
-            page = document.new_page(width=400, height=240)
-            page.insert_text((20, 40), "image placeholder")
-        pdf_bytes = document.tobytes()
-        document.close()
-
+    def test_pdf_with_unrecognized_text_ocr_stops_after_first_recognized_page(self) -> None:
+        pdf_bytes = _build_pdf_with_blank_pages(2)
         service = OAAttachmentInvoiceService()
-        service._extract_pdf_text_segments = lambda _document: []  # type: ignore[method-assign]
+        page_texts = iter(
+            [
+                _digital_invoice_text("126117000001052654674"),
+                "second page without invoice evidence",
+            ]
+        )
+        service._extract_pdf_page_text = lambda _page: next(page_texts)  # type: ignore[method-assign]
         ocr_calls: list[int] = []
 
         def fake_ocr(_content: bytes) -> list[str]:
             ocr_calls.append(1)
-            return [
-                "电子发票",
-                "发票号码:26117000001052654674",
-                "开票日期:2026年08月14日",
-                "购买方名称:云南溯源科技有限公司 纳税人识别号:915300007194052520",
-                "销售方名称:云南供应商有限公司 纳税人识别号:915300000000000001",
-                "合计¥100.00¥13.00",
-                "价税合计（小写）¥113.00",
-                "13%",
-            ]
+            return _digital_invoice_text("26117000001052654674").splitlines()
 
         service._run_image_ocr = fake_ocr  # type: ignore[method-assign]
 
         evidence = service.recognize_uploaded_invoice(file_name="invoice.pdf", content=pdf_bytes)
 
         self.assertEqual(evidence["invoice_no"], "26117000001052654674")
+        self.assertEqual(evidence["net_amount"], "100.00")
+        self.assertEqual(evidence["tax_amount"], "13.00")
+        self.assertEqual(evidence["total_with_tax"], "113.00")
         self.assertEqual(len(ocr_calls), 1)
+
+    def test_text_pdf_recognition_does_not_run_ocr(self) -> None:
+        pdf_bytes = _build_pdf_with_blank_pages(1)
+        service = OAAttachmentInvoiceService()
+        service._extract_pdf_page_text = (  # type: ignore[method-assign]
+            lambda _page: _digital_invoice_text("26117000001052654674")
+        )
+
+        def unexpected_ocr(_content: bytes) -> list[str]:
+            raise AssertionError("text-recognized PDF page must not run OCR")
+
+        service._run_image_ocr = unexpected_ocr  # type: ignore[method-assign]
+
+        evidence = service.recognize_uploaded_invoice(file_name="invoice.pdf", content=pdf_bytes)
+
+        self.assertEqual(evidence["invoice_no"], "26117000001052654674")
 
     def test_jpeg_upload_is_validated_by_signature(self) -> None:
         output = BytesIO()

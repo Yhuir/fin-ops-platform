@@ -3,6 +3,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from fin_ops_platform.services.mongo_oa_adapter import MongoOAAdapter, MongoOASettings
+from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentOCRRuntimeError
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from pymongo.errors import ServerSelectionTimeoutError
 
@@ -2515,6 +2516,28 @@ class MongoOAAdapterTests(unittest.TestCase):
             self.assertTrue(cache.entries[cache_key]["invoices"][0].get(field), field)
         self.assertEqual(cache.entries[cache_key]["parser_version"], adapter._attachment_invoice_cache_parser_version())
         self.assertEqual(cache.entries[cache_key]["cache_schema_version"], "2026-05-11-evidence-v1")
+
+    def test_worker_sync_does_not_save_cache_when_ocr_runtime_fails(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        file_entry = {"fileName": "invoice-a.pdf", "filePath": "/invoice-a.pdf", "suffix": "pdf"}
+        adapter = StubMongoOAAdapter(
+            form_documents={"2": [], "32": []},
+            project_documents=[],
+            attachment_invoice_cache=cache,
+        )
+        cache_key = adapter._attachment_invoice_cache_key(file_entry)
+
+        with (
+            patch.object(
+                adapter._attachment_invoice_service,
+                "parse_file_result",
+                side_effect=OAAttachmentOCRRuntimeError("ocr_inference_failed"),
+            ),
+            self.assertRaisesRegex(OAAttachmentOCRRuntimeError, "ocr_inference_failed"),
+        ):
+            adapter._parse_attachment_invoice_files_now([(cache_key, file_entry)], month="2026-03")
+
+        self.assertNotIn(cache_key, cache.entries)
 
     def test_fetch_projects_and_counterparties_derive_from_form_data(self) -> None:
         adapter = StubMongoOAAdapter(
