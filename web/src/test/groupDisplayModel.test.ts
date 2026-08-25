@@ -7,7 +7,6 @@ import {
   mergeWorkbenchGroupsById,
   replaceWorkbenchSupportingDocuments,
   workbenchInvoiceSourceLabels,
-  workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
@@ -978,30 +977,13 @@ describe("groupDisplayModel time filter", () => {
     });
   });
 
-  test("normalizes grouped amount queries for server and local workbench search", () => {
+  test("normalizes grouped amount queries for the server-owned workbench search", () => {
     const state = {
       ...createEmptyWorkbenchZoneDisplayState(),
       searchQuery: "4,311.00",
     } as ReturnType<typeof createEmptyWorkbenchZoneDisplayState>;
-    const row = buildOaRow("oa-money-search", "4,311.00");
 
     expect(buildWorkbenchServerPageQuery(state)).toEqual({ search: "4311.00" });
-    expect(workbenchRowMatchesUnifiedSearch(row, "4311.00")).toBe(true);
-  });
-
-  test("matches structured bank note labels and values shown in the grid", () => {
-    const row = {
-      ...buildBankRow("bank-searchable-text", "2026-07-21 11:30"),
-      bankTextFields: [{ label: "客户附言", value: "专项服务费" }],
-      tableValues: {
-        transactionTime: "2026-07-21 11:30",
-        paymentAccount: "建设银行 8106",
-      },
-    };
-
-    expect(workbenchRowMatchesUnifiedSearch(row, "客户附言")).toBe(true);
-    expect(workbenchRowMatchesUnifiedSearch(row, "专项服务费")).toBe(true);
-    expect(workbenchRowMatchesUnifiedSearch(row, "建行 8106")).toBe(true);
   });
 
   test("uses one primary invoice source label while keeping ownership evidence separate", () => {
@@ -1021,11 +1003,6 @@ describe("groupDisplayModel time filter", () => {
       sourceKinds: ["manual_invoice_import" as const],
     };
 
-    expect(workbenchRowMatchesUnifiedSearch(row, "OA附件")).toBe(true);
-    expect(workbenchRowMatchesUnifiedSearch(row, "导入记录")).toBe(false);
-    expect(workbenchRowMatchesUnifiedSearch(row, "明细归属")).toBe(true);
-    expect(workbenchRowMatchesUnifiedSearch(row, "人工导入")).toBe(false);
-    expect(workbenchRowMatchesUnifiedSearch(manualRow, "人工导入")).toBe(true);
     expect(workbenchInvoiceSourceLabels(row.sourceKinds, row.sourceKind)).toEqual([
       "OA附件",
       "明细归属",

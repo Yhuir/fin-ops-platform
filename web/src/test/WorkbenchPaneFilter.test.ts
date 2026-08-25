@@ -293,7 +293,7 @@ describe("Workbench pane display model", () => {
     });
   });
 
-  test("applies pane search and column filters locally while the server page refresh is pending", async () => {
+  test("keeps the column preview while search membership remains server-owned", async () => {
     const fetchMock = installMockApiFetch({ workbenchLoadDelayMs: 1000 });
     renderWorkbenchPage();
     await screen.findByTestId("zone-unpaired", {}, { timeout: 3000 });

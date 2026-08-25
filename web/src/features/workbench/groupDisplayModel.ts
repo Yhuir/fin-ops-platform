@@ -85,8 +85,7 @@ export function buildWorkbenchDisplayGroups(
   }
   const activePaneId = resolveWorkbenchActivePane(state, state.activePaneId);
   const sortDirection = activePaneId ? state.sortByPane[activePaneId] : null;
-  const hasPaneCriteria = Boolean(normalizeWorkbenchSearchText(state.searchQuery))
-    || workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
+  const hasPaneCriteria = workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
   const hasPaneRowCriteria = workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
 
   const displayGroups = !hasPaneCriteria
@@ -841,16 +840,6 @@ export function resolveWorkbenchActivePane(
 }
 
 function groupMatchesPaneCriteria(group: WorkbenchRelationGroup, state: WorkbenchZoneDisplayState) {
-  const normalizedSearchQuery = normalizeWorkbenchSearchText(state.searchQuery);
-  if (
-    normalizedSearchQuery
-    && !workbenchPaneIds.some((paneId) =>
-      getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) => matchesWorkbenchRowText(row, normalizedSearchQuery)),
-    )
-  ) {
-    return false;
-  }
-
   const activePanes = workbenchPaneIds.filter((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
   if (activePanes.length === 0) {
     return true;
@@ -860,7 +849,7 @@ function groupMatchesPaneCriteria(group: WorkbenchRelationGroup, state: Workbenc
     const paneFilters = state.filtersByPaneAndColumn[paneId] ?? {};
     const paneTimeFilter = state.timeFilterByPane[paneId] ?? { mode: "none" };
     return getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) =>
-      matchesWorkbenchRow(row, paneId, "", paneFilters, paneTimeFilter),
+      matchesWorkbenchRow(row, paneId, paneFilters, paneTimeFilter),
     );
   });
 }
@@ -884,7 +873,7 @@ function applyPaneCriteriaToGroup(
 
       return [
         paneId,
-        group.rows[paneId].filter((row) => matchesWorkbenchRow(row, paneId, "", paneFilters, paneTimeFilter)),
+        group.rows[paneId].filter((row) => matchesWorkbenchRow(row, paneId, paneFilters, paneTimeFilter)),
       ];
     }),
   ) as WorkbenchPaneRows;
@@ -902,18 +891,11 @@ function groupHasRowsInCriteriaPanes(group: WorkbenchRelationGroup, state: Workb
 function matchesWorkbenchRow(
   row: WorkbenchRecord,
   paneId: WorkbenchRecordType,
-  normalizedQuery: string,
   activeFilters: Record<string, string[]>,
   timeFilter: WorkbenchPaneTimeFilter,
 ) {
   if (!matchesWorkbenchTimeFilter(row, paneId, timeFilter)) {
     return false;
-  }
-
-  if (normalizedQuery) {
-    if (!matchesWorkbenchRowText(row, normalizedQuery)) {
-      return false;
-    }
   }
 
   return Object.entries(activeFilters).every(([columnKey, selectedValues]) => {
@@ -1006,55 +988,6 @@ function matchesOaProjectFilters(row: WorkbenchRecord, selectedValues: string[])
       ? !item.projectName || ["--", "—"].includes(item.projectName)
       : value === item.projectName,
   }));
-}
-
-function normalizeWorkbenchSearchText(value: string) {
-  return normalizeMoneySearchQuery(value).toLocaleLowerCase("zh-CN");
-}
-
-export function workbenchRowMatchesUnifiedSearch(row: WorkbenchRecord, query: string) {
-  const normalizedQuery = normalizeWorkbenchSearchText(query);
-  return normalizedQuery ? matchesWorkbenchRowText(row, normalizedQuery) : false;
-}
-
-function matchesWorkbenchRowText(row: WorkbenchRecord, normalizedQuery: string) {
-  const tableValues = Object.entries(row.tableValues)
-    .filter(([key]) => !key.startsWith("__detail:"))
-    .map(([, value]) => value);
-  const bankTextValues = (row.bankTextFields ?? []).flatMap((field) => [field.label, field.value]);
-  const displayAliases = workbenchRowDisplaySearchAliases(row);
-  const normalizedHaystack = normalizeWorkbenchSearchText(
-    [
-      row.label,
-      row.status,
-      row.amount,
-      row.counterparty,
-      row.categoryLabel,
-      ...tableValues,
-      ...bankTextValues,
-      ...displayAliases,
-      ...(row.tags ?? []).filter((tag) => tag !== "OA附件" && tag !== "人工导入"),
-    ].join(" "),
-  );
-  return (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalizedQuery)
-    ? normalizedHaystack.replace(/,/g, "")
-    : normalizedHaystack
-  ).includes(normalizedQuery);
-}
-
-function workbenchRowDisplaySearchAliases(row: WorkbenchRecord) {
-  if (row.recordType === "bank") {
-    return [compactWorkbenchBankAccountLabel(row.tableValues.paymentAccount ?? "")];
-  }
-  if (row.recordType === "invoice") {
-    const invoiceType = row.tableValues.invoiceType ?? "";
-    const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
-    return [
-      flowLabel,
-      ...workbenchInvoiceSourceLabels(row.sourceKinds, row.sourceKind),
-    ].filter((value): value is string => Boolean(value));
-  }
-  return [];
 }
 
 export function compactWorkbenchBankAccountLabel(value: string) {

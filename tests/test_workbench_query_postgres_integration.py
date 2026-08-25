@@ -481,6 +481,185 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             {row["source_kind"] for row in invoice_rows},
         )
 
+    def test_unified_search_covers_visible_oa_bank_and_invoice_columns(self) -> None:
+        self.raw_connection.execute(
+            """
+            update app.oa_applications
+            set normalized_payload = normalized_payload || %s::jsonb
+            where row_id = 'oa-direct-1'
+            """,
+            (
+                json.dumps(
+                    {
+                        "project_name_display": "统一搜索展示项目",
+                        "apply_type": "支付申请",
+                        "expense_type": "交通费",
+                        "counterparty_name": "张丽芬",
+                        "reason": "统一搜索申请事由",
+                        "apply_time": "2026-07-21 09:08:07",
+                        "expense_items": [
+                            {
+                                "id": "oa-direct-1:item:0",
+                                "project_name": "子付款项项目",
+                                "expense_type": "住宿费",
+                                "amount": "100.00",
+                                "fee_content": "酒店住宿",
+                                "fee_description": "子付款项搜索说明",
+                                "attachment_file_count": "0",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        self.raw_connection.execute(
+            """
+            with next_settings as (
+                select jsonb_set(
+                    settings_payload,
+                    '{bank_account_mappings}',
+                    '[{"last4":"8106","bank_name":"中国建设银行"}]'::jsonb,
+                    true
+                ) as payload
+                from app.app_settings
+                where settings_key = 'app_settings'
+            )
+            update app.app_settings settings
+            set settings_payload = next_settings.payload,
+                raw_payload = jsonb_build_object(
+                    'normalized_payload', next_settings.payload
+                )
+            from next_settings
+            where settings.settings_key = 'app_settings'
+            """
+        )
+        self.raw_connection.execute(
+            """
+            update app.bank_transactions
+            set remark = '统一搜索流水备注'
+            where legacy_mongo_id = 'bank-direct-1'
+            """
+        )
+        self.raw_connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, digital_invoice_no,
+                invoice_date, invoice_month, seller_name, seller_tax_no,
+                buyer_name, buyer_tax_no, amount, signed_amount, tax_rate,
+                tax_amount, total_with_tax, status, workbench_visibility,
+                source_links, raw_payload
+            ) values (
+                'invoice-unified-search', 'input', 'INV-UNIFIED-SEARCH',
+                'DIGITAL-UNIFIED-SEARCH', '2026-07-25', '2026-07-01',
+                '统一搜索销方', 'SELLER-TAX-SEARCH', '统一搜索购方',
+                'BUYER-TAX-SEARCH', 91, 91, '9%%', 9, 100,
+                'active', 'visible',
+                '[{"source_type":"manual_invoice_import"}]'::jsonb,
+                '{}'::jsonb
+            )
+            """
+        )
+
+        def assert_search_contains(
+            search: str,
+            *,
+            row_type: str,
+            row_id: str,
+        ) -> None:
+            statement_offset = len(self.connection.statements)
+            page = self.repository.get_workbench_groups_page(
+                scope_key="2026-07",
+                zone="unpaired",
+                search=search,
+                page_size=100,
+            )
+            business_statements = [
+                statement
+                for statement in self.connection.statements[statement_offset:]
+                if not str(statement.get("raw_sql") or "")
+                .strip()
+                .lower()
+                .startswith("set ")
+            ]
+            self.assertLessEqual(len(business_statements), 7)
+            self.assertTrue(
+                any(
+                    row.get("id") == row_id
+                    for group in page["groups"]
+                    for row in list(group.get(f"{row_type}_rows") or [])
+                ),
+                f"expected {row_type}:{row_id} for search {search!r}",
+            )
+
+        for search in (
+            "张丽芬",
+            "统一搜索展示项目",
+            "支付申请",
+            "交通费",
+            "统一搜索申请事由",
+            "09:08:07",
+            "子付款项项目",
+            "住宿费",
+            "酒店住宿",
+            "子付款项搜索说明",
+            "已完成",
+        ):
+            with self.subTest(search=search):
+                assert_search_contains(search, row_type="oa", row_id="oa-direct-1")
+
+        for search in (
+            "云南腾安科技有限公司",
+            "材料款",
+            "统一搜索流水备注",
+            "支出",
+            "建行 基本户 8106",
+            "2026-07-22 10:00",
+        ):
+            with self.subTest(search=search):
+                assert_search_contains(search, row_type="bank", row_id="bank-direct-1")
+
+        for search in (
+            "INV-UNIFIED-SEARCH",
+            "DIGITAL-UNIFIED-SEARCH",
+            "统一搜索销方",
+            "SELLER-TAX-SEARCH",
+            "统一搜索购方",
+            "BUYER-TAX-SEARCH",
+            "9%",
+            "91.00",
+            "9.00",
+            "100.00",
+            "2026-07-25",
+            "人工导入",
+            "进",
+        ):
+            with self.subTest(search=search):
+                assert_search_contains(
+                    search,
+                    row_type="invoice",
+                    row_id="invoice-unified-search",
+                )
+
+        self.raw_connection.execute(
+            """
+            update app.invoices
+            set source_links = '[
+                {"source_type":"manual_invoice_import"},
+                {"source_type":"oa_attachment_invoice"},
+                {"source_type":"oa_expense_item_invoice"}
+            ]'::jsonb
+            where legacy_mongo_id = 'invoice-unified-search'
+            """
+        )
+        for search in ("OA附件", "明细归属"):
+            with self.subTest(search=search):
+                assert_search_contains(
+                    search,
+                    row_type="invoice",
+                    row_id="invoice-unified-search",
+                )
+
     def test_pending_oa_uses_nested_application_date_for_display_and_search(self) -> None:
         self.raw_connection.execute(
             """
@@ -492,7 +671,21 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 'default', '2026-07', 'oa-pending-with-time', 'in_progress', '胡琦',
                 '大理卷烟厂余热综合利用项目', '大理卷烟厂余热综合利用项目', 175,
                 'signature:oa-pending-with-time',
-                '{"detail_fields":{"申请日期":"2026-07-17 09:08:07"},"apply_type":"日常报销","expense_type":"交通费"}'::jsonb,
+                '{
+                    "detail_fields":{"申请日期":"2026-07-17 09:08:07"},
+                    "apply_type":"日常报销",
+                    "expense_type":"交通费",
+                    "counterparty_name":"进行中搜索对方",
+                    "reason":"进行中搜索事由",
+                    "expense_items":[{
+                        "id":"oa-pending-with-time:item:0",
+                        "project_name":"进行中子付款项",
+                        "expense_type":"差旅费",
+                        "amount":"175.00",
+                        "fee_content":"进行中费用内容",
+                        "fee_description":"进行中费用说明"
+                    }]
+                }'::jsonb,
                 '{}'::jsonb
             )
             """
@@ -521,6 +714,28 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 for row in list(group.get("oa_rows") or [])
             )
         )
+        for search in (
+            "进行中",
+            "进行中搜索对方",
+            "进行中搜索事由",
+            "进行中子付款项",
+            "差旅费",
+            "进行中费用内容",
+            "进行中费用说明",
+        ):
+            with self.subTest(search=search):
+                page = self.repository.get_workbench_groups_page(
+                    scope_key="2026-07",
+                    zone="unpaired",
+                    search=search,
+                )
+                self.assertTrue(
+                    any(
+                        row.get("id") == "oa-pending-with-time"
+                        for group in page["groups"]
+                        for row in list(group.get("oa_rows") or [])
+                    )
+                )
 
     def test_oa_applicant_filter_options_use_narrow_projection_without_semantic_loss(
         self,

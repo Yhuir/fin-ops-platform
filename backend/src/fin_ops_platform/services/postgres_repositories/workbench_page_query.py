@@ -5024,6 +5024,53 @@ class PostgresWorkbenchPageQueryRepository:
                 [pattern for _expression in expressions],
             )
 
+        def label_matches(label: str) -> bool:
+            return normalized.casefold() in label.casefold()
+
+        def expense_item_text_predicate(payload_sql: str) -> tuple[str, list[Any]]:
+            expressions = [
+                "item.value->>'project_name'",
+                "item.value->>'expense_type'",
+                "item.value->>'fee_content'",
+                "item.value->>'fee_description'",
+                "coalesce(item.value->>'amount', "
+                "item.value->>'settlement_amount', item.value->>'total_with_tax')",
+            ]
+            predicate, params = text_predicates(expressions)
+            return (
+                f"""
+                exists (
+                    select 1
+                    from jsonb_array_elements(
+                        case when jsonb_typeof({payload_sql}->'expense_items') = 'array'
+                             then {payload_sql}->'expense_items'
+                             else '[]'::jsonb end
+                    ) item(value)
+                    where {predicate}
+                )
+                """,
+                params,
+            )
+
+        def expense_item_amount_predicate(payload_sql: str) -> str:
+            item_amount = (
+                "coalesce(item.value->>'amount', "
+                "item.value->>'settlement_amount', item.value->>'total_with_tax')"
+            )
+            normalized_item_amount = f"replace(btrim({item_amount}), ',', '')"
+            return f"""
+                exists (
+                    select 1
+                    from jsonb_array_elements(
+                        case when jsonb_typeof({payload_sql}->'expense_items') = 'array'
+                             then {payload_sql}->'expense_items'
+                             else '[]'::jsonb end
+                    ) item(value)
+                    where {normalized_item_amount} ~ '^[+-]?[0-9]+([.][0-9]+)?$'
+                      and {normalized_item_amount}::numeric = %s::numeric
+                )
+            """
+
         amount: Decimal | None = None
         try:
             amount = Decimal(normalized.replace(",", ""))
@@ -5035,45 +5082,133 @@ class PostgresWorkbenchPageQueryRepository:
         except ValueError:
             pass
 
+        completed_oa_application_time_sql = """coalesce(
+            nullif(btrim(oa.normalized_payload->>'apply_time'), ''),
+            nullif(btrim(oa.normalized_payload->>'application_time'), ''),
+            nullif(btrim(oa.normalized_payload#>>'{detail_fields,申请时间}'), ''),
+            oa.application_date::text
+        )"""
         oa_text, oa_params = text_predicates(
             [
                 "oa.applicant",
-                "oa.project_name",
-                "oa.normalized_payload->>'workflow_no'",
+                "coalesce(nullif(oa.normalized_payload->>'project_name_display', ''), "
+                "oa.project_name)",
+                "coalesce(oa.normalized_payload->>'apply_type', "
+                "oa.normalized_payload#>>'{detail_fields,申请类型}')",
+                "nullif(btrim(oa.normalized_payload->>'expense_type'), '')",
+                "coalesce(oa.normalized_payload->>'counterparty_name', "
+                "oa.normalized_payload#>>'{detail_fields,往来单位}')",
+                "oa.normalized_payload->>'reason'",
+                completed_oa_application_time_sql,
             ]
         )
+        oa_expense_text, oa_expense_params = expense_item_text_predicate(
+            "oa.normalized_payload"
+        )
+        oa_params.extend(oa_expense_params)
+        pending_application_time_sql = pending_oa_application_time_sql("pending")
         pending_text, pending_params = text_predicates(
             [
-                "pending.applicant",
-                "pending.project_name_display",
-                "pending.project_name",
-                "pending.source_payload->>'apply_type'",
-                "pending.source_payload->>'application_type'",
+                "coalesce(pending.source_payload->>'applicant', pending.applicant)",
+                "coalesce(pending.project_name_display, pending.project_name)",
+                "coalesce(pending.source_payload->>'apply_type', "
+                "pending.source_payload->>'application_type', "
+                "pending.source_payload->>'form_type')",
+                "nullif(btrim(pending.source_payload->>'expense_type'), '')",
                 "pending.source_payload->>'counterparty_name'",
                 "pending.source_payload->>'reason'",
+                pending_application_time_sql,
             ]
         )
+        pending_expense_text, pending_expense_params = expense_item_text_predicate(
+            "pending.source_payload"
+        )
+        pending_params.extend(pending_expense_params)
+
+        bank_name_sql = """coalesce(
+            (
+                select mapping.value->>'bank_name'
+                from app.app_settings search_settings
+                cross join lateral jsonb_array_elements(
+                    case
+                        when jsonb_typeof(search_settings.settings_payload->'bank_account_mappings') = 'array'
+                            then search_settings.settings_payload->'bank_account_mappings'
+                        else '[]'::jsonb
+                    end
+                ) mapping(value)
+                where search_settings.settings_key = 'app_settings'
+                  and mapping.value->>'last4' = right(bank.account_no, 4)
+                order by mapping.value->>'bank_name'
+                limit 1
+            ),
+            case
+                when bank.account_no like '6225%%' then '招商银行'
+                when bank.account_no like '6222%%' then '工商银行'
+                when bank.account_no like '6217%%' then '建设银行'
+                when bank.account_no like '6228%%' then '农业银行'
+                when bank.account_no like '6214%%' then '中国银行'
+                else '未识别银行'
+            end
+        )"""
+        bank_account_type_sql = """case
+            when bank.account_name like '%%基本%%' then '基本户'
+            when bank.account_name like '%%一般%%' then '一般户'
+            when bank.account_name like '%%专户%%' then '专户'
+            else '账户'
+        end"""
+        bank_account_display_sql = (
+            f"concat_ws(' ', {bank_name_sql}, {bank_account_type_sql}, "
+            "right(bank.account_no, 4))"
+        )
+        compact_bank_name_sql = bank_name_sql
+        for full_name, short_name in (
+            ("中国工商银行", "工行"),
+            ("工商银行", "工行"),
+            ("中国建设银行", "建行"),
+            ("建设银行", "建行"),
+            ("中国农业银行", "农行"),
+            ("农业银行", "农行"),
+            ("中国银行", "中行"),
+            ("招商银行", "招行"),
+            ("交通银行", "交行"),
+            ("中国光大银行", "光大"),
+            ("光大银行", "光大"),
+            ("中国民生银行", "民生"),
+            ("民生银行", "民生"),
+            ("平安银行", "平安"),
+        ):
+            compact_bank_name_sql = (
+                f"replace({compact_bank_name_sql}, '{full_name}', '{short_name}')"
+            )
+        bank_account_compact_sql = f"""concat_ws(
+            ' ',
+            {compact_bank_name_sql},
+            {bank_account_type_sql},
+            right(bank.account_no, 4)
+        )"""
         bank_text, bank_params = text_predicates(
             [
                 "bank.counterparty_name_raw",
-                "bank.account_no",
-                "bank.account_name",
                 "bank.summary",
                 "bank.remark",
-                "bank.project_id",
+                "coalesce(bank.trade_time, bank.txn_date::timestamptz)::text",
+                bank_account_display_sql,
+                bank_account_compact_sql,
             ]
         )
         invoice_text, invoice_params = text_predicates(
             [
                 "invoice.invoice_no",
-                "invoice.invoice_code",
                 "invoice.digital_invoice_no",
-                "invoice.counterparty_name",
                 "invoice.seller_name",
                 "invoice.seller_tax_no",
                 "invoice.buyer_name",
                 "invoice.buyer_tax_no",
-                "invoice.invoice_type",
+                "invoice.tax_rate",
+                "invoice.tax_amount::text",
+                "invoice.amount::text",
+                "coalesce(invoice.total_with_tax, invoice.amount)::text",
+                "invoice.invoice_date::text",
             ]
         )
         etc_text, etc_params = text_predicates(
@@ -5097,21 +5232,87 @@ class PostgresWorkbenchPageQueryRepository:
             """,
         ]
         etc_params.append(pattern)
-        oa_predicates = [oa_text]
-        pending_predicates = [pending_text]
+        oa_predicates = [oa_text, oa_expense_text]
+        pending_predicates = [pending_text, pending_expense_text]
         bank_predicates = [bank_text]
         invoice_predicates = [invoice_text]
+        if label_matches("已完成"):
+            oa_predicates.append("true")
+        if label_matches("进行中"):
+            pending_predicates.append("true")
+        if label_matches("支出"):
+            bank_predicates.append(
+                "(lower(coalesce(bank.txn_direction, '')) in "
+                "('out', 'outflow', 'debit', 'expense', '支出') "
+                "or coalesce(bank.signed_amount, 0) < 0)"
+            )
+        if label_matches("收入"):
+            bank_predicates.append(
+                "not (lower(coalesce(bank.txn_direction, '')) in "
+                "('out', 'outflow', 'debit', 'expense', '支出') "
+                "or coalesce(bank.signed_amount, 0) < 0)"
+            )
+        source_type_sql = """coalesce(
+            source.value->>'source_type',
+            source.value->>'type',
+            source.value->>'source'
+        )"""
+        source_exists_sql = """exists (
+            select 1
+            from jsonb_array_elements(
+                case when jsonb_typeof(invoice.source_links) = 'array'
+                     then invoice.source_links
+                     else '[]'::jsonb end
+            ) source(value)
+            where {condition}
+        )"""
+        has_oa_attachment_sql = source_exists_sql.format(
+            condition=f"{source_type_sql} = 'oa_attachment_invoice'"
+        )
+        if label_matches("OA附件"):
+            invoice_predicates.append(has_oa_attachment_sql)
+        if label_matches("人工导入"):
+            has_manual_import_sql = source_exists_sql.format(
+                condition=f"{source_type_sql} = 'manual_invoice_import'"
+            )
+            invoice_predicates.append(
+                f"(not ({has_oa_attachment_sql}) and ({has_manual_import_sql}))"
+            )
+        if label_matches("明细归属"):
+            invoice_predicates.append(
+                source_exists_sql.format(
+                    condition=f"{source_type_sql} = 'oa_expense_item_invoice'"
+                )
+            )
+        if label_matches("进"):
+            invoice_predicates.append(
+                "(lower(coalesce(invoice.invoice_type, '')) like '%%input%%' "
+                "or lower(coalesce(invoice.invoice_type, '')) like '%%purchase%%' "
+                "or invoice.invoice_type like '%%进%%')"
+            )
+        if label_matches("销"):
+            invoice_predicates.append(
+                "(lower(coalesce(invoice.invoice_type, '')) like '%%output%%' "
+                "or lower(coalesce(invoice.invoice_type, '')) like '%%sale%%' "
+                "or invoice.invoice_type like '%%销%%')"
+            )
         if amount is not None:
             oa_predicates.append("oa.amount = %s::numeric")
+            oa_predicates.append(expense_item_amount_predicate("oa.normalized_payload"))
             pending_predicates.append("pending.amount = %s::numeric")
+            pending_predicates.append(
+                expense_item_amount_predicate("pending.source_payload")
+            )
             bank_predicates.append("abs(bank.amount) = abs(%s::numeric)")
             invoice_predicates.append(
-                "(invoice.amount = %s::numeric or invoice.total_with_tax = %s::numeric)"
+                "(invoice.amount = %s::numeric "
+                "or invoice.tax_amount = %s::numeric "
+                "or coalesce(invoice.total_with_tax, invoice.amount) = %s::numeric)"
             )
-            oa_params.append(amount)
-            pending_params.append(amount)
+            oa_params.extend([amount, amount])
+            pending_params.extend([amount, amount])
             bank_params.append(amount)
-            invoice_params.extend([amount, amount])
+            invoice_params.extend([amount, amount, amount])
             etc_predicates.append("etc_batch.total_amount = %s::numeric")
             etc_params.append(amount)
         if search_date is not None:

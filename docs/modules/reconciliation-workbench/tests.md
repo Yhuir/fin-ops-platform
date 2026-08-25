@@ -2,6 +2,13 @@
 
 日期：2026-08-25
 
+## 2026-08-25 三栏统一搜索展示字段对齐
+
+- Repository/SQL：`tests/test_workbench_page_query_repository.py` 保护 unified search 显式覆盖 completed/in-progress OA 的申请人、展示项目、类型、费用类型、对方户名、事由、申请时间与付款项字段，流水的对方户名、时间、摘要、备注、方向和展示账户，以及发票的号码、销购方/税号、日期、金额、税率/税额、进销方向和 canonical 来源标签；内部 workflow no、project id、整段 raw/source payload 与隐藏 counterparty 字段不得重新进入搜索面。
+- PostgreSQL integration：`tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_unified_search_covers_visible_oa_bank_and_invoice_columns` 在全 migration disposable PostgreSQL 上复现 completed OA `counterparty_name=张丽芬`，并逐项验证 OA 父项/子付款项、流水、发票字段命中后返回完整组；同文件 pending OA 用例同时保护进行中流程标签及其对方户名、事由和子付款项字段。
+- Frontend：`groupDisplayModel.ts` 不再对浏览器当前已加载页执行第二套 search membership；输入 search 后由 zone direct API 唯一决定组命中，旧页在请求期间保持稳定，响应到达后保留服务端返回的完整 relation context。金额 canonicalize、高亮、列/时间筛选和排序仍走各自现役边界。
+- 性能/边界：search 继续复用既有 `needed_keys` materialized 候选和一次 source-hit CTE；没有新增 SQL round-trip、API、索引、表、read model、worker、cache、依赖或数据库写入。
+
 ## 2026-08-25 OA 附件发票 current-item 展示分组
 
 - Business core：`tests/test_workbench_relation_grouping.py` 保护 OA 附件发票只按 current canonical expense item 的精确 ownership 分组；历史 `row_index`、旧 alias 和金额相等均不能充当归属，`id / row_id / expense_item_id` 冲突时 fail closed。一个附件 occurrence 合法归属同一 OA 多个明细时保留全部精确分组，跨 OA 或无 current owner 时保持未归属。
@@ -12,7 +19,7 @@
 ## 2026-08-24 OA附件历史归属与来源标签回归
 
 - Repository/SQL：`tests/test_workbench_page_query_repository.py` 保护 candidate 与 summary hydration 都读取 payload、owned item/attachment 和 active OA source alias，且页面热查询不扫描 attachment cache bridge；`tests/test_oa_projection_sql_runtime.py` 与 `tests/test_workbench_query_service.py` 保护 full/detail 的既有 row-id 查询在单条 statement 内携带同一 alias 集合；`tests/test_oa_attachment_invoice_linking.py` 以两个历史 parent 子付款项证明按 `row_index` 精确映射当前 canonical items。
-- Frontend：`web/src/test/groupDisplayModel.test.ts` 与 `WorkbenchColumns.test.tsx` 保护 OA附件优先、人工导入其次、明细归属独立，以及旧“导入记录”搜索/Chip 不再出现；Browser fanout/exception specs 保护主表和异常抽屉一致。
+- Frontend：`web/src/test/groupDisplayModel.test.ts` 与 `WorkbenchColumns.test.tsx` 保护 OA附件优先、人工导入其次、明细归属独立，以及旧“导入记录”Chip 不再出现；来源标签搜索由 direct repository 的 SQL/PostgreSQL integration 用例保护，Browser fanout/exception specs 保护主表和异常抽屉一致。
 - Regression：不改变 API DTO、canonical `source_links[]`、relation membership、数据库 schema、read model、worker 或其它页面导入历史标签。
 
 ## 2026-08-23 补充凭证全局只读画廊

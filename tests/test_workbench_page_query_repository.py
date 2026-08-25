@@ -1464,6 +1464,72 @@ def test_filter_sql_escapes_literal_search_and_preserves_and_or_semantics() -> N
     assert "2027-01-01" in params
 
 
+def test_source_search_projection_matches_visible_grid_fields_only() -> None:
+    search_ctes, _search_params, _hit_name = (
+        PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(
+            prefix="visible_fields",
+            search="张丽芬",
+        )
+    )
+    normalized_sql = " ".join(search_ctes.split()).lower()
+
+    for visible_expression in (
+        "project_name_display",
+        "detail_fields,申请类型",
+        "expense_type",
+        "counterparty_name",
+        "detail_fields,往来单位",
+        "fee_content",
+        "fee_description",
+        "pending.source_payload->>'counterparty_name'",
+        "bank.counterparty_name_raw",
+        "bank.trade_time",
+        "bank.account_no",
+        "invoice.seller_name",
+        "invoice.seller_tax_no",
+        "invoice.buyer_name",
+        "invoice.buyer_tax_no",
+        "invoice.tax_rate",
+        "invoice.tax_amount",
+    ):
+        assert visible_expression.lower() in normalized_sql
+
+    assert "oa.normalized_payload->>'workflow_no'" not in normalized_sql
+    assert "bank.project_id" not in normalized_sql
+    assert "invoice.counterparty_name" not in normalized_sql
+    assert "source_payload::text" not in normalized_sql
+    assert "normalized_payload::text" not in normalized_sql
+
+
+def test_source_search_uses_canonical_invoice_source_labels_and_flow_aliases() -> None:
+    oa_attachment_sql, _params, _hit_name = (
+        PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(
+            prefix="oa_source_label",
+            search="OA附件",
+        )
+    )
+    manual_sql, _params, _hit_name = (
+        PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(
+            prefix="manual_source_label",
+            search="人工导入",
+        )
+    )
+    input_sql, _params, _hit_name = (
+        PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(
+            prefix="input_flow_label",
+            search="进",
+        )
+    )
+
+    assert "invoice.source_links" in oa_attachment_sql
+    assert "oa_attachment_invoice" in oa_attachment_sql
+    assert "invoice.raw_payload->'source_links'" not in oa_attachment_sql
+    assert "manual_invoice_import" in manual_sql
+    assert "not (exists" in " ".join(manual_sql.split()).lower()
+    assert "purchase" in input_sql
+    assert "invoice.invoice_type like '%%进%%'" in input_sql
+
+
 def test_etc_summary_search_uses_batch_ids_invoice_numbers_and_exact_amount() -> None:
     search_ctes, search_params, _hit_name = (
         PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(

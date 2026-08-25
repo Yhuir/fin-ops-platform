@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-25 - 三栏统一搜索收口到 direct canonical query
+
+- 根因：前端搜索参数已经发送到 `/api/workbench/groups`，但 completed OA 的 SQL allowlist 只含申请人、父项目和 workflow no，漏掉页面实际展示的对方户名与子付款项；流水和发票 allowlist 同时混有不可见 `project_id/counterparty_name`，且遗漏展示账户、税率/税额和来源 Chip。浏览器还保留一套只对已加载页过滤的 matcher，服务端未命中的 OA 会被错误显示为 0 条，形成双事实源漂移。
+- 修复：现有 direct repository 的 source-hit CTE 显式对齐三栏 summary DTO；OA completed/in-progress 共用相同父项/子付款项字段口径，流水账户复用现有 settings mapping 与银行尾号展示规则，发票来源只读取 canonical `source_links` 并保持“OA附件优先、人工导入其次、明细归属独立”。任一成员命中仍返回完整 group，literal wildcard、numeric/date 精确比较和 opaque cursor 合同不变。
+- 旧链删除：删除 `workbenchRowMatchesUnifiedSearch`、`matchesWorkbenchRowText` 及其 display alias 聚合；页面不再用当前 10 组猜测搜索结果。发票来源 Chip formatter、账户紧凑 formatter、列/时间筛选和排序仍有现役 renderer/filter consumer，因此保留。
+- 边界与性能：不新增模块、依赖、API、表、migration、索引、read model、worker、queue、cache 或 SQL round-trip；查询仍先以 scope/zone 构造 `needed_keys`，只对候选 typed members 做参数化匹配。本次不写业务数据、不创建数据库备份、不删除主数据库。
+
 ## 2026-08-25 - OA 附件发票当前付款项展示归属闭环
 
 - 根因：canonical 发票已经保留 OA 附件 provenance，但没有正式 relation 的 OA 与其发票仍各自显示为 singleton；旧展示归一又允许历史 parent alias/`row_index` 先把 stale item 改成当前 item，若直接拿来分组会把“历史位置相同”误当成当前 ownership。列表 SQL、Python hydration 与 full/detail 对 OA `expense_items` 的 ID key 口径也不完全一致。

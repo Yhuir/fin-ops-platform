@@ -33,7 +33,6 @@ import {
   buildWorkbenchDisplayGroups,
   countWorkbenchGroupRows,
   createEmptyWorkbenchZoneDisplayState,
-  workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
 
@@ -1663,34 +1662,13 @@ describe("workbench api bank amount mapping", () => {
     expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["nooa-salary-summary"]);
   });
 
-  test.each(workbenchPanes)(
-    "keeps full relation context for every group whose %s fixture has a zone-wide hit",
-    (activePaneId) => {
-      const groups = createContextSearchGroups(activePaneId);
-      const state = createEmptyWorkbenchZoneDisplayState();
-      state.searchQuery = "张三";
+  test("does not locally discard server-owned search results or their relation context", () => {
+    const groups = createContextSearchGroups("oa");
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.searchQuery = "张丽芬";
 
-      const displayGroups = buildWorkbenchDisplayGroups(groups, state);
-      const displayIds = displayGroups.map((group) => group.id);
-      const supplementPanes = workbenchPanes.filter((paneId) => paneId !== activePaneId);
-
-      expect(displayIds).toEqual([
-        `${activePaneId}-anchor`,
-        ...supplementPanes.map((paneId) => `${paneId}-supplement`),
-        "multi-pane-hit",
-      ]);
-      expect(displayIds.filter((id) => id === "multi-pane-hit")).toHaveLength(1);
-
-      const anchorGroup = displayGroups.find((group) => group.id === `${activePaneId}-anchor`);
-      expect(anchorGroup?.rows[activePaneId].map((row) => row.counterparty)).toEqual(["张三"]);
-      expect(anchorGroup?.rows[supplementPanes[0]].map((row) => row.counterparty)).toEqual([
-        supplementPanes[0] === "bank" ? "上下文银行" : supplementPanes[0] === "oa" ? "上下文OA" : "上下文发票",
-      ]);
-      expect(anchorGroup?.rows[supplementPanes[1]].map((row) => row.counterparty)).toEqual([
-        supplementPanes[1] === "bank" ? "上下文银行" : supplementPanes[1] === "oa" ? "上下文OA" : "上下文发票",
-      ]);
-    },
-  );
+    expect(buildWorkbenchDisplayGroups(groups, state)).toBe(groups);
+  });
 
   test("keeps the zone search query as one explicit state value", () => {
     const pairedState = createEmptyWorkbenchZoneDisplayState();
@@ -1701,7 +1679,7 @@ describe("workbench api bank amount mapping", () => {
     expect(unpairedState.searchQuery).toBe("");
   });
 
-  test("intersects another pane search query with active pane row filters", () => {
+  test("keeps active pane row filters independent from the server-owned search query", () => {
     const groups = createContextSearchGroups("invoice").map((group) => {
       if (group.id !== "invoice-anchor" && group.id !== "multi-pane-hit") {
         return group;
