@@ -404,7 +404,8 @@ describe("workbench api bank amount mapping", () => {
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 review_decision: "accept_paired",
                 review_note: "财务已核对",
-                reviewed_by: "reviewer",
+                reviewed_by_account: "YNSYLP007",
+                reviewed_by_name: "杨丽萍",
                 reviewed_at: "2026-08-19 01:00:00+08",
                 items: [{
                   code: "oa_bank_equal_invoice_less",
@@ -1096,7 +1097,8 @@ describe("workbench api bank amount mapping", () => {
                 fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 review_decision: "accept_paired",
                 review_note: "财务已核对",
-                reviewed_by: "reviewer",
+                reviewed_by_account: "YNSYLP007",
+                reviewed_by_name: "杨丽萍",
                 reviewed_at: "2026-08-19 01:00:00+08",
                 items: [{
                   code: "oa_bank_equal_invoice_less",
@@ -1260,7 +1262,8 @@ describe("workbench api bank amount mapping", () => {
       amountDelta: "1.00",
       reviewDecision: "accept_paired",
       reviewNote: "财务已核对",
-      reviewedBy: "reviewer",
+      reviewedByAccount: "YNSYLP007",
+      reviewedByName: "杨丽萍",
       reviewedAt: "2026-08-19 01:00:00+08",
     });
   });

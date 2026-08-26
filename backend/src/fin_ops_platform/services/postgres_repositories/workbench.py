@@ -894,13 +894,14 @@ class PostgresWorkbenchRepository:
             params = (*params, month_start(normalized_scope_key))
         rows = self._connection.fetch_all(
             f"""
-            select fingerprint, resolution, updated_by, updated_at,
-                   raw_payload#>>'{{normalized_payload,note}}' as note
+            select fingerprint, resolution, updated_at,
+                   raw_payload#>>'{{normalized_payload,note}}' as note,
+                   raw_payload#>>'{{normalized_payload,actor_account}}' as actor_account,
+                   raw_payload#>>'{{normalized_payload,actor_name}}' as actor_name
             from (
                 select
                     raw_payload#>>'{{normalized_payload,fingerprint}}' as fingerprint,
                     resolution,
-                    updated_by,
                     updated_at,
                     raw_payload,
                     row_number() over (
@@ -919,7 +920,8 @@ class PostgresWorkbenchRepository:
             fingerprint: {
                 "decision": text(row.get("resolution")),
                 "note": text(row.get("note")),
-                "reviewed_by": text(row.get("updated_by")),
+                "reviewed_by_account": text(row.get("actor_account")),
+                "reviewed_by_name": text(row.get("actor_name")),
                 "reviewed_at": serialize_value(row.get("updated_at")),
             }
             for row in rows
@@ -934,6 +936,8 @@ class PostgresWorkbenchRepository:
         group_id: str,
         scope_key: str,
         actor_id: str,
+        actor_account: str,
+        actor_name: str,
         decision: str,
         note: str,
         detected_classification_codes: list[str],
@@ -943,6 +947,8 @@ class PostgresWorkbenchRepository:
         normalized_group_id = str(group_id or "").strip()
         normalized_scope_key = str(scope_key or "").strip()
         normalized_actor_id = str(actor_id or "").strip()
+        normalized_actor_account = str(actor_account or "").strip()
+        normalized_actor_name = str(actor_name or "").strip()
         normalized_decision = str(decision or "").strip()
         normalized_note = str(note or "").strip()
         normalized_detected_codes = sorted(
@@ -963,8 +969,13 @@ class PostgresWorkbenchRepository:
             character not in "0123456789abcdef" for character in normalized_fingerprint
         ):
             raise ValueError("fingerprint must be a SHA-256 hex digest.")
-        if not normalized_group_id or not normalized_scope_key or not normalized_actor_id:
-            raise ValueError("group_id, scope_key and actor_id are required.")
+        if (
+            not normalized_group_id
+            or not normalized_scope_key
+            or not normalized_actor_id
+            or not normalized_actor_account
+        ):
+            raise ValueError("group_id, scope_key, actor_id and actor_account are required.")
         if normalized_decision not in {"accept_paired", "keep_unpaired"}:
             raise ValueError("decision must be accept_paired or keep_unpaired.")
         case_id = f"ANOMALY-REVIEW-{normalized_fingerprint[:32]}"
@@ -973,12 +984,15 @@ class PostgresWorkbenchRepository:
             current = connection.fetch_one(
                 """
                 select id::text as id, status, resolution, version, created_by, created_at,
+                       updated_by, updated_at,
                        scope_month::text as scope_month,
                        raw_payload#>'{normalized_payload,evidence_item_fingerprints}'
                            as evidence_item_fingerprints,
                        raw_payload#>'{normalized_payload,detected_classification_codes}'
                            as detected_classification_codes,
-                       raw_payload#>>'{normalized_payload,note}' as note
+                       raw_payload#>>'{normalized_payload,note}' as note,
+                       raw_payload#>>'{normalized_payload,actor_account}' as actor_account,
+                       raw_payload#>>'{normalized_payload,actor_name}' as actor_name
                 from app.workbench_exception_cases
                 where case_id = %s
                 for update
@@ -1017,10 +1031,21 @@ class PostgresWorkbenchRepository:
                 "row_ids": [],
                 "candidate_ids": [],
                 "updated_by": normalized_actor_id,
+                "actor_account": normalized_actor_account,
+                "actor_name": normalized_actor_name,
             }
             if not changed:
+                current_actor_account = text((current or {}).get("actor_account"))
+                if not current_actor_account:
+                    raise RuntimeError(
+                        f"Stored anomaly reviewer account is missing for {case_id}."
+                    )
                 return {
                     **normalized_payload,
+                    "updated_by": text((current or {}).get("updated_by")),
+                    "actor_account": current_actor_account,
+                    "actor_name": text((current or {}).get("actor_name")),
+                    "reviewed_at": serialize_value((current or {}).get("updated_at")),
                     "changed": False,
                 }
             connection.execute(

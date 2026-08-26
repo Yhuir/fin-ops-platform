@@ -745,7 +745,9 @@ function buildAmountMismatchWorkbenchGroup(decision: WorkbenchAnomalyReviewDecis
     fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     review_decision: decision,
     review_note: decision === "accept_paired" ? "浏览器 E2E 已确认进入已配对" : "",
-    reviewed_by: decision === "accept_paired" ? "浏览器测试员" : "",
+    reviewed_by_account: decision === "accept_paired" ? "E2E-REVIEWER" : "",
+    reviewed_by_name: decision === "accept_paired" ? "浏览器测试员" : "",
+    reviewed_at: decision === "accept_paired" ? "2026-08-25T17:03:47.404624+08:00" : null,
     items: [anomalyItem],
   };
   return {

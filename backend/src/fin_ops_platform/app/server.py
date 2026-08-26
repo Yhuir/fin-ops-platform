@@ -3154,9 +3154,20 @@ class Application:
         if isinstance(auth_context, Response):
             return auth_context
         actor_id, _tenant_id = auth_context
+        request_actor_id, actor_name, actor_account = _REQUEST_AUDIT_ACTOR.get()
+        if request_actor_id != actor_id or not actor_account:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "oa_identity_unavailable",
+                    "message": "当前 OA 账户身份信息不完整，无法记录异常审阅。",
+                },
+            )
         status_code, result = self._workbench_action_api_routes.review_anomaly(
             payload,
             actor_id=actor_id,
+            actor_account=actor_account,
+            actor_name=actor_name,
         )
         return self._json_response(status_code, result)
 

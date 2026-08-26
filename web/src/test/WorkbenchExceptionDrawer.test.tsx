@@ -61,9 +61,15 @@ function group(zone: "paired" | "unpaired"): WorkbenchRelationGroup {
       fingerprint: "a".repeat(64),
       reviewDecision: zone === "paired" ? "accept_paired" : "pending",
       reviewNote: "",
-      reviewedBy: zone === "paired" ? "reviewer" : "",
+      reviewedByAccount: zone === "paired" ? "YNSYLP007" : "",
+      reviewedByName: zone === "paired" ? "杨丽萍" : "",
       items: anomalyItems.map((item) => zone === "paired"
-        ? { ...item, reviewDecision: "accept_paired", reviewedBy: "reviewer" }
+        ? {
+            ...item,
+            reviewDecision: "accept_paired",
+            reviewedByAccount: "YNSYLP007",
+            reviewedByName: "杨丽萍",
+          }
         : item),
     },
   };

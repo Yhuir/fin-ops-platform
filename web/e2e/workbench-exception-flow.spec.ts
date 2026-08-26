@@ -206,6 +206,15 @@ test.describe("workbench exception browser flow", () => {
     await expect(pairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     })).toBeVisible();
+    await collapsedIndicator.hover();
+    const reviewedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
+    await expect(reviewedPopover.getByText("已接受该异常风险")).toBeVisible();
+    await expect(reviewedPopover.getByText("操作账户")).toBeVisible();
+    await expect(reviewedPopover.getByText("E2E-REVIEWER（浏览器测试员）")).toBeVisible();
+    await expect(reviewedPopover.getByText("操作时间")).toBeVisible();
+    await expect(reviewedPopover.getByText("2026-08-25 17:03:47")).toBeVisible();
+    await expect(reviewedPopover).not.toContainText("+08:00");
+    await page.keyboard.press("Escape");
     await expect(unpairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     })).toHaveCount(0);

@@ -12,6 +12,7 @@ import {
   isWorkbenchAmountAnomalyCode,
   type WorkbenchAnomalyItem,
 } from "../../features/workbench/types";
+import { formatDateTimeText } from "../../features/dateTime";
 
 type WorkbenchAnomalyIndicatorProps = {
   anomalies: WorkbenchAnomalyItem[];
@@ -84,6 +85,9 @@ export default function WorkbenchAnomalyIndicator({
   }
 
   const review = anomalies.find((anomaly) => anomaly.reviewDecision === "accept_paired");
+  const reviewerLabel = review
+    ? `${review.reviewedByAccount}${review.reviewedByName ? `（${review.reviewedByName}）` : ""}`
+    : "";
   const ariaLabel = `${levelLabel}有 ${anomalies.length} 项异常，查看详情`;
 
   return (
@@ -173,10 +177,23 @@ export default function WorkbenchAnomalyIndicator({
             </ul>
             {review ? (
               <div className="workbench-anomaly-popover__review">
-                已接受该异常风险
-                {review.reviewedBy ? ` · ${review.reviewedBy}` : ""}
-                {review.reviewedAt ? ` · ${review.reviewedAt}` : ""}
-                {review.reviewNote ? ` · ${review.reviewNote}` : ""}
+                <strong>已接受该异常风险</strong>
+                <dl>
+                  <div>
+                    <dt>操作账户</dt>
+                    <dd>{reviewerLabel}</dd>
+                  </div>
+                  <div>
+                    <dt>操作时间</dt>
+                    <dd>{formatDateTimeText(review.reviewedAt)}</dd>
+                  </div>
+                  {review.reviewNote ? (
+                    <div>
+                      <dt>备注</dt>
+                      <dd>{review.reviewNote}</dd>
+                    </div>
+                  ) : null}
+                </dl>
               </div>
             ) : null}
             {action ? (

@@ -83,6 +83,8 @@ class WorkbenchActionApiRoutes:
         payload: dict[str, Any],
         *,
         actor_id: str,
+        actor_account: str,
+        actor_name: str,
     ) -> tuple[HTTPStatus, dict[str, object]]:
         if self._anomaly_review_service is None:
             return HTTPStatus.SERVICE_UNAVAILABLE, {
@@ -90,7 +92,12 @@ class WorkbenchActionApiRoutes:
                 "message": "异常审阅服务暂时不可用。",
             }
         try:
-            result = self._anomaly_review_service.review(payload, actor_id=actor_id)
+            result = self._anomaly_review_service.review(
+                payload,
+                actor_id=actor_id,
+                actor_account=actor_account,
+                actor_name=actor_name,
+            )
         except WorkbenchAnomalyReviewConflict as error:
             return HTTPStatus.CONFLICT, {
                 "error": error.code,

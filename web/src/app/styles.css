@@ -14695,12 +14695,39 @@ body.column-layout-dragging {
 }
 
 .workbench-anomaly-popover__review {
+  display: grid;
+  gap: 5px;
   padding-top: 7px;
   border-top: 1px solid #e5eaf0;
   color: #617185;
   font-size: var(--fp-text-caption);
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.workbench-anomaly-popover__review strong {
+  color: #526277;
+}
+
+.workbench-anomaly-popover__review dl {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.workbench-anomaly-popover__review dl > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.workbench-anomaly-popover__review dt,
+.workbench-anomaly-popover__review dd {
+  margin: 0;
+}
+
+.workbench-anomaly-popover__review dt {
+  color: #7a8899;
 }
 
 .workbench-anomaly-popover__action {

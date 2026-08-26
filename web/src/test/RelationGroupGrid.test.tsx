@@ -1287,7 +1287,8 @@ describe("Workbench candidate grouping layout", () => {
         fingerprint: "a".repeat(64),
         reviewDecision: "pending",
         reviewNote: "",
-        reviewedBy: "",
+        reviewedByAccount: "",
+        reviewedByName: "",
         items: [amountAnomaly, documentAnomaly],
       },
     };

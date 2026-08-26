@@ -1363,7 +1363,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             anomaly_review_decisions={
                 fingerprint: {
                     "decision": "accept_paired",
-                    "reviewed_by": "reviewer",
+                    "reviewed_by_account": "YNSYLP007",
+                    "reviewed_by_name": "杨丽萍",
                 }
             },
         )

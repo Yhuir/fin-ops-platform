@@ -297,7 +297,12 @@ class WorkbenchRelationGroupingService:
         if anomaly:
             anomaly["review_decision"] = decision
             anomaly["review_note"] = str((review or {}).get("note") or "") if isinstance(review, dict) else ""
-            anomaly["reviewed_by"] = str((review or {}).get("reviewed_by") or "") if isinstance(review, dict) else ""
+            anomaly["reviewed_by_account"] = str(
+                (review or {}).get("reviewed_by_account") or ""
+            ) if isinstance(review, dict) else ""
+            anomaly["reviewed_by_name"] = str(
+                (review or {}).get("reviewed_by_name") or ""
+            ) if isinstance(review, dict) else ""
             anomaly["reviewed_at"] = (review or {}).get("reviewed_at") if isinstance(review, dict) else None
             for item in anomaly["items"]:
                 item["display_label"] = item["label"]

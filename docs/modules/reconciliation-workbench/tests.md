@@ -1,6 +1,13 @@
 # 关联台测试与验证
 
-日期：2026-08-26
+日期：2026-08-27
+
+## 2026-08-27 异常审阅人身份快照与 Popover 时间格式
+
+- Service/repository/API：`tests/test_workbench_anomaly_review_service.py` 保护异常审阅只接收后端认证的 actor id/account/name，账户缺失 fail closed；持久化同时保留内部 actor id 与用户可见账户/姓名快照，幂等重复请求返回原审核人的快照和原审阅时间，不被后来点击者覆盖。compact/full 两条 direct hydration 都只发布 `reviewed_by_account/reviewed_by_name/reviewed_at`，旧 `reviewed_by` 用户可见字段已删除。
+- PostgreSQL migration：`0156_backfill_workbench_anomaly_reviewer_identity.sql` 仅为缺少账户快照的历史异常审阅记录补齐唯一 `audit.events` 账户和最新非空姓名；映射缺失或同一内部 actor 出现多个账户时整笔迁移失败，既有 decision/version/updated_by/updated_at 与历史 audit 不重写，并追加一次可审计的 migration event。集成测试保护成功、幂等和歧义零部分写入。
+- Frontend interaction：`WorkbenchAnomalyIndicator.test.tsx` 保护 Popover 显示 `YNSYLP007（杨丽萍）`、正常业务时区时间 `2026-08-25 17:03:47` 和可选备注，不再显示内部 `8` 或原始 `+08:00`。
+- 性能与回归：写入只增加固定大小 JSON 快照；两条既有页面 SQL 在原 projection 内读取 JSON 字段，不增加 SQL、HTTP、read model、worker、cache、依赖或 N+1。七类金额异常、三类资料异常、分区、筛选、分页、确认/撤回与其它页面合同保持不变。
 
 ## 2026-08-26 ETC 折叠汇总、选择去重与误异常迁移
 

@@ -14,7 +14,14 @@ class WorkbenchAnomalyReviewService:
         self._group_repository = group_repository
         self._decision_repository = decision_repository
 
-    def review(self, payload: dict[str, object], *, actor_id: str) -> dict[str, object]:
+    def review(
+        self,
+        payload: dict[str, object],
+        *,
+        actor_id: str,
+        actor_account: str,
+        actor_name: str,
+    ) -> dict[str, object]:
         scope_key = str(payload.get("month") or "").strip()
         zone = str(payload.get("zone") or "").strip()
         group_id = str(payload.get("group_id") or "").strip()
@@ -92,6 +99,8 @@ class WorkbenchAnomalyReviewService:
             group_id=group_id,
             scope_key=decision_scope_key,
             actor_id=actor_id,
+            actor_account=actor_account,
+            actor_name=actor_name,
             decision=decision,
             note=note,
             detected_classification_codes=detected_classification_codes,

@@ -100,4 +100,30 @@ describe("WorkbenchAnomalyIndicator", () => {
     expect(onPress).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("button", { name: "选择 OA 明细" })).not.toBeInTheDocument());
   });
+
+  it("shows the reviewer account snapshot and a normal business-time timestamp", async () => {
+    const user = userEvent.setup({ skipHover: true });
+    render(
+      <WorkbenchAnomalyIndicator
+        anomalies={[{
+          ...anomaly,
+          reviewDecision: "accept_paired",
+          reviewedByAccount: "YNSYLP007",
+          reviewedByName: "杨丽萍",
+          reviewedAt: "2026-08-25T17:03:47.404624+08:00",
+          reviewNote: "金额差异已核对",
+        }]}
+        levelLabel="该关联组"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" }));
+
+    expect(await screen.findByText("已接受该异常风险")).toBeVisible();
+    expect(screen.getByText("YNSYLP007（杨丽萍）")).toBeVisible();
+    expect(screen.getByText("2026-08-25 17:03:47")).toBeVisible();
+    expect(screen.getByText("金额差异已核对")).toBeVisible();
+    expect(screen.queryByText("8")).not.toBeInTheDocument();
+    expect(screen.queryByText(/\+08:00/)).not.toBeInTheDocument();
+  });
 });

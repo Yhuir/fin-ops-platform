@@ -226,7 +226,8 @@ type ApiWorkbenchAnomaly = {
   fingerprint?: string | null;
   review_decision?: string | null;
   review_note?: string | null;
-  reviewed_by?: string | null;
+  reviewed_by_account?: string | null;
+  reviewed_by_name?: string | null;
   reviewed_at?: string | null;
   items?: ApiWorkbenchAnomalyItem[] | null;
 };
@@ -901,7 +902,8 @@ function mapWorkbenchAnomaly(
       ? "keep_unpaired"
       : "pending";
   const reviewNote = toDisplayValue(value.review_note, "");
-  const reviewedBy = toDisplayValue(value.reviewed_by, "");
+  const reviewedByAccount = toDisplayValue(value.reviewed_by_account, "");
+  const reviewedByName = toDisplayValue(value.reviewed_by_name, "");
   const reviewedAt = toDisplayValue(value.reviewed_at, "") || undefined;
   const items = (Array.isArray(value.items) ? value.items : []).flatMap((item) => {
     if (!item || typeof item !== "object") {
@@ -941,7 +943,8 @@ function mapWorkbenchAnomaly(
       displayRowId: toDisplayValue(item.display_row_id, "") || undefined,
       reviewDecision,
       reviewNote,
-      reviewedBy,
+      reviewedByAccount,
+      reviewedByName,
       reviewedAt,
     }];
   });
@@ -953,7 +956,8 @@ function mapWorkbenchAnomaly(
     fingerprint,
     reviewDecision,
     reviewNote,
-    reviewedBy,
+    reviewedByAccount,
+    reviewedByName,
     reviewedAt,
     items,
   };

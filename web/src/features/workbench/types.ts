@@ -120,7 +120,8 @@ export type WorkbenchAnomalyItem = {
   displayRowId?: string;
   reviewDecision?: "pending" | "accept_paired" | "keep_unpaired";
   reviewNote?: string;
-  reviewedBy?: string;
+  reviewedByAccount?: string;
+  reviewedByName?: string;
   reviewedAt?: string;
 };
 
@@ -129,7 +130,8 @@ export type WorkbenchAnomaly = {
   fingerprint: string;
   reviewDecision: "pending" | "accept_paired" | "keep_unpaired";
   reviewNote: string;
-  reviewedBy: string;
+  reviewedByAccount: string;
+  reviewedByName: string;
   reviewedAt?: string;
   items: WorkbenchAnomalyItem[];
 };

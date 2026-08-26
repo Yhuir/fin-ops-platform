@@ -3,14 +3,11 @@ from __future__ import annotations
 import json
 import os
 import time
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 from typing import Any
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
-    PostgresWorkbenchPageQueryRepository,
-)
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
@@ -18,26 +15,30 @@ from fin_ops_platform.services.postgres_repositories.operations_audit import (
 from fin_ops_platform.services.postgres_repositories.workbench import (
     PostgresWorkbenchRepository,
 )
-from fin_ops_platform.services.workbench_direct_query_errors import (
-    WorkbenchDirectQueryUnavailable,
+from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+    PostgresWorkbenchIdempotencyRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
+    PostgresWorkbenchPageQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
     PostgresWorkbenchPageSelectionRepository,
 )
-from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
-    PostgresWorkbenchIdempotencyRepository,
-)
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
+)
+from fin_ops_platform.services.workbench_canonical_rows import (
+    WorkbenchCanonicalRowsBuilder,
+)
+from fin_ops_platform.services.workbench_direct_query_errors import (
+    WorkbenchDirectQueryUnavailable,
 )
 from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
     WorkbenchInvoiceExpenseItemAssignmentService,
 )
-from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
-from fin_ops_platform.services.workbench_canonical_rows import (
-    WorkbenchCanonicalRowsBuilder,
-)
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -861,6 +862,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             group_id="case:CASE-DIRECT-1",
             scope_key="2026-07",
             actor_id="test-suite",
+            actor_account="test-suite",
+            actor_name="测试账户",
             decision="accept_paired",
             note="附件异常与金额异常均已复核",
             detected_classification_codes=[
@@ -1565,6 +1568,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 group_id=str(group["group_id"]),
                 scope_key="2026-08",
                 actor_id="test-suite",
+                actor_account="test-suite",
+                actor_name="测试账户",
                 decision="accept_paired",
                 note="验证自动分类 cursor 固定分区",
                 detected_classification_codes=[
@@ -1746,6 +1751,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             group_id=str(mismatched_group["group_id"]),
             scope_key="2026-07",
             actor_id="test-suite",
+            actor_account="test-suite",
+            actor_name="测试账户",
             decision="accept_paired",
             note="production-shape regression",
             detected_classification_codes=[

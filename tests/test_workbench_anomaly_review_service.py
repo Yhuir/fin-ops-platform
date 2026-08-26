@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from fin_ops_platform.app.routes_workbench_actions import WorkbenchActionApiRoutes
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.workbench_anomaly_review_service import (
@@ -88,7 +87,12 @@ def test_review_uses_current_server_evidence_and_ignores_client_classification_f
         "review_classification_codes": ["no_anomaly"],
     }
 
-    target.review(request, actor_id="reviewer")
+    target.review(
+        request,
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
+    )
 
     assert decisions.calls[0]["evidence_item_fingerprints"] == ["b" * 64, "c" * 64]
     assert decisions.calls[0]["detected_classification_codes"] == [
@@ -100,7 +104,12 @@ def test_review_uses_current_server_evidence_and_ignores_client_classification_f
 def test_accept_paired_persists_auditable_review_for_anomaly_only_blocker() -> None:
     target, decisions, groups = service(anomaly_group())
 
-    result = target.review(payload(), actor_id="reviewer")
+    result = target.review(
+        payload(),
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
+    )
 
     assert result["affected_scope_keys"] == ["2026-05"]
     assert groups.calls == [{
@@ -113,7 +122,9 @@ def test_accept_paired_persists_auditable_review_for_anomaly_only_blocker() -> N
         "fingerprint": "a" * 64,
         "group_id": "case:CASE-1",
         "scope_key": "2026-05",
-        "actor_id": "reviewer",
+        "actor_id": "8",
+        "actor_account": "YNSYLP007",
+        "actor_name": "杨丽萍",
         "decision": "accept_paired",
         "note": "",
         "detected_classification_codes": [
@@ -130,7 +141,12 @@ def test_accept_paired_cannot_bypass_other_relation_blockers() -> None:
     )
 
     with pytest.raises(WorkbenchAnomalyReviewConflict, match="不能强制"):
-        target.review(payload(), actor_id="reviewer")
+        target.review(
+            payload(),
+            actor_id="8",
+            actor_account="YNSYLP007",
+            actor_name="杨丽萍",
+        )
 
     assert decisions.calls == []
 
@@ -140,7 +156,12 @@ def test_keep_unpaired_is_valid_even_when_other_blockers_exist() -> None:
         anomaly_group(blockers=["anomaly_review_required", "missing_invoice"])
     )
 
-    target.review(payload("keep_unpaired"), actor_id="reviewer")
+    target.review(
+        payload("keep_unpaired"),
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
+    )
 
     assert decisions.calls[0]["decision"] == "keep_unpaired"
 
@@ -152,7 +173,12 @@ def test_paired_anomaly_can_be_withdrawn_without_client_classification() -> None
     anomaly["review_decision"] = "accept_paired"
     target, decisions, _groups = service(group)
 
-    target.review({**payload("keep_unpaired"), "zone": "paired"}, actor_id="reviewer")
+    target.review(
+        {**payload("keep_unpaired"), "zone": "paired"},
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
+    )
 
     assert decisions.calls[0]["decision"] == "keep_unpaired"
 
@@ -161,7 +187,12 @@ def test_review_rejects_stale_fingerprint() -> None:
     target, decisions, _groups = service(anomaly_group())
 
     with pytest.raises(WorkbenchAnomalyReviewConflict, match="已变化"):
-        target.review({**payload(), "fingerprint": "f" * 64}, actor_id="reviewer")
+        target.review(
+            {**payload(), "fingerprint": "f" * 64},
+            actor_id="8",
+            actor_account="YNSYLP007",
+            actor_name="杨丽萍",
+        )
 
     assert decisions.calls == []
 
@@ -173,7 +204,12 @@ def test_review_route_returns_stable_bad_request_contract() -> None:
         anomaly_review_service=target,
     )
 
-    status, result = routes.review_anomaly({**payload(), "zone": "invalid"}, actor_id="reviewer")
+    status, result = routes.review_anomaly(
+        {**payload(), "zone": "invalid"},
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
+    )
 
     assert int(status) == 400
     assert result["error"] == "invalid_workbench_anomaly_review_request"
@@ -193,7 +229,12 @@ def test_review_forwards_detail_key_and_persists_cross_month_decision_globally()
         "detail_key": "singleton:oa:OA-1",
     }
 
-    result = target.review(request, actor_id="reviewer")
+    result = target.review(
+        request,
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
+    )
 
     assert groups.calls[0]["detail_key"] == "singleton:oa:OA-1"
     assert decisions.calls[0]["scope_key"] == "all"
@@ -209,7 +250,12 @@ def test_review_route_returns_specific_blocker_conflict_code() -> None:
         anomaly_review_service=target,
     )
 
-    status, result = routes.review_anomaly(payload(), actor_id="reviewer")
+    status, result = routes.review_anomaly(
+        payload(),
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
+    )
 
     assert int(status) == 409
     assert result["error"] == "workbench_anomaly_review_blocked"
@@ -249,7 +295,8 @@ def test_repository_reads_latest_scoped_anomaly_review_and_excludes_it_from_lega
         "fingerprint": "a" * 64,
         "resolution": "accept_paired",
         "note": "已核对",
-        "updated_by": "reviewer",
+        "actor_account": "YNSYLP007",
+        "actor_name": "杨丽萍",
         "updated_at": "2026-08-15T08:00:00+08:00",
     }])
     decisions = PostgresWorkbenchRepository(
@@ -259,7 +306,8 @@ def test_repository_reads_latest_scoped_anomaly_review_and_excludes_it_from_lega
     assert decisions["a" * 64] == {
         "decision": "accept_paired",
         "note": "已核对",
-        "reviewed_by": "reviewer",
+        "reviewed_by_account": "YNSYLP007",
+        "reviewed_by_name": "杨丽萍",
         "reviewed_at": "2026-08-15T08:00:00+08:00",
     }
     read_sql, read_params = review_connection.fetch_all_calls[0]
@@ -276,7 +324,9 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         fingerprint="a" * 64,
         group_id="case:CASE-1",
         scope_key="2026-05",
-        actor_id="reviewer",
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
         decision="accept_paired",
         note="已核对",
         detected_classification_codes=["oa_bank_equal_invoice_more"],
@@ -292,6 +342,10 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         "resolution": "accept_paired",
         "version": 1,
         "scope_month": "2026-05-01",
+        "updated_by": "8",
+        "updated_at": "2026-08-15T08:00:00+08:00",
+        "actor_account": "YNSYLP007",
+        "actor_name": "杨丽萍",
         "note": "已核对",
         "evidence_item_fingerprints": ["b" * 64],
         "detected_classification_codes": ["oa_bank_equal_invoice_more"],
@@ -302,14 +356,40 @@ def test_repository_anomaly_review_is_idempotent_and_audits_only_changes() -> No
         fingerprint="a" * 64,
         group_id="case:CASE-1",
         scope_key="2026-05",
-        actor_id="reviewer",
+        actor_id="11",
+        actor_account="YNSYLP010",
+        actor_name="陈秀云",
         decision="accept_paired",
         note="已核对",
         detected_classification_codes=["oa_bank_equal_invoice_more"],
         evidence_item_fingerprints=["b" * 64],
     )
     assert unchanged["changed"] is False
+    assert unchanged["updated_by"] == "8"
+    assert unchanged["actor_account"] == "YNSYLP007"
+    assert unchanged["actor_name"] == "杨丽萍"
+    assert unchanged["reviewed_at"] == "2026-08-15T08:00:00+08:00"
     assert unchanged_connection.execute_calls == []
+
+
+def test_repository_anomaly_review_requires_authenticated_account_snapshot() -> None:
+    connection = WriteRecordingConnection()
+
+    with pytest.raises(ValueError, match="actor_account"):
+        PostgresWorkbenchRepository(connection).set_workbench_anomaly_review_decision(
+            fingerprint="a" * 64,
+            group_id="case:CASE-1",
+            scope_key="2026-05",
+            actor_id="8",
+            actor_account="",
+            actor_name="杨丽萍",
+            decision="accept_paired",
+            note="已核对",
+            detected_classification_codes=["oa_bank_equal_invoice_more"],
+            evidence_item_fingerprints=["b" * 64],
+        )
+
+    assert connection.execute_calls == []
 
 
 def test_repository_promotes_an_existing_monthly_decision_to_global_scope() -> None:
@@ -317,6 +397,10 @@ def test_repository_promotes_an_existing_monthly_decision_to_global_scope() -> N
         "resolution": "accept_paired",
         "version": 1,
         "scope_month": "2026-05-01",
+        "updated_by": "8",
+        "updated_at": "2026-08-15T08:00:00+08:00",
+        "actor_account": "YNSYLP007",
+        "actor_name": "杨丽萍",
         "note": "已核对",
         "evidence_item_fingerprints": ["b" * 64],
         "detected_classification_codes": ["oa_bank_equal_invoice_more"],
@@ -326,7 +410,9 @@ def test_repository_promotes_an_existing_monthly_decision_to_global_scope() -> N
         fingerprint="a" * 64,
         group_id="case:CASE-1",
         scope_key="all",
-        actor_id="reviewer",
+        actor_id="8",
+        actor_account="YNSYLP007",
+        actor_name="杨丽萍",
         decision="accept_paired",
         note="已核对",
         detected_classification_codes=["oa_bank_equal_invoice_more"],

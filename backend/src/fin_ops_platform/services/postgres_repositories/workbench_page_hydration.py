@@ -19,12 +19,12 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
     without_keys,
 )
-from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
-    oa_source_aliases_sql,
-)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
+)
+from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
+    oa_source_aliases_sql,
 )
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
@@ -985,7 +985,14 @@ class PostgresWorkbenchPageHydrationRepository:
                             decision.raw_payload#>>'{normalized_payload,note}',
                             ''
                         ),
-                        'reviewed_by', coalesce(decision.updated_by, ''),
+                        'reviewed_by_account', coalesce(
+                            decision.raw_payload#>>'{normalized_payload,actor_account}',
+                            ''
+                        ),
+                        'reviewed_by_name', coalesce(
+                            decision.raw_payload#>>'{normalized_payload,actor_name}',
+                            ''
+                        ),
                         'reviewed_at', decision.updated_at
                     ) as payload
                 from (
@@ -994,7 +1001,6 @@ class PostgresWorkbenchPageHydrationRepository:
                         exception.raw_payload#>>'{normalized_payload,fingerprint}'
                             as fingerprint,
                         exception.resolution,
-                        exception.updated_by,
                         exception.updated_at,
                         exception.raw_payload,
                         row_number() over (
@@ -1445,7 +1451,10 @@ class PostgresWorkbenchPageHydrationRepository:
                    relation.updated_at as relation_updated_at,
                    decision.fingerprint as decision_fingerprint,
                    decision.resolution as decision_resolution,
-                   decision.updated_by as decision_updated_by,
+                   decision.raw_payload#>>'{normalized_payload,actor_account}'
+                       as decision_actor_account,
+                   decision.raw_payload#>>'{normalized_payload,actor_name}'
+                       as decision_actor_name,
                    decision.updated_at as decision_updated_at,
                    decision.raw_payload#>>'{normalized_payload,note}' as decision_note
             from app.workbench_pair_relations relation
@@ -1454,7 +1463,6 @@ class PostgresWorkbenchPageHydrationRepository:
                     exception.raw_payload#>>'{normalized_payload,fingerprint}'
                         as fingerprint,
                     exception.resolution,
-                    exception.updated_by,
                     exception.updated_at,
                     exception.raw_payload
                 from app.workbench_exception_cases exception
@@ -1506,7 +1514,8 @@ class PostgresWorkbenchPageHydrationRepository:
                 decisions[fingerprint] = {
                     "decision": resolution,
                     "note": str(row.get("decision_note") or ""),
-                    "reviewed_by": str(row.get("decision_updated_by") or ""),
+                    "reviewed_by_account": str(row.get("decision_actor_account") or ""),
+                    "reviewed_by_name": str(row.get("decision_actor_name") or ""),
                     "reviewed_at": serialize_value(reviewed_at),
                 }
         return relations, decisions
