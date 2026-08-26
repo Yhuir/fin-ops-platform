@@ -339,7 +339,10 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(resolver_class.call_count, 1)
         self.assertEqual(
             connection.snapshot_transaction.executed,
-            ["set transaction isolation level repeatable read read only"],
+            [
+                "set transaction isolation level repeatable read read only",
+                "set local jit = off",
+            ],
         )
         sql = "\n".join(connection.snapshot_transaction.fetched)
         self.assertIn("from app.app_settings", sql)

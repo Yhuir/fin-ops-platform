@@ -287,6 +287,7 @@ class PostgresCostStatisticsCanonicalRepository:
             return
         with self._connection.transaction() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
+            transaction.execute("set local jit = off")
             yield transaction
 
 
