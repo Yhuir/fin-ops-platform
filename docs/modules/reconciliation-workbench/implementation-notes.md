@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-08-26 - ETC 异常审阅 0155 精确重验证
+
+- 根因：`0154` 在旧 current decision 已不存在时会直接 no-op；即使已生成新 decision，后续完全相同的关系重复持久化也曾刷新 relation `updated_at`，使现役 `decision.updated_at >= relation.updated_at` freshness 合同立即失效。查询层 freshness gate 保持不变。
+- 数据修复：`0155` 只接受固定 case/group、三类正式成员、`batch_accounting`、2026-04、三方 2411.25、唯一且未删除的 canonical 支出流水 `txn_imported_1453`、canonical ETC 业务批次 `etc_business_batch_hist_20260413_241125`、44 张/2411.25 明细，以及 OA `oa-exp-2080` 两条精确 `oa_invoice_attachment_absent` 证据。迁移用经只读生产事实授权的固定 SHA-256 锚定 44 个 `invoice_identity + amount`，并按现役三层 ETC 来源优先级重算 preferred 集合；canonical 与 preferred 都必须命中固定合同，因此即使数量与总额相抵不变也会拒绝来源漂移，同 identity、同金额的高优先级覆盖则允许通过。目标完全不存在时 no-op；但 exception lineage、relation history、0155 audit 或任一 ETC runtime source anchor 残留都属于部分存在并 fail closed。
+- 审阅语义：已 fresh 的精确 v2 decision 只有在旧 v1 原审阅仍完整存在、且唯一 0154 migration event 精确复现生成 payload 时才保持不变；fresh v3 还必须同时存在且精确匹配唯一 exception event 和 immutable audit event 才 no-op。精确 decision 缺失或因 relation 时间戳后移而失效时，写入 v3 的“经授权系统定向修正”。系统修正时间取 relation 与既有精确 decision 的最大时间再加 1 微秒，既满足现役 freshness，也保证 `latest_anomaly_decisions` 稳定选中新 v3；随后追加 exception event 与 immutable audit event。新事件使用 `system:migration:0155`，不冒充 actor 8 重新人工复核；两条真实缺附件证据继续保留，已移除的 synthetic `oa_invoice_attachment_unassigned` 不恢复。
+- 边界与安全：不修改 relation、OA、流水、ETC 发票明细或 canonical summary，不放宽查询 freshness，不新增 fallback、read model、worker、cache、依赖或数据库备份；API shape 与模块职责未变化，`boundary-io.md` 仅补充 deterministic matching 的真 no-op 持久化合同。
+
 ## 2026-08-26 - ETC 折叠汇总、正式选择与历史误异常闭环
 
 - 折叠展示：ETC 关系折叠态只返回并显示 canonical `etc_invoice_summary` 和真实发票总数，不再混入“第一张真实发票”；展开态只显示完整真实发票，收起或 canonical reload 后恢复同一汇总行。删除前端 `rows[0]`、首票和 `slice(0, 1)` 等闭合态兜底，缺少汇总合同就明确显示空态。

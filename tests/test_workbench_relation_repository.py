@@ -108,6 +108,9 @@ def test_relation_save_persists_only_canonical_facts_and_history() -> None:
 
     execute_sql = _normalized_sql(connection.execute_calls)
     assert any("insert into app.workbench_pair_relations" in sql for sql in execute_sql)
+    relation_upsert = next(sql for sql in execute_sql if "insert into app.workbench_pair_relations" in sql)
+    assert "where app.workbench_pair_relations.relation_mode is distinct from excluded.relation_mode" in relation_upsert
+    assert "raw_payload #- '{normalized_payload,updated_at}'" in relation_upsert
     assert not any("delete from app.workbench_pair_relation_history" in sql for sql in execute_sql)
     assert any("insert into app.workbench_pair_relation_history" in sql for sql in execute_sql)
     assert any("on conflict (id) do nothing" in sql for sql in execute_sql)

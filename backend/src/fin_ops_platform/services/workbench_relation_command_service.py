@@ -99,6 +99,46 @@ def _formal_oa_attachment_metadata(
     return metadata
 
 
+def _formal_relation_state_matches(
+    relation: dict[str, Any] | None,
+    *,
+    row_ids: list[str],
+    row_types: list[str],
+    relation_mode: str,
+    month_scope: str,
+    created_by: str,
+    note: str,
+    amount_check: dict[str, Any],
+    special_metadata: dict[str, Any],
+    rule_version: str,
+    evidence: dict[str, Any],
+) -> bool:
+    if not isinstance(relation, dict) or str(relation.get("status") or "") != "active":
+        return False
+    existing_row_ids = [str(item).strip() for item in list(relation.get("row_ids") or [])]
+    existing_row_types = [str(item).strip() for item in list(relation.get("row_types") or [])]
+    if len(existing_row_ids) != len(existing_row_types) or len(row_ids) != len(row_types):
+        return False
+    existing_members = sorted(zip(existing_row_types, existing_row_ids, strict=True))
+    requested_members = sorted(zip(row_types, row_ids, strict=True))
+    if existing_members != requested_members:
+        return False
+    expected_state = {
+        "relation_mode": relation_mode,
+        "month_scope": month_scope,
+        "created_by": created_by,
+        "note": note,
+        "amount_check": amount_check,
+        "special_metadata": special_metadata,
+        "exception_case_id": "",
+        "rule_version": rule_version,
+        "evidence": evidence,
+        "oa_exemption": None,
+        "display_tags": [],
+    }
+    return all(relation.get(key) == value for key, value in expected_state.items())
+
+
 @dataclass(frozen=True, slots=True)
 class WorkbenchRelationConfirmPreparation:
     owner_token: object
@@ -660,15 +700,17 @@ class WorkbenchRelationCommandService:
         histories: list[dict[str, Any]] = []
         changed_case_ids: set[str] = set()
         affected_months: set[str] = set()
+        applied_etc_link_count = 0
         for plan in sorted(normalized_plans, key=lambda item: str(getattr(item, "relation_fingerprint", ""))):
             case_id = str(getattr(plan, "case_id", "") or "")
             plan_row_ids, plan_row_types = typed_members_by_case[case_id]
             target_case_id = str(getattr(plan, "target_case_id", "") or "")
+            resolved_case_id = target_case_id or case_id
             active_relations = pair_service.active_relations_for_row_ids(plan_row_ids)
             conflicts = [
                 relation
                 for relation in active_relations
-                if str(relation.get("case_id") or "") != target_case_id
+                if str(relation.get("case_id") or "") != resolved_case_id
             ]
             if conflicts:
                 raise WorkbenchRelationCommandError(
@@ -744,6 +786,7 @@ class WorkbenchRelationCommandService:
                         payload={"case_id": case_id, "oa_row_id": etc_batch_link["oa_row_id"]},
                     )
                 special_metadata["etc_batch_link"] = self._desired_etc_batch_link(etc_batch_link)
+            relation_note = "系统确定性配对扩展" if target_case_id else "系统确定性配对"
             if target_case_id:
                 before_relation = pair_service.get_active_relation_by_case_id(target_case_id)
                 if not isinstance(before_relation, dict):
@@ -773,6 +816,20 @@ class WorkbenchRelationCommandService:
                         bindings=attachment_bindings,
                     )
                 )
+                if _formal_relation_state_matches(
+                    before_relation,
+                    row_ids=plan_row_ids,
+                    row_types=plan_row_types,
+                    relation_mode=relation_mode,
+                    month_scope=month_scope,
+                    created_by=actor_id,
+                    note=relation_note,
+                    amount_check=amount_check,
+                    special_metadata=special_metadata,
+                    rule_version=str(getattr(plan, "rule_version", "") or ""),
+                    evidence=evidence,
+                ):
+                    continue
                 relation, history = pair_service.replace_with_confirmed_relation(
                     case_id=target_case_id,
                     row_ids=plan_row_ids,
@@ -780,17 +837,32 @@ class WorkbenchRelationCommandService:
                     relation_mode=relation_mode,
                     created_by=actor_id,
                     month_scope=month_scope,
-                    note="系统确定性配对扩展",
+                    note=relation_note,
                     amount_check=amount_check,
                     special_metadata=special_metadata,
                     operation_type="confirm_link",
                     history_created_by=actor_id,
-                    history_note="系统确定性配对扩展",
+                    history_note=relation_note,
                     rule_version=str(getattr(plan, "rule_version", "") or ""),
                     evidence=evidence,
                     before_relations=[before_relation],
                 )
             else:
+                before_relation = pair_service.get_active_relation_by_case_id(case_id)
+                if _formal_relation_state_matches(
+                    before_relation,
+                    row_ids=plan_row_ids,
+                    row_types=plan_row_types,
+                    relation_mode=relation_mode,
+                    month_scope=month_scope,
+                    created_by=actor_id,
+                    note=relation_note,
+                    amount_check=amount_check,
+                    special_metadata=special_metadata,
+                    rule_version=str(getattr(plan, "rule_version", "") or ""),
+                    evidence=evidence,
+                ):
+                    continue
                 relation = pair_service.create_active_relation(
                     case_id=case_id,
                     row_ids=plan_row_ids,
@@ -798,7 +870,7 @@ class WorkbenchRelationCommandService:
                     relation_mode=relation_mode,
                     created_by=actor_id,
                     month_scope=month_scope,
-                    note="系统确定性配对",
+                    note=relation_note,
                     amount_check=amount_check,
                     special_metadata=special_metadata,
                     rule_version=str(getattr(plan, "rule_version", "") or ""),
@@ -810,25 +882,27 @@ class WorkbenchRelationCommandService:
                     after_relations=[relation],
                     affected_row_ids=plan_row_ids,
                     created_by=actor_id,
-                    note="系统确定性配对",
+                    note=relation_note,
                     amount_check=amount_check,
                 )
             relations.append(relation)
             histories.append(history)
             changed_case_ids.add(case_id)
             affected_months.update(scope_keys)
+            if etc_batch_link is not None:
+                applied_etc_link_count += 1
         self._save_changed_cases(
             pair_service,
             sorted(changed_case_ids),
             history_events=histories,
         )
         return {
-            "status": "confirmed",
+            "status": "confirmed" if changed_case_ids else "noop",
             "relations": relations,
             "histories": histories,
             "changed_case_ids": sorted(changed_case_ids),
             "affected_months": sorted(affected_months),
-            "enriched_relation_count": len(normalized_links),
+            "enriched_relation_count": applied_etc_link_count,
         }
 
     def enrich_etc_batch_links(
@@ -2461,6 +2535,13 @@ class WorkbenchRelationCommandService:
                 "Workbench relation repository does not expose changed-case delta persistence.",
             )
         changed_ids = {str(case_id).strip() for case_id in list(changed_case_ids or []) if str(case_id).strip()}
+        if not changed_ids:
+            if history_events:
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_history_without_changed_case",
+                    "Workbench relation history requires at least one changed case.",
+                )
+            return
         snapshot = pair_service.snapshot_case_ids(sorted(changed_ids), include_history=False)
         snapshot["pair_relation_history"] = [
             deepcopy(history)

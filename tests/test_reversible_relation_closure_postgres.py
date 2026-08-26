@@ -188,6 +188,68 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
         self.assertEqual(sorted(active_snapshot["pair_relations"]), ["case-delta"])
         self.assertNotIn("pair_relation_history", active_snapshot)
 
+    def test_identical_relation_delta_does_not_advance_persisted_updated_at(self) -> None:
+        repository = PostgresWorkbenchRelationRepository(self.connection)
+        relation = {
+            "case_id": "case-semantic-noop",
+            "relation_mode": "manual_confirmed",
+            "status": "active",
+            "version": 1,
+            "month_scope": "2026-02",
+            "row_ids": ["bank-semantic-noop", "oa-semantic-noop"],
+            "row_types": ["bank", "oa"],
+            "created_by": "system:workbench-matching",
+            "created_at": "2026-02-01T00:00:00+00:00",
+            "updated_at": "2026-02-01T00:00:00+00:00",
+            "note": "系统确定性配对",
+            "amount_check": {"status": "matched"},
+            "special_metadata": {},
+            "source_versions": {},
+        }
+        repository.save_workbench_pair_relation_delta(
+            {"pair_relations": {relation["case_id"]: relation}, "pair_relation_history": []},
+            changed_case_ids={relation["case_id"]},
+        )
+        self.connection.execute(
+            "update app.workbench_pair_relations set updated_at = %s where case_id = %s",
+            ("2026-02-02T00:00:00+00:00", relation["case_id"]),
+        )
+
+        rerun = dict(relation)
+        rerun["updated_at"] = "2026-02-03T00:00:00+00:00"
+        repository.save_workbench_pair_relation_delta(
+            {"pair_relations": {rerun["case_id"]: rerun}, "pair_relation_history": []},
+            changed_case_ids={rerun["case_id"]},
+        )
+        unchanged = self.connection.fetch_one(
+            """
+            select updated_at = %s::timestamptz as unchanged,
+                   raw_payload#>>'{normalized_payload,updated_at}' as payload_updated_at
+            from app.workbench_pair_relations
+            where case_id = %s
+            """,
+            ("2026-02-02T00:00:00+00:00", relation["case_id"]),
+        )
+        self.assertTrue(unchanged["unchanged"])
+        self.assertEqual(unchanged["payload_updated_at"], relation["updated_at"])
+
+        changed = dict(rerun)
+        changed["note"] = "业务证据已变化"
+        repository.save_workbench_pair_relation_delta(
+            {"pair_relations": {changed["case_id"]: changed}, "pair_relation_history": []},
+            changed_case_ids={changed["case_id"]},
+        )
+        updated = self.connection.fetch_one(
+            """
+            select updated_at > %s::timestamptz as advanced, note
+            from app.workbench_pair_relations
+            where case_id = %s
+            """,
+            ("2026-02-02T00:00:00+00:00", relation["case_id"]),
+        )
+        self.assertTrue(updated["advanced"])
+        self.assertEqual(updated["note"], changed["note"])
+
     def test_confirm_uow_extends_immutable_attachment_only_after_real_commit(self) -> None:
         oa_row_id = f"oa-pg-confirm-{self.run_id}"
         bank_row_id = f"bank-pg-confirm-{self.run_id}"

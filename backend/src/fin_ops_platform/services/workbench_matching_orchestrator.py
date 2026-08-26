@@ -268,8 +268,21 @@ class WorkbenchMatchingOrchestrator:
 
             write_result = self._relation_uow.run(command, apply_formal_relations)
             relations = [item for item in list(write_result.get("relations") or []) if isinstance(item, dict)]
-            summary["created_relation_count"] = sum(1 for plan in command.plans if not plan.target_case_id)
-            summary["extended_relation_count"] = sum(1 for plan in command.plans if plan.target_case_id)
+            changed_case_ids = {
+                str(case_id)
+                for case_id in list(write_result.get("changed_case_ids") or [])
+                if str(case_id)
+            }
+            summary["created_relation_count"] = sum(
+                1
+                for plan in command.plans
+                if not plan.target_case_id and plan.case_id in changed_case_ids
+            )
+            summary["extended_relation_count"] = sum(
+                1
+                for plan in command.plans
+                if plan.target_case_id and plan.case_id in changed_case_ids
+            )
             summary["enriched_relation_count"] = int(write_result.get("enriched_relation_count") or 0)
             summary["relation_ids"] = [
                 str(relation.get("case_id") or "")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 import unittest
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
@@ -23,6 +24,100 @@ def command_service() -> WorkbenchRelationCommandService:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_identical_formal_plan_rerun_is_a_true_noop(self) -> None:
+        service = command_service()
+        plan = SimpleNamespace(
+            case_id="CASE-FORMAL-NOOP",
+            row_ids=("oa-formal-noop", "bank-formal-noop"),
+            row_types=("oa", "bank"),
+            relation_fingerprint="formal-noop-fingerprint",
+            batch_hash="formal-noop-batch",
+            rule_code="exact_amount",
+            rule_version="1",
+            amount_minor=10000,
+            currency="CNY",
+            scope_keys=("2026-05",),
+            evidence_summary=(("amount", "100.00"),),
+            target_case_id=None,
+            oa_attachment_bindings=(),
+            relation_mode="manual_confirmed",
+        )
+
+        first = service.confirm_formal_relation_plans(
+            [plan],
+            actor_id="system:workbench-matching",
+        )
+        before = service.get_active_relation_by_case_id("CASE-FORMAL-NOOP")
+        history_before = service.list_history()
+        second = service.confirm_formal_relation_plans(
+            [plan],
+            actor_id="system:workbench-matching",
+        )
+        after = service.get_active_relation_by_case_id("CASE-FORMAL-NOOP")
+
+        self.assertEqual(first["status"], "confirmed")
+        self.assertEqual(second["status"], "noop")
+        self.assertEqual(second["changed_case_ids"], [])
+        self.assertEqual(second["histories"], [])
+        self.assertEqual(after, before)
+        self.assertEqual(service.list_history(), history_before)
+
+    def test_identical_formal_extension_rerun_is_a_true_noop(self) -> None:
+        pair_service = WorkbenchPairRelationService()
+        pair_service.create_active_relation(
+            case_id="CASE-FORMAL-EXTENSION-NOOP",
+            row_ids=["oa-formal-extension", "bank-formal-extension"],
+            row_types=["oa", "bank"],
+            relation_mode="manual_confirmed",
+            created_by="system:workbench-matching",
+            month_scope="2026-05",
+        )
+        service = WorkbenchRelationCommandService(
+            relation_repository=WorkbenchRelationCommandRepositoryAdapter(
+                pair_relation_service=pair_service,
+                save_repository=False,
+            )
+        )
+        plan = SimpleNamespace(
+            case_id="CASE-FORMAL-EXTENSION-NOOP",
+            row_ids=(
+                "oa-formal-extension",
+                "bank-formal-extension",
+                "invoice-formal-extension",
+            ),
+            row_types=("oa", "bank", "invoice"),
+            relation_fingerprint="formal-extension-noop-fingerprint",
+            batch_hash="formal-extension-noop-batch",
+            rule_code="exact_amount",
+            rule_version="1",
+            amount_minor=10000,
+            currency="CNY",
+            scope_keys=("2026-05",),
+            evidence_summary=(("amount", "100.00"),),
+            target_case_id="CASE-FORMAL-EXTENSION-NOOP",
+            oa_attachment_bindings=(),
+            relation_mode="manual_confirmed",
+        )
+
+        first = service.confirm_formal_relation_plans(
+            [plan],
+            actor_id="system:workbench-matching",
+        )
+        before = service.get_active_relation_by_case_id("CASE-FORMAL-EXTENSION-NOOP")
+        history_before = service.list_history()
+        second = service.confirm_formal_relation_plans(
+            [plan],
+            actor_id="system:workbench-matching",
+        )
+        after = service.get_active_relation_by_case_id("CASE-FORMAL-EXTENSION-NOOP")
+
+        self.assertEqual(first["status"], "confirmed")
+        self.assertEqual(second["status"], "noop")
+        self.assertEqual(second["changed_case_ids"], [])
+        self.assertEqual(second["histories"], [])
+        self.assertEqual(after, before)
+        self.assertEqual(service.list_history(), history_before)
+
     def test_confirm_and_query_use_canonical_relation_state(self) -> None:
         service = command_service()
         result = service.confirm_relation(

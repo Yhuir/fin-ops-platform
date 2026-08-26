@@ -11,6 +11,7 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
     _ANOMALY_STATE_CTES,
     _SCOPED_CANONICAL_GROUPS_CTE,
+    _anomaly_state_ctes,
     PostgresWorkbenchPageQueryRepository,
     WORKBENCH_GROUP_PAGE_SIZE,
 )
@@ -176,6 +177,12 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
     assert "exact_totals" in connection.sql
     assert "exact_row_counts" in connection.sql
     assert "filter_option_anomaly_groups" not in connection.sql
+    anomaly_candidate_sql = connection.sql.split(
+        "group_page_anomaly_groups as materialized (", 1
+    )[1].split("latest_anomaly_decisions as materialized (", 1)[0]
+    assert "groups.group_kind = 'relation'" in anomaly_candidate_sql
+    assert "groups.zone = 'paired'" in anomaly_candidate_sql
+    assert "from group_page_anomaly_groups groups" in connection.sql
     assert "exception_counts" not in connection.sql
     assert "offset" not in connection.sql.lower()
     assert "limit %s" in connection.sql.lower()
@@ -284,6 +291,7 @@ def test_exception_amount_view_returns_additive_counts_and_auto_code_cursor() ->
     }
     assert len(connection.calls) == 1
     assert "base_filtered_groups" in connection.sql
+    assert "group_page_anomaly_groups" not in connection.sql
     assert "exception_counts" in connection.sql
     assert "selected_exception" in connection.sql
     assert payload["next_cursor"] is not None
@@ -558,8 +566,20 @@ def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     assert sql.count("join visible_invoice_facts invoice") == 1
     assert sql.count("coalesce(invoice.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'") == 1
     assert visible_invoice_sql.count("jsonb_array_elements(") == 1
+    assert "invoice.source_links as invoice_source_links" in visible_invoice_sql
+    assert "invoice.raw_payload->'source_links'" not in visible_invoice_sql
+    assert "source_flags.has_oa_ownership_link" in visible_invoice_sql
+    assert "source_flags.has_explicit_oa_item_link" in visible_invoice_sql
     assert "source_flags.has_direct_oa_attachment" in visible_invoice_sql
     assert "source_flags.has_manual_import" in visible_invoice_sql
+
+    ownership_sql = sql.split(
+        "scoped_invoice_ownership_links as materialized (", 1
+    )[1].split("current_oa_item_facts as materialized (", 1)[0]
+    assert "case when invoice.has_oa_ownership_link" in ownership_sql
+    assert "where invoice.has_oa_ownership_link" in ownership_sql
+    assert "or not invoice.has_explicit_oa_item_link" in ownership_sql
+    assert ownership_sql.count("jsonb_array_elements(") == 1
 
 
 def test_canonical_spine_rolls_active_invoice_relation_members_once() -> None:
@@ -572,7 +592,10 @@ def test_canonical_spine_rolls_active_invoice_relation_members_once() -> None:
     )[1].split("ranked_invoices as materialized (", 1)[0]
 
     assert sql.count("active_invoice_relation_members as materialized") == 1
-    assert "select distinct member.row_id" in active_member_sql
+    assert "from all_active_relation_members member" in active_member_sql
+    assert "scope.scope_key = 'all'" in active_member_sql
+    assert "join app.workbench_pair_relations relation" in active_member_sql
+    assert "scope.scope_key <> 'all'" in active_member_sql
     assert "relation.status = 'active'" in active_member_sql
     assert "cardinality(relation.row_ids) = cardinality(relation.row_types)" in active_member_sql
     assert "cross join lateral unnest(relation.row_ids, relation.row_types)" in active_member_sql
@@ -617,6 +640,15 @@ def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     assert "document_anomaly_groups" not in sql
     assert "left join relation_amount_classifications classification" not in sql
     assert "state" in sql
+
+
+def test_anomaly_query_group_source_is_explicit_and_fail_closed() -> None:
+    sql = _anomaly_state_ctes(group_source="group_page_anomaly_groups")
+
+    assert sql.count("group_page_anomaly_groups groups") == 3
+    assert "canonical_groups groups" not in sql
+    with pytest.raises(ValueError, match="unsupported anomaly group source"):
+        _anomaly_state_ctes(group_source="injected_groups")
 
 
 def test_etc_summary_is_excluded_only_from_unassigned_invoice_evidence() -> None:
@@ -724,7 +756,7 @@ def test_source_owner_resolution_precedes_group_filters_counts_and_cursor_limit(
     group_index = spine_sql.index("canonical_groups as materialized")
     member_index = spine_sql.index("canonical_group_members as materialized")
     assert owner_index < placement_index < source_group_index < group_index < member_index
-    assert "or not exists ( select 1 from jsonb_array_elements(" in spine_sql
+    assert "or not invoice.has_explicit_oa_item_link" in spine_sql
     assert "= 'oa_expense_item_invoice'" in spine_sql
     assert "having bool_and(resolution.resolved_oa_row_id is not null)" in spine_sql
     assert "count(distinct resolution.resolved_oa_row_id) = 1" in spine_sql
@@ -965,6 +997,9 @@ def test_oa_invoice_and_relation_details_use_one_target_bounded_set_query() -> N
         assert "count(distinct item_identity.value)" in lowered
         assert "scoped_invoice_facts as materialized" in lowered
         assert "invoice.invoice_month = invoice_scope.scope_month" in lowered
+        assert "invoice.source_links as invoice_source_links" in lowered
+        assert "invoice.raw_payload->'source_links'" not in lowered
+        assert "invoice.raw_payload->'normalized_payload'->'source_links'" not in lowered
         assert "scope.scope_key = 'all' or invoice.invoice_month" not in lowered
         assert "source_owned_invoice_placements as materialized" in lowered
         assert "relation.row_ids as formal_member_ids" in lowered

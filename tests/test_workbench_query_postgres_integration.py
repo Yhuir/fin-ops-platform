@@ -806,9 +806,22 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             statement
             for statement in self.connection.statements
             if statement["operation"] == "fetch_all"
-            and "anomaly_counts" in str(statement.get("raw_sql") or "")
+            and "overall_group_summary as materialized"
+            in str(statement.get("raw_sql") or "")
         )
         self.assertEqual(candidate_statement["page_rows_with_anomaly_payload"], 0)
+
+        ordinary_unpaired = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+        )
+        self.assertTrue(
+            any(
+                candidate.get("detail_key") == "CASE-DIRECT-1"
+                for candidate in ordinary_unpaired["groups"]
+            ),
+            ordinary_unpaired,
+        )
 
         self.connection.statements.clear()
         unpaired = self.repository.get_workbench_groups_page(
@@ -1527,7 +1540,11 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 item["code"]
                 for item in document_page["groups"][0]["workbench_anomaly"]["items"]
             ],
-            ["oa_invoice_attachment_absent", "oa_invoice_attachment_absent"],
+            [
+                "oa_invoice_attachment_unassigned",
+                "oa_invoice_attachment_absent",
+                "oa_invoice_attachment_absent",
+            ],
         )
         self.assertEqual(document_page["exception_counts"], amount_page["exception_counts"])
 

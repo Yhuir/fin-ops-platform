@@ -181,6 +181,32 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(relation["special_metadata"]["formal_relation"]["origin"], "system_deterministic")
         self.assertNotIn("cost_statistics", uow.calls[0].refresh_metadata["downstream_scope_types"])
 
+    def test_identical_formal_plan_rerun_reports_no_relation_write(self) -> None:
+        fixture = FormalRelationFactBatch(
+            facts=(fact("oa", "oa-rerun-noop"), fact("invoice", "invoice-rerun-noop"))
+        )
+        orchestrator, _repository, uow = self._orchestrator(fixture)
+
+        first = orchestrator.run(
+            changed_scope_months=["2026-05"],
+            reason="dirty_scope_retry",
+            request_id="request-rerun-noop-1",
+        )
+        relation_before = dict(next(iter(uow.snapshot["pair_relations"].values())))
+        second = orchestrator.run(
+            changed_scope_months=["2026-05"],
+            reason="dirty_scope_retry",
+            request_id="request-rerun-noop-2",
+        )
+
+        self.assertEqual(first["created_relation_count"], 1)
+        self.assertEqual(second["planned_relation_count"], 1)
+        self.assertEqual(second["created_relation_count"], 0)
+        self.assertEqual(second["extended_relation_count"], 0)
+        self.assertEqual(second["relation_ids"], [])
+        self.assertEqual(uow.save_count, 1)
+        self.assertEqual(next(iter(uow.snapshot["pair_relations"].values())), relation_before)
+
     def test_bank_plan_persists_one_bulk_requirement_snapshot(self) -> None:
         fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-520"), fact("bank", "bank-520")))
         orchestrator, repository, uow = self._orchestrator(fixture)

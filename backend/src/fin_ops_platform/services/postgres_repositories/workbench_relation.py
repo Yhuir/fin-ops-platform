@@ -650,6 +650,18 @@ class PostgresWorkbenchRelationRepository:
                         source_versions = excluded.source_versions,
                         raw_payload = excluded.raw_payload,
                         updated_at = now()
+                    where app.workbench_pair_relations.relation_mode is distinct from excluded.relation_mode
+                       or app.workbench_pair_relations.status is distinct from excluded.status
+                       or app.workbench_pair_relations.version is distinct from excluded.version
+                       or app.workbench_pair_relations.month_scope is distinct from excluded.month_scope
+                       or app.workbench_pair_relations.row_ids is distinct from excluded.row_ids
+                       or app.workbench_pair_relations.row_types is distinct from excluded.row_types
+                       or app.workbench_pair_relations.note is distinct from excluded.note
+                       or app.workbench_pair_relations.amount_check is distinct from excluded.amount_check
+                       or app.workbench_pair_relations.special_metadata is distinct from excluded.special_metadata
+                       or app.workbench_pair_relations.source_versions is distinct from excluded.source_versions
+                       or app.workbench_pair_relations.raw_payload #- '{normalized_payload,updated_at}'
+                          is distinct from excluded.raw_payload #- '{normalized_payload,updated_at}'
                     """,
                     (
                         case_id,

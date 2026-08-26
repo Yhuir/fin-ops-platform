@@ -115,22 +115,6 @@ def _anomaly_oa_external_alias_values_sql(source_payload: str) -> str:
     )
 
 
-def _anomaly_invoice_source_links_sql(invoice_alias: str) -> str:
-    return f"""
-        case
-            when jsonb_typeof({invoice_alias}.source_links) = 'array'
-                then {invoice_alias}.source_links
-            when jsonb_typeof({invoice_alias}.raw_payload->'source_links') = 'array'
-                then {invoice_alias}.raw_payload->'source_links'
-            when jsonb_typeof(
-                {invoice_alias}.raw_payload->'normalized_payload'->'source_links'
-            ) = 'array'
-                then {invoice_alias}.raw_payload->'normalized_payload'->'source_links'
-            else '[]'::jsonb
-        end
-    """
-
-
 def _canonical_oa_item_id_sql(item_value: str) -> str:
     """Return one current item identity, rejecting conflicting aliases."""
 
@@ -500,7 +484,11 @@ visible_invoice_facts as materialized (
                 then 'payment'
             else null
         end as invoice_direction,
-        {_anomaly_invoice_source_links_sql('invoice')} as invoice_source_links,
+        invoice.source_links as invoice_source_links,
+        coalesce(source_flags.has_oa_ownership_link, false)
+            as has_oa_ownership_link,
+        coalesce(source_flags.has_explicit_oa_item_link, false)
+            as has_explicit_oa_item_link,
         case
             when nullif(invoice.digital_invoice_no, '') is not null
                 then 'digital:' || invoice.digital_invoice_no
@@ -512,28 +500,25 @@ visible_invoice_facts as materialized (
     from app.invoices invoice
     left join lateral (
         select
-            bool_or(
-                jsonb_typeof(invoice.source_links) = 'array'
-                and coalesce(
-                    source_link.value->>'source_type',
-                    source_link.value->>'type',
-                    source_link.value->>'source'
-                ) = 'oa_attachment_invoice'
-            ) as has_direct_oa_attachment,
-            bool_or(coalesce(
+            bool_or(source_link.source_type = 'oa_attachment_invoice')
+                as has_direct_oa_attachment,
+            bool_or(source_link.source_type = 'manual_invoice_import')
+                as has_manual_import,
+            bool_or(source_link.source_type in (
+                'oa_attachment_invoice',
+                'oa_expense_item_invoice'
+            )) as has_oa_ownership_link,
+            bool_or(source_link.source_type = 'oa_expense_item_invoice')
+                as has_explicit_oa_item_link
+        from (
+            select coalesce(
                 source_link.value->>'source_type',
                 source_link.value->>'type',
                 source_link.value->>'source'
-            ) = 'manual_invoice_import') as has_manual_import
-        from jsonb_array_elements(
-            case
-                when jsonb_typeof(invoice.source_links) = 'array'
-                    then invoice.source_links
-                when jsonb_typeof(invoice.raw_payload->'source_links') = 'array'
-                    then invoice.raw_payload->'source_links'
-                else '[]'::jsonb
-            end
-        ) source_link(value)
+            ) as source_type
+            from jsonb_array_elements(invoice.source_links)
+                source_link(value)
+        ) source_link
     ) source_flags on true
     where {_VISIBLE_INVOICE_SQL}
 ),
@@ -587,9 +572,14 @@ scoped_invoice_ownership_links as materialized (
     join scoped_source_keys source_key
       on source_key.row_type = 'invoice'
      and source_key.row_id = invoice.row_id
-    cross join lateral jsonb_array_elements(invoice.invoice_source_links)
+    cross join lateral jsonb_array_elements(
+        case when invoice.has_oa_ownership_link
+             then invoice.invoice_source_links
+             else '[]'::jsonb end
+    )
       with ordinality source_link(value, ordinality)
-    where coalesce(
+    where invoice.has_oa_ownership_link
+      and coalesce(
         source_link.value->>'source_type',
         source_link.value->>'type',
         source_link.value->>'source'
@@ -600,15 +590,7 @@ scoped_invoice_ownership_links as materialized (
               source_link.value->>'type',
               source_link.value->>'source'
           ) = 'oa_expense_item_invoice'
-          or not exists (
-              select 1
-              from jsonb_array_elements(invoice.invoice_source_links) explicit_link(value)
-              where coalesce(
-                  explicit_link.value->>'source_type',
-                  explicit_link.value->>'type',
-                  explicit_link.value->>'source'
-              ) = 'oa_expense_item_invoice'
-          )
+          or not invoice.has_explicit_oa_item_link
       )
 ),
 current_oa_item_facts as materialized (
@@ -1077,11 +1059,19 @@ requested_invoice_hard_identities as materialized (
      and needed.row_id = invoice.row_id
 ),
 active_invoice_relation_members as materialized (
-    select distinct member.row_id
-    from app.workbench_pair_relations relation
+    select member.row_id
+    from all_active_relation_members member
+    cross join requested_scope scope
+    where scope.scope_key = 'all'
+      and member.row_type = 'invoice'
+    union
+    select member.row_id
+    from requested_scope scope
+    join app.workbench_pair_relations relation
+      on relation.status = 'active'
     cross join lateral unnest(relation.row_ids, relation.row_types)
         as member(row_id, row_type)
-    where relation.status = 'active'
+    where scope.scope_key <> 'all'
       and cardinality(relation.row_ids) = cardinality(relation.row_types)
       and case lower(member.row_type)
             when 'invoice_record' then 'invoice'
@@ -1490,7 +1480,14 @@ canonical_group_members as materialized (
 # These CTEs consume the already-built canonical group spine and keep anomaly
 # evaluation in PostgreSQL.  They emit one compact state row per anomalous
 # relation; no all-scope member JSON is copied into the application process.
-_ANOMALY_STATE_CTES = f"""
+def _anomaly_state_ctes(*, group_source: str) -> str:
+    if group_source not in {
+        "canonical_groups",
+        "filter_option_anomaly_groups",
+        "group_page_anomaly_groups",
+    }:
+        raise ValueError(f"unsupported anomaly group source: {group_source}")
+    return f"""
 latest_anomaly_decisions as materialized (
     select group_id, fingerprint, resolution as decision, updated_at
     from (
@@ -1517,7 +1514,7 @@ latest_anomaly_decisions as materialized (
 ),
 relation_anomaly_etc_requests as materialized (
     select distinct summary.external_batch_id
-    from canonical_groups groups
+    from {group_source} groups
     join scoped_relations relation on relation.case_id = groups.detail_key
     join all_active_relation_members member
       on member.relation_id = relation.id
@@ -1583,7 +1580,7 @@ relation_anomaly_members as materialized (
         ) as invoice_total_with_tax,
         canonical_row.invoice_direction,
         canonical_row.invoice_source_links
-    from canonical_groups groups
+    from {group_source} groups
     join scoped_relations relation
       on relation.case_id = groups.detail_key
     join all_active_relation_members member
@@ -2117,11 +2114,33 @@ anomaly_states as materialized (
             else 'pending'
         end as decision
     from anomaly_fingerprints anomaly
-    join canonical_groups groups on groups.internal_key = anomaly.internal_key
+    join {group_source} groups on groups.internal_key = anomaly.internal_key
     left join latest_anomaly_decisions decision
       on decision.group_id = anomaly.internal_key
 )
 """
+
+
+_ANOMALY_STATE_CTES = _anomaly_state_ctes(group_source="canonical_groups")
+
+
+def _group_page_anomaly_state_ctes(*, exception_bucket: str | None) -> str:
+    if exception_bucket is not None:
+        return _ANOMALY_STATE_CTES
+    # An anomaly can only move a base-paired relation into the unpaired zone.
+    # Base-unpaired groups remain unpaired for every anomaly decision, so
+    # ordinary page reads do not need to fingerprint them. Exception pages
+    # retain the complete two-zone anomaly universe above.
+    return f"""
+group_page_anomaly_groups as materialized (
+    select groups.*
+    from canonical_groups groups
+    where groups.group_kind = 'relation'
+      and groups.zone = 'paired'
+),
+{_anomaly_state_ctes(group_source="group_page_anomaly_groups")}
+"""
+
 
 def _filter_option_anomaly_state_ctes(*, exception_bucket: str | None) -> str:
     # Only relations can carry anomalies. Normal option reads need anomaly state
@@ -2140,7 +2159,7 @@ filter_option_anomaly_groups as materialized (
           and target_member.row_type = %s
     )
 ),
-{_ANOMALY_STATE_CTES.replace("canonical_groups groups", "filter_option_anomaly_groups groups")}
+{_anomaly_state_ctes(group_source="filter_option_anomaly_groups")}
 """
 
 _EFFECTIVE_GROUPS_CTES = """
@@ -3000,7 +3019,7 @@ class PostgresWorkbenchPageQueryRepository:
             f"""
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {search_ctes}
-            {_ANOMALY_STATE_CTES},
+            {_group_page_anomaly_state_ctes(exception_bucket=normalized_exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
             {exception_query_cte_sql}
             {filtered_group_cte_name} as materialized (
@@ -3480,7 +3499,7 @@ class PostgresWorkbenchPageQueryRepository:
                 cross join requested_scope scope
                 join app.invoices invoice on true
                 cross join lateral jsonb_array_elements(
-                    {_anomaly_invoice_source_links_sql('invoice')}
+                    invoice.source_links
                 ) source_link(value)
                 join target_owner_item_ids owner
                   on owner.current_item_id = nullif(
@@ -3506,7 +3525,7 @@ class PostgresWorkbenchPageQueryRepository:
                       or not exists (
                           select 1
                           from jsonb_array_elements(
-                              {_anomaly_invoice_source_links_sql('invoice')}
+                              invoice.source_links
                           ) explicit_link(value)
                           where coalesce(
                               explicit_link.value->>'source_type',
@@ -3533,8 +3552,7 @@ class PostgresWorkbenchPageQueryRepository:
                     coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
                     invoice.invoice_month as scope_month,
                     invoice.updated_at,
-                    {_anomaly_invoice_source_links_sql('invoice')}
-                        as invoice_source_links
+                    invoice.source_links as invoice_source_links
                 from requested_target target
                 cross join target_invoice_scope_months invoice_scope
                 join app.invoices invoice
