@@ -5,6 +5,7 @@ import type {
   BankAccountMapping,
   WorkbenchPaneRows,
   WorkbenchRecord,
+  WorkbenchRecordIdentity,
   WorkbenchRecordType,
   WorkbenchRelationMode,
   WorkbenchRelationPreview,
@@ -453,6 +454,8 @@ type ApiWorkbenchGroup = {
   display_mode?: string | null;
   default_collapsed?: boolean | null;
   summary_row?: ApiWorkbenchRow | null;
+  formal_member_ids?: unknown[] | null;
+  formal_member_types?: unknown[] | null;
   row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
   display_row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
   collapsed_rows?: Partial<Record<WorkbenchRecordType, ApiWorkbenchRow[]>> | null;
@@ -1377,6 +1380,37 @@ function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): Wor
   };
 }
 
+function mapFormalMemberIdentities(
+  group: ApiWorkbenchGroup,
+  rawGroupType: string,
+): WorkbenchRecordIdentity[] | undefined {
+  if (rawGroupType !== "relation") {
+    return undefined;
+  }
+  const ids = group.formal_member_ids;
+  const types = group.formal_member_types;
+  if (!Array.isArray(ids) || !Array.isArray(types) || ids.length === 0 || ids.length !== types.length) {
+    return [];
+  }
+  const identities: WorkbenchRecordIdentity[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < ids.length; index += 1) {
+    const rawId = ids[index];
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    const recordType = types[index];
+    if (!id || (recordType !== "oa" && recordType !== "bank" && recordType !== "invoice")) {
+      return [];
+    }
+    const identityKey = `${recordType}\u001f${id}`;
+    if (seen.has(identityKey)) {
+      return [];
+    }
+    seen.add(identityKey);
+    identities.push({ id, recordType });
+  }
+  return identities;
+}
+
 function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): WorkbenchRelationGroup {
   const summaryRow = group.summary_row ? mapRow(group.summary_row) : undefined;
   const rowCounts = mapPaneRowCounts(group.row_counts);
@@ -1403,6 +1437,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
   const workbenchAnomaly = mapWorkbenchAnomaly(group.workbench_anomaly);
   decorateWorkbenchAnomalies(rows, workbenchAnomaly);
   const rawGroupType = String(group.group_type || "").trim();
+  const formalMemberIdentities = mapFormalMemberIdentities(group, rawGroupType);
   const mapped: WorkbenchRelationGroup = {
     id: group.group_id,
     detailKey: typeof group.detail_key === "string" && group.detail_key.trim()
@@ -1420,6 +1455,7 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
       : undefined,
     defaultCollapsed: group.default_collapsed === true ? true : undefined,
     summaryRow,
+    formalMemberIdentities,
     rows,
     rowCounts,
     displayRowCounts,

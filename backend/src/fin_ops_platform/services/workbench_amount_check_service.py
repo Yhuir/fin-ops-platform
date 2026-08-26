@@ -454,7 +454,8 @@ class WorkbenchAmountCheckService:
                 if item_id in expense_by_id
             }
             if not source_item_ids:
-                unassigned_invoice_rows.append(invoice_row)
+                if invoice_row.get("source_kind") != "etc_invoice_summary":
+                    unassigned_invoice_rows.append(invoice_row)
                 continue
             invoice_item_ids[invoice_id] = source_item_ids
             for item_id in source_item_ids:

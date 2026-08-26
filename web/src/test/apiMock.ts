@@ -2111,6 +2111,8 @@ function buildGroups(
       bank_rows: Array<Record<string, unknown>>;
       invoice_rows: Array<Record<string, unknown>>;
       can_withdraw?: boolean;
+      formal_member_ids?: string[];
+      formal_member_types?: string[];
     }
   >();
 
@@ -2139,10 +2141,19 @@ function buildGroups(
     }
   }
 
-  return Array.from(groups.values()).map((group) => ({
-    ...group,
-    can_withdraw: section === "paired" ? true : undefined,
-  }));
+  return Array.from(groups.values()).map((group) => {
+    const formalRows = [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows];
+    return {
+      ...group,
+      can_withdraw: section === "paired" ? true : undefined,
+      formal_member_ids: section === "paired"
+        ? formalRows.map((row) => String(row.id))
+        : undefined,
+      formal_member_types: section === "paired"
+        ? formalRows.map((row) => String(row.type))
+        : undefined,
+    };
+  });
 }
 
 type MockWorkbenchGroup = ReturnType<typeof buildGroups>[number];
@@ -2807,12 +2818,17 @@ function buildMockRelationPreview({
   const asRelationGroups = (
     groups: ReturnType<typeof buildRelationPreviewGroups>,
     zone: "paired" | "unpaired",
-  ) => groups.map((group) => ({
-    ...group,
-    group_type: "relation",
-    zone,
-    status: zone,
-  }));
+  ) => groups.map((group) => {
+    const formalRows = [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows];
+    return {
+      ...group,
+      group_type: "relation",
+      formal_member_ids: formalRows.map((row) => String(row.id)),
+      formal_member_types: formalRows.map((row) => String(row.type)),
+      zone,
+      status: zone,
+    };
+  });
   return {
     operation,
     can_submit: true,

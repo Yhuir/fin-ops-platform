@@ -687,6 +687,49 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         )
         self.assertTrue(all(item["display_scope"] == "row" for item in unassigned))
 
+    def test_etc_summary_is_not_unassigned_but_still_counts_toward_invoice_total(self) -> None:
+        rows = {
+            "oa": [{
+                **self._oa_row("30.00"),
+                "id": "oa-1",
+                "expense_items": [
+                    {"id": "item-1", "amount": "30.00", "attachment_file_count": "1"},
+                ],
+            }],
+            "bank": [self._bank_row("30.00")],
+            "invoice": [
+                {
+                    **self._invoice_row("12.00"),
+                    "id": "etc-summary-batch-1",
+                    "source_kind": "etc_invoice_summary",
+                    "source_links": [],
+                },
+                {
+                    **self._invoice_row("18.00"),
+                    "id": "invoice-real",
+                    "source_links": [],
+                },
+            ],
+        }
+
+        amount_check = self.service.check(rows, relation_mode="manual_confirmed")
+        anomaly = self.service.workbench_anomaly(
+            rows,
+            relation_id="CASE-ETC-SUMMARY",
+            relation_mode="manual_confirmed",
+        )
+
+        self.assertEqual(amount_check["invoice_total"], "30.00")
+        assert anomaly is not None
+        self.assertEqual(
+            [
+                item["display_row_id"]
+                for item in anomaly["items"]
+                if item["code"] == "oa_invoice_attachment_unassigned"
+            ],
+            ["invoice-real"],
+        )
+
     def test_relation_without_oa_expense_items_does_not_create_unassigned_anomaly(self) -> None:
         self.assertIsNone(
             self.service.workbench_anomaly(

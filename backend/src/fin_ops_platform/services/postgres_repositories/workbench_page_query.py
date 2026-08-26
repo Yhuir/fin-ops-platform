@@ -1565,6 +1565,7 @@ relation_anomaly_members as materialized (
         relation.relation_mode,
         member.row_type,
         member.row_id,
+        canonical_row.source_kind,
         canonical_row.oa_expense_items,
         canonical_row.oa_source_aliases,
         canonical_row.oa_exact_identity_aliases,
@@ -1685,6 +1686,7 @@ invoice_anomaly_facts as materialized (
         member.internal_key,
         member.case_id,
         member.row_id as invoice_row_id,
+        member.source_kind,
         coalesce(member.invoice_total_with_tax, member.invoice_amount) as invoice_amount,
         source_link.source_expense_item_id,
         coalesce(
@@ -1811,6 +1813,7 @@ unassigned_relation_invoices as materialized (
         from oa_expense_items expense
         where expense.internal_key = invoice.internal_key
     )
+      and invoice.source_kind is distinct from 'etc_invoice_summary'
       and not exists (
         select 1
         from normalized_invoice_item_links linked

@@ -619,6 +619,24 @@ def test_set_based_anomaly_query_emits_only_compact_fingerprint_state() -> None:
     assert "state" in sql
 
 
+def test_etc_summary_is_excluded_only_from_unassigned_invoice_evidence() -> None:
+    sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
+    relation_members_sql = sql.split(
+        "relation_anomaly_members as materialized (", 1
+    )[1].split("oa_exact_identity_aliases as materialized (", 1)[0]
+    invoice_facts_sql = sql.split(
+        "invoice_anomaly_facts as materialized (", 1
+    )[1].split("invoice_item_candidates as materialized (", 1)[0]
+    unassigned_sql = sql.split(
+        "unassigned_relation_invoices as materialized (", 1
+    )[1].split("unassigned_invoice_anomaly_items as materialized (", 1)[0]
+
+    assert "canonical_row.source_kind" in relation_members_sql
+    assert "member.source_kind" in invoice_facts_sql
+    assert "invoice.source_kind is distinct from 'etc_invoice_summary'" in unassigned_sql
+    assert "relation_mode" not in unassigned_sql
+
+
 def test_set_based_anomaly_query_nets_bank_refunds_inside_a_relation() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
 
@@ -787,11 +805,16 @@ def test_compact_summary_removes_repeated_internal_row_metadata() -> None:
     ]
 
 
-def test_compact_etc_summary_keeps_only_the_first_real_invoice_preview() -> None:
+def test_compact_etc_summary_outputs_only_the_canonical_summary_row() -> None:
     group = {
         "group_id": "case:ETC-68",
         "invoice_rows": [
-            {"id": "etc-summary-ETC-68", "type": "invoice", "source_kind": "etc_invoice_summary"}
+            {
+                "id": "etc-summary-ETC-68",
+                "type": "invoice",
+                "source_kind": "etc_invoice_summary",
+                "etc_invoice_count": 68,
+            }
         ],
         "collapsed_rows": {
             "invoice": [
@@ -809,15 +832,19 @@ def test_compact_etc_summary_keeps_only_the_first_real_invoice_preview() -> None
 
     compact = PostgresWorkbenchPageHydrationRepository._compact_group(group)
 
-    assert compact["collapsed_rows"] == {
-        "invoice": [
-            {"id": "etc-invoice-1", "type": "invoice", "source_kind": "etc_invoice"}
-        ]
-    }
+    assert compact["invoice_rows"] == [
+        {
+            "id": "etc-summary-ETC-68",
+            "type": "invoice",
+            "source_kind": "etc_invoice_summary",
+            "etc_invoice_count": 68,
+        }
+    ]
+    assert "collapsed_rows" not in compact
     assert compact["collapsed_row_counts"] == {"invoice": 68}
 
 
-def test_compact_etc_summary_builds_first_real_invoice_preview() -> None:
+def test_compact_etc_summary_does_not_embed_a_real_invoice_preview() -> None:
     summary = PostgresWorkbenchPageHydrationRepository._compact_etc_summary_row(
         row_id="etc-summary-ETC-68",
         external_batch_id="ETC-68",
@@ -827,67 +854,11 @@ def test_compact_etc_summary_builds_first_real_invoice_preview() -> None:
             "issue_date_min": "2026-05-28",
             "issue_date_max": "2026-06-28",
             "seller_name": "云南省交通投资建设集团有限公司",
-            "first_invoice": {
-                "row_id": "etc-invoice-1",
-                "invoice_no": "26537912210500678556",
-                "invoice_code": "032002300111",
-                "invoice_date": "2026-05-28",
-                "seller_name": "云南省交通投资建设集团有限公司",
-                "buyer_name": "云南溯源科技有限公司",
-                "amount": "72.86",
-                "tax_rate": "3%",
-                "tax_amount": "2.19",
-                "total_with_tax": "75.05",
-                "invoice_type": "进项发票",
-            },
         },
     )
 
     assert summary["etc_invoice_detail_count"] == 68
-    assert summary["etc_invoice_detail_rows"] == [
-        {
-            "id": "etc-invoice-1",
-            "type": "invoice",
-            "source_kind": "etc_invoice",
-            "status": "paired",
-            "seller_tax_no": "ETC发票",
-            "seller_name": "云南省交通投资建设集团有限公司",
-            "buyer_tax_no": "ETC-68",
-            "buyer_name": "云南溯源科技有限公司",
-            "invoice_code": "032002300111",
-            "invoice_no": "26537912210500678556",
-            "digital_invoice_no": "26537912210500678556",
-            "issue_date": "2026-05-28",
-            "amount": "75.05",
-            "amount_value": "75.05",
-            "tax_rate": "3%",
-            "tax_amount": "2.19",
-            "total_with_tax": "75.05",
-            "invoice_type": "进项发票",
-            "tags": ["ETC", "ETC发票明细"],
-            "etc_batch_id": "ETC-68",
-            "invoice_bank_relation": {
-                "code": "etc_batch_detail",
-                "label": "ETC批次明细",
-                "tone": "neutral",
-            },
-            "available_actions": ["detail"],
-            "summary_fields": {
-                "ETC批次": "ETC-68",
-                "发票号码": "26537912210500678556",
-                "销方": "云南省交通投资建设集团有限公司",
-                "金额": "75.05",
-                "开票日期": "2026-05-28",
-            },
-            "detail_fields": {
-                "ETC批次": "ETC-68",
-                "发票号码": "26537912210500678556",
-                "销方": "云南省交通投资建设集团有限公司",
-                "金额": "75.05",
-                "开票日期": "2026-05-28",
-            },
-        }
-    ]
+    assert "etc_invoice_detail_rows" not in summary
 
 
 def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> None:
@@ -929,6 +900,7 @@ def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> No
     assert "admission.source_payload->>'expense_type'" in connection.sql
     assert connection.sql.count("'oa_expense_item_invoice'") >= 3
     assert "'supporting_documents'" not in connection.sql
+    assert "'first_invoice'" not in connection.sql
 
 
 def test_detail_queries_are_typed_and_bounded_without_full_scope_spine() -> None:
@@ -1313,10 +1285,28 @@ def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
         "status": "unpaired",
         "expense_items": [],
     }
+    etc_detail_rows = [
+        {
+            "id": "etc-invoice-1",
+            "type": "invoice",
+            "source_kind": "etc_invoice",
+            "total_with_tax": "10.00",
+        },
+        {
+            "id": "etc-invoice-2",
+            "type": "invoice",
+            "source_kind": "etc_invoice",
+            "total_with_tax": "20.00",
+        },
+    ]
     etc_summary = {
         "id": "etc-summary-ETC-1",
         "type": "invoice",
+        "source_kind": "etc_invoice_summary",
         "etc_batch_id": "ETC-1",
+        "etc_invoice_count": 2,
+        "etc_invoice_detail_count": 2,
+        "etc_invoice_detail_rows": list(etc_detail_rows),
     }
 
     class _PageBuilder:
@@ -1343,6 +1333,11 @@ def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
 
         def build_page_groups(self, **kwargs: Any) -> dict[str, Any]:
             captured["page_etc_summaries"] = kwargs.get("page_etc_summaries")
+            summary_row = {
+                key: value
+                for key, value in etc_summary.items()
+                if key != "etc_invoice_detail_rows"
+            }
             return {
                 "paired": {"groups": []},
                 "unpaired": {
@@ -1353,7 +1348,14 @@ def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
                             "status": "unpaired",
                             "oa_rows": [dict(oa_row)],
                             "bank_rows": [],
-                            "invoice_rows": [],
+                            "invoice_rows": [dict(summary_row)],
+                            "display_mode": "collapsed_summary",
+                            "default_collapsed": True,
+                            "summary_row": dict(summary_row),
+                            "collapsed_rows": {
+                                "invoice": [dict(row) for row in etc_detail_rows]
+                            },
+                            "collapsed_row_counts": {"invoice": 2},
                         }
                     ]
                 },
@@ -1386,6 +1388,11 @@ def test_full_page_hydration_passes_prefetched_etc_summaries_to_grouping(
     assert captured["required_external_batch_ids"] == set()
     assert captured["row_etc_summaries"] == {"ETC-1": etc_summary}
     assert captured["page_etc_summaries"] == {"ETC-1": etc_summary}
+    assert groups[0]["summary_row"]["id"] == "etc-summary-ETC-1"
+    assert [
+        row["id"] for row in groups[0]["collapsed_rows"]["invoice"]
+    ] == ["etc-invoice-1", "etc-invoice-2"]
+    assert groups[0]["collapsed_row_counts"] == {"invoice": 2}
 
 
 def test_scope_spine_prunes_relation_candidates_then_rechecks_typed_membership() -> None:

@@ -165,6 +165,7 @@ EXPECTED_MIGRATIONS = [
     "0151_workbench_matching_worker_idempotency_grant.sql",
     "0152_workbench_supporting_document_gallery_index.sql",
     "0153_oa_source_alias_attachment_identity_repair.sql",
+    "0154_migrate_etc_summary_anomaly_review.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -324,7 +325,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 154)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 155)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -379,6 +380,25 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("system:migration:0153", sql)
         self.assertNotIn("update app.oa_applications", sql)
         self.assertNotIn("update app.invoices", sql)
+        self.assertNotIn("delete from", sql)
+
+    def test_etc_summary_anomaly_review_migration_is_exact_append_only_and_fail_closed(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0154_migrate_etc_summary_anomaly_review.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("e21ebad42ce05610276655cc07aea50fd9cde2a23721d05e4c15b9f6491d1b76", sql)
+        self.assertIn("cdab5ebcc4b83c29027d67e457fb81baff4c10f08a044a09ed6cc9498bf9863b", sql)
+        self.assertIn("case-batch-txn_imported_1453", sql)
+        self.assertIn("etc-summary-etc-oa-20260413-241125", sql)
+        self.assertIn("v_expected_members", sql)
+        self.assertIn("relation_row.amount_check->>'invoice_total' is distinct from '2411.25'", sql)
+        self.assertIn("old_evidence is distinct from v_expected_old_evidence", sql)
+        self.assertIn("old_decision.updated_at is distinct from v_reviewed_at", sql)
+        self.assertIn("workbench_anomaly_review_migrated", sql)
+        self.assertIn("system:migration:0154", sql)
+        self.assertIn("insert into app.workbench_exception_cases", sql)
+        self.assertNotIn("update app.workbench_exception_cases", sql)
         self.assertNotIn("delete from", sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
@@ -1619,6 +1639,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         checked_sql = checked_sql.replace(
             oa_source_alias_attachment_repair_sql,
             "approved_oa_source_alias_attachment_identity_repair;",
+        )
+        etc_summary_anomaly_review_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0154_migrate_etc_summary_anomaly_review.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(etc_summary_anomaly_review_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            etc_summary_anomaly_review_sql,
+            "approved_etc_summary_anomaly_review_migration;",
         )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",

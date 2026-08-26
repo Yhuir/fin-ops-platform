@@ -583,17 +583,16 @@ class WorkbenchRelationGroupingService:
         group["display_mode"] = "collapsed_summary"
         group["default_collapsed"] = True
         group["summary_row"] = summary
+        detail_count = len(details)
+        if str(summary.get("source_kind") or "").strip() == "etc_invoice_summary":
+            detail_count = int(summary["etc_invoice_detail_count"])
+            if detail_count < 0:
+                raise ValueError("ETC invoice detail count must be non-negative.")
+            if details and len(details) != detail_count:
+                raise ValueError("ETC invoice detail rows must match the canonical detail count.")
         if details:
             group["collapsed_rows"] = {"invoice": details}
-            detail_count = len(details)
-            if str(summary.get("source_kind") or "").strip() == "etc_invoice_summary":
-                try:
-                    detail_count = max(
-                        detail_count,
-                        int(summary.get("etc_invoice_detail_count") or 0),
-                    )
-                except (TypeError, ValueError):
-                    pass
+        if detail_count > 0:
             group["collapsed_row_counts"] = {"invoice": detail_count}
 
     @staticmethod

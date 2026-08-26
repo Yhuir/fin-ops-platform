@@ -615,6 +615,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
                     "source_kind": "etc_invoice_summary",
                     "status": "unpaired",
                     "etc_invoice_count": 2,
+                    "etc_invoice_detail_count": 2,
                     "etc_invoice_detail_rows": [
                         {
                             "id": "etc-invoice-1",
@@ -651,7 +652,9 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
         self.assertEqual(group["collapsed_row_counts"], {"invoice": 2})
 
-    def test_etc_summary_count_can_exceed_loaded_preview_rows(self) -> None:
+    def test_relation_etc_summary_count_exposes_expand_contract_without_compact_rows(
+        self,
+    ) -> None:
         payload = self.service.group_payload(
             "2026-04",
             rows_by_id={
@@ -663,26 +666,57 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
                     "status": "unpaired",
                     "etc_invoice_count": 68,
                     "etc_invoice_detail_count": 68,
-                    "etc_invoice_detail_rows": [
-                        {
-                            "id": "etc-invoice-1",
-                            "type": "invoice",
-                            "source_kind": "etc_invoice",
-                            "status": "paired",
-                            "amount_value": "12.34",
-                        }
-                    ],
                 }
             },
-            active_relations=[],
+            active_relations=[
+                {
+                    "case_id": "CASE-ETC-68",
+                    "row_ids": ["etc-summary-batch-68"],
+                    "row_types": ["invoice"],
+                    "status": "active",
+                    "relation_mode": "manual_confirmed",
+                }
+            ],
         )
 
-        group = payload["unpaired"]["groups"][0]
-        self.assertEqual(
-            [row["id"] for row in group["collapsed_rows"]["invoice"]],
-            ["etc-invoice-1"],
-        )
+        groups = [
+            *payload["paired"]["groups"],
+            *payload["unpaired"]["groups"],
+        ]
+        group = next(item for item in groups if item["group_id"] == "case:CASE-ETC-68")
+        self.assertEqual(group["summary_row"]["id"], "etc-summary-batch-68")
+        self.assertNotIn("etc_invoice_detail_rows", group["summary_row"])
+        self.assertNotIn("collapsed_rows", group)
         self.assertEqual(group["collapsed_row_counts"], {"invoice": 68})
+
+    def test_etc_summary_rejects_detail_count_drift(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "ETC invoice detail rows must match the canonical detail count",
+        ):
+            self.service.group_payload(
+                "2026-04",
+                rows_by_id={
+                    "etc-summary-batch-drift": {
+                        "id": "etc-summary-batch-drift",
+                        "type": "invoice",
+                        "object_identity_key": "etc-summary:batch-drift",
+                        "source_kind": "etc_invoice_summary",
+                        "status": "unpaired",
+                        "etc_invoice_count": 2,
+                        "etc_invoice_detail_count": 2,
+                        "etc_invoice_detail_rows": [
+                            {
+                                "id": "etc-invoice-only-one",
+                                "type": "invoice",
+                                "source_kind": "etc_invoice",
+                                "amount_value": "12.34",
+                            }
+                        ],
+                    }
+                },
+                active_relations=[],
+            )
 
     def test_no_oa_single_pane_relation_is_paired_without_collapsing_rows(self) -> None:
         rows = {

@@ -1022,17 +1022,12 @@ class PostgresWorkbenchPageHydrationRepository:
                     requested.external_batch_id,
                     coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
                     invoice.invoice_no,
-                    invoice.invoice_code,
                     invoice.digital_invoice_no,
                     invoice.invoice_date,
                     invoice.seller_name,
                     invoice.counterparty_name,
-                    invoice.buyer_name,
                     invoice.amount,
-                    invoice.total_with_tax,
-                    invoice.tax_rate,
-                    invoice.tax_amount,
-                    invoice.invoice_type
+                    invoice.total_with_tax
                 from requested_etc requested
                 join app.etc_batch_invoice_links link on link.link_status = 'active'
                 join app.invoices invoice
@@ -1052,20 +1047,12 @@ class PostgresWorkbenchPageHydrationRepository:
                     requested.external_batch_id,
                     coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text),
                     invoice.invoice_no,
-                    invoice.invoice_code,
                     invoice.invoice_no,
                     invoice.invoice_date,
                     invoice.seller_name,
                     invoice.seller_name,
-                    invoice.buyer_name,
                     invoice.amount,
-                    invoice.total_with_tax,
-                    coalesce(
-                        invoice.raw_payload->'normalized_payload'->>'tax_rate',
-                        '—'
-                    ),
-                    invoice.tax_amount,
-                    '进项发票'::text
+                    invoice.total_with_tax
                 from requested_etc requested
                 join app.etc_business_batches batch
                   on batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
@@ -1085,17 +1072,12 @@ class PostgresWorkbenchPageHydrationRepository:
                     requested.external_batch_id,
                     coalesce(invoice.legacy_mongo_id, invoice.id::text),
                     invoice.invoice_no,
-                    invoice.invoice_code,
                     invoice.digital_invoice_no,
                     invoice.invoice_date,
                     invoice.seller_name,
                     invoice.counterparty_name,
-                    invoice.buyer_name,
                     invoice.amount,
-                    invoice.total_with_tax,
-                    invoice.tax_rate,
-                    invoice.tax_amount,
-                    invoice.invoice_type
+                    invoice.total_with_tax
                 from requested_etc requested
                 join app.etc_submission_batches submission
                   on submission.status in ('submitted_confirmed', 'submitted', 'closed')
@@ -1165,22 +1147,7 @@ class PostgresWorkbenchPageHydrationRepository:
                         'seller_name', (array_agg(
                             coalesce(preferred.seller_name, preferred.counterparty_name)
                             order by preferred.invoice_date, preferred.row_id
-                        ))[1],
-                        'first_invoice', (jsonb_agg(jsonb_build_object(
-                            'row_id', preferred.row_id,
-                            'invoice_no', preferred.invoice_no,
-                            'invoice_code', preferred.invoice_code,
-                            'digital_invoice_no', preferred.digital_invoice_no,
-                            'invoice_date', preferred.invoice_date,
-                            'seller_name', preferred.seller_name,
-                            'counterparty_name', preferred.counterparty_name,
-                            'buyer_name', preferred.buyer_name,
-                            'amount', preferred.amount,
-                            'total_with_tax', preferred.total_with_tax,
-                            'tax_rate', preferred.tax_rate,
-                            'tax_amount', preferred.tax_amount,
-                            'invoice_type', preferred.invoice_type
-                        ) order by preferred.invoice_date, preferred.row_id)->0)
+                        ))[1]
                     ) as payload
                 from preferred_etc_rows preferred
                 where preferred.source_tier = preferred.preferred_source_tier
@@ -1431,17 +1398,6 @@ class PostgresWorkbenchPageHydrationRepository:
         )
         title = f"ETC发票 {count} 张"
         amount = f"{total:.2f}"
-        first_invoice = payload.get("first_invoice")
-        detail_rows = (
-            [
-                WorkbenchCanonicalRowsBuilder._etc_invoice_detail_row(
-                    first_invoice,
-                    external_batch_id=external_batch_id,
-                )
-            ]
-            if isinstance(first_invoice, dict)
-            else []
-        )
         return {
             "id": row_id,
             "type": "invoice",
@@ -1470,7 +1426,6 @@ class PostgresWorkbenchPageHydrationRepository:
             "etc_batch_id": external_batch_id,
             "etc_invoice_count": count,
             "etc_invoice_detail_count": count,
-            "etc_invoice_detail_rows": detail_rows,
             "available_actions": ["detail"],
         }
 
@@ -1619,30 +1574,9 @@ class PostgresWorkbenchPageHydrationRepository:
             },
         )
         if isinstance(compact, dict):
-            collapsed = compact.get("collapsed_rows")
-            invoice_rows = list(compact.get("invoice_rows") or [])
-            is_etc_summary = any(
-                isinstance(row, dict)
-                and str(row.get("source_kind") or "").strip() == "etc_invoice_summary"
-                for row in invoice_rows
-            )
-            first_etc_invoice = next(
-                (
-                    row
-                    for row in list(collapsed.get("invoice") or [])
-                    if isinstance(row, dict)
-                    and str(row.get("source_kind") or "").strip() == "etc_invoice"
-                ),
-                None,
-            ) if isinstance(collapsed, dict) and is_etc_summary else None
-            if first_etc_invoice is None:
-                compact.pop("collapsed_rows", None)
-            else:
-                compact["collapsed_rows"] = {"invoice": [first_etc_invoice]}
+            compact.pop("collapsed_rows", None)
             for pane in ("oa", "bank", "invoice"):
                 visible_rows = list(compact.get(f"{pane}_rows") or [])
-                if pane == "invoice":
-                    visible_rows.extend(list((compact.get("collapsed_rows") or {}).get("invoice") or []))
                 for row in visible_rows:
                     if not isinstance(row, dict):
                         continue

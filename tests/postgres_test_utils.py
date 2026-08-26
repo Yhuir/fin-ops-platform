@@ -165,6 +165,7 @@ EXPECTED_MIGRATION_FILES = [
     "0151_workbench_matching_worker_idempotency_grant.sql",
     "0152_workbench_supporting_document_gallery_index.sql",
     "0153_oa_source_alias_attachment_identity_repair.sql",
+    "0154_migrate_etc_summary_anomaly_review.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (

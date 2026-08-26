@@ -266,6 +266,11 @@ export type WorkbenchPaneRows = {
 
 export type WorkbenchPaneRowCounts = Partial<Record<WorkbenchRecordType, number>>;
 
+export type WorkbenchRecordIdentity = {
+  id: string;
+  recordType: WorkbenchRecordType;
+};
+
 export type WorkbenchMatchConfidence = "high" | "medium" | "low";
 
 export type WorkbenchGroupType = WorkbenchZoneId;
@@ -285,6 +290,7 @@ export type WorkbenchRelationGroup = {
   displayMode?: WorkbenchDisplayMode;
   defaultCollapsed?: boolean;
   summaryRow?: WorkbenchRecord;
+  formalMemberIdentities?: WorkbenchRecordIdentity[];
   rows: WorkbenchPaneRows;
   rowCounts?: WorkbenchPaneRowCounts;
   displayRowCounts?: WorkbenchPaneRowCounts;

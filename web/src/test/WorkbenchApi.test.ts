@@ -1077,6 +1077,8 @@ describe("workbench api bank amount mapping", () => {
             {
               group_id: "case:formal-paired",
               group_type: "relation",
+              formal_member_ids: ["oa-paired", "bank-paired"],
+              formal_member_types: ["oa", "bank"],
               match_confidence: "high",
               reason: "active_formal_relation",
               completion: { is_complete: false, missing_row_types: ["oa", "invoice"] },
@@ -1196,6 +1198,10 @@ describe("workbench api bank amount mapping", () => {
     expect(group.groupType).toBe("paired");
     expect(group.rawGroupType).toBe("relation");
     expect(group.reason).toBe("active_formal_relation");
+    expect(group.formalMemberIdentities).toEqual([
+      { id: "oa-paired", recordType: "oa" },
+      { id: "bank-paired", recordType: "bank" },
+    ]);
     expect(group.completion).toEqual({
       isComplete: false,
       missingRecordTypes: ["oa", "invoice"],
@@ -1243,6 +1249,7 @@ describe("workbench api bank amount mapping", () => {
       "oa_expense_item_invoice",
     ]);
     expect(group.rows.invoice[0].sourceExpenseItemIds).toEqual(["oa-paired:item:1"]);
+    expect(group.rows.invoice[0].displayOnly).toBeUndefined();
     expect(group.workbenchAnomaly).toMatchObject({ reviewDecision: "accept_paired" });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });
     expect(group.rows.oa[0].relationAmountCheck).toEqual(group.amountCheck);
@@ -1256,6 +1263,39 @@ describe("workbench api bank amount mapping", () => {
       reviewedBy: "reviewer",
       reviewedAt: "2026-08-19 01:00:00+08",
     });
+  });
+
+  test("fails the formal-member mapping closed when relation identity arrays disagree", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        month: "all",
+        zone: "paired",
+        page: 1,
+        page_size: 50,
+        total: 1,
+        has_more: false,
+        groups: [{
+          group_id: "case:invalid-formal-members",
+          group_type: "relation",
+          match_confidence: "high",
+          reason: "active_formal_relation",
+          formal_member_ids: ["oa-1", "bank-1"],
+          formal_member_types: ["oa"],
+          oa_rows: [{ id: "oa-1", type: "oa" }],
+          bank_rows: [{ id: "bank-1", type: "bank" }],
+          invoice_rows: [{
+            id: "display-invoice",
+            type: "invoice",
+            workbench_membership_role: "source_owned_display",
+          }],
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    const result = await fetchWorkbenchGroupsPage("all", "paired", null, 50);
+
+    expect(result.groups[0].formalMemberIdentities).toEqual([]);
+    expect(result.groups[0].rows.invoice[0].displayOnly).toBeUndefined();
   });
 
   test("serializes workbench group page SQL query controls", async () => {

@@ -74,6 +74,7 @@ import type {
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
   WorkbenchRecord,
+  WorkbenchRecordIdentity,
   WorkbenchRecordType,
   WorkbenchRelationPreview,
   WorkbenchSettings,
@@ -1393,8 +1394,6 @@ export default function ReconciliationWorkbenchPage() {
 
   const selectedOpenRows = openSelectionContext.includedRows;
   const selectedOpenActionableRows = selectedOpenRows.filter((row) => !row.displayOnly);
-  const selectedOpenActionableIdentityKeys = selectedOpenActionableRows.map(workbenchRowIdentityKey);
-  const selectedPairedRows = pairedSelectionContext.includedRows;
   const openSelectionSummary = openSelectionContext.summary;
   const pairedSelectionSummary = pairedSelectionContext.summary;
   const contextualOpenRowIdentityKeys = openSelectionContext.relatedRowIdentityKeySet;
@@ -1416,35 +1415,29 @@ export default function ReconciliationWorkbenchPage() {
     ).has(identityKey) ? "related" : "idle";
   }, [contextualOpenRowIdentityKeys, contextualPairedRowIdentityKeys, getRowState]);
 
-  const selectedOpenGroupsForUnifiedAction = useMemo(() => {
-    const selectedRowIdentityKeySet = new Set(openSelectionContext.includedRowIdentityKeys);
-    return openSelectionSourceGroups.filter((group) => (
-      flattenGroups([group]).some((row) => selectedRowIdentityKeySet.has(workbenchRowIdentityKey(row)))
-    ));
-  }, [openSelectionContext.includedRowIdentityKeys, openSelectionSourceGroups]);
-  const selectedOpenWithdrawableRelationGroups = selectedOpenGroupsForUnifiedAction.filter(
-    (group) => group.rawGroupType === "relation" && group.canWithdraw,
+  const selectedOpenRelationGroupIdSet = new Set(openSelectionContext.selectedRelationGroupIds);
+  const selectedOpenWithdrawableRelationGroups = openSelectionSourceGroups.filter((group) => (
+    selectedOpenRelationGroupIdSet.has(group.id)
+    && group.rawGroupType === "relation"
+    && group.canWithdraw
+  ));
+  const selectedOpenFormalIdentities = selectedOpenWithdrawableRelationGroups[0]?.formalMemberIdentities ?? [];
+  const selectedOpenFormalIdentityKeySet = new Set(
+    selectedOpenFormalIdentities.map(workbenchRowIdentityKey),
   );
-  const selectedOpenWithdrawableRelationRows = flattenGroups(selectedOpenWithdrawableRelationGroups)
-    .filter((row) => !row.displayOnly);
-  const selectedOpenWithdrawableRelationRowIdentityKeySet = new Set(
-    selectedOpenWithdrawableRelationRows.map(workbenchRowIdentityKey),
-  );
-  const isExactOpenRelationSelection = selectedOpenActionableRows.length >= 2
-    && selectedOpenGroupsForUnifiedAction.length === 1
-    && selectedOpenWithdrawableRelationGroups.length === 1
-    && selectedOpenActionableIdentityKeys.length === selectedOpenWithdrawableRelationRowIdentityKeySet.size
-    && selectedOpenActionableIdentityKeys.every((identityKey) => (
-      selectedOpenWithdrawableRelationRowIdentityKeySet.has(identityKey)
+  const isExactOpenRelationSelection = selectedOpenWithdrawableRelationGroups.length === 1
+    && selectedOpenRelationGroupIdSet.size === 1
+    && selectedOpenFormalIdentities.length >= 2
+    && openSelectionContext.includedRowIdentityKeys.length === selectedOpenFormalIdentityKeySet.size
+    && openSelectionContext.includedRowIdentityKeys.every((identityKey) => (
+      selectedOpenFormalIdentityKeySet.has(identityKey)
     ));
   const canConfirmOpenSelection = selectedOpenActionableRows.length >= 2 && !isExactOpenRelationSelection;
   const canWithdrawOpenSelection = isExactOpenRelationSelection;
   const selectedPairedGroupsForUnifiedAction = useMemo(() => {
-    const selectedRowIdentityKeySet = new Set(pairedSelectionContext.includedRowIdentityKeys);
-    return pairedSelectionSourceGroups.filter((group) => (
-      flattenGroups([group]).some((row) => selectedRowIdentityKeySet.has(workbenchRowIdentityKey(row)))
-    ));
-  }, [pairedSelectionContext.includedRowIdentityKeys, pairedSelectionSourceGroups]);
+    const selectedGroupIdSet = new Set(pairedSelectionContext.selectedRelationGroupIds);
+    return pairedSelectionSourceGroups.filter((group) => selectedGroupIdSet.has(group.id));
+  }, [pairedSelectionContext.selectedRelationGroupIds, pairedSelectionSourceGroups]);
   const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection;
   const isOpenWithdrawSelectionDisabled = !canWithdrawOpenSelection;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
@@ -1983,7 +1976,16 @@ export default function ReconciliationWorkbenchPage() {
         return;
       }
       try {
-        await openWithdrawPreview(collectCaseRows(row));
+        const relationSelection = buildWorkbenchSelectionContext({
+          explicitRows: [row],
+          sourceGroups: sourceAllGroups,
+          zoneId: "paired",
+        });
+        if (relationSelection.includedRowIdentities.length === 0) {
+          openActionResultDialog("当前关联组的正式成员合同无效，请刷新后重试。");
+          return;
+        }
+        await openWithdrawPreviewIdentities(relationSelection.includedRowIdentities);
       } catch (error) {
         openRelationPreviewErrorDialog(error);
       }
@@ -1996,6 +1998,7 @@ export default function ReconciliationWorkbenchPage() {
     handleCloseExceptionDrawer,
     openActionResultDialog,
     runBlockingAction,
+    sourceAllGroups,
     withdrawBankFlowRuleBatchSummaryRow,
     openRelationPreviewErrorDialog,
   ]);
@@ -2071,17 +2074,15 @@ export default function ReconciliationWorkbenchPage() {
     togglePairedRowSelection(row);
   }, [toggleOpenRowSelection, togglePairedRowSelection]);
 
-  const resolveSelectedCaseId = (rows: WorkbenchRecord[]) => {
-    const caseIds = Array.from(new Set(rows.map((row) => row.caseId).filter((caseId): caseId is string => Boolean(caseId))));
-    return caseIds.length === 1 ? caseIds[0] : undefined;
-  };
-
-  const openRelationPreview = async (kind: RelationPreviewRequestKind, rows: WorkbenchRecord[]) => {
+  const openRelationPreview = async (
+    kind: RelationPreviewRequestKind,
+    identities: WorkbenchRecordIdentity[],
+  ) => {
     if (relationPreviewRequestKindRef.current) {
       return;
     }
-    const rowIds = rows.map((row) => row.id);
-    const rowTypes = rows.map((row) => row.recordType);
+    const rowIds = identities.map((identity) => identity.id);
+    const rowTypes = identities.map((identity) => identity.recordType);
     const requestContextKey = relationPreviewContextKeyRef.current;
     relationPreviewAbortControllerRef.current?.abort();
     const controller = new AbortController();
@@ -2108,7 +2109,7 @@ export default function ReconciliationWorkbenchPage() {
         rowIds,
         rowTypes,
         canonicalEpoch: canonicalEpochRef.current,
-        caseId: kind === "withdraw" ? resolveSelectedCaseId(rows) : undefined,
+        caseId: undefined,
         idempotencyKey: crypto.randomUUID(),
       });
     } catch (error) {
@@ -2129,11 +2130,21 @@ export default function ReconciliationWorkbenchPage() {
   };
 
   const openConfirmPreview = async (rows: WorkbenchRecord[]) => {
-    await openRelationPreview("confirm", rows);
+    await openRelationPreview(
+      "confirm",
+      rows.map((row) => ({ id: row.id, recordType: row.recordType })),
+    );
   };
 
   const openWithdrawPreview = async (rows: WorkbenchRecord[]) => {
-    await openRelationPreview("withdraw", rows);
+    await openRelationPreview(
+      "withdraw",
+      rows.map((row) => ({ id: row.id, recordType: row.recordType })),
+    );
+  };
+
+  const openWithdrawPreviewIdentities = async (identities: WorkbenchRecordIdentity[]) => {
+    await openRelationPreview("withdraw", identities);
   };
 
   const handleSubmitRelationPreview = async (note: string, onProgress: WorkbenchActionProgressHandler) => {
@@ -2234,7 +2245,7 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     try {
-      await openWithdrawPreview(selectedOpenWithdrawableRelationRows);
+      await openWithdrawPreviewIdentities(openSelectionContext.includedRowIdentities);
     } catch (error) {
       openRelationPreviewErrorDialog(error);
     }
@@ -2258,16 +2269,12 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    if (selectedPairedRows.length === 0) {
-      openActionResultDialog("请先选择已配对记录。");
-      return;
-    }
     if (selectedPairedGroupsForUnifiedAction.length > 1) {
       openActionResultDialog("一次只能处理一个关联组。");
       return;
     }
     const selectedBankFlowRuleBatchRows = uniqueBankFlowRuleBatchRows(
-      selectedPairedRows.filter(isBankFlowRuleBatchSummaryRow),
+      pairedSelectionContext.explicitRows.filter(isBankFlowRuleBatchSummaryRow),
     );
     if (selectedBankFlowRuleBatchRows.length > 0) {
       await runBlockingAction({
@@ -2283,14 +2290,12 @@ export default function ReconciliationWorkbenchPage() {
       });
       return;
     }
-    const selectedPairedRowIdentityKeys = new Set(selectedPairedRows.map(workbenchRowIdentityKey));
-    const selectedRelationRows = pairedSelectionSourceGroups
-      .filter((group) => group.canWithdraw && flattenGroups([group]).some((row) => (
-        selectedPairedRowIdentityKeys.has(workbenchRowIdentityKey(row))
-      )))
-      .flatMap((group) => flattenGroups([group]));
+    if (pairedSelectionContext.includedRowIdentities.length === 0) {
+      openActionResultDialog("当前关联组的正式成员合同无效，请刷新后重试。");
+      return;
+    }
     try {
-      await openWithdrawPreview(selectedRelationRows.length > 0 ? selectedRelationRows : selectedPairedRows);
+      await openWithdrawPreviewIdentities(pairedSelectionContext.includedRowIdentities);
     } catch (error) {
       openRelationPreviewErrorDialog(error);
     }

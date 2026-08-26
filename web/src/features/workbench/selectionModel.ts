@@ -1,4 +1,9 @@
-import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "./types";
+import type {
+  WorkbenchRecordIdentity,
+  WorkbenchRelationGroup,
+  WorkbenchRecord,
+  WorkbenchRecordType,
+} from "./types";
 import { formatMoney } from "../money";
 
 const paneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
@@ -15,7 +20,9 @@ export type WorkbenchSelectionSummary = {
 export type WorkbenchSelectionContext = {
   explicitRows: WorkbenchRecord[];
   includedRows: WorkbenchRecord[];
+  includedRowIdentities: WorkbenchRecordIdentity[];
   includedRowIdentityKeys: string[];
+  selectedRelationGroupIds: string[];
   relatedRowIdentityKeySet: Set<string>;
   summary: WorkbenchSelectionSummary;
 };
@@ -35,42 +42,99 @@ export function buildWorkbenchSelectionContext({
   sourceGroups: WorkbenchRelationGroup[];
   zoneId: "paired" | "unpaired";
 }): WorkbenchSelectionContext {
-  const sourceRowsByIdentity = new Map(
-    flattenWorkbenchGroups(sourceGroups).map((row) => [workbenchRowIdentityKey(row), row]),
-  );
-  const explicitRowIdentityKeys = explicitRows.map(workbenchRowIdentityKey);
-  const explicitRowIdentityKeySet = new Set(explicitRowIdentityKeys);
-  const includedRowsByIdentity = new Map<string, WorkbenchRecord>();
-
+  const explicitRowsByIdentity = new Map<string, WorkbenchRecord>();
   explicitRows.forEach((row) => {
     const identityKey = workbenchRowIdentityKey(row);
-    includedRowsByIdentity.set(identityKey, sourceRowsByIdentity.get(identityKey) ?? row);
+    if (!explicitRowsByIdentity.has(identityKey)) {
+      explicitRowsByIdentity.set(identityKey, row);
+    }
   });
+  if (explicitRowsByIdentity.size === 0) {
+    return {
+      explicitRows: [],
+      includedRows: [],
+      includedRowIdentities: [],
+      includedRowIdentityKeys: [],
+      selectedRelationGroupIds: [],
+      relatedRowIdentityKeySet: new Set(),
+      summary: summarizeWorkbenchRows([], 0),
+    };
+  }
 
-  sourceGroups.forEach((group) => {
-    const groupRows = flattenWorkbenchGroup(group);
-    if (!groupRows.some((row) => explicitRowIdentityKeySet.has(workbenchRowIdentityKey(row)))) {
+  const explicitRowIdentityKeys = Array.from(explicitRowsByIdentity.keys());
+  const explicitRowIdentityKeySet = new Set(explicitRowIdentityKeys);
+  const relationGroupBySelectableRowIdentity = new Map<string, WorkbenchRelationGroup>();
+  const unresolvedExplicitIdentityKeys = new Set(explicitRowIdentityKeys);
+  for (const group of sourceGroups) {
+    for (const row of flattenWorkbenchGroupSelectionRows(group)) {
+      const identityKey = workbenchRowIdentityKey(row);
+      if (!unresolvedExplicitIdentityKeys.has(identityKey)) {
+        continue;
+      }
+      explicitRowsByIdentity.set(identityKey, row);
+      unresolvedExplicitIdentityKeys.delete(identityKey);
+      if (group.rawGroupType === "relation") {
+        relationGroupBySelectableRowIdentity.set(identityKey, group);
+      }
+    }
+    if (unresolvedExplicitIdentityKeys.size === 0) {
+      break;
+    }
+  }
+  const includedRowsByIdentity = new Map<string, WorkbenchRecord>();
+  const includedIdentitiesByKey = new Map<string, WorkbenchRecordIdentity>();
+  const selectedRelationGroups = new Map<string, WorkbenchRelationGroup>();
+  const amountCents: Record<WorkbenchRecordType, number> = { oa: 0, bank: 0, invoice: 0 };
+
+  explicitRowsByIdentity.forEach((row, identityKey) => {
+    const relationGroup = relationGroupBySelectableRowIdentity.get(identityKey);
+    if (!relationGroup) {
+      includedRowsByIdentity.set(identityKey, row);
+      includedIdentitiesByKey.set(identityKey, { id: row.id, recordType: row.recordType });
+      amountCents[row.recordType] += workbenchComparableAmountCents(row);
       return;
     }
+    selectedRelationGroups.set(relationGroup.id, relationGroup);
+  });
 
-    groupRows.forEach((row) => includedRowsByIdentity.set(workbenchRowIdentityKey(row), row));
+  selectedRelationGroups.forEach((group) => {
+    const selection = resolveFormalRelationSelection(group);
+    if (!selection) {
+      return;
+    }
+    selection.identities.forEach((identity) => {
+      includedIdentitiesByKey.set(workbenchRowIdentityKey(identity), identity);
+    });
+    selection.rows.forEach((relationRow) => {
+      includedRowsByIdentity.set(workbenchRowIdentityKey(relationRow), relationRow);
+    });
+    paneIds.forEach((paneId) => {
+      amountCents[paneId] += selection.amountCents[paneId];
+    });
   });
 
   const includedRows = Array.from(includedRowsByIdentity.values());
+  const includedRowIdentities = Array.from(includedIdentitiesByKey.values());
+  const includedRowIdentityKeys = Array.from(includedIdentitiesByKey.keys());
   const relatedRowIdentityKeySet = new Set(
-    includedRows
-      .map(workbenchRowIdentityKey)
+    includedRowIdentityKeys
       .filter((identityKey) => !explicitRowIdentityKeySet.has(identityKey)),
   );
 
   return {
     explicitRows: explicitRowIdentityKeys
-      .map((identityKey) => includedRowsByIdentity.get(identityKey))
+      .map((identityKey) => explicitRowsByIdentity.get(identityKey))
       .filter((row): row is WorkbenchRecord => Boolean(row)),
     includedRows,
-    includedRowIdentityKeys: includedRows.map(workbenchRowIdentityKey),
+    includedRowIdentities,
+    includedRowIdentityKeys,
+    selectedRelationGroupIds: Array.from(selectedRelationGroups.keys()),
     relatedRowIdentityKeySet,
-    summary: summarizeWorkbenchRows(includedRows, explicitRowIdentityKeySet.size),
+    summary: summarizeWorkbenchIdentities(
+      includedRowIdentities,
+      amountCents,
+      explicitRowIdentityKeySet.size,
+    ),
   };
 }
 
@@ -125,10 +189,132 @@ export function workbenchComparableAmountCents(row: WorkbenchRecord): number {
   return parseWorkbenchAmountCents(row.amount);
 }
 
-function flattenWorkbenchGroups(groups: WorkbenchRelationGroup[]) {
-  return groups.flatMap(flattenWorkbenchGroup);
-}
-
 function flattenWorkbenchGroup(group: WorkbenchRelationGroup) {
   return paneIds.flatMap((paneId) => group.rows[paneId]);
+}
+
+function resolveFormalRelationSelection(group: WorkbenchRelationGroup): {
+  identities: WorkbenchRecordIdentity[];
+  rows: WorkbenchRecord[];
+  amountCents: Record<WorkbenchRecordType, number>;
+} | undefined {
+  const identities = group.formalMemberIdentities;
+  if (!Array.isArray(identities) || identities.length === 0) {
+    return undefined;
+  }
+  const rowsByIdentity = new Map(
+    flattenWorkbenchGroup(group).map((row) => [workbenchRowIdentityKey(row), row]),
+  );
+  const resolvedRows: WorkbenchRecord[] = [];
+  const seen = new Set<string>();
+  for (const identity of identities) {
+    const identityKey = workbenchRowIdentityKey(identity);
+    if (seen.has(identityKey)) {
+      return undefined;
+    }
+    const row = rowsByIdentity.get(identityKey);
+    if (row) {
+      resolvedRows.push(row);
+    }
+    seen.add(identityKey);
+  }
+  const resolvedAmountCents = resolvedRows.length === identities.length
+    ? sumWorkbenchAmountsByType(resolvedRows)
+    : resolveAuthoritativeRelationAmountCents(group, identities);
+  if (!resolvedAmountCents) {
+    return undefined;
+  }
+  return { identities, rows: resolvedRows, amountCents: resolvedAmountCents };
+}
+
+function resolveAuthoritativeRelationAmountCents(
+  group: WorkbenchRelationGroup,
+  identities: WorkbenchRecordIdentity[],
+): Record<WorkbenchRecordType, number> | undefined {
+  const counts = countWorkbenchIdentitiesByType(identities);
+  const amountValues: Partial<Record<WorkbenchRecordType, string>> = {
+    oa: group.amountCheck?.oaTotal,
+    bank: group.amountCheck?.bankTotal,
+    invoice: group.amountCheck?.invoiceTotal,
+  };
+  const summaryRow = group.summaryRow;
+  const isExactSinglePaneSummary = Boolean(
+    summaryRow
+    && identities.every((identity) => identity.recordType === summaryRow.recordType)
+    && (
+      summaryRow.sourceKind === "bank_flow_rule_batch_summary"
+      || summaryRow.sourceKind === "etc_invoice_summary"
+    ),
+  );
+  const resolved: Record<WorkbenchRecordType, number> = { oa: 0, bank: 0, invoice: 0 };
+  for (const paneId of paneIds) {
+    if (counts[paneId] === 0) {
+      continue;
+    }
+    const exactAmount = parseExactWorkbenchAmountCents(amountValues[paneId]);
+    if (exactAmount !== undefined) {
+      resolved[paneId] = exactAmount;
+      continue;
+    }
+    if (isExactSinglePaneSummary && summaryRow?.recordType === paneId) {
+      resolved[paneId] = workbenchComparableAmountCents(summaryRow);
+      continue;
+    }
+    return undefined;
+  }
+  return resolved;
+}
+
+function parseExactWorkbenchAmountCents(value: string | undefined) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.replace(/,/g, "").trim();
+  if (!normalized || normalized === "--" || normalized === "—") {
+    return undefined;
+  }
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : undefined;
+}
+
+function sumWorkbenchAmountsByType(rows: WorkbenchRecord[]) {
+  return {
+    oa: sumWorkbenchAmountCents(rows.filter((row) => row.recordType === "oa")),
+    bank: sumWorkbenchAmountCents(rows.filter((row) => row.recordType === "bank")),
+    invoice: sumWorkbenchAmountCents(rows.filter((row) => row.recordType === "invoice")),
+  };
+}
+
+function countWorkbenchIdentitiesByType(identities: WorkbenchRecordIdentity[]) {
+  return {
+    oa: identities.filter((identity) => identity.recordType === "oa").length,
+    bank: identities.filter((identity) => identity.recordType === "bank").length,
+    invoice: identities.filter((identity) => identity.recordType === "invoice").length,
+  };
+}
+
+function summarizeWorkbenchIdentities(
+  identities: WorkbenchRecordIdentity[],
+  amountCents: Record<WorkbenchRecordType, number>,
+  explicitTotal: number,
+): WorkbenchSelectionSummary {
+  const counts = countWorkbenchIdentitiesByType(identities);
+  return {
+    explicitTotal,
+    total: identities.length,
+    ...counts,
+    amounts: {
+      oa: formatWorkbenchAmountCents(amountCents.oa),
+      bank: formatWorkbenchAmountCents(amountCents.bank),
+      invoice: formatWorkbenchAmountCents(amountCents.invoice),
+    },
+  };
+}
+
+function flattenWorkbenchGroupSelectionRows(group: WorkbenchRelationGroup) {
+  return [
+    ...flattenWorkbenchGroup(group),
+    ...(group.summaryRow ? [group.summaryRow] : []),
+    ...paneIds.flatMap((paneId) => group.collapsedRows?.[paneId] ?? []),
+  ];
 }

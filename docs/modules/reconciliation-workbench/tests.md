@@ -2,6 +2,15 @@
 
 日期：2026-08-26
 
+## 2026-08-26 ETC 折叠汇总、选择去重与误异常迁移
+
+- Business core：`tests/test_workbench_amount_check_service.py` 保护 `etc_invoice_summary` 不产生“发票待归属”，同时保留真实 OA 附件发票的待归属异常；`web/src/test/WorkbenchSelectionModel.test.ts` 保护选择 ETC 关系后再勾选任意展开发票，正式成员数量和发票金额仍只计算一次。
+- Repository/API：`tests/test_workbench_page_query_repository.py` 与 `tests/test_workbench_query_postgres_integration.py` 保护 compact payload 只有 canonical summary + 完整真实成员总数，detail 才返回全部真实发票；`web/src/test/WorkbenchApi.test.ts` 保护严格映射且验证 `formal_member_ids/formal_member_types` 等长、类型合法、身份唯一，非法合同 fail closed。
+- Frontend interaction：`web/src/test/RelationGroupGrid.test.tsx` 保护折叠汇总、展开全量、收起恢复、详情加载失败及 canonical reload 后自动回到汇总；`web/src/test/WorkbenchSelection.test.tsx` 保护展示成员不进入统计或通用撤回 payload，银行规则批次仍走专用撤回链路。
+- PostgreSQL migration：`tests/test_etc_summary_anomaly_review_migration_postgres_integration.py` 在 disposable PostgreSQL 上保护精确旧 fingerprint/evidence 前镜像迁移、真实异常保留、审阅决定继承、漂移失败、无关状态 no-op 和重复运行幂等；`tests/test_postgres_migrations.py` 锁定顺序与静态边界。
+- 性能/回归：compact 查询 statement budget 不增加；正式选择为已加载组内线性 `Map/Set` 去重，不发新增请求。普通 OA/流水/发票关系、真实待归属异常、银行批次专用撤回、详情查看和其它页面 API shape 保持不变。
+- Read model/cache/worker：不适用。关联台继续 direct canonical PostgreSQL 读取，本次没有 projection、refresh、queue、worker 或缓存状态。
+
 ## 2026-08-26 OA + 外部往来完整闭环金额
 
 - Business core / service：`tests/test_workbench_auth_context_idempotency.py` 覆盖 `200000 OA + 2×100000 收入 + 2×100000 支出` 的 preview/submit，断言同方向本金 `200000`、净额 `0`、差额 `0`、无需备注，并持久化 `turnover_manual_closure` evidence/history；单边外部往来选择继续走普通人工金额规则，结构化 action 缺失时 fail closed。
@@ -218,16 +227,16 @@
 
 ## 2026-08-20 ETC 批次折叠、搜索、计数与关系缺口审计
 
-- Business/repository：`tests/test_workbench_page_query_repository.py` 保护 ETC inventory 只统计 submitted/closed distinct batch，搜索命中 external/business/submission batch ID、成员发票号和精确金额，并让 compact summary 只携带第一张真实 ETC 发票与完整总数；`tests/test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 上保护分页快速水合从部分 link + business 完整成员中稳定选出首张真实发票，声明完整折叠数量，且 statement budget 不增加。
+- Business/repository：`tests/test_workbench_page_query_repository.py` 保护 ETC inventory 只统计 submitted/closed distinct batch，搜索命中 external/business/submission batch ID、成员发票号和精确金额，并让 compact summary 只携带 canonical ETC `summary_row` 与完整真实成员总数；`tests/test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 上保护分页快速水合从部分 link + business 完整成员中稳定物化汇总行、声明完整折叠数量，且 statement budget 不增加。
 - Audit：`tests/test_workbench_page_audit.py` 保护缺 OA 与缺 active relation 的 submitted ETC batch 分别输出稳定 warning code，既有无效 relation member 仍为 error。
-- Frontend：`web/src/test/RelationGroupGrid.test.tsx` 保护折叠态不显示 summary 占位行、直接显示第一张发票，展开/收起复用既有 detail loader 展示全部 N 张。
+- Frontend：`web/src/test/RelationGroupGrid.test.tsx` 保护折叠态只显示 `summaryRow`、不显示任何真实发票；展开态只显示全部 N 张 `collapsedRows`，收起恢复同一汇总行。缺少 `summaryRow` 时显示明确空态，禁止以 `rows[0]`、第一张真实发票或 `slice(0, 1)` 兜底。
 - 性能：首屏不携带全部 ETC 发票，成员发票号仅在用户搜索时通过有界 `exists` 查询；不新增 API、SQL round-trip、表、worker、read model、cache 或第二套展开状态。
 
 ## 2026-07-28 逐栏折叠、普通行直显与搜索真实预览
 
 - Business core：`no_oa_bank_batch` 与普通关系保留全部真实行；`bank_flow_rule_batch` 只有银行成员数 `>3` 才生成银行栏 summary/collapsed rows，1 到 3 行直接显示；ETC 仍只折叠发票栏。
-- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；折叠栏传 summary + count，ETC 例外保留第一张真实发票窄行，搜索只决定组命中、不自动展开全部 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v12 淘汰旧 generation/page cache，并统一 ETC relation proof，不新增表、worker、cache 或 API。
-- API/Frontend：group detail 按 `collapsed_row_counts.<pane>` 逐栏验证；ETC 的 OA/银行栏验证正常 rows，发票栏验证 collapsed rows。闭合态搜索直接渲染真实命中行并高亮，不显示“隐藏内容命中”、不自动展开或预取详情。
+- Repository/read model：summary page 不再把普通银行/发票行截成 3 行；折叠栏传 canonical summary + count，ETC 发票栏同样只传汇总行，不把第一张真实发票混入首屏。搜索只决定组命中、不自动展开全部 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v12 淘汰旧 generation/page cache，并统一 ETC relation proof，不新增表、worker、cache 或 API。
+- API/Frontend：group detail 按 `collapsed_row_counts.<pane>` 逐栏验证；ETC 的 OA/银行栏验证正常 rows，发票栏验证 collapsed rows。闭合态搜索只保留命中组并渲染 summary，不显示折叠成员或“隐藏内容命中”，也不自动展开或预取详情。
 - Regression：普通多行与 legacy no-OA 不出现通用“还有 N 条，展开”；bank-flow 与 ETC 保留 click-only detail、失败可重试和同 generation fail-closed。
 
 ## 2026-07-28 日常报销付款明细复合行

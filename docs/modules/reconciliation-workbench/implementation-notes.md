@@ -1,5 +1,13 @@
 # 关联台 实施记录
 
+## 2026-08-26 - ETC 折叠汇总、正式选择与历史误异常闭环
+
+- 折叠展示：ETC 关系折叠态只返回并显示 canonical `etc_invoice_summary` 和真实发票总数，不再混入“第一张真实发票”；展开态只显示完整真实发票，收起或 canonical reload 后恢复同一汇总行。删除前端 `rows[0]`、首票和 `slice(0, 1)` 等闭合态兜底，缺少汇总合同就明确显示空态。
+- 正式选择：关系组选择、表头数量/金额和通用撤回 payload 只消费后端 `formal_member_ids/formal_member_types` 合同；`source_owned_display`、展开详情和重复勾选只影响视觉选择，不得重复计入金额或写操作。银行规则批次继续走既有专用撤回边界，不能把合成 summary ID 发送到通用 relation API。
+- 异常根因：`etc_invoice_summary` 是批次金额锚点，不是待归属的 OA 附件发票。金额与资料异常计算现在仅从“发票待归属”证据中排除该 synthetic summary，真实 OA 附件待归属仍保持异常；页面 SQL 在既有一次查询中携带 `source_kind`，不增加 I/O。
+- 历史数据：migration `0154` 只锁定并迁移已审阅的精确关系 `CASE-BATCH-txn_imported_1453`、旧 fingerprint 和完整证据前镜像，生成去除 synthetic 待归属证据的新版本；无关状态 no-op，目标漂移 fail closed，重复运行幂等，不修改 OA、流水、发票或 active relation。
+- 性能与边界：首屏由“一张真实发票 + 总数”缩减为“一个汇总行 + 总数”，展开仍复用既有 detail I/O；选择统计为已加载组内的 `Map/Set` 线性去重，不增加网络请求、SQL statement、read model、worker、cache、依赖或数据库备份。
+
 ## 2026-08-26 - OA 与外部往来款闭环金额口径统一
 
 - 根因：关联台 confirm preview/submit 把所有人工关系硬编码为 `manual_confirmed`，即使所选银行成员已由 canonical 分类证明为完整外部往来收支闭环，也仍按普通付款净额 `支出-收入` 计算，导致 `200000 OA + 200000 收入 + 200000 支出` 被误报差额 `200000`。
@@ -73,7 +81,7 @@
 
 - 根因：分页列表把 submitted/closed ETC 批次发布为 canonical `etc-summary-*` 单成员组，但 singleton detail 的窄查询只解析普通 OA、流水和普通发票，导致无 active relation 的最新 ETC 批次列表可见、点击展开却返回 404。
 - 修复：列表与详情共用一份 `_ETC_SUMMARY_IDENTITY_CTES`，detail 只按 `detail_key` 解出的精确 summary row id 查询并携带权威 external batch id，再复用既有 bounded hydration 一次返回全部真实 ETC 发票；不扫描 group digest，不增加 fallback、API、表、worker、read model、cache 或前端状态机。
-- 完整性：summary identity 发生规范化碰撞继续 fail closed；scope、typed member、detail key、group id 和 zone 仍逐项复核。折叠态首票与完整数量合同不变，展开态不包含 summary 占位行。
+- 完整性：summary identity 发生规范化碰撞继续 fail closed；scope、typed member、detail key、group id 和 zone 仍逐项复核。当时的折叠态首票合同已由 2026-08-26 方案取代；现行合同为折叠态只显示 canonical summary、展开态只显示完整真实成员。
 
 ## 2026-08-20 - submitted ETC 关系成员与延迟 OA scope 闭环
 
@@ -84,9 +92,9 @@
 - 4 个早期 migration 批次缺 OA 原始 marker，不能进入常规 matcher。既有专用 summary repair 工具改为在 exact case、ETC marker、唯一 OA 成员和 submitted canonical summary 均可证明时，通过同一 relation command 追加正式 invoice member；回滚同样走 relation command/history，不直写 relation SQL。
 - Page Audit v29 将 business batch 的历史 `relation_case_id` 作为必要证据之一；只有该 case 的 active relation 同时包含 canonical OA 且 owner marker 一致时，才不会误报 OA 缺失。
 
-## 2026-08-20 - ETC 全量折叠与历史关系缺口可观测
+## 2026-08-20 - ETC 全量折叠与历史关系缺口可观测（历史方案，已废止）
 
-- 折叠态删除 ETC summary 占位展示，直接保留第一张真实发票；PostgreSQL 分页快速水合在既有 ETC 汇总 CTE 内按“开票日期、行 ID”同时聚合一张真实首票和完整总数，不能只依赖完整详情 builder。展开使用既有 group detail 一次加载全部成员，收起回到第一张。首屏仍为 `O(1)` 发票窄行 + 总数，不把 68 张塞入 initial payload。
+- 本段折叠展示方案已由 2026-08-26 的 canonical `etc_invoice_summary` 合同完整取代，不再是现行设计。历史实现曾在折叠态保留第一张真实发票并聚合完整总数；该首票路径及其前端兜底现已删除，禁止恢复使用。
 - ETC inventory 只统计 submitted/closed distinct batch；搜索补齐 external/business/submission batch ID、成员发票号和精确批次金额，成员号通过 `exists` 命中完整 group。
 - Page Audit 新增 submitted batch 的 OA 缺失/active relation 缺失 warning，区分“上游 OA 不存在”和“OA 已存在但 matching 未闭环”；不改变 canonical relation 完整性 error。
 - 旧链：不引入 summary 展示行、客户端 68 行预载、第二展开组件、第二 matcher、page read model 或缓存。

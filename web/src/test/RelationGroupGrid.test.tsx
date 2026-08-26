@@ -488,6 +488,7 @@ describe("Workbench candidate grouping layout", () => {
       reason: "ETC批次",
       displayMode: "collapsed_summary",
       defaultCollapsed: true,
+      summaryRow: summary,
       rows: {
         oa: [],
         bank: [],
@@ -731,7 +732,10 @@ describe("Workbench candidate grouping layout", () => {
       relation_mode: "bank_flow_rule_batch",
       display_mode: "collapsed_summary",
       default_collapsed: true,
+      summary_row: summaryRow,
       bank_rows: [summaryRow],
+      formal_member_ids: collapsedBankRows.map((row) => row.id),
+      formal_member_types: collapsedBankRows.map(() => "bank"),
       collapsed_rows: { bank: collapsedBankRows },
       collapsed_row_counts: { bank: 4 },
       row_counts: { oa: 0, bank: 4, invoice: 0, rows: 4 },
@@ -1732,13 +1736,15 @@ describe("Workbench candidate grouping layout", () => {
     const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
     const expandButton = screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" });
     expect(expandButton).toHaveAttribute("aria-expanded", "false");
-    expect(invoiceCell).toHaveTextContent("ETC-001");
+    expect(invoiceCell).toHaveTextContent("ETC-OA-20260215-154900");
+    expect(invoiceCell).not.toHaveTextContent("ETC-001");
     expect(invoiceCell).not.toHaveTextContent("ETC-002");
 
     fireEvent.click(expandButton);
 
     const collapseButton = screen.getByRole("button", { name: "收起ETC发票" });
     expect(collapseButton).toHaveAttribute("aria-expanded", "true");
+    expect(invoiceCell).not.toHaveTextContent("ETC-OA-20260215-154900");
     expect(invoiceCell).toHaveTextContent("ETC-001");
     expect(invoiceCell).toHaveTextContent("ETC-002");
 
@@ -1748,7 +1754,8 @@ describe("Workbench candidate grouping layout", () => {
       "aria-expanded",
       "false",
     );
-    expect(invoiceCell).toHaveTextContent("ETC-001");
+    expect(invoiceCell).toHaveTextContent("ETC-OA-20260215-154900");
+    expect(invoiceCell).not.toHaveTextContent("ETC-001");
     expect(invoiceCell).not.toHaveTextContent("ETC-002");
   });
 
@@ -1913,6 +1920,50 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByRole("button", { name: "收起流水规则批次明细" })).toBeInTheDocument();
   });
 
+  test("returns an expanded pane to its summary when canonical reload replaces full detail with compact rows", () => {
+    const fullDetailGroup = createEtcCollapsedGroup();
+    const compactGroup = createEtcCollapsedGroup();
+    compactGroup.collapsedRows = { invoice: [] };
+    const renderGrid = (group: WorkbenchRelationGroup) => (
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />
+    );
+    const view = render(renderGrid(fullDetailGroup));
+
+    fireEvent.click(screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" }));
+
+    expect(screen.getByRole("button", { name: "收起ETC发票" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByText("ETC-001")).toBeInTheDocument();
+    expect(screen.queryByText("ETC-OA-20260215-154900")).not.toBeInTheDocument();
+
+    view.rerender(renderGrid(compactGroup));
+
+    expect(screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByText("ETC-OA-20260215-154900")).toBeInTheDocument();
+    expect(screen.queryByText("ETC-001")).not.toBeInTheDocument();
+    expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
+  });
+
   test("keeps truncated collapsed summary closed when full detail loading fails", async () => {
     const group = createBankFlowCollapsedGroup();
     const ensureGroupDetail = vi.fn().mockRejectedValue(new Error("stale"));
@@ -1954,7 +2005,7 @@ describe("Workbench candidate grouping layout", () => {
     await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledTimes(2));
   });
 
-  test("renders the first ETC invoice directly and expands all invoices in the invoice pane", () => {
+  test("renders the ETC summary while collapsed and only real invoices while expanded", () => {
     const group = createEtcCollapsedGroup();
     render(
       <RelationGroupGrid
@@ -1976,10 +2027,9 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
-    const firstInvoiceRow = within(invoiceCell).getByRole("row", { name: /ETC-001/ });
-    expect(screen.queryByText("ETC批次")).not.toBeInTheDocument();
-    expect(within(firstInvoiceRow).getByRole("button", { name: /^查看发票 .* 详情$|^详情$/ })).toBeInTheDocument();
-    expect(screen.getByText("ETC-001")).toBeInTheDocument();
+    expect(screen.getByText("ETC批次")).toBeInTheDocument();
+    expect(screen.getByText("ETC-OA-20260215-154900")).toBeInTheDocument();
+    expect(screen.queryByText("ETC-001")).not.toBeInTheDocument();
     expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
     const expandButton = screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" });
     expect(expandButton).toHaveTextContent("展开全部 2 张发票");
@@ -1991,10 +2041,60 @@ describe("Workbench candidate grouping layout", () => {
 
     fireEvent.click(expandButton);
 
+    expect(screen.queryByText("ETC-OA-20260215-154900")).not.toBeInTheDocument();
     expect(screen.getByText("ETC-001")).toBeInTheDocument();
     expect(screen.getByText("ETC-002")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "收起ETC发票" })).toBeInTheDocument();
+    const collapseButton = screen.getByRole("button", { name: "收起ETC发票" });
     expect(within(invoiceCell).getAllByRole("row")).toHaveLength(2);
+
+    fireEvent.click(collapseButton);
+
+    expect(screen.getByText("ETC-OA-20260215-154900")).toBeInTheDocument();
+    expect(screen.queryByText("ETC-001")).not.toBeInTheDocument();
+    expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
+    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
+  });
+
+  test("shows an explicit empty collapsed pane when the ETC summary is missing", () => {
+    const group = createEtcCollapsedGroup();
+    group.summaryRow = undefined;
+    group.rows.invoice = [createEtcInvoiceRecord("legacy-first", "LEGACY-FIRST", "23.50")];
+    render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const invoiceCell = screen.getByTestId("candidate-scroll-paired-case:ETC-OA-20260215-154900-invoice");
+    expect(within(invoiceCell).getByText("-")).toBeInTheDocument();
+    expect(invoiceCell).not.toHaveTextContent("LEGACY-FIRST");
+    expect(invoiceCell).not.toHaveTextContent("ETC-001");
+    expect(invoiceCell).not.toHaveTextContent("ETC-002");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开全部ETC发票，共 2 张" }));
+
+    expect(invoiceCell).toHaveTextContent("ETC-001");
+    expect(invoiceCell).toHaveTextContent("ETC-002");
+
+    fireEvent.click(screen.getByRole("button", { name: "收起ETC发票" }));
+
+    expect(within(invoiceCell).getByText("-")).toBeInTheDocument();
+    expect(invoiceCell).not.toHaveTextContent("LEGACY-FIRST");
+    expect(invoiceCell).not.toHaveTextContent("ETC-001");
+    expect(invoiceCell).not.toHaveTextContent("ETC-002");
   });
 
   test("prefers canonical collapsed detail counts over aggregate row counts", () => {

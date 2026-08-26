@@ -455,6 +455,13 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             if list(item.get("invoice_rows") or [])
             and item["invoice_rows"][0].get("etc_batch_id") == "etc_detail_49"
         )
+        self.assertEqual(group["collapsed_row_counts"], {"invoice": 49})
+        self.assertNotIn("collapsed_rows", group)
+        self.assertEqual(len(group["invoice_rows"]), 1)
+        self.assertEqual(
+            group["invoice_rows"][0]["source_kind"],
+            "etc_invoice_summary",
+        )
         detail = self.repository.get_workbench_group_detail(
             scope_key="all",
             zone="unpaired",
@@ -2151,13 +2158,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(priority_group["invoice_rows"][0]["amount"], "33.00")
         self.assertEqual(priority_group["collapsed_row_counts"], {"invoice": 2})
-        self.assertEqual(
-            [
-                (row["source_kind"], row["invoice_no"])
-                for row in priority_group["collapsed_rows"]["invoice"]
-            ],
-            [("etc_invoice", "PRIORITY-BUSINESS")],
-        )
+        self.assertNotIn("collapsed_rows", priority_group)
         anomaly_items = list(
             (priority_group.get("workbench_anomaly") or {}).get("items") or []
         )

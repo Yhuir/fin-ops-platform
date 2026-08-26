@@ -97,9 +97,8 @@ function isEtcInvoiceCollapse(
   paneId: WorkbenchRecordType,
   collapsedRows: WorkbenchRecord[],
 ) {
-  const summaryRow = group.summaryRow ?? group.rows[paneId]?.[0];
   return paneId === "invoice" && (
-    summaryRow?.sourceKind === "etc_invoice_summary"
+    group.summaryRow?.sourceKind === "etc_invoice_summary"
     || collapsedRows.some((row) => row.sourceKind === "etc_invoice")
   );
 }
@@ -201,6 +200,26 @@ function RelationGroupGrid({
     setLoadingPaneGroups(new Set());
     setFailedPaneGroups(new Set());
   }, [normalizedSearchQuery]);
+
+  useLayoutEffect(() => {
+    setExpandedPaneGroups((current) => {
+      if (current.size === 0) {
+        return current;
+      }
+      const next = new Set(current);
+      groups.forEach((group) => {
+        panes.forEach((pane) => {
+          const key = `${group.id}:${pane.id}`;
+          const loadedRowCount = group.collapsedRows?.[pane.id]?.length ?? 0;
+          const totalRowCount = group.collapsedRowCounts?.[pane.id] ?? loadedRowCount;
+          if (next.has(key) && totalRowCount > loadedRowCount) {
+            next.delete(key);
+          }
+        });
+      });
+      return next.size === current.size ? current : next;
+    });
+  }, [groups, panes]);
 
   useEffect(() => {
     const root = gridRef.current;
@@ -455,10 +474,7 @@ function RelationGroupGrid({
           if (expandedPaneGroups.has(collapseKey)) {
             return collapsedRows;
           }
-          if (isEtcInvoiceCollapse(group, paneId, collapsedRows)) {
-            return collapsedRows.slice(0, 1);
-          }
-          return group.rows[paneId];
+          return group.summaryRow?.recordType === paneId ? [group.summaryRow] : [];
         };
         const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];

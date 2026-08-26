@@ -110,6 +110,8 @@ function withUnpairedActiveRelations(memberIdSets: string[][]) {
       return {
         group_id: `case:TEST-UNPAIRED-RELATION-${index + 1}`,
         group_type: "relation",
+        formal_member_ids: rows.map((row) => String(row.id)),
+        formal_member_types: rows.map((row) => String(row.type)),
         zone: "unpaired",
         match_confidence: "high",
         reason: "active_formal_relation_incomplete",
@@ -136,6 +138,54 @@ function withUnpairedActiveRelations(memberIdSets: string[][]) {
         groups: [...relationGroups, ...remainingGroups],
       },
     };
+  };
+}
+
+function withUnpairedFormalRelationDisplayInvoice(payload: Record<string, unknown>) {
+  const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
+  const allRows = unpaired.groups.flatMap((group) => [
+    ...group.oa_rows,
+    ...group.bank_rows,
+    ...group.invoice_rows,
+  ]);
+  const formalOa = allRows.find((row) => row.id === "oa-o-202603-001");
+  const formalBank = allRows.find((row) => row.id === "bk-o-202603-001");
+  const displayInvoice = allRows.find((row) => row.id === "iv-o-202603-001");
+  if (!formalOa || !formalBank || !displayInvoice) {
+    throw new Error("Missing canonical Workbench rows for the display-only invoice relation test.");
+  }
+  const relationMemberIds = new Set([formalOa.id, formalBank.id, displayInvoice.id]);
+  const remainingGroups = unpaired.groups.filter((group) => ![
+    ...group.oa_rows,
+    ...group.bank_rows,
+    ...group.invoice_rows,
+  ].some((row) => relationMemberIds.has(row.id)));
+  return {
+    ...payload,
+    unpaired: {
+      ...unpaired,
+      groups: [{
+        group_id: "case:TEST-UNPAIRED-FORMAL-DISPLAY",
+        group_type: "relation",
+        formal_member_ids: [formalOa.id, formalBank.id],
+        formal_member_types: [formalOa.type, formalBank.type],
+        zone: "unpaired",
+        match_confidence: "high",
+        reason: "active_formal_relation_incomplete",
+        oa_rows: [formalOa],
+        bank_rows: [formalBank],
+        invoice_rows: [{
+          ...displayInvoice,
+          workbench_membership_role: "source_owned_display",
+        }],
+        can_withdraw: true,
+        completion: {
+          is_complete: false,
+          missing_row_types: ["invoice"],
+          blocking_reasons: [],
+        },
+      }, ...remainingGroups],
+    },
   };
 }
 
@@ -456,6 +506,13 @@ function withCollapsedPairedGroup(payload: Record<string, unknown>, amount: stri
   const compactGroup = {
     ...sourceGroup,
     bank_rows: sourceRows.slice(0, 1),
+    summary_row: {
+      ...sourceRow,
+      id: "group-detail-race-summary",
+      debit_amount: amount,
+      remark: `汇总快照 ${amount}`,
+      available_actions: ["detail"],
+    },
     row_counts: { oa: 1, bank: 2, invoice: 1 },
     collapsed_rows: {
       oa: sourceGroup.oa_rows,
@@ -471,6 +528,93 @@ function withCollapsedPairedGroup(payload: Record<string, unknown>, amount: stri
       groups: paired.groups.map((group) => (
         group.group_id === "case:CASE-202603-001" ? compactGroup : group
       )),
+    },
+  };
+}
+
+function withFormalRelationDisplayAlias(payload: Record<string, unknown>) {
+  const paired = payload.paired as { groups: Array<Record<string, unknown>> };
+  const sourceGroup = paired.groups.find((group) => group.group_id === "case:CASE-202603-001");
+  if (!sourceGroup) {
+    throw new Error("Missing paired Workbench fixture group for relation display selection test.");
+  }
+  const sourceBankRow = (sourceGroup.bank_rows as Array<Record<string, unknown>>)[0];
+  if (!sourceBankRow) {
+    throw new Error("Missing paired bank row for relation display selection test.");
+  }
+  return {
+    ...payload,
+    paired: {
+      ...paired,
+      groups: paired.groups.map((group) => (
+        group.group_id === "case:CASE-202603-001"
+          ? {
+            ...group,
+            formal_member_ids: ["oa-p-202603-001", "bk-p-202603-001"],
+            formal_member_types: ["oa", "bank"],
+            invoice_rows: (group.invoice_rows as Array<Record<string, unknown>>).map((invoiceRow) => ({
+              ...invoiceRow,
+              workbench_membership_role: "source_owned_display",
+            })),
+            display_mode: "collapsed_summary",
+            default_collapsed: true,
+            collapsed_rows: { bank: group.bank_rows },
+            collapsed_row_counts: { bank: (group.bank_rows as Array<Record<string, unknown>>).length },
+            summary_row: {
+              ...sourceBankRow,
+              id: "relation-display-summary-CASE-202603-001",
+              counterparty_name: "正式关系汇总选择行",
+              debit_amount: "999999.00",
+              available_actions: ["detail"],
+            },
+          }
+          : group
+      )),
+    },
+  };
+}
+
+function withCompactBankFlowRelation(payload: Record<string, unknown>) {
+  const paired = payload.paired as { groups: Array<Record<string, unknown>> };
+  const sourceGroup = paired.groups[0];
+  if (!sourceGroup) {
+    throw new Error("Missing paired Workbench fixture group for compact bank batch test.");
+  }
+  const summaryRow = {
+    id: "bank-flow-summary-COMPACT-202603",
+    type: "bank",
+    source_kind: "bank_flow_rule_batch_summary",
+    trade_time: "2026-03-31 23:59:59",
+    debit_amount: "128000.00",
+    counterparty_name: "流水规则专用批次",
+    available_actions: ["detail", "withdraw_no_oa_batch"],
+    special_metadata: {
+      source_batch_id: "COMPACT-202603",
+      batch_version: 7,
+      relation_mode: "bank_flow_rule_batch",
+      row_count: 2,
+      total_amount: "128000.00",
+    },
+  };
+  return {
+    ...payload,
+    paired: {
+      ...paired,
+      groups: [{
+        ...sourceGroup,
+        group_id: "bank-flow-rule-batch:COMPACT-202603",
+        relation_mode: "bank_flow_rule_batch",
+        display_mode: "collapsed_summary",
+        default_collapsed: true,
+        summary_row: summaryRow,
+        formal_member_ids: ["compact-bank-1", "compact-bank-2"],
+        formal_member_types: ["bank", "bank"],
+        oa_rows: [],
+        bank_rows: [summaryRow],
+        invoice_rows: [],
+        row_counts: { oa: 0, bank: 2, invoice: 0, rows: 2 },
+        display_row_counts: { oa: 0, bank: 1, invoice: 0, rows: 1 },
+      }],
     },
   };
 }
@@ -2420,6 +2564,46 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
+  test("unpaired display invoice keeps detail access while exact relation withdraw uses only formal members", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: withUnpairedFormalRelationDisplayInvoice,
+    });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const displayInvoiceRow = await within(unpairedZone).findByRole("row", {
+      name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
+    });
+    expect(within(displayInvoiceRow).getByRole("button", { name: /查看发票.*详情/ })).toBeInTheDocument();
+
+    await user.click(displayInvoiceRow);
+
+    expect(displayInvoiceRow).toHaveAttribute("data-row-state", "selected");
+    expect(within(unpairedZone).getByText("已选 1")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("OA 1 / 58000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("流水 1 / 58000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("发票 0 / 0.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    const withdrawButton = within(unpairedZone).getByRole("button", { name: "撤回关联" });
+    expect(withdrawButton).toBeEnabled();
+
+    await user.click(withdrawButton);
+
+    expect(await screen.findByRole("dialog", { name: "撤回关联" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/withdraw-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
+          row_types: ["oa", "bank"],
+        }),
+      }),
+    );
+  });
+
   test("unpaired relation withdraw stays disabled when selection also contains an orphaned stale row", async () => {
     const user = userEvent.setup();
     const relationPayload = withUnpairedActiveRelations([
@@ -3839,6 +4023,87 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
 
     expect(await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ })).toBeInTheDocument();
+  });
+
+  test("a selected formal relation display row keeps its visual state but withdraws only canonical group rows", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: withFormalRelationDisplayAlias,
+    });
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const displayRow = await within(pairedZone).findByRole("row", {
+      name: /正式关系汇总选择行/,
+    });
+
+    await user.click(displayRow);
+
+    expect(displayRow).toHaveAttribute("data-row-state", "selected");
+    expect(within(pairedZone).getByText("已选 1")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("OA 1 / 128000.00")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("流水 1 / 128000.00")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("发票 0 / 0.00")).toBeInTheDocument();
+
+    await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+    expect(await screen.findByRole("dialog", { name: "撤回关联" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/actions/withdraw-link/preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          month: "all",
+          row_ids: ["oa-p-202603-001", "bk-p-202603-001"],
+          row_types: ["oa", "bank"],
+        }),
+      }),
+    );
+  });
+
+  test("compact bank-flow summary keeps exact totals and uses only the dedicated batch withdrawal", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: withCompactBankFlowRelation,
+    });
+    const mockImplementation = fetchMock.getMockImplementation();
+    if (!mockImplementation) {
+      throw new Error("Missing Workbench fetch mock implementation.");
+    }
+    fetchMock.mockImplementation(async (input, init) => {
+      if (fetchPath(input) === "/api/bank-flow-rule-batches/COMPACT-202603/withdraw") {
+        return jsonResponse({ affected_months: ["2026-03"], results: [] });
+      }
+      return mockImplementation(input, init);
+    });
+    renderWorkbenchPage();
+
+    const pairedZone = await screen.findByTestId("zone-paired");
+    const summaryRow = await within(pairedZone).findByRole("row", { name: /流水规则专用批次/ });
+    await user.click(summaryRow);
+
+    expect(summaryRow).toHaveAttribute("data-row-state", "selected");
+    expect(within(pairedZone).getByText("已选 1")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("流水 2 / 128000.00")).toBeInTheDocument();
+    expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
+
+    await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-flow-rule-batches/COMPACT-202603/withdraw",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            expected_version: 7,
+            reason: "由关联台撤回流水规则批次",
+          }),
+        }),
+      );
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/workbench/actions/withdraw-link/preview",
+      expect.objectContaining({ body: expect.stringContaining("bank-flow-summary-COMPACT-202603") }),
+    );
   });
 
   test("paired zone withdraw preview blocks immutable OA attachment invoice binding", async () => {

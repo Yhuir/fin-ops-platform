@@ -694,6 +694,8 @@ function buildPairedWorkbenchGroup(includeCashSpecialActions = false) {
     oa_rows: [rows.oa],
     bank_rows: [rows.bank],
     invoice_rows: [rows.invoice],
+    formal_member_ids: [rows.oa.id, rows.bank.id, rows.invoice.id],
+    formal_member_types: [rows.oa.type, rows.bank.type, rows.invoice.type],
     can_withdraw: true,
     amount_check: {
       status: "matched",
