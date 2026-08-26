@@ -54,7 +54,9 @@
 - 事实源：`job.outbox_events(event_type='oa.sync')`；payload 显式为 `operation=refresh_attachments + row_ids`。
 - 状态：`queued -> processing -> done`，失败为 `failed/dead_lettered`。
 - POST 只返回 202/event id；页面轮询同资源状态，并且只有 terminal `done` 才用 worker result 更新附件/可导入发票计数。
-- 缺失、非完成态、OCR/解析/promotion 失败必须显示真实错误；禁止返回旧 PostgreSQL projection 伪造成功。
+- 刷新与正式导入是两个独立状态机：当前 UI 保留所有 completed OA 的刷新能力，并只对 `in_progress + expense_claim` 扩展刷新；正式导入继续只允许 `completed + can_import=true`，进行中日常报销刷新成功也不得进入已选导入集合。
+- terminal `done` 后必须按 exact row ID、原 form type、`statuses=completed,in_progress` 与 `page_size=2` 回读；只接受 `total=1` 且 row ID 唯一命中。若该行仍为 `in_progress`，提示“附件已解析，待 OA 完成后进入统一发票池”；若排队期间已迁移为 `completed`，按最新完成态呈现。
+- 缺失、非支持表单/状态、回读 0/多条、OCR/解析/promotion 失败必须显示真实错误；禁止返回旧 PostgreSQL projection 或搜索 fallback 伪造成功。
 - 新刷新开始或页面卸载时取消旧轮询；Settings 不执行 Mongo/OCR/promotion，不新增第二种 worker event。
 
 ### 数据重置

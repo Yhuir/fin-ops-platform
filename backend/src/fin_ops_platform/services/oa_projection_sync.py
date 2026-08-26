@@ -5,7 +5,10 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_adapter import (
+    OAApplicationRecord,
+    is_in_progress_expense_claim,
+)
 from fin_ops_platform.services.oa_attachment_refresh_request_service import (
     REFRESH_ATTACHMENTS_OPERATION,
 )
@@ -28,9 +31,9 @@ class OAProjectionSyncService:
         payment_status_repository: Any | None = None,
         pending_payment_source_snapshot_repository: Any | None = None,
     ) -> None:
-        if (payment_status_repository is None) != (pending_payment_source_snapshot_repository is None):
+        if payment_status_repository is not None and pending_payment_source_snapshot_repository is None:
             raise ValueError(
-                "payment_status_repository and pending_payment_source_snapshot_repository must be configured together."
+                "payment_status_repository requires pending_payment_source_snapshot_repository."
             )
         self._source_adapter = source_adapter
         self._projection_repository = projection_repository
@@ -67,14 +70,14 @@ class OAProjectionSyncService:
             raise RuntimeError(
                 "OA sync source adapter must expose refresh_application_record_attachments()."
             )
-        upsert_targeted = getattr(
-            self._projection_repository,
-            "upsert_targeted_application_records",
+        commit_targeted = getattr(
+            self._pending_payment_source_snapshot_repository,
+            "commit_targeted_attachment_refresh",
             None,
         )
-        if not callable(upsert_targeted):
+        if not callable(commit_targeted):
             raise RuntimeError(
-                "OA attachment refresh requires targeted projection upserts."
+                "OA attachment refresh requires atomic targeted owner writes."
             )
         promote_records = getattr(self._attachment_invoice_promoter, "promote_records", None)
         if not callable(promote_records):
@@ -96,10 +99,16 @@ class OAProjectionSyncService:
                 f"OA attachment refresh source returned unrequested row_ids: {', '.join(unexpected_row_ids)}"
             )
         selected_records = [records_by_id[row_id] for row_id in row_ids]
-        in_progress_row_ids = [record.id for record in selected_records if not _is_completed_workflow(record)]
-        if in_progress_row_ids:
+        unsupported_row_ids = [
+            record.id
+            for record in selected_records
+            if not _is_completed_workflow(record)
+            and not is_in_progress_expense_claim(record)
+        ]
+        if unsupported_row_ids:
             raise RuntimeError(
-                f"OA attachment refresh requires completed workflows: {', '.join(in_progress_row_ids)}"
+                "OA attachment refresh supports completed workflows and in-progress expense claims only: "
+                + ", ".join(unsupported_row_ids)
             )
         failed_parse_row_ids = _targeted_attachment_failure_row_ids(selected_records)
         if failed_parse_row_ids:
@@ -118,18 +127,25 @@ class OAProjectionSyncService:
             raise RuntimeError(
                 "OA attachment refresh source scopes changed after enqueue."
             )
-        upserted_count = 0
-        for scope_key, records in records_by_scope.items():
-            upserted_count += int(
-                upsert_targeted(records, scope_key=scope_key)
+        owner_write = commit_targeted(records=selected_records)
+        upserted_completed_count = getattr(owner_write, "upserted_completed_count", None)
+        upserted_pending_count = getattr(owner_write, "upserted_pending_count", None)
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (upserted_completed_count, upserted_pending_count)
+        ):
+            raise RuntimeError("OA attachment refresh owner writer returned an invalid result.")
+        upserted_count = upserted_completed_count + upserted_pending_count
+        completed_records = [record for record in selected_records if _is_completed_workflow(record)]
+        promotion_summary: dict[str, object] = {}
+        if completed_records:
+            promotion = promote_records(
+                completed_records,
+                ensure_matching=True,
             )
-        promotion = promote_records(
-            selected_records,
-            ensure_matching=True,
-        )
-        if not isinstance(promotion, dict):
-            raise RuntimeError("OA attachment invoice promoter returned an invalid result.")
-        promotion_summary = dict(promotion.get("summary") or {})
+            if not isinstance(promotion, dict):
+                raise RuntimeError("OA attachment invoice promoter returned an invalid result.")
+            promotion_summary = dict(promotion.get("summary") or {})
         result = {
             "sync_type": "oa_attachment_refresh",
             "operation": REFRESH_ATTACHMENTS_OPERATION,
@@ -165,7 +181,11 @@ class OAProjectionSyncService:
         admission_records = self._sanitized_records(list(source_batch["admission_records"]))
         payment_statuses = self._load_payment_statuses()
         completed_records = [record for record in projection_records if _is_completed_workflow(record)]
-        if self._pending_payment_source_snapshot_repository is not None:
+        if self._payment_status_repository is not None:
+            if self._pending_payment_source_snapshot_repository is None:
+                raise RuntimeError(
+                    "OA payment snapshot sync requires pending_payment_source_snapshot_repository."
+                )
             source_snapshot_result = self._commit_pending_payment_source_snapshot(
                 scope_key=scope_key,
                 projection_records=projection_records,

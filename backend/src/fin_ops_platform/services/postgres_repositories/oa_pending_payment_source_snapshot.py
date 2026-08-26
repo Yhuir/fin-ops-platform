@@ -5,7 +5,10 @@ import hashlib
 import json
 from typing import Any, Callable
 
-from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_adapter import (
+    OAApplicationRecord,
+    is_in_progress_expense_claim,
+)
 from fin_ops_platform.services.oa_payment_status_service import (
     OAPaymentStatusRecord,
     PAY_STATUS_PAID,
@@ -62,6 +65,7 @@ class OaPendingPaymentSourceSnapshotResult:
     removed_stale_completed_count: int = 0
     removed_non_completed_count: int = 0
     pruned_scope_keys: tuple[str, ...] = ()
+    upserted_pending_count: int = 0
 
 
 class PostgresOaPendingPaymentSourceSnapshotRepository:
@@ -95,6 +99,200 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             tenant_id=tenant_id,
         )
 
+    def commit_targeted_attachment_refresh(
+        self,
+        *,
+        records: list[OAApplicationRecord],
+        tenant_id: str = "default",
+    ) -> OaPendingPaymentSourceSnapshotResult:
+        """Atomically refresh exact OA rows without advancing full-sync watermarks."""
+
+        normalized_tenant_id = text(tenant_id) or "default"
+        normalized_records = _canonical_owner_records(records)
+        if not normalized_records:
+            raise ValueError("OA targeted attachment refresh requires at least one record.")
+        in_progress_flow_ids: dict[str, str] = {}
+        for record in normalized_records:
+            if not text(record.id) or not _month(record.month):
+                raise ValueError("OA targeted attachment refresh requires row_id and month.")
+            if not is_completed_workflow_status(record.workflow_status):
+                if not is_in_progress_expense_claim(record):
+                    raise ValueError(
+                        "OA targeted attachment refresh supports completed workflows "
+                        f"and in-progress expense claims only: {record.id}."
+                    )
+                flow_id = _record_flow_id(record)
+                if not flow_id:
+                    raise ValueError(
+                        "OA targeted attachment refresh requires a stable pending flow_id: "
+                        f"{record.id}."
+                    )
+                in_progress_flow_ids[record.id] = flow_id
+
+        row_ids = sorted(record.id for record in normalized_records)
+
+        def write(transaction: Any) -> OaPendingPaymentSourceSnapshotResult:
+            _lock_oa_owner_writes(
+                transaction,
+                tenant_id=normalized_tenant_id,
+            )
+            completed_rows = list(
+                transaction.fetch_all(
+                    """
+                    select row_id
+                    from app.oa_applications
+                    where row_id = any(%s::text[])
+                    """,
+                    (row_ids,),
+                )
+                or []
+            )
+            existing_completed_ids = {
+                row_id
+                for row in completed_rows
+                if (row_id := text(row.get("row_id")))
+            }
+            in_progress_ids = {
+                record.id
+                for record in normalized_records
+                if not is_completed_workflow_status(record.workflow_status)
+            }
+            regressed_ids = sorted(existing_completed_ids.intersection(in_progress_ids))
+            if regressed_ids:
+                raise RuntimeError(
+                    "OA targeted attachment refresh refused completed-to-in-progress owner regression: "
+                    + ", ".join(regressed_ids)
+                )
+
+            old_rows = list(
+                transaction.fetch_all(
+                    """
+                    select scope_key, oa_id, source_signature, source_payload
+                    from app.oa_pending_payment_admissions
+                    where tenant_id = %s and oa_id = any(%s::text[])
+                    """,
+                    (normalized_tenant_id, row_ids),
+                )
+                or []
+            )
+            old_by_id = {
+                oa_id: {
+                    "scope_key": _month(row.get("scope_key")),
+                    "source_signature": text(row.get("source_signature")) or "",
+                    "source_payload": _dict(row.get("source_payload")),
+                }
+                for row in old_rows
+                if (oa_id := text(row.get("oa_id")))
+            }
+            pending_owner_counts: dict[str, int] = {}
+            for row in old_rows:
+                oa_id = text(row.get("oa_id"))
+                if oa_id:
+                    pending_owner_counts[oa_id] = pending_owner_counts.get(oa_id, 0) + 1
+            invalid_pending_owner_ids = sorted(
+                row_id
+                for row_id in in_progress_ids
+                if pending_owner_counts.get(row_id, 0) != 1
+            )
+            if invalid_pending_owner_ids:
+                raise RuntimeError(
+                    "OA targeted attachment refresh requires exactly one existing pending owner: "
+                    + ", ".join(invalid_pending_owner_ids)
+                )
+            invalid_pending_scope_ids = sorted(
+                record.id
+                for record in normalized_records
+                if record.id in in_progress_ids
+                and _month((old_by_id.get(record.id) or {}).get("scope_key"))
+                != _month(record.month)
+            )
+            if invalid_pending_scope_ids:
+                raise RuntimeError(
+                    "OA targeted attachment refresh requires the existing pending owner scope: "
+                    + ", ".join(invalid_pending_scope_ids)
+                )
+
+            projection_repository = PostgresOAProjectionRepository(transaction)
+            upserted_completed_count = 0
+            completed_projection_changed_scopes: set[str] = set()
+            for scope_key in sorted(
+                {
+                    scope
+                    for record in normalized_records
+                    if is_completed_workflow_status(record.workflow_status)
+                    and (scope := _month(record.month))
+                }
+            ):
+                scope_records = [
+                    record
+                    for record in normalized_records
+                    if is_completed_workflow_status(record.workflow_status)
+                    and _month(record.month) == scope_key
+                ]
+                changed = projection_repository.upsert_targeted_application_records(
+                    scope_records,
+                    scope_key=scope_key,
+                )
+                upserted_completed_count += int(changed)
+                if changed:
+                    completed_projection_changed_scopes.add(scope_key)
+
+            desired_pending: dict[str, dict[str, Any]] = {}
+            for record in normalized_records:
+                if is_completed_workflow_status(record.workflow_status):
+                    continue
+                flow_id = in_progress_flow_ids[record.id]
+                payload = _admission_payload(record, flow_id=flow_id)
+                desired_pending[record.id] = {
+                    "scope_key": _month(record.month),
+                    "source_signature": _signature(payload),
+                    "source_payload": payload,
+                }
+
+            changed_pending_ids = {
+                record.id
+                for record in normalized_records
+                if is_completed_workflow_status(record.workflow_status)
+                and record.id in old_by_id
+            }
+            changed_pending_ids.update(
+                oa_id
+                for oa_id, desired in desired_pending.items()
+                if (
+                    (old_by_id.get(oa_id) or {}).get("scope_key"),
+                    (old_by_id.get(oa_id) or {}).get("source_signature"),
+                )
+                != (desired["scope_key"], desired["source_signature"])
+            )
+            changed_pending_scopes = {
+                scope
+                for oa_id in changed_pending_ids
+                for scope in (
+                    _month((old_by_id.get(oa_id) or {}).get("scope_key")),
+                    _month((desired_pending.get(oa_id) or {}).get("scope_key")),
+                )
+                if scope
+            }
+            if changed_pending_ids:
+                self._replace_targeted_admissions(
+                    transaction,
+                    tenant_id=normalized_tenant_id,
+                    changed_oa_ids=changed_pending_ids,
+                    admissions=desired_pending,
+                )
+
+            return OaPendingPaymentSourceSnapshotResult(
+                completed_projection_changed_scopes=tuple(sorted(completed_projection_changed_scopes)),
+                oa_pending_payment_changed_scopes=tuple(sorted(changed_pending_scopes)),
+                payment_status_count=0,
+                admission_count=len(desired_pending),
+                source_signatures={},
+                upserted_completed_count=upserted_completed_count,
+                upserted_pending_count=len(changed_pending_ids.intersection(desired_pending)),
+            )
+
+        return run_in_transaction(self._connection, write)
+
     def replace_authoritative_snapshot(
         self,
         *,
@@ -108,14 +306,19 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
     ) -> OaPendingPaymentSourceSnapshotResult:
         normalized_scope_key = _scope_key(scope_key)
         normalized_tenant_id = text(tenant_id) or "default"
-        normalized_completed_records = [
+        normalized_completed_records = _canonical_owner_records([
             record
             for record in list(completed_projection_records or [])
             if isinstance(record, OAApplicationRecord) and is_completed_workflow_status(record.workflow_status)
-        ]
-        normalized_admission_records = [
+        ])
+        normalized_admission_records = _canonical_owner_records([
             record for record in list(admission_records or []) if isinstance(record, OAApplicationRecord)
-        ]
+        ])
+        completed_owner_ids = {
+            record.id
+            for record in normalized_admission_records
+            if is_completed_workflow_status(record.workflow_status)
+        }
         normalized_statuses = _normalized_statuses(payment_statuses)
         normalized_removed_projection_oa_row_ids = {
             row_id
@@ -202,8 +405,15 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 old_admissions,
                 old_watermarks,
             )
+            completed_owner_cleanup_scopes = {
+                admission_scope
+                for (admission_scope, oa_id) in old_admissions
+                if oa_id in completed_owner_ids
+            }
             new_admissions = dict(old_admissions) if normalized_scope_key != "all" else {}
             for key in [key for key in new_admissions if key[0] in replaced_scopes]:
+                new_admissions.pop(key, None)
+            for key in [key for key in new_admissions if key[1] in completed_owner_ids]:
                 new_admissions.pop(key, None)
             for record in normalized_admission_records:
                 scope_month = _month(record.month)
@@ -213,6 +423,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     or not flow_id
                     or flow_id not in new_statuses
                     or is_completed_workflow_status(record.workflow_status)
+                    or record.id in completed_owner_ids
                 ):
                     continue
                 payload = _admission_payload(record, flow_id=flow_id)
@@ -270,7 +481,9 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             self._replace_admissions(
                 transaction,
                 tenant_id=normalized_tenant_id,
-                replaced_scopes=replaced_scopes.intersection(changed_admission_scopes),
+                replaced_scopes=(replaced_scopes | completed_owner_cleanup_scopes).intersection(
+                    changed_admission_scopes
+                ),
                 admissions=new_admissions,
             )
 
@@ -407,12 +620,12 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
     ) -> OaPendingPaymentSourceSnapshotResult:
         """Commit completed OA facts and all pending-payment inputs as one PostgreSQL write."""
 
-        normalized_projection_records = [
+        normalized_projection_records = _canonical_owner_records([
             record for record in list(projection_records or []) if isinstance(record, OAApplicationRecord)
-        ]
-        normalized_admission_records = [
+        ])
+        normalized_admission_records = _canonical_owner_records([
             record for record in list(admission_records or []) if isinstance(record, OAApplicationRecord)
-        ]
+        ])
         completed_records = [
             record
             for record in normalized_projection_records
@@ -420,6 +633,10 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         ]
 
         def write(transaction: Any) -> OaPendingPaymentSourceSnapshotResult:
+            _lock_oa_owner_writes(
+                transaction,
+                tenant_id=text(tenant_id) or "default",
+            )
             projection_repository = PostgresOAProjectionRepository(transaction)
             upserted_count = projection_repository.upsert_application_records(completed_records, scope_key=scope_key)
             removed_stale_row_ids = (
@@ -742,6 +959,69 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         )
 
     @staticmethod
+    def _replace_targeted_admissions(
+        transaction: Any,
+        *,
+        tenant_id: str,
+        changed_oa_ids: set[str],
+        admissions: dict[str, dict[str, Any]],
+    ) -> None:
+        normalized_oa_ids = sorted(
+            oa_id for value in changed_oa_ids if (oa_id := text(value))
+        )
+        if not normalized_oa_ids:
+            return
+        transaction.execute(
+            """
+            delete from app.oa_pending_payment_admissions
+            where tenant_id = %s and oa_id = any(%s::text[])
+            """,
+            (tenant_id, normalized_oa_ids),
+        )
+        rows: list[dict[str, Any]] = []
+        for oa_id in normalized_oa_ids:
+            admission = admissions.get(oa_id)
+            if not admission:
+                continue
+            payload = dict(admission["source_payload"])
+            rows.append(
+                {
+                    "scope_key": admission["scope_key"],
+                    "oa_id": oa_id,
+                    "workflow_status": text(payload.get("workflow_status")),
+                    "applicant": text(payload.get("applicant")),
+                    "project_name": text(payload.get("project_name")),
+                    "project_name_display": text(payload.get("project_name_display")),
+                    "amount": text(payload.get("amount")),
+                    "source_signature": admission["source_signature"],
+                    "source_payload": payload,
+                }
+            )
+        if not rows:
+            return
+        transaction.execute(
+            """
+            insert into app.oa_pending_payment_admissions(
+                tenant_id, scope_key, oa_id, workflow_status, applicant,
+                project_name, project_name_display, amount, source_signature,
+                source_payload, raw_payload, registered_at, updated_at
+            )
+            select
+                %s, item.scope_key, item.oa_id, item.workflow_status, item.applicant,
+                item.project_name, item.project_name_display, nullif(item.amount, '')::numeric,
+                item.source_signature, item.source_payload,
+                jsonb_build_object('normalized_payload', item.source_payload),
+                now(), now()
+            from jsonb_to_recordset(%s::jsonb) as item(
+                scope_key text, oa_id text, workflow_status text, applicant text,
+                project_name text, project_name_display text, amount text,
+                source_signature text, source_payload jsonb
+            )
+            """,
+            (tenant_id, jsonb(rows)),
+        )
+
+    @staticmethod
     def _save_watermark(
         transaction: Any,
         *,
@@ -852,6 +1132,36 @@ def oa_pending_payment_source_versions_from_snapshot(
         "payment_status_signature": text(payload.get("payment_status_signature")) or "",
         "oa_pending_payment_source_signature": text(payload.get("source_signature")) or "",
     }
+
+
+def _canonical_owner_records(records: list[OAApplicationRecord]) -> list[OAApplicationRecord]:
+    """Select one deterministic owner per canonical OA row; completed is monotonic."""
+
+    records_by_id: dict[str, OAApplicationRecord] = {}
+    for record in list(records or []):
+        if not isinstance(record, OAApplicationRecord):
+            raise ValueError("OA owner snapshot contains an unsupported record.")
+        row_id = text(record.id)
+        if not row_id:
+            raise ValueError("OA owner snapshot contains an empty row_id.")
+        current = records_by_id.get(row_id)
+        if current is None:
+            records_by_id[row_id] = record
+            continue
+        current_completed = is_completed_workflow_status(current.workflow_status)
+        candidate_completed = is_completed_workflow_status(record.workflow_status)
+        if current_completed != candidate_completed:
+            records_by_id[row_id] = current if current_completed else record
+            continue
+        raise ValueError(f"OA owner snapshot contains duplicate winning row_id: {row_id}.")
+    return [records_by_id[row_id] for row_id in sorted(records_by_id)]
+
+
+def _lock_oa_owner_writes(transaction: Any, *, tenant_id: str) -> None:
+    transaction.execute(
+        "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (f"oa_owner:{tenant_id}",),
+    )
 
 
 def _normalized_statuses(statuses: dict[str, OAPaymentStatusRecord]) -> dict[str, OAPaymentStatusRecord]:

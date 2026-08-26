@@ -25,6 +25,14 @@ pending -> processing -> done
 - stale processing 只能通过受控 queue ops 释放；不能伪造 done。
 - App 页面 GET 不 enqueue、不等待这些状态，也不从它们推导财务 payload。
 
+### `oa.sync(operation=refresh_attachments)` 分支
+
+- `pending -> processing` 前，request owner 已把 row IDs 限定为 canonical completed 或 `in_progress + expense_claim`；worker 必须对 source 返回的 exact row ID、唯一性和 enqueue-time month scope 再次 fail closed 校验。
+- processing 对 selected rows 集合式下载/解析并定向 owner commit，不执行 all/month stale deletion。
+- completed rows 才能进入正式发票 promotion，并以 `ensure_matching=true` 补发 matching reconciliation。
+- `in_progress + expense_claim` 只允许附件解析结果落到当前 OA/子付款项，promotion、matching 与统一发票池写入必须为零；进行中支付申请及未知表单/状态失败。
+- terminal result 只报告该 event 的逐 row 计数与 completed 子集的 promotion summary；不能把旧 projection、普通搜索或另一 row 的结果包装为 done。
+
 ## 非法状态
 
 - required instance 集合不是精确 4 个，或未知旧 worker/env/timer 仍 enabled/running。
@@ -32,6 +40,7 @@ pending -> processing -> done
 - worker import HTTP/Application 层，或跨 owner 写 canonical facts。
 - 新 `%.read_model.refresh` event、`read_model_key` registration、projection/readiness/dirty-scope runtime 出现。
 - import/OA worker 回写全量旧 snapshot，或半提交后标记 succeeded。
+- OA 精确刷新把 `in_progress + expense_claim` 提前 promotion/匹配/正式导入，或把不支持的进行中表单标记 done。
 
 ## 发布与恢复
 

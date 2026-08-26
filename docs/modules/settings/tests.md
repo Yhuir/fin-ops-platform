@@ -12,7 +12,7 @@
   payload、日志或错误。
 - data reset 是独立 durable job + `settings-maintenance` worker，必须保护权限、密码复核、secret 不持久化、protected targets、进度、
   interrupted destructive reset fail-closed、API graceful reload 和页面重进；job 完成不依赖 API 线程或 retired page worker。
-- OA 精确附件刷新只登记现有 `oa.sync` operation；POST 202、GET durable status/result，Settings API 不访问 Mongo/OCR/promoter，不以旧 projection 计数伪造同步成功。
+- OA 精确附件刷新只登记现有 `oa.sync` operation；`completed` 与 `in_progress + expense_claim` 是后端可接纳状态，当前 UI 保留所有 completed OA 的刷新，并只对 `in_progress + expense_claim` 扩展刷新，且与 completed-only 正式导入能力隔离。POST 202、GET durable status/result，Settings API 不访问 Mongo/OCR/promoter，不以旧 projection 计数伪造同步成功。
 
 ## 七类测试
 
@@ -22,7 +22,7 @@
 | 2. Service/repository | 适用 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_settings_data_reset_job.py`、`tests/test_oa_attachment_refresh_request_service.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`：ACL critical section、durable audit、精确刷新 enqueue/status、commit recovery、OA target/compensation |
 | 3. API contract | 适用 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_app_health_api.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_settings_data_reset_job.py`：精确刷新 202/status/result/error、direct URL/API 403、generic 400、dedicated admin-only、409/502/503 shape |
 | 4. Read model/cache/worker | 适用（负向/共享） | `tests/test_runtime_queue.py`、`tests/test_oa_projection_sync_service.py`、唯一 inventory owner `tests/test_permissions_write_entry_inventory.py` + `tests/test_settings_data_reset_job.py`：精确 `oa.sync` terminal result、Settings API 零 Mongo/OCR/promoter、普通 save 零 dirty/read-model path，并锁定既有 worker/event 集合 |
-| 5. 前端交互 | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/App.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx`：精确刷新 queued/processing/done/failed、轮询取消，以及既有权限/路由/ACL UI |
+| 5. 前端交互 | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/App.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx`：精确刷新 queued/processing/done/failed、轮询取消；所有 completed OA（含支付申请）保持可刷新，进行中日常报销可刷新但不可正式导入、进行中支付申请不可刷新，刷新后 `completed/in_progress` exact 唯一回读及 0/重复 fail closed，以及既有权限/路由/ACL UI |
 | 6. 端到端 | 适用 | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/settings-data-reset-flow.spec.ts`：admin/full/read/denied、direct protected API、admin-only controls、ACL save/restore/即时撤权及 reset 主链 |
 | 7. 既有功能回归 | 适用 | 13-09 backend/inventory 与 13-11 frontend/Browser 证据；唯一 scanner 继续保护 AppHealth、OA credentials、data reset、权威路由注册、现有两个 read models/六个 workers和普通页面 I/O 不变 |
 

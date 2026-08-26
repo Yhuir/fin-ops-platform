@@ -72,6 +72,11 @@ function oaDisplayLabel(row: OaManualSearchRow) {
   return row.oaNo || [row.applicant, row.applicationDate].filter(Boolean).join(" ") || "未命名 OA";
 }
 
+function canRefreshAttachments(row: OaManualSearchRow) {
+  return row.status === "completed"
+    || (row.status === "in_progress" && row.formType === "expense_claim");
+}
+
 function nextToggledList(value: string, current: string[]) {
   return current.includes(value)
     ? current.filter((item) => item !== value)
@@ -276,7 +281,7 @@ export default function OaManualSearchImportTable() {
   }
 
   async function handleRefresh(row: OaManualSearchRow) {
-    if (attachmentRefreshAbortRef.current || importInFlightRef.current || row.status !== "completed") {
+    if (attachmentRefreshAbortRef.current || importInFlightRef.current || !canRefreshAttachments(row)) {
       return;
     }
     const controller = new AbortController();
@@ -319,20 +324,22 @@ export default function OaManualSearchImportTable() {
       const refreshed = await searchManualOaImports({
         query: row.rowId,
         formTypes: [row.formType],
-        statuses: ["completed"],
+        statuses: ["completed", "in_progress"],
         dateFrom: "",
         dateTo: "",
         page: 0,
-        pageSize: 1,
+        pageSize: 2,
       }, controller.signal, {
         timeoutMs: oaAttachmentRefreshDetailRequestTimeoutMs,
         timeoutMessage: "OA 附件刷新已完成，但最新 OA 明细查询超时。",
       });
-      const refreshedRow = refreshed.rows.find((candidate) => candidate.rowId === row.rowId);
-      const refreshSummary = status.result.rows.find((candidate) => candidate.rowId === row.rowId);
-      if (!refreshedRow || !refreshSummary) {
+      const refreshedRows = refreshed.rows.filter((candidate) => candidate.rowId === row.rowId);
+      const refreshSummaries = status.result.rows.filter((candidate) => candidate.rowId === row.rowId);
+      if (refreshed.total !== 1 || refreshedRows.length !== 1 || refreshSummaries.length !== 1) {
         throw new Error("OA 附件刷新完成，但无法读取最新 OA 明细");
       }
+      const [refreshedRow] = refreshedRows;
+      const [refreshSummary] = refreshSummaries;
       if (
         refreshedRow.attachmentFileCount !== refreshSummary.attachmentFileCount
         || refreshedRow.importableInvoiceCount !== refreshSummary.importableInvoiceCount
@@ -350,7 +357,11 @@ export default function OaManualSearchImportTable() {
           rowId === refreshedRow.rowId ? refreshedRow : selectedRow,
         ]),
       ));
-      setRefreshMessage("OA 附件刷新完成");
+      setRefreshMessage(
+        refreshedRow.status === "in_progress"
+          ? "附件已解析，待 OA 完成后进入统一发票池"
+          : "OA 附件刷新完成",
+      );
     } catch (refreshError) {
       if (observationTimedOut) {
         if (mountedRef.current) {
@@ -427,7 +438,7 @@ export default function OaManualSearchImportTable() {
       <div className="oa-manual-import__header">
         <div>
           <h4 id="oa-manual-search-import-title">OA全量搜索导入</h4>
-          <p>可按独立条件搜索全量 OA，并手动导入已完成 OA 项。</p>
+          <p>已完成 OA 可正式导入；进行中日常报销可先解析附件，流程完成后进入统一发票池。</p>
         </div>
         <div className="oa-manual-import__metrics">
           <span>已选 {selectedList.length} 个OA</span>
@@ -619,7 +630,7 @@ export default function OaManualSearchImportTable() {
                       <Button
                         aria-label={`刷新 OA ${oaDisplayLabel(row)} 附件解析`}
                         className="settings-icon-button"
-                        isDisabled={busyRowId !== null || isImporting || row.status !== "completed"}
+                        isDisabled={busyRowId !== null || isImporting || !canRefreshAttachments(row)}
                         isIconOnly
                         onPress={() => void handleRefresh(row)}
                         size="sm"

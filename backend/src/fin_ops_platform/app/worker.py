@@ -172,15 +172,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_adapter.set_import_settings_provider(lambda: dict(oa_runtime_settings["oa_import"]))
         projection_repository = PostgresOAProjectionRepository(connection)
         payment_status_repository = MySQLOAPaymentStatusRepository.from_environment()
-        pending_payment_source_snapshot_repository = (
-            PostgresOaPendingPaymentSourceSnapshotRepository(
-                connection,
-                relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
-                    relation_repository=PostgresWorkbenchRelationRepository(transaction),
-                ),
-            )
-            if payment_status_repository is not None
-            else None
+        pending_payment_source_snapshot_repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda transaction: WorkbenchRelationCommandService(
+                relation_repository=PostgresWorkbenchRelationRepository(transaction),
+            ),
         )
         sync_service = OAProjectionSyncService(
             source_adapter=source_adapter,

@@ -6,6 +6,7 @@
 - PostgreSQL 是 durable item、传输和 heartbeat 的唯一运行时事实源；Worker 不依赖 RabbitMQ/Redis。
 - Worker 不依赖 `Application`、Flask/session/header/HTTP response。
 - App read model manifest/worker/event/dirty-scope/readiness/projection 数量为 0。
+- `oa.sync(operation=refresh_attachments)` 对 completed 与 `in_progress + expense_claim` 共用既有 worker；只有 completed 子集允许 promotion/matching，进行中日常报销必须 parse-only，进行中支付申请 fail closed。
 - deploy 停止并移除 registry 外旧实例，但不删除主数据库或有效业务队列。
 
 ## 七类测试
@@ -25,5 +26,6 @@
 - 任意新 `*.read_model.refresh`、旧 registration/env/systemd/timer、operation barrier 或页面 refresh polling 均失败。
 - 任意 RabbitMQ dispatcher/consumer/topology/env/systemd 或 Worker Redis dependency 回归均失败。
 - import/OA sync 不写 full-state snapshot 或旧 page fan-out。
+- OA 精确附件刷新不得为 `in_progress + expense_claim` 调用 promotion/matching 或写统一发票池；不得接纳进行中支付申请、重复/缺失 source row ID 或 scope drift，也不得执行 stale snapshot deletion。
 - workbench-matching 不得恢复启动时 category snapshot + Python effective-category provider；计划银行分类必须走 fact repository 的有界 canonical projection。
 - deploy 不恢复旧 schema/worker，也不删除主数据库。

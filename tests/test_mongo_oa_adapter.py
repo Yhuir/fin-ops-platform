@@ -823,6 +823,153 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(adapter.search_document_calls[0]["limit"], 20)
         self.assertIn("$and", adapter.count_document_calls[0])
 
+    def test_search_application_record_rows_uses_exact_id_lookup_and_completed_authority(self) -> None:
+        adapter = SearchSummaryStubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "进行中申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "进行中附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "_id": "expense-doc-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "已完成申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "已完成附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_cached_attachment_invoice_count",
+            return_value=0,
+        ) as cached_invoice_count:
+            payload = adapter.search_application_record_rows(
+                q="oa-exp-3002",
+                form_types=["expense_claim"],
+                statuses=["completed", "in_progress"],
+                page=0,
+                page_size=2,
+            )
+
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(len(payload["rows"]), 1)
+        self.assertEqual(payload["rows"][0]["row_id"], "oa-exp-3002")
+        self.assertEqual(payload["rows"][0]["status"], "completed")
+        self.assertEqual(payload["rows"][0]["applicant"], "已完成申请人")
+        cached_invoice_count.assert_called_once()
+        self.assertEqual(
+            [file_entry["fileName"] for file_entry in cached_invoice_count.call_args.args[0]],
+            ["已完成附件.pdf"],
+        )
+        self.assertEqual(adapter.form_load_calls, [])
+        self.assertEqual(adapter.search_document_calls, [])
+        self.assertEqual(adapter.count_document_calls, [])
+
+    def test_search_application_records_selects_completed_duplicate_before_attachment_parse(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "进行中申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "进行中附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "_id": "expense-doc-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "已完成申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "已完成附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            return_value={"evidences": [], "invoices": [], "artifacts": []},
+        ) as parse_pool:
+            records = adapter.search_application_records(
+                q="oa-exp-3002",
+                form_types=["expense_claim"],
+                statuses=["completed", "in_progress"],
+            )
+
+        self.assertEqual([record.id for record in records], ["oa-exp-3002"])
+        self.assertEqual(records[0].workflow_status, "completed")
+        self.assertEqual(records[0].applicant, "已完成申请人")
+        parse_pool.assert_called_once()
+        self.assertEqual(
+            [file_entry["fileName"] for file_entry in parse_pool.call_args.args[0]],
+            ["已完成附件.pdf"],
+        )
+
     def test_refresh_application_record_attachments_forces_selected_records_only(self) -> None:
         adapter = AttachmentStubMongoOAAdapter(
             form_documents={
@@ -2624,8 +2771,9 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([document["external_id"] for document in documents], ["2047"])
         self.assertEqual(months, ["2026-03"])
 
-    def test_sync_batch_keeps_projection_filter_but_always_admits_in_progress_without_attachment_parse(self) -> None:
-        adapter = CountingStubMongoOAAdapter(
+    def test_sync_batch_parses_unique_in_progress_expense_attachment_without_projecting_it(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
+        adapter = StubMongoOAAdapter(
             form_documents={
                 "2": [
                     {
@@ -2667,17 +2815,27 @@ class MongoOAAdapterTests(unittest.TestCase):
                 ],
             },
             project_documents=[],
+            attachment_invoice_cache=cache,
         )
         adapter.set_import_settings_provider(
             lambda: {"form_types": ["payment_request", "expense_claim"], "statuses": ["completed"]}
         )
 
         with patch.object(
-            adapter,
-            "_parse_attachment_evidence_pool",
-            side_effect=AssertionError("in-progress sync admission must not parse attachments"),
-        ):
-            batch = adapter.load_sync_application_batch("2026-03")
+            adapter._attachment_invoice_service,
+            "parse_evidences",
+            return_value=[
+                {
+                    "evidence_type": "tax_invoice",
+                    "invoice_no": "40513002",
+                    "amount": "88.00",
+                    "attachment_name": "进行中附件.pdf",
+                }
+            ],
+            create=True,
+        ) as parse_evidences:
+            with adapter.force_attachment_invoice_sync_parse():
+                batch = adapter.load_sync_application_batch("2026-03")
 
         self.assertEqual([record.id for record in batch.projection_records], ["oa-pay-2047"])
         self.assertEqual(
@@ -2686,14 +2844,21 @@ class MongoOAAdapterTests(unittest.TestCase):
         )
         in_progress = next(record for record in batch.admission_records if record.id == "oa-exp-3002")
         self.assertEqual(in_progress.workflow_status, "in_progress")
-        self.assertEqual(in_progress.attachment_evidences, [])
-        self.assertEqual(in_progress.attachment_artifacts, [])
-        self.assertEqual(in_progress.attachment_invoices, [])
+        self.assertEqual(
+            [invoice["invoice_no"] for invoice in in_progress.attachment_invoices],
+            ["40513002"],
+        )
         self.assertEqual(in_progress.expense_items[0]["attachment_files"][0]["fileId"], "file-1")
-        self.assertIn("_attachment_invoice_source_context", in_progress.expense_items[0]["attachment_files"][0])
-        self.assertEqual(adapter.form_load_calls, [("2", "2026-03"), ("32", "2026-03")])
+        parse_evidences.assert_called_once()
+        self.assertEqual(len(cache.entries), 1)
+        cached_entry = next(iter(cache.entries.values()))
+        self.assertEqual(
+            cached_entry["parser_version"],
+            adapter._attachment_invoice_cache_parser_version(),
+        )
 
-    def test_manual_attachment_refresh_keeps_in_progress_attachment_as_metadata_only(self) -> None:
+    def test_manual_attachment_refresh_parses_in_progress_expense_with_existing_parser_and_cache(self) -> None:
+        cache = MemoryAttachmentInvoiceCache()
         adapter = StubMongoOAAdapter(
             form_documents={
                 "2": [],
@@ -2721,21 +2886,248 @@ class MongoOAAdapterTests(unittest.TestCase):
                 ],
             },
             project_documents=[],
+            attachment_invoice_cache=cache,
+        )
+
+        with patch.object(
+            adapter._attachment_invoice_service,
+            "parse_evidences",
+            return_value=[
+                {
+                    "evidence_type": "tax_invoice",
+                    "invoice_no": "40513002",
+                    "amount": "88.00",
+                    "attachment_name": "进行中附件.pdf",
+                }
+            ],
+            create=True,
+        ) as parse_evidences:
+            records = adapter.refresh_application_record_attachments(["oa-exp-3002"])
+
+        self.assertEqual([record.id for record in records], ["oa-exp-3002"])
+        self.assertEqual(records[0].workflow_status, "in_progress")
+        self.assertEqual(
+            [invoice["invoice_no"] for invoice in records[0].attachment_invoices],
+            ["40513002"],
+        )
+        self.assertEqual(records[0].expense_items[0]["attachment_files"][0]["fileId"], "file-1")
+        parse_evidences.assert_called_once()
+        self.assertEqual(len(cache.entries), 1)
+        cached_entry = next(iter(cache.entries.values()))
+        self.assertEqual(
+            cached_entry["parser_version"],
+            adapter._attachment_invoice_cache_parser_version(),
+        )
+
+    def test_manual_attachment_refresh_selects_completed_duplicate_before_attachment_parse(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "进行中申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {
+                                                "fileId": "in-progress-file",
+                                                "fileName": "进行中附件.pdf",
+                                            }
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "_id": "expense-doc-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "已完成申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {
+                                                "fileId": "completed-file",
+                                                "fileName": "已完成附件.pdf",
+                                            }
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            project_documents=[],
         )
 
         with patch.object(
             adapter,
             "_parse_attachment_evidence_pool",
-            side_effect=AssertionError("in-progress manual refresh must not parse attachments"),
-        ):
+            return_value={"evidences": [], "invoices": [], "artifacts": []},
+        ) as parse_pool:
             records = adapter.refresh_application_record_attachments(["oa-exp-3002"])
 
         self.assertEqual([record.id for record in records], ["oa-exp-3002"])
+        self.assertEqual(records[0].workflow_status, "completed")
+        self.assertEqual(records[0].applicant, "已完成申请人")
+        parse_pool.assert_called_once()
+        parsed_files = parse_pool.call_args.args[0]
+        self.assertEqual(
+            [file_entry["fileName"] for file_entry in parsed_files],
+            ["已完成附件.pdf"],
+        )
+
+    def test_manual_attachment_refresh_fails_closed_for_same_status_duplicate_before_parse(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": document_id,
+                        "form_id": "32",
+                        "modifiedTime": modified_time,
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "胡瑢",
+                            "flowRequestId": "3002",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": f"{document_id}.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                    for document_id, modified_time in (
+                        ("expense-doc-progress-a", "2026-03-18T09:00:00"),
+                        ("expense-doc-progress-b", "2026-03-18T10:00:00"),
+                    )
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            side_effect=AssertionError("ambiguous source must fail before attachment parsing"),
+        ) as parse_pool:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "ambiguous workflow documents.*workflow_status=in_progress.*candidates=2",
+            ):
+                adapter.refresh_application_record_attachments(["oa-exp-3002"])
+
+        parse_pool.assert_not_called()
+
+    def test_manual_attachment_refresh_does_not_merge_different_expense_business_ids(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": f"expense-doc-{external_id}",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": external_id,
+                            "flowRequestId": external_id,
+                            "processStatus": process_status,
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": f"{external_id}.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                    for external_id, process_status in (
+                        ("3002", "1"),
+                        ("3003", "2"),
+                    )
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            return_value={"evidences": [], "invoices": [], "artifacts": []},
+        ) as parse_pool:
+            records = adapter.refresh_application_record_attachments(
+                ["oa-exp-3002", "oa-exp-3003"]
+            )
+
+        self.assertEqual([record.id for record in records], ["oa-exp-3002", "oa-exp-3003"])
+        self.assertEqual(
+            [record.workflow_status for record in records],
+            ["in_progress", "completed"],
+        )
+        self.assertEqual(parse_pool.call_count, 2)
+
+    def test_manual_attachment_refresh_does_not_parse_in_progress_payment_request(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-in-progress",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-18",
+                            "userName": "樊祖芳",
+                            "amount": "88050",
+                            "beneficiary": "云南辰飞机电工程有限公司",
+                            "cause": "空气源热泵预付款",
+                            "flowRequestId": "2048",
+                            "processStatus": "1",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            side_effect=AssertionError("payment request must not enter expense attachment parsing"),
+        ) as parse_pool:
+            records = adapter.refresh_application_record_attachments(["oa-pay-2048"])
+
+        self.assertEqual([record.id for record in records], ["oa-pay-2048"])
         self.assertEqual(records[0].workflow_status, "in_progress")
-        self.assertEqual(records[0].attachment_evidences, [])
-        self.assertEqual(records[0].attachment_artifacts, [])
         self.assertEqual(records[0].attachment_invoices, [])
-        self.assertEqual(records[0].expense_items[0]["attachment_files"][0]["fileId"], "file-1")
+        parse_pool.assert_not_called()
 
     def test_sync_batch_fails_closed_when_mongo_read_is_incomplete(self) -> None:
         adapter = FailingMongoOAAdapter()
@@ -2774,10 +3166,11 @@ class MongoOAAdapterTests(unittest.TestCase):
         )
 
         with patch.object(
-            adapter,
-            "_parse_attachment_evidence_pool",
-            side_effect=AssertionError("in-progress draft must not parse attachments"),
-        ):
+            adapter._attachment_invoice_service,
+            "parse_evidences",
+            side_effect=AssertionError("draft without attachments must not invoke OCR"),
+            create=True,
+        ) as parse_evidences:
             batch = adapter.load_sync_application_batch("2026-03")
 
         self.assertEqual(batch.projection_records, ())
@@ -2792,6 +3185,7 @@ class MongoOAAdapterTests(unittest.TestCase):
             self.assertEqual(record.attachment_evidences, [])
             self.assertEqual(record.attachment_artifacts, [])
             self.assertEqual(record.attachment_invoices, [])
+        parse_evidences.assert_not_called()
 
     def test_sync_batch_still_fails_closed_for_completed_document_missing_required_business_fields(self) -> None:
         adapter = StubMongoOAAdapter(
@@ -2859,6 +3253,70 @@ class MongoOAAdapterTests(unittest.TestCase):
             ["oa-pay-retained-valid-completed"],
         )
         self.assertEqual(adapter.form_load_calls, [("2", None), ("32", None)])
+
+    def test_sync_batch_arbitrates_completed_duplicate_before_all_scope_cutoff(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "进行中申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "进行中附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "_id": "expense-doc-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2025-12-18",
+                            "Reimbursement Personnel": "已完成申请人",
+                            "flowRequestId": "3002",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileName": "已完成附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            side_effect=AssertionError("cutoff must run after arbitration and before parsing"),
+        ) as parse_pool:
+            batch = adapter.load_sync_application_batch(
+                "all",
+                retention_cutoff_month="2026-01",
+            )
+
+        self.assertEqual(batch.projection_records, ())
+        self.assertEqual(batch.admission_records, ())
+        parse_pool.assert_not_called()
 
     def test_sync_batch_fails_closed_after_one_form_succeeds_and_the_next_form_fails(self) -> None:
         class PartialFailureAdapter(StubMongoOAAdapter):
@@ -2933,6 +3391,83 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([record.id for record in batch.projection_records], ["oa-exp-3003"])
         self.assertEqual([record.id for record in batch.admission_records], ["oa-exp-3003"])
         parse_pool.assert_called_once()
+
+    def test_sync_batch_selects_completed_duplicate_before_attachment_parse(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "进行中申请人",
+                            "flowRequestId": "3003",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {
+                                                "fileId": "in-progress-file",
+                                                "fileName": "进行中附件.pdf",
+                                            }
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "_id": "expense-doc-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "已完成申请人",
+                            "flowRequestId": "3003",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [
+                                            {
+                                                "fileId": "completed-file",
+                                                "fileName": "已完成附件.pdf",
+                                            }
+                                        ]
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            return_value={"evidences": [], "invoices": [], "artifacts": []},
+        ) as parse_pool:
+            batch = adapter.load_sync_application_batch("2026-03")
+
+        self.assertEqual([record.id for record in batch.projection_records], ["oa-exp-3003"])
+        self.assertEqual([record.id for record in batch.admission_records], ["oa-exp-3003"])
+        self.assertEqual(batch.projection_records[0].workflow_status, "completed")
+        self.assertEqual(batch.projection_records[0].applicant, "已完成申请人")
+        parse_pool.assert_called_once()
+        self.assertEqual(
+            [file_entry["fileName"] for file_entry in parse_pool.call_args.args[0]],
+            ["已完成附件.pdf"],
+        )
 
     def test_import_settings_filter_form_types_and_statuses(self) -> None:
         adapter = StubMongoOAAdapter(

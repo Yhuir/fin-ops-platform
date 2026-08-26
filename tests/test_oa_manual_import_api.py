@@ -8,6 +8,9 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.oa_attachment_refresh_request_service import (
+    OAAttachmentRefreshRowNotRefreshableError,
+)
 from fin_ops_platform.services.oa_manual_import_service import OAManualImportService
 
 from tests.app_test_support import (
@@ -188,6 +191,27 @@ class OAManualImportApiTests(unittest.TestCase):
         self.assertEqual(non_string.status_code, 400)
         self.assertEqual(oversized.status_code, 400)
         self.assertEqual(refresh_request_service.requests, [])
+
+    def test_refresh_endpoint_returns_exact_not_refreshable_conflict_contract(self) -> None:
+        app = self._build_app_with_service(
+            adapter=RecordingOAAdapter([oa_record("oa-pay-progress")]),
+        )
+        with patch.object(
+            app._oa_attachment_refresh_request_service,
+            "request",
+            side_effect=OAAttachmentRefreshRowNotRefreshableError(
+                "仅支持已完成流程或进行中的日常报销刷新附件：oa-pay-progress"
+            ),
+        ):
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/settings/oa/manual-search/refresh-attachments",
+                json.dumps({"row_ids": ["oa-pay-progress"]}),
+            )
+
+        self.assertEqual(response.status_code, 409)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["error"], "oa_row_not_refreshable")
 
     def test_import_endpoint_imports_completed_rejects_in_progress_and_is_idempotent(self) -> None:
         adapter = RecordingOAAdapter(

@@ -1083,6 +1083,180 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(int(counts["completed_projection_count"]), 1)
         self.assertEqual(int(counts["admission_count"]), 0)
 
+    def test_targeted_refresh_updates_existing_pending_owner_without_advancing_watermark(
+        self,
+    ) -> None:
+        record = replace(
+            _in_progress_record(),
+            apply_type="日常报销",
+            attachment_file_count=1,
+            attachment_invoices=[{"invoice_no": "265300000001"}],
+        )
+        source_snapshot = self._source_snapshot()
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[],
+            admission_records=[
+                replace(record, attachment_file_count=0, attachment_invoices=[])
+            ],
+            payment_statuses={
+                "flow-in-progress-1": OAPaymentStatusRecord(
+                    flow_id="flow-in-progress-1",
+                    pay_status=0,
+                )
+            },
+        )
+        watermark_before = self.connection.fetch_one(
+            """
+            select version, payload
+            from app.oa_sync_watermarks
+            where sync_key = 'oa_pending_payment_source:default:2026-05'
+            """
+        )
+
+        result = source_snapshot.commit_targeted_attachment_refresh(records=[record])
+        counts = self.connection.fetch_one(
+            """
+            select
+                (select count(*) from app.oa_applications where row_id = %s) as completed_count,
+                (select count(*) from app.oa_pending_payment_admissions where oa_id = %s) as pending_count,
+                (select count(*) from app.oa_sync_watermarks) as watermark_count
+            """,
+            (record.id, record.id),
+        )
+
+        self.assertEqual(result.upserted_completed_count, 0)
+        self.assertEqual(result.upserted_pending_count, 1)
+        self.assertEqual(int(counts["completed_count"]), 0)
+        self.assertEqual(int(counts["pending_count"]), 1)
+        self.assertEqual(int(counts["watermark_count"]), 1)
+        self.assertEqual(
+            self.connection.fetch_one(
+                """
+                select version, payload
+                from app.oa_sync_watermarks
+                where sync_key = 'oa_pending_payment_source:default:2026-05'
+                """
+            ),
+            watermark_before,
+        )
+
+    def test_targeted_attachment_refresh_moves_pending_to_completed_atomically(self) -> None:
+        pending = replace(_in_progress_record(), apply_type="日常报销")
+        completed = replace(pending, workflow_status="completed")
+        source_snapshot = self._source_snapshot()
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[],
+            admission_records=[pending],
+            payment_statuses={
+                "flow-in-progress-1": OAPaymentStatusRecord(
+                    flow_id="flow-in-progress-1",
+                    pay_status=0,
+                )
+            },
+        )
+
+        result = source_snapshot.commit_targeted_attachment_refresh(records=[completed])
+        counts = self.connection.fetch_one(
+            """
+            select
+                (select count(*) from app.oa_applications where row_id = %s) as completed_count,
+                (select count(*) from app.oa_pending_payment_admissions where oa_id = %s) as pending_count
+            """,
+            (pending.id, pending.id),
+        )
+
+        self.assertEqual(result.upserted_completed_count, 1)
+        self.assertEqual(int(counts["completed_count"]), 1)
+        self.assertEqual(int(counts["pending_count"]), 0)
+
+    def test_targeted_attachment_refresh_refuses_completed_owner_regression(self) -> None:
+        completed = replace(_in_progress_record(), apply_type="日常报销", workflow_status="completed")
+        in_progress = replace(completed, workflow_status="in_progress")
+        source_snapshot = self._source_snapshot()
+        source_snapshot.commit_targeted_attachment_refresh(records=[completed])
+
+        with self.assertRaisesRegex(RuntimeError, "owner regression"):
+            source_snapshot.commit_targeted_attachment_refresh(records=[in_progress])
+
+        counts = self.connection.fetch_one(
+            """
+            select
+                (select count(*) from app.oa_applications where row_id = %s) as completed_count,
+                (select count(*) from app.oa_pending_payment_admissions where oa_id = %s) as pending_count
+            """,
+            (completed.id, completed.id),
+        )
+        self.assertEqual(int(counts["completed_count"]), 1)
+        self.assertEqual(int(counts["pending_count"]), 0)
+
+    def test_targeted_refresh_cannot_revive_owner_removed_by_full_snapshot(self) -> None:
+        pending = replace(_in_progress_record(), apply_type="日常报销")
+        source_snapshot = self._source_snapshot()
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[],
+            admission_records=[pending],
+            payment_statuses={
+                "flow-in-progress-1": OAPaymentStatusRecord(
+                    flow_id="flow-in-progress-1",
+                    pay_status=0,
+                )
+            },
+        )
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[],
+            admission_records=[],
+            payment_statuses={},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "exactly one existing pending owner"):
+            source_snapshot.commit_targeted_attachment_refresh(records=[pending])
+
+        counts = self.connection.fetch_one(
+            """
+            select
+                (select count(*) from app.oa_applications where row_id = %s) as completed_count,
+                (select count(*) from app.oa_pending_payment_admissions where oa_id = %s) as pending_count
+            """,
+            (pending.id, pending.id),
+        )
+        self.assertEqual(int(counts["completed_count"]), 0)
+        self.assertEqual(int(counts["pending_count"]), 0)
+
+    def test_full_snapshot_completed_owner_wins_same_id_in_progress_duplicate(self) -> None:
+        in_progress = _in_progress_record()
+        completed = replace(in_progress, workflow_status="completed")
+
+        self._source_snapshot().commit_authoritative_snapshot(
+            scope_key="2026-05",
+            projection_records=[completed],
+            admission_records=[in_progress, completed],
+            payment_statuses={
+                "flow-in-progress-1": OAPaymentStatusRecord(
+                    flow_id="flow-in-progress-1",
+                    pay_status=0,
+                )
+            },
+        )
+        counts = self.connection.fetch_one(
+            """
+            select
+                (select count(*) from app.oa_applications where row_id = %s) as completed_count,
+                (select count(*) from app.oa_pending_payment_admissions where oa_id = %s) as pending_count
+            """,
+            (completed.id, completed.id),
+        )
+
+        self.assertEqual(int(counts["completed_count"]), 1)
+        self.assertEqual(int(counts["pending_count"]), 0)
+
 
 
 def _record() -> OAApplicationRecord:

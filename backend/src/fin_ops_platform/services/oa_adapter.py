@@ -10,6 +10,7 @@ from fin_ops_platform.services.imports import clean_string
 ETC_BATCH_SOURCE = "etc_batch"
 ETC_BATCH_TAG = "ETC批量提交"
 ETC_BATCH_ID_RE = re.compile(r"etc_batch_id\s*=\s*([^\s,;，；]+)", re.IGNORECASE)
+OA_EXPENSE_CLAIM_APPLY_TYPE = "日常报销"
 
 
 @dataclass(slots=True)
@@ -45,6 +46,14 @@ class OAApplicationRecord:
     project_name_display: str | None = None
     project_names: list[str] = field(default_factory=list)
     source_aliases: list[str] = field(default_factory=list)
+
+
+def is_in_progress_expense_claim(record: OAApplicationRecord) -> bool:
+    """Return whether a canonical OA row is an in-progress expense claim."""
+
+    workflow_status = clean_string(record.workflow_status).lower()
+    apply_type = clean_string(record.apply_type)
+    return workflow_status == "in_progress" and apply_type == OA_EXPENSE_CLAIM_APPLY_TYPE
 
 
 @dataclass(slots=True)

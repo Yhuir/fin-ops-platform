@@ -62,6 +62,48 @@ const searchRows = [
     disabled_reason: "流程未完成",
     items: [],
   },
+  {
+    row_id: "oa-exp-2002",
+    oa_no: "2002",
+    applicant: "李欣",
+    application_date: "2025-12-25",
+    form_type: "expense_claim",
+    form_type_label: "日常报销",
+    status: "in_progress",
+    status_label: "进行中",
+    project_name: "设备检修",
+    reason: "差旅报销",
+    amount: "88.00",
+    attachment_file_count: 1,
+    importable_invoice_count: 0,
+    unrecognized_attachment_count: 1,
+    import_status: "not_imported",
+    imported_at: null,
+    can_import: false,
+    disabled_reason: "流程未完成",
+    items: [],
+  },
+  {
+    row_id: "oa-pay-2003",
+    oa_no: "2003",
+    applicant: "赵璇",
+    application_date: "2025-12-26",
+    form_type: "payment_request",
+    form_type_label: "支付申请",
+    status: "completed",
+    status_label: "已完成",
+    project_name: "设备采购",
+    reason: "设备采购款",
+    amount: "560.00",
+    attachment_file_count: 1,
+    importable_invoice_count: 0,
+    unrecognized_attachment_count: 1,
+    import_status: "not_imported",
+    imported_at: null,
+    can_import: false,
+    disabled_reason: "未识别到可导入发票",
+    items: [],
+  },
 ];
 
 const healthyStatus: AppHealthStatus = {
@@ -142,39 +184,50 @@ function successfulImportResponse() {
 function installFetchMock({
   manualImportResponse,
   refreshStatusSequence,
+  exactRefreshResponseRows,
+  exactRefreshResponseTotal,
 }: {
   manualImportResponse?: Promise<Response>;
   refreshStatusSequence?: Array<Record<string, unknown>>;
+  exactRefreshResponseRows?: Array<Record<string, unknown>>;
+  exactRefreshResponseTotal?: number;
 } = {}) {
   let refreshStatusIndex = 0;
+  let requestedRefreshRowId = "oa-exp-1981";
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === "/api/workbench/settings/oa/manual-search") {
-      const exactRefreshRow = url.searchParams.get("q") === "oa-exp-1981";
-      const responseRows = exactRefreshRow
-        ? [{
-          ...searchRows[0],
+      const exactRowId = url.searchParams.get("q");
+      const exactRow = searchRows.find((row) => row.row_id === exactRowId);
+      const responseRows = exactRow
+        ? exactRefreshResponseRows ?? [{
+          ...exactRow,
+          attachment_file_count: 2,
           importable_invoice_count: 2,
           unrecognized_attachment_count: 0,
-          items: [{
-            ...searchRows[0].items[0],
+          items: exactRow.items.map((item) => ({
+            ...item,
             importable_invoice_count: 2,
-          }],
+          })),
         }]
         : searchRows;
       return new Response(JSON.stringify({
         rows: responseRows,
-        total: responseRows.length,
+        total: exactRow && exactRefreshResponseTotal !== undefined
+          ? exactRefreshResponseTotal
+          : responseRows.length,
         page: Number(url.searchParams.get("page") ?? 0),
         page_size: Number(url.searchParams.get("page_size") ?? 20),
       }));
     }
     if (url.pathname === "/api/workbench/settings/oa/manual-search/refresh-attachments") {
       expect(init?.method).toBe("POST");
+      const body = JSON.parse(String(init?.body)) as { row_ids: string[] };
+      requestedRefreshRowId = body.row_ids[0];
       return new Response(JSON.stringify({
         event_id: "refresh-event-1",
         status: "queued",
-        row_ids: ["oa-exp-1981"],
+        row_ids: [requestedRefreshRowId],
         affected_scope_keys: ["2025-12"],
       }), { status: 202 });
     }
@@ -183,12 +236,12 @@ function installFetchMock({
       const defaultStatus = {
         event_id: "refresh-event-1",
         status: "done",
-        row_ids: ["oa-exp-1981"],
+        row_ids: [requestedRefreshRowId],
         affected_scope_keys: ["2025-12"],
         result: {
           rows: [
             {
-              row_id: "oa-exp-1981",
+              row_id: requestedRefreshRowId,
               attachment_file_count: 2,
               importable_invoice_count: 2,
               unrecognized_attachment_count: 0,
@@ -292,6 +345,93 @@ describe("OaManualSearchImportTable", () => {
     await user.click(screen.getByRole("button", { name: "清空选择" }));
     expect(screen.getByText("已选 0 个OA")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeDisabled();
+  });
+
+  test("refreshes an in-progress expense claim without enabling formal import", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+
+    const inProgressExpenseRow = await screen.findByRole("row", { name: "2002" });
+    expect(within(inProgressExpenseRow).getByLabelText("选择 OA 2002")).toBeDisabled();
+    const refreshButton = within(inProgressExpenseRow).getByLabelText("刷新 OA 2002 附件解析");
+    expect(refreshButton).toBeEnabled();
+
+    await user.click(refreshButton);
+
+    expect(await screen.findByText("附件已解析，待 OA 完成后进入统一发票池")).toBeInTheDocument();
+    expect(screen.getByText("已选 0 个OA")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入已选OA项" })).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings/oa/manual-search/refresh-attachments",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ row_ids: ["oa-exp-2002"] }),
+      }),
+    );
+    const exactReadCall = fetchMock.mock.calls.find(([input]) => (
+      String(input).includes("/api/workbench/settings/oa/manual-search?")
+      && String(input).includes("q=oa-exp-2002")
+    ));
+    expect(exactReadCall).toBeTruthy();
+    const exactReadUrl = new URL(String(exactReadCall?.[0]), "http://localhost");
+    expect(exactReadUrl.searchParams.get("form_types")).toBe("expense_claim");
+    expect(exactReadUrl.searchParams.get("statuses")).toBe("completed,in_progress");
+    expect(exactReadUrl.searchParams.get("page_size")).toBe("2");
+  });
+
+  test("preserves attachment refresh for a completed payment request", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+
+    const completedPaymentRow = await screen.findByRole("row", { name: "2003" });
+    const refreshButton = within(completedPaymentRow).getByLabelText("刷新 OA 2003 附件解析");
+    expect(refreshButton).toBeEnabled();
+
+    await user.click(refreshButton);
+
+    expect(await screen.findByText("OA 附件刷新完成")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/settings/oa/manual-search/refresh-attachments",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ row_ids: ["oa-pay-2003"] }),
+      }),
+    );
+    const exactReadCall = fetchMock.mock.calls.find(([input]) => (
+      String(input).includes("/api/workbench/settings/oa/manual-search?")
+      && String(input).includes("q=oa-pay-2003")
+    ));
+    expect(exactReadCall).toBeTruthy();
+    const exactReadUrl = new URL(String(exactReadCall?.[0]), "http://localhost");
+    expect(exactReadUrl.searchParams.get("form_types")).toBe("payment_request");
+    expect(exactReadUrl.searchParams.get("statuses")).toBe("completed,in_progress");
+  });
+
+  test.each([
+    ["missing", [], 0],
+    ["duplicate", [searchRows[0], searchRows[0]], 2],
+    ["reported as non-unique", [searchRows[0]], 2],
+  ])("fails closed when the exact refresh read is %s", async (
+    _caseName,
+    exactRefreshResponseRows,
+    exactRefreshResponseTotal,
+  ) => {
+    const user = userEvent.setup();
+    installFetchMock({ exactRefreshResponseRows, exactRefreshResponseTotal });
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await user.click(await screen.findByRole("button", { name: "刷新 OA 1981 附件解析" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "OA 附件刷新完成，但无法读取最新 OA 明细",
+    );
   });
 
   test("polls processing refreshes to completion without allowing a second submission", async () => {

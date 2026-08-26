@@ -235,8 +235,8 @@
 
 - 根因：HTTP 侧 `OAManualImportService` 运行时注入的是 PostgreSQL projection adapter，却用动态能力探测调用 Mongo-only refresh；能力不存在时静默重读旧 projection，仍返回 200 和旧计数，形成“刷新成功但没有下载/OCR/重解析”的假成功。手动导入入口还有同一旧 fallback。
 - 边界：删除两处动态 refresh/fallback 和 HTTP 侧 promoter。Settings route 只通过 `OAAttachmentRefreshRequestService` 校验 row IDs、登记现有 `oa.sync(operation=refresh_attachments)` 并读取受控 durable status/result；Mongo 下载、强制 parser reparse、定向 projection upsert、promotion 和 matching reconciliation 全部由既有 OA worker 执行。
-- 合同：POST 返回 202/event id，GET 返回 `pending/processing/done/failed/dead_lettered`。只有 `done` 才携带逐 row 计数和 promotion summary；缺记录、非完成态、OCR/解析/promotion 失败均显式失败，禁止回退普通全量 sync、旧 projection 或第二套解析。
-- 数据与性能：精确 operation 只处理选中 rows，不执行 stale deletion，不新增 event type、worker、表、migration、数据库备份或页面 read model；重复执行保持 canonical invoice/source link 幂等，并显式补发 matching reconciliation。
+- 合同：POST 返回 202/event id，GET 返回 `pending/processing/done/failed/dead_lettered`。只有 `done` 才携带逐 row 计数和 promotion summary；缺记录、不支持的表单/状态、OCR/解析/promotion 失败均显式失败，禁止回退普通全量 sync、旧 projection 或第二套解析。completed 沿既有 promotion/matching；`in_progress + expense_claim` 只解析附件，必须零 promotion/matching/统一发票池写入。
+- 数据与性能：精确 operation 只处理选中 rows，不执行 stale deletion，不新增 event type、worker、表、migration、数据库备份或页面 read model；重复执行保持 canonical invoice/source link 幂等。matching reconciliation 只对 completed 子集补发，进行中日常报销完成后才由完成态链路进入统一发票池。
 ## 2026-07-28 - 日常报销付款明细存量重投合同
 
 - 目标：确保历史日常报销与新数据都保留稳定付款明细 identity，并让 OA 附件证据可显式回指对应付款项。
@@ -265,11 +265,19 @@
 ## 2026-08-16 进行中附件隔离、铁路客票金额与 lifecycle alias promotion
 
 - 影响范围：Mongo OA adapter 的日常报销记录构建、设置页精确附件刷新、铁路电子客票金额解析、OA 附件正式发票 promotion 与 PostgreSQL active source alias read port。
-- 关键决策：进行中 OA 只保留附件引用元数据；所有入口都由 adapter 构建边界强制禁止下载/OCR/evidence/invoice。铁路票价限制为最多两位小数，避免压平文本后吞入下一行长客票号，并升级 parser cache version。promotion 按批量读取 `app.oa_source_aliases.status='active'`，只允许 lifecycle alias 两端共享 canonical invoice；未激活或不同 canonical OA 继续 fail closed。
+- 当时决策：进行中 OA 只保留附件引用元数据，禁止下载/OCR/evidence/invoice。该附件隔离口径已在 2026-08-26 被下节的新合同取代；铁路票价、parser cache version 与 lifecycle alias promotion 规则仍继续有效。铁路票价限制为最多两位小数，避免压平文本后吞入下一行长客票号；promotion 按批量读取 `app.oa_source_aliases.status='active'`，只允许 lifecycle alias 两端共享 canonical invoice，未激活或不同 canonical OA 继续 fail closed。
 - 生产样本补充：历史统一发票来源可能把 `derived_from_oa_id` 保存为 `父OA ID:item:...`。promotion 必须复用 `oa_attachment_parent_oa_id` 先归一父 OA ID，再做 active alias 集合查询和冲突判断；否则已批准的生命周期 alias 仍会被旧 item 级来源误判为跨 OA 冲突。
-- 旧链路删除：移除调用方可通过 `parse_attachment_evidence=True` 强迫进行中流程解析的隐式能力；不新增第二套解析、promotion 或页面 fallback。
+- 历史旧链路：当时移除了普通调用方强迫进行中流程解析的隐式能力；2026-08-26 改为由 worker-owned 正常同步和精确刷新显式拥有解析责任，仍不新增第二套 parser、promotion 或页面 fallback。
 - 数据安全：不改主数据库 schema，不删除 OA 投影、附件 cache 或 canonical invoice；生产历史样本只允许先 dry-run，再对已核验的 active alias 与精确 OA row 执行受控修复。
 - 验证：新增进行中人工刷新、高铁票价长号、active alias promotion 与 repository 单批查询回归；发布后验证目标 144.99 OA 的铁路票进入统一发票池并保留 1 分金额差异 chip，同时附件缺失异常消失。
+
+## 2026-08-26 进行中日常报销复用统一附件解析链
+
+- 业务口径：唯一的 `in_progress + expense_claim` 在普通 month/all `oa.sync` 中就要像 completed 日常报销一样下载并解析附件；Settings 精确刷新只负责强制重解析指定 row。进行中支付申请不扩展附件解析。
+- 权威去重：同一 form、同一 canonical OA ID 同时存在 completed 与 in-progress 时，必须在 retention cutoff、cache、下载、parser 和 OCR 前选择 completed；不同 canonical ID 保持不同 OA，同一胜出状态仍重复则 fail closed。
+- 数据边界：进行中解析结果只更新 pending OA/子付款项 owner 和既有 parser cache，不进入 canonical 发票池，不执行 promotion/matching。状态变为 completed 时，PostgreSQL 单事务写 completed owner 并删除同 ID pending，然后仅对 completed 复用既有 promotion/matching。
+- 旧代码删除：删除 adapter 内 completed-only 附件解析门槛以及 service 直接 targeted projection 写路径；普通同步与精确刷新共用同一个 parser/cache、owner repository 和 completed promotion 边界，不保留并行旧路径或 fallback。
+- 性能与数据安全：相同附件命中既有版本化 cache，未变附件不重复 OCR；无新 event type、worker、read model、表、migration 或数据库备份，不删除主数据库数据。
 
 ## 2026-08-17 OA 费用类型真实字段收口
 

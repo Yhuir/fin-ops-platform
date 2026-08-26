@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from fin_ops_platform.services.imports import clean_string
+from fin_ops_platform.services.oa_adapter import is_in_progress_expense_claim
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     is_completed_workflow_status,
 )
@@ -22,8 +23,8 @@ class OAAttachmentRefreshRowNotFoundError(OAAttachmentRefreshRequestError):
     code = "oa_row_not_found"
 
 
-class OAAttachmentRefreshRowNotCompletedError(OAAttachmentRefreshRequestError):
-    code = "oa_row_not_completed"
+class OAAttachmentRefreshRowNotRefreshableError(OAAttachmentRefreshRequestError):
+    code = "oa_row_not_refreshable"
 
 
 class OAAttachmentRefreshEventNotFoundError(OAAttachmentRefreshRequestError):
@@ -88,20 +89,22 @@ class OAAttachmentRefreshRequestService:
             raise OAAttachmentRefreshRowNotFoundError(
                 f"OA row_id 不存在：{', '.join(missing_row_ids)}"
             )
-        in_progress_row_ids = [
+        unsupported_row_ids = [
             row_id
             for row_id in normalized_row_ids
-            if not is_completed_workflow_status(getattr(records_by_id[row_id], "workflow_status", None))
+            if not is_completed_workflow_status(records_by_id[row_id].workflow_status)
+            and not is_in_progress_expense_claim(records_by_id[row_id])
         ]
-        if in_progress_row_ids:
-            raise OAAttachmentRefreshRowNotCompletedError(
-                f"流程未完成，不能刷新附件：{', '.join(in_progress_row_ids)}"
+        if unsupported_row_ids:
+            raise OAAttachmentRefreshRowNotRefreshableError(
+                "仅支持已完成流程或进行中的日常报销刷新附件："
+                + ", ".join(unsupported_row_ids)
             )
         affected_scope_keys = sorted(
             {
                 month
                 for row_id in normalized_row_ids
-                if (month := clean_string(getattr(records_by_id[row_id], "month", "")))
+                if (month := clean_string(records_by_id[row_id].month))
             }
         )
         if not affected_scope_keys:

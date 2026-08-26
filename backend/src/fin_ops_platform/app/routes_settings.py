@@ -25,8 +25,8 @@ from fin_ops_platform.services.oa_applicant_credentials import (
 from fin_ops_platform.services.oa_attachment_refresh_request_service import (
     OAAttachmentRefreshEventNotFoundError,
     OAAttachmentRefreshRequestError,
-    OAAttachmentRefreshRowNotCompletedError,
     OAAttachmentRefreshRowNotFoundError,
+    OAAttachmentRefreshRowNotRefreshableError,
 )
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
@@ -540,7 +540,7 @@ class SettingsApiRoutes:
                 HTTPStatus.NOT_FOUND,
                 {"error": exc.code, "message": str(exc)},
             )
-        except OAAttachmentRefreshRowNotCompletedError as exc:
+        except OAAttachmentRefreshRowNotRefreshableError as exc:
             return self._json_response(
                 HTTPStatus.CONFLICT,
                 {"error": exc.code, "message": str(exc)},

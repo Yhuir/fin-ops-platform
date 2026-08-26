@@ -7,8 +7,8 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_attachment_refresh_request_service import (
     OAAttachmentRefreshRequestError,
     OAAttachmentRefreshRequestService,
-    OAAttachmentRefreshRowNotCompletedError,
     OAAttachmentRefreshRowNotFoundError,
+    OAAttachmentRefreshRowNotRefreshableError,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -34,7 +34,7 @@ class OAAttachmentRefreshRequestServiceTests(unittest.TestCase):
         self.assertEqual(request["payload"]["row_ids"], ["oa-2", "oa-1"])
         self.assertEqual(request["priority"], "high")
 
-    def test_request_fails_before_enqueue_for_missing_or_in_progress_row(self) -> None:
+    def test_request_accepts_in_progress_expense_claim_and_rejects_missing_row(self) -> None:
         queue = FakeQueueRepository()
         service = OAAttachmentRefreshRequestService(
             queue_repository=queue,
@@ -43,8 +43,30 @@ class OAAttachmentRefreshRequestServiceTests(unittest.TestCase):
 
         with self.assertRaises(OAAttachmentRefreshRowNotFoundError):
             service.request(["missing"], actor_id="admin")
-        with self.assertRaises(OAAttachmentRefreshRowNotCompletedError):
-            service.request(["oa-progress"], actor_id="admin")
+
+        result = service.request(["oa-progress"], actor_id="admin")
+
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(queue.enqueued[0]["payload"]["row_ids"], ["oa-progress"])
+
+    def test_request_rejects_in_progress_payment_request_before_enqueue(self) -> None:
+        queue = FakeQueueRepository()
+        service = OAAttachmentRefreshRequestService(
+            queue_repository=queue,
+            workflow_reader=FakeWorkflowReader(
+                [
+                    _record(
+                        "oa-payment-progress",
+                        "2026-06",
+                        completed=False,
+                        apply_type="支付申请",
+                    )
+                ]
+            ),
+        )
+
+        with self.assertRaises(OAAttachmentRefreshRowNotRefreshableError):
+            service.request(["oa-payment-progress"], actor_id="admin")
 
         self.assertEqual(queue.enqueued, [])
 
@@ -295,7 +317,13 @@ class FakeWorkflowReader:
         return [self.records[row_id] for row_id in row_ids if row_id in self.records]
 
 
-def _record(row_id: str, month: str, *, completed: bool = True) -> OAApplicationRecord:
+def _record(
+    row_id: str,
+    month: str,
+    *,
+    completed: bool = True,
+    apply_type: str = "日常报销",
+) -> OAApplicationRecord:
     return OAApplicationRecord(
         id=row_id,
         month=month,
@@ -303,7 +331,7 @@ def _record(row_id: str, month: str, *, completed: bool = True) -> OAApplication
         case_id=None,
         applicant="申请人",
         project_name="项目",
-        apply_type="日常报销",
+        apply_type=apply_type,
         amount="100.00",
         counterparty_name="",
         reason="测试",

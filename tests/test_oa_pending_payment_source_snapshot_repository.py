@@ -11,6 +11,142 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 
 
 class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
+    def test_owner_snapshot_refuses_duplicate_winning_status_before_transaction(self) -> None:
+        record = _oa(
+            "oa-exp-duplicate",
+            "2026-06",
+            workflow_status="in_progress",
+            flow_id="flow-duplicate",
+            apply_type="日常报销",
+        )
+        connection = FakeConnection()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate winning row_id"):
+            repository.commit_authoritative_snapshot(
+                scope_key="2026-06",
+                projection_records=[],
+                admission_records=[record, record],
+                payment_statuses={
+                    "flow-duplicate": OAPaymentStatusRecord(
+                        flow_id="flow-duplicate",
+                        pay_status=0,
+                    )
+                },
+            )
+
+        self.assertEqual(connection.transaction_count, 0)
+
+    def test_targeted_in_progress_refresh_requires_one_existing_pending_owner(self) -> None:
+        record = _oa(
+            "oa-exp-targeted",
+            "2026-06",
+            workflow_status="in_progress",
+            flow_id="flow-targeted",
+            apply_type="日常报销",
+        )
+
+        for admission_rows in (
+            [],
+            [
+                {
+                    "scope_key": "2026-06",
+                    "oa_id": record.id,
+                    "source_signature": "one",
+                    "source_payload": {"id": record.id},
+                },
+                {
+                    "scope_key": "2026-05",
+                    "oa_id": record.id,
+                    "source_signature": "two",
+                    "source_payload": {"id": record.id},
+                },
+            ],
+        ):
+            with self.subTest(owner_count=len(admission_rows)):
+                connection = FakeConnection(admission_rows=admission_rows)
+                repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+                    connection,
+                    relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+                )
+
+                with self.assertRaisesRegex(RuntimeError, "exactly one existing pending owner"):
+                    repository.commit_targeted_attachment_refresh(records=[record])
+
+                self.assertFalse(connection.committed)
+                self.assertTrue(connection.rolled_back)
+                executed_sql = "\n".join(
+                    sql for sql, _params in connection.transaction_handle.executions
+                )
+                self.assertNotIn("insert into app.oa_pending_payment_admissions", executed_sql)
+
+    def test_targeted_in_progress_refresh_replaces_the_existing_pending_owner(self) -> None:
+        record = _oa(
+            "oa-exp-targeted",
+            "2026-06",
+            workflow_status="in_progress",
+            flow_id="flow-targeted",
+            apply_type="日常报销",
+        )
+        connection = FakeConnection(
+            admission_rows=[
+                {
+                    "scope_key": "2026-06",
+                    "oa_id": record.id,
+                    "source_signature": "stale",
+                    "source_payload": {"id": record.id},
+                }
+            ]
+        )
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        result = repository.commit_targeted_attachment_refresh(records=[record])
+
+        self.assertTrue(connection.committed)
+        self.assertFalse(connection.rolled_back)
+        self.assertEqual(result.upserted_completed_count, 0)
+        self.assertEqual(result.upserted_pending_count, 1)
+        executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
+        self.assertIn("delete from app.oa_pending_payment_admissions", executed_sql)
+        self.assertIn("insert into app.oa_pending_payment_admissions", executed_sql)
+
+    def test_targeted_in_progress_refresh_refuses_pending_owner_scope_drift(self) -> None:
+        record = _oa(
+            "oa-exp-targeted",
+            "2026-06",
+            workflow_status="in_progress",
+            flow_id="flow-targeted",
+            apply_type="日常报销",
+        )
+        connection = FakeConnection(
+            admission_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "oa_id": record.id,
+                    "source_signature": "stale",
+                    "source_payload": {"id": record.id},
+                }
+            ]
+        )
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "existing pending owner scope"):
+            repository.commit_targeted_attachment_refresh(records=[record])
+
+        self.assertFalse(connection.committed)
+        self.assertTrue(connection.rolled_back)
+        executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
+        self.assertNotIn("insert into app.oa_pending_payment_admissions", executed_sql)
+
     def test_complete_snapshot_replaces_status_and_admission_in_one_canonical_transaction(self) -> None:
         connection = FakeConnection()
         relation_commands = FakeRelationCommandService()
@@ -53,6 +189,48 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         self.assertNotIn("job.read_model_dirty_scopes", executed_sql)
         self.assertNotIn("job.outbox_events", executed_sql)
+
+    def test_completed_admission_clears_pending_owner_even_when_projection_excludes_it(
+        self,
+    ) -> None:
+        completed = _oa(
+            "oa-completed-filtered",
+            "2026-06",
+            workflow_status="completed",
+            flow_id="flow-completed-filtered",
+            apply_type="日常报销",
+        )
+        connection = FakeConnection(
+            admission_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "oa_id": completed.id,
+                    "source_signature": "pending-before-completion",
+                    "source_payload": {"id": completed.id},
+                }
+            ]
+        )
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        result = repository.replace_authoritative_snapshot(
+            scope_key="2026-06",
+            completed_projection_records=[],
+            admission_records=[completed],
+            payment_statuses={},
+        )
+
+        self.assertIn("2026-05", result.oa_pending_payment_changed_scopes)
+        admission_deletes = [
+            params
+            for sql, params in connection.transaction_handle.executions
+            if "delete from app.oa_pending_payment_admissions" in sql
+        ]
+        self.assertEqual(admission_deletes, [("default", ["2026-05"])])
+        executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
+        self.assertNotIn("insert into app.oa_pending_payment_admissions", executed_sql)
 
     def test_authoritative_empty_snapshot_reports_removed_rows_old_month(self) -> None:
         connection = FakeConnection(
@@ -430,7 +608,14 @@ class FakeRelationCommandService:
         return {"changed_case_ids": [], "affected_months": []}
 
 
-def _oa(row_id: str, month: str, *, workflow_status: str, flow_id: str) -> OAApplicationRecord:
+def _oa(
+    row_id: str,
+    month: str,
+    *,
+    workflow_status: str,
+    flow_id: str,
+    apply_type: str = "支付申请",
+) -> OAApplicationRecord:
     return OAApplicationRecord(
         id=row_id,
         month=month,
@@ -438,7 +623,7 @@ def _oa(row_id: str, month: str, *, workflow_status: str, flow_id: str) -> OAApp
         case_id=None,
         applicant="测试申请人",
         project_name="测试项目",
-        apply_type="支付申请",
+        apply_type=apply_type,
         amount="100.00",
         counterparty_name="测试供应商",
         reason="测试付款",

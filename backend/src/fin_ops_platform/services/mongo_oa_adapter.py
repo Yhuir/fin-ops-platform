@@ -306,17 +306,20 @@ class MongoOAAdapter(OAAdapter):
                 continue
             documents = self._load_form_documents(form_id, month)
             self._require_sync_source_read_ready(f"after {form_type} read")
+            documents = self._select_authoritative_documents(form_type, documents)
+            if normalized_scope_key == "all" and normalized_cutoff_month:
+                documents = [
+                    document
+                    for document in documents
+                    if self._derive_month(
+                        self._document_data(document),
+                        document,
+                    )
+                    >= normalized_cutoff_month
+                ]
             for document in documents:
                 data = self._document_data(document)
-                if (
-                    normalized_scope_key == "all"
-                    and normalized_cutoff_month
-                    and self._derive_month(data, document) < normalized_cutoff_month
-                ):
-                    continue
                 status_key = self._canonical_status_key(data)
-                if status_key not in {OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS}:
-                    continue
                 if form_type == OA_IMPORT_FORM_TYPE_PAYMENT:
                     record = self._build_payment_request_record(
                         document,
@@ -330,7 +333,7 @@ class MongoOAAdapter(OAAdapter):
                         document,
                         project_names,
                         respect_status_settings=False,
-                        parse_attachment_evidence=status_key == OA_IMPORT_STATUS_COMPLETED,
+                        parse_attachment_evidence=True,
                         allow_incomplete_business_fields=status_key == OA_IMPORT_STATUS_IN_PROGRESS,
                     )
                 if not records:
@@ -467,9 +470,12 @@ class MongoOAAdapter(OAAdapter):
 
         records_by_id: dict[str, OAApplicationRecord] = {}
         if payment_external_ids:
-            payment_documents = self._load_form_documents_by_external_ids(
-                self._settings.payment_request_form_id,
-                payment_external_ids,
+            payment_documents = self._select_authoritative_documents(
+                OA_IMPORT_FORM_TYPE_PAYMENT,
+                self._load_form_documents_by_external_ids(
+                    self._settings.payment_request_form_id,
+                    payment_external_ids,
+                ),
             )
             if self._mongo_temporarily_unavailable():
                 self._set_read_status("error", "OA 连接失败")
@@ -484,9 +490,12 @@ class MongoOAAdapter(OAAdapter):
                     records_by_id[record.id] = record
 
         if expense_external_ids:
-            expense_documents = self._load_form_documents_by_external_ids(
-                self._settings.expense_claim_form_id,
-                expense_external_ids,
+            expense_documents = self._select_authoritative_documents(
+                OA_IMPORT_FORM_TYPE_EXPENSE,
+                self._load_form_documents_by_external_ids(
+                    self._settings.expense_claim_form_id,
+                    expense_external_ids,
+                ),
             )
             if self._mongo_temporarily_unavailable():
                 self._set_read_status("error", "OA 连接失败")
@@ -542,12 +551,20 @@ class MongoOAAdapter(OAAdapter):
         records: list[OAApplicationRecord] = []
         with self._temporary_import_settings(search_settings):
             if OA_IMPORT_FORM_TYPE_PAYMENT in set(search_settings["form_types"]):
-                for document in self._load_form_documents(self._settings.payment_request_form_id):
+                payment_documents = self._select_authoritative_documents(
+                    OA_IMPORT_FORM_TYPE_PAYMENT,
+                    self._load_form_documents(self._settings.payment_request_form_id),
+                )
+                for document in payment_documents:
                     record = self._build_payment_request_record(document, project_names)
                     if record is not None:
                         records.append(record)
             if OA_IMPORT_FORM_TYPE_EXPENSE in set(search_settings["form_types"]):
-                for document in self._load_form_documents(self._settings.expense_claim_form_id):
+                expense_documents = self._select_authoritative_documents(
+                    OA_IMPORT_FORM_TYPE_EXPENSE,
+                    self._load_form_documents(self._settings.expense_claim_form_id),
+                )
+                for document in expense_documents:
                     records.extend(self._build_expense_claim_records(document, project_names))
 
         filtered_records = [
@@ -581,8 +598,22 @@ class MongoOAAdapter(OAAdapter):
             return {"rows": [], "total": 0, "page": normalized_page, "page_size": normalized_page_size}
         window_limit = (normalized_page + 1) * normalized_page_size
         project_names = self._project_name_index()
-        project_query_values = self._project_query_values(q, project_names)
         imported_by_id = dict(imported_entries or {})
+        exact_row_id = clean_string(q)
+        parsed_row_id = self._parse_oa_row_id(exact_row_id)
+        if parsed_row_id is not None:
+            return self._search_application_record_rows_by_exact_row_id(
+                row_id=exact_row_id,
+                parsed_row_id=parsed_row_id,
+                search_settings=search_settings,
+                date_from=date_from,
+                date_to=date_to,
+                page=normalized_page,
+                page_size=normalized_page_size,
+                project_names=project_names,
+                imported_entries=imported_by_id,
+            )
+        project_query_values = self._project_query_values(q, project_names)
 
         rows: list[dict[str, object]] = []
         total = 0
@@ -628,6 +659,76 @@ class MongoOAAdapter(OAAdapter):
             "total": total,
             "page": normalized_page,
             "page_size": normalized_page_size,
+        }
+
+    def _search_application_record_rows_by_exact_row_id(
+        self,
+        *,
+        row_id: str,
+        parsed_row_id: tuple[str, str, str | None],
+        search_settings: dict[str, list[str]],
+        date_from: str | None,
+        date_to: str | None,
+        page: int,
+        page_size: int,
+        project_names: dict[str, str],
+        imported_entries: dict[str, Any],
+    ) -> dict[str, object]:
+        record_kind, external_id, _row_index = parsed_row_id
+        form_type = (
+            OA_IMPORT_FORM_TYPE_PAYMENT
+            if record_kind == "payment"
+            else OA_IMPORT_FORM_TYPE_EXPENSE
+        )
+        if form_type not in set(search_settings["form_types"]):
+            return {"rows": [], "total": 0, "page": page, "page_size": page_size}
+
+        form_id = (
+            self._settings.payment_request_form_id
+            if form_type == OA_IMPORT_FORM_TYPE_PAYMENT
+            else self._settings.expense_claim_form_id
+        )
+        external_ids = (
+            {external_id}
+            if form_type == OA_IMPORT_FORM_TYPE_PAYMENT
+            else set(self._expense_external_id_candidates_from_row_id(row_id))
+        )
+        documents = self._load_form_documents_by_external_ids(form_id, external_ids)
+        if self._mongo_temporarily_unavailable():
+            self._set_read_status("error", "OA 连接失败")
+            return {"rows": [], "total": 0, "page": page, "page_size": page_size}
+        documents = self._select_authoritative_documents(form_type, documents)
+
+        rows: list[dict[str, object]] = []
+        allowed_statuses = set(search_settings["statuses"])
+        normalized_date_from = clean_string(date_from or "")
+        normalized_date_to = clean_string(date_to or "")
+        for document in documents:
+            row = self._search_document_to_row(
+                document,
+                form_type=form_type,
+                project_names=project_names,
+                imported_entries=imported_entries,
+            )
+            if row is None or clean_string(row.get("row_id") or "") != row_id:
+                continue
+            if clean_string(row.get("status") or "") not in allowed_statuses:
+                continue
+            application_date = clean_string(row.get("application_date") or "")
+            if normalized_date_from and application_date and application_date < normalized_date_from:
+                continue
+            if normalized_date_to and application_date and application_date > normalized_date_to:
+                continue
+            rows.append(row)
+
+        total = len(rows)
+        start = page * page_size
+        self._set_read_status("ready", "OA 已同步")
+        return {
+            "rows": rows[start : start + page_size],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
         }
 
     def refresh_application_record_attachments(self, row_ids: list[str]) -> list[OAApplicationRecord]:
@@ -897,10 +998,7 @@ class MongoOAAdapter(OAAdapter):
             respect_status_settings=respect_status_settings,
         ):
             return []
-        should_parse_attachment_evidence = (
-            parse_attachment_evidence
-            and self._canonical_status_key(data) == OA_IMPORT_STATUS_COMPLETED
-        )
+        should_parse_attachment_evidence = parse_attachment_evidence
         applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
         if not applicant and not allow_incomplete_business_fields:
             return []
@@ -2239,6 +2337,58 @@ class MongoOAAdapter(OAAdapter):
             for document in documents
             if self._document_external_id(form_id, document) in normalized_external_ids
         ]
+
+    def _select_authoritative_documents(
+        self,
+        form_type: str,
+        documents: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if form_type == OA_IMPORT_FORM_TYPE_PAYMENT:
+            business_id = self._payment_external_id
+        elif form_type == OA_IMPORT_FORM_TYPE_EXPENSE:
+            business_id = self._expense_external_id
+        else:
+            raise ValueError(f"Unsupported OA form type: {form_type}")
+
+        candidates_by_business_id: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        for document in documents:
+            data = self._document_data(document)
+            status_key = self._canonical_status_key(data)
+            if status_key not in {
+                OA_IMPORT_STATUS_COMPLETED,
+                OA_IMPORT_STATUS_IN_PROGRESS,
+            }:
+                continue
+            external_id = business_id(data, document)
+            if not external_id:
+                raise RuntimeError(
+                    "OA source document is missing canonical business identity: "
+                    f"form_type={form_type}, document_id={self._document_id(document)}"
+                )
+            candidates_by_business_id.setdefault(external_id, []).append(
+                (status_key, document)
+            )
+
+        selected: list[dict[str, Any]] = []
+        for external_id, candidates in candidates_by_business_id.items():
+            winning_status = (
+                OA_IMPORT_STATUS_COMPLETED
+                if any(status == OA_IMPORT_STATUS_COMPLETED for status, _document in candidates)
+                else OA_IMPORT_STATUS_IN_PROGRESS
+            )
+            winners = [
+                document
+                for status, document in candidates
+                if status == winning_status
+            ]
+            if len(winners) != 1:
+                raise RuntimeError(
+                    "OA source has ambiguous workflow documents: "
+                    f"form_type={form_type}, business_id={external_id}, "
+                    f"workflow_status={winning_status}, candidates={len(winners)}"
+                )
+            selected.append(winners[0])
+        return selected
 
     def _load_project_documents(self) -> list[dict]:
         if self._mongo_temporarily_unavailable():
