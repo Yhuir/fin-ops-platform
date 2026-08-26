@@ -44,6 +44,7 @@ class PostgresCostStatisticsCanonicalRepository:
         scope_value: str | None = None,
         view: str = "project",
         include_statistics: bool = True,
+        include_cost_row_tags: bool = True,
     ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
             settings = _settings_payload(transaction)
@@ -129,9 +130,24 @@ class PostgresCostStatisticsCanonicalRepository:
                 if scoped
                 else bank_rows
             )
-            category_ids = list(
-                dict.fromkeys([*bank_ids, *_bank_row_ids(relation_bank_rows)])
-            )
+            no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
+            category_rows = [
+                *(
+                    bank_rows
+                    if include_cost_row_tags or no_oa_assignments
+                    else [row for row in bank_rows if _direction(row) == "inflow"]
+                ),
+                *(
+                    relation_bank_rows
+                    if include_cost_row_tags
+                    else [
+                        row
+                        for row in relation_bank_rows
+                        if _direction(row) == "inflow"
+                    ]
+                ),
+            ]
+            category_ids = _bank_row_ids(category_rows)
             categories_by_transaction_id = (
                 PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
                     transaction,
@@ -339,6 +355,7 @@ class LocalCostStatisticsCanonicalRepository:
         scope_value: str | None = None,
         view: str = "project",
         include_statistics: bool = True,
+        include_cost_row_tags: bool = True,
     ) -> dict[str, Any]:
         settings = dict(self._settings_provider() or {})
         account_resolver = _bank_account_resolver(settings)
@@ -363,7 +380,15 @@ class LocalCostStatisticsCanonicalRepository:
             if isinstance(relation, dict)
             and str(relation.get("status") or "active").strip().lower() == "active"
         ]
-        _apply_bank_tags(scoped_bank_rows, category_provider=self._category_provider)
+        no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
+        _apply_bank_tags(
+            (
+                scoped_bank_rows
+                if include_cost_row_tags or no_oa_assignments
+                else [row for row in scoped_bank_rows if _direction(row) == "inflow"]
+            ),
+            category_provider=self._category_provider,
+        )
         if view in {"time", "bank_tag"}:
             return _build_snapshot(
                 settings=settings,
@@ -391,7 +416,14 @@ class LocalCostStatisticsCanonicalRepository:
             if _text(row.get("id") or row.get("transaction_id") or row.get("row_id"))
             in relation_bank_ids
         ]
-        _apply_bank_tags(relation_bank_rows, category_provider=self._category_provider)
+        _apply_bank_tags(
+            (
+                relation_bank_rows
+                if include_cost_row_tags
+                else [row for row in relation_bank_rows if _direction(row) == "inflow"]
+            ),
+            category_provider=self._category_provider,
+        )
         all_oa_rows = [
             _object_payload(row)
             for row in self._oa_rows_by_ids_provider(relation_oa_ids)

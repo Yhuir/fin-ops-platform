@@ -258,6 +258,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="project",
             include_statistics=False,
+            include_cost_row_tags=False,
         )
 
         relation_sql = next(
@@ -273,6 +274,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="project",
             include_statistics=False,
+            include_cost_row_tags=False,
         )
 
         bank_sql, bank_params = next(
@@ -283,6 +285,12 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         )
         self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
         self.assertIn(["bank-1"], bank_params)
+        self.assertFalse(
+            any(
+                "select row_id, effective_category_code" in query
+                for query in connection.snapshot_transaction.fetched
+            )
+        )
 
     def test_all_scope_with_no_oa_assignment_keeps_full_bank_scan(self) -> None:
         connection = _ConfiguredNoOaCostConnection()
@@ -290,6 +298,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="project",
             include_statistics=False,
+            include_cost_row_tags=False,
         )
 
         bank_sql = next(
@@ -299,6 +308,12 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             and "select row_id, effective_category_code" not in query
         )
         self.assertNotIn("legacy_mongo_id = any(%s::text[])", bank_sql)
+        self.assertTrue(
+            any(
+                "select row_id, effective_category_code" in query
+                for query in connection.snapshot_transaction.fetched
+            )
+        )
 
     def test_scoped_relation_filter_uses_gin_prefilter_and_exact_member_types(self) -> None:
         connection = _PopulatedCostConnection()

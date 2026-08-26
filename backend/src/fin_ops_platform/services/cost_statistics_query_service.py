@@ -80,6 +80,10 @@ class CostStatisticsQueryService:
                 scope_value=scope_value,
                 view=normalized_view,
                 include_statistics=include_statistics,
+                include_cost_row_tags=_cost_row_tags_required(
+                    normalized_view,
+                    normalized_filters,
+                ),
             ),
         )
         raw_page = policy.explorer_page(
@@ -1461,6 +1465,18 @@ class CostStatisticsQueryService:
                 f"{_sanitize_filename(expense_type or '未命名费用类型')}.xlsx"
             )
         raise ValueError(f"unsupported export view: {view}")
+
+
+def _cost_row_tags_required(view: str, filters: dict[str, str]) -> bool:
+    if view == "project":
+        return bool(filters.get("project_name") and filters.get("expense_type"))
+    if view == "bank":
+        return bool(
+            filters.get("payment_account_label") and filters.get("project_name")
+        )
+    if view == "expense_type":
+        return bool(filters.get("expense_type"))
+    return True
 
 
 def _plain_money(value: Decimal) -> str:
