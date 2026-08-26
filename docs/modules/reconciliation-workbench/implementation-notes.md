@@ -1861,3 +1861,11 @@
 - 运维真实状态：failed matching scope 产生 critical alert；stale/rebuilding/error 会把 Workbench domain 标为 busy，但不阻断全局写入、不恢复已退役 BackgroundJob，也不把 direct page 伪装成 read model。
 - 旧链删除：不恢复历史 pending relation/claim 运行时，不新增第二套 worker、cache、read model、轮询或 fallback；日期 SQL 从页面 hydration 文件移到共享 PostgreSQL helper，避免匹配仓储反向依赖页面实现。
 - 数据安全：无 migration、无数据库备份、无业务数据直接修补、无主数据库删除操作；关系由现有 deterministic worker 幂等写入。
+
+## 2026-08-26 - ETC 摘要身份与异常金额共用单一发票事实集
+
+- 部署后只读证据显示 combined initial 的主 SQL 是唯一性能瓶颈：当前默认 all-scope 形状在 `pg_stat_statements` 中平均约 `900ms`、每次约 `9.1 万` shared-buffer hits；compact hydration 和银行分类不是主要耗时。
+- 根因是 ETC 摘要身份解析和关系异常金额计算分别扫描同一三类来源：正式 ETC 批次发票、active batch link 发票和历史 submission 发票。两条链各自重新连接发票/批次事实，主查询合计出现六次 `app.invoices` 顺序扫描。
+- 收口：在列表、筛选等 page spine 使用的 `_SCOPED_ETC_SUMMARY_IDENTITY_CTES` 内一次物化带 `source_rank / external_batch_id / scope_month / updated_at / invoice_identity / invoice_amount` 的窄事实集；摘要 identity key 与异常金额都消费该事实集，删除异常链中三段重复来源 SQL。单行/单组详情继续使用只解析 summary identity 的批次级窄查询，避免打开抽屉时物化全量 ETC 发票。来源优先级、金额、去重 identity、更新时间和 API DTO 均不改变。
+- 同一生产只读快照旧/新 payload SHA-256 完全一致；候选主 SQL 的 `pg_stat_statements` 平均约 `692ms`、单次 shared-buffer hits 约 `7.1 万`，相对旧形状分别下降约 `23%` 与 `22%`。最终 HTTP p95/p99 仍以发布后的标准门禁为准。
+- 本次只修改关联台 direct repository 私有 SQL 和对应查询形状测试；不新增 API、表、索引、migration、read model、cache、worker、依赖、兼容分支或兜底代码，不修改其它页面 I/O。未创建数据库备份，未写生产业务数据。

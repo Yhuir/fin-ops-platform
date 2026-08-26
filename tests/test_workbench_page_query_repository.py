@@ -503,6 +503,13 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "anomaly_states" in sql
     assert "anomaly_counts as materialized" not in sql
     assert "left join anomaly_states anomaly" in group_summary_sql
+    assert sql.count("etc_summary_invoice_source_rows as materialized") == 1
+    anomaly_etc_sql = sql.split(
+        "relation_anomaly_etc_source_rows as materialized (", 1
+    )[1].split("relation_anomaly_preferred_etc_rows as materialized (", 1)[0]
+    assert "join etc_summary_invoice_source_rows source" in anomaly_etc_sql
+    assert "join app.invoices" not in anomaly_etc_sql
+    assert "join app.etc_invoices" not in anomaly_etc_sql
     assert payload["summary"]["paired_count"] == 1
     assert payload["invoice_inventory"]["system_total"] == 2
     assert payload["paired"]["groups"][0]["detail_key"] == "case-1"
@@ -994,6 +1001,8 @@ def test_oa_invoice_and_relation_details_use_one_target_bounded_set_query() -> N
         assert "scoped_source_keys" not in lowered
         assert "canonical_groups as materialized" not in lowered
         assert "canonical_group_members" not in lowered
+        assert "etc_summary_invoice_source_rows as materialized" not in lowered
+        assert "and exists ( select 1 from app.etc_invoices invoice" in lowered
         assert "oa_attachment_invoice_cache" not in lowered
         assert "limit 4" in lowered
         assert params[:4] == (

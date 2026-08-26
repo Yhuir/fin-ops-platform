@@ -228,9 +228,135 @@ coalesce(
 """
 
 
-# Keep submitted ETC summary identity resolution shared by the bounded page
-# query and the bounded singleton-detail lookup.  A detail key must resolve to
-# the exact same authoritative batch id, month, and summary row as the list.
+# The page spine and anomaly calculator need the same ETC invoice facts. Build
+# them once so list/filter queries do not scan all three ETC invoice sources
+# twice in the same snapshot.
+_SCOPED_ETC_SUMMARY_IDENTITY_CTES = """
+etc_summary_invoice_source_rows as materialized (
+    select
+        2 as source_rank,
+        coalesce(
+            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+            batch.business_batch_id
+        ) as external_batch_id,
+        batch.scope_month,
+        batch.updated_at,
+        coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text)
+            as row_id,
+        coalesce(
+            nullif(invoice.invoice_no, ''),
+            coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text)
+        ) as invoice_identity,
+        coalesce(invoice.total_with_tax, invoice.amount) as invoice_amount
+    from app.etc_business_batches batch
+    join app.etc_invoices invoice
+      on invoice.business_batch_id = batch.business_batch_id
+     and invoice.status <> 'deleted'
+    where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+    union all
+    select
+        1,
+        coalesce(
+            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+            link.business_batch_id
+        ),
+        coalesce(batch.scope_month, invoice.invoice_month),
+        greatest(link.updated_at, batch.updated_at, invoice.updated_at),
+        coalesce(invoice.legacy_mongo_id, invoice.id::text),
+        coalesce(
+            nullif(invoice.digital_invoice_no, ''),
+            nullif(invoice.invoice_no, ''),
+            coalesce(invoice.legacy_mongo_id, invoice.id::text)
+        ),
+        coalesce(invoice.total_with_tax, invoice.amount)
+    from app.etc_batch_invoice_links link
+    join app.invoices invoice on invoice.id = link.invoice_id
+    left join app.etc_business_batches batch
+      on batch.business_batch_id = link.business_batch_id
+    where link.link_status = 'active'
+      and invoice.status <> 'deleted'
+    union all
+    select
+        3,
+        coalesce(
+            nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
+            submission.submission_batch_id
+        ),
+        coalesce(submission.scope_month, invoice.invoice_month),
+        greatest(submission.updated_at, invoice.updated_at),
+        coalesce(invoice.legacy_mongo_id, invoice.id::text),
+        coalesce(
+            nullif(invoice.digital_invoice_no, ''),
+            nullif(invoice.invoice_no, ''),
+            coalesce(invoice.legacy_mongo_id, invoice.id::text)
+        ),
+        coalesce(invoice.total_with_tax, invoice.amount)
+    from app.etc_submission_batches submission
+    join app.invoices invoice
+      on submission.submission_batch_id = coalesce(
+          invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id', ''
+      )
+      or coalesce(
+          nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
+          submission.submission_batch_id
+      ) = coalesce(
+          invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id', ''
+      )
+    where submission.status in ('submitted_confirmed', 'submitted', 'closed')
+      and invoice.status <> 'deleted'
+      and (
+          invoice.workbench_visibility = 'hidden_after_etc_submission'
+          or invoice.raw_payload->'normalized_payload'->>'workbench_visibility'
+              = 'hidden_after_etc_submission'
+          or invoice.raw_payload->'normalized_payload'->>'etc_submission_status'
+              = 'submitted'
+      )
+),
+etc_summary_source_keys as materialized (
+    select
+        source.external_batch_id,
+        source.scope_month,
+        source.updated_at
+    from etc_summary_invoice_source_rows source
+),
+etc_summary_keys as materialized (
+    select distinct on (source.external_batch_id)
+        'etc-summary-' || regexp_replace(
+            source.external_batch_id,
+            '[^A-Za-z0-9_-]+',
+            '-',
+            'g'
+        ) as row_id,
+        source.external_batch_id,
+        source.scope_month,
+        source.updated_at
+    from etc_summary_source_keys source
+    where nullif(source.external_batch_id, '') is not null
+      and source.scope_month is not null
+    order by source.external_batch_id, source.updated_at desc nulls last
+),
+etc_summary_identity_conflicts as materialized (
+    select summary.row_id
+    from etc_summary_keys summary
+    group by summary.row_id
+    having count(distinct summary.external_batch_id) > 1
+),
+etc_summary_identity_guard as materialized (
+    select 1 / case when count(*) = 0 then 1 else 0 end as guard
+    from etc_summary_identity_conflicts
+)
+"""
+
+
+# Singleton detail lookup only needs the authoritative ETC summary identity.
+# Keep this projection batch-bounded so opening a drawer does not materialize
+# every ETC invoice merely to resolve one row or case.
 _ETC_SUMMARY_IDENTITY_CTES = """
 etc_summary_source_keys as materialized (
     select
@@ -411,7 +537,7 @@ visible_invoice_facts as materialized (
     ) source_flags on true
     where {_VISIBLE_INVOICE_SQL}
 ),
-{_ETC_SUMMARY_IDENTITY_CTES},
+{_SCOPED_ETC_SUMMARY_IDENTITY_CTES},
 scoped_source_keys as materialized (
     select 'oa'::text as row_type, oa.row_id
     from requested_scope scope
@@ -1401,88 +1527,14 @@ relation_anomaly_etc_requests as materialized (
 ),
 relation_anomaly_etc_source_rows as materialized (
     select
-        1 as source_rank,
-        requested.external_batch_id,
-        coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
-        coalesce(
-            nullif(invoice.digital_invoice_no, ''),
-            nullif(invoice.invoice_no, ''),
-            coalesce(invoice.legacy_mongo_id, invoice.id::text)
-        ) as invoice_identity,
-        coalesce(invoice.total_with_tax, invoice.amount) as invoice_amount
+        source.source_rank,
+        source.external_batch_id,
+        source.row_id,
+        source.invoice_identity,
+        source.invoice_amount
     from relation_anomaly_etc_requests requested
-    join app.etc_batch_invoice_links link on link.link_status = 'active'
-    join app.invoices invoice
-      on invoice.id = link.invoice_id and invoice.status <> 'deleted'
-    left join app.etc_business_batches batch
-      on batch.business_batch_id = link.business_batch_id
-    where requested.external_batch_id = coalesce(
-        nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
-        nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
-        nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
-        nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
-        link.business_batch_id
-    )
-    union all
-    select
-        2,
-        requested.external_batch_id,
-        coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text),
-        coalesce(
-            nullif(invoice.invoice_no, ''),
-            coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text)
-        ),
-        coalesce(invoice.total_with_tax, invoice.amount)
-    from relation_anomaly_etc_requests requested
-    join app.etc_business_batches batch
-      on batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-     and requested.external_batch_id = coalesce(
-        nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
-        nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
-        nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
-        nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
-        batch.business_batch_id
-     )
-    join app.etc_invoices invoice
-      on invoice.business_batch_id = batch.business_batch_id
-     and invoice.status <> 'deleted'
-    union all
-    select
-        3,
-        requested.external_batch_id,
-        coalesce(invoice.legacy_mongo_id, invoice.id::text),
-        coalesce(
-            nullif(invoice.digital_invoice_no, ''),
-            nullif(invoice.invoice_no, ''),
-            coalesce(invoice.legacy_mongo_id, invoice.id::text)
-        ),
-        coalesce(invoice.total_with_tax, invoice.amount)
-    from relation_anomaly_etc_requests requested
-    join app.etc_submission_batches submission
-      on submission.status in ('submitted_confirmed', 'submitted', 'closed')
-     and requested.external_batch_id = coalesce(
-        nullif(submission.raw_payload->'normalized_payload'->>'etc_batch_id', ''),
-        submission.submission_batch_id
-     )
-    join app.invoices invoice
-      on invoice.status <> 'deleted'
-     and (
-            submission.submission_batch_id = coalesce(
-                invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id',
-                ''
-            )
-         or requested.external_batch_id = coalesce(
-                invoice.raw_payload->'normalized_payload'->>'etc_submission_batch_id',
-                ''
-            )
-     )
-     and (
-            invoice.workbench_visibility = 'hidden_after_etc_submission'
-         or invoice.raw_payload->'normalized_payload'->>'workbench_visibility'
-                = 'hidden_after_etc_submission'
-         or invoice.raw_payload->'normalized_payload'->>'etc_submission_status'
-                = 'submitted'
-     )
+    join etc_summary_invoice_source_rows source
+      on source.external_batch_id = requested.external_batch_id
 ),
 relation_anomaly_preferred_etc_rows as materialized (
     select source.*,
