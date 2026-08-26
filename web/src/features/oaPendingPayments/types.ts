@@ -173,17 +173,9 @@ export type OaPendingPaymentSummary = {
 };
 
 export type OaPendingPaymentStatistics = Partial<{
-  oa_count: number;
-  bank_transaction_count: number;
   input_invoice_count: number;
-  paid_oa_count: number;
   completed_oa_count: number;
   in_progress_oa_count: number;
-  expense_transaction_count: number;
-  income_transaction_count: number;
-  unpaid_oa_count: number;
-  linked_bank_oa_count: number;
-  linked_input_invoice_oa_count: number;
 }>;
 
 export type OaPendingPaymentRowsResponse = {

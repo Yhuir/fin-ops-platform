@@ -277,10 +277,8 @@ const rowsPayload = {
   ],
   statistics: {
     invoice_count: 6,
-    linked_income_bank_invoice_count: 3,
-    collected_invoice_count: 1,
-    unlinked_bank_invoice_count: 3,
-    uncollected_invoice_count: 1,
+    income_bank_transaction_count: 3,
+    blue_invoice_count: 4,
     red_invoice_count: 2,
   },
   pagination: { page: 1, page_size: 20, total: 6 },

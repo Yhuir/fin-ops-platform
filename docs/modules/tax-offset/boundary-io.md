@@ -30,6 +30,8 @@
 | --- | --- | --- |
 | rows | 页面两张发票表与认证 drawer | 输出/进项/认证匹配/范围外 rows 使用同一 snapshot |
 | summary/statistics | 页面卡片与统计 popover | 与 rows 同一 snapshot；金额由 Decimal 业务策略计算并以无千分位两位小数输出 |
+
+页面标题 `statistics` 只包含当前月份 canonical 进项和销项发票数量；认证匹配、认证范围、可抵扣和勾选数量不再属于标题统计合同。
 | `canonical_snapshot_version` | 前端计划保存 CAS | 对发票与认证页面事实生成稳定 SHA-256 token，不含 read-model 版本语义 |
 | 计划保存结果 | 前端 | `status`、`plan`、`affected_scope_keys`；不含 read-model targets |
 | 认证导入结果 | 前端/job | batch/job 与 `affected_scope_keys`；不含 tax operation barrier |

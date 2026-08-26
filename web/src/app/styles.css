@@ -1027,6 +1027,10 @@ textarea {
   outline: none;
 }
 
+.page-statistics-trigger--static {
+  cursor: default;
+}
+
 .page-statistics-trigger[data-focus-visible] {
   border-radius: var(--fp-radius-sm);
   box-shadow: 0 0 0 2px var(--fp-accent-soft);

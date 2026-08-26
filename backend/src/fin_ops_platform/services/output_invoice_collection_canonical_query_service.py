@@ -509,37 +509,23 @@ def _local_statistics(rows: list[dict[str, Any]]) -> dict[str, int]:
         )
         for row in rows
     )
-    linked_bank = sum(
+    bank_rows = {
+        str(item.get("id") or ""): item
+        for row in rows
+        for item in list((row.get("bankTransactions") or {}).get("summaries") or [])
+        if isinstance(item, dict) and str(item.get("id") or "")
+    }
+    red_count = sum(
         1
         for row in rows
-        if any(
-            str(item.get("direction") or "") == "inflow"
-            for item in list(
-                (
-                    row.get("bankTransactions")
-                    if isinstance(row.get("bankTransactions"), dict)
-                    else {}
-                ).get("summaries")
-                or []
-            )
-            if isinstance(item, dict)
-        )
-    )
-    collected = sum(
-        1
-        for row in rows
-        if str((row.get("collectionStatus") or {}).get("code") or "")
-        in {"collected", "reversed_by_red", "reverses_blue"}
+        if str((row.get("invoice") or {}).get("totalWithTax") or "").startswith("-")
     )
     return {
         "invoiceCount": invoice_count,
-        "linkedIncomeBankInvoiceCount": linked_bank,
-        "collectedInvoiceCount": collected,
-        "unlinkedBankInvoiceCount": max(0, invoice_count - linked_bank),
-        "uncollectedInvoiceCount": max(0, invoice_count - collected),
-        "redInvoiceCount": sum(
-            1
-            for row in rows
-            if str((row.get("invoice") or {}).get("totalWithTax") or "").startswith("-")
+        "incomeBankTransactionCount": sum(
+            str(item.get("direction") or "") in {"inflow", "收入"}
+            for item in bank_rows.values()
         ),
+        "blueInvoiceCount": max(0, invoice_count - red_count),
+        "redInvoiceCount": red_count,
     }

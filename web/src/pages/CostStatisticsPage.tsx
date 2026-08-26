@@ -1598,8 +1598,6 @@ export default function CostStatisticsPage() {
           { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
         ]}
         detailItems={[
-          { label: "OA 配对成本组", value: visibleStatistics?.costGroupCount, unit: "组" },
-          { label: "有成本标签流水", value: visibleStatistics?.taggedTransactionCount, unit: "笔", tone: "success" },
           { label: "未标记流水", value: visibleStatistics?.untaggedTransactionCount, unit: "笔", tone: "warning" },
           { label: "项目", value: visibleStatistics?.projectCount, unit: "个" },
           { label: "费用类型", value: visibleStatistics?.expenseTypeCount, unit: "类" },

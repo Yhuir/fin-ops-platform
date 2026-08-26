@@ -44,6 +44,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`collection_status` 候选排除自身状态条件后聚合，并补齐六种合法状态，选择状态不得缩减候选词表 |
+
+`statistics` 只包含 canonical 销项发票总数、收入流水、蓝字发票和红字发票数量；红蓝按含税总额符号互斥分类，并满足蓝字 + 红字 = 销项总数。旧收款和关系状态数量字段已删除。
 | `GET /filter-options` | 页面/兼容调用 | 返回同一 canonical facets；不读取缓存或 read model |
 | invoice/bank detail | 详情抽屉 | 按 canonical id 定向读取；不存在返回 404 |
 | relation detail | 详情抽屉 | 只支持 `kind=bank|invoice` |

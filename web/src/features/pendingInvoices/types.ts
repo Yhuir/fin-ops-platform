@@ -252,13 +252,9 @@ export type PendingInvoiceStatistics = {
   bankTransactionCount?: number;
   expenseTransactionCount?: number;
   incomeTransactionCount?: number;
-  foundInvoiceTransactionCount?: number;
-  pendingInvoiceTransactionCount?: number;
-  noInvoiceRequiredTransactionCount?: number;
-  cashIncomeTransactionCount?: number;
-  linkedOaTransactionCount?: number;
-  linkedInputInvoiceTransactionCount?: number;
-  linkedOutputInvoiceTransactionCount?: number;
+  oaCount?: number;
+  inputInvoiceCount?: number;
+  outputInvoiceCount?: number;
 };
 
 export type PendingInvoiceRelationDetailKind = "all" | "bank" | "invoice" | "oa";

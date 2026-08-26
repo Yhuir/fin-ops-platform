@@ -109,7 +109,11 @@ class TaxOffsetCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["certified_input_tax"], "6.00")
         self.assertEqual(payload["summary"]["planned_input_tax"], "3.00")
         self.assertEqual(payload["statistics"]["input_invoice_count"], 2)
-        self.assertEqual(payload["statistics"]["matched_certification_count"], 1)
+        self.assertEqual(payload["statistics"]["output_invoice_count"], 1)
+        self.assertEqual(
+            payload["statistics"],
+            {"input_invoice_count": 2, "output_invoice_count": 1},
+        )
         self.assertRegex(payload["canonical_snapshot_version"], r"^tax-offset-v1:[0-9a-f]{64}$")
 
     def test_rejects_invalid_month_before_opening_a_snapshot(self) -> None:

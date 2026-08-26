@@ -1180,67 +1180,24 @@ class PostgresOpsTaxEtcRepository:
                     select bucket, count(*)::integer as count
                     from scoped
                     group by bucket
-                ), invoice_stats as (
+                ), canonical_invoice_stats as (
                     select
-                        count(*)::integer as etc_invoice_count,
-                        count(*) filter (where import_batch.batch_id is not null)::integer
-                            as imported_invoice_count
-                    from app.etc_invoices invoice
-                    left join app.etc_import_batches import_batch
-                      on import_batch.batch_id = nullif(
-                          coalesce(
-                              invoice.raw_payload->'normalized_payload'->>'import_batch_id',
-                              invoice.raw_payload->>'import_batch_id'
-                          ),
-                          ''
+                        count(*)::integer as input_invoice_count,
+                        count(*) filter (
+                            where nullif(invoice.etc_invoice_id, '') is not null
+                        )::integer as etc_invoice_count
+                    from app.invoices invoice
+                    where invoice.status <> 'deleted'
+                      and (
+                          lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
+                              ('input', 'input_invoice', 'in_invoice', 'purchase', 'purchase_invoice', 'payable')
+                          or coalesce(invoice.invoice_type, '') like '%%进项%%'
                       )
-                     and coalesce(import_batch.legacy_mongo_id, '') !~ '^current_state:'
-                     and import_batch.status <> 'deleted'
-                    where coalesce(invoice.legacy_mongo_id, '') !~ '^current_state:'
-                      and invoice.status <> 'deleted'
                 ), statistics as (
                     select
-                        invoice_stats.etc_invoice_count,
-                        batch_stats.business_batch_count,
-                        batch_stats.unsubmitted_batch_count,
-                        batch_stats.draft_batch_count,
-                        batch_stats.submitted_batch_count,
-                        (
-                            select count(*)::integer
-                            from app.etc_reconciliation_tasks task
-                            where coalesce(task.legacy_mongo_id, '') !~ '^current_state:'
-                              and task.status <> 'deleted'
-                        ) as reconciliation_task_count,
-                        (
-                            select count(*)::integer
-                            from app.etc_reconciliation_files file
-                            where coalesce(file.legacy_mongo_id, '') !~ '^current_state:'
-                              and file.status <> 'deleted'
-                        ) as source_file_count,
-                        invoice_stats.imported_invoice_count,
-                        (
-                            select count(distinct link.etc_invoice_id)::integer
-                            from app.etc_batch_invoice_links link
-                            where link.link_status = 'active'
-                              and link.tenant_id = 'default'
-                        ) as linked_canonical_invoice_count,
-                        batch_stats.oa_draft_batch_count
-                    from (
-                        select
-                            count(*)::integer as business_batch_count,
-                            count(*) filter (
-                                where status not in (
-                                    'oa_draft_creating', 'oa_confirmation_pending', 'oa_submitted', 'manually_marked_submitted', 'closed'
-                                )
-                            )::integer as unsubmitted_batch_count,
-                            count(*) filter (where status in ('oa_draft_creating', 'oa_confirmation_pending'))::integer as draft_batch_count,
-                            count(*) filter (
-                                where status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-                            )::integer as submitted_batch_count,
-                            count(*) filter (where oa_draft_id is not null)::integer as oa_draft_batch_count
-                        from canonical
-                    ) batch_stats
-                    cross join invoice_stats
+                        canonical_invoice_stats.input_invoice_count,
+                        canonical_invoice_stats.etc_invoice_count
+                    from canonical_invoice_stats
                 )
                 select bucket.bucket, coalesce(bucket_counts.count, 0)::integer as count, statistics.*
                 from (values ('unsubmitted'), ('staged'), ('submitted')) as bucket(bucket)
@@ -1289,16 +1246,8 @@ class PostgresOpsTaxEtcRepository:
                 counts[row_bucket] = int(row.get("count") or 0)
             if statistics is None:
                 statistics = {
+                    "input_invoice_count": int(row.get("input_invoice_count") or 0),
                     "invoice_count": int(row.get("etc_invoice_count") or 0),
-                    "business_batch_count": int(row.get("business_batch_count") or 0),
-                    "unsubmitted_batch_count": int(row.get("unsubmitted_batch_count") or 0),
-                    "draft_batch_count": int(row.get("draft_batch_count") or 0),
-                    "submitted_batch_count": int(row.get("submitted_batch_count") or 0),
-                    "reconciliation_task_count": int(row.get("reconciliation_task_count") or 0),
-                    "source_file_count": int(row.get("source_file_count") or 0),
-                    "imported_invoice_count": int(row.get("imported_invoice_count") or 0),
-                    "linked_canonical_invoice_count": int(row.get("linked_canonical_invoice_count") or 0),
-                    "oa_draft_batch_count": int(row.get("oa_draft_batch_count") or 0),
                 }
         return {
             "items": [

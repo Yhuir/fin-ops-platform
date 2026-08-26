@@ -30,13 +30,6 @@ export type TaxSummary = {
 export type TaxPageStatistics = {
   inputInvoiceCount?: number;
   outputInvoiceCount?: number;
-  certificationRecordCount?: number;
-  matchedCertificationCount?: number;
-  unmatchedCertificationCount?: number;
-  outOfScopeCertificationCount?: number;
-  deductibleInvoiceCount?: number;
-  selectedInvoiceCount?: number;
-  unselectedInvoiceCount?: number;
 };
 
 export type TaxMonthData = {

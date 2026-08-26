@@ -35,9 +35,6 @@ describe("tax API mappers", () => {
       statistics: {
         input_invoice_count: "800",
         output_invoice_count: 600,
-        certification_record_count: 500,
-        matched_certification_count: -1,
-        deductible_invoice_count: 2.5,
       },
       canonical_snapshot_version: "tax-offset-v1:test",
     }), { headers: { "Content-Type": "application/json" } })));
@@ -47,9 +44,6 @@ describe("tax API mappers", () => {
     expect(result.statistics).toEqual(expect.objectContaining({
       inputInvoiceCount: 800,
       outputInvoiceCount: 600,
-      certificationRecordCount: 500,
-      matchedCertificationCount: undefined,
-      deductibleInvoiceCount: undefined,
     }));
     expect(result.canonicalSnapshotVersion).toBe("tax-offset-v1:test");
   });

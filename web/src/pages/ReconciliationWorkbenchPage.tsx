@@ -2528,17 +2528,12 @@ export default function ReconciliationWorkbenchPage() {
                     { label: "销项", value: statistics?.outputInvoiceCount, unit: "张" },
                   ]}
                   detailItems={[
-                    { label: "已配对组", value: statistics?.pairedGroupCount, unit: "组", tone: "success" },
-                    { label: "未配对对象", value: statistics?.unpairedObjectCount, unit: "个", tone: "warning" },
+                    { label: "已完成 OA", value: statistics?.completedOaCount, unit: "条", tone: "success" },
+                    { label: "进行中 OA", value: statistics?.inProgressOaCount, unit: "条" },
                     { label: "支出流水", value: statistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
                     { label: "收入流水", value: statistics?.incomeTransactionCount, unit: "笔", tone: "income" },
-                    { label: "已配对 OA", value: statistics?.pairedOaCount, unit: "条" },
-                    { label: "已配对流水", value: statistics?.pairedBankTransactionCount, unit: "笔" },
-                    { label: "已配对发票", value: statistics?.pairedInvoiceCount, unit: "张" },
-                    { label: "不完整关系组", value: statistics?.incompleteGroupCount, unit: "组", tone: "warning" },
-                    { label: "缺 OA 关系组", value: statistics?.missingOaGroupCount, unit: "组", tone: "warning" },
-                    { label: "缺流水关系组", value: statistics?.missingBankGroupCount, unit: "组", tone: "warning" },
-                    { label: "缺发票关系组", value: statistics?.missingInvoiceGroupCount, unit: "组", tone: "warning" },
+                    { label: "手工导入发票", value: statistics?.manualImportInvoiceCount, unit: "张" },
+                    { label: "OA 解析新增发票", value: statistics?.oaParseCreatedInvoiceCount, unit: "张" },
                   ]}
                 />
               </div>

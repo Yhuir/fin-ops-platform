@@ -268,14 +268,11 @@ export default function OutputInvoiceCollectionsPage() {
         ariaLabel="销项发票收款情况数据统计"
         coreItems={[
           { label: "销项发票", value: statistics?.invoiceCount, unit: "张" },
-          { label: "已关联收入流水", value: statistics?.linkedIncomeBankInvoiceCount, unit: "张" },
-          { label: "已收款", value: statistics?.collectedInvoiceCount, unit: "张", tone: "success" },
-        ]}
-        detailItems={[
-          { label: "未关联流水", value: statistics?.unlinkedBankInvoiceCount, unit: "张", tone: "warning" },
-          { label: "未收款", value: statistics?.uncollectedInvoiceCount, unit: "张", tone: "warning" },
+          { label: "收入流水", value: statistics?.incomeBankTransactionCount, unit: "笔", tone: "income" },
+          { label: "蓝字发票", value: statistics?.blueInvoiceCount, unit: "张" },
           { label: "红字发票", value: statistics?.redInvoiceCount, unit: "张" },
         ]}
+        detailItems={[]}
         loading={loading}
       />
     </div>

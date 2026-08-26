@@ -190,10 +190,11 @@ describe("pending invoices and tag settings API mapping", () => {
       },
       statistics: {
         bank_transaction_count: "10000",
-        found_invoice_transaction_count: 6200,
-        pending_invoice_transaction_count: 3800,
-        expense_transaction_count: -1,
-        income_transaction_count: 2.5,
+        expense_transaction_count: 7000,
+        income_transaction_count: 3000,
+        oa_count: 433,
+        input_invoice_count: 1158,
+        output_invoice_count: 30,
       },
       tag_dictionary: {
         version: 9,
@@ -253,10 +254,11 @@ describe("pending invoices and tag settings API mapping", () => {
     });
     expect(payload.statistics).toEqual(expect.objectContaining({
       bankTransactionCount: 10000,
-      foundInvoiceTransactionCount: 6200,
-      pendingInvoiceTransactionCount: 3800,
-      expenseTransactionCount: undefined,
-      incomeTransactionCount: undefined,
+      expenseTransactionCount: 7000,
+      incomeTransactionCount: 3000,
+      oaCount: 433,
+      inputInvoiceCount: 1158,
+      outputInvoiceCount: 30,
     }));
     expect(payload.filterFields).toEqual([
       {

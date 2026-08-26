@@ -435,12 +435,6 @@ class CostStatisticsPolicy:
                     if row["direction"] == "收入"
                 }
             ),
-            "cost_group_count": len(
-                {row["group_id"] for row in cost_rows if row["group_id"]}
-            ),
-            "tagged_transaction_count": len(
-                {row["transaction_id"] for row in tagged}
-            ),
             "untagged_transaction_count": len(
                 {row["transaction_id"] for row in self.bank_flow_rows}
                 - {row["transaction_id"] for row in tagged}

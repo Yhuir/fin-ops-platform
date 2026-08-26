@@ -45,6 +45,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | `/rows` | 页面 | 同一 snapshot 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`payment_status` 候选排除自身状态条件后聚合，并按规则字典补齐零数量状态，选择状态不得缩减候选词表 |
+
+`statistics` 只包含 canonical 进项发票总数、已完成/进行中 OA、支出/收入流水数量；同 ID OA 以已完成优先，旧付款、关系组和反提批次数量字段已删除。
 | relation/details | drawer | row/invoice/bank 按 canonical id 定向读取，不存在返回 404；OA 详情按 canonical OA id 返回 `detailAvailable=true|false`，不可用时保持 200 的既有 drawer 合同 |
 | OA 申请人列与详情 | frontend | 总览只显示申请人、申请类型、多 OA 数量和合计金额，不显示流程状态；单条 OA 详情和多 OA 关联详情使用 canonical `workflowStatus` 显示“已完成/进行中”，不得读取或回退 linked/unlinked/unpaired 关系状态 |
 | export preview/download | export drawer | 复用 canonical filters/sort；20,000 行上限和原错误合同不变 |

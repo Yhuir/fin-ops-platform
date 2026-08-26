@@ -158,8 +158,6 @@ type ApiBankDetailTransactionsResponse = {
     income_transaction_count?: number | null;
     classified_transaction_count?: number | null;
     unclassified_transaction_count?: number | null;
-    linked_transaction_count?: number | null;
-    unlinked_transaction_count?: number | null;
   } | null;
   tag_dictionary?: Parameters<typeof mapBankTransactionTagDictionary>[0];
   bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
@@ -791,8 +789,6 @@ export async function fetchBankDetailTransactions({
       incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
       classifiedTransactionCount: optionalCount(payload.statistics.classified_transaction_count),
       unclassifiedTransactionCount: optionalCount(payload.statistics.unclassified_transaction_count),
-      linkedTransactionCount: optionalCount(payload.statistics.linked_transaction_count),
-      unlinkedTransactionCount: optionalCount(payload.statistics.unlinked_transaction_count),
     } : undefined,
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
   };

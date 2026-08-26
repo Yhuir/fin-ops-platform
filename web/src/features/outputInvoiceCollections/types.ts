@@ -122,10 +122,8 @@ export type OutputInvoiceCollectionRow = {
 
 export type OutputInvoiceCollectionStatistics = {
   invoiceCount?: number;
-  linkedIncomeBankInvoiceCount?: number;
-  collectedInvoiceCount?: number;
-  unlinkedBankInvoiceCount?: number;
-  uncollectedInvoiceCount?: number;
+  incomeBankTransactionCount?: number;
+  blueInvoiceCount?: number;
   redInvoiceCount?: number;
 };
 

@@ -141,8 +141,6 @@ export type BankDetailStatistics = {
   incomeTransactionCount?: number;
   classifiedTransactionCount?: number;
   unclassifiedTransactionCount?: number;
-  linkedTransactionCount?: number;
-  unlinkedTransactionCount?: number;
 };
 
 export type BankDetailTransactionsResponse = {

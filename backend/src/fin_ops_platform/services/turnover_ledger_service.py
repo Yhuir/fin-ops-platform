@@ -248,16 +248,6 @@ class TurnoverLedgerService:
                 row_id = str(flow.get("source_bank_row_id") or "").strip()
                 if row_id:
                     flows_by_id[row_id] = flow
-        closed_group_count = sum(
-            1
-            for group in groups
-            if bool(group.get("cash_closure_linked"))
-            or bool(
-                (group.get("summary_row") if isinstance(group.get("summary_row"), dict) else {}).get(
-                    "cash_closure_linked"
-                )
-            )
-        )
         expense_count = sum(
             1
             for flow in flows_by_id.values()
@@ -272,15 +262,6 @@ class TurnoverLedgerService:
             "transaction_count": len(flows_by_id),
             "expense_transaction_count": expense_count,
             "income_transaction_count": income_count,
-            "ledger_group_count": len(groups),
-            "closed_group_count": closed_group_count,
-            "unclosed_group_count": max(len(groups) - closed_group_count, 0),
-            "linked_oa_transaction_count": sum(
-                1 for flow in flows_by_id.values() if bool(flow.get("linked_oa"))
-            ),
-            "linked_invoice_transaction_count": sum(
-                1 for flow in flows_by_id.values() if bool(flow.get("linked_invoice"))
-            ),
         }
 
     def get_relation_detail(self, relation_id: str) -> dict[str, Any]:

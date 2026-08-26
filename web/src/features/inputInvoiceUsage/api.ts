@@ -297,14 +297,10 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
       const statistics = objectValue(raw.statistics);
       return {
         invoiceCount: optionalCount(camelOrSnake(statistics, "invoiceCount", "invoice_count")),
-        linkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedOaInvoiceCount", "linked_oa_invoice_count")),
-        linkedBankInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedBankInvoiceCount", "linked_bank_invoice_count")),
-        paidInvoiceCount: optionalCount(camelOrSnake(statistics, "paidInvoiceCount", "paid_invoice_count")),
-        unlinkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedOaInvoiceCount", "unlinked_oa_invoice_count")),
-        unlinkedBankInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedBankInvoiceCount", "unlinked_bank_invoice_count")),
-        unpaidInvoiceCount: optionalCount(camelOrSnake(statistics, "unpaidInvoiceCount", "unpaid_invoice_count")),
-        formalRelationGroupCount: optionalCount(camelOrSnake(statistics, "formalRelationGroupCount", "formal_relation_group_count")),
-        oaReverseBatchCount: optionalCount(camelOrSnake(statistics, "oaReverseBatchCount", "oa_reverse_batch_count")),
+        completedOaCount: optionalCount(camelOrSnake(statistics, "completedOaCount", "completed_oa_count")),
+        inProgressOaCount: optionalCount(camelOrSnake(statistics, "inProgressOaCount", "in_progress_oa_count")),
+        expenseTransactionCount: optionalCount(camelOrSnake(statistics, "expenseTransactionCount", "expense_transaction_count")),
+        incomeTransactionCount: optionalCount(camelOrSnake(statistics, "incomeTransactionCount", "income_transaction_count")),
       };
     })() : undefined,
     pagination: {

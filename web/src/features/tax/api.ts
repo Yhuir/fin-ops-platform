@@ -76,13 +76,6 @@ type ApiTaxMonthPayload = {
   statistics?: {
     input_invoice_count?: number | null;
     output_invoice_count?: number | null;
-    certification_record_count?: number | null;
-    matched_certification_count?: number | null;
-    unmatched_certification_count?: number | null;
-    out_of_scope_certification_count?: number | null;
-    deductible_invoice_count?: number | null;
-    selected_invoice_count?: number | null;
-    unselected_invoice_count?: number | null;
   } | null;
   canonical_snapshot_version: string;
 };
@@ -393,13 +386,6 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
     statistics: payload.statistics ? {
       inputInvoiceCount: optionalCount(payload.statistics.input_invoice_count),
       outputInvoiceCount: optionalCount(payload.statistics.output_invoice_count),
-      certificationRecordCount: optionalCount(payload.statistics.certification_record_count),
-      matchedCertificationCount: optionalCount(payload.statistics.matched_certification_count),
-      unmatchedCertificationCount: optionalCount(payload.statistics.unmatched_certification_count),
-      outOfScopeCertificationCount: optionalCount(payload.statistics.out_of_scope_certification_count),
-      deductibleInvoiceCount: optionalCount(payload.statistics.deductible_invoice_count),
-      selectedInvoiceCount: optionalCount(payload.statistics.selected_invoice_count),
-      unselectedInvoiceCount: optionalCount(payload.statistics.unselected_invoice_count),
     } : undefined,
     canonicalSnapshotVersion,
   };

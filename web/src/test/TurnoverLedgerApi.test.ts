@@ -683,8 +683,6 @@ describe("turnover ledger API", () => {
             transaction_count: "9000",
             expense_transaction_count: 4500,
             income_transaction_count: 4500,
-            closed_group_count: -1,
-            ledger_group_count: 2.5,
           },
         }), { headers: { "Content-Type": "application/json" } });
       }),
@@ -704,8 +702,6 @@ describe("turnover ledger API", () => {
       transactionCount: 9000,
       expenseTransactionCount: 4500,
       incomeTransactionCount: 4500,
-      closedGroupCount: undefined,
-      ledgerGroupCount: undefined,
     }));
     expect(ledger.groups[0]).toMatchObject({
       groupId: "counterparty:company:梁希涛",

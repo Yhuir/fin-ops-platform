@@ -76,16 +76,8 @@ export type EtcBusinessBatchCounts = {
 };
 
 export type EtcPageStatistics = {
+  inputInvoiceCount?: number;
   invoiceCount?: number;
-  businessBatchCount?: number;
-  unsubmittedBatchCount?: number;
-  draftBatchCount?: number;
-  submittedBatchCount?: number;
-  reconciliationTaskCount?: number;
-  sourceFileCount?: number;
-  importedInvoiceCount?: number;
-  linkedCanonicalInvoiceCount?: number;
-  oaDraftBatchCount?: number;
 };
 
 export type EtcBusinessBatchQuery = {

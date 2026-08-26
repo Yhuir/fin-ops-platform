@@ -629,17 +629,13 @@ export default function PendingInvoicesPage() {
         loading={loading && statistics === null}
         coreItems={[
           { label: "流水", value: statistics?.bankTransactionCount, unit: "笔" },
-          { label: "已找到发票的流水", value: statistics?.foundInvoiceTransactionCount, unit: "笔", tone: "success" },
-          { label: "待找发票的流水", value: statistics?.pendingInvoiceTransactionCount, unit: "笔", tone: "warning" },
+          { label: "OA", value: statistics?.oaCount, unit: "条" },
+          { label: "进项发票", value: statistics?.inputInvoiceCount, unit: "张" },
+          { label: "销项发票", value: statistics?.outputInvoiceCount, unit: "张" },
         ]}
         detailItems={[
           { label: "支出", value: statistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
           { label: "收入", value: statistics?.incomeTransactionCount, unit: "笔", tone: "income" },
-          { label: "无需开票流水", value: statistics?.noInvoiceRequiredTransactionCount, unit: "笔" },
-          { label: "现金收入流水", value: statistics?.cashIncomeTransactionCount, unit: "笔", tone: "income" },
-          { label: "已关联 OA 的流水", value: statistics?.linkedOaTransactionCount, unit: "笔" },
-          { label: "已关联进项票的流水", value: statistics?.linkedInputInvoiceTransactionCount, unit: "笔" },
-          { label: "已关联销项票的流水", value: statistics?.linkedOutputInvoiceTransactionCount, unit: "笔" },
         ]}
       />
     </div>

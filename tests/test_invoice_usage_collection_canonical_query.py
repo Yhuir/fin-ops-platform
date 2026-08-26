@@ -219,7 +219,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(payload.pagination, {"page": 10, "pageSize": 200, "total": 0})
         self.assertEqual(len(connection.transactions), 1)
         statements = connection.transactions[0].statements
-        self.assertEqual(len(statements), 2)
+        self.assertEqual(len(statements), 3)
         self.assertEqual(
             statements[0],
             "set transaction isolation level repeatable read read only",
@@ -234,7 +234,8 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("then 'unmatched_red'", sql)
         self.assertNotIn("app.output_invoice_collection_status_overrides", sql)
         self.assertNotIn("receipt_status", sql)
-        self.assertNotIn("oa_applications", sql)
+        self.assertNotIn("oa_applications", statements[1])
+        self.assertIn("from app.oa_applications oa", statements[2])
         self.assertIn("filtered_rows as materialized", sql)
         self.assertIn("status_option_rows as materialized", sql)
         self.assertIn("page_supporting_keys as", sql)
@@ -242,6 +243,9 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(sql.count("with recursive"), 1)
         self.assertNotIn("where group_key = any(%s::text[])", sql)
         self.assertIn("jsonb_agg(", sql)
+        self.assertIn("as blue_invoice_count", sql)
+        self.assertIn("as red_invoice_count", sql)
+        self.assertIn("from app.bank_transactions", sql)
         self.assertNotIn("read_model.output_invoice_collection", sql)
         self.assertNotIn("read_model.workbench_relation", sql)
         self.assertNotIn("read_model.invoice_lifecycle", sql)

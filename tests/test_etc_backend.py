@@ -3864,15 +3864,7 @@ class EtcApiTests(unittest.TestCase):
                     "bucket": "unsubmitted",
                     "count": 1,
                     "etc_invoice_count": 65,
-                    "business_batch_count": 9,
-                    "unsubmitted_batch_count": 6,
-                    "draft_batch_count": 1,
-                    "submitted_batch_count": 2,
-                    "reconciliation_task_count": 4,
-                    "source_file_count": 7,
-                    "imported_invoice_count": 60,
-                    "linked_canonical_invoice_count": 58,
-                    "oa_draft_batch_count": 2,
+                    "input_invoice_count": 1158,
                 }]
             if "select page.batch_payload" in normalized_sql:
                 return [{
@@ -3926,10 +3918,10 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("lower(%s::text)", list_count_sql)
         self.assertIn("where bucket = %s::text", list_page_sql)
         self.assertIn("limit %s::integer offset %s::integer", list_page_sql)
-        self.assertIn("left join app.etc_import_batches import_batch", list_count_sql)
-        self.assertIn("invoice.raw_payload->'normalized_payload'->>'import_batch_id'", list_count_sql)
-        self.assertIn("count(*) filter (where import_batch.batch_id is not null)", list_count_sql)
-        self.assertIn("count(*) filter (where oa_draft_id is not null)", list_count_sql)
+        self.assertIn("from app.invoices invoice", list_count_sql)
+        self.assertIn("nullif(invoice.etc_invoice_id, '') is not null", list_count_sql)
+        self.assertIn("as input_invoice_count", list_count_sql)
+        self.assertIn("as etc_invoice_count", list_count_sql)
         self.assertNotIn("invoice_ranges", list_count_sql)
         self.assertIn("left join lateral", list_page_sql)
         self.assertIn("min(invoice.invoice_date) as invoice_date_start", list_page_sql)
@@ -3937,7 +3929,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertNotIn("jsonb_array_elements_text", list_count_sql)
         self.assertNotIn("cross join lateral unnest", list_count_sql)
         self.assertEqual(list_payload["counts"]["unsubmitted"], 1)
-        self.assertEqual(list_payload["statistics"]["business_batch_count"], 9)
+        self.assertEqual(list_payload["statistics"]["input_invoice_count"], 1158)
         self.assertEqual(list_payload["statistics"]["invoice_count"], 65)
         self.assertEqual(list_payload["items"][0]["invoice_date_start"], "2026-03-28")
         self.assertEqual(list_payload["items"][0]["invoice_date_end"], "2026-04-27")
@@ -3965,15 +3957,7 @@ class EtcApiTests(unittest.TestCase):
                         "bucket": "unsubmitted",
                         "count": 1,
                         "etc_invoice_count": 2,
-                        "business_batch_count": 1,
-                        "unsubmitted_batch_count": 1,
-                        "draft_batch_count": 0,
-                        "submitted_batch_count": 0,
-                        "reconciliation_task_count": 1,
-                        "source_file_count": 1,
-                        "imported_invoice_count": 2,
-                        "linked_canonical_invoice_count": 2,
-                        "oa_draft_batch_count": 0,
+                        "input_invoice_count": 2,
                     }]
                 if "select page.batch_payload" in normalized_sql:
                     return [{
@@ -4023,6 +4007,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(snapshot_calls[0], ("set transaction isolation level repeatable read read only", ()))
         self.assertEqual(len([call for call in snapshot_calls if call[0] != snapshot_calls[0][0]]), 2)
         self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["statistics"]["input_invoice_count"], 2)
         self.assertEqual(payload["statistics"]["invoice_count"], 2)
         self.assertEqual(
             payload["items"][0]["business_batch"]["business_batch_id"],

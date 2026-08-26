@@ -211,11 +211,6 @@ type ApiTurnoverLedgerGroupedResponse = {
     transaction_count?: number | null;
     expense_transaction_count?: number | null;
     income_transaction_count?: number | null;
-    closed_group_count?: number | null;
-    ledger_group_count?: number | null;
-    unclosed_group_count?: number | null;
-    linked_oa_transaction_count?: number | null;
-    linked_invoice_transaction_count?: number | null;
   } | null;
 };
 
@@ -858,11 +853,6 @@ export async function fetchTurnoverLedgerGrouped({
       transactionCount: optionalCount(payload.statistics.transaction_count),
       expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
       incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
-      closedGroupCount: optionalCount(payload.statistics.closed_group_count),
-      ledgerGroupCount: optionalCount(payload.statistics.ledger_group_count),
-      unclosedGroupCount: optionalCount(payload.statistics.unclosed_group_count),
-      linkedOaTransactionCount: optionalCount(payload.statistics.linked_oa_transaction_count),
-      linkedInvoiceTransactionCount: optionalCount(payload.statistics.linked_invoice_transaction_count),
     } : undefined,
   };
 }

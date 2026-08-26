@@ -119,14 +119,10 @@ export type InputInvoiceUsageRow = {
 
 export type InputInvoiceUsageStatistics = {
   invoiceCount?: number;
-  linkedOaInvoiceCount?: number;
-  linkedBankInvoiceCount?: number;
-  paidInvoiceCount?: number;
-  unlinkedOaInvoiceCount?: number;
-  unlinkedBankInvoiceCount?: number;
-  unpaidInvoiceCount?: number;
-  formalRelationGroupCount?: number;
-  oaReverseBatchCount?: number;
+  completedOaCount?: number;
+  inProgressOaCount?: number;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
 };
 
 export type InputInvoiceUsageRowsResponse = {

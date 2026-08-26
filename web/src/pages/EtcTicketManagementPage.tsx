@@ -1902,19 +1902,10 @@ export default function EtcTicketManagementPage() {
             ariaLabel="ETC票据数据统计"
             loading={loading && !statistics}
             coreItems={[
+              { label: "进项发票", value: statistics?.inputInvoiceCount, unit: "张" },
               { label: "ETC 发票", value: statistics?.invoiceCount, unit: "张" },
-              { label: "业务批次", value: statistics?.businessBatchCount, unit: "批" },
-              { label: "已提交", value: statistics?.submittedBatchCount, unit: "批", tone: "success" },
             ]}
-            detailItems={[
-              { label: "未提交", value: statistics?.unsubmittedBatchCount, unit: "批", tone: "warning" },
-              { label: "暂存", value: statistics?.draftBatchCount, unit: "批" },
-              { label: "对账任务", value: statistics?.reconciliationTaskCount, unit: "个" },
-              { label: "源文件", value: statistics?.sourceFileCount, unit: "个" },
-              { label: "成功导入发票", value: statistics?.importedInvoiceCount, unit: "张", tone: "success" },
-              { label: "已关联统一发票", value: statistics?.linkedCanonicalInvoiceCount, unit: "张" },
-              { label: "OA 草稿批次", value: statistics?.oaDraftBatchCount, unit: "批" },
-            ]}
+            detailItems={[]}
           />
         }
         actions={

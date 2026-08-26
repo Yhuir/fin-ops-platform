@@ -971,22 +971,52 @@ statistics as (
         count(*)::integer as bank_transaction_count,
         count(*) filter (where direction = 'expense')::integer as expense_transaction_count,
         count(*) filter (where direction = 'income')::integer as income_transaction_count,
-        count(*) filter (
-            where (direction = 'expense' and input_invoice_count > 0)
-               or (direction = 'income' and output_invoice_count > 0)
-        )::integer as found_invoice_transaction_count,
-        count(*) filter (
-            where status_code in ('paid_pending_invoice', 'paid_pending_future_invoice', 'income_pending_invoice')
-        )::integer as pending_invoice_transaction_count,
-        count(*) filter (
-            where status_code in ('no_invoice_required', 'income_no_invoice_required')
-        )::integer as no_invoice_required_transaction_count,
-        count(*) filter (where status_code = 'cash_income')::integer as cash_income_transaction_count,
-        count(*) filter (where oa_count > 0)::integer as linked_oa_transaction_count,
-        count(*) filter (where direction = 'expense' and input_invoice_count > 0)::integer
-            as linked_input_invoice_transaction_count,
-        count(*) filter (where direction = 'income' and output_invoice_count > 0)::integer
-            as linked_output_invoice_transaction_count
+        (
+            select count(*)::integer
+            from app.oa_applications oa
+            where oa.workflow_status is null
+               or oa.workflow_status = ''
+               or oa.workflow_status in (
+                   'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
+               )
+        ) + (
+            select count(*)::integer
+            from app.oa_pending_payment_admissions admission
+            where admission.tenant_id = 'default'
+              and admission.workflow_status = 'in_progress'
+              and not exists (
+                  select 1
+                  from app.oa_applications completed
+                  where completed.row_id = admission.oa_id
+                    and (
+                        completed.workflow_status is null
+                        or completed.workflow_status = ''
+                        or completed.workflow_status in (
+                            'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
+                        )
+                    )
+              )
+        ) as oa_count,
+        (
+            select count(*)::integer
+            from app.invoices invoice
+            where invoice.status <> 'deleted'
+              and (
+                  lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
+                      ('input', 'input_invoice', 'in_invoice', 'purchase', 'purchase_invoice', 'payable')
+                  or coalesce(invoice.invoice_type, '') like '%%进项%%'
+              )
+        ) as input_invoice_count,
+        (
+            select count(*)::integer
+            from app.invoices invoice
+            where invoice.status <> 'deleted'
+              and (
+                  lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
+                      ('output', 'output_invoice', 'out_invoice', 'sales', 'sale', 'sales_invoice', 'receivable')
+                  or coalesce(invoice.invoice_type, '') like '%%销项%%'
+              )
+        ) as output_invoice_count
     from classified
     where %s::boolean
 ),
@@ -2953,38 +2983,29 @@ def _local_statistics(rows: list[dict[str, Any]]) -> dict[str, int]:
         "bank_transaction_count": len(rows),
         "expense_transaction_count": sum(row.get("_direction") == "expense" for row in rows),
         "income_transaction_count": sum(row.get("_direction") == "income" for row in rows),
-        "found_invoice_transaction_count": sum(
-            bool((row.get("input_invoices") or {}).get("summaries"))
+        "oa_count": len({
+            str(summary.get("id") or summary.get("row_id") or "")
             for row in rows
-            if isinstance(row.get("input_invoices"), dict)
-        ),
-        "pending_invoice_transaction_count": sum(
-            _status_code(row)
-            in {"paid_pending_invoice", "paid_pending_future_invoice", "income_pending_invoice"}
+            for summary in list((row.get("oa") or {}).get("summaries") or [])
+            if isinstance(summary, dict)
+            and str(summary.get("id") or summary.get("row_id") or "")
+        }),
+        "input_invoice_count": len({
+            str(summary.get("id") or "")
             for row in rows
-        ),
-        "no_invoice_required_transaction_count": sum(
-            _status_code(row) in {"no_invoice_required", "income_no_invoice_required"}
+            for summary in list((row.get("input_invoices") or {}).get("summaries") or [])
+            if row.get("_direction") == "expense"
+            and isinstance(summary, dict)
+            and str(summary.get("id") or "")
+        }),
+        "output_invoice_count": len({
+            str(summary.get("id") or "")
             for row in rows
-        ),
-        "cash_income_transaction_count": sum(_status_code(row) == "cash_income" for row in rows),
-        "linked_oa_transaction_count": sum(
-            bool((row.get("oa") or {}).get("summaries"))
-            for row in rows
-            if isinstance(row.get("oa"), dict)
-        ),
-        "linked_input_invoice_transaction_count": sum(
-            row.get("_direction") == "expense"
-            and isinstance(row.get("input_invoices"), dict)
-            and bool((row.get("input_invoices") or {}).get("summaries"))
-            for row in rows
-        ),
-        "linked_output_invoice_transaction_count": sum(
-            row.get("_direction") == "income"
-            and isinstance(row.get("input_invoices"), dict)
-            and bool((row.get("input_invoices") or {}).get("summaries"))
-            for row in rows
-        ),
+            for summary in list((row.get("input_invoices") or {}).get("summaries") or [])
+            if row.get("_direction") == "income"
+            and isinstance(summary, dict)
+            and str(summary.get("id") or "")
+        }),
     }
 
 

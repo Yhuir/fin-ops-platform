@@ -388,6 +388,14 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
         "summary_paired_count": 1,
         "summary_unpaired_count": 1,
         "inventory_system_total": 2,
+        "inventory_input_invoice_total": 1158,
+        "inventory_output_invoice_total": 30,
+        "inventory_manual_import_total": 1139,
+        "inventory_oa_parse_created_total": 49,
+        "inventory_completed_oa_total": 415,
+        "inventory_in_progress_oa_total": 18,
+        "expense_transaction_count": 1043,
+        "income_transaction_count": 159,
         "unpaired_exception_count": 0,
         "paired_exception_count": 0,
     }
@@ -500,6 +508,10 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert invoice_inventory_sql.count("jsonb_array_elements(") == 1
     assert "source_flags.has_manual_import" in invoice_inventory_sql
     assert "source_flags.has_oa_attachment" in invoice_inventory_sql
+    assert "inventory_input_invoice_total" in invoice_inventory_sql
+    assert "inventory_output_invoice_total" in invoice_inventory_sql
+    assert "inventory_oa_parse_created_total" in invoice_inventory_sql
+    assert "oa_inventory as materialized" in sql
     assert WORKBENCH_GROUP_PAGE_SIZE == 10
     assert connection.calls[0][1].count(WORKBENCH_GROUP_PAGE_SIZE + 1) == 2
     assert [row["internal_key"] for row in hydrated_batches[0]] == [
@@ -508,6 +520,18 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     ]
     assert payload["summary"]["unpaired_exception_count"] == 0
     assert payload["summary"]["paired_exception_count"] == 0
+    assert payload["statistics"] == {
+        "oa_count": 433,
+        "bank_transaction_count": 1,
+        "input_invoice_count": 1158,
+        "output_invoice_count": 30,
+        "completed_oa_count": 415,
+        "in_progress_oa_count": 18,
+        "expense_transaction_count": 1043,
+        "income_transaction_count": 159,
+        "manual_import_invoice_count": 1139,
+        "oa_parse_created_invoice_count": 49,
+    }
     assert "anomaly_states" in sql
     assert "anomaly_counts as materialized" not in sql
     assert "left join anomaly_states anomaly" in group_summary_sql

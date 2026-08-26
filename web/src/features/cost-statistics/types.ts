@@ -12,8 +12,6 @@ export type CostStatisticsPageStatistics = {
   transactionCount?: number;
   expenseTransactionCount?: number;
   incomeTransactionCount?: number;
-  costGroupCount?: number;
-  taggedTransactionCount?: number;
   untaggedTransactionCount?: number;
   projectCount?: number;
   expenseTypeCount?: number;

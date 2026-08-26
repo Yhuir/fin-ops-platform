@@ -301,10 +301,8 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
       const statistics = objectValue(raw.statistics);
       return {
         invoiceCount: optionalCount(camelOrSnake(statistics, "invoiceCount", "invoice_count")),
-        linkedIncomeBankInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedIncomeBankInvoiceCount", "linked_income_bank_invoice_count")),
-        collectedInvoiceCount: optionalCount(camelOrSnake(statistics, "collectedInvoiceCount", "collected_invoice_count")),
-        unlinkedBankInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedBankInvoiceCount", "unlinked_bank_invoice_count")),
-        uncollectedInvoiceCount: optionalCount(camelOrSnake(statistics, "uncollectedInvoiceCount", "uncollected_invoice_count")),
+        incomeBankTransactionCount: optionalCount(camelOrSnake(statistics, "incomeBankTransactionCount", "income_bank_transaction_count")),
+        blueInvoiceCount: optionalCount(camelOrSnake(statistics, "blueInvoiceCount", "blue_invoice_count")),
         redInvoiceCount: optionalCount(camelOrSnake(statistics, "redInvoiceCount", "red_invoice_count")),
       };
     })() : undefined,

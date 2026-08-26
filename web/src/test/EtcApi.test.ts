@@ -91,10 +91,7 @@ describe("etc api", () => {
               counts: { unsubmitted: 0, staged: 1, submitted: 0 },
               statistics: {
                 invoice_count: "10000",
-                business_batch_count: 25,
-                submitted_batch_count: 20,
-                unsubmitted_batch_count: -1,
-                draft_batch_count: 1.25,
+                input_invoice_count: 1158,
               },
               items: [
                 {
@@ -146,11 +143,8 @@ describe("etc api", () => {
     );
     expect(result.counts).toEqual({ unsubmitted: 0, staged: 1, submitted: 0 });
     expect(result.statistics).toEqual(expect.objectContaining({
+      inputInvoiceCount: 1158,
       invoiceCount: 10000,
-      businessBatchCount: 25,
-      submittedBatchCount: 20,
-      unsubmittedBatchCount: undefined,
-      draftBatchCount: undefined,
     }));
     expect(result.items[0]).toMatchObject({
       businessBatchId: "etc_business_batch_0001",

@@ -45,6 +45,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 页面 rows/groups/summary/statistics | 前端页面 | 直接由当前 canonical snapshot 计算；当前页只提交与 `{family,page}` 一致的最新请求响应，旧请求即使晚返回也不得覆盖新页。页面 grouped DTO 保留 `summary_row` 与 `flow_rows`，不传输未被页面消费的 `allocation_lots` / `lot_rows`；API 不返回 `read_model_status`、`source_versions`、`refresh_enqueued` 或 refresh scope |
+
+`statistics` 只包含往来流水总数、支出和收入数量；旧闭环组、台账组及已关联 OA/发票的流水数量字段已删除。
 | 流水日期与借款天数 | 前端详情抽屉 | 日期统一按 `Asia/Shanghai` 展示为 `YYYY-MM-DD HH:mm:ss`，不显示 ISO 时区后缀。本金流水的 `loan_days` 始终按该笔流水日期到上海业务今天计算；FIFO lot 的计息天数仍按未结清到今天、已结清到结清日计算；结算流水不重复显示借款天数 |
 | `flow_rows[*].selection_version` | 正式闭环提交 | 由银行事实 `updated_at`、有效分类版本/规则版本和往来 role/action/family 共同生成；缺失任何必要语义时不输出，前端禁止提交。它是当前选择快照的 CAS token，不是新的 read model generation |
 | 导出 grouped payload | XLSX export owner | 复用同一 canonical query，但明确包含 normalized `allocation_lots` / `lot_rows`，保证导出财务字段不因页面瘦身而丢失。 |

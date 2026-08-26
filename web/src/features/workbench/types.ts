@@ -425,17 +425,12 @@ export type WorkbenchStatistics = {
   bankTransactionCount?: number;
   inputInvoiceCount?: number;
   outputInvoiceCount?: number;
-  pairedGroupCount?: number;
-  unpairedObjectCount?: number;
+  completedOaCount?: number;
+  inProgressOaCount?: number;
   expenseTransactionCount?: number;
   incomeTransactionCount?: number;
-  pairedOaCount?: number;
-  pairedBankTransactionCount?: number;
-  pairedInvoiceCount?: number;
-  incompleteGroupCount?: number;
-  missingOaGroupCount?: number;
-  missingBankGroupCount?: number;
-  missingInvoiceGroupCount?: number;
+  manualImportInvoiceCount?: number;
+  oaParseCreatedInvoiceCount?: number;
 };
 
 export type WorkbenchZoneCounts = {

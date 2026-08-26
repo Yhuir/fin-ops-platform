@@ -315,20 +315,11 @@ export default function OaPendingPaymentsPage() {
         ariaLabel="OA 待付款核对数据统计"
         loading={loading && !statistics}
         coreItems={[
-          { label: "OA", value: statistics?.oa_count, unit: "条" },
-          { label: "流水", value: statistics?.bank_transaction_count, unit: "笔" },
+          { label: "已完成 OA", value: statistics?.completed_oa_count, unit: "条", tone: "success" },
+          { label: "进行中 OA", value: statistics?.in_progress_oa_count, unit: "条" },
           { label: "进项发票", value: statistics?.input_invoice_count, unit: "张" },
         ]}
-        detailItems={[
-          { label: "已付款 OA", value: statistics?.paid_oa_count, unit: "条", tone: "success" },
-          { label: "已完成", value: statistics?.completed_oa_count, unit: "条", tone: "success" },
-          { label: "进行中", value: statistics?.in_progress_oa_count, unit: "条" },
-          { label: "支出流水", value: statistics?.expense_transaction_count, unit: "笔", tone: "expense" },
-          { label: "收入流水", value: statistics?.income_transaction_count, unit: "笔", tone: "income" },
-          { label: "未付款", value: statistics?.unpaid_oa_count, unit: "条", tone: "warning" },
-          { label: "已关联流水的 OA", value: statistics?.linked_bank_oa_count, unit: "条" },
-          { label: "已关联进项票的 OA", value: statistics?.linked_input_invoice_oa_count, unit: "条" },
-        ]}
+        detailItems={[]}
       />
     </div>
   );

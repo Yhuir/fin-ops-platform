@@ -2095,8 +2095,6 @@ export default function BankDetailsPage() {
         detailItems={[
           { label: "已分类", value: visibleStatistics?.classifiedTransactionCount, unit: "笔" },
           { label: "未分类", value: visibleStatistics?.unclassifiedTransactionCount, unit: "笔", tone: "warning" },
-          { label: "已关联", value: visibleStatistics?.linkedTransactionCount, unit: "笔", tone: "success" },
-          { label: "未关联", value: visibleStatistics?.unlinkedTransactionCount, unit: "笔", tone: "warning" },
         ]}
       />
     </div>

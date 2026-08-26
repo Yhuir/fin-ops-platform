@@ -242,23 +242,9 @@ def _certified_item(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def tax_offset_scope_statistics(payload: dict[str, Any]) -> dict[str, int]:
-    input_count = len(list(payload.get("input_plan_items") or []))
-    output_count = len(list(payload.get("output_items") or []))
-    certification_count = len(list(payload.get("certified_items") or []))
-    matched_count = len(list(payload.get("certified_matched_rows") or []))
-    selected_count = len(set(payload.get("default_selected_input_ids") or [])) + len(
-        set(payload.get("default_selected_output_ids") or [])
-    )
     return {
-        "input_invoice_count": input_count,
-        "output_invoice_count": output_count,
-        "certification_record_count": certification_count,
-        "matched_certification_count": matched_count,
-        "unmatched_certification_count": max(certification_count - matched_count, 0),
-        "out_of_scope_certification_count": len(list(payload.get("certified_outside_plan_rows") or [])),
-        "deductible_invoice_count": input_count,
-        "selected_invoice_count": selected_count,
-        "unselected_invoice_count": max(input_count + output_count - selected_count, 0),
+        "input_invoice_count": len(list(payload.get("input_plan_items") or [])),
+        "output_invoice_count": len(list(payload.get("output_items") or [])),
     }
 
 

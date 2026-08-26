@@ -59,6 +59,7 @@ HTTP PUT /manual-allocations/{case_id}
 - 页面首次访问和浏览器刷新走同一条链。
 - 页面首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务月；用户选择与“全部时间”继续走既有 query/session 合同，不使用硬编码历史月份。
 - 首次 explorer 内容请求发送 `include_statistics=false`，优先返回当前 scope 的表格/分组；内容可用后再以 `page_size=1` 非阻塞读取全局 `statistics`。统计失败不重新锁住已可用内容；手动刷新会重试两条职责分离的读链。
+- 全局 `statistics` 保留流水总数、支出、收入、未标记流水、项目、费用类型、银行标签和成本明细数量；旧 `cost_group_count` 与 `tagged_transaction_count` 字段已删除。
 - `include_statistics=false` 且范围不是 `all` 时，五个视图都先以 `bank_transactions.txn_month` 下推银行范围。`time|bank_tag` 到此直接读取原始银行事实，不查询 OA/关系；三种归因视图再批量读取范围内流水命中的 active relation，并扩展这些关系的全部银行/OA 成员作为完整资格与退款证据，最终只输出真实支出流水日期落在请求范围内的归因行。跨月退款回溯冲减原支出流水所在月，不在退款月份生成负成本行；原始视图仍按退款真实日期展示收入。
 - 银行流水详情与 OA 分摊详情分别把当前 `scope`、`view` 和 `include_statistics=false` 下推到同一个 canonical repository；禁止为单条详情重新加载全期间 snapshot。所有视图都可能出现银行流水行，详情类型必须读行级 `row_kind`，不得按 view 推断。
 - explorer 的 `query` 在 service 中折叠空白、将纯金额归一为无千分位文本并限制为 200 字符，写入 cursor identity；policy 先过滤当前视图事实行，再计算 summary、facets、row count 和分页。`project|bank|expense_type` 搜索银行事件拆出的归因行，`time|bank_tag` 搜索独立标签规则过滤后的原始银行事实；输出金额统一使用无千分位两位小数。

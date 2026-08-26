@@ -49,6 +49,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | rows response | frontend | 固定 `200` canonical JSON：rows/pagination/summary/statistics/filterConfig/filterOptions/appliedFilters/sort/viewMode |
+
+`statistics` 只包含已完成 OA、进行中 OA 和 canonical 进项发票数量；同 ID 同时出现时已完成优先，旧付款、流水和关系数量字段已删除。
 | OA facts export | frontend download | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`；sheet 为 `已完成OA` / `进行中OA`；只含登记的 OA 字段，20,000 行上限，`Cache-Control: no-store`。 |
 | export audit | `audit.events` | action=`oa_pending_payment_source_export_downloaded`，以 `operation.completed/success` 终态记录；只记录 actor、来源、各来源数量、总行数和文件名，不记录 OA 业务内容。 |
 | detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |

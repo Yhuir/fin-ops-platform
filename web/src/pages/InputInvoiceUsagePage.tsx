@@ -418,16 +418,12 @@ export default function InputInvoiceUsagePage() {
         loading={loading && !hasLoadedRef.current}
         coreItems={[
           { label: "进项发票", value: visibleStatistics?.invoiceCount, unit: "张" },
-          { label: "已关联 OA 的进项票", value: visibleStatistics?.linkedOaInvoiceCount, unit: "张" },
-          { label: "已关联流水的进项票", value: visibleStatistics?.linkedBankInvoiceCount, unit: "张" },
+          { label: "已完成 OA", value: visibleStatistics?.completedOaCount, unit: "条", tone: "success" },
+          { label: "进行中 OA", value: visibleStatistics?.inProgressOaCount, unit: "条" },
         ]}
         detailItems={[
-          { label: "已付款进项票", value: visibleStatistics?.paidInvoiceCount, unit: "张", tone: "success" },
-          { label: "未关联 OA", value: visibleStatistics?.unlinkedOaInvoiceCount, unit: "张", tone: "warning" },
-          { label: "未关联流水", value: visibleStatistics?.unlinkedBankInvoiceCount, unit: "张", tone: "warning" },
-          { label: "未付款进项票", value: visibleStatistics?.unpaidInvoiceCount, unit: "张", tone: "warning" },
-          { label: "正式关系组", value: visibleStatistics?.formalRelationGroupCount, unit: "组" },
-          { label: "反提 OA 批次", value: visibleStatistics?.oaReverseBatchCount, unit: "批" },
+          { label: "支出流水", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
+          { label: "收入流水", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
         ]}
       />
     </div>

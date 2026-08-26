@@ -329,12 +329,6 @@ class PostgresOaPendingPaymentQueryRepository:
             ),
             inventory as (
                 select
-                    (select count(*)::integer from canonical_oa) as oa_count,
-                    (
-                        select count(distinct coalesce(bank.legacy_mongo_id, bank.id::text))::integer
-                        from app.bank_transactions bank
-                        where bank.status <> 'deleted'
-                    ) as bank_transaction_count,
                     (
                         select count(distinct coalesce(invoice.legacy_mongo_id, invoice.id::text))::integer
                         from app.invoices invoice
@@ -345,41 +339,13 @@ class PostgresOaPendingPaymentQueryRepository:
                           )
                     ) as input_invoice_count,
                     (
-                        select count(*)::integer
-                        from app.bank_transactions bank
-                        where bank.status <> 'deleted' and bank.txn_direction = 'outflow'
-                    ) as expense_transaction_count,
-                    (
-                        select count(*)::integer
-                        from app.bank_transactions bank
-                        where bank.status <> 'deleted' and bank.txn_direction = 'inflow'
-                    ) as income_transaction_count,
-                    (
                         select count(*)::integer from canonical_oa
                         where source_kind = 'completed'
                     ) as completed_oa_count,
                     (
                         select count(*)::integer from canonical_oa
                         where source_kind = 'in_progress'
-                    ) as in_progress_oa_count,
-                    (
-                        select count(distinct oa_id)::integer
-                        from canonical_rows
-                        cross join lateral unnest(oa_ids) as expanded(oa_id)
-                        where payment_status = 'paid'
-                    ) as paid_oa_count,
-                    (
-                        select count(distinct oa_id)::integer
-                        from canonical_rows
-                        cross join lateral unnest(oa_ids) as expanded(oa_id)
-                        where existing_outflow_count > 0
-                    ) as linked_bank_oa_count,
-                    (
-                        select count(distinct oa_id)::integer
-                        from canonical_rows
-                        cross join lateral unnest(oa_ids) as expanded(oa_id)
-                        where existing_invoice_count > 0
-                    ) as linked_input_invoice_oa_count
+                    ) as in_progress_oa_count
             )
             select
                 summary.row_count,
@@ -409,7 +375,6 @@ class PostgresOaPendingPaymentQueryRepository:
             ),
         ) or {}
         total = int_value(result.get("row_count"), 0)
-        paid_count = int_value(result.get("paid_oa_count"), 0)
         filter_options = {
             field: [dict(option) for option in list(options or []) if isinstance(option, dict)]
             for field, options in dict(result.get("filter_options") or {}).items()
@@ -436,17 +401,9 @@ class PostgresOaPendingPaymentQueryRepository:
                 },
             },
             "statistics": {
-                "oa_count": int_value(result.get("oa_count"), 0),
-                "bank_transaction_count": int_value(result.get("bank_transaction_count"), 0),
                 "input_invoice_count": int_value(result.get("input_invoice_count"), 0),
-                "paid_oa_count": paid_count,
                 "completed_oa_count": int_value(result.get("completed_oa_count"), 0),
                 "in_progress_oa_count": int_value(result.get("in_progress_oa_count"), 0),
-                "expense_transaction_count": int_value(result.get("expense_transaction_count"), 0),
-                "income_transaction_count": int_value(result.get("income_transaction_count"), 0),
-                "unpaid_oa_count": max(int_value(result.get("oa_count"), 0) - paid_count, 0),
-                "linked_bank_oa_count": int_value(result.get("linked_bank_oa_count"), 0),
-                "linked_input_invoice_oa_count": int_value(result.get("linked_input_invoice_oa_count"), 0),
             },
             "filterOptions": filter_options,
         }

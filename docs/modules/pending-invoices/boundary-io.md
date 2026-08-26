@@ -44,6 +44,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | rows + summary + optional statistics | 前端页面 | 每次请求使用同一显式 `REPEATABLE READ / READ ONLY` snapshot；默认返回全期间 statistics，`include_statistics=false` 返回 `statistics=null` |
+
+全期间 `statistics` 只包含流水总数、支出、收入、OA、进项发票和销项发票数量；旧已找到/待找、现金状态和关系状态数量字段已删除。
 | rows.filter_options | 前端筛选 | rows 首响应只返回稳定字段定义，不执行高基数 options 聚合；页面完成首响应后调用专用 `/filter-options`，每字段最多 50 项，数据库聚合且不阻塞表格首屏。 |
 | export-preview/export | 前端导出 | 复用同一 canonical row DTO；最大 20,000 行，超限先报错；不读取页面 read model |
 | relation/object detail | 前端抽屉 | active canonical relations；统一只返回 `title/subtitle?/detail_available/sections` 公开合同，`kind=bank|invoice|oa` 只控制响应分区；禁止返回 relation case、raw payload、内部 form id 或重复 summary 容器 |

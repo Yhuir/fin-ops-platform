@@ -194,8 +194,6 @@ describe("Cost statistics export API", () => {
       transactionCount: 12000,
       expenseTransactionCount: 7000,
       incomeTransactionCount: 5000,
-      costGroupCount: undefined,
-      taggedTransactionCount: undefined,
     }));
     expect(payload.rows[0]).toMatchObject({
       bankTagCode: "travel_transport",

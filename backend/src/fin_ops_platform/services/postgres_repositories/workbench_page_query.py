@@ -2398,8 +2398,22 @@ class PostgresWorkbenchPageQueryRepository:
                 select
                     count(*)::bigint as inventory_system_total,
                     count(*) filter (
+                        where lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
+                              ('input', 'input_invoice', 'in_invoice', 'purchase', 'purchase_invoice', 'payable')
+                           or coalesce(invoice.invoice_type, '') like '%%进项%%'
+                    )::bigint as inventory_input_invoice_total,
+                    count(*) filter (
+                        where lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
+                              ('output', 'output_invoice', 'out_invoice', 'sales', 'sale', 'sales_invoice', 'receivable')
+                           or coalesce(invoice.invoice_type, '') like '%%销项%%'
+                    )::bigint as inventory_output_invoice_total,
+                    count(*) filter (
                         where coalesce(source_flags.has_manual_import, false)
                     )::bigint as inventory_manual_import_total,
+                    count(*) filter (
+                        where coalesce(source_flags.has_oa_attachment, false)
+                          and not coalesce(source_flags.has_manual_import, false)
+                    )::bigint as inventory_oa_parse_created_total,
                     count(*) filter (
                         where coalesce(invoice.workbench_visibility, 'visible')
                             <> 'hidden_after_etc_submission'
@@ -2436,6 +2450,45 @@ class PostgresWorkbenchPageQueryRepository:
                 where invoice.status <> 'deleted'
                   and (scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month)
             ),
+            oa_inventory as materialized (
+                select
+                    count(*) filter (where source_kind = 'completed')::bigint
+                        as inventory_completed_oa_total,
+                    count(*) filter (where source_kind = 'in_progress')::bigint
+                        as inventory_in_progress_oa_total
+                from (
+                    select 'completed'::text as source_kind
+                    from app.oa_applications oa
+                    cross join requested_scope scope
+                    where (
+                        oa.workflow_status is null
+                        or oa.workflow_status = ''
+                        or oa.workflow_status in (
+                            'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
+                        )
+                    )
+                      and (scope.scope_key = 'all' or oa.scope_month = scope.scope_month)
+                    union all
+                    select 'in_progress'::text
+                    from app.oa_pending_payment_admissions admission
+                    cross join requested_scope scope
+                    where admission.tenant_id = scope.tenant_id
+                      and admission.workflow_status = 'in_progress'
+                      and (scope.scope_key = 'all' or admission.scope_key = scope.scope_key)
+                      and not exists (
+                          select 1
+                          from app.oa_applications completed
+                          where completed.row_id = admission.oa_id
+                            and (
+                                completed.workflow_status is null
+                                or completed.workflow_status = ''
+                                or completed.workflow_status in (
+                                    'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
+                                )
+                            )
+                      )
+                ) canonical_oa
+            ),
             batch_inventory as materialized (
                 select count(distinct coalesce(
                     nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
@@ -2453,6 +2506,7 @@ class PostgresWorkbenchPageQueryRepository:
                 select *
                 from overall_summary
                 cross join invoice_inventory
+                cross join oa_inventory
                 cross join batch_inventory
             )
             select
@@ -2777,11 +2831,16 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as unpaired_bank_count,
                 null::bigint as unpaired_invoice_count,
                 null::bigint as inventory_system_total,
+                null::bigint as inventory_input_invoice_total,
+                null::bigint as inventory_output_invoice_total,
                 null::bigint as inventory_manual_import_total,
+                null::bigint as inventory_oa_parse_created_total,
                 null::bigint as inventory_workbench_visible_total,
                 null::bigint as inventory_hidden_submitted_etc_total,
                 null::bigint as inventory_extra_etc_total,
                 null::bigint as inventory_oa_attachment_total,
+                null::bigint as inventory_completed_oa_total,
+                null::bigint as inventory_in_progress_oa_total,
                 null::bigint as inventory_etc_summary_batch_count
             from {prefix}_exact_totals totals
             cross join {prefix}_exact_row_counts row_counts
@@ -4531,34 +4590,34 @@ class PostgresWorkbenchPageQueryRepository:
                 "zone_counts": zone_counts,
             },
             "statistics": {
-                "oa_count": oa_count,
+                "oa_count": (
+                    int_value(metadata.get("inventory_completed_oa_total"), 0)
+                    + int_value(metadata.get("inventory_in_progress_oa_total"), 0)
+                ),
                 "bank_transaction_count": bank_count,
-                "input_invoice_count": int_value(metadata.get("input_invoice_count"), 0),
-                "output_invoice_count": int_value(metadata.get("output_invoice_count"), 0),
-                "paired_group_count": paired_count,
-                "unpaired_object_count": unpaired_count,
+                "input_invoice_count": int_value(
+                    metadata.get("inventory_input_invoice_total"), 0
+                ),
+                "output_invoice_count": int_value(
+                    metadata.get("inventory_output_invoice_total"), 0
+                ),
+                "completed_oa_count": int_value(
+                    metadata.get("inventory_completed_oa_total"), 0
+                ),
+                "in_progress_oa_count": int_value(
+                    metadata.get("inventory_in_progress_oa_total"), 0
+                ),
                 "expense_transaction_count": int_value(
                     metadata.get("expense_transaction_count"), 0
                 ),
                 "income_transaction_count": int_value(
                     metadata.get("income_transaction_count"), 0
                 ),
-                "paired_oa_count": int_value(metadata.get("paired_oa_count"), 0),
-                "paired_bank_transaction_count": int_value(
-                    metadata.get("paired_bank_count"), 0
+                "manual_import_invoice_count": int_value(
+                    metadata.get("inventory_manual_import_total"), 0
                 ),
-                "paired_invoice_count": int_value(metadata.get("paired_invoice_count"), 0),
-                "incomplete_group_count": int_value(
-                    metadata.get("incomplete_group_count"), 0
-                ),
-                "missing_oa_group_count": int_value(
-                    metadata.get("missing_oa_group_count"), 0
-                ),
-                "missing_bank_group_count": int_value(
-                    metadata.get("missing_bank_group_count"), 0
-                ),
-                "missing_invoice_group_count": int_value(
-                    metadata.get("missing_invoice_group_count"), 0
+                "oa_parse_created_invoice_count": int_value(
+                    metadata.get("inventory_oa_parse_created_total"), 0
                 ),
             },
             "invoice_inventory": {

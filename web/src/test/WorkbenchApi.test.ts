@@ -837,8 +837,12 @@ describe("workbench api bank amount mapping", () => {
                 bank_transaction_count: 900,
                 input_invoice_count: 700,
                 output_invoice_count: 600,
-                paired_group_count: -1,
-                unpaired_object_count: 3.5,
+                completed_oa_count: 780,
+                in_progress_oa_count: 20,
+                expense_transaction_count: 700,
+                income_transaction_count: 200,
+                manual_import_invoice_count: 650,
+                oa_parse_created_invoice_count: 50,
               },
               invoice_inventory: {
                 system_total: 9,
@@ -981,8 +985,12 @@ describe("workbench api bank amount mapping", () => {
       bankTransactionCount: 900,
       inputInvoiceCount: 700,
       outputInvoiceCount: 600,
-      pairedGroupCount: undefined,
-      unpairedObjectCount: undefined,
+      completedOaCount: 780,
+      inProgressOaCount: 20,
+      expenseTransactionCount: 700,
+      incomeTransactionCount: 200,
+      manualImportInvoiceCount: 650,
+      oaParseCreatedInvoiceCount: 50,
     }));
     expect(result.pages.unpaired.hasMore).toBe(false);
     expect(result.pages.paired.nextCursor).toBeNull();

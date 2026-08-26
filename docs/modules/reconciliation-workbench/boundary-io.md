@@ -87,6 +87,7 @@ requested tenant/scope
 ### 首屏与分页
 
 - `GET /api/workbench` 在一个短 `REPEATABLE READ READ ONLY` transaction 内返回 summary、statistics、invoice inventory 与 paired/unpaired 各 10 组首页。精确 total 不变，后续使用 opaque cursor 自动续读。
+- `statistics` 只返回 canonical OA/流水/进项/销项总数，以及已完成/进行中 OA、支出/收入流水、手工导入发票和 OA 解析新增发票数量；顶部进项/销项不得使用 ETC 折叠后的可见对象数。旧配对组、缺关系组和未配对对象统计字段已删除。
 - 首屏 candidate spine 只构建一次；禁止依次执行 summary、paired count/page、unpaired count/page 六套重复 canonical CTE。
 - `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`；异常 bucket 请求 additive 返回 `selected_exception_code` 与 `exception_counts={total,amount_total,document_only,by_code}`，`by_code` 固定包含七个 code（包括零值）。
 - compact summary group 保留组级 `amount_check`；每行不重复输出相同 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only metadata。折叠栏以现有 `summary_row` 作为唯一闭合态展示 I/O；ETC 发票栏首屏只返回 canonical `source_kind=etc_invoice_summary` 汇总行和真实成员总数，不返回第一张真实发票。用户展开时复用既有 group detail 一次加载全部 `source_kind=etc_invoice` 成员，展开态不混入汇总行，收起恢复同一汇总行；汇总行缺失时前端显示明确空态，禁止从 `rows` 或详情成员推断兜底。前端只把组级金额判断继承给可见行 chip，完整诊断仍由 detail I/O 提供。

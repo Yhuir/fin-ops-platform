@@ -18,7 +18,7 @@ export type PageStatisticItem = {
 type PageStatisticsPopoverProps = {
   ariaLabel: string;
   coreItems: PageStatisticItem[];
-  detailItems: PageStatisticItem[];
+  detailItems?: PageStatisticItem[];
   loading?: boolean;
 };
 
@@ -44,19 +44,29 @@ function StatisticValue({ item }: { item: PageStatisticItem }) {
 export default function PageStatisticsPopover({
   ariaLabel,
   coreItems,
-  detailItems,
+  detailItems = [],
   loading = false,
 }: PageStatisticsPopoverProps) {
+  const coreContent = loading ? (
+    <span aria-label="数据统计加载中" className="page-statistics-skeleton" role="status" />
+  ) : (
+    <span className="page-statistics-core">
+      {coreItems.map((item) => <StatisticValue item={item} key={item.label} />)}
+    </span>
+  );
+
+  if (detailItems.length === 0) {
+    return (
+      <div aria-label={ariaLabel} className="page-statistics-trigger page-statistics-trigger--static">
+        {coreContent}
+      </div>
+    );
+  }
+
   return (
     <PopoverRoot>
       <PopoverTrigger aria-label={ariaLabel} className="page-statistics-trigger">
-        {loading ? (
-          <span aria-label="数据统计加载中" className="page-statistics-skeleton" role="status" />
-        ) : (
-          <span className="page-statistics-core">
-            {coreItems.map((item) => <StatisticValue item={item} key={item.label} />)}
-          </span>
-        )}
+        {coreContent}
         <ChevronDown aria-hidden="true" className="page-statistics-chevron" size={14} strokeWidth={2.2} />
       </PopoverTrigger>
       <PopoverContent className="page-statistics-popover" placement="bottom start">

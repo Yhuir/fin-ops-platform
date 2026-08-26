@@ -103,8 +103,6 @@ type ApiCostStatisticsExplorerPage = {
     transaction_count?: number | null;
     expense_transaction_count?: number | null;
     income_transaction_count?: number | null;
-    cost_group_count?: number | null;
-    tagged_transaction_count?: number | null;
     untagged_transaction_count?: number | null;
     project_count?: number | null;
     expense_type_count?: number | null;
@@ -463,8 +461,6 @@ export async function fetchCostStatisticsExplorerPage(
       transactionCount: optionalCount(payload.statistics.transaction_count),
       expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
       incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
-      costGroupCount: optionalCount(payload.statistics.cost_group_count),
-      taggedTransactionCount: optionalCount(payload.statistics.tagged_transaction_count),
       untaggedTransactionCount: optionalCount(payload.statistics.untagged_transaction_count),
       projectCount: optionalCount(payload.statistics.project_count),
       expenseTypeCount: optionalCount(payload.statistics.expense_type_count),

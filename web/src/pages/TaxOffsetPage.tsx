@@ -328,16 +328,8 @@ export default function TaxOffsetPage() {
         coreItems={[
           { label: "进项发票", value: visibleStatistics?.inputInvoiceCount, unit: "张" },
           { label: "销项发票", value: visibleStatistics?.outputInvoiceCount, unit: "张" },
-          { label: "认证记录", value: visibleStatistics?.certificationRecordCount, unit: "条" },
         ]}
-        detailItems={[
-          { label: "认证匹配", value: visibleStatistics?.matchedCertificationCount, unit: "条", tone: "success" },
-          { label: "认证未匹配", value: visibleStatistics?.unmatchedCertificationCount, unit: "条", tone: "warning" },
-          { label: "认证范围外", value: visibleStatistics?.outOfScopeCertificationCount, unit: "条", tone: "warning" },
-          { label: "可抵扣", value: visibleStatistics?.deductibleInvoiceCount, unit: "张" },
-          { label: "已选择", value: visibleStatistics?.selectedInvoiceCount, unit: "张", tone: "success" },
-          { label: "未选择", value: visibleStatistics?.unselectedInvoiceCount, unit: "张" },
-        ]}
+        detailItems={[]}
       />
     </div>
   );

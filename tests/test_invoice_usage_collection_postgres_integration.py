@@ -154,12 +154,15 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             snapshot.statistics,
             {
                 "invoiceCount": 2,
-                "linkedIncomeBankInvoiceCount": 0,
-                "collectedInvoiceCount": 0,
-                "unlinkedBankInvoiceCount": 2,
-                "uncollectedInvoiceCount": 2,
+                "incomeBankTransactionCount": 0,
+                "blueInvoiceCount": 1,
                 "redInvoiceCount": 1,
             },
+        )
+        self.assertEqual(
+            snapshot.statistics["blueInvoiceCount"]
+            + snapshot.statistics["redInvoiceCount"],
+            snapshot.statistics["invoiceCount"],
         )
         self.assertEqual(
             [group["primary"].id for group in snapshot.groups],
@@ -264,10 +267,8 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             snapshot.statistics,
             {
                 "invoiceCount": 1,
-                "linkedIncomeBankInvoiceCount": 1,
-                "collectedInvoiceCount": 1,
-                "unlinkedBankInvoiceCount": 0,
-                "uncollectedInvoiceCount": 0,
+                "incomeBankTransactionCount": 1,
+                "blueInvoiceCount": 1,
                 "redInvoiceCount": 0,
             },
         )

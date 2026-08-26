@@ -57,11 +57,6 @@ export type TurnoverLedgerStatistics = {
   transactionCount?: number;
   expenseTransactionCount?: number;
   incomeTransactionCount?: number;
-  closedGroupCount?: number;
-  ledgerGroupCount?: number;
-  unclosedGroupCount?: number;
-  linkedOaTransactionCount?: number;
-  linkedInvoiceTransactionCount?: number;
 };
 
 export type TurnoverLedgerFamilySummary = {

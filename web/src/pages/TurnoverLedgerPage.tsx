@@ -996,13 +996,7 @@ export default function TurnoverLedgerPage() {
           { label: "支出", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
           { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
         ]}
-        detailItems={[
-          { label: "已闭环组", value: visibleStatistics?.closedGroupCount, unit: "组", tone: "success" },
-          { label: "台账组", value: visibleStatistics?.ledgerGroupCount, unit: "组" },
-          { label: "未闭环组", value: visibleStatistics?.unclosedGroupCount, unit: "组", tone: "warning" },
-          { label: "已关联 OA 的流水", value: visibleStatistics?.linkedOaTransactionCount, unit: "笔" },
-          { label: "已关联发票的流水", value: visibleStatistics?.linkedInvoiceTransactionCount, unit: "笔" },
-        ]}
+        detailItems={[]}
       />
     </div>
   );

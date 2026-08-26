@@ -233,32 +233,7 @@ class PostgresInputInvoiceUsageQueryRepository:
                         count(*) filter (where oa_count > 0)::bigint as matched_oa_count,
                         count(*) filter (where bank_count > 0)::bigint as matched_bank_count,
                         count(*) filter (where status_code = 'pending')::bigint as pending_count,
-                        (select count(*) from selected_members)::bigint as invoice_count,
-                        (
-                            select count(distinct member.invoice_id)
-                            from filtered_rows candidate
-                            cross join lateral unnest(candidate.invoice_ids)
-                                member(invoice_id)
-                            where candidate.oa_count > 0
-                        )::bigint as linked_oa_invoice_count,
-                        (
-                            select count(distinct member.invoice_id)
-                            from filtered_rows candidate
-                            cross join lateral unnest(candidate.invoice_ids)
-                                member(invoice_id)
-                            where candidate.bank_count > 0
-                        )::bigint as linked_bank_invoice_count,
-                        (
-                            select count(distinct member.invoice_id)
-                            from filtered_rows candidate
-                            cross join lateral unnest(candidate.invoice_ids)
-                                member(invoice_id)
-                            where candidate.status_code = 'paid'
-                        )::bigint as paid_invoice_count,
-                        count(*) filter (
-                            where relation_case_id is not null
-                              and (oa_count > 0 or bank_count > 0)
-                        )::bigint as formal_relation_group_count
+                        (select count(*) from selected_members)::bigint as invoice_count
                     from filtered_rows
                 ),
                 facet_rows as (
@@ -333,17 +308,12 @@ class PostgresInputInvoiceUsageQueryRepository:
                 invoice_type="input",
                 tenant_id=tenant_id,
             )
-            reverse_row = transaction.fetch_one(
-                """
-                select count(*)::bigint as batch_count
-                from app.input_invoice_usage_oa_reverse_batches
-                """
-            ) or {}
+            statistics_row = _canonical_header_statistics(
+                transaction,
+                tenant_id=tenant_id,
+            )
         filtered_total = int((group_rows[0] if group_rows else {}).get("filtered_total") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
-        linked_oa = int(summary_row.get("linked_oa_invoice_count") or 0)
-        linked_bank = int(summary_row.get("linked_bank_invoice_count") or 0)
-        paid = int(summary_row.get("paid_invoice_count") or 0)
         labels = {
             str(rule.get("statusCode") or ""): str(rule.get("label") or "")
             for rule in list(payment_settings.get("rules") or [])
@@ -365,17 +335,15 @@ class PostgresInputInvoiceUsageQueryRepository:
                 "pendingCount": int(summary_row.get("pending_count") or 0),
             },
             statistics={
-                "invoiceCount": invoice_count,
-                "linkedOaInvoiceCount": linked_oa,
-                "linkedBankInvoiceCount": linked_bank,
-                "paidInvoiceCount": paid,
-                "unlinkedOaInvoiceCount": max(0, invoice_count - linked_oa),
-                "unlinkedBankInvoiceCount": max(0, invoice_count - linked_bank),
-                "unpaidInvoiceCount": max(0, invoice_count - paid),
-                "formalRelationGroupCount": int(
-                    summary_row.get("formal_relation_group_count") or 0
+                "invoiceCount": int(statistics_row.get("input_invoice_count") or 0),
+                "completedOaCount": int(statistics_row.get("completed_oa_count") or 0),
+                "inProgressOaCount": int(statistics_row.get("in_progress_oa_count") or 0),
+                "expenseTransactionCount": int(
+                    statistics_row.get("expense_transaction_count") or 0
                 ),
-                "oaReverseBatchCount": int(reverse_row.get("batch_count") or 0),
+                "incomeTransactionCount": int(
+                    statistics_row.get("income_transaction_count") or 0
+                ),
             },
             facet_counts=_facet_counts(
                 facet_rows,
@@ -545,18 +513,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         )::bigint as pending_collection_count,
                         count(*) filter (
                             where status_code = 'partial_collected'
-                        )::bigint as partial_collection_count,
-                        coalesce(
-                            sum(invoice_count) filter (where bank_inflow_total > 0),
-                            0
-                        )::bigint as linked_income_bank_count,
-                        coalesce(sum(invoice_count) filter (
-                            where status_code = 'collected'
-                        ), 0)::bigint as collected_count,
-                        coalesce(
-                            sum(invoice_count) filter (where has_negative_invoice),
-                            0
-                        )::bigint as red_invoice_count
+                        )::bigint as partial_collection_count
                     from filtered_rows
                 ),
                 facet_rows as (
@@ -639,10 +596,12 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 supporting_group_rows=supporting_group_rows,
                 invoice_type="output",
             )
+            statistics_row = _canonical_header_statistics(
+                transaction,
+                tenant_id=tenant_id,
+            )
         filtered_total = int((group_rows[0] if group_rows else {}).get("filtered_total") or 0)
         invoice_count = int(summary_row.get("invoice_count") or 0)
-        linked_bank = int(summary_row.get("linked_income_bank_count") or 0)
-        collected = int(summary_row.get("collected_count") or 0)
         status_labels = {
             "reversed_by_red": "已被红冲",
             "reverses_blue": "已冲销蓝票",
@@ -672,12 +631,12 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 ),
             },
             statistics={
-                "invoiceCount": invoice_count,
-                "linkedIncomeBankInvoiceCount": linked_bank,
-                "collectedInvoiceCount": collected,
-                "unlinkedBankInvoiceCount": max(0, invoice_count - linked_bank),
-                "uncollectedInvoiceCount": max(0, invoice_count - collected),
-                "redInvoiceCount": int(summary_row.get("red_invoice_count") or 0),
+                "invoiceCount": int(statistics_row.get("output_invoice_count") or 0),
+                "incomeBankTransactionCount": int(
+                    statistics_row.get("income_transaction_count") or 0
+                ),
+                "blueInvoiceCount": int(statistics_row.get("blue_invoice_count") or 0),
+                "redInvoiceCount": int(statistics_row.get("red_invoice_count") or 0),
             },
             facet_counts=_facet_counts(
                 facet_rows,
@@ -686,6 +645,78 @@ class PostgresOutputInvoiceCollectionQueryRepository:
             ),
             payment_status_labels={},
         )
+
+
+def _canonical_header_statistics(
+    transaction: Any,
+    *,
+    tenant_id: str,
+) -> dict[str, Any]:
+    return transaction.fetch_one(
+        """
+        with invoice_statistics as (
+            select
+                count(*) filter (where invoice_type = 'input')::bigint
+                    as input_invoice_count,
+                count(*) filter (where invoice_type = 'output')::bigint
+                    as output_invoice_count,
+                count(*) filter (
+                    where invoice_type = 'output'
+                      and coalesce(total_with_tax, amount + coalesce(tax_amount, 0), 0) < 0
+                )::bigint as red_invoice_count,
+                count(*) filter (
+                    where invoice_type = 'output'
+                      and coalesce(total_with_tax, amount + coalesce(tax_amount, 0), 0) >= 0
+                )::bigint as blue_invoice_count
+            from app.invoices
+            where status <> 'deleted'
+        ),
+        oa_statistics as (
+            select
+                (
+                    select count(*)::bigint
+                    from app.oa_applications oa
+                    where oa.workflow_status is null
+                       or oa.workflow_status = ''
+                       or oa.workflow_status in (
+                           'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
+                       )
+                ) as completed_oa_count,
+                (
+                    select count(*)::bigint
+                    from app.oa_pending_payment_admissions admission
+                    where admission.tenant_id = %s
+                      and admission.workflow_status = 'in_progress'
+                      and not exists (
+                          select 1
+                          from app.oa_applications completed
+                          where completed.row_id = admission.oa_id
+                            and (
+                                completed.workflow_status is null
+                                or completed.workflow_status = ''
+                                or completed.workflow_status in (
+                                    'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
+                                )
+                            )
+                      )
+                ) as in_progress_oa_count
+        ),
+        bank_statistics as (
+            select
+                count(*) filter (where txn_direction = 'outflow')::bigint
+                    as expense_transaction_count,
+                count(*) filter (where txn_direction = 'inflow')::bigint
+                    as income_transaction_count
+            from app.bank_transactions
+            where status <> 'deleted'
+        )
+        select *
+        from invoice_statistics
+        cross join oa_statistics
+        cross join bank_statistics
+        """,
+        (str(tenant_id or "default"),),
+    ) or {}
 
 
 _INPUT_FIELDS = {

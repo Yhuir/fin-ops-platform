@@ -689,32 +689,37 @@ def _input_statistics_from_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
         )
         for row in rows
     )
-    linked_oa = sum(
-        1 for row in rows if int((row.get("oa") or {}).get("relationCount") or 0)
-    )
-    linked_bank = sum(
-        1
+    oa_rows = {
+        str(summary.get("id") or summary.get("oaId") or ""): summary
         for row in rows
-        if int((row.get("bankTransactions") or {}).get("relationCount") or 0)
-    )
-    paid = sum(
-        1
+        for summary in list((row.get("oa") or {}).get("summaries") or [])
+        if isinstance(summary, dict)
+        and str(summary.get("id") or summary.get("oaId") or "")
+    }
+    bank_rows = {
+        str(summary.get("id") or ""): summary
         for row in rows
-        if str((row.get("paymentStatus") or {}).get("code") or "") == "paid"
-    )
+        for summary in list((row.get("bankTransactions") or {}).get("summaries") or [])
+        if isinstance(summary, dict) and str(summary.get("id") or "")
+    }
     return {
         "invoiceCount": invoice_count,
-        "linkedOaInvoiceCount": linked_oa,
-        "linkedBankInvoiceCount": linked_bank,
-        "paidInvoiceCount": paid,
-        "unlinkedOaInvoiceCount": max(0, invoice_count - linked_oa),
-        "unlinkedBankInvoiceCount": max(0, invoice_count - linked_bank),
-        "unpaidInvoiceCount": max(0, invoice_count - paid),
-        "formalRelationGroupCount": sum(
-            1
-            for row in rows
-            if int((row.get("oa") or {}).get("relationCount") or 0)
-            or int((row.get("bankTransactions") or {}).get("relationCount") or 0)
+        "completedOaCount": sum(
+            str(summary.get("workflowStatus") or "").strip().lower()
+            in {"", "completed", "已完成", "approved", "2"}
+            for summary in oa_rows.values()
         ),
-        "oaReverseBatchCount": 0,
+        "inProgressOaCount": sum(
+            str(summary.get("workflowStatus") or "").strip().lower()
+            in {"in_progress", "进行中"}
+            for summary in oa_rows.values()
+        ),
+        "expenseTransactionCount": sum(
+            str(summary.get("direction") or "") in {"outflow", "支出"}
+            for summary in bank_rows.values()
+        ),
+        "incomeTransactionCount": sum(
+            str(summary.get("direction") or "") in {"inflow", "收入"}
+            for summary in bank_rows.values()
+        ),
     }

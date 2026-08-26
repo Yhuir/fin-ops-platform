@@ -263,17 +263,12 @@ type ApiWorkbenchSummaryPayload = {
     bank_transaction_count?: number | null;
     input_invoice_count?: number | null;
     output_invoice_count?: number | null;
-    paired_group_count?: number | null;
-    unpaired_object_count?: number | null;
+    completed_oa_count?: number | null;
+    in_progress_oa_count?: number | null;
     expense_transaction_count?: number | null;
     income_transaction_count?: number | null;
-    paired_oa_count?: number | null;
-    paired_bank_transaction_count?: number | null;
-    paired_invoice_count?: number | null;
-    incomplete_group_count?: number | null;
-    missing_oa_group_count?: number | null;
-    missing_bank_group_count?: number | null;
-    missing_invoice_group_count?: number | null;
+    manual_import_invoice_count?: number | null;
+    oa_parse_created_invoice_count?: number | null;
   } | null;
 };
 
@@ -2800,17 +2795,12 @@ export async function fetchWorkbenchInitialPage(
       bankTransactionCount: toOptionalCount(payload.statistics.bank_transaction_count),
       inputInvoiceCount: toOptionalCount(payload.statistics.input_invoice_count),
       outputInvoiceCount: toOptionalCount(payload.statistics.output_invoice_count),
-      pairedGroupCount: toOptionalCount(payload.statistics.paired_group_count),
-      unpairedObjectCount: toOptionalCount(payload.statistics.unpaired_object_count),
+      completedOaCount: toOptionalCount(payload.statistics.completed_oa_count),
+      inProgressOaCount: toOptionalCount(payload.statistics.in_progress_oa_count),
       expenseTransactionCount: toOptionalCount(payload.statistics.expense_transaction_count),
       incomeTransactionCount: toOptionalCount(payload.statistics.income_transaction_count),
-      pairedOaCount: toOptionalCount(payload.statistics.paired_oa_count),
-      pairedBankTransactionCount: toOptionalCount(payload.statistics.paired_bank_transaction_count),
-      pairedInvoiceCount: toOptionalCount(payload.statistics.paired_invoice_count),
-      incompleteGroupCount: toOptionalCount(payload.statistics.incomplete_group_count),
-      missingOaGroupCount: toOptionalCount(payload.statistics.missing_oa_group_count),
-      missingBankGroupCount: toOptionalCount(payload.statistics.missing_bank_group_count),
-      missingInvoiceGroupCount: toOptionalCount(payload.statistics.missing_invoice_group_count),
+      manualImportInvoiceCount: toOptionalCount(payload.statistics.manual_import_invoice_count),
+      oaParseCreatedInvoiceCount: toOptionalCount(payload.statistics.oa_parse_created_invoice_count),
     } : undefined,
   };
 }
