@@ -204,6 +204,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             }
 
         repository.load_snapshot = mismatch_snapshot
+        repository.load_manual_allocation_task_snapshot = mismatch_snapshot
         repository.load_relation_snapshot = lambda _case_id, **_kwargs: mismatch_snapshot()
 
         status, tasks = self._json("/api/cost-statistics/manual-allocations")

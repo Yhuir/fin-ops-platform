@@ -46,7 +46,7 @@ HTTP GET
 
 HTTP GET /manual-allocations
   -> CostStatisticsManualAllocationService
-  -> canonical attributed snapshot + stored allocations
+  -> relation-only canonical task snapshot + stored allocations
   -> pending / stale / allocated tasks
 
 HTTP PUT /manual-allocations/{case_id}
@@ -119,9 +119,9 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 - 一次 API 请求只建立一个数据库快照，不轮询、不等待后台任务。
 - 用户可观察的首屏合同以 `include_statistics=false` 的 scoped 内容请求计时；全局 statistics 是随后发出的非阻塞辅助请求，必须单独记录延迟，不能冒充首屏成功或失败。
 - 归集计算按 relation 成员和 OA 付款明细线性遍历；repository 批量读取 relation、OA、流水与人工分配，不做逐明细 I/O。人工分配只在三种归因视图读取一次，`time|bank_tag` 热路径在进入 OA/关系前返回并完全跳过该表。
-- 待分配 Popover 只在用户打开时请求一个有界任务页；保存只锁定当前 case 的关系成员和事实，不重算或写入其它关系。
+- 待分配 Popover 只在用户打开时请求一个有界任务页；repository 使用专用 relation-only 快照，只读取 active relation 的银行/OA 成员及其人工记录，不扫描无关系流水。保存只锁定当前 case 的关系成员和事实，不重算或写入其它关系。
 - OA 查询只映射当前范围银行流水命中的 active relation OA，并只读取 policy 消费的父单字段、明细字段和明细金额；不递归复制附件/发票树，附件仍由其 owner 页面读取。
-- 常规 scoped 请求保持有界批量查询，禁止按关系、银行流水或 OA 明细执行 N+1 I/O；两个规则候选的全历史读取只在打开/保存对应抽屉时执行，不进入普通 explorer 热路径。`time|bank_tag` 请求必须跳过 OA 与 relation 查询。
+- 常规 scoped 请求保持有界批量查询，关系筛选先使用 `row_ids` GIN overlap 缩小候选，再以 `row_ids/row_types` 配对做精确类型校验；全量范围直接批量读取 active relation 后在同一快照内按已加载银行身份过滤，禁止把全量银行 ID 数组送入逐关系 `unnest`。禁止按关系、银行流水或 OA 明细执行 N+1 I/O；两个规则候选的全历史读取只在打开/保存对应抽屉时执行，不进入普通 explorer 热路径。`time|bank_tag` 请求必须跳过 OA 与 relation 查询。
 - 有银行流水时只执行一次有界有效分类投影；空银行集合不查询分类/确认表。投影必须携带内部转账所需的有界上下文，不能退回逐行或全量 Python 分类。
 - “无 OA 成本范围”候选使用 repository 的专用只读快照：一次读取全量银行事实和 active OA/流水关系，先排除已有 OA 关系及收入流水，再只对剩余支出做同一 canonical 标签投影；不得读取 OA payload、构建成本组或回退普通 explorer 快照。
 - 分页和详情按当前 scope 有界读取；导出仍受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。

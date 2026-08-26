@@ -37,6 +37,12 @@ class CostStatisticsManualAllocationService:
         allocation_repository: Any,
         write_connection: Any | None = None,
     ) -> None:
+        if not callable(
+            getattr(canonical_repository, "load_manual_allocation_task_snapshot", None)
+        ):
+            raise ValueError(
+                "Cost statistics manual allocation service requires a task snapshot repository."
+            )
         self._canonical_repository = canonical_repository
         self._allocation_repository = allocation_repository
         self._write_connection = write_connection
@@ -51,10 +57,7 @@ class CostStatisticsManualAllocationService:
         normalized_size = max(1, min(int(page_size), 100))
         normalized_cursor = str(cursor or "").strip()
         policy = CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(
-                view="project",
-                include_statistics=True,
-            )
+            self._canonical_repository.load_manual_allocation_task_snapshot()
         )
         tasks = [
             {**task, "can_save": can_save}

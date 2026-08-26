@@ -78,10 +78,25 @@ class PostgresCostStatisticsCanonicalRepository:
                     relations=[],
                     available_years=available_years,
                 )
-            relations = _postgres_relations(
-                transaction,
-                bank_row_ids=bank_ids,
-            )
+            if scoped:
+                relations = _postgres_relations(
+                    transaction,
+                    bank_row_ids=bank_ids,
+                )
+            elif bank_ids:
+                active_bank_ids = set(bank_ids)
+                relations = [
+                    relation
+                    for relation in _postgres_relations(transaction)
+                    if active_bank_ids.intersection(
+                        _relation_member_ids(
+                            [relation],
+                            {"bank", "bank_transaction"},
+                        )
+                    )
+                ]
+            else:
+                relations = []
             relation_bank_ids = _relation_member_ids(
                 relations,
                 {"bank", "bank_transaction"},
@@ -129,6 +144,48 @@ class PostgresCostStatisticsCanonicalRepository:
                 relations=relations,
                 manual_allocations=manual_allocations,
                 available_years=available_years,
+            )
+
+    def load_manual_allocation_task_snapshot(self) -> dict[str, Any]:
+        """Load only active OA/bank relation facts required by the task popover."""
+        with self._snapshot_transaction() as transaction:
+            settings = _settings_payload(transaction)
+            relations = _postgres_relations(transaction)
+            relation_bank_ids = _relation_member_ids(
+                relations,
+                {"bank", "bank_transaction"},
+            )
+            bank_rows = _postgres_bank_rows(
+                transaction,
+                settings=settings,
+                transaction_ids=relation_bank_ids,
+            )
+            categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                transaction,
+                settings=settings,
+                transaction_ids=relation_bank_ids,
+            )
+            _apply_bank_category_projection(
+                bank_rows,
+                categories_by_transaction_id=categories,
+            )
+            oa_rows = _postgres_oa_rows(
+                transaction,
+                oa_ids=_relation_member_ids(relations, {"oa"}),
+            )
+            manual_allocations = PostgresCostStatisticsManualAllocationRepository(
+                transaction
+            ).list_by_case_ids(
+                [_text(relation.get("case_id")) for relation in relations]
+            )
+            return _build_snapshot(
+                settings=settings,
+                bank_rows=bank_rows,
+                relation_bank_rows=bank_rows,
+                oa_rows=oa_rows,
+                relations=relations,
+                manual_allocations=manual_allocations,
+                available_years=[],
             )
 
     def load_relation_snapshot(
@@ -356,6 +413,9 @@ class LocalCostStatisticsCanonicalRepository:
         snapshot["manual_allocations"] = self._manual_allocations_provider([normalized_case_id])
         return snapshot
 
+    def load_manual_allocation_task_snapshot(self) -> dict[str, Any]:
+        return self.load_snapshot(view="project", include_statistics=True)
+
     def load_no_oa_tag_candidate_snapshot(self) -> dict[str, Any]:
         settings = dict(self._settings_provider() or {})
         account_resolver = _bank_account_resolver(settings)
@@ -519,6 +579,7 @@ def _postgres_relations(
     params: tuple[Any, ...] = ()
     if bank_row_ids is not None:
         filter_sql = """
+          and row_ids && %s::text[]
           and exists (
               select 1
               from unnest(row_ids, row_types) as member(row_id, row_type)
@@ -526,7 +587,7 @@ def _postgres_relations(
                 and member.row_id = any(%s::text[])
           )
         """
-        params = (bank_row_ids,)
+        params = (bank_row_ids, bank_row_ids)
     if relation_case_id is not None:
         filter_sql += " and case_id = %s"
         params = (*params, relation_case_id)

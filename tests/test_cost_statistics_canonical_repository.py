@@ -206,6 +206,55 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("'{}'::jsonb as normalized_payload", source_sql)
         self.assertIn("classified_with_semantics as not materialized", projection_sql)
 
+    def test_all_scope_avoids_large_relation_member_filter(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            view="project",
+            include_statistics=False,
+        )
+
+        relation_sql = next(
+            query
+            for query in connection.snapshot_transaction.fetched
+            if "from app.workbench_pair_relations" in query
+        )
+        self.assertNotIn("unnest(row_ids, row_types)", relation_sql)
+
+    def test_scoped_relation_filter_uses_gin_prefilter_and_exact_member_types(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            scope_kind="month",
+            scope_value="2026-04",
+            view="project",
+            include_statistics=False,
+        )
+
+        relation_sql = next(
+            query
+            for query in connection.snapshot_transaction.fetched
+            if "from app.workbench_pair_relations" in query
+        )
+        self.assertIn("row_ids && %s::text[]", relation_sql)
+        self.assertIn("unnest(row_ids, row_types)", relation_sql)
+
+    def test_manual_allocation_snapshot_loads_only_relation_bank_rows(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        snapshot = PostgresCostStatisticsCanonicalRepository(
+            connection
+        ).load_manual_allocation_task_snapshot()
+
+        self.assertEqual([row["id"] for row in snapshot["bank_rows"]], ["bank-1"])
+        bank_sql = next(
+            query
+            for query in connection.snapshot_transaction.fetched
+            if "from app.bank_transactions" in query
+            and "select row_id, effective_category_code" not in query
+        )
+        self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
+
     def test_no_oa_candidate_snapshot_skips_oa_payload_and_classifies_only_candidates(self) -> None:
         connection = _NoOaCandidateConnection()
 
