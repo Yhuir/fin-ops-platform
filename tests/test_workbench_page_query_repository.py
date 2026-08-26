@@ -515,9 +515,17 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     invoice_inventory_sql = sql.split(
         "invoice_inventory as materialized (", 1
     )[1].split("batch_inventory as materialized (", 1)[0]
-    assert invoice_inventory_sql.count("jsonb_array_elements(") == 1
-    assert "source_flags.has_manual_import" in invoice_inventory_sql
-    assert "source_flags.has_oa_attachment" in invoice_inventory_sql
+    canonical_invoice_facts_sql = sql.split(
+        "canonical_invoice_facts as materialized (", 1
+    )[1].split("visible_invoice_facts as materialized (", 1)[0]
+    assert canonical_invoice_facts_sql.count("jsonb_array_elements(") == 1
+    assert "source_flags.has_manual_import" in canonical_invoice_facts_sql
+    assert "source_flags.has_direct_oa_attachment" in canonical_invoice_facts_sql
+    assert sql.count("from app.invoices invoice") == 1
+    assert "from canonical_invoice_facts invoice" in invoice_inventory_sql
+    assert "jsonb_array_elements(" not in invoice_inventory_sql
+    assert "invoice.has_manual_import" in invoice_inventory_sql
+    assert "invoice.has_direct_oa_attachment" in invoice_inventory_sql
     assert "inventory_input_invoice_total" in invoice_inventory_sql
     assert "inventory_output_invoice_total" in invoice_inventory_sql
     assert "inventory_oa_parse_created_total" in invoice_inventory_sql
@@ -598,6 +606,9 @@ def test_initial_page_keeps_member_sort_aggregation_only_for_explicitly_sorted_z
 
 def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.lower().split())
+    canonical_invoice_sql = sql.split(
+        "canonical_invoice_facts as materialized (", 1
+    )[1].split("visible_invoice_facts as materialized (", 1)[0]
     visible_invoice_sql = sql.split(
         "visible_invoice_facts as materialized (", 1
     )[1].split("scoped_source_keys as materialized (", 1)[0]
@@ -606,13 +617,15 @@ def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     assert sql.count("from visible_invoice_facts invoice") == 3
     assert sql.count("join visible_invoice_facts invoice") == 1
     assert sql.count("coalesce(invoice.workbench_visibility, 'visible') <> 'hidden_after_etc_submission'") == 1
-    assert visible_invoice_sql.count("jsonb_array_elements(") == 1
-    assert "invoice.source_links as invoice_source_links" in visible_invoice_sql
-    assert "invoice.raw_payload->'source_links'" not in visible_invoice_sql
-    assert "source_flags.has_oa_ownership_link" in visible_invoice_sql
-    assert "source_flags.has_explicit_oa_item_link" in visible_invoice_sql
-    assert "source_flags.has_direct_oa_attachment" in visible_invoice_sql
-    assert "source_flags.has_manual_import" in visible_invoice_sql
+    assert canonical_invoice_sql.count("jsonb_array_elements(") == 1
+    assert "invoice.source_links as invoice_source_links" in canonical_invoice_sql
+    assert "invoice.raw_payload->'source_links'" not in canonical_invoice_sql
+    assert "source_flags.has_oa_ownership_link" in canonical_invoice_sql
+    assert "source_flags.has_explicit_oa_item_link" in canonical_invoice_sql
+    assert "source_flags.has_direct_oa_attachment" in canonical_invoice_sql
+    assert "source_flags.has_manual_import" in canonical_invoice_sql
+    assert "from canonical_invoice_facts invoice" in visible_invoice_sql
+    assert "jsonb_array_elements(" not in visible_invoice_sql
 
     ownership_sql = sql.split(
         "scoped_invoice_ownership_links as materialized (", 1

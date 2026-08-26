@@ -456,8 +456,9 @@ requested_settings as materialized (
         limit 1
     ), '{{}}'::jsonb) as settings_payload
 ),
-visible_invoice_facts as materialized (
+canonical_invoice_facts as materialized (
     select
+        invoice.id,
         coalesce(invoice.legacy_mongo_id, invoice.id::text) as row_id,
         case when coalesce(source_flags.has_direct_oa_attachment, false)
             then 'oa_attachment_invoice'
@@ -472,6 +473,18 @@ visible_invoice_facts as materialized (
         invoice.invoice_type,
         invoice.amount,
         invoice.total_with_tax,
+        invoice.status,
+        invoice.workbench_visibility,
+        invoice.raw_payload,
+        invoice.digital_invoice_no,
+        invoice.invoice_code,
+        invoice.invoice_no,
+        invoice.tags,
+        invoice.etc_invoice_id,
+        coalesce(source_flags.has_direct_oa_attachment, false)
+            as has_direct_oa_attachment,
+        coalesce(source_flags.has_manual_import, false)
+            as has_manual_import,
         case
             when lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
                  ('output', 'output_invoice', 'out_invoice', 'sales', 'sale', 'sales_invoice', 'receivable')
@@ -520,6 +533,11 @@ visible_invoice_facts as materialized (
                 source_link(value)
         ) source_link
     ) source_flags on true
+    where invoice.status <> 'deleted'
+),
+visible_invoice_facts as materialized (
+    select *
+    from canonical_invoice_facts invoice
     where {_VISIBLE_INVOICE_SQL}
 ),
 {_SCOPED_ETC_SUMMARY_IDENTITY_CTES},
@@ -2427,11 +2445,11 @@ class PostgresWorkbenchPageQueryRepository:
                            or coalesce(invoice.invoice_type, '') like '%%销项%%'
                     )::bigint as inventory_output_invoice_total,
                     count(*) filter (
-                        where coalesce(source_flags.has_manual_import, false)
+                        where invoice.has_manual_import
                     )::bigint as inventory_manual_import_total,
                     count(*) filter (
-                        where coalesce(source_flags.has_oa_attachment, false)
-                          and not coalesce(source_flags.has_manual_import, false)
+                        where invoice.has_direct_oa_attachment
+                          and not invoice.has_manual_import
                     )::bigint as inventory_oa_parse_created_total,
                     count(*) filter (
                         where coalesce(invoice.workbench_visibility, 'visible')
@@ -2445,29 +2463,11 @@ class PostgresWorkbenchPageQueryRepository:
                            or invoice.tags && array['ETC', 'etc', 'etc_invoice']::text[]
                     )::bigint as inventory_extra_etc_total,
                     count(*) filter (
-                        where coalesce(source_flags.has_oa_attachment, false)
+                        where invoice.has_direct_oa_attachment
                     )::bigint as inventory_oa_attachment_total
-                from app.invoices invoice
+                from canonical_invoice_facts invoice
                 cross join requested_scope scope
-                left join lateral (
-                    select
-                        bool_or(coalesce(
-                            source_link.value->>'source_type',
-                            source_link.value->>'type',
-                            source_link.value->>'source'
-                        ) = 'manual_invoice_import') as has_manual_import,
-                        bool_or(coalesce(
-                            source_link.value->>'source_type',
-                            source_link.value->>'type',
-                            source_link.value->>'source'
-                        ) = 'oa_attachment_invoice') as has_oa_attachment
-                    from jsonb_array_elements(
-                        case when jsonb_typeof(invoice.source_links) = 'array'
-                             then invoice.source_links else '[]'::jsonb end
-                    ) source_link(value)
-                ) source_flags on true
-                where invoice.status <> 'deleted'
-                  and (scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month)
+                where scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month
             ),
             oa_inventory as materialized (
                 select
