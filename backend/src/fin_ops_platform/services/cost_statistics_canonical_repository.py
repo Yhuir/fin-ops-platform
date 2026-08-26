@@ -6,6 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Callable, Iterator
 
+from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
@@ -47,15 +48,32 @@ class PostgresCostStatisticsCanonicalRepository:
         with self._snapshot_transaction() as transaction:
             settings = _settings_payload(transaction)
             scoped = not include_statistics and scope_kind != "all"
-            bank_rows = _postgres_bank_rows(
-                transaction,
-                scope_kind=scope_kind if scoped else "all",
-                scope_value=scope_value if scoped else None,
-                settings=settings,
+            relation_only_all_scope = (
+                not include_statistics
+                and scope_kind == "all"
+                and view not in {"time", "bank_tag"}
+                and not _has_no_oa_project_tag_assignments(settings)
+            )
+            relations = _postgres_relations(transaction) if relation_only_all_scope else []
+            relation_only_bank_ids = (
+                _relation_member_ids(relations, {"bank", "bank_transaction"})
+                if relation_only_all_scope
+                else None
+            )
+            bank_rows = (
+                []
+                if relation_only_all_scope and not relation_only_bank_ids
+                else _postgres_bank_rows(
+                    transaction,
+                    scope_kind=scope_kind if scoped else "all",
+                    scope_value=scope_value if scoped else None,
+                    settings=settings,
+                    transaction_ids=relation_only_bank_ids,
+                )
             )
             available_years = (
                 _postgres_bank_available_years(transaction)
-                if scoped
+                if scoped or relation_only_all_scope
                 else _bank_available_years(bank_rows)
             )
             bank_ids = _bank_row_ids(bank_rows)
@@ -78,25 +96,26 @@ class PostgresCostStatisticsCanonicalRepository:
                     relations=[],
                     available_years=available_years,
                 )
-            if scoped:
-                relations = _postgres_relations(
-                    transaction,
-                    bank_row_ids=bank_ids,
-                )
-            elif bank_ids:
-                active_bank_ids = set(bank_ids)
-                relations = [
-                    relation
-                    for relation in _postgres_relations(transaction)
-                    if active_bank_ids.intersection(
-                        _relation_member_ids(
-                            [relation],
-                            {"bank", "bank_transaction"},
-                        )
+            if not relation_only_all_scope:
+                if scoped:
+                    relations = _postgres_relations(
+                        transaction,
+                        bank_row_ids=bank_ids,
                     )
-                ]
-            else:
-                relations = []
+                elif bank_ids:
+                    active_bank_ids = set(bank_ids)
+                    relations = [
+                        relation
+                        for relation in _postgres_relations(transaction)
+                        if active_bank_ids.intersection(
+                            _relation_member_ids(
+                                [relation],
+                                {"bank", "bank_transaction"},
+                            )
+                        )
+                    ]
+                else:
+                    relations = []
             relation_bank_ids = _relation_member_ids(
                 relations,
                 {"bank", "bank_transaction"},
@@ -163,7 +182,9 @@ class PostgresCostStatisticsCanonicalRepository:
             categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
                 transaction,
                 settings=settings,
-                transaction_ids=relation_bank_ids,
+                transaction_ids=_bank_row_ids(
+                    [row for row in bank_rows if _direction(row) == "inflow"]
+                ),
             )
             _apply_bank_category_projection(
                 bank_rows,
@@ -470,6 +491,16 @@ def _settings_payload(connection: Any) -> dict[str, Any]:
     )
     payload = row.get("settings_payload") if isinstance(row, dict) else None
     return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _has_no_oa_project_tag_assignments(settings: dict[str, Any]) -> bool:
+    payload = AppSettingsService.cost_statistics_no_oa_projects_payload_from_settings(
+        settings
+    )
+    return any(
+        isinstance(project, dict) and bool(project.get("tag_codes"))
+        for project in list(payload.get("projects") or [])
+    )
 
 
 def _postgres_bank_available_years(connection: Any) -> list[str]:

@@ -17,19 +17,23 @@ class _SnapshotTransaction:
     def __init__(self) -> None:
         self.executed: list[str] = []
         self.fetched: list[str] = []
+        self.fetch_calls: list[tuple[str, tuple]] = []
 
     def execute(self, sql: str, _params: tuple = ()) -> None:
         self.executed.append(" ".join(sql.lower().split()))
 
     def fetch_one(self, sql: str, _params: tuple = ()):
-        self.fetched.append(" ".join(sql.lower().split()))
-        if "from app.app_settings" in self.fetched[-1]:
+        normalized = " ".join(sql.lower().split())
+        self.fetched.append(normalized)
+        self.fetch_calls.append((normalized, _params))
+        if "from app.app_settings" in normalized:
             return {"settings_payload": {}}
         return None
 
     def fetch_all(self, sql: str, _params: tuple = ()):
         normalized = " ".join(sql.lower().split())
         self.fetched.append(normalized)
+        self.fetch_calls.append((normalized, _params))
         return []
 
 
@@ -48,6 +52,7 @@ class _PopulatedCostSnapshotTransaction(_SnapshotTransaction):
     def fetch_all(self, sql: str, _params: tuple = ()):
         normalized = " ".join(sql.lower().split())
         self.fetched.append(normalized)
+        self.fetch_calls.append((normalized, _params))
         if "select row_id, effective_category_code" in normalized:
             return [
                 {
@@ -113,6 +118,47 @@ class _PopulatedCostConnection(_Connection):
     def __init__(self) -> None:
         super().__init__()
         self.snapshot_transaction = _PopulatedCostSnapshotTransaction()
+
+
+class _ConfiguredNoOaCostSnapshotTransaction(_PopulatedCostSnapshotTransaction):
+    def fetch_one(self, sql: str, _params: tuple = ()):
+        normalized = " ".join(sql.lower().split())
+        self.fetched.append(normalized)
+        self.fetch_calls.append((normalized, _params))
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "bank_transaction_tags": {
+                        "version": 1,
+                        "definitions": [
+                            {
+                                "code": "salary",
+                                "label": "工资",
+                                "output_primary_label": "薪资社保福利",
+                                "output_sub_label": "工资",
+                            }
+                        ],
+                    },
+                    "cost_statistics_no_oa_projects": {
+                        "version": 1,
+                        "schema_version": 1,
+                        "projects": [
+                            {
+                                "id": "no-oa-project",
+                                "display_name": "无 OA 项目",
+                                "tag_codes": ["salary"],
+                            }
+                        ],
+                    },
+                }
+            }
+        return None
+
+
+class _ConfiguredNoOaCostConnection(_Connection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.snapshot_transaction = _ConfiguredNoOaCostSnapshotTransaction()
 
 
 class _NoOaCandidateTransaction(_SnapshotTransaction):
@@ -221,6 +267,39 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         )
         self.assertNotIn("unnest(row_ids, row_types)", relation_sql)
 
+    def test_all_scope_without_no_oa_assignments_loads_only_relation_bank_rows(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            view="project",
+            include_statistics=False,
+        )
+
+        bank_sql, bank_params = next(
+            (query, params)
+            for query, params in connection.snapshot_transaction.fetch_calls
+            if "from app.bank_transactions" in query
+            and "select row_id, effective_category_code" not in query
+        )
+        self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
+        self.assertIn(["bank-1"], bank_params)
+
+    def test_all_scope_with_no_oa_assignment_keeps_full_bank_scan(self) -> None:
+        connection = _ConfiguredNoOaCostConnection()
+
+        PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            view="project",
+            include_statistics=False,
+        )
+
+        bank_sql = next(
+            query
+            for query in connection.snapshot_transaction.fetched
+            if "from app.bank_transactions" in query
+            and "select row_id, effective_category_code" not in query
+        )
+        self.assertNotIn("legacy_mongo_id = any(%s::text[])", bank_sql)
+
     def test_scoped_relation_filter_uses_gin_prefilter_and_exact_member_types(self) -> None:
         connection = _PopulatedCostConnection()
 
@@ -254,6 +333,12 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             and "select row_id, effective_category_code" not in query
         )
         self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
+        self.assertFalse(
+            any(
+                "select row_id, effective_category_code" in query
+                for query in connection.snapshot_transaction.fetched
+            )
+        )
 
     def test_no_oa_candidate_snapshot_skips_oa_payload_and_classifies_only_candidates(self) -> None:
         connection = _NoOaCandidateConnection()
