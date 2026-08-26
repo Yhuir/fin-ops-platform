@@ -651,7 +651,7 @@ def test_anomaly_query_group_source_is_explicit_and_fail_closed() -> None:
         _anomaly_state_ctes(group_source="injected_groups")
 
 
-def test_etc_summary_is_excluded_only_from_unassigned_invoice_evidence() -> None:
+def test_etc_batch_accounting_summary_is_excluded_from_document_evidence() -> None:
     sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
     relation_members_sql = sql.split(
         "relation_anomaly_members as materialized (", 1
@@ -662,11 +662,16 @@ def test_etc_summary_is_excluded_only_from_unassigned_invoice_evidence() -> None
     unassigned_sql = sql.split(
         "unassigned_relation_invoices as materialized (", 1
     )[1].split("unassigned_invoice_anomaly_items as materialized (", 1)[0]
+    unlinked_expense_sql = sql.split(
+        "unlinked_expense_items as materialized (", 1
+    )[1].split("unlinked_expense_anomaly_items as materialized (", 1)[0]
 
     assert "canonical_row.source_kind" in relation_members_sql
     assert "member.source_kind" in invoice_facts_sql
     assert "invoice.source_kind is distinct from 'etc_invoice_summary'" in unassigned_sql
-    assert "relation_mode" not in unassigned_sql
+    assert "etc_member.relation_mode = 'batch_accounting'" in unlinked_expense_sql
+    assert "etc_member.row_type = 'invoice'" in unlinked_expense_sql
+    assert "etc_member.source_kind = 'etc_invoice_summary'" in unlinked_expense_sql
 
 
 def test_set_based_anomaly_query_nets_bank_refunds_inside_a_relation() -> None:

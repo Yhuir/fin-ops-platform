@@ -730,6 +730,52 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
             ["invoice-real"],
         )
 
+    def test_etc_batch_accounting_summary_closes_document_evidence(self) -> None:
+        rows = {
+            "oa": [{
+                **self._oa_row("2411.25"),
+                "id": "oa-exp-2080",
+                "expense_items": [
+                    {
+                        "id": "oa-exp-2080:item:0",
+                        "amount": "2169.68",
+                        "attachment_file_count": "0",
+                    },
+                    {
+                        "id": "oa-exp-2080:item:1",
+                        "amount": "241.57",
+                        "attachment_file_count": "0",
+                    },
+                ],
+            }],
+            "bank": [self._bank_row("2411.25")],
+            "invoice": [{
+                **self._invoice_row("2411.25"),
+                "id": "etc-summary-ETC-OA-20260413-241125",
+                "source_kind": "etc_invoice_summary",
+                "source_links": [],
+            }],
+        }
+
+        self.assertIsNone(
+            self.service.workbench_anomaly(
+                rows,
+                relation_id="CASE-BATCH-txn_imported_1453",
+                relation_mode="batch_accounting",
+            )
+        )
+
+        manual_anomaly = self.service.workbench_anomaly(
+            rows,
+            relation_id="CASE-MANUAL-ETC-SUMMARY",
+            relation_mode="manual_confirmed",
+        )
+        assert manual_anomaly is not None
+        self.assertEqual(
+            [item["code"] for item in manual_anomaly["items"]],
+            ["oa_invoice_attachment_absent", "oa_invoice_attachment_absent"],
+        )
+
     def test_relation_without_oa_expense_items_does_not_create_unassigned_anomaly(self) -> None:
         self.assertIsNone(
             self.service.workbench_anomaly(

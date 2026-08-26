@@ -94,10 +94,21 @@ class WorkbenchAmountCheckService:
         if not oa_rows:
             return None
 
-        evidence_items = self._expense_item_anomalies(
-            oa_rows,
-            invoice_rows,
-            relation_id=relation_id,
+        is_etc_batch_accounting = (
+            relation_mode == "batch_accounting"
+            and any(
+                row.get("source_kind") == "etc_invoice_summary"
+                for row in invoice_rows
+            )
+        )
+        evidence_items = (
+            None
+            if is_etc_batch_accounting
+            else self._expense_item_anomalies(
+                oa_rows,
+                invoice_rows,
+                relation_id=relation_id,
+            )
         )
         has_expense_items = evidence_items is not None
         evidence_items = evidence_items or []

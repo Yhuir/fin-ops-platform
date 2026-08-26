@@ -1850,6 +1850,14 @@ unlinked_expense_items as materialized (
       on linked.internal_key = expense.internal_key
      and linked.canonical_expense_item_id = expense.item_id
     where linked.invoice_row_id is null
+      and not exists (
+        select 1
+        from relation_anomaly_members etc_member
+        where etc_member.internal_key = expense.internal_key
+          and etc_member.relation_mode = 'batch_accounting'
+          and etc_member.row_type = 'invoice'
+          and etc_member.source_kind = 'etc_invoice_summary'
+      )
     group by
         expense.internal_key,
         expense.case_id,

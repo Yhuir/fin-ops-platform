@@ -402,67 +402,15 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertNotIn("update app.workbench_exception_cases", sql)
         self.assertNotIn("delete from", sql)
 
-    def test_etc_summary_anomaly_review_revalidation_is_exact_audited_and_fail_closed(self) -> None:
+    def test_etc_summary_anomaly_review_revalidation_is_retired_without_data_mutation(self) -> None:
         sql = (
             MIGRATIONS_DIR / "0155_revalidate_etc_summary_anomaly_review.sql"
         ).read_text(encoding="utf-8").lower()
 
-        self.assertIn("case-batch-txn_imported_1453", sql)
-        self.assertIn("etc-oa-20260413-241125", sql)
-        self.assertIn("oa-exp-2080:item:0:63f422ef26de", sql)
-        self.assertIn("oa-exp-2080:item:1:3b08cbfe865a", sql)
-        self.assertIn("630c2bb2856e5a614790cd2df30a84625cddac2daf467fc8b149124f3bd64c5d", sql)
-        self.assertIn("f1f2d1612a1499e8485182dddaa365f9a89c5abd5186cf30580b900a4a9b55af", sql)
-        self.assertIn("v_expected_members", sql)
-        self.assertIn("v_expected_oa_items", sql)
-        self.assertIn("target bank transaction differs", sql)
-        self.assertIn("bank_row.txn_direction is distinct from 'outflow'", sql)
-        self.assertIn("bank_row.txn_month is distinct from v_scope_month", sql)
-        self.assertIn("etc_business_batch_hist_20260413_241125", sql)
-        self.assertIn("v_expected_invoice_count constant integer := 44", sql)
-        self.assertIn(
-            "4aa0f9ee52fea682caa89ead17a9ad29b3c830c77b25f9aca0ab2acf9d7455fa",
-            sql,
-        )
-        self.assertIn("canonical_invoice_contract_sha256", sql)
-        self.assertIn("preferred_invoice_contract_sha256", sql)
-        self.assertIn("octet_length(source.invoice_identity)::text", sql)
-        self.assertIn("target canonical etc summary differs", sql)
-        self.assertIn("invoice_detail_count is distinct from v_expected_invoice_count", sql)
-        self.assertIn("invoice_detail_total is distinct from v_expected_invoice_total", sql)
-        self.assertIn("runtime_preferred_rows", sql)
-        self.assertIn("preferred_invoice_contract is distinct from canonical_invoice_contract", sql)
-        self.assertIn("target state partially exists", sql)
-        self.assertIn("from app.workbench_pair_relation_history history", sql)
-        self.assertIn("from app.etc_batch_invoice_links link", sql)
-        self.assertIn("from app.etc_submission_batches submission", sql)
-        self.assertIn("from app.invoices invoice", sql)
-        self.assertIn("another current decision exists for the target etc group", sql)
-        self.assertIn("a target anomaly acceptance withdrawal exists", sql)
-        self.assertIn("old_decision.business_line is distinct from", sql)
-        self.assertIn("old_decision.row_ids is distinct from array[]::text[]", sql)
-        self.assertIn("old_decision.candidate_ids is distinct from array[]::text[]", sql)
-        self.assertIn("{normalized_payload,row_ids}", sql)
-        self.assertIn("{normalized_payload,candidate_ids}", sql)
-        self.assertIn("workbench_anomaly_review_migrated", sql)
-        self.assertIn("valid_migration_event_count", sql)
-        self.assertIn("exact v2 migration lineage event is missing or conflicting", sql)
-        self.assertIn("workbench_anomaly_review_system_corrected", sql)
-        self.assertIn("workbench.anomaly_review.system_corrected", sql)
-        self.assertIn("system:migration:0155", sql)
-        self.assertIn("correction_updated_at := greatest", sql)
-        self.assertIn("+ interval '1 microsecond'", sql)
-        self.assertIn("'system_correction_updated_at', correction_updated_at", sql)
-        self.assertIn("exact v3 decision has incomplete or conflicting system correction audit", sql)
-        self.assertIn("event.payload = current_new_decision.raw_payload->'normalized_payload'", sql)
-        self.assertIn(
-            "event.exception_case_id in (\n                select exception.id",
-            sql,
-        )
-        self.assertIn("audit.payload = expected_audit_payload", sql)
-        self.assertIn("insert into audit.events", sql)
-        self.assertIn("update app.workbench_exception_cases", sql)
-        self.assertNotIn("update app.workbench_pair_relations", sql)
+        self.assertIn("targeted 0155 decision rewrite was retired", sql)
+        self.assertIn("preserve the 0154 exception rows", sql)
+        self.assertNotIn("insert into", sql)
+        self.assertNotIn("update app.", sql)
         self.assertNotIn("delete from", sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:

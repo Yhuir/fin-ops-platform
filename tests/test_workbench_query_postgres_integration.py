@@ -1945,6 +1945,108 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertNotIn("oa_invoice_attachment_absent", anomaly_codes)
         self.assertNotIn("oa_invoice_attachment_unparsed", anomaly_codes)
 
+    def test_etc_batch_accounting_summary_does_not_require_oa_attachment_edges(self) -> None:
+        self.raw_connection.execute(
+            """
+            insert into app.etc_business_batches(
+                business_batch_id, status, scope_month, invoice_count,
+                total_amount, raw_payload
+            ) values (
+                'etc-batch-document-contract', 'oa_submitted', '2026-04-01', 2,
+                33.00,
+                '{"normalized_payload":{"external_etc_batch_id":"ETC-DOCUMENT-CONTRACT"}}'::jsonb
+            );
+            insert into app.etc_invoices(
+                etc_invoice_id, business_batch_id, status, invoice_no,
+                invoice_date, seller_name, amount, tax_amount, total_with_tax,
+                raw_payload
+            ) values
+                (
+                    'etc-document-20', 'etc-batch-document-contract', 'submitted',
+                    'ETC-DOCUMENT-20', '2026-04-11', 'ETC供应商一',
+                    20.00, 0.00, 20.00, '{}'::jsonb
+                ),
+                (
+                    'etc-document-13', 'etc-batch-document-contract', 'submitted',
+                    'ETC-DOCUMENT-13', '2026-04-12', 'ETC供应商二',
+                    13.00, 0.00, 13.00, '{}'::jsonb
+                );
+            insert into app.oa_applications(
+                oa_source_id, form_id, form_type, row_id, status, workflow_status,
+                applicant, application_date, scope_month, amount, currency,
+                normalized_payload, raw_payload
+            ) values (
+                'oa-source-etc-document', 'expense_claim', '日常报销',
+                'oa-etc-document', 'active', 'completed', '测试用户',
+                '2026-04-10', '2026-04-01', 33.00, 'CNY',
+                jsonb_build_object(
+                    'id', 'oa-etc-document',
+                    'amount', '33.00',
+                    'workflow_status', 'completed',
+                    'expense_items', jsonb_build_array(
+                        jsonb_build_object(
+                            'id', 'oa-etc-document:item:0',
+                            'row_index', '0',
+                            'amount', '20.00',
+                            'attachment_file_count', '0'
+                        ),
+                        jsonb_build_object(
+                            'id', 'oa-etc-document:item:1',
+                            'row_index', '1',
+                            'amount', '13.00',
+                            'attachment_file_count', '0'
+                        )
+                    )
+                ),
+                '{}'::jsonb
+            );
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, account_name, txn_direction,
+                counterparty_name_raw, amount, signed_amount, txn_date,
+                txn_month, trade_time, summary, raw_payload, status
+            ) values (
+                'bank-etc-document', '8106', '建设银行 8106', 'outflow',
+                'ETC批量账务集中处理', 33.00, -33.00, '2026-04-13',
+                '2026-04-01', '2026-04-13T10:52:01+08:00', '报销',
+                '{}'::jsonb, 'active'
+            );
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'CASE-ETC-DOCUMENT-CONTRACT', 'batch_accounting', 'active', 1,
+                '2026-04-01',
+                array[
+                    'oa-etc-document',
+                    'bank-etc-document',
+                    'etc-summary-ETC-DOCUMENT-CONTRACT'
+                ],
+                array['oa','bank','invoice'],
+                '{"status":"matched","oa_total":"33.00","bank_total":"33.00","invoice_total":"33.00","amount_delta":"0.00"}'::jsonb,
+                '{"external_etc_batch_id":"ETC-DOCUMENT-CONTRACT"}'::jsonb,
+                '{}'::jsonb
+            )
+            """
+        )
+
+        page = self.repository.get_workbench_groups_page(
+            scope_key="2026-04",
+            zone="paired",
+            search="ETC-DOCUMENT-CONTRACT",
+            detail_level="summary",
+        )
+
+        group = next(
+            row
+            for row in page["groups"]
+            if row.get("detail_key") == "CASE-ETC-DOCUMENT-CONTRACT"
+        )
+        self.assertEqual(group["zone"], "paired")
+        self.assertTrue(group["completion"]["is_complete"])
+        self.assertIsNone(group.get("workbench_anomaly"))
+        self.assertEqual(group["invoice_rows"][0]["source_kind"], "etc_invoice_summary")
+        self.assertEqual(group["invoice_rows"][0]["amount"], "33.00")
+
     def test_summary_hydration_does_not_transport_large_unused_source_payloads(self) -> None:
         sentinel = "summary-hot-path-unused-" + ("x" * 200_000)
         self.raw_connection.execute(

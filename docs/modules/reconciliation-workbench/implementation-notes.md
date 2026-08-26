@@ -1,17 +1,17 @@
 # 关联台 实施记录
 
-## 2026-08-26 - ETC 异常审阅 0155 精确重验证
+## 2026-08-26 - ETC 批次资料异常边界收口
 
-- 根因：`0154` 在旧 current decision 已不存在时会直接 no-op；即使已生成新 decision，后续完全相同的关系重复持久化也曾刷新 relation `updated_at`，使现役 `decision.updated_at >= relation.updated_at` freshness 合同立即失效。查询层 freshness gate 保持不变。
-- 数据修复：`0155` 只接受固定 case/group、三类正式成员、`batch_accounting`、2026-04、三方 2411.25、唯一且未删除的 canonical 支出流水 `txn_imported_1453`、canonical ETC 业务批次 `etc_business_batch_hist_20260413_241125`、44 张/2411.25 明细，以及 OA `oa-exp-2080` 两条精确 `oa_invoice_attachment_absent` 证据。迁移用经只读生产事实授权的固定 SHA-256 锚定 44 个 `invoice_identity + amount`，并按现役三层 ETC 来源优先级重算 preferred 集合；canonical 与 preferred 都必须命中固定合同，因此即使数量与总额相抵不变也会拒绝来源漂移，同 identity、同金额的高优先级覆盖则允许通过。目标完全不存在时 no-op；但 exception lineage、relation history、0155 audit 或任一 ETC runtime source anchor 残留都属于部分存在并 fail closed。
-- 审阅语义：已 fresh 的精确 v2 decision 只有在旧 v1 原审阅仍完整存在、且唯一 0154 migration event 精确复现生成 payload 时才保持不变；fresh v3 还必须同时存在且精确匹配唯一 exception event 和 immutable audit event 才 no-op。精确 decision 缺失或因 relation 时间戳后移而失效时，写入 v3 的“经授权系统定向修正”。系统修正时间取 relation 与既有精确 decision 的最大时间再加 1 微秒，既满足现役 freshness，也保证 `latest_anomaly_decisions` 稳定选中新 v3；随后追加 exception event 与 immutable audit event。新事件使用 `system:migration:0155`，不冒充 actor 8 重新人工复核；两条真实缺附件证据继续保留，已移除的 synthetic `oa_invoice_attachment_unassigned` 不恢复。
-- 边界与安全：不修改 relation、OA、流水、ETC 发票明细或 canonical summary，不放宽查询 freshness，不新增 fallback、read model、worker、cache、依赖或数据库备份；API shape 与模块职责未变化，`boundary-io.md` 仅补充 deterministic matching 的真 no-op 持久化合同。
+- 根因：旧逻辑只把 canonical `etc_invoice_summary` 从“发票待归属”逐票证据中排除，却仍把同一 `batch_accounting` 关系的 OA 子项送入普通附件归属规则，因此 44 张/2411.25 已由 ETC 批次完整证明的关系仍被误报“发票附件缺失”，并落入 `anomaly_review_required`。
+- 修复：只有 `relation_mode=batch_accounting` 且正式发票成员是 canonical `etc_invoice_summary` 时，资料异常计算跳过 OA 子项附件缺失/未解析/待归属；三栏金额检查继续使用同一 canonical 汇总。普通关系、真实 OA 附件发票和人工发票仍按原规则逐项校验，不新增兼容分支或文本/金额推断。
+- 旧链删除：删除未到达生产、且对单笔 case/OA/流水/44 张发票及 SHA-256 全量硬编码的 0155 定向 decision 重写。为保持已发布 migration 序号稳定，0155 只保留显式无数据变更的退役标记；0154 已有 exception/audit 历史原样保留，现役查询因不再生成该异常而不会消费旧 decision。
+- 性能与安全：SQL 只在既有 relation member CTE 内增加一次同组 `not exists` 判断；Python 对当前组做一次固定规模 `any`。不增加 API、SQL statement、read model、worker、cache、依赖或数据库备份，也不修改 OA、流水、发票、关系或历史审计数据。
 
 ## 2026-08-26 - ETC 折叠汇总、正式选择与历史误异常闭环
 
 - 折叠展示：ETC 关系折叠态只返回并显示 canonical `etc_invoice_summary` 和真实发票总数，不再混入“第一张真实发票”；展开态只显示完整真实发票，收起或 canonical reload 后恢复同一汇总行。删除前端 `rows[0]`、首票和 `slice(0, 1)` 等闭合态兜底，缺少汇总合同就明确显示空态。
 - 正式选择：关系组选择、表头数量/金额和通用撤回 payload 只消费后端 `formal_member_ids/formal_member_types` 合同；`source_owned_display`、展开详情和重复勾选只影响视觉选择，不得重复计入金额或写操作。银行规则批次继续走既有专用撤回边界，不能把合成 summary ID 发送到通用 relation API。
-- 异常根因：`etc_invoice_summary` 是批次金额锚点，不是待归属的 OA 附件发票。金额与资料异常计算现在仅从“发票待归属”证据中排除该 synthetic summary，真实 OA 附件待归属仍保持异常；页面 SQL 在既有一次查询中携带 `source_kind`，不增加 I/O。
+- 异常根因：`etc_invoice_summary` 是批次金额锚点，不是待归属的 OA 附件发票；该轮先删除了 synthetic summary 自身的“发票待归属”。后续已进一步确认 `batch_accounting + canonical ETC summary` 整体不属于 OA 附件归属流程，现行口径见上方“ETC 批次资料异常边界收口”。
 - 历史数据：migration `0154` 只锁定并迁移已审阅的精确关系 `CASE-BATCH-txn_imported_1453`、旧 fingerprint 和完整证据前镜像，生成去除 synthetic 待归属证据的新版本；无关状态 no-op，目标漂移 fail closed，重复运行幂等，不修改 OA、流水、发票或 active relation。
 - 性能与边界：首屏由“一张真实发票 + 总数”缩减为“一个汇总行 + 总数”，展开仍复用既有 detail I/O；选择统计为已加载组内的 `Map/Set` 线性去重，不增加网络请求、SQL statement、read model、worker、cache、依赖或数据库备份。
 

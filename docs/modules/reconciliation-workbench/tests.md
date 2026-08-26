@@ -4,11 +4,11 @@
 
 ## 2026-08-26 ETC 折叠汇总、选择去重与误异常迁移
 
-- Business core：`tests/test_workbench_amount_check_service.py` 保护 `etc_invoice_summary` 不产生“发票待归属”，同时保留真实 OA 附件发票的待归属异常；`web/src/test/WorkbenchSelectionModel.test.ts` 保护选择 ETC 关系后再勾选任意展开发票，正式成员数量和发票金额仍只计算一次。
+- Business core：`tests/test_workbench_amount_check_service.py` 保护 `batch_accounting + etc_invoice_summary` 不产生 OA 附件缺失/未解析/待归属资料异常，同时证明普通关系仍保留同样的真实异常；`web/src/test/WorkbenchSelectionModel.test.ts` 保护选择 ETC 关系后再勾选任意展开发票，正式成员数量和发票金额仍只计算一次。
 - Formal matching 幂等：`tests/test_workbench_relation_command_service.py` 保护 deterministic 正式关系的新建与既有 case 扩展在完全相同计划重跑时都返回 `noop`，不刷新 relation、不追加 history；`tests/test_reversible_relation_closure_postgres.py` 在 disposable PostgreSQL 上证明仅 normalized `updated_at` 变化不会更新持久化时间，而真实 note 变化仍会落库。
 - Repository/API：`tests/test_workbench_page_query_repository.py` 与 `tests/test_workbench_query_postgres_integration.py` 保护 compact payload 只有 canonical summary + 完整真实成员总数，detail 才返回全部真实发票；`web/src/test/WorkbenchApi.test.ts` 保护严格映射且验证 `formal_member_ids/formal_member_types` 等长、类型合法、身份唯一，非法合同 fail closed。
 - Frontend interaction：`web/src/test/RelationGroupGrid.test.tsx` 保护折叠汇总、展开全量、收起恢复、详情加载失败及 canonical reload 后自动回到汇总；`web/src/test/WorkbenchSelection.test.tsx` 保护展示成员不进入统计或通用撤回 payload，银行规则批次仍走专用撤回链路。
-- PostgreSQL migration：`tests/test_etc_summary_anomaly_review_migration_postgres_integration.py` 保护 0154 的精确旧 fingerprint/evidence 前镜像迁移；`tests/test_etc_summary_anomaly_review_revalidation_migration_postgres_integration.py` 在 disposable PostgreSQL 上保护 0155 的 fresh v2/v3 no-op、old-only/current-missing/stale 重验证、时间排序、漂移失败、事件审计唯一性和重复运行幂等；`tests/test_postgres_migrations.py` 锁定顺序与静态边界。
+- PostgreSQL migration：`tests/test_etc_summary_anomaly_review_migration_postgres_integration.py` 保护 0154 的历史 fingerprint/evidence 前镜像迁移；`tests/test_postgres_migrations.py` 锁定 0155 退役标记不得写业务或审阅数据，并由全 migration disposable PostgreSQL 验证可应用。
 - 性能/回归：compact 查询 statement budget 不增加；正式选择为已加载组内线性 `Map/Set` 去重，不发新增请求。direct canonical SQL 的 all-scope active invoice owner 复用既有 relation-member CTE，发票来源只读取受 schema 约束的 canonical `source_links` 并一次生成来源标志，普通 groups 页只对可能从 base-paired 移区的关系计算 anomaly；异常页、initial、跨月 owner 和最终页面 hydration 继续保留完整事实集。普通 OA/流水/发票关系、真实待归属异常、银行批次专用撤回、详情查看和其它页面 API shape 保持不变。
 - Read model/cache/worker：不适用。关联台继续 direct canonical PostgreSQL 读取，本次没有 projection、refresh、queue、worker 或缓存状态。
 
