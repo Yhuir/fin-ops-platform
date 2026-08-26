@@ -2344,25 +2344,30 @@ class PostgresWorkbenchPageQueryRepository:
                 where bank.status <> 'deleted'
                   and (scope.scope_key = 'all' or bank.txn_month = scope.scope_month)
             ),
-            overall_unique_members as materialized (
+            overall_zone_member_summary as materialized (
                 select
-                    member.row_type,
-                    member.row_id,
-                    bool_or(groups.zone = 'paired') as in_paired,
-                    bool_or(groups.zone = 'unpaired') as in_unpaired
+                    groups.zone,
+                    count(distinct member.row_id) filter (
+                        where member.row_type = 'oa'
+                    )::bigint as oa_count,
+                    count(distinct member.row_id) filter (
+                        where member.row_type = 'bank'
+                    )::bigint as bank_count,
+                    count(distinct member.row_id) filter (
+                        where member.row_type = 'invoice'
+                    )::bigint as invoice_count
                 from effective_groups groups
                 cross join lateral unnest(groups.member_ids, groups.member_types)
                     as member(row_id, row_type)
-                group by member.row_type, member.row_id
+                group by groups.zone
             ),
             overall_member_summary as materialized (
                 select
-                    count(*) filter (where member.row_type = 'oa')::bigint
+                    count(*) filter (where source.row_type = 'oa')::bigint
                         as summary_oa_count,
-                    count(*) filter (where member.row_type = 'bank')::bigint
+                    count(*) filter (where source.row_type = 'bank')::bigint
                         as summary_bank_count,
-                    count(*)
-                        filter (where member.row_type = 'invoice')::bigint
+                    count(*) filter (where source.row_type = 'invoice')::bigint
                         as summary_invoice_count,
                     bank_inventory.inventory_expense_transaction_total
                         as expense_transaction_count,
@@ -2370,25 +2375,37 @@ class PostgresWorkbenchPageQueryRepository:
                         as income_transaction_count,
                     0::bigint as input_invoice_count,
                     0::bigint as output_invoice_count,
-                    count(*) filter (
-                        where member.in_paired and member.row_type = 'oa'
-                    )::bigint as paired_oa_count,
-                    count(*) filter (
-                        where member.in_paired and member.row_type = 'bank'
-                    )::bigint as paired_bank_count,
-                    count(*) filter (
-                        where member.in_paired and member.row_type = 'invoice'
-                    )::bigint as paired_invoice_count,
-                    count(*) filter (
-                        where member.in_unpaired and member.row_type = 'oa'
-                    )::bigint as unpaired_oa_count,
-                    count(*) filter (
-                        where member.in_unpaired and member.row_type = 'bank'
-                    )::bigint as unpaired_bank_count,
-                    count(*) filter (
-                        where member.in_unpaired and member.row_type = 'invoice'
-                    )::bigint as unpaired_invoice_count
-                from overall_unique_members member
+                    coalesce((
+                        select zone_members.oa_count
+                        from overall_zone_member_summary zone_members
+                        where zone_members.zone = 'paired'
+                    ), 0)::bigint as paired_oa_count,
+                    coalesce((
+                        select zone_members.bank_count
+                        from overall_zone_member_summary zone_members
+                        where zone_members.zone = 'paired'
+                    ), 0)::bigint as paired_bank_count,
+                    coalesce((
+                        select zone_members.invoice_count
+                        from overall_zone_member_summary zone_members
+                        where zone_members.zone = 'paired'
+                    ), 0)::bigint as paired_invoice_count,
+                    coalesce((
+                        select zone_members.oa_count
+                        from overall_zone_member_summary zone_members
+                        where zone_members.zone = 'unpaired'
+                    ), 0)::bigint as unpaired_oa_count,
+                    coalesce((
+                        select zone_members.bank_count
+                        from overall_zone_member_summary zone_members
+                        where zone_members.zone = 'unpaired'
+                    ), 0)::bigint as unpaired_bank_count,
+                    coalesce((
+                        select zone_members.invoice_count
+                        from overall_zone_member_summary zone_members
+                        where zone_members.zone = 'unpaired'
+                    ), 0)::bigint as unpaired_invoice_count
+                from scoped_source_keys source
                 cross join bank_inventory
                 group by
                     bank_inventory.inventory_expense_transaction_total,

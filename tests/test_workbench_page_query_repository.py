@@ -477,32 +477,32 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "null::date as oa_sort_min" in unpaired_filtered_sql
     group_summary_sql = sql.split(
         "overall_group_summary as materialized (", 1
-    )[1].split("overall_unique_members as materialized (", 1)[0]
-    unique_members_sql = sql.split(
-        "overall_unique_members as materialized (", 1
+    )[1].split("bank_inventory as materialized (", 1)[0]
+    zone_member_summary_sql = sql.split(
+        "overall_zone_member_summary as materialized (", 1
     )[1].split("overall_member_summary as materialized (", 1)[0]
     member_summary_sql = sql.split(
         "overall_member_summary as materialized (", 1
     )[1].split("overall_summary as materialized (", 1)[0]
     assert "canonical_group_members" not in group_summary_sql
     assert "count(distinct groups.internal_key)" not in group_summary_sql
-    assert "canonical_group_members" not in unique_members_sql
-    assert "unnest(groups.member_ids, groups.member_types)" in unique_members_sql
-    assert "group by member.row_type, member.row_id" in unique_members_sql
-    assert "from overall_unique_members member" in member_summary_sql
+    assert "canonical_group_members" not in zone_member_summary_sql
+    assert "unnest(groups.member_ids, groups.member_types)" in zone_member_summary_sql
+    assert "group by groups.zone" in zone_member_summary_sql
+    assert "from scoped_source_keys source" in member_summary_sql
     assert "count(distinct (member.row_type, member.row_id))" not in member_summary_sql
     assert "cross join bank_inventory" in member_summary_sql
     assert "select summary_paired_count::bigint as total_count" in sql
     assert "select summary_unpaired_count::bigint as total_count" in sql
-    assert "where member.in_paired and member.row_type = 'oa'" in sql
-    assert "where member.in_unpaired and member.row_type = 'oa'" in sql
+    assert "where zone_members.zone = 'paired'" in sql
+    assert "where zone_members.zone = 'unpaired'" in sql
     assert "paired_oa_count::bigint as oa_count" in sql
     assert "paired_bank_count::bigint as bank_count" in sql
     assert "paired_invoice_count::bigint as invoice_count" in sql
     assert "unpaired_oa_count::bigint as oa_count" in sql
     assert "unpaired_bank_count::bigint as bank_count" in sql
     assert "unpaired_invoice_count::bigint as invoice_count" in sql
-    assert sql.count("from overall_unique_members member") == 1
+    assert member_summary_sql.count("from scoped_source_keys source") == 1
     assert "invoice_inventory" in sql
     invoice_inventory_sql = sql.split(
         "invoice_inventory as materialized (", 1
