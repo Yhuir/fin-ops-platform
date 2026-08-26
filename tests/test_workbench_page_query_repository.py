@@ -486,10 +486,12 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     )[1].split("overall_summary as materialized (", 1)[0]
     assert "canonical_group_members" not in group_summary_sql
     assert "count(distinct groups.internal_key)" not in group_summary_sql
-    assert "canonical_group_members" in unique_members_sql
+    assert "canonical_group_members" not in unique_members_sql
+    assert "unnest(groups.member_ids, groups.member_types)" in unique_members_sql
     assert "group by member.row_type, member.row_id" in unique_members_sql
     assert "from overall_unique_members member" in member_summary_sql
     assert "count(distinct (member.row_type, member.row_id))" not in member_summary_sql
+    assert "cross join bank_inventory" in member_summary_sql
     assert "select summary_paired_count::bigint as total_count" in sql
     assert "select summary_unpaired_count::bigint as total_count" in sql
     assert "where member.in_paired and member.row_type = 'oa'" in sql

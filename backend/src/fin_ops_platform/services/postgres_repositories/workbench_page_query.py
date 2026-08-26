@@ -2325,25 +2325,34 @@ class PostgresWorkbenchPageQueryRepository:
                 left join anomaly_states anomaly
                   on anomaly.internal_key = groups.internal_key
             ),
+            bank_inventory as materialized (
+                select
+                    count(*) filter (
+                        where lower(coalesce(bank.txn_direction, '')) in (
+                            'out', 'outflow', 'debit', 'expense', 'payment', 'pay',
+                            '支出', '付款'
+                        ) or coalesce(bank.signed_amount, 0) < 0
+                    )::bigint as inventory_expense_transaction_total,
+                    count(*) filter (
+                        where lower(coalesce(bank.txn_direction, '')) in (
+                            'in', 'inflow', 'credit', 'income', 'receipt', 'receive',
+                            '收入', '收款'
+                        ) or coalesce(bank.signed_amount, 0) > 0
+                    )::bigint as inventory_income_transaction_total
+                from app.bank_transactions bank
+                cross join requested_scope scope
+                where bank.status <> 'deleted'
+                  and (scope.scope_key = 'all' or bank.txn_month = scope.scope_month)
+            ),
             overall_unique_members as materialized (
                 select
                     member.row_type,
                     member.row_id,
                     bool_or(groups.zone = 'paired') as in_paired,
-                    bool_or(groups.zone = 'unpaired') as in_unpaired,
-                    bool_or(member.column_values->>'direction' = '支出') as is_expense,
-                    bool_or(member.column_values->>'direction' = '收入') as is_income,
-                    bool_or(
-                        lower(coalesce(member.column_values->>'invoiceType', ''))
-                            like any(array['%%进%%', '%%input%%', '%%purchase%%'])
-                    ) as is_input_invoice,
-                    bool_or(
-                        lower(coalesce(member.column_values->>'invoiceType', ''))
-                            like any(array['%%销%%', '%%output%%', '%%sale%%'])
-                    ) as is_output_invoice
+                    bool_or(groups.zone = 'unpaired') as in_unpaired
                 from effective_groups groups
-                join canonical_group_members member
-                  on member.internal_key = groups.internal_key
+                cross join lateral unnest(groups.member_ids, groups.member_types)
+                    as member(row_id, row_type)
                 group by member.row_type, member.row_id
             ),
             overall_member_summary as materialized (
@@ -2355,18 +2364,12 @@ class PostgresWorkbenchPageQueryRepository:
                     count(*)
                         filter (where member.row_type = 'invoice')::bigint
                         as summary_invoice_count,
-                    count(*) filter (
-                        where member.row_type = 'bank' and member.is_expense
-                    )::bigint as expense_transaction_count,
-                    count(*) filter (
-                        where member.row_type = 'bank' and member.is_income
-                    )::bigint as income_transaction_count,
-                    count(*) filter (
-                        where member.row_type = 'invoice' and member.is_input_invoice
-                    )::bigint as input_invoice_count,
-                    count(*) filter (
-                        where member.row_type = 'invoice' and member.is_output_invoice
-                    )::bigint as output_invoice_count,
+                    bank_inventory.inventory_expense_transaction_total
+                        as expense_transaction_count,
+                    bank_inventory.inventory_income_transaction_total
+                        as income_transaction_count,
+                    0::bigint as input_invoice_count,
+                    0::bigint as output_invoice_count,
                     count(*) filter (
                         where member.in_paired and member.row_type = 'oa'
                     )::bigint as paired_oa_count,
@@ -2386,6 +2389,10 @@ class PostgresWorkbenchPageQueryRepository:
                         where member.in_unpaired and member.row_type = 'invoice'
                     )::bigint as unpaired_invoice_count
                 from overall_unique_members member
+                cross join bank_inventory
+                group by
+                    bank_inventory.inventory_expense_transaction_total,
+                    bank_inventory.inventory_income_transaction_total
             ),
             overall_summary as materialized (
                 select *
