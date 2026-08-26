@@ -187,6 +187,25 @@ class _CategoryProvider:
 
 
 class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
+    def test_cost_category_projection_defers_unused_full_payload(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            view="time",
+            include_statistics=False,
+        )
+
+        projection_sql = next(
+            query
+            for query in connection.snapshot_transaction.fetched
+            if "select row_id, effective_category_code" in query
+        )
+        source_sql = projection_sql.split(
+            "source_rows as materialized", 1
+        )[1].split("display_rows as materialized", 1)[0]
+        self.assertIn("'{}'::jsonb as normalized_payload", source_sql)
+        self.assertIn("classified_with_semantics as not materialized", projection_sql)
+
     def test_no_oa_candidate_snapshot_skips_oa_payload_and_classifies_only_candidates(self) -> None:
         connection = _NoOaCandidateConnection()
 
