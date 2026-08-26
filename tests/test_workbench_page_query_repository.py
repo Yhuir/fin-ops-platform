@@ -492,6 +492,14 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "from scoped_source_keys source" in member_summary_sql
     assert "count(distinct (member.row_type, member.row_id))" not in member_summary_sql
     assert "cross join bank_inventory" in member_summary_sql
+    bank_inventory_sql = sql.split(
+        "bank_inventory as materialized (", 1
+    )[1].split("overall_zone_member_summary as materialized (", 1)[0]
+    assert "from canonical_rows bank" in bank_inventory_sql
+    assert "join scoped_source_keys source" in bank_inventory_sql
+    assert "from app.bank_transactions bank" not in bank_inventory_sql
+    assert "bank.bank_direction = 'payment'" in bank_inventory_sql
+    assert "bank.bank_direction = 'receipt'" in bank_inventory_sql
     assert "select summary_paired_count::bigint as total_count" in sql
     assert "select summary_unpaired_count::bigint as total_count" in sql
     assert "where zone_members.zone = 'paired'" in sql
@@ -514,6 +522,13 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "inventory_output_invoice_total" in invoice_inventory_sql
     assert "inventory_oa_parse_created_total" in invoice_inventory_sql
     assert "oa_inventory as materialized" in sql
+    oa_inventory_sql = sql.split(
+        "oa_inventory as materialized (", 1
+    )[1].split("batch_inventory as materialized (", 1)[0]
+    assert "from canonical_rows oa" in oa_inventory_sql
+    assert "join scoped_source_keys source" in oa_inventory_sql
+    assert "from app.oa_applications oa" not in oa_inventory_sql
+    assert "from app.oa_pending_payment_admissions admission" not in oa_inventory_sql
     assert WORKBENCH_GROUP_PAGE_SIZE == 10
     assert connection.calls[0][1].count(WORKBENCH_GROUP_PAGE_SIZE + 1) == 2
     assert [row["internal_key"] for row in hydrated_batches[0]] == [

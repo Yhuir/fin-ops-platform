@@ -2328,21 +2328,16 @@ class PostgresWorkbenchPageQueryRepository:
             bank_inventory as materialized (
                 select
                     count(*) filter (
-                        where lower(coalesce(bank.txn_direction, '')) in (
-                            'out', 'outflow', 'debit', 'expense', 'payment', 'pay',
-                            '支出', '付款'
-                        ) or coalesce(bank.signed_amount, 0) < 0
+                        where bank.bank_direction = 'payment'
                     )::bigint as inventory_expense_transaction_total,
                     count(*) filter (
-                        where lower(coalesce(bank.txn_direction, '')) in (
-                            'in', 'inflow', 'credit', 'income', 'receipt', 'receive',
-                            '收入', '收款'
-                        ) or coalesce(bank.signed_amount, 0) > 0
+                        where bank.bank_direction = 'receipt'
                     )::bigint as inventory_income_transaction_total
-                from app.bank_transactions bank
-                cross join requested_scope scope
-                where bank.status <> 'deleted'
-                  and (scope.scope_key = 'all' or bank.txn_month = scope.scope_month)
+                from canonical_rows bank
+                join scoped_source_keys source
+                  on source.row_type = 'bank'
+                 and source.row_id = bank.row_id
+                where bank.pane = 'bank'
             ),
             overall_zone_member_summary as materialized (
                 select
@@ -2476,42 +2471,17 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             oa_inventory as materialized (
                 select
-                    count(*) filter (where source_kind = 'completed')::bigint
-                        as inventory_completed_oa_total,
-                    count(*) filter (where source_kind = 'in_progress')::bigint
-                        as inventory_in_progress_oa_total
-                from (
-                    select 'completed'::text as source_kind
-                    from app.oa_applications oa
-                    cross join requested_scope scope
-                    where (
-                        oa.workflow_status is null
-                        or oa.workflow_status = ''
-                        or oa.workflow_status in (
-                            'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
-                        )
-                    )
-                      and (scope.scope_key = 'all' or oa.scope_month = scope.scope_month)
-                    union all
-                    select 'in_progress'::text
-                    from app.oa_pending_payment_admissions admission
-                    cross join requested_scope scope
-                    where admission.tenant_id = scope.tenant_id
-                      and admission.workflow_status = 'in_progress'
-                      and (scope.scope_key = 'all' or admission.scope_key = scope.scope_key)
-                      and not exists (
-                          select 1
-                          from app.oa_applications completed
-                          where completed.row_id = admission.oa_id
-                            and (
-                                completed.workflow_status is null
-                                or completed.workflow_status = ''
-                                or completed.workflow_status in (
-                                    'completed', '已完成', 'approved', 'APPROVED', 'Approved', '2'
-                                )
-                            )
-                      )
-                ) canonical_oa
+                    count(*) filter (
+                        where coalesce(oa.workflow_status, '') <> 'in_progress'
+                    )::bigint as inventory_completed_oa_total,
+                    count(*) filter (
+                        where oa.workflow_status = 'in_progress'
+                    )::bigint as inventory_in_progress_oa_total
+                from canonical_rows oa
+                join scoped_source_keys source
+                  on source.row_type = 'oa'
+                 and source.row_id = oa.row_id
+                where oa.pane = 'oa'
             ),
             batch_inventory as materialized (
                 select count(distinct coalesce(
