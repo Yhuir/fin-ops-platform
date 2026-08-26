@@ -168,6 +168,7 @@ EXPECTED_MIGRATIONS = [
     "0154_migrate_etc_summary_anomaly_review.sql",
     "0155_revalidate_etc_summary_anomaly_review.sql",
     "0156_backfill_workbench_anomaly_reviewer_identity.sql",
+    "0157_cost_statistics_manual_allocations.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -199,6 +200,7 @@ EXPECTED_TABLES = [
     "app.matching_runs",
     "app.matching_results",
     "app.workbench_pair_relations",
+    "app.cost_statistics_manual_allocations",
     "app.workbench_pair_relation_history",
     "app.workbench_row_overrides",
     "app.workbench_exception_cases",
@@ -327,7 +329,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 157)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 158)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -429,6 +431,26 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("for update", sql)
         self.assertNotIn("delete from", sql)
         self.assertNotIn("update audit.events", sql)
+
+    def test_cost_statistics_manual_allocations_are_versioned_and_not_deletable_by_runtime_roles(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0157_cost_statistics_manual_allocations.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("relation_case_id text not null unique", normalized_sql)
+        self.assertIn("source_fingerprint ~ '^[0-9a-f]{64}$'", normalized_sql)
+        self.assertIn("allocations jsonb not null", normalized_sql)
+        self.assertIn(
+            "grant select, insert, update on app.cost_statistics_manual_allocations to fin_ops_api",
+            normalized_sql,
+        )
+        self.assertIn(
+            "grant select, insert, update on app.cost_statistics_manual_allocations to fin_ops_app_runtime",
+            normalized_sql,
+        )
+        self.assertNotIn("grant delete", normalized_sql)
+        self.assertNotIn("delete from", normalized_sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
         sql = (

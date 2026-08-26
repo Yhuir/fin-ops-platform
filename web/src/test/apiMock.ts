@@ -4697,6 +4697,47 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailAutoTagRulesSaved = false;
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
   let workbenchWriteActionCount = 0;
+  const buildManualAllocationTask = (
+    relationCaseId: string,
+    allocations: Array<Record<string, unknown>> = [],
+  ) => ({
+    relation_case_id: relationCaseId,
+    relation_version: 1,
+    source_fingerprint: "a".repeat(64),
+    status: allocations.length > 0 ? "allocated" : "pending",
+    oa_allocation_total: "1010.00",
+    bank_outflow_total: "1000.00",
+    paid_wrong_refund_total: "0.00",
+    net_cash_cost: "1000.00",
+    difference: "-10.00",
+    units: [
+      {
+        unit_id: "oa-1:expense-1",
+        oa_id: "oa-1",
+        expense_item_id: "expense-1",
+        project_id: "project-a",
+        project_name: "项目 A",
+        expense_type: "材料费",
+        expense_content: "设备采购",
+        oa_original_amount: "1000.00",
+      },
+      {
+        unit_id: "oa-1:expense-2",
+        oa_id: "oa-1",
+        expense_item_id: "expense-2",
+        project_id: "project-b",
+        project_name: "项目 B",
+        expense_type: "交通费",
+        expense_content: "运输",
+        oa_original_amount: "10.00",
+      },
+    ],
+    allocations,
+    version: allocations.length > 0 ? 1 : 0,
+    updated_by: allocations.length > 0 ? "测试全权限" : "",
+    updated_at: allocations.length > 0 ? "2026-08-27T10:00:00+08:00" : "",
+    can_save: true,
+  });
   const workbenchStateStore = createWorkbenchStateStore(options);
   const taxOffsetStateStore = createTaxOffsetStateStore();
   let latestTaxCertifiedPreview: {
@@ -5904,6 +5945,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ),
       };
     },
+    "/api/cost-statistics/manual-allocations": () => ({
+      body: { items: [buildManualAllocationTask("relation-manual-001")], row_count: 1, next_cursor: null },
+    }),
     "/api/cost-statistics/export-preview": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       const view = url.searchParams.get("view") ?? "time";
@@ -7678,6 +7722,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           },
         },
       });
+    }
+    if (
+      method === "PUT"
+      && url.pathname.startsWith("/api/cost-statistics/manual-allocations/")
+    ) {
+      const relationCaseId = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+      const allocations = Array.isArray(jsonBody?.allocations)
+        ? jsonBody.allocations as Array<Record<string, unknown>>
+        : [];
+      return jsonResponse({ body: buildManualAllocationTask(relationCaseId, allocations) });
     }
     if (
       url.pathname.startsWith("/api/cost-statistics/bank-transactions/")

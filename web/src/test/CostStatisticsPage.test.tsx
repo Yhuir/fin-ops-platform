@@ -78,7 +78,7 @@ function expectProjectCostShell() {
   const page = heading.closest(".cost-page");
   expect(page).not.toBeNull();
   expect(page).not.toHaveClass("MuiBox-root");
-  const viewSwitcher = screen.getByRole("radiogroup", { name: "成本统计视图切换" });
+  const viewSwitcher = screen.getByRole("group", { name: "成本统计视图切换" });
   expect(viewSwitcher).toHaveClass("cost-view-switcher");
   expect(viewSwitcher).not.toHaveClass("MuiTabs-root");
   expect(heading.closest(".page-header")).toContainElement(viewSwitcher);
@@ -191,7 +191,8 @@ describe("Cost statistics page", () => {
     expect(css).not.toContain(".cost-page .stat-card");
     expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*border:\s*0/s);
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
-    expect(css).toMatch(/\.cost-view-tabs\s*{[^}]*border:\s*1px solid var\(--fp-border\)[^}]*background:\s*var\(--fp-surface-muted\)/s);
+    expect(css).toMatch(/\.cost-view-tabs\s*{[^}]*border:\s*1px solid var\(--fp-border-subtle\)[^}]*background:\s*var\(--fp-surface\)/s);
+    expect(css).toMatch(/\.cost-view-switcher-divider\s*{[^}]*width:\s*1px[^}]*background:\s*var\(--fp-border\)/s);
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.business-period-picker\s*{[^}]*--business-period-control-height:\s*40px/s);
     expect(css).toMatch(/\.business-period-popover\s*{[^}]*width:\s*min\(340px,\s*calc\(100vw - 24px\)\)/s);
@@ -253,7 +254,7 @@ describe("Cost statistics page", () => {
     const heading = await screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
     const statusCopy = screen.getByText("正在加载成本统计");
     const status = statusCopy.closest('[role="status"]');
-    const tablist = screen.getByRole("radiogroup", { name: "成本统计视图切换" });
+    const tablist = screen.getByRole("group", { name: "成本统计视图切换" });
     const overlay = screen.getByTestId("cost-statistics-interaction-overlay");
 
     expect(status).toHaveClass("cost-lock-status--loading");
@@ -281,7 +282,7 @@ describe("Cost statistics page", () => {
 
     expect(screen.queryByText("正在加载成本统计")).not.toBeInTheDocument();
     expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
-    expect(screen.getByRole("radiogroup", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
+    expect(screen.getByRole("group", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
   });
@@ -295,6 +296,8 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expectProjectCostShell();
+    expect(screen.getByText("配对归集")).toBeInTheDocument();
+    expect(screen.getByText("流水分析")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "按时间" })).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByText(/以已配对的支出流水为基准/)).not.toBeInTheDocument();
     expect(screen.queryByText("费用类型数")).not.toBeInTheDocument();
@@ -348,6 +351,38 @@ describe("Cost statistics page", () => {
       "/api/cost-statistics/explorer?scope=2026-04&view=time&page_size=50&include_statistics=false",
       expect.any(Object),
     );
+  });
+
+  test("loads pending paired-cost allocation lazily and saves only an exact blank-form allocation", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderCostStatisticsPage();
+    await findCostStatisticsHeading();
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/cost-statistics/manual-allocations?page_size=100",
+      expect.any(Object),
+    );
+    await user.click(screen.getByRole("button", { name: "待分配" }));
+    const dialog = await screen.findByRole("dialog", { name: "成本统计待分配" });
+    const projectA = within(dialog).getByRole("textbox", { name: "项目 A实际分配金额" });
+    const projectB = within(dialog).getByRole("textbox", { name: "项目 B实际分配金额" });
+
+    expect(projectA).toHaveValue("");
+    expect(projectB).toHaveValue("");
+    expect(within(dialog).getByRole("button", { name: "保存分配" })).toBeDisabled();
+
+    await user.type(projectA, "900.00");
+    await user.type(projectB, "100.00");
+    await user.click(within(dialog).getByRole("button", { name: "保存分配" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/manual-allocations/relation-manual-001",
+      expect.objectContaining({ method: "PUT" }),
+    ));
+    expect(await within(dialog).findByText("已分配")).toBeInTheDocument();
   });
 
   test("searches only the active view without refreshing the page chrome", async () => {
@@ -1049,11 +1084,11 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按银行" }));
 
     expect(screen.queryByText("正在加载成本统计")).not.toBeInTheDocument();
-    expect(screen.getByRole("radiogroup", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
+    expect(screen.getByRole("group", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.queryByRole("grid", { name: "按时间统计表" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
-    expect(screen.getByRole("radiogroup", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
+    expect(screen.getByRole("group", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.getByRole("button", { name: "银行统计时间范围：年月" })).toBeInTheDocument();
   });
 

@@ -193,7 +193,113 @@ class CostStatisticsApiTests(unittest.TestCase):
                 }
             ],
         }
-        repository.load_snapshot = lambda **_kwargs: snapshot
+        manual_repository = self.app._cost_statistics_manual_allocation_repository  # noqa: SLF001
+
+        def mismatch_snapshot(**_kwargs):
+            return {
+                **snapshot,
+                "manual_allocations": manual_repository.list_by_case_ids(
+                    [str(group["group_id"])]
+                ),
+            }
+
+        repository.load_snapshot = mismatch_snapshot
+        repository.load_relation_snapshot = lambda _case_id, **_kwargs: mismatch_snapshot()
+
+        status, tasks = self._json("/api/cost-statistics/manual-allocations")
+        self.assertEqual(status, 200)
+        self.assertEqual(tasks["row_count"], 1)
+        task = tasks["items"][0]
+        self.assertEqual(task["status"], "pending")
+        status, pending_project = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_name=云南溯源科技"
+            "&expense_type=设备货款及材料费"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(pending_project["row_count"], 0)
+        self.assertEqual(
+            pending_project["allocation_quality"]["pending_manual_allocation_count"],
+            1,
+        )
+        status, pending_time = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=time"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(pending_time["summary"]["expense_amount"], "1250.00")
+        self.assertEqual(pending_time["summary"]["income_amount"], "35.00")
+        status, preview = self._json(
+            "/api/cost-statistics/export-preview"
+            "?month=2026-03&view=project&project_name=云南溯源科技"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(preview["summary"]["manual_allocation_pending_count"], 1)
+        self.assertIn("待分配说明", preview["sheet_names"])
+        pending_export = self._get(
+            "/api/cost-statistics/export"
+            "?month=2026-03&view=project&project_name=云南溯源科技"
+        )
+        self.assertEqual(pending_export.status_code, 200)
+        pending_workbook = load_workbook(
+            filename=__import__("io").BytesIO(pending_export.body)
+        )
+        self.assertIn("待分配说明", pending_workbook.sheetnames)
+        self.assertEqual(pending_workbook["待分配说明"]["B2"].value, 1)
+
+        for invalid_allocations in (
+            [],
+            [{"unit_id": task["units"][0]["unit_id"], "amount": "-1.00"}],
+            [{"unit_id": task["units"][0]["unit_id"], "amount": "1215"}],
+            [{"unit_id": "unknown-unit", "amount": "1215.00"}],
+            [{"unit_id": task["units"][0]["unit_id"], "amount": "1200.00"}],
+        ):
+            with self.subTest(invalid_allocations=invalid_allocations):
+                invalid_response = self.app.handle_request(
+                    "PUT",
+                    f"/api/cost-statistics/manual-allocations/{task['relation_case_id']}",
+                    body=json.dumps(
+                        {
+                            "expected_version": task["version"],
+                            "source_fingerprint": task["source_fingerprint"],
+                            "allocations": invalid_allocations,
+                        }
+                    ),
+                )
+                self.assertEqual(invalid_response.status_code, 400)
+        response = self.app.handle_request(
+            "PUT",
+            f"/api/cost-statistics/manual-allocations/{task['relation_case_id']}",
+            body=json.dumps(
+                {
+                    "expected_version": task["version"],
+                    "source_fingerprint": task["source_fingerprint"],
+                    "allocations": [
+                        {
+                            "unit_id": task["units"][0]["unit_id"],
+                            "amount": "1215.00",
+                        }
+                    ],
+                }
+            ),
+        )
+        self.assertEqual(response.status_code, 200)
+        stale_write = self.app.handle_request(
+            "PUT",
+            f"/api/cost-statistics/manual-allocations/{task['relation_case_id']}",
+            body=json.dumps(
+                {
+                    "expected_version": task["version"],
+                    "source_fingerprint": task["source_fingerprint"],
+                    "allocations": [
+                        {
+                            "unit_id": task["units"][0]["unit_id"],
+                            "amount": "1215.00",
+                        }
+                    ],
+                }
+            ),
+        )
+        self.assertEqual(stale_write.status_code, 409)
 
         status, project = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"

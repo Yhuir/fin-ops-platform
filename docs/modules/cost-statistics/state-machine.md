@@ -34,6 +34,19 @@ no-oa-drawer-closed
           -> no-oa-drawer-ready（保存成功并刷新成本数据）
           -> save-error（保留用户输入，可重试）
   -> no-oa-drawer-closed
+
+manual-allocation-closed
+  -> manual-allocation-loading（打开 Popover 后才请求）
+      -> manual-allocation-ready
+      -> manual-allocation-error
+manual-allocation-ready
+  -> editing（首次 pending/stale 输入为空；allocated 显示已保存值）
+      -> saving
+          -> manual-allocation-ready（保存成功并刷新当前归因视图）
+          -> validation-error（保留输入）
+          -> conflict（事实或版本变化，要求重新加载）
+manual-allocation-loading / manual-allocation-ready / manual-allocation-error
+  -> manual-allocation-closed
 ```
 
 ## 状态合同
@@ -48,5 +61,10 @@ no-oa-drawer-closed
 - `detail-error`：错误与重试按钮只存在于抽屉；已加载统计内容保持不变。
 - `no-oa-drawer-ready`：只显示当前实际无 active OA 关系的支出标签；名称和标签默认都为空。选择标签后必须填写虚拟项目名，未选择标签时名称可为空。
 - `saving / save-error`：使用 settings version CAS；冲突或失败不得伪报成功，也不得清空用户输入。保存成功后下一次 canonical GET 对全部历史期间逐笔应用规则。
+- `manual-allocation-loading`：只有用户打开“待分配” Popover 后才读取有界任务页；普通 explorer 和原始流水视图不因该交互增加请求。
+- `editing`：按稳定 OA 单元 ID 维护完整输入集合。pending/stale 不预填数字、不自动计算；显式 `0.00` 有效，空值与零值必须区分。
+- `saving`：服务端在单个写事务内锁定当前关系事实，校验 source fingerprint、expected version、完整单元集合、两位小数、非负与合计严格等于净支出，再写 allocation 和 audit。
+- `validation-error`：格式、缺项、负数或合计错误返回明确 400；页面保留用户输入。
+- `conflict`：事实或版本已变化返回明确 409；旧输入不得作为 fallback 写入，重新加载后以新的空白任务为准。
 - 重新访问、浏览器刷新或页面内刷新都会发起全新请求；没有 `202 refreshing`、`409 read_model_not_fresh` 或后台轮询。
 - 页面打开期间事实源发生变化时不主动推送；用户下次刷新读取最新已提交事实。

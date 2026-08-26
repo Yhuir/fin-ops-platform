@@ -12,6 +12,9 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 )
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.postgres_repositories.common import row_payload
+from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
+    PostgresCostStatisticsManualAllocationRepository,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
 )
@@ -27,10 +30,11 @@ class CostStatisticsIntegrityError(ValueError):
 class PostgresCostStatisticsCanonicalRepository:
     """Load every Cost page input from canonical tables in one DB snapshot."""
 
-    def __init__(self, connection: Any) -> None:
+    def __init__(self, connection: Any, *, transaction_bound: bool = False) -> None:
         if connection is None:
             raise ValueError("Cost statistics canonical repository requires a PostgreSQL connection.")
         self._connection = connection
+        self._transaction_bound = transaction_bound
 
     def load_snapshot(
         self,
@@ -112,13 +116,72 @@ class PostgresCostStatisticsCanonicalRepository:
                 )
             relation_oa_ids = _relation_member_ids(relations, {"oa"})
             oa_rows = _postgres_oa_rows(transaction, oa_ids=relation_oa_ids)
+            manual_allocations = PostgresCostStatisticsManualAllocationRepository(
+                transaction
+            ).list_by_case_ids(
+                [_text(relation.get("case_id")) for relation in relations]
+            )
             return _build_snapshot(
                 settings=settings,
                 bank_rows=bank_rows,
                 relation_bank_rows=relation_bank_rows,
                 oa_rows=oa_rows,
                 relations=relations,
+                manual_allocations=manual_allocations,
                 available_years=available_years,
+            )
+
+    def load_relation_snapshot(
+        self,
+        relation_case_id: str,
+        *,
+        for_update: bool = False,
+    ) -> dict[str, Any]:
+        normalized_case_id = _text(relation_case_id)
+        if not normalized_case_id:
+            raise KeyError(relation_case_id)
+        if for_update and not self._transaction_bound:
+            raise ValueError("for_update requires a transaction-bound cost repository")
+        with self._snapshot_transaction() as transaction:
+            settings = _settings_payload(transaction)
+            relations = _postgres_relations(
+                transaction,
+                relation_case_id=normalized_case_id,
+                for_update=for_update,
+            )
+            if not relations:
+                raise KeyError(normalized_case_id)
+            relation = relations[0]
+            bank_ids = _relation_member_ids(relations, {"bank", "bank_transaction"})
+            bank_rows = _postgres_bank_rows(
+                transaction,
+                settings=settings,
+                transaction_ids=bank_ids,
+            )
+            categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                transaction,
+                settings=settings,
+                transaction_ids=bank_ids,
+            )
+            _apply_bank_category_projection(
+                bank_rows,
+                categories_by_transaction_id=categories,
+            )
+            oa_rows = _postgres_oa_rows(
+                transaction,
+                oa_ids=_relation_member_ids(relations, {"oa"}),
+            )
+            manual_allocations = PostgresCostStatisticsManualAllocationRepository(
+                transaction
+            ).list_by_case_ids([normalized_case_id])
+            return _build_snapshot(
+                settings=settings,
+                bank_rows=bank_rows,
+                relation_bank_rows=bank_rows,
+                oa_rows=oa_rows,
+                relations=[relation],
+                manual_allocations=manual_allocations,
+                available_years=_bank_available_years(bank_rows),
             )
 
     def load_no_oa_tag_candidate_snapshot(self) -> dict[str, Any]:
@@ -162,6 +225,9 @@ class PostgresCostStatisticsCanonicalRepository:
 
     @contextmanager
     def _snapshot_transaction(self) -> Iterator[Any]:
+        if self._transaction_bound:
+            yield self._connection
+            return
         with self._connection.transaction() as transaction:
             transaction.execute("set transaction isolation level repeatable read read only")
             yield transaction
@@ -178,12 +244,14 @@ class LocalCostStatisticsCanonicalRepository:
         oa_rows_by_ids_provider: Callable[[list[str]], list[Any]],
         settings_provider: Callable[[], dict[str, Any]],
         category_provider: Any,
+        manual_allocations_provider: Callable[[list[str]], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
         self._bank_rows_provider = bank_rows_provider
         self._relations_provider = relations_provider
         self._oa_rows_by_ids_provider = oa_rows_by_ids_provider
         self._settings_provider = settings_provider
         self._category_provider = category_provider
+        self._manual_allocations_provider = manual_allocations_provider or (lambda _case_ids: {})
 
     def load_snapshot(
         self,
@@ -261,8 +329,32 @@ class LocalCostStatisticsCanonicalRepository:
             relation_bank_rows=relation_bank_rows,
             oa_rows=oa_rows,
             relations=relations,
+            manual_allocations=self._manual_allocations_provider(
+                [_text(relation.get("case_id")) for relation in relations]
+            ),
             available_years=bank_available_years,
         )
+
+    def load_relation_snapshot(
+        self,
+        relation_case_id: str,
+        *,
+        for_update: bool = False,
+    ) -> dict[str, Any]:
+        if for_update:
+            raise ValueError("local cost statistics does not support row locking")
+        normalized_case_id = _text(relation_case_id)
+        snapshot = self.load_snapshot(view="project")
+        groups = [
+            group
+            for group in list(snapshot.get("cost_groups") or [])
+            if _text(group.get("group_id")) == normalized_case_id
+        ]
+        if not groups:
+            raise KeyError(normalized_case_id)
+        snapshot["cost_groups"] = groups
+        snapshot["manual_allocations"] = self._manual_allocations_provider([normalized_case_id])
+        return snapshot
 
     def load_no_oa_tag_candidate_snapshot(self) -> dict[str, Any]:
         settings = dict(self._settings_provider() or {})
@@ -418,6 +510,8 @@ def _postgres_relations(
     connection: Any,
     *,
     bank_row_ids: list[str] | None = None,
+    relation_case_id: str | None = None,
+    for_update: bool = False,
 ) -> list[dict[str, Any]]:
     if bank_row_ids is not None and not bank_row_ids:
         return []
@@ -433,10 +527,15 @@ def _postgres_relations(
           )
         """
         params = (bank_row_ids,)
+    if relation_case_id is not None:
+        filter_sql += " and case_id = %s"
+        params = (*params, relation_case_id)
+    lock_sql = "for update" if for_update else ""
     rows = connection.fetch_all(
         f"""
         select
             case_id,
+            version,
             relation_mode,
             row_ids,
             row_types,
@@ -449,6 +548,7 @@ def _postgres_relations(
           and row_types && array['bank', 'bank_transaction']::text[]
           {filter_sql}
         order by case_id
+        {lock_sql}
         """,
         params,
     )
@@ -459,6 +559,7 @@ def _postgres_relations(
         relation.update(
             {
                 "case_id": _text(row.get("case_id")),
+                "version": int(row.get("version") or relation.get("version") or 1),
                 "relation_mode": _text(
                     row.get("relation_mode") or relation.get("relation_mode")
                 ),
@@ -605,6 +706,7 @@ def _build_snapshot(
     relation_bank_rows: list[dict[str, Any]] | None = None,
     oa_rows: list[dict[str, Any]],
     relations: list[dict[str, Any]],
+    manual_allocations: dict[str, dict[str, Any]] | None = None,
     available_years: list[str] | None = None,
 ) -> dict[str, Any]:
     banks_by_id = {
@@ -664,6 +766,9 @@ def _build_snapshot(
                         relation.get("case_id") or relation.get("group_id")
                     ),
                     "relation_mode": _text(relation.get("relation_mode")),
+                    "relation_version": int(relation.get("version") or 1),
+                    "row_ids": row_ids,
+                    "row_types": row_types,
                     "declared_oa_ids": sorted(declared_oa_ids),
                     "oa_rows": oa_members,
                     "bank_rows": bank_members,
@@ -679,6 +784,7 @@ def _build_snapshot(
         "oa_related_bank_ids": sorted(oa_related_bank_ids),
         "active_relation_count": len(relations),
         "available_years": list(available_years or []),
+        "manual_allocations": dict(manual_allocations or {}),
     }
 
 

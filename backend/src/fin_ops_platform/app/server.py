@@ -129,6 +129,9 @@ from fin_ops_platform.services.cost_statistics_canonical_repository import (
     LocalCostStatisticsCanonicalRepository,
     PostgresCostStatisticsCanonicalRepository,
 )
+from fin_ops_platform.services.cost_statistics_manual_allocation_service import (
+    CostStatisticsManualAllocationService,
+)
 from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsQueryService
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
@@ -261,6 +264,10 @@ from fin_ops_platform.services.operation_history_evidence import (
 from fin_ops_platform.services.operation_history_semantics import operation_semantics
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
+from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
+    InMemoryCostStatisticsManualAllocationRepository,
+    PostgresCostStatisticsManualAllocationRepository,
+)
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
@@ -1225,10 +1232,18 @@ class Application:
             or getattr(self._state_store, "_connection", None)
         )
         if connection is not None:
+            manual_allocation_repository = PostgresCostStatisticsManualAllocationRepository(
+                connection
+            )
             canonical_repository = PostgresCostStatisticsCanonicalRepository(
                 connection
             )
         else:
+            manual_allocation_repository = getattr(
+                self,
+                "_cost_statistics_manual_allocation_repository",
+                None,
+            ) or InMemoryCostStatisticsManualAllocationRepository()
             canonical_repository = LocalCostStatisticsCanonicalRepository(
                 bank_rows_provider=lambda: self._import_service.list_transactions(
                     month="all"
@@ -1245,10 +1260,17 @@ class Application:
                     else self._app_settings_service.get_settings_payload
                 ),
                 category_provider=self._bank_transaction_effective_category_provider,
+                manual_allocations_provider=manual_allocation_repository.list_by_case_ids,
             )
+        self._cost_statistics_manual_allocation_repository = manual_allocation_repository
         self._cost_statistics_canonical_repository = canonical_repository
         self._cost_statistics_query_service = CostStatisticsQueryService(
             canonical_repository=canonical_repository,
+        )
+        self._cost_statistics_manual_allocation_service = CostStatisticsManualAllocationService(
+            canonical_repository=canonical_repository,
+            allocation_repository=manual_allocation_repository,
+            write_connection=connection,
         )
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
             query_service=self._cost_statistics_query_service,
@@ -1259,6 +1281,7 @@ class Application:
             duration_ms=self._duration_ms,
             optional_bool_parser=lambda value: self._parse_optional_bool(value, default=True),
             app_settings_service=getattr(self, "_app_settings_service", None),
+            manual_allocation_service=self._cost_statistics_manual_allocation_service,
             resolve_read_session=self._resolve_cost_statistics_read_session,
             resolve_write_session=self._resolve_cost_statistics_write_session,
             load_json_body=self._load_json_body,
@@ -5872,7 +5895,7 @@ class Application:
         if session is not None and not session.can_mutate_data:
             return None, self._json_response(
                 HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存成本统计标签规则权限。"},
+                {"error": "permission_denied", "message": "当前账户没有保存成本统计设置或人工分配权限。"},
             )
         return session, None
 

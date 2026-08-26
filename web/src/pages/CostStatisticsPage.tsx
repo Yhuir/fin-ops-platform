@@ -11,6 +11,7 @@ import BusinessPeriodPicker from "../components/common/BusinessPeriodPicker";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
+import CostStatisticsManualAllocationPopover from "../components/cost-statistics/CostStatisticsManualAllocationPopover";
 import CostStatisticsNoOaRulesDrawer from "../components/cost-statistics/CostStatisticsNoOaRulesDrawer";
 import CostStatisticsTimeTagRulesDrawer from "../components/cost-statistics/CostStatisticsTimeTagRulesDrawer";
 import ExportCenterModal, {
@@ -1581,6 +1582,10 @@ export default function CostStatisticsPage() {
     onRequestNextPage: () => void loadMoreExplorerRows(),
   };
   const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading;
+  const pendingManualAllocationCount = viewMode === "project" || viewMode === "bank" || viewMode === "expenseType"
+    ? (explorerData?.allocationQuality?.pendingManualAllocationCount ?? 0)
+      + (explorerData?.allocationQuality?.staleManualAllocationCount ?? 0)
+    : 0;
   const visibleStatistics = pageStatistics;
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -1622,24 +1627,46 @@ export default function CostStatisticsPage() {
             inert={interactionLocked ? true : undefined}
             ref={headerControlsRef}
           >
-            <ToggleButtonGroup
-              aria-label="成本统计视图切换"
-              className="cost-view-switcher cost-view-tabs"
-              disallowEmptySelection
-              onSelectionChange={(keys) => {
-                const [key] = Array.from(keys);
-                if (key === "project" || key === "bank" || key === "expenseType" || key === "bankTag" || key === "time") handleViewModeChange(key);
-              }}
-              selectedKeys={new Set([viewMode])}
-              selectionMode="single"
-              size="sm"
-            >
-              <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
-              <ToggleButton className="cost-view-tab" id="bank">按银行</ToggleButton>
-              <ToggleButton className="cost-view-tab" id="expenseType">按费用类型</ToggleButton>
-              <ToggleButton className="cost-view-tab" id="bankTag"><ToggleButtonGroup.Separator />按标签</ToggleButton>
-              <ToggleButton className="cost-view-tab" id="time"><ToggleButtonGroup.Separator />按时间</ToggleButton>
-            </ToggleButtonGroup>
+            <div className="cost-view-switcher" role="group" aria-label="成本统计视图切换">
+              <div className="cost-view-switcher-group">
+                <span className="cost-view-switcher-label">配对归集</span>
+                <ToggleButtonGroup
+                  aria-label="配对归集视图"
+                  className="cost-view-tabs"
+                  onSelectionChange={(keys) => {
+                    const [key] = Array.from(keys);
+                    if (key === "project" || key === "bank" || key === "expenseType") handleViewModeChange(key);
+                  }}
+                  selectedKeys={new Set(
+                    viewMode === "project" || viewMode === "bank" || viewMode === "expenseType" ? [viewMode] : [],
+                  )}
+                  selectionMode="single"
+                  size="sm"
+                >
+                  <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
+                  <ToggleButton className="cost-view-tab" id="bank">按银行</ToggleButton>
+                  <ToggleButton className="cost-view-tab" id="expenseType">按费用类型</ToggleButton>
+                </ToggleButtonGroup>
+              </div>
+              <span aria-hidden="true" className="cost-view-switcher-divider" />
+              <div className="cost-view-switcher-group">
+                <span className="cost-view-switcher-label">流水分析</span>
+                <ToggleButtonGroup
+                  aria-label="流水分析视图"
+                  className="cost-view-tabs"
+                  onSelectionChange={(keys) => {
+                    const [key] = Array.from(keys);
+                    if (key === "bankTag" || key === "time") handleViewModeChange(key);
+                  }}
+                  selectedKeys={new Set(viewMode === "bankTag" || viewMode === "time" ? [viewMode] : [])}
+                  selectionMode="single"
+                  size="sm"
+                >
+                  <ToggleButton className="cost-view-tab" id="bankTag">按标签</ToggleButton>
+                  <ToggleButton className="cost-view-tab" id="time">按时间</ToggleButton>
+                </ToggleButtonGroup>
+              </div>
+            </div>
           </div>
         </div>
         <div
@@ -1661,6 +1688,11 @@ export default function CostStatisticsPage() {
           >
             刷新
           </Button>
+          <CostStatisticsManualAllocationPopover
+            canSave={canMutateData && !interactionLocked}
+            knownPendingCount={pendingManualAllocationCount}
+            onSaved={handleManualRefresh}
+          />
           <Button
             className="cost-page-action"
             isDisabled={isTimeTagRulesSaving}

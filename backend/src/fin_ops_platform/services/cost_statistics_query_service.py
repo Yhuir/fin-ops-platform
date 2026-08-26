@@ -315,7 +315,8 @@ class CostStatisticsQueryService:
                 "expense_type is required for expense_type export preview"
             )
         row_shape = "raw_bank" if view in {"time", "bank_tag"} else "raw_cost"
-        page = self._policy().export_page(
+        policy = self._policy(view=view)
+        page = policy.export_page(
             month=month,
             project_names=sorted(project_names),
             expense_types=sorted(expense_types),
@@ -434,6 +435,12 @@ class CostStatisticsQueryService:
                 expense_type=self._build_expense_type_label(expense_types),
             )
             extra = {}
+        allocation_quality = self._manual_allocation_quality_from_export_summary(
+            summary
+        )
+        extra.update(allocation_quality)
+        if allocation_quality["manual_allocation_pending_count"] > 0:
+            sheet_names.append("待分配说明")
         return self._preview_payload(
             view=view,
             file_name=file_name,
@@ -494,7 +501,7 @@ class CostStatisticsQueryService:
                 if (aggregate_by or "month") == "month"
                 else "project_year"
             )
-        policy = self._policy()
+        policy = self._policy(view=view)
         page = policy.export_page(
             month=export_month,
             project_names=sorted(project_names),
@@ -669,10 +676,16 @@ class CostStatisticsQueryService:
                 view=view,
                 expense_type=self._build_expense_type_label(expense_types),
             )
+        self._append_manual_allocation_notice(workbook, summary=summary)
         return filename, self._serialize_workbook(workbook)
 
-    def _policy(self) -> CostStatisticsPolicy:
-        return CostStatisticsPolicy(self._canonical_repository.load_snapshot())
+    def _policy(self, *, view: str) -> CostStatisticsPolicy:
+        snapshot_view = "bank_tag" if view == "bank_tag" else view
+        if snapshot_view in {"month", "expense_type"}:
+            snapshot_view = "project"
+        return CostStatisticsPolicy(
+            self._canonical_repository.load_snapshot(view=snapshot_view)
+        )
 
     @staticmethod
     def _normalize_page_scope(
@@ -860,6 +873,18 @@ class CostStatisticsQueryService:
     def _export_page_summary(page: dict[str, Any]) -> dict[str, Any]:
         summary = page.get("summary")
         return dict(summary) if isinstance(summary, dict) else {}
+
+    @staticmethod
+    def _manual_allocation_quality_from_export_summary(
+        summary: dict[str, Any],
+    ) -> dict[str, int]:
+        pending = int(summary.get("pending_manual_allocation_count") or 0)
+        stale = int(summary.get("stale_manual_allocation_count") or 0)
+        return {
+            "manual_allocation_pending_count": pending + stale,
+            "pending_manual_allocation_count": pending,
+            "stale_manual_allocation_count": stale,
+        }
 
     @staticmethod
     def _export_entry_from_row(
@@ -1139,6 +1164,27 @@ class CostStatisticsQueryService:
         for index in range(1, len(headers) + 1):
             sheet.column_dimensions[chr(64 + index)].width = 18
         return workbook
+
+    @classmethod
+    def _append_manual_allocation_notice(
+        cls,
+        workbook: Workbook,
+        *,
+        summary: dict[str, Any],
+    ) -> None:
+        quality = cls._manual_allocation_quality_from_export_summary(summary)
+        if quality["manual_allocation_pending_count"] == 0:
+            return
+        sheet = workbook.create_sheet("待分配说明")
+        sheet.append(["说明", "数量"])
+        sheet.append(
+            [
+                "OA 合计与流水净支出不一致且尚未形成有效人工分配，未计入本次配对归集统计。",
+                quality["manual_allocation_pending_count"],
+            ]
+        )
+        sheet.append(["待首次分配", quality["pending_manual_allocation_count"]])
+        sheet.append(["来源变化待重新分配", quality["stale_manual_allocation_count"]])
 
     def _project_detail_workbook(
         self,

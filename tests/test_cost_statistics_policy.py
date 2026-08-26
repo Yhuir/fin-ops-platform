@@ -77,7 +77,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                         self._oa("oa-4360", amount="4360.00", project_name="大理项目"),
                         self._oa("oa-5450", amount="5450.00", project_name="玉溪项目"),
                     ],
-                    bank_rows=[self._bank("bank-10000", "10000.00")],
+                    bank_rows=[self._bank("bank-9810", "9810.00")],
                 )
             ]
         )
@@ -85,8 +85,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(
             {(row["allocation_id"], row["amount"]) for row in policy.serialized_cost_rows},
             {
-                ("bank:bank-10000:oa:oa-4360", "4444.44"),
-                ("bank:bank-10000:oa:oa-5450", "5555.56"),
+                ("bank:bank-9810:oa:oa-4360", "4360.00"),
+                ("bank:bank-9810:oa:oa-5450", "5450.00"),
             },
         )
 
@@ -95,9 +95,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             [
                 self._group(
                     oa_rows=[
-                        self._oa("oa-1", amount="100.00", project_name="项目A"),
-                        self._oa("oa-2", amount="200.00", project_name="项目B"),
-                        self._oa("oa-3", amount="300.00", project_name="项目C"),
+                        self._oa("oa-1", amount="90.00", project_name="项目A"),
+                        self._oa("oa-2", amount="180.00", project_name="项目B"),
+                        self._oa("oa-3", amount="270.00", project_name="项目C"),
                     ],
                     bank_rows=[
                         self._bank("bank-1", "250.00", account_no="1111", account_label="建行 1111"),
@@ -133,10 +133,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             Decimal("540.00"),
         )
 
-    def test_mismatched_oa_total_scales_item_cost_by_net_cost_over_oa_total(self) -> None:
-        policy = self._policy(
-            [
-                self._group(
+    def test_mismatched_oa_total_waits_for_manual_allocation_without_scaling(self) -> None:
+        group = self._group(
                     oa_rows=[
                         self._oa(
                             "oa-exp-1",
@@ -159,13 +157,112 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                         ),
                     ],
                 )
-            ]
+        policy = self._policy([group])
+
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(policy.allocation_quality["pending_manual_allocation_count"], 1)
+        self.assertEqual(policy.allocation_quality["stale_manual_allocation_count"], 0)
+        self.assertEqual(policy.manual_allocation_tasks[0]["status"], "pending")
+        self.assertEqual(policy.manual_allocation_tasks[0]["net_cash_cost"], "1015.00")
+        self.assertEqual(
+            [unit["unit_id"] for unit in policy.manual_allocation_tasks[0]["units"]],
+            ["oa:oa-exp-1:item:lodging", "oa:oa-exp-1:item:other"],
+        )
+
+    def test_valid_manual_allocation_drives_mismatched_cost_rows(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa(
+                    "oa-exp-1",
+                    apply_type="日常报销",
+                    amount="1200.00",
+                    expense_items=[
+                        self._item("lodging", "大理项目", "住宿费", "710.00"),
+                        self._item("other", "大理项目", "其他", "490.00"),
+                    ],
+                )
+            ],
+            bank_rows=[self._bank("bank-out", "1015.00")],
+        )
+        pending = self._policy([group]).manual_allocation_tasks[0]
+        policy = self._policy(
+            [group],
+            manual_allocations={
+                "case-1": {
+                    "source_fingerprint": pending["source_fingerprint"],
+                    "version": 1,
+                    "allocations": [
+                        {"unit_id": "oa:oa-exp-1:item:lodging", "amount": "1000.00"},
+                        {"unit_id": "oa:oa-exp-1:item:other", "amount": "15.00"},
+                    ],
+                }
+            },
         )
 
         self.assertEqual(
             {(row["expense_type"], row["amount"]) for row in policy.serialized_cost_rows},
-            {("住宿费", "600.54"), ("其他", "414.46")},
+            {("住宿费", "1000.00"), ("其他", "15.00")},
         )
+        self.assertEqual(policy.manual_allocation_tasks[0]["status"], "allocated")
+
+    def test_manual_allocation_matrix_closes_each_bank_and_unit_to_the_cent(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa("oa-a", amount="300.00", project_name="项目A"),
+                self._oa("oa-b", amount="300.00", project_name="项目B"),
+            ],
+            bank_rows=[
+                self._bank("bank-1", "33.33"),
+                self._bank("bank-2", "66.67"),
+            ],
+        )
+        pending = self._policy([group]).manual_allocation_tasks[0]
+        policy = self._policy(
+            [group],
+            manual_allocations={
+                "case-1": {
+                    "source_fingerprint": pending["source_fingerprint"],
+                    "version": 1,
+                    "allocations": [
+                        {"unit_id": "oa:oa-a", "amount": "50.01"},
+                        {"unit_id": "oa:oa-b", "amount": "49.99"},
+                    ],
+                }
+            },
+        )
+
+        by_bank: dict[str, Decimal] = {}
+        by_oa: dict[str, Decimal] = {}
+        for row in policy.serialized_cost_rows:
+            by_bank[row["transaction_id"]] = by_bank.get(row["transaction_id"], Decimal("0")) + Decimal(row["amount"])
+            by_oa[row["oa_id"]] = by_oa.get(row["oa_id"], Decimal("0")) + Decimal(row["amount"])
+        self.assertEqual(by_bank, {"bank-1": Decimal("33.33"), "bank-2": Decimal("66.67")})
+        self.assertEqual(by_oa, {"oa-a": Decimal("50.01"), "oa-b": Decimal("49.99")})
+
+    def test_changed_relation_source_marks_manual_allocation_stale(self) -> None:
+        group = self._group(
+            oa_rows=[self._oa("oa-a", amount="120.00")],
+            bank_rows=[self._bank("bank-1", "100.00")],
+        )
+        pending = self._policy([group]).manual_allocation_tasks[0]
+        changed = self._group(
+            oa_rows=[self._oa("oa-a", amount="120.00")],
+            bank_rows=[self._bank("bank-1", "90.00")],
+        )
+        policy = self._policy(
+            [changed],
+            manual_allocations={
+                "case-1": {
+                    "source_fingerprint": pending["source_fingerprint"],
+                    "version": 1,
+                    "allocations": [{"unit_id": "oa:oa-a", "amount": "100.00"}],
+                }
+            },
+        )
+
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(policy.manual_allocation_tasks[0]["status"], "stale")
+        self.assertEqual(policy.allocation_quality["stale_manual_allocation_count"], 1)
 
     def test_any_ongoing_oa_excludes_entire_relation(self) -> None:
         policy = self._policy(
@@ -418,10 +515,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 ]
             ),
         )
-        self.assertEqual(
-            {(row["transaction_id"], row["amount"]) for row in policy.serialized_cost_rows},
-            {("paired", "99.00")},
-        )
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(policy.allocation_quality["pending_manual_allocation_count"], 1)
         self.assertEqual([row["code"] for row in policy.no_oa_tag_candidates()], ["fee"])
 
     def test_any_active_oa_relation_protects_bank_row_from_no_oa_even_without_allocation_group(self) -> None:
@@ -545,6 +640,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         bank_rows: list[dict[str, object]] | None = None,
         oa_related_bank_ids: list[str] | None = None,
         settings: dict[str, object] | None = None,
+        manual_allocations: dict[str, dict[str, object]] | None = None,
     ) -> CostStatisticsPolicy:
         snapshot_bank_rows = list(bank_rows or [])
         if bank_rows is None:
@@ -562,6 +658,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 "oa_related_bank_ids": list(oa_related_bank_ids or []),
                 "active_relation_count": len(groups),
                 "available_years": ["2026"],
+                "manual_allocations": dict(manual_allocations or {}),
             },
         )
 
@@ -624,6 +721,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
     ) -> dict[str, object]:
         return {
             "group_id": group_id,
+            "relation_version": 1,
             "declared_oa_ids": list(
                 declared_oa_ids
                 if declared_oa_ids is not None

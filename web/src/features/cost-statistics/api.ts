@@ -8,12 +8,15 @@ import type {
   CostStatisticsExplorerPage,
   CostStatisticsExplorerPageRequest,
   CostStatisticsNoOaRules,
+  CostStatisticsManualAllocationPage,
+  CostStatisticsManualAllocationTask,
   CostStatisticsTimeTagRules,
   CostStatisticsTagRuleTag,
   CostStatisticsView,
   CostExplorerEntryRow,
   CostEntryDetail,
   SaveCostStatisticsNoOaRulesRequest,
+  SaveCostStatisticsManualAllocationRequest,
   SaveCostStatisticsTimeTagRulesRequest,
 } from "./types";
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
@@ -122,7 +125,42 @@ type ApiCostStatisticsExplorerPage = {
   allocation_quality?: {
     excluded_allocation_count: number;
     excluded_by_reason?: Array<{ reason: string; count: number }> | null;
+    pending_manual_allocation_count?: number | null;
+    stale_manual_allocation_count?: number | null;
   } | null;
+};
+
+type ApiCostStatisticsManualAllocationTask = {
+  relation_case_id: string;
+  relation_version: number;
+  source_fingerprint: string;
+  status: "pending" | "stale" | "allocated";
+  oa_allocation_total: string;
+  bank_outflow_total: string;
+  paid_wrong_refund_total: string;
+  net_cash_cost: string;
+  difference: string;
+  units: Array<{
+    unit_id: string;
+    oa_id: string;
+    expense_item_id: string;
+    project_id: string;
+    project_name: string;
+    expense_type: string;
+    expense_content: string;
+    oa_original_amount: string;
+  }>;
+  allocations: Array<{ unit_id: string; amount: string }>;
+  version: number;
+  updated_by: string;
+  updated_at: string;
+  can_save: boolean;
+};
+
+type ApiCostStatisticsManualAllocationPage = {
+  items: ApiCostStatisticsManualAllocationTask[];
+  row_count: number;
+  next_cursor?: string | null;
 };
 
 type ApiCostBankTransactionDetail = {
@@ -345,6 +383,40 @@ function mapNoOaRules(payload: ApiCostStatisticsNoOaRules): CostStatisticsNoOaRu
   };
 }
 
+function mapManualAllocationTask(
+  task: ApiCostStatisticsManualAllocationTask,
+): CostStatisticsManualAllocationTask {
+  return {
+    relationCaseId: task.relation_case_id,
+    relationVersion: task.relation_version,
+    sourceFingerprint: task.source_fingerprint,
+    status: task.status,
+    oaAllocationTotal: task.oa_allocation_total,
+    bankOutflowTotal: task.bank_outflow_total,
+    paidWrongRefundTotal: task.paid_wrong_refund_total,
+    netCashCost: task.net_cash_cost,
+    difference: task.difference,
+    units: task.units.map((unit) => ({
+      unitId: unit.unit_id,
+      oaId: unit.oa_id,
+      expenseItemId: unit.expense_item_id,
+      projectId: unit.project_id,
+      projectName: unit.project_name,
+      expenseType: unit.expense_type,
+      expenseContent: unit.expense_content,
+      oaOriginalAmount: unit.oa_original_amount,
+    })),
+    allocations: task.allocations.map((line) => ({
+      unitId: line.unit_id,
+      amount: line.amount,
+    })),
+    version: task.version,
+    updatedBy: task.updated_by,
+    updatedAt: task.updated_at,
+    canSave: task.can_save,
+  };
+}
+
 async function requestJson<T>(url: string, init: RequestInit = {}) {
   return apiRequestJson<T>(url, init);
 }
@@ -446,10 +518,50 @@ export async function fetchCostStatisticsExplorerPage(
         reason: item.reason,
         count: item.count,
       })),
+      pendingManualAllocationCount: optionalCount(payload.allocation_quality.pending_manual_allocation_count) ?? 0,
+      staleManualAllocationCount: optionalCount(payload.allocation_quality.stale_manual_allocation_count) ?? 0,
     } : undefined,
     rowCount: payload.row_count,
     nextCursor: optionalString(payload.next_cursor),
   };
+}
+
+export async function fetchCostStatisticsManualAllocations(
+  signal?: AbortSignal,
+  cursor?: string,
+): Promise<CostStatisticsManualAllocationPage> {
+  const query = new URLSearchParams({ page_size: "100" });
+  if (cursor) query.set("cursor", cursor);
+  const payload = await requestJson<ApiCostStatisticsManualAllocationPage>(
+    `/api/cost-statistics/manual-allocations?${query.toString()}`,
+    { method: "GET", signal },
+  );
+  return {
+    items: payload.items.map(mapManualAllocationTask),
+    rowCount: payload.row_count,
+    nextCursor: optionalString(payload.next_cursor),
+  };
+}
+
+export async function saveCostStatisticsManualAllocation(
+  request: SaveCostStatisticsManualAllocationRequest,
+): Promise<CostStatisticsManualAllocationTask> {
+  const payload = await requestJson<ApiCostStatisticsManualAllocationTask>(
+    `/api/cost-statistics/manual-allocations/${encodeURIComponent(request.relationCaseId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expected_version: request.expectedVersion,
+        source_fingerprint: request.sourceFingerprint,
+        allocations: request.allocations.map((line) => ({
+          unit_id: line.unitId,
+          amount: line.amount,
+        })),
+      }),
+    },
+  );
+  return mapManualAllocationTask(payload);
 }
 
 export async function fetchCostStatisticsTimeTagRules(signal?: AbortSignal): Promise<CostStatisticsTimeTagRules> {

@@ -13,6 +13,10 @@ from fin_ops_platform.services.cost_statistics_query_service import (
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     CostStatisticsIntegrityError,
 )
+from fin_ops_platform.services.cost_statistics_manual_allocation_service import (
+    CostStatisticsManualAllocationConflictError,
+    CostStatisticsManualAllocationValidationError,
+)
 from fin_ops_platform.services.cost_statistics_policy import (
     CostStatisticsAllocationConflictError,
 )
@@ -20,6 +24,18 @@ from fin_ops_platform.services.cost_statistics_policy import (
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
 WriteSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
+
+
+def _header_value(headers: dict[str, str] | None, name: str) -> str:
+    target = name.casefold()
+    return next(
+        (
+            str(value).strip()
+            for key, value in dict(headers or {}).items()
+            if str(key).casefold() == target and str(value).strip()
+        ),
+        "",
+    )
 
 
 class CostStatisticsApiRoutes:
@@ -35,6 +51,7 @@ class CostStatisticsApiRoutes:
         now_provider: Callable[[], datetime] | None = None,
         optional_bool_parser: Callable[[str | None], bool] | None = None,
         app_settings_service: Any | None = None,
+        manual_allocation_service: Any | None = None,
         resolve_read_session: ReadSessionResolver | None = None,
         resolve_write_session: WriteSessionResolver | None = None,
         load_json_body: JsonBodyLoader | None = None,
@@ -48,6 +65,7 @@ class CostStatisticsApiRoutes:
         self._now_provider = now_provider or datetime.now
         self._optional_bool_parser = optional_bool_parser or _parse_optional_bool_default_true
         self._app_settings_service = app_settings_service
+        self._manual_allocation_service = manual_allocation_service
         self._resolve_read_session = resolve_read_session
         self._resolve_write_session = resolve_write_session
         self._load_json_body = load_json_body
@@ -68,6 +86,19 @@ class CostStatisticsApiRoutes:
             return self.handle_no_oa_rules(headers)
         if method == "PUT" and route_path == "/api/cost-statistics/no-oa-rules":
             return self.handle_update_no_oa_rules(body, headers)
+        if method == "GET" and route_path == "/api/cost-statistics/manual-allocations":
+            return self.handle_manual_allocations(
+                cursor=query.get("cursor", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+                headers=headers,
+            )
+        if method == "PUT" and route_path.startswith("/api/cost-statistics/manual-allocations/"):
+            relation_case_id = route_path.rsplit("/", 1)[-1]
+            return self.handle_update_manual_allocation(
+                relation_case_id,
+                body=body,
+                headers=headers,
+            )
         if method == "GET" and route_path == "/api/cost-statistics/explorer":
             return self.handle_explorer(
                 scope=query.get("scope", [None])[0],
@@ -129,6 +160,80 @@ class CostStatisticsApiRoutes:
                 query.get("scope", [None])[0],
             )
         return None
+
+    def handle_manual_allocations(
+        self,
+        *,
+        cursor: str | None,
+        page_size: str | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        session, error = self._read_session(headers)
+        if error is not None:
+            return error
+        try:
+            payload = self._manual_allocation_service_required().list_tasks(
+                cursor=cursor,
+                page_size=int(page_size or 50),
+                can_save=bool(session is None or session.can_mutate_data),
+            )
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
+            return self._integrity_error_response(exc)
+        except (TypeError, ValueError) as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_cost_statistics_manual_allocation_query", "message": str(exc)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            payload,
+            {"Cache-Control": "private, no-cache", "Vary": "Authorization, Cookie"},
+        )
+
+    def handle_update_manual_allocation(
+        self,
+        relation_case_id: str,
+        *,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+    ) -> Any:
+        session, error = self._write_session(headers)
+        if error is not None:
+            return error
+        payload, body_error = self._load_body(body)
+        if body_error is not None:
+            return body_error
+        identity = session.identity if session is not None else None
+        actor = {
+            "id": actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "cost_statistics"),
+            "name": str(getattr(identity, "display_name", "") or getattr(identity, "nickname", "") or ""),
+            "account": str(getattr(identity, "username", "") or ""),
+        }
+        try:
+            result = self._manual_allocation_service_required().save(
+                relation_case_id,
+                payload,
+                actor=actor,
+                request_id=_header_value(headers, "x-request-id"),
+            )
+        except CostStatisticsManualAllocationValidationError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except CostStatisticsManualAllocationConflictError as exc:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": exc.error_code, "message": str(exc)},
+            )
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
+            return self._integrity_error_response(exc)
+        return self._json_response(HTTPStatus.OK, result)
+
+    def _manual_allocation_service_required(self) -> Any:
+        if self._manual_allocation_service is None:
+            raise RuntimeError("cost statistics manual allocation service is not configured")
+        return self._manual_allocation_service
 
     def handle_time_tag_rules(self, headers: dict[str, str] | None) -> Any:
         session, error = self._read_session(headers)

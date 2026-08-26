@@ -19467,17 +19467,40 @@ body.column-layout-dragging {
 }
 
 .cost-view-switcher {
-  display: inline-block;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--fp-space-3);
+}
+
+.cost-view-switcher-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fp-space-2);
+}
+
+.cost-view-switcher-label {
+  color: var(--fp-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.cost-view-switcher-divider {
+  width: 1px;
+  height: 28px;
+  background: var(--fp-border);
 }
 
 .cost-view-tabs {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 4px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
-  background: var(--fp-surface-muted);
+  padding: 2px;
+  border: 1px solid var(--fp-border-subtle);
+  border-radius: var(--fp-radius-sm);
+  background: var(--fp-surface);
   flex-wrap: wrap;
 }
 
@@ -19513,6 +19536,148 @@ body.column-layout-dragging {
   background: var(--fp-accent);
   color: #ffffff;
   box-shadow: 0 1px 2px rgba(29, 78, 216, 0.18);
+}
+
+.cost-manual-allocation-popover {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(720px, calc(100dvh - 96px));
+  border: 1px solid var(--fp-border);
+  border-radius: var(--fp-radius-md);
+  background: var(--fp-surface);
+  box-shadow: var(--fp-shadow-lg);
+  overflow: auto;
+}
+
+.cost-manual-allocation-dialog {
+  display: grid;
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-4);
+}
+
+.cost-manual-allocation-heading,
+.cost-manual-allocation-footer,
+.cost-manual-allocation-unit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fp-space-3);
+}
+
+.cost-manual-allocation-heading strong {
+  color: var(--fp-text);
+  font-size: 14px;
+}
+
+.cost-manual-allocation-heading p,
+.cost-manual-allocation-state,
+.cost-manual-allocation-error {
+  margin: 3px 0 0;
+  color: var(--fp-text-muted);
+  font-size: 12px;
+}
+
+.cost-manual-allocation-error {
+  color: var(--fp-danger);
+}
+
+.cost-manual-allocation-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--fp-space-2);
+  padding: var(--fp-space-3) 0;
+  border-block: 1px solid var(--fp-border-subtle);
+}
+
+.cost-manual-allocation-facts span {
+  display: grid;
+  gap: 2px;
+  color: var(--fp-text-muted);
+  font-size: 11px;
+}
+
+.cost-manual-allocation-facts strong,
+.cost-manual-allocation-footer span {
+  color: var(--fp-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-manual-allocation-units {
+  display: grid;
+  gap: 0;
+  border-block: 1px solid var(--fp-border-subtle);
+}
+
+.cost-manual-allocation-unit {
+  min-height: 58px;
+  padding: var(--fp-space-2) 0;
+  border-bottom: 1px solid var(--fp-border-subtle);
+}
+
+.cost-manual-allocation-unit:last-child {
+  border-bottom: 0;
+}
+
+.cost-manual-allocation-unit > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.cost-manual-allocation-unit strong,
+.cost-manual-allocation-unit small {
+  overflow-wrap: anywhere;
+}
+
+.cost-manual-allocation-unit small {
+  color: var(--fp-text-muted);
+  font-size: 11px;
+}
+
+.cost-manual-allocation-unit [data-slot="base"] {
+  width: 150px;
+  flex: 0 0 150px;
+}
+
+.cost-manual-allocation-footer {
+  position: sticky;
+  bottom: calc(var(--fp-space-4) * -1);
+  padding-block: var(--fp-space-2);
+  background: var(--fp-surface);
+}
+
+.cost-manual-allocation-footer span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cost-manual-allocation-footer span.is-balanced {
+  color: var(--fp-success);
+}
+
+@media (max-width: 1024px) {
+  .cost-manual-allocation-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cost-manual-allocation-unit {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .cost-manual-allocation-unit {
+    flex-direction: column;
+  }
+
+  .cost-manual-allocation-unit [data-slot="base"] {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .cost-manual-allocation-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .cost-view-tab:focus-visible {
@@ -21039,6 +21204,21 @@ body.column-layout-dragging {
   .cost-analysis-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .cost-view-switcher {
+    width: 100%;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .cost-view-switcher-group {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cost-view-switcher-divider {
+    display: none;
   }
 
   .cost-view-scope-heading {

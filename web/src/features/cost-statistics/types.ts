@@ -104,9 +104,53 @@ export type CostStatisticsExplorerPage = {
   allocationQuality?: {
     excludedAllocationCount: number;
     excludedByReason: Array<{ reason: string; count: number }>;
+    pendingManualAllocationCount: number;
+    staleManualAllocationCount: number;
   };
   rowCount: number;
   nextCursor?: string;
+};
+
+export type CostStatisticsManualAllocationUnit = {
+  unitId: string;
+  oaId: string;
+  expenseItemId: string;
+  projectId: string;
+  projectName: string;
+  expenseType: string;
+  expenseContent: string;
+  oaOriginalAmount: string;
+};
+
+export type CostStatisticsManualAllocationTask = {
+  relationCaseId: string;
+  relationVersion: number;
+  sourceFingerprint: string;
+  status: "pending" | "stale" | "allocated";
+  oaAllocationTotal: string;
+  bankOutflowTotal: string;
+  paidWrongRefundTotal: string;
+  netCashCost: string;
+  difference: string;
+  units: CostStatisticsManualAllocationUnit[];
+  allocations: Array<{ unitId: string; amount: string }>;
+  version: number;
+  updatedBy: string;
+  updatedAt: string;
+  canSave: boolean;
+};
+
+export type CostStatisticsManualAllocationPage = {
+  items: CostStatisticsManualAllocationTask[];
+  rowCount: number;
+  nextCursor?: string;
+};
+
+export type SaveCostStatisticsManualAllocationRequest = {
+  relationCaseId: string;
+  expectedVersion: number;
+  sourceFingerprint: string;
+  allocations: Array<{ unitId: string; amount: string }>;
 };
 
 export type CostStatisticsExplorerPageRequest = {

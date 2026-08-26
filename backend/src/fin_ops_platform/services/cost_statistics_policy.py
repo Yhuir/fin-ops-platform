@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from functools import cached_property
@@ -46,6 +48,11 @@ class CostStatisticsPolicy:
             for group in list(snapshot.get("cost_groups") or [])
             if isinstance(group, dict)
         ]
+        self._manual_allocations = {
+            _clean_text(case_id): dict(record)
+            for case_id, record in dict(snapshot.get("manual_allocations") or {}).items()
+            if _clean_text(case_id) and isinstance(record, dict)
+        }
         self._active_relation_count = int(snapshot.get("active_relation_count") or 0)
         self._oa_related_bank_ids = {
             _clean_text(value)
@@ -97,14 +104,27 @@ class CostStatisticsPolicy:
         return dict(self._allocation_result[1])
 
     @cached_property
+    def manual_allocation_tasks(self) -> list[dict[str, Any]]:
+        return [dict(task) for task in self._allocation_result[2]]
+
+    @cached_property
+    def pending_manual_allocation_count(self) -> int:
+        return int(self.allocation_quality.get("pending_manual_allocation_count") or 0)
+
+    @cached_property
+    def stale_manual_allocation_count(self) -> int:
+        return int(self.allocation_quality.get("stale_manual_allocation_count") or 0)
+
+    @cached_property
     def _allocation_result(
         self,
-    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
         return _cost_entries(
             self._groups,
             all_bank_rows=self._bank_rows,
             oa_related_bank_ids=self._oa_related_bank_ids,
             settings=self._settings,
+            manual_allocations=self._manual_allocations,
         )
 
     @cached_property
@@ -316,6 +336,13 @@ class CostStatisticsPolicy:
                     ),
                 }
             )
+            if row_shape != "raw_bank":
+                summary.update(
+                    {
+                        "pending_manual_allocation_count": self.pending_manual_allocation_count,
+                        "stale_manual_allocation_count": self.stale_manual_allocation_count,
+                    }
+                )
         page_rows = result_rows[offset : offset + page_size]
         return {
             "summary": summary,
@@ -527,8 +554,10 @@ def _cost_entries(
     all_bank_rows: list[dict[str, Any]],
     oa_related_bank_ids: set[str],
     settings: dict[str, Any],
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    manual_allocations: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
     entries: list[dict[str, Any]] = []
+    manual_tasks: list[dict[str, Any]] = []
     owners: dict[str, str] = {}
     event_owners: dict[str, str] = {}
     protected_bank_ids = set(oa_related_bank_ids)
@@ -635,6 +664,11 @@ def _cost_entries(
             start=ZERO,
         ).quantize(MONEY_QUANTUM)
         net_cash_cost = (bank_outflow_total - refund_total).quantize(MONEY_QUANTUM)
+        if net_cash_cost < ZERO:
+            excluded_by_reason["refund_exceeds_outflow"] = (
+                excluded_by_reason.get("refund_exceeds_outflow", 0) + 1
+            )
+            continue
         difference = (net_cash_cost - oa_total).quantize(MONEY_QUANTUM)
         evidence = [_payment_evidence(row) for row in [*outflows, *refunds]]
         reconciliation = {
@@ -670,15 +704,51 @@ def _cost_entries(
             (_allocation_id(context), context["allocation_amount"])
             for context in contexts
         ]
-        for bank_row, net_outflow_amount in zip(
+        manual_amounts: list[Decimal] | None = None
+        if difference != ZERO:
+            task = _manual_allocation_task(
+                group=group,
+                contexts=contexts,
+                outflows=outflows,
+                refunds=refunds,
+                reconciliation=reconciliation,
+                manual_record=manual_allocations.get(relation_case_id),
+            )
+            manual_tasks.append(task)
+            if task["status"] != "allocated":
+                reason = (
+                    "stale_manual_allocation"
+                    if task["status"] == "stale"
+                    else "pending_manual_allocation"
+                )
+                excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
+                continue
+            manual_amounts = [
+                _required_nonnegative_money(line.get("amount"))
+                for line in list(task.get("allocations") or [])
+                if isinstance(line, dict)
+            ]
+            if len(manual_amounts) != len(contexts):
+                raise CostStatisticsAllocationConflictError(
+                    f"manual allocation {relation_case_id} has an incomplete unit set"
+                )
+
+        if manual_amounts is not None:
+            allocation_matrix = _allocation_matrix(
+                net_outflow_amounts,
+                manual_amounts,
+            )
+        else:
+            allocation_matrix = [
+                _proportional_amounts(net_outflow_amount, oa_weights)
+                for net_outflow_amount in net_outflow_amounts
+            ]
+        for bank_row, net_outflow_amount, allocated_amounts in zip(
             outflows,
             net_outflow_amounts,
+            allocation_matrix,
             strict=True,
         ):
-            allocated_amounts = _proportional_amounts(
-                net_outflow_amount,
-                oa_weights,
-            )
             included_event_amount = sum(
                 allocated_amounts,
                 start=ZERO,
@@ -744,6 +814,8 @@ def _cost_entries(
                     project_id=project["id"],
                 )
             )
+    pending_count = sum(1 for task in manual_tasks if task.get("status") == "pending")
+    stale_count = sum(1 for task in manual_tasks if task.get("status") == "stale")
     return (
         sorted(entries, key=_row_sort_key, reverse=True),
         {
@@ -752,7 +824,10 @@ def _cost_entries(
                 {"reason": reason, "count": count}
                 for reason, count in sorted(excluded_by_reason.items())
             ],
+            "pending_manual_allocation_count": pending_count,
+            "stale_manual_allocation_count": stale_count,
         },
+        sorted(manual_tasks, key=lambda task: str(task.get("relation_case_id") or "")),
     )
 
 
@@ -849,6 +924,226 @@ def _proportional_amounts(
     for index in order[:remaining_cents]:
         rounded[index] += MONEY_QUANTUM
     return [(amount * sign).quantize(MONEY_QUANTUM) for amount in rounded]
+
+
+def _allocation_matrix(
+    row_totals: list[Decimal],
+    column_totals: list[Decimal],
+) -> list[list[Decimal]]:
+    """Close bank-event rows and manually entered OA-unit columns to the cent."""
+    if not row_totals:
+        return []
+    if not column_totals:
+        return [[] for _row in row_totals]
+    if any(amount < ZERO for amount in [*row_totals, *column_totals]):
+        raise CostStatisticsAllocationConflictError(
+            "cost allocation matrix cannot contain negative amounts"
+        )
+    if sum(row_totals, start=ZERO) != sum(column_totals, start=ZERO):
+        raise CostStatisticsAllocationConflictError(
+            "cost allocation matrix row and column totals do not match"
+        )
+    remaining_columns = [amount.quantize(MONEY_QUANTUM) for amount in column_totals]
+    matrix: list[list[Decimal]] = []
+    for row_index, row_total in enumerate(row_totals):
+        normalized_row_total = row_total.quantize(MONEY_QUANTUM)
+        if row_index == len(row_totals) - 1:
+            row = list(remaining_columns)
+        else:
+            row = _bounded_proportional_amounts(
+                normalized_row_total,
+                remaining_columns,
+            )
+        if sum(row, start=ZERO) != normalized_row_total:
+            raise CostStatisticsAllocationConflictError(
+                "cost allocation matrix row did not close"
+            )
+        remaining_columns = [
+            (remaining - allocated).quantize(MONEY_QUANTUM)
+            for remaining, allocated in zip(remaining_columns, row, strict=True)
+        ]
+        if any(amount < ZERO for amount in remaining_columns):
+            raise CostStatisticsAllocationConflictError(
+                "cost allocation matrix exceeded a manual unit total"
+            )
+        matrix.append(row)
+    if any(amount != ZERO for amount in remaining_columns):
+        raise CostStatisticsAllocationConflictError(
+            "cost allocation matrix columns did not close"
+        )
+    return matrix
+
+
+def _bounded_proportional_amounts(
+    total: Decimal,
+    capacities: list[Decimal],
+) -> list[Decimal]:
+    capacity_total = sum(capacities, start=ZERO).quantize(MONEY_QUANTUM)
+    if total < ZERO or total > capacity_total:
+        raise CostStatisticsAllocationConflictError(
+            "cost allocation row is outside the remaining column capacity"
+        )
+    if capacity_total == ZERO:
+        return [ZERO for _capacity in capacities]
+    raw = [total * capacity / capacity_total for capacity in capacities]
+    allocated = [
+        min(capacity, amount.quantize(MONEY_QUANTUM, rounding=ROUND_DOWN))
+        for capacity, amount in zip(capacities, raw, strict=True)
+    ]
+    cents_left = int(
+        ((total - sum(allocated, start=ZERO)) / MONEY_QUANTUM).to_integral_value()
+    )
+    order = sorted(
+        range(len(capacities)),
+        key=lambda index: (-(raw[index] - allocated[index]), index),
+    )
+    while cents_left > 0:
+        progressed = False
+        for index in order:
+            if allocated[index] + MONEY_QUANTUM <= capacities[index]:
+                allocated[index] += MONEY_QUANTUM
+                cents_left -= 1
+                progressed = True
+                if cents_left == 0:
+                    break
+        if not progressed:
+            raise CostStatisticsAllocationConflictError(
+                "cost allocation row could not be distributed within capacity"
+            )
+    return [amount.quantize(MONEY_QUANTUM) for amount in allocated]
+
+
+def _manual_allocation_task(
+    *,
+    group: dict[str, Any],
+    contexts: list[dict[str, Any]],
+    outflows: list[dict[str, Any]],
+    refunds: list[dict[str, Any]],
+    reconciliation: dict[str, Any],
+    manual_record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    relation_case_id = _clean_text(group.get("group_id"))
+    relation_version = int(group.get("relation_version") or 1)
+    units = [
+        {
+            "unit_id": _allocation_id(context),
+            "oa_id": context["oa_id"],
+            "expense_item_id": context["expense_item_id"],
+            "project_id": context["project_id"],
+            "project_name": context["project_name"],
+            "expense_type": context["expense_type"],
+            "expense_content": context["expense_content"],
+            "oa_original_amount": _money(context["allocation_amount"]),
+        }
+        for context in contexts
+    ]
+    source_payload = {
+        "relation_case_id": relation_case_id,
+        "relation_version": relation_version,
+        "members": sorted(
+            zip(
+                [str(value) for value in list(group.get("row_types") or [])],
+                [str(value) for value in list(group.get("row_ids") or [])],
+                strict=False,
+            )
+        ),
+        "units": sorted(units, key=lambda unit: str(unit["unit_id"])),
+        "outflows": sorted(
+            (
+                _bank_transaction_id(row),
+                _money(_outflow_amount(row) or ZERO),
+                _clean_text(row.get("account_no")),
+                _clean_text(row.get("account_name")),
+                _clean_text(row.get("payment_account_label")),
+                _clean_text(row.get("bank_tag_code")),
+            )
+            for row in outflows
+        ),
+        "refunds": sorted(
+            (
+                _bank_transaction_id(row),
+                _money(_inflow_amount(row) or ZERO),
+                _clean_text(row.get("account_no")),
+                _clean_text(row.get("account_name")),
+                _clean_text(row.get("payment_account_label")),
+                _clean_text(row.get("bank_tag_code")),
+            )
+            for row in refunds
+        ),
+        "reconciliation": reconciliation,
+    }
+    source_fingerprint = hashlib.sha256(
+        json.dumps(
+            source_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    task: dict[str, Any] = {
+        "relation_case_id": relation_case_id,
+        "relation_version": relation_version,
+        "source_fingerprint": source_fingerprint,
+        "status": "pending",
+        "oa_allocation_total": reconciliation["oa_allocation_total"],
+        "bank_outflow_total": reconciliation["bank_outflow_total"],
+        "paid_wrong_refund_total": reconciliation["paid_wrong_refund_total"],
+        "net_cash_cost": reconciliation["net_cash_cost"],
+        "difference": reconciliation["difference"],
+        "units": units,
+        "allocations": [],
+        "version": 0,
+        "updated_by": "",
+        "updated_at": "",
+    }
+    if manual_record is None:
+        return task
+    task.update(
+        {
+            "version": int(manual_record.get("version") or 0),
+            "updated_by": _clean_text(manual_record.get("updated_by")),
+            "updated_at": _clean_text(manual_record.get("updated_at")),
+        }
+    )
+    if _clean_text(manual_record.get("source_fingerprint")) != source_fingerprint:
+        task["status"] = "stale"
+        return task
+    raw_allocations = [
+        dict(line)
+        for line in list(manual_record.get("allocations") or [])
+        if isinstance(line, dict)
+    ]
+    expected_unit_ids = [str(unit["unit_id"]) for unit in units]
+    allocations_by_unit = {
+        _clean_text(line.get("unit_id")): _required_nonnegative_money(line.get("amount"))
+        for line in raw_allocations
+        if _clean_text(line.get("unit_id"))
+    }
+    if set(allocations_by_unit) != set(expected_unit_ids):
+        raise CostStatisticsAllocationConflictError(
+            f"manual allocation {relation_case_id} does not match the current OA units"
+        )
+    net_cash_cost = _required_nonnegative_money(reconciliation["net_cash_cost"])
+    ordered_allocations = [
+        {"unit_id": unit_id, "amount": _money(allocations_by_unit[unit_id])}
+        for unit_id in expected_unit_ids
+    ]
+    if sum(allocations_by_unit.values(), start=ZERO) != net_cash_cost:
+        raise CostStatisticsAllocationConflictError(
+            f"manual allocation {relation_case_id} does not equal net cash cost"
+        )
+    task["status"] = "allocated"
+    task["allocations"] = ordered_allocations
+    return task
+
+
+def _required_nonnegative_money(value: Any) -> Decimal:
+    amount = _decimal(value)
+    if amount is None or amount < ZERO or amount != amount.quantize(MONEY_QUANTUM):
+        raise CostStatisticsAllocationConflictError(
+            "manual allocation amounts must be nonnegative two-decimal values"
+        )
+    return amount.quantize(MONEY_QUANTUM)
 
 
 def _paid_wrong_refund_tag_codes(settings: dict[str, Any]) -> set[str]:

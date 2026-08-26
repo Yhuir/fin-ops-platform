@@ -300,6 +300,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("txn_month >= %s and txn_month < %s", sql)
         self.assertNotIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("from app.oa_applications", sql)
+        self.assertNotIn("from app.cost_statistics_manual_allocations", sql)
 
     def test_scoped_cost_view_uses_bounded_seven_query_bank_date_snapshot(self) -> None:
         connection = _PopulatedCostConnection()

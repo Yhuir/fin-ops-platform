@@ -168,6 +168,7 @@ EXPECTED_MIGRATION_FILES = [
     "0154_migrate_etc_summary_anomaly_review.sql",
     "0155_revalidate_etc_summary_anomaly_review.sql",
     "0156_backfill_workbench_anomaly_reviewer_identity.sql",
+    "0157_cost_statistics_manual_allocations.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (
@@ -199,6 +200,7 @@ TEST_TABLES = (
     "app.matching_runs",
     "app.matching_results",
     "app.workbench_pair_relations",
+    "app.cost_statistics_manual_allocations",
     "app.workbench_pair_relation_history",
     "app.workbench_row_overrides",
     "app.workbench_exception_cases",
