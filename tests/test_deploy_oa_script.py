@@ -566,6 +566,11 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("--http-target-ms 1000", script)
         self.assertIn('--required-worker-instance "$required_worker_instance"', script)
         self.assertIn("candidate_only_worker_event_types", script)
+        self.assertIn(
+            "from fin_ops_platform.services.runtime_worker_registry import worker_registrations",
+            script,
+        )
+        self.assertNotIn("runtime_worker_manifest --event-types", script)
         self.assertIn('--allow-preflight-pending-event-type "$candidate_only_event_type"', script)
         self.assertIn("accepted_candidate_upgrade_backlog", script)
         self.assertIn("sleep 30", script)

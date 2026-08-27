@@ -941,10 +941,18 @@ required_worker_instances() {
 registered_worker_event_types() {
   local src="$1"
   PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
-    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --event-types \
-    | tr ' ' '\n' \
-    | sed '/^$/d' \
-    | sort -u
+    "$WORKER_PYTHON" - <<'PY'
+from fin_ops_platform.services.runtime_worker_registry import worker_registrations
+
+for event_type in sorted(
+    {
+        event_type
+        for registration in worker_registrations()
+        for event_type in registration.event_types
+    }
+):
+    print(event_type)
+PY
 }
 
 candidate_only_worker_event_types() {
