@@ -2554,7 +2554,7 @@ release_gate_checkpoint() {
       while IFS= read -r candidate_only_event_type; do
         [[ -n "$candidate_only_event_type" ]] \
           && closure_args+=(--allow-preflight-pending-event-type "$candidate_only_event_type")
-      done < <(candidate_only_worker_event_types "$src" "$verification_src")
+      done < <(candidate_only_worker_event_types "$verification_src" "$src")
     fi
     "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null
   ) || true
