@@ -60,6 +60,7 @@ class OaPendingPaymentSourceSnapshotResult:
     payment_status_count: int
     admission_count: int
     source_signatures: dict[str, str]
+    pending_admission_changed_scopes: tuple[str, ...] = ()
     relation_cleanup: tuple[dict[str, object], ...] = ()
     upserted_completed_count: int = 0
     removed_stale_completed_count: int = 0
@@ -287,6 +288,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 payment_status_count=0,
                 admission_count=len(desired_pending),
                 source_signatures={},
+                pending_admission_changed_scopes=tuple(sorted(changed_pending_scopes)),
                 upserted_completed_count=upserted_completed_count,
                 upserted_pending_count=len(changed_pending_ids.intersection(desired_pending)),
             )
@@ -601,6 +603,9 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 payment_status_count=len(new_statuses),
                 admission_count=len(new_admissions),
                 source_signatures=source_signatures,
+                pending_admission_changed_scopes=tuple(
+                    sorted(changed_admission_scopes, key=lambda value: (value == "all", value))
+                ),
                 relation_cleanup=tuple(cleanup_results),
             )
 
@@ -677,6 +682,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 payment_status_count=snapshot.payment_status_count,
                 admission_count=snapshot.admission_count,
                 source_signatures=snapshot.source_signatures,
+                pending_admission_changed_scopes=snapshot.pending_admission_changed_scopes,
                 relation_cleanup=snapshot.relation_cleanup,
                 upserted_completed_count=upserted_count,
                 removed_stale_completed_count=len(removed_stale_row_ids),

@@ -51,12 +51,12 @@
 | 状态 | 触发/合同 | 下一状态 |
 | --- | --- | --- |
 | `queued` | Settings mutation gate 校验 row IDs 为存在的 canonical completed OA 或 `in_progress + expense_claim` 后，登记 `oa.sync(operation=refresh_attachments)`；POST 返回 202/event id | `processing` |
-| `processing` | OA worker 只对 event 中 row IDs 强制下载/解析附件并定向提交；completed 子集复用统一 promotion 且 `ensure_matching=true`，`in_progress + expense_claim` 子集必须在同一 tenant 锁内证明同 ID/同 scope 的 pending owner 恰好一条，并保持零 promotion/matching/统一发票池写入 | `done`、`failed`、`dead_lettered` |
+| `processing` | OA worker 只对 event 中 row IDs 强制下载/解析附件并定向提交；completed 与 `in_progress + expense_claim` 都复用统一 promotion 且 `ensure_matching=true`。进行中子集必须先在同一 tenant 锁内证明同 ID/同 scope 的 pending owner恰好一条，再把正式发票关联到该 OA 的明确子付款项；任一步失败则整项任务失败重试 | `done`、`failed`、`dead_lettered` |
 | `done` | durable `runtime_result` 含逐 row 附件/发票计数、promotion summary 与 affected scopes；前端再以 exact row ID、原 form type、`completed+in_progress` 和 page size 2 回读，只在 `total=1` 且 row ID 唯一时更新行 | 终态 |
 | `failed` | 来源记录缺失、表单/状态不支持、exact 回读 0/多条、附件/OCR/promotion 或持久化失败 | durable retry 或 `dead_lettered`；返回真实错误，不读取旧投影或宽搜索 fallback 冒充成功 |
 | `dead_lettered` | bounded retry 已用尽 | 终态，需人工处理 |
 
-精确刷新不新增 worker/event type，不执行普通 all/month sync 的 stale deletion，也不允许 HTTP 进程持有 Mongo adapter、OCR 或 promoter。重复刷新必须保持 canonical 发票和来源边幂等；只有 completed 分支允许再次补发 matching reconciliation。正式导入保持 completed-only，不得因进行中附件已解析而提前开放。
+精确刷新不新增 worker/event type，不执行普通 all/month sync 的 stale deletion，也不允许 HTTP 进程持有 Mongo adapter、OCR 或 promoter。重复刷新必须保持 canonical 发票和来源边幂等；completed 与 `in_progress + expense_claim` 均允许补发 matching reconciliation。Settings 的“正式导入”操作仍保持 completed-only；进行中附件进入统一池只由 worker 的确定性解析与 promotion 完成，不开放人工导入入口。
 
 ## OA Applicant Credential 状态
 

@@ -44,6 +44,7 @@
 - `finops:app:view` 只定位唯一 OA menu。Runtime 验证唯一 menu、三个专用 role 和 exact 三绑定后，只替换三 role members；历史 non-dedicated binding cleanup 已退休，deployment 稳态只读验证 exact topology。
 - OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。它不 fan-out 页面 refresh；关联台及其它 direct 页面下一次 GET 读取已提交 facts。共享 `workbench_relation` 由其 owner 按独立消费者合同维护，不得恢复 page `workbench` runtime。
 - OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时可受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。受控创建由设置页 `OA附件发票晋级` 控制：默认 `link_existing_only` 只关联已有发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许创建缺失的统一发票池记录。
+- completed 与唯一的 `in_progress + expense_claim` 复用上述同一识别/promotion 边界；进行中发票必须带明确子付款项来源。普通同步只处理 OA owner 内容真实变化的 scope，精确刷新可为选中记录补发 matching reconciliation；进行中支付申请不扩展附件解析。
 - 目标 OA 申请人凭据只允许 admin 维护，API / settings response 不得回显 password；创建草稿时用目标申请人账号登录 OA 并只使用返回 token。
 - ETC 与进项发票 OA 草稿只创建或本地撤销绑定，不自动删除或撤销真实 OA 草稿/流程。
 - 真实 OA 登录、RSA 加密、OA 草稿页面、生产 Mongo 字段变体和 OA 菜单角色同步必须通过 staging/生产前 smoke 补证，本地测试只能保护 contract 与失败处理。

@@ -73,6 +73,7 @@ OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票，并�
 - `filterOptions` 随同一 rows snapshot 由后端 set-based 计算，不能前端自造枚举。
 - 关联关系必须来自关联台 Workbench active relation；同一 relation 下出现多条 OA、支出流水或进项发票时，OA 待付款只展示一条核对行，金额为各自合计，并通过明细展开所有 OA、流水或发票。
 - completed 与 in-progress 使用同一套 OA、支付状态、流水、发票四分组表格，并只认 `app.workbench_pair_relations.status='active'`。历史 OA pending relation/claim 不参与查询、占用或 promotion；未正式化 decision 不能自动写回 OA。
+- 唯一的 `in_progress + 日常报销` 必须和 completed 日常报销复用同一套附件逐页解析、正式发票 promotion 与子付款项归属链路；多页 PDF 的每张正式发票都按强身份进入或关联统一发票池，并保留明确 `source_expense_item_id`。同一 canonical OA ID 同时出现 completed 与 in-progress 时只处理 completed；进行中支付申请不扩展该能力。
 - 付款状态只有“已支付/未支付”。active linked relation驱动“已支付”；金额差异、缺失银行事实或非支出边只作为reason和写回阻断，不产生“待核对/支付多了/多条OA合并支付”等第三状态。
 - 用户点击逐行“写回”，或in-progress显式关联支出流水且金额匹配后，后端必须校验active relation、outflow、金额相等和flow id，再幂等写MySQL `pay_status=1`，并更新PG payment snapshot、月份watermark和精确月份outbox。MySQL已paid时仍要修复PG；PG失败返回可安全重试错误。
 - 实机验证显示 `t_payment_simple.flow_id` 对应 OA Mongo `form_data._id`，平台使用投影中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀读写支付状态；Flowable 流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为支付状态写回 key。

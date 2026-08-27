@@ -235,8 +235,8 @@
 
 - 根因：HTTP 侧 `OAManualImportService` 运行时注入的是 PostgreSQL projection adapter，却用动态能力探测调用 Mongo-only refresh；能力不存在时静默重读旧 projection，仍返回 200 和旧计数，形成“刷新成功但没有下载/OCR/重解析”的假成功。手动导入入口还有同一旧 fallback。
 - 边界：删除两处动态 refresh/fallback 和 HTTP 侧 promoter。Settings route 只通过 `OAAttachmentRefreshRequestService` 校验 row IDs、登记现有 `oa.sync(operation=refresh_attachments)` 并读取受控 durable status/result；Mongo 下载、强制 parser reparse、定向 projection upsert、promotion 和 matching reconciliation 全部由既有 OA worker 执行。
-- 合同：POST 返回 202/event id，GET 返回 `pending/processing/done/failed/dead_lettered`。只有 `done` 才携带逐 row 计数和 promotion summary；缺记录、不支持的表单/状态、OCR/解析/promotion 失败均显式失败，禁止回退普通全量 sync、旧 projection 或第二套解析。completed 沿既有 promotion/matching；`in_progress + expense_claim` 只解析附件，必须零 promotion/matching/统一发票池写入。
-- 数据与性能：精确 operation 只处理选中 rows，不执行 stale deletion，不新增 event type、worker、表、migration、数据库备份或页面 read model；重复执行保持 canonical invoice/source link 幂等。matching reconciliation 只对 completed 子集补发，进行中日常报销完成后才由完成态链路进入统一发票池。
+- 当时合同：POST 返回 202/event id，GET 返回 `pending/processing/done/failed/dead_lettered`。只有 `done` 才携带逐 row 计数和 promotion summary；缺记录、不支持的表单/状态、OCR/解析/promotion 失败均显式失败，禁止回退普通全量 sync、旧 projection 或第二套解析。当时 `in_progress + expense_claim` 只解析附件、零 promotion/matching；该状态限制已由 2026-08-27 的“进行中日常报销附件正式归属闭环”取代。
+- 当时数据与性能：精确 operation 只处理选中 rows，不执行 stale deletion，不新增 event type、worker、表、migration、数据库备份或页面 read model；重复执行保持 canonical invoice/source link 幂等。2026-08-27 起 matching reconciliation 同样覆盖 eligible 的进行中日常报销。
 ## 2026-07-28 - 日常报销付款明细存量重投合同
 
 - 目标：确保历史日常报销与新数据都保留稳定付款明细 identity，并让 OA 附件证据可显式回指对应付款项。
@@ -275,8 +275,15 @@
 
 - 业务口径：唯一的 `in_progress + expense_claim` 在普通 month/all `oa.sync` 中就要像 completed 日常报销一样下载并解析附件；Settings 精确刷新只负责强制重解析指定 row。进行中支付申请不扩展附件解析。
 - 权威去重：同一 form、同一 canonical OA ID 同时存在 completed 与 in-progress 时，必须在 retention cutoff、cache、下载、parser 和 OCR 前选择 completed；不同 canonical ID 保持不同 OA，同一胜出状态仍重复则 fail closed。
-- 数据边界：进行中解析结果只更新 pending OA/子付款项 owner 和既有 parser cache，不进入 canonical 发票池，不执行 promotion/matching。状态变为 completed 时，PostgreSQL 单事务写 completed owner 并删除同 ID pending，然后仅对 completed 复用既有 promotion/matching。
+- 历史数据边界：当时进行中解析结果只更新 pending OA/子付款项 owner 和既有 parser cache，不进入 canonical 发票池、不执行 promotion/matching；该限制已被 2026-08-27 的“进行中附件正式归属闭环”取代。
 - 旧代码删除：删除 adapter 内 completed-only 附件解析门槛以及 service 直接 targeted projection 写路径；普通同步与精确刷新共用同一个 parser/cache、owner repository 和 completed promotion 边界，不保留并行旧路径或 fallback。
+
+## 2026-08-27 进行中日常报销附件正式归属闭环
+
+- 根因：多页 PDF parser 已能逐页识别全部正式发票，但 `OAProjectionSyncService` 在 pending owner 提交后只把 completed 子集送入 promotion，导致进行中 OA 只留下解析 cache，既有人工导入 canonical 发票缺 OA provenance 和 `source_expense_item_id`，Workbench 因而不能把发票显示在对应子付款项同行。
+- 业务口径：唯一的 `in_progress + expense_claim` 与 completed 日常报销复用同一个 `OAAttachmentInvoicePromotionService`；多页 PDF 的全部正式发票按强身份批量关联或按 Settings mode 受控创建，并保留每个附件 occurrence 的明确子付款项 owner。进行中支付申请仍不接纳附件解析/晋升。
+- 性能边界：snapshot repository 单独返回 `pending_admission_changed_scopes`；普通同步只对 admission 内容真实变化的月份晋升进行中附件，不能把 payment status 变化误当附件变化。精确刷新对选中 eligible rows 显式 `ensure_matching=true`，可修复历史已存在 canonical 发票的来源边而不重复创建。
+- 旧代码删除：移除 targeted refresh 的 completed-only promotion filter 和普通同步的 completed-only helper；不新增 parser、route、worker、表、migration、页面 fallback 或全表周期扫描。
 - 性能与数据安全：相同附件命中既有版本化 cache，未变附件不重复 OCR；无新 event type、worker、read model、表、migration 或数据库备份，不删除主数据库数据。
 
 ## 2026-08-17 OA 费用类型真实字段收口

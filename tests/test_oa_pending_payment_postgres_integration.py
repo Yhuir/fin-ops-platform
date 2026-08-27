@@ -1128,6 +1128,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result.upserted_completed_count, 0)
         self.assertEqual(result.upserted_pending_count, 1)
+        self.assertEqual(result.pending_admission_changed_scopes, ("2026-05",))
         self.assertEqual(int(counts["completed_count"]), 0)
         self.assertEqual(int(counts["pending_count"]), 1)
         self.assertEqual(int(counts["watermark_count"]), 1)

@@ -136,16 +136,13 @@ class OAProjectionSyncService:
         ):
             raise RuntimeError("OA attachment refresh owner writer returned an invalid result.")
         upserted_count = upserted_completed_count + upserted_pending_count
-        completed_records = [record for record in selected_records if _is_completed_workflow(record)]
-        promotion_summary: dict[str, object] = {}
-        if completed_records:
-            promotion = promote_records(
-                completed_records,
-                ensure_matching=True,
-            )
-            if not isinstance(promotion, dict):
-                raise RuntimeError("OA attachment invoice promoter returned an invalid result.")
-            promotion_summary = dict(promotion.get("summary") or {})
+        promotion = promote_records(
+            selected_records,
+            ensure_matching=True,
+        )
+        if not isinstance(promotion, dict):
+            raise RuntimeError("OA attachment invoice promoter returned an invalid result.")
+        promotion_summary = dict(promotion.get("summary") or {})
         result = {
             "sync_type": "oa_attachment_refresh",
             "operation": REFRESH_ATTACHMENTS_OPERATION,
@@ -219,17 +216,30 @@ class OAProjectionSyncService:
             source_snapshot_result = None
         attachment_invoice_records = completed_records
         if source_snapshot_result is not None:
-            changed_scopes = set(
+            completed_changed_scopes = set(
                 getattr(source_snapshot_result, "completed_projection_changed_scopes", ())
+            )
+            pending_admission_changed_scopes = set(
+                getattr(source_snapshot_result, "pending_admission_changed_scopes", ())
             )
             attachment_invoice_records = [
                 record
                 for record in completed_records
-                if "all" in changed_scopes or str(record.month) in changed_scopes
+                if "all" in completed_changed_scopes
+                or str(record.month) in completed_changed_scopes
             ]
+            attachment_invoice_records.extend(
+                record
+                for record in admission_records
+                if is_in_progress_expense_claim(record)
+                and (
+                    "all" in pending_admission_changed_scopes
+                    or str(record.month) in pending_admission_changed_scopes
+                )
+            )
         elif upserted_count == 0:
             attachment_invoice_records = []
-        attachment_invoice_promotion_result = self._promote_completed_attachment_invoices(
+        attachment_invoice_promotion_result = self._promote_attachment_invoices(
             attachment_invoice_records
         )
         attachment_invoice_summary = dict(attachment_invoice_promotion_result.get("summary") or {})
@@ -283,19 +293,24 @@ class OAProjectionSyncService:
                 if source_snapshot_result is not None
                 else []
             ),
+            "pending_admission_changed_scope_keys": (
+                list(getattr(source_snapshot_result, "pending_admission_changed_scopes", ()))
+                if source_snapshot_result is not None
+                else []
+            ),
         }
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
             record_sync_run(result)
         return result
 
-    def _promote_completed_attachment_invoices(
+    def _promote_attachment_invoices(
         self,
-        completed_records: list[OAApplicationRecord],
+        records: list[OAApplicationRecord],
     ) -> dict[str, Any]:
-        if self._attachment_invoice_promoter is None or not completed_records:
+        if self._attachment_invoice_promoter is None or not records:
             return {"summary": {}}
-        return dict(self._attachment_invoice_promoter.promote_records(completed_records) or {})
+        return dict(self._attachment_invoice_promoter.promote_records(records) or {})
 
     def _record_failed_sync_run(
         self,

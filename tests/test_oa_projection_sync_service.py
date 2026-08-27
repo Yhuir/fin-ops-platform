@@ -45,7 +45,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         )
         self.assertEqual(repository.stale_completed_scopes, [])
         self.assertEqual(repository.non_completed_scopes, [])
-        self.assertEqual(promoter.completed_records, [selected])
+        self.assertEqual(promoter.records, [selected])
         self.assertTrue(promoter.ensure_matching)
         self.assertEqual(result["rows"][0]["importable_invoice_count"], 1)
         self.assertEqual(result["errors"], [])
@@ -68,7 +68,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(repository.saved_records, [])
         self.assertEqual(promoter.call_count, 0)
 
-    def test_targeted_attachment_refresh_writes_in_progress_expense_claim_without_promotion(self) -> None:
+    def test_targeted_attachment_refresh_promotes_in_progress_expense_claim(self) -> None:
         selected = replace(
             _oa(
                 "oa-progress",
@@ -97,8 +97,9 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         result = service.handle_runtime_event(_targeted_event(["oa-progress"]))
 
         self.assertEqual(owner_repository.targeted_records, [selected])
-        self.assertEqual(promoter.call_count, 0)
-        self.assertEqual(result["promotion_summary"], {})
+        self.assertEqual(promoter.records, [selected])
+        self.assertTrue(promoter.ensure_matching)
+        self.assertEqual(result["promotion_summary"]["affected_invoice_count"], 5)
         self.assertEqual(result["upserted_count"], 1)
 
     def test_targeted_attachment_refresh_rejects_in_progress_payment_request(self) -> None:
@@ -121,7 +122,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(owner_repository.targeted_records, [])
 
-    def test_targeted_attachment_refresh_promotes_only_completed_rows_from_mixed_batch(self) -> None:
+    def test_targeted_attachment_refresh_promotes_completed_and_in_progress_expense_claims(self) -> None:
         completed = _oa("oa-completed", "2026-06", workflow_status="completed")
         in_progress = replace(
             _oa(
@@ -150,7 +151,8 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(owner_repository.targeted_records, [completed, in_progress])
-        self.assertEqual(promoter.completed_records, [completed])
+        self.assertEqual(promoter.records, [completed, in_progress])
+        self.assertTrue(promoter.ensure_matching)
         self.assertEqual(result["upserted_count"], 2)
 
     def test_targeted_attachment_refresh_fails_without_source_capability(self) -> None:
@@ -446,7 +448,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         result = service.handle_runtime_event(_event("2026-06"))
 
-        self.assertEqual([record.id for record in promoter.completed_records], ["oa-pay-completed"])
+        self.assertEqual([record.id for record in promoter.records], ["oa-pay-completed"])
         self.assertEqual(result["scanned_oa_attachment_invoice_candidate_count"], 5)
         self.assertEqual(result["promoted_oa_attachment_invoice_count"], 5)
         self.assertEqual(result["linked_existing_oa_attachment_invoice_count"], 5)
@@ -507,8 +509,92 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         service.handle_runtime_event(_event("all"))
 
-        self.assertEqual([record.id for record in promoter.completed_records], ["oa-june"])
+        self.assertEqual([record.id for record in promoter.records], ["oa-june"])
         self.assertEqual(promoter.call_count, 1)
+
+    def test_pending_admission_change_promotes_in_progress_expense_claim_only(self) -> None:
+        in_progress_expense = _oa(
+            "oa-progress-expense",
+            "2026-06",
+            workflow_status="in_progress",
+            apply_type="日常报销",
+        )
+        in_progress_payment = _oa(
+            "oa-progress-payment",
+            "2026-06",
+            workflow_status="in_progress",
+        )
+        promoter = FakeAttachmentInvoicePromoter()
+
+        class AdmissionChangedSnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
+            def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
+                self.calls.append(dict(kwargs))
+                return OaPendingPaymentSourceSnapshotResult(
+                    completed_projection_changed_scopes=(),
+                    oa_pending_payment_changed_scopes=("2026-06",),
+                    payment_status_count=2,
+                    admission_count=2,
+                    source_signatures={"2026-06": "signature"},
+                    pending_admission_changed_scopes=("2026-06",),
+                )
+
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06"],
+                records_by_month={
+                    "2026-06": [in_progress_expense, in_progress_payment]
+                },
+                projection_records_by_month={"2026-06": []},
+            ),
+            projection_repository=FakeProjectionRepository(),
+            attachment_invoice_promoter=promoter,
+            payment_status_repository=FakePaymentStatusRepository({}),
+            pending_payment_source_snapshot_repository=AdmissionChangedSnapshotRepository(),
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(promoter.records, [in_progress_expense])
+        self.assertEqual(result["pending_admission_changed_scope_keys"], ["2026-06"])
+
+    def test_payment_status_only_change_does_not_repromote_pending_attachments(self) -> None:
+        in_progress_expense = _oa(
+            "oa-progress-expense",
+            "2026-06",
+            workflow_status="in_progress",
+            apply_type="日常报销",
+        )
+        promoter = FakeAttachmentInvoicePromoter()
+
+        class PaymentStatusOnlySnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
+            def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
+                self.calls.append(dict(kwargs))
+                return OaPendingPaymentSourceSnapshotResult(
+                    completed_projection_changed_scopes=(),
+                    oa_pending_payment_changed_scopes=("2026-06",),
+                    payment_status_count=1,
+                    admission_count=1,
+                    source_signatures={"2026-06": "signature"},
+                    pending_admission_changed_scopes=(),
+                )
+
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06"],
+                records_by_month={"2026-06": [in_progress_expense]},
+                projection_records_by_month={"2026-06": []},
+            ),
+            projection_repository=FakeProjectionRepository(),
+            attachment_invoice_promoter=promoter,
+            payment_status_repository=FakePaymentStatusRepository({}),
+            pending_payment_source_snapshot_repository=PaymentStatusOnlySnapshotRepository(),
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(promoter.call_count, 0)
+        self.assertEqual(result["pending_payment_affected_scope_keys"], ["2026-06"])
+        self.assertEqual(result["pending_admission_changed_scope_keys"], [])
 
     def test_unchanged_completed_snapshot_skips_attachment_invoice_promotion(self) -> None:
         records = [_oa("oa-unchanged", "2026-06", workflow_status="completed")]
@@ -778,7 +864,7 @@ class FakeProjectionRepository:
 
 class FakeAttachmentInvoicePromoter:
     def __init__(self) -> None:
-        self.completed_records: list[OAApplicationRecord] = []
+        self.records: list[OAApplicationRecord] = []
         self.call_count = 0
         self.ensure_matching = False
 
@@ -789,7 +875,7 @@ class FakeAttachmentInvoicePromoter:
         ensure_matching: bool = False,
     ) -> dict[str, object]:
         self.call_count += 1
-        self.completed_records = list(records)
+        self.records = list(records)
         self.ensure_matching = ensure_matching
         return {
             "summary": {
@@ -834,12 +920,22 @@ class FakePendingPaymentSourceSnapshotRepository:
         pending_count = sum(
             1 for record in records if record.workflow_status == "in_progress"
         )
+        pending_changed_scopes = tuple(
+            sorted(
+                {
+                    record.month
+                    for record in records
+                    if record.workflow_status == "in_progress" and record.month
+                }
+            )
+        )
         return OaPendingPaymentSourceSnapshotResult(
             completed_projection_changed_scopes=(),
             oa_pending_payment_changed_scopes=(),
             payment_status_count=0,
             admission_count=pending_count,
             source_signatures={},
+            pending_admission_changed_scopes=pending_changed_scopes,
             upserted_completed_count=completed_count,
             upserted_pending_count=pending_count,
         )
@@ -866,6 +962,11 @@ class FakePendingPaymentSourceSnapshotRepository:
             payment_status_count=len(statuses),
             admission_count=admission_count,
             source_signatures={str(kwargs.get("scope_key") or "all"): "signature"},
+            pending_admission_changed_scopes=(
+                (str(kwargs.get("scope_key") or "all"),)
+                if admission_count
+                else ()
+            ),
             upserted_completed_count=completed_count,
             removed_non_completed_count=non_completed_count,
         )

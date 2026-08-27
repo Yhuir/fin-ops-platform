@@ -112,6 +112,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertFalse(connection.rolled_back)
         self.assertEqual(result.upserted_completed_count, 0)
         self.assertEqual(result.upserted_pending_count, 1)
+        self.assertEqual(result.pending_admission_changed_scopes, ("2026-06",))
         executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
         self.assertIn("delete from app.oa_pending_payment_admissions", executed_sql)
         self.assertIn("insert into app.oa_pending_payment_admissions", executed_sql)
@@ -164,6 +165,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.completed_projection_changed_scopes, ())
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
+        self.assertEqual(result.pending_admission_changed_scopes, ("2026-06",))
         self.assertEqual(result.payment_status_count, 1)
         self.assertEqual(result.admission_count, 1)
         self.assertTrue(connection.committed)
