@@ -1,5 +1,11 @@
 # 销项发票收款情况 实施记录
 
+## 2026-08-27 - 红字发票备注交叉核对闭环
+
+- 根因：导入链路已将 Excel 备注保存到 canonical invoice `remark`，但销项列表 DTO 丢弃该字段，生产 canonical detail 又维护了一份缺字段的重复 assembler，同时 keyword SQL 未检索备注。
+- 决策：在现有 assembler 内精确提取“被红冲蓝字数电发票号码：20 位号码”，统一 rows/detail/export DTO，删除 canonical service 重复详情 assembler；SQL 只为 output keyword 增加 grouped remarks，不增 API、查询往返、read model、worker 或数据库写入。
+- 边界：备注号码是来源证据，不创建/修改 Workbench `output_invoice_reversal` 关系，不改变收款状态。
+
 ## 2026-08-25 - 发票号码列展示票面极性
 
 - 前端 mapper 保留 canonical rows 已有的 `isPositiveInvoice`，映射为蓝字/红字；字段异常时明确显示“票面类型未知”，不使用金额正负、收款状态或红蓝票关系猜测。

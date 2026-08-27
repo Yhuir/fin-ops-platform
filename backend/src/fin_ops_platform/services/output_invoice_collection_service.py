@@ -7,6 +7,7 @@ from hashlib import sha1
 from http import HTTPStatus
 from io import BytesIO
 import json
+import re
 from typing import Any
 from urllib.parse import unquote
 
@@ -46,8 +47,13 @@ OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS = [
     "收款金额",
     "收款银行",
     "摘要",
+    "冲红蓝字发票号码",
     "红蓝票关系",
 ]
+
+REVERSED_BLUE_INVOICE_NO_PATTERN = re.compile(
+    r"被红冲蓝字数电发票号码\s*[：:]\s*(\d{20})(?!\d)"
+)
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "invoice_no": {
@@ -422,6 +428,12 @@ class OutputInvoiceCollectionQueryService:
                 f"Invoice detail not found: {invoice_id}",
                 status_code=HTTPStatus.NOT_FOUND,
             )
+        return self.invoice_detail_for_group(group)
+
+    def invoice_detail_for_group(
+        self,
+        group: dict[str, Any],
+    ) -> dict[str, Any]:
         primary: Invoice = group["primary"]
         lines: list[Invoice] = list(group["line_items"])
         return {
@@ -457,7 +469,10 @@ class OutputInvoiceCollectionQueryService:
             "isPositiveInvoice": primary.is_positive_invoice or "",
             "riskLevel": primary.risk_level or "",
             "issuer": primary.issuer or "",
-            "remark": primary.remark or "",
+            "remark": _join_non_empty(line.remark for line in lines),
+            "reversalTargetInvoiceNos": _reversal_target_invoice_nos(
+                line.remark for line in lines
+            ),
             "sourceBatchId": primary.source_batch_id or "",
             "sourceLinks": deepcopy(primary.source_links),
             "lineItems": [self._line_item_payload(line) for line in lines],
@@ -806,6 +821,9 @@ class OutputInvoiceCollectionQueryService:
             ),
             "specificBusinessType": primary.specific_business_type or "",
             "taxableItemName": primary.taxable_item_name or "",
+            "reversalTargetInvoiceNos": _reversal_target_invoice_nos(
+                line.remark for line in line_items
+            ),
             "lineItemCount": len(line_items),
             "hasMoreInvoiceLines": len(line_items) > 1,
             "isPositiveInvoice": primary.is_positive_invoice or "",
@@ -1040,6 +1058,9 @@ class OutputInvoiceCollectionQueryService:
             "taxAmount": _money(invoice.tax_amount),
             "totalWithTax": _money(_invoice_total(invoice)),
             "remark": invoice.remark or "",
+            "reversalTargetInvoiceNos": _reversal_target_invoice_nos(
+                [invoice.remark]
+            ),
         }
 
     @staticmethod
@@ -1354,6 +1375,9 @@ class OutputInvoiceCollectionQueryService:
             "收款金额": bank.get("amount") or "",
             "收款银行": bank.get("bankName") or "",
             "摘要": bank.get("summary") or "",
+            "冲红蓝字发票号码": _join_non_empty(
+                invoice.get("reversalTargetInvoiceNos") or []
+            ),
             "红蓝票关系": _join_non_empty(
                 item.get("displayNo") or item.get("invoiceNo")
                 for item in reversal_invoices
@@ -1537,3 +1561,14 @@ def _join_non_empty(values: Any) -> str:
         if text and text not in result:
             result.append(text)
     return "；".join(result)
+
+
+def _reversal_target_invoice_nos(remarks: Any) -> list[str]:
+    invoice_nos: list[str] = []
+    for remark in remarks:
+        for invoice_no in REVERSED_BLUE_INVOICE_NO_PATTERN.findall(
+            str(remark or "")
+        ):
+            if invoice_no not in invoice_nos:
+                invoice_nos.append(invoice_no)
+    return invoice_nos

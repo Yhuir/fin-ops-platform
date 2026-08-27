@@ -157,6 +157,9 @@ async function requestExportBlob(url: string, init: RequestInit = {}): Promise<O
 function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][number]["invoice"] {
   const raw = objectValue(rawValue);
   const isPositiveInvoice = stringValue(camelOrSnake(raw, "isPositiveInvoice", "is_positive_invoice")).trim();
+  const reversalTargetInvoiceNos = arrayValue(
+    camelOrSnake(raw, "reversalTargetInvoiceNos", "reversal_target_invoice_nos"),
+  ).map(stringValue).filter(Boolean);
   return {
     id: stringValue(raw.id),
     displayNo: stringValue(camelOrSnake(raw, "displayNo", "display_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no")),
@@ -174,6 +177,7 @@ function mapInvoice(rawValue: unknown): OutputInvoiceCollectionRowsResponse["row
     taxAmount: stringValue(camelOrSnake(raw, "taxAmount", "tax_amount")),
     specificBusinessType: stringValue(camelOrSnake(raw, "specificBusinessType", "specific_business_type")),
     taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
+    reversalTargetInvoiceNos,
     polarity: isPositiveInvoice === "是" ? "blue" : isPositiveInvoice === "否" ? "red" : "unknown",
   };
 }
@@ -360,6 +364,9 @@ function bankDirectionLabel(value: unknown) {
 function mapInvoiceDetailResponse(payload: unknown): OutputInvoiceCollectionDetailResponse {
   const raw = objectValue(payload);
   const invoiceNo = stringValue(camelOrSnake(raw, "digitalInvoiceNo", "digital_invoice_no") ?? camelOrSnake(raw, "invoiceNo", "invoice_no") ?? raw.id);
+  const reversalTargetInvoiceNos = arrayValue(
+    camelOrSnake(raw, "reversalTargetInvoiceNos", "reversal_target_invoice_nos"),
+  ).map(stringValue).filter(Boolean);
   const sections = compactDetailSections([
     detailSection("发票主信息", [
       detailField("发票号码", camelOrSnake(raw, "invoiceNo", "invoice_no")),
@@ -381,6 +388,7 @@ function mapInvoiceDetailResponse(payload: unknown): OutputInvoiceCollectionDeta
       detailField("税收分类编码", camelOrSnake(raw, "taxClassificationCode", "tax_classification_code")),
       detailField("特定业务类型", camelOrSnake(raw, "specificBusinessType", "specific_business_type")),
       detailField("货物或应税劳务名称", camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
+      detailField("被冲红蓝字发票号码", reversalTargetInvoiceNos.join("；")),
       detailField("发票来源", camelOrSnake(raw, "invoiceSource", "invoice_source")),
       detailField("发票票种", camelOrSnake(raw, "invoiceKind", "invoice_kind")),
       detailField("发票状态", camelOrSnake(raw, "invoiceStatus", "invoice_status")),

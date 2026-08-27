@@ -172,6 +172,60 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertIn("红蓝票关系", preview["columns"])
         self.assertFalse(any("收据" in column or "OA" in column for column in preview["columns"]))
 
+    def test_red_invoice_remark_drives_display_search_detail_and_export_evidence(self) -> None:
+        target_invoice_no = "26532000000395506981"
+        remark = f"被红冲蓝字数电发票号码：{target_invoice_no}"
+        service = self._service(
+            invoices=[
+                self._invoice(
+                    "red-with-remark",
+                    "5001",
+                    amount="-94.34",
+                    tax_amount="-5.66",
+                    total_with_tax="-100.00",
+                    is_positive_invoice="否",
+                    remark=remark,
+                )
+            ]
+        )
+
+        row = service.list_rows()["rows"][0]
+        detail = service.invoice_detail("red-with-remark")
+        searched = service.list_rows(keyword=target_invoice_no)
+        preview = service.export_preview()
+
+        self.assertEqual(
+            row["invoice"]["reversalTargetInvoiceNos"],
+            [target_invoice_no],
+        )
+        self.assertEqual(detail["remark"], remark)
+        self.assertEqual(
+            detail["reversalTargetInvoiceNos"],
+            [target_invoice_no],
+        )
+        self.assertEqual(searched["pagination"]["total"], 1)
+        self.assertIn("冲红蓝字发票号码", preview["columns"])
+        self.assertEqual(
+            preview["sampleRows"][0]["冲红蓝字发票号码"],
+            target_invoice_no,
+        )
+
+    def test_non_contract_remark_does_not_invent_a_reversal_target(self) -> None:
+        service = self._service(
+            invoices=[
+                self._invoice(
+                    "red-with-free-text",
+                    "5002",
+                    is_positive_invoice="否",
+                    remark="参考蓝票26532000000395506981",
+                )
+            ]
+        )
+
+        row = service.list_rows()["rows"][0]
+
+        self.assertEqual(row["invoice"]["reversalTargetInvoiceNos"], [])
+
     def test_relation_details_allow_only_bank_and_invoice(self) -> None:
         invoice = self._invoice("invoice", "4001", total_with_tax="100.00")
         bank = self._bank("bank", "100.00", TransactionDirection.INFLOW)
@@ -247,6 +301,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         total_with_tax: str = "100.00",
         invoice_date: str = "2026-05-20",
         is_positive_invoice: str = "是",
+        remark: str = "",
     ) -> Invoice:
         buyer = Counterparty(
             id=f"buyer-{invoice_id}",
@@ -272,6 +327,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             total_with_tax=Decimal(total_with_tax),
             taxable_item_name="服务费",
             is_positive_invoice=is_positive_invoice,
+            remark=remark,
         )
 
     @staticmethod

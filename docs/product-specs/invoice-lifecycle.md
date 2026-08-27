@@ -16,6 +16,7 @@
 - `InvoiceLifecyclePolicy` 是待找发票、进项付款、OA 付款和税局认证状态的共享规则入口。
 - `read_model.invoice_lifecycle_rows` 是跨页面分发边界，按月分片预计算 subject lifecycle。HTTP 热路径只批量读取 read model，不同步扫描发票、银行流水、OA 和关联台事实。
 - 销项发票收款情况是显式例外：它不读取 `invoice_lifecycle` 或页面 read model，而是在同一 canonical PostgreSQL snapshot 中根据销项发票、收入流水和 active Workbench 关系直接派生 `collectionStatus`。
+- 销项红字发票原始备注中精确标记的“被红冲蓝字数电发票号码”只作为列表、详情、搜索和导出的交叉核对证据；不代替 `output_invoice_reversal` 正式关系，不单独改变 `collectionStatus`。
 - 现有页面 API shape 保持明确：待找发票返回 `invoice_acquisition_status`，进项使用返回 `paymentStatus`，OA 待付款返回 `paymentStatus`，销项收款返回 `collectionStatus`，税金抵扣返回认证字段。
 - 页面自己的 read model 仍保留筛选、分页、导出和页面 DTO；生命周期 read model 只分发生命周期结果，不替代业务页面 read model。
 

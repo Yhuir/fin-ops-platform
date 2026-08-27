@@ -54,6 +54,7 @@ export type OutputInvoiceCollectionInvoiceSummary = {
   taxAmount: string;
   specificBusinessType: string;
   taxableItemName: string;
+  reversalTargetInvoiceNos: string[];
   polarity: "blue" | "red" | "unknown";
 };
 

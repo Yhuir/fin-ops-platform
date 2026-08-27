@@ -197,6 +197,7 @@ const rowsPayload = {
         tax_amount: "-20984.07",
         specific_business_type: "技术服务",
         taxable_item_name: "系统建设服务",
+        reversal_target_invoice_nos: ["26532000000395506981"],
         is_positive_invoice: "否",
       },
       collection_status: {
@@ -333,6 +334,18 @@ function installFetchMock() {
         total_with_tax: "182400.00",
       });
     }
+    if (url.pathname === "/api/output-invoice-collections/invoices/invoice-red/detail") {
+      return jsonResponse({
+        invoice_no: "RED-001",
+        digital_invoice_no: "XSFP-RED-001",
+        invoice_date: "2026-07-10",
+        seller_name: "云南溯源科技有限公司",
+        buyer_name: "云南客户有限公司",
+        total_with_tax: "-182400.00",
+        reversal_target_invoice_nos: ["26532000000395506981"],
+        remark: "被红冲蓝字数电发票号码：26532000000395506981",
+      });
+    }
     if (url.pathname === "/api/output-invoice-collections/rows/output-blue/relation-details") {
       return jsonResponse({
         kind: "invoice",
@@ -369,6 +382,7 @@ describe("销项发票收款情况", () => {
     const redRow = within(table).getByRole("row", { name: /XSFP-RED-001/ });
     expect(within(blueRow).getByText("蓝字")).toHaveClass("output-invoice-collections-table-tag--info");
     expect(within(redRow).getByText("红字")).toHaveClass("output-invoice-collections-table-tag--danger");
+    expect(within(redRow).getByText("冲红蓝票：26532000000395506981")).toBeVisible();
     const blueInvoiceTags = within(blueRow).getByText("2026-07-08").closest(".output-invoice-collections-tag-row");
     expect(Array.from(blueInvoiceTags?.children ?? []).map((child) => child.textContent)).toEqual([
       "2026-07-08",
@@ -465,6 +479,13 @@ describe("销项发票收款情况", () => {
     expect(within(invoiceDrawer).getByText("云南客户有限公司")).toBeVisible();
     await user.click(within(invoiceDrawer).getByRole("button", { name: "关闭详情抽屉" }));
 
+    await user.click(screen.getByRole("button", { name: "查看发票 XSFP-RED-001 详情" }));
+    const redInvoiceDrawer = await screen.findByRole("dialog", { name: "销项发票详情" });
+    expect(within(redInvoiceDrawer).getByText("被冲红蓝字发票号码")).toBeVisible();
+    expect(within(redInvoiceDrawer).getByText("26532000000395506981")).toBeVisible();
+    expect(within(redInvoiceDrawer).getByText("被红冲蓝字数电发票号码：26532000000395506981")).toBeVisible();
+    await user.click(within(redInvoiceDrawer).getByRole("button", { name: "关闭详情抽屉" }));
+
     await user.click(screen.getByRole("button", { name: "红蓝票 · 2" }));
     const relationDrawer = await screen.findByRole("dialog", { name: "销项发票详情" });
     expect(within(relationDrawer).getByRole("heading", { name: "发票 1" })).toBeVisible();
@@ -479,6 +500,7 @@ describe("销项发票收款情况", () => {
     await waitFor(() => {
       const requestedPaths = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost").pathname);
       expect(requestedPaths).toContain("/api/output-invoice-collections/invoices/invoice-blue/detail");
+      expect(requestedPaths).toContain("/api/output-invoice-collections/invoices/invoice-red/detail");
       expect(requestedPaths).toContain("/api/output-invoice-collections/rows/output-blue/relation-details");
       expect(requestedPaths.some((path) => path.includes("/status") || path.includes("/receipts") || path.includes("/red-invoice"))).toBe(false);
     });

@@ -34,6 +34,7 @@
 - 正式关系只来自 `app.workbench_pair_relations status='active'`。销项红蓝票由 Workbench 匹配引擎确定性识别并以 `mode=output_invoice_reversal` 写入同一正式关系事实源。
 - 蓝票与红票各自保留为独立表格行，通过 `invoiceRelations` 互相引用；页面不再把多张销项票折叠成一条净额行。
 - 收款状态只由发票正负、有效红蓝票关系和已关联收入流水计算，不接受页面手工覆盖。
+- 红字发票原始备注中精确标记的被冲红蓝字发票号可在第四列、详情、搜索和导出中交叉核对；它是来源证据，不是 Workbench 正式关系的替代。
 - 页面只展示三组：`销项发票`、`收款状态`、`收入流水`。OA 和收据不属于本页 DTO。
 - 页面请求失败时结构化报错，不回退旧 projection；前端只维护 loading、empty、error 和用户主动刷新状态。
 - 页面使用共享紧凑时间范围选择器，搜索与范围控件互不重叠；HeroUI 分页位于同一有界 `FinanceTable` footer，不保留表格外的旧分页外壳。

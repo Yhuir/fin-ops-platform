@@ -34,7 +34,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | rows 查询 | `OutputInvoiceCollectionsPage.tsx` | `page`、`page_size`、keyword、月份、filters、sort；非法值返回 400。纯金额 keyword 使用无千分位文本并查询价税合计、税额、待收和关联收款金额。 |
-| canonical invoices | `app.invoices` | 只取非删除 output invoices；正票和负票分别保留 |
+| canonical invoices | `app.invoices` | 只取非删除 output invoices；正票和负票分别保留；原始 `remark` 仅按精确“被红冲蓝字数电发票号码”标记提取结构化号码 |
 | formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；红蓝票关系识别 `mode=output_invoice_reversal` |
 | bank facts | `app.bank_transactions` | 只统计 active relation 中的收入流水；支出不计入已收金额 |
 | exact reversal candidates | Workbench matching engine | 标准化税号、币种、税率及金额绝对值；唯一、日期合法才允许正式化 |
@@ -43,13 +43,13 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`collection_status` 候选排除自身状态条件后聚合，并补齐六种合法状态，选择状态不得缩减候选词表 |
+| `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`invoice.reversalTargetInvoiceNos` 只来源于原始备注精确标记；`collection_status` 候选排除自身状态条件后聚合，并补齐六种合法状态，选择状态不得缩减候选词表 |
 
 `statistics` 只包含 canonical 销项发票总数、收入流水、蓝字发票和红字发票数量；红蓝按含税总额符号互斥分类，并满足蓝字 + 红字 = 销项总数。旧收款和关系状态数量字段已删除。
 | `GET /filter-options` | 页面/兼容调用 | 返回同一 canonical facets；不读取缓存或 read model |
-| invoice/bank detail | 详情抽屉 | 按 canonical id 定向读取；不存在返回 404 |
+| invoice/bank detail | 详情抽屉 | 按 canonical id 定向读取；发票详情保留完整 remark 和精确提取的被冲红蓝票号；不存在返回 404 |
 | relation detail | 详情抽屉 | 只支持 `kind=bank|invoice` |
-| export preview/download | 导出 | 复用 canonical filters/sort；20,000 行上限 |
+| export preview/download | 导出 | 复用 canonical filters/sort；独立输出“冲红蓝字发票号码”列；20,000 行上限 |
 
 row 顶层只包含：
 
@@ -74,7 +74,9 @@ row 顶层只包含：
 - repository set-based 完成筛选、排序、分页和聚合；service 只组装当前页有界 DTO。
 - 收款状态的 self-excluding facet 与当前页 rows 共用一个 SQL statement 和同一 canonical CTE snapshot，不增加 API 或数据库往返。
 - SQL 数量不得随当前页行数、关系数量或红蓝票数量线性增长。
+- keyword 在同一 grouped invoice SQL 中搜索发票备注，不增加逐行查询、缓存、worker 或 read model。
 - 自动红蓝票关系必须确定性、幂等；歧义时不创建关系。
+- 备注提取号码是展示/搜索/导出证据，不能反向修改收款状态或正式红蓝票关系。
 - 页面不通过 Redis/read model 提速；只有真实慢查询证据才增加索引或缓存。
 - API 错误必须 fail closed，不回退已删除的 lifecycle/receipt/read-model 路径。
 - 首次加载可显示 skeleton；后续筛选、排序、分页和手动刷新保留现有 HeroUI FinanceTable DOM，只更新表格内容，刷新失败保留上一份成功结果并显示错误。

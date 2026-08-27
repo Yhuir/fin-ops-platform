@@ -440,6 +440,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 invoice_date_to=invoice_date_to,
                 filters=filters,
                 field_sql=_OUTPUT_FIELDS,
+                keyword_extra_columns=("invoice_remarks",),
                 row_id=row_id,
             )
             status_where_sql, status_where_params = _where_sql(
@@ -448,6 +449,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                 invoice_date_to=invoice_date_to,
                 filters=_filters_without_field(filters, "collection_status"),
                 field_sql=_OUTPUT_FIELDS,
+                keyword_extra_columns=("invoice_remarks",),
                 row_id=row_id,
             )
             filtered_sql = (
@@ -1032,6 +1034,11 @@ def _fact_cte(
                     ''
                 ) as taxable_item_name,
                 coalesce(
+                    invoice.raw_payload->'normalized_payload'->>'remark',
+                    invoice.raw_payload->>'remark',
+                    ''
+                ) as remark,
+                coalesce(
                     invoice.raw_payload->'normalized_payload'->>'is_positive_invoice',
                     invoice.raw_payload->>'is_positive_invoice',
                     ''
@@ -1220,6 +1227,13 @@ def _fact_cte(
                     as specific_business_type,
                 (array_agg(member.taxable_item_name order by member.primary_rank))[1]
                     as taxable_item_name,
+                coalesce(
+                    string_agg(
+                        nullif(member.remark, ''),
+                        ' ' order by member.primary_rank
+                    ),
+                    ''
+                ) as invoice_remarks,
                 count(*)::bigint as invoice_count,
                 bool_or(member.total_with_tax < 0) as has_negative_invoice
             from ranked_members member
@@ -1444,6 +1458,7 @@ def _where_sql(
     invoice_date_to: str | None,
     filters: list[dict[str, Any]],
     field_sql: dict[str, str],
+    keyword_extra_columns: tuple[str, ...] = (),
     invoice_ids: list[str] | None = None,
     row_id: str | None = None,
 ) -> tuple[str, list[Any]]:
@@ -1455,10 +1470,22 @@ def _where_sql(
             for field in _NUMERIC_FILTER_FIELDS
             if field in field_sql
         ]
+        search_columns = [
+            "invoice_no",
+            "seller_name",
+            "seller_tax_no",
+            "buyer_name",
+            "buyer_tax_no",
+            "taxable_item_name",
+            "oa_applicant",
+            "oa_project_name",
+            "bank_counterparty_name",
+            "bank_summary",
+            *keyword_extra_columns,
+            *amount_columns,
+        ]
         clauses.append(
-            "concat_ws(' ', invoice_no, seller_name, seller_tax_no, buyer_name, "
-            "buyer_tax_no, taxable_item_name, oa_applicant, oa_project_name, "
-            f"bank_counterparty_name, bank_summary, {', '.join(amount_columns)}) ilike %s"
+            f"concat_ws(' ', {', '.join(search_columns)}) ilike %s"
         )
         params.append(f"%{text}%")
     if text := str(invoice_date_from or "").strip():

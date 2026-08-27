@@ -19,6 +19,7 @@ from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_qu
     PostgresInputInvoiceUsageQueryRepository,
     PostgresOutputInvoiceCollectionQueryRepository,
     _INPUT_FIELDS,
+    _OUTPUT_FIELDS,
     _facet_counts,
     _where_sql,
 )
@@ -153,6 +154,27 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertIn("amount::text", sql)
         self.assertIn("tax_amount::text", sql)
         self.assertIn("bank_amount::text", sql)
+
+    def test_output_keyword_search_includes_invoice_remarks_only_when_requested(self) -> None:
+        output_sql, output_params = _where_sql(
+            keyword="26532000000395506981",
+            invoice_date_from=None,
+            invoice_date_to=None,
+            filters=[],
+            field_sql=_OUTPUT_FIELDS,
+            keyword_extra_columns=("invoice_remarks",),
+        )
+        input_sql, _ = _where_sql(
+            keyword="26532000000395506981",
+            invoice_date_from=None,
+            invoice_date_to=None,
+            filters=[],
+            field_sql=_INPUT_FIELDS,
+        )
+
+        self.assertEqual(output_params, ["%26532000000395506981%"])
+        self.assertIn("invoice_remarks", output_sql)
+        self.assertNotIn("invoice_remarks", input_sql)
 
     def test_input_rows_summary_and_facets_share_one_bounded_canonical_snapshot(self) -> None:
         connection = RecordingConnection()

@@ -251,7 +251,7 @@ class OutputInvoiceCollectionCanonicalQueryService:
                 f"Invoice detail not found: {invoice_id}",
                 status_code=404,
             )
-        return _output_invoice_detail(group)
+        return self._row_assembler.invoice_detail_for_group(group)
 
     def bank_transaction_detail(
         self,
@@ -462,34 +462,6 @@ def _positive_int(
             f"{field} must be a positive integer{limit}.",
         )
     return number
-
-
-def _output_invoice_detail(group: dict[str, Any]) -> dict[str, Any]:
-    primary = group["primary"]
-    lines = list(group["line_items"])
-    return {
-        "id": primary.id,
-        "invoiceIdentityKey": group["identity_key"],
-        "invoiceNo": primary.invoice_no,
-        "invoiceCode": primary.invoice_code or "",
-        "digitalInvoiceNo": primary.digital_invoice_no or "",
-        "invoiceDate": primary.invoice_date or "",
-        "sellerName": primary.seller_name or "",
-        "sellerTaxNo": primary.seller_tax_no or "",
-        "buyerName": primary.buyer_name or primary.counterparty.name,
-        "buyerTaxNo": primary.buyer_tax_no or primary.counterparty.tax_no or "",
-        "amount": f"{sum((invoice.amount for invoice in lines), start=0):.2f}",
-        "taxAmount": f"{sum((invoice.tax_amount or 0 for invoice in lines), start=0):.2f}",
-        "totalWithTax": f"{sum((invoice.total_with_tax or invoice.amount for invoice in lines), start=0):.2f}",
-        "taxRate": primary.tax_rate or "",
-        "specificBusinessType": primary.specific_business_type or "",
-        "taxableItemName": primary.taxable_item_name or "",
-        "isPositiveInvoice": primary.is_positive_invoice or "",
-        "lineItems": [
-            OutputInvoiceCollectionQueryService._line_item_payload(invoice)
-            for invoice in lines
-        ],
-    }
 
 
 def _local_statistics(rows: list[dict[str, Any]]) -> dict[str, int]:

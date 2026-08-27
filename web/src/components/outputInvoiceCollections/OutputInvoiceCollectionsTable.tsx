@@ -227,6 +227,12 @@ function DataRow({
   const statusCode = row.collectionStatus.code || "pending_collection";
   const showCollectionAmounts = ["pending_collection", "partial_collected", "collected"].includes(statusCode);
   const polarity = invoicePolarityPresentation(row.invoice.polarity);
+  const reversalTargetInvoiceNos = row.invoice.reversalTargetInvoiceNos;
+  const businessTextValue = [
+    row.invoice.specificBusinessType,
+    row.invoice.taxableItemName,
+    ...reversalTargetInvoiceNos,
+  ].filter(Boolean).join(" ");
 
   return (
     <FinanceTableRow className="output-invoice-collections-table-row" id={row.id} textValue={displayInvoiceNo(row)}>
@@ -257,7 +263,7 @@ function DataRow({
         <TextLine numeric strong value={formatMoney(row.invoice.totalWithTax)} />
         <TextLine muted numeric value={taxSummary(row.invoice.taxAmount, row.invoice.taxRate)} />
       </FinanceTableCell>
-      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="description" textValue={row.invoice.taxableItemName}>
+      <FinanceTableCell className="output-invoice-collections-table-cell output-invoice-collections-table-cell--small-border" columnRole="description" textValue={businessTextValue}>
         <TextLine strong value={row.invoice.specificBusinessType} />
         <ExpandableCellText
           expanded={expandedCells.has(`${row.id}:invoice-business`)}
@@ -265,6 +271,9 @@ function DataRow({
           text={row.invoice.taxableItemName}
           threshold={18}
         />
+        {reversalTargetInvoiceNos.length > 0 ? (
+          <TextLine muted value={`冲红蓝票：${reversalTargetInvoiceNos.join("；")}`} />
+        ) : null}
       </FinanceTableCell>
       <FinanceTableCell className={cx(
         "output-invoice-collections-table-cell",

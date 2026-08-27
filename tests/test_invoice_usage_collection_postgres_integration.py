@@ -273,6 +273,67 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
             },
         )
 
+    def test_output_red_remark_is_searchable_and_preserved_in_canonical_detail(self) -> None:
+        target_invoice_no = "26532000000395506981"
+        self.connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, digital_invoice_no,
+                invoice_date, invoice_month, seller_name, buyer_name, amount,
+                signed_amount, tax_amount, total_with_tax, status, raw_payload
+            ) values (
+                'output-red-remark-1', 'output', 'OUT-RED-REMARK-001',
+                '26532000001069507471', '2026-07-10', '2026-07-01',
+                '销售方', '购买方', -100, -100, -6, -106, 'pending',
+                jsonb_build_object(
+                    'normalized_payload',
+                    jsonb_build_object(
+                        'invoice_no', 'OUT-RED-REMARK-001',
+                        'digital_invoice_no', '26532000001069507471',
+                        'invoice_type', 'output',
+                        'invoice_date', '2026-07-10',
+                        'amount', '-100.00',
+                        'tax_amount', '-6.00',
+                        'total_with_tax', '-106.00',
+                        'seller_name', '销售方',
+                        'buyer_name', '购买方',
+                        'is_positive_invoice', '否',
+                        'remark', '被红冲蓝字数电发票号码：26532000000395506981'
+                    )
+                )
+            )
+            """
+        )
+        repository = PostgresOutputInvoiceCollectionQueryRepository(self.connection)
+        query_service = OutputInvoiceCollectionCanonicalQueryService(
+            repository=repository,
+            row_assembler=OutputInvoiceCollectionQueryService(
+                import_service=ImportNormalizationService(),
+            ),
+        )
+
+        payload = query_service.list_rows(
+            page=1,
+            page_size=20,
+            keyword=target_invoice_no,
+        )
+
+        self.assertEqual(payload["pagination"]["total"], 1)
+        [row] = payload["rows"]
+        self.assertEqual(
+            row["invoice"]["reversalTargetInvoiceNos"],
+            [target_invoice_no],
+        )
+        detail = query_service.invoice_detail("output-red-remark-1")
+        self.assertEqual(
+            detail["remark"],
+            f"被红冲蓝字数电发票号码：{target_invoice_no}",
+        )
+        self.assertEqual(
+            detail["reversalTargetInvoiceNos"],
+            [target_invoice_no],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
