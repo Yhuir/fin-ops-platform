@@ -174,6 +174,7 @@ class RuntimeMonitoringRepository:
             "mismatched_required_worker_count": mismatched_count,
             "critical_failed_outbox_count": outbox_summary["critical_failed_outbox_count"],
             "pending_outbox_events_by_scope": outbox_summary["pending_outbox_events_by_scope"],
+            "outbox_events_by_type_status": outbox_summary["outbox_events_by_type_status"],
         }
 
     def _ready_outbox_summary(self) -> dict[str, Any]:
@@ -205,6 +206,13 @@ class RuntimeMonitoringRepository:
               group by event_type, status, scope_type, scope_key
               order by oldest_age_seconds desc nulls last
               limit 30
+            ),
+            event_type_rows as (
+              select event_type, status, count(*)::bigint as count
+              from current_events
+              where status in ('pending', 'processing', 'failed', 'dead_lettered')
+              group by event_type, status
+              order by event_type, status
             )
             select
               coalesce((select jsonb_object_agg(status, count) from queue_counts), '{}'::jsonb) as queue_backlog,
@@ -212,6 +220,8 @@ class RuntimeMonitoringRepository:
                 as max_pending_age_seconds,
               coalesce((select jsonb_agg(to_jsonb(scope_rows)) from scope_rows), '[]'::jsonb)
                 as pending_outbox_events_by_scope,
+              coalesce((select jsonb_agg(to_jsonb(event_type_rows)) from event_type_rows), '[]'::jsonb)
+                as outbox_events_by_type_status,
               (select count(*)::bigint from current_events where status in ('failed', 'dead_lettered'))
                 as critical_failed_outbox_count
             """,
@@ -219,6 +229,7 @@ class RuntimeMonitoringRepository:
         payload = row if isinstance(row, dict) else {}
         queue_payload = payload.get("queue_backlog") if isinstance(payload.get("queue_backlog"), dict) else {}
         scope_rows = payload.get("pending_outbox_events_by_scope") if isinstance(payload.get("pending_outbox_events_by_scope"), list) else []
+        event_type_rows = payload.get("outbox_events_by_type_status") if isinstance(payload.get("outbox_events_by_type_status"), list) else []
         return {
             "queue_backlog": {str(key): int(value or 0) for key, value in queue_payload.items()},
             "max_pending_age_seconds": payload.get("max_pending_age_seconds"),
@@ -236,6 +247,15 @@ class RuntimeMonitoringRepository:
                 }
                 for scope in scope_rows
                 if isinstance(scope, dict)
+            ],
+            "outbox_events_by_type_status": [
+                {
+                    "event_type": str(item.get("event_type") or ""),
+                    "status": str(item.get("status") or ""),
+                    "count": int(item.get("count") or 0),
+                }
+                for item in event_type_rows
+                if isinstance(item, dict)
             ],
         }
 

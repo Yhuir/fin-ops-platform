@@ -41,6 +41,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
   `app.workbench_idempotency_records`；Migration `0151` 是该权限的事实源，不授予 `DELETE`。
 - `oa-sync` 同时消费 `oa.sync` 与 `oa.payment_status.reconcile`。后者由 relation 事务登记、按最新 active OA+outflow topology 收敛外部状态；Migration `0158` 提供 App ownership state 和历史 active relation 事件回填，不直接修改外部支付表。Migration `0159` 为生产 worker 共用的 `fin_ops_app_runtime` 补齐 ownership 表的最小 `SELECT/INSERT/UPDATE` 权限；不授予 `DELETE`。
 - Runtime queue retention 只清理已完成历史；不得删除 pending、processing、failed 或 dead-lettered 行来伪造健康。
+- 发布 preflight 仅可接受 exact candidate 新增 event type 的纯 pending 升级积压，并必须用未截断的
+  `event_type + status` 数据库聚合与 queue 总数完全对账；任何混合事件、processing、failed、dead-lettered
+  仍阻断。这个接受范围不会延续到 T+0/T+30，候选 worker 启动后仍须完成真实消费并清零。
 
 ## Read Model 退役治理
 

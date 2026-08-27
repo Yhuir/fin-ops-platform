@@ -565,6 +565,9 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("--write-target-ms 5000", script)
         self.assertIn("--http-target-ms 1000", script)
         self.assertIn('--required-worker-instance "$required_worker_instance"', script)
+        self.assertIn("candidate_only_worker_event_types", script)
+        self.assertIn('--allow-preflight-pending-event-type "$candidate_only_event_type"', script)
+        self.assertIn("accepted_candidate_upgrade_backlog", script)
         self.assertIn("sleep 30", script)
         self.assertNotIn("sleep 60", script)
         self.assertNotIn("sleep 240", script)
@@ -1147,6 +1150,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("--apply-read-model-smoke", checkpoint)
         self.assertIn('if [[ "$profile" == "preflight" ]]', checkpoint)
         self.assertIn('required_worker_instances "$src"', checkpoint)
+        self.assertIn('candidate_only_worker_event_types "$src" "$verification_src"', checkpoint)
+        self.assertIn("--allow-preflight-pending-event-type", checkpoint)
         self.assertIn("--timeout-seconds 60", checkpoint)
         self.assertLess(
             checkpoint.index("-m fin_ops_platform.tools.runtime_sync_closure_gate"),

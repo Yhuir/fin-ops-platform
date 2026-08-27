@@ -938,6 +938,23 @@ required_worker_instances() {
     "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
 }
 
+registered_worker_event_types() {
+  local src="$1"
+  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --event-types \
+    | tr ' ' '\n' \
+    | sed '/^$/d' \
+    | sort -u
+}
+
+candidate_only_worker_event_types() {
+  local current_src="$1"
+  local candidate_src="$2"
+  comm -13 \
+    <(registered_worker_event_types "$current_src") \
+    <(registered_worker_event_types "$candidate_src")
+}
+
 known_worker_services() {
   {
     all_worker_services
@@ -2482,7 +2499,7 @@ release_gate_checkpoint() {
   local profile="${5:-full}"
   local verification_release="${6:-$release}"
   local src verification_src checkpoint_dir domain_report closure_report inventory_report runtime_report
-  local required_worker_instance
+  local required_worker_instance candidate_only_event_type
   local -a closure_args
   [[ "$profile" == "preflight" || "$profile" == "full" || "$profile" == "stability" ]] \
     || die "unsupported release gate profile: $profile"
@@ -2534,6 +2551,10 @@ release_gate_checkpoint() {
       for required_worker_instance in $(required_worker_instances "$src"); do
         closure_args+=(--required-worker-instance "$required_worker_instance")
       done
+      while IFS= read -r candidate_only_event_type; do
+        [[ -n "$candidate_only_event_type" ]] \
+          && closure_args+=(--allow-preflight-pending-event-type "$candidate_only_event_type")
+      done < <(candidate_only_worker_event_types "$src" "$verification_src")
     fi
     "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null
   ) || true
@@ -2710,14 +2731,42 @@ pending = (
 )
 failed = int(queue_backlog.get("failed") or 0) if isinstance(queue_backlog, dict) else -1
 dead_letters = int(queue_backlog.get("dead_lettered") or 0) if isinstance(queue_backlog, dict) else -1
+runtime_health_check = next(
+    (
+        check
+        for check in closure_checks
+        if isinstance(check, dict) and check.get("name") == "runtime_health"
+    ),
+    {},
+)
+runtime_health_payload = (
+    runtime_health_check.get("payload", {})
+    if isinstance(runtime_health_check, dict)
+    else {}
+)
+accepted_preflight_pending_events = (
+    runtime_health_payload.get("accepted_preflight_pending_events")
+    if isinstance(runtime_health_payload, dict)
+    else None
+)
+preflight_pending_accepted = (
+    profile == "preflight"
+    and isinstance(accepted_preflight_pending_events, dict)
+    and accepted_preflight_pending_events.get("status") == "accepted_candidate_upgrade_backlog"
+    and int(accepted_preflight_pending_events.get("count") or -1) == pending
+    and pending > 0
+)
+postgres_queue_passed = (
+    (pending == 0 or preflight_pending_accepted)
+    and failed == 0
+    and dead_letters == 0
+)
 passed = (
     inventory.get("status") == "PASS"
     and domain.get("status") == "pass"
     and closure.get("status") == "pass"
     and (page_canonical_audit_ready or not page_canonical_audit_required)
-    and pending == 0
-    and failed == 0
-    and dead_letters == 0
+    and postgres_queue_passed
 )
 payload = {
     "release_gate_status": "PASS" if passed else "FAIL",
@@ -2730,7 +2779,7 @@ payload = {
         "domain_contract_audit": domain.get("status"),
         "runtime_sync_closure": closure.get("status"),
         "page_canonical_audit": page_canonical_audit.get("status"),
-        "postgres_queue": "pass" if pending == 0 and failed == 0 and dead_letters == 0 else "fail",
+        "postgres_queue": "pass" if postgres_queue_passed else "fail",
     },
     "unknown_worker_count": int(inventory.get("unknown_worker_count") or 0),
     "required_worker_not_ready": int(inventory.get("required_worker_not_ready") or 0),
@@ -2738,6 +2787,9 @@ payload = {
     "pending_outbox_count": pending,
     "failed_outbox_count": failed,
     "dead_letter_count": dead_letters,
+    "accepted_preflight_pending_events": (
+        accepted_preflight_pending_events if preflight_pending_accepted else None
+    ),
     "runtime_sync_closure_failed_checks": [
         failure.get("name") for failure in closure_failures
     ],

@@ -22,6 +22,7 @@ class FakeRuntimeMonitoringRepository:
             ],
             "critical_failed_outbox_count": 0,
             "pending_outbox_events_by_scope": [],
+            "outbox_events_by_type_status": [],
         }
 
 
@@ -48,6 +49,9 @@ class BackloggedPostgresRuntimeMonitoringRepository:
                 "scope_key": "all",
                 "count": 1,
             }
+        ]
+        summary["outbox_events_by_type_status"] = [
+            {"event_type": "oa.sync", "status": "pending", "count": 1}
         ]
         return summary
 
@@ -333,6 +337,54 @@ class ReleaseGateBoundaryTests(unittest.TestCase):
         self.assertEqual(check.payload["error"], "system_audit_business_pages_failed")
         self.assertEqual(check.payload["system_audits"], [])
 
+    def test_page_canonical_audit_uses_candidate_snapshot_for_exact_upgrade_backlog(self) -> None:
+        candidate_audit = {
+            "status": "fail",
+            "error": "system_audit_internal_gate_failed",
+            "diagnostics": {
+                "summary": {
+                    "audited_business_page_count": 12,
+                    "passed_business_page_count": 12,
+                },
+                "issue_codes": [
+                    "page_runtime_queue_not_drained",
+                    "worker_event_type_mismatch",
+                ],
+                "failed_page_reports": [],
+            },
+        }
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            BackloggedPostgresRuntimeMonitoringRepository,
+        ), patch.object(
+            gate.write_operation_e2e_smoke,
+            "_wait_for_system_audit",
+        ) as wait_for_audit, patch.object(
+            gate,
+            "_candidate_system_audit",
+            return_value=candidate_audit,
+        ):
+            check = gate._page_canonical_audit_check(
+                object(),
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                tenant_id="default",
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                require_auth=True,
+                allowed_preflight_pending_event_types={"oa.sync"},
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(check.payload["verification_source"], "candidate_read_only_snapshot")
+        self.assertEqual(
+            check.payload["current_http_audit"]["reason"],
+            "candidate_upgrade_backlog_requires_candidate_snapshot",
+        )
+        wait_for_audit.assert_not_called()
+
     def test_candidate_system_audit_preserves_bounded_failure_diagnostics(self) -> None:
         issues = [{"code": f"issue-{index}"} for index in range(12)]
         report = {
@@ -496,6 +548,99 @@ class RuntimeSyncClosureGateTests(unittest.TestCase):
             preflight_call = page_audit.call_args
 
         self.assertTrue(preflight_call.kwargs["allow_compatible_previous_registry"])
+
+    def test_preflight_accepts_exact_candidate_only_pending_event_backlog(self) -> None:
+        with patch.object(
+            gate,
+            "RuntimeMonitoringRepository",
+            BackloggedPostgresRuntimeMonitoringRepository,
+        ):
+            check = gate._runtime_health_check(
+                object(),
+                timeout_seconds=0,
+                poll_interval_seconds=0.05,
+                allowed_preflight_pending_event_types={"oa.sync"},
+            )
+
+        self.assertEqual(check.status, gate.PASS)
+        self.assertEqual(
+            check.payload["accepted_preflight_pending_events"],
+            {
+                "status": "accepted_candidate_upgrade_backlog",
+                "count": 1,
+                "event_types": ["oa.sync"],
+                "rows": [
+                    {"event_type": "oa.sync", "status": "pending", "count": 1}
+                ],
+            },
+        )
+
+    def test_preflight_rejects_mixed_or_unaccounted_pending_event_backlog(self) -> None:
+        summary = BackloggedPostgresRuntimeMonitoringRepository(None).ready_health_summary()
+        summary["outbox_events_by_type_status"] = [
+            {"event_type": "oa.sync", "status": "pending", "count": 1},
+            {"event_type": "import.process.requested", "status": "pending", "count": 1},
+        ]
+        summary["queue_backlog"] = {"pending": 2}
+
+        blockers = gate._runtime_blockers(
+            summary,
+            allowed_preflight_pending_event_types={"oa.sync"},
+        )
+
+        self.assertEqual(blockers["queue_backlog"], {"pending": 2})
+
+    def test_candidate_page_audit_accepts_only_upgrade_runtime_issues(self) -> None:
+        candidate_audit = {
+            "status": "fail",
+            "error": "system_audit_internal_gate_failed",
+            "diagnostics": {
+                "summary": {
+                    "audited_business_page_count": 12,
+                    "passed_business_page_count": 12,
+                },
+                "issue_codes": [
+                    "page_runtime_queue_not_drained",
+                    "worker_event_type_mismatch",
+                ],
+                "failed_page_reports": [],
+            },
+        }
+        accepted = gate._accept_preflight_candidate_audit(
+            candidate_audit,
+            accepted_preflight_pending_events={
+                "status": "accepted_candidate_upgrade_backlog",
+                "count": 321,
+                "event_types": ["oa.payment_status.reconcile"],
+            },
+        )
+
+        self.assertEqual(accepted["status"], gate.PASS)
+        self.assertNotIn("error", accepted)
+
+    def test_candidate_page_audit_rejects_unrelated_issue(self) -> None:
+        candidate_audit = {
+            "status": "fail",
+            "error": "system_audit_internal_gate_failed",
+            "diagnostics": {
+                "summary": {
+                    "audited_business_page_count": 12,
+                    "passed_business_page_count": 12,
+                },
+                "issue_codes": ["app_health_inventory_projection_mismatch"],
+                "failed_page_reports": [],
+            },
+        }
+
+        rejected = gate._accept_preflight_candidate_audit(
+            candidate_audit,
+            accepted_preflight_pending_events={
+                "status": "accepted_candidate_upgrade_backlog",
+                "count": 321,
+            },
+        )
+
+        self.assertEqual(rejected, candidate_audit)
 
     def test_runtime_health_empty_summary_prevents_closure_pass(self) -> None:
         with patch.object(

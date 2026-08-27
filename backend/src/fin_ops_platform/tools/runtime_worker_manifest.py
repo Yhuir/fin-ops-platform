@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="Print full worker registry as JSON.")
     parser.add_argument("--instances", action="store_true", help="Print all registered worker instance names.")
     parser.add_argument("--required-instances", action="store_true", help="Print required worker instance names.")
+    parser.add_argument("--event-types", action="store_true", help="Print all registered durable event types.")
     parser.add_argument("--env-example", help="Print env example filename for a worker instance.")
     parser.add_argument("--worker-check-command", help="Print app.worker --check args for a worker instance.")
     parser.add_argument("--worker-command", help="Print app.worker args for a worker instance.")
@@ -34,6 +35,20 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> i
         return 0
     if args.required_instances:
         print(" ".join(required_worker_instance_names()), file=stdout)
+        return 0
+    if args.event_types:
+        print(
+            " ".join(
+                sorted(
+                    {
+                        event_type
+                        for registration in worker_registrations()
+                        for event_type in registration.event_types
+                    }
+                )
+            ),
+            file=stdout,
+        )
         return 0
     if args.env_example:
         print(get_registration_by_instance_name(args.env_example).env_example, file=stdout)

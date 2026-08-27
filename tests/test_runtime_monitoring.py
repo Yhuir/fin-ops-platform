@@ -30,6 +30,10 @@ class FakeConnection:
                         "last_error": "",
                     }
                 ],
+                "outbox_events_by_type_status": [
+                    {"event_type": "oa.sync", "status": "pending", "count": 3},
+                    {"event_type": "oa.sync", "status": "failed", "count": 1},
+                ],
             }
         if "from job.runtime_worker_heartbeats" in normalized:
             return {"max_worker_heartbeat_lag_seconds": 8.0}
@@ -117,6 +121,13 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertNotIn("rabbitmq_queue_depth", summary)
         self.assertEqual(summary["critical_failed_outbox_count"], 1)
         self.assertEqual(summary["pending_outbox_events_by_scope"][0]["event_type"], "oa.sync")
+        self.assertEqual(
+            summary["outbox_events_by_type_status"],
+            [
+                {"event_type": "oa.sync", "status": "pending", "count": 3},
+                {"event_type": "oa.sync", "status": "failed", "count": 1},
+            ],
+        )
         self.assertEqual(summary["missing_required_worker_count"], 0)
         self.assertNotIn("read_models", summary)
         self.assertNotIn("dirty_scopes", summary)

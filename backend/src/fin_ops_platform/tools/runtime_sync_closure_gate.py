@@ -38,6 +38,9 @@ RUNTIME_HEALTH_REQUIRED_FIELDS = (
     "worker_metrics",
     "critical_failed_outbox_count",
 )
+PREFLIGHT_UPGRADE_AUDIT_ISSUE_CODES = frozenset(
+    {"page_runtime_queue_not_drained", "worker_event_type_mismatch"}
+)
 CANDIDATE_AUDIT_BOOTSTRAP_ERRORS = frozenset(
     {
         "system_audit_business_pages_failed",
@@ -90,6 +93,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Override the required worker inventory used by runtime health checks.",
     )
+    parser.add_argument(
+        "--allow-preflight-pending-event-type",
+        action="append",
+        default=[],
+        help=(
+            "Allow a preflight-only pending backlog for an event type introduced by the exact candidate release. "
+            "Processing, failed, dead-lettered, mixed, or unaccounted rows still fail closed."
+        ),
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json", action="store_true", help="Print JSON output. This is the default output shape.")
     return parser
@@ -136,6 +148,11 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             for instance in args.required_worker_instance
             if str(instance).strip()
         } or None,
+        allowed_preflight_pending_event_types={
+            str(event_type).strip()
+            for event_type in args.allow_preflight_pending_event_type
+            if str(event_type).strip()
+        } or None,
     )
     encoded = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if args.output is not None:
@@ -164,9 +181,12 @@ def run_closure_gate(
     timeout_seconds: float = 90.0,
     poll_interval_seconds: float = 0.5,
     required_worker_instances: set[str] | None = None,
+    allowed_preflight_pending_event_types: set[str] | None = None,
 ) -> dict[str, Any]:
     if profile not in GATE_PROFILES:
         raise ValueError(f"unsupported release gate profile: {profile}")
+    if allowed_preflight_pending_event_types and profile != "preflight":
+        raise ValueError("preflight pending event types are only valid for the preflight profile")
     normalized_headers = {str(key): str(value) for key, value in dict(headers or {}).items() if str(value).strip()}
     normalized_admin_headers = {
         str(key): str(value)
@@ -188,6 +208,7 @@ def run_closure_gate(
                     timeout_seconds=timeout_seconds,
                     poll_interval_seconds=poll_interval_seconds,
                     required_worker_instances=required_worker_instances,
+                    allowed_preflight_pending_event_types=allowed_preflight_pending_event_types,
                 ),
                 _health_ready_payload_check(
                     base_url=base_url,
@@ -254,6 +275,7 @@ def run_closure_gate(
             poll_interval_seconds=poll_interval_seconds,
             require_auth=not allow_unauthenticated_http,
             allow_compatible_previous_registry=profile == "preflight",
+            allowed_preflight_pending_event_types=allowed_preflight_pending_event_types,
         )
     )
     status = _overall_status(checks)
@@ -283,6 +305,7 @@ def _runtime_health_check(
     poll_interval_seconds: float,
     name: str = "runtime_health",
     required_worker_instances: set[str] | None = None,
+    allowed_preflight_pending_event_types: set[str] | None = None,
 ) -> ClosureCheck:
     deadline = monotonic() + max(0.0, timeout_seconds)
     monitoring_repository = RuntimeMonitoringRepository(connection)
@@ -324,6 +347,11 @@ def _runtime_health_check(
         blockers = _runtime_blockers(
             summary,
             allow_required_worker_contract_mismatch=required_worker_instances is not None,
+            allowed_preflight_pending_event_types=allowed_preflight_pending_event_types,
+        )
+        accepted_preflight_pending_events = _accepted_preflight_pending_events(
+            summary,
+            allowed_event_types=allowed_preflight_pending_event_types,
         )
         timed_out = monotonic() >= deadline
         if not blockers or timed_out:
@@ -351,6 +379,11 @@ def _runtime_health_check(
                         )
                         if key in summary
                     },
+                    **(
+                        {"accepted_preflight_pending_events": accepted_preflight_pending_events}
+                        if accepted_preflight_pending_events is not None
+                        else {}
+                    ),
                 },
             )
         sleep(min(max(0.05, poll_interval_seconds), max(0.0, deadline - monotonic())))
@@ -579,6 +612,7 @@ def _page_canonical_audit_check(
     poll_interval_seconds: float,
     require_auth: bool,
     allow_compatible_previous_registry: bool = False,
+    allowed_preflight_pending_event_types: set[str] | None = None,
 ) -> ClosureCheck:
     if require_auth and not _auth_configured(headers):
         return ClosureCheck(
@@ -593,24 +627,50 @@ def _page_canonical_audit_check(
         steps=(),
         system_audit_path=write_operation_e2e_smoke.SYSTEM_AUDIT_PATH,
     )
-    audit = write_operation_e2e_smoke._wait_for_system_audit(
-        checkpoint,
-        base_url=base_url,
-        api_prefix=api_prefix,
-        headers=headers,
-        timeout_seconds=timeout_seconds,
-        poll_interval_seconds=poll_interval_seconds,
-        request_fn=write_operation_e2e_smoke._http_request,
-        excluded_audit_ids=set(),
-        allow_compatible_previous_registry=allow_compatible_previous_registry,
+    accepted_preflight_pending_events = (
+        _accepted_preflight_pending_events(
+            RuntimeMonitoringRepository(connection).ready_health_summary(),
+            allowed_event_types=allowed_preflight_pending_event_types,
+        )
+        if allowed_preflight_pending_event_types
+        else None
     )
-    verification_source = "current_http_api"
+    audit = (
+        {
+            "status": SKIP,
+            "reason": "candidate_upgrade_backlog_requires_candidate_snapshot",
+            "accepted_preflight_pending_events": accepted_preflight_pending_events,
+        }
+        if accepted_preflight_pending_events is not None
+        else write_operation_e2e_smoke._wait_for_system_audit(
+            checkpoint,
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+            request_fn=write_operation_e2e_smoke._http_request,
+            excluded_audit_ids=set(),
+            allow_compatible_previous_registry=allow_compatible_previous_registry,
+        )
+    )
+    verification_source = (
+        "candidate_read_only_snapshot"
+        if accepted_preflight_pending_events is not None
+        else "current_http_api"
+    )
     candidate_audit: dict[str, Any] | None = None
-    if audit.get("status") != PASS and audit.get("error") in CANDIDATE_AUDIT_BOOTSTRAP_ERRORS:
+    if accepted_preflight_pending_events is not None or (
+        audit.get("status") != PASS and audit.get("error") in CANDIDATE_AUDIT_BOOTSTRAP_ERRORS
+    ):
         candidate_audit = _candidate_system_audit(
             connection,
             tenant_id=tenant_id,
             timeout_seconds=timeout_seconds,
+        )
+        candidate_audit = _accept_preflight_candidate_audit(
+            candidate_audit,
+            accepted_preflight_pending_events=accepted_preflight_pending_events,
         )
         verification_source = "candidate_read_only_snapshot"
     passed = audit.get("status") == PASS or bool(candidate_audit and candidate_audit.get("status") == PASS)
@@ -691,6 +751,13 @@ def _candidate_system_audit(
             "audit_status": report.get("audit_status"),
             "summary": report.get("summary"),
             "issues": list(report.get("issues") or [])[:10],
+            "issue_codes": sorted(
+                {
+                    str(issue.get("code") or "")
+                    for issue in list(report.get("issues") or [])
+                    if isinstance(issue, dict) and str(issue.get("code") or "")
+                }
+            ),
             "failed_page_reports": [
                 {
                     "page_key": page_report.get("page_key"),
@@ -710,6 +777,7 @@ def _runtime_blockers(
     summary: Mapping[str, Any],
     *,
     allow_required_worker_contract_mismatch: bool = False,
+    allowed_preflight_pending_event_types: set[str] | None = None,
 ) -> dict[str, Any]:
     blockers: dict[str, Any] = {}
     for key in ("missing_required_worker_count", "stale_required_worker_count"):
@@ -729,9 +797,105 @@ def _runtime_blockers(
         if int(summary.get(key) or 0) > 0:
             blockers[key] = summary.get(key)
     queue_backlog = summary.get("queue_backlog")
-    if isinstance(queue_backlog, dict) and any(int(value or 0) > 0 for value in queue_backlog.values()):
+    accepted_preflight_pending_events = _accepted_preflight_pending_events(
+        summary,
+        allowed_event_types=allowed_preflight_pending_event_types,
+    )
+    if (
+        isinstance(queue_backlog, dict)
+        and any(int(value or 0) > 0 for value in queue_backlog.values())
+        and accepted_preflight_pending_events is None
+    ):
         blockers["queue_backlog"] = queue_backlog
     return blockers
+
+
+def _accepted_preflight_pending_events(
+    summary: Mapping[str, Any],
+    *,
+    allowed_event_types: set[str] | None,
+) -> dict[str, Any] | None:
+    normalized_allowed = {
+        str(event_type).strip()
+        for event_type in (allowed_event_types or set())
+        if str(event_type).strip()
+    }
+    if not normalized_allowed:
+        return None
+    queue_backlog = summary.get("queue_backlog")
+    if not isinstance(queue_backlog, dict):
+        return None
+    positive_queue = {
+        str(status): int(count or 0)
+        for status, count in queue_backlog.items()
+        if int(count or 0) > 0
+    }
+    if set(positive_queue) != {"pending"}:
+        return None
+    type_rows = summary.get("outbox_events_by_type_status")
+    if not isinstance(type_rows, list) or not type_rows:
+        return None
+    normalized_rows = [
+        {
+            "event_type": str(row.get("event_type") or "").strip(),
+            "status": str(row.get("status") or "").strip(),
+            "count": int(row.get("count") or 0),
+        }
+        for row in type_rows
+        if isinstance(row, dict) and int(row.get("count") or 0) > 0
+    ]
+    if (
+        not normalized_rows
+        or any(row["status"] != "pending" for row in normalized_rows)
+        or any(row["event_type"] not in normalized_allowed for row in normalized_rows)
+        or sum(row["count"] for row in normalized_rows) != positive_queue["pending"]
+    ):
+        return None
+    return {
+        "status": "accepted_candidate_upgrade_backlog",
+        "count": positive_queue["pending"],
+        "event_types": sorted({row["event_type"] for row in normalized_rows}),
+        "rows": normalized_rows,
+    }
+
+
+def _accept_preflight_candidate_audit(
+    candidate_audit: dict[str, Any],
+    *,
+    accepted_preflight_pending_events: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if candidate_audit.get("status") == PASS or accepted_preflight_pending_events is None:
+        return candidate_audit
+    diagnostics = candidate_audit.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return candidate_audit
+    summary = diagnostics.get("summary")
+    issue_codes = {
+        str(code)
+        for code in list(diagnostics.get("issue_codes") or [])
+        if str(code)
+    }
+    failed_page_reports = list(diagnostics.get("failed_page_reports") or [])
+    business_pages_passed = (
+        isinstance(summary, dict)
+        and int(summary.get("audited_business_page_count") or -1)
+        == int(summary.get("passed_business_page_count") or -2)
+    )
+    if (
+        candidate_audit.get("error") != "system_audit_internal_gate_failed"
+        or not business_pages_passed
+        or failed_page_reports
+        or not issue_codes
+        or not issue_codes.issubset(PREFLIGHT_UPGRADE_AUDIT_ISSUE_CODES)
+        or "page_runtime_queue_not_drained" not in issue_codes
+    ):
+        return candidate_audit
+    accepted = dict(candidate_audit)
+    accepted["status"] = PASS
+    accepted.pop("error", None)
+    accepted["accepted_preflight_pending_events"] = accepted_preflight_pending_events
+    accepted["accepted_issue_codes"] = sorted(issue_codes)
+    return accepted
 
 
 def _overall_status(checks: Sequence[ClosureCheck]) -> str:

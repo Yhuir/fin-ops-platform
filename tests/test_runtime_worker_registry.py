@@ -29,6 +29,17 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(runtime_worker_manifest.main(["--required-instances"], stdout=stdout), 0)
         self.assertEqual(tuple(stdout.getvalue().split()), required_worker_instance_names())
 
+        event_stdout = io.StringIO()
+        self.assertEqual(runtime_worker_manifest.main(["--event-types"], stdout=event_stdout), 0)
+        self.assertEqual(
+            set(event_stdout.getvalue().split()),
+            {
+                event_type
+                for registration in worker_registrations()
+                for event_type in registration.event_types
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
