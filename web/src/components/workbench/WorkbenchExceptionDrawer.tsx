@@ -320,6 +320,7 @@ export default function WorkbenchExceptionDrawer({
                       <WorkbenchAnomalyIndicator
                         anomalies={group.workbenchAnomaly.items}
                         className="workbench-anomaly-indicator--drawer-summary"
+                        confirmation={group.workbenchAnomaly.confirmation}
                         levelLabel="该关联组"
                       />
                     ) : null}

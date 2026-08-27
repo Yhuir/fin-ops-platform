@@ -1199,10 +1199,8 @@ def assert_auto_linked_group(
         for row in list(group.get(key) or []):
             assert isinstance(row, dict)
             testcase.assertTrue(str(row.get("case_id") or "").startswith("CASE-AUTO-"))
-            relation_amount_check = row.get("relation_amount_check")
-            testcase.assertIsInstance(relation_amount_check, dict)
-            assert isinstance(relation_amount_check, dict)
-            testcase.assertEqual(relation_amount_check.get("status"), "matched")
+            testcase.assertNotIn("relation_amount_check", row)
+            testcase.assertNotIn("relation_note", row)
     return group
 
 def build_personal_advance_repayment_raw_payload(

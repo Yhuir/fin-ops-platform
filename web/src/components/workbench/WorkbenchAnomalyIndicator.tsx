@@ -10,12 +10,14 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import {
   isWorkbenchAmountAnomalyCode,
+  type WorkbenchAnomaly,
   type WorkbenchAnomalyItem,
 } from "../../features/workbench/types";
 import { formatDateTimeText } from "../../features/dateTime";
 
 type WorkbenchAnomalyIndicatorProps = {
   anomalies: WorkbenchAnomalyItem[];
+  confirmation?: WorkbenchAnomaly["confirmation"];
   levelLabel: string;
   externalUrl?: string;
   className?: string;
@@ -33,6 +35,7 @@ type InteractionMode = "idle" | "hover-open" | "hover-dismissed" | "click-open";
 
 export default function WorkbenchAnomalyIndicator({
   anomalies,
+  confirmation,
   levelLabel,
   externalUrl,
   className = "",
@@ -175,6 +178,12 @@ export default function WorkbenchAnomalyIndicator({
                 );
               })}
             </ul>
+            {confirmation ? (
+              <div className="workbench-anomaly-popover__confirmation">
+                <strong>确认关联备注</strong>
+                <p>{confirmation.note}</p>
+              </div>
+            ) : null}
             {review ? (
               <div className="workbench-anomaly-popover__review">
                 <strong>已接受该异常风险</strong>

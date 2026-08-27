@@ -187,8 +187,6 @@ type ApiWorkbenchRow = {
   summary_fields?: Record<string, unknown>;
   detail_fields?: Record<string, unknown>;
   tags?: string[];
-  relation_note?: string | null;
-  relation_amount_check?: ApiWorkbenchRelationAmountCheck | null;
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
   source_expense_item_ids?: unknown[] | null;
@@ -228,6 +226,9 @@ type ApiWorkbenchAnomaly = {
   reviewed_by_account?: string | null;
   reviewed_by_name?: string | null;
   reviewed_at?: string | null;
+  confirmation?: {
+    note?: string | null;
+  } | null;
   items?: ApiWorkbenchAnomalyItem[] | null;
 };
 
@@ -901,6 +902,7 @@ function mapWorkbenchAnomaly(
   const reviewedByAccount = toDisplayValue(value.reviewed_by_account, "");
   const reviewedByName = toDisplayValue(value.reviewed_by_name, "");
   const reviewedAt = toDisplayValue(value.reviewed_at, "") || undefined;
+  const confirmationNote = toDisplayValue(value.confirmation?.note, "");
   const items = (Array.isArray(value.items) ? value.items : []).flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
@@ -955,6 +957,7 @@ function mapWorkbenchAnomaly(
     reviewedByAccount,
     reviewedByName,
     reviewedAt,
+    confirmation: confirmationNote ? { note: confirmationNote } : undefined,
     items,
   };
 }
@@ -1304,8 +1307,6 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     categorySource: toDisplayValue(row.category_source, "") || undefined,
     categoryResolutionStatus: toDisplayValue(row.category_resolution_status, "") || undefined,
     bankTextFields: row.type === "bank" ? mapBankTextFields(row) : undefined,
-    relationNote: toDisplayValue(row.relation_note, "") || undefined,
-    relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
   };
 }
@@ -1429,11 +1430,6 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     invoice: group.invoice_rows.map(mapRow),
   };
   const amountCheck = mapRelationAmountCheck(group.amount_check);
-  if (amountCheck) {
-    ([...rows.oa, ...rows.bank, ...rows.invoice]).forEach((row) => {
-      row.relationAmountCheck ??= amountCheck;
-    });
-  }
   const workbenchAnomaly = mapWorkbenchAnomaly(group.workbench_anomaly);
   decorateWorkbenchAnomalies(rows, workbenchAnomaly);
   const rawGroupType = String(group.group_type || "").trim();

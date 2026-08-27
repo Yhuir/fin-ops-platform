@@ -1235,7 +1235,6 @@ class WorkbenchCanonicalRowsBuilder:
             )
             relation_zone = "paired" if completion["is_complete"] else "unpaired"
             external_etc_batch_id = self._relation_external_etc_batch_id(relation)
-            relation_amount_check = relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None
             for row_id in relation_row_ids:
                 row = working_rows_by_id[row_id]
                 row["status"] = relation_zone
@@ -1246,8 +1245,6 @@ class WorkbenchCanonicalRowsBuilder:
                     relation,
                     completion=completion,
                 )
-                if relation_amount_check:
-                    row["relation_amount_check"] = deepcopy(relation_amount_check)
                 if external_etc_batch_id and str(row.get("type") or "").strip() == "oa":
                     row["etc_batch_id"] = external_etc_batch_id
                     tags = [str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()]
@@ -1280,8 +1277,6 @@ class WorkbenchCanonicalRowsBuilder:
                     if "已关联ETC发票" not in tags:
                         tags.append("已关联ETC发票")
                     row["tags"] = tags
-                    if relation_amount_check:
-                        row["relation_amount_check"] = deepcopy(relation_amount_check)
                     working_rows_by_id[str(row["id"])] = row
 
         WorkbenchObjectIdentityArbitrationService(identity_policy=OBJECT_IDENTITY_POLICY).arbitrate_rows(

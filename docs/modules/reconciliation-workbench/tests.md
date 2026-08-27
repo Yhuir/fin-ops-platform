@@ -2,6 +2,12 @@
 
 日期：2026-08-27
 
+## 2026-08-28 关系异常唯一入口与确认备注
+
+- Business/service：`tests/test_workbench_relation_grouping.py` 保护组级 `amount_check` 保留、三类 row 不再复制 `relation_amount_check`，并把 `manual_confirmed` 的非空确认备注投影到同一 `workbench_anomaly.confirmation`；异常审阅前后该确认事实不丢失。
+- API/read：`tests/test_workbench_v2_api.py`、`tests/test_workbench_page_query_repository.py` 保护 direct page 的组级合同与精简 row payload；`web/src/test/WorkbenchApi.test.ts` 保护确认备注映射且客户端 row 不再拥有旧金额判断字段。
+- Frontend/regression：`WorkbenchColumns.test.tsx`、`WorkbenchZone.test.tsx` 不再保留流水三角形/tooltip 行为；`RelationGroupGrid.test.tsx`、`WorkbenchExceptionDrawer.test.tsx` 保护主表、展开抽屉与折叠摘要复用圆形异常入口，并在 Popover 展示确认关联备注。批量账务页面自身的提交金额差异提示由 `BatchAccountingPage.test.tsx` 继续独立保护。
+
 ## 2026-08-27 paired / unpaired canonical 发票守恒统计
 
 - Business/repository：`tests/test_workbench_page_query_repository.py` 保护两区 SQL 同时返回展示 `invoice` 和业务 `canonical_invoice`，无筛选统计直接按唯一 canonical ID 分区；paired owner 优先，未拥有者进入 unpaired，禁止 summary 与真实成员重复计数。

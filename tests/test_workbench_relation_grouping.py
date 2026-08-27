@@ -1265,8 +1265,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertFalse(group["amount_check"]["requires_note"])
         for row_type in ("oa", "bank", "invoice"):
             for row in group[f"{row_type}_rows"]:
-                self.assertEqual(row["relation_amount_check"]["status"], "matched")
-                self.assertEqual(row["relation_amount_check"]["bank_total"], "1015.00")
+                self.assertNotIn("relation_amount_check", row)
+                self.assertNotIn("relation_note", row)
 
     def test_input_order_and_decorations_do_not_change_membership_or_group_ids(self) -> None:
         batch = yunnan_lifu_520_fixture()
@@ -1337,6 +1337,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             "row_types": ["oa", "invoice", "bank"],
             "status": "active",
             "relation_mode": "manual_confirmed",
+            "note": "票面金额少 0.01 元，经确认保留关联",
         }
 
         active_payload = self.service.group_payload(
@@ -1349,6 +1350,10 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(active_payload["summary"]["unpaired_exception_count"], 1)
         self.assertEqual(active_payload["summary"]["paired_exception_count"], 0)
         self.assertEqual(active_group["workbench_anomaly"]["review_decision"], "pending")
+        self.assertEqual(
+            active_group["workbench_anomaly"]["confirmation"],
+            {"note": "票面金额少 0.01 元，经确认保留关联"},
+        )
         self.assertEqual(
             {item["display_label"] for item in active_group["workbench_anomaly"]["items"]},
             {"OA 流水一致，票少"},
@@ -1378,6 +1383,10 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(
             {item["display_label"] for item in accepted_group["workbench_anomaly"]["items"]},
             {"OA 流水一致，票少"},
+        )
+        self.assertEqual(
+            accepted_group["workbench_anomaly"]["confirmation"],
+            {"note": "票面金额少 0.01 元，经确认保留关联"},
         )
 
     def test_uploaded_expense_item_without_parsed_invoice_is_an_active_group_exception(self) -> None:

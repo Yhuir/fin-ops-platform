@@ -136,9 +136,10 @@ test.describe("workbench exception browser flow", () => {
     await expect(unpairedIndicator).toBeVisible();
     await expect(unpairedZone.getByText("OA附件", { exact: true })).toHaveCount(1);
     await expect(unpairedZone.getByText("明细归属", { exact: true })).toHaveCount(1);
-    await expect(unpairedZone.getByText("人工导入", { exact: true })).toHaveCount(0);
+    await expect(unpairedZone.getByText("人工导入", { exact: true })).toHaveCount(1);
     await expect(unpairedZone.getByText("导入记录", { exact: true })).toHaveCount(0);
     await expect(unpairedZone.getByText("OA 流水一致，票少")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "查看金额不一致差额说明" })).toHaveCount(0);
     await unpairedIndicator.hover();
     await expect(page.getByText("OA 流水一致，票少")).toBeVisible();
     const indicatorStyle = await unpairedIndicator.evaluate((element) => {
@@ -183,6 +184,8 @@ test.describe("workbench exception browser flow", () => {
     await collapsedIndicator.hover();
     const collapsedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
     await expect(collapsedPopover.getByText("OA 流水一致，票少")).toBeVisible();
+    await expect(collapsedPopover.getByText("确认关联备注")).toBeVisible();
+    await expect(collapsedPopover.getByText("票面金额少 0.01 元，经确认保留关联")).toBeVisible();
     await collapsedIndicator.click();
     await expect(collapsedPopover).toHaveCount(0);
     await collapsedIndicator.click();

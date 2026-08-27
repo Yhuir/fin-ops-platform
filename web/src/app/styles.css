@@ -14492,76 +14492,6 @@ body.column-layout-dragging {
   white-space: normal;
 }
 
-.record-warning-tooltip-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  overflow: visible;
-  vertical-align: middle;
-}
-
-.record-warning-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  margin-left: 2px;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: #b7791f;
-  cursor: pointer;
-  vertical-align: middle;
-  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
-}
-
-.record-warning-icon-btn:hover,
-.record-warning-icon-btn:focus-visible {
-  outline: none;
-  background: #fff3cd;
-  color: #8a4f00;
-  box-shadow: 0 0 0 2px rgba(217, 154, 50, 0.2);
-}
-
-.record-warning-icon {
-  display: block;
-  width: 16px;
-  height: 16px;
-}
-
-.bank-amount-mismatch-tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  z-index: 80;
-  display: grid;
-  min-width: 176px;
-  max-width: 260px;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid #e8bd78;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #243b53;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.18);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: left;
-  white-space: normal;
-  transform: translateX(-50%);
-}
-
-.bank-amount-mismatch-tooltip strong {
-  color: #7a4d16;
-  font-size: 12px;
-  font-weight: 700;
-}
-
 .money-cell-account {
   display: inline-flex;
   justify-content: center;
@@ -14891,6 +14821,7 @@ body.column-layout-dragging {
   overflow-wrap: anywhere;
 }
 
+.workbench-anomaly-popover__confirmation,
 .workbench-anomaly-popover__review {
   display: grid;
   gap: 5px;
@@ -14902,8 +14833,15 @@ body.column-layout-dragging {
   overflow-wrap: anywhere;
 }
 
+.workbench-anomaly-popover__confirmation strong,
 .workbench-anomaly-popover__review strong {
   color: #526277;
+}
+
+.workbench-anomaly-popover__confirmation p {
+  margin: 0;
+  color: #43556a;
+  white-space: pre-wrap;
 }
 
 .workbench-anomaly-popover__review dl {

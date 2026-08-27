@@ -745,6 +745,9 @@ function buildAmountMismatchWorkbenchGroup(decision: WorkbenchAnomalyReviewDecis
     reviewed_by_account: decision === "accept_paired" ? "E2E-REVIEWER" : "",
     reviewed_by_name: decision === "accept_paired" ? "浏览器测试员" : "",
     reviewed_at: decision === "accept_paired" ? "2026-08-25T17:03:47.404624+08:00" : null,
+    confirmation: {
+      note: "票面金额少 0.01 元，经确认保留关联",
+    },
     items: [anomalyItem],
   };
   return {

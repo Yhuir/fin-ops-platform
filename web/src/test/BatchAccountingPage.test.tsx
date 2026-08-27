@@ -1026,9 +1026,6 @@ describe("BatchAccountingPage", () => {
       expect(screen.getByText("已选 OA 金额 850.00")).toBeInTheDocument();
       expect(screen.getByText("差额 50.00")).toBeInTheDocument();
       expect(screen.getByText("金额不一致")).toBeInTheDocument();
-      const mismatchIcon = screen.getByRole("button", { name: "查看金额不一致差额说明" });
-      await user.hover(mismatchIcon);
-      expect(await screen.findByText("差额说明：财务确认差额闭环")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "撤回关联" })).toBeEnabled();
 
       await user.click(screen.getByRole("button", { name: "撤回关联" }));

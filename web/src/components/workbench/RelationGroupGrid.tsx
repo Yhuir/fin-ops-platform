@@ -674,6 +674,7 @@ function RelationGroupGrid({
                 <WorkbenchAnomalyIndicator
                   anomalies={groupLevelAnomalies}
                   className="workbench-anomaly-indicator--group"
+                  confirmation={group.workbenchAnomaly?.confirmation}
                   levelLabel="该关联组"
                 />
               ) : null}
@@ -741,6 +742,7 @@ function RelationGroupGrid({
               <WorkbenchAnomalyIndicator
                 anomalies={groupLevelAnomalies}
                 className="workbench-anomaly-indicator--group"
+                confirmation={group.workbenchAnomaly?.confirmation}
                 levelLabel="该关联组"
               />
             ) : null}

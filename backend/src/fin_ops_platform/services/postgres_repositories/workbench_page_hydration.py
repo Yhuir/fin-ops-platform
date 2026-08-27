@@ -941,6 +941,7 @@ class PostgresWorkbenchPageHydrationRepository:
                                 member(row_type, ordinality)
                             order by member.ordinality
                         ),
+                        'note', relation.note,
                         'amount_check', relation.amount_check,
                         'special_metadata', relation.special_metadata,
                         'display_tags', coalesce(
@@ -1589,10 +1590,6 @@ class PostgresWorkbenchPageHydrationRepository:
                 for row in visible_rows:
                     if not isinstance(row, dict):
                         continue
-                    # Summary pages inherit the relation-level amount check in
-                    # the frontend. Repeating the same payload on every row is
-                    # both redundant and a material transfer/serialization cost.
-                    row.pop("relation_amount_check", None)
                     for key in (
                         "object_identity_key",
                         "object_identity_kind",

@@ -133,6 +133,9 @@ export type WorkbenchAnomaly = {
   reviewedByAccount: string;
   reviewedByName: string;
   reviewedAt?: string;
+  confirmation?: {
+    note: string;
+  };
   items: WorkbenchAnomalyItem[];
 };
 
@@ -180,8 +183,6 @@ export type WorkbenchRecord = {
   categorySource?: string;
   categoryResolutionStatus?: WorkbenchBankCategoryResolutionStatus;
   bankTextFields?: WorkbenchBankTextField[];
-  relationNote?: string;
-  relationAmountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
   workbenchAnomalies?: WorkbenchAnomalyItem[];
   displayOnly?: boolean;

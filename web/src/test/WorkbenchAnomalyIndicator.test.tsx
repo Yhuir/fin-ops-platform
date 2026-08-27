@@ -113,6 +113,7 @@ describe("WorkbenchAnomalyIndicator", () => {
           reviewedAt: "2026-08-25T17:03:47.404624+08:00",
           reviewNote: "金额差异已核对",
         }]}
+        confirmation={{ note: "票面金额少 1.00 元，经确认保留关联" }}
         levelLabel="该关联组"
       />,
     );
@@ -123,6 +124,8 @@ describe("WorkbenchAnomalyIndicator", () => {
     expect(screen.getByText("YNSYLP007（杨丽萍）")).toBeVisible();
     expect(screen.getByText("2026-08-25 17:03:47")).toBeVisible();
     expect(screen.getByText("金额差异已核对")).toBeVisible();
+    expect(screen.getByText("确认关联备注")).toBeVisible();
+    expect(screen.getByText("票面金额少 1.00 元，经确认保留关联")).toBeVisible();
     expect(screen.queryByText("8")).not.toBeInTheDocument();
     expect(screen.queryByText(/\+08:00/)).not.toBeInTheDocument();
   });

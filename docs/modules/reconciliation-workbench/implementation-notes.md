@@ -1,5 +1,11 @@
 # 关联台 实施记录
 
+## 2026-08-28 - 关系异常入口统一与确认备注归档
+
+- 交互收口：删除流水金额旁旧三角形、行级金额差异 tooltip 及其 row DTO 映射；关联台关系异常只保留既有圆形感叹号与统一 HeroUI Popover。
+- I/O 收口：关系 `amount_check` 继续是组级事实，不再复制为 OA/流水/发票行字段；`manual_confirmed` 的非空 `relation.note` 直接投影为 `workbench_anomaly.confirmation.note`，不新增数据库字段、migration、read model、worker、API 或兜底分支。
+- 边界：批量账务页面自己的提交金额差异提示不属于关联台旧三角形，保持不变；本次只修改 Reconciliation Workbench query/DTO/Popover 链路。
+
 ## 2026-08-26 - ETC 批次资料异常边界收口
 
 - 根因：旧逻辑只把 canonical `etc_invoice_summary` 从“发票待归属”逐票证据中排除，却仍把同一 `batch_accounting` 关系的 OA 子项送入普通附件归属规则，因此 44 张/2411.25 已由 ETC 批次完整证明的关系仍被误报“发票附件缺失”，并落入 `anomaly_review_required`。

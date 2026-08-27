@@ -1132,6 +1132,9 @@ describe("workbench api bank amount mapping", () => {
                 reviewed_by_account: "YNSYLP007",
                 reviewed_by_name: "杨丽萍",
                 reviewed_at: "2026-08-19 01:00:00+08",
+                confirmation: {
+                  note: "票面金额少 1.00 元，经确认保留关联",
+                },
                 items: [{
                   code: "oa_bank_equal_invoice_less",
                   label: "OA 流水一致，票少",
@@ -1284,11 +1287,17 @@ describe("workbench api bank amount mapping", () => {
     ]);
     expect(group.rows.invoice[0].sourceExpenseItemIds).toEqual(["oa-paired:item:1"]);
     expect(group.rows.invoice[0].displayOnly).toBeUndefined();
-    expect(group.workbenchAnomaly).toMatchObject({ reviewDecision: "accept_paired" });
+    expect(group.workbenchAnomaly).toMatchObject({
+      reviewDecision: "accept_paired",
+      confirmation: { note: "票面金额少 1.00 元，经确认保留关联" },
+    });
     expect(group.amountCheck).toMatchObject({ oaTotal: "100.00", bankTotal: "100.00", invoiceTotal: "99.00" });
-    expect(group.rows.oa[0].relationAmountCheck).toEqual(group.amountCheck);
-    expect(group.rows.bank[0].relationAmountCheck).toEqual(group.amountCheck);
-    expect(group.rows.invoice[0].relationAmountCheck).toEqual(group.amountCheck);
+    expect(group.rows.oa[0]).not.toHaveProperty("relationAmountCheck");
+    expect(group.rows.bank[0]).not.toHaveProperty("relationAmountCheck");
+    expect(group.rows.invoice[0]).not.toHaveProperty("relationAmountCheck");
+    expect(group.rows.oa[0]).not.toHaveProperty("relationNote");
+    expect(group.rows.bank[0]).not.toHaveProperty("relationNote");
+    expect(group.rows.invoice[0]).not.toHaveProperty("relationNote");
     expect(group.rows.invoice[0].workbenchAnomalies?.[0]).toMatchObject({
       displayLabel: "OA 流水一致，票少",
       amountDelta: "1.00",

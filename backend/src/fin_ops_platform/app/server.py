@@ -8942,12 +8942,8 @@ class Application:
         if isinstance(special_metadata, dict) and special_metadata:
             merged_metadata.update(self._serialize_value(special_metadata))
         payload["special_metadata"] = merged_metadata
-        relation_note = str(relation.get("note") or "").strip()
-        if relation_note:
-            payload["relation_note"] = relation_note
         relation_amount_check = relation.get("amount_check")
         if isinstance(relation_amount_check, dict) and relation_amount_check:
-            payload["relation_amount_check"] = self._serialize_value(relation_amount_check)
             external_etc_batch_id = str(
                 relation_amount_check.get("external_etc_batch_id")
                 or relation_amount_check.get("etc_batch_id")

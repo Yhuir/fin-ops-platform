@@ -6,65 +6,6 @@ import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 describe("Workbench columns and inline actions", () => {
-  test("keeps bank amount warning icon interactions from selecting the row", async () => {
-    const user = userEvent.setup();
-    const onSelectRow = vi.fn();
-    const onOpenDetail = vi.fn();
-
-    render(
-      <WorkbenchRecordCard
-        canMutateData
-        columns={[
-          { key: "amount", label: "金额", kind: "money", track: "minmax(144px, 144fr)", minWidth: 144 },
-        ]}
-        onOpenDetail={onOpenDetail}
-        onRowAction={() => {}}
-        onSelectRow={onSelectRow}
-        paneId="bank"
-        row={{
-          id: "bank-warning-1",
-          caseId: "case:bank-warning-1",
-          recordType: "bank",
-          label: "银行流水",
-          status: "已配对",
-          statusCode: "paired",
-          statusTone: "warning",
-          exceptionHandled: false,
-          amount: "3,617.41",
-          counterparty: "华东设备供应商",
-          actionVariant: "detail-only",
-          availableActions: ["detail"],
-          detailFields: [],
-          relationNote: "财务确认差额闭环",
-          relationAmountCheck: {
-            status: "mismatch",
-            direction: "expense",
-            bankAmount: "3,617.41",
-            oaAmount: "3,425.41",
-            amountDelta: "192.00",
-            requiresNote: true,
-          },
-          tableValues: {
-            amount: "3,617.41",
-            direction: "支出",
-            paymentAccount: "招商银行 9123",
-            counterparty: "华东设备供应商",
-          },
-        }}
-        rowState="idle"
-        showWorkflowActions
-        zoneId="paired"
-      />,
-    );
-
-    const warningButton = screen.getByRole("button", { name: "查看金额不一致差额说明" });
-    await user.click(warningButton);
-
-    expect(await screen.findByText("金额不一致")).toBeInTheDocument();
-    expect(onSelectRow).not.toHaveBeenCalled();
-    expect(onOpenDetail).not.toHaveBeenCalled();
-  });
-
   test("keeps invoice inline detail icon clicks from bubbling into row selection", async () => {
     const user = userEvent.setup();
     const onSelectRow = vi.fn();

@@ -247,8 +247,6 @@ class WorkbenchRelationGroupingService:
             relation_amount_check.update(
                 amount_check_service.check(rows_by_type, relation_mode=relation_mode)
             )
-            for row in rows:
-                row["relation_amount_check"] = deepcopy(relation_amount_check)
         anomaly = amount_check_service.workbench_anomaly(
             rows_by_type,
             relation_id=case_id,
@@ -304,6 +302,9 @@ class WorkbenchRelationGroupingService:
                 (review or {}).get("reviewed_by_name") or ""
             ) if isinstance(review, dict) else ""
             anomaly["reviewed_at"] = (review or {}).get("reviewed_at") if isinstance(review, dict) else None
+            relation_note = str(relation.get("note") or "").strip()
+            if relation_mode == "manual_confirmed" and relation_note:
+                anomaly["confirmation"] = {"note": relation_note}
             for item in anomaly["items"]:
                 item["display_label"] = item["label"]
             group["workbench_anomaly"] = anomaly
@@ -534,7 +535,6 @@ class WorkbenchRelationGroupingService:
         if case_id.startswith(LEGACY_CANDIDATE_CASE_PREFIXES):
             resolved.pop("case_id", None)
             resolved.pop("relation_mode", None)
-            resolved.pop("relation_amount_check", None)
         return resolved
 
     @staticmethod

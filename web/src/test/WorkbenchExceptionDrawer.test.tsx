@@ -175,7 +175,11 @@ describe("WorkbenchExceptionDrawer", () => {
 
   it("keeps the collapsed row to the three pane summary and reveals chips only in the popover", async () => {
     const user = userEvent.setup();
-    renderDrawer("unpaired");
+    const anomalyGroup = group("unpaired");
+    anomalyGroup.workbenchAnomaly!.confirmation = {
+      note: "流水金额与 OA 金额存在差额，经确认保留关联",
+    };
+    renderDrawer("unpaired", vi.fn(), true, anomalyGroup);
 
     expect(screen.getByText("OA · 0项")).toBeInTheDocument();
     expect(screen.getByText("流水 · 0项")).toBeInTheDocument();
@@ -190,6 +194,8 @@ describe("WorkbenchExceptionDrawer", () => {
     const popover = await screen.findByRole("dialog", { name: "该关联组异常详情" });
     expect(within(popover).getByText("三项不一致")).toBeVisible();
     expect(within(popover).getByText("OA 100.00 · 流水 90.00 · 发票 80.00")).toBeVisible();
+    expect(within(popover).getByText("确认关联备注")).toBeVisible();
+    expect(within(popover).getByText("流水金额与 OA 金额存在差额，经确认保留关联")).toBeVisible();
     await user.click(indicator);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "该关联组异常详情" })).not.toBeInTheDocument());
     await user.click(indicator);

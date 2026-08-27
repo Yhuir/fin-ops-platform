@@ -1,5 +1,5 @@
 import { Eye, FilePlus2 } from "lucide-react";
-import { memo, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Chip, Tooltip } from "@heroui/react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
@@ -397,7 +397,6 @@ function renderCellValue(
       row.tableValues.direction ?? "",
       row.tableValues.paymentAccount ?? "",
       row,
-      zoneId,
       searchQuery,
     );
   }
@@ -591,7 +590,6 @@ function renderBankMoneyValue(
   direction: string,
   paymentAccount: string,
   row: WorkbenchRecord,
-  zoneId: "paired" | "unpaired",
   searchQuery = "",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
@@ -607,7 +605,6 @@ function renderBankMoneyValue(
     <span className="money-cell-stack">
       <span className="money-cell-value">
         <span>{highlightSearchText(displayedValue, searchQuery)}</span>
-        {columnKey === "amount" && zoneId === "paired" ? <BankAmountMismatchWarning row={row} /> : null}
       </span>
       {shouldShowDirectionTag || shouldShowAccount ? (
         <span className="money-cell-meta-row">
@@ -676,87 +673,6 @@ function renderOaMoneyValue(
       </span>
     </span>
   );
-}
-
-function BankAmountMismatchWarning({ row }: { row: WorkbenchRecord }) {
-  const [open, setOpen] = useState(false);
-  const amountCheck = row.relationAmountCheck;
-  const relationNote = (row.relationNote ?? "").trim();
-  const shouldShow =
-    row.recordType === "bank"
-    && amountCheck?.status === "mismatch"
-    && (relationNote.length > 0 || amountCheck.requiresNote === true);
-
-  if (!shouldShow || !amountCheck) {
-    return null;
-  }
-
-  const showTooltip = (
-    event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>,
-  ) => {
-    event.stopPropagation();
-    setOpen(true);
-  };
-  const hideTooltip = (event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    setOpen(false);
-  };
-
-  return (
-    <span className="record-warning-tooltip-wrap">
-      <button
-        aria-label="查看金额不一致差额说明"
-        className="record-warning-icon-btn"
-        type="button"
-        onBlur={hideTooltip}
-        onClick={showTooltip}
-        onFocus={showTooltip}
-        onMouseEnter={showTooltip}
-        onMouseLeave={hideTooltip}
-        onTouchStart={showTooltip}
-      >
-        <WarningTriangleIcon />
-      </button>
-      {open ? (
-        <span className="bank-amount-mismatch-tooltip" role="tooltip">
-          <strong>金额不一致</strong>
-          <span>{`银行流水金额：${formatMismatchAmount(amountCheck.bankAmount)}`}</span>
-          <span>{`OA合计：${formatMismatchAmount(amountCheck.oaAmount)}`}</span>
-          <span>{`差额：${formatMismatchAmount(amountCheck.amountDelta)}`}</span>
-          <span>{`差额说明：${relationNote || "—"}`}</span>
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function WarningTriangleIcon() {
-  return (
-    <svg aria-hidden="true" className="record-warning-icon" viewBox="0 0 20 20">
-      <path
-        d="M10 3.1 18 16.4H2L10 3.1Z"
-        fill="none"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.7"
-      />
-      <path d="M10 7.4v4.2" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-      <circle cx="10" cy="14.1" r="0.8" fill="currentColor" />
-    </svg>
-  );
-}
-
-function formatMismatchAmount(value: string | undefined) {
-  const normalizedValue = (value ?? "").trim();
-  if (!normalizedValue || normalizedValue === "--" || normalizedValue === "—") {
-    return "—";
-  }
-  const numericValue = normalizedValue.replace(/,/g, "");
-  if (!/^-?\d+(\.\d+)?$/.test(numericValue)) {
-    return normalizedValue;
-  }
-
-  return formatMoney(numericValue);
 }
 
 function renderHighlightedBankAccount(value: string, searchQuery: string) {

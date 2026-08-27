@@ -894,7 +894,6 @@ def test_compact_summary_removes_repeated_internal_row_metadata() -> None:
             {
                 "id": "oa-1",
                 "type": "oa",
-                "relation_amount_check": {"status": "mismatch"},
                 "object_identity_key": "oa-1",
                 "source_identity_aliases": ["legacy-oa-1"],
                 "special_metadata": {
@@ -1234,7 +1233,6 @@ def test_full_hydration_restores_relation_display_without_formal_state_pollution
                     "object_identity_key": "invoice:display",
                     "case_id": "stale-case",
                     "relation_mode": "stale-mode",
-                    "relation_amount_check": {"status": "stale"},
                     "available_actions": ["confirm_relation", "withdraw"],
                 }
             }
@@ -1307,7 +1305,6 @@ def test_full_hydration_restores_relation_display_without_formal_state_pollution
     assert display["available_actions"] == ["detail"]
     assert "case_id" not in display
     assert "relation_mode" not in display
-    assert "relation_amount_check" not in display
     assert relation_group["invoice_rows"] == []
 
 
