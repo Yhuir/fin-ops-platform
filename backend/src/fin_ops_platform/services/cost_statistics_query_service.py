@@ -1183,7 +1183,7 @@ class CostStatisticsQueryService:
         sheet.append(["说明", "数量"])
         sheet.append(
             [
-                "OA 合计与流水净支出不一致且尚未形成有效人工分配，未计入本次配对归集统计。",
+                "复杂配对关系尚未形成当前有效的逐子付款项、逐资金来源人工分配，未计入本次配对归集统计。",
                 quality["manual_allocation_pending_count"],
             ]
         )

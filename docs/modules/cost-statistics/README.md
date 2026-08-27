@@ -19,7 +19,7 @@
 
 分面列表统一使用行内长文本展开：项目名、费用类型、银行账户、主标签或子标签在折叠态保持最低 66px 高度并显示单行省略号，只有浏览器实测发生溢出时才显示 HeroUI `展开`操作；展开后当前条目按完整文字自然增高，操作切换为 `折叠`，不创建 Popover 或其它浮层。同一列表最多展开一个条目，左中栏状态互不影响；布局变化只发生在当前栏的内部滚动内容，不增加 API、持久化或跨页面 I/O。
 
-active 正式关系中只要存在一张进行中 OA，该关系整体不进入三种归因视图，也不能转入无 OA 虚拟项目，但其银行流水仍进入原始 `按标签`/`按时间`。全部 OA 已完成时，关系净支出等于支出原额合计减同关系明确标记的“付错退款”；普通收入不冲减。仅当 OA 原额合计等于净支出时，才按既有比例与最大余数法自动闭合。两者不等时关系进入“待分配”，三种归因视图和导出不计入该关系；用户通过按需加载的 HeroUI Popover 为全部稳定 OA 单元填写实际金额，合计必须严格等于净支出。有效人工分配按真实支出流水与 OA 单元的行列边界确定性按分闭合。canonical 事实变化会使旧分配变为“已失效”，必须重新填写，禁止自动沿用、比例回退或默认项目。
+active 正式关系中只要存在一张进行中 OA，该关系整体不进入三种归因视图，也不能转入无 OA 虚拟项目，但其银行流水仍进入原始 `按标签`/`按时间`。全部 OA 已完成时，关系净支出等于支出原额合计减同关系明确标记的“付错退款”；普通收入不冲减。只有“一个有效 OA 分配单元 + 一条支出流水”的关系自动按净支出计入成本，OA 与流水金额是否相等不影响该自动规则。其它关系一律进入全局人工分配队列，在 HeroUI 右侧抽屉内按“OA 子付款项 × 支出/付错退款来源”逐格填写；每条来源必须精确闭合，退款作为负向净成本，任一 OA 单元最终净成本不得为负。待分配或来源已变化的关系不进入三种归因视图和导出；保存后进入“人工已分配”并可继续编辑。canonical 事实变化会使旧分配回到待重新分配，禁止自动沿用、比例回退、默认项目或合成分配矩阵。
 
 没有 active OA 关系的支出流水，仅在其实际标签被用户分配给某个虚拟项目时进入该项目，费用类型统一为“无 OA 分类”；候选标签只来自当前实际存在的无 OA 支出流水，纳入时仍逐笔复核无 active OA 关系。规则默认没有虚拟项目并对全部历史期间生效；同一标签在多个虚拟项目间互斥。已有 OA 的同标签流水绝不进入虚拟项目。
 
@@ -35,7 +35,7 @@ active 正式关系中只要存在一张进行中 OA，该关系整体不进入�
 - API：`/api/cost-statistics/explorer`、`export-preview`、`export`、`bank-transactions/{id}`、`allocations/{id}`
 - 原始流水标签规则：`GET|PUT /api/cost-statistics/time-tag-rules`
 - 无 OA 虚拟项目规则：`GET|PUT /api/cost-statistics/no-oa-rules`
-- 金额不一致人工分配：`GET /api/cost-statistics/manual-allocations`、`PUT /api/cost-statistics/manual-allocations/{case_id}`
+- 复杂关系人工分配：`GET /api/cost-statistics/manual-allocations?status=pending|allocated&query=&cursor=&page_size=50`、`PUT /api/cost-statistics/manual-allocations/{case_id}`
 - Audit：`cost-statistics` 页面审计，直接验证 canonical relation 完整性
 
 ## 维护文档

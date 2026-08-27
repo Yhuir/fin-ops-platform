@@ -11,7 +11,7 @@ import BusinessPeriodPicker from "../components/common/BusinessPeriodPicker";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
-import CostStatisticsManualAllocationPopover from "../components/cost-statistics/CostStatisticsManualAllocationPopover";
+import CostStatisticsManualAllocationDrawer from "../components/cost-statistics/CostStatisticsManualAllocationDrawer";
 import CostStatisticsNoOaRulesDrawer from "../components/cost-statistics/CostStatisticsNoOaRulesDrawer";
 import CostStatisticsTimeTagRulesDrawer from "../components/cost-statistics/CostStatisticsTimeTagRulesDrawer";
 import ExportCenterModal, {
@@ -1582,10 +1582,6 @@ export default function CostStatisticsPage() {
     onRequestNextPage: () => void loadMoreExplorerRows(),
   };
   const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading;
-  const pendingManualAllocationCount = viewMode === "project" || viewMode === "bank" || viewMode === "expenseType"
-    ? (explorerData?.allocationQuality?.pendingManualAllocationCount ?? 0)
-      + (explorerData?.allocationQuality?.staleManualAllocationCount ?? 0)
-    : 0;
   const visibleStatistics = pageStatistics;
   const titleAccessory = (
     <div className="page-title-accessory-group">
@@ -1686,9 +1682,8 @@ export default function CostStatisticsPage() {
           >
             刷新
           </Button>
-          <CostStatisticsManualAllocationPopover
+          <CostStatisticsManualAllocationDrawer
             canSave={canMutateData && !interactionLocked}
-            knownPendingCount={pendingManualAllocationCount}
             onSaved={handleManualRefresh}
           />
           <Button

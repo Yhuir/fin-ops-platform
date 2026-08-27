@@ -9,6 +9,7 @@ import type {
   CostStatisticsExplorerPageRequest,
   CostStatisticsNoOaRules,
   CostStatisticsManualAllocationPage,
+  CostStatisticsManualAllocationPageRequest,
   CostStatisticsManualAllocationTask,
   CostStatisticsTimeTagRules,
   CostStatisticsTagRuleTag,
@@ -146,9 +147,24 @@ type ApiCostStatisticsManualAllocationTask = {
     project_name: string;
     expense_type: string;
     expense_content: string;
+    oa_applicant: string;
     oa_original_amount: string;
   }>;
-  allocations: Array<{ unit_id: string; amount: string }>;
+  sources: Array<{
+    source_id: string;
+    source_kind: "outflow" | "paid_wrong_refund";
+    amount: string;
+    trade_time: string;
+    counterparty_name: string;
+    payment_account_label: string;
+    remark: string;
+  }>;
+  allocations: Array<{
+    unit_id: string;
+    source_id: string;
+    source_kind: "outflow" | "paid_wrong_refund";
+    amount: string;
+  }>;
   version: number;
   updated_by: string;
   updated_at: string;
@@ -158,6 +174,7 @@ type ApiCostStatisticsManualAllocationTask = {
 type ApiCostStatisticsManualAllocationPage = {
   items: ApiCostStatisticsManualAllocationTask[];
   row_count: number;
+  counts: { pending: number; allocated: number };
   next_cursor?: string | null;
 };
 
@@ -402,10 +419,22 @@ function mapManualAllocationTask(
       projectName: unit.project_name,
       expenseType: unit.expense_type,
       expenseContent: unit.expense_content,
+      oaApplicant: unit.oa_applicant,
       oaOriginalAmount: unit.oa_original_amount,
+    })),
+    sources: task.sources.map((source) => ({
+      sourceId: source.source_id,
+      sourceKind: source.source_kind,
+      amount: source.amount,
+      tradeTime: source.trade_time,
+      counterpartyName: source.counterparty_name,
+      paymentAccountLabel: source.payment_account_label,
+      remark: source.remark,
     })),
     allocations: task.allocations.map((line) => ({
       unitId: line.unit_id,
+      sourceId: line.source_id,
+      sourceKind: line.source_kind,
       amount: line.amount,
     })),
     version: task.version,
@@ -523,18 +552,22 @@ export async function fetchCostStatisticsExplorerPage(
 }
 
 export async function fetchCostStatisticsManualAllocations(
-  signal?: AbortSignal,
-  cursor?: string,
+  request: CostStatisticsManualAllocationPageRequest,
 ): Promise<CostStatisticsManualAllocationPage> {
-  const query = new URLSearchParams({ page_size: "100" });
-  if (cursor) query.set("cursor", cursor);
+  const query = new URLSearchParams({
+    page_size: String(request.pageSize ?? 50),
+    status: request.status,
+  });
+  if (request.cursor) query.set("cursor", request.cursor);
+  if (request.query) query.set("query", request.query);
   const payload = await requestJson<ApiCostStatisticsManualAllocationPage>(
     `/api/cost-statistics/manual-allocations?${query.toString()}`,
-    { method: "GET", signal },
+    { method: "GET", signal: request.signal },
   );
   return {
     items: payload.items.map(mapManualAllocationTask),
     rowCount: payload.row_count,
+    counts: payload.counts,
     nextCursor: optionalString(payload.next_cursor),
   };
 }
@@ -552,6 +585,8 @@ export async function saveCostStatisticsManualAllocation(
         source_fingerprint: request.sourceFingerprint,
         allocations: request.allocations.map((line) => ({
           unit_id: line.unitId,
+          source_id: line.sourceId,
+          source_kind: line.sourceKind,
           amount: line.amount,
         })),
       }),

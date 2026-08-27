@@ -36,11 +36,12 @@ no-oa-drawer-closed
   -> no-oa-drawer-closed
 
 manual-allocation-closed
-  -> manual-allocation-loading（打开 Popover 后才请求）
+  -> manual-allocation-loading（打开右侧 Drawer 后才请求全局队列）
       -> manual-allocation-ready
       -> manual-allocation-error
 manual-allocation-ready
-  -> editing（首次 pending/stale 输入为空；allocated 显示已保存值）
+  -> pending / allocated 切换（服务端 status/search/cursor 分页）
+  -> editing（首次 pending/stale 输入为空；allocated 显示已保存矩阵）
       -> saving
           -> manual-allocation-ready（保存成功并刷新当前归因视图）
           -> validation-error（保留输入）
@@ -61,9 +62,10 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - `detail-error`：错误与重试按钮只存在于抽屉；已加载统计内容保持不变。
 - `no-oa-drawer-ready`：只显示当前实际无 active OA 关系的支出标签；名称和标签默认都为空。选择标签后必须填写虚拟项目名，未选择标签时名称可为空。
 - `saving / save-error`：使用 settings version CAS；冲突或失败不得伪报成功，也不得清空用户输入。保存成功后下一次 canonical GET 对全部历史期间逐笔应用规则。
-- `manual-allocation-loading`：只有用户打开“待分配” Popover 后才读取有界任务页；普通 explorer 和原始流水视图不因该交互增加请求。
-- `editing`：按稳定 OA 单元 ID 维护完整输入集合。pending/stale 不预填数字、不自动计算；显式 `0.00` 有效，空值与零值必须区分。
-- `saving`：服务端在单个写事务内锁定当前关系事实，校验 source fingerprint、expected version、完整单元集合、两位小数、非负与合计严格等于净支出，再写 allocation 和 audit。
+- `manual-allocation-loading`：只有用户打开“待分配” Drawer 后才读取全局队列的有界任务页；普通 explorer 和原始流水视图不因该交互增加请求。
+- `pending / allocated`：pending 视图包含 pending 与 stale，allocated 只含当前有效人工分配；两者都使用服务端 search 和稳定 cursor，计数来自同一次全局任务快照，不由浏览过的成本项累积。
+- `editing`：按稳定 OA 单元与稳定流水来源的组合键维护完整矩阵。pending/stale 不预填数字、不自动计算；allocated 显示已保存值并允许编辑；显式 `0.00` 有效，空值与零值必须区分。
+- `saving`：服务端在单个写事务内锁定当前关系事实，校验 source fingerprint、expected version、完整单元和来源集合、两位小数、每条来源精确闭合与每个单元净成本非负，再写 allocation 和 audit。
 - `validation-error`：格式、缺项、负数或合计错误返回明确 400；页面保留用户输入。
 - `conflict`：事实或版本已变化返回明确 409；旧输入不得作为 fallback 写入，重新加载后以新的空白任务为准。
 - 重新访问、浏览器刷新或页面内刷新都会发起全新请求；没有 `202 refreshing`、`409 read_model_not_fresh` 或后台轮询。

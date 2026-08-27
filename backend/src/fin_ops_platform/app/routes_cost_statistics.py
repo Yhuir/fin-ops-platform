@@ -90,6 +90,8 @@ class CostStatisticsApiRoutes:
             return self.handle_manual_allocations(
                 cursor=query.get("cursor", [None])[0],
                 page_size=query.get("page_size", [None])[0],
+                status=query.get("status", [None])[0],
+                search_query=query.get("query", [None])[0],
                 headers=headers,
             )
         if method == "PUT" and route_path.startswith("/api/cost-statistics/manual-allocations/"):
@@ -166,6 +168,8 @@ class CostStatisticsApiRoutes:
         *,
         cursor: str | None,
         page_size: str | None,
+        status: str | None,
+        search_query: str | None,
         headers: dict[str, str] | None,
     ) -> Any:
         session, error = self._read_session(headers)
@@ -175,6 +179,8 @@ class CostStatisticsApiRoutes:
             payload = self._manual_allocation_service_required().list_tasks(
                 cursor=cursor,
                 page_size=int(page_size or 50),
+                status=str(status or "pending"),
+                query=search_query,
                 can_save=bool(session is None or session.can_mutate_data),
             )
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:

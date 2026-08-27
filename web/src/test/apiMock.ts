@@ -4691,9 +4691,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailAutoTagRulesSaved = false;
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
   let workbenchWriteActionCount = 0;
+  let manualAllocationLines: Array<Record<string, unknown>> = [];
+  let manualAllocationVersion = 0;
   const buildManualAllocationTask = (
     relationCaseId: string,
-    allocations: Array<Record<string, unknown>> = [],
+    allocations: Array<Record<string, unknown>> = manualAllocationLines,
   ) => ({
     relation_case_id: relationCaseId,
     relation_version: 1,
@@ -4713,6 +4715,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         project_name: "项目 A",
         expense_type: "材料费",
         expense_content: "设备采购",
+        oa_applicant: "测试申请人",
         oa_original_amount: "1000.00",
       },
       {
@@ -4723,11 +4726,23 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         project_name: "项目 B",
         expense_type: "交通费",
         expense_content: "运输",
+        oa_applicant: "测试申请人",
         oa_original_amount: "10.00",
       },
     ],
+    sources: [
+      {
+        source_id: "bank-manual-001",
+        source_kind: "outflow",
+        amount: "1000.00",
+        trade_time: "2026-08-27 09:30:00",
+        counterparty_name: "昆明设备供应商",
+        payment_account_label: "建设银行 8106",
+        remark: "设备采购",
+      },
+    ],
     allocations,
-    version: allocations.length > 0 ? 1 : 0,
+    version: manualAllocationVersion,
     updated_by: allocations.length > 0 ? "测试全权限" : "",
     updated_at: allocations.length > 0 ? "2026-08-27T10:00:00+08:00" : "",
     can_save: true,
@@ -5951,9 +5966,19 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ),
       };
     },
-    "/api/cost-statistics/manual-allocations": () => ({
-      body: { items: [buildManualAllocationTask("relation-manual-001")], row_count: 1, next_cursor: null },
-    }),
+    "/api/cost-statistics/manual-allocations": ({ url }) => {
+      const requestedStatus = url.searchParams.get("status") ?? "pending";
+      const allocated = manualAllocationLines.length > 0;
+      const visible = requestedStatus === "allocated" ? allocated : !allocated;
+      return {
+        body: {
+          items: visible ? [buildManualAllocationTask("relation-manual-001")] : [],
+          row_count: visible ? 1 : 0,
+          counts: { pending: allocated ? 0 : 1, allocated: allocated ? 1 : 0 },
+          next_cursor: null,
+        },
+      };
+    },
     "/api/cost-statistics/export-preview": ({ url }) => {
       const month = url.searchParams.get("month") ?? "";
       const view = url.searchParams.get("view") ?? "time";
@@ -7737,7 +7762,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const allocations = Array.isArray(jsonBody?.allocations)
         ? jsonBody.allocations as Array<Record<string, unknown>>
         : [];
-      return jsonResponse({ body: buildManualAllocationTask(relationCaseId, allocations) });
+      manualAllocationLines = allocations;
+      manualAllocationVersion += 1;
+      return jsonResponse({ body: buildManualAllocationTask(relationCaseId) });
     }
     if (
       url.pathname.startsWith("/api/cost-statistics/bank-transactions/")

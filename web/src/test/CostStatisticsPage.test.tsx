@@ -353,7 +353,7 @@ describe("Cost statistics page", () => {
     );
   });
 
-  test("loads pending paired-cost allocation lazily and saves only an exact blank-form allocation", async () => {
+  test("loads the global manual-allocation queue lazily, validates the source matrix, and moves saved work to allocated", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -362,13 +362,13 @@ describe("Cost statistics page", () => {
     await findCostStatisticsHeading();
 
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/cost-statistics/manual-allocations?page_size=100",
+      "/api/cost-statistics/manual-allocations?page_size=50&status=pending",
       expect.any(Object),
     );
-    await user.click(screen.getByRole("button", { name: "待分配" }));
-    const dialog = await screen.findByRole("dialog", { name: "成本统计待分配" });
-    const projectA = within(dialog).getByRole("textbox", { name: "项目 A实际分配金额" });
-    const projectB = within(dialog).getByRole("textbox", { name: "项目 B实际分配金额" });
+    await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
+    const dialog = await screen.findByRole("dialog", { name: "成本人工分配" });
+    const projectA = within(dialog).getByRole("textbox", { name: "项目 A分配至昆明设备供应商的金额" });
+    const projectB = within(dialog).getByRole("textbox", { name: "项目 B分配至昆明设备供应商的金额" });
 
     expect(projectA).toHaveValue("");
     expect(projectB).toHaveValue("");
@@ -376,13 +376,17 @@ describe("Cost statistics page", () => {
 
     await user.type(projectA, "900.00");
     await user.type(projectB, "100.00");
+    expect(within(dialog).getByText("流水已填 1000.00 / 1000.00")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "保存分配" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/manual-allocations/relation-manual-001",
       expect.objectContaining({ method: "PUT" }),
     ));
-    expect(await within(dialog).findByText("已分配")).toBeInTheDocument();
+    expect(await within(dialog).findByText("当前没有待人工分配的关系。")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("radio", { name: "人工已分配 1" }));
+    expect(await within(dialog).findByText("人工已分配")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "保存修改" })).toBeEnabled();
   });
 
   test("searches only the active view without refreshing the page chrome", async () => {

@@ -117,7 +117,25 @@ export type CostStatisticsManualAllocationUnit = {
   projectName: string;
   expenseType: string;
   expenseContent: string;
+  oaApplicant: string;
   oaOriginalAmount: string;
+};
+
+export type CostStatisticsManualAllocationSource = {
+  sourceId: string;
+  sourceKind: "outflow" | "paid_wrong_refund";
+  amount: string;
+  tradeTime: string;
+  counterpartyName: string;
+  paymentAccountLabel: string;
+  remark: string;
+};
+
+export type CostStatisticsManualAllocationLine = {
+  unitId: string;
+  sourceId: string;
+  sourceKind: "outflow" | "paid_wrong_refund";
+  amount: string;
 };
 
 export type CostStatisticsManualAllocationTask = {
@@ -131,7 +149,8 @@ export type CostStatisticsManualAllocationTask = {
   netCashCost: string;
   difference: string;
   units: CostStatisticsManualAllocationUnit[];
-  allocations: Array<{ unitId: string; amount: string }>;
+  sources: CostStatisticsManualAllocationSource[];
+  allocations: CostStatisticsManualAllocationLine[];
   version: number;
   updatedBy: string;
   updatedAt: string;
@@ -141,14 +160,23 @@ export type CostStatisticsManualAllocationTask = {
 export type CostStatisticsManualAllocationPage = {
   items: CostStatisticsManualAllocationTask[];
   rowCount: number;
+  counts: { pending: number; allocated: number };
   nextCursor?: string;
+};
+
+export type CostStatisticsManualAllocationPageRequest = {
+  status: "pending" | "allocated";
+  query?: string;
+  cursor?: string;
+  pageSize?: number;
+  signal?: AbortSignal;
 };
 
 export type SaveCostStatisticsManualAllocationRequest = {
   relationCaseId: string;
   expectedVersion: number;
   sourceFingerprint: string;
-  allocations: Array<{ unitId: string; amount: string }>;
+  allocations: CostStatisticsManualAllocationLine[];
 };
 
 export type CostStatisticsExplorerPageRequest = {

@@ -8,7 +8,7 @@
 | Canonical repository | PostgreSQL connection | 单个一致性快照 | read model、Redis、RabbitMQ、HTTP |
 | Policy | canonical snapshot、筛选参数 | 视图、统计、详情、导出行 | 数据库、网络、全局状态 |
 | Query service | repository、policy、分页/游标 | 稳定 API DTO | freshness gate、worker、隐式 fallback |
-| Manual allocation service | case ID、完整单元金额、actor、expected version | 当前有效人工分配与审计事件 | HTTP、页面状态、比例建议、跨事务半写入 |
+| Manual allocation service | status/search/cursor、case ID、完整“单元 × 来源”矩阵、actor、expected version | 全局待分配/已分配任务页、当前有效人工分配与审计事件 | HTTP、页面状态、比例建议、跨事务半写入 |
 | Manual allocation repository | PostgreSQL 写事务、versioned allocation | 乐观并发写入结果 | 业务推断、删除历史、独立提交 |
 | Frontend | API DTO、用户筛选 | 页面、下载、错误/重试状态 | read-model polling、版本推断、跨页面 I/O |
 
@@ -47,7 +47,7 @@ HTTP GET
 HTTP GET /manual-allocations
   -> CostStatisticsManualAllocationService
   -> relation-only canonical task snapshot + stored allocations
-  -> pending / stale / allocated tasks
+  -> global pending(stale included) / allocated counts + searched cursor page
 
 HTTP PUT /manual-allocations/{case_id}
   -> CostStatisticsManualAllocationService
@@ -68,8 +68,9 @@ HTTP PUT /manual-allocations/{case_id}
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
 - `CostStatisticsPolicy` 将支付申请整张 OA 原始金额作为一个权重单元，将日常报销 canonical `expense_items` 逐项作为权重单元。项目或正数权重缺失时整组不分摊；费用类型缺失不再排除，而是进入“未填写 OA 费用类型”。权重合计非正只做内部除零保护，不新增产品状态。
 - active relation 中只要有一张 OA 不是明确完成态，整组银行流水从三种归因视图排除，也不得作为无 OA 流水；原始 `time|bank_tag` 仍展示这些银行事实。关系声明的 OA 成员没有被 canonical snapshot 完整加载时同样整组 fail closed，且银行成员继续受 OA 保护。全部 OA 完成时，关系净支出 `N = 支出合计 B - 同关系明确“付错退款”R`；普通收入不进入净额，退款不生成独立归因行。
-- OA 原额合计 `O` 与净支出 `N` 相等时，先按真实支出原额权重把 `N` 分到各支出流水，再按 OA 原额权重分到 OA 单元，两级都使用确定性最大余数法按分闭合；`sum(outflow bank transaction × OA unit) = N`。
-- `O != N` 时禁止自动比例缩放。没有当前有效人工分配的关系只生成 pending/stale task，并从三种归因视图、详情人口和归因导出中排除；导出预览/文件必须明确给出待分配/已失效数量，禁止静默漏数。人工输入必须覆盖完整稳定单元集合、非负、精确两位小数且合计严格等于 `N`。有效人工列边界与按支出原额计算的行边界通过确定性按分矩阵闭合，禁止把全部金额默认到首个项目或任一 fallback。
+- 只有恰好一个有效 OA 分配单元且恰好一条支出流水的关系自动归因；同关系明确“付错退款”继续冲减该单元净成本，金额是否与 OA 原额相等不作为门槛。自动路径不创建人工任务，也不读取旧人工值。
+- 其它已完成 OA active relation 全部生成全局人工任务，与 OA/净支出金额是否相等无关。没有当前有效人工分配的关系只生成 pending/stale task，并从三种归因视图、详情人口和归因导出中排除；导出预览/文件必须明确给出待分配/已失效数量，禁止静默漏数。
+- 人工输入必须覆盖完整稳定 `OA 单元 × 金额来源` 矩阵。支出来源为正、明确付错退款来源为负；每个输入是非负、精确两位小数，每条来源的纵向合计必须等于其原始金额，每个 OA 单元的支出减退款不得为负。policy 直接消费用户确认的矩阵，禁止再生成比例矩阵、首项默认或任一 fallback。
 - source fingerprint 覆盖关系版本/成员、OA 单元、银行支出/退款金额、账户与标签事实；任一输入变化后旧记录只保留为历史证据并标记 stale，不再参与归因。同一银行流水或 OA 单元跨 active relation 重复时整次响应报冲突，不能重复计入。
 - `project / bank / expense_type`、allocation detail 和归因导出共享逐流水归因结果；每行银行账户来自该条真实流水，不再生成“混合支付账户”。`time / bank_tag` 与 bank transaction detail 共享独立原始银行事实集合。三种归因视图彼此可对账，两个原始银行视图彼此可对账；两个集合的总额不要求相等。
 - OA 分摊详情同时展示 OA 原始金额/权重、本笔支出流水原额，以及关系 OA 总额、银行总支出、负数“付错退款”、关系净支出、差额和现金比例；退款冲减只在同一 active 关系内成立，API 证据金额保持正数加方向，前端成本抽屉负责按负数展示退款。
@@ -120,7 +121,7 @@ migration `0126` 负责停止遗留运行时事件并删除旧表。除该迁移
 - 一次 API 请求只建立一个数据库快照，不轮询、不等待后台任务。
 - 用户可观察的首屏合同以 `include_statistics=false` 的 scoped 内容请求计时；全局 statistics 是随后发出的非阻塞辅助请求，必须单独记录延迟，不能冒充首屏成功或失败。
 - 归集计算按 relation 成员和 OA 付款明细线性遍历；repository 批量读取 relation、OA、流水与人工分配，不做逐明细 I/O。人工分配只在三种归因视图读取一次，`time|bank_tag` 热路径在进入 OA/关系前返回并完全跳过该表。
-- 待分配 Popover 只在用户打开时请求一个有界任务页；repository 使用专用 relation-only 快照，只读取 active relation 的银行/OA 成员及其人工记录，不扫描无关系流水。保存只锁定当前 case 的关系成员和事实，不重算或写入其它关系。
+- 人工分配 Drawer 只在用户打开时请求全局任务队列的首个 cursor 页；服务端在一次 relation-only canonical snapshot 中计算全部 active relation 的资格与 pending/allocated 总数，再按 status、用户可见字段 search 和稳定 case cursor 返回最多 50 条。repository 不扫描无关系流水。保存只锁定当前 case 的关系成员和事实，不重算或写入其它关系。
 - OA 查询只映射当前范围银行流水命中的 active relation OA，并只读取 policy 消费的父单字段、明细字段和明细金额；不递归复制附件/发票树，附件仍由其 owner 页面读取。
 - 常规 scoped 请求保持有界批量查询，关系筛选先使用 `row_ids` GIN overlap 缩小候选，再以 `row_ids/row_types` 配对做精确类型校验；全量范围直接批量读取 active relation 后在同一快照内按已加载银行身份过滤，禁止把全量银行 ID 数组送入逐关系 `unnest`。禁止按关系、银行流水或 OA 明细执行 N+1 I/O；两个规则候选的全历史读取只在打开/保存对应抽屉时执行，不进入普通 explorer 热路径。`time|bank_tag` 请求必须跳过 OA 与 relation 查询。
 - 有银行流水时只执行一次有界有效分类投影；空银行集合不查询分类/确认表。投影必须携带内部转账所需的有界上下文，不能退回逐行或全量 Python 分类。

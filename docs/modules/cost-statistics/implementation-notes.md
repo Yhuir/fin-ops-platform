@@ -1,6 +1,16 @@
 # 成本统计实施决策
 
+## 2026-08-28：全局复杂关系队列与显式来源矩阵
+
+- 自动归因资格收窄为“恰好一个有效 OA 单元 + 恰好一条支出流水”；金额相等不再是判断条件，明确付错退款继续从该单元净成本中扣除。所有其它已完成 OA active relation 都进入全局人工队列，即使 OA 合计与净支出刚好相等也不再猜测各子付款项或多流水的分配。
+- `GET /manual-allocations` 在服务端一次 relation-only canonical snapshot 中生成全量任务，按 `pending|allocated`、用户可见字段搜索和稳定 cursor 返回 50 条页及全局计数。前端改为 HeroUI `AppDrawer`，顶部切换“待分配/人工已分配”；保存后自动移入已分配，已分配可继续编辑。删除旧 Popover、浏览项发现和内部 case ID 展示。
+- 人工 DTO 从“每 OA 单元一个总额”改为完整 `OA 单元 × 来源` 矩阵。支出来源正向、付错退款来源负向；服务端要求每条来源精确闭合且每个单元净成本非负。policy 直接生成对应正/负成本行，删除旧 `_allocation_matrix` 与 `_bounded_proportional_amounts` 合成比例路径。
+- source fingerprint 现在覆盖完整可见单元和来源事实；旧格式记录不会被新 fingerprint 视为有效。发布前必须确认生产旧人工记录为零，否则停止部署并单独制定数据迁移，禁止兼容读取或 fallback。
+- 没有新增表、migration、read model、worker、cache、数据库备份或跨页面写入；持久化继续使用 `app.cost_statistics_manual_allocations` 的 JSONB 和现有 version/audit 事务边界。
+
 ## 2026-08-27：OA 与净支出不等改为显式人工分配
+
+> 本节的“仅 O!=N 进入人工分配”、Popover、单元总额 DTO 和合成比例矩阵已由 2026-08-28 决策取代；表、审计与乐观并发边界继续有效。
 
 - 保留 `按标签`、`按时间`的原始银行事实链不变；`按项目`、`按银行`、`按费用类型`继续只消费已完成 OA 的 active relation 与显式无 OA 项目。五个 HeroUI 切换按钮在同一扁平工具区按“配对归集/流水分析”分组，不增加页面、卡片或请求层。
 - 关系净支出仍为 `N=支出合计-同关系明确付错退款`。仅当 OA 原额合计 `O=N` 时复用既有比例与最大余数算法；删除 `O!=N` 时按 `N/O` 自动缩放的旧路径。异常关系只生成 pending/stale 分配任务，在有效人工分配前不进入三种归因视图和归因导出人口；导出增加待分配说明，禁止静默漏数。
