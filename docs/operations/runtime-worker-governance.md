@@ -39,7 +39,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - Workbench matching scope 是领域状态，只由 matching repository/orchestrator 管理，不得塞进通用 queue adapter。
 - `workbench-matching` 复用正式关系命令，因此生产 `fin_ops_worker` 必须能 `SELECT/INSERT/UPDATE`
   `app.workbench_idempotency_records`；Migration `0151` 是该权限的事实源，不授予 `DELETE`。
-- `oa-sync` 同时消费 `oa.sync` 与 `oa.payment_status.reconcile`。后者由 relation 事务登记、按最新 active OA+outflow topology 收敛外部状态；Migration `0158` 提供 App ownership state 和历史 active relation 事件回填，不直接修改外部支付表。
+- `oa-sync` 同时消费 `oa.sync` 与 `oa.payment_status.reconcile`。后者由 relation 事务登记、按最新 active OA+outflow topology 收敛外部状态；Migration `0158` 提供 App ownership state 和历史 active relation 事件回填，不直接修改外部支付表。Migration `0159` 为生产 worker 共用的 `fin_ops_app_runtime` 补齐 ownership 表的最小 `SELECT/INSERT/UPDATE` 权限；不授予 `DELETE`。
 - Runtime queue retention 只清理已完成历史；不得删除 pending、processing、failed 或 dead-lettered 行来伪造健康。
 
 ## Read Model 退役治理

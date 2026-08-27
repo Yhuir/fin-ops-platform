@@ -170,6 +170,7 @@ EXPECTED_MIGRATIONS = [
     "0156_backfill_workbench_anomaly_reviewer_identity.sql",
     "0157_cost_statistics_manual_allocations.sql",
     "0158_oa_payment_status_auto_reconcile.sql",
+    "0159_oa_payment_status_runtime_grant.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -330,7 +331,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 159)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 160)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -468,6 +469,20 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("do nothing", normalized_sql)
         self.assertNotIn("delete from", normalized_sql)
         self.assertNotIn("update app.oa_", normalized_sql)
+
+    def test_oa_payment_status_runtime_role_can_persist_writeback_ownership(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0159_oa_payment_status_runtime_grant.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn(
+            "grant select, insert, update on app.oa_payment_status_writeback_states "
+            "to fin_ops_app_runtime",
+            normalized_sql,
+        )
+        self.assertNotIn("grant delete", normalized_sql)
+        self.assertNotIn("delete from", normalized_sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
         sql = (
