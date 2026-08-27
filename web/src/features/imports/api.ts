@@ -7,6 +7,8 @@ import type {
   ImportReviewRowsPage,
   ImportSessionPayload,
   ImportTemplate,
+  ManualBankTransactionEntryBatchPreview,
+  ManualBankTransactionEntryValues,
   ManualInvoiceEntryBatchPreview,
   ManualInvoiceEntryValues,
   MatchingRunSummary,
@@ -182,6 +184,28 @@ type ApiManualInvoiceEntryValues = {
   tax_rate?: string;
   tax_amount?: string;
   total_with_tax?: string;
+};
+
+type ApiManualBankTransactionEntryValues = {
+  bank_mapping_id?: string;
+  bank_name?: string;
+  bank_short_name?: string;
+  last4?: string;
+  account_no?: string;
+  account_name?: string;
+  direction?: string;
+  amount?: string;
+  balance?: string;
+  trade_time?: string;
+  currency?: string;
+  counterparty_name?: string;
+  counterparty_account_no?: string;
+  counterparty_bank_name?: string;
+  summary?: string;
+  remark?: string;
+  reference_field_key?: string;
+  reference_field_label?: string;
+  reference_value?: string;
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
@@ -501,6 +525,91 @@ export async function previewManualInvoicesAtEndpoint(
   });
   return {
     values: payload.values.map((item) => mapManualInvoiceEntryValues(item) as ManualInvoiceEntryValues),
+    fileIds: payload.file_ids.map(String),
+    importSession: mapImportPayload(payload.import_session),
+  };
+}
+
+function mapManualBankTransactionEntryValues(
+  payload: ApiManualBankTransactionEntryValues,
+): ManualBankTransactionEntryValues {
+  const rawReferenceKey = payload.reference_field_key;
+  const referenceFieldKey = rawReferenceKey === "bank_serial_no"
+    ? "bankSerialNo"
+    : rawReferenceKey === "account_detail_no"
+      ? "accountDetailNo"
+      : rawReferenceKey === "enterprise_serial_no"
+        ? "enterpriseSerialNo"
+        : null;
+  if (!referenceFieldKey) {
+    throw new Error("流水预览返回了未知的银行流水标识字段。");
+  }
+  if (payload.direction !== "inflow" && payload.direction !== "outflow") {
+    throw new Error("流水预览返回了未知的收支方向。");
+  }
+  return {
+    bankMappingId: stringOrEmpty(payload.bank_mapping_id),
+    bankName: stringOrEmpty(payload.bank_name),
+    bankShortName: stringOrEmpty(payload.bank_short_name),
+    last4: stringOrEmpty(payload.last4),
+    accountNo: stringOrEmpty(payload.account_no),
+    accountName: stringOrEmpty(payload.account_name),
+    direction: payload.direction,
+    amount: stringOrEmpty(payload.amount),
+    balance: stringOrEmpty(payload.balance),
+    tradeTime: stringOrEmpty(payload.trade_time).replace(" ", "T"),
+    currency: stringOrEmpty(payload.currency),
+    counterpartyName: stringOrEmpty(payload.counterparty_name),
+    counterpartyAccountNo: stringOrEmpty(payload.counterparty_account_no),
+    counterpartyBankName: stringOrEmpty(payload.counterparty_bank_name),
+    summary: stringOrEmpty(payload.summary),
+    remark: stringOrEmpty(payload.remark),
+    referenceFieldKey,
+    referenceFieldLabel: stringOrEmpty(payload.reference_field_label),
+    referenceValue: stringOrEmpty(payload.reference_value),
+  };
+}
+
+function serializeManualBankTransactionEntryValues(values: ManualBankTransactionEntryValues) {
+  const referenceFieldKey = values.referenceFieldKey === "bankSerialNo"
+    ? "bank_serial_no"
+    : values.referenceFieldKey === "accountDetailNo"
+      ? "account_detail_no"
+      : values.referenceFieldKey === "enterpriseSerialNo"
+        ? "enterprise_serial_no"
+        : "";
+  return {
+    bank_mapping_id: values.bankMappingId,
+    account_no: values.accountNo,
+    account_name: values.accountName,
+    direction: values.direction,
+    amount: values.amount,
+    balance: values.balance,
+    trade_time: values.tradeTime,
+    currency: values.currency,
+    counterparty_name: values.counterpartyName,
+    counterparty_account_no: values.counterpartyAccountNo,
+    counterparty_bank_name: values.counterpartyBankName,
+    summary: values.summary,
+    remark: values.remark,
+    ...(referenceFieldKey ? { [referenceFieldKey]: values.referenceValue } : {}),
+  };
+}
+
+export async function previewManualBankTransactions(
+  values: ManualBankTransactionEntryValues[],
+): Promise<ManualBankTransactionEntryBatchPreview> {
+  const payload = await requestJson<{
+    values: ApiManualBankTransactionEntryValues[];
+    file_ids: string[];
+    import_session: ApiImportSessionPayload;
+  }>("/imports/bank-transactions/manual/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transactions: values.map(serializeManualBankTransactionEntryValues) }),
+  });
+  return {
+    values: payload.values.map(mapManualBankTransactionEntryValues),
     fileIds: payload.file_ids.map(String),
     importSession: mapImportPayload(payload.import_session),
   };

@@ -203,6 +203,10 @@ from fin_ops_platform.services.manual_invoice_entry_service import (
     ManualInvoiceEntryError,
     ManualInvoiceEntryService,
 )
+from fin_ops_platform.services.manual_bank_transaction_entry_service import (
+    ManualBankTransactionEntryError,
+    ManualBankTransactionEntryService,
+)
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.no_oa_bank_batch_application_service import (
     NoOaBankBatchApplicationService,
@@ -904,6 +908,10 @@ class Application:
             bank_transaction_category_service=self._bank_transaction_category_service,
             bank_transaction_auto_category_service=self._bank_transaction_auto_category_service,
             audit_service=self._audit_service,
+        )
+        self._manual_bank_transaction_entry_service = ManualBankTransactionEntryService(
+            file_import_service=self._file_import_service,
+            bank_account_mappings_provider=self._app_settings_service.get_bank_account_mappings_payload,
         )
         self._no_oa_bank_batch_tag_selection_service = NoOaBankBatchTagSelectionApplicationService(
             app_settings_service=self._app_settings_service,
@@ -1983,6 +1991,8 @@ class Application:
             return self._handle_manual_invoice_recognize(body, headers)
         if method == "POST" and route_path == "/imports/invoices/manual/preview":
             return self._handle_manual_invoice_preview(body, imported_by=request_actor_id)
+        if method == "POST" and route_path == "/imports/bank-transactions/manual/preview":
+            return self._handle_manual_bank_transaction_preview(body, imported_by=request_actor_id)
         if method == "POST" and route_path == "/api/workbench/oa-invoice-supplements/manual/preview":
             return self._handle_manual_invoice_preview(
                 body,
@@ -2104,6 +2114,7 @@ class Application:
                 "/imports/files/sessions/{session_id}",
                 "/imports/invoices/manual/recognize",
                 "/imports/invoices/manual/preview",
+                "/imports/bank-transactions/manual/preview",
                 "/api/workbench/oa-invoice-supplements/manual/preview",
                 "/api/workbench/oa-invoice-supplements/manual",
                 "/api/workbench/oa-invoice-supplements/documents",
@@ -7505,6 +7516,53 @@ class Application:
             },
         )
 
+    def _handle_manual_bank_transaction_preview(
+        self,
+        body: str | bytes | None,
+        *,
+        imported_by: str,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        transactions = payload.get("transactions")
+        if not isinstance(transactions, list) or any(not isinstance(item, dict) for item in transactions):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "manual_bank_transaction_payload_invalid",
+                    "message": "流水录入内容必须是对象数组。",
+                },
+            )
+        try:
+            preview = self._manual_bank_transaction_entry_service.preview_batch(
+                payloads=transactions,
+                imported_by=imported_by,
+            )
+            self._persist_import_preview_delta(preview.session.id)
+        except ManualBankTransactionEntryError as exc:
+            return self._json_response(exc.status_code, {"error": exc.error, "message": exc.message})
+        except RuntimeError:
+            LOGGER.exception(
+                "Manual bank transaction preview unavailable.",
+                extra={"request_id": _REQUEST_AUDIT_REQUEST_ID.get()},
+            )
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "manual_bank_transaction_preview_unavailable",
+                    "message": "流水录入预览暂时不可用，请稍后重试。",
+                },
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {
+                "values": preview.values,
+                "file_ids": preview.file_ids,
+                "import_session": self._serialize_file_session(preview.session),
+            },
+        )
+
     def _workbench_invoice_supplement_service(self) -> WorkbenchInvoiceSupplementService:
         state_store = getattr(self, "_state_store", None)
         connection = getattr(state_store, "_connection", None)
@@ -8262,6 +8320,10 @@ class Application:
         self._manual_invoice_entry_service = ManualInvoiceEntryService(
             file_import_service=self._file_import_service,
             document_recognizer=self._invoice_document_recognizer,
+        )
+        self._manual_bank_transaction_entry_service = ManualBankTransactionEntryService(
+            file_import_service=self._file_import_service,
+            bank_account_mappings_provider=self._app_settings_service.get_bank_account_mappings_payload,
         )
 
     def _parse_import_file_preview_overrides(

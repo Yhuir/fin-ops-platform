@@ -18,6 +18,7 @@ import {
 } from "../common/FinanceTable";
 import AppDrawer from "../common/AppDrawer";
 import PageScaffold from "../common/PageScaffold";
+import ManualBankTransactionEntryDrawer from "./ManualBankTransactionEntryDrawer";
 import ManualInvoiceEntryDrawer from "./ManualInvoiceEntryDrawer";
 import SupportingDocumentGalleryDrawer from "./SupportingDocumentGalleryDrawer";
 import {
@@ -766,6 +767,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [mappingDrafts, setMappingDrafts] = useState<Record<string, Record<string, string>>>({});
   const [mappingRetryingFileId, setMappingRetryingFileId] = useState<string | null>(null);
   const [isDiscarding, setIsDiscarding] = useState(false);
+  const [manualBankTransactionEntryOpen, setManualBankTransactionEntryOpen] = useState(false);
   const [manualInvoiceEntryOpen, setManualInvoiceEntryOpen] = useState(false);
   const [supportingDocumentGalleryOpen, setSupportingDocumentGalleryOpen] = useState(false);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
@@ -1314,10 +1316,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
   }
 
-  function handleManualInvoiceImportAccepted(payload: ImportSessionPayload) {
+  function handleManualImportAccepted(payload: ImportSessionPayload, recordLabel: "发票" | "流水") {
     if (payload.job && payload.job.status !== "succeeded" && payload.job.status !== "partial_success") {
       setFeedbackMessage("已开始后台导入");
-      setProgress({ tone: "loading", label: "发票录入任务已创建。" });
+      setProgress({ tone: "loading", label: `${recordLabel}录入任务已创建。` });
     } else {
       setFeedbackMessage("已确认导入");
       completeImportFeedback(payload);
@@ -1413,6 +1415,18 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               >
                 <FilePlus2 aria-hidden="true" size={16} />
                 发票录入
+              </Button>
+            ) : null}
+            {mode === "bank_transaction" && canMutateData ? (
+              <Button
+                isDisabled={healthStatus.blocksMutations || isPreviewing || isConfirming || isDiscarding || settingsLoading}
+                onPress={() => setManualBankTransactionEntryOpen(true)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                <FilePlus2 aria-hidden="true" size={16} />
+                流水录入
               </Button>
             ) : null}
             {mode === "invoice" ? (
@@ -1724,7 +1738,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           <ManualInvoiceEntryDrawer
             disabled={!canMutateData || healthStatus.blocksMutations}
             onClose={() => setManualInvoiceEntryOpen(false)}
-            onImportAccepted={handleManualInvoiceImportAccepted}
+            onImportAccepted={(payload) => handleManualImportAccepted(payload, "发票")}
             open={manualInvoiceEntryOpen}
           />
           <SupportingDocumentGalleryDrawer
@@ -1732,6 +1746,16 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
             open={supportingDocumentGalleryOpen}
           />
         </>
+      ) : null}
+
+      {mode === "bank_transaction" ? (
+        <ManualBankTransactionEntryDrawer
+          bankAccounts={bankOptions}
+          disabled={!canMutateData || healthStatus.blocksMutations || settingsLoading}
+          onClose={() => setManualBankTransactionEntryOpen(false)}
+          onImportAccepted={(payload) => handleManualImportAccepted(payload, "流水")}
+          open={manualBankTransactionEntryOpen}
+        />
       ) : null}
 
       <AppDrawer

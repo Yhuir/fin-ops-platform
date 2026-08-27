@@ -1839,6 +1839,10 @@ class AppSettingsServiceTests(unittest.TestCase):
                     "last4": "8826",
                     "bank_name": "中国光大银行股份有限公司",
                     "short_name": "光大",
+                    "manual_entry_reference_field": {
+                        "key": "enterprise_serial_no",
+                        "label": "企业流水号",
+                    },
                 }
             ],
         )

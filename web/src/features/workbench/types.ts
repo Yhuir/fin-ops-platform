@@ -202,6 +202,10 @@ export type BankAccountMapping = {
   last4: string;
   bankName: string;
   shortName: string;
+  manualEntryReferenceField?: {
+    key: "bankSerialNo" | "accountDetailNo" | "enterpriseSerialNo";
+    label: string;
+  };
 };
 
 export type WorkbenchColumnLayouts = {

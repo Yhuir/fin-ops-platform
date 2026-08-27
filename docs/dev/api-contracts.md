@@ -43,6 +43,16 @@
 - 相同文件内容以 SHA-256 判断，不受文件名影响；同批或历史已确认文件命中时返回 `duplicate_file`。银行来源控制合计不一致返回 `source_control_mismatch` 且不可确认。
 - 字段映射仅属于 import file/session 的解析审计信息，不是 canonical 银行交易事实；confirm 仍只接受 `preview_ready` 文件，并继续执行去重、preview stale 和账户冲突合同。
 
+### 银行流水手工录入预览
+
+`POST /imports/bank-transactions/manual/preview`
+
+- 需要数据写权限并经过共享 mutation guard；操作人只取认证 session，不接受 body 中的身份字段。
+- 请求为 `{ "transactions": [...] }`，数组长度 1–50。每项必须包含 `bank_mapping_id`、完整 `account_no`、`direction=inflow|outflow`、正数 `amount`、`balance`、秒级 `trade_time`、三位 `currency`、`counterparty_name`，以及 mapping 对应的官方参考号字段：建行 `account_detail_no`，光大 `enterprise_serial_no`，其余当前银行为 `bank_serial_no`。
+- mapping 不存在、银行未登记明确手工字段合同、完整账号尾号不匹配、字段缺失/非法或本批出现相同强 identity 时返回明确 `400/409`，不创建 preview session。未知银行不得套用通用流水号字段兜底；服务端对整批 canonical identities 做有界批量预载，不逐笔查询数据库。
+- 成功返回 `{values,file_ids,import_session}`。`import_session.files` 与输入顺序一一对应并携带逐笔 row decision；`file_ids` 只包含 `created` 项。`duplicate_skipped`、`suspected_duplicate` 和错误项可展示但不可确认。
+- 返回修改或关闭抽屉调用现有 `POST /imports/files/discard`；正式提交调用现有 `POST /imports/files/confirm`，继续复用 durable `file_import` job、preview stale、幂等、审计和 canonical 写入合同。
+
 ## 页面标题完整性统计契约
 
 银行明细、OA 待付款、外部往来款、ETC 业务批次、税金抵扣、待找发票、进项发票使用、销项发票收款、关联台和成本统计的现有页面主响应可以携带 additive `statistics` 对象。前端默认复用该对象；只有本文件明确登记的首屏热路径可以用同一 endpoint 的非阻塞统计请求，禁止新增跨页统一统计接口。

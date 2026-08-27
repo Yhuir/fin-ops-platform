@@ -371,6 +371,15 @@ class ImportNormalizationService:
         self._batches[batch_id] = preview
         return preview
 
+    @contextmanager
+    def preload_bank_transaction_identities(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> Iterator[None]:
+        normalized_rows = [self._normalize_transaction_row(row)[0] for row in rows]
+        with self._transaction_identity_cache_for(normalized_rows):
+            yield
+
     def confirm_import(self, batch_id: str) -> ImportedBatch:
         return self.confirm_imports([batch_id])[0]
 
@@ -1015,6 +1024,9 @@ class ImportNormalizationService:
     ) -> Iterator[None]:
         previous_cache = self._transaction_identity_cache
         if not enabled:
+            yield
+            return
+        if previous_cache is not None:
             yield
             return
         self._transaction_identity_cache = self._build_transaction_identity_cache(normalized_rows)

@@ -84,7 +84,84 @@ def manual_invoice_payload(**overrides: str) -> dict[str, str]:
     return values
 
 
+def manual_bank_transaction_payload(**overrides: str) -> dict[str, str]:
+    values = {
+        "bank_mapping_id": "ccb-8106",
+        "account_no": "6227000012348106",
+        "account_name": "云南溯源科技有限公司",
+        "direction": "outflow",
+        "amount": "100.00",
+        "balance": "900.00",
+        "trade_time": "2026-08-28T09:01:02",
+        "currency": "CNY",
+        "counterparty_name": "测试供应商",
+        "account_detail_no": "CCB-API-001",
+    }
+    values.update(overrides)
+    return values
+
+
 class ImportFileApiTests(unittest.TestCase):
+    def test_manual_bank_transaction_preview_rejects_non_object_batch_items(self) -> None:
+        app = build_application()
+
+        response = app.handle_request(
+            "POST",
+            "/imports/bank-transactions/manual/preview",
+            json.dumps({"transactions": [manual_bank_transaction_payload(), "invalid"]}),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            json.loads(response.body)["error"],
+            "manual_bank_transaction_payload_invalid",
+        )
+
+    def test_manual_bank_transaction_preview_and_confirm_use_the_formal_import_job_chain(self) -> None:
+        app = build_application()
+        import_queue = install_durable_import_queue(app)
+        app._manual_bank_transaction_entry_service._bank_account_mappings_provider = lambda: [{  # type: ignore[attr-defined]
+            "id": "ccb-8106",
+            "last4": "8106",
+            "bank_name": "中国建设银行",
+            "short_name": "建行",
+        }]
+
+        preview_response = app.handle_request(
+            "POST",
+            "/imports/bank-transactions/manual/preview",
+            json.dumps({"transactions": [manual_bank_transaction_payload()]}),
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_payload = json.loads(preview_response.body)
+        self.assertEqual(preview_payload["values"][0]["reference_field_key"], "account_detail_no")
+        self.assertEqual(len(preview_payload["file_ids"]), 1)
+        self.assertEqual(
+            preview_payload["import_session"]["files"][0]["template_code"],
+            "manual_bank_transaction_entry",
+        )
+
+        confirm_response = app.handle_request(
+            "POST",
+            "/imports/files/confirm",
+            json.dumps({
+                "session_id": preview_payload["import_session"]["session"]["id"],
+                "selected_file_ids": preview_payload["file_ids"],
+            }),
+        )
+        self.assertEqual(confirm_response.status_code, 202)
+        self.assertEqual(
+            json.loads(confirm_response.body)["job"]["affected_domains"],
+            ["imports_bank_transactions"],
+        )
+
+        import_queue.process_all()
+        transactions = app._import_service.list_transactions()  # type: ignore[attr-defined]
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(transactions[0].account_detail_no, "CCB-API-001")
+        self.assertEqual(str(transactions[0].amount), "100.00")
+
     def test_postgres_discard_synchronizes_local_session_without_full_runtime_reload(self) -> None:
         app = build_application()
         preview = app._manual_invoice_entry_service.preview_batch(  # type: ignore[attr-defined]

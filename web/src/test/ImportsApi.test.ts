@@ -7,6 +7,7 @@ import {
   fetchImportReviewRows,
   fetchImportSession,
   previewManualInvoices,
+  previewManualBankTransactions,
   previewImportFiles,
   recognizeManualInvoice,
   resolveImportApiErrorMessage,
@@ -23,6 +24,99 @@ afterEach(() => {
 });
 
 describe("imports api", () => {
+  test("serializes manual bank entries and maps the server-authoritative preview", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      values: [{
+        bank_mapping_id: "ccb-8106",
+        bank_name: "中国建设银行",
+        bank_short_name: "建行",
+        last4: "8106",
+        account_no: "6227000012348106",
+        account_name: "云南溯源科技有限公司",
+        direction: "outflow",
+        amount: "100.00",
+        balance: "900.00",
+        trade_time: "2026-08-28 09:01:02",
+        currency: "CNY",
+        counterparty_name: "测试供应商",
+        counterparty_account_no: "",
+        counterparty_bank_name: "",
+        summary: "电子转账",
+        remark: "人工录入",
+        reference_field_key: "account_detail_no",
+        reference_field_label: "账户明细编号-交易流水号",
+        reference_value: "CCB-WEB-001",
+      }],
+      file_ids: ["manual_bank_file_1"],
+      import_session: {
+        session: {
+          id: "manual_bank_session_1",
+          imported_by: "web_finance_user",
+          file_count: 1,
+          status: "preview_ready",
+          created_at: "2026-08-28T09:02:00+08:00",
+        },
+        files: [{
+          id: "manual_bank_file_1",
+          file_name: "新流水1",
+          template_code: "manual_bank_transaction_entry",
+          batch_type: "bank_transaction",
+          status: "preview_ready",
+          message: "预览成功",
+          row_count: 1,
+          success_count: 1,
+          error_count: 0,
+          duplicate_count: 0,
+          suspected_duplicate_count: 0,
+          updated_count: 0,
+          row_results: [],
+        }],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    global.fetch = fetchMock as typeof fetch;
+
+    const preview = await previewManualBankTransactions([{
+      bankMappingId: "ccb-8106",
+      bankName: "中国建设银行",
+      bankShortName: "建行",
+      last4: "8106",
+      accountNo: "6227000012348106",
+      accountName: "云南溯源科技有限公司",
+      direction: "outflow",
+      amount: "100",
+      balance: "900",
+      tradeTime: "2026-08-28T09:01:02",
+      currency: "CNY",
+      counterpartyName: "测试供应商",
+      counterpartyAccountNo: "",
+      counterpartyBankName: "",
+      summary: "电子转账",
+      remark: "人工录入",
+      referenceFieldKey: "accountDetailNo",
+      referenceFieldLabel: "账户明细编号-交易流水号",
+      referenceValue: "CCB-WEB-001",
+    }]);
+
+    expect(preview.fileIds).toEqual(["manual_bank_file_1"]);
+    expect(preview.values[0]).toMatchObject({
+      direction: "outflow",
+      referenceFieldKey: "accountDetailNo",
+      referenceValue: "CCB-WEB-001",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/imports/bank-transactions/manual/preview",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      transactions: [{
+        bank_mapping_id: "ccb-8106",
+        direction: "outflow",
+        account_detail_no: "CCB-WEB-001",
+      }],
+    });
+  });
+
   test("maps OCR prefill and serializes the server-authoritative manual invoice preview", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

@@ -21,11 +21,14 @@
 
 - `web/src/pages/imports/ImportBankTransactionsPage.tsx`
 - `web/src/components/imports/ImportWorkflowPage.tsx`
+- `web/src/components/imports/ManualBankTransactionBatchEditor.tsx`
+- `web/src/components/imports/ManualBankTransactionEntryDrawer.tsx`
 - `web/src/features/imports/api.ts`
 - `web/src/features/imports/types.ts`
 - `web/src/features/imports/importRoutes.ts`
 - `backend/src/fin_ops_platform/app/server.py`
 - `backend/src/fin_ops_platform/services/import_file_service.py`
+- `backend/src/fin_ops_platform/services/manual_bank_transaction_entry_service.py`
 - `backend/src/fin_ops_platform/services/imports.py`
 - `backend/src/fin_ops_platform/services/import_processing_service.py`
 - `backend/src/fin_ops_platform/services/import_job_queue.py`
@@ -45,6 +48,9 @@
 
 - 前端入口 `ImportBankTransactionsPage` 只渲染 `<ImportWorkflowPage mode="bank_transaction" />`。
 - 页面必须先加载设置里的银行账户映射；每个文件都要选择对应账户后才能预览。
+- 页面右上角提供“流水录入”入口。抽屉一次最多填写 50 笔；每笔必须选择已配置且已有明确手工录入字段合同的银行账户、填写完整本方账号、收支、金额、余额、秒级交易时间、币种、对方户名，以及该银行明确配置的官方流水标识字段。完整账号尾号必须与设置映射一致，客户端显示与服务端校验都不允许绕过；未知银行模板明确阻断，不套用通用字段兜底。
+- 手工录入只新增一个有界输入适配层：`POST /imports/bank-transactions/manual/preview` 把每笔输入转为独立的 `bank_transaction` preview file，随后继续复用现有 session/discard/confirm/durable job/canonical 写链；不建立手工流水池、第二套确认接口或同步写入路径。
+- 预览同时展示可录入、已存在、疑似重复和错误结果。只有 `created` 行对应的 file id 可以确认；已存在和疑似重复保留预览证据但不可进入正式确认。本次输入内相同强 identity 在创建 session 前直接拒绝。
 - 文件识别银行/尾号与所选账户不一致时，预览可展示差异但确认必须 fail closed；前端和后端都不得提供“仍按所选账户导入”的绕过入口。
 - 预览使用 `/imports/files/preview`，通过 `file_overrides` 传递 `batch_type=bank_transaction`、`bank_mapping_id`、`bank_name`、`bank_short_name`、`last4`。
 - `preview_ready` 只表示文件解析完成。页面只把 `audit.confirmable_count > 0` 的银行文件送入确认；全部记录已存在且无疑似、错误或账户冲突时显示“无需导入”，不创建零变更 confirm/job。多文件预览只提交真正有可处理记录的文件。
@@ -69,7 +75,7 @@
 
 | 改动点 | 必查影响 |
 | --- | --- |
-| 页面上传、选择银行、预览、确认、session restore | `ImportCenterPage.test.tsx`、`ImportsApi.test.ts`、`ImportWorkflowPage` |
+| 页面上传、选择银行、手工多笔录入、预览、确认、session restore | `ImportCenterPage.test.tsx`、`ManualBankTransactionBatchEditor.test.tsx`、`ImportsApi.test.ts`、`ImportWorkflowPage` |
 | `/imports/files/*` contract | `tests/test_import_file_api.py`、`tests/test_import_file_service.py`、`web/src/features/imports/api.ts` |
 | 银行流水 parser/normalizer/identity/字段映射 | `tests/test_import_api.py`、`tests/test_import_file_service.py`、`tests/test_import_service.py`、`tests/test_import_preview_audit.py`、`web/src/test/ImportCenterPage.test.tsx` |
 | confirm job / import worker | `tests/test_import_job_queue.py`、`runtime_worker_registry.py`、`runtime_worker_handlers.py` |

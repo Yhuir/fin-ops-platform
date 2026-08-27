@@ -220,3 +220,34 @@ export type ManualInvoiceEntryBatchPreview = {
   fileIds: string[];
   importSession: ImportSessionPayload;
 };
+
+export type ManualBankTransactionDirection = "inflow" | "outflow";
+export type ManualBankReferenceFieldKey = "bankSerialNo" | "accountDetailNo" | "enterpriseSerialNo";
+
+export type ManualBankTransactionEntryValues = {
+  bankMappingId: string;
+  bankName: string;
+  bankShortName: string;
+  last4: string;
+  accountNo: string;
+  accountName: string;
+  direction: ManualBankTransactionDirection;
+  amount: string;
+  balance: string;
+  tradeTime: string;
+  currency: string;
+  counterpartyName: string;
+  counterpartyAccountNo: string;
+  counterpartyBankName: string;
+  summary: string;
+  remark: string;
+  referenceFieldKey: ManualBankReferenceFieldKey | "";
+  referenceFieldLabel: string;
+  referenceValue: string;
+};
+
+export type ManualBankTransactionEntryBatchPreview = {
+  values: ManualBankTransactionEntryValues[];
+  fileIds: string[];
+  importSession: ImportSessionPayload;
+};

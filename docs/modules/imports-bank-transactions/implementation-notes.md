@@ -1,5 +1,11 @@
 # 银行流水导入 实施记录
 
+## 2026-08-28 - 手工多笔流水录入复用正式导入链
+
+- 页面新增“流水录入”右侧抽屉，使用现有银行账户设置与 HeroUI 表单；一次最多 50 笔，银行选择只决定有明确合同的官方参考号字段，其余为统一 canonical 必填字段。
+- 服务端要求完整本方账号且尾号与 mapping 一致，不从仅有的四位尾号猜造账号；各笔先统一归一，再一次批量预载 canonical identity。已有重复和疑似重复只展示，不进入可确认 file ids；同批强 identity 重复在 session 创建前拒绝。
+- 每笔映射为独立 preview file，确认、幂等、preview stale、durable job、canonical 写入、审计和 discard 全部复用既有 file/session 边界；未新增表、migration、worker、read model、第二流水池、隐藏 fallback 或数据库备份。
+
 ## 2026-08-20 - terminal suspected canonical 引用闭环
 
 - 根因：去重 preview 会为弱/多义命中保留 candidate ID；普通 confirm 已不创建 canonical 流水，但旧终态序列化仍把 transient candidate 写进 `app.import_batch_rows.linked_object_*` 与 normalized payload，违反 Page Audit 的 terminal decision 合同并持续制造阻断。

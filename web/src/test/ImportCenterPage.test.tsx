@@ -149,6 +149,7 @@ describe("Import pages", () => {
     expectProjectImportShell();
     const bankUploadInput = expectProjectUploadZone("上传银行流水文件");
     expect(screen.queryByRole("dialog", { name: "银行流水导入" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "流水录入" })).toBeInTheDocument();
 
     await user.upload(bankUploadInput, [
       new File(["bank-demo"], "historydetail14080.xlsx", {

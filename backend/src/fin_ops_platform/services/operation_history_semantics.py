@@ -285,6 +285,9 @@ _EXACT_ROUTES = {
     ("POST", "/imports/invoices/manual/preview"): _semantic(
         "imports.invoice.preview", "预览发票录入", "invoice_import", "发票录入", "解析并预览待录入的发票。"
     ),
+    ("POST", "/imports/bank-transactions/manual/preview"): _semantic(
+        "imports.bank.preview", "预览流水录入", "bank_import", "流水录入", "校验并预览待录入的银行流水。"
+    ),
     ("POST", "/imports/invoices/manual/recognize"): _semantic(
         "imports.invoice.recognize", "识别发票", "invoice_import", "发票录入", "识别待录入发票的业务字段。"
     ),

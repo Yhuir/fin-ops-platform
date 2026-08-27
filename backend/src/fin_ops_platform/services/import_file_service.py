@@ -465,6 +465,57 @@ class FileImportService:
         self._sessions[session.id] = session
         return session
 
+    def preview_manual_bank_transaction_entries(
+        self,
+        *,
+        imported_by: str,
+        entries: list[dict[str, Any]],
+    ) -> FileImportSession:
+        if not entries:
+            raise ValueError("manual bank transaction entry batch requires at least one transaction")
+        files: list[FileImportPreviewItem] = []
+        with self._import_service.preload_bank_transaction_identities(entries):
+            for index, row in enumerate(entries, start=1):
+                preview = self._import_service.preview_import(
+                    batch_type=BatchType.BANK_TRANSACTION,
+                    source_name="manual_bank_transaction_entry",
+                    imported_by=imported_by,
+                    rows=[dict(row)],
+                )
+                files.append(FileImportPreviewItem(
+                    id=self._next_file_id(),
+                    file_name=f"新流水{index}",
+                    template_code="manual_bank_transaction_entry",
+                    batch_type=BatchType.BANK_TRANSACTION,
+                    status="preview_ready",
+                    message="手工录入流水已完成预览校验。",
+                    row_count=1,
+                    success_count=preview.success_count,
+                    error_count=preview.error_count,
+                    duplicate_count=preview.duplicate_count,
+                    suspected_duplicate_count=preview.suspected_duplicate_count,
+                    updated_count=preview.updated_count,
+                    preview_batch_id=preview.id,
+                    selected_bank_mapping_id=str(row.get("selected_bank_mapping_id") or ""),
+                    selected_bank_name=str(row.get("selected_bank_name") or ""),
+                    selected_bank_short_name=str(row.get("selected_bank_short_name") or ""),
+                    selected_bank_last4=str(row.get("selected_bank_last4") or ""),
+                    detected_bank_name=str(row.get("detected_bank_name") or ""),
+                    detected_last4=str(row.get("detected_last4") or ""),
+                    row_results=preview.row_results,
+                    normalized_rows=preview.normalized_rows,
+                ))
+        session = FileImportSession(
+            id=self._next_session_id(),
+            imported_by=imported_by,
+            file_count=len(files),
+            status="preview_ready",
+            files=files,
+        )
+        self._refresh_session_audit(session)
+        self._sessions[session.id] = session
+        return session
+
     def get_session(self, session_id: str) -> FileImportSession:
         return self._sessions[session_id]
 

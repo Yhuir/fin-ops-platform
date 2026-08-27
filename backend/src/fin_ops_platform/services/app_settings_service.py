@@ -24,6 +24,7 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     SETTINGS_KEY as INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
     normalize_payment_status_rules_settings,
 )
+from fin_ops_platform.services.manual_bank_transaction_entry_service import manual_bank_reference_field
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleSyncConfigurationError,
     OARoleSyncService,
@@ -205,7 +206,7 @@ class AppSettingsService:
                 active_projects.append(payload)
 
         mappings = sorted(
-            self._snapshot["bank_account_mappings"],
+            self.get_bank_account_mappings_payload(),
             key=lambda item: (item["bank_name"], item["last4"]),
         )
         oa_import_options = self._oa_import_available_options()
@@ -1751,7 +1752,7 @@ class AppSettingsService:
             for item in self._snapshot["bank_account_mappings"]
         }
 
-    def get_bank_account_mappings_payload(self) -> list[dict[str, str]]:
+    def get_bank_account_mappings_payload(self) -> list[dict[str, Any]]:
         self._refresh_snapshot_from_state_store()
         return [
             {
@@ -1759,6 +1760,9 @@ class AppSettingsService:
                 "last4": str(item.get("last4") or ""),
                 "bank_name": str(item.get("bank_name") or ""),
                 "short_name": str(item.get("short_name") or ""),
+                "manual_entry_reference_field": manual_bank_reference_field(
+                    str(item.get("bank_name") or "")
+                ),
             }
             for item in self._snapshot["bank_account_mappings"]
         ]

@@ -4799,18 +4799,30 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         last4: "4080",
         bank_name: "工商银行",
         short_name: "工行",
+        manual_entry_reference_field: {
+          key: "bank_serial_no",
+          label: "银行流水号",
+        },
       },
       {
         id: "bank_mapping_0093",
         last4: "0093",
         bank_name: "平安银行",
         short_name: "平安",
+        manual_entry_reference_field: {
+          key: "bank_serial_no",
+          label: "银行流水号",
+        },
       },
       {
         id: "bank_mapping_8826",
         last4: "8826",
         bank_name: "建设银行",
         short_name: "建行",
+        manual_entry_reference_field: {
+          key: "account_detail_no",
+          label: "账户明细编号",
+        },
       },
     ],
     workbench_column_layouts: {
