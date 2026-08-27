@@ -235,7 +235,7 @@
 
 ## 2026-08-20 ETC 批次折叠、搜索、计数与关系缺口审计
 
-- Business/repository：`tests/test_workbench_page_query_repository.py` 保护 ETC inventory 只统计 submitted/closed distinct batch，搜索命中 external/business/submission batch ID、成员发票号和精确金额，并让 compact summary 只携带 canonical ETC `summary_row` 与完整真实成员总数；`tests/test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 上保护分页快速水合从部分 link + business 完整成员中稳定物化汇总行、声明完整折叠数量，且 statement budget 不增加。
+- Business/repository：`tests/test_workbench_page_query_repository.py` 保护发票统计直接复用 canonical invoice facts，只输出总数、进项、销项、人工导入和 OA 解析新增入池，并确保旧 `invoice_inventory` / ETC 展示诊断统计不回流；同文件继续保护搜索命中 external/business/submission batch ID、成员发票号和精确金额，并让 compact summary 只携带 canonical ETC `summary_row` 与完整真实成员总数；`tests/test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 上保护分页快速水合从部分 link + business 完整成员中稳定物化汇总行、声明完整折叠数量，且 statement budget 不增加。
 - Audit：`tests/test_workbench_page_audit.py` 保护缺 OA 与缺 active relation 的 submitted ETC batch 分别输出稳定 warning code，既有无效 relation member 仍为 error。
 - Frontend：`web/src/test/RelationGroupGrid.test.tsx` 保护折叠态只显示 `summaryRow`、不显示任何真实发票；展开态只显示全部 N 张 `collapsedRows`，收起恢复同一汇总行。缺少 `summaryRow` 时显示明确空态，禁止以 `rows[0]`、第一张真实发票或 `slice(0, 1)` 兜底。
 - 性能：首屏不携带全部 ETC 发票，成员发票号仅在用户搜索时通过有界 `exists` 查询；不新增 API、SQL round-trip、表、worker、read model、cache 或第二套展开状态。

@@ -19,7 +19,7 @@ import {
 import type {
   WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
-  WorkbenchInvoiceInventory,
+  WorkbenchStatistics,
   WorkbenchRecord,
   WorkbenchRecordType,
   WorkbenchFilterOptionsLoader,
@@ -45,7 +45,7 @@ type RelationGroupGridProps = {
   panes: WorkbenchPane[];
   groups: WorkbenchRelationGroup[];
   sourceGroups?: WorkbenchRelationGroup[];
-  invoiceInventory?: WorkbenchInvoiceInventory;
+  invoiceStatistics?: WorkbenchStatistics;
   displayState?: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   rowTemplateColumns: string;
@@ -145,7 +145,7 @@ function RelationGroupGrid({
   panes,
   groups,
   sourceGroups,
-  invoiceInventory = emptyInvoiceInventory,
+  invoiceStatistics,
   displayState = createEmptyWorkbenchZoneDisplayState(),
   columnLayouts,
   rowTemplateColumns,
@@ -803,7 +803,7 @@ function RelationGroupGrid({
               <div className="pane-header">
                 <div className="pane-header-main">
                   {pane.id === "invoice" ? (
-                    <InvoiceInventoryDiagnosticsTrigger title={pane.title} inventory={invoiceInventory} />
+                    <InvoiceStatisticsTrigger title={pane.title} statistics={invoiceStatistics} />
                   ) : (
                     <span>{pane.title}</span>
                   )}
@@ -954,28 +954,18 @@ function buildPaneSortVisualLabel(currentDirection: "asc" | "desc" | null) {
   return currentDirection === "desc" ? "时间↑" : "时间↓";
 }
 
-const emptyInvoiceInventory: WorkbenchInvoiceInventory = {
-  systemTotal: 0,
-  manualImportTotal: 0,
-  workbenchVisibleTotal: 0,
-  hiddenSubmittedEtcTotal: 0,
-  extraEtcTotal: 0,
-  etcSummaryBatchCount: 0,
-  oaAttachmentTotal: 0,
-};
-
-function InvoiceInventoryDiagnosticsTrigger({
+function InvoiceStatisticsTrigger({
   title,
-  inventory,
+  statistics,
 }: {
   title: string;
-  inventory: WorkbenchInvoiceInventory;
+  statistics?: WorkbenchStatistics;
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [popoverStyle, setPopoverStyle] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const rows = buildInvoiceInventoryRows(inventory);
-  const ariaLabel = `${title}库存统计：${rows.map((row) => `${row.label} ${row.value}`).join("，")}`;
+  const rows = buildInvoiceStatisticsRows(statistics);
+  const ariaLabel = `${title}统计：${rows.map((row) => `${row.label} ${formatStatisticValue(row.value)}`).join("，")}`;
 
   const syncPopoverPosition = useCallback(() => {
     const trigger = triggerRef.current;
@@ -1033,7 +1023,7 @@ function InvoiceInventoryDiagnosticsTrigger({
         {rows.map((row) => (
           <div className="pane-title-hover-row" key={row.label}>
             <span>{row.label}</span>
-            <strong>{row.value}</strong>
+            <strong>{formatStatisticValue(row.value)}</strong>
           </div>
         ))}
       </div>
@@ -1041,14 +1031,16 @@ function InvoiceInventoryDiagnosticsTrigger({
   );
 }
 
-function buildInvoiceInventoryRows(inventory: WorkbenchInvoiceInventory) {
+function buildInvoiceStatisticsRows(statistics?: WorkbenchStatistics) {
   return [
-    { label: "系统发票总数", value: inventory.systemTotal },
-    { label: "人工导入总数", value: inventory.manualImportTotal },
-    { label: "普通可见", value: inventory.workbenchVisibleTotal },
-    { label: "已提交 ETC 隐藏", value: inventory.hiddenSubmittedEtcTotal },
-    { label: "额外 ETC", value: inventory.extraEtcTotal },
-    { label: "ETC 折叠批次", value: inventory.etcSummaryBatchCount },
-    { label: "OA附件解析发票", value: inventory.oaAttachmentTotal },
+    { label: "发票总数", value: statistics?.invoiceTotalCount },
+    { label: "进项发票", value: statistics?.inputInvoiceCount },
+    { label: "销项发票", value: statistics?.outputInvoiceCount },
+    { label: "人工导入", value: statistics?.manualImportInvoiceCount },
+    { label: "OA 解析新增入池", value: statistics?.oaParseCreatedInvoiceCount },
   ];
+}
+
+function formatStatisticValue(value: number | undefined) {
+  return typeof value === "number" ? value.toLocaleString("zh-CN") : "—";
 }

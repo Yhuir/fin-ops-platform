@@ -1884,3 +1884,9 @@
 - 收口：在列表、筛选等 page spine 使用的 `_SCOPED_ETC_SUMMARY_IDENTITY_CTES` 内一次物化带 `source_rank / external_batch_id / scope_month / updated_at / invoice_identity / invoice_amount` 的窄事实集；摘要 identity key 与异常金额都消费该事实集，删除异常链中三段重复来源 SQL。单行/单组详情继续使用只解析 summary identity 的批次级窄查询，避免打开抽屉时物化全量 ETC 发票。来源优先级、金额、去重 identity、更新时间和 API DTO 均不改变。
 - 同一生产只读快照旧/新 payload SHA-256 完全一致；候选主 SQL 的 `pg_stat_statements` 平均约 `692ms`、单次 shared-buffer hits 约 `7.1 万`，相对旧形状分别下降约 `23%` 与 `22%`。最终 HTTP p95/p99 仍以发布后的标准门禁为准。
 - 本次只修改关联台 direct repository 私有 SQL 和对应查询形状测试；不新增 API、表、索引、migration、read model、cache、worker、依赖、兼容分支或兜底代码，不修改其它页面 I/O。未创建数据库备份，未写生产业务数据。
+## 2026-08-27 - 发票栏统计合同收敛
+
+- 目标：关联台发票栏只展示可与统一事实源直接交叉核对的发票总数、进项、销项、人工导入和 OA 解析新增入池；删除普通可见、已提交 ETC 隐藏、额外 ETC、ETC 折叠批次和宽泛 OA 附件来源等混合展示诊断口径。
+- 边界：首屏 combined initial 继续在同一只读快照内计算 canonical 统计，但删除独立 `invoice_inventory` response object，全部前端消费统一走 `statistics`；ETC 折叠、可见性、搜索和组内成员 I/O 不变。
+- 性能：删除 ETC 批次额外聚合和五项无消费统计，不增加查询、缓存、worker、依赖、数据库迁移或备份。
+- 测试：repository 合同测试保护 canonical invoice statistics 及旧 CTE/字段删除；API mapper 和发票栏交互测试保护新五项展示并禁止旧标签回流。

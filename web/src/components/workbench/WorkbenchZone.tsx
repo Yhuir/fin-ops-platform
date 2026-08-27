@@ -12,7 +12,7 @@ import {
 import type {
   WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
-  WorkbenchInvoiceInventory,
+  WorkbenchStatistics,
   WorkbenchRecord,
   WorkbenchZonePageInfo,
   WorkbenchFilterOptionsLoader,
@@ -31,7 +31,7 @@ type WorkbenchZoneProps = {
   panes: WorkbenchPane[];
   groups?: WorkbenchRelationGroup[];
   sourceGroups?: WorkbenchRelationGroup[];
-  invoiceInventory?: WorkbenchInvoiceInventory;
+  invoiceStatistics?: WorkbenchStatistics;
   displayState?: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
@@ -115,7 +115,7 @@ function WorkbenchZone({
   panes,
   groups,
   sourceGroups,
-  invoiceInventory,
+  invoiceStatistics,
   displayState = createEmptyWorkbenchZoneDisplayState(),
   columnLayouts,
   getRowState,
@@ -379,7 +379,7 @@ function WorkbenchZone({
         getRowState={getRowState}
         groups={groups}
         highlightedRowId={highlightedRowId}
-        invoiceInventory={invoiceInventory}
+        invoiceStatistics={invoiceStatistics}
         loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}

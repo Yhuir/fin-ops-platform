@@ -2443,7 +2443,7 @@ export default function ReconciliationWorkbenchPage() {
       groups={displayPairedGroups}
       sourceGroups={workbenchData?.paired.groups ?? []}
       loadFilterOptions={loadFilterOptions}
-      invoiceInventory={workbenchData?.invoiceInventory}
+      invoiceStatistics={statistics ?? undefined}
       loadingMore={loadingMoreByZone.paired}
       loadMoreError={loadMoreErrorByZone.paired}
       pageInfo={zonePages.paired}
@@ -2495,7 +2495,7 @@ export default function ReconciliationWorkbenchPage() {
       groups={displayOpenGroups}
       sourceGroups={visibleOpenGroups}
       loadFilterOptions={loadFilterOptions}
-      invoiceInventory={workbenchData?.invoiceInventory}
+      invoiceStatistics={statistics ?? undefined}
       loadingMore={loadingMoreByZone.unpaired}
       loadMoreError={loadMoreErrorByZone.unpaired}
       pageInfo={zonePages.unpaired}

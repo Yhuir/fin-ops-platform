@@ -893,7 +893,7 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 `GET /api/workbench?month=...`
 
-- 该接口是 Workbench 唯一首屏读入口，在一个短生命 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 `month`、`scope_key`、`summary`、`statistics`、`invoice_inventory`、`paired` 和 `unpaired`。summary、精确计数和两区首页 keys 必须来自同一 candidate spine/snapshot，不得串行重建三次全 scope 事实。
+- 该接口是 Workbench 唯一首屏读入口，在一个短生命 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 `month`、`scope_key`、`summary`、`statistics`、`paired` 和 `unpaired`。`statistics` 直接基于 canonical OA、流水和统一发票事实计算，其中发票字段固定为 `invoice_total_count`、`input_invoice_count`、`output_invoice_count`、`manual_import_invoice_count`、`oa_parse_created_invoice_count`；不返回 Workbench 可见数、ETC 隐藏数/额外数/折叠批次数或宽泛的 OA 附件来源数。summary、精确计数和两区首页 keys 必须来自同一 candidate spine/snapshot，不得串行重建三次全 scope 事实。
 - 每区 shape 固定为 `groups,total,row_counts,page_size,has_more,next_cursor`。首屏 `page_size=10`，候选 SQL 返回 `page_size+1` keys 判定 `has_more`，再 set-based hydration 只完整装配当前页的 groups。精确 total 与跨未加载页搜索合同不变。
 - compact summary group 保留唯一的组级 `amount_check`；列表行不重复传输同一 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only `special_metadata`。前端可把组级金额判断继承到可见行用于 chip，完整行级诊断只由 detail 端点返回。
 - `GET /api/workbench/groups` 使用 `month,zone,search,filters,sort,cursor,page_size,exception_bucket,exception_view,exception_code` 的明确白名单合同。`exception_bucket` 必须与 zone 相同；`exception_view` 必须与 bucket 同时使用，`exception_code` 只允许用于金额视图。`cursor` 绑定 scope/zone/search/filter/sort/异常筛选和上一行完整稳定排序 tuple，是不透明的 keyset 位置，不是读快照版本或写 CAS。不提供 `page/OFFSET` fallback；服务端自动选中的金额 code 封存在 cursor 中，不得由客户端在同一次分页链中回填，也不得在续页时重新自动选择。

@@ -46,7 +46,7 @@ canonical fact repositories
 
 页面为 direct-only：不读 projection/Redis，不比较 generation/freshness，不投递 page refresh，也不从旧 snapshot、旧 candidate/decision 表或 row metadata 恢复关系。自动匹配仍由 `workbench-matching` 通过 relation UoW 写 active relations；共享 `workbench_relation` read model 只为其它明确消费者服务，不参与 Workbench page read path。
 
-ETC 批次在折叠态只显示 canonical `summaryRow`，不显示任何真实发票成员；“展开全部 N 张发票”通过既有 group detail I/O 一次加载该批次完整 `collapsedRows`，展开态只显示真实成员，收起后恢复 `summaryRow`。首屏只携带汇总行和总数，避免 68 张等大批次放大初始 payload；缺少汇总行时明确显示空态，禁止拿第一张真实发票兜底。关联台统计只计算 submitted/closed 批次；搜索可命中 ETC 批次标识、成员发票号和精确批次金额。
+ETC 批次在折叠态只显示 canonical `summaryRow`，不显示任何真实发票成员；“展开全部 N 张发票”通过既有 group detail I/O 一次加载该批次完整 `collapsedRows`，展开态只显示真实成员，收起后恢复 `summaryRow`。首屏只携带汇总行和总数，避免 68 张等大批次放大初始 payload；缺少汇总行时明确显示空态，禁止拿第一张真实发票兜底。ETC 折叠资格只认 submitted/closed 批次；搜索可命中 ETC 批次标识、成员发票号和精确批次金额。发票栏标题的统计只展示 canonical 发票总数、进项、销项、人工导入和 OA 解析新增入池，不混入 ETC 展示折叠口径。
 
 ## 代码入口
 

@@ -4,7 +4,7 @@ import type { WorkbenchZoneDisplayState } from "../../features/workbench/groupDi
 import type {
   WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
-  WorkbenchInvoiceInventory,
+  WorkbenchStatistics,
   WorkbenchRecord,
   WorkbenchRecordType,
   WorkbenchFilterOptionsLoader,
@@ -28,7 +28,7 @@ type ResizableTriPaneProps = {
   panes: WorkbenchPane[];
   groups?: WorkbenchRelationGroup[];
   sourceGroups?: WorkbenchRelationGroup[];
-  invoiceInventory?: WorkbenchInvoiceInventory;
+  invoiceStatistics?: WorkbenchStatistics;
   displayState: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   widths: number[];
@@ -68,7 +68,7 @@ function ResizableTriPane({
   panes,
   groups,
   sourceGroups,
-  invoiceInventory,
+  invoiceStatistics,
   displayState,
   columnLayouts,
   widths,
@@ -145,7 +145,7 @@ function ResizableTriPane({
         getRowState={getRowState}
         groups={effectiveGroups}
         highlightedRowId={highlightedRowId}
-        invoiceInventory={invoiceInventory}
+        invoiceStatistics={invoiceStatistics}
         loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}

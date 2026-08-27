@@ -58,7 +58,6 @@ class _Repository:
             "scope_key": "2026-07",
             "summary": {},
             "statistics": {},
-            "invoice_inventory": {},
             "paired": {**zone, "groups": []},
             "unpaired": zone,
         }

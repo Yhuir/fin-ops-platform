@@ -26,7 +26,6 @@ import type {
   WorkbenchExceptionView,
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
-  WorkbenchInvoiceInventory,
   WorkbenchSourceKind,
   WorkbenchGroupType,
   WorkbenchGroupsPageQuery,
@@ -234,7 +233,6 @@ type ApiWorkbenchAnomaly = {
 
 type ApiWorkbenchPayload = {
   month: string;
-  invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: {
     oa_count: number;
     bank_count: number;
@@ -256,11 +254,11 @@ type ApiWorkbenchPayload = {
 type ApiWorkbenchSummaryPayload = {
   month: string;
   scope_key?: string;
-  invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: ApiWorkbenchPayload["summary"];
   statistics?: {
     oa_count?: number | null;
     bank_transaction_count?: number | null;
+    invoice_total_count?: number | null;
     input_invoice_count?: number | null;
     output_invoice_count?: number | null;
     completed_oa_count?: number | null;
@@ -307,16 +305,6 @@ type ApiWorkbenchFilterOptionsPayload = {
 type ApiWorkbenchInitialPayload = ApiWorkbenchSummaryPayload & {
   paired: ApiWorkbenchGroupsPayload;
   unpaired: ApiWorkbenchGroupsPayload;
-};
-
-type ApiWorkbenchInvoiceInventory = {
-  system_total?: number | null;
-  manual_import_total?: number | null;
-  workbench_visible_total?: number | null;
-  hidden_submitted_etc_total?: number | null;
-  extra_etc_total?: number | null;
-  etc_summary_batch_count?: number | null;
-  oa_attachment_total?: number | null;
 };
 
 type ApiWorkbenchOaSyncStatus = {
@@ -1836,22 +1824,6 @@ function mapWorkbenchExceptionCounts(
   };
 }
 
-function mapInventoryCount(value: number | null | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function mapInvoiceInventory(inventory?: ApiWorkbenchInvoiceInventory): WorkbenchInvoiceInventory {
-  return {
-    systemTotal: mapInventoryCount(inventory?.system_total),
-    manualImportTotal: mapInventoryCount(inventory?.manual_import_total),
-    workbenchVisibleTotal: mapInventoryCount(inventory?.workbench_visible_total),
-    hiddenSubmittedEtcTotal: mapInventoryCount(inventory?.hidden_submitted_etc_total),
-    extraEtcTotal: mapInventoryCount(inventory?.extra_etc_total),
-    etcSummaryBatchCount: mapInventoryCount(inventory?.etc_summary_batch_count),
-    oaAttachmentTotal: mapInventoryCount(inventory?.oa_attachment_total),
-  };
-}
-
 function mapProjectSetting(project: ApiWorkbenchSettings["projects"]["active"][number]): WorkbenchProjectSetting {
   return {
     id: project.id,
@@ -2778,7 +2750,6 @@ export async function fetchWorkbenchInitialPage(
     data: {
       month: payload.month,
       summary: mapSummaryCounts(payload.summary),
-      invoiceInventory: mapInvoiceInventory(payload.invoice_inventory),
       paired: {
         groups: pairedPayload.groups.map((group) => mapGroup(group, "paired")),
       },
@@ -2793,6 +2764,7 @@ export async function fetchWorkbenchInitialPage(
     statistics: payload.statistics ? {
       oaCount: toOptionalCount(payload.statistics.oa_count),
       bankTransactionCount: toOptionalCount(payload.statistics.bank_transaction_count),
+      invoiceTotalCount: toOptionalCount(payload.statistics.invoice_total_count),
       inputInvoiceCount: toOptionalCount(payload.statistics.input_invoice_count),
       outputInvoiceCount: toOptionalCount(payload.statistics.output_invoice_count),
       completedOaCount: toOptionalCount(payload.statistics.completed_oa_count),

@@ -639,7 +639,6 @@ describe("Workbench candidate grouping layout", () => {
         manual_import_invoice_count: 0,
         oa_parse_created_invoice_count: 0,
       },
-      invoice_inventory: {},
       paired: {
         groups: [
           {
@@ -2471,7 +2470,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(emptyCells).toHaveLength(2);
   });
 
-  test("shows backend invoice inventory diagnostics on the invoice pane title", async () => {
+  test("shows canonical invoice statistics on the invoice pane title", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
@@ -2479,18 +2478,20 @@ describe("Workbench candidate grouping layout", () => {
     const invoicePane = within(unpairedZone).getByTestId("pane-invoice");
     const groupRow = await screen.findByTestId("candidate-group-unpaired-row:oa-o-202603-002");
     const diagnostics = within(invoicePane).getByRole("button", {
-      name: "进销项发票库存统计：系统发票总数 9，人工导入总数 7，普通可见 4，已提交 ETC 隐藏 2，额外 ETC 1，ETC 折叠批次 3，OA附件解析发票 5",
+      name: "进销项发票统计：发票总数 6，进项发票 6，销项发票 0，人工导入 6，OA 解析新增入池 0",
     });
 
     expect(diagnostics).toHaveTextContent("进销项发票");
-    expect(within(invoicePane).getByText("系统发票总数")).toBeInTheDocument();
-    expect(within(invoicePane).getByText("人工导入总数")).toBeInTheDocument();
-    expect(within(invoicePane).getByText("普通可见")).toBeInTheDocument();
-    expect(within(invoicePane).getByText("已提交 ETC 隐藏")).toBeInTheDocument();
-    expect(within(invoicePane).getByText("额外 ETC")).toBeInTheDocument();
-    expect(within(invoicePane).getByText("ETC 折叠批次")).toBeInTheDocument();
-    expect(within(invoicePane).getByText("OA附件解析发票")).toBeInTheDocument();
-    expect(within(invoicePane).queryByText("已导入的发票数量")).not.toBeInTheDocument();
+    expect(within(invoicePane).getByText("发票总数")).toBeInTheDocument();
+    expect(within(invoicePane).getByText("进项发票")).toBeInTheDocument();
+    expect(within(invoicePane).getByText("销项发票")).toBeInTheDocument();
+    expect(within(invoicePane).getByText("人工导入")).toBeInTheDocument();
+    expect(within(invoicePane).getByText("OA 解析新增入池")).toBeInTheDocument();
+    expect(within(invoicePane).queryByText("普通可见")).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByText("已提交 ETC 隐藏")).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByText("额外 ETC")).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByText("ETC 折叠批次")).not.toBeInTheDocument();
+    expect(within(invoicePane).queryByText("OA附件解析发票")).not.toBeInTheDocument();
     expect(within(groupRow).queryByRole("button", { name: /附件统计/ })).not.toBeInTheDocument();
   });
 

@@ -423,6 +423,7 @@ export type WorkbenchSummary = {
 export type WorkbenchStatistics = {
   oaCount?: number;
   bankTransactionCount?: number;
+  invoiceTotalCount?: number;
   inputInvoiceCount?: number;
   outputInvoiceCount?: number;
   completedOaCount?: number;
@@ -495,16 +496,6 @@ export type WorkbenchZonePageInfo = {
   nextCursor: string | null;
 };
 
-export type WorkbenchInvoiceInventory = {
-  systemTotal: number;
-  manualImportTotal: number;
-  workbenchVisibleTotal: number;
-  hiddenSubmittedEtcTotal: number;
-  extraEtcTotal: number;
-  etcSummaryBatchCount: number;
-  oaAttachmentTotal: number;
-};
-
 export type WorkbenchOaSyncStatus = {
   status: string;
   message: string;
@@ -520,7 +511,6 @@ export type WorkbenchOaSyncStatus = {
 export type WorkbenchData = {
   month: string;
   summary: WorkbenchSummary;
-  invoiceInventory: WorkbenchInvoiceInventory;
   paired: {
     groups: WorkbenchRelationGroup[];
   };

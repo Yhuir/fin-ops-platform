@@ -123,7 +123,7 @@ requested tenant/scope
 
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
-| combined initial | 前端 | `month,scope_key,summary,statistics,invoice_inventory,paired,unpaired`；两区使用相同 zone page shape。`invoice_inventory.inventory_etc_summary_batch_count` 只统计 `oa_submitted/manually_marked_submitted/closed` 的 distinct ETC external batch，不把 draft/withdrawn 历史状态计成已提交批次。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
+| combined initial | 前端 | `month,scope_key,summary,statistics,paired,unpaired`；两区使用相同 zone page shape。`statistics` 的发票统计只输出统一发票事实总数、进项、销项、人工导入、OA 解析新增入池；`invoice_inventory` 及普通可见、已提交 ETC 隐藏、额外 ETC、ETC 折叠批次、宽泛 OA 附件来源等旧诊断合同已删除。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。异常 bucket 请求 additive 返回服务端选中 code 和按唯一关系计算的双视图/七分类 counts。 |
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；感叹号与原始系统分类 Chip 仍保留，审阅审计只在 Popover 展示为 `操作账户（姓名）` 与 Asia/Shanghai `YYYY-MM-DD HH:mm:ss`，不得显示内部 actor id 或原始 ISO offset。精确归属于组内 OA、但不是正式 relation member 的发票可作为 `source_owned_display` 展示；它不改变正式成员、状态或动作。 |

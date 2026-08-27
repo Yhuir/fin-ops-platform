@@ -835,6 +835,7 @@ describe("workbench api bank amount mapping", () => {
               statistics: {
                 oa_count: "800",
                 bank_transaction_count: 900,
+                invoice_total_count: 1300,
                 input_invoice_count: 700,
                 output_invoice_count: 600,
                 completed_oa_count: 780,
@@ -843,15 +844,6 @@ describe("workbench api bank amount mapping", () => {
                 income_transaction_count: 200,
                 manual_import_invoice_count: 650,
                 oa_parse_created_invoice_count: 50,
-              },
-              invoice_inventory: {
-                system_total: 9,
-                manual_import_total: 7,
-                workbench_visible_total: 4,
-                hidden_submitted_etc_total: 2,
-                extra_etc_total: 1,
-                etc_summary_batch_count: 3,
-                oa_attachment_total: 5,
               },
               paired: {
                 month: "all",
@@ -977,12 +969,12 @@ describe("workbench api bank amount mapping", () => {
       actionVariant: "detail-only",
       availableActions: ["detail"],
     });
-    expect(result.data.invoiceInventory.systemTotal).toBe(9);
-    expect(result.data.invoiceInventory.oaAttachmentTotal).toBe(5);
+    expect(result.data).not.toHaveProperty("invoiceInventory");
     expect(result.data).not.toHaveProperty("oaStatus");
     expect(result.statistics).toEqual(expect.objectContaining({
       oaCount: 800,
       bankTransactionCount: 900,
+      invoiceTotalCount: 1300,
       inputInvoiceCount: 700,
       outputInvoiceCount: 600,
       completedOaCount: 780,

@@ -2386,8 +2386,6 @@ class PostgresWorkbenchPageQueryRepository:
                         as expense_transaction_count,
                     bank_inventory.inventory_income_transaction_total
                         as income_transaction_count,
-                    0::bigint as input_invoice_count,
-                    0::bigint as output_invoice_count,
                     coalesce((
                         select zone_members.oa_count
                         from overall_zone_member_summary zone_members
@@ -2431,40 +2429,26 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             {self._initial_zone_ctes('paired', paired_plan)},
             {self._initial_zone_ctes('unpaired', unpaired_plan)},
-            invoice_inventory as materialized (
+            invoice_statistics as materialized (
                 select
-                    count(*)::bigint as inventory_system_total,
+                    count(*)::bigint as statistics_invoice_total,
                     count(*) filter (
                         where lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
                               ('input', 'input_invoice', 'in_invoice', 'purchase', 'purchase_invoice', 'payable')
                            or coalesce(invoice.invoice_type, '') like '%%进项%%'
-                    )::bigint as inventory_input_invoice_total,
+                    )::bigint as statistics_input_invoice_total,
                     count(*) filter (
                         where lower(replace(replace(coalesce(invoice.invoice_type, ''), '-', '_'), ' ', '_')) in
                               ('output', 'output_invoice', 'out_invoice', 'sales', 'sale', 'sales_invoice', 'receivable')
                            or coalesce(invoice.invoice_type, '') like '%%销项%%'
-                    )::bigint as inventory_output_invoice_total,
+                    )::bigint as statistics_output_invoice_total,
                     count(*) filter (
                         where invoice.has_manual_import
-                    )::bigint as inventory_manual_import_total,
+                    )::bigint as statistics_manual_import_total,
                     count(*) filter (
                         where invoice.has_direct_oa_attachment
                           and not invoice.has_manual_import
-                    )::bigint as inventory_oa_parse_created_total,
-                    count(*) filter (
-                        where coalesce(invoice.workbench_visibility, 'visible')
-                            <> 'hidden_after_etc_submission'
-                    )::bigint as inventory_workbench_visible_total,
-                    count(*) filter (
-                        where invoice.workbench_visibility = 'hidden_after_etc_submission'
-                    )::bigint as inventory_hidden_submitted_etc_total,
-                    count(*) filter (
-                        where nullif(invoice.etc_invoice_id, '') is not null
-                           or invoice.tags && array['ETC', 'etc', 'etc_invoice']::text[]
-                    )::bigint as inventory_extra_etc_total,
-                    count(*) filter (
-                        where invoice.has_direct_oa_attachment
-                    )::bigint as inventory_oa_attachment_total
+                    )::bigint as statistics_oa_parse_created_total
                 from canonical_invoice_facts invoice
                 cross join requested_scope scope
                 where scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month
@@ -2473,35 +2457,21 @@ class PostgresWorkbenchPageQueryRepository:
                 select
                     count(*) filter (
                         where coalesce(oa.workflow_status, '') <> 'in_progress'
-                    )::bigint as inventory_completed_oa_total,
+                    )::bigint as statistics_completed_oa_total,
                     count(*) filter (
                         where oa.workflow_status = 'in_progress'
-                    )::bigint as inventory_in_progress_oa_total
+                    )::bigint as statistics_in_progress_oa_total
                 from canonical_rows oa
                 join scoped_source_keys source
                   on source.row_type = 'oa'
                  and source.row_id = oa.row_id
                 where oa.pane = 'oa'
             ),
-            batch_inventory as materialized (
-                select count(distinct coalesce(
-                    nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
-                    nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
-                    nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
-                    nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
-                    batch.business_batch_id
-                ))::bigint as inventory_etc_summary_batch_count
-                from app.etc_business_batches batch
-                cross join requested_scope scope
-                where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-                  and (scope.scope_key = 'all' or batch.scope_month = scope.scope_month)
-            ),
             page_metadata as materialized (
                 select *
                 from overall_summary
-                cross join invoice_inventory
+                cross join invoice_statistics
                 cross join oa_inventory
-                cross join batch_inventory
             )
             select
                 'metadata'::text as record_zone,
@@ -2816,26 +2786,19 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as paired_exception_count,
                 null::bigint as expense_transaction_count,
                 null::bigint as income_transaction_count,
-                null::bigint as input_invoice_count,
-                null::bigint as output_invoice_count,
                 null::bigint as paired_oa_count,
                 null::bigint as paired_bank_count,
                 null::bigint as paired_invoice_count,
                 null::bigint as unpaired_oa_count,
                 null::bigint as unpaired_bank_count,
                 null::bigint as unpaired_invoice_count,
-                null::bigint as inventory_system_total,
-                null::bigint as inventory_input_invoice_total,
-                null::bigint as inventory_output_invoice_total,
-                null::bigint as inventory_manual_import_total,
-                null::bigint as inventory_oa_parse_created_total,
-                null::bigint as inventory_workbench_visible_total,
-                null::bigint as inventory_hidden_submitted_etc_total,
-                null::bigint as inventory_extra_etc_total,
-                null::bigint as inventory_oa_attachment_total,
-                null::bigint as inventory_completed_oa_total,
-                null::bigint as inventory_in_progress_oa_total,
-                null::bigint as inventory_etc_summary_batch_count
+                null::bigint as statistics_invoice_total,
+                null::bigint as statistics_input_invoice_total,
+                null::bigint as statistics_output_invoice_total,
+                null::bigint as statistics_manual_import_total,
+                null::bigint as statistics_oa_parse_created_total,
+                null::bigint as statistics_completed_oa_total,
+                null::bigint as statistics_in_progress_oa_total
             from {prefix}_exact_totals totals
             cross join {prefix}_exact_row_counts row_counts
             left join {prefix}_page_groups page on true
@@ -4585,21 +4548,24 @@ class PostgresWorkbenchPageQueryRepository:
             },
             "statistics": {
                 "oa_count": (
-                    int_value(metadata.get("inventory_completed_oa_total"), 0)
-                    + int_value(metadata.get("inventory_in_progress_oa_total"), 0)
+                    int_value(metadata.get("statistics_completed_oa_total"), 0)
+                    + int_value(metadata.get("statistics_in_progress_oa_total"), 0)
                 ),
                 "bank_transaction_count": bank_count,
+                "invoice_total_count": int_value(
+                    metadata.get("statistics_invoice_total"), 0
+                ),
                 "input_invoice_count": int_value(
-                    metadata.get("inventory_input_invoice_total"), 0
+                    metadata.get("statistics_input_invoice_total"), 0
                 ),
                 "output_invoice_count": int_value(
-                    metadata.get("inventory_output_invoice_total"), 0
+                    metadata.get("statistics_output_invoice_total"), 0
                 ),
                 "completed_oa_count": int_value(
-                    metadata.get("inventory_completed_oa_total"), 0
+                    metadata.get("statistics_completed_oa_total"), 0
                 ),
                 "in_progress_oa_count": int_value(
-                    metadata.get("inventory_in_progress_oa_total"), 0
+                    metadata.get("statistics_in_progress_oa_total"), 0
                 ),
                 "expense_transaction_count": int_value(
                     metadata.get("expense_transaction_count"), 0
@@ -4608,31 +4574,10 @@ class PostgresWorkbenchPageQueryRepository:
                     metadata.get("income_transaction_count"), 0
                 ),
                 "manual_import_invoice_count": int_value(
-                    metadata.get("inventory_manual_import_total"), 0
+                    metadata.get("statistics_manual_import_total"), 0
                 ),
                 "oa_parse_created_invoice_count": int_value(
-                    metadata.get("inventory_oa_parse_created_total"), 0
-                ),
-            },
-            "invoice_inventory": {
-                "system_total": int_value(metadata.get("inventory_system_total"), 0),
-                "manual_import_total": int_value(
-                    metadata.get("inventory_manual_import_total"), 0
-                ),
-                "workbench_visible_total": int_value(
-                    metadata.get("inventory_workbench_visible_total"), 0
-                ),
-                "hidden_submitted_etc_total": int_value(
-                    metadata.get("inventory_hidden_submitted_etc_total"), 0
-                ),
-                "extra_etc_total": int_value(
-                    metadata.get("inventory_extra_etc_total"), 0
-                ),
-                "etc_summary_batch_count": int_value(
-                    metadata.get("inventory_etc_summary_batch_count"), 0
-                ),
-                "oa_attachment_total": int_value(
-                    metadata.get("inventory_oa_attachment_total"), 0
+                    metadata.get("statistics_oa_parse_created_total"), 0
                 ),
             },
         }

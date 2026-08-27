@@ -387,13 +387,13 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
         "summary_invoice_count": 0,
         "summary_paired_count": 1,
         "summary_unpaired_count": 1,
-        "inventory_system_total": 2,
-        "inventory_input_invoice_total": 1158,
-        "inventory_output_invoice_total": 30,
-        "inventory_manual_import_total": 1139,
-        "inventory_oa_parse_created_total": 49,
-        "inventory_completed_oa_total": 415,
-        "inventory_in_progress_oa_total": 18,
+        "statistics_invoice_total": 1188,
+        "statistics_input_invoice_total": 1158,
+        "statistics_output_invoice_total": 30,
+        "statistics_manual_import_total": 1139,
+        "statistics_oa_parse_created_total": 49,
+        "statistics_completed_oa_total": 415,
+        "statistics_in_progress_oa_total": 18,
         "expense_transaction_count": 1043,
         "income_transaction_count": 159,
         "unpaired_exception_count": 0,
@@ -511,10 +511,10 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "unpaired_bank_count::bigint as bank_count" in sql
     assert "unpaired_invoice_count::bigint as invoice_count" in sql
     assert member_summary_sql.count("from scoped_source_keys source") == 1
-    assert "invoice_inventory" in sql
-    invoice_inventory_sql = sql.split(
-        "invoice_inventory as materialized (", 1
-    )[1].split("batch_inventory as materialized (", 1)[0]
+    assert "invoice_statistics as materialized" in sql
+    invoice_statistics_sql = sql.split(
+        "invoice_statistics as materialized (", 1
+    )[1].split("oa_inventory as materialized (", 1)[0]
     canonical_invoice_facts_sql = sql.split(
         "canonical_invoice_facts as materialized (", 1
     )[1].split("visible_invoice_facts as materialized (", 1)[0]
@@ -522,17 +522,23 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "source_flags.has_manual_import" in canonical_invoice_facts_sql
     assert "source_flags.has_direct_oa_attachment" in canonical_invoice_facts_sql
     assert sql.count("from app.invoices invoice") == 1
-    assert "from canonical_invoice_facts invoice" in invoice_inventory_sql
-    assert "jsonb_array_elements(" not in invoice_inventory_sql
-    assert "invoice.has_manual_import" in invoice_inventory_sql
-    assert "invoice.has_direct_oa_attachment" in invoice_inventory_sql
-    assert "inventory_input_invoice_total" in invoice_inventory_sql
-    assert "inventory_output_invoice_total" in invoice_inventory_sql
-    assert "inventory_oa_parse_created_total" in invoice_inventory_sql
+    assert "from canonical_invoice_facts invoice" in invoice_statistics_sql
+    assert "jsonb_array_elements(" not in invoice_statistics_sql
+    assert "invoice.has_manual_import" in invoice_statistics_sql
+    assert "invoice.has_direct_oa_attachment" in invoice_statistics_sql
+    assert "statistics_invoice_total" in invoice_statistics_sql
+    assert "statistics_input_invoice_total" in invoice_statistics_sql
+    assert "statistics_output_invoice_total" in invoice_statistics_sql
+    assert "statistics_oa_parse_created_total" in invoice_statistics_sql
+    assert "inventory_workbench_visible_total" not in sql
+    assert "inventory_hidden_submitted_etc_total" not in sql
+    assert "inventory_extra_etc_total" not in sql
+    assert "inventory_oa_attachment_total" not in sql
+    assert "batch_inventory as materialized" not in sql
     assert "oa_inventory as materialized" in sql
     oa_inventory_sql = sql.split(
         "oa_inventory as materialized (", 1
-    )[1].split("batch_inventory as materialized (", 1)[0]
+    )[1].split("page_metadata as materialized (", 1)[0]
     assert "from canonical_rows oa" in oa_inventory_sql
     assert "join scoped_source_keys source" in oa_inventory_sql
     assert "from app.oa_applications oa" not in oa_inventory_sql
@@ -548,6 +554,7 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert payload["statistics"] == {
         "oa_count": 433,
         "bank_transaction_count": 1,
+        "invoice_total_count": 1188,
         "input_invoice_count": 1158,
         "output_invoice_count": 30,
         "completed_oa_count": 415,
@@ -568,7 +575,7 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "join app.invoices" not in anomaly_etc_sql
     assert "join app.etc_invoices" not in anomaly_etc_sql
     assert payload["summary"]["paired_count"] == 1
-    assert payload["invoice_inventory"]["system_total"] == 2
+    assert "invoice_inventory" not in payload
     assert payload["paired"]["groups"][0]["detail_key"] == "case-1"
     assert payload["unpaired"]["groups"][0]["detail_key"] == "bank-1"
     page_rows = connection.rows[1:]
