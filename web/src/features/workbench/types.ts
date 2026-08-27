@@ -439,6 +439,7 @@ export type WorkbenchZoneCounts = {
   oa: number;
   bank: number;
   invoice: number;
+  canonicalInvoice: number;
   rows: number;
 };
 
@@ -490,7 +491,7 @@ export type WorkbenchZonePageInfo = {
   page: number;
   pageSize: number;
   total: number;
-  rowCounts: Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">;
+  rowCounts: Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "canonicalInvoice" | "rows">;
   hasMore: boolean;
   cursor: string | null;
   nextCursor: string | null;

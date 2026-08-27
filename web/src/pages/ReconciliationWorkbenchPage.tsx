@@ -131,7 +131,7 @@ function createInitialZonePageInfo(zone: "paired" | "unpaired"): WorkbenchZonePa
     page: 0,
     pageSize: WORKBENCH_GROUP_PAGE_SIZE,
     total: 0,
-    rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
+    rowCounts: { oa: 0, bank: 0, invoice: 0, canonicalInvoice: 0, rows: 0 },
     hasMore: false,
     cursor: null,
     nextCursor: null,
@@ -2358,7 +2358,7 @@ export default function ReconciliationWorkbenchPage() {
       return [
         { id: "oa", title: "OA", rows: paneRows.oa, totalRows: totals?.oa },
         { id: "bank", title: "银行流水", rows: paneRows.bank, totalRows: totals?.bank },
-        { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.invoice },
+        { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.canonicalInvoice },
       ];
     },
     [displayPairedGroups, workbenchData?.summary.zoneCounts.paired, zonePages.paired.rowCounts],
@@ -2373,7 +2373,7 @@ export default function ReconciliationWorkbenchPage() {
       return [
         { id: "oa", title: "OA", rows: paneRows.oa, totalRows: totals?.oa },
         { id: "bank", title: "银行流水", rows: paneRows.bank, totalRows: totals?.bank },
-        { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.invoice },
+        { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.canonicalInvoice },
       ];
     },
     [displayOpenGroups, workbenchData?.summary.zoneCounts.unpaired, zonePages.unpaired.rowCounts],

@@ -2,6 +2,13 @@
 
 日期：2026-08-27
 
+## 2026-08-27 paired / unpaired canonical 发票守恒统计
+
+- Business/repository：`tests/test_workbench_page_query_repository.py` 保护两区 SQL 同时返回展示 `invoice` 和业务 `canonical_invoice`，无筛选统计直接按唯一 canonical ID 分区；paired owner 优先，未拥有者进入 unpaired，禁止 summary 与真实成员重复计数。
+- PostgreSQL integration：`tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_direct_initial_and_groups_use_canonical_facts_without_read_model` 构造一个 summary 内含两张隐藏 canonical ETC 发票，断言展示发票数为 4、canonical 发票数为 5，并保护 paired + unpaired canonical 数等于统一发票池总数。
+- API/frontend：`web/src/test/WorkbenchApi.test.ts` 保护 `canonical_invoice -> canonicalInvoice` DTO 映射及两区求和；`RelationGroupGrid.test.tsx` 保护发票栏标题消费 canonical 数，ETC 展开/收起仍只改变展示行；`WorkbenchZone.test.tsx` 保护分页 I/O 新字段不改变 `rows` 语义。
+- 非适用：未修改数据库 schema、mutation、权限、read model、worker、queue、cache 或其它页面 API，因此不新增 migration、写事务/幂等、后台任务或跨页面数据修复测试。
+
 ## 2026-08-27 异常审阅人身份快照与 Popover 时间格式
 
 - Service/repository/API：`tests/test_workbench_anomaly_review_service.py` 保护异常审阅只接收后端认证的 actor id/account/name，账户缺失 fail closed；持久化同时保留内部 actor id 与用户可见账户/姓名快照，幂等重复请求返回原审核人的快照和原审阅时间，不被后来点击者覆盖。compact/full 两条 direct hydration 都只发布 `reviewed_by_account/reviewed_by_name/reviewed_at`，旧 `reviewed_by` 用户可见字段已删除。

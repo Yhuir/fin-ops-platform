@@ -231,6 +231,15 @@ type ApiWorkbenchAnomaly = {
   items?: ApiWorkbenchAnomalyItem[] | null;
 };
 
+type ApiWorkbenchZoneCounts = {
+  groups?: number | string | null;
+  oa?: number | string | null;
+  bank?: number | string | null;
+  invoice?: number | string | null;
+  canonical_invoice?: number | string | null;
+  rows?: number | string | null;
+};
+
 type ApiWorkbenchPayload = {
   month: string;
   summary: {
@@ -241,7 +250,7 @@ type ApiWorkbenchPayload = {
     unpaired_count: number;
     unpaired_exception_count: number;
     paired_exception_count?: number;
-    zone_counts?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>;
+    zone_counts?: Partial<Record<WorkbenchZoneId, ApiWorkbenchZoneCounts>>;
   };
   paired: {
     groups: ApiWorkbenchGroup[];
@@ -277,7 +286,7 @@ type ApiWorkbenchGroupsPayload = {
   page?: number;
   page_size: number;
   total: number;
-  row_counts?: Partial<Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">>;
+  row_counts?: ApiWorkbenchZoneCounts;
   has_more: boolean;
   next_cursor?: string | null;
   selected_exception_code?: string | null;
@@ -1735,12 +1744,12 @@ function mapRelationPreview(payload: ApiWorkbenchRelationPreview): WorkbenchRela
 
 function mapZoneCounts(
   summary: ApiWorkbenchPayload["summary"],
-  fallback?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>,
+  fallback?: Partial<Record<WorkbenchZoneId, ApiWorkbenchZoneCounts>>,
 ): Record<WorkbenchZoneId, WorkbenchZoneCounts> {
   const source = summary.zone_counts ?? fallback ?? {};
   const paired = source.paired ?? {};
   const unpaired = source.unpaired ?? {};
-  const mapOne = (value: Partial<WorkbenchZoneCounts>, groupFallback: number): WorkbenchZoneCounts => {
+  const mapOne = (value: ApiWorkbenchZoneCounts, groupFallback: number): WorkbenchZoneCounts => {
     const oa = toCount(value.oa);
     const bank = toCount(value.bank);
     const invoice = toCount(value.invoice);
@@ -1749,6 +1758,7 @@ function mapZoneCounts(
       oa,
       bank,
       invoice,
+      canonicalInvoice: toCount(value.canonical_invoice),
       rows: toCount(value.rows) || oa + bank + invoice,
     };
   };
@@ -1798,6 +1808,7 @@ function mapWorkbenchZonePage(
       oa: toCount(payload.row_counts?.oa),
       bank: toCount(payload.row_counts?.bank),
       invoice: toCount(payload.row_counts?.invoice),
+      canonicalInvoice: toCount(payload.row_counts?.canonical_invoice),
       rows: toCount(payload.row_counts?.rows)
         || toCount(payload.row_counts?.oa) + toCount(payload.row_counts?.bank) + toCount(payload.row_counts?.invoice),
     },

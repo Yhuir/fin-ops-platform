@@ -230,6 +230,7 @@ etc_summary_invoice_source_rows as materialized (
         batch.updated_at,
         coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text)
             as row_id,
+        nullif(invoice.etc_invoice_id, '') as etc_invoice_id,
         coalesce(
             nullif(invoice.invoice_no, ''),
             coalesce(invoice.legacy_mongo_id, invoice.etc_invoice_id, invoice.id::text)
@@ -253,6 +254,7 @@ etc_summary_invoice_source_rows as materialized (
         coalesce(batch.scope_month, invoice.invoice_month),
         greatest(link.updated_at, batch.updated_at, invoice.updated_at),
         coalesce(invoice.legacy_mongo_id, invoice.id::text),
+        nullif(coalesce(link.etc_invoice_id, invoice.etc_invoice_id), ''),
         coalesce(
             nullif(invoice.digital_invoice_no, ''),
             nullif(invoice.invoice_no, ''),
@@ -275,6 +277,7 @@ etc_summary_invoice_source_rows as materialized (
         coalesce(submission.scope_month, invoice.invoice_month),
         greatest(submission.updated_at, invoice.updated_at),
         coalesce(invoice.legacy_mongo_id, invoice.id::text),
+        nullif(invoice.etc_invoice_id, ''),
         coalesce(
             nullif(invoice.digital_invoice_no, ''),
             nullif(invoice.invoice_no, ''),
@@ -334,6 +337,26 @@ etc_summary_identity_conflicts as materialized (
 etc_summary_identity_guard as materialized (
     select 1 / case when count(*) = 0 then 1 else 0 end as guard
     from etc_summary_identity_conflicts
+),
+etc_summary_canonical_invoice_members as materialized (
+    select distinct
+        summary.row_id as summary_row_id,
+        invoice.row_id as canonical_invoice_row_id
+    from etc_summary_keys summary
+    join etc_summary_invoice_source_rows source
+      on source.external_batch_id = summary.external_batch_id
+    join canonical_invoice_facts invoice
+      on invoice.row_id = source.row_id
+    union
+    select distinct
+        summary.row_id,
+        invoice.row_id
+    from etc_summary_keys summary
+    join etc_summary_invoice_source_rows source
+      on source.external_batch_id = summary.external_batch_id
+     and source.etc_invoice_id is not null
+    join canonical_invoice_facts invoice
+      on invoice.etc_invoice_id = source.etc_invoice_id
 )
 """
 
@@ -2213,6 +2236,60 @@ effective_groups as materialized (
 """
 
 
+# A collapsed ETC summary remains one display row, but statistics must count
+# every canonical invoice represented by that row.  Resolve those members once
+# per snapshot, then assign each canonical invoice to exactly one zone.  A
+# canonical invoice represented by a paired group is paired; every other
+# canonical invoice in the requested scope is unpaired.
+_CANONICAL_INVOICE_GROUP_MEMBER_CTES = """
+canonical_invoice_group_member_candidates as materialized (
+    select distinct
+        groups.internal_key,
+        groups.zone,
+        invoice.row_id as canonical_invoice_row_id
+    from effective_groups groups
+    join canonical_group_members member
+      on member.internal_key = groups.internal_key
+     and member.row_type = 'invoice'
+    join canonical_invoice_facts invoice
+      on invoice.row_id = member.row_id
+    union
+    select distinct
+        groups.internal_key,
+        groups.zone,
+        summary_member.canonical_invoice_row_id
+    from effective_groups groups
+    join canonical_group_members member
+      on member.internal_key = groups.internal_key
+     and member.row_type = 'invoice'
+    join etc_summary_canonical_invoice_members summary_member
+      on summary_member.summary_row_id = member.row_id
+),
+scoped_canonical_invoice_zone_members as materialized (
+    select
+        invoice.row_id as canonical_invoice_row_id,
+        case when exists (
+            select 1
+            from canonical_invoice_group_member_candidates candidate
+            where candidate.canonical_invoice_row_id = invoice.row_id
+              and candidate.zone = 'paired'
+        ) then 'paired'::text else 'unpaired'::text end as zone
+    from canonical_invoice_facts invoice
+    cross join requested_scope scope
+    where scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month
+),
+canonical_invoice_group_members as materialized (
+    select distinct
+        candidate.internal_key,
+        candidate.canonical_invoice_row_id
+    from canonical_invoice_group_member_candidates candidate
+    join scoped_canonical_invoice_zone_members zone_member
+      on zone_member.canonical_invoice_row_id = candidate.canonical_invoice_row_id
+     and zone_member.zone = candidate.zone
+)
+"""
+
+
 class PostgresWorkbenchPageQueryRepository:
     """Direct Workbench page reads from canonical PostgreSQL facts."""
 
@@ -2315,6 +2392,7 @@ class PostgresWorkbenchPageQueryRepository:
             with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
             {_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
+            {_CANONICAL_INVOICE_GROUP_MEMBER_CTES},
             overall_group_summary as materialized (
                 select
                     count(*) filter (where groups.zone = 'paired')::bigint
@@ -2374,14 +2452,24 @@ class PostgresWorkbenchPageQueryRepository:
                     as member(row_id, row_type)
                 group by groups.zone
             ),
+            overall_canonical_invoice_zone_summary as materialized (
+                select
+                    count(*) filter (where member.zone = 'paired')::bigint
+                        as paired_canonical_invoice_count,
+                    count(*) filter (where member.zone = 'unpaired')::bigint
+                        as unpaired_canonical_invoice_count
+                from scoped_canonical_invoice_zone_members member
+            ),
             overall_member_summary as materialized (
                 select
                     count(*) filter (where source.row_type = 'oa')::bigint
                         as summary_oa_count,
                     count(*) filter (where source.row_type = 'bank')::bigint
                         as summary_bank_count,
-                    count(*) filter (where source.row_type = 'invoice')::bigint
-                        as summary_invoice_count,
+                    (
+                        canonical_invoice_inventory.paired_canonical_invoice_count
+                        + canonical_invoice_inventory.unpaired_canonical_invoice_count
+                    )::bigint as summary_invoice_count,
                     bank_inventory.inventory_expense_transaction_total
                         as expense_transaction_count,
                     bank_inventory.inventory_income_transaction_total
@@ -2415,12 +2503,17 @@ class PostgresWorkbenchPageQueryRepository:
                         select zone_members.invoice_count
                         from overall_zone_member_summary zone_members
                         where zone_members.zone = 'unpaired'
-                    ), 0)::bigint as unpaired_invoice_count
+                    ), 0)::bigint as unpaired_invoice_count,
+                    canonical_invoice_inventory.paired_canonical_invoice_count,
+                    canonical_invoice_inventory.unpaired_canonical_invoice_count
                 from scoped_source_keys source
                 cross join bank_inventory
+                cross join overall_canonical_invoice_zone_summary canonical_invoice_inventory
                 group by
                     bank_inventory.inventory_expense_transaction_total,
-                    bank_inventory.inventory_income_transaction_total
+                    bank_inventory.inventory_income_transaction_total,
+                    canonical_invoice_inventory.paired_canonical_invoice_count,
+                    canonical_invoice_inventory.unpaired_canonical_invoice_count
             ),
             overall_summary as materialized (
                 select *
@@ -2492,6 +2585,7 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as oa_count,
                 null::bigint as bank_count,
                 null::bigint as invoice_count,
+                null::bigint as canonical_invoice_count,
                 page_metadata.*
             from page_metadata
             union all
@@ -2699,7 +2793,8 @@ class PostgresWorkbenchPageQueryRepository:
                 select
                     {prefix}_oa_count::bigint as oa_count,
                     {prefix}_bank_count::bigint as bank_count,
-                    {prefix}_invoice_count::bigint as invoice_count
+                    {prefix}_invoice_count::bigint as invoice_count,
+                    {prefix}_canonical_invoice_count::bigint as canonical_invoice_count
                 from overall_member_summary
             """
         else:
@@ -2714,10 +2809,14 @@ class PostgresWorkbenchPageQueryRepository:
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'bank')::bigint as bank_count,
                     count(distinct (member.row_type, member.row_id))
-                        filter (where member.row_type = 'invoice')::bigint as invoice_count
+                        filter (where member.row_type = 'invoice')::bigint as invoice_count,
+                    count(distinct canonical_invoice.canonical_invoice_row_id)::bigint
+                        as canonical_invoice_count
                 from {prefix}_keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
+                left join canonical_invoice_group_members canonical_invoice
+                  on canonical_invoice.internal_key = groups.internal_key
             """
         filtered_groups_select_sql = (
             PostgresWorkbenchPageQueryRepository._filtered_groups_select_sql(
@@ -2773,6 +2872,7 @@ class PostgresWorkbenchPageQueryRepository:
                 row_counts.oa_count,
                 row_counts.bank_count,
                 row_counts.invoice_count,
+                row_counts.canonical_invoice_count,
                 null::bigint as summary_oa_count,
                 null::bigint as summary_bank_count,
                 null::bigint as summary_invoice_count,
@@ -2792,6 +2892,8 @@ class PostgresWorkbenchPageQueryRepository:
                 null::bigint as unpaired_oa_count,
                 null::bigint as unpaired_bank_count,
                 null::bigint as unpaired_invoice_count,
+                null::bigint as paired_canonical_invoice_count,
+                null::bigint as unpaired_canonical_invoice_count,
                 null::bigint as statistics_invoice_total,
                 null::bigint as statistics_input_invoice_total,
                 null::bigint as statistics_output_invoice_total,
@@ -2832,6 +2934,10 @@ class PostgresWorkbenchPageQueryRepository:
         oa_count = int_value(metadata.get("oa_count"), 0)
         bank_count = int_value(metadata.get("bank_count"), 0)
         invoice_count = int_value(metadata.get("invoice_count"), 0)
+        canonical_invoice_count = int_value(
+            metadata.get("canonical_invoice_count"),
+            0,
+        )
         return {
             "month": scope_key,
             "scope_key": scope_key,
@@ -2842,6 +2948,7 @@ class PostgresWorkbenchPageQueryRepository:
                 "oa": oa_count,
                 "bank": bank_count,
                 "invoice": invoice_count,
+                "canonical_invoice": canonical_invoice_count,
                 "rows": oa_count + bank_count + invoice_count,
             },
             "has_more": has_more,
@@ -2958,6 +3065,29 @@ class PostgresWorkbenchPageQueryRepository:
             direction=direction,
         )
         order_sql = self._group_order_sql(direction)
+        uses_unfiltered_zone_counts = not any(
+            (
+                normalized_status,
+                normalized_source_kind,
+                normalized_search,
+                normalized_columns,
+                normalized_times,
+                normalized_exception_bucket,
+            )
+        )
+        if uses_unfiltered_zone_counts:
+            canonical_invoice_count_sql = f"""
+                select count(*)::bigint
+                from scoped_canonical_invoice_zone_members member
+                where member.zone = '{normalized_zone}'
+            """
+        else:
+            canonical_invoice_count_sql = """
+                select count(distinct member.canonical_invoice_row_id)::bigint
+                from keyed_groups groups
+                join canonical_invoice_group_members member
+                  on member.internal_key = groups.internal_key
+            """
         filtered_group_cte_name = "filtered_groups"
         exception_query_cte_sql = ""
         exception_filter_ctes_sql = ""
@@ -3045,6 +3175,7 @@ class PostgresWorkbenchPageQueryRepository:
             {search_ctes}
             {_group_page_anomaly_state_ctes(exception_bucket=normalized_exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
+            {_CANONICAL_INVOICE_GROUP_MEMBER_CTES},
             {exception_query_cte_sql}
             {filtered_group_cte_name} as materialized (
                 {filtered_groups_select_sql}
@@ -3075,7 +3206,8 @@ class PostgresWorkbenchPageQueryRepository:
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'bank')::bigint as bank_count,
                     count(distinct (member.row_type, member.row_id))
-                        filter (where member.row_type = 'invoice')::bigint as invoice_count
+                        filter (where member.row_type = 'invoice')::bigint as invoice_count,
+                    ({canonical_invoice_count_sql})::bigint as canonical_invoice_count
                 from keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
@@ -3084,7 +3216,8 @@ class PostgresWorkbenchPageQueryRepository:
                    exact_totals.total_count,
                    exact_row_counts.oa_count,
                    exact_row_counts.bank_count,
-                   exact_row_counts.invoice_count
+                   exact_row_counts.invoice_count,
+                   exact_row_counts.canonical_invoice_count
                    {exception_select_sql}
             from exact_totals
             cross join exact_row_counts
@@ -3138,6 +3271,10 @@ class PostgresWorkbenchPageQueryRepository:
         oa_count = int_value(metadata.get("oa_count"), 0)
         bank_count = int_value(metadata.get("bank_count"), 0)
         invoice_count = int_value(metadata.get("invoice_count"), 0)
+        canonical_invoice_count = int_value(
+            metadata.get("canonical_invoice_count"),
+            0,
+        )
         exception_payload: dict[str, Any] = {}
         if normalized_exception_bucket is not None:
             exception_payload = {
@@ -3168,6 +3305,7 @@ class PostgresWorkbenchPageQueryRepository:
                 "oa": oa_count,
                 "bank": bank_count,
                 "invoice": invoice_count,
+                "canonical_invoice": canonical_invoice_count,
                 "rows": oa_count + bank_count + invoice_count,
             },
             "has_more": has_more,

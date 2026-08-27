@@ -15,6 +15,7 @@
 
 - 设统一事实源中可见 canonical facts 为 `C`，要求已满足的 active relation members 为 `R_complete`，要求未满足的 active relation members 为 `R_incomplete`，则 `paired = R_complete`、`unpaired = R_incomplete ∪ (C - active relation members)`。
 - `paired` 与 `unpaired` 不相交，二者并集必须精确等于 `C`；任何事实不得遗漏、重复显示或同时属于两个 active case。
+- 发票数量以统一发票池 canonical row ID 为唯一统计身份。ETC 批次即使折叠为一个 summary 展示对象，也必须按明确 canonical row id / `etc_invoice_id` 展开到批次内每张 canonical 发票后再计数；不得把 summary 当成一张发票，也不得按金额、名称或顺序推断成员。同一 canonical 发票若存在 paired owner 只计入 paired，否则只计入 unpaired，因此 `已配对 canonical 发票数 + 未配对 canonical 发票数 = 当前 scope 统一发票池 canonical 发票总数`。
 - 历史 `case_id`、row 上残留的 `case_id`、来源标签和旧 case 前缀都不能决定分组。含银行流水的普通关系只读取 canonical relation 当前持久化的 `requires_oa` / `requires_invoice`；缺失证明 fail closed，不得在读路径临时回查当前规则或按旧 case 前缀放行。规则保存后的增量任务必须先通过正式 relation command 更新 metadata/history，再刷新精确 Workbench 月份。
 - 普通 OA 付款关系必须包含银行流水才算完整；OA 与附件发票的 immutable binding 只表达不可拆分 ownership，缺银行时整组保留 active case 但位于 `unpaired`。显式 batch-accounting 与 ETC batch relation 继续按登记豁免处理。
 - 进行中 OA 可以与银行流水和发票写入同一正式关系，也可以扩展唯一已存在的银行-发票 active case；不得为进行中 OA 建立第二套 pending relation 或隐藏银行流水。关系满足全部材料要求后仍停留在 `unpaired`，直到所有 OA 完成；OA sync 将同一 OA 迁入 completed canonical projection 后，原 case 不变并在下一次 Workbench normal GET 进入 `paired`。多 OA 关系中任一 OA 进行中即阻断整组。
@@ -56,6 +57,7 @@
 - 日常报销仍以外层 OA 作为唯一 canonical relation member。其付款明细只作为该 OA 的嵌套展示事实，不得独立选择、配对或撤回；点击任一付款明细等价于选择父 OA。
 - 多付款明细日常报销在 OA 栏显示为一个复合行：申请人栏显示申请人、申请类型和日期；项目名称栏先显示“多个项目 · N”及父 OA 金额，再逐项显示真实项目名称；金额栏只显示逐项金额。不得显示按项目聚合金额，不得增加“付款明细”列，也不得在项目名称栏显示关系或附件解析状态 chip。
 - ETC `collapsed_summary` 在折叠态只显示服务端提供的 canonical 汇总行和真实发票总数，不显示任何真实发票成员；用户显式展开后只显示完整真实发票成员，收起恢复同一汇总行。汇总行缺失时显示明确空态，禁止拿首张发票、`rows[0]` 或详情子集兜底；搜索命中隐藏成员只保留该组，不自动展开或预取明细。
+- 两区发票栏标题显示 canonical 发票数，不显示 ETC summary 等展示对象数；展开/收起批次只改变展示行，不改变统计。区域搜索/筛选时该数字按命中的关系组所拥有的 canonical ID 去重计算，无筛选时两区数字必须满足统一发票池全量守恒式。
 - 单一日常报销父 OA 展开后，父 OA 级银行流水作为整单证据占满摘要与全部付款项高度；只有带明确费用子项 ownership 的发票进入对应付款项同行。该展示不改变正式 relation membership、选择身份或撤回边界。
 - OA 附件发票通过显式 `source_expense_item_ids[]` 与付款明细对齐；同一付款项的多张发票、同一发票的多个付款项以及更一般的多对多来源必须按“付款项—发票”连通分量进入同一展示带，每张发票只渲染一次。金额仅用于异常判断，不得把已明确归属但金额有差异的发票拆到残余行。没有任何明确付款项来源的 OA 发票进入独立“待归属”残余带，不得进入父 OA 的“日常报销汇总明细”行。项目名、顺序或 subset-sum 一律不得用来推断 ownership。该视觉同行不创建或修改正式关系。每个付款项的“申请事由”继续显示来源“费用内容”和“费用说明”。
 - 发票来源与发票归属是两个独立合同。`source_kinds[]` 保留同一 canonical 发票的全部来源证据，`source_kind` 继续作为单值结构兼容字段，不能覆盖复数来源；页面只显示一个主来源 Chip：存在 `oa_attachment_invoice` 时显示“OA附件”，否则存在 `manual_invoice_import` 时显示“人工导入”，不再显示“导入记录”。`oa_expense_item_invoice` 仍作为独立的“明细归属”Chip。只有 `source_expense_item_ids[]` 决定发票与 OA 子付款项同行；OA 附件来源必须能通过当前 OA 显式身份、owned item/attachment parent identity 或 active OA source alias 精确恢复到当前子付款项，否则保持待归属异常，禁止按金额或顺序猜测。OA 附件来源和显式明细归属必须在后续 Excel 导入中保留；未知来源不得默认伪装为“人工导入”。

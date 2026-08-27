@@ -208,8 +208,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 total_amount, raw_payload
             ) values
                 (
-                    'etc_202607_unlinked', 'oa_submitted', '2026-07-01', 1,
-                    88, '{"normalized_payload":{"external_etc_batch_id":"etc_202607_unlinked"}}'::jsonb
+                    'etc_202607_unlinked', 'oa_submitted', '2026-07-01', 2,
+                    99, '{"normalized_payload":{"external_etc_batch_id":"etc_202607_unlinked"}}'::jsonb
                 ),
                 (
                     'etc_202607_linked', 'oa_submitted', '2026-07-01', 1,
@@ -241,6 +241,11 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 (
                     'etc-invoice-direct-3', 'etc_202607_special', 'submitted',
                     'ETC-INV-SPECIAL', '2026-07-25', 'ETC特殊供应商', 30, 3, 33,
+                    '{}'::jsonb
+                ),
+                (
+                    'etc-invoice-direct-4', 'etc_202607_unlinked', 'submitted',
+                    'ETC-INV-DIRECT-SECOND', '2026-07-24', 'ETC供应商', 10, 1, 11,
                     '{}'::jsonb
                 )
             """
@@ -280,11 +285,37 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             insert into app.invoices(
                 legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
                 amount, signed_amount, total_with_tax, status, workbench_visibility,
-                source_links, raw_payload
-            ) values (
-                'same-text-id', 'input', 'INV-SAME', '2026-07-23', '2026-07-01',
-                10, 10, 10, 'active', 'visible', '[]'::jsonb, '{}'::jsonb
-            )
+                etc_invoice_id, source_links, raw_payload
+            ) values
+                (
+                    'same-text-id', 'input', 'INV-SAME', '2026-07-23', '2026-07-01',
+                    10, 10, 10, 'active', 'visible', null,
+                    '[]'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'canonical-etc-direct-1', 'input', 'ETC-INV-DIRECT',
+                    '2026-07-24', '2026-07-01', 88, 88, 88, 'active',
+                    'hidden_after_etc_submission', 'etc-invoice-direct-1',
+                    '[]'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'canonical-etc-direct-2', 'input', 'ETC-INV-LINKED',
+                    '2026-07-24', '2026-07-01', 44, 44, 44, 'active',
+                    'hidden_after_etc_submission', 'etc-invoice-direct-2',
+                    '[]'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'canonical-etc-direct-3', 'input', 'ETC-INV-SPECIAL',
+                    '2026-07-25', '2026-07-01', 33, 33, 33, 'active',
+                    'hidden_after_etc_submission', 'etc-invoice-direct-3',
+                    '[]'::jsonb, '{}'::jsonb
+                ),
+                (
+                    'canonical-etc-direct-4', 'input', 'ETC-INV-DIRECT-SECOND',
+                    '2026-07-24', '2026-07-01', 11, 11, 11, 'active',
+                    'hidden_after_etc_submission', 'etc-invoice-direct-4',
+                    '[]'::jsonb, '{}'::jsonb
+                )
             """
         )
         self.raw_connection.execute(
@@ -308,11 +339,19 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
 
         self.assertEqual(initial["summary"]["oa_count"], 1)
         self.assertEqual(initial["summary"]["bank_count"], 2)
-        self.assertEqual(initial["summary"]["invoice_count"], 4)
+        self.assertEqual(initial["summary"]["invoice_count"], 5)
         self.assertEqual(initial["summary"]["paired_count"], 0)
         self.assertEqual(initial["summary"]["unpaired_count"], 5)
         self.assertEqual(initial["paired"]["total"], 0)
         self.assertEqual(initial["unpaired"]["total"], 5)
+        self.assertEqual(initial["paired"]["row_counts"]["canonical_invoice"], 0)
+        self.assertEqual(initial["unpaired"]["row_counts"]["invoice"], 4)
+        self.assertEqual(initial["unpaired"]["row_counts"]["canonical_invoice"], 5)
+        self.assertEqual(
+            initial["paired"]["row_counts"]["canonical_invoice"]
+            + initial["unpaired"]["row_counts"]["canonical_invoice"],
+            initial["statistics"]["invoice_total_count"],
+        )
         initial_oa_rows = [
             row
             for zone in ("paired", "unpaired")
@@ -414,6 +453,14 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(page["total"], 1)
         self.assertEqual(page["groups"][0]["detail_key"], "CASE-DIRECT-1")
+
+        unpaired_page = self.repository.get_workbench_groups_page(
+            scope_key="2026-07",
+            zone="unpaired",
+            page_size=100,
+        )
+        self.assertEqual(unpaired_page["row_counts"]["invoice"], 4)
+        self.assertEqual(unpaired_page["row_counts"]["canonical_invoice"], 5)
 
     def test_unpaired_submitted_etc_summary_detail_hydrates_all_invoices(self) -> None:
         self.raw_connection.execute(

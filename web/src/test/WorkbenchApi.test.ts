@@ -828,8 +828,22 @@ describe("workbench api bank amount mapping", () => {
                 unpaired_exception_count: 0,
                 paired_exception_count: 3,
                 zone_counts: {
-                  paired: { groups: 1, oa: 0, bank: 7, invoice: 0, rows: 7 },
-                  unpaired: { groups: 1, oa: 3, bank: 0, invoice: 5, rows: 8 },
+                  paired: {
+                    groups: 1,
+                    oa: 0,
+                    bank: 7,
+                    invoice: 0,
+                    canonical_invoice: 410,
+                    rows: 7,
+                  },
+                  unpaired: {
+                    groups: 1,
+                    oa: 3,
+                    bank: 0,
+                    invoice: 5,
+                    canonical_invoice: 890,
+                    rows: 8,
+                  },
                 },
               },
               statistics: {
@@ -853,7 +867,13 @@ describe("workbench api bank amount mapping", () => {
                 total: 1,
                 has_more: false,
                 next_cursor: null,
-                row_counts: { oa: 0, bank: 7, invoice: 0, rows: 7 },
+                row_counts: {
+                  oa: 0,
+                  bank: 7,
+                  invoice: 0,
+                  canonical_invoice: 410,
+                  rows: 7,
+                },
                 groups: [
                   {
                     group_id: "case:paired",
@@ -874,7 +894,13 @@ describe("workbench api bank amount mapping", () => {
                 total: 1,
                 has_more: false,
                 next_cursor: null,
-                row_counts: { oa: 3, bank: 0, invoice: 5, rows: 8 },
+                row_counts: {
+                  oa: 3,
+                  bank: 0,
+                  invoice: 5,
+                  canonical_invoice: 890,
+                  rows: 8,
+                },
                 groups: [
                   {
                     group_id: "row:oa-unpaired",
@@ -962,7 +988,13 @@ describe("workbench api bank amount mapping", () => {
     expect(result.data.summary.pairedExceptionCount).toBe(3);
     expect(duplicateResult).toEqual(result);
     expect(result.data.summary.zoneCounts.paired.bank).toBe(7);
+    expect(result.data.summary.zoneCounts.paired.canonicalInvoice).toBe(410);
     expect(result.pages.paired.rowCounts.bank).toBe(7);
+    expect(result.pages.paired.rowCounts.canonicalInvoice).toBe(410);
+    expect(
+      result.pages.paired.rowCounts.canonicalInvoice
+        + result.pages.unpaired.rowCounts.canonicalInvoice,
+    ).toBe(result.statistics.invoiceTotalCount);
     expect(result.data.paired.groups[0].id).toBe("case:paired");
     expect(result.data.unpaired.groups[0].id).toBe("row:oa-unpaired");
     expect(result.data.unpaired.groups[0].rows.oa[0]).toMatchObject({

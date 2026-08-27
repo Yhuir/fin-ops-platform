@@ -130,6 +130,7 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
                 "oa_count": 1,
                 "bank_count": 5,
                 "invoice_count": 1,
+                "canonical_invoice_count": 3,
             },
             {
                 "internal_key": "row:bank:bank-1",
@@ -143,6 +144,7 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
                 "oa_count": 1,
                 "bank_count": 5,
                 "invoice_count": 1,
+                "canonical_invoice_count": 3,
             },
         ]
     )
@@ -168,7 +170,13 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
         "zone": "unpaired",
         "page_size": 1,
         "total": 7,
-        "row_counts": {"oa": 1, "bank": 5, "invoice": 1, "rows": 7},
+        "row_counts": {
+            "oa": 1,
+            "bank": 5,
+            "invoice": 1,
+            "canonical_invoice": 3,
+            "rows": 7,
+        },
         "has_more": True,
         "next_cursor": payload["next_cursor"],
         "groups": [{"group_id": "unpaired:bank:hash", "detail_key": "bank-2"}],
@@ -385,6 +393,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
         "summary_oa_count": 1,
         "summary_bank_count": 1,
         "summary_invoice_count": 0,
+        "paired_canonical_invoice_count": 0,
+        "unpaired_canonical_invoice_count": 0,
         "summary_paired_count": 1,
         "summary_unpaired_count": 1,
         "statistics_invoice_total": 1188,
@@ -421,6 +431,7 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
                 "oa_count": 1,
                 "bank_count": 0,
                 "invoice_count": 0,
+                "canonical_invoice_count": 0,
             },
             {
                 "record_zone": "unpaired",
@@ -437,6 +448,7 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
                 "oa_count": 0,
                 "bank_count": 1,
                 "invoice_count": 0,
+                "canonical_invoice_count": 0,
             },
         ]
     )
@@ -480,6 +492,9 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     )[1].split("bank_inventory as materialized (", 1)[0]
     zone_member_summary_sql = sql.split(
         "overall_zone_member_summary as materialized (", 1
+    )[1].split("overall_canonical_invoice_zone_summary as materialized (", 1)[0]
+    canonical_invoice_zone_summary_sql = sql.split(
+        "overall_canonical_invoice_zone_summary as materialized (", 1
     )[1].split("overall_member_summary as materialized (", 1)[0]
     member_summary_sql = sql.split(
         "overall_member_summary as materialized (", 1
@@ -489,6 +504,9 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "canonical_group_members" not in zone_member_summary_sql
     assert "unnest(groups.member_ids, groups.member_types)" in zone_member_summary_sql
     assert "group by groups.zone" in zone_member_summary_sql
+    assert "from scoped_canonical_invoice_zone_members member" in canonical_invoice_zone_summary_sql
+    assert "member.zone = 'paired'" in canonical_invoice_zone_summary_sql
+    assert "member.zone = 'unpaired'" in canonical_invoice_zone_summary_sql
     assert "from scoped_source_keys source" in member_summary_sql
     assert "count(distinct (member.row_type, member.row_id))" not in member_summary_sql
     assert "cross join bank_inventory" in member_summary_sql
@@ -510,6 +528,8 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "unpaired_oa_count::bigint as oa_count" in sql
     assert "unpaired_bank_count::bigint as bank_count" in sql
     assert "unpaired_invoice_count::bigint as invoice_count" in sql
+    assert "paired_canonical_invoice_count::bigint as canonical_invoice_count" in sql
+    assert "unpaired_canonical_invoice_count::bigint as canonical_invoice_count" in sql
     assert member_summary_sql.count("from scoped_source_keys source") == 1
     assert "invoice_statistics as materialized" in sql
     invoice_statistics_sql = sql.split(

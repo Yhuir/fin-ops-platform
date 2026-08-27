@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-08-25
+日期：2026-08-27
 
 ## 职责
 
@@ -47,7 +47,7 @@ ReconciliationWorkbenchPage
 | --- | --- | --- |
 | canonical OA | OA canonical repositories | 同一 tenant 下合并 completed OA 与 in-progress admission；输出稳定 typed identity、权威申请时间和 `workflow_status=completed|in_progress`。in-progress admission 的申请时间只从 source snapshot 的 `detail_fields.申请时间/申请日期`（兼容同义顶层字段）读取，并同时作为 OA 搜索、筛选和排序日期；不得回退到审批完成、创建、修改或更新时间。同一 OA 同时命中两源时 fail closed。费用子项仅用于展示和金额比较，不成为 relation member。 |
 | canonical bank | bank canonical repositories | 使用稳定 typed identity、权威金额/方向/账号/交易日期和既有有效分类结果；同一次批量分类投影同时携带非空的 canonical `turnover_role / turnover_action_type / turnover_family`，不新增查询。页面查询不重新实现分类规则。 |
-| canonical invoice / ETC | invoice / ETC canonical repositories | 只读取可见 canonical invoice、正式 OA attachment `source_links[]`、已提交 ETC business batch/link；同一发票在同一 OA 可携带多个子付款项来源边，direct DTO 去重发布 `source_expense_item_ids[]`，不得压回单值。DTO 另以稳定、去重的 `source_kinds[]` 发布完整来源证据，并保留单值 `source_kind` 兼容结构；前端主来源只显示“OA附件”或“人工导入”，`oa_expense_item_invoice` 另显示“明细归属”，来源标签不得参与正式 relation owner 计算。source-owned 展示分组只接受 normalize 前的 untouched `source_expense_item_id` 精确命中当前 OA item：显式 `oa_expense_item_invoice` 优先，否则才接受当前 `oa_attachment_invoice`；任一有效边缺 item、多 OA、多 owner 或已正式属于其它 relation 均 fail closed。历史 parent alias/`row_index` 只可继续服务异常/单元格对齐，绝不能创建或移动展示分组。ETC summary 把 canonical link 与 ETC business invoice 视为同一现代来源层：link 只覆盖相同发票身份，未桥接的 business 成员仍必须保留；只有完全没有现代来源时才回退 legacy submission。身份优先使用统一发票号命名空间，其次稳定 row id，禁止按“批次存在任意 link”淘汰其它成员或从 raw payload 猜 owner。 |
+| canonical invoice / ETC | invoice / ETC canonical repositories | 展示读取可见 canonical invoice、正式 OA attachment `source_links[]`、已提交 ETC business batch/link；统计读取请求 scope 内统一发票池的全部 canonical invoice。ETC summary 仍是一个展示对象，但统计必须通过 canonical row id 或明确 `etc_invoice_id` 展开到批次真实 canonical 成员，并按 canonical row id 去重；禁止按金额、名称或顺序猜测成员。同一发票在同一 OA 可携带多个子付款项来源边，direct DTO 去重发布 `source_expense_item_ids[]`，不得压回单值。DTO 另以稳定、去重的 `source_kinds[]` 发布完整来源证据，并保留单值 `source_kind` 兼容结构；前端主来源只显示“OA附件”或“人工导入”，`oa_expense_item_invoice` 另显示“明细归属”，来源标签不得参与正式 relation owner 计算。source-owned 展示分组只接受 normalize 前的 untouched `source_expense_item_id` 精确命中当前 OA item：显式 `oa_expense_item_invoice` 优先，否则才接受当前 `oa_attachment_invoice`；任一有效边缺 item、多 OA、多 owner 或已正式属于其它 relation 均 fail closed。历史 parent alias/`row_index` 只可继续服务异常/单元格对齐，绝不能创建或移动展示分组。ETC summary 把 canonical link 与 ETC business invoice 视为同一现代来源层：link 只覆盖相同发票身份，未桥接的 business 成员仍必须保留；只有完全没有现代来源时才回退 legacy submission。身份优先使用统一发票号命名空间，其次稳定 row id，禁止按“批次存在任意 link”淘汰其它成员或从 raw payload 猜 owner。 |
 | active formal relations | workbench-relations | 只接受 `status=active` 的正式关系。成员以 `(row_type,row_id)` 精确匹配；parallel `row_types/row_ids` 长度不一致、typed owner 重复或缺 canonical member 时 fail closed。 |
 | completion metadata | workbench-relations | 关系是否要求 OA/发票及 mode 豁免使用确认时持久化事实，不在 GET 中重跑当前规则。关系含 in-progress OA 时完整 case 保留在 `unpaired`。 |
 | anomaly decisions | workbench exception repository | 当前 canonical group 在三栏金额完整、方向明确时自动归为七种互斥金额分类，并保留 `absent / unparsed / unassigned` 附件状态；未知方向、冲突或缺栏不得猜测。relation 存在 OA expense item 时，每张无有效 item edge 的 relation invoice 生成且只生成一个 row-scoped `unassigned` item；没有 OA expense item 的关系不生成该异常。分页前的 SQL 状态只用三栏总额、成员/附件事实计算 review fingerprint 与分区，当前页 hydration 再以纯内存付款项—发票连通分量确定精确落点，禁止在全量 group spine 递归重算定位图。普通付款关系按净额比较，`turnover_manual_closure` 仅按 canonical mode 使用付款本金侧。只有唯一来源能证明具体明细时才输出行级定位，否则输出 group scope。异常审阅客户端只提交 group/bundle fingerprint 和决定；发票明细归属客户端提交目标 `unassigned` item fingerprint，二者不得混用。repository 持久化服务端推导的 evidence fingerprints、detected codes，以及已认证 actor id/account/name 快照与审阅时间；OA 账户缺失时 fail closed，禁止接收客户端 actor/人工分类或在页面读取时反查账户。 |
@@ -88,6 +88,7 @@ requested tenant/scope
 
 - `GET /api/workbench` 在一个短 `REPEATABLE READ READ ONLY` transaction 内返回 summary、statistics、invoice inventory 与 paired/unpaired 各 10 组首页。精确 total 不变，后续使用 opaque cursor 自动续读。
 - `statistics` 只返回 canonical OA/流水/进项/销项总数，以及已完成/进行中 OA、支出/收入流水、手工导入发票和 OA 解析新增发票数量；顶部进项/销项不得使用 ETC 折叠后的可见对象数。旧配对组、缺关系组和未配对对象统计字段已删除。
+- 两区 `row_counts` 同时返回 `invoice` 与 `canonical_invoice`：`invoice` 只表示分页和布局使用的展示对象数，`canonical_invoice` 表示该区去重后的统一发票池 canonical ID 数。无区域筛选时，若同一 canonical 发票存在 paired owner 则只计入 paired，否则只计入 unpaired；两区 `canonical_invoice` 必须互斥且合计等于 `statistics.invoice_total_count`。ETC 折叠、展开或重复勾选真实成员不得改变该统计。
 - 首屏 candidate spine 只构建一次；禁止依次执行 summary、paired count/page、unpaired count/page 六套重复 canonical CTE。
 - `GET /api/workbench/groups` 返回 `groups,total,row_counts,page_size,has_more,next_cursor`；异常 bucket 请求 additive 返回 `selected_exception_code` 与 `exception_counts={total,amount_total,document_only,by_code}`，`by_code` 固定包含七个 code（包括零值）。
 - compact summary group 保留组级 `amount_check`；每行不重复输出相同 `relation_amount_check`、对象身份仲裁字段、来源 identity aliases 或 detail-only metadata。折叠栏以现有 `summary_row` 作为唯一闭合态展示 I/O；ETC 发票栏首屏只返回 canonical `source_kind=etc_invoice_summary` 汇总行和真实成员总数，不返回第一张真实发票。用户展开时复用既有 group detail 一次加载全部 `source_kind=etc_invoice` 成员，展开态不混入汇总行，收起恢复同一汇总行；汇总行缺失时前端显示明确空态，禁止从 `rows` 或详情成员推断兜底。前端只把组级金额判断继承给可见行 chip，完整诊断仍由 detail I/O 提供。
@@ -124,7 +125,7 @@ requested tenant/scope
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
 | combined initial | 前端 | `month,scope_key,summary,statistics,paired,unpaired`；两区使用相同 zone page shape。`statistics` 的发票统计只输出统一发票事实总数、进项、销项、人工导入、OA 解析新增入池；`invoice_inventory` 及普通可见、已提交 ETC 隐藏、额外 ETC、ETC 折叠批次、宽泛 OA 附件来源等旧诊断合同已删除。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
-| zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；列表只含 compact summary DTO。异常 bucket 请求 additive 返回服务端选中 code 和按唯一关系计算的双视图/七分类 counts。 |
+| zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；`row_counts.invoice` 是展示对象数，`row_counts.canonical_invoice` 是按 canonical ID 去重的业务统计数，`row_counts.rows` 继续只服务展示分页。列表只含 compact summary DTO。异常 bucket 请求 additive 返回服务端选中 code 和按唯一关系计算的双视图/七分类 counts。 |
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；感叹号与原始系统分类 Chip 仍保留，审阅审计只在 Popover 展示为 `操作账户（姓名）` 与 Asia/Shanghai `YYYY-MM-DD HH:mm:ss`，不得显示内部 actor id 或原始 ISO offset。精确归属于组内 OA、但不是正式 relation member 的发票可作为 `source_owned_display` 展示；它不改变正式成员、状态或动作。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton、由精确当前 item owner 证明的 OA+发票 source-owned 展示组，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；正式关系本身不被删除或拆散，展示组也不伪装为正式配对。 |
