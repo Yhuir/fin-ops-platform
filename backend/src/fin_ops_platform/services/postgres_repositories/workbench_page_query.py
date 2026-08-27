@@ -2243,14 +2243,17 @@ effective_groups as materialized (
 _CANONICAL_INVOICE_GROUP_MEMBER_CTES = """
 paired_canonical_invoice_members as materialized (
     select distinct
-        invoice.row_id as canonical_invoice_row_id
+        member.row_id as canonical_invoice_row_id
     from effective_groups groups
     join canonical_group_members member
       on member.internal_key = groups.internal_key
      and member.row_type = 'invoice'
-    join canonical_invoice_facts invoice
-      on invoice.row_id = member.row_id
     where groups.zone = 'paired'
+      and not exists (
+          select 1
+          from etc_summary_keys summary
+          where summary.row_id = member.row_id
+      )
     union
     select distinct
         summary_member.canonical_invoice_row_id
@@ -2262,11 +2265,14 @@ paired_canonical_invoice_members as materialized (
       on summary_member.summary_row_id = member.row_id
     where groups.zone = 'paired'
 ),
-scoped_canonical_invoice_zone_members as materialized (
+scoped_canonical_invoice_inventory as materialized (
     select
-        invoice.row_id as canonical_invoice_row_id,
-        case when paired.canonical_invoice_row_id is not null
-            then 'paired'::text else 'unpaired'::text end as zone
+        count(*) filter (
+            where paired.canonical_invoice_row_id is not null
+        )::bigint as paired_canonical_invoice_count,
+        count(*) filter (
+            where paired.canonical_invoice_row_id is null
+        )::bigint as unpaired_canonical_invoice_count
     from canonical_invoice_facts invoice
     cross join requested_scope scope
     left join paired_canonical_invoice_members paired
@@ -2278,12 +2284,15 @@ scoped_canonical_invoice_zone_members as materialized (
 
 _CANONICAL_INVOICE_MEMBERS_FOR_KEYED_GROUPS_JOIN = """
 left join lateral (
-    select invoice.row_id as canonical_invoice_row_id
+    select member.row_id as canonical_invoice_row_id
     from canonical_group_members member
-    join canonical_invoice_facts invoice
-      on invoice.row_id = member.row_id
     where member.internal_key = groups.internal_key
       and member.row_type = 'invoice'
+      and not exists (
+          select 1
+          from etc_summary_keys summary
+          where summary.row_id = member.row_id
+      )
     union
     select summary_member.canonical_invoice_row_id
     from canonical_group_members member
@@ -2459,11 +2468,9 @@ class PostgresWorkbenchPageQueryRepository:
             ),
             overall_canonical_invoice_zone_summary as materialized (
                 select
-                    count(*) filter (where member.zone = 'paired')::bigint
-                        as paired_canonical_invoice_count,
-                    count(*) filter (where member.zone = 'unpaired')::bigint
-                        as unpaired_canonical_invoice_count
-                from scoped_canonical_invoice_zone_members member
+                    inventory.paired_canonical_invoice_count,
+                    inventory.unpaired_canonical_invoice_count
+                from scoped_canonical_invoice_inventory inventory
             ),
             overall_member_summary as materialized (
                 select
@@ -3081,9 +3088,8 @@ class PostgresWorkbenchPageQueryRepository:
         )
         if uses_unfiltered_zone_counts:
             canonical_invoice_count_sql = f"""
-                select count(*)::bigint
-                from scoped_canonical_invoice_zone_members member
-                where member.zone = '{normalized_zone}'
+                select inventory.{normalized_zone}_canonical_invoice_count
+                from scoped_canonical_invoice_inventory inventory
             """
             canonical_invoice_members_join_sql = ""
         else:

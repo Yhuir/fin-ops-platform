@@ -504,9 +504,9 @@ def test_initial_page_uses_one_shared_candidate_spine_and_one_combined_hydration
     assert "canonical_group_members" not in zone_member_summary_sql
     assert "unnest(groups.member_ids, groups.member_types)" in zone_member_summary_sql
     assert "group by groups.zone" in zone_member_summary_sql
-    assert "from scoped_canonical_invoice_zone_members member" in canonical_invoice_zone_summary_sql
-    assert "member.zone = 'paired'" in canonical_invoice_zone_summary_sql
-    assert "member.zone = 'unpaired'" in canonical_invoice_zone_summary_sql
+    assert "from scoped_canonical_invoice_inventory inventory" in canonical_invoice_zone_summary_sql
+    assert "inventory.paired_canonical_invoice_count" in canonical_invoice_zone_summary_sql
+    assert "inventory.unpaired_canonical_invoice_count" in canonical_invoice_zone_summary_sql
     assert "from scoped_source_keys source" in member_summary_sql
     assert "count(distinct (member.row_type, member.row_id))" not in member_summary_sql
     assert "cross join bank_inventory" in member_summary_sql
