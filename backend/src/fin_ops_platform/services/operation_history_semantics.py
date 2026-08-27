@@ -141,9 +141,6 @@ _EXACT_ROUTES = {
     ("POST", "/api/input-invoice-usage/oa-reverse/oa-draft"): _semantic(
         "input_invoice.oa_draft.create", "创建 OA 草稿", "oa_draft", "OA 草稿", "为反提批次创建 OA 草稿。"
     ),
-    ("POST", "/api/oa-pending-payments/writeback-paid"): _semantic(
-        "oa_pending.writeback_paid", "确认已支付", "oa_payment", "OA 付款项", "将所选 OA 付款项写回为已支付。"
-    ),
     ("POST", "/api/oa-pending-payments/link-bank-transactions"): _semantic(
         "oa_pending.link_bank", "关联支出流水", "oa_bank_relation", "OA 与流水关联", "将 OA 付款项与所选支出流水关联。"
     ),

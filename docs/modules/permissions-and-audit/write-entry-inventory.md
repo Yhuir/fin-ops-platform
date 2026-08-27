@@ -128,12 +128,12 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `appHealth/api.ts` | `app-health-operations` | 管理员从导入历史撤回可证明为单批次独占创建的银行流水。 |
 | `bankDetails/api.ts` | `bank-details` | 银行明细分类、自动标签、关系入口等写入口。 |
 | `batchAccounting/api.ts` | `batch-accounting` | 批量账务标签规则保存、提交和撤回。 |
-| `cost-statistics/api.ts` | `cost-statistics` | 两套独立规则 PUT：按标签/按时间标签选择，以及无 OA 虚拟项目分配；导出仍为只读能力。 |
+| `cost-statistics/api.ts` | `cost-statistics` | 两套独立规则 PUT 与配对金额人工分配写入；导出仍为只读能力。 |
 | `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口。 |
 | `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 通用导入 preview/confirm/template 写链路。 |
 | `inputInvoiceUsage/api.ts` | `input-invoice-usage` | 支付规则、OA reverse 草稿/批次/状态写入口。 |
 | `bankFlowRuleBatches/api.ts` | `bank-flow-rule-batches` | 流水规则批量处理标签规则、提交、撤回和内部往来迁移底座写入口。 |
-| `oaPendingPayments/api.ts` | `oa-pending-payments` | OA 待付款确认写回和关联支出流水。 |
+| `oaPendingPayments/api.ts` | `oa-pending-payments` | 关联支出流水；支付状态由 relation event 自动同步，无人工写回 API。 |
 | `pendingInvoices/api.ts` | `pending-invoices` | 待找发票规则、选择发票和收入状态写入口。 |
 | `tax/api.ts` | `tax-offset` | 税金计划保存和已认证发票导入。 |
 | `turnoverLedger/api.ts` | `turnover-ledger` | 外部往来标签、闭环、撤回和 extra 写入口。 |
@@ -201,7 +201,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `turnover-ledger` | 标签准入保存、确认闭环、撤回闭环、extra 保存/confirm/withdraw、导出 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖标签抽屉保存 disabled、flow checkbox disabled、extra 编辑入口 disabled、确认闭环 disabled 且零 mutation；extra 抽屉内部保存/confirm/withdraw 因只读角色无法进入写入口，组件/API 覆盖内部按钮和 guard；`web/e2e/turnover-ledger-flow.spec.ts` 覆盖 full_access 主链路 | 新增 turnover 写入口或把 extra 改成只读可打开时，必须补对应 Browser 断言。 |
 | `input-invoice-usage` | 支付规则保存、OA reverse 草稿创建 | `covered-browser` | `web/e2e/input-invoice-usage-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开支付状态规则抽屉和以发票反提 OA 工作流，断言规则只读、OA reverse preview 不可创建草稿、durable write endpoints 零调用并复跑 DOM 写控件候选扫描 | 新增 payment/OA 写入口时补。 |
 | `output-invoice-collections` | 无业务写入口；仅 canonical 查询、详情和导出 | `covered-browser` | `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、API tests；`web/e2e/permissions-role-matrix.spec.ts` 通过 `output-invoice-collections:canonical-read-only` 证明三种角色均无旧状态/提醒/人工红蓝票/收据写入口且 durable mutation 为 0。 | 若新增写入口，必须先恢复权限、API、审计和回滚合同；当前保持只读。 |
-| `oa-pending-payments` | 进行中 OA confirm-paid、link-bank、支出流水无需开票规则保存 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下 confirm-paid 隐藏、link-bank disabled、OA 选择隐藏、支出流水无需开票规则 drawer 只读且保存禁用，并保持零 mutation；`web/e2e/oa-pending-payments-*` 覆盖 full_access 主链路 | 新增 OA command 时补。 |
+| `oa-pending-payments` | link-bank、支出流水无需开票规则保存；支付状态由 relation event 自动同步、无页面写入口 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下 link-bank disabled、OA 选择隐藏、规则 drawer 只读且保存禁用，并保持零 mutation；页面/API tests 锁定人工 writeback/confirm 入口不存在 | 新增 OA command 时补。 |
 | `cost-statistics` | 标签准入规则保存、导出 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 在 read-export 下打开标签规则抽屉，断言 `保存` disabled 且 tag-rules PUT 零调用；`web/src/test/CostStatisticsPage.test.tsx` 覆盖 writable canonical save→query-time reload 且零 barrier；`web/e2e/cost-statistics-flow.spec.ts` 覆盖 read-export download | 真实 XLSX、代理 header 和生产 rule write audit 归 staging。 |
 | `etc-tickets` | OA 草稿、人工提交、delete/reset、source file/upload/import/manual reconciliation | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下提交 OA、新建批次、删除按钮、source file 上传、确认对账和人工核对动作禁用且零 mutation；`web/e2e/etc-tickets-flow.spec.ts` 覆盖 full_access OA 草稿和人工提交主链路；组件/API tests 覆盖 source file/upload/manual reconciliation guard | 新增 ETC 写入口时补同类 Browser 断言。 |
 | `settings` | 保存设置、访问账户、OA 凭据、数据重置 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 保存禁用、full-access 普通 settings 保存 POST/200 且 direct ACL 攻击被 generic 400/dedicated 403 拒绝、admin 通过独立 versioned access-control PUT 保存账户；普通 settings payload 无 ACL。OA 凭据与数据重置继续覆盖 admin-only 和 secret 不泄漏；`web/e2e/settings-data-reset-flow.spec.ts` 覆盖 admin data reset 主链路 | 真实 admin/OA 凭据登录有效性由 production evidence 验证。 |
@@ -210,7 +210,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 ## 本轮发现并修复的前端 gate
 
-- `oa-pending-payments`：进行中 OA 的 confirm-paid 和 link-bank 前端未消费 session mutation 权限；已改为 `read_export_only` 下隐藏确认写回、禁用关联支出流水并隐藏 OA 选择。
+- `oa-pending-payments`：人工 confirm/writeback 已退役；`read_export_only` 下继续禁用关联支出流水并隐藏 OA 选择。
 - `batch-accounting`：submit/withdraw 前端未消费 session mutation 权限；已改为 `read_export_only` 下 submit/withdraw disabled，并显示只读提示。
 - `turnover-ledger`：标签准入抽屉保存、全选/清空和 flow 选择未完全禁用；已改为 `read_export_only` 下禁用并显示只读提示。
 

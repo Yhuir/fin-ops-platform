@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-08-27 - 正式关系驱动支付状态自动同步
+
+- 人工 `writeback-paid` / `confirm-paid` API、前端按钮、page command direct MySQL write 和对应 Browser spec 已删除；`link-bank-transactions` 只创建/扩展正式关系并返回 `paymentStatusSync=queued`。
+- Workbench relation repository 在 OA+bank topology 创建、扩展、撤回和恢复事务中登记 `oa.payment_status.reconcile`；复用现有 `oa-sync` worker，不新增 worker、fallback 或第二套关系链。
+- 最新 active relation 只要含 canonical outflow 就写 paid，金额不等仅保留异常；撤回只恢复 App-owned paid，pre-existing paid 不回退，inflow-only 不支付，failed/missing flow id 明确失败，同 flow 去重且 completed 优先。
+- Migration `0158` 只新增 ownership state 并为历史 active OA+outflow 关系登记事件，不直接修改外部支付表，不需要数据库备份。
+- 后续旧记录中的人工写回、金额相等 gate 和 confirm-paid spec 只描述当时历史实现，均由本条当前合同取代，不得恢复到运行时。
+
 ## 2026-08-19 - OA 事实源 XLSX 导出
 
 - 页面右上角新增“导出 OA”，复用共享 `AppDrawer`；默认全选已完成/进行中 OA，可部分选择，至少选择一种后下载。

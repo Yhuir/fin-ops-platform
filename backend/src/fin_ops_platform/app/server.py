@@ -5561,8 +5561,6 @@ class Application:
             import_service=self._import_service,
             oa_projection=self._oa_pending_payment_command_oa_projection(),
             relation_command_service=self._workbench_relation_command_service(repository=getattr(self, "_state_store", None)),
-            payment_status_repository=self._oa_payment_status_repository(),
-            payment_status_snapshot_writer=self._oa_pending_payment_source_snapshot_repository(),
             bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
             bank_flow_rule_tag_rules_payload=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
         )

@@ -201,19 +201,6 @@ export type OaPendingPaymentQuery = {
   viewMode: OaPendingPaymentViewMode;
 };
 
-export type WritebackOaPendingPaymentPaidRequest = {
-  oaRowIds: string[];
-};
-
-export type WritebackOaPendingPaymentPaidResponse = {
-  success: boolean;
-  action?: string;
-  writebackCount?: number;
-  oaRowIds?: string[];
-  oaPaymentWriteback?: OaPendingPaymentWritebackStatus | null;
-  oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
-};
-
 export type OaPendingPaymentBankCandidateRelationStatus = "all" | "unmatched" | "matched" | "linked_in_progress";
 
 export type OaPendingPaymentBankCandidate = {
@@ -257,15 +244,10 @@ export type LinkOaPendingPaymentBankTransactionsResponse = {
   oaRowIds?: string[];
   bankTransactionIds?: string[];
   relation?: Record<string, unknown>;
-  autoWriteback?: {
-    code?: string;
+  paymentStatusSync?: {
+    code?: "queued" | string;
     label?: string;
-    reason?: string;
-    matched?: boolean;
-    writebackCount?: number;
   };
-  oaPaymentWriteback?: OaPendingPaymentWritebackStatus | null;
-  oaPaymentWritebacks?: OaPendingPaymentWritebackStatus[];
 };
 
 export type OaPendingPaymentDetailTarget = {

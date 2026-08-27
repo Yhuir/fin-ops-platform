@@ -413,8 +413,9 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
-        result = repository.record_paid_statuses(
-            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
+        result = repository.record_payment_statuses(
+            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
+            pay_statuses_by_flow_id={"flow-1": 1},
         )
 
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
@@ -441,8 +442,9 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
-        result = repository.record_paid_statuses(
-            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
+        result = repository.record_payment_statuses(
+            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
+            pay_statuses_by_flow_id={"flow-1": 1},
         )
 
         self.assertEqual(result.oa_pending_payment_changed_scopes, ())
@@ -466,8 +468,9 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
         )
 
-        result = repository.record_paid_statuses(
-            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
+        result = repository.record_payment_statuses(
+            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
+            pay_statuses_by_flow_id={"flow-1": 1},
         )
 
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
@@ -492,8 +495,9 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "not initialized for scopes: 2026-06"):
-            repository.record_paid_statuses(
-                records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
+            repository.record_payment_statuses(
+                records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
+                pay_statuses_by_flow_id={"flow-1": 1},
             )
 
         self.assertEqual(connection.transaction_handle.executions, [])

@@ -169,6 +169,7 @@ EXPECTED_MIGRATIONS = [
     "0155_revalidate_etc_summary_anomaly_review.sql",
     "0156_backfill_workbench_anomaly_reviewer_identity.sql",
     "0157_cost_statistics_manual_allocations.sql",
+    "0158_oa_payment_status_auto_reconcile.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -329,7 +330,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 158)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 159)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -451,6 +452,22 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         )
         self.assertNotIn("grant delete", normalized_sql)
         self.assertNotIn("delete from", normalized_sql)
+
+    def test_oa_payment_status_auto_reconcile_backfill_is_bounded_and_event_only(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0158_oa_payment_status_auto_reconcile.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("create table if not exists app.oa_payment_status_writeback_states", normalized_sql)
+        self.assertIn("where relation.status = 'active'", normalized_sql)
+        self.assertIn("bank.txn_direction = 'outflow'", normalized_sql)
+        self.assertIn("insert into job.outbox_events", normalized_sql)
+        self.assertIn("'oa.payment_status.reconcile'", normalized_sql)
+        self.assertIn("on conflict (tenant_id, dedupe_key)", normalized_sql)
+        self.assertIn("do nothing", normalized_sql)
+        self.assertNotIn("delete from", normalized_sql)
+        self.assertNotIn("update app.oa_", normalized_sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
         sql = (
@@ -1723,6 +1740,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         checked_sql = checked_sql.replace(
             anomaly_reviewer_identity_sql,
             "approved_anomaly_reviewer_identity_backfill;",
+        )
+        oa_payment_status_reconcile_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0158_oa_payment_status_auto_reconcile.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(oa_payment_status_reconcile_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            oa_payment_status_reconcile_sql,
+            "approved_oa_payment_status_reconcile_backfill;",
         )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",

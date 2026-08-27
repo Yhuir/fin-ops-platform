@@ -47,7 +47,13 @@ class FakeConnection:
         normalized = " ".join(sql.lower().split())
         if "from job.runtime_worker_heartbeats" in normalized:
             return [
-                _worker("host-oa", "oa-sync", "oa-sync", ["oa.sync"], lag=1.0),
+                _worker(
+                    "host-oa",
+                    "oa-sync",
+                    "oa-sync",
+                    ["oa.sync", "oa.payment_status.reconcile"],
+                    lag=1.0,
+                ),
                 _worker("host-match", "workbench-matching", "workbench-matching", [], lag=2.0),
                 _worker("host-import", "import", "import-job", ["import.process.requested"], lag=3.0),
                 _worker(

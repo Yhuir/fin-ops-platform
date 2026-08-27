@@ -6,8 +6,6 @@ import type {
   OaPendingPaymentQuery,
   OaPendingPaymentRowsResponse,
   OaPendingPaymentSortDirection,
-  WritebackOaPendingPaymentPaidRequest,
-  WritebackOaPendingPaymentPaidResponse,
   LinkOaPendingPaymentBankTransactionsRequest,
   LinkOaPendingPaymentBankTransactionsResponse,
   OaPendingPaymentBankCandidateRelationStatus,
@@ -113,21 +111,6 @@ export async function fetchOaPendingPaymentDetail(
   params.set("kind", kind);
   return apiRequestJson<OaPendingPaymentDetailResponse>(
     `/api/oa-pending-payments/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`,
-  );
-}
-
-export async function writebackOaPendingPaymentPaid(
-  request: WritebackOaPendingPaymentPaidRequest,
-): Promise<WritebackOaPendingPaymentPaidResponse> {
-  return apiRequestJson<WritebackOaPendingPaymentPaidResponse>(
-    "/api/oa-pending-payments/writeback-paid",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        oa_row_ids: request.oaRowIds,
-      }),
-    },
   );
 }
 

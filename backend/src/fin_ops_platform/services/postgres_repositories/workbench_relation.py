@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha1
 from typing import Any, Callable
 
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -14,6 +15,10 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
 )
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_workbench_pair_relations
+from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_RECONCILE_EVENT,
+)
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
@@ -627,9 +632,22 @@ class PostgresWorkbenchRelationRepository:
         def write(connection: Any) -> None:
             relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
             changed_ids = {str(item) for item in changed_case_ids} if changed_case_ids is not None else None
-            for case_id, payload in iter_mapping(relations):
-                if changed_ids is not None and case_id not in changed_ids:
-                    continue
+            selected_relations = [
+                (case_id, payload)
+                for case_id, payload in iter_mapping(relations)
+                if changed_ids is None or case_id in changed_ids
+            ]
+            reconcile_candidates = [
+                (case_id, payload, event_payload)
+                for case_id, payload in selected_relations
+                if (event_payload := _oa_payment_reconcile_payload(case_id, payload)) is not None
+            ]
+            existing_reconcile_signatures = _existing_reconcile_signatures(
+                connection,
+                [case_id for case_id, _payload, _event_payload in reconcile_candidates],
+            )
+            reconcile_events: list[tuple[str, dict[str, Any]]] = []
+            for case_id, payload in selected_relations:
                 connection.execute(
                     """
                     insert into app.workbench_pair_relations(
@@ -678,12 +696,43 @@ class PostgresWorkbenchRelationRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
+                event_payload = _oa_payment_reconcile_payload(case_id, payload)
+                if (
+                    event_payload is not None
+                    and existing_reconcile_signatures.get(case_id)
+                    != _reconcile_signature(payload)
+                ):
+                    reconcile_events.append((case_id, event_payload))
             history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
             self._append_workbench_pair_relation_history(
                 connection,
                 history,
                 changed_case_ids=changed_ids,
             )
+            queue = RuntimeQueueRepository(connection)
+            for case_id, event_payload in reconcile_events:
+                fingerprint = sha1(
+                    "|".join(
+                        [
+                            case_id,
+                            str(event_payload["relation_status"]),
+                            str(event_payload["relation_version"]),
+                            *event_payload["oa_row_ids"],
+                        ]
+                    ).encode("utf-8")
+                ).hexdigest()
+                queue.enqueue_in_transaction(
+                    transaction=connection,
+                    event_type=OA_PAYMENT_STATUS_RECONCILE_EVENT,
+                    aggregate_type="workbench_relation",
+                    aggregate_id=case_id,
+                    scope_type="oa_payment_status",
+                    scope_key=case_id,
+                    dedupe_key=f"{OA_PAYMENT_STATUS_RECONCILE_EVENT}:{fingerprint}",
+                    payload=event_payload,
+                    source_version=event_payload["relation_version"],
+                    priority="high",
+                )
 
         run_in_transaction(self._connection, write)
 
@@ -776,3 +825,63 @@ class PostgresWorkbenchRelationRepository:
                     if isinstance(relation, dict) and (normalized := text(relation.get("case_id"))):
                         case_ids.append(normalized)
         return sorted(set(case_ids))
+
+
+def _oa_payment_reconcile_payload(case_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    row_ids = text_list(payload.get("row_ids"))
+    row_types = text_list(payload.get("row_types"))
+    if len(row_ids) != len(row_types):
+        return None
+    oa_row_ids = [
+        row_id
+        for row_id, row_type in zip(row_ids, row_types, strict=True)
+        if row_type in {"oa", "oa_application"}
+    ]
+    has_bank = any(row_type in {"bank", "bank_transaction"} for row_type in row_types)
+    if not oa_row_ids or not has_bank:
+        return None
+    return {
+        "oa_row_ids": oa_row_ids,
+        "relation_case_id": case_id,
+        "relation_status": text(payload.get("status")) or "active",
+        "relation_version": int_value(payload.get("version"), 1),
+        "reason": "workbench_relation_changed",
+    }
+
+
+def _existing_reconcile_signatures(
+    connection: Any,
+    case_ids: list[str],
+) -> dict[str, tuple[str, int, tuple[str, ...], tuple[str, ...]]]:
+    normalized_case_ids = text_list(case_ids)
+    if not normalized_case_ids:
+        return {}
+    rows = connection.fetch_all(
+        """
+        select case_id, status, version, row_ids, row_types
+        from app.workbench_pair_relations
+        where case_id = any(%s::text[])
+        """,
+        (normalized_case_ids,),
+    )
+    return {
+        case_id: (
+            text(row.get("status")) or "active",
+            int_value(row.get("version"), 1),
+            tuple(text_list(row.get("row_ids"))),
+            tuple(text_list(row.get("row_types"))),
+        )
+        for row in rows
+        if (case_id := text(row.get("case_id")))
+    }
+
+
+def _reconcile_signature(
+    payload: dict[str, Any],
+) -> tuple[str, int, tuple[str, ...], tuple[str, ...]]:
+    return (
+        text(payload.get("status")) or "active",
+        int_value(payload.get("version"), 1),
+        tuple(text_list(payload.get("row_ids"))),
+        tuple(text_list(payload.get("row_types"))),
+    )

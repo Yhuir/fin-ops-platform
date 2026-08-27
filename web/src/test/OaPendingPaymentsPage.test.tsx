@@ -490,8 +490,6 @@ function installOaPendingPaymentsFetch(overrides?: {
   }>;
   detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
   rulesCanSave?: boolean;
-  writebackPaidPayload?: Record<string, unknown>;
-  writebackPaidResponses?: Array<{ status: number; payload: Record<string, unknown> }>;
   bankCandidatesPayload?: (url: URL) => Record<string, unknown>;
   bankCandidatesDelay?: Promise<void>;
   bankCandidatesResponses?: Array<{
@@ -507,7 +505,6 @@ function installOaPendingPaymentsFetch(overrides?: {
     delay?: Promise<void>;
   }>;
 }) {
-  const writebackPaidResponses = [...(overrides?.writebackPaidResponses ?? [])];
   const rowsResponses = [...(overrides?.rowsResponses ?? [])];
   const bankCandidatesResponses = [...(overrides?.bankCandidatesResponses ?? [])];
   const exportResponses = [...(overrides?.exportResponses ?? [])];
@@ -541,20 +538,6 @@ function installOaPendingPaymentsFetch(overrides?: {
           "Content-Disposition": scriptedResponse?.fileName
             ?? "attachment; filename*=UTF-8''OA%E4%BA%8B%E5%AE%9E%E6%BA%90_2026-08-19.xlsx",
         },
-      });
-    }
-    if (url.pathname === "/api/oa-pending-payments/writeback-paid") {
-      const scriptedResponse = writebackPaidResponses.shift();
-      const status = scriptedResponse?.status ?? (init?.method === "POST" ? 200 : 405);
-      return new Response(JSON.stringify(scriptedResponse?.payload ?? overrides?.writebackPaidPayload ?? {
-        success: true,
-        action: "oa_pending_payment_writeback_paid",
-        oaRowIds: [],
-        writebackCount: 0,
-        oaPaymentWritebacks: [],
-      }), {
-        status,
-        headers: { "Content-Type": "application/json" },
       });
     }
     if (url.pathname === "/api/oa-pending-payments/bank-transaction-candidates") {
@@ -598,8 +581,7 @@ function installOaPendingPaymentsFetch(overrides?: {
         oaRowIds: ["oa-candidate"],
         bankTransactionIds: ["bank-drawer-001"],
         relation: { status: "confirmed" },
-        autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
-        oaPaymentWritebacks: [{ code: "written", label: "已写回", flowId: "proc-candidate", syncStatus: "ready" }],
+        paymentStatusSync: { code: "queued", label: "已进入自动同步" },
       }), {
         status: init?.method === "POST" ? 200 : 405,
         headers: { "Content-Type": "application/json" },
@@ -685,13 +667,6 @@ function rulesSaveRequests(fetchMock: ReturnType<typeof installOaPendingPayments
   return fetchMock.mock.calls.filter(([input, init]) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     return url.pathname === "/api/pending-invoices/rules" && init?.method === "PUT";
-  });
-}
-
-function writebackPaidRequests(fetchMock: ReturnType<typeof installOaPendingPaymentsFetch>) {
-  return fetchMock.mock.calls.filter(([input]) => {
-    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-    return url.pathname === "/api/oa-pending-payments/writeback-paid";
   });
 }
 
@@ -878,7 +853,6 @@ describe("OA pending payments page", () => {
     const detailButton = cssRule(styles, ".oa-pending-payments-detail-button");
     const sortButton = cssRule(styles, ".oa-pending-payments-sort-button");
     const viewToggle = cssRule(styles, ".oa-pending-payments-view-toggle");
-    const writebackLine = cssRule(styles, ".oa-pending-payments-writeback-line");
     const tableCell = cssRule(styles, ".oa-pending-payments-table-cell");
     const invoiceColumn = cssRule(styles, ".oa-pending-payments-table-sub-header--invoice");
     const statusColumn = cssRule(styles, ".oa-pending-payments-table-sub-header--status");
@@ -907,7 +881,6 @@ describe("OA pending payments page", () => {
     expect(detailButton).toContain("var(--motion-fast)");
     expect(sortButton).toContain("var(--motion-fast)");
     expect(viewToggle).toContain("display: inline-flex");
-    expect(writebackLine).toContain("flex-wrap: wrap");
     expect(tableCell).toContain("font-size: 12px");
     expect(invoiceColumn).toContain("width: 13%");
     expect(statusColumn).toContain("width: 8%");
@@ -1012,7 +985,7 @@ describe("OA pending payments page", () => {
     }
     expect(within(groupHeader).queryByRole("columnheader", { name: "凭证信息" })).not.toBeInTheDocument();
     const subHeader = groupHeader;
-    for (const label of ["申请人", "项目", "申请事由", "金额", "状态", "写回", "对方户名", "流水摘要", "发票号", "发票方", "日期"]) {
+    for (const label of ["申请人", "项目", "申请事由", "金额", "状态", "对方户名", "流水摘要", "发票号", "发票方", "日期"]) {
       expect(within(subHeader).getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(within(subHeader).getByText("OA")).toBeInTheDocument();
@@ -1066,7 +1039,7 @@ describe("OA pending payments page", () => {
     const groupedCells = groupedRow.querySelectorAll(".oa-pending-payments-table-cell");
     expect(groupedCells[0]).toHaveTextContent("4450.00");
     expect(groupedCells[0]).toHaveTextContent("+2");
-    expect(groupedCells[1]).toHaveTextContent("已写回");
+    expect(groupedCells[1]).toHaveTextContent("已支付");
     expect(within(page).queryByText("同步状态异常")).not.toBeInTheDocument();
     expect(groupedCells[1]).not.toHaveTextContent("OA写回状态");
     expect(groupedCells[1]).not.toHaveTextContent("写回失败");
@@ -1190,7 +1163,7 @@ describe("OA pending payments page", () => {
     });
   });
 
-  test("switches to in-progress OA view and links bank payment with automatic writeback", async () => {
+  test("switches to in-progress OA view and queues automatic payment-status sync after bank link", async () => {
     const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
 
@@ -1233,7 +1206,7 @@ describe("OA pending payments page", () => {
       oa_row_ids: ["oa-candidate"],
       bank_transaction_ids: ["bank-drawer-001"],
     });
-    expect(await within(page).findByText("已关联支出流水并写回 OA，正在重新加载当前核对表。")).toBeInTheDocument();
+    expect(await within(page).findByText("已关联支出流水，OA 支付状态正在自动同步。")).toBeInTheDocument();
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
@@ -1385,10 +1358,6 @@ describe("OA pending payments page", () => {
       pagination: { page: 1, pageSize: 100, total: 1 },
     });
     const fetchMock = installOaPendingPaymentsFetch({
-      writebackPaidResponses: [{
-        status: 503,
-        payload: { message: "新的写回失败" },
-      }],
       bankCandidatesResponses: [
         { payload: candidatePayload("initial", "初始结果") },
         { status: 503, payload: { message: "候选查询暂时失败" } },
@@ -1436,102 +1405,21 @@ describe("OA pending payments page", () => {
     await waitFor(() => expect(screen.queryByLabelText("关联支出流水抽屉")).not.toBeInTheDocument());
     expect(screen.queryByText("候选查询暂时失败")).not.toBeInTheDocument();
 
-    await user.click(within(page).getByRole("radio", { name: /已完成 OA/ }));
-    await waitFor(() => expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("completed"));
-    await user.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
-    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
-    expect(await within(page).findByRole("alert")).toHaveTextContent("新的写回失败");
-    expect(screen.queryByText("候选查询暂时失败")).not.toBeInTheDocument();
   });
 
-  test("shows row writeback only for paid rows that are not written", async () => {
-    const fetchMock = installOaPendingPaymentsFetch();
+  test("does not expose a manual payment-status writeback control", async () => {
+    installOaPendingPaymentsFetch();
 
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     await within(page).findByText("候选付款人");
-
-    expect(within(page).getByRole("button", { name: "写回 OA 王五" })).toBeInTheDocument();
-    expect(within(page).queryByRole("button", { name: "写回 OA 刘际涛" })).not.toBeInTheDocument();
+    expect(within(page).queryByRole("button", { name: /写回 OA/ })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "自动匹配并写回 OA 待付款" })).not.toBeInTheDocument();
-    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
-  });
-
-  test("reloads the current OA pending payment page without a write-time barrier after paid writeback", async () => {
-    const fetchMock = installOaPendingPaymentsFetch({
-      writebackPaidPayload: {
-        success: true,
-        action: "oa_pending_payment_writeback_paid",
-        oaRowIds: ["oa-003"],
-        writebackCount: 1,
-        oaPaymentWritebacks: [
-          { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
-        ],
-      },
-    });
-
-    renderAuthenticatedAppAt("/oa-pending-payments");
-
-    const page = await screen.findByTestId("oa-pending-payments-page");
-    await within(page).findByText("候选付款人");
-    const rowsBeforeMutation = rowsRequests(fetchMock).length;
-    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
-
-    await userEvent.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
-    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
-    const [, writebackInit] = writebackPaidRequests(fetchMock)[0];
-    expect(JSON.parse(String(writebackInit?.body))).toEqual({ oa_row_ids: ["oa-003"] });
-    await waitFor(() => {
-      expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
-    });
-    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
-  });
-
-  test("allows paid writeback retry after a failed attempt", async () => {
-    const fetchMock = installOaPendingPaymentsFetch({
-      writebackPaidResponses: [
-        {
-          status: 503,
-          payload: {
-            error: "temporary_api_error",
-            message: "写回暂不可用。",
-          },
-        },
-        {
-          status: 200,
-          payload: {
-            success: true,
-            action: "oa_pending_payment_writeback_paid",
-            oaRowIds: ["oa-003"],
-            writebackCount: 1,
-            oaPaymentWritebacks: [
-              { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
-            ],
-          },
-        },
-      ],
-    });
-    const user = userEvent.setup();
-
-    renderAuthenticatedAppAt("/oa-pending-payments");
-
-    const page = await screen.findByTestId("oa-pending-payments-page");
-    await within(page).findByText("候选付款人");
-    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
-
-    await user.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
-    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
-    expect(await within(page).findByText("写回暂不可用。")).toBeInTheDocument();
-
-    await user.click(within(page).getByRole("button", { name: "写回 OA 王五" }));
-
-    await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(2));
-    await waitFor(() => expect(within(page).queryByText("写回暂不可用。")).not.toBeInTheDocument());
   });
 
   test("renders a canonical empty response as a true empty state", async () => {
-    const fetchMock = installOaPendingPaymentsFetch({
+    installOaPendingPaymentsFetch({
       rowsPayload: {
         rows: [],
         pagination: { page: 1, pageSize: 20, total: 0 },
@@ -1545,7 +1433,6 @@ describe("OA pending payments page", () => {
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("当前条件下暂无记录。")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: /写回 OA/ })).not.toBeInTheDocument();
-    expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
   });
 
   test("reloads the current OA pending payment page without a write-time barrier after bank link", async () => {

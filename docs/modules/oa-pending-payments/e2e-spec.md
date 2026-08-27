@@ -20,15 +20,15 @@
 | `OA-PENDING-E2E-003` | OA/银行/发票/relation detail | drawer 打开时惰性读取；missing/error 可观察；不访问 live external source |
 | `OA-PENDING-E2E-004` | 页面保持打开 | 经过 550ms 仍只有首屏 rows 请求；无后台 polling |
 | `OA-PENDING-E2E-005` | empty/error/manual refresh | empty 是真实空集；错误不伪装空集；手工刷新只新增一个 normal GET |
-| `OA-PENDING-E2E-006` | writeback-paid | 合法行单次命令；成功后 normal GET，409/503 明确且不伪成功；响应无 refresh metadata |
-| `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许无冲突 outflow；formal relation 创建/唯一 case 扩展/自动写回保持幂等与冲突语义；成功后 normal GET |
-| `OA-PENDING-E2E-008` | active relation withdraw | canonical relation 改为 withdrawn 后下一次 GET 不展示银行/发票 relation；无需 worker |
+| `OA-PENDING-E2E-006` | no manual writeback | 页面无“写回”按钮，不请求已退役的 `writeback-paid` / `confirm-paid` API |
+| `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许无冲突 outflow；formal relation 创建/唯一 case 扩展保持幂等与冲突语义；成功返回 `paymentStatusSync=queued` 后 normal GET |
+| `OA-PENDING-E2E-008` | active relation withdraw | canonical relation 改为 withdrawn 后下一次 GET 不展示银行/发票 relation；backend integration 证明 reconcile worker 只将 App-owned paid 恢复 pending |
 | `OA-PENDING-E2E-009` | Audit | pass/checking/integrity fail/unavailable 文案正确；单次请求且无 page barrier |
 | `OA-PENDING-E2E-010` | 列筛选浮层 | HeroUI Popover 在窄高视口自动避让；内容可滚动、操作区始终可见；Escape 关闭并归还焦点；零业务写请求 |
 | `OA-PENDING-E2E-011` | OA 事实源导出 | 右上角打开抽屉；默认全选且可部分选择；只下载 OA-only XLSX；不继承页面条件、不刷新 rows、不发送 mutation；read-export-only 可用 |
 
 ## 基础设施边界
 
-本地 Playwright deterministic mock 只证明浏览器合同。真实 PostgreSQL integration 测试证明 canonical commit/active withdraw；生产等量级 EXPLAIN、endpoint p95/p99、真实 OA MySQL 写回和浏览器 render 由统一部署后验证。
+本地 Playwright deterministic mock 只证明浏览器合同。backend service/repository tests 证明 relation event、active outflow、ownership revert、failed status、重复 flow 与 snapshot 收敛；生产 endpoint p95/p99、queue/worker 和真实 OA MySQL 状态由统一部署后验证。
 
 `oa-pending-payments-nonfresh-flow.spec.ts` 保留原文件名以兼容共享 smoke 清单，内容已改为 canonical `200` response shape、无后台 polling、503 错误不伪装空集和单次手工刷新恢复。

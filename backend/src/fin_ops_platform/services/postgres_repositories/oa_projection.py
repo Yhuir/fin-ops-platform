@@ -1155,7 +1155,9 @@ class PostgresOAWorkflowRepository:
             """,
             (normalized_row_ids, self._tenant_id, normalized_row_ids),
         )
-        records_by_id = {record.id: record for record in records}
+        records_by_id: dict[str, OAApplicationRecord] = {}
+        for record in records:
+            records_by_id.setdefault(record.id, record)
         return [records_by_id[row_id] for row_id in normalized_row_ids if row_id in records_by_id]
 
     def list_available_months(self) -> list[str]:
@@ -1185,17 +1187,12 @@ class PostgresOAWorkflowRepository:
 
     def _records(self, sql: str, params: tuple[Any, ...] = ()) -> list[OAApplicationRecord]:
         rows = list(self._connection.fetch_all(sql, params) or [])
-        counts: dict[str, int] = {}
+        selected_rows: dict[str, dict[str, Any]] = {}
         for row in rows:
             row_id = text(row.get("row_id"))
-            if row_id:
-                counts[row_id] = counts.get(row_id, 0) + 1
-        duplicate_ids = sorted(row_id for row_id, count in counts.items() if count > 1)
-        if duplicate_ids:
-            raise ValueError(
-                "OA workflow facts contain completed/in-progress duplicate ids: "
-                + ",".join(duplicate_ids)
-            )
+            if row_id and row_id not in selected_rows:
+                selected_rows[row_id] = row
+        rows = list(selected_rows.values())
         statuses_by_id = {
             text(row.get("row_id")): text(row.get("workflow_status"))
             for row in rows

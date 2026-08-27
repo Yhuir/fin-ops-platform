@@ -60,8 +60,6 @@ type OaPendingPaymentsTableProps = {
   onOpenDetail: (target: OaPendingPaymentDetailTarget) => void;
   selectedOaRowIds?: Set<string>;
   onToggleOaSelection?: (row: OaPendingPaymentRow) => void;
-  onWritebackPaid?: (row: OaPendingPaymentRow) => void;
-  writingBackOaRowIds?: Set<string>;
   emptyStateMessage?: string;
   tableWrapRef?: MutableRefObject<HTMLDivElement | null>;
 };
@@ -157,8 +155,6 @@ export default function OaPendingPaymentsTable({
   onOpenDetail,
   selectedOaRowIds = new Set(),
   onToggleOaSelection,
-  onWritebackPaid,
-  writingBackOaRowIds = new Set(),
   emptyStateMessage = "暂无 OA 待付款核对数据",
   tableWrapRef,
 }: OaPendingPaymentsTableProps) {
@@ -240,8 +236,6 @@ export default function OaPendingPaymentsTable({
               const selectable = Boolean(onToggleOaSelection) && canSelectOa(row);
               const rowOaIds = oaRowIds(row);
               const selected = rowOaIds.length > 0 && rowOaIds.every((oaId) => selectedOaRowIds.has(oaId));
-              const canWriteback = Boolean(onWritebackPaid) && canWritebackPaid(row);
-              const writingBack = rowOaIds.some((oaId) => writingBackOaRowIds.has(oaId));
               return (
                 <FinanceTableRow className="oa-pending-payments-table-row" id={row.id} key={row.id}>
                   <FinanceTableCell className="oa-pending-payments-table-cell oa-pending-payments-table-cell--oa" columnRole="identity">
@@ -315,20 +309,6 @@ export default function OaPendingPaymentsTable({
                         <FinanceStatusTag tone={statusTone(row.paymentStatus.severity)}>
                           {paymentStatusLabel(row)}
                         </FinanceStatusTag>
-                      </span>
-                      <span className="oa-pending-payments-writeback-line">
-                        <TableTag>{writebackLabel(row)}</TableTag>
-                        {canWriteback ? (
-                          <button
-                            aria-label={`写回 OA ${row.oa.applicantName || "未填写申请人"}`}
-                            className="oa-pending-payments-writeback-button"
-                            disabled={writingBack}
-                            onClick={() => onWritebackPaid?.(row)}
-                            type="button"
-                          >
-                            {writingBack ? "写回中" : "写回"}
-                          </button>
-                        ) : null}
                       </span>
                     </span>
                   </FinanceTableCell>
@@ -496,7 +476,6 @@ function GroupedSubHeader({
           sortField: "payment_status",
           sortLabel: "支付状态",
         })}</span>
-        <span>写回</span>
       </span>
     );
   }
@@ -881,10 +860,6 @@ function paymentStatusLabel(row: OaPendingPaymentRow): string {
   return row.paymentStatus.label || "-";
 }
 
-function writebackLabel(row: OaPendingPaymentRow): string {
-  return row.oaPaymentWriteback?.code === "written" ? "已写回" : "未写回";
-}
-
 function workflowStatusLabel(row: OaPendingPaymentRow): string {
   const status = String(row.oa.workflowStatus || "").trim();
   if (status === "in_progress") {
@@ -925,16 +900,8 @@ function oaCounterpartyDisplay(row: OaPendingPaymentRow): string {
   );
 }
 
-function writebackWritten(row: OaPendingPaymentRow): boolean {
-  return row.oaPaymentWriteback?.code === "written";
-}
-
-function canWritebackPaid(row: OaPendingPaymentRow): boolean {
-  return row.paymentStatus.code === "paid" && !writebackWritten(row) && row.oaPaymentWriteback?.syncStatus === "ready";
-}
-
 function canSelectOa(row: OaPendingPaymentRow): boolean {
-  return workflowStatusLabel(row) === "进行中" && !writebackWritten(row);
+  return workflowStatusLabel(row) === "进行中";
 }
 
 function oaRowIds(row: OaPendingPaymentRow): string[] {

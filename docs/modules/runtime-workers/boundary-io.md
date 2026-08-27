@@ -8,7 +8,7 @@
 
 | Instance | Worker kind | 输入 | 责任 |
 | --- | --- | --- | --- |
-| `oa-sync` | `oa-sync` | `oa.sync` | OA integration 普通 month/all 同步，以及显式 `operation=refresh_attachments` 的 selected-row 精确附件重解析；后者只接纳 completed 或 `in_progress + expense_claim`，且不执行 stale snapshot deletion |
+| `oa-sync` | `oa-sync` | `oa.sync`、`oa.payment_status.reconcile` | OA integration 普通 month/all 同步、selected-row 精确附件重解析，以及正式 OA+流水关系变化后的支付状态自动收敛 |
 | `workbench-matching` | `workbench-matching` | PostgreSQL matching dirty scopes | 正式关系候选计算 |
 | `import` | `import-job` | `import.process.requested` | 文件导入后台处理 |
 | `settings-maintenance` | `settings-maintenance` | settings maintenance events | 数据重置与关系要求重算 |
@@ -24,6 +24,7 @@
 - 每个 job/event 必须有 bounded retry、lease、idempotency 和结构化失败证据。
 - API route 只 enqueue 已登记任务；worker 不读取 HTTP cookie/header，不构造 response，不依赖 `Application`。
 - OA 精确附件刷新复用 `oa.sync`，不新增 event/worker；worker 独占 Mongo 下载、OCR、定向 owner commit、统一附件 promotion 与 matching reconciliation。completed 与 `in_progress + expense_claim` 复用同一个 promotion 边界；进行中支付申请仍不接纳附件解析。API 只读取受控 durable status/result，不得恢复同步 fallback。
+- OA 支付状态复用同一个 `oa-sync` instance 的独立 `oa.payment_status.reconcile` handler。事件只携带 typed OA IDs 和 relation identity，handler 必须查询最新 active topology；金额不等不阻断、inflow 不触发、failed 不覆盖，撤回仅恢复 App-owned 状态。
 - `oa.sync(operation=refresh_attachments)` 的 pending/processing/failed 状态由专用 event status 接口和通用队列指标观测，不得计入全量 `oa_projection` freshness、App Health 全局 OA 状态或发布 readiness；单条修复失败不能污染全量 OA 健康结论。
 
 ## 输出 I/O

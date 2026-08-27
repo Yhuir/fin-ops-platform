@@ -28,8 +28,8 @@
 | 状态 | 业务含义 |
 | --- | --- |
 | `unpaid` | 没有可解析的 active outflow relation |
-| `paid` | 至少存在一条可解析的 active outflow relation；金额差额不改变关系事实，但会阻断自动写回 |
-| `oaPaymentWriteback.code=written` | PostgreSQL payment-status snapshot 已记录 OA 外部写回结果 |
+| `paid` | 至少存在一条可解析的 active outflow relation；金额差额不改变关系事实，也不阻断自动写回 |
+| `pending` after withdraw | 最新 topology 没有 active outflow，且该 flow 的 paid 状态此前由本 App 写入 |
 
 页面只展示后端给出的结果，不在浏览器重算金额、方向或写回资格。
 
@@ -109,24 +109,21 @@ closed
 - 候选查询错误不得写入或清除页面 `error` / `actionError`；关联提交和页面写回等 mutation 错误继续由页面级错误状态负责。
 - 抽屉关闭后候选错误反馈不可残留在页面；重新打开时由新的当前请求开始清理。
 
-## 写回状态机
-
-### `writeback-paid`
+## 支付状态自动同步状态机
 
 ```text
-validate actor/tenant/payload
-  -> load OA + active relation evidence
-  -> validate workflow/outflow/amount/flow id（混合关系只合计 outflow）
-  -> idempotent external MySQL paid write
-  -> idempotent PostgreSQL payment-status snapshot reconcile
-  -> audit/result
-  -> frontend normal rows GET
+formal relation transaction commits
+  -> enqueue oa.payment_status.reconcile with typed OA ids
+  -> oa-sync worker loads canonical OA + latest active relation topology
+  -> resolve exact flow id; failed/missing facts fail closed
+  -> active outflow ? mark paid : revert only App-owned paid to pending
+  -> persist ownership state + PostgreSQL payment-status snapshot
 ```
 
-- already-paid 仍必须确保 PostgreSQL snapshot 已收敛。
-- 外部成功、PG 失败：返回可安全重试错误，不返回成功。
-- 冲突/非法状态保持既有 `409/400` 合同。
-- 成功响应不含 read-model refresh/barrier metadata。
+- 金额不等只保留关系异常，不参与 paid gate；inflow 不算支付证据。
+- 外部原有 paid 记录只同步 snapshot，不取得 App ownership，撤回时不得改为 pending。
+- `pay_status=2`、OA/flow id/canonical bank 缺失明确失败，禁止覆盖或静默跳过。
+- 同一 flow 的重复 OA row 只执行一次外部写；同 ID completed/in-progress 冲突时 completed 优先。
 
 ### `link-bank-transactions`
 
@@ -134,12 +131,12 @@ validate actor/tenant/payload
 validate actor/tenant/payload/idempotency
   -> validate outflow bank rows and active owner overlap
   -> create formal relation or extend the unique active case + audit
-  -> amount matched ? run paid writeback : keep formal relation
+  -> relation transaction enqueues payment reconcile event
   -> result
   -> frontend normal rows GET
 ```
 
-重复提交必须幂等；多个 active owner、版本冲突或正式关系冲突不得半写。历史 pending relation/claim 不参与运行时。
+重复提交必须幂等；多个 active owner、版本冲突或正式关系冲突不得半写。历史 pending relation/claim 不参与运行时。成功响应只说明 `paymentStatusSync=queued`，页面没有人工写回动作。
 
 ## System Audit 子页 proof
 

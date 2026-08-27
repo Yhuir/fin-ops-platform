@@ -2654,8 +2654,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         retired_query_service_path = SERVICES_ROOT / "oa_pending_payment_service.py"
         query_service_path = SERVICES_ROOT / "oa_pending_payment_query_service.py"
         command_service_path = SERVICES_ROOT / "oa_pending_payment_command_service.py"
+        payment_reconcile_service_path = SERVICES_ROOT / "oa_payment_status_reconcile.py"
+        payment_reconcile_contract_path = SERVICES_ROOT / "oa_payment_status_reconcile_contract.py"
         read_model_service_path = SERVICES_ROOT / "oa_pending_payment_read_model_service.py"
         query_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_query.py"
+        relation_repository_path = SERVICES_ROOT / "postgres_repositories" / "workbench_relation.py"
         retired_relation_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_relation.py"
         retired_promotion_service_path = SERVICES_ROOT / "oa_pending_payment_relation_promotion_service.py"
         server_source = server_path.read_text(encoding="utf-8")
@@ -2664,8 +2667,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OaPendingPaymentApiRoutes")
         command_service_source = command_service_path.read_text(encoding="utf-8")
+        payment_reconcile_service_source = payment_reconcile_service_path.read_text(encoding="utf-8")
+        payment_reconcile_contract_source = payment_reconcile_contract_path.read_text(encoding="utf-8")
         query_service_source = query_service_path.read_text(encoding="utf-8")
         query_repository_source = query_repository_path.read_text(encoding="utf-8")
+        relation_repository_source = relation_repository_path.read_text(encoding="utf-8")
+        worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
         violations: list[str] = []
         if retired_query_service_path.exists():
             violations.append("retired OA live query service still exists")
@@ -2684,7 +2691,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "/api/oa-pending-payments/bank-transactions/",
             "/api/oa-pending-payments/invoices/",
             "/api/oa-pending-payments/rows/",
-            "/api/oa-pending-payments/writeback-paid",
             "/api/oa-pending-payments/link-bank-transactions",
             "def _json_read(",
             "def _json_write(",
@@ -2745,15 +2751,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if retired_symbol in server_source + command_service_source + query_repository_source:
                 violations.append(f"OA pending payment runtime still references {retired_symbol}")
         command_composition = _function_source(server_tree, server_source, "_oa_pending_payment_command_service")
-        if "payment_status_snapshot_writer=self._oa_pending_payment_source_snapshot_repository()" not in command_composition:
-            violations.append("OA payment command does not compose the canonical PostgreSQL status snapshot writer")
-        paid_snapshot_write = _function_source(
-            _parse(command_service_path),
-            command_service_source,
-            "_record_paid_statuses",
-        )
-        if "record_paid_statuses" not in paid_snapshot_write:
-            violations.append("OA payment command does not reconcile successful external writes into PostgreSQL")
+        for required, source, owner in (
+            ("OA_PAYMENT_STATUS_RECONCILE_EVENT", payment_reconcile_contract_source, "payment reconcile contract"),
+            ("OA_PAYMENT_STATUS_RECONCILE_EVENT", relation_repository_source, "relation repository"),
+            ("enqueue_in_transaction(", relation_repository_source, "relation repository"),
+            ("active_outflow_by_oa_row_id", payment_reconcile_service_source, "payment reconcile service"),
+            ("mark_paid(", payment_reconcile_service_source, "payment reconcile service"),
+            ("mark_pending(", payment_reconcile_service_source, "payment reconcile service"),
+            ("PAY_STATUS_FAILED", payment_reconcile_service_source, "payment reconcile service"),
+            ("record_payment_statuses", payment_reconcile_service_source, "payment reconcile service"),
+            ("handlers[OA_PAYMENT_STATUS_RECONCILE_EVENT]", worker_source, "oa-sync worker"),
+        ):
+            if required not in source:
+                violations.append(f"OA {owner} is missing {required}")
+        for forbidden in (
+            "writeback_paid",
+            "mark_paid(",
+            "mark_pending(",
+            "record_payment_statuses",
+        ):
+            if forbidden in command_service_source:
+                violations.append(f"OA pending-payment command still owns payment writeback concern {forbidden}")
         if "_enqueue_refreshes_for_records" in command_service_source:
             violations.append("OA payment command still owns ordinary write-time read-model fan-out")
         if "enqueue_workbench_refresh=" in command_composition or "enqueue_oa_pending_payment_refresh=" in command_composition:
@@ -2761,10 +2779,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for removed_write_path in (
             "/api/oa-pending-payments/confirm-paid",
             "/api/oa-pending-payments/auto-reconcile-bank-transactions",
+            "/api/oa-pending-payments/writeback-paid",
             "def confirm_paid(",
             ".confirm_paid(",
             "def auto_reconcile_bank_transactions(",
             ".auto_reconcile_bank_transactions(",
+            "def writeback_paid(",
+            ".writeback_paid(",
         ):
             if removed_write_path in route_class:
                 violations.append(f"OA pending payment route owner still exposes removed manual write path {removed_write_path}")

@@ -133,8 +133,6 @@ class OaPendingPaymentApiRoutes:
                     self.relation_details(row_id, query, tenant_id=self._tenant_id(session)),
                 ),
             )
-        if method == "POST" and route_path == "/api/oa-pending-payments/writeback-paid":
-            return self._json_write(body, headers, lambda payload, actor_id: self.writeback_paid(payload, actor_id=actor_id))
         if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
             return self._json_write(body, headers, lambda payload, actor_id: self.link_bank_transactions(payload, actor_id=actor_id))
         return None
@@ -212,11 +210,6 @@ class OaPendingPaymentApiRoutes:
         if self._command_service is None:
             raise RuntimeError("OA pending payment command service is not configured.")
         return self._command_service.link_bank_transactions(payload, actor_id=actor_id)
-
-    def writeback_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        if self._command_service is None:
-            raise RuntimeError("OA pending payment command service is not configured.")
-        return self._command_service.writeback_paid(payload, actor_id=actor_id)
 
     def bank_transaction_candidates(
         self,

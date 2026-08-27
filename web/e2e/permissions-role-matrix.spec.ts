@@ -445,7 +445,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await page.goto("/oa-pending-payments");
       await expect(page.getByRole("heading", { name: "OA 待付款核对" })).toBeVisible();
       await page.getByRole("radio", { name: /进行中 OA/ }).click();
-      await expect(page.getByText("当前账号仅支持查看和导出，不能自动写回 OA 或关联支出流水。")).toBeVisible();
+      await expect(page.getByText("当前账号仅支持查看和导出，不能关联支出流水。")).toBeVisible();
       await expect(page.getByRole("button", { name: "关联支出流水" })).toBeDisabled();
       await expect(page.getByRole("button", { name: /确认已支付并写回|写回 OA/ })).toHaveCount(0);
       await expect(page.getByRole("checkbox", { name: /选择 OA 进行中/ })).toHaveCount(0);
@@ -702,7 +702,6 @@ test.describe("permissions browser role matrix", () => {
       bankDetailsClassificationMode: "needs_confirmation",
       etcTicketReconciliationWorkflow: true,
       oaPendingPaymentBankLinkFlow: true,
-      oaPendingPaymentWritebackPaidFlow: true,
       pendingInvoiceAttachExistingBatchRows: true,
       pendingInvoiceIncomeBatchRows: true,
       sessionMode: "read_export_only",

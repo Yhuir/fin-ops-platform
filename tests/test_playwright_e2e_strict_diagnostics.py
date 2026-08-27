@@ -170,7 +170,6 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         guarded_success_flows = {
             "workbench shared confirm flow": (E2E_DIR / "fixtures" / "workbenchFlow.ts").read_text(encoding="utf-8"),
             "bank details auto-tag rules": (E2E_DIR / "bank-details-auto-tag-rules-flow.spec.ts").read_text(encoding="utf-8"),
-            "OA pending confirm-paid": (E2E_DIR / "oa-pending-payments-confirm-paid-flow.spec.ts").read_text(encoding="utf-8"),
             "OA pending bank-link": (E2E_DIR / "oa-pending-payments-bank-link-flow.spec.ts").read_text(encoding="utf-8"),
             "pending invoices attach existing": (E2E_DIR / "pending-invoices-attach-existing-flow.spec.ts").read_text(encoding="utf-8"),
             "pending invoices income status": (E2E_DIR / "pending-invoices-income-status-flow.spec.ts").read_text(encoding="utf-8"),

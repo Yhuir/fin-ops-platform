@@ -12,6 +12,7 @@ from fin_ops_platform.services.oa_payment_status_service import (
     MySQLOAPaymentStatusRepository,
     OAPaymentStatusRecord,
     OAPaymentStatusSettings,
+    PAY_STATUS_FAILED,
     PAY_STATUS_PAID,
     PAY_STATUS_PENDING,
     oa_flow_id_candidates,
@@ -269,6 +270,31 @@ class OAPaymentStatusServiceTests(unittest.TestCase):
         self.assertEqual(record.pay_status, PAY_STATUS_PAID)
         self.assertIn("INSERT INTO t_payment_simple", connection.executed[1][0])
         self.assertTrue(connection.committed)
+
+    def test_mark_pending_updates_existing_app_owned_status(self) -> None:
+        connection = ScriptedConnection([
+            [(10, "flow-app-owned", PAY_STATUS_PAID)],
+        ])
+        repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
+
+        record = repository.mark_pending("flow-app-owned")
+
+        self.assertEqual(record, OAPaymentStatusRecord(flow_id="flow-app-owned", pay_status=PAY_STATUS_PENDING))
+        self.assertIn("FOR UPDATE", connection.executed[0][0])
+        self.assertIn("UPDATE t_payment_simple SET pay_status", connection.executed[1][0])
+        self.assertTrue(connection.committed)
+
+    def test_failed_status_is_never_overwritten(self) -> None:
+        connection = ScriptedConnection([
+            [(10, "flow-failed", PAY_STATUS_FAILED)],
+        ])
+        repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
+
+        with self.assertRaisesRegex(OAPaymentStatusExecutionError, "failed"):
+            repository.mark_paid("flow-failed")
+
+        self.assertEqual(len(connection.executed), 1)
+        self.assertTrue(connection.rolled_back)
 
     def test_mark_paid_rolls_back_and_closes_connection_on_write_error(self) -> None:
         connection = ScriptedConnection(raise_on_execute=RuntimeError("mysql down"))

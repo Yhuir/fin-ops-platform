@@ -23,7 +23,6 @@ import {
   downloadOaPendingPaymentSources,
   linkOaPendingPaymentBankTransactions,
   nextOaPendingPaymentSortDirection,
-  writebackOaPendingPaymentPaid,
 } from "../features/oaPendingPayments/api";
 import type {
   OaPendingPaymentBankCandidate,
@@ -40,7 +39,6 @@ import type {
   OaPendingPaymentStatistics,
   OaPendingPaymentViewMode,
   LinkOaPendingPaymentBankTransactionsResponse,
-  WritebackOaPendingPaymentPaidResponse,
 } from "../features/oaPendingPayments/types";
 import { formatMoney } from "../features/money";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
@@ -92,7 +90,6 @@ export default function OaPendingPaymentsPage() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [bankLinkDrawerOpen, setBankLinkDrawerOpen] = useState(false);
-  const [writingBackOaRowIds, setWritingBackOaRowIds] = useState<Set<string>>(() => new Set());
   const requestIdRef = useRef(0);
   const selectedOaRowIdList = useMemo(() => [...selectedOaRowIds], [selectedOaRowIds]);
 
@@ -224,31 +221,6 @@ export default function OaPendingPaymentsPage() {
     setBankLinkDrawerOpen(false);
     loadRows("refresh");
   }, [loadRows]);
-
-  const handleWritebackPaid = useCallback(async (row: OaPendingPaymentRow) => {
-    if (!canMutateData) {
-      return;
-    }
-    const oaRowIds = rowOaIdsForWriteback(row);
-    if (oaRowIds.length === 0) {
-      return;
-    }
-    setActionError(null);
-    setWritingBackOaRowIds((current) => new Set([...current, ...oaRowIds]));
-    try {
-      const result = await writebackOaPendingPaymentPaid({ oaRowIds });
-      setFeedback(writebackPaidFeedback(result));
-      loadRows("refresh");
-    } catch (caught: unknown) {
-      setActionError(caught instanceof Error ? caught.message : "写回失败。");
-    } finally {
-      setWritingBackOaRowIds((current) => {
-        const next = new Set(current);
-        oaRowIds.forEach((oaRowId) => next.delete(oaRowId));
-        return next;
-      });
-    }
-  }, [canMutateData, loadRows]);
 
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
@@ -393,7 +365,7 @@ export default function OaPendingPaymentsPage() {
               <>
                 {!canMutateData ? (
                   <StatePanel compact tone="warning">
-                    当前账号仅支持查看和导出，不能自动写回 OA 或关联支出流水。
+                    当前账号仅支持查看和导出，不能关联支出流水。
                   </StatePanel>
                 ) : null}
                 {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
@@ -417,8 +389,6 @@ export default function OaPendingPaymentsPage() {
                   onOpenDetail={setDetailTarget}
                   selectedOaRowIds={selectedOaRowIds}
                   onToggleOaSelection={canMutateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
-                  onWritebackPaid={canMutateData ? (row) => void handleWritebackPaid(row) : undefined}
-                  writingBackOaRowIds={writingBackOaRowIds}
                   emptyStateMessage={
                     error
                       ? "OA 待付款核对加载失败，请点击刷新重试。"
@@ -466,33 +436,18 @@ function formatViewCount(count: number | null | undefined): string {
   return typeof count === "number" && Number.isFinite(count) ? `${count}条` : "";
 }
 
-function writebackPaidFeedback(result: WritebackOaPendingPaymentPaidResponse): string {
-  const written = Number(result.writebackCount ?? 0);
-  if (written > 0) {
-    return `已写回 ${written} 条 OA。`;
-  }
-  return "OA 已经写回。";
-}
-
 function linkBankSuccessMessage(result: LinkOaPendingPaymentBankTransactionsResponse): string {
-  if (
-    result.autoWriteback?.code === "written"
-    || result.oaPaymentWriteback?.code === "written"
-    || (result.oaPaymentWritebacks ?? []).some((item) => item.code === "written")
-  ) {
-    return "已关联支出流水并写回 OA，正在重新加载当前核对表。";
+  if (result.paymentStatusSync?.code === "queued") {
+    return "已关联支出流水，OA 支付状态正在自动同步。";
   }
   return "已关联支出流水，正在重新加载当前核对表。";
 }
 
 function selectableOaRowIds(row: OaPendingPaymentRow): string[] {
-  return rowOaIdsForWriteback(row);
+  return rowOaIds(row);
 }
 
-function rowOaIdsForWriteback(row: OaPendingPaymentRow): string[] {
-  if (row.oaPaymentWriteback?.code === "written") {
-    return [];
-  }
+function rowOaIds(row: OaPendingPaymentRow): string[] {
   const ids: string[] = [];
   const primary = row.oa.primaryOaId || row.oa.id;
   if (primary) {

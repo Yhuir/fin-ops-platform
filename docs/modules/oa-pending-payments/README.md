@@ -25,6 +25,7 @@
 - 查询/导出合同与纯组装：`oa_pending_payment_query_contract.py`、`oa_pending_payment_export.py`、`oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py`
 - 命令：`oa_pending_payment_command_service.py`、`workbench_relation_command_service.py`
 - Canonical snapshot owners：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_admission.py`、`oa_projection.py`
+- 支付状态自动同步：`oa_payment_status_reconcile.py`、`oa_payment_status_reconcile_contract.py`、`postgres_repositories/oa_payment_status_reconcile.py`；复用 `oa-sync` worker。
 - System Audit 子页 proof：`postgres_repositories/page_business_audit.py`；OA 待付款页面不展示 Audit 控件。
 
 ## 当前有效读链路
@@ -69,11 +70,11 @@ browser
 - completed 与 in-progress 关系统一读取 `app.workbench_pair_relations.status='active'`；workflow status 只决定关联台 paired/unpaired gate，不产生 pending owner 或 promotion。
 - 银行流水和发票只是 relation evidence，不替代 OA 主行。
 
-## 写回一致性
+## 支付状态自动同步
 
-`writeback-paid` 和金额匹配后的 `link-bank-transactions` 保留原有单次鉴权、tenant、active formal relation、outflow、金额、CAS/冲突、审计和幂等语义。link-bank 只通过正式 relation command 创建或扩展唯一 active case；已有混合收支关系的写回只合计 outflow，inflow 不参与金额校验。外部 MySQL 写回仍走既有 command/adapter；成功或 already-paid 后必须幂等更新 PostgreSQL payment-status canonical snapshot。响应不再返回页面 read-model refresh metadata，前端成功后立即重新调用当前 rows GET。
+页面与 page command 不直接写 OA 支付状态。正式 relation 的 repository 在关系创建、扩展、撤回或恢复事务中登记 `oa.payment_status.reconcile` durable event；现有 `oa-sync` worker 始终查询最新 active topology：存在 OA+canonical outflow 就写已支付，金额差额只保留为异常；不存在 active outflow 时，只撤销本 App 曾写入的已支付状态。收入、inactive/candidate、缺 flow id 和 `pay_status=2` 均不得伪造成功。
 
-Mongo/MySQL 与 PostgreSQL 之间没有分布式事务。若外部写成功而 PostgreSQL canonical commit 失败，命令必须返回可安全重试错误；重试或后续 OA sync 收敛，不允许页面请求回退读取外部系统。
+`link-bank-transactions` 只负责正式关系命令，成功响应 `paymentStatusSync.code=queued`。人工 `writeback-paid` / `confirm-paid` API、按钮和 direct command 写入均已删除。外部 MySQL 与 PostgreSQL snapshot 由同一幂等 worker handler 收敛，页面只通过普通 GET 观察结果，不回退读取外部系统。
 
 ## 旧链清理结果
 

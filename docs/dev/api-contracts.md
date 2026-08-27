@@ -1052,28 +1052,16 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 - 成功返回 XLSX MIME、UTF-8 `Content-Disposition`、`Cache-Control: no-store`，空来源 sheet 保留表头；总 OA 行数上限 20,000，超限返回结构化 `400`。
 - read-export-only 与 full/admin 可以下载，未认证或 denied 用户拒绝；成功审计只记录 actor、来源、数量和文件名，不记录 OA 内容。
 
-### OA 已支付行写回
+### OA 支付状态自动同步
 
-`POST /api/oa-pending-payments/writeback-paid`
+`POST /api/oa-pending-payments/writeback-paid` 已退役并固定返回 `404`；页面不再展示人工“写回”按钮，也不存在 GET 触发写回的路径。
 
-请求 body：
-
-```json
-{
-  "oa_row_ids": ["oa-pay-..."]
-}
-```
-
-契约要求：
-
-- 后端必须用写权限校验 actor，不接受前端仅隐藏按钮作为权限事实。
-- `oa_row_ids` 必填，至少一条；前端只对 `paymentStatus=paid` 且 `oaPaymentWriteback.code != written` 的行展示按钮，但后端必须重新校验。
-- 该接口不做自动匹配，不创建 OA-bank relation，不读取候选流水池；它只处理已经存在有效 relation 的 OA。
-- completed 与 in-progress 行都必须存在包含目标 OA 的 Workbench active 支出流水 relation。候选流水、自动 decision、历史 pending relation/claim、未确认 relation 或收入流水都不能触发写回。
-- 写回前必须校验银行流水存在且方向为支出、支出合计等于 OA 金额、可解析 OA Mongo 文档 ID，并将 `t_payment_simple.flow_id` 对应记录写成 `pay_status=1`；缺记录时可插入一条已支付记录。Flowable 流程实例 ID 和流程请求 ID 不作为 `t_payment_simple.flow_id` 写回 key。
-- MySQL成功后，命令必须调用PG snapshot writer幂等更新payment-status snapshot、月份source watermark和精确月份dirty/outbox；即使MySQL此前已paid也不能跳过PG修复。PG三项写入同事务。
-- 成功响应返回 `success`、`action=oa_pending_payment_writeback_paid`、`oaRowIds`、`writebackCount`、`oaPaymentWriteback` 或 `oaPaymentWritebacks`；不返回已退役的 `readModelRefresh` 或 operation barrier targets，前端成功后只执行一次普通 rows GET。
-- 金额、方向或flow id校验失败不得写MySQL。若MySQL已成功但PG snapshot提交失败，返回 `oa_payment_status_snapshot_write_failed` / 503和可安全重试语义，不得声称页面已fresh；下一次幂等重试或OA sync负责恢复。
+- 唯一触发事实是 `app.workbench_pair_relations` 的正式关系变更：目标 OA 只要位于至少一条 active 且含 canonical 支出流水的关系中，就通过 durable `oa.payment_status.reconcile` 事件将 `t_payment_simple.pay_status` 同步为 `1`。OA 与流水金额是否相等只保留为关系异常，不阻断支付状态同步。
+- 只有收入流水、candidate/decision、inactive/withdrawn 或历史 pending relation/claim 都不能触发“已支付”。
+- 关系撤回或拓扑变化后，worker 以最新 active topology 重算；只有曾由本 App 从待支付改成已支付、并在 `app.oa_payment_status_writeback_states` 留有 ownership 记录的 flow 才自动恢复 `pay_status=0`。外部原本就是已支付的记录不得被 App 撤回。
+- `pay_status=2`（支付失败）必须 fail closed，禁止自动覆盖；缺 OA、缺 canonical 流水或无法解析 `flow_id` 必须形成明确失败事件，禁止猜测字段或静默跳过。
+- 同一 OA ID 同时存在 completed 与 in-progress 快照时 completed 优先；多个 canonical OA row 解析到同一 `flow_id` 时每个事件只写一次外部状态。
+- handler 由现有 `oa-sync` worker 承担，采用 at-least-once 幂等处理；外部状态成功后必须同步记录 PostgreSQL payment-status snapshot。历史 active OA+支出关系由 migration `0158` 只登记 reconcile event，不直接修改外部支付状态。
 
 `GET /api/oa-pending-payments/bank-transaction-candidates`
 
@@ -1090,7 +1078,7 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 
 `POST /api/oa-pending-payments/link-bank-transactions`
 
-该接口是进行中 OA 显式关联支出流水入口。请求由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`；`case_id` 是服务端关系所有权标识，不属于本接口的客户端输入，服务端不得信任或采用请求中伪造的 `case_id` / `caseId`。后端必须通过 `WorkbenchRelationCommandService` 创建正式 active relation，或在目标成员只命中一个 active case 时原地扩展该 case并保留已有发票成员；多个 active owner、成员冲突或非法方向必须 fail closed。不得写历史 `app.oa_pending_payment_bank_relations` 或 `app.bank_transaction_relation_claims`，也不存在后续 promotion。关联成功后必须沿用同一写回校验；支出合计等于 OA 金额且可解析 `flow_id` 时，响应必须携带 `autoWriteback` 和 `oaPaymentWritebacks`，并把 `t_payment_simple.pay_status` 写为已支付。前端和后端都不再提供人工 `confirm-paid` 写回入口。
+该接口是进行中 OA 显式关联支出流水入口。请求由前端传入选中的 `oa_row_ids` 和 `bank_transaction_ids`；`case_id` 是服务端关系所有权标识，不属于本接口的客户端输入，服务端不得信任或采用请求中伪造的 `case_id` / `caseId`。后端必须通过 `WorkbenchRelationCommandService` 创建正式 active relation，或在目标成员只命中一个 active case 时原地扩展该 case并保留已有发票成员；多个 active owner、成员冲突或非法方向必须 fail closed。不得写历史 `app.oa_pending_payment_bank_relations` 或 `app.bank_transaction_relation_claims`，也不存在后续 promotion。关联成功响应返回 `paymentStatusSync.code=queued`；支付状态由 relation repository 同事务登记的 `oa.payment_status.reconcile` 事件异步收敛，不由页面 command 直接写 MySQL。前端和后端都不再提供人工 `confirm-paid` / `writeback-paid` 入口。
 
 ### 工作台 row detail
 

@@ -14,7 +14,6 @@ class OperationHistorySemanticsTests(unittest.TestCase):
             ("POST", "/api/workbench/actions/confirm-link", "确认关联", "关联关系"),
             ("PUT", "/api/bank-details/auto-tag-rules", "保存自动标签规则", "流水标签规则"),
             ("POST", "/imports/invoices/manual/preview", "预览发票录入", "发票录入"),
-            ("POST", "/api/oa-pending-payments/writeback-paid", "确认已支付", "OA 付款项"),
             ("POST", "/api/workbench/actions/confirm-link/preview", "预览确认关联", "关联关系"),
             ("POST", "/api/tax-offset/calculate", "计算抵扣方案", "税金抵扣计划"),
             (

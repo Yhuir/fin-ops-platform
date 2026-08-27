@@ -70,7 +70,7 @@ async function openInProgressView(page: Page, recordLatency?: OperationLatencyRe
 }
 
 test.describe("OA pending payments in-progress bank link browser flow", () => {
-  test("links only unmatched bank transactions and refreshes rows with automatic OA writeback", async ({ page }, testInfo) => {
+  test("links only unmatched bank transactions and refreshes rows through automatic payment-status sync", async ({ page }, testInfo) => {
     const runtimeErrors = collectRuntimeErrors(page);
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentBankLinkDelayMs: 300,
@@ -85,7 +85,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     await expect(row).toBeVisible();
     await expect(row.getByLabel("OA流程状态：进行中")).toBeVisible();
     await expect(row).toContainText("未支付");
-    await expect(row).toContainText("未写回");
+    await expect(row).not.toContainText("未写回");
     await expect(page.getByRole("button", { name: "关联支出流水" })).toBeDisabled();
 
     await recordLatency({
@@ -182,21 +182,21 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     });
     expect(api.count("POST /api/operation-barrier/status")).toBe(barriersBeforeLink);
 
-    await expect(page.getByText("已关联支出流水并写回 OA，正在重新加载当前核对表。")).toBeVisible();
+    await expect(page.getByText("已关联支出流水，OA 支付状态正在自动同步。")).toBeVisible();
     await expect(page.getByRole("heading", { name: "关联支出流水" })).toHaveCount(0);
     await expect.poll(() => api.count(ROWS_PATH)).toBeGreaterThan(rowsBeforeLink);
 
     const refreshedRow = page.getByRole("row", { name: /进行中关联申请人/ });
     await expect(refreshedRow).toContainText("进行中关联供应商");
     await expect(refreshedRow).toContainText("已支付");
-    await expect(refreshedRow).toContainText("已写回");
+    await expect(refreshedRow).not.toContainText("已写回");
     await expect(refreshedRow.getByRole("button", { name: /确认已支付并写回|写回 OA/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count(CONFIRM_PAID_PATH)).toBe(0);
     expect(unexpectedRuntimeErrors(runtimeErrors)).toEqual([]);
   });
 
-  test("keeps bank link failures visible without refreshing rows or writing OA paid status", async ({ page }, testInfo) => {
+  test("keeps bank link failures visible without refreshing rows or queueing OA paid status", async ({ page }, testInfo) => {
     const runtimeErrors = collectRuntimeErrors(page);
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentBankLinkError: true,
@@ -269,7 +269,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "关联支出流水" })).toHaveCount(0));
     });
     await expect(row).toContainText("未支付");
-    await expect(row).toContainText("未写回");
+    await expect(row).not.toContainText("未写回");
     await expect(row).not.toContainText("进行中关联供应商");
     expect(unexpectedRuntimeErrors(runtimeErrors, [/409 \(Conflict\)/])).toEqual([]);
   });

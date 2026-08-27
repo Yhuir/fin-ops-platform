@@ -3318,9 +3318,8 @@ textarea {
 }
 
 .oa-pending-payments-status-stack {
-  display: grid;
-  justify-items: start;
-  gap: 5px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .oa-pending-payments-status-action-line {
@@ -3329,40 +3328,6 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   gap: 3px;
-}
-
-.oa-pending-payments-writeback-line {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 3px;
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-label);
-  font-weight: 700;
-}
-
-.oa-pending-payments-writeback-button {
-  border: 1px solid color-mix(in srgb, var(--fp-border-strong) 72%, transparent);
-  border-radius: 6px;
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  cursor: pointer;
-  font: inherit;
-  line-height: 1.1;
-  padding: 3px 7px;
-}
-
-.oa-pending-payments-writeback-button:hover:not(:disabled),
-.oa-pending-payments-writeback-button:focus-visible {
-  border-color: var(--fp-focus);
-  color: var(--fp-accent);
-  outline: none;
-}
-
-.oa-pending-payments-writeback-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .oa-pending-payments-empty-bank-cell {
@@ -19485,7 +19450,7 @@ body.column-layout-dragging {
 
 .cost-view-switcher-label {
   color: var(--fp-text-muted);
-  font-size: 11px;
+  font-size: var(--fp-text-label);
   font-weight: 700;
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -19548,7 +19513,7 @@ body.column-layout-dragging {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-md);
   background: var(--fp-surface);
-  box-shadow: var(--fp-shadow-lg);
+  box-shadow: var(--fp-shadow-popover);
   overflow: auto;
 }
 
@@ -19596,7 +19561,7 @@ body.column-layout-dragging {
   display: grid;
   gap: 2px;
   color: var(--fp-text-muted);
-  font-size: 11px;
+  font-size: var(--fp-text-label);
 }
 
 .cost-manual-allocation-facts strong,
@@ -19634,7 +19599,7 @@ body.column-layout-dragging {
 
 .cost-manual-allocation-unit small {
   color: var(--fp-text-muted);
-  font-size: 11px;
+  font-size: var(--fp-text-label);
 }
 
 .cost-manual-allocation-unit [data-slot="base"] {

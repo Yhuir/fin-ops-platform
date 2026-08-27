@@ -16,7 +16,7 @@
 - OA 待付款 rows、summary、statistics、facets、筛选、排序、分页和惰性详情。
 - `/api/oa-pending-payments` owned endpoints 的单次鉴权、tenant 隔离和结构化 HTTP 错误。
 - 页面 query service 的业务组合，以及 page-specific repository 的 canonical SQL。
-- in-progress admission、正式 Workbench relation 和 OA paid writeback 编排。
+- in-progress admission、正式 Workbench relation 命令和 OA 支付状态自动同步结果展示。
 - 已完成/进行中 OA 事实源 XLSX 导出；导出边界不消费流水、发票或关系事实。
 - 写后重新 GET 和前端 loading/empty/error 状态。
 
@@ -37,12 +37,12 @@
 | bank candidate query | frontend/API | relation status、keyword、page/page_size、repeated oa_row_ids；全部支出流水池由 PostgreSQL 服务端分页 |
 | completed OA | OA integration | `app.oa_applications` 已提交 snapshot；页面不访问 Mongo |
 | in-progress admission | OA integration | `app.oa_pending_payment_admissions`，按 tenant 读取 |
-| payment status | OA integration/command | `app.oa_pending_payment_status_snapshots`，按 tenant + flow ids 批量读取 |
+| payment status | OA integration/oa-sync worker | `app.oa_pending_payment_status_snapshots`，按 tenant + flow ids 批量读取 |
 | completed relation | Workbench relation owner | 只读 `app.workbench_pair_relations` 中全部 `status='active'`；混合收支关系只把可解析 outflow 作为支付证据，不读 Workbench page payload 或 `workbench_relation` projection |
 | in-progress relation | Workbench relation owner | 与 completed OA 共用 `app.workbench_pair_relations.status='active'`；workflow status 只决定关联台 zone，不产生第二套 relation owner |
 | bank facts | core/bank owner | `app.bank_transactions`，只批量读取当前页 relation members |
 | input invoice facts | invoice owner | `app.invoices`，只批量读取当前页 relation members |
-| write command | frontend | 保留 active relation、outflow、金额、flow id、幂等、CAS/冲突和 audit 校验 |
+| relation write command | frontend | 只创建/扩展 active relation；保留 outflow、幂等、CAS/冲突和 audit 校验，不直接写 OA 支付状态 |
 
 ## 直接输出 I/O
 
@@ -56,7 +56,8 @@
 | detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
 | bank candidates | frontend drawer | canonical bank facts + active formal relations；返回 relation status 与服务端 pagination |
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
-| canonical status reconcile | PostgreSQL | 外部写回成功或 already-paid 后幂等记录 payment-status snapshot；混合关系写回金额只合计 outflow |
+| payment reconcile event | `job.outbox_events` / `oa-sync` worker | relation writer 同事务登记 `oa.payment_status.reconcile`；worker 按最新 active OA+outflow topology 幂等写外部状态与 PostgreSQL snapshot |
+| writeback ownership | PostgreSQL | `app.oa_payment_status_writeback_states` 只记录本 App 是否改变过该 flow；撤回时只恢复 App-owned 状态，外部原有 paid 不回退 |
 | formal relation mutation | PostgreSQL | 只调用 `WorkbenchRelationCommandService`；扩展唯一 active case 时保留原 case 和发票成员，冲突或多个 owner fail closed |
 | matching dirty scopes | `job.workbench_matching_dirty_scopes` | admission 或 completed OA canonical snapshot 发生匹配相关变化时，在同一业务事务中标记实际月份及前后各两个月；仅 payment-status 变化不触发匹配。 |
 | Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
@@ -68,7 +69,7 @@
 - `PostgresOaPendingPaymentQueryRepository.snapshot()` 显式执行 `REPEATABLE READ READ ONLY`。
 - 同一 rows 响应的 descriptors、pagination、summary、statistics、status counts 和 filter options 在一个 snapshot 内读取。
 - selector 使用一个 set-based statement 完成过滤、排序、服务端分页与聚合；随后只为当前页批量 hydrate canonical records/relations/bank/invoices/status。
-- selector 与 hydrate 都不得按 relation mode 丢弃 active relation；支付状态、展示和写回只消费成功解析的 outflow bank facts。
+- selector 与 hydrate 都不得按 relation mode 丢弃 active relation；支付状态和展示只消费成功解析的 outflow bank facts。
 - 查询次数与 page size 无关；最大 `page_size=200`，禁止逐行/逐组查询和 Python/浏览器全量分页。
 - 详情各自使用一个只读 repeatable-read snapshot，先定位 descriptor，再批量 hydrate 单一 canonical group。
 - 候选抽屉用一个 set-based statement 读取全量月份的 outflow bank facts、active relation status、keyword filter、total 和当前页；不得经 command service 全量加载后 Python 分页。
@@ -78,7 +79,7 @@
 
 - completed OA：`app.oa_applications`，OA sync owner。
 - in-progress admission：`app.oa_pending_payment_admissions`，OA sync owner。
-- payment status：`app.oa_pending_payment_status_snapshots`，OA sync/paid reconcile owner。
+- payment status：`app.oa_pending_payment_status_snapshots`，OA sync/payment reconcile owner；自动写回 ownership 为 `app.oa_payment_status_writeback_states`。
 - formal relation：`app.workbench_pair_relations`，Workbench relation owner；completed 与 in-progress 共用同一事实源。
 - 历史 pending relation / claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表只读审计；migration `0136` 已迁移 active 关系并撤销运行时写权限。
 - bank/input invoice：`app.bank_transactions`、`app.invoices`，对应 canonical owner。
@@ -93,7 +94,7 @@
 | in-progress OA relation create/extend | OA pending command -> Workbench relation UoW | formal owner transaction commit 后下一次页面 GET 可见；无 promotion 阶段 |
 | admission terminal cleanup | OA source snapshot -> Workbench relation command | OA 不再属于 completed 或 admitted 时，从 active case 移除该 OA；剩余成员仍构成有效组则保留原 case，否则取消 relation |
 | bank/invoice import or correction | canonical import owners | commit 后下一次页面 GET 可见 |
-| MySQL paid writeback | OA command adapter + PG snapshot reconcile | command 成功后前端重新 GET；PG 失败返回可重试错误 |
+| active relation topology change | Workbench relation repository -> `oa.payment_status.reconcile` -> oa-sync worker | 有 active outflow 自动 paid；无 active outflow 仅将 App-owned paid 恢复 pending；金额不等不阻断，失败状态不覆盖 |
 
 任何 writer 都不能要求本页面 freshness enqueue/polling 才能达到正确结果。外部系统未同步到 PostgreSQL 属于 integration lag，不允许通过页面 fallback 绕过。
 
@@ -101,7 +102,8 @@
 
 ```text
 route -> query service -> page PostgreSQL repository -> canonical tables
-route -> command service -> existing command/adapters/repositories
+route -> command service -> Workbench relation command
+relation repository -> durable reconcile event -> oa-sync handler -> OA payment adapter + PostgreSQL snapshot/state
 frontend -> page API only
 ```
 
@@ -127,6 +129,7 @@ frontend -> page API only
 | Query repository | `postgres_repositories/oa_pending_payment_query.py` |
 | Pure row/detail composition | `oa_pending_payment_canonical_rows.py`、`oa_pending_payment_details.py` |
 | Command | `oa_pending_payment_command_service.py`、`workbench_relation_command_service.py` |
+| Payment reconcile | `oa_payment_status_reconcile.py`、`oa_payment_status_reconcile_contract.py`、`postgres_repositories/oa_payment_status_reconcile.py` |
 | Canonical snapshots | `postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_admission.py`、`oa_projection.py` |
 | Tests/docs | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPayment*`、本目录 |
 
@@ -138,6 +141,7 @@ frontend -> page API only
 - `If-None-Match`、ETag、`202 refreshing`、`304`。
 - frontend conditional polling、visibility retry 和 Audit barrier wait。
 - command response 的 `readModelRefresh` envelope。
+- 人工 `writeback-paid` / `confirm-paid` API、按钮与 page-command direct MySQL write。
 
 旧 service/projector/worker、manifest/scope/registry、App Status、deploy/RabbitMQ registration、Redis cache schema 和 invoice-lifecycle 间接依赖已在跨页面清理中删除。`read_model.oa_pending_payment_*` 历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
 

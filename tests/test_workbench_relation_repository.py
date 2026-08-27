@@ -51,6 +51,62 @@ def _snapshot(*, case_ids: tuple[str, ...] = ("CASE-1",)) -> dict[str, object]:
     }
 
 
+def _oa_bank_snapshot(
+    *,
+    status: str = "active",
+    version: int = 1,
+) -> dict[str, object]:
+    return {
+        "pair_relations": {
+            "CASE-OA-BANK": {
+                "case_id": "CASE-OA-BANK",
+                "relation_mode": "manual_confirmed",
+                "status": status,
+                "version": version,
+                "month_scope": "2026-08",
+                "row_ids": ["oa-1", "bank-1"],
+                "row_types": ["oa", "bank"],
+            }
+        },
+        "pair_relation_history": [],
+    }
+
+
+class QueueRecordingConnection(RecordingConnection):
+    def __init__(self, *, existing_relation: dict[str, object] | None = None) -> None:
+        super().__init__()
+        self.existing_relation = existing_relation
+
+    def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, object]]:
+        self.fetch_all_calls.append((sql, params))
+        normalized_sql = " ".join(sql.lower().split())
+        if "select case_id, status, version, row_ids, row_types" in normalized_sql:
+            return [self.existing_relation] if self.existing_relation is not None else []
+        return []
+
+    def fetch_one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, object]:
+        self.fetch_one_calls.append((sql, params))
+        if "insert into job.outbox_events" not in " ".join(sql.lower().split()):
+            return {}
+        return {
+            "event_id": "event-1",
+            "tenant_id": "default",
+            "event_type": params[1],
+            "aggregate_type": params[2],
+            "aggregate_id": params[3],
+            "scope_type": params[4],
+            "scope_key": params[5],
+            "dedupe_key": params[6],
+            "payload": params[7],
+            "attempts": 0,
+            "status": "pending",
+            "schema_version": 1,
+            "source_version": params[9],
+            "priority": params[10],
+            "trace_id": params[11],
+        }
+
+
 def _normalized_sql(calls: list[tuple[str, tuple[Any, ...]]]) -> list[str]:
     return [" ".join(sql.lower().split()) for sql, _params in calls]
 
@@ -148,6 +204,48 @@ def test_relation_delta_save_has_the_same_canonical_only_io_boundary() -> None:
     all_sql = _normalized_sql(connection.execute_calls + connection.fetch_one_calls + connection.fetch_all_calls)
     assert any("insert into app.workbench_pair_relations" in sql for sql in all_sql)
     assert not any("job.read_model_dirty_scopes" in sql or "job.outbox_events" in sql for sql in all_sql)
+
+
+def test_oa_bank_relation_change_enqueues_payment_status_reconcile_event() -> None:
+    connection = QueueRecordingConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relation_delta(
+        _oa_bank_snapshot(),
+        changed_case_ids={"CASE-OA-BANK"},
+    )
+
+    queue_calls = [
+        (sql, params)
+        for sql, params in connection.fetch_one_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+    ]
+    assert len(queue_calls) == 1
+    assert queue_calls[0][1][1] == "oa.payment_status.reconcile"
+    assert queue_calls[0][1][7]["oa_row_ids"] == ["oa-1"]
+
+
+def test_unchanged_oa_bank_relation_does_not_enqueue_duplicate_reconcile_event() -> None:
+    connection = QueueRecordingConnection(
+        existing_relation={
+            "case_id": "CASE-OA-BANK",
+            "status": "active",
+            "version": 1,
+            "row_ids": ["oa-1", "bank-1"],
+            "row_types": ["oa", "bank"],
+        }
+    )
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relations(
+        _oa_bank_snapshot(),
+        changed_case_ids=None,
+    )
+
+    assert not any(
+        "insert into job.outbox_events" in " ".join(sql.lower().split())
+        for sql, _params in connection.fetch_one_calls
+    )
 
 
 def test_relation_repository_registers_runtime_publication_with_uow_callback() -> None:

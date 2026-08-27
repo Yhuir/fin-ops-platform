@@ -17,6 +17,10 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT
 from fin_ops_platform.services.mongo_oa_adapter import load_mongo_oa_settings
 from fin_ops_platform.services.oa_payment_status_service import MySQLOAPaymentStatusRepository
+from fin_ops_platform.services.oa_payment_status_reconcile import OAPaymentStatusReconcileService
+from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_RECONCILE_EVENT,
+)
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoicePromotionService,
 )
@@ -30,6 +34,9 @@ from fin_ops_platform.services.postgres_connection import (
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_payment_status_reconcile import (
+    PostgresOAPaymentStatusReconcileRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_relation import (
     PostgresWorkbenchRelationRepository,
 )
@@ -38,7 +45,9 @@ from fin_ops_platform.services.workbench_relation_command_service import (
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     OA_PROJECTION_SYNC_VERSION,
+    PostgresOAProjectionAdapter,
     PostgresOAProjectionRepository,
+    PostgresOAWorkflowRepository,
 )
 from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
     PostgresOAAttachmentInvoiceRepository,
@@ -192,8 +201,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             pending_payment_source_snapshot_repository=pending_payment_source_snapshot_repository,
         )
         handlers["oa.sync"] = sync_service.handle_runtime_event
+        if args.check:
+            handlers[OA_PAYMENT_STATUS_RECONCILE_EVENT] = lambda _event: {"status": "check"}
+        else:
+            if payment_status_repository is None:
+                raise RuntimeError(
+                    "OA payment-status reconciliation requires FIN_OPS_OA_PAYMENT_STATUS_ENABLED."
+                )
+            payment_status_reconcile_service = OAPaymentStatusReconcileService(
+                oa_projection=PostgresOAProjectionAdapter(PostgresOAWorkflowRepository(connection)),
+                reconcile_repository=PostgresOAPaymentStatusReconcileRepository(connection),
+                payment_status_repository=payment_status_repository,
+                payment_status_snapshot_writer=pending_payment_source_snapshot_repository,
+            )
+            handlers[OA_PAYMENT_STATUS_RECONCILE_EVENT] = (
+                payment_status_reconcile_service.handle_runtime_event
+            )
         if "oa.sync" not in config.event_types:
             config.event_types.append("oa.sync")
+        if OA_PAYMENT_STATUS_RECONCILE_EVENT not in config.event_types:
+            config.event_types.append(OA_PAYMENT_STATUS_RECONCILE_EVENT)
     if args.enable_import_job_processing:
         import_processors = (
             check_import_job_processors()

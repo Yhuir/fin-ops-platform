@@ -47,19 +47,7 @@ class FakeCommandService:
             "oaRowIds": payload.get("oa_row_ids") or payload.get("oaRowIds") or [],
             "bankTransactionIds": payload.get("bank_transaction_ids") or payload.get("bankTransactionIds") or [],
             "relation": {"status": "confirmed"},
-            "autoWriteback": {"code": "written", "label": "已写回", "matched": True, "writebackCount": 1},
-            "oaPaymentWritebacks": [{"code": "written", "label": "已写回", "flowId": "proc-api"}],
-        }
-
-    def writeback_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        self.link_calls.append(({"writeback_paid": dict(payload)}, actor_id))
-        return {
-            "success": True,
-            "action": "oa_pending_payment_writeback_paid",
-            "oaRowIds": payload.get("oa_row_ids") or payload.get("oaRowIds") or [],
-            "writebackCount": 1,
-            "oaPaymentWriteback": {"code": "written", "label": "已写回", "flowId": "proc-api"},
-            "oaPaymentWritebacks": [{"code": "written", "label": "已写回", "flowId": "proc-api"}],
+            "paymentStatusSync": {"code": "queued", "label": "已进入自动同步"},
         }
 
 
@@ -218,31 +206,20 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertTrue(payload["success"])
         self.assertEqual(payload["action"], "oa_pending_payment_link_bank_transactions")
-        self.assertEqual(payload["autoWriteback"]["label"], "已写回")
+        self.assertEqual(payload["paymentStatusSync"]["code"], "queued")
         self.assertNotIn("readModelRefresh", payload)
         self.assertEqual(command_service.link_calls, [({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}, "tester")])
 
-    def test_writeback_paid_route_delegates_to_command_service_with_write_actor(self) -> None:
+    def test_writeback_paid_route_is_removed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            command_service = FakeCommandService()
-            app._oa_pending_payment_api_routes = OaPendingPaymentApiRoutes(command_service=command_service)
-            app._workbench_write_auth_context = lambda _headers: ("tester", "default")  # type: ignore[method-assign]
-
             response = app.handle_request(
                 "POST",
                 "/api/oa-pending-payments/writeback-paid",
                 body=json.dumps({"oa_row_ids": ["oa-api"]}),
             )
 
-        self.assertEqual(response.status_code, 200)
-        payload = json.loads(response.body)
-        self.assertTrue(payload["success"])
-        self.assertEqual(payload["action"], "oa_pending_payment_writeback_paid")
-        self.assertEqual(payload["writebackCount"], 1)
-        self.assertNotIn("readModelRefresh", payload)
-        self.assertEqual(payload["oaPaymentWriteback"]["flowId"], "proc-api")
-        self.assertEqual(command_service.link_calls, [({"writeback_paid": {"oa_row_ids": ["oa-api"]}}, "tester")])
+        self.assertEqual(response.status_code, HTTPStatus.NOT_FOUND)
 
     def test_bank_transaction_candidates_route_delegates_to_tenant_query_service(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -436,7 +413,6 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 "/api/oa-pending-payments/link-bank-transactions",
                 {"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]},
             ),
-            ("POST", "/api/oa-pending-payments/writeback-paid", {"oa_row_ids": ["oa-api"]}),
         ]
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir), install_test_session=False)
@@ -461,20 +437,12 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                 permissions=[],
             )
             headers = {"Authorization": "Bearer oa-readonly-token"}
-            responses = [
-                app.handle_request(
-                    "POST",
-                    "/api/oa-pending-payments/link-bank-transactions",
-                    headers=headers,
-                    body=json.dumps({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}),
-                ),
-                app.handle_request(
-                    "POST",
-                    "/api/oa-pending-payments/writeback-paid",
-                    headers=headers,
-                    body=json.dumps({"oa_row_ids": ["oa-api"]}),
-                ),
-            ]
+            responses = [app.handle_request(
+                "POST",
+                "/api/oa-pending-payments/link-bank-transactions",
+                headers=headers,
+                body=json.dumps({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}),
+            )]
 
         self.assertTrue(all(response.status_code == HTTPStatus.FORBIDDEN for response in responses))
         self.assertTrue(all(json.loads(response.body)["error"] == "permission_denied" for response in responses))

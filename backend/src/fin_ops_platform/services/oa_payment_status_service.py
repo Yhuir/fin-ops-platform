@@ -65,6 +65,8 @@ class OAPaymentStatusRepository(Protocol):
 
     def mark_paid(self, flow_id: str) -> OAPaymentStatusRecord: ...
 
+    def mark_pending(self, flow_id: str) -> OAPaymentStatusRecord: ...
+
 
 def oa_flow_id_candidates(record: OAApplicationRecord) -> OAFlowIdCandidates:
     detail_fields = record.detail_fields if isinstance(record.detail_fields, dict) else {}
@@ -191,6 +193,7 @@ class MySQLOAPaymentStatusRepository:
                     (normalized_flow_id,),
                 )
                 rows = list(cursor.fetchall() or [])
+                _assert_not_failed(rows, normalized_flow_id)
                 if rows:
                     cursor.execute(
                         "UPDATE t_payment_simple SET pay_status = %s WHERE flow_id = %s AND pay_status <> %s",
@@ -208,6 +211,41 @@ class MySQLOAPaymentStatusRepository:
             if isinstance(exc, OAPaymentStatusError):
                 raise
             raise OAPaymentStatusExecutionError(f"Failed to mark OA payment status as paid: {exc}") from exc
+        finally:
+            connection.close()
+
+    def mark_pending(self, flow_id: str) -> OAPaymentStatusRecord:
+        normalized_flow_id = _required_text(flow_id, "flow_id")
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, flow_id, pay_status
+                    FROM t_payment_simple
+                    WHERE flow_id = %s
+                    ORDER BY create_time DESC, id DESC
+                    FOR UPDATE
+                    """,
+                    (normalized_flow_id,),
+                )
+                rows = list(cursor.fetchall() or [])
+                if not rows:
+                    raise OAPaymentStatusExecutionError(
+                        f"Cannot mark missing OA payment status as pending: {normalized_flow_id}"
+                    )
+                _assert_not_failed(rows, normalized_flow_id)
+                cursor.execute(
+                    "UPDATE t_payment_simple SET pay_status = %s WHERE flow_id = %s AND pay_status <> %s",
+                    (PAY_STATUS_PENDING, normalized_flow_id, PAY_STATUS_PENDING),
+                )
+            connection.commit()
+            return OAPaymentStatusRecord(flow_id=normalized_flow_id, pay_status=PAY_STATUS_PENDING)
+        except Exception as exc:  # pragma: no cover - deployed dependency path
+            connection.rollback()
+            if isinstance(exc, OAPaymentStatusError):
+                raise
+            raise OAPaymentStatusExecutionError(f"Failed to mark OA payment status as pending: {exc}") from exc
         finally:
             connection.close()
 
@@ -238,6 +276,13 @@ def _payment_status_record(row: Any) -> OAPaymentStatusRecord | None:
     if not flow_id or pay_status == "":
         return None
     return OAPaymentStatusRecord(flow_id=flow_id, pay_status=int(pay_status))
+
+
+def _assert_not_failed(rows: list[Any], flow_id: str) -> None:
+    if any(_first_row_text(row, 2, "pay_status") == str(PAY_STATUS_FAILED) for row in rows):
+        raise OAPaymentStatusExecutionError(
+            f"OA payment status is failed and requires explicit handling: {flow_id}"
+        )
 
 
 def _first_row_text(row: Any, index: int, key: str) -> str:

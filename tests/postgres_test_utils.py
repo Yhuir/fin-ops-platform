@@ -169,6 +169,7 @@ EXPECTED_MIGRATION_FILES = [
     "0155_revalidate_etc_summary_anomaly_review.sql",
     "0156_backfill_workbench_anomaly_reviewer_identity.sql",
     "0157_cost_statistics_manual_allocations.sql",
+    "0158_oa_payment_status_auto_reconcile.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (

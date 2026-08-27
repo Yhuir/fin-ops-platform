@@ -88,9 +88,6 @@ type ApiMockOptions = {
   oaPendingPaymentBankLinkDelayMs?: number;
   oaPendingPaymentBankLinkError?: boolean;
   oaPendingPaymentBankLinkFlow?: boolean;
-  oaPendingPaymentWritebackPaidDelayMs?: number;
-  oaPendingPaymentWritebackPaidError?: boolean;
-  oaPendingPaymentWritebackPaidFlow?: boolean;
   oaPendingPaymentRowsFailOnce?: boolean;
   oaPendingPaymentRowsFailuresBeforeSuccess?: number;
   oaPendingPaymentRelationFanout?: boolean;
@@ -4470,103 +4467,6 @@ function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
   };
 }
 
-function oaPendingPaymentWritebackPaidRowsPayload(confirmed: boolean) {
-  return {
-    rows: [
-      {
-        id: "oa-writeback-paid-row-e2e-001",
-        oa: {
-          id: "oa-writeback-paid-e2e-001",
-          primaryOaId: "oa-writeback-paid-e2e-001",
-          applicantName: "进行中付款申请人",
-          applicationType: "付款申请",
-          projectName: "进行中写回项目",
-          applicationTime: "2026-06-18",
-          amount: "9800.00",
-          detailAvailable: true,
-          workflowStatus: "in_progress",
-          relationCount: 1,
-          relationStatus: "linked",
-          relationSource: "workbench_relation",
-        },
-        paymentStatus: {
-          code: "paid",
-          label: "已支付",
-          reason: "支出流水合计等于 OA 金额，等待用户确认写回 OA。",
-          severity: "success",
-        },
-        oaPaymentWriteback: confirmed
-          ? { code: "written", label: "已写回", flowIds: ["flow-writeback-paid-e2e-001"], syncStatus: "ready" }
-          : { code: "not_written", label: "未写回", flowIds: ["flow-writeback-paid-e2e-001"], syncStatus: "ready" },
-        bankTransaction: {
-          primaryBankTransactionId: "bank-writeback-paid-e2e-001",
-          accountDetailNo: "bank-detail-writeback-paid-e2e-001",
-          enterpriseSerialNo: "E2E-WRITEBACK-PAID-SERIAL-001",
-          voucherKind: "电子转账凭证",
-          voucherNo: "E2E-WRITEBACK-PAID-001",
-          bankName: "招商银行",
-          accountNo: "6222000000006789",
-          accountLast4: "6789",
-          bankAccount: "招商银行 6789",
-          direction: "outflow",
-          directionLabel: "支出",
-          accountName: "云南溯源科技有限公司",
-          tradeTime: "2026-06-18 10:30:00",
-          debitAmount: "9800.00",
-          creditAmount: "0.00",
-          balance: "102400.00",
-          currency: "人民币元",
-          counterpartyName: "进行中写回供应商",
-          counterpartyAccountNo: "2502124119024526789",
-          counterpartyBankName: "招商银行昆明支行",
-          bookedDate: "20260618",
-          summary: confirmed ? "进行中 OA 已写回" : "进行中 OA 待写回",
-          remark: confirmed ? "写回后刷新" : "确认已支付前",
-          amount: "9800.00",
-          paidTotal: "9800.00",
-          relationCount: 1,
-          relationStatus: "linked",
-          relationSource: "workbench_relation",
-          hasMultiple: false,
-          detailMode: "single",
-        },
-        invoice: {
-          primaryInvoiceId: null,
-          digitalInvoiceNo: "",
-          sellerName: "",
-          invoiceDate: "",
-          totalWithTax: "",
-          relationCount: 0,
-          hasMultiple: false,
-          detailMode: "none",
-        },
-      },
-    ],
-    pagination: { page: 1, pageSize: 20, total: 1 },
-    summary: {
-      rowCount: 1,
-      oaAmountTotal: "9800.00",
-      bankPaidTotal: "9800.00",
-      statusCounts: { paid: 1 },
-      viewCounts: { completed: 1, in_progress: 1 },
-    },
-    filterOptions: oaPendingPaymentFilterOptions(),
-    filterConfig: [
-      { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
-      { field: "oa_project_name", label: "项目名称", mode: "enum_multi", sortable: true, operators: ["in"] },
-      { field: "payment_status", label: "支付状态", mode: "enum_multi", sortable: true, operators: ["in"] },
-      { field: "bank_counterparty_name", label: "对方户名", mode: "enum_multi", sortable: true, operators: ["in"] },
-      { field: "bank_trade_time", label: "交易时间", mode: "date", sortable: true, operators: ["between", "equals"] },
-      { field: "bank_account", label: "银行账户", mode: "enum_multi", sortable: false, operators: ["in"] },
-      { field: "bank_direction", label: "收支", mode: "enum_multi", sortable: false, operators: ["in"] },
-      { field: "seller_name", label: "发票方", mode: "enum_multi", sortable: true, operators: ["in"] },
-      { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"] },
-    ],
-    viewMode: "in_progress",
-    view_mode: "in_progress",
-  };
-}
-
 function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
   return {
     rows: [
@@ -4590,7 +4490,7 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
           ? {
             code: "paid",
             label: "已支付",
-            reason: "支出流水已通过进行中 OA 关联抽屉建立 Workbench relation，并已自动写回 OA。",
+            reason: "支出流水已建立正式关联，OA 支付状态由后台自动同步。",
             severity: "success",
           }
           : {
@@ -8619,7 +8519,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let oaPendingPaymentRowsFailuresRemaining =
     options.oaPendingPaymentRowsFailuresBeforeSuccess ?? (options.oaPendingPaymentRowsFailOnce ? 1 : 0);
   let oaPendingPaymentBankLinked = false;
-  let oaPendingPaymentWritebackPaidConfirmed = false;
   let etcBusinessBatchStatus: EtcBusinessBatchStatus = options.etcTicketInitialBusinessBatchStatus ?? "imported";
   let etcBusinessBatchDeleted = false;
   let etcWorkflowSourceFileDeleted = false;
@@ -9355,9 +9254,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.oaPendingPaymentBankLinkFlow && url.searchParams.get("view_mode") === "in_progress") {
         return json(route, oaPendingPaymentBankLinkRowsPayload(oaPendingPaymentBankLinked));
       }
-      if (options.oaPendingPaymentWritebackPaidFlow && url.searchParams.get("view_mode") === "in_progress") {
-        return json(route, oaPendingPaymentWritebackPaidRowsPayload(oaPendingPaymentWritebackPaidConfirmed));
-      }
       if (options.oaPendingPaymentRelationFanout) {
         return json(route, oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed));
       }
@@ -9403,46 +9299,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           status: "confirmed",
           origin: "oa_pending_payment",
         },
-        autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
-        oaPaymentWritebacks: [
-          { code: "written", label: "已写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" },
-        ],
-      });
-    }
-
-    if (path === "/api/oa-pending-payments/writeback-paid") {
-      await delay(Math.max(0, options.oaPendingPaymentWritebackPaidDelayMs ?? 0));
-      if (options.oaPendingPaymentWritebackPaidError) {
-        return json(route, {
-          error: "oa_pending_payment_writeback_paid_rejected",
-          message: "OA 写回校验失败，未写入支付状态。",
-          affected_oa_row_ids: [],
-          affected_bank_transaction_ids: [],
-        }, 409);
-      }
-      if (options.oaPendingPaymentWritebackPaidFlow) {
-        oaPendingPaymentWritebackPaidConfirmed = true;
-        return json(route, {
-          success: true,
-          action: "oa_pending_payment_writeback_paid",
-          oaRowIds: ["oa-writeback-paid-e2e-001"],
-          writebackCount: 1,
-          oaPaymentWritebacks: [
-            {
-              code: "written",
-              label: "已写回",
-              flowIds: ["flow-writeback-paid-e2e-001"],
-              syncStatus: "ready",
-            },
-          ],
-        });
-      }
-      return json(route, {
-        success: true,
-        action: "oa_pending_payment_writeback_paid",
-        oaRowIds: [],
-        writebackCount: 0,
-        oaPaymentWritebacks: [],
+        paymentStatusSync: { code: "queued", label: "已进入自动同步" },
       });
     }
 

@@ -12,6 +12,7 @@ from fin_ops_platform.services.oa_adapter import (
 from fin_ops_platform.services.oa_payment_status_service import (
     OAPaymentStatusRecord,
     PAY_STATUS_PAID,
+    PAY_STATUS_PENDING,
     oa_flow_id_candidates,
 )
 from fin_ops_platform.services.postgres_repositories.common import jsonb, run_in_transaction, serialize_value, text
@@ -692,31 +693,37 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
 
         return run_in_transaction(self._connection, write)
 
-    def record_paid_statuses(
+    def record_payment_statuses(
         self,
         *,
         records: list[OAApplicationRecord],
+        pay_statuses_by_flow_id: dict[str, int],
         tenant_id: str = "default",
     ) -> OaPendingPaymentSourceSnapshotResult:
-        """Reconcile successful external payment writes into the canonical PG snapshot."""
+        """Reconcile external payment status writes into the canonical PG snapshot."""
 
         normalized_tenant_id = text(tenant_id) or "default"
-        paid_rows: dict[str, dict[str, Any]] = {}
+        reconciled_rows: dict[str, dict[str, Any]] = {}
         for record in list(records or []):
             if not isinstance(record, OAApplicationRecord):
-                raise ValueError("OA paid-status reconciliation requires OAApplicationRecord values.")
+                raise ValueError("OA payment-status reconciliation requires OAApplicationRecord values.")
             flow_id = _record_flow_id(record)
             scope_month = _month(record.month)
             if not flow_id or not scope_month:
-                raise ValueError(f"OA paid-status reconciliation requires flow_id and month for {record.id}.")
+                raise ValueError(f"OA payment-status reconciliation requires flow_id and month for {record.id}.")
+            if flow_id not in pay_statuses_by_flow_id:
+                raise ValueError(f"OA payment-status reconciliation requires a status for {flow_id}.")
+            pay_status = int(pay_statuses_by_flow_id[flow_id])
+            if pay_status not in {PAY_STATUS_PENDING, PAY_STATUS_PAID}:
+                raise ValueError(f"Unsupported OA payment status for snapshot reconciliation: {pay_status}.")
             payload = {
                 "flow_id": flow_id,
-                "pay_status": PAY_STATUS_PAID,
+                "pay_status": pay_status,
                 "scope_month": scope_month,
             }
-            paid_rows[flow_id] = {**payload, "source_signature": _signature(payload)}
+            reconciled_rows[flow_id] = {**payload, "source_signature": _signature(payload)}
 
-        if not paid_rows:
+        if not reconciled_rows:
             return OaPendingPaymentSourceSnapshotResult(
                 completed_projection_changed_scopes=(),
                 oa_pending_payment_changed_scopes=(),
@@ -749,18 +756,18 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             }
             changed_scopes: set[str] = set()
             changed_rows: list[dict[str, Any]] = []
-            for flow_id, paid_row in paid_rows.items():
+            for flow_id, reconciled_row in reconciled_rows.items():
                 current = statuses.get(flow_id) or {}
                 if (
                     int(current.get("pay_status") or 0),
                     _month(current.get("scope_month")),
-                ) == (PAY_STATUS_PAID, paid_row["scope_month"]):
+                ) == (reconciled_row["pay_status"], reconciled_row["scope_month"]):
                     continue
-                for scope in (_month(current.get("scope_month")), paid_row["scope_month"]):
+                for scope in (_month(current.get("scope_month")), reconciled_row["scope_month"]):
                     if scope:
                         changed_scopes.add(scope)
-                statuses[flow_id] = paid_row
-                changed_rows.append(paid_row)
+                statuses[flow_id] = reconciled_row
+                changed_rows.append(reconciled_row)
 
             if not changed_rows:
                 return OaPendingPaymentSourceSnapshotResult(

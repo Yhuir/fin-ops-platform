@@ -9,11 +9,6 @@ from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
 from fin_ops_platform.services.imports import ImportNormalizationService, clean_string
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_payment_status_service import (
-    OAPaymentStatusError,
-    OAPaymentStatusRepository,
-    PAY_STATUS_PAID,
-)
 from fin_ops_platform.services.oa_pending_payment_query_contract import (
     OaPendingPaymentError,
     VIEW_MODE_IN_PROGRESS,
@@ -24,7 +19,6 @@ from fin_ops_platform.services.workbench_relation_command_service import (
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
-from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 class OaPendingPaymentCommandService:
@@ -34,16 +28,12 @@ class OaPendingPaymentCommandService:
         import_service: ImportNormalizationService,
         oa_projection: Any,
         relation_command_service: Any | None,
-        payment_status_repository: OAPaymentStatusRepository | None,
-        payment_status_snapshot_writer: Any | None = None,
         bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
         bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._import_service = import_service
         self._oa_projection = oa_projection
         self._relation_command_service = relation_command_service
-        self._payment_status_repository = payment_status_repository
-        self._payment_status_snapshot_writer = payment_status_snapshot_writer
         self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
         self._bank_flow_rule_tag_rules_payload = bank_flow_rule_tag_rules_payload
 
@@ -80,7 +70,6 @@ class OaPendingPaymentCommandService:
                 details={"bank_transaction_ids": non_outflow},
             )
         amount_check = self._relation_amount_check(records, bank_transactions)
-        flow_ids = self._resolve_oa_flow_ids(records) if amount_check.get("matched") is True else []
         relation_result = self._confirm_formal_relation(
             records,
             bank_transactions,
@@ -91,56 +80,16 @@ class OaPendingPaymentCommandService:
             history_operation_type="oa_pending_payment_link_bank",
             history_note=_payload_text(payload, "note") or "OA 待付款关联支出流水",
         )
-        writebacks = self._mark_oa_flow_ids_paid(flow_ids)
-        if flow_ids:
-            self._record_paid_statuses(records)
         return {
             "success": True,
             "action": "oa_pending_payment_link_bank_transactions",
             "oaRowIds": [record.id for record in records],
             "bankTransactionIds": [transaction.id for transaction in bank_transactions],
             "relation": relation_result,
-            "autoWriteback": {
-                "code": "written" if writebacks else "not_required",
-                "label": "已写回" if writebacks else "未写回",
-                "reason": amount_check.get("reason", ""),
-                "matched": amount_check.get("matched") is True,
-                "writebackCount": len(writebacks),
+            "paymentStatusSync": {
+                "code": "queued",
+                "label": "已进入自动同步",
             },
-            "oaPaymentWriteback": writebacks[0] if len(writebacks) == 1 else None,
-            "oaPaymentWritebacks": writebacks,
-        }
-
-    def writeback_paid(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
-        if self._payment_status_repository is None:
-            raise OaPendingPaymentError(
-                "oa_payment_status_repository_unavailable",
-                "OA payment status writeback is not configured.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            )
-        oa_row_ids = _payload_list(payload, "oa_row_ids", "oaRowIds")
-        if not oa_row_ids:
-            raise OaPendingPaymentError("oa_row_ids_required", "At least one OA row is required.")
-        records = self._writeback_records(oa_row_ids)
-        if len(records) != len(set(oa_row_ids)):
-            found_ids = {record.id for record in records}
-            missing = [row_id for row_id in oa_row_ids if row_id not in found_ids]
-            raise OaPendingPaymentError(
-                "oa_not_found",
-                "One or more OA rows were not found.",
-                status_code=HTTPStatus.NOT_FOUND,
-                details={"oa_row_ids": missing},
-            )
-        writeback_items, eligible_records = self._writeback_paid_relations(records)
-        self._record_paid_statuses(eligible_records)
-        writebacks = [_public_writeback(item) for item in writeback_items]
-        return {
-            "success": True,
-            "action": "oa_pending_payment_writeback_paid",
-            "oaRowIds": [record.id for record in records],
-            "writebackCount": len(writebacks),
-            "oaPaymentWriteback": writebacks[0] if len(writebacks) == 1 else None,
-            "oaPaymentWritebacks": writebacks,
         }
 
     def _oa_record(self, oa_row_id: str) -> OAApplicationRecord:
@@ -171,21 +120,6 @@ class OaPendingPaymentCommandService:
     def _oa_records(self, oa_row_ids: list[str]) -> list[OAApplicationRecord]:
         return self._records_from_projection(self._oa_projection, oa_row_ids)
 
-    def _writeback_records(self, oa_row_ids: list[str]) -> list[OAApplicationRecord]:
-        wanted: list[str] = []
-        for row_id in oa_row_ids:
-            normalized = clean_string(row_id)
-            if normalized and normalized not in wanted:
-                wanted.append(normalized)
-        records: list[OAApplicationRecord] = []
-        seen: set[str] = set()
-        for record in self._records_from_projection(self._oa_projection, wanted):
-            if record.id in seen:
-                continue
-            seen.add(record.id)
-            records.append(record)
-        record_by_id = {record.id: record for record in records}
-        return [record_by_id[row_id] for row_id in wanted if row_id in record_by_id]
 
     @staticmethod
     def _records_from_projection(projection: Any, oa_row_ids: list[str]) -> list[OAApplicationRecord]:
@@ -247,28 +181,6 @@ class OaPendingPaymentCommandService:
             return []
         return _dedupe_relations(active_relations_for_row_ids(row_ids) or [])
 
-    def _bank_transactions_from_relation(self, relation: dict[str, Any]) -> list[BankTransaction]:
-        bank_ids = _relation_bank_ids(relation)
-        if not bank_ids:
-            raise OaPendingPaymentError(
-                "active_relation_has_no_bank_transaction",
-                "Active relation does not contain a bank transaction.",
-                status_code=HTTPStatus.CONFLICT,
-                details={"case_id": clean_string(relation.get("case_id") or "")},
-            )
-        outflows: list[BankTransaction] = []
-        for bank_id in bank_ids:
-            transaction = self._bank_transaction(bank_id)
-            if _bank_direction(transaction) == "outflow":
-                outflows.append(transaction)
-        if not outflows:
-            raise OaPendingPaymentError(
-                "active_relation_has_no_bank_transaction",
-                "Active relation does not contain an outflow bank transaction.",
-                status_code=HTTPStatus.CONFLICT,
-                details={"case_id": clean_string(relation.get("case_id") or "")},
-            )
-        return outflows
 
     def _relation_amount_check(
         self,
@@ -403,126 +315,6 @@ class OaPendingPaymentCommandService:
                 details=exc.payload,
             ) from exc
 
-    def _resolve_oa_flow_id(self, record: OAApplicationRecord) -> str:
-        assert self._payment_status_repository is not None
-        try:
-            flow_id = self._payment_status_repository.resolve_flow_id(record)
-            if not flow_id:
-                raise OaPendingPaymentError(
-                    "oa_flow_id_not_found",
-                    "Cannot resolve OA Flowable process id for payment status writeback.",
-                    status_code=HTTPStatus.CONFLICT,
-                    details={"oa_row_id": record.id},
-                )
-            return flow_id
-        except OaPendingPaymentError:
-            raise
-        except OAPaymentStatusError as exc:
-            raise OaPendingPaymentError(
-                "oa_payment_status_writeback_unavailable",
-                "OA payment status writeback is unavailable.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                details={"oa_row_id": record.id},
-            ) from exc
-
-    def _mark_oa_paid(self, flow_id: str) -> dict[str, Any]:
-        assert self._payment_status_repository is not None
-        try:
-            status_record = self._payment_status_repository.mark_paid(flow_id)
-        except OAPaymentStatusError as exc:
-            raise OaPendingPaymentError(
-                "oa_payment_status_writeback_unavailable",
-                "OA payment status writeback failed.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                details={"flow_id": flow_id},
-            ) from exc
-        return {
-            "code": "written" if status_record.pay_status == PAY_STATUS_PAID else "not_written",
-            "label": "已写回" if status_record.pay_status == PAY_STATUS_PAID else "未写回",
-            "flowId": status_record.flow_id,
-        }
-
-    def _mark_oa_paid_if_needed(self, flow_id: str) -> dict[str, Any] | None:
-        assert self._payment_status_repository is not None
-        try:
-            status_record = self._payment_status_repository.get_payment_status(flow_id)
-        except OAPaymentStatusError as exc:
-            raise OaPendingPaymentError(
-                "oa_payment_status_writeback_unavailable",
-                "OA payment status writeback is unavailable.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                details={"flow_id": flow_id},
-            ) from exc
-        if status_record is not None and status_record.pay_status == PAY_STATUS_PAID:
-            return None
-        return self._mark_oa_paid(flow_id)
-
-    def _record_paid_statuses(self, records: list[OAApplicationRecord]) -> bool:
-        if not records:
-            return False
-        writer = getattr(self._payment_status_snapshot_writer, "record_paid_statuses", None)
-        if not callable(writer):
-            raise OaPendingPaymentError(
-                "oa_payment_status_snapshot_writer_unavailable",
-                "OA payment status snapshot writer is not configured.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            )
-        try:
-            result = writer(records=records)
-        except (ValueError, RuntimeError) as exc:
-            raise OaPendingPaymentError(
-                "oa_payment_status_snapshot_write_failed",
-                "OA payment status was written externally but the page snapshot update failed; retry is safe.",
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                details={"oa_row_ids": [record.id for record in records]},
-            ) from exc
-        return bool(tuple(getattr(result, "oa_pending_payment_changed_scopes", ()) or ()))
-
-    def _writeback_paid_relations(
-        self,
-        records: list[OAApplicationRecord],
-    ) -> tuple[list[dict[str, Any]], list[OAApplicationRecord]]:
-        if not records:
-            return [], []
-        records_by_id = {record.id: record for record in records}
-        relations = self._active_relations_for_row_ids(list(records_by_id))
-        writebacks: list[dict[str, Any]] = []
-        eligible_records: list[OAApplicationRecord] = []
-        matched_relation_found = False
-        for relation in relations:
-            relation_oa_ids = _relation_oa_ids([relation])
-            if not relation_oa_ids:
-                continue
-            relation_records = self._writeback_records(relation_oa_ids)
-            if not relation_records:
-                continue
-            bank_transactions = self._bank_transactions_from_relation(relation)
-            amount_check = self._relation_amount_check(relation_records, bank_transactions)
-            if amount_check.get("matched") is not True:
-                continue
-            matched_relation_found = True
-            for record in relation_records:
-                if record.id not in records_by_id:
-                    continue
-                eligible_records.append(record)
-                flow_id = self._resolve_oa_flow_id(record)
-                writeback = self._mark_oa_paid_if_needed(flow_id)
-                if writeback is not None:
-                    writebacks.append({"record": record, "writeback": writeback, "source": "existing_relation"})
-        if not matched_relation_found:
-            raise OaPendingPaymentError(
-                "oa_payment_status_not_paid",
-                "Only paid OA rows with an active outflow bank relation can be written back.",
-                status_code=HTTPStatus.CONFLICT,
-                details={"oa_row_ids": list(records_by_id)},
-            )
-        return writebacks, _dedupe_records(eligible_records)
-
-    def _resolve_oa_flow_ids(self, records: list[OAApplicationRecord]) -> list[str]:
-        return [self._resolve_oa_flow_id(record) for record in records]
-
-    def _mark_oa_flow_ids_paid(self, flow_ids: list[str]) -> list[dict[str, Any]]:
-        return [self._mark_oa_paid(flow_id) for flow_id in flow_ids]
 
 
 def _payload_text(payload: dict[str, Any], *keys: str) -> str:
@@ -548,44 +340,6 @@ def _payload_list(payload: dict[str, Any], *keys: str) -> list[str]:
             if text and text not in values:
                 values.append(text)
     return values
-
-
-def _relation_bank_ids(relation: dict[str, Any]) -> list[str]:
-    explicit_ids = _relation_text_list(
-        relation,
-        "bank_transaction_ids",
-        "bankTransactionIds",
-        "bank_row_ids",
-        "bankRowIds",
-    )
-    if explicit_ids:
-        return explicit_ids
-    return _relation_typed_ids(relation, "bank")
-
-
-def _relation_oa_ids(relations: list[dict[str, Any]]) -> list[str]:
-    oa_ids: list[str] = []
-    for relation in relations:
-        relation_oa_ids = _relation_text_list(relation, "oa_row_ids", "oaRowIds")
-        if not relation_oa_ids:
-            relation_oa_ids = _relation_typed_ids(relation, "oa")
-        for oa_id in relation_oa_ids:
-            if oa_id not in oa_ids:
-                oa_ids.append(oa_id)
-    return oa_ids
-
-
-def _relation_typed_ids(relation: dict[str, Any], expected_type: str) -> list[str]:
-    ids: list[str] = []
-    row_ids = _relation_text_list(relation, "row_ids", "rowIds")
-    row_types = _relation_text_sequence(relation, "row_types", "rowTypes")
-    for index, row_id in enumerate(row_ids):
-        row_type = clean_string(row_types[index] if index < len(row_types) else "")
-        if not row_type:
-            row_type = row_type_for_workbench_row_id(row_id)
-        if row_type == expected_type and row_id not in ids:
-            ids.append(row_id)
-    return ids
 
 
 def _relation_text_sequence(relation: dict[str, Any], *keys: str) -> list[str]:
@@ -630,27 +384,6 @@ def _dedupe_relations(relations: Any) -> list[dict[str, Any]]:
         seen.add(key)
         deduped.append(relation)
     return deduped
-
-
-def _dedupe_records(records: list[OAApplicationRecord]) -> list[OAApplicationRecord]:
-    deduped: list[OAApplicationRecord] = []
-    seen: set[str] = set()
-    for record in records:
-        if record.id in seen:
-            continue
-        seen.add(record.id)
-        deduped.append(record)
-    return deduped
-
-
-def _public_writeback(item: dict[str, Any]) -> dict[str, Any]:
-    writeback = dict(item.get("writeback") or {})
-    record = item.get("record")
-    if isinstance(record, OAApplicationRecord):
-        writeback["oaRowId"] = record.id
-    if item.get("source"):
-        writeback["source"] = item["source"]
-    return writeback
 
 
 def _pending_payment_relation_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:

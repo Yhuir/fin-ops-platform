@@ -211,6 +211,40 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from app.oa_source_aliases alias_row", executed_sql)
         self.assertIn("alias_row.status = 'active'", executed_sql)
 
+    def test_postgres_oa_workflow_row_lookup_prefers_completed_duplicate_row_id(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAWorkflowRepository
+
+        completed_payload = asdict(oa_record(row_id="oa-pay-duplicate"))
+        completed_payload["workflow_status"] = "completed"
+        in_progress_payload = dict(completed_payload)
+        in_progress_payload["workflow_status"] = "in_progress"
+        connection = OAProjectionConnection(
+            rows=[
+                {
+                    "row_id": "oa-pay-duplicate",
+                    "month": "2026-05",
+                    "workflow_status": "completed",
+                    "normalized_payload": completed_payload,
+                    "raw_payload": {"normalized_payload": completed_payload},
+                },
+                {
+                    "row_id": "oa-pay-duplicate",
+                    "month": "2026-05",
+                    "workflow_status": "in_progress",
+                    "normalized_payload": in_progress_payload,
+                    "raw_payload": {"normalized_payload": in_progress_payload},
+                },
+            ]
+        )
+
+        records = PostgresOAWorkflowRepository(connection).list_application_records_by_row_ids(
+            ["oa-pay-duplicate"]
+        )
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].workflow_status, "completed")
+        self.assertIn("order by row_id, source_priority", connection.executed[0][0])
+
     def test_postgres_oa_projection_repository_normalizes_only_the_legacy_open_section(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 

@@ -430,13 +430,8 @@ def _payment_status_for_amount(
 
 
 def _payment_writeback_eligible(oa_amount_value: Any, bank_payload: dict[str, Any]) -> bool:
-    oa_amount = _parse_decimal(oa_amount_value)
-    return bool(
-        oa_amount is not None
-        and int(bank_payload.get("linkedRelationCount") or 0) > 0
-        and int(bank_payload.get("missingBankRelationCount") or 0) == 0
-        and abs(_decimal(bank_payload.get("paidTotal")) - oa_amount) <= CENT
-    )
+    _ = oa_amount_value
+    return int(bank_payload.get("linkedRelationCount") or 0) > 0
 
 
 def _oa_payment_writeback_status(

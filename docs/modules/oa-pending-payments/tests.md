@@ -40,7 +40,7 @@
 - Audit 必须发现 active OA+outflow 关系存在但 canonical page consumer 遗漏的情况。
 - 页面请求不访问 OA Mongo/MySQL、Redis、queue、worker 或 read-model projection。
 - SQL 服务端过滤/排序/分页，查询次数不随 page size 增长。
-- formal relation create/extend、写回的权限、审计、幂等、冲突和写后重新 GET 不回归。
+- formal relation create/extend 的权限、审计、幂等、冲突和写后重新 GET 不回归；支付状态由 durable reconcile 收敛。
 - `read_model_status`、source versions、refresh enqueue、`202/304/ETag` 和 frontend polling 不再出现。
 
 ## 七类测试
@@ -53,13 +53,14 @@
 - 混合收支关系只展示/合计 outflow；inflow-only、missing bank fact fail closed。
 - completed/in-progress identity、flow id、duplicate/empty/invalid input。
 - grouped OA/bank/invoice row 组装、跨月隔离和 relation row identity。
-- writeback already-paid、重复提交、formal relation CAS/冲突和部分失败。
+- auto reconcile 的 active outflow、金额不等、inflow-only、App-owned withdraw revert、pre-existing paid、failed、missing flow id、duplicate flow 和 formal relation CAS/冲突。
 - filters/sort/paging/view mode 参数合同。
 
 入口：
 
 - `tests/test_oa_pending_payment_canonical_rows.py`
 - `tests/test_oa_pending_payment_command_service.py`
+- `tests/test_oa_payment_status_reconcile_service.py`
 - `tests/test_invoice_lifecycle_policy.py`
 - `tests/test_oa_pending_payment_query_service.py`
 
@@ -73,7 +74,7 @@
 - selector SQL 使用 canonical OA/admission/payment status、active Workbench relation、bank/invoice tables，且不读取历史 pending relation/claim。
 - active OA+outflow relation 与 canonical consumer visibility 的 Audit 对照。
 - 当前页 1 与 200 descriptors 的 hydrate 查询次数相同，无 N+1。
-- OA authoritative snapshot 幂等 commit、writeback 后 PG reconcile、失败回滚。
+- OA authoritative snapshot 幂等 commit、worker 写回后 PG reconcile、ownership state 和失败重试。
 
 入口：
 
@@ -81,6 +82,7 @@
 - `tests/test_oa_pending_payment_postgres_integration.py`
 - `tests/test_oa_pending_payment_source_snapshot_repository.py`
 - `tests/test_oa_pending_payment_command_service.py`
+- `tests/test_oa_payment_status_reconcile_service.py`
 
 ### 3. API contract：适用
 
@@ -92,7 +94,7 @@
 - tenant 传入 query repository。
 - 旧 filter endpoint 保持不存在。
 - `If-None-Match` 不触发旧条件语义；响应不含 ETag、`202/304`、read-model/version/refresh fields。
-- write 200/400/409/503、幂等重复和 `readModelRefresh` 删除。
+- link write 200/400/409/503、幂等重复、`paymentStatusSync=queued`；退役人工写回 route 为 404。
 
 入口：
 
@@ -126,7 +128,7 @@
 - 搜索、筛选、排序、分页、view toggle。
 - OA/bank/invoice/relation drawers，detail error。
 - 权限隐藏/禁用写操作。
-- link/writeback 成功后当前 rows GET；失败反馈与重试。
+- link 成功后当前 rows GET；页面无人工 writeback 控件；失败反馈与重试。
 - 晚响应不能覆盖新 query。
 - 页面不展示 Audit 控件；System Audit 子页 proof 不调用 page operation barrier。
 
@@ -140,15 +142,13 @@
 
 - canonical OA + active Workbench relation + bank/invoice facts -> rows/details。
 - canonical OA + mixed turnover relation + inflow/outflow facts -> 只显示和合计 outflow。
-- active relation withdraw -> 下一次 GET 直接不再展示 relation，无 refresh worker。
-- in-progress link-bank -> optional paid writeback -> PG snapshot -> current rows GET。
-- writeback-paid -> external adapter -> PG snapshot -> current rows GET。
+- active relation withdraw -> 下一次 GET 不再展示 relation，同时 reconcile 仅将 App-owned paid 恢复 pending。
+- in-progress link-bank -> relation event -> oa-sync worker -> external adapter + PG snapshot -> current rows GET。
 
 自动化入口：
 
 - `tests/test_oa_pending_payment_postgres_integration.py`
 - `web/e2e/oa-pending-payments-flow.spec.ts`
-- `web/e2e/oa-pending-payments-confirm-paid-flow.spec.ts`
 - `web/e2e/oa-pending-payments-bank-link-flow.spec.ts`
 
 `web/e2e/oa-pending-payments-nonfresh-flow.spec.ts` 已在保留文件名的同时改写为 direct canonical response、无后台 polling、503 错误不伪装空集和单次手工刷新恢复。
