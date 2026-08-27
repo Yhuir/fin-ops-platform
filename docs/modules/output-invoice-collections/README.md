@@ -23,6 +23,7 @@
 - `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py`
 - `backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py`
 - `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`
+- `backend/src/fin_ops_platform/services/output_invoice_reversal.py`
 - `backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py`
 - `backend/src/fin_ops_platform/services/workbench_free_matching_engine.py`
 - `backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py`
@@ -31,25 +32,23 @@
 
 - 浏览器只调用 `/api/output-invoice-collections/*` 的七个 GET API；页面没有收款状态、提醒、收据编号、正式收据或手工红蓝票写入口。
 - rows、summary、statistics、facets、筛选、排序、分页、详情和导出直接读取 PostgreSQL canonical facts，不读取页面 read model，也不访问 OA、MongoDB、MySQL 或对象存储。
-- 正式关系只来自 `app.workbench_pair_relations status='active'`。销项红蓝票由 Workbench 匹配引擎确定性识别并以 `mode=output_invoice_reversal` 写入同一正式关系事实源。
-- 蓝票与红票各自保留为独立表格行，通过 `invoiceRelations` 互相引用；页面不再把多张销项票折叠成一条净额行。
+- 收款流水归属只来自 `app.workbench_pair_relations status='active'`；红蓝票指向关系只来源于红票原始备注中的精确号码合同。
+- 每个 canonical 销项发票 ID 固定输出一条表格行。普通 Workbench relation、红蓝票关系和相同金额均不得把多张发票折叠成一条净额行。
 - 收款状态只由发票正负、有效红蓝票关系和已关联收入流水计算，不接受页面手工覆盖。
-- 红字发票原始备注中精确标记的被冲红蓝字发票号可在第四列、详情、搜索和导出中交叉核对；它是来源证据，不是 Workbench 正式关系的替代。
+- 红字发票原始备注中精确标记的被冲红蓝字发票号同时驱动第四列、详情、搜索、导出和红蓝票状态。页面不使用金额、税额、购销方或日期猜测冲红对象。
 - 页面只展示三组：`销项发票`、`收款状态`、`收入流水`。OA 和收据不属于本页 DTO。
 - 页面请求失败时结构化报错，不回退旧 projection；前端只维护 loading、empty、error 和用户主动刷新状态。
 - 页面使用共享紧凑时间范围选择器，搜索与范围控件互不重叠；HeroUI 分页位于同一有界 `FinanceTable` footer，不保留表格外的旧分页外壳。
 
 ## 红蓝票确定性规则
 
-只有同时满足以下条件且候选唯一时才自动正式化：
+只有同时满足以下条件时才建立确定性红蓝票指向：
 
-1. 同为销项发票，且一张价税合计为正、一张为负。
-2. 销方识别号、购方识别号、币种、税率一致。
-3. 价税合计、不含税金额、税额的绝对值一致。
-4. 红票开票日期不早于蓝票。
-5. 一组 identity 内恰好一张蓝票和一张红票；重复或歧义候选保持未配对。
+1. 当前发票价税合计为负。
+2. 原始备注精确包含 `被红冲蓝字数电发票号码：<20 位数字>`，且只能提取出一个目标号码。
+3. canonical 发票池中该号码恰好命中一张价税合计为正的销项发票。
 
-正式关系写入 `app.workbench_pair_relations`，`mode=output_invoice_reversal`，并保留规则与匹配证据。红票不再进入通用自由匹配，避免被错误配到流水、OA 或其他发票。
+页面直接按上述证据派生 `invoiceRelations` 和红蓝票状态；不要求另建一条可能与现有 OA/流水 relation 冲突的 active owner。Workbench 自动匹配复用同一精确号码 key；缺备注、目标不存在或目标不唯一时保持 `unmatched_red`，不执行金额兜底。
 
 ## 权限与审计
 

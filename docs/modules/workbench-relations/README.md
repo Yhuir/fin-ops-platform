@@ -12,6 +12,8 @@
 
 自动匹配没有候选/decision 持久状态。确定性引擎只生成 `FormalRelationPlan`，并通过 `WorkbenchRelationCommandService` + relation UoW 直接写 active 正式关系；不安全、不唯一或资源受限时不写任何关系。
 
+销项红蓝票是受限的精确匹配：红票只使用原始备注中的 `被红冲蓝字数电发票号码：<20 位数字>` 作为目标 key，蓝票只使用自己的 canonical 20 位号码。禁止恢复按金额、税额、购销方或日期推断冲红对象的旧 identity。
+
 人工确认与自动匹配采用不同准入责任：人工确认允许任意至少 2 个不同 canonical 成员，只有既有 `amount_check.requires_note=true` 时才要求 `note` 审计说明；金额/方向检查和完整性仍影响备注门禁或关联台分区，但不再作为通用 active relation 创建门槛。银行成员的 `internal_transfer` 分类也不选择另一条人工写链：mixed 或全 `internal_transfer` 选择统一以 `manual_confirmed` 进入标准 command/UoW。唯一窄例外是 OA 与完整 canonical external-turnover 零差额闭环同时确认：业务 facade 复用现有 Turnover validator 后仍通过同一个 command/UoW 写 `turnover_manual_closure` evidence/history，不建立第二写链。自动匹配仍执行既有 exact-sum、强证据、唯一性与资源保护规则。
 
 ## 核心边界

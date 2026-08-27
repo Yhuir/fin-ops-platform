@@ -1,6 +1,6 @@
 # 销项发票收款情况模块边界与 I/O
 
-日期：2026-07-31
+日期：2026-08-27
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 页面能力：只读、筛选、排序、分页、详情、导出
 - Query owner：`OutputInvoiceCollectionCanonicalQueryService`
 - PostgreSQL owner：`PostgresOutputInvoiceCollectionQueryRepository`
-- 自动红蓝票关系 owner：Workbench matching/formal relation 边界
+- 红蓝票号码合同 owner：`output_invoice_reversal.py`
 - 页面 read model/worker：无
 
 ## 职责边界
@@ -19,7 +19,7 @@
 - 销项发票、已关联收入流水和销项发票关系详情。
 - 当前筛选结果的导出预览和 XLSX 下载。
 - 根据 canonical facts 计算六种收款/红蓝票状态。
-- 消费 Workbench 已正式化的 `output_invoice_reversal` 关系。
+- 按红票原始备注中的精确目标号码派生红蓝票关系。
 
 ### 不负责
 
@@ -35,15 +35,15 @@
 | --- | --- | --- |
 | rows 查询 | `OutputInvoiceCollectionsPage.tsx` | `page`、`page_size`、keyword、月份、filters、sort；非法值返回 400。纯金额 keyword 使用无千分位文本并查询价税合计、税额、待收和关联收款金额。 |
 | canonical invoices | `app.invoices` | 只取非删除 output invoices；正票和负票分别保留；原始 `remark` 仅按精确“被红冲蓝字数电发票号码”标记提取结构化号码 |
-| formal relations | `app.workbench_pair_relations` | 只取 `status='active'`；红蓝票关系识别 `mode=output_invoice_reversal` |
-| bank facts | `app.bank_transactions` | 只统计 active relation 中的收入流水；支出不计入已收金额 |
-| exact reversal candidates | Workbench matching engine | 标准化税号、币种、税率及金额绝对值；唯一、日期合法才允许正式化 |
+| formal relations | `app.workbench_pair_relations` | 只取 `status='active'` 的普通 relation 计算收款流水归属；不得用 relation 折叠发票行 |
+| bank facts | `app.bank_transactions` | 只统计 active relation 中唯一可归属到某一正票的收入流水；支出不计入已收金额，红票和其精确目标蓝票不重复占用同组收款 |
+| exact reversal evidence | `app.invoices.raw_payload.normalized_payload.remark` | 只接受 `被红冲蓝字数电发票号码：<20 位数字>`；目标必须唯一命中一张正数销项发票，无金额兜底 |
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；`invoice.reversalTargetInvoiceNos` 只来源于原始备注精确标记；`collection_status` 候选排除自身状态条件后聚合，并补齐六种合法状态，选择状态不得缩减候选词表 |
+| `GET /rows` | 页面 | 返回 `rows`、`summary`、`statistics`、`pagination`、`filterConfig`、`filterOptions`；每个 canonical 发票 ID 恰好一行；`invoice.reversalTargetInvoiceNos` 只来源于原始备注精确标记；`collection_status` 候选排除自身状态条件后聚合，并补齐六种合法状态，选择状态不得缩减候选词表 |
 
 `statistics` 只包含 canonical 销项发票总数、收入流水、蓝字发票和红字发票数量；红蓝按含税总额符号互斥分类，并满足蓝字 + 红字 = 销项总数。旧收款和关系状态数量字段已删除。
 | `GET /filter-options` | 页面/兼容调用 | 返回同一 canonical facets；不读取缓存或 read model |
@@ -75,8 +75,8 @@ row 顶层只包含：
 - 收款状态的 self-excluding facet 与当前页 rows 共用一个 SQL statement 和同一 canonical CTE snapshot，不增加 API 或数据库往返。
 - SQL 数量不得随当前页行数、关系数量或红蓝票数量线性增长。
 - keyword 在同一 grouped invoice SQL 中搜索发票备注，不增加逐行查询、缓存、worker 或 read model。
-- 自动红蓝票关系必须确定性、幂等；歧义时不创建关系。
-- 备注提取号码是展示/搜索/导出证据，不能反向修改收款状态或正式红蓝票关系。
+- 红蓝票关系必须由备注精确号码确定性派生；歧义时不建立关系，不按金额、税额、购销方或日期猜测。
+- 普通 relation 只提供收款流水归属，不拥有页面 row identity；同一 relation 内多张销项发票仍逐张输出。
 - 页面不通过 Redis/read model 提速；只有真实慢查询证据才增加索引或缓存。
 - API 错误必须 fail closed，不回退已删除的 lifecycle/receipt/read-model 路径。
 - 首次加载可显示 skeleton；后续筛选、排序、分页和手动刷新保留现有 HeroUI FinanceTable DOM，只更新表格内容，刷新失败保留上一份成功结果并显示错误。
@@ -95,7 +95,7 @@ row 顶层只包含：
 | Frontend | `web/src/pages/OutputInvoiceCollectionsPage.tsx`、`web/src/features/outputInvoiceCollections/*`、`web/src/components/outputInvoiceCollections/OutputInvoiceCollection*.tsx` |
 | Route | `backend/src/fin_ops_platform/app/routes_output_invoice_collections.py` |
 | Query service | `backend/src/fin_ops_platform/services/output_invoice_collection_canonical_query_service.py` |
-| Assembler | `backend/src/fin_ops_platform/services/output_invoice_collection_service.py` |
+| Assembler | `backend/src/fin_ops_platform/services/output_invoice_collection_service.py`、`backend/src/fin_ops_platform/services/output_invoice_reversal.py` |
 | Query repository | `backend/src/fin_ops_platform/services/postgres_repositories/invoice_usage_collection_query.py` |
 | Matching/formal relation | `workbench_free_matching_engine.py`、`workbench_relation_command_service.py`、`postgres_repositories/workbench_formal_relation.py` |
 | Tests | `tests/test_output_invoice_collection*.py`、`tests/test_invoice_usage_collection_canonical_query.py`、`tests/test_workbench_free_matching_engine.py`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-*.spec.ts` |
@@ -106,9 +106,11 @@ row 顶层只包含：
 
 `frontend -> route -> canonical query service -> query repository -> canonical PostgreSQL tables`
 
-自动红蓝票：
+精确红蓝票：
 
-`Workbench matcher -> relation command service -> formal relation repository -> app.workbench_pair_relations`
+`invoice remark -> output_invoice_reversal parser -> canonical output query/status`
+
+Workbench matcher 只复用同一号码 key 尝试正式化，不是页面展示和状态成立的前置条件。
 
 禁止：
 

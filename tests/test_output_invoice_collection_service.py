@@ -93,16 +93,18 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         self.assertEqual(rows["pending"]["collectionStatus"]["code"], "pending_collection")
         self.assertEqual(rows["pending"]["bankTransactions"]["receivedTotal"], "0.00")
 
-    def test_exact_reversal_relation_drives_blue_red_and_unmatched_red_statuses(self) -> None:
-        blue = self._invoice("blue", "2001", total_with_tax="100.00")
+    def test_exact_reversal_remark_drives_blue_red_and_unmatched_red_statuses(self) -> None:
+        blue_invoice_no = "26532000000809302711"
+        blue = self._invoice("blue", blue_invoice_no, total_with_tax="100.00")
         red = self._invoice(
             "red",
-            "2002",
+            "26532000000808367761",
             amount="-94.34",
             tax_amount="-5.66",
             total_with_tax="-100.00",
             is_positive_invoice="否",
             invoice_date="2026-05-21",
+            remark=f"被红冲蓝字数电发票号码：{blue_invoice_no}",
         )
         unmatched_red = self._invoice(
             "red-unmatched",
@@ -113,17 +115,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             is_positive_invoice="否",
             invoice_date="2026-05-22",
         )
-        service = self._service(
-            invoices=[blue, red, unmatched_red],
-            relations=[
-                self._relation(
-                    "reversal-blue-red",
-                    ["blue", "red"],
-                    ["invoice", "invoice"],
-                    relation_mode=OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
-                )
-            ],
-        )
+        service = self._service(invoices=[blue, red, unmatched_red])
 
         rows = {row["invoiceId"]: row for row in service.list_rows()["rows"]}
 
@@ -137,12 +129,48 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
             {item["invoiceId"] for item in rows["blue"]["invoiceRelations"]["summaries"]},
             {"blue", "red"},
         )
-        self.assertTrue(
-            all(
-                item["relationMode"] == OUTPUT_INVOICE_REVERSAL_RELATION_MODE
-                for item in rows["blue"]["invoiceRelations"]["summaries"]
-            )
+        self.assertTrue(all(
+            item["relationMode"] == OUTPUT_INVOICE_REVERSAL_RELATION_MODE
+            for item in rows["blue"]["invoiceRelations"]["summaries"]
+        ))
+
+    def test_relation_case_does_not_merge_invoices_or_duplicate_bank_collection(self) -> None:
+        target_no = "26532000000809302711"
+        invoices = [
+            self._invoice("collected-blue", "26532000000809764126", total_with_tax="182400.00", amount="172075.47", tax_amount="10324.53"),
+            self._invoice("target-blue", target_no, total_with_tax="182400.00", amount="172075.47", tax_amount="10324.53"),
+            self._invoice(
+                "red",
+                "26532000000808367761",
+                total_with_tax="-182400.00",
+                amount="-172075.47",
+                tax_amount="-10324.53",
+                is_positive_invoice="否",
+                remark=f"被红冲蓝字数电发票号码：{target_no}",
+            ),
+        ]
+        bank = self._bank("bank", "182400.00", TransactionDirection.INFLOW)
+        service = self._service(
+            invoices=invoices,
+            transactions=[bank],
+            relations=[
+                self._relation(
+                    "collection-case",
+                    ["collected-blue", "target-blue", "red", "bank"],
+                    ["invoice", "invoice", "invoice", "bank"],
+                )
+            ],
         )
+
+        rows = {row["invoiceId"]: row for row in service.list_rows()["rows"]}
+
+        self.assertEqual(set(rows), {"collected-blue", "target-blue", "red"})
+        self.assertEqual(rows["collected-blue"]["collectionStatus"]["code"], "collected")
+        self.assertEqual(rows["target-blue"]["collectionStatus"]["code"], "reversed_by_red")
+        self.assertEqual(rows["red"]["collectionStatus"]["code"], "reverses_blue")
+        self.assertEqual(rows["collected-blue"]["bankTransactions"]["receivedTotal"], "182400.00")
+        self.assertEqual(rows["target-blue"]["bankTransactions"]["receivedTotal"], "0.00")
+        self.assertEqual(rows["red"]["bankTransactions"]["receivedTotal"], "0.00")
 
     def test_filter_sort_paging_and_export_use_current_contract(self) -> None:
         service = self._service(
@@ -226,6 +254,36 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(row["invoice"]["reversalTargetInvoiceNos"], [])
 
+    def test_red_invoice_with_two_different_exact_targets_stays_unmatched(self) -> None:
+        first_target = "26532000000395506981"
+        second_target = "26532000000809302711"
+        service = self._service(
+            invoices=[
+                self._invoice("blue-one", first_target),
+                self._invoice("blue-two", second_target),
+                self._invoice(
+                    "ambiguous-red",
+                    "26532000000808367761",
+                    amount="-94.34",
+                    tax_amount="-5.66",
+                    total_with_tax="-100.00",
+                    is_positive_invoice="否",
+                    remark=(
+                        f"被红冲蓝字数电发票号码：{first_target}；"
+                        f"被红冲蓝字数电发票号码：{second_target}"
+                    ),
+                ),
+            ]
+        )
+
+        rows = {row["invoiceId"]: row for row in service.list_rows()["rows"]}
+
+        self.assertEqual(
+            rows["ambiguous-red"]["collectionStatus"]["code"],
+            "unmatched_red",
+        )
+        self.assertEqual(rows["ambiguous-red"]["invoiceRelations"]["summaries"], [])
+
     def test_relation_details_allow_only_bank_and_invoice(self) -> None:
         invoice = self._invoice("invoice", "4001", total_with_tax="100.00")
         bank = self._bank("bank", "100.00", TransactionDirection.INFLOW)
@@ -244,7 +302,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
         invoice_details = canonical.relation_details(row_id, {"kind": ["invoice"]})
 
         self.assertEqual(bank_details["relationCount"], 1)
-        self.assertEqual(invoice_details["relationCount"], 1)
+        self.assertEqual(invoice_details["relationCount"], 0)
         with self.assertRaises(OutputInvoiceCollectionError) as context:
             canonical.relation_details(row_id, {"kind": ["oa"]})
         self.assertEqual(context.exception.error_code, "invalid_relation_kind")

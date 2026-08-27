@@ -16,7 +16,7 @@
 - `InvoiceLifecyclePolicy` 是待找发票、进项付款、OA 付款和税局认证状态的共享规则入口。
 - `read_model.invoice_lifecycle_rows` 是跨页面分发边界，按月分片预计算 subject lifecycle。HTTP 热路径只批量读取 read model，不同步扫描发票、银行流水、OA 和关联台事实。
 - 销项发票收款情况是显式例外：它不读取 `invoice_lifecycle` 或页面 read model，而是在同一 canonical PostgreSQL snapshot 中根据销项发票、收入流水和 active Workbench 关系直接派生 `collectionStatus`。
-- 销项红字发票原始备注中精确标记的“被红冲蓝字数电发票号码”只作为列表、详情、搜索和导出的交叉核对证据；不代替 `output_invoice_reversal` 正式关系，不单独改变 `collectionStatus`。
+- 销项红字发票原始备注中精确标记的“被红冲蓝字数电发票号码”是销项页面红蓝票关系的业务证据，同时驱动列表、详情、搜索、导出和 `collectionStatus`。号码必须唯一命中一张正数 canonical 销项发票；不按金额、税额、购销方或日期兜底猜测。
 - 现有页面 API shape 保持明确：待找发票返回 `invoice_acquisition_status`，进项使用返回 `paymentStatus`，OA 待付款返回 `paymentStatus`，销项收款返回 `collectionStatus`，税金抵扣返回认证字段。
 - 页面自己的 read model 仍保留筛选、分页、导出和页面 DTO；生命周期 read model 只分发生命周期结果，不替代业务页面 read model。
 
@@ -30,7 +30,7 @@
 | 销项发票收款情况 | `output_invoice` | canonical query 派生 `pending_collection`、`partial_collected`、`collected`、`reversed_by_red`、`reverses_blue`、`unmatched_red` |
 | 税金抵扣 | `input_invoice` | `certification_status` |
 
-进项发票使用情况和销项发票收款情况的页面表头发票数量用于核对发票拉取完整性，必须读取 rows summary 中按唯一发票 ID 统计的 `invoiceCount`；`pagination.total` 仍表示表格行数或配对组行数。同一 linked relation 折叠多张发票到一行时，表头发票数必须计入所有成员发票，不能用行数替代。
+进项发票使用情况和销项发票收款情况的页面表头发票数量用于核对发票拉取完整性，必须读取 rows summary 中按唯一发票 ID 统计的 `invoiceCount`。销项发票收款情况每个 canonical 发票 ID 固定一行，因此无筛选时 `pagination.total` 必须与 `invoiceCount` 相等；任何 Workbench relation 或红蓝票关系均不得折叠销项发票行。
 
 ## 待找发票
 

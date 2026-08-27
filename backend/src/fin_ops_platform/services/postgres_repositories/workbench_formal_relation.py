@@ -20,6 +20,9 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_SOURCE_ALIAS_FIELD_NAMES,
     oa_row_source_alias_map,
 )
+from fin_ops_platform.services.output_invoice_reversal import (
+    unique_reversal_target_invoice_no,
+)
 from fin_ops_platform.services.workbench_free_matching_engine import (
     ActiveFormalRelationAnchor,
     FormalRelationFact,
@@ -803,36 +806,33 @@ def _output_invoice_reversal_identity(
 ) -> tuple[tuple[str, ...] | None, Literal["blue", "red"] | None]:
     if str(row.get("invoice_type") or "").strip().lower() != "output":
         return None, None
-    seller_tax_no = _normalized_identifier(row.get("seller_tax_no"))
-    buyer_tax_no = _normalized_identifier(row.get("buyer_tax_no"))
-    currency = _canonical_currency(row.get("currency"))
-    tax_rate = _decimal_value(row.get("tax_rate"))
     gross = _decimal_value(row.get("total_with_tax"))
-    net = _decimal_value(row.get("amount"))
-    tax = _decimal_value(row.get("tax_amount"))
-    if not seller_tax_no or not buyer_tax_no or tax_rate is None or gross is None or net is None or tax is None:
+    if gross is None or gross == 0:
         return None, None
-    if (
-        gross == 0
-        or net == 0
-        or (gross > 0) != (net > 0)
-        or (tax != 0 and (gross > 0) != (tax > 0))
-    ):
-        return None, None
-    key = (
-        seller_tax_no,
-        buyer_tax_no,
-        currency,
-        str(abs(_minor_units(gross))),
-        str(abs(_minor_units(net))),
-        str(abs(_minor_units(tax))),
-        format(abs(tax_rate).normalize(), "f"),
+    payload = row_payload(row, "raw_payload")
+    payload = payload if isinstance(payload, dict) else {}
+    normalized = (
+        payload.get("normalized_payload")
+        if isinstance(payload.get("normalized_payload"), dict)
+        else payload
     )
-    return key, "blue" if gross > 0 else "red"
-
-
-def _normalized_identifier(value: Any) -> str:
-    return "".join(character for character in str(value or "").upper() if character.isalnum())
+    own_invoice_no = str(
+        row.get("digital_invoice_no")
+        or normalized.get("digital_invoice_no")
+        or row.get("invoice_no")
+        or normalized.get("invoice_no")
+        or ""
+    ).strip()
+    if gross > 0:
+        if len(own_invoice_no) != 20 or not own_invoice_no.isdigit():
+            return None, None
+        return ("remark-target", own_invoice_no), "blue"
+    target_invoice_no = unique_reversal_target_invoice_no(
+        normalized.get("remark") or payload.get("remark")
+    )
+    if target_invoice_no is None:
+        return None, None
+    return ("remark-target", target_invoice_no), "red"
 
 
 def _canonical_currency(value: Any) -> str:

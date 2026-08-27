@@ -9,6 +9,9 @@ from typing import Any
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     normalize_payment_status_rules_settings,
 )
+from fin_ops_platform.services.output_invoice_reversal import (
+    REVERSED_BLUE_INVOICE_NO_SQL_PATTERN,
+)
 from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
@@ -477,6 +480,7 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         status_code,
                         collected_amount,
                         pending_amount,
+                        (bank_count > 0) as bank_attributed,
                         red_related_group_keys as supporting_group_keys,
                         count(*) over()::bigint as filtered_total,
                         row_number() over ({order_sql}) as page_order
@@ -500,8 +504,9 @@ class PostgresOutputInvoiceCollectionQueryRepository:
                         final.status_code,
                         final.collected_amount,
                         final.pending_amount,
+                        (final.bank_count > 0) as bank_attributed,
                         final.red_related_group_keys as supporting_group_keys
-                    from final_rows final
+                    from all_final_rows final
                     join page_supporting_keys supporting using (group_key)
                 ),
                 summary as (
@@ -819,6 +824,181 @@ def _fact_cte(
             else 'id:' || coalesce(invoice.legacy_mongo_id, invoice.id::text)
         end
     """
+    output_reversal_ctes_sql = (
+        f"""
+        , output_reversal_matches as (
+            select
+                red.invoice_id as red_invoice_id,
+                matched.value[1] as target_invoice_no
+            from invoice_rows red
+            cross join lateral regexp_matches(
+                    red.remark,
+                    '{REVERSED_BLUE_INVOICE_NO_SQL_PATTERN}',
+                    'g'
+            ) matched(value)
+            where red.total_with_tax < 0
+        ),
+        output_reversal_candidates as (
+            select
+                matched.red_invoice_id,
+                min(matched.target_invoice_no) as target_invoice_no
+            from output_reversal_matches matched
+            group by matched.red_invoice_id
+            having count(distinct matched.target_invoice_no) = 1
+        ),
+        output_reversal_pairs as (
+            select
+                candidate.red_invoice_id,
+                min(blue.invoice_id) as blue_invoice_id
+            from output_reversal_candidates candidate
+            join invoice_rows blue
+              on coalesce(
+                    nullif(trim(blue.digital_invoice_no), ''),
+                    trim(blue.invoice_no)
+                 ) = candidate.target_invoice_no
+             and blue.total_with_tax > 0
+            group by candidate.red_invoice_id, candidate.target_invoice_no
+            having count(distinct blue.invoice_id) = 1
+        )
+        """
+        if invoice_type == "output"
+        else ""
+    )
+    relation_grouping_sql = (
+        """
+        eligible_relation_components as (
+            select
+                mapped.component_id,
+                min(mapped.case_id) as case_id
+            from relation_invoice_members mapped
+            join invoice_rows invoice on invoice.invoice_id = mapped.invoice_id
+            group by mapped.component_id
+            having count(distinct mapped.invoice_id) > 1
+               and bool_or(invoice.in_scope)
+        ),
+        assigned_relation as (
+            select distinct on (mapped.invoice_id)
+                mapped.invoice_id,
+                eligible.component_id,
+                eligible.case_id
+            from relation_invoice_members mapped
+            join eligible_relation_components eligible using (component_id)
+            order by mapped.invoice_id, eligible.component_id
+        ),
+        group_members as (
+            select
+                'relation-component:' || assigned.component_id as group_key,
+                assigned.case_id as relation_case_id,
+                assigned.invoice_id
+            from assigned_relation assigned
+            union all
+            select
+                'identity:' || invoice.identity_key as group_key,
+                null::text as relation_case_id,
+                invoice.invoice_id
+            from invoice_rows invoice
+            where invoice.in_scope
+              and not exists (
+                    select 1
+                    from assigned_relation assigned
+                    where assigned.invoice_id = invoice.invoice_id
+              )
+        )
+        """
+        if invoice_type == "input"
+        else """
+        group_members as (
+            select
+                'identity:' || invoice.identity_key as group_key,
+                null::text as relation_case_id,
+                invoice.invoice_id
+            from invoice_rows invoice
+        )
+        """
+    )
+    group_reversal_links_sql = (
+        """
+        select
+            grouped.group_key,
+            array_agg(
+                distinct related_group.group_key
+                order by related_group.group_key
+            ) as related_group_keys
+        from grouped_invoices grouped
+        cross join lateral unnest(grouped.invoice_ids) own_invoice(invoice_id)
+        join invoice_aliases own_alias
+          on own_alias.invoice_id = own_invoice.invoice_id
+        join relation_members reversal
+          on reversal.row_id = own_alias.row_id
+         and reversal.relation_mode = 'output_invoice_reversal'
+        join relation_members related_member
+          on related_member.relation_id = reversal.relation_id
+         and related_member.row_id <> reversal.row_id
+         and related_member.row_type in (
+             'invoice', 'input_invoice', 'output_invoice'
+         )
+        join invoice_aliases related_alias
+          on related_alias.row_id = related_member.row_id
+        join group_members related_group
+          on related_group.invoice_id = related_alias.invoice_id
+        group by grouped.group_key
+        """
+        if invoice_type == "input"
+        else """
+        select red_group.group_key,
+               array_agg(distinct blue_group.group_key order by blue_group.group_key)
+                   as related_group_keys
+        from output_reversal_pairs pair
+        join group_members red_group on red_group.invoice_id = pair.red_invoice_id
+        join group_members blue_group on blue_group.invoice_id = pair.blue_invoice_id
+        group by red_group.group_key
+        union all
+        select blue_group.group_key,
+               array_agg(distinct red_group.group_key order by red_group.group_key)
+                   as related_group_keys
+        from output_reversal_pairs pair
+        join group_members red_group on red_group.invoice_id = pair.red_invoice_id
+        join group_members blue_group on blue_group.invoice_id = pair.blue_invoice_id
+        group by blue_group.group_key
+        """
+    )
+    bank_owner_ctes_sql = (
+        """
+        , output_component_bank_candidates as (
+            select distinct
+                mapped.component_id,
+                mapped.invoice_id
+            from relation_invoice_members mapped
+            join invoice_rows invoice on invoice.invoice_id = mapped.invoice_id
+            where invoice.total_with_tax > 0
+              and not exists (
+                    select 1
+                    from output_reversal_pairs pair
+                    where pair.red_invoice_id = mapped.invoice_id
+                       or pair.blue_invoice_id = mapped.invoice_id
+              )
+        ),
+        output_component_bank_owner as (
+            select
+                component_id,
+                min(invoice_id) as invoice_id
+            from output_component_bank_candidates
+            group by component_id
+            having count(distinct invoice_id) = 1
+        )
+        """
+        if invoice_type == "output"
+        else ""
+    )
+    bank_owner_join_sql = (
+        """
+            join output_component_bank_owner owner
+              on owner.component_id = component.component_id
+             and owner.invoice_id = invoice_member.invoice_id
+        """
+        if invoice_type == "output"
+        else ""
+    )
     final_status_sql = (
         f"""
         , final_rows as (
@@ -832,7 +1012,7 @@ def _fact_cte(
         """
         if invoice_type == "input"
         else """
-        , final_rows as (
+        , all_final_rows as (
             select
                 facts.*,
                 case
@@ -863,6 +1043,11 @@ def _fact_cte(
                     )
                 end::numeric as pending_amount
             from group_facts facts
+        ),
+        final_rows as (
+            select *
+            from all_final_rows
+            where in_scope
         )
         """
     )
@@ -1141,45 +1326,9 @@ def _fact_cte(
                 'invoice', 'input_invoice', 'output_invoice'
             )
               and coalesce(member.relation_mode, '') <> 'output_invoice_reversal'
-        ),
-        eligible_relation_components as (
-            select
-                mapped.component_id,
-                min(mapped.case_id) as case_id
-            from relation_invoice_members mapped
-            join invoice_rows invoice on invoice.invoice_id = mapped.invoice_id
-            group by mapped.component_id
-            having count(distinct mapped.invoice_id) > 1
-               and bool_or(invoice.in_scope)
-        ),
-        assigned_relation as (
-            select distinct on (mapped.invoice_id)
-                mapped.invoice_id,
-                eligible.component_id,
-                eligible.case_id
-            from relation_invoice_members mapped
-            join eligible_relation_components eligible using (component_id)
-            order by mapped.invoice_id, eligible.component_id
-        ),
-        group_members as (
-            select
-                'relation-component:' || assigned.component_id as group_key,
-                assigned.case_id as relation_case_id,
-                assigned.invoice_id
-            from assigned_relation assigned
-            union all
-            select
-                'identity:' || invoice.identity_key as group_key,
-                null::text as relation_case_id,
-                invoice.invoice_id
-            from invoice_rows invoice
-            where invoice.in_scope
-              and not exists (
-                    select 1
-                    from assigned_relation assigned
-                    where assigned.invoice_id = invoice.invoice_id
-              )
-        ),
+        )
+        {output_reversal_ctes_sql},
+        {relation_grouping_sql},
         ranked_members as (
             select
                 member.group_key,
@@ -1235,36 +1384,15 @@ def _fact_cte(
                     ''
                 ) as invoice_remarks,
                 count(*)::bigint as invoice_count,
-                bool_or(member.total_with_tax < 0) as has_negative_invoice
+                bool_or(member.total_with_tax < 0) as has_negative_invoice,
+                bool_or(member.in_scope) as in_scope
             from ranked_members member
             group by member.group_key
         ),
         group_reversal_links as (
-            select
-                grouped.group_key,
-                array_agg(
-                    distinct related_group.group_key
-                    order by related_group.group_key
-                ) as related_group_keys
-            from grouped_invoices grouped
-            cross join lateral unnest(grouped.invoice_ids) own_invoice(invoice_id)
-            join invoice_aliases own_alias
-              on own_alias.invoice_id = own_invoice.invoice_id
-            join relation_members reversal
-              on reversal.row_id = own_alias.row_id
-             and reversal.relation_mode = 'output_invoice_reversal'
-            join relation_members related_member
-              on related_member.relation_id = reversal.relation_id
-             and related_member.row_id <> reversal.row_id
-             and related_member.row_type in (
-                 'invoice', 'input_invoice', 'output_invoice'
-             )
-            join invoice_aliases related_alias
-              on related_alias.row_id = related_member.row_id
-            join group_members related_group
-              on related_group.invoice_id = related_alias.invoice_id
-            group by grouped.group_key
-        ),
+            {group_reversal_links_sql}
+        )
+        {bank_owner_ctes_sql},
         group_relation_components as (
             select distinct
                 grouped.group_key,
@@ -1275,6 +1403,7 @@ def _fact_cte(
             join relation_members member on member.row_id = alias.row_id
             join relation_component_ids component
               on component.relation_id = member.relation_id
+            {bank_owner_join_sql}
         ),
         group_relation_ids as (
             select distinct
@@ -1716,6 +1845,7 @@ def _group_payload(
         payload["status_code"] = str(row.get("status_code") or "")
         payload["collected_amount"] = _money(row.get("collected_amount"))
         payload["pending_amount"] = _money(row.get("pending_amount"))
+        payload["bank_attributed"] = bool(row.get("bank_attributed"))
         payload["supporting_group_keys"] = [
             str(value)
             for value in list(row.get("supporting_group_keys") or [])

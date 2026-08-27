@@ -1,5 +1,13 @@
 # 销项发票收款情况 实施记录
 
+## 2026-08-27 - canonical 一票一行与精确备注冲红
+
+- 目标：修复多张销项发票因属于同一 Workbench relation 而被折叠为一行，导致按购买方搜索少行；历史和未来销项发票均按 canonical ID 一张一行。
+- 决策：删除 output query 的 relation-component row grouping。红票只解析 `被红冲蓝字数电发票号码：<20 位数字>`，目标唯一命中正票时派生红蓝票状态；删除金额、税额、购销方、币种、税率和日期推断 identity，不写 fallback。
+- 收款归属：普通 relation 内先排除红票及其精确目标蓝票；剩余正票唯一时才把该 relation 的收入流水归属给它，避免同一流水在多张发票行重复累计。
+- 历史闭环：查询直接读取已有 canonical remark，不需要数据迁移、备份或新 read model；搜索、分页、统计、详情和导出复用同一行 identity 与结构化目标号码。
+- 验证：业务/service 单测、PostgreSQL 集成测试覆盖 3 蓝 1 红同购买方搜索返回 4 行、跨月份精确目标、唯一收款归属和非合同备注不猜测；发布后按真实公司名称与目标号码做生产 API/视觉核对。
+
 ## 2026-08-27 - 红字发票备注交叉核对闭环
 
 - 根因：导入链路已将 Excel 备注保存到 canonical invoice `remark`，但销项列表 DTO 丢弃该字段，生产 canonical detail 又维护了一份缺字段的重复 assembler，同时 keyword SQL 未检索备注。

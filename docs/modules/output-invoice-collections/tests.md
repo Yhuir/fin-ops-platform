@@ -1,12 +1,12 @@
 # 销项发票收款情况测试矩阵
 
-日期：2026-08-11
+日期：2026-08-27
 
 ## 七类测试适用性
 
 | 类别 | 适用性 | 覆盖 |
 | --- | --- | --- |
-| 1. 业务核心单元 | 适用 | 红蓝票精确 identity、正负极性、唯一性、日期、歧义拒绝、六种状态、收入金额 |
+| 1. 业务核心单元 | 适用 | 备注精确号码、正负极性、唯一目标、歧义拒绝、六种状态、收入金额 |
 | 2. Service/repository | 适用 | canonical query、固定查询边界、关系组装、支出流水排除、详情与导出 |
 | 3. API contract | 适用 | 七个 GET、权限、非法参数、404、错误映射、旧 mutation route 不存在 |
 | 4. Read model/cache/worker | 不新增运行时覆盖 | 页面不使用 read model/cache/worker；boundary guard 保护旧链路不回归 |
@@ -16,10 +16,11 @@
 
 ## 关键合同
 
-- 红蓝票匹配同时验证 tax IDs、currency、tax rate、gross/net/tax 绝对值、日期和唯一性。
-- 匹配结果写入正式 relation mode `output_invoice_reversal`；重复执行幂等，歧义不写。
+- 红蓝票匹配只接受备注中的精确 20 位目标号码，且目标唯一命中正数销项发票；不得按金额、税额、购销方或日期猜测。
+- Workbench formal matcher 与页面 canonical query 共用同一精确号码合同；页面不依赖第二条 active relation 才能展示关系。
 - 红票不进入通用自由匹配。
-- 蓝票和红票各自保留为独立行，并通过 `invoiceRelations.summaries` 互相引用。
+- 每个 canonical 销项发票 ID 各自保留为独立行，普通 relation 和红蓝票关系均不得折叠行；蓝票和红票通过 `invoiceRelations.summaries` 互相引用。
+- 同一普通 relation 含多张等额蓝票、红票和一条收入流水时，红票及其精确目标蓝票不重复计收款；仅在剩余正票唯一时归属该收入。
 - 列表与关系详情共用唯一 row ID 合同：`output_invoice_collection_row_` 加 `sha1(group_key)` 前 16 位；PostgreSQL `load_row()` 必须能原样读取列表返回的 ID。
 - 已收金额只统计 active relation 中的收入流水，支出流水不计入。
 - row 顶层只含七个当前字段，不含 OA、receipt、manual status 或 reminder。

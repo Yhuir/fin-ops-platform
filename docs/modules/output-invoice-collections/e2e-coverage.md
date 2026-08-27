@@ -11,6 +11,7 @@
 | `OUT-COLL-E2E-005` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、`tests/test_platform_runtime_boundary_guards.py` |
 | `OUT-COLL-E2E-006` | `covered` | `web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`tests/test_output_invoice_collection_api.py` |
 | `OUT-COLL-E2E-007` | `covered` | `web/e2e/output-invoice-collections-flow.spec.ts`、`tests/test_output_invoice_collection_api.py` |
+| `OUT-COLL-E2E-008` | `covered` | `tests/test_invoice_usage_collection_postgres_integration.py`、`tests/test_output_invoice_collection_service.py`；生产发布后补真实浏览器公司名称搜索证据。 |
 
 ## 发布验证
 

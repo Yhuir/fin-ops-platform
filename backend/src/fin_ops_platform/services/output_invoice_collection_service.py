@@ -7,7 +7,6 @@ from hashlib import sha1
 from http import HTTPStatus
 from io import BytesIO
 import json
-import re
 from typing import Any
 from urllib.parse import unquote
 
@@ -23,6 +22,9 @@ from fin_ops_platform.services.invoice_relation_query_context import (
     summary_is_linked,
 )
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
+from fin_ops_platform.services.output_invoice_reversal import (
+    reversal_target_invoice_nos,
+)
 from fin_ops_platform.services.workbench_relation_modes import (
     OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
 )
@@ -50,10 +52,6 @@ OUTPUT_INVOICE_COLLECTION_EXPORT_COLUMNS = [
     "冲红蓝字发票号码",
     "红蓝票关系",
 ]
-
-REVERSED_BLUE_INVOICE_NO_PATTERN = re.compile(
-    r"被红冲蓝字数电发票号码\s*[：:]\s*(\d{20})(?!\d)"
-)
 
 FILTER_CONFIG: dict[str, dict[str, Any]] = {
     "invoice_no": {
@@ -470,7 +468,7 @@ class OutputInvoiceCollectionQueryService:
             "riskLevel": primary.risk_level or "",
             "issuer": primary.issuer or "",
             "remark": _join_non_empty(line.remark for line in lines),
-            "reversalTargetInvoiceNos": _reversal_target_invoice_nos(
+            "reversalTargetInvoiceNos": reversal_target_invoice_nos(
                 line.remark for line in lines
             ),
             "sourceBatchId": primary.source_batch_id or "",
@@ -594,15 +592,20 @@ class OutputInvoiceCollectionQueryService:
         context: DistributedInvoiceRelationContext,
     ) -> list[dict[str, Any]]:
         groups = self._invoice_groups(month=month, context=context)
+        all_groups = (
+            groups
+            if month in (None, "")
+            else self._invoice_groups(month=None, context=context)
+        )
         context.preload_relation_rows(
             [
                 invoice.id
-                for group in groups
+                for group in all_groups
                 for invoice in list(group["line_items"])
             ]
         )
         return [
-            self._row_payload(group, groups, context=context)
+            self._row_payload(group, all_groups, context=context)
             for group in groups
         ]
 
@@ -617,76 +620,12 @@ class OutputInvoiceCollectionQueryService:
             month=source_month,
             invoice_type=InvoiceType.OUTPUT,
         )
-        current_invoice_ids = {invoice.id for invoice in invoices}
-        all_invoices_by_id = context.invoices_by_id(
-            month="all",
-            invoice_type=InvoiceType.OUTPUT,
-        )
-        context.preload_relation_rows([invoice.id for invoice in invoices])
         grouped: dict[str, list[Invoice]] = {}
         for invoice in invoices:
             grouped.setdefault(self._identity_key(invoice), []).append(invoice)
-        base_groups = [
+        groups = [
             self._base_group(identity_key, line_items)
             for identity_key, line_items in grouped.items()
-        ]
-        relation_groups: list[dict[str, Any]] = []
-        emitted_invoice_ids: set[str] = set()
-        emitted_case_ids: set[str] = set()
-        for invoice in invoices:
-            for relation in context.distributed_relations_for_row_ids([invoice.id]):
-                case_id = str(
-                    relation.get("case_id")
-                    or relation.get("relation_id")
-                    or ""
-                ).strip()
-                if (
-                    not case_id
-                    or case_id in emitted_case_ids
-                    or not relation_is_linked(relation)
-                    or str(relation.get("relation_mode") or "")
-                    == OUTPUT_INVOICE_REVERSAL_RELATION_MODE
-                ):
-                    continue
-                output_ids = [
-                    row_id
-                    for row_id, row_type in context.typed_relation_rows(relation)
-                    if row_type == "invoice" and row_id in all_invoices_by_id
-                ]
-                if len(output_ids) <= 1 or invoice.id not in output_ids:
-                    continue
-                line_items = [all_invoices_by_id[row_id] for row_id in output_ids]
-                primary = sorted(
-                    line_items,
-                    key=lambda item: (
-                        0 if item.id in current_invoice_ids else 1,
-                        str(item.invoice_date or ""),
-                        str(item.id),
-                    ),
-                )[0]
-                relation_groups.append(
-                    {
-                        "identity_key": self._identity_key(primary),
-                        "group_key": f"relation:{case_id}",
-                        "primary": primary,
-                        "line_items": sorted(
-                            line_items,
-                            key=lambda item: str(item.id),
-                        ),
-                    }
-                )
-                emitted_case_ids.add(case_id)
-                emitted_invoice_ids.update(item.id for item in line_items)
-        groups = [
-            *relation_groups,
-            *[
-                group
-                for group in base_groups
-                if not any(
-                    line.id in emitted_invoice_ids
-                    for line in list(group["line_items"])
-                )
-            ],
         ]
         groups.sort(
             key=lambda group: (
@@ -737,6 +676,8 @@ class OutputInvoiceCollectionQueryService:
             primary,
             line_items,
             relations,
+            group=group,
+            all_groups=all_groups,
             context=context,
         )
         invoice_payload = self._invoice_relation_payload(
@@ -745,13 +686,6 @@ class OutputInvoiceCollectionQueryService:
             relations,
             context=context,
         )
-        reversal_relations = [
-            relation
-            for relation in relations
-            if relation_is_linked(relation)
-            and str(relation.get("relation_mode") or "")
-            == OUTPUT_INVOICE_REVERSAL_RELATION_MODE
-        ]
         invoice_total = sum(
             (_invoice_total(line) for line in line_items),
             start=ZERO,
@@ -760,11 +694,20 @@ class OutputInvoiceCollectionQueryService:
             list(bank_payload["summaries"]),
             direction="inflow",
         )
-        collection_status = _collection_status_for_facts(
-            invoice_total=invoice_total,
-            invoice_sign=_invoice_sign(primary, invoice_total),
-            collected_total=collected_total,
-            has_reversal=bool(reversal_relations),
+        related_invoice_ids = {
+            str(item.get("invoiceId") or "")
+            for item in list(invoice_payload.get("summaries") or [])
+            if str(item.get("invoiceId") or "") != str(primary.id)
+        }
+        collection_status = (
+            _collection_status_from_snapshot(group)
+            if str(group.get("status_code") or "")
+            else _collection_status_for_facts(
+                invoice_total=invoice_total,
+                invoice_sign=_invoice_sign(primary, invoice_total),
+                collected_total=collected_total,
+                has_reversal=bool(related_invoice_ids),
+            )
         )
         row_id = "output_invoice_collection_row_" + sha1(
             str(group.get("group_key") or group["identity_key"]).encode("utf-8")
@@ -821,7 +764,7 @@ class OutputInvoiceCollectionQueryService:
             ),
             "specificBusinessType": primary.specific_business_type or "",
             "taxableItemName": primary.taxable_item_name or "",
-            "reversalTargetInvoiceNos": _reversal_target_invoice_nos(
+            "reversalTargetInvoiceNos": reversal_target_invoice_nos(
                 line.remark for line in line_items
             ),
             "lineItemCount": len(line_items),
@@ -835,8 +778,17 @@ class OutputInvoiceCollectionQueryService:
         line_items: list[Invoice],
         relations: list[dict[str, Any]],
         *,
+        group: dict[str, Any],
+        all_groups: list[dict[str, Any]],
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
+        if not self._group_receives_bank_rows(
+            group,
+            all_groups,
+            relations,
+            context=context,
+        ):
+            relations = []
         bank_map = context.bank_transactions_by_id()
         summaries: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -937,33 +889,36 @@ class OutputInvoiceCollectionQueryService:
         *,
         context: DistributedInvoiceRelationContext,
     ) -> dict[str, Any]:
-        groups_by_invoice_id = {
-            invoice.id: group
-            for group in all_groups
-            for invoice in list(group["line_items"])
-        }
-        summaries: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
-        for relation in relations:
-            if not relation_is_linked(relation):
-                continue
-            case_id = str(
-                relation.get("case_id")
-                or relation.get("relation_id")
-                or ""
-            )
-            for row_id, row_type in context.typed_relation_rows(relation):
-                related_group = groups_by_invoice_id.get(row_id)
-                if row_type != "invoice" or related_group is None:
-                    continue
-                key = (case_id, str(related_group.get("group_key") or ""))
-                if key in seen:
-                    continue
-                seen.add(key)
-                summaries.append(
-                    self._invoice_relation_summary(related_group, relation)
-                )
+        del relations, context
+        links = self._remark_reversal_links(all_groups)
         current_group_key = str(current_group.get("group_key") or "")
+        related_group_keys = links.get(current_group_key, set())
+        groups_by_key = {
+            str(group.get("group_key") or ""): group
+            for group in all_groups
+        }
+        summary_groups = [
+            current_group,
+            *[
+                groups_by_key[group_key]
+                for group_key in sorted(related_group_keys)
+                if group_key in groups_by_key
+            ],
+        ]
+        relation = {
+            "case_id": "invoice-remark-reversal",
+            "relation_mode": OUTPUT_INVOICE_REVERSAL_RELATION_MODE,
+            "status": "active",
+            "relation_source": "invoice_remark",
+        }
+        summaries = (
+            [
+                self._invoice_relation_summary(group, relation)
+                for group in summary_groups
+            ]
+            if related_group_keys
+            else []
+        )
         summaries.sort(
             key=lambda item: (
                 0 if item["groupKey"] == current_group_key else 1,
@@ -977,6 +932,98 @@ class OutputInvoiceCollectionQueryService:
             "detailMode": "none" if not summaries else "list",
             "summaries": summaries,
         }
+
+    def _group_receives_bank_rows(
+        self,
+        current_group: dict[str, Any],
+        all_groups: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+        *,
+        context: DistributedInvoiceRelationContext,
+    ) -> bool:
+        if "bank_attributed" in current_group:
+            return bool(current_group.get("bank_attributed"))
+        current_group_key = str(current_group.get("group_key") or "")
+        reversal_links = self._remark_reversal_links(all_groups)
+        if current_group_key in reversal_links:
+            return False
+        groups_by_invoice_id = {
+            str(invoice.id): group
+            for group in all_groups
+            for invoice in list(group["line_items"])
+        }
+        candidate_group_keys: set[str] = set()
+        for relation in relations:
+            if (
+                not relation_is_linked(relation)
+                or str(relation.get("relation_mode") or "")
+                == OUTPUT_INVOICE_REVERSAL_RELATION_MODE
+            ):
+                continue
+            for row_id, row_type in context.typed_relation_rows(relation):
+                group = groups_by_invoice_id.get(str(row_id))
+                if row_type != "invoice" or group is None:
+                    continue
+                group_key = str(group.get("group_key") or "")
+                group_total = sum(
+                    (_invoice_total(item) for item in list(group["line_items"])),
+                    start=ZERO,
+                )
+                if group_total > ZERO and group_key not in reversal_links:
+                    candidate_group_keys.add(group_key)
+        return candidate_group_keys == {current_group_key}
+
+    @staticmethod
+    def _remark_reversal_links(
+        groups: list[dict[str, Any]],
+    ) -> dict[str, set[str]]:
+        groups_by_invoice_no: dict[str, list[dict[str, Any]]] = {}
+        for group in groups:
+            primary: Invoice = group["primary"]
+            invoice_no = str(
+                primary.digital_invoice_no or primary.invoice_no or ""
+            ).strip()
+            if invoice_no:
+                groups_by_invoice_no.setdefault(invoice_no, []).append(group)
+
+        links: dict[str, set[str]] = {}
+        for red_group in groups:
+            red_total = sum(
+                (
+                    _invoice_total(item)
+                    for item in list(red_group["line_items"])
+                ),
+                start=ZERO,
+            )
+            if red_total >= ZERO:
+                continue
+            targets = reversal_target_invoice_nos(
+                item.remark for item in list(red_group["line_items"])
+            )
+            if len(targets) != 1:
+                continue
+            candidates = [
+                group
+                for group in groups_by_invoice_no.get(targets[0], [])
+                if sum(
+                    (
+                        _invoice_total(item)
+                        for item in list(group["line_items"])
+                    ),
+                    start=ZERO,
+                )
+                > ZERO
+            ]
+            if len(candidates) != 1:
+                continue
+            blue_group = candidates[0]
+            red_key = str(red_group.get("group_key") or "")
+            blue_key = str(blue_group.get("group_key") or "")
+            if not red_key or not blue_key or red_key == blue_key:
+                continue
+            links.setdefault(red_key, set()).add(blue_key)
+            links.setdefault(blue_key, set()).add(red_key)
+        return links
 
     def _invoice_relation_summary(
         self,
@@ -1058,7 +1105,7 @@ class OutputInvoiceCollectionQueryService:
             "taxAmount": _money(invoice.tax_amount),
             "totalWithTax": _money(_invoice_total(invoice)),
             "remark": invoice.remark or "",
-            "reversalTargetInvoiceNos": _reversal_target_invoice_nos(
+            "reversalTargetInvoiceNos": reversal_target_invoice_nos(
                 [invoice.remark]
             ),
         }
@@ -1450,6 +1497,53 @@ def _collection_status_for_facts(
     )
 
 
+def _collection_status_from_snapshot(group: dict[str, Any]) -> dict[str, Any]:
+    code = str(group.get("status_code") or "")
+    collected = _decimal(group.get("collected_amount"))
+    pending = _decimal(group.get("pending_amount"))
+    definitions = {
+        "reversed_by_red": (
+            "已被红冲",
+            "蓝字发票已由红字发票备注中的精确号码指向并冲销。",
+            "info",
+        ),
+        "reverses_blue": (
+            "已冲销蓝票",
+            "红字发票备注已精确指向被冲销的蓝字发票号码。",
+            "warning",
+        ),
+        "unmatched_red": (
+            "红票待核对",
+            "红字发票备注未形成唯一、确定的蓝字发票号码关系。",
+            "danger",
+        ),
+        "collected": (
+            "已收款",
+            "canonical 配对的收入流水已覆盖发票金额。",
+            "success",
+        ),
+        "partial_collected": (
+            "部分收款",
+            "canonical 配对的收入流水尚未覆盖发票金额。",
+            "warning",
+        ),
+        "pending_collection": (
+            "待收款",
+            "尚无唯一归属到该发票的 canonical 收入流水。",
+            "pending",
+        ),
+    }
+    label, reason, severity = definitions[code]
+    return _collection_status(
+        code,
+        label,
+        reason,
+        collected_amount=collected,
+        pending_amount=pending,
+        severity=severity,
+    )
+
+
 def _collection_status(
     code: str,
     label: str,
@@ -1561,14 +1655,3 @@ def _join_non_empty(values: Any) -> str:
         if text and text not in result:
             result.append(text)
     return "；".join(result)
-
-
-def _reversal_target_invoice_nos(remarks: Any) -> list[str]:
-    invoice_nos: list[str] = []
-    for remark in remarks:
-        for invoice_no in REVERSED_BLUE_INVOICE_NO_PATTERN.findall(
-            str(remark or "")
-        ):
-            if invoice_no not in invoice_nos:
-                invoice_nos.append(invoice_no)
-    return invoice_nos

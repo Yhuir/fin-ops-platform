@@ -93,35 +93,31 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["paymentStatus"]["code"], "pending")
         self.assertEqual(legacy_provider.evaluate_count, 0)
 
-    def test_output_reversal_page_keeps_exact_summary_order_and_supporting_group(self) -> None:
+    def test_output_reversal_remark_keeps_exact_summary_order_and_supporting_group(self) -> None:
         self.connection.execute(
             """
             insert into app.invoices(
-                legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month,
-                seller_name, buyer_name, amount, signed_amount, tax_amount,
-                total_with_tax, status
+                legacy_mongo_id, invoice_type, invoice_no, digital_invoice_no,
+                invoice_date, invoice_month, seller_name, buyer_name, amount,
+                signed_amount, tax_amount, total_with_tax, status, raw_payload
             ) values
                 (
-                    'output-blue-1', 'output', 'OUT-BLUE-001', '2026-07-10',
-                    '2026-07-01', '销售方', '购买方', 100, 100, 18, 118, 'pending'
+                    'output-blue-1', 'output', 'OUT-BLUE-001',
+                    '26532000000809302711', '2026-07-10', '2026-07-01',
+                    '销售方', '购买方', 100, 100, 18, 118, 'pending', '{}'::jsonb
                 ),
                 (
-                    'output-red-1', 'output', 'OUT-RED-001', '2026-07-11',
-                    '2026-07-01', '销售方', '购买方', -100, -100, -18, -118, 'pending'
+                    'output-red-1', 'output', 'OUT-RED-001',
+                    '26532000000808367761', '2026-07-11', '2026-07-01',
+                    '销售方', '购买方', -100, -100, -18, -118, 'pending',
+                    jsonb_build_object(
+                        'normalized_payload',
+                        jsonb_build_object(
+                            'remark',
+                            '被红冲蓝字数电发票号码：26532000000809302711'
+                        )
+                    )
                 )
-            """
-        )
-        self.connection.execute(
-            """
-            insert into app.workbench_pair_relations(
-                case_id, relation_mode, status, version, month_scope,
-                row_ids, row_types, amount_check, special_metadata, raw_payload
-            ) values (
-                'output-reversal-1', 'output_invoice_reversal', 'active', 1,
-                '2026-07-01', array['output-blue-1', 'output-red-1'],
-                array['output_invoice', 'output_invoice'], '{}'::jsonb,
-                '{}'::jsonb, '{}'::jsonb
-            )
             """
         )
 
@@ -332,6 +328,136 @@ class InvoiceUsageCollectionPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(
             detail["reversalTargetInvoiceNos"],
             [target_invoice_no],
+        )
+
+    def test_output_company_search_keeps_every_canonical_invoice_as_its_own_row(
+        self,
+    ) -> None:
+        buyer_name = "成都智领趋势科技有限公司"
+        target_invoice_no = "26532000000809302711"
+        self.connection.execute(
+            """
+            insert into app.invoices(
+                legacy_mongo_id, invoice_type, invoice_no, digital_invoice_no,
+                invoice_date, invoice_month, seller_name, buyer_name, amount,
+                signed_amount, tax_amount, total_with_tax, status, raw_payload
+            ) values
+                (
+                    'company-blue-small', 'output', 'COMPANY-BLUE-SMALL',
+                    '26532000001153800406', '2026-07-10', '2026-07-01',
+                    '销售方', %s, 3362.83, 3800, 437.17, 3800, 'pending', '{}'::jsonb
+                ),
+                (
+                    'company-blue-collected', 'output', 'COMPANY-BLUE-COLLECTED',
+                    '26532000000809764126', '2026-05-21', '2026-05-01',
+                    '销售方', %s, 161415.93, 182400, 20984.07, 182400,
+                    'pending', '{}'::jsonb
+                ),
+                (
+                    'company-red', 'output', 'COMPANY-RED',
+                    '26532000000808367761', '2026-06-29', '2026-06-01',
+                    '销售方', %s, -161415.93, -182400, -20984.07, -182400,
+                    'pending',
+                    jsonb_build_object(
+                        'normalized_payload',
+                        jsonb_build_object(
+                            'remark',
+                            '被红冲蓝字数电发票号码：26532000000809302711'
+                        )
+                    )
+                ),
+                (
+                    'company-blue-target', 'output', 'COMPANY-BLUE-TARGET',
+                    %s, '2026-05-21', '2026-05-01',
+                    '销售方', %s, 161415.93, 182400, 20984.07, 182400,
+                    'pending', '{}'::jsonb
+                )
+            """,
+            (
+                buyer_name,
+                buyer_name,
+                buyer_name,
+                target_invoice_no,
+                buyer_name,
+            ),
+        )
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status
+            ) values (
+                'company-bank', '62220001', 'inflow', %s,
+                182400, 182400, '2026-05-21', '2026-05-01', 'pending'
+            )
+            """,
+            (buyer_name,),
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, version, month_scope,
+                row_ids, row_types, amount_check, special_metadata, raw_payload
+            ) values (
+                'company-collection-relation', 'manual', 'active', 1,
+                '2026-05-01',
+                array[
+                    'company-blue-collected', 'company-red',
+                    'company-blue-target', 'company-bank'
+                ],
+                array[
+                    'output_invoice', 'output_invoice',
+                    'output_invoice', 'bank_transaction'
+                ],
+                '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
+            )
+            """
+        )
+
+        repository = PostgresOutputInvoiceCollectionQueryRepository(self.connection)
+        query_service = OutputInvoiceCollectionCanonicalQueryService(
+            repository=repository,
+            row_assembler=OutputInvoiceCollectionQueryService(
+                import_service=ImportNormalizationService(),
+            ),
+        )
+
+        payload = query_service.list_rows(
+            page=1,
+            page_size=20,
+            keyword=buyer_name,
+        )
+
+        self.assertEqual(payload["pagination"]["total"], 4)
+        rows = {row["invoiceId"]: row for row in payload["rows"]}
+        self.assertEqual(
+            set(rows),
+            {
+                "company-blue-small",
+                "company-blue-collected",
+                "company-red",
+                "company-blue-target",
+            },
+        )
+        self.assertEqual(
+            rows["company-blue-collected"]["collectionStatus"]["code"],
+            "collected",
+        )
+        self.assertEqual(
+            rows["company-blue-target"]["collectionStatus"]["code"],
+            "reversed_by_red",
+        )
+        self.assertEqual(
+            rows["company-red"]["collectionStatus"]["code"],
+            "reverses_blue",
+        )
+        self.assertEqual(
+            rows["company-blue-collected"]["bankTransactions"]["receivedTotal"],
+            "182400.00",
+        )
+        self.assertEqual(
+            rows["company-blue-target"]["bankTransactions"]["receivedTotal"],
+            "0.00",
         )
 
 

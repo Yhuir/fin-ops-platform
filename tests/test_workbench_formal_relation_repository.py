@@ -201,6 +201,60 @@ def invoice_row(
 
 
 class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
+    def test_output_reversal_identity_uses_exact_remark_target_not_equal_amounts(self) -> None:
+        target_invoice_no = "26532000000809302711"
+        blue = invoice_row("output-blue", total_with_tax=Decimal("182400.00"))
+        blue.update(
+            invoice_type="output",
+            invoice_no=target_invoice_no,
+            digital_invoice_no=target_invoice_no,
+            amount=Decimal("161415.93"),
+            signed_amount=Decimal("182400.00"),
+        )
+        same_amount_blue = invoice_row(
+            "output-same-amount-blue",
+            total_with_tax=Decimal("182400.00"),
+        )
+        same_amount_blue.update(
+            invoice_type="output",
+            invoice_no="26532000000809764126",
+            digital_invoice_no="26532000000809764126",
+            amount=Decimal("161415.93"),
+            signed_amount=Decimal("182400.00"),
+        )
+        red = invoice_row("output-red", total_with_tax=Decimal("-182400.00"))
+        red.update(
+            invoice_type="output",
+            invoice_no="26532000000808367761",
+            digital_invoice_no="26532000000808367761",
+            amount=Decimal("-161415.93"),
+            signed_amount=Decimal("-182400.00"),
+            fact_date=date(2026, 5, 21),
+            raw_payload={
+                "normalized_payload": {
+                    "remark": f"被红冲蓝字数电发票号码：{target_invoice_no}"
+                }
+            },
+        )
+
+        batch = PostgresWorkbenchFormalRelationFactRepository(
+            FakeConnection(invoice_rows=[blue, same_amount_blue, red])
+        ).load_batch(["2026-05"])
+        facts = {fact.row_id: fact for fact in batch.facts}
+
+        self.assertEqual(
+            facts["output-blue"].reversal_key,
+            ("remark-target", target_invoice_no),
+        )
+        self.assertEqual(
+            facts["output-red"].reversal_key,
+            ("remark-target", target_invoice_no),
+        )
+        self.assertNotEqual(
+            facts["output-same-amount-blue"].reversal_key,
+            facts["output-red"].reversal_key,
+        )
+
     def test_bank_categories_use_one_bounded_canonical_projection(self) -> None:
         connection = FakeConnection(
             category_projection_rows=[
