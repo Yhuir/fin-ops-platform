@@ -948,10 +948,10 @@ registered_worker_event_types() {
 }
 
 candidate_only_worker_event_types() {
-  local current_src="$1"
+  local active_src="$1"
   local candidate_src="$2"
   comm -13 \
-    <(registered_worker_event_types "$current_src") \
+    <(registered_worker_event_types "$active_src") \
     <(registered_worker_event_types "$candidate_src")
 }
 
@@ -2554,7 +2554,9 @@ release_gate_checkpoint() {
       while IFS= read -r candidate_only_event_type; do
         [[ -n "$candidate_only_event_type" ]] \
           && closure_args+=(--allow-preflight-pending-event-type "$candidate_only_event_type")
-      done < <(candidate_only_worker_event_types "$verification_src" "$src")
+      # Preflight executes the active release while verifying the candidate.
+      # Only event types added by the candidate may be accepted as upgrade backlog.
+      done < <(candidate_only_worker_event_types "$src" "$verification_src")
     fi
     "$API_PYTHON" -m fin_ops_platform.tools.runtime_sync_closure_gate "${closure_args[@]}" >/dev/null
   ) || true

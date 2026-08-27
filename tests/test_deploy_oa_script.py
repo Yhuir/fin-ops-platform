@@ -1150,7 +1150,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("--apply-read-model-smoke", checkpoint)
         self.assertIn('if [[ "$profile" == "preflight" ]]', checkpoint)
         self.assertIn('required_worker_instances "$src"', checkpoint)
-        self.assertIn('candidate_only_worker_event_types "$verification_src" "$src"', checkpoint)
+        self.assertIn('candidate_only_worker_event_types "$src" "$verification_src"', checkpoint)
         self.assertIn("--allow-preflight-pending-event-type", checkpoint)
         self.assertIn("--timeout-seconds 60", checkpoint)
         self.assertLess(
