@@ -2237,15 +2237,12 @@ effective_groups as materialized (
 
 
 # A collapsed ETC summary remains one display row, but statistics must count
-# every canonical invoice represented by that row.  Resolve those members once
-# per snapshot, then assign each canonical invoice to exactly one zone.  A
-# canonical invoice represented by a paired group is paired; every other
-# canonical invoice in the requested scope is unpaired.
+# every canonical invoice represented by that row.  Only paired ownership has
+# to be resolved globally: every other canonical invoice in scope is unpaired.
+# Filtered counts expand members only for the keyed groups that matched.
 _CANONICAL_INVOICE_GROUP_MEMBER_CTES = """
-canonical_invoice_group_member_candidates as materialized (
+paired_canonical_invoice_members as materialized (
     select distinct
-        groups.internal_key,
-        groups.zone,
         invoice.row_id as canonical_invoice_row_id
     from effective_groups groups
     join canonical_group_members member
@@ -2253,10 +2250,9 @@ canonical_invoice_group_member_candidates as materialized (
      and member.row_type = 'invoice'
     join canonical_invoice_facts invoice
       on invoice.row_id = member.row_id
+    where groups.zone = 'paired'
     union
     select distinct
-        groups.internal_key,
-        groups.zone,
         summary_member.canonical_invoice_row_id
     from effective_groups groups
     join canonical_group_members member
@@ -2264,29 +2260,38 @@ canonical_invoice_group_member_candidates as materialized (
      and member.row_type = 'invoice'
     join etc_summary_canonical_invoice_members summary_member
       on summary_member.summary_row_id = member.row_id
+    where groups.zone = 'paired'
 ),
 scoped_canonical_invoice_zone_members as materialized (
     select
         invoice.row_id as canonical_invoice_row_id,
-        case when exists (
-            select 1
-            from canonical_invoice_group_member_candidates candidate
-            where candidate.canonical_invoice_row_id = invoice.row_id
-              and candidate.zone = 'paired'
-        ) then 'paired'::text else 'unpaired'::text end as zone
+        case when paired.canonical_invoice_row_id is not null
+            then 'paired'::text else 'unpaired'::text end as zone
     from canonical_invoice_facts invoice
     cross join requested_scope scope
+    left join paired_canonical_invoice_members paired
+      on paired.canonical_invoice_row_id = invoice.row_id
     where scope.scope_key = 'all' or invoice.invoice_month = scope.scope_month
-),
-canonical_invoice_group_members as materialized (
-    select distinct
-        candidate.internal_key,
-        candidate.canonical_invoice_row_id
-    from canonical_invoice_group_member_candidates candidate
-    join scoped_canonical_invoice_zone_members zone_member
-      on zone_member.canonical_invoice_row_id = candidate.canonical_invoice_row_id
-     and zone_member.zone = candidate.zone
 )
+"""
+
+
+_CANONICAL_INVOICE_MEMBERS_FOR_KEYED_GROUPS_JOIN = """
+left join lateral (
+    select invoice.row_id as canonical_invoice_row_id
+    from canonical_group_members member
+    join canonical_invoice_facts invoice
+      on invoice.row_id = member.row_id
+    where member.internal_key = groups.internal_key
+      and member.row_type = 'invoice'
+    union
+    select summary_member.canonical_invoice_row_id
+    from canonical_group_members member
+    join etc_summary_canonical_invoice_members summary_member
+      on summary_member.summary_row_id = member.row_id
+    where member.internal_key = groups.internal_key
+      and member.row_type = 'invoice'
+) canonical_invoice on true
 """
 
 
@@ -2815,8 +2820,7 @@ class PostgresWorkbenchPageQueryRepository:
                 from {prefix}_keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
-                left join canonical_invoice_group_members canonical_invoice
-                  on canonical_invoice.internal_key = groups.internal_key
+                {_CANONICAL_INVOICE_MEMBERS_FOR_KEYED_GROUPS_JOIN}
             """
         filtered_groups_select_sql = (
             PostgresWorkbenchPageQueryRepository._filtered_groups_select_sql(
@@ -3081,13 +3085,14 @@ class PostgresWorkbenchPageQueryRepository:
                 from scoped_canonical_invoice_zone_members member
                 where member.zone = '{normalized_zone}'
             """
+            canonical_invoice_members_join_sql = ""
         else:
-            canonical_invoice_count_sql = """
-                select count(distinct member.canonical_invoice_row_id)::bigint
-                from keyed_groups groups
-                join canonical_invoice_group_members member
-                  on member.internal_key = groups.internal_key
-            """
+            canonical_invoice_count_sql = (
+                "count(distinct canonical_invoice.canonical_invoice_row_id)"
+            )
+            canonical_invoice_members_join_sql = (
+                _CANONICAL_INVOICE_MEMBERS_FOR_KEYED_GROUPS_JOIN
+            )
         filtered_group_cte_name = "filtered_groups"
         exception_query_cte_sql = ""
         exception_filter_ctes_sql = ""
@@ -3211,6 +3216,7 @@ class PostgresWorkbenchPageQueryRepository:
                 from keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
+                {canonical_invoice_members_join_sql}
             )
             select page_groups.*,
                    exact_totals.total_count,
