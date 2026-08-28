@@ -1,6 +1,6 @@
 # Deploy 模块边界与 I/O
 
-日期：2026-08-15
+日期：2026-08-28
 
 ## 输入
 
@@ -23,8 +23,10 @@
 
 ## Forward-only
 
-Migration 0149 退役旧 schema。执行后 previous release 若依赖旧对象则不可自动恢复；候选失败保持 maintenance
-并 forward repair。前端-only release 仍可按 immutable fingerprint 回滚。
+Migration 0149/0160 退役旧 schema。执行后 previous release 若依赖旧对象则不可自动恢复；Migration 0161
+会入队正式关联关系规则收敛任务，其正确消费依赖候选版本按 `relation_mode` 选择正式关系，旧 release 不得消费该任务。
+因此以上 migration 均为 forward-only：候选失败保持 maintenance 并 forward repair。前端-only release 仍可按
+immutable fingerprint 回滚。
 
 ## 候选事件升级互锁
 
