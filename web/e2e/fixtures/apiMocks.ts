@@ -4498,7 +4498,7 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
           }
           : {
             code: "unpaid",
-            label: "未支付",
+            label: "待支付",
             reason: "未关联支出流水",
             severity: "warning",
           },
@@ -4694,7 +4694,7 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
           }
           : {
             code: "unpaid",
-            label: "未支付",
+            label: "待支付",
             reason: "关联台尚未建立 active 正式关系，不能计入已支付。",
             severity: "warning",
           },

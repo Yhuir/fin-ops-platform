@@ -94,7 +94,7 @@ class InvoiceLifecyclePolicy:
         merged_payment: bool = False,
     ) -> dict[str, str]:
         if not has_bank:
-            return _status("unpaid", "未支付", "未关联支出流水")
+            return _status("unpaid", "待支付", "未关联支出流水")
         if has_missing_bank_relation:
             return _status("paid", "已支付", "已存在已配对流水关系，流水事实缺失不影响付款状态")
         if has_non_outflow_bank_relation:

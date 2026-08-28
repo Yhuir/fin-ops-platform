@@ -161,7 +161,7 @@ test.describe("workbench withdraw browser flow", () => {
 
     await page.getByRole("link", { name: "OA待付款核对" }).click();
     const oaRow = page.getByRole("row", { name: /陈涛/ });
-    await expect(oaRow.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("未支付");
+    await expect(oaRow.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("待支付");
     await expect(oaRow.getByText("候选")).toHaveCount(0);
 
     await page.getByRole("link", { name: "成本统计" }).click();

@@ -84,6 +84,7 @@ class InvoiceLifecyclePolicyTests(unittest.TestCase):
             [status["code"] for status in statuses],
             ["unpaid", "paid", "paid", "paid", "paid"],
         )
+        self.assertEqual(statuses[0]["label"], "待支付")
         for status in statuses:
             self.assertIn(status["code"], {"paid", "unpaid"})
             self.assertNotIn(status["code"], {"overpaid", "merged_paid", "partially_paid", "pending_review"})

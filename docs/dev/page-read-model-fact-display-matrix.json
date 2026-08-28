@@ -73,7 +73,7 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/workbench-relations-oa-pending-fanout.spec.ts",
-          "required_markers": ["未支付", "已支付", "关联台已确认", "12561048"]
+          "required_markers": ["待支付", "已支付", "关联台已确认", "12561048"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:oa_pending_payments_rows"]

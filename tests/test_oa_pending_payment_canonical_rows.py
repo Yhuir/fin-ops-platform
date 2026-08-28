@@ -55,6 +55,7 @@ class OaPendingPaymentProjectionRowsTests(unittest.TestCase):
         self.assertEqual(rows[0]["oa"]["relationCount"], 1)
         self.assertEqual(rows[0]["bankTransaction"]["relationCount"], 0)
         self.assertEqual(rows[0]["paymentStatus"]["code"], "unpaid")
+        self.assertEqual(rows[0]["paymentStatus"]["label"], "待支付")
 
     def test_month_shard_excludes_cross_month_oa_member(self) -> None:
         may = self._oa("oa-may", "100.00", month="2026-05")
