@@ -96,3 +96,4 @@
 | 2026-07-05 | 移除 `legacy-current` 覆盖式发布入口和旧单文件 env 模板 | 发布状态机只保留 versioned release；legacy current 仅可作为 activate 清理对象 | `tests.test_deploy_oa_script`、`tests.test_deploy_runtime_examples`、`tests.test_platform_runtime_boundary_guards` |
 | 2026-08-03 | 自动风险分级并拆分 frontend/runtime/ACL 门禁 | 普通发布只验证 005；纯前端走 pre/T+0 快速门；ACL 变更自动升级双身份专项门禁；一次性 env/OA cleanup 退出运行链 | `tests.test_deploy_oa_script`、`bash -n deploy/oa/bin/finops-deploy-control.sh` |
 | 2026-08-05 | 标准发布统一为 005-only，并收窄 ACL 自动分类边界 | 通用 Settings service/store/repository 变更归入 runtime；005/006 双身份工具保留为显式专项验收，不再阻断激活 | `test_release_gate_auto_escalates_acl_without_requiring_006`、`test_release_gate_profile_is_automatic_and_fail_safe` |
+| 2026-08-28 | 将 `0160` 标记为 forward-only migration | `0160` 删除旧 release 仍访问的 OA 支付状态 ownership 表，禁止 migration 后自动启动旧 binary；失败时保持 maintenance 并前向修复 | `tests.test_deploy_oa_script.DeployOAScriptTest.test_release_gate_blocks_unproven_schema_rollback_before_services_stop` |

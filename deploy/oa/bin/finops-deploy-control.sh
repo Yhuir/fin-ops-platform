@@ -389,7 +389,7 @@ for migration in migrations:
 
 server_version_num = int(run_psql(database_url, sql="show server_version_num;"))
 applied_versions = sorted(applied)
-forward_only_versions = {"0149"}
+forward_only_versions = {"0149", "0160"}
 forward_only = bool(pending) and all(
     item["version"] in forward_only_versions for item in pending
 )
