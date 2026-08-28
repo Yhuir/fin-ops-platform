@@ -19,6 +19,7 @@ from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
     OA_PAYMENT_STATUS_RECONCILE_EVENT,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
@@ -187,7 +188,7 @@ class PostgresWorkbenchRelationRepository:
                 ) as canonical_bank_months
             from app.workbench_pair_relations relation
             where relation.status = 'active'
-              and relation.case_id !~ '^(candidate|decision|temp):'
+              and relation.relation_mode = any(%s::text[])
               and relation.special_metadata->>'paired_requirement_source' = 'bank_transaction_paired_policy'
               and (
                     relation.special_metadata->'paired_requirement_tag_codes' ?| %s::text[]
@@ -195,7 +196,11 @@ class PostgresWorkbenchRelationRepository:
               )
             order by relation.case_id
             """,
-            (normalized_tag_codes, normalized_tag_codes),
+            (
+                sorted(VALID_WORKBENCH_RELATION_MODES),
+                normalized_tag_codes,
+                normalized_tag_codes,
+            ),
         )
         relations: list[dict[str, Any]] = []
         for row in rows:

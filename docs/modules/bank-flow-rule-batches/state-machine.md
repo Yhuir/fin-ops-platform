@@ -16,7 +16,7 @@
 - 已提交/已撤回批次的标签文本、行级分类和 requirement snapshot 保持创建时历史，不随规则改写。
 - active relation 持久化 tag codes/source/version 作为可审计证明；相关标签的 `requires_oa` / `requires_invoice` 发生真实语义变化时，后台任务仅重算命中这些 tag codes 的 active relation，并使用关系完整 tag set 做 OR 聚合。
 - 完全相同的保存是 no-op；语义变化使用版本 CAS 并写审计。
-- 规则与 background job/outbox 在同一事务写入。保存成功后前端清空旧选择、执行一次正常 GET 并提示后台重算；worker 只为实际发生 requirement 变化的关系刷新精确月份。
+- 规则与 background job/outbox 在同一事务写入。保存成功后前端清空旧选择并观察 response 中的 job；任务成功后再执行一次正常 GET 并提示“已重算”，失败或 30 秒超时必须显式反馈。worker 只为实际发生 requirement 变化的关系刷新精确月份。
 
 ## 批量状态
 

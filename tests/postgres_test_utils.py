@@ -172,6 +172,7 @@ EXPECTED_MIGRATION_FILES = [
     "0158_oa_payment_status_auto_reconcile.sql",
     "0159_oa_payment_status_runtime_grant.sql",
     "0160_remove_oa_payment_status_writeback_ownership.sql",
+    "0161_converge_formal_bank_relation_requirements.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (

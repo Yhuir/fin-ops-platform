@@ -172,6 +172,7 @@ EXPECTED_MIGRATIONS = [
     "0158_oa_payment_status_auto_reconcile.sql",
     "0159_oa_payment_status_runtime_grant.sql",
     "0160_remove_oa_payment_status_writeback_ownership.sql",
+    "0161_converge_formal_bank_relation_requirements.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -332,7 +333,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 161)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 162)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1798,6 +1799,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             oa_payment_status_rule_sql,
             "approved_oa_payment_status_rule_migration;",
         )
+        formal_bank_relation_convergence_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0161_converge_formal_bank_relation_requirements.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(formal_bank_relation_convergence_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            formal_bank_relation_convergence_sql,
+            "approved_formal_bank_relation_requirement_convergence;",
+        )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",
@@ -1879,6 +1891,23 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("supersedes_job_id", sql)
         self.assertIn("insert into job.background_jobs", sql)
         self.assertIn("insert into job.outbox_events", sql)
+        self.assertIn("on conflict (job_id) do nothing", sql)
+        self.assertIn("on conflict (tenant_id, dedupe_key)", sql)
+        self.assertNotIn("delete from", sql)
+        self.assertNotIn("update app.workbench_pair_relations", sql)
+
+    def test_formal_bank_relation_requirement_convergence_is_worker_owned_and_idempotent(self) -> None:
+        sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0161_converge_formal_bank_relation_requirements.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+
+        self.assertIn("bank_relation_requirement_recalculation", sql)
+        self.assertIn("formal_relation_mode_convergence", sql)
+        self.assertIn("settings.bank_relation_requirements.recalculate.requested", sql)
+        self.assertIn("active_job.status in ('queued', 'running')", sql)
         self.assertIn("on conflict (job_id) do nothing", sql)
         self.assertIn("on conflict (tenant_id, dedupe_key)", sql)
         self.assertNotIn("delete from", sql)

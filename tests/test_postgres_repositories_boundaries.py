@@ -1046,7 +1046,7 @@ def test_workbench_active_relation_case_load_is_one_history_free_query() -> None
     assert params == ("case-1",)
 
 
-def test_requirement_recalculation_query_excludes_non_formal_candidate_case_ids() -> None:
+def test_requirement_recalculation_query_selects_formal_relation_modes_regardless_of_case_id() -> None:
     connection = WorkbenchReadConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
 
@@ -1054,12 +1054,15 @@ def test_requirement_recalculation_query_excludes_non_formal_candidate_case_ids(
 
     assert len(connection.fetched_all) == 1
     sql, params = connection.fetched_all[0]
-    assert "case_id !~ '^(candidate|decision|temp):'" in sql
+    assert "relation.relation_mode = any(%s::text[])" in sql
+    assert "case_id !~" not in sql
     assert "paired_requirement_source" in sql
     assert "canonical_bank_months" in sql
     assert "from app.bank_transactions bank" in sql
     assert "bank.txn_month is not null" in sql
-    assert params == (["sales_income"], ["sales_income"])
+    assert "manual_confirmed" in params[0]
+    assert "bank_flow_rule_batch" in params[0]
+    assert params[1:] == (["sales_income"], ["sales_income"])
 
 
 def test_workbench_active_relation_overlap_load_is_one_history_free_query() -> None:

@@ -69,6 +69,7 @@ import type {
   BankFlowRuleBatchTagRule,
   BankFlowRuleBatchTagSelection,
 } from "../features/bankFlowRuleBatches/types";
+import { fetchBackgroundJob } from "../features/backgroundJobs/api";
 import { formatDateTimeText } from "../features/dateTime";
 
 const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
@@ -106,6 +107,28 @@ const SELF_SUB_LABEL = "主标签本身";
 const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
 const CANDIDATE_CONFLICT_CODE = "bank_flow_rule_batch_candidate_conflict";
 const CANDIDATE_CONFLICT_MESSAGE = "候选已更新，请重新选择。";
+const RECALCULATION_POLL_INTERVAL_MS = 250;
+const RECALCULATION_POLL_LIMIT = 120;
+
+function waitForPollInterval() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, RECALCULATION_POLL_INTERVAL_MS);
+  });
+}
+
+async function waitForRequirementRecalculation(jobId: string) {
+  for (let attempt = 0; attempt < RECALCULATION_POLL_LIMIT; attempt += 1) {
+    const job = await fetchBackgroundJob(jobId);
+    if (job.status === "succeeded") {
+      return;
+    }
+    if (job.status !== "queued" && job.status !== "running") {
+      throw new Error(job.error || job.message || `流水关联要求重算失败（${job.status}）。`);
+    }
+    await waitForPollInterval();
+  }
+  throw new Error("流水规则已保存，但关联重算在 30 秒内未完成，请稍后刷新。");
+}
 
 function isCandidateConflict(caught: unknown) {
   return caught instanceof ApiClientError && caught.code === CANDIDATE_CONFLICT_CODE;
@@ -627,6 +650,10 @@ export default function BankFlowRuleBatchPage() {
           setSelectedBatchId("");
           setDetails({});
           setDetailErrors({});
+          if (saved.recalculationJobId) {
+            setMessage("流水规则已保存，正在重算受影响关联...");
+            await waitForRequirementRecalculation(saved.recalculationJobId);
+          }
           setMessage("流水规则已保存，正在加载当前页面最新数据...");
           await reloadBatchesAfterMutation();
           return saved;
@@ -640,9 +667,7 @@ export default function BankFlowRuleBatchPage() {
       const saved = result.value;
       setFeedback({
         severity: "success",
-        message: saved?.recalculationJobId
-          ? "流水规则已保存，受影响关联正在后台重算"
-          : "流水规则已保存",
+        message: saved?.recalculationJobId ? "流水规则已保存，受影响关联已重算" : "流水规则已保存",
       });
     }
   };

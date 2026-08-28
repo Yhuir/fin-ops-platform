@@ -4827,7 +4827,7 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 ## 2026-08-12 - 规则收敛候选边界修复
 
 - 真实原因：首次上线收敛 job 的 repository 查询只按 `status=active + requirement source + tag proof` 过滤，误把遗留的 `candidate:*` 预配对候选行纳入正式关系集合。候选没有正式关系的 exact `month_scope`，因此 handler 的全量预验证正确地 fail closed，生产关系保持零写，但两笔存量 182400 元关系也没有完成规则迁移。
-- 修复边界：在 PostgreSQL relation repository 的集合查询入口排除 `candidate:`、`decision:`、`temp:`；不在 handler 添加跳过 fallback，确保真正正式关系仍接受完整预验证。预配对候选继续由 matching/read model 基于当前规则重建，不写 requirement history。
+- 后续修正：不能以 `case_id` 的 `candidate:`、`decision:`、`temp:` 历史前缀判定正式性，因为确认后的正式关系可继续沿用 `decision:` identity。PostgreSQL relation repository 现以 active `status` + 正式 `relation_mode` 白名单选取；仍为候选 mode 的记录自然排除，已正式确认的 decision-origin 关系参与完整预验证与 requirement 重算。handler 不添加跳过 fallback。
 - 恢复策略：migration 0146 只在 0145 rollout job 已经 `failed` 时创建确定性的 v2 job/event；全新环境中 0145 仍为 queued，因此不会产生重复 rollout。v2 成功完成关系写入和精确 scope enqueue 后才通过 BackgroundJobService 将 v1 标记 superseded；v2 失败则保留两条 attention 证据。
 - 性能与污染控制：仍按变化 tag code + GIN proof 索引查询；不扫描全关系、不使用 `all` refresh、不创建第二条关系写链，也不改页面/API DTO。
 

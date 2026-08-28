@@ -417,11 +417,13 @@ function installFetchMock(
     listFailuresBeforeSuccess?: number;
     tagSelection?: Record<string, unknown>;
     tagSelectionResponses?: Array<{ delay?: Promise<void>; payload?: Record<string, unknown> }>;
+    recalculationStatuses?: string[];
   } = {},
 ) {
   let listFailuresRemaining = options.listFailuresBeforeSuccess ?? 0;
   const tagSelection = options.tagSelection ?? tagSelectionPayload;
   const tagSelectionResponses = [...(options.tagSelectionResponses ?? [])];
+  const recalculationStatuses = [...(options.recalculationStatuses ?? ["succeeded"])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     if (url.pathname === "/api/bank-flow-rule-batches/tag-rules" && (!init?.method || init.method === "GET")) {
@@ -437,6 +439,20 @@ function installFetchMock(
         rules: body.rules ?? [],
         requirement_changed_tag_codes: ["fee"],
         recalculation_job: { job_id: "job-recalculate-1" },
+      });
+    }
+    if (url.pathname === "/api/background-jobs/job-recalculate-1") {
+      const status = recalculationStatuses.length > 1
+        ? recalculationStatuses.shift()
+        : recalculationStatuses[0];
+      return jsonResponse({
+        job: {
+          job_id: "job-recalculate-1",
+          type: "bank_relation_requirement_recalculation",
+          status,
+          message: status === "failed" ? "重算失败" : "重算完成",
+          error: status === "failed" ? "重算失败" : null,
+        },
       });
     }
     if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
@@ -946,7 +962,25 @@ describe("BankFlowRuleBatchPage", () => {
       );
     });
     expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
-    expect(await screen.findByText("流水规则已保存，受影响关联正在后台重算")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/background-jobs/job-recalculate-1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(await screen.findByText("流水规则已保存，受影响关联已重算")).toBeInTheDocument();
+  });
+
+  test("surfaces requirement recalculation failure instead of reporting stale data as complete", async () => {
+    const user = userEvent.setup();
+    installFetchMock(listPayload, { recalculationStatuses: ["failed"] });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "流水规则标签管理" }));
+    const drawer = screen.getByRole("dialog", { name: "流水规则标签管理" });
+    await user.click(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" }));
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByText("重算失败")).toBeInTheDocument();
+    expect(screen.queryByText("流水规则已保存，受影响关联已重算")).not.toBeInTheDocument();
   });
 
   test("does not save stale tag rules before the opening request completes", async () => {

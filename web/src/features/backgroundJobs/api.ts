@@ -115,6 +115,17 @@ export async function fetchActiveBackgroundJobs(signal?: AbortSignal): Promise<B
   };
 }
 
+export async function fetchBackgroundJob(jobId: string, signal?: AbortSignal): Promise<BackgroundJob> {
+  const payload = await requestJson<{ job?: ApiBackgroundJob }>(`/api/background-jobs/${encodeURIComponent(jobId)}`, {
+    method: "GET",
+    signal,
+  });
+  if (!payload.job) {
+    throw new Error("后台任务响应缺少任务数据。");
+  }
+  return mapBackgroundJob(payload.job);
+}
+
 export async function acknowledgeBackgroundJob(jobId: string, signal?: AbortSignal): Promise<BackgroundJob> {
   const payload = await requestJson<{ job?: ApiBackgroundJob }>(`/api/background-jobs/${encodeURIComponent(jobId)}/acknowledge`, {
     method: "POST",
