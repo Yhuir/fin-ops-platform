@@ -124,6 +124,11 @@ API、Worker、监控和部署链路均不读写这些列，不再存在 RabbitM
 一旦 0149 已执行，不允许自动切回依赖旧 schema 的 previous release。后验证失败时保持 maintenance，使用
 当前 release 向前修复；这是避免旧代码重新污染链路的必要限制。
 
+Migration `0162_cost_statistics_unit_manual_allocations.sql` 同样是 forward-only：它把旧的
+“OA 单元 × 流水来源矩阵”持久化合同收敛为“每个 OA 单元一个分配金额”，并重命名相关列。旧 release
+依赖已退役列，不能在 0162 schema 上安全运行；若 0162 激活后的验证失败，保持 maintenance 并向前修复，
+不得自动切回旧 release。
+
 ## Release checkpoint
 
 每个 checkpoint 必须同时证明：

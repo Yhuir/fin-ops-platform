@@ -173,6 +173,7 @@ EXPECTED_MIGRATIONS = [
     "0159_oa_payment_status_runtime_grant.sql",
     "0160_remove_oa_payment_status_writeback_ownership.sql",
     "0161_converge_formal_bank_relation_requirements.sql",
+    "0162_cost_statistics_unit_manual_allocations.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -333,7 +334,10 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 162)])
+        self.assertEqual(
+            [item.version for item in migrations],
+            [f"{number:04d}" for number in range(1, 163)],
+        )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -455,6 +459,29 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         )
         self.assertNotIn("grant delete", normalized_sql)
         self.assertNotIn("delete from", normalized_sql)
+
+    def test_cost_statistics_manual_allocations_migrate_from_source_matrix_fail_closed(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0162_cost_statistics_unit_manual_allocations.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("jsonb_array_elements(decision.allocations)", normalized_sql)
+        self.assertIn("jsonb_object_keys(line.value)", normalized_sql)
+        self.assertIn("line.value->>'source_kind' not in ('outflow', 'paid_wrong_refund')", normalized_sql)
+        self.assertIn("when 'paid_wrong_refund' then -(line.value->>'amount')::numeric", normalized_sql)
+        self.assertIn("group by line.value->>'unit_id'", normalized_sql)
+        self.assertIn("reduced.minimum_unit_amount < 0", normalized_sql)
+        self.assertIn("reduced.allocated_total <> decision.net_cash_cost", normalized_sql)
+        self.assertIn("raise exception", normalized_sql)
+        self.assertIn("'unit_id', grouped.unit_id", normalized_sql)
+        self.assertIn("'amount', to_char(grouped.unit_amount", normalized_sql)
+        self.assertIn("rename column allocations to unit_allocations", normalized_sql)
+        self.assertIn("add column non_cost_amount numeric(18, 2) not null default 0.00", normalized_sql)
+        self.assertIn("add column non_cost_reason text not null default ''", normalized_sql)
+        self.assertIn("non_cost_amount <= net_outflow_total", normalized_sql)
+        self.assertNotIn("delete from", normalized_sql)
+        self.assertNotIn("drop table", normalized_sql)
 
     def test_oa_payment_status_auto_reconcile_backfill_is_bounded_and_event_only(self) -> None:
         sql = (

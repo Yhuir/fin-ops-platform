@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "description": "Page-level read-boundary and fact-display coverage matrix. Every route in web/src/app/pageRegistry.tsx must have one row. The matrix records read model keys when present, production read-only probes, canonical fact sources, pairing relation fact sources when the page displays relation state, and deterministic evidence anchors.",
   "rows": [
     {
@@ -28,7 +28,7 @@
       "route": "/cost-statistics",
       "read_model_keys": [],
       "freshness_probe_names": ["cost_statistics_explorer_all"],
-      "fact_sources": ["app.bank_transactions", "app.bank_transaction_categories", "app.bank_transaction_category_confirmations", "app.oa_applications", "app.workbench_pair_relations", "app.app_settings"],
+      "fact_sources": ["app.bank_transactions", "app.bank_transaction_categories", "app.bank_transaction_category_confirmations", "app.oa_applications", "app.workbench_pair_relations", "app.cost_statistics_manual_allocations", "app.app_settings"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations"],
       "deterministic_evidence": [
         {
@@ -37,7 +37,11 @@
         },
         {
           "path": "tests/test_cost_statistics_api.py",
-          "required_markers": ["/api/cost-statistics/explorer", "test_each_api_request_loads_exactly_one_snapshot"]
+          "required_markers": ["/api/cost-statistics/explorer", "/api/cost-statistics/manual-allocations", "source_fingerprint", "non_cost_amount", "test_each_api_request_loads_exactly_one_snapshot"]
+        },
+        {
+          "path": "web/src/test/CostStatisticsPage.test.tsx",
+          "required_markers": ["保存分配", "不计入成本金额"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:cost_statistics_explorer_all"]

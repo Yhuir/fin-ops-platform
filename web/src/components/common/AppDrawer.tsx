@@ -11,6 +11,7 @@ type AppDrawerProps = {
   closeDisabled?: boolean;
   closeLabel?: string;
   footer?: ReactNode;
+  headerActions?: ReactNode;
   modal?: boolean;
   width?: number | string;
   onClose: () => void;
@@ -32,6 +33,7 @@ export default function AppDrawer({
   closeDisabled = false,
   closeLabel,
   footer,
+  headerActions,
   modal = true,
   width = 420,
   onClose,
@@ -40,7 +42,7 @@ export default function AppDrawer({
   const [persistentMounted, setPersistentMounted] = useState(open);
   const [persistentVisible, setPersistentVisible] = useState(false);
   const [persistentClosing, setPersistentClosing] = useState(false);
-  const lastOpenModalContentRef = useRef({ ariaLabel, children, footer, title });
+  const lastOpenModalContentRef = useRef({ ariaLabel, children, footer, headerActions, title });
   const persistentCloseTimerRef = useRef<number | null>(null);
   const persistentFrameRef = useRef<number | null>(null);
   const persistentOpenerRef = useRef<HTMLElement | null>(null);
@@ -50,10 +52,10 @@ export default function AppDrawer({
     "--finance-drawer-width": typeof width === "number" ? `${width}px` : width,
   };
   if (open) {
-    lastOpenModalContentRef.current = { ariaLabel, children, footer, title };
+    lastOpenModalContentRef.current = { ariaLabel, children, footer, headerActions, title };
   }
   const modalContent = open
-    ? { ariaLabel, children, footer, title }
+    ? { ariaLabel, children, footer, headerActions, title }
     : lastOpenModalContentRef.current;
 
   useLayoutEffect(() => {
@@ -160,6 +162,7 @@ export default function AppDrawer({
             <h2 className="finance-drawer__title" id={titleId}>
               {title}
             </h2>
+            {headerActions ? <div className="finance-drawer__header-actions">{headerActions}</div> : null}
             <Button
               aria-label={closeLabel ?? "关闭抽屉"}
               isDisabled={closeDisabled}
@@ -202,6 +205,9 @@ export default function AppDrawer({
             <Drawer.Heading className="finance-drawer__title" id={titleId}>
               {modalContent.title}
             </Drawer.Heading>
+            {modalContent.headerActions ? (
+              <div className="finance-drawer__header-actions">{modalContent.headerActions}</div>
+            ) : null}
             <Button
               aria-label={closeLabel ?? "关闭抽屉"}
               isDisabled={closeDisabled}

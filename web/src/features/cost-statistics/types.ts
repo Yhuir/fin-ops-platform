@@ -112,6 +112,7 @@ export type CostStatisticsExplorerPage = {
 export type CostStatisticsManualAllocationUnit = {
   unitId: string;
   oaId: string;
+  oaApplyType: string;
   expenseItemId: string;
   projectId: string;
   projectName: string;
@@ -121,20 +122,18 @@ export type CostStatisticsManualAllocationUnit = {
   oaOriginalAmount: string;
 };
 
-export type CostStatisticsManualAllocationSource = {
-  sourceId: string;
-  sourceKind: "outflow" | "paid_wrong_refund";
+export type CostStatisticsManualAllocationBankEvent = {
+  transactionId: string;
+  eventKind: "outflow" | "wrong_payment_refund";
   amount: string;
   tradeTime: string;
   counterpartyName: string;
-  paymentAccountLabel: string;
-  remark: string;
+  summary: string;
+  tags: string[];
 };
 
 export type CostStatisticsManualAllocationLine = {
   unitId: string;
-  sourceId: string;
-  sourceKind: "outflow" | "paid_wrong_refund";
   amount: string;
 };
 
@@ -143,14 +142,15 @@ export type CostStatisticsManualAllocationTask = {
   relationVersion: number;
   sourceFingerprint: string;
   status: "pending" | "stale" | "allocated";
-  oaAllocationTotal: string;
-  bankOutflowTotal: string;
-  paidWrongRefundTotal: string;
-  netCashCost: string;
-  difference: string;
+  oaTotal: string;
+  grossOutflowTotal: string;
+  wrongPaymentRefundTotal: string;
+  netOutflowTotal: string;
   units: CostStatisticsManualAllocationUnit[];
-  sources: CostStatisticsManualAllocationSource[];
+  bankEvents: CostStatisticsManualAllocationBankEvent[];
   allocations: CostStatisticsManualAllocationLine[];
+  nonCostAmount: string;
+  nonCostReason: string;
   version: number;
   updatedBy: string;
   updatedAt: string;
@@ -177,6 +177,8 @@ export type SaveCostStatisticsManualAllocationRequest = {
   expectedVersion: number;
   sourceFingerprint: string;
   allocations: CostStatisticsManualAllocationLine[];
+  nonCostAmount: string;
+  nonCostReason: string;
 };
 
 export type CostStatisticsExplorerPageRequest = {
@@ -250,10 +252,10 @@ export type CostAllocationDetail = {
   }>;
   reconciliation: {
     relationCaseId: string;
-    oaAllocationTotal: string;
-    bankOutflowTotal: string;
-    paidWrongRefundTotal: string;
-    netCashCost: string;
+    oaTotal: string;
+    grossOutflowTotal: string;
+    wrongPaymentRefundTotal: string;
+    netOutflowTotal: string;
     difference: string;
     cashPaymentRatio: string;
     status: "balanced" | "mismatch";

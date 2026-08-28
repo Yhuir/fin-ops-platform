@@ -25,6 +25,7 @@ type MockApiOptions = {
   costExplorerDelayMs?: number;
   costDetailFailuresBeforeSuccess?: number;
   costDetailDelayMs?: number;
+  costManualAllocationLoadMoreError?: boolean;
   costExportErrorViews?: string[];
   costDuplicateTransactionRows?: boolean;
   costTagRulesCanSave?: boolean;
@@ -4321,10 +4322,10 @@ function buildCostStatisticsAllocationPayload(allocationId: string) {
       }],
       reconciliation: {
         relation_case_id: `relation-${transactionId}`,
-        oa_allocation_total: sourceRow.amount,
-        bank_outflow_total: transaction.amount,
-        paid_wrong_refund_total: "0.00",
-        net_cash_cost: transaction.amount,
+        oa_total: sourceRow.amount,
+        gross_outflow_total: transaction.amount,
+        wrong_payment_refund_total: "0.00",
+        net_outflow_total: transaction.amount,
         difference: "0.00",
         cash_payment_ratio: "100.00%",
         status: "balanced",
@@ -4692,6 +4693,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
   let workbenchWriteActionCount = 0;
   let manualAllocationLines: Array<Record<string, unknown>> = [];
+  let manualAllocationNonCostAmount = "0.00";
+  let manualAllocationNonCostReason = "";
   let manualAllocationVersion = 0;
   const buildManualAllocationTask = (
     relationCaseId: string,
@@ -4701,15 +4704,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     relation_version: 1,
     source_fingerprint: "a".repeat(64),
     status: allocations.length > 0 ? "allocated" : "pending",
-    oa_allocation_total: "1010.00",
-    bank_outflow_total: "1000.00",
-    paid_wrong_refund_total: "0.00",
-    net_cash_cost: "1000.00",
-    difference: "-10.00",
+    oa_total: "1010.00",
+    gross_outflow_total: "1000.00",
+    wrong_payment_refund_total: "0.00",
+    net_outflow_total: "1000.00",
     units: [
       {
         unit_id: "oa-1:expense-1",
         oa_id: "oa-1",
+        oa_apply_type: "日常报销",
         expense_item_id: "expense-1",
         project_id: "project-a",
         project_name: "项目 A",
@@ -4721,6 +4724,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       {
         unit_id: "oa-1:expense-2",
         oa_id: "oa-1",
+        oa_apply_type: "日常报销",
         expense_item_id: "expense-2",
         project_id: "project-b",
         project_name: "项目 B",
@@ -4730,18 +4734,29 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         oa_original_amount: "10.00",
       },
     ],
-    sources: [
+    bank_events: [
       {
-        source_id: "bank-manual-001",
-        source_kind: "outflow",
-        amount: "1000.00",
-        trade_time: "2026-08-27 09:30:00",
+        transaction_id: "bank-manual-001",
+        event_kind: "outflow",
+        amount: "600.00",
+        trade_time: "2026-08-27T09:30:00+08:00",
         counterparty_name: "昆明设备供应商",
-        payment_account_label: "建设银行 8106",
-        remark: "设备采购",
+        summary: "设备采购",
+        tags: ["费用", "设备采购"],
+      },
+      {
+        transaction_id: "bank-manual-002",
+        event_kind: "outflow",
+        amount: "400.00",
+        trade_time: "2026-08-27T10:30:00+08:00",
+        counterparty_name: "昆明设备供应商",
+        summary: "设备尾款",
+        tags: ["费用", "设备采购"],
       },
     ],
     allocations,
+    non_cost_amount: manualAllocationNonCostAmount,
+    non_cost_reason: manualAllocationNonCostReason,
     version: manualAllocationVersion,
     updated_by: allocations.length > 0 ? "测试全权限" : "",
     updated_at: allocations.length > 0 ? "2026-08-27T10:00:00+08:00" : "",
@@ -5967,6 +5982,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/cost-statistics/manual-allocations": ({ url }) => {
+      const cursor = url.searchParams.get("cursor");
+      if (cursor && options.costManualAllocationLoadMoreError) {
+        return {
+          status: 503,
+          body: {
+            error: "cost_statistics_manual_allocations_temporarily_unavailable",
+            message: "人工分配下一页加载失败，请重试。",
+          },
+        };
+      }
       const requestedStatus = url.searchParams.get("status") ?? "pending";
       const allocated = manualAllocationLines.length > 0;
       const visible = requestedStatus === "allocated" ? allocated : !allocated;
@@ -5975,7 +6000,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           items: visible ? [buildManualAllocationTask("relation-manual-001")] : [],
           row_count: visible ? 1 : 0,
           counts: { pending: allocated ? 0 : 1, allocated: allocated ? 1 : 0 },
-          next_cursor: null,
+          next_cursor: options.costManualAllocationLoadMoreError && !cursor ? "next-page" : null,
         },
       };
     },
@@ -7763,6 +7788,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ? jsonBody.allocations as Array<Record<string, unknown>>
         : [];
       manualAllocationLines = allocations;
+      manualAllocationNonCostAmount = String(jsonBody?.non_cost_amount ?? "");
+      manualAllocationNonCostReason = String(jsonBody?.non_cost_reason ?? "");
       manualAllocationVersion += 1;
       return jsonResponse({ body: buildManualAllocationTask(relationCaseId) });
     }

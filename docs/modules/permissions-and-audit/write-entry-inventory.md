@@ -117,6 +117,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `确认导入` | `web/src/components/imports/ImportWorkflowPage.tsx` | 导入确认。 |
 | `保存` | `web/src/components/cost-statistics/CostStatisticsTimeTagRulesDrawer.tsx` | 按标签/按时间银行流水标签规则保存；只影响两个原始流水视图。 |
 | `保存` | `web/src/components/cost-statistics/CostStatisticsNoOaRulesDrawer.tsx` | 无 OA 虚拟项目与互斥标签归属保存；只影响三个成本归因视图。 |
+| `保存` | `web/src/components/cost-statistics/CostStatisticsManualAllocationDrawer.tsx` | 成本人工分配按关系逐组保存或修改；请求携带关系版本与事实指纹，保存逐 OA 单元成本、可选不计入成本金额及说明。 |
 
 ## Mutating feature API coverage map
 
@@ -130,7 +131,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `batchAccounting/api.ts` | `batch-accounting` | 批量账务标签规则保存、提交和撤回。 |
 | `cost-statistics/api.ts` | `cost-statistics` | 两套独立规则 PUT 与配对金额人工分配写入；导出仍为只读能力。 |
 | `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口。 |
-| `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 通用导入 preview/confirm/template 写链路。 |
+| `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 文件导入 preview/confirm/template；人工流水 preview 仅创建当前用户的临时预览 session，属于 read-like command，确认/放弃复用既有 import batch/session 边界。 |
 | `inputInvoiceUsage/api.ts` | `input-invoice-usage` | 支付规则、OA reverse 草稿/批次/状态写入口。 |
 | `bankFlowRuleBatches/api.ts` | `bank-flow-rule-batches` | 流水规则批量处理标签规则、提交、撤回和内部往来迁移底座写入口。 |
 | `oaPendingPayments/api.ts` | `oa-pending-payments` | 关联支出流水；支付状态由 relation event 自动同步，无人工写回 API。 |
@@ -153,6 +154,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `bank-details:auto-tag-rules` | `bank-details` | 自动标签规则抽屉 | read-export 下新增标签、重新应用规则、保存禁用，且复扫 visible enabled 写控件候选。 |
 | `cost-statistics:time-tag-rules` | `cost-statistics` | 按标签/按时间标签规则抽屉 | read-export 下可查看完整标签集合，但全选、清空、标签选择与 `保存` disabled，`PUT /api/cost-statistics/time-tag-rules` 零调用，并复扫 visible enabled 写控件候选。 |
 | `cost-statistics:no-oa-rules` | `cost-statistics` | 无 OA 成本范围抽屉 | read-export 下可查看候选与虚拟项目，但新增、编辑、删除、标签选择与 `保存` disabled，`PUT /api/cost-statistics/no-oa-rules` 零调用，并复扫 visible enabled 写控件候选。 |
+| `cost-statistics:manual-allocations` | `cost-statistics` | 成本人工分配抽屉 | read-export 下可打开并展开确定性关系组，但分配金额输入、不计入成本复选框与逐关系 `保存分配` 均 disabled，`PUT /api/cost-statistics/manual-allocations/CASE-COST-MANUAL-READONLY` 零调用，并复扫 visible enabled 写控件候选。 |
 | `bank-details:category-confirmation` | `bank-details` | 银行明细行内分类确认入口 | read-export 下待确认分类按钮禁用，分类菜单不打开，category-confirmation durable mutation 零调用，且复扫候选。 |
 | `bank-details:manual-category-assignment` | `bank-details` | 银行明细待分类/待确认/自动标签人工覆盖入口 | read-export 下待分类与自动标签“撤销”按钮禁用，人工分类菜单不打开，category-assignment durable mutation 零调用，且复扫候选。 |
 | `bank-flow-rule-batches:tag-drawer` | `bank-flow-rule-batches` | 流水规则批量处理标签规则抽屉 | read-export 下提交/撤回入口不可见，标签规则 OA/发票复选框和保存禁用，且复扫候选。 |
@@ -177,7 +179,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 | Module | 静态覆盖原因 | 当前证明 |
 | --- | --- | --- |
-| `imports-bank-transactions` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-bank-transactions-flow.spec.ts` 覆盖 full-access 主链路。 |
+| `imports-bank-transactions` | 文件导入写入口位于首屏；人工流水录入 opener 本身受 mutation 权限保护，read-export 下不存在，因此不需要动态打开 Drawer。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下断言文件 input、开始预览和确认导入禁用，并断言 `流水录入` opener 不存在且零 mutation；人工流水 full-access preview/confirm/dedupe 由现有组件/API 测试覆盖。 |
 | `imports-invoices` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-invoices-flow.spec.ts` 覆盖 full-access 主链路。 |
 | `imports-etc-invoices` | 导入页写入口集中在首屏上传、开始预览和确认导入控件，不需要额外抽屉 opener。 | `permissions-role-matrix.spec.ts` 的 import controls 循环在 read-export 下打开该 route，断言文件 input、开始预览和确认导入禁用且零 mutation；`imports-etc-invoices-flow.spec.ts` 覆盖 full-access 主链路。 |
 | `tax-offset` | read-export 下保存计划和已认证发票导入入口在页面首屏直接可判定，深层导入流程由 full-access Browser flow 覆盖。 | `permissions-role-matrix.spec.ts` 直接断言 read-export 下无保存计划/已认证发票导入入口；`tax-offset-flow.spec.ts` 覆盖 full-access 保存、导入、冲突和 read model 非 fresh。 |
@@ -191,7 +193,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | --- | --- | --- | --- | --- |
 | `reconciliation-workbench` | manual confirm、paired/unpaired active-relation withdraw、异常接受进入已配对/留在未配对/撤回、待归属发票显式选择 OA 明细、行级忽略、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save；未配对工具栏人工“异常处理”已删除 | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对关系并打开统一异常抽屉，断言确认和关系级撤回禁用、未配对工具栏人工“异常处理”不存在、异常决定/撤回入口隐藏；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常审阅、发票明细归属、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
 | `bank-details` | 分类保存/清除、候选确认/撤回、人工待分类、自动标签规则保存/reapply | `covered-browser` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开自动标签规则抽屉并分别进入待确认分类和未匹配待分类状态，断言新增标签/reapply/保存禁用、待确认/待分类按钮禁用、分类菜单不打开、category-confirmation/category-assignment 零 mutation，并复跑 DOM 写控件候选扫描 | 新增批量分类或规则入口时补 read-export 零 mutation。 |
-| `imports-bank-transactions` | 文件选择、preview、confirm import、账户冲突确认 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖 full_access 主链路 | 新增清空/重试/批量导入 mutation 时补按钮矩阵。 |
+| `imports-bank-transactions` | 文件选择、文件 preview/confirm import、账户冲突确认、人工流水 preview/discard/confirm | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 文件导入 controls disabled，并证明 `流水录入` opener 不存在；`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖 full_access 文件导入主链路，人工流水组件/API 测试覆盖 preview/confirm/dedupe | 人工流水 Drawer 若改为只读可打开，必须补动态 opener 和内部控件扫描。 |
 | `imports-invoices` | 文件选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |
 | `imports-etc-invoices` | zip 选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-etc-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |
 | `pending-invoices` | 选择已有发票、收入批量状态、规则保存 | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下选择已有发票、支出/收入规则保存、收入状态按钮禁用且零 mutation；`web/e2e/pending-invoices-*` 覆盖 full_access 主链路；后端/API guard 覆盖 mutation 拒绝 | 新增待找发票写入口时补同类 Browser 断言。 |
@@ -202,7 +204,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `input-invoice-usage` | 支付规则保存、OA reverse 草稿创建 | `covered-browser` | `web/e2e/input-invoice-usage-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开支付状态规则抽屉和以发票反提 OA 工作流，断言规则只读、OA reverse preview 不可创建草稿、durable write endpoints 零调用并复跑 DOM 写控件候选扫描 | 新增 payment/OA 写入口时补。 |
 | `output-invoice-collections` | 无业务写入口；仅 canonical 查询、详情和导出 | `covered-browser` | `web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、API tests；`web/e2e/permissions-role-matrix.spec.ts` 通过 `output-invoice-collections:canonical-read-only` 证明三种角色均无旧状态/提醒/人工红蓝票/收据写入口且 durable mutation 为 0。 | 若新增写入口，必须先恢复权限、API、审计和回滚合同；当前保持只读。 |
 | `oa-pending-payments` | link-bank、支出流水无需开票规则保存；支付状态由 relation event 自动同步、无页面写入口 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下 link-bank disabled、OA 选择隐藏、规则 drawer 只读且保存禁用，并保持零 mutation；页面/API tests 锁定人工 writeback/confirm 入口不存在 | 新增 OA command 时补。 |
-| `cost-statistics` | 标签准入规则保存、导出 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 在 read-export 下打开标签规则抽屉，断言 `保存` disabled 且 tag-rules PUT 零调用；`web/src/test/CostStatisticsPage.test.tsx` 覆盖 writable canonical save→query-time reload 且零 barrier；`web/e2e/cost-statistics-flow.spec.ts` 覆盖 read-export download | 真实 XLSX、代理 header 和生产 rule write audit 归 staging。 |
+| `cost-statistics` | 按标签/按时间规则保存、无 OA 成本范围保存、成本人工分配逐关系保存、导出 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 在 read-export 下打开三套 Drawer；人工分配使用确定性关系组，证明分配金额输入、不计入成本复选框和逐关系保存均 disabled，相关 PUT 零调用并复扫写控件；`web/src/test/CostStatisticsPage.test.tsx` 覆盖金额闭合校验、逐关系保存与保存后刷新；API/service tests 覆盖权限、版本/事实指纹冲突、审计与持久化 | 新增成本规则、分配字段或写入口时同步扩展 opener；生产环境仍只做只读列表/口径与性能验证，不以真实财务关系执行写入 smoke。 |
 | `etc-tickets` | OA 草稿、人工提交、delete/reset、source file/upload/import/manual reconciliation | `covered-browser` | 本轮 `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 下提交 OA、新建批次、删除按钮、source file 上传、确认对账和人工核对动作禁用且零 mutation；`web/e2e/etc-tickets-flow.spec.ts` 覆盖 full_access OA 草稿和人工提交主链路；组件/API tests 覆盖 source file/upload/manual reconciliation guard | 新增 ETC 写入口时补同类 Browser 断言。 |
 | `settings` | 保存设置、访问账户、OA 凭据、数据重置 | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 保存禁用、full-access 普通 settings 保存 POST/200 且 direct ACL 攻击被 generic 400/dedicated 403 拒绝、admin 通过独立 versioned access-control PUT 保存账户；普通 settings payload 无 ACL。OA 凭据与数据重置继续覆盖 admin-only 和 secret 不泄漏；`web/e2e/settings-data-reset-flow.spec.ts` 覆盖 admin data reset 主链路 | 真实 admin/OA 凭据登录有效性由 production evidence 验证。 |
 | `app-health-operations` | dashboard/admin runtime read、write-safety blockers、导入历史银行流水批次撤回 | `covered-browser` | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` 覆盖 admin-only route；`web/src/test/AppHealthOperationsPage.test.tsx` 与 `tests/test_app_health_api.py` 覆盖撤回交互和 admin fail-closed | 发布后验证真实撤回事务、审计、账户纠正以及 systemd/RabbitMQ/Redis。 |
@@ -216,4 +218,4 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 ## 仍未完全闭合
 
-`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对确认/关系级撤回与旧人工异常入口缺席断言、关联台已配对关系级撤回、关联台现金处理行级菜单、关联台统一异常抽屉审阅/放行/撤回、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。
+`PERM-E2E-003` 仍不能标记为全量 `covered`：新增页面/route 漏登记、非 admin route 漏进 role matrix、covered row 缺 Browser 证据、dynamic opener 与 Playwright/inventory 不一致已由 `tests/test_permissions_write_entry_inventory.py` 自动拦截，read-export 首屏 visible enabled 写控件和当前 role matrix 已打开的关联台列顺序拖拽 settings 保存入口、关联台未配对确认/关系级撤回与旧人工异常入口缺席断言、关联台已配对关系级撤回、关联台现金处理行级菜单、关联台统一异常抽屉审阅/放行/撤回、银行分类确认、银行人工待分类、银行自动标签、成本标签/no-OA/人工分配、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回、turnover 等动态区域已由 DOM 候选扫描拦截；但尚未由 role matrix 自动打开的页面特定抽屉/弹窗深层爬取尚未完成，真实 OA/代理/生产审计也不能由本地 Browser mock 证明。后续每轮新增按钮时，必须先更新本文件，再补对应 Browser 断言。

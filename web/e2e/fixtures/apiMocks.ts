@@ -5587,10 +5587,10 @@ function costAllocationPayload(
     }],
     reconciliation: {
       relation_case_id: `relation-${transactionId}`,
-      oa_allocation_total: amount,
-      bank_outflow_total: amount,
-      paid_wrong_refund_total: "0.00",
-      net_cash_cost: amount,
+      oa_total: amount,
+      gross_outflow_total: amount,
+      wrong_payment_refund_total: "0.00",
+      net_outflow_total: amount,
       difference: "0.00",
       cash_payment_ratio: "100.00%",
       status: "balanced",
@@ -9390,6 +9390,54 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           output_sub_label: "材料费",
         }],
         can_save: configuredSessionTier() === "admin" || configuredSessionTier() === "full_access",
+      });
+    }
+
+    if (path === "/api/cost-statistics/manual-allocations") {
+      const status = url.searchParams.get("status") ?? "pending";
+      const task = {
+        relation_case_id: "CASE-COST-MANUAL-READONLY",
+        relation_version: 1,
+        source_fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        status: "pending",
+        oa_total: "120.00",
+        gross_outflow_total: "100.00",
+        wrong_payment_refund_total: "0.00",
+        net_outflow_total: "100.00",
+        units: [{
+          unit_id: "oa-cost-1:item:0",
+          oa_id: "oa-cost-1",
+          oa_apply_type: "日常报销",
+          expense_item_id: "oa-cost-1:item:0",
+          project_id: "project-cost-1",
+          project_name: "权限测试项目",
+          expense_type: "材料费",
+          expense_content: "测试材料",
+          oa_applicant: "只读用户",
+          oa_original_amount: "120.00",
+        }],
+        bank_events: [{
+          transaction_id: "bank-cost-1",
+          event_kind: "outflow",
+          amount: "100.00",
+          trade_time: "2026-08-28T10:00:00+08:00",
+          counterparty_name: "权限测试供应商",
+          summary: "测试支出",
+          tags: ["费用/材料费"],
+        }],
+        allocations: [],
+        non_cost_amount: "0.00",
+        non_cost_reason: "",
+        version: 0,
+        updated_by: "",
+        updated_at: "",
+        can_save: configuredSessionTier() === "admin" || configuredSessionTier() === "full_access",
+      };
+      return json(route, {
+        items: status === "pending" ? [task] : [],
+        row_count: status === "pending" ? 1 : 0,
+        counts: { pending: 1, allocated: 0 },
+        next_cursor: null,
       });
     }
 

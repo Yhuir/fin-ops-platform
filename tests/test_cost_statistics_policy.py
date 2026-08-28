@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import unittest
 from decimal import Decimal
 
@@ -10,7 +12,7 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
-    def test_daily_reimbursement_uses_saved_source_matrix_and_bank_date(self) -> None:
+    def test_equal_daily_reimbursement_uses_one_cost_entry_per_unit(self) -> None:
         group = self._group(
                     oa_rows=[
                         self._oa(
@@ -37,49 +39,33 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                         ),
                     ],
                 )
-        pending = self._policy([group]).manual_allocation_tasks[0]
-        policy = self._policy(
-            [group],
-            manual_allocations={
-                "case-1": self._manual_record(
-                    pending,
-                    [
-                        self._cell("oa:oa-exp-1:item:item-1", "outflow", "bank-1050", "240.00"),
-                        self._cell("oa:oa-exp-1:item:item-1", "paid_wrong_refund", "bank-refund-35", "0.00"),
-                        self._cell("oa:oa-exp-1:item:item-2", "outflow", "bank-1050", "745.00"),
-                        self._cell("oa:oa-exp-1:item:item-2", "paid_wrong_refund", "bank-refund-35", "35.00"),
-                        self._cell("oa:oa-exp-1:item:item-3", "outflow", "bank-1050", "65.00"),
-                        self._cell("oa:oa-exp-1:item:item-3", "paid_wrong_refund", "bank-refund-35", "0.00"),
-                    ],
-                )
-            },
-        )
+        policy = self._policy([group])
 
         rows = policy.serialized_cost_rows
-        self.assertEqual({row["amount"] for row in rows}, {"240.00", "745.00", "65.00", "-35.00"})
-        self.assertEqual({row["transaction_id"] for row in rows}, {"bank-1050", "bank-refund-35"})
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({row["amount"] for row in rows}, {"240.00", "710.00", "65.00"})
+        self.assertEqual({row["transaction_id"] for row in rows}, {""})
+        self.assertEqual({row["payment_account_label"] for row in rows}, {""})
         dali = next(
             row
             for row in rows
             if row["project_name"] == "大理卷烟厂余热综合利用项目"
-            and row["transaction_id"] == "bank-1050"
         )
         self.assertEqual(dali["month"], "2026-08")
         self.assertEqual(dali["oa_completed_at"], "2026-07-23 18:00:00")
-        self.assertEqual(dali["payment_account_label"], "建设银行 8106")
         detail = policy.allocation(
-            allocation_id="bank:bank-1050:oa:oa-exp-1:item:item-2",
+            allocation_id="relation:case-1:unit:oa:oa-exp-1:item:item-2",
             scope_kind="month",
             scope_value="2026-08",
         )
         self.assertIsNotNone(detail)
         assert detail is not None
-        self.assertEqual(detail["amount"], "745.00")
+        self.assertEqual(detail["amount"], "710.00")
         self.assertEqual(detail["oa_original_amount"], "710.00")
         self.assertEqual(detail["oa_allocation_weight"], "69.95%")
-        self.assertEqual(detail["bank_event_amount"], "1050.00")
-        self.assertEqual(detail["reconciliation"]["paid_wrong_refund_total"], "35.00")
-        self.assertEqual(detail["reconciliation"]["net_cash_cost"], "1015.00")
+        self.assertEqual(detail["bank_event_amount"], "")
+        self.assertEqual(detail["reconciliation"]["wrong_payment_refund_total"], "35.00")
+        self.assertEqual(detail["reconciliation"]["net_outflow_total"], "1015.00")
         self.assertEqual(detail["reconciliation"]["difference"], "0.00")
         self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "100.00%")
         self.assertEqual(
@@ -87,7 +73,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ["bank-1050", "bank-refund-35"],
         )
 
-    def test_payment_application_allocates_bank_amount_by_oa_weight(self) -> None:
+    def test_equal_payment_applications_keep_one_unit_each(self) -> None:
         group = self._group(
                     oa_rows=[
                         self._oa("oa-4360", amount="4360.00", project_name="大理项目"),
@@ -95,25 +81,13 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     ],
                     bank_rows=[self._bank("bank-9810", "9810.00")],
                 )
-        pending = self._policy([group]).manual_allocation_tasks[0]
-        policy = self._policy(
-            [group],
-            manual_allocations={
-                "case-1": self._manual_record(
-                    pending,
-                    [
-                        self._cell("oa:oa-4360", "outflow", "bank-9810", "4360.00"),
-                        self._cell("oa:oa-5450", "outflow", "bank-9810", "5450.00"),
-                    ],
-                )
-            },
-        )
+        policy = self._policy([group])
 
         self.assertEqual(
             {(row["allocation_id"], row["amount"]) for row in policy.serialized_cost_rows},
             {
-                ("bank:bank-9810:oa:oa-4360", "4360.00"),
-                ("bank:bank-9810:oa:oa-5450", "5450.00"),
+                ("relation:case-1:unit:oa:oa-4360", "4360.00"),
+                ("relation:case-1:unit:oa:oa-5450", "5450.00"),
             },
         )
 
@@ -136,45 +110,38 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                         ),
                     ],
                 )
-        pending = self._policy([group]).manual_allocation_tasks[0]
-        policy = self._policy(
-            [group],
-            manual_allocations={
-                "case-1": self._manual_record(
-                    pending,
-                    [
-                        self._cell("oa:oa-1", "outflow", "bank-1", "40.00"),
-                        self._cell("oa:oa-1", "outflow", "bank-2", "60.00"),
-                        self._cell("oa:oa-1", "paid_wrong_refund", "bank-refund", "10.00"),
-                        self._cell("oa:oa-2", "outflow", "bank-1", "80.00"),
-                        self._cell("oa:oa-2", "outflow", "bank-2", "120.00"),
-                        self._cell("oa:oa-2", "paid_wrong_refund", "bank-refund", "20.00"),
-                        self._cell("oa:oa-3", "outflow", "bank-1", "130.00"),
-                        self._cell("oa:oa-3", "outflow", "bank-2", "170.00"),
-                        self._cell("oa:oa-3", "paid_wrong_refund", "bank-refund", "30.00"),
-                    ],
-                )
-            },
-        )
+        policy = self._policy([group])
 
-        self.assertEqual(len(policy.serialized_cost_rows), 9)
+        self.assertEqual(len(policy.serialized_cost_rows), 3)
         self.assertEqual(
             {row["payment_account_label"] for row in policy.serialized_cost_rows},
-            {"建行 1111", "民生 2222", "建设银行 8106"},
+            {""},
         )
         detail = policy.allocation(
-            allocation_id="bank:bank-1:oa:oa-2",
+            allocation_id="relation:case-1:unit:oa:oa-2",
             scope_kind="all",
             scope_value=None,
         )
         assert detail is not None
-        self.assertEqual(detail["amount"], "80.00")
-        self.assertEqual(detail["bank_event_amount"], "250.00")
+        self.assertEqual(detail["amount"], "180.00")
+        self.assertEqual(detail["bank_event_amount"], "")
         self.assertEqual(len(detail["payment_evidence"]), 3)
         self.assertEqual(
             sum((Decimal(row["amount"]) for row in policy.serialized_cost_rows), start=Decimal("0")),
             Decimal("540.00"),
         )
+        for view in ("bank", "bank_tag", "time"):
+            page = policy.explorer_page(
+                scope_kind="all",
+                scope_value=None,
+                view=view,
+                filters={},
+                cursor_values=None,
+                page_size=50,
+            )
+            self.assertEqual(page["summary"]["expense_amount"], "600.00")
+            self.assertEqual(page["summary"]["income_amount"], "60.00")
+            self.assertEqual(page["summary"]["total_amount"], "540.00")
 
     def test_mismatched_oa_total_waits_for_manual_allocation_without_scaling(self) -> None:
         group = self._group(
@@ -206,13 +173,13 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(policy.allocation_quality["pending_manual_allocation_count"], 1)
         self.assertEqual(policy.allocation_quality["stale_manual_allocation_count"], 0)
         self.assertEqual(policy.manual_allocation_tasks[0]["status"], "pending")
-        self.assertEqual(policy.manual_allocation_tasks[0]["net_cash_cost"], "1015.00")
+        self.assertEqual(policy.manual_allocation_tasks[0]["net_outflow_total"], "1015.00")
         self.assertEqual(
             [unit["unit_id"] for unit in policy.manual_allocation_tasks[0]["units"]],
             ["oa:oa-exp-1:item:lodging", "oa:oa-exp-1:item:other"],
         )
 
-    def test_single_unit_single_outflow_is_automatic_even_when_amounts_differ(self) -> None:
+    def test_single_unit_single_outflow_mismatch_requires_manual_allocation(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -222,8 +189,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(policy.manual_allocation_tasks, [])
-        self.assertEqual(policy.serialized_cost_rows[0]["amount"], "100.00")
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertEqual(len(policy.manual_allocation_tasks), 1)
+        self.assertEqual(policy.manual_allocation_tasks[0]["net_outflow_total"], "100.00")
 
     def test_valid_manual_allocation_drives_mismatched_cost_rows(self) -> None:
         group = self._group(
@@ -248,9 +216,11 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "version": 1,
                     "allocations": [
-                        self._cell("oa:oa-exp-1:item:lodging", "outflow", "bank-out", "1000.00"),
-                        self._cell("oa:oa-exp-1:item:other", "outflow", "bank-out", "15.00"),
+                        self._line("oa:oa-exp-1:item:lodging", "1000.00"),
+                        self._line("oa:oa-exp-1:item:other", "15.00"),
                     ],
+                    "non_cost_amount": "0.00",
+                    "non_cost_reason": "",
                 }
             },
         )
@@ -261,7 +231,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
         self.assertEqual(policy.manual_allocation_tasks[0]["status"], "allocated")
 
-    def test_manual_allocation_matrix_closes_each_bank_and_unit_to_the_cent(self) -> None:
+    def test_manual_allocation_keeps_unit_cost_separate_from_bank_evidence(self) -> None:
         group = self._group(
             oa_rows=[
                 self._oa("oa-a", amount="300.00", project_name="项目A"),
@@ -280,22 +250,38 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "version": 1,
                     "allocations": [
-                        self._cell("oa:oa-a", "outflow", "bank-1", "20.00"),
-                        self._cell("oa:oa-a", "outflow", "bank-2", "30.01"),
-                        self._cell("oa:oa-b", "outflow", "bank-1", "13.33"),
-                        self._cell("oa:oa-b", "outflow", "bank-2", "36.66"),
+                        self._line("oa:oa-a", "50.01"),
+                        self._line("oa:oa-b", "49.99"),
                     ],
+                    "non_cost_amount": "0.00",
+                    "non_cost_reason": "",
                 }
             },
         )
 
-        by_bank: dict[str, Decimal] = {}
-        by_oa: dict[str, Decimal] = {}
-        for row in policy.serialized_cost_rows:
-            by_bank[row["transaction_id"]] = by_bank.get(row["transaction_id"], Decimal("0")) + Decimal(row["amount"])
-            by_oa[row["oa_id"]] = by_oa.get(row["oa_id"], Decimal("0")) + Decimal(row["amount"])
-        self.assertEqual(by_bank, {"bank-1": Decimal("33.33"), "bank-2": Decimal("66.67")})
-        self.assertEqual(by_oa, {"oa-a": Decimal("50.01"), "oa-b": Decimal("49.99")})
+        self.assertEqual(len(policy.serialized_cost_rows), 2)
+        self.assertEqual(
+            {(row["oa_id"], row["amount"]) for row in policy.serialized_cost_rows},
+            {("oa-a", "50.01"), ("oa-b", "49.99")},
+        )
+        self.assertEqual(
+            {row["transaction_id"] for row in policy.serialized_cost_rows}, {""}
+        )
+        self.assertEqual(
+            {row["payment_account_label"] for row in policy.serialized_cost_rows},
+            {""},
+        )
+        for view in ("bank", "bank_tag", "time"):
+            page = policy.explorer_page(
+                scope_kind="all",
+                scope_value=None,
+                view=view,
+                filters={},
+                cursor_values=None,
+                page_size=50,
+            )
+            self.assertEqual(page["summary"]["expense_amount"], "100.00")
+            self.assertEqual(page["summary"]["total_amount"], "100.00")
 
     def test_changed_relation_source_marks_manual_allocation_stale(self) -> None:
         group = self._group(
@@ -314,9 +300,11 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "version": 1,
                     "allocations": [
-                        self._cell("oa:oa-a", "outflow", "bank-1", "50.00"),
-                        self._cell("oa:oa-b", "outflow", "bank-1", "50.00"),
+                        self._line("oa:oa-a", "50.00"),
+                        self._line("oa:oa-b", "50.00"),
                     ],
+                    "non_cost_amount": "0.00",
+                    "non_cost_reason": "",
                 }
             },
         )
@@ -324,6 +312,57 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(policy.serialized_cost_rows, [])
         self.assertEqual(policy.manual_allocation_tasks[0]["status"], "stale")
         self.assertEqual(policy.allocation_quality["stale_manual_allocation_count"], 1)
+
+    def test_manual_allocation_fingerprint_preserves_pre_0162_identity(self) -> None:
+        group = self._group(
+            oa_rows=[self._oa("oa-a", amount="120.00")],
+            bank_rows=[self._bank("bank-1", "100.00")],
+        )
+
+        task = self._policy([group]).manual_allocation_tasks[0]
+        pre_0162_payload = {
+            "relation_case_id": "case-1",
+            "relation_version": 1,
+            "members": [],
+            "units": [
+                {
+                    key: value
+                    for key, value in dict(task["units"][0]).items()
+                    if key != "oa_apply_type"
+                }
+            ],
+            "sources": [
+                {
+                    "source_id": "bank-1",
+                    "source_kind": "outflow",
+                    "amount": "100.00",
+                    "trade_time": "2026-05-18 10:00:00",
+                    "counterparty_name": "供应商",
+                    "payment_account_label": "建设银行 8106",
+                    "remark": "货款",
+                }
+            ],
+            "reconciliation": {
+                "relation_case_id": "case-1",
+                "oa_allocation_total": "120.00",
+                "bank_outflow_total": "100.00",
+                "paid_wrong_refund_total": "0.00",
+                "net_cash_cost": "100.00",
+                "difference": "-20.00",
+                "cash_payment_ratio": "83.33%",
+                "status": "mismatch",
+            },
+        }
+        expected = hashlib.sha256(
+            json.dumps(
+                pre_0162_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        self.assertEqual(task["source_fingerprint"], expected)
 
     def test_any_ongoing_oa_excludes_entire_relation(self) -> None:
         policy = self._policy(
@@ -435,17 +474,21 @@ class CostStatisticsPolicyTests(unittest.TestCase):
 
         self.assertEqual(
             {(row["transaction_id"], row["amount"], row["direction"]) for row in policy.serialized_cost_rows},
-            {("bank-out", "1015.00", "支出")},
+            {("", "1015.00", "支出")},
         )
         self.assertEqual(policy.explorer_page(
             scope_kind="all", scope_value=None, view="project",
             filters={"project_name": "项目A", "expense_type": "设备采购"},
             cursor_values=None, page_size=50,
         )["summary"]["total_amount"], "1015.00")
-        detail = policy.allocation(allocation_id="bank:bank-out:oa:oa-1", scope_kind="all", scope_value=None)
+        detail = policy.allocation(
+            allocation_id="relation:case-1:unit:oa:oa-1",
+            scope_kind="all",
+            scope_value=None,
+        )
         assert detail is not None
-        self.assertEqual(detail["reconciliation"]["paid_wrong_refund_total"], "35.00")
-        self.assertEqual(detail["reconciliation"]["net_cash_cost"], "1015.00")
+        self.assertEqual(detail["reconciliation"]["wrong_payment_refund_total"], "35.00")
+        self.assertEqual(detail["reconciliation"]["net_outflow_total"], "1015.00")
         self.assertEqual(detail["reconciliation"]["cash_payment_ratio"], "100.00%")
         self.assertEqual(
             [row["transaction_id"] for row in detail["payment_evidence"]],
@@ -566,7 +609,12 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         unpaired = self._bank("unpaired", "8.00", tag_code="fee", tag_label="手续费")
         income = self._bank("income", "1.00", direction="inflow", tag_code="refund", tag_label="付错退款")
         policy = self._policy(
-            [self._group(oa_rows=[self._oa("oa-1")], bank_rows=[paired, income])],
+            [
+                self._group(
+                    oa_rows=[self._oa("oa-1", amount="99.00")],
+                    bank_rows=[paired, income],
+                )
+            ],
             bank_rows=[paired, unpaired, income],
             settings=self._settings(
                 tags=[
@@ -578,7 +626,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             [row["transaction_id"] for row in policy.serialized_cost_rows],
-            ["paired"],
+            [""],
         )
         self.assertEqual(
             sum(
@@ -621,19 +669,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ],
             bank_rows=[self._bank("bank-1", "200.00")],
         )
-        pending = self._policy([group]).manual_allocation_tasks[0]
         policy = self._policy(
             [group],
             settings={"projects": {"completed": [{"id": "P-1", "project_name": "已完成项目"}]}},
-            manual_allocations={
-                "case-1": self._manual_record(
-                    pending,
-                    [
-                        self._cell("oa:oa-a", "outflow", "bank-1", "100.00"),
-                        self._cell("oa:oa-b", "outflow", "bank-1", "100.00"),
-                    ],
-                )
-            },
         )
         self.assertEqual(
             {(row["project_name"], row["amount"]) for row in policy.serialized_cost_rows},
@@ -751,16 +789,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
 
     @staticmethod
-    def _cell(
-        unit_id: str,
-        source_kind: str,
-        source_id: str,
-        amount: str,
-    ) -> dict[str, str]:
+    def _line(unit_id: str, amount: str) -> dict[str, str]:
         return {
             "unit_id": unit_id,
-            "source_kind": source_kind,
-            "source_id": source_id,
             "amount": amount,
         }
 
@@ -773,6 +804,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             "source_fingerprint": pending["source_fingerprint"],
             "version": 1,
             "allocations": allocations,
+            "non_cost_amount": "0.00",
+            "non_cost_reason": "",
         }
 
     @staticmethod

@@ -56,7 +56,7 @@ class CostStatisticsManualAllocationService:
         query: str | None,
         can_save: bool,
     ) -> dict[str, Any]:
-        normalized_size = max(1, min(int(page_size), 100))
+        normalized_size = max(1, min(int(page_size), 50))
         normalized_cursor = str(cursor or "").strip()
         normalized_status = str(status or "pending").strip()
         if normalized_status not in {"pending", "allocated"}:
@@ -173,6 +173,29 @@ class CostStatisticsManualAllocationService:
         audit_repository: Any | None,
         for_update: bool,
     ) -> dict[str, Any]:
+        allowed_fields = {
+            "relation_case_id",
+            "expected_version",
+            "source_fingerprint",
+            "allocations",
+            "non_cost_amount",
+            "non_cost_reason",
+        }
+        unknown_fields = set(payload) - allowed_fields
+        if unknown_fields:
+            raise CostStatisticsManualAllocationValidationError(
+                "manual allocation payload contains unsupported fields"
+            )
+        body_case_id_value = payload.get("relation_case_id")
+        if not isinstance(body_case_id_value, str) or not body_case_id_value.strip():
+            raise CostStatisticsManualAllocationValidationError(
+                "relation_case_id is required"
+            )
+        body_case_id = body_case_id_value.strip()
+        if body_case_id != relation_case_id:
+            raise CostStatisticsManualAllocationValidationError(
+                "relation_case_id must match the request path"
+            )
         try:
             snapshot = canonical_repository.load_relation_snapshot(
                 relation_case_id,
@@ -208,8 +231,26 @@ class CostStatisticsManualAllocationService:
         allocations = _validate_allocations(
             payload.get("allocations"),
             units=list(task.get("units") or []),
-            sources=list(task.get("sources") or []),
         )
+        non_cost_amount = _optional_money(payload.get("non_cost_amount"))
+        non_cost_reason = _non_cost_reason(payload.get("non_cost_reason"))
+        if non_cost_amount > Decimal("0.00") and not non_cost_reason:
+            raise CostStatisticsManualAllocationValidationError(
+                "填写不计入成本金额时必须填写原因。"
+            )
+        if non_cost_amount == Decimal("0.00") and non_cost_reason:
+            raise CostStatisticsManualAllocationValidationError(
+                "不计入成本金额为 0.00 时不得填写原因。"
+            )
+        allocated_total = sum(
+            (Decimal(line["amount"]) for line in allocations),
+            start=Decimal("0.00"),
+        )
+        net_outflow_total = Decimal(str(task["net_outflow_total"]))
+        if allocated_total + non_cost_amount != net_outflow_total:
+            raise CostStatisticsManualAllocationValidationError(
+                "分配金额合计与不计入成本金额之和必须等于净支出。"
+            )
         actor_id = str(actor.get("id") or "").strip()
         if not actor_id:
             raise CostStatisticsManualAllocationValidationError(
@@ -219,11 +260,13 @@ class CostStatisticsManualAllocationService:
             relation_case_id=relation_case_id,
             relation_version=int(task["relation_version"]),
             source_fingerprint=source_fingerprint,
-            oa_allocation_total=str(task["oa_allocation_total"]),
-            bank_outflow_total=str(task["bank_outflow_total"]),
-            paid_wrong_refund_total=str(task["paid_wrong_refund_total"]),
-            net_cash_cost=str(task["net_cash_cost"]),
+            oa_total=str(task["oa_total"]),
+            gross_outflow_total=str(task["gross_outflow_total"]),
+            wrong_payment_refund_total=str(task["wrong_payment_refund_total"]),
+            net_outflow_total=str(task["net_outflow_total"]),
             allocations=allocations,
+            non_cost_amount=f"{non_cost_amount:.2f}",
+            non_cost_reason=non_cost_reason,
             expected_version=expected_version,
             actor_id=actor_id,
         )
@@ -250,8 +293,10 @@ class CostStatisticsManualAllocationService:
                         "relation_case_id": relation_case_id,
                         "source_fingerprint": source_fingerprint,
                         "version": int(saved["version"]),
-                        "net_cash_cost": str(task["net_cash_cost"]),
+                        "net_outflow_total": str(task["net_outflow_total"]),
                         "allocations": allocations,
+                        "non_cost_amount": f"{non_cost_amount:.2f}",
+                        "non_cost_reason": non_cost_reason,
                     },
                 }
             )
@@ -259,6 +304,8 @@ class CostStatisticsManualAllocationService:
             **task,
             "status": "allocated",
             "allocations": allocations,
+            "non_cost_amount": f"{non_cost_amount:.2f}",
+            "non_cost_reason": non_cost_reason,
             "version": int(saved["version"]),
             "updated_by": actor_id,
             "updated_at": str(saved.get("updated_at") or ""),
@@ -288,104 +335,95 @@ def _validate_allocations(
     value: Any,
     *,
     units: list[dict[str, Any]],
-    sources: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     if not isinstance(value, list):
         raise CostStatisticsManualAllocationValidationError(
             "allocations must be an array"
         )
     expected_unit_ids = [str(unit.get("unit_id") or "") for unit in units]
-    expected_sources = [
-        (
-            str(source.get("source_kind") or ""),
-            str(source.get("source_id") or ""),
-            Decimal(str(source.get("amount") or "0.00")),
-        )
-        for source in sources
-    ]
-    expected_keys = {
-        (unit_id, source_kind, source_id)
-        for unit_id in expected_unit_ids
-        for source_kind, source_id, _amount in expected_sources
-    }
-    if len(value) != len(expected_keys):
+    if len(value) != len(expected_unit_ids):
         raise CostStatisticsManualAllocationValidationError(
-            "必须填写当前关联关系中的全部子付款项和流水来源。"
+            "必须填写当前关联关系中的全部分配单元。"
         )
-    amounts: dict[tuple[str, str, str], Decimal] = {}
+    amounts: dict[str, Decimal] = {}
     for line in value:
         if not isinstance(line, dict):
             raise CostStatisticsManualAllocationValidationError(
                 "allocation lines must be objects"
             )
+        if set(line) != {"unit_id", "amount"}:
+            raise CostStatisticsManualAllocationValidationError(
+                "allocation lines only accept unit_id and amount"
+            )
         unit_id = str(line.get("unit_id") or "").strip()
-        source_kind = str(line.get("source_kind") or "").strip()
-        source_id = str(line.get("source_id") or "").strip()
-        key = (unit_id, source_kind, source_id)
         amount_text = str(line.get("amount") or "").strip()
         if (
-            not all(key)
-            or key in amounts
+            not unit_id
+            or unit_id in amounts
             or not MONEY_PATTERN.fullmatch(amount_text)
         ):
             raise CostStatisticsManualAllocationValidationError(
-                "每个子付款项和流水来源必须且只能填写一次非负两位小数金额。"
+                "每个分配单元必须且只能填写一次非负两位小数金额。"
             )
         try:
-            amounts[key] = Decimal(amount_text)
+            amounts[unit_id] = Decimal(amount_text)
         except InvalidOperation as exc:
             raise CostStatisticsManualAllocationValidationError(
                 "分配金额格式无效。"
             ) from exc
-    if set(amounts) != expected_keys:
+    if set(amounts) != set(expected_unit_ids):
         raise CostStatisticsManualAllocationValidationError(
-            "提交的子付款项或流水来源与当前关联关系不一致。"
+            "提交的分配单元与当前关联关系不一致。"
         )
-    for source_kind, source_id, source_amount in expected_sources:
-        source_allocated = sum(
-            (
-                amounts[(unit_id, source_kind, source_id)]
-                for unit_id in expected_unit_ids
-            ),
-            start=Decimal("0.00"),
-        )
-        if source_allocated != source_amount:
-            raise CostStatisticsManualAllocationValidationError(
-                "每条流水的分配合计必须等于该流水金额。"
-            )
-    for unit_id in expected_unit_ids:
-        unit_net = sum(
-            (
-                -amounts[(unit_id, source_kind, source_id)]
-                if source_kind == "paid_wrong_refund"
-                else amounts[(unit_id, source_kind, source_id)]
-                for source_kind, source_id, _amount in expected_sources
-            ),
-            start=Decimal("0.00"),
-        )
-        if unit_net < Decimal("0.00"):
-            raise CostStatisticsManualAllocationValidationError(
-                "单个子付款项分配后的净成本不能为负数。"
-            )
     return [
         {
             "unit_id": unit_id,
-            "source_kind": source_kind,
-            "source_id": source_id,
-            "amount": f"{amounts[(unit_id, source_kind, source_id)]:.2f}",
+            "amount": f"{amounts[unit_id]:.2f}",
         }
         for unit_id in expected_unit_ids
-        for source_kind, source_id, _amount in expected_sources
     ]
+
+
+def _optional_money(value: Any) -> Decimal:
+    if value is None:
+        return Decimal("0.00")
+    amount_text = str(value).strip()
+    if not MONEY_PATTERN.fullmatch(amount_text):
+        raise CostStatisticsManualAllocationValidationError(
+            "不计入成本金额必须是非负两位小数。"
+        )
+    try:
+        return Decimal(amount_text)
+    except InvalidOperation as exc:
+        raise CostStatisticsManualAllocationValidationError(
+            "不计入成本金额格式无效。"
+        ) from exc
+
+
+def _non_cost_reason(value: Any) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise CostStatisticsManualAllocationValidationError(
+            "不计入成本原因必须是字符串。"
+        )
+    reason = " ".join(value.split())
+    if len(reason) > 500:
+        raise CostStatisticsManualAllocationValidationError(
+            "不计入成本原因不得超过 500 个字符。"
+        )
+    return reason
 
 
 def _task_search_text(task: dict[str, Any]) -> str:
     visible_values: list[str] = [
         str(task.get("status") or ""),
-        str(task.get("oa_allocation_total") or ""),
-        str(task.get("bank_outflow_total") or ""),
-        str(task.get("paid_wrong_refund_total") or ""),
-        str(task.get("net_cash_cost") or ""),
+        str(task.get("oa_total") or ""),
+        str(task.get("gross_outflow_total") or ""),
+        str(task.get("wrong_payment_refund_total") or ""),
+        str(task.get("net_outflow_total") or ""),
+        str(task.get("non_cost_amount") or ""),
+        str(task.get("non_cost_reason") or ""),
         str(task.get("updated_by") or ""),
         str(task.get("updated_at") or ""),
     ]
@@ -401,16 +439,18 @@ def _task_search_text(task: dict[str, Any]) -> str:
                     "oa_original_amount",
                 )
             )
-    for source in list(task.get("sources") or []):
-        if isinstance(source, dict):
+    for event in list(task.get("bank_events") or []):
+        if isinstance(event, dict):
             visible_values.extend(
-                str(source.get(key) or "")
+                str(event.get(key) or "")
                 for key in (
                     "amount",
                     "trade_time",
                     "counterparty_name",
-                    "payment_account_label",
-                    "remark",
+                    "summary",
                 )
+            )
+            visible_values.extend(
+                str(value) for value in list(event.get("tags") or [])
             )
     return " ".join(visible_values).casefold()

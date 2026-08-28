@@ -94,7 +94,9 @@
 - 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
 - `include_statistics=false` 时 `statistics=null`，repository 可按当前 scope 下推事实读取。成本统计首屏先用该模式取得可见内容，再以独立 `page_size=1` 请求非阻塞加载全局 statistics；辅助统计失败不得清空或重新锁住已返回的内容。
 - `query` 只搜索当前 view 的事实域，并在 summary、facets、row count 和 cursor 分页之前生效；cursor identity 必须包含规范化 query，禁止跨搜索条件复用。
-- `project|bank|expense_type` 使用真实支出 `bank_transaction × OA_unit` 净归因行和无 OA 银行行；`time|bank_tag` 使用独立规则过滤后的原始 canonical 银行流水。归因行按支出交易日期归属，跨月“付错退款”回溯冲减原支出月且不独立成行。三种归因视图相互对账，两个原始银行视图相互对账；五个 view 的根层总额不要求一致。
+- `project|expense_type` 消费成本金额 `C`，`bank|bank_tag|time` 消费关系净支出 `N`；其中 `C + X = N`，`X` 为明确保存的不计入成本金额。项目/费用事件使用关系最新有效支出时间作为确定性期间锚点，但该时间只用于排序和期间归集，不证明 OA 单元来自该流水、账户或标签。无 OA 银行行继续按无 OA 成本范围进入相应视图。
+- 对已完成 OA 的 active relation，`O=N` 时不区分 1:1、1:N、N:1 或 N:M，直接按 canonical OA 单元原金额形成 `C`；`O!=N` 时该关系在有效人工分配前不进入项目/费用成本人口。`N=0` 不形成成本或人工任务，`N<0` 返回完整性错误，不取绝对值或其它 fallback。
+- `project|expense_type` 的根层总额为 `C`；`bank|bank_tag|time` 的根层总额为 `N`。只有同一口径内要求对账，禁止用 OA 单元按流水比例合成账户、标签、月份或资金来源归属。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
 - 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
 
@@ -104,8 +106,20 @@
 
 `GET /api/cost-statistics/allocations/{allocation_id}`
 
-- 只服务 `project|bank|expense_type` 中 `row_kind=oa_allocation` 的行，返回一个真实支出 `bank_transaction × OA_unit` 净分摊、同一正式关系组的付款/付错退款证据和金额核对。关系先计算 `净支出 = 支出合计 - 付错退款`，再按支出原额与 OA 原额两级比例分配；退款不产生 allocation ID。字段包括 OA 原始金额、OA 权重比例、本笔支出流水原额、银行总支出、付错退款、关系净支出、差额和现金比例。证据中的退款 `amount` 保持正数并以 `direction=收入` 表意，成本详情 UI 显示为负数。
+- 只服务 `project|bank|expense_type` 中 `row_kind=oa_allocation` 的行，返回 OA 单元成本、同一正式关系组的支出/付错退款证据和金额核对。接口不得返回或暗示不能由 canonical facts 证明的 OA 单元资金来源归属；银行证据只说明关系层净支出，项目/费用事件时间也只是最新有效支出时间锚点。证据中的退款 `amount` 保持正数并以 `direction=收入` 表意，成本详情 UI 显示为负数。
 - 两个详情接口都从同一 canonical snapshot 计算，按请求的 `scope`、`view` 有界读取且不加载全局 statistics；不跨页面 API/read model fallback。
+
+`GET /api/cost-statistics/manual-allocations`
+
+- 从一次 relation-only canonical snapshot 全量识别人工任务，不依赖用户浏览过哪些成本项，也不读取 read model、worker 或 cache。`status=pending|allocated` 必填；`query` 规范化后最长 200 字符；`page_size` 为 1..50；cursor 绑定状态、搜索条件和稳定排序。
+- 响应返回全局 `pending_count`、`allocated_count`、当前页 `items` 和 `next_cursor`。每个 item 包含关系级 OA 合计、支出、付错退款、净支出、canonical OA 单元、银行流水证据、当前人工分配、可选不计入成本金额、version 与事实指纹；不展示内部 relation ID，但写接口继续使用稳定 `relation_case_id`。
+- `pending` 只包含 `O!=N` 且 `N>0` 的已完成 OA active relation；`allocated` 只包含当前事实指纹仍有效的人工记录。`O=N` 任意拓扑自动归因，`N=0` 不产生任务，`N<0` 返回完整性错误。
+
+`PUT /api/cost-statistics/manual-allocations/{relation_case_id}`
+
+- 请求体固定为 `{expected_version, source_fingerprint, allocations, non_cost_amount, non_cost_reason}`。`allocations[]` 每个 canonical OA 单元恰好一项，只接受 `{unit_id, amount}`；不得提交流水来源字段或同一 OA 单元的多格金额。
+- 记 `C=sum(allocations.amount)`、`X=non_cost_amount`、`N=关系净支出`。未使用“不计入成本金额”时 `X=0`、原因必须为空且 `C=N`；使用时 `0<X<=N`、原因必填且 `C+X=N`。金额必须为非负、有限、最多两位小数，OA 单元集合必须完整且无重复。
+- 保存前在同一事务内重新读取并锁定当前关系，校验关系仍 active、OA 已完成、事实指纹与 `expected_version` 未变化；成功同时写 `app.cost_statistics_manual_allocations` 和 `audit.events`，返回新 version。非法 payload 返回 `400`，无写权限返回 `403`，关系/版本/事实变化返回 `409`，不得部分写入、自动比例分配或沿用 stale 值。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 

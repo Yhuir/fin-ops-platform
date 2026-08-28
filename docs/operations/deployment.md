@@ -21,3 +21,6 @@
 
 Migration 0149 删除旧 projection schema，是 forward-only。执行后禁止自动回滚到依赖旧 schema 的 release；
 失败时保持 maintenance 并用当前代码向前修复。不会删除主数据库。
+
+Migration 0162 将成本人工分配从旧来源矩阵合同迁移为 OA 单元金额合同并重命名持久化列，同样属于
+forward-only；执行后禁止自动回滚到仍读取旧矩阵列的 release，失败时保持 maintenance 并向前修复。

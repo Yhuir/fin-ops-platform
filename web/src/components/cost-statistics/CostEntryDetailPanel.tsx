@@ -48,10 +48,10 @@ function costDetailSections(detail: CostEntryDetail) {
   }, {
     title: "金额核对",
     fields: [
-      { label: "OA 原始金额合计", value: formatCostAmount(detail.reconciliation.oaAllocationTotal) },
-      { label: "支出流水原额", value: formatCostAmount(detail.reconciliation.bankOutflowTotal) },
-      { label: "付错退款", value: formatCostReduction(detail.reconciliation.paidWrongRefundTotal) },
-      { label: "关系净支出", value: formatCostAmount(detail.reconciliation.netCashCost) },
+      { label: "OA 原始金额合计", value: formatCostAmount(detail.reconciliation.oaTotal) },
+      { label: "支出流水原额", value: formatCostAmount(detail.reconciliation.grossOutflowTotal) },
+      { label: "付错退款", value: formatCostReduction(detail.reconciliation.wrongPaymentRefundTotal) },
+      { label: "关系净支出", value: formatCostAmount(detail.reconciliation.netOutflowTotal) },
       { label: "净支出与 OA 差额", value: formatCostAmount(detail.reconciliation.difference) },
       { label: "净支出 / OA", value: detail.reconciliation.cashPaymentRatio },
       { label: "状态", value: detail.reconciliation.status === "balanced" ? "金额一致" : "金额不一致" },

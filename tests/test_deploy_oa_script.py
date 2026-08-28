@@ -1029,7 +1029,10 @@ class DeployOAScriptTest(unittest.TestCase):
             rollback.index('activate_release "$previous_release"'),
         )
         self.assertIn("production remains in maintenance for forward repair", rollback)
-        self.assertIn('forward_only_versions = {"0149", "0160", "0161"}', script)
+        self.assertIn(
+            'forward_only_versions = {"0149", "0160", "0161", "0162"}',
+            script,
+        )
         for operation in (
             "bank_transaction_existing_upsert",
             "correction_audit_same_transaction",

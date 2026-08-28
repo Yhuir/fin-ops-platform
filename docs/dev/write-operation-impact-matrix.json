@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "slo": {
     "write_time_page_fan_out_max": 0,
     "access_to_fresh_p95_ms": 1000,
@@ -1521,6 +1521,57 @@
       "retired_direct_canonical_scope_types": [
         "cost_statistics",
         "turnover_ledger"
+      ]
+    },
+    {
+      "operation": "cost_statistics_manual_allocation_save",
+      "source_page_keys": [
+        "cost-statistics"
+      ],
+      "write_entrypoints": [
+        "/api/cost-statistics/manual-allocations/{relation_case_id}"
+      ],
+      "write_fact_sources": [
+        "app.cost_statistics_manual_allocations",
+        "audit.events"
+      ],
+      "pairing_relation_fact_sources": [
+        "app.workbench_pair_relations"
+      ],
+      "expected_outbox_scope_types": [],
+      "target_read_model_keys": [],
+      "target_page_keys": [
+        "cost-statistics"
+      ],
+      "direct_canonical_target_page_keys": [
+        "cost-statistics"
+      ],
+      "production_gate": {
+        "slo_audit_profile": "cost_statistics_manual_allocation_save",
+        "apply_policy": "no_standing_production_apply"
+      },
+      "deterministic_evidence": [
+        {
+          "path": "tests/test_cost_statistics_api.py",
+          "required_markers": [
+            "/api/cost-statistics/manual-allocations",
+            "source_fingerprint",
+            "non_cost_amount"
+          ]
+        },
+        {
+          "path": "web/src/test/CostStatisticsPage.test.tsx",
+          "required_markers": [
+            "保存分配",
+            "不计入成本金额"
+          ]
+        }
+      ],
+      "forbidden_write_time_scope_types": [
+        "cost_statistics"
+      ],
+      "retired_direct_canonical_scope_types": [
+        "cost_statistics"
       ]
     }
   ]

@@ -41,7 +41,7 @@ manual-allocation-closed
       -> manual-allocation-error
 manual-allocation-ready
   -> pending / allocated 切换（服务端 status/search/cursor 分页）
-  -> editing（首次 pending/stale 输入为空；allocated 显示已保存矩阵）
+  -> editing（首次 pending/stale 输入为空；allocated 显示逐 OA 单元金额和可选非成本金额）
       -> 切换关系/状态/搜索/关闭（有未保存输入时先确认丢弃）
       -> saving
           -> manual-allocation-ready（保存成功并刷新当前归因视图）
@@ -65,8 +65,8 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - `saving / save-error`：使用 settings version CAS；冲突或失败不得伪报成功，也不得清空用户输入。保存成功后下一次 canonical GET 对全部历史期间逐笔应用规则。
 - `manual-allocation-loading`：只有用户打开“待分配” Drawer 后才读取全局队列的有界任务页；普通 explorer 和原始流水视图不因该交互增加请求。
 - `pending / allocated`：pending 视图包含 pending 与 stale，allocated 只含当前有效人工分配；两者都使用服务端 search 和稳定 cursor，计数来自同一次全局任务快照，不由浏览过的成本项累积。
-- `editing`：按稳定 OA 单元与稳定流水来源的组合键维护完整矩阵。pending/stale 不预填数字、不自动计算；allocated 显示已保存值并允许编辑；显式 `0.00` 有效，空值与零值必须区分。
-- `saving`：服务端在单个写事务内锁定当前关系事实，校验 source fingerprint、expected version、完整单元和来源集合、两位小数、每条来源精确闭合与每个单元净成本非负，再写 allocation 和 audit。
+- `editing`：每个关系以 Disclosure 独立展开并维护自己的草稿和保存按钮。支付申请整单一个输入；日常报销逐 canonical 子付款项一个输入，不按流水重复。pending/stale 不预填数字、不自动计算；allocated 显示已保存值并允许编辑。勾选“不计入成本金额”后才显示 `X` 和原因；显式 `0.00` 有效，空值与零值必须区分。
+- `saving`：服务端在单个写事务内锁定当前关系事实，校验 source fingerprint、expected version、完整 OA 单元集合、非负两位小数及 `C+X=N`；`X>0` 时原因必填，`X=0` 时原因不得提交。成功后只移动/刷新当前关系并写 allocation 与 audit。
 - `validation-error`：格式、缺项、负数或合计错误返回明确 400；页面保留用户输入。
 - `conflict`：事实或版本已变化返回明确 409；旧输入不得作为 fallback 写入，重新加载后以新的空白任务为准。
 - 重新访问、浏览器刷新或页面内刷新都会发起全新请求；没有 `202 refreshing`、`409 read_model_not_fresh` 或后台轮询。

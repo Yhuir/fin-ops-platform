@@ -414,6 +414,23 @@ describe("common platform components", () => {
     expect(workbenchDetailDrawerSource).not.toContain('window.addEventListener("keydown"');
   });
 
+  test("renders optional drawer header actions without changing the title or close control", () => {
+    renderWithProject(
+      <AppDrawer
+        headerActions={<button type="button">切换视图</button>}
+        onClose={vi.fn()}
+        open
+        title="成本人工分配"
+      >
+        抽屉内容
+      </AppDrawer>,
+    );
+
+    expect(screen.getByRole("heading", { name: "成本人工分配" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换视图" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭抽屉" })).toBeInTheDocument();
+  });
+
   test("renders page scaffold heading, description, actions, and children", () => {
     renderWithProject(
       <PageScaffold

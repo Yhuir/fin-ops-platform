@@ -359,7 +359,7 @@ describe("Cost statistics page", () => {
     );
   });
 
-  test("loads the global manual-allocation queue lazily, validates the source matrix, and moves saved work to allocated", async () => {
+  test("loads allocation facts lazily, renders one input per OA unit, and saves one expanded group", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -367,36 +367,66 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
     await findCostStatisticsHeading();
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/manual-allocations?page_size=1&status=pending",
+      expect.any(Object),
+    );
+    const allocationTrigger = screen.getByRole("button", { name: "打开成本人工分配" });
+    expect(await within(allocationTrigger).findByText("1")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/cost-statistics/manual-allocations?page_size=50&status=pending",
       expect.any(Object),
     );
-    await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
+    await user.click(allocationTrigger);
     const dialog = await screen.findByRole("dialog", { name: "成本人工分配" });
-    const projectA = within(dialog).getByRole("textbox", { name: "项目 A分配至昆明设备供应商的金额" });
-    const projectB = within(dialog).getByRole("textbox", { name: "项目 B分配至昆明设备供应商的金额" });
+    expect(within(dialog).getByRole("radio", { name: "待分配 1" })).toBeChecked();
+    expect(within(dialog).queryByRole("textbox", { name: "项目 A分配金额" })).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "展开项目 A 等 2 个项目人工分配" }));
+    const projectA = within(dialog).getByRole("textbox", { name: "项目 A分配金额" });
+    const projectB = within(dialog).getByRole("textbox", { name: "项目 B分配金额" });
 
     expect(projectA).toHaveValue("");
     expect(projectB).toHaveValue("");
     const allocationGroup = dialog.querySelector(".cost-manual-allocation-detail");
     expect(allocationGroup).not.toBeNull();
     expect(dialog.querySelector(".finance-drawer__footer")).toBeNull();
+    expect(within(allocationGroup as HTMLElement).getAllByText("2026-08-27 09:30:00").length).toBeGreaterThan(0);
+    expect(within(allocationGroup as HTMLElement).getByRole("columnheader", { name: "OA 项" })).toBeInTheDocument();
+    expect(within(allocationGroup as HTMLElement).getByRole("columnheader", { name: "分配金额" })).toBeInTheDocument();
+    expect(within(allocationGroup as HTMLElement).queryByRole("columnheader", { name: "净成本" })).not.toBeInTheDocument();
+    expect(within(allocationGroup as HTMLElement).getAllByText(/日常报销子付款项/)).toHaveLength(2);
     expect(within(allocationGroup as HTMLElement).getByRole("button", { name: "保存分配" })).toBeDisabled();
 
     await user.type(projectA, "900.00");
     await user.type(projectB, "100.00");
-    expect(within(dialog).getByText("流水已填 1000.00 / 1000.00")).toBeInTheDocument();
+    expect(within(dialog).getByText("已分配 1000.00 / 净支出 1000.00")).toBeInTheDocument();
     await user.click(within(allocationGroup as HTMLElement).getByRole("button", { name: "保存分配" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/manual-allocations/relation-manual-001",
       expect.objectContaining({ method: "PUT" }),
     ));
+    const saveCall = vi.mocked(fetchMock).mock.calls.find(([url]) => (
+      url === "/api/cost-statistics/manual-allocations/relation-manual-001"
+    ));
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({
+      relation_case_id: "relation-manual-001",
+      expected_version: 0,
+      source_fingerprint: "a".repeat(64),
+      allocations: [
+        { unit_id: "oa-1:expense-1", amount: "900.00" },
+        { unit_id: "oa-1:expense-2", amount: "100.00" },
+      ],
+      non_cost_amount: "0.00",
+      non_cost_reason: "",
+    });
     expect(await within(dialog).findByText("当前没有待人工分配的关系。")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("radio", { name: "人工已分配 1" }));
-    expect(await within(dialog).findByText("人工已分配")).toBeInTheDocument();
+    await user.click(await within(dialog).findByRole("button", { name: "展开项目 A 等 2 个项目人工分配" }));
     const allocatedGroup = dialog.querySelector(".cost-manual-allocation-detail");
     expect(allocatedGroup).not.toBeNull();
+    expect(within(allocatedGroup as HTMLElement).getByRole("textbox", { name: "项目 A分配金额" })).toHaveValue("900.00");
     expect(within(allocatedGroup as HTMLElement).getByRole("button", { name: "保存修改" })).toBeEnabled();
   });
 
@@ -410,14 +440,72 @@ describe("Cost statistics page", () => {
     await findCostStatisticsHeading();
     await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
     const dialog = await screen.findByRole("dialog", { name: "成本人工分配" });
-    const projectA = within(dialog).getByRole("textbox", { name: "项目 A分配至昆明设备供应商的金额" });
+    await user.click(within(dialog).getByRole("button", { name: "展开项目 A 等 2 个项目人工分配" }));
+    const projectA = within(dialog).getByRole("textbox", { name: "项目 A分配金额" });
     await user.type(projectA, "12.00");
     await user.click(within(dialog).getByRole("radio", { name: "人工已分配 0" }));
 
-    expect(confirmSpy).toHaveBeenCalledWith("当前分配尚未保存，继续操作将丢失输入。");
+    expect(confirmSpy).toHaveBeenCalledWith("当前仍有未保存的分配，继续操作将丢失输入。");
     expect(projectA).toHaveValue("12.00");
     expect(within(dialog).getByRole("radio", { name: "待分配 1" })).toBeChecked();
     confirmSpy.mockRestore();
+  });
+
+  test("keeps loaded allocation tasks visible when loading the next page fails", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costManualAllocationLoadMoreError: true });
+
+    renderCostStatisticsPage();
+    await findCostStatisticsHeading();
+    await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
+    const dialog = await screen.findByRole("dialog", { name: "成本人工分配" });
+    const task = within(dialog).getByRole("button", { name: "展开项目 A 等 2 个项目人工分配" });
+
+    await user.click(within(dialog).getByRole("button", { name: "加载更多" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("人工分配下一页加载失败，请重试。");
+    expect(task).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "加载更多" })).toBeEnabled();
+  });
+
+  test("requires non-cost amount and reason to close the net-outflow total", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderCostStatisticsPage();
+    await findCostStatisticsHeading();
+    await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
+    const dialog = await screen.findByRole("dialog", { name: "成本人工分配" });
+    await user.click(within(dialog).getByRole("button", { name: "展开项目 A 等 2 个项目人工分配" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "项目 A分配金额" }), "900.00");
+    await user.type(within(dialog).getByRole("textbox", { name: "项目 B分配金额" }), "0.00");
+
+    const save = within(dialog).getByRole("button", { name: "保存分配" });
+    expect(save).toBeDisabled();
+    await user.click(within(dialog).getByRole("checkbox", { name: "存在不计入成本金额" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "不计入成本金额" }), "100.00");
+    expect(save).toBeDisabled();
+    await user.type(within(dialog).getByRole("textbox", { name: "不计入成本说明" }), "合同约定不计入成本");
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/manual-allocations/relation-manual-001",
+      expect.objectContaining({ method: "PUT" }),
+    ));
+    const saveCall = vi.mocked(fetchMock).mock.calls.find(([url]) => (
+      url === "/api/cost-statistics/manual-allocations/relation-manual-001"
+    ));
+    expect(JSON.parse(String(saveCall?.[1]?.body))).toMatchObject({
+      allocations: [
+        { unit_id: "oa-1:expense-1", amount: "900.00" },
+        { unit_id: "oa-1:expense-2", amount: "0.00" },
+      ],
+      non_cost_amount: "100.00",
+      non_cost_reason: "合同约定不计入成本",
+    });
   });
 
   test("searches only the active view without refreshing the page chrome", async () => {
@@ -1221,15 +1309,15 @@ describe("Cost statistics page", () => {
 
   test("surfaces OA session errors from explorer loading", async () => {
     window.history.pushState({}, "", "/cost-statistics");
-    global.fetch = vi.fn().mockResolvedValue(
+    global.fetch = vi.fn().mockImplementation(async () => (
       new Response(JSON.stringify({
         error: "invalid_oa_session",
         message: "缺少 OA 登录态，请从 OA 系统进入。",
       }), {
         status: 401,
         headers: { "Content-Type": "application/json; charset=utf-8" },
-      }),
-    ) as typeof fetch;
+      })
+    )) as typeof fetch;
 
     renderCostStatisticsPage();
 

@@ -1,4 +1,15 @@
-import { Button, Chip, Input, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import {
+  Button,
+  Checkbox,
+  Chip,
+  Disclosure,
+  DisclosureGroup,
+  Input,
+  TextArea,
+  ToggleButton,
+  ToggleButtonGroup,
+} from "@heroui/react";
+import type { Key } from "@heroui/react";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -7,9 +18,11 @@ import {
   fetchCostStatisticsManualAllocations,
   saveCostStatisticsManualAllocation,
 } from "../../features/cost-statistics/api";
+import { formatDateTimeText } from "../../features/dateTime";
 import type {
   CostStatisticsManualAllocationLine,
   CostStatisticsManualAllocationTask,
+  CostStatisticsManualAllocationUnit,
 } from "../../features/cost-statistics/types";
 
 const MONEY_PATTERN = /^(?:0|[1-9]\d{0,14})\.\d{2}$/;
@@ -21,13 +34,18 @@ type Props = {
   onSaved: () => void;
 };
 
-function cellKey(unitId: string, sourceKind: string, sourceId: string) {
-  return `${unitId}\u001f${sourceKind}\u001f${sourceId}`;
-}
+type TaskDraft = {
+  allocations: Record<string, string>;
+  hasNonCostAmount: boolean;
+  nonCostAmount: string;
+  nonCostReason: string;
+};
 
-function sourceKey(sourceKind: string, sourceId: string) {
-  return `${sourceKind}\u001f${sourceId}`;
-}
+type DraftSummary = {
+  allocatedCents: bigint;
+  valid: boolean;
+  message: string;
+};
 
 function moneyToCents(value: string) {
   const [whole, fraction] = value.split(".");
@@ -42,38 +60,87 @@ function formatCents(value: bigint) {
 
 function taskLabel(task: CostStatisticsManualAllocationTask) {
   const projects = [...new Set(task.units.map((unit) => unit.projectName).filter(Boolean))];
-  const counterparties = [...new Set(task.sources.map((source) => source.counterpartyName).filter(Boolean))];
-  return projects[0] || counterparties[0] || "未命名成本关系";
+  if (projects.length > 1) return `${projects[0]} 等 ${projects.length} 个项目`;
+  if (projects.length === 1) return projects[0];
+  const counterparty = task.bankEvents.find((event) => event.counterpartyName)?.counterpartyName;
+  return counterparty || "未填写业务名称";
 }
 
-function taskMeta(task: CostStatisticsManualAllocationTask) {
-  const extraUnits = Math.max(0, task.units.length - 1);
-  const extraSources = Math.max(0, task.sources.length - 1);
-  const parts = [`净支出 ${task.netCashCost}`];
-  if (extraUnits > 0) parts.push(`${task.units.length} 个子付款项`);
-  if (extraSources > 0) parts.push(`${task.sources.length} 条流水`);
-  return parts.join(" · ");
+function taskStatusLabel(task: CostStatisticsManualAllocationTask) {
+  if (task.status === "allocated") return "人工已分配";
+  if (task.status === "stale") return "待重新分配";
+  return "待分配";
 }
 
-function buildTaskDrafts(task: CostStatisticsManualAllocationTask | undefined) {
-  if (!task) return {};
-  const saved = new Map(task.allocations.map((line) => [
-    cellKey(line.unitId, line.sourceKind, line.sourceId),
-    line.amount,
-  ]));
-  return Object.fromEntries(task.units.flatMap((unit) => (
-    task.sources.map((source) => {
-      const key = cellKey(unit.unitId, source.sourceKind, source.sourceId);
-      return [key, task.status === "allocated" ? saved.get(key) ?? "" : ""];
-    })
-  )));
+function buildTaskDraft(task: CostStatisticsManualAllocationTask): TaskDraft {
+  const saved = new Map(task.allocations.map((line) => [line.unitId, line.amount]));
+  const allocated = task.status === "allocated";
+  const nonCostAmount = allocated ? task.nonCostAmount : "";
+  return {
+    allocations: Object.fromEntries(task.units.map((unit) => [
+      unit.unitId,
+      allocated ? saved.get(unit.unitId) ?? "" : "",
+    ])),
+    hasNonCostAmount: allocated && MONEY_PATTERN.test(nonCostAmount) && moneyToCents(nonCostAmount) > 0n,
+    nonCostAmount,
+    nonCostReason: allocated ? task.nonCostReason : "",
+  };
 }
 
-function draftsEqual(left: Record<string, string>, right: Record<string, string>) {
-  const leftKeys = Object.keys(left);
-  const rightKeys = Object.keys(right);
-  return leftKeys.length === rightKeys.length
-    && leftKeys.every((key) => left[key] === right[key]);
+function taskDrafts(tasks: CostStatisticsManualAllocationTask[]) {
+  return Object.fromEntries(tasks.map((task) => [task.relationCaseId, buildTaskDraft(task)]));
+}
+
+function draftsEqual(left: TaskDraft | undefined, right: TaskDraft) {
+  if (!left) return true;
+  const leftKeys = Object.keys(left.allocations);
+  const rightKeys = Object.keys(right.allocations);
+  return left.hasNonCostAmount === right.hasNonCostAmount
+    && left.nonCostAmount === right.nonCostAmount
+    && left.nonCostReason === right.nonCostReason
+    && leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => left.allocations[key] === right.allocations[key]);
+}
+
+function summarizeDraft(task: CostStatisticsManualAllocationTask, draft: TaskDraft): DraftSummary {
+  const values = task.units.map((unit) => draft.allocations[unit.unitId] ?? "");
+  const allocatedCents = values
+    .filter((value) => MONEY_PATTERN.test(value))
+    .reduce((total, value) => total + moneyToCents(value), 0n);
+  const netOutflowCents = moneyToCents(task.netOutflowTotal);
+  if (values.some((value) => !MONEY_PATTERN.test(value))) {
+    return {
+      allocatedCents,
+      valid: false,
+      message: "每项分配金额均需填写为非负数，并保留两位小数。",
+    };
+  }
+  let nonCostCents = 0n;
+  if (draft.hasNonCostAmount) {
+    if (!MONEY_PATTERN.test(draft.nonCostAmount) || moneyToCents(draft.nonCostAmount) <= 0n) {
+      return { allocatedCents, valid: false, message: "不计入成本金额必须大于 0.00，并保留两位小数。" };
+    }
+    if (!draft.nonCostReason.trim()) {
+      return { allocatedCents, valid: false, message: "请填写不计入成本说明。" };
+    }
+    nonCostCents = moneyToCents(draft.nonCostAmount);
+  }
+  const totalCents = allocatedCents + nonCostCents;
+  return {
+    allocatedCents,
+    valid: totalCents === netOutflowCents,
+    message: totalCents === netOutflowCents
+      ? `已分配 ${formatCents(allocatedCents)} / 净支出 ${task.netOutflowTotal}`
+      : `分配金额${draft.hasNonCostAmount ? "与不计入成本金额合计" : "合计"} ${formatCents(totalCents)}，需等于净支出 ${task.netOutflowTotal}。`,
+  };
+}
+
+function unitTitle(unit: CostStatisticsManualAllocationUnit) {
+  return unit.projectName || unit.expenseContent || unit.expenseType || "未填写 OA 项";
+}
+
+function isPaymentApplication(unit: CostStatisticsManualAllocationUnit) {
+  return unit.oaApplyType === "支付申请";
 }
 
 export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved }: Props) {
@@ -83,25 +150,26 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
   const [query, setQuery] = useState("");
   const [tasks, setTasks] = useState<CostStatisticsManualAllocationTask[]>([]);
   const [counts, setCounts] = useState({ pending: 0, allocated: 0 });
-  const [selectedCaseId, setSelectedCaseId] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [draftsByCase, setDraftsByCase] = useState<Record<string, TaskDraft>>({});
+  const [expandedKeys, setExpandedKeys] = useState<Set<Key>>(new Set());
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
-  const [saving, setSaving] = useState(false);
+  const [savingCaseIds, setSavingCaseIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [taskErrors, setTaskErrors] = useState<Record<string, string>>({});
   const requestRef = useRef<AbortController | null>(null);
-  const selectedTask = tasks.find((task) => task.relationCaseId === selectedCaseId) ?? tasks[0];
-  const initialDrafts = useMemo(() => buildTaskDrafts(selectedTask), [
-    selectedTask?.relationCaseId,
-    selectedTask?.sourceFingerprint,
-    selectedTask?.status,
-    selectedTask?.version,
-  ]);
-  const hasUnsavedChanges = useMemo(
-    () => !draftsEqual(drafts, initialDrafts),
-    [drafts, initialDrafts],
-  );
+  const countRequestRef = useRef<AbortController | null>(null);
+
+  const hasUnsavedChanges = useMemo(() => tasks.some((task) => (
+    !draftsEqual(draftsByCase[task.relationCaseId], buildTaskDraft(task))
+  )), [draftsByCase, tasks]);
+
+  const confirmDiscardDrafts = () => {
+    if (!hasUnsavedChanges) return true;
+    return window.confirm("当前仍有未保存的分配，继续操作将丢失输入。");
+  };
 
   const load = async ({
     targetStatus = status,
@@ -115,9 +183,14 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
-    if (cursor) setLoadingMore(true);
-    else setLoading(true);
-    setError(null);
+    if (cursor) {
+      setLoadingMore(true);
+      setLoadMoreError(null);
+    } else {
+      setLoading(true);
+      setError(null);
+      setLoadMoreError(null);
+    }
     try {
       const page = await fetchCostStatisticsManualAllocations({
         status: targetStatus,
@@ -127,19 +200,31 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
         signal: controller.signal,
       });
       if (requestRef.current !== controller) return;
-      setTasks((current) => cursor
-        ? [...current, ...page.items.filter((item) => !current.some((task) => task.relationCaseId === item.relationCaseId))]
-        : page.items);
+      if (cursor) {
+        setTasks((current) => [
+          ...current,
+          ...page.items.filter((item) => !current.some((task) => task.relationCaseId === item.relationCaseId)),
+        ]);
+        setDraftsByCase((current) => {
+          const next = { ...current };
+          page.items.forEach((task) => {
+            if (!next[task.relationCaseId]) next[task.relationCaseId] = buildTaskDraft(task);
+          });
+          return next;
+        });
+      } else {
+        setTasks(page.items);
+        setDraftsByCase(taskDrafts(page.items));
+        setExpandedKeys(new Set());
+        setTaskErrors({});
+      }
       setCounts(page.counts);
       setNextCursor(page.nextCursor);
-      setSelectedCaseId((current) => (
-        cursor || page.items.some((task) => task.relationCaseId === current)
-          ? current
-          : page.items[0]?.relationCaseId ?? ""
-      ));
     } catch (caught) {
       if (!controller.signal.aborted) {
-        setError(caught instanceof Error ? caught.message : "人工分配任务加载失败。");
+        const message = caught instanceof Error ? caught.message : "人工分配任务加载失败。";
+        if (cursor) setLoadMoreError(message);
+        else setError(message);
       }
     } finally {
       if (requestRef.current === controller) {
@@ -149,82 +234,130 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
     }
   };
 
-  useEffect(() => () => requestRef.current?.abort(), []);
-
   useEffect(() => {
-    setDrafts(initialDrafts);
-  }, [initialDrafts]);
-
-  const draftSummary = useMemo(() => {
-    if (!selectedTask) return { complete: false, valid: false, sourceTotals: new Map<string, bigint>(), unitNets: new Map<string, bigint>() };
-    const sourceTotals = new Map<string, bigint>();
-    const unitNets = new Map<string, bigint>();
-    let complete = true;
-    selectedTask.units.forEach((unit) => {
-      let unitNet = 0n;
-      selectedTask.sources.forEach((source) => {
-        const draftKey = cellKey(unit.unitId, source.sourceKind, source.sourceId);
-        const value = drafts[draftKey] ?? "";
-        if (!MONEY_PATTERN.test(value)) {
-          complete = false;
-          return;
-        }
-        const cents = moneyToCents(value);
-        const totalKey = sourceKey(source.sourceKind, source.sourceId);
-        sourceTotals.set(totalKey, (sourceTotals.get(totalKey) ?? 0n) + cents);
-        unitNet += source.sourceKind === "paid_wrong_refund" ? -cents : cents;
-      });
-      unitNets.set(unit.unitId, unitNet);
+    const controller = new AbortController();
+    countRequestRef.current = controller;
+    void fetchCostStatisticsManualAllocations({
+      status: "pending",
+      pageSize: 1,
+      signal: controller.signal,
+    }).then((page) => {
+      if (countRequestRef.current === controller) setCounts(page.counts);
+    }).catch((caught) => {
+      if (!controller.signal.aborted) {
+        setError(caught instanceof Error ? caught.message : "人工分配任务数量加载失败。");
+      }
     });
-    const sourcesClose = selectedTask.sources.every((source) => (
-      sourceTotals.get(sourceKey(source.sourceKind, source.sourceId)) === moneyToCents(source.amount)
-    ));
-    const unitsNonnegative = [...unitNets.values()].every((amount) => amount >= 0n);
-    return { complete, valid: complete && sourcesClose && unitsNonnegative, sourceTotals, unitNets };
-  }, [drafts, selectedTask]);
-
-  const allocations = useMemo<CostStatisticsManualAllocationLine[]>(() => (
-    selectedTask?.units.flatMap((unit) => selectedTask.sources.map((source) => ({
-      unitId: unit.unitId,
-      sourceId: source.sourceId,
-      sourceKind: source.sourceKind,
-      amount: drafts[cellKey(unit.unitId, source.sourceKind, source.sourceId)] ?? "",
-    }))) ?? []
-  ), [drafts, selectedTask]);
-
-  const handleSave = async () => {
-    if (!selectedTask || !draftSummary.valid) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await saveCostStatisticsManualAllocation({
-        relationCaseId: selectedTask.relationCaseId,
-        expectedVersion: selectedTask.version,
-        sourceFingerprint: selectedTask.sourceFingerprint,
-        allocations,
-      });
-      onSaved();
-      await load({ targetStatus: status, targetQuery: query });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "人工分配保存失败。");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmDiscardDrafts = () => {
-    if (!hasUnsavedChanges) return true;
-    if (!window.confirm("当前分配尚未保存，继续操作将丢失输入。")) return false;
-    setDrafts(initialDrafts);
-    return true;
-  };
+    return () => {
+      controller.abort();
+      requestRef.current?.abort();
+    };
+  }, []);
 
   const applySearch = () => {
-    if (saving || !confirmDiscardDrafts()) return;
+    if (savingCaseIds.size > 0 || !confirmDiscardDrafts()) return;
     const normalized = queryDraft.trim().replace(/\s+/g, " ");
     setQuery(normalized);
     void load({ targetQuery: normalized });
   };
+
+  const updateDraft = (relationCaseId: string, updater: (draft: TaskDraft) => TaskDraft) => {
+    setDraftsByCase((current) => ({
+      ...current,
+      [relationCaseId]: updater(current[relationCaseId]),
+    }));
+    setTaskErrors((current) => {
+      if (!current[relationCaseId]) return current;
+      const next = { ...current };
+      delete next[relationCaseId];
+      return next;
+    });
+  };
+
+  const handleSave = async (task: CostStatisticsManualAllocationTask) => {
+    const draft = draftsByCase[task.relationCaseId];
+    if (!draft) return;
+    const summary = summarizeDraft(task, draft);
+    if (!summary.valid) return;
+    setSavingCaseIds((current) => new Set(current).add(task.relationCaseId));
+    setTaskErrors((current) => {
+      const next = { ...current };
+      delete next[task.relationCaseId];
+      return next;
+    });
+    try {
+      const allocations: CostStatisticsManualAllocationLine[] = task.units.map((unit) => ({
+        unitId: unit.unitId,
+        amount: draft.allocations[unit.unitId],
+      }));
+      const saved = await saveCostStatisticsManualAllocation({
+        relationCaseId: task.relationCaseId,
+        expectedVersion: task.version,
+        sourceFingerprint: task.sourceFingerprint,
+        allocations,
+        nonCostAmount: draft.hasNonCostAmount ? draft.nonCostAmount : "0.00",
+        nonCostReason: draft.hasNonCostAmount ? draft.nonCostReason.trim() : "",
+      });
+      onSaved();
+      if (status === "pending") {
+        setTasks((current) => current.filter((item) => item.relationCaseId !== task.relationCaseId));
+        setDraftsByCase((current) => {
+          const next = { ...current };
+          delete next[task.relationCaseId];
+          return next;
+        });
+        setExpandedKeys((current) => {
+          const next = new Set(current);
+          next.delete(task.relationCaseId);
+          return next;
+        });
+        setCounts((current) => ({
+          pending: Math.max(0, current.pending - 1),
+          allocated: current.allocated + 1,
+        }));
+      } else {
+        setTasks((current) => current.map((item) => (
+          item.relationCaseId === saved.relationCaseId ? saved : item
+        )));
+        setDraftsByCase((current) => ({
+          ...current,
+          [saved.relationCaseId]: buildTaskDraft(saved),
+        }));
+      }
+    } catch (caught) {
+      setTaskErrors((current) => ({
+        ...current,
+        [task.relationCaseId]: caught instanceof Error ? caught.message : "人工分配保存失败。",
+      }));
+    } finally {
+      setSavingCaseIds((current) => {
+        const next = new Set(current);
+        next.delete(task.relationCaseId);
+        return next;
+      });
+    }
+  };
+
+  const headerActions = (
+    <ToggleButtonGroup
+      aria-label="成本人工分配状态"
+      className="cost-manual-allocation-tabs"
+      disallowEmptySelection
+      onSelectionChange={(keys) => {
+        const next = String([...keys][0] ?? "pending") as AllocationStatus;
+        if (next === status || savingCaseIds.size > 0 || !confirmDiscardDrafts()) return;
+        setStatus(next);
+        setTasks([]);
+        setDraftsByCase({});
+        void load({ targetStatus: next });
+      }}
+      selectedKeys={new Set([status])}
+      selectionMode="single"
+    >
+      <ToggleButton id="pending">待分配 {counts.pending}</ToggleButton>
+      <ToggleButton id="allocated"><ToggleButtonGroup.Separator />人工已分配 {counts.allocated}</ToggleButton>
+    </ToggleButtonGroup>
+  );
 
   return (
     <>
@@ -242,162 +375,235 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
         {counts.pending > 0 ? <Chip color="warning" size="sm" variant="soft">{counts.pending}</Chip> : null}
       </Button>
       <AppDrawer
-        ariaBusy={loading || saving}
+        ariaBusy={loading || savingCaseIds.size > 0}
         className="cost-manual-allocation-drawer"
-        closeDisabled={saving}
+        closeDisabled={savingCaseIds.size > 0}
+        headerActions={headerActions}
         onClose={() => {
           if (confirmDiscardDrafts()) setOpen(false);
         }}
         open={open}
         title="成本人工分配"
-        width="min(780px, 100vw)"
+        width="min(880px, 100vw)"
       >
         <div className="cost-manual-allocation-body">
-          <p className="cost-manual-allocation-intro">单 OA 单流水自动按流水金额计入；其余关系必须逐条流水、逐个子付款项明确分配。</p>
-          <ToggleButtonGroup
-            aria-label="成本人工分配状态"
-            className="cost-manual-allocation-tabs"
-            disallowEmptySelection
-            onSelectionChange={(keys) => {
-              const next = String([...keys][0] ?? "pending") as AllocationStatus;
-              if (next === status || saving || !confirmDiscardDrafts()) return;
-              setStatus(next);
-              setTasks([]);
-              setSelectedCaseId("");
-              void load({ targetStatus: next });
-            }}
-            selectedKeys={new Set([status])}
-            selectionMode="single"
-          >
-            <ToggleButton id="pending">待分配 {counts.pending}</ToggleButton>
-            <ToggleButton id="allocated"><ToggleButtonGroup.Separator />人工已分配 {counts.allocated}</ToggleButton>
-          </ToggleButtonGroup>
           <div className="cost-manual-allocation-search">
             <Input
               aria-label="搜索人工分配任务"
               onChange={(event) => setQueryDraft(event.currentTarget.value)}
               onKeyDown={(event) => { if (event.key === "Enter") applySearch(); }}
-              placeholder="搜索项目、费用、申请人或流水"
+              placeholder="搜索项目、费用或申请人"
               value={queryDraft}
             />
             <Button aria-label="查询人工分配任务" isIconOnly onPress={applySearch} size="sm" variant="secondary">
               <Search aria-hidden="true" size={16} />
             </Button>
           </div>
-          {loading ? <div className="cost-manual-allocation-state">正在读取全量配对事实…</div> : null}
-          {!loading && tasks.length === 0 ? (
-            <div className="cost-manual-allocation-state">{query ? "没有命中当前搜索条件的任务。" : status === "pending" ? "当前没有待人工分配的关系。" : "当前没有人工已分配的关系。"}</div>
-          ) : null}
-          {tasks.length > 0 ? (
-            <div aria-label="人工分配任务" className="cost-manual-allocation-task-strip">
-              {tasks.map((task) => (
-                <button
-                  aria-current={task.relationCaseId === selectedTask?.relationCaseId ? "true" : undefined}
-                  className={task.relationCaseId === selectedTask?.relationCaseId ? "is-selected" : ""}
-                  disabled={saving}
-                  key={task.relationCaseId}
-                  onClick={() => {
-                    if (task.relationCaseId === selectedTask?.relationCaseId || !confirmDiscardDrafts()) return;
-                    setSelectedCaseId(task.relationCaseId);
-                  }}
-                  type="button"
-                >
-                  <span><strong>{taskLabel(task)}</strong>{task.status === "stale" ? <Chip color="warning" size="sm" variant="soft">来源已变化</Chip> : null}</span>
-                  <small>{taskMeta(task)}</small>
-                </button>
-              ))}
-              {nextCursor ? <Button isPending={loadingMore} onPress={() => void load({ cursor: nextCursor })} size="sm" variant="secondary">加载更多</Button> : null}
+          {error ? <p className="cost-manual-allocation-error" role="alert">{error}</p> : null}
+          {loading ? <div className="cost-manual-allocation-state">正在读取配对事实…</div> : null}
+          {!loading && !error && tasks.length === 0 ? (
+            <div className="cost-manual-allocation-state">
+              {query
+                ? "没有命中当前搜索条件的任务。"
+                : status === "pending"
+                  ? "当前没有待人工分配的关系。"
+                  : "当前没有人工已分配的关系。"}
             </div>
           ) : null}
-          {selectedTask ? (
-            <section className="cost-manual-allocation-detail">
-              <header>
-                <div>
-                  <strong>{taskLabel(selectedTask)}</strong>
-                  <span>{selectedTask.units.length} 个子付款项 · {selectedTask.sources.length} 条金额来源</span>
-                </div>
-                <Chip color={selectedTask.status === "allocated" ? "success" : selectedTask.status === "stale" ? "warning" : "default"} size="sm" variant="soft">
-                  {selectedTask.status === "allocated" ? "人工已分配" : selectedTask.status === "stale" ? "待重新分配" : "待分配"}
-                </Chip>
-              </header>
-              <div className="cost-manual-allocation-facts">
-                <span>OA 子付款项合计<strong>{selectedTask.oaAllocationTotal}</strong></span>
-                <span>流水支出<strong>{selectedTask.bankOutflowTotal}</strong></span>
-                <span>付错退款<strong>{selectedTask.paidWrongRefundTotal}</strong></span>
-                <span>净支出<strong>{selectedTask.netCashCost}</strong></span>
-              </div>
-              <div className="cost-manual-allocation-matrix-wrap">
-                <table className="cost-manual-allocation-matrix">
-                  <thead>
-                    <tr>
-                      <th>OA 子付款项</th>
-                      {selectedTask.sources.map((source, index) => (
-                        <th key={`${source.sourceKind}-${source.sourceId}`}>
-                          <span>{source.sourceKind === "paid_wrong_refund" ? "付错退款" : `流水 ${index + 1}`}</span>
-                          <strong>{source.amount}</strong>
-                          <small>{source.counterpartyName || "未填写对方户名"} · {source.tradeTime || "时间未知"}</small>
-                        </th>
-                      ))}
-                      <th>净成本</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedTask.units.map((unit) => (
-                      <tr key={unit.unitId}>
-                        <th scope="row">
-                          <strong>{unit.projectName || "未填写项目"}</strong>
-                          <span>{unit.expenseType || "未填写费用类型"}</span>
-                          <small>{unit.oaApplicant ? `${unit.oaApplicant} · ` : ""}OA 金额 {unit.oaOriginalAmount}</small>
-                        </th>
-                        {selectedTask.sources.map((source) => {
-                          const key = cellKey(unit.unitId, source.sourceKind, source.sourceId);
-                          return (
-                            <td key={key}>
-                              <Input
-                                aria-label={`${unit.projectName || "OA 子付款项"}分配至${source.counterpartyName || "流水"}的金额`}
-                                disabled={!canSave || !selectedTask.canSave}
-                                inputMode="decimal"
-                                maxLength={18}
-                                onChange={(event) => {
-                                  const value = event.currentTarget.value;
-                                  setDrafts((current) => ({ ...current, [key]: value }));
-                                }}
-                                placeholder="0.00"
-                                value={drafts[key] ?? ""}
-                              />
-                            </td>
-                          );
-                        })}
-                        <td className={(draftSummary.unitNets.get(unit.unitId) ?? 0n) < 0n ? "is-invalid" : ""}>
-                          {formatCents(draftSummary.unitNets.get(unit.unitId) ?? 0n)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {selectedTask.status === "stale" ? <p className="cost-manual-allocation-warning">关系事实已变化，旧分配不再生效；请按当前子付款项和流水重新填写。</p> : null}
-              <div className="cost-manual-allocation-actions">
-                <div>
-                  {selectedTask.sources.map((source) => (
-                    <span className={draftSummary.sourceTotals.get(sourceKey(source.sourceKind, source.sourceId)) === moneyToCents(source.amount) ? "is-balanced" : ""} key={sourceKey(source.sourceKind, source.sourceId)}>
-                      {source.sourceKind === "paid_wrong_refund" ? "退款" : "流水"}已填 {formatCents(draftSummary.sourceTotals.get(sourceKey(source.sourceKind, source.sourceId)) ?? 0n)} / {source.amount}
-                    </span>
-                  ))}
-                </div>
-                <Button
-                  isDisabled={!canSave || !selectedTask.canSave || !draftSummary.valid}
-                  isPending={saving}
-                  onPress={() => void handleSave()}
-                  size="sm"
-                  variant="primary"
-                >
-                  {status === "allocated" ? "保存修改" : "保存分配"}
-                </Button>
-              </div>
-            </section>
+          {!loading && !error && tasks.length > 0 ? (
+            <DisclosureGroup
+              allowsMultipleExpanded
+              className="cost-manual-allocation-list"
+              expandedKeys={expandedKeys}
+              onExpandedChange={setExpandedKeys}
+            >
+              {tasks.map((task) => {
+                const expanded = expandedKeys.has(task.relationCaseId);
+                const draft = draftsByCase[task.relationCaseId] ?? buildTaskDraft(task);
+                const summary = summarizeDraft(task, draft);
+                const saving = savingCaseIds.has(task.relationCaseId);
+                return (
+                  <Disclosure className="cost-manual-allocation-group" id={task.relationCaseId} key={task.relationCaseId}>
+                    <Disclosure.Heading className="cost-manual-allocation-heading">
+                      <Button
+                        aria-label={`${expanded ? "收起" : "展开"}${taskLabel(task)}人工分配`}
+                        className="cost-manual-allocation-group-trigger"
+                        fullWidth
+                        slot="trigger"
+                        variant="tertiary"
+                      >
+                        <span className="cost-manual-allocation-group-title">
+                          <strong title={taskLabel(task)}>{taskLabel(task)}</strong>
+                          <span>OA 合计 <b>{task.oaTotal}</b></span>
+                          <span>净支出 <b>{task.netOutflowTotal}</b></span>
+                          <Chip
+                            color={task.status === "allocated" ? "success" : task.status === "stale" ? "warning" : "default"}
+                            size="sm"
+                            variant="soft"
+                          >
+                            {taskStatusLabel(task)}
+                          </Chip>
+                          <Disclosure.Indicator className="cost-manual-allocation-indicator" />
+                        </span>
+                      </Button>
+                    </Disclosure.Heading>
+                    <Disclosure.Content>
+                      <Disclosure.Body className="cost-manual-allocation-detail">
+                        {expanded ? (
+                          <>
+                            <div className="cost-manual-allocation-facts">
+                              <span>OA 合计<strong>{task.oaTotal}</strong></span>
+                              <span>
+                                净支出<strong>{task.netOutflowTotal}</strong>
+                                <small>流水支出 {task.grossOutflowTotal} · 付错退款 {task.wrongPaymentRefundTotal}</small>
+                              </span>
+                            </div>
+                            <section className="cost-manual-allocation-sources" aria-label="流水明细">
+                              <h3>流水</h3>
+                              <div>
+                                {task.bankEvents.map((event, index) => (
+                                  <article key={`${event.eventKind}:${event.transactionId}`}>
+                                    <strong>{event.eventKind === "wrong_payment_refund" ? `付错退款 ${index + 1}` : `流水 ${index + 1}`} · {event.amount}</strong>
+                                    <span>{event.counterpartyName || "未填写对方户名"}</span>
+                                    <span>{formatDateTimeText(event.tradeTime)}</span>
+                                    {event.summary ? <small>{event.summary}</small> : null}
+                                    {event.tags.length > 0 ? <small>{event.tags.join(" · ")}</small> : null}
+                                  </article>
+                                ))}
+                              </div>
+                            </section>
+                            <div className="cost-manual-allocation-table-wrap">
+                              <table className="cost-manual-allocation-table">
+                                <thead>
+                                  <tr>
+                                    <th>OA 项</th>
+                                    <th>分配金额</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {task.units.map((unit) => (
+                                    <tr key={unit.unitId}>
+                                      <th scope="row">
+                                        <strong>{unitTitle(unit)}</strong>
+                                        <span>{unit.expenseType || "未填写费用类型"}</span>
+                                        <small>
+                                          {isPaymentApplication(unit) ? "支付申请" : "日常报销子付款项"}
+                                          {unit.oaApplicant ? ` · ${unit.oaApplicant}` : ""}
+                                          {` · OA 金额 ${unit.oaOriginalAmount}`}
+                                        </small>
+                                      </th>
+                                      <td>
+                                        <Input
+                                          aria-label={`${unitTitle(unit)}分配金额`}
+                                          disabled={!canSave || !task.canSave || saving}
+                                          inputMode="decimal"
+                                          maxLength={18}
+                                          onChange={(event) => {
+                                            const value = event.currentTarget.value;
+                                            updateDraft(task.relationCaseId, (current) => ({
+                                              ...current,
+                                              allocations: { ...current.allocations, [unit.unitId]: value },
+                                            }));
+                                          }}
+                                          placeholder="0.00"
+                                          value={draft.allocations[unit.unitId] ?? ""}
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                            <div className="cost-manual-allocation-non-cost">
+                              <Checkbox
+                                isDisabled={!canSave || !task.canSave || saving}
+                                isSelected={draft.hasNonCostAmount}
+                                onChange={(selected) => updateDraft(task.relationCaseId, (current) => ({
+                                  ...current,
+                                  hasNonCostAmount: selected,
+                                  nonCostAmount: selected ? current.nonCostAmount : "",
+                                  nonCostReason: selected ? current.nonCostReason : "",
+                                }))}
+                              >
+                                <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                                <span>存在不计入成本金额</span>
+                              </Checkbox>
+                              {draft.hasNonCostAmount ? (
+                                <div>
+                                  <Input
+                                    aria-label="不计入成本金额"
+                                    disabled={!canSave || !task.canSave || saving}
+                                    inputMode="decimal"
+                                    maxLength={18}
+                                    onChange={(event) => {
+                                      const value = event.currentTarget.value;
+                                      updateDraft(task.relationCaseId, (current) => ({
+                                        ...current,
+                                        nonCostAmount: value,
+                                      }));
+                                    }}
+                                    placeholder="0.00"
+                                    value={draft.nonCostAmount}
+                                  />
+                                  <TextArea
+                                    aria-label="不计入成本说明"
+                                    disabled={!canSave || !task.canSave || saving}
+                                    maxLength={500}
+                                    onChange={(event) => {
+                                      const value = event.currentTarget.value;
+                                      updateDraft(task.relationCaseId, (current) => ({
+                                        ...current,
+                                        nonCostReason: value,
+                                      }));
+                                    }}
+                                    placeholder="不计入成本说明（必填）"
+                                    rows={2}
+                                    value={draft.nonCostReason}
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                            {task.status === "stale" ? (
+                              <p className="cost-manual-allocation-warning">关系事实已变化，请按当前 OA 与流水重新分配。</p>
+                            ) : null}
+                            {taskErrors[task.relationCaseId] ? (
+                              <p className="cost-manual-allocation-error" role="alert">{taskErrors[task.relationCaseId]}</p>
+                            ) : null}
+                            <div className="cost-manual-allocation-actions">
+                              <span className={summary.valid ? "is-balanced" : ""}>{summary.message}</span>
+                              <Button
+                                isDisabled={!canSave || !task.canSave || !summary.valid}
+                                isPending={saving}
+                                onPress={() => void handleSave(task)}
+                                size="sm"
+                                variant="primary"
+                              >
+                                {status === "allocated" ? "保存修改" : "保存分配"}
+                              </Button>
+                            </div>
+                          </>
+                        ) : null}
+                      </Disclosure.Body>
+                    </Disclosure.Content>
+                  </Disclosure>
+                );
+              })}
+            </DisclosureGroup>
           ) : null}
-          {error ? <p className="cost-manual-allocation-error" role="alert">{error}</p> : null}
+          {!loading && tasks.length > 0 && nextCursor ? (
+            <div className="cost-manual-allocation-load-more">
+              {loadMoreError ? <p className="cost-manual-allocation-error" role="alert">{loadMoreError}</p> : null}
+              <Button
+                isDisabled={loadingMore || savingCaseIds.size > 0}
+                isPending={loadingMore}
+                onPress={() => void load({ cursor: nextCursor })}
+                size="sm"
+                variant="secondary"
+              >
+                加载更多
+              </Button>
+            </div>
+          ) : null}
         </div>
       </AppDrawer>
     </>

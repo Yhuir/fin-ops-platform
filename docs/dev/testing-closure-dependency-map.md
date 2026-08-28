@@ -43,22 +43,22 @@
 
 ## 模块细化：cost-statistics
 
-本节记录成本统计的浏览器测试闭环。业务事实源仍以 `docs/product-specs/`、`docs/modules/cost-statistics/`、`docs/dev/api-contracts.md` 和成本统计 read model 文档为准。
+本节记录成本统计的测试闭环。业务事实源以 `docs/product-specs/`、`docs/modules/cost-statistics/` 与 `docs/dev/api-contracts.md` 为准；成本统计直接读取 canonical facts，不存在 Cost read model、worker 或 freshness gate。
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/CostStatisticsPage.tsx` | time/project/bank/expenseType 视图、project scope、范围选择、drilldown、HeroUI 详情 drawer、export center 和 direct-read loading/empty/error 状态不能漂移。 |
-| Frontend API mapper | `web/src/features/cost-statistics/api.ts` | explorer/export-preview/export/transaction detail 的 query 参数、project scope、read model status、错误 JSON message 和缓存 key 不能漂移。 |
-| API/service/read model | `/api/cost-statistics*`、`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsSqlProjectionBuilder`、`CostStatisticsReadModelRepositoryPort` | project scope、export row-limit、归集规则、parent/shard readiness、scope normalization、durable invalidation 和 worker enqueue 必须保持一致；不得恢复进程内 read model owner。 |
-| Export center | `ExportCenterModal` | preview 与 download 必须携带当前 view/project scope/filter；结构化后端错误必须展示给用户，不得误当文件下载。 |
+| Frontend page | `web/src/pages/CostStatisticsPage.tsx`、`CostStatisticsManualAllocationDrawer.tsx` | 五视图、范围选择、下钻、详情/人工分配 Drawer、逐关系草稿和保存、pending/allocated 状态、权限、export center 与 direct-read loading/empty/error 状态不能漂移。 |
+| Frontend API mapper | `web/src/features/cost-statistics/api.ts` | explorer/detail/export 与 manual allocation GET/PUT 的 query/body、snake/camel 映射、错误 JSON message、事实指纹和乐观版本不能漂移。 |
+| API/service/policy | `/api/cost-statistics*`、`CostStatisticsQueryService`、`CostStatisticsManualAllocationService`、`CostStatisticsPolicy` | `O=N` 任意拓扑自动、`O!=N` 全局待分配、`C+X=N`、逐 OA 单元输入、`project|expense_type=C`、`bank|bank_tag|time=N`、权限/审计/并发冲突必须一致；不得按流水比例伪造 OA 单元资金来源归属。 |
+| Repository/persistence | `PostgresCostStatisticsCanonicalRepository`、`PostgresCostStatisticsManualAllocationRepository`、`app.cost_statistics_manual_allocations`、`audit.events` | relation-only canonical snapshot、全量任务发现、稳定 cursor、关系锁定、事实指纹、version CAS、人工记录与审计同事务；不得新增 Cost read model、worker、cache 或浏览项发现。 |
+| Export center | `ExportCenterModal` | preview 与 download 必须携带当前 view/scope/filter；项目/费用导出使用 `C`，银行/标签/时间导出使用 `N`，结构化后端错误不得误当文件下载。 |
 
 当前 Browser e2e：
 
-- `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 中进入成本统计页，验证 read model `refreshing` / `stale` / `failed` 不显示最终空态或旧数据，`read_export_only` time-view 导出中心可成功触发 download event 且请求/文件字段正确；同时验证按时间首屏，切到按项目并切换 `project_scope=all`，从项目到费用类型再到流水详情下钻，打开导出中心执行 project preview，并断言同步导出行数上限错误能在弹窗内显示；另有 390px 窄屏 120+ 行长字段 smoke，等待 explorer `read_model_status=fresh` 后验证按时间表和项目下钻表均可横向/纵向滚动、右侧列在 viewport 内、导出入口和选择器未被遮挡且无浏览器错误。
-- `web/e2e/imports-etc-invoices-flow.spec.ts`：真实 Chromium 中确认 ETC 导入后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示 ETC 导入通行成本项目、通行费和服务商，证明 ETC import 子链路不是只停留在导入页 job feedback。
-- `web/e2e/bank-flow-rule-batches-flow.spec.ts`：真实 Chromium 中 bank-flow selected-row submit 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示流水规则手续费成本项目、费用类型和银行流水字段，证明 bank-flow submit 子链路不是只停留在本页 bucket 状态。
-- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中外部往来 manual closure confirm 后进入成本统计，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，并在按项目/流水视图展示外部往来闭环成本项目、费用类型和银行流水字段，证明 turnover closure 子链路不是只停留在周转页闭环 chip 状态。
-- `web/e2e/settings-data-reset-flow.spec.ts`：真实 Chromium 中设置页项目标记完成并保存后进入成本统计，等待 active/all `/api/cost-statistics/explorer` 返回 `read_model_status=fresh`，active scope 排除已完成项目，all scope 保留该项目和金额，证明 settings project scope 子链路不是只停留在设置页保存成功反馈。
+- `web/e2e/cost-statistics-flow.spec.ts`：真实 Chromium 覆盖五视图、direct canonical 加载失败后刷新恢复、下钻、导出 download/row-limit、大数据宽表与窄屏滚动、read-export 读取/导出。人工分配 Drawer 的 `O=N/O!=N`、逐 OA 单元输入、可选 X、独立保存/编辑、409 与权限目前由组件/API/后端测试保护，仍需补一条真实 Browser 主链，因此 inventory 状态保持 partial。
+- `web/e2e/cost-statistics-relation-fanout.spec.ts`：relation 建立/撤回后独立进入成本统计，以普通 direct canonical GET 验证人口和金额收敛；禁止等待 Cost freshness 或发布 Cost fan-out。
+- `web/e2e/imports-etc-invoices-flow.spec.ts`、`imports-bank-transactions-flow.spec.ts`、`bank-flow-rule-batches-flow.spec.ts`、`turnover-ledger-flow.spec.ts`：上游写完成后独立访问成本统计并执行下一次 canonical GET，验证当前事实可见；不等待 Cost read model，不把上游 mutation 当成成本页面刷新 owner。
+- `web/e2e/settings-data-reset-flow.spec.ts`：数据重置或设置保存后独立访问成本统计并用下一次 canonical GET 验证当前范围；不保留 project-scope read model 两阶段 gate。
 
 ## 模块细化：input-invoice-usage
 

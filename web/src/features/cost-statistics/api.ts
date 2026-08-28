@@ -134,14 +134,14 @@ type ApiCostStatisticsManualAllocationTask = {
   relation_version: number;
   source_fingerprint: string;
   status: "pending" | "stale" | "allocated";
-  oa_allocation_total: string;
-  bank_outflow_total: string;
-  paid_wrong_refund_total: string;
-  net_cash_cost: string;
-  difference: string;
+  oa_total: string;
+  gross_outflow_total: string;
+  wrong_payment_refund_total: string;
+  net_outflow_total: string;
   units: Array<{
     unit_id: string;
     oa_id: string;
+    oa_apply_type: string;
     expense_item_id: string;
     project_id: string;
     project_name: string;
@@ -150,21 +150,21 @@ type ApiCostStatisticsManualAllocationTask = {
     oa_applicant: string;
     oa_original_amount: string;
   }>;
-  sources: Array<{
-    source_id: string;
-    source_kind: "outflow" | "paid_wrong_refund";
+  bank_events: Array<{
+    transaction_id: string;
+    event_kind: "outflow" | "wrong_payment_refund";
     amount: string;
     trade_time: string;
     counterparty_name: string;
-    payment_account_label: string;
-    remark: string;
+    summary: string;
+    tags: string[];
   }>;
   allocations: Array<{
     unit_id: string;
-    source_id: string;
-    source_kind: "outflow" | "paid_wrong_refund";
     amount: string;
   }>;
+  non_cost_amount: string;
+  non_cost_reason: string;
   version: number;
   updated_by: string;
   updated_at: string;
@@ -234,10 +234,10 @@ type ApiCostAllocationDetail = {
   }>;
   reconciliation: {
     relation_case_id: string;
-    oa_allocation_total: string;
-    bank_outflow_total: string;
-    paid_wrong_refund_total: string;
-    net_cash_cost: string;
+    oa_total: string;
+    gross_outflow_total: string;
+    wrong_payment_refund_total: string;
+    net_outflow_total: string;
     difference: string;
     cash_payment_ratio: string;
     status: "balanced" | "mismatch";
@@ -406,14 +406,14 @@ function mapManualAllocationTask(
     relationVersion: task.relation_version,
     sourceFingerprint: task.source_fingerprint,
     status: task.status,
-    oaAllocationTotal: task.oa_allocation_total,
-    bankOutflowTotal: task.bank_outflow_total,
-    paidWrongRefundTotal: task.paid_wrong_refund_total,
-    netCashCost: task.net_cash_cost,
-    difference: task.difference,
+    oaTotal: task.oa_total,
+    grossOutflowTotal: task.gross_outflow_total,
+    wrongPaymentRefundTotal: task.wrong_payment_refund_total,
+    netOutflowTotal: task.net_outflow_total,
     units: task.units.map((unit) => ({
       unitId: unit.unit_id,
       oaId: unit.oa_id,
+      oaApplyType: unit.oa_apply_type,
       expenseItemId: unit.expense_item_id,
       projectId: unit.project_id,
       projectName: unit.project_name,
@@ -422,21 +422,21 @@ function mapManualAllocationTask(
       oaApplicant: unit.oa_applicant,
       oaOriginalAmount: unit.oa_original_amount,
     })),
-    sources: task.sources.map((source) => ({
-      sourceId: source.source_id,
-      sourceKind: source.source_kind,
-      amount: source.amount,
-      tradeTime: source.trade_time,
-      counterpartyName: source.counterparty_name,
-      paymentAccountLabel: source.payment_account_label,
-      remark: source.remark,
+    bankEvents: task.bank_events.map((event) => ({
+      transactionId: event.transaction_id,
+      eventKind: event.event_kind,
+      amount: event.amount,
+      tradeTime: event.trade_time,
+      counterpartyName: event.counterparty_name,
+      summary: event.summary,
+      tags: event.tags,
     })),
     allocations: task.allocations.map((line) => ({
       unitId: line.unit_id,
-      sourceId: line.source_id,
-      sourceKind: line.source_kind,
       amount: line.amount,
     })),
+    nonCostAmount: task.non_cost_amount,
+    nonCostReason: task.non_cost_reason,
     version: task.version,
     updatedBy: task.updated_by,
     updatedAt: task.updated_at,
@@ -581,14 +581,15 @@ export async function saveCostStatisticsManualAllocation(
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        relation_case_id: request.relationCaseId,
         expected_version: request.expectedVersion,
         source_fingerprint: request.sourceFingerprint,
         allocations: request.allocations.map((line) => ({
           unit_id: line.unitId,
-          source_id: line.sourceId,
-          source_kind: line.sourceKind,
           amount: line.amount,
         })),
+        non_cost_amount: request.nonCostAmount,
+        non_cost_reason: request.nonCostReason,
       }),
     },
   );
@@ -718,10 +719,10 @@ export async function fetchCostEntryDetail(
     })),
     reconciliation: {
       relationCaseId: payload.reconciliation.relation_case_id,
-      oaAllocationTotal: payload.reconciliation.oa_allocation_total,
-      bankOutflowTotal: payload.reconciliation.bank_outflow_total,
-      paidWrongRefundTotal: payload.reconciliation.paid_wrong_refund_total,
-      netCashCost: payload.reconciliation.net_cash_cost,
+      oaTotal: payload.reconciliation.oa_total,
+      grossOutflowTotal: payload.reconciliation.gross_outflow_total,
+      wrongPaymentRefundTotal: payload.reconciliation.wrong_payment_refund_total,
+      netOutflowTotal: payload.reconciliation.net_outflow_total,
       difference: payload.reconciliation.difference,
       cashPaymentRatio: payload.reconciliation.cash_payment_ratio,
       status: payload.reconciliation.status,

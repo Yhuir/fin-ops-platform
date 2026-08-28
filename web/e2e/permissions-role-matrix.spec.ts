@@ -301,6 +301,22 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
     },
   },
   {
+    id: "cost-statistics:manual-allocations",
+    label: "cost statistics manual allocation drawer",
+    verify: async (page) => {
+      await page.goto("/cost-statistics");
+      await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+      await page.getByRole("button", { name: "打开成本人工分配" }).click();
+      const drawer = page.getByRole("dialog", { name: "成本人工分配" });
+      await expect(drawer).toBeVisible();
+      await drawer.getByRole("button", { name: "展开权限测试项目人工分配" }).click();
+      await expect(drawer.getByLabel("权限测试项目分配金额")).toBeDisabled();
+      await expect(drawer.getByRole("checkbox", { name: "存在不计入成本金额" })).toBeDisabled();
+      await expect(drawer.getByRole("button", { name: "保存分配" })).toBeDisabled();
+      await expectNoEnabledWriteControlCandidates(page);
+    },
+  },
+  {
     id: "bank-details:category-confirmation",
     label: "bank details category confirmation controls",
     verify: async (page) => {
@@ -729,6 +745,9 @@ test.describe("permissions browser role matrix", () => {
         await expect(page.getByRole("button", { name: "开始预览" })).toBeDisabled();
         await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
         await expect(page.locator("input[type='file']")).toBeDisabled();
+        if (importPath === "/imports/bank-transactions") {
+          await expect(page.getByRole("button", { name: "流水录入" })).toHaveCount(0);
+        }
         await expectNoEnabledWriteControlCandidates(page);
       });
     }
@@ -770,6 +789,7 @@ test.describe("permissions browser role matrix", () => {
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/batches")).toBe(0);
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/batches/input-oa-reverse-batch-e2e-001/manual-oa-status")).toBe(0);
     expect(api.count("PUT /api/pending-invoices/rules")).toBe(0);
+    expect(api.count("PUT /api/cost-statistics/manual-allocations/CASE-COST-MANUAL-READONLY")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
 

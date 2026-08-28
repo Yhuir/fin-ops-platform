@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from functools import cached_property
 from typing import Any
 
@@ -142,7 +142,7 @@ class CostStatisticsPolicy:
         page_size: int,
         include_statistics: bool = True,
     ) -> dict[str, Any]:
-        bank_flow_view = view in {"time", "bank_tag"}
+        bank_flow_view = view in {"time", "bank", "bank_tag"}
         base_rows = [
             row
             for row in (
@@ -187,19 +187,10 @@ class CostStatisticsPolicy:
         elif view == "bank":
             primary_facets = _bank_facets(base_rows)
             if payment_account_label:
-                secondary_facets = _project_facets(
-                    [
-                        row
-                        for row in base_rows
-                        if row["payment_account_label"] == payment_account_label
-                    ]
-                )
-            if payment_account_label and project_name:
                 row_matches = [
                     row
                     for row in base_rows
                     if row["payment_account_label"] == payment_account_label
-                    and row["project_name"] == project_name
                 ]
         elif view == "expense_type":
             primary_facets = _expense_facets(base_rows)
@@ -643,7 +634,7 @@ def _cost_entries(
                 excluded_by_reason.get("invalid_oa_weight_total", 0) + 1
             )
             continue
-        bank_outflow_total = sum(
+        gross_outflow_total = sum(
             (_outflow_amount(row) or ZERO for row in outflows),
             start=ZERO,
         ).quantize(MONEY_QUANTUM)
@@ -653,26 +644,29 @@ def _cost_entries(
             if _inflow_amount(row) is not None
             and _is_paid_wrong_refund(row, refund_tag_codes)
         ]
-        refund_total = sum(
+        wrong_payment_refund_total = sum(
             (_inflow_amount(row) or ZERO for row in refunds),
             start=ZERO,
         ).quantize(MONEY_QUANTUM)
-        net_cash_cost = (bank_outflow_total - refund_total).quantize(MONEY_QUANTUM)
-        if net_cash_cost < ZERO:
-            excluded_by_reason["refund_exceeds_outflow"] = (
-                excluded_by_reason.get("refund_exceeds_outflow", 0) + 1
+        net_outflow_total = (
+            gross_outflow_total - wrong_payment_refund_total
+        ).quantize(MONEY_QUANTUM)
+        if net_outflow_total < ZERO:
+            raise CostStatisticsAllocationConflictError(
+                f"relation {relation_case_id} has paid-wrong refunds exceeding outflows"
             )
+        if net_outflow_total == ZERO:
             continue
-        difference = (net_cash_cost - oa_total).quantize(MONEY_QUANTUM)
+        difference = (net_outflow_total - oa_total).quantize(MONEY_QUANTUM)
         evidence = [_payment_evidence(row) for row in [*outflows, *refunds]]
         reconciliation = {
             "relation_case_id": relation_case_id,
-            "oa_allocation_total": _money(oa_total),
-            "bank_outflow_total": _money(bank_outflow_total),
-            "paid_wrong_refund_total": _money(refund_total),
-            "net_cash_cost": _money(net_cash_cost),
+            "oa_total": _money(oa_total),
+            "gross_outflow_total": _money(gross_outflow_total),
+            "wrong_payment_refund_total": _money(wrong_payment_refund_total),
+            "net_outflow_total": _money(net_outflow_total),
             "difference": _money(difference),
-            "cash_payment_ratio": _ratio(net_cash_cost, oa_total),
+            "cash_payment_ratio": _ratio(net_outflow_total, oa_total),
             "status": "balanced" if difference == ZERO else "mismatch",
         }
         for bank_row in [*outflows, *refunds]:
@@ -687,11 +681,7 @@ def _cost_entries(
                 )
             event_owners[transaction_id] = relation_case_id
 
-        oa_weights = [
-            (_allocation_id(context), context["allocation_amount"])
-            for context in contexts
-        ]
-        is_automatic = len(contexts) == 1 and len(outflows) == 1
+        is_automatic = oa_total == net_outflow_total
         if not is_automatic:
             task = _manual_allocation_task(
                 group=group,
@@ -710,90 +700,38 @@ def _cost_entries(
                 )
                 excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
                 continue
-            context_by_unit_id = {
-                _allocation_id(context): context for context in contexts
+            manual_amounts = {
+                _clean_text(line.get("unit_id")): _required_nonnegative_money(
+                    line.get("amount")
+                )
+                for line in list(task.get("allocations") or [])
+                if isinstance(line, dict)
             }
-            source_rows = {
-                ("outflow", _bank_transaction_id(row)): row for row in outflows
-            }
-            source_rows.update(
-                {
-                    ("paid_wrong_refund", _bank_transaction_id(row)): row
-                    for row in refunds
-                }
+            _append_unit_allocation_entries(
+                entries,
+                contexts=contexts,
+                unit_amounts=manual_amounts,
+                outflows=outflows,
+                oa_total=oa_total,
+                relation_case_id=relation_case_id,
+                payment_evidence=evidence,
+                reconciliation=reconciliation,
             )
-            for line in list(task.get("allocations") or []):
-                if not isinstance(line, dict):
-                    raise CostStatisticsAllocationConflictError(
-                        f"manual allocation {relation_case_id} contains an invalid line"
-                    )
-                unit_id = _clean_text(line.get("unit_id"))
-                source_id = _clean_text(line.get("source_id"))
-                source_kind = _clean_text(line.get("source_kind"))
-                amount = _required_nonnegative_money(line.get("amount"))
-                if amount == ZERO:
-                    continue
-                context = context_by_unit_id.get(unit_id)
-                bank_row = source_rows.get((source_kind, source_id))
-                if context is None or bank_row is None:
-                    raise CostStatisticsAllocationConflictError(
-                        f"manual allocation {relation_case_id} does not match current sources"
-                    )
-                signed_amount = (
-                    -amount if source_kind == "paid_wrong_refund" else amount
-                )
-                entries.append(
-                    _allocation_entry(
-                        context,
-                        bank_row=bank_row,
-                        allocated_amount=signed_amount,
-                        oa_total=oa_total,
-                        relation_case_id=relation_case_id,
-                        payment_evidence=evidence,
-                        reconciliation=reconciliation,
-                    )
-                )
             continue
 
-        net_outflow_amounts = _proportional_amounts(
-            net_cash_cost,
-            [
-                (_bank_transaction_id(row), _outflow_amount(row) or ZERO)
-                for row in outflows
-            ],
+        _append_unit_allocation_entries(
+            entries,
+            contexts=contexts,
+            unit_amounts={
+                _allocation_id(context): context["allocation_amount"]
+                for context in contexts
+            },
+            outflows=outflows,
+            oa_total=oa_total,
+            relation_case_id=relation_case_id,
+            payment_evidence=evidence,
+            reconciliation=reconciliation,
         )
-        allocation_matrix = [
-            _proportional_amounts(net_outflow_amount, oa_weights)
-            for net_outflow_amount in net_outflow_amounts
-        ]
-        for bank_row, net_outflow_amount, allocated_amounts in zip(
-            outflows,
-            net_outflow_amounts,
-            allocation_matrix,
-            strict=True,
-        ):
-            included_event_amount = sum(
-                allocated_amounts,
-                start=ZERO,
-            ).quantize(MONEY_QUANTUM)
-            if included_event_amount == ZERO:
-                continue
-            for context, allocated_amount in zip(
-                contexts,
-                allocated_amounts,
-                strict=True,
-            ):
-                entries.append(
-                    _allocation_entry(
-                        context,
-                        bank_row=bank_row,
-                        allocated_amount=allocated_amount,
-                        oa_total=oa_total,
-                        relation_case_id=relation_case_id,
-                        payment_evidence=evidence,
-                        reconciliation=reconciliation,
-                    )
-                )
 
     no_oa_payload = AppSettingsService.cost_statistics_no_oa_projects_payload_from_settings(
         settings
@@ -915,38 +853,46 @@ def _no_oa_entry(
     }
 
 
-def _proportional_amounts(
-    total: Decimal,
-    weighted_amounts: list[tuple[str, Decimal]],
-) -> list[Decimal]:
-    if not weighted_amounts:
-        return []
-    weight_total = sum(
-        (weight for _key, weight in weighted_amounts),
-        start=ZERO,
-    ).quantize(MONEY_QUANTUM)
-    if weight_total <= ZERO:
-        return [ZERO for _item in weighted_amounts]
-    sign = Decimal("-1") if total < ZERO else Decimal("1")
-    absolute_total = abs(total).quantize(MONEY_QUANTUM)
-    raw_amounts = [
-        absolute_total * weight / weight_total
-        for _key, weight in weighted_amounts
-    ]
-    rounded = [amount.quantize(MONEY_QUANTUM, rounding=ROUND_DOWN) for amount in raw_amounts]
-    remaining_cents = int(
-        ((absolute_total - sum(rounded, start=ZERO)) / MONEY_QUANTUM).to_integral_value()
-    )
-    order = sorted(
-        range(len(weighted_amounts)),
-        key=lambda index: (
-            -(raw_amounts[index] - rounded[index]),
-            weighted_amounts[index][0],
+def _append_unit_allocation_entries(
+    entries: list[dict[str, Any]],
+    *,
+    contexts: list[dict[str, Any]],
+    unit_amounts: dict[str, Decimal],
+    outflows: list[dict[str, Any]],
+    oa_total: Decimal,
+    relation_case_id: str,
+    payment_evidence: list[dict[str, Any]],
+    reconciliation: dict[str, Any],
+) -> None:
+    context_by_unit_id = {
+        _allocation_id(context): context for context in contexts
+    }
+    if set(unit_amounts) != set(context_by_unit_id):
+        raise CostStatisticsAllocationConflictError(
+            f"manual allocation {relation_case_id} does not match current units"
+        )
+    anchor_outflow = max(
+        outflows,
+        key=lambda row: (
+            _serialize_bank_row(row)["trade_time"],
+            _bank_transaction_id(row),
         ),
     )
-    for index in order[:remaining_cents]:
-        rounded[index] += MONEY_QUANTUM
-    return [(amount * sign).quantize(MONEY_QUANTUM) for amount in rounded]
+    for unit_id, context in context_by_unit_id.items():
+        unit_amount = _required_nonnegative_money(unit_amounts[unit_id])
+        if unit_amount == ZERO:
+            continue
+        entries.append(
+            _allocation_entry(
+                context,
+                bank_row=anchor_outflow,
+                allocated_amount=unit_amount,
+                oa_total=oa_total,
+                relation_case_id=relation_case_id,
+                payment_evidence=payment_evidence,
+                reconciliation=reconciliation,
+            )
+        )
 
 
 def _manual_allocation_task(
@@ -970,58 +916,51 @@ def _manual_allocation_task(
             "expense_type": context["expense_type"],
             "expense_content": context["expense_content"],
             "oa_applicant": context["oa_applicant"],
+            "oa_apply_type": context["oa_apply_type"],
             "oa_original_amount": _money(context["allocation_amount"]),
         }
         for context in contexts
     ]
-    sources = [
-        _manual_allocation_source(row, source_kind="outflow") for row in outflows
+    bank_events = [
+        _manual_allocation_bank_event(row, event_kind="outflow") for row in outflows
     ]
-    sources.extend(
-        _manual_allocation_source(row, source_kind="paid_wrong_refund")
+    bank_events.extend(
+        _manual_allocation_bank_event(row, event_kind="wrong_payment_refund")
         for row in refunds
     )
-    source_payload = {
-        "relation_case_id": relation_case_id,
-        "relation_version": relation_version,
-        "members": sorted(
-            zip(
-                [str(value) for value in list(group.get("row_types") or [])],
-                [str(value) for value in list(group.get("row_ids") or [])],
-                strict=False,
-            )
+    bank_events = sorted(
+        bank_events,
+        key=lambda event: (
+            str(event["event_kind"]),
+            str(event["transaction_id"]),
         ),
-        "units": sorted(units, key=lambda unit: str(unit["unit_id"])),
-        "sources": sorted(
-            sources,
-            key=lambda source: (
-                str(source["source_kind"]),
-                str(source["source_id"]),
-            ),
-        ),
-        "reconciliation": reconciliation,
-    }
-    source_fingerprint = hashlib.sha256(
-        json.dumps(
-            source_payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    )
+    source_fingerprint = _manual_allocation_source_fingerprint(
+        group=group,
+        relation_case_id=relation_case_id,
+        relation_version=relation_version,
+        units=units,
+        outflows=outflows,
+        refunds=refunds,
+        reconciliation=reconciliation,
+    )
     task: dict[str, Any] = {
         "relation_case_id": relation_case_id,
         "relation_version": relation_version,
         "source_fingerprint": source_fingerprint,
         "status": "pending",
-        "oa_allocation_total": reconciliation["oa_allocation_total"],
-        "bank_outflow_total": reconciliation["bank_outflow_total"],
-        "paid_wrong_refund_total": reconciliation["paid_wrong_refund_total"],
-        "net_cash_cost": reconciliation["net_cash_cost"],
+        "oa_total": reconciliation["oa_total"],
+        "gross_outflow_total": reconciliation["gross_outflow_total"],
+        "wrong_payment_refund_total": reconciliation[
+            "wrong_payment_refund_total"
+        ],
+        "net_outflow_total": reconciliation["net_outflow_total"],
         "difference": reconciliation["difference"],
         "units": units,
-        "sources": sources,
+        "bank_events": bank_events,
         "allocations": [],
+        "non_cost_amount": "0.00",
+        "non_cost_reason": "",
         "version": 0,
         "updated_by": "",
         "updated_at": "",
@@ -1033,6 +972,12 @@ def _manual_allocation_task(
             "version": int(manual_record.get("version") or 0),
             "updated_by": _clean_text(manual_record.get("updated_by")),
             "updated_at": _clean_text(manual_record.get("updated_at")),
+            "non_cost_amount": _money(
+                _required_nonnegative_money(
+                    manual_record.get("non_cost_amount") or "0.00"
+                )
+            ),
+            "non_cost_reason": _clean_text(manual_record.get("non_cost_reason")),
         }
     )
     if _clean_text(manual_record.get("source_fingerprint")) != source_fingerprint:
@@ -1044,53 +989,163 @@ def _manual_allocation_task(
         if isinstance(line, dict)
     ]
     expected_unit_ids = [str(unit["unit_id"]) for unit in units]
-    expected_sources = [
-        (str(source["source_kind"]), str(source["source_id"]))
-        for source in sources
-    ]
-    expected_keys = {
-        (unit_id, source_kind, source_id)
-        for unit_id in expected_unit_ids
-        for source_kind, source_id in expected_sources
-    }
-    allocations_by_key: dict[tuple[str, str, str], Decimal] = {}
+    allocations_by_unit: dict[str, Decimal] = {}
     for line in raw_allocations:
-        key = (
-            _clean_text(line.get("unit_id")),
-            _clean_text(line.get("source_kind")),
-            _clean_text(line.get("source_id")),
-        )
-        if key in allocations_by_key:
+        unit_id = _clean_text(line.get("unit_id"))
+        if unit_id in allocations_by_unit:
             raise CostStatisticsAllocationConflictError(
-                f"manual allocation {relation_case_id} contains duplicate matrix cells"
+                f"manual allocation {relation_case_id} contains duplicate units"
             )
-        allocations_by_key[key] = _required_nonnegative_money(line.get("amount"))
-    if set(allocations_by_key) != expected_keys:
+        allocations_by_unit[unit_id] = _required_nonnegative_money(
+            line.get("amount")
+        )
+    if set(allocations_by_unit) != set(expected_unit_ids):
         raise CostStatisticsAllocationConflictError(
-            f"manual allocation {relation_case_id} does not match current units and sources"
+            f"manual allocation {relation_case_id} does not match current units"
         )
     ordered_allocations = [
         {
             "unit_id": unit_id,
-            "source_kind": source_kind,
-            "source_id": source_id,
-            "amount": _money(allocations_by_key[(unit_id, source_kind, source_id)]),
+            "amount": _money(allocations_by_unit[unit_id]),
         }
         for unit_id in expected_unit_ids
-        for source_kind, source_id in expected_sources
     ]
-    _validate_manual_allocation_matrix(
-        relation_case_id=relation_case_id,
-        unit_ids=expected_unit_ids,
-        sources=sources,
-        allocations=allocations_by_key,
+    allocated_total = sum(allocations_by_unit.values(), start=ZERO).quantize(
+        MONEY_QUANTUM
     )
+    non_cost_amount = _required_nonnegative_money(task["non_cost_amount"])
+    net_outflow_total = _required_nonnegative_money(task["net_outflow_total"])
+    if allocated_total + non_cost_amount != net_outflow_total:
+        raise CostStatisticsAllocationConflictError(
+            f"manual allocation {relation_case_id} does not close net outflow"
+        )
+    if (non_cost_amount > ZERO) != bool(task["non_cost_reason"]):
+        raise CostStatisticsAllocationConflictError(
+            f"manual allocation {relation_case_id} has invalid non-cost reason"
+        )
     task["status"] = "allocated"
     task["allocations"] = ordered_allocations
     return task
 
 
-def _manual_allocation_source(
+def _manual_allocation_bank_event(
+    row: dict[str, Any],
+    *,
+    event_kind: str,
+) -> dict[str, Any]:
+    transaction_id = _bank_transaction_id(row)
+    if not transaction_id:
+        raise CostStatisticsAllocationConflictError(
+            "manual allocation bank event is missing transaction id"
+        )
+    amount = (
+        _outflow_amount(row)
+        if event_kind == "outflow"
+        else _inflow_amount(row)
+    )
+    if amount is None or amount <= ZERO:
+        raise CostStatisticsAllocationConflictError(
+            f"manual allocation bank event {transaction_id} has an invalid amount"
+        )
+    serialized = _serialize_bank_row(row)
+    tag_path = [
+        _clean_text(value)
+        for value in list(serialized.get("bank_tag_label_path") or [])
+        if _clean_text(value) and _clean_text(value) != "未标记"
+    ]
+    return {
+        "transaction_id": transaction_id,
+        "event_kind": event_kind,
+        "amount": _money(amount),
+        "trade_time": serialized["trade_time"],
+        "counterparty_name": serialized["counterparty_name"],
+        "summary": serialized["remark"] or serialized["expense_content"],
+        "tags": list(dict.fromkeys(tag_path)),
+    }
+
+
+def _manual_allocation_source_fingerprint(
+    *,
+    group: dict[str, Any],
+    relation_case_id: str,
+    relation_version: int,
+    units: list[dict[str, Any]],
+    outflows: list[dict[str, Any]],
+    refunds: list[dict[str, Any]],
+    reconciliation: dict[str, Any],
+) -> str:
+    """Hash canonical relation facts without coupling the hash to the UI DTO.
+
+    This persisted identity contract intentionally remains byte-for-byte stable
+    across the 0162 source-matrix removal.  Existing valid decisions therefore
+    stay valid after their allocation rows are reduced to one amount per OA
+    unit, while any member, unit, bank event, amount, or relation-version change
+    still invalidates the decision.
+    """
+    fingerprint_units = [
+        {
+            key: value
+            for key, value in unit.items()
+            if key != "oa_apply_type"
+        }
+        for unit in units
+    ]
+    fingerprint_sources = [
+        _manual_allocation_fingerprint_bank_source(row, source_kind="outflow")
+        for row in outflows
+    ]
+    fingerprint_sources.extend(
+        _manual_allocation_fingerprint_bank_source(
+            row,
+            source_kind="paid_wrong_refund",
+        )
+        for row in refunds
+    )
+    payload = {
+        "relation_case_id": relation_case_id,
+        "relation_version": relation_version,
+        "members": sorted(
+            zip(
+                [str(value) for value in list(group.get("row_types") or [])],
+                [str(value) for value in list(group.get("row_ids") or [])],
+                strict=False,
+            )
+        ),
+        "units": sorted(
+            fingerprint_units,
+            key=lambda unit: str(unit["unit_id"]),
+        ),
+        "sources": sorted(
+            fingerprint_sources,
+            key=lambda source: (
+                str(source["source_kind"]),
+                str(source["source_id"]),
+            ),
+        ),
+        "reconciliation": {
+            "relation_case_id": relation_case_id,
+            "oa_allocation_total": reconciliation["oa_total"],
+            "bank_outflow_total": reconciliation["gross_outflow_total"],
+            "paid_wrong_refund_total": reconciliation[
+                "wrong_payment_refund_total"
+            ],
+            "net_cash_cost": reconciliation["net_outflow_total"],
+            "difference": reconciliation["difference"],
+            "cash_payment_ratio": reconciliation["cash_payment_ratio"],
+            "status": reconciliation["status"],
+        },
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _manual_allocation_fingerprint_bank_source(
     row: dict[str, Any],
     *,
     source_kind: str,
@@ -1098,7 +1153,7 @@ def _manual_allocation_source(
     source_id = _bank_transaction_id(row)
     if not source_id:
         raise CostStatisticsAllocationConflictError(
-            "manual allocation source is missing transaction id"
+            "manual allocation bank event is missing transaction id"
         )
     amount = (
         _outflow_amount(row)
@@ -1107,7 +1162,7 @@ def _manual_allocation_source(
     )
     if amount is None or amount <= ZERO:
         raise CostStatisticsAllocationConflictError(
-            f"manual allocation source {source_id} has an invalid amount"
+            f"manual allocation bank event {source_id} has an invalid amount"
         )
     serialized = _serialize_bank_row(row)
     return {
@@ -1119,44 +1174,6 @@ def _manual_allocation_source(
         "payment_account_label": serialized["payment_account_label"],
         "remark": serialized["remark"],
     }
-
-
-def _validate_manual_allocation_matrix(
-    *,
-    relation_case_id: str,
-    unit_ids: list[str],
-    sources: list[dict[str, Any]],
-    allocations: dict[tuple[str, str, str], Decimal],
-) -> None:
-    for source in sources:
-        source_kind = str(source["source_kind"])
-        source_id = str(source["source_id"])
-        source_total = _required_nonnegative_money(source["amount"])
-        allocated_total = sum(
-            (
-                allocations[(unit_id, source_kind, source_id)]
-                for unit_id in unit_ids
-            ),
-            start=ZERO,
-        ).quantize(MONEY_QUANTUM)
-        if allocated_total != source_total:
-            raise CostStatisticsAllocationConflictError(
-                f"manual allocation {relation_case_id} does not close source {source_id}"
-            )
-    for unit_id in unit_ids:
-        unit_net = sum(
-            (
-                -allocations[(unit_id, str(source["source_kind"]), str(source["source_id"]))]
-                if source["source_kind"] == "paid_wrong_refund"
-                else allocations[(unit_id, str(source["source_kind"]), str(source["source_id"]))]
-                for source in sources
-            ),
-            start=ZERO,
-        ).quantize(MONEY_QUANTUM)
-        if unit_net < ZERO:
-            raise CostStatisticsAllocationConflictError(
-                f"manual allocation {relation_case_id} makes unit {unit_id} negative"
-            )
 
 
 def _required_nonnegative_money(value: Any) -> Decimal:
@@ -1448,11 +1465,10 @@ def _allocation_entry(
     payment_evidence: list[dict[str, Any]],
     reconciliation: dict[str, Any],
 ) -> dict[str, Any]:
-    transaction_id = _bank_transaction_id(bank_row)
-    allocation_id = f"bank:{transaction_id}:{_allocation_id(context)}"
-    serialized_bank = _serialize_bank_row(bank_row)
+    unit_id = _allocation_id(context)
+    allocation_id = f"relation:{relation_case_id}:unit:{unit_id}"
+    occurred_at = _serialize_bank_row(bank_row)["trade_time"]
     return {
-        **dict(bank_row),
         "row_key": allocation_id,
         "entry_id": allocation_id,
         "row_kind": "oa_allocation",
@@ -1463,12 +1479,12 @@ def _allocation_entry(
         "oa_apply_type": context["oa_apply_type"],
         "expense_item_id": context["expense_item_id"],
         "oa_completed_at": context["oa_completed_at"],
-        "transaction_id": transaction_id,
-        "occurred_at": serialized_bank["trade_time"],
-        "counterparty_name": serialized_bank["counterparty_name"] or context["counterparty_name"],
-        "payment_account_label": serialized_bank["payment_account_label"],
-        "direction": "收入" if allocated_amount < ZERO else "支出",
-        "remark": serialized_bank["remark"],
+        "transaction_id": "",
+        "occurred_at": occurred_at,
+        "counterparty_name": context["counterparty_name"],
+        "payment_account_label": "",
+        "direction": "支出",
+        "remark": "",
         "project_name": str(context["project_name"]),
         "project_id": str(context["project_id"]),
         "expense_type": str(context["expense_type"]),
@@ -1477,10 +1493,14 @@ def _allocation_entry(
         "amount_decimal": allocated_amount,
         "oa_original_amount": context["allocation_amount"],
         "oa_allocation_weight": _ratio(context["allocation_amount"], oa_total),
-        "bank_event_amount": serialized_bank["amount"],
+        "bank_event_amount": "",
         "payment_evidence": payment_evidence,
         "reconciliation": reconciliation,
-        **bank_tag_context_from_row(bank_row),
+        "bank_tag_code": "",
+        "bank_tag_label": "",
+        "bank_tag_primary_label": "",
+        "bank_tag_sub_label": "",
+        "bank_tag_label_path": [],
     }
 
 
@@ -1537,6 +1557,17 @@ def _inflow_amount(bank_row: dict[str, Any]) -> Decimal | None:
 
 def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
     occurred_at = str(entry["occurred_at"])
+    tag_context = (
+        {
+            "bank_tag_code": "",
+            "bank_tag_label": "",
+            "bank_tag_primary_label": "",
+            "bank_tag_sub_label": "",
+            "bank_tag_label_path": [],
+        }
+        if entry.get("row_kind") == "oa_allocation"
+        else bank_tag_context_from_row(entry)
+    )
     return {
         "entry_id": entry["entry_id"],
         "row_kind": entry["row_kind"],
@@ -1563,7 +1594,7 @@ def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "oa_applicant": entry["oa_applicant"],
         "linked_bank_transaction_count": len(entry.get("payment_evidence") or []),
         "reconciliation_status": str((entry.get("reconciliation") or {}).get("status") or ""),
-        **bank_tag_context_from_row(entry),
+        **tag_context,
     }
 
 

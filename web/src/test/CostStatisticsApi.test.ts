@@ -2,11 +2,13 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   exportCostStatisticsView,
+  fetchCostStatisticsManualAllocations,
   fetchCostStatisticsExplorerPage,
   fetchCostStatisticsExportPreview,
   fetchCostStatisticsNoOaRules,
   fetchCostStatisticsTimeTagRules,
   saveCostStatisticsNoOaRules,
+  saveCostStatisticsManualAllocation,
   saveCostStatisticsTimeTagRules,
 } from "../features/cost-statistics/api";
 
@@ -18,6 +20,93 @@ afterEach(() => {
 });
 
 describe("Cost statistics export API", () => {
+  test("maps the unit-allocation and bank-event contract without source-matrix fields", async () => {
+    const task = {
+      relation_case_id: "relation-1",
+      relation_version: 3,
+      source_fingerprint: "b".repeat(64),
+      status: "pending",
+      oa_total: "120.00",
+      gross_outflow_total: "125.00",
+      wrong_payment_refund_total: "5.00",
+      net_outflow_total: "120.00",
+      units: [{
+        unit_id: "oa-1:parent",
+        oa_id: "oa-1",
+        oa_apply_type: "支付申请",
+        expense_item_id: "",
+        project_id: "project-1",
+        project_name: "云南溯源科技",
+        expense_type: "材料费",
+        expense_content: "采购款",
+        oa_applicant: "申请人",
+        oa_original_amount: "120.00",
+      }],
+      bank_events: [{
+        transaction_id: "bank-1",
+        event_kind: "wrong_payment_refund",
+        amount: "5.00",
+        counterparty_name: "供应商",
+        trade_time: "2026-08-27T10:00:00+08:00",
+        summary: "付错退款",
+        tags: ["退款"],
+      }],
+      allocations: [],
+      non_cost_amount: "0.00",
+      non_cost_reason: "",
+      version: 0,
+      updated_by: "",
+      updated_at: "",
+      can_save: true,
+    };
+    global.fetch = vi.fn(async (_input, init) => new Response(JSON.stringify({
+      ...(init?.method === "PUT" ? {
+        ...task,
+        status: "allocated",
+        allocations: [{ unit_id: "oa-1:parent", amount: "120.00" }],
+        version: 1,
+      } : {
+        items: [task],
+        row_count: 1,
+        counts: { pending: 1, allocated: 0 },
+        next_cursor: null,
+      }),
+    }), { status: 200 })) as typeof fetch;
+
+    const page = await fetchCostStatisticsManualAllocations({ status: "pending", pageSize: 50 });
+    expect(page.items[0]).toMatchObject({
+      oaTotal: "120.00",
+      grossOutflowTotal: "125.00",
+      wrongPaymentRefundTotal: "5.00",
+      netOutflowTotal: "120.00",
+      units: [{ oaApplyType: "支付申请" }],
+      bankEvents: [{
+        transactionId: "bank-1",
+        eventKind: "wrong_payment_refund",
+        summary: "付错退款",
+        tags: ["退款"],
+      }],
+    });
+
+    await saveCostStatisticsManualAllocation({
+      relationCaseId: "relation-1",
+      expectedVersion: 0,
+      sourceFingerprint: "b".repeat(64),
+      allocations: [{ unitId: "oa-1:parent", amount: "120.00" }],
+      nonCostAmount: "0.00",
+      nonCostReason: "",
+    });
+    const putCall = vi.mocked(global.fetch).mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(JSON.parse(String(putCall?.[1]?.body))).toEqual({
+      relation_case_id: "relation-1",
+      expected_version: 0,
+      source_fingerprint: "b".repeat(64),
+      allocations: [{ unit_id: "oa-1:parent", amount: "120.00" }],
+      non_cost_amount: "0.00",
+      non_cost_reason: "",
+    });
+  });
+
   test("prefers RFC 5987 filename* from content disposition for exports", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(new Blob(["xlsx"]), {
