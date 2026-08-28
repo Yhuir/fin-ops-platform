@@ -17,9 +17,6 @@ from fin_ops_platform.services.oa_payment_status_service import (
     PAY_STATUS_PAID,
     PAY_STATUS_PENDING,
 )
-from fin_ops_platform.services.postgres_repositories.oa_payment_status_reconcile import (
-    OAPaymentStatusWritebackState,
-)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -60,34 +57,11 @@ class MemoryReconcileRepository:
         self,
         *,
         active_outflow: dict[str, bool] | None = None,
-        states: dict[str, OAPaymentStatusWritebackState] | None = None,
     ) -> None:
         self.active_outflow = dict(active_outflow or {})
-        self.states = dict(states or {})
-        self.saved: list[dict[str, object]] = []
 
     def active_outflow_by_oa_row_id(self, row_ids: list[str]) -> dict[str, bool]:
         return {row_id: self.active_outflow.get(row_id, False) for row_id in row_ids}
-
-    def load_state(self, *, tenant_id: str, flow_id: str) -> OAPaymentStatusWritebackState | None:
-        return self.states.get(flow_id)
-
-    def save_state(self, **payload: object) -> None:
-        self.saved.append(dict(payload))
-        flow_id = str(payload["flow_id"])
-        self.states[flow_id] = OAPaymentStatusWritebackState(
-            flow_id=flow_id,
-            oa_row_ids=tuple(payload["oa_row_ids"]),  # type: ignore[arg-type]
-            app_owned=bool(payload["app_owned"]),
-            sync_state=str(payload["sync_state"]),
-            desired_pay_status=int(payload["desired_pay_status"]),
-            observed_pay_status=(
-                int(payload["observed_pay_status"])
-                if payload["observed_pay_status"] is not None
-                else None
-            ),
-            last_event_id=str(payload["event_id"]),
-        )
 
 
 class RecordingSnapshotWriter:
@@ -111,35 +85,30 @@ class OAPaymentStatusReconcileServiceTests(unittest.TestCase):
 
         self.assertEqual(payment.marked_paid, ["flow-1"])
         self.assertEqual(payment.marked_pending, [])
-        self.assertTrue(reconcile.states["flow-1"].app_owned)
         self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PAID})
         self.assertEqual(result["status"], "reconciled")
 
-    def test_withdrawn_outflow_relation_reverts_only_app_owned_paid_status(self) -> None:
-        state = _state("flow-1", app_owned=True, observed_status=PAY_STATUS_PAID)
-        service, payment, reconcile, snapshot = _service(
+    def test_withdrawn_outflow_relation_reverts_paid_status_without_ownership_gate(self) -> None:
+        service, payment, _, snapshot = _service(
             records=[_record("oa-1", "flow-1")],
             statuses={"flow-1": PAY_STATUS_PAID},
-            states={"flow-1": state},
         )
 
         service.handle_runtime_event(_event(["oa-1"]))
 
         self.assertEqual(payment.marked_pending, ["flow-1"])
-        self.assertFalse(reconcile.states["flow-1"].app_owned)
         self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PENDING})
 
-    def test_preexisting_paid_status_is_not_reverted_without_app_ownership(self) -> None:
-        service, payment, reconcile, snapshot = _service(
+    def test_preexisting_paid_status_without_outflow_is_reverted_to_pending(self) -> None:
+        service, payment, _, snapshot = _service(
             records=[_record("oa-1", "flow-1")],
             statuses={"flow-1": PAY_STATUS_PAID},
         )
 
         service.handle_runtime_event(_event(["oa-1"]))
 
-        self.assertEqual(payment.marked_pending, [])
-        self.assertFalse(reconcile.states["flow-1"].app_owned)
-        self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PAID})
+        self.assertEqual(payment.marked_pending, ["flow-1"])
+        self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PENDING})
 
     def test_inflow_only_relation_does_not_mark_paid(self) -> None:
         service, payment, _, snapshot = _service(
@@ -151,7 +120,32 @@ class OAPaymentStatusReconcileServiceTests(unittest.TestCase):
         service.handle_runtime_event(_event(["oa-1"]))
 
         self.assertEqual(payment.marked_paid, [])
+        self.assertEqual(payment.marked_pending, [])
         self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PENDING})
+
+    def test_missing_external_status_without_outflow_is_created_as_pending(self) -> None:
+        service, payment, _, snapshot = _service(
+            records=[_record("oa-1", "flow-1")],
+            statuses={},
+        )
+
+        service.handle_runtime_event(_event(["oa-1"]))
+
+        self.assertEqual(payment.marked_pending, ["flow-1"])
+        self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PENDING})
+
+    def test_existing_status_already_matching_topology_is_not_written_again(self) -> None:
+        service, payment, _, snapshot = _service(
+            records=[_record("oa-1", "flow-1")],
+            statuses={"flow-1": PAY_STATUS_PAID},
+            active_outflow={"oa-1": True},
+        )
+
+        service.handle_runtime_event(_event(["oa-1"]))
+
+        self.assertEqual(payment.marked_paid, [])
+        self.assertEqual(payment.marked_pending, [])
+        self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-1": PAY_STATUS_PAID})
 
     def test_failed_payment_status_is_never_overwritten(self) -> None:
         service, payment, _, snapshot = _service(
@@ -201,7 +195,6 @@ def _service(
     records: list[OAApplicationRecord],
     statuses: dict[str, int],
     active_outflow: dict[str, bool] | None = None,
-    states: dict[str, OAPaymentStatusWritebackState] | None = None,
 ) -> tuple[
     OAPaymentStatusReconcileService,
     MemoryPaymentStatusRepository,
@@ -209,7 +202,7 @@ def _service(
     RecordingSnapshotWriter,
 ]:
     payment = MemoryPaymentStatusRepository(statuses)
-    reconcile = MemoryReconcileRepository(active_outflow=active_outflow, states=states)
+    reconcile = MemoryReconcileRepository(active_outflow=active_outflow)
     snapshot = RecordingSnapshotWriter()
     return (
         OAPaymentStatusReconcileService(
@@ -263,24 +256,6 @@ def _record(
         workflow_status=workflow_status,
         detail_fields={"支付状态FlowID": flow_id} if flow_id else {},
     )
-
-
-def _state(
-    flow_id: str,
-    *,
-    app_owned: bool,
-    observed_status: int,
-) -> OAPaymentStatusWritebackState:
-    return OAPaymentStatusWritebackState(
-        flow_id=flow_id,
-        oa_row_ids=("oa-1",),
-        app_owned=app_owned,
-        sync_state="stable",
-        desired_pay_status=observed_status,
-        observed_pay_status=observed_status,
-        last_event_id="previous-event",
-    )
-
 
 if __name__ == "__main__":
     unittest.main()

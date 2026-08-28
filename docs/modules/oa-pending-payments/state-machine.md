@@ -21,15 +21,14 @@
 | completed/in-progress + withdrawn/inactive | 未关联；不得由 raw payload 的旧 active 值复活 |
 | candidate/历史 claim only | 不等于正式支付，不直接驱动 paid 或 writeback |
 
-所有 active 正式关系都进入本页关系消费。`turnover_manual_closure` 等混合收支关系中，只有可解析的 outflow bank member 是支付证据；inflow 不进入流水展示、已付金额或写回金额。只有 inflow、没有 outflow 时仍为未支付。
+所有 active 正式关系都进入本页关系消费。`turnover_manual_closure` 等混合收支关系中，只有可解析的 outflow bank member 是支付证据；inflow 不进入流水展示、已付金额或写回金额。只有 inflow、没有 outflow 时仍为待支付。
 
 ### Payment
 
 | 状态 | 业务含义 |
 | --- | --- |
-| `unpaid` | 没有可解析的 active outflow relation |
+| `unpaid` / `待支付` | 没有可解析的 active outflow relation |
 | `paid` | 至少存在一条可解析的 active outflow relation；金额差额不改变关系事实，也不阻断自动写回 |
-| `pending` after withdraw | 最新 topology 没有 active outflow，且该 flow 的 paid 状态此前由本 App 写入 |
 
 页面只展示后端给出的结果，不在浏览器重算金额、方向或写回资格。
 
@@ -116,12 +115,12 @@ formal relation transaction commits
   -> enqueue oa.payment_status.reconcile with typed OA ids
   -> oa-sync worker loads canonical OA + latest active relation topology
   -> resolve exact flow id; failed/missing facts fail closed
-  -> active outflow ? mark paid : revert only App-owned paid to pending
-  -> persist ownership state + PostgreSQL payment-status snapshot
+  -> active outflow ? mark paid : mark pending
+  -> persist PostgreSQL payment-status snapshot
 ```
 
 - 金额不等只保留关系异常，不参与 paid gate；inflow 不算支付证据。
-- 外部原有 paid 记录只同步 snapshot，不取得 App ownership，撤回时不得改为 pending。
+- 最新 topology 没有 active outflow 时统一写 `待支付`，不判断该状态此前由 App 还是外部系统写入。
 - `pay_status=2`、OA/flow id/canonical bank 缺失明确失败，禁止覆盖或静默跳过。
 - 同一 flow 的重复 OA row 只执行一次外部写；同 ID completed/in-progress 冲突时 completed 优先。
 

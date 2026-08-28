@@ -271,17 +271,30 @@ class OAPaymentStatusServiceTests(unittest.TestCase):
         self.assertIn("INSERT INTO t_payment_simple", connection.executed[1][0])
         self.assertTrue(connection.committed)
 
-    def test_mark_pending_updates_existing_app_owned_status(self) -> None:
+    def test_mark_pending_updates_existing_status(self) -> None:
         connection = ScriptedConnection([
-            [(10, "flow-app-owned", PAY_STATUS_PAID)],
+            [(10, "flow-existing-paid", PAY_STATUS_PAID)],
         ])
         repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
 
-        record = repository.mark_pending("flow-app-owned")
+        record = repository.mark_pending("flow-existing-paid")
 
-        self.assertEqual(record, OAPaymentStatusRecord(flow_id="flow-app-owned", pay_status=PAY_STATUS_PENDING))
+        self.assertEqual(
+            record,
+            OAPaymentStatusRecord(flow_id="flow-existing-paid", pay_status=PAY_STATUS_PENDING),
+        )
         self.assertIn("FOR UPDATE", connection.executed[0][0])
         self.assertIn("UPDATE t_payment_simple SET pay_status", connection.executed[1][0])
+        self.assertTrue(connection.committed)
+
+    def test_mark_pending_inserts_row_when_flow_id_has_no_payment_status_record(self) -> None:
+        connection = ScriptedConnection([[]])
+        repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
+
+        record = repository.mark_pending("flow-pending-new")
+
+        self.assertEqual(record, OAPaymentStatusRecord(flow_id="flow-pending-new", pay_status=PAY_STATUS_PENDING))
+        self.assertIn("INSERT INTO t_payment_simple", connection.executed[1][0])
         self.assertTrue(connection.committed)
 
     def test_failed_status_is_never_overwritten(self) -> None:

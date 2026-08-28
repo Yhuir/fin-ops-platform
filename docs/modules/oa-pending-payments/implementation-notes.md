@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-08-28 - 支付状态收敛为 relation topology 唯一规则
+
+- 唯一规则：OA 存在 active canonical 支出流水 relation 时写回 `已支付`；不存在时写回 `待支付`。金额是否一致不作为门禁，收入流水不作为支付证据。
+- 删除 `app.oa_payment_status_writeback_states` 及运行时 ownership repository/service 分支；不再判断 paid 状态此前由 App 或外部系统写入。
+- 页面用户可见文案由“未支付”统一为“待支付”；内部稳定查询枚举 `unpaid` 保持不变，不新增兼容分支。
+- Migration `0160` 只删除过期内部 ownership 状态表，并为全部已完成 OA 与已准入进行中 OA 的并集登记 durable reconcile 事件；不删除主数据库或财务业务事实，因此无需数据库备份。
+- `pay_status=2`、缺失 flow id 或 canonical facts 仍明确失败，避免把已知异常静默改写。
+
 ## 2026-08-27 - 正式关系驱动支付状态自动同步
 
 - 人工 `writeback-paid` / `confirm-paid` API、前端按钮、page command direct MySQL write 和对应 Browser spec 已删除；`link-bank-transactions` 只创建/扩展正式关系并返回 `paymentStatusSync=queued`。

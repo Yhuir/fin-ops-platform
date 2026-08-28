@@ -72,9 +72,7 @@ class OAPaymentStatusReconcileService:
                 else PAY_STATUS_PENDING
             )
             final_statuses[flow_id] = self._reconcile_flow(
-                event=event,
                 flow_id=flow_id,
-                records=flow_records,
                 desired_status=desired_status,
             )
 
@@ -93,9 +91,7 @@ class OAPaymentStatusReconcileService:
     def _reconcile_flow(
         self,
         *,
-        event: RuntimeQueueEvent,
         flow_id: str,
-        records: list[OAApplicationRecord],
         desired_status: int,
     ) -> int:
         current = self._payment_status_repository.get_payment_status(flow_id)
@@ -103,98 +99,14 @@ class OAPaymentStatusReconcileService:
             raise OAPaymentStatusReconcileError(
                 f"OA payment status is failed and requires explicit handling: {flow_id}"
             )
-        state = self._reconcile_repository.load_state(
-            tenant_id=event.tenant_id,
-            flow_id=flow_id,
-        )
-        row_ids = [record.id for record in records]
-
         if desired_status == PAY_STATUS_PAID:
-            if current is not None and current.pay_status == PAY_STATUS_PAID:
-                app_owned = bool(state and state.app_owned)
-            else:
-                self._save_state(
-                    event=event,
-                    flow_id=flow_id,
-                    row_ids=row_ids,
-                    app_owned=True,
-                    sync_state="applying",
-                    desired_status=PAY_STATUS_PAID,
-                    observed_status=current.pay_status if current else None,
-                )
-                current = self._payment_status_repository.mark_paid(flow_id)
-                app_owned = True
-            self._save_state(
-                event=event,
-                flow_id=flow_id,
-                row_ids=row_ids,
-                app_owned=app_owned,
-                sync_state="stable",
-                desired_status=PAY_STATUS_PAID,
-                observed_status=PAY_STATUS_PAID,
-            )
+            if current is None or current.pay_status != PAY_STATUS_PAID:
+                self._payment_status_repository.mark_paid(flow_id)
             return PAY_STATUS_PAID
 
-        if state is not None and state.app_owned:
-            if current is None:
-                raise OAPaymentStatusReconcileError(
-                    f"App-owned OA payment status disappeared before revert: {flow_id}"
-                )
-            self._save_state(
-                event=event,
-                flow_id=flow_id,
-                row_ids=row_ids,
-                app_owned=True,
-                sync_state="applying",
-                desired_status=PAY_STATUS_PENDING,
-                observed_status=current.pay_status,
-            )
-            if current.pay_status != PAY_STATUS_PENDING:
-                current = self._payment_status_repository.mark_pending(flow_id)
-            self._save_state(
-                event=event,
-                flow_id=flow_id,
-                row_ids=row_ids,
-                app_owned=False,
-                sync_state="stable",
-                desired_status=PAY_STATUS_PENDING,
-                observed_status=PAY_STATUS_PENDING,
-            )
-            return PAY_STATUS_PENDING
-
-        observed_status = current.pay_status if current is not None else PAY_STATUS_PENDING
-        self._save_state(
-            event=event,
-            flow_id=flow_id,
-            row_ids=row_ids,
-            app_owned=False,
-            sync_state="stable",
-            desired_status=PAY_STATUS_PENDING,
-            observed_status=observed_status,
-        )
-        return observed_status
-
-    def _save_state(
-        self,
-        *,
-        event: RuntimeQueueEvent,
-        flow_id: str,
-        row_ids: list[str],
-        app_owned: bool,
-        sync_state: str,
-        desired_status: int,
-        observed_status: int | None,
-    ) -> None:
-        self._reconcile_repository.save_state(
-            tenant_id=event.tenant_id,
-            flow_id=flow_id,
-            oa_row_ids=row_ids,
-            app_owned=app_owned,
-            sync_state=sync_state,
-            desired_pay_status=desired_status,
-            observed_pay_status=observed_status,
-            event_id=event.event_id,
-        )
+        if current is None or current.pay_status != PAY_STATUS_PENDING:
+            self._payment_status_repository.mark_pending(flow_id)
+        return PAY_STATUS_PENDING
 
 
 def _text_list(value: Any) -> list[str]:

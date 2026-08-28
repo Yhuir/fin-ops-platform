@@ -1057,7 +1057,7 @@ canonical_rows as materialized (
         group_oa.oa_project_name,
         group_oa.oa_amount,
         case when bank_aggregates.existing_outflow_count > 0 then 'paid' else 'unpaid' end as payment_status,
-        case when bank_aggregates.existing_outflow_count > 0 then '已支付' else '未支付' end
+        case when bank_aggregates.existing_outflow_count > 0 then '已支付' else '待支付' end
             as payment_status_label,
         bank_aggregates.bank_trade_time,
         bank_aggregates.bank_amount,

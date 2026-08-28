@@ -171,6 +171,7 @@ EXPECTED_MIGRATIONS = [
     "0157_cost_statistics_manual_allocations.sql",
     "0158_oa_payment_status_auto_reconcile.sql",
     "0159_oa_payment_status_runtime_grant.sql",
+    "0160_remove_oa_payment_status_writeback_ownership.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -331,7 +332,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 160)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 161)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -483,6 +484,25 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         )
         self.assertNotIn("grant delete", normalized_sql)
         self.assertNotIn("delete from", normalized_sql)
+
+    def test_oa_payment_status_rule_migration_removes_ownership_and_reconciles_all_canonical_oa(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0160_remove_oa_payment_status_writeback_ownership.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("drop table if exists app.oa_payment_status_writeback_states", normalized_sql)
+        self.assertIn("from app.oa_applications", normalized_sql)
+        self.assertIn("from app.oa_pending_payment_admissions", normalized_sql)
+        self.assertIn("select 'default'::text as tenant_id, row_id as oa_id", normalized_sql)
+        self.assertIn("select tenant_id, oa_id", normalized_sql)
+        self.assertIn("union", normalized_sql)
+        self.assertIn("insert into job.outbox_events", normalized_sql)
+        self.assertIn("'oa.payment_status.reconcile'", normalized_sql)
+        self.assertIn("'migration_0160_rule_reconcile'", normalized_sql)
+        self.assertIn("on conflict (tenant_id, dedupe_key)", normalized_sql)
+        self.assertNotIn("delete from app.oa_", normalized_sql)
+        self.assertNotIn("update app.oa_", normalized_sql)
 
     def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
         sql = (
@@ -1766,6 +1786,17 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         checked_sql = checked_sql.replace(
             oa_payment_status_reconcile_sql,
             "approved_oa_payment_status_reconcile_backfill;",
+        )
+        oa_payment_status_rule_sql = strip_sql_comments(
+            (
+                MIGRATIONS_DIR
+                / "0160_remove_oa_payment_status_writeback_ownership.sql"
+            ).read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(oa_payment_status_rule_sql, checked_sql)
+        checked_sql = checked_sql.replace(
+            oa_payment_status_rule_sql,
+            "approved_oa_payment_status_rule_migration;",
         )
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",

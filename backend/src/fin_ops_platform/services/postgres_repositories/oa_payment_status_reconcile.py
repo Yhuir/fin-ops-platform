@@ -1,26 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import (
-    int_value,
-    jsonb,
-    run_in_transaction,
     text,
     text_list,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class OAPaymentStatusWritebackState:
-    flow_id: str
-    oa_row_ids: tuple[str, ...]
-    app_owned: bool
-    sync_state: str
-    desired_pay_status: int
-    observed_pay_status: int | None
-    last_event_id: str
 
 
 class PostgresOAPaymentStatusReconcileRepository:
@@ -73,88 +58,3 @@ class PostgresOAPaymentStatusReconcileRepository:
             for row in rows
             if text(row.get("oa_row_id"))
         }
-
-    def load_state(
-        self,
-        *,
-        tenant_id: str,
-        flow_id: str,
-    ) -> OAPaymentStatusWritebackState | None:
-        row = self._connection.fetch_one(
-            """
-            select flow_id, oa_row_ids, app_owned, sync_state, desired_pay_status,
-                   observed_pay_status, last_event_id
-            from app.oa_payment_status_writeback_states
-            where tenant_id = %s and flow_id = %s
-            """,
-            (tenant_id, flow_id),
-        )
-        if not row:
-            return None
-        return OAPaymentStatusWritebackState(
-            flow_id=text(row.get("flow_id")) or flow_id,
-            oa_row_ids=tuple(text_list(row.get("oa_row_ids"))),
-            app_owned=bool(row.get("app_owned")),
-            sync_state=text(row.get("sync_state")) or "stable",
-            desired_pay_status=int_value(row.get("desired_pay_status"), 0),
-            observed_pay_status=(
-                int_value(row.get("observed_pay_status"), 0)
-                if row.get("observed_pay_status") is not None
-                else None
-            ),
-            last_event_id=text(row.get("last_event_id")) or "",
-        )
-
-    def save_state(
-        self,
-        *,
-        tenant_id: str,
-        flow_id: str,
-        oa_row_ids: list[str],
-        app_owned: bool,
-        sync_state: str,
-        desired_pay_status: int,
-        observed_pay_status: int | None,
-        event_id: str,
-    ) -> None:
-        normalized_ids = text_list(oa_row_ids)
-
-        def write(transaction: Any) -> None:
-            transaction.execute(
-                """
-                insert into app.oa_payment_status_writeback_states(
-                    tenant_id, flow_id, oa_row_ids, app_owned, sync_state,
-                    desired_pay_status, observed_pay_status, last_event_id, raw_payload
-                )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                on conflict (tenant_id, flow_id) do update set
-                    oa_row_ids = excluded.oa_row_ids,
-                    app_owned = excluded.app_owned,
-                    sync_state = excluded.sync_state,
-                    desired_pay_status = excluded.desired_pay_status,
-                    observed_pay_status = excluded.observed_pay_status,
-                    last_event_id = excluded.last_event_id,
-                    raw_payload = excluded.raw_payload,
-                    updated_at = now()
-                """,
-                (
-                    tenant_id,
-                    flow_id,
-                    normalized_ids,
-                    app_owned,
-                    sync_state,
-                    desired_pay_status,
-                    observed_pay_status,
-                    event_id,
-                    jsonb({
-                        "oa_row_ids": normalized_ids,
-                        "desired_pay_status": desired_pay_status,
-                        "observed_pay_status": observed_pay_status,
-                        "app_owned": app_owned,
-                        "sync_state": sync_state,
-                        "event_id": event_id,
-                    }),
-                ),
-            )
-
-        run_in_transaction(self._connection, write)

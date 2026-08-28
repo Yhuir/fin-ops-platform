@@ -24,7 +24,7 @@
 - 每个 job/event 必须有 bounded retry、lease、idempotency 和结构化失败证据。
 - API route 只 enqueue 已登记任务；worker 不读取 HTTP cookie/header，不构造 response，不依赖 `Application`。
 - OA 精确附件刷新复用 `oa.sync`，不新增 event/worker；worker 独占 Mongo 下载、OCR、定向 owner commit、统一附件 promotion 与 matching reconciliation。completed 与 `in_progress + expense_claim` 复用同一个 promotion 边界；进行中支付申请仍不接纳附件解析。API 只读取受控 durable status/result，不得恢复同步 fallback。
-- OA 支付状态复用同一个 `oa-sync` instance 的独立 `oa.payment_status.reconcile` handler。事件只携带 typed OA IDs 和 relation identity，handler 必须查询最新 active topology；金额不等不阻断、inflow 不触发、failed 不覆盖，撤回仅恢复 App-owned 状态。生产 worker 共用的 `fin_ops_app_runtime` 角色与专用 `fin_ops_worker` 角色都只对 ownership 表持有 `SELECT/INSERT/UPDATE`，均不得 `DELETE`。
+- OA 支付状态复用同一个 `oa-sync` instance 的独立 `oa.payment_status.reconcile` handler。事件只携带 typed OA IDs 和 relation identity，handler 必须查询最新 active topology；金额不等不阻断、inflow 不触发、failed 不覆盖；有 active outflow 写 `已支付`，无 active outflow 写 `待支付`。Migration `0160` 删除旧 ownership 表，并为全部已完成 OA 与已准入进行中 OA 的并集登记一次规则重算事件。
 - `oa.sync(operation=refresh_attachments)` 的 pending/processing/failed 状态由专用 event status 接口和通用队列指标观测，不得计入全量 `oa_projection` freshness、App Health 全局 OA 状态或发布 readiness；单条修复失败不能污染全量 OA 健康结论。
 
 ## 输出 I/O

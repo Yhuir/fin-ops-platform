@@ -230,15 +230,17 @@ class MySQLOAPaymentStatusRepository:
                     (normalized_flow_id,),
                 )
                 rows = list(cursor.fetchall() or [])
-                if not rows:
-                    raise OAPaymentStatusExecutionError(
-                        f"Cannot mark missing OA payment status as pending: {normalized_flow_id}"
-                    )
                 _assert_not_failed(rows, normalized_flow_id)
-                cursor.execute(
-                    "UPDATE t_payment_simple SET pay_status = %s WHERE flow_id = %s AND pay_status <> %s",
-                    (PAY_STATUS_PENDING, normalized_flow_id, PAY_STATUS_PENDING),
-                )
+                if rows:
+                    cursor.execute(
+                        "UPDATE t_payment_simple SET pay_status = %s WHERE flow_id = %s AND pay_status <> %s",
+                        (PAY_STATUS_PENDING, normalized_flow_id, PAY_STATUS_PENDING),
+                    )
+                else:
+                    cursor.execute(
+                        "INSERT INTO t_payment_simple(flow_id, pay_status) VALUES (%s, %s)",
+                        (normalized_flow_id, PAY_STATUS_PENDING),
+                    )
             connection.commit()
             return OAPaymentStatusRecord(flow_id=normalized_flow_id, pay_status=PAY_STATUS_PENDING)
         except Exception as exc:  # pragma: no cover - deployed dependency path

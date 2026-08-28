@@ -225,6 +225,35 @@ def test_oa_bank_relation_change_enqueues_payment_status_reconcile_event() -> No
     assert queue_calls[0][1][7]["oa_row_ids"] == ["oa-1"]
 
 
+def test_cancelled_oa_bank_relation_enqueues_pending_reconcile_event() -> None:
+    connection = QueueRecordingConnection(
+        existing_relation={
+            "case_id": "CASE-OA-BANK",
+            "status": "active",
+            "version": 1,
+            "row_ids": ["oa-1", "bank-1"],
+            "row_types": ["oa", "bank"],
+        }
+    )
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relation_delta(
+        _oa_bank_snapshot(status="cancelled", version=2),
+        changed_case_ids={"CASE-OA-BANK"},
+    )
+
+    queue_calls = [
+        (sql, params)
+        for sql, params in connection.fetch_one_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+    ]
+    assert len(queue_calls) == 1
+    payload = queue_calls[0][1][7]
+    assert payload["oa_row_ids"] == ["oa-1"]
+    assert payload["relation_status"] == "cancelled"
+    assert payload["relation_version"] == 2
+
+
 def test_unchanged_oa_bank_relation_does_not_enqueue_duplicate_reconcile_event() -> None:
     connection = QueueRecordingConnection(
         existing_relation={

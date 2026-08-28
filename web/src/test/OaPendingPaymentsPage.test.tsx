@@ -291,7 +291,7 @@ const rowsPayload = {
       },
       paymentStatus: {
         code: "unpaid",
-        label: "未支付",
+        label: "待支付",
         reason: "未关联支出流水",
       },
       bankTransaction: {
@@ -349,7 +349,7 @@ const rowsPayload = {
       },
       paymentStatus: {
         code: "unpaid",
-        label: "未支付",
+        label: "待支付",
         reason: "候选流水不计入已支付金额",
       },
       bankTransaction: {
@@ -1054,7 +1054,7 @@ describe("OA pending payments page", () => {
     expect(within(noInvoiceRow).queryByRole("button", { name: /查看发票/ })).not.toBeInTheDocument();
     const candidateRow = within(page).getByRole("row", { name: /候选付款人/ });
     expect(within(candidateRow).queryByText("候选")).not.toBeInTheDocument();
-    expect(within(candidateRow).getByText("未支付")).toBeInTheDocument();
+    expect(within(candidateRow).getByText("待支付")).toBeInTheDocument();
     expect(within(candidateRow).queryByRole("button", { name: "确认已支付并写回" })).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "支出流水无需开票规则设置" })).toBeInTheDocument();
 

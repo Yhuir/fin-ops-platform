@@ -1068,10 +1068,10 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 
 - 唯一触发事实是 `app.workbench_pair_relations` 的正式关系变更：目标 OA 只要位于至少一条 active 且含 canonical 支出流水的关系中，就通过 durable `oa.payment_status.reconcile` 事件将 `t_payment_simple.pay_status` 同步为 `1`。OA 与流水金额是否相等只保留为关系异常，不阻断支付状态同步。
 - 只有收入流水、candidate/decision、inactive/withdrawn 或历史 pending relation/claim 都不能触发“已支付”。
-- 关系撤回或拓扑变化后，worker 以最新 active topology 重算；只有曾由本 App 从待支付改成已支付、并在 `app.oa_payment_status_writeback_states` 留有 ownership 记录的 flow 才自动恢复 `pay_status=0`。外部原本就是已支付的记录不得被 App 撤回。
+- 关系撤回或拓扑变化后，worker 以最新 active topology 重算；目标 OA 没有任何 active canonical 支出流水时固定写回 `pay_status=0`（待支付）。不保留 App ownership 门禁，也不区分原支付状态由 App 还是外部系统写入。
 - `pay_status=2`（支付失败）必须 fail closed，禁止自动覆盖；缺 OA、缺 canonical 流水或无法解析 `flow_id` 必须形成明确失败事件，禁止猜测字段或静默跳过。
 - 同一 OA ID 同时存在 completed 与 in-progress 快照时 completed 优先；多个 canonical OA row 解析到同一 `flow_id` 时每个事件只写一次外部状态。
-- handler 由现有 `oa-sync` worker 承担，采用 at-least-once 幂等处理；外部状态成功后必须同步记录 PostgreSQL payment-status snapshot。历史 active OA+支出关系由 migration `0158` 只登记 reconcile event，不直接修改外部支付状态。
+- handler 由现有 `oa-sync` worker 承担，采用 at-least-once 幂等处理；外部状态成功后必须同步记录 PostgreSQL payment-status snapshot。Migration `0160` 删除旧 ownership 状态，并为全部已完成 OA 与已准入进行中 OA 的并集只登记 reconcile event，不直接批量修改外部支付状态。
 
 `GET /api/oa-pending-payments/bank-transaction-candidates`
 

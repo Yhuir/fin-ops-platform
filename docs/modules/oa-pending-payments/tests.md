@@ -53,7 +53,7 @@
 - 混合收支关系只展示/合计 outflow；inflow-only、missing bank fact fail closed。
 - completed/in-progress identity、flow id、duplicate/empty/invalid input。
 - grouped OA/bank/invoice row 组装、跨月隔离和 relation row identity。
-- auto reconcile 的 active outflow、金额不等、inflow-only、App-owned withdraw revert、pre-existing paid、failed、missing flow id、duplicate flow 和 formal relation CAS/冲突。
+- auto reconcile 的 active outflow、金额不等、inflow-only、无 active outflow 统一回退、pre-existing paid 收敛、failed、missing flow id、duplicate flow 和 formal relation CAS/冲突。
 - filters/sort/paging/view mode 参数合同。
 
 入口：
@@ -74,7 +74,7 @@
 - selector SQL 使用 canonical OA/admission/payment status、active Workbench relation、bank/invoice tables，且不读取历史 pending relation/claim。
 - active OA+outflow relation 与 canonical consumer visibility 的 Audit 对照。
 - 当前页 1 与 200 descriptors 的 hydrate 查询次数相同，无 N+1。
-- OA authoritative snapshot 幂等 commit、worker 写回后 PG reconcile、ownership state 和失败重试。
+- OA authoritative snapshot 幂等 commit、worker 写回后 PG reconcile 和失败重试。
 
 入口：
 
@@ -142,7 +142,7 @@
 
 - canonical OA + active Workbench relation + bank/invoice facts -> rows/details。
 - canonical OA + mixed turnover relation + inflow/outflow facts -> 只显示和合计 outflow。
-- active relation withdraw -> 下一次 GET 不再展示 relation，同时 reconcile 仅将 App-owned paid 恢复 pending。
+- active relation withdraw -> 下一次 GET 不再展示 relation，同时 reconcile 在无 active outflow 时统一恢复 pending。
 - in-progress link-bank -> relation event -> oa-sync worker -> external adapter + PG snapshot -> current rows GET。
 
 自动化入口：
