@@ -55,6 +55,27 @@ function taskMeta(task: CostStatisticsManualAllocationTask) {
   return parts.join(" · ");
 }
 
+function buildTaskDrafts(task: CostStatisticsManualAllocationTask | undefined) {
+  if (!task) return {};
+  const saved = new Map(task.allocations.map((line) => [
+    cellKey(line.unitId, line.sourceKind, line.sourceId),
+    line.amount,
+  ]));
+  return Object.fromEntries(task.units.flatMap((unit) => (
+    task.sources.map((source) => {
+      const key = cellKey(unit.unitId, source.sourceKind, source.sourceId);
+      return [key, task.status === "allocated" ? saved.get(key) ?? "" : ""];
+    })
+  )));
+}
+
+function draftsEqual(left: Record<string, string>, right: Record<string, string>) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => left[key] === right[key]);
+}
+
 export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved }: Props) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<AllocationStatus>("pending");
@@ -71,6 +92,16 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const selectedTask = tasks.find((task) => task.relationCaseId === selectedCaseId) ?? tasks[0];
+  const initialDrafts = useMemo(() => buildTaskDrafts(selectedTask), [
+    selectedTask?.relationCaseId,
+    selectedTask?.sourceFingerprint,
+    selectedTask?.status,
+    selectedTask?.version,
+  ]);
+  const hasUnsavedChanges = useMemo(
+    () => !draftsEqual(drafts, initialDrafts),
+    [drafts, initialDrafts],
+  );
 
   const load = async ({
     targetStatus = status,
@@ -121,21 +152,8 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
   useEffect(() => () => requestRef.current?.abort(), []);
 
   useEffect(() => {
-    if (!selectedTask) {
-      setDrafts({});
-      return;
-    }
-    const saved = new Map(selectedTask.allocations.map((line) => [
-      cellKey(line.unitId, line.sourceKind, line.sourceId),
-      line.amount,
-    ]));
-    setDrafts(Object.fromEntries(selectedTask.units.flatMap((unit) => (
-      selectedTask.sources.map((source) => {
-        const key = cellKey(unit.unitId, source.sourceKind, source.sourceId);
-        return [key, selectedTask.status === "allocated" ? saved.get(key) ?? "" : ""];
-      })
-    ))));
-  }, [selectedTask?.relationCaseId, selectedTask?.sourceFingerprint, selectedTask?.version]);
+    setDrafts(initialDrafts);
+  }, [initialDrafts]);
 
   const draftSummary = useMemo(() => {
     if (!selectedTask) return { complete: false, valid: false, sourceTotals: new Map<string, bigint>(), unitNets: new Map<string, bigint>() };
@@ -194,7 +212,15 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
     }
   };
 
+  const confirmDiscardDrafts = () => {
+    if (!hasUnsavedChanges) return true;
+    if (!window.confirm("当前分配尚未保存，继续操作将丢失输入。")) return false;
+    setDrafts(initialDrafts);
+    return true;
+  };
+
   const applySearch = () => {
+    if (saving || !confirmDiscardDrafts()) return;
     const normalized = queryDraft.trim().replace(/\s+/g, " ");
     setQuery(normalized);
     void load({ targetQuery: normalized });
@@ -219,27 +245,9 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
         ariaBusy={loading || saving}
         className="cost-manual-allocation-drawer"
         closeDisabled={saving}
-        footer={selectedTask ? (
-          <div className="cost-manual-allocation-footer">
-            <div>
-              {selectedTask.sources.map((source) => (
-                <span className={draftSummary.sourceTotals.get(sourceKey(source.sourceKind, source.sourceId)) === moneyToCents(source.amount) ? "is-balanced" : ""} key={sourceKey(source.sourceKind, source.sourceId)}>
-                  {source.sourceKind === "paid_wrong_refund" ? "退款" : "流水"}已填 {formatCents(draftSummary.sourceTotals.get(sourceKey(source.sourceKind, source.sourceId)) ?? 0n)} / {source.amount}
-                </span>
-              ))}
-            </div>
-            <Button
-              isDisabled={!canSave || !selectedTask.canSave || !draftSummary.valid}
-              isPending={saving}
-              onPress={() => void handleSave()}
-              size="sm"
-              variant="primary"
-            >
-              {status === "allocated" ? "保存修改" : "保存分配"}
-            </Button>
-          </div>
-        ) : undefined}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          if (confirmDiscardDrafts()) setOpen(false);
+        }}
         open={open}
         title="成本人工分配"
         width="min(780px, 100vw)"
@@ -252,6 +260,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
             disallowEmptySelection
             onSelectionChange={(keys) => {
               const next = String([...keys][0] ?? "pending") as AllocationStatus;
+              if (next === status || saving || !confirmDiscardDrafts()) return;
               setStatus(next);
               setTasks([]);
               setSelectedCaseId("");
@@ -285,8 +294,12 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                 <button
                   aria-current={task.relationCaseId === selectedTask?.relationCaseId ? "true" : undefined}
                   className={task.relationCaseId === selectedTask?.relationCaseId ? "is-selected" : ""}
+                  disabled={saving}
                   key={task.relationCaseId}
-                  onClick={() => setSelectedCaseId(task.relationCaseId)}
+                  onClick={() => {
+                    if (task.relationCaseId === selectedTask?.relationCaseId || !confirmDiscardDrafts()) return;
+                    setSelectedCaseId(task.relationCaseId);
+                  }}
                   type="button"
                 >
                   <span><strong>{taskLabel(task)}</strong>{task.status === "stale" ? <Chip color="warning" size="sm" variant="soft">来源已变化</Chip> : null}</span>
@@ -364,6 +377,24 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                 </table>
               </div>
               {selectedTask.status === "stale" ? <p className="cost-manual-allocation-warning">关系事实已变化，旧分配不再生效；请按当前子付款项和流水重新填写。</p> : null}
+              <div className="cost-manual-allocation-actions">
+                <div>
+                  {selectedTask.sources.map((source) => (
+                    <span className={draftSummary.sourceTotals.get(sourceKey(source.sourceKind, source.sourceId)) === moneyToCents(source.amount) ? "is-balanced" : ""} key={sourceKey(source.sourceKind, source.sourceId)}>
+                      {source.sourceKind === "paid_wrong_refund" ? "退款" : "流水"}已填 {formatCents(draftSummary.sourceTotals.get(sourceKey(source.sourceKind, source.sourceId)) ?? 0n)} / {source.amount}
+                    </span>
+                  ))}
+                </div>
+                <Button
+                  isDisabled={!canSave || !selectedTask.canSave || !draftSummary.valid}
+                  isPending={saving}
+                  onPress={() => void handleSave()}
+                  size="sm"
+                  variant="primary"
+                >
+                  {status === "allocated" ? "保存修改" : "保存分配"}
+                </Button>
+              </div>
             </section>
           ) : null}
           {error ? <p className="cost-manual-allocation-error" role="alert">{error}</p> : null}

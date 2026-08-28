@@ -19602,16 +19602,19 @@ body.column-layout-dragging {
 }
 
 .cost-view-switcher {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: max-content 1px max-content;
   min-width: 0;
-  align-items: center;
-  gap: var(--fp-space-3);
+  align-items: stretch;
+  column-gap: var(--fp-space-3);
 }
 
 .cost-view-switcher-group {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--fp-space-2);
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  align-content: start;
+  align-items: start;
+  gap: 4px;
 }
 
 .cost-view-switcher-label {
@@ -19624,7 +19627,8 @@ body.column-layout-dragging {
 
 .cost-view-switcher-divider {
   width: 1px;
-  height: 28px;
+  height: auto;
+  align-self: stretch;
   background: var(--fp-border);
 }
 
@@ -19724,16 +19728,25 @@ body.column-layout-dragging {
 
 .cost-manual-allocation-task-strip > button:not([data-slot]) {
   display: grid;
-  min-width: 190px;
-  max-width: 240px;
+  box-sizing: border-box;
+  width: 220px;
+  min-width: 0;
+  max-width: 220px;
+  flex: 0 0 220px;
   gap: 3px;
   padding: 9px 11px;
   border: 1px solid var(--fp-border-subtle);
   border-radius: var(--fp-radius-sm);
   background: transparent;
   color: var(--fp-text);
+  overflow: hidden;
   text-align: left;
   cursor: pointer;
+}
+
+.cost-manual-allocation-task-strip > button:not([data-slot]):disabled {
+  cursor: default;
+  opacity: 0.64;
 }
 
 .cost-manual-allocation-task-strip > button:not([data-slot]):hover,
@@ -19744,21 +19757,36 @@ body.column-layout-dragging {
 
 .cost-manual-allocation-task-strip button > span {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-}
-
-.cost-manual-allocation-task-strip strong,
-.cost-manual-allocation-task-strip small {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.cost-manual-allocation-task-strip strong {
+  display: -webkit-box;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.cost-manual-allocation-task-strip button > span [data-slot="base"] {
+  flex: 0 0 auto;
 }
 
 .cost-manual-allocation-task-strip small {
+  display: block;
+  overflow: hidden;
   color: var(--fp-text-muted);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cost-manual-allocation-detail {
@@ -19904,28 +19932,30 @@ body.column-layout-dragging {
   color: var(--fp-danger);
 }
 
-.cost-manual-allocation-footer {
+.cost-manual-allocation-actions {
   display: flex;
   width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--fp-border-subtle);
 }
 
-.cost-manual-allocation-footer > div {
+.cost-manual-allocation-actions > div {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
   gap: 4px 12px;
 }
 
-.cost-manual-allocation-footer span {
+.cost-manual-allocation-actions span {
   color: var(--fp-text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
-.cost-manual-allocation-footer span.is-balanced {
+.cost-manual-allocation-actions span.is-balanced {
   color: var(--fp-success);
 }
 
@@ -19943,12 +19973,12 @@ body.column-layout-dragging {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .cost-manual-allocation-footer {
+  .cost-manual-allocation-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .cost-manual-allocation-footer > button {
+  .cost-manual-allocation-actions > button {
     width: 100%;
   }
 }
@@ -19959,7 +19989,9 @@ body.column-layout-dragging {
   }
 
   .cost-manual-allocation-task-strip > button:not([data-slot]) {
-    min-width: 168px;
+    width: 168px;
+    max-width: 168px;
+    flex-basis: 168px;
   }
 }
 
@@ -21511,13 +21543,12 @@ body.column-layout-dragging {
 
   .cost-view-switcher {
     width: 100%;
-    align-items: flex-start;
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--fp-space-2);
   }
 
   .cost-view-switcher-group {
     align-items: flex-start;
-    flex-direction: column;
   }
 
   .cost-view-switcher-divider {

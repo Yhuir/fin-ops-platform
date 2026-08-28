@@ -82,6 +82,10 @@ function expectProjectCostShell() {
   expect(viewSwitcher).toHaveClass("cost-view-switcher");
   expect(viewSwitcher).not.toHaveClass("MuiTabs-root");
   expect(heading.closest(".page-header")).toContainElement(viewSwitcher);
+  const pairedViews = within(viewSwitcher).getByRole("radiogroup", { name: "配对归集视图" });
+  expect(within(pairedViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按项目", "按银行", "按费用类型"]);
+  const bankViews = within(viewSwitcher).getByRole("radiogroup", { name: "流水分析视图" });
+  expect(within(bankViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按标签", "按时间"]);
 }
 
 function expectProjectCostTable(name: string) {
@@ -192,7 +196,9 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-analysis-toolbar\s*{[^}]*border:\s*0/s);
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
     expect(css).toMatch(/\.cost-view-tabs\s*{[^}]*border:\s*1px solid var\(--fp-border-subtle\)[^}]*background:\s*var\(--fp-surface\)/s);
+    expect(css).toMatch(/\.cost-view-switcher\s*{[^}]*display:\s*inline-grid[^}]*grid-template-columns:\s*max-content 1px max-content/s);
     expect(css).toMatch(/\.cost-view-switcher-divider\s*{[^}]*width:\s*1px[^}]*background:\s*var\(--fp-border\)/s);
+    expect(css).not.toContain(".cost-manual-allocation-footer");
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.business-period-picker\s*{[^}]*--business-period-control-height:\s*40px/s);
     expect(css).toMatch(/\.business-period-popover\s*{[^}]*width:\s*min\(340px,\s*calc\(100vw - 24px\)\)/s);
@@ -372,12 +378,15 @@ describe("Cost statistics page", () => {
 
     expect(projectA).toHaveValue("");
     expect(projectB).toHaveValue("");
-    expect(within(dialog).getByRole("button", { name: "保存分配" })).toBeDisabled();
+    const allocationGroup = dialog.querySelector(".cost-manual-allocation-detail");
+    expect(allocationGroup).not.toBeNull();
+    expect(dialog.querySelector(".finance-drawer__footer")).toBeNull();
+    expect(within(allocationGroup as HTMLElement).getByRole("button", { name: "保存分配" })).toBeDisabled();
 
     await user.type(projectA, "900.00");
     await user.type(projectB, "100.00");
     expect(within(dialog).getByText("流水已填 1000.00 / 1000.00")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "保存分配" }));
+    await user.click(within(allocationGroup as HTMLElement).getByRole("button", { name: "保存分配" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/manual-allocations/relation-manual-001",
@@ -386,7 +395,29 @@ describe("Cost statistics page", () => {
     expect(await within(dialog).findByText("当前没有待人工分配的关系。")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("radio", { name: "人工已分配 1" }));
     expect(await within(dialog).findByText("人工已分配")).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "保存修改" })).toBeEnabled();
+    const allocatedGroup = dialog.querySelector(".cost-manual-allocation-detail");
+    expect(allocatedGroup).not.toBeNull();
+    expect(within(allocatedGroup as HTMLElement).getByRole("button", { name: "保存修改" })).toBeEnabled();
+  });
+
+  test("keeps unsaved group input when task status navigation is cancelled", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    renderCostStatisticsPage();
+    await findCostStatisticsHeading();
+    await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
+    const dialog = await screen.findByRole("dialog", { name: "成本人工分配" });
+    const projectA = within(dialog).getByRole("textbox", { name: "项目 A分配至昆明设备供应商的金额" });
+    await user.type(projectA, "12.00");
+    await user.click(within(dialog).getByRole("radio", { name: "人工已分配 0" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith("当前分配尚未保存，继续操作将丢失输入。");
+    expect(projectA).toHaveValue("12.00");
+    expect(within(dialog).getByRole("radio", { name: "待分配 1" })).toBeChecked();
+    confirmSpy.mockRestore();
   });
 
   test("searches only the active view without refreshing the page chrome", async () => {

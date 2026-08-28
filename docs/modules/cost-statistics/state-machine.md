@@ -42,6 +42,7 @@ manual-allocation-closed
 manual-allocation-ready
   -> pending / allocated 切换（服务端 status/search/cursor 分页）
   -> editing（首次 pending/stale 输入为空；allocated 显示已保存矩阵）
+      -> 切换关系/状态/搜索/关闭（有未保存输入时先确认丢弃）
       -> saving
           -> manual-allocation-ready（保存成功并刷新当前归因视图）
           -> validation-error（保留输入）

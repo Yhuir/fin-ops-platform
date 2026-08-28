@@ -7,6 +7,7 @@
 - 人工 DTO 从“每 OA 单元一个总额”改为完整 `OA 单元 × 来源` 矩阵。支出来源正向、付错退款来源负向；服务端要求每条来源精确闭合且每个单元净成本非负。policy 直接生成对应正/负成本行，删除旧 `_allocation_matrix` 与 `_bounded_proportional_amounts` 合成比例路径。
 - source fingerprint 现在覆盖完整可见单元和来源事实；旧格式记录不会被新 fingerprint 视为有效。发布前必须确认生产旧人工记录为零，否则停止部署并单独制定数据迁移，禁止兼容读取或 fallback。
 - 没有新增表、migration、read model、worker、cache、数据库备份或跨页面写入；持久化继续使用 `app.cost_statistics_manual_allocations` 的 JSONB 和现有 version/audit 事务边界。
+- 人工分配 Drawer 的保存动作归属当前选中的关系组，按钮与该组来源闭合状态放在组详情内，不再使用抽屉全局 footer；切换关系、状态、搜索或关闭前如有未保存输入会明确确认。任务卡使用固定滚动宽度和两行标题边界，长项目名不再覆盖相邻关系。五个视图在桌面端按两行“配对归集 / 流水分析”排版，窄屏按组纵向堆叠；API、保存事务和计算口径不变。
 
 ## 2026-08-27：OA 与净支出不等改为显式人工分配
 
