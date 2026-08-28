@@ -43,9 +43,6 @@ describe("imports api", () => {
         counterparty_bank_name: "",
         summary: "电子转账",
         remark: "人工录入",
-        reference_field_key: "account_detail_no",
-        reference_field_label: "账户明细编号-交易流水号",
-        reference_value: "CCB-WEB-001",
       }],
       file_ids: ["manual_bank_file_1"],
       import_session: {
@@ -92,16 +89,11 @@ describe("imports api", () => {
       counterpartyBankName: "",
       summary: "电子转账",
       remark: "人工录入",
-      referenceFieldKey: "accountDetailNo",
-      referenceFieldLabel: "账户明细编号-交易流水号",
-      referenceValue: "CCB-WEB-001",
     }]);
 
     expect(preview.fileIds).toEqual(["manual_bank_file_1"]);
     expect(preview.values[0]).toMatchObject({
       direction: "outflow",
-      referenceFieldKey: "accountDetailNo",
-      referenceValue: "CCB-WEB-001",
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/imports/bank-transactions/manual/preview",
@@ -112,9 +104,9 @@ describe("imports api", () => {
       transactions: [{
         bank_mapping_id: "ccb-8106",
         direction: "outflow",
-        account_detail_no: "CCB-WEB-001",
       }],
     });
+    expect(JSON.parse(String(request.body)).transactions[0]).not.toHaveProperty("account_detail_no");
   });
 
   test("maps OCR prefill and serializes the server-authoritative manual invoice preview", async () => {

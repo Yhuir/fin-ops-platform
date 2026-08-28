@@ -18,7 +18,7 @@
 - 账户选择冲突必须在 confirm 前后端双重阻断；识别结果只用于校验，不能让误选 mapping 覆盖文件中的真实完整账号。
 
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
-- 银行流水手工录入的表单归一与预览：只接受设置中存在的账户 mapping，按银行名称选择既有官方参考号字段，校验完整本方账号尾号、秒级时间和 canonical 必填字段，再进入同一 file/session 导入链。
+- 银行流水手工录入的表单归一与预览：只接受设置中存在的账户 mapping，校验完整本方账号尾号、秒级时间和 canonical 必填字段，再进入同一 file/session 导入链。手工输入不接收或生成银行流水标识；使用正式 identity service 的弱指纹执行保守判重。
 - 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
 - 记录导入预览审计。
 - 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只允许在同一事务内将未确认 preview session/file/batch 终结为 `reverted`。
@@ -49,7 +49,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportBankTransactionsPage.tsx` | 文件只进入 import API/service |
 | 文件预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水文件只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；`preview_ready` 只证明解析完成，前端仅提交 `audit.confirmable_count > 0` 且账户无冲突的文件；全量已存在时不调用 confirm、不创建 job |
-| 手工流水预览 | `POST /imports/bank-transactions/manual/preview` | body 为 `{transactions:[...]}`，1–50 笔。每笔必须绑定现有且已登记手工字段合同的 `bank_mapping_id`，填写与 mapping 尾号一致的完整本方账号、收支、正金额、余额、秒级交易时间、三位币种、对方户名和银行官方参考号；未知银行模板 fail closed，不猜通用字段。服务端一次批量预载 canonical identities，再为每笔生成独立 preview file。只返回 `created` 文件的 `file_ids`，重复/疑似项不可确认。 |
+| 手工流水预览 | `POST /imports/bank-transactions/manual/preview` | body 为 `{transactions:[...]}`，1–50 笔。每笔必须绑定现有 `bank_mapping_id`，填写与 mapping 尾号一致的完整本方账号、收支、正金额、余额、秒级交易时间、三位币种和对方户名；不接收银行流水标识。服务端一次批量预载 canonical identities，再为每笔生成独立 preview file。既有弱指纹命中为 `suspected_duplicate`，同批弱指纹重复在 session 创建前拒绝；只返回 `created` 文件的 `file_ids`。 |
 | 预览恢复/放弃 | `GET /imports/files/sessions?mode=bank_transaction`、`POST /imports/files/discard` | 只返回当前认证用户的可恢复会话。放弃必须校验 owner，对已确认文件或 pending/processing/succeeded job fail closed，重复放弃幂等。 |
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。session 摘要不携带无界 `row_results`、`normalized_rows` 或 `duplicate_groups`，页面不得从摘要恢复全量复核列表。 |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
@@ -86,7 +86,7 @@ round-trip；`ON CONFLICT` 的 legacy batch owner 条件和 affected-row 数必�
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认；无法安全归一的银行表头返回显式字段映射合同，不生成 preview rows。复核表按服务端分页读取银行专属字段，不一次性映射全部结果。 |
-| 手工录入预览结果 | 前端录入抽屉 | 返回规范化 `values`、逐笔 file/row decision 与可确认 `file_ids`；用户返回修改或关闭抽屉时走既有 discard 终结 preview，确认继续调用 `/imports/files/confirm` 并进入 durable job。 |
+| 手工录入预览结果 | 前端录入抽屉 | 返回不含银行流水标识的规范化 `values`、逐笔 file/row decision 与可确认 `file_ids`；用户返回修改或关闭抽屉时走既有 discard 终结 preview，确认继续调用 `/imports/files/confirm` 并进入 durable job。 |
 | 来源控制证据 | 前端导入页面 | `source_control.status` 只允许 `verified/mismatch/unavailable/not_applicable`；mismatch 文件不可确认。 |
 | 错误明细 | `/imports/batches/{batch_id}/errors.csv` | 仅输出用户可读字段，不输出内部对象 ID。 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |

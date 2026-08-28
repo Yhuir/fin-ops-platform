@@ -8,7 +8,6 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.manual_bank_transaction_entry_service import (
     ManualBankTransactionEntryError,
     ManualBankTransactionEntryService,
-    manual_bank_reference_field,
 )
 
 
@@ -41,7 +40,6 @@ def payload(**overrides: str) -> dict[str, str]:
         "counterparty_bank_name": "测试银行",
         "summary": "电子转账",
         "remark": "人工录入",
-        "account_detail_no": "CCB-001",
     }
     values.update(overrides)
     return values
@@ -67,8 +65,8 @@ class ManualBankTransactionEntryServiceTests(unittest.TestCase):
         self.assertEqual(normalized["txn_direction"], "outflow")
         self.assertEqual(normalized["amount"], "100.00")
         self.assertEqual(normalized["balance"], "900.00")
-        self.assertEqual(normalized["account_detail_no"], "CCB-001")
-        self.assertTrue(normalized["source_unique_key"].startswith("bank-v3:"))
+        self.assertIsNone(normalized["source_unique_key"])
+        self.assertTrue(normalized["data_fingerprint"].startswith("bank:"))
 
         self.file_import_service.confirm_session(
             session_id=preview.session.id,
@@ -77,7 +75,8 @@ class ManualBankTransactionEntryServiceTests(unittest.TestCase):
         transaction = self.import_service.list_transactions()[0]
         self.assertEqual(transaction.txn_direction, TransactionDirection.OUTFLOW)
         self.assertEqual(str(transaction.amount), "100.00")
-        self.assertEqual(transaction.account_detail_no, "CCB-001")
+        self.assertIsNone(transaction.account_detail_no)
+        self.assertTrue(transaction.data_fingerprint.startswith("bank:"))
         self.assertEqual(transaction.imported_bank_last4, "8106")
 
     def test_multiple_entries_remain_independently_confirmable(self) -> None:
@@ -85,7 +84,6 @@ class ManualBankTransactionEntryServiceTests(unittest.TestCase):
             payloads=[
                 payload(),
                 payload(
-                    account_detail_no="CCB-002",
                     trade_time="2026-08-28T09:02:03",
                     direction="inflow",
                     amount="20.00",
@@ -123,14 +121,14 @@ class ManualBankTransactionEntryServiceTests(unittest.TestCase):
         service.preview_batch(
             payloads=[
                 payload(),
-                payload(account_detail_no="CCB-002", trade_time="2026-08-28T09:02:03"),
+                payload(trade_time="2026-08-28T09:02:03"),
             ],
             imported_by="finance-user",
         )
 
         self.assertEqual(repository.identity_queries, 1)
 
-    def test_existing_canonical_duplicate_is_visible_but_not_confirmable(self) -> None:
+    def test_existing_weak_fingerprint_duplicate_is_visible_but_not_confirmable(self) -> None:
         first = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
         self.file_import_service.confirm_session(
             session_id=first.session.id,
@@ -142,7 +140,7 @@ class ManualBankTransactionEntryServiceTests(unittest.TestCase):
         self.assertEqual(duplicate.file_ids, [])
         self.assertEqual(
             duplicate.session.files[0].row_results[0].decision,
-            ImportDecision.DUPLICATE_SKIPPED,
+            ImportDecision.SUSPECTED_DUPLICATE,
         )
         self.assertEqual(len(self.import_service.list_transactions()), 1)
 
@@ -158,12 +156,11 @@ class ManualBankTransactionEntryServiceTests(unittest.TestCase):
             [],
         )
 
-    def test_mapping_account_time_and_reference_contracts_fail_fast(self) -> None:
+    def test_mapping_account_and_time_contracts_fail_fast(self) -> None:
         cases = (
             ({"bank_mapping_id": "missing"}, "不存在或已被删除"),
             ({"account_no": "6227000012340000"}, "尾号与所选账户"),
             ({"trade_time": "2026-08-28T09:01"}, "精确到秒"),
-            ({"account_detail_no": ""}, "账户明细编号-交易流水号"),
         )
         for overrides, message in cases:
             with self.subTest(overrides=overrides):
@@ -173,28 +170,16 @@ class ManualBankTransactionEntryServiceTests(unittest.TestCase):
                         imported_by="finance-user",
                     )
 
-    def test_reference_field_is_derived_from_the_selected_bank(self) -> None:
-        self.assertEqual(
-            manual_bank_reference_field("中国建设银行"),
-            {"key": "account_detail_no", "label": "账户明细编号-交易流水号"},
-        )
-        self.assertEqual(
-            manual_bank_reference_field("中国光大银行"),
-            {"key": "enterprise_serial_no", "label": "企业流水号"},
-        )
-        self.assertEqual(
-            manual_bank_reference_field("云南本地银行"),
-            None,
-        )
-
-    def test_unknown_bank_does_not_fall_back_to_a_guessed_reference_field(self) -> None:
+    def test_configured_bank_without_reference_template_can_preview(self) -> None:
         self.mappings = [mapping(bank_name="云南本地银行")]
 
-        with self.assertRaisesRegex(ManualBankTransactionEntryError, "尚未配置手工流水录入字段"):
-            self.service.preview_batch(
-                payloads=[payload(bank_serial_no="LOCAL-001")],
-                imported_by="finance-user",
-            )
+        preview = self.service.preview_batch(
+            payloads=[payload()],
+            imported_by="finance-user",
+        )
+
+        self.assertEqual(len(preview.file_ids), 1)
+        self.assertIsNone(preview.session.files[0].normalized_rows[0]["source_unique_key"])
 
 
 if __name__ == "__main__":

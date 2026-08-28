@@ -6,10 +6,10 @@
 
 | 影响面 | 需要保护的行为 | 当前测试入口 |
 | --- | --- | --- |
-| 前端页面/共享工作流 | 独立路由、银行账户映射加载、每文件银行选择、手工多笔增删/动态官方参考号/预览确认、字段映射 retry、preview stale 错误、session restore、read-only 导入门禁、视觉/CSS 契约 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ManualBankTransactionBatchEditor.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` |
+| 前端页面/共享工作流 | 独立路由、银行账户映射加载、每文件银行选择、手工多笔增删/无银行流水标识/预览确认、字段映射 retry、preview stale 错误、session restore、read-only 导入门禁、视觉/CSS 契约 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ManualBankTransactionBatchEditor.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` |
 | 前端 API mapper | multipart `file_overrides`、Authorization/credentials、session/confirm/retry/fetch、嵌套 `field_mapping`、duplicate groups、skipped rows、preview stale message | `web/src/test/ImportsApi.test.ts` |
 | 文件预览 API | 损坏 Excel、模板识别、银行流水模板、per-file override、银行选择冲突、只确认 selected files | `tests/test_import_file_api.py` |
-| 手工流水录入 service/API | 1–50 笔、各银行官方参考号字段、完整账号尾号、金额/余额/秒级时间、同批重复、canonical 重复、批量 identity preload、预览后正式 durable confirm | `tests/test_manual_bank_transaction_entry_service.py`、`tests/test_import_file_api.py` |
+| 手工流水录入 service/API | 1–50 笔、无银行流水标识、完整账号尾号、金额/余额/秒级时间、同批弱指纹重复、既有弱指纹疑似重复、批量 identity preload、预览后正式 durable confirm | `tests/test_manual_bank_transaction_entry_service.py`、`tests/test_import_file_api.py` |
 | 文件预览 service | 文件级错误、session/file/batch id 去重、银行映射冲突与别名、preview stale、真实银行流水模板 | `tests/test_import_file_service.py` |
 | 银行 identity v3/v4 / 批量去重 | 复用官方参考号时不同业务指纹可创建；基础键冲突且余额/币种不同的事实生成稳定 statement-position v4 键，同位置重放即使自由文本 fingerprint 漂移也按 position key 判重；历史行尚无 v4 时只接受账户/秒级时间/方向/金额/余额/币种六项全等的唯一 position 命中，多义转疑似；历史 v2 唯一参考号迁移判重、缺失/多义参考号疑似、preview/confirm 常数次批量 preload、同批重复阻断、页面 Audit 对相同业务指纹及相交官方参考号的 v3→v2 引用迁移放行 | `tests/test_bank_transaction_identity_service.py`、`tests/test_object_dedup_decision_service.py`、`tests/test_import_service.py`、`tests/test_postgres_repositories_core.py`、`tests/test_audit_bank_transaction_import_page.py` |
 | 生产 cohort 恢复 | 精确 source session/file、目标/保护/重复删除/重放新增/受控重复/错误 reference 释放数门禁、保护集合不相交、唯一 fingerprint/reference duplicate、指纹漂移时唯一 statement-position 二级证据、4 位账户尾号与完整账户的单向兼容及不同完整账户拒绝、dry-run 匹配证据、修复重复 keeper、现存 created owner、既有 canonical duplicate reference 三类权威行证据、reference 六字段不一致释放普通 decision、缺失目标拒绝、拒绝指向待删除事实的引用、关系/核销 fail-closed、文件 hash、审计计数 CAS、可重复受控重放；每次重放登记独立归档对象；历史缺失 object link 和 audit count 只允许在唯一 URI/hash/lifecycle 证明、精确计数、fingerprint 与 CAS 门禁下修复；历史错误 canonical row link 还须精确 row 数，优先同 fingerprint + 严格 statement-position + 标准化对方名；fingerprint 漂移只能以全库唯一严格 statement-position + 对方名作为二级证据；清理、首轮重放、幂等重放、审计与 refresh outbox 共享一个写事务，任一重放计数门禁失败时回滚全部写入 | `tests/test_bank_import_dedup_repair_service.py`、`tests/test_bank_import_audit_contract_repair.py`、`tests/test_import_file_service.py`、`tests/test_audit_bank_transaction_import_page.py`、`tests/test_import_audit_repair_ops.py` |
@@ -55,7 +55,7 @@
 
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
-| 1. Business core unit tests | 适用 | `tests/test_manual_bank_transaction_entry_service.py`、`tests/test_import_service.py`、`tests/test_import_api.py`、`tests/test_import_file_service.py`、`tests/test_import_preview_audit.py` | 覆盖 canonical 表头归一、手工输入校验、各银行官方参考号、direction、金额、identity、重复/疑似重复、缺失秒级时间、账号维度唯一键、原始文本字段。 |
+| 1. Business core unit tests | 适用 | `tests/test_manual_bank_transaction_entry_service.py`、`tests/test_import_service.py`、`tests/test_import_api.py`、`tests/test_import_file_service.py`、`tests/test_import_preview_audit.py` | 覆盖 canonical 表头归一、手工输入校验、无官方参考号的弱 identity、direction、金额、同批重复/既有疑似重复、缺失秒级时间、账号维度和原始文本字段；文件导入官方参考号 identity 继续由正式 importer 测试覆盖。 |
 | 2. Service-layer tests | 适用 | `tests/test_manual_bank_transaction_entry_service.py`、`tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py`、`tests/test_bank_import_withdrawal_service.py` | 覆盖手工多笔 preview file 编排与批量 identity preload、session/file/batch 生命周期、人工映射保存与复用、preview stale、confirm 持久化、job idempotency、worker processor，以及撤回事务、业务引用阻断和幂等。 |
 | 3. API contract tests | 适用 | `tests/test_import_file_api.py`、`tests/test_import_api.py`、`web/src/test/ImportsApi.test.ts`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `/imports/bank-transactions/manual/preview` 与 `/imports/files/preview`、`confirm`、`retry`、`sessions`，包括错误 shape 和 mapper；boundary guard 锁定银行流水前端不调用旧 JSON API。 |
 | 4. Read model/cache/background job tests | cleanup 适用 | `tests/test_import_job_queue.py`、`tests/test_app_status_overview_service.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py` | 覆盖 import worker、退休银行明细/余额/Search/no-OA refresh 事件不再出现，以及关联台按正式 `workbench` 合同精确收敛；两个保留 read model 由各自模块测试负责。 |
@@ -106,7 +106,7 @@
 5. 导入完成后进入银行明细和成本统计，确认 normal canonical GET 返回新账户余额及“按时间”导入流水；切换“按项目”后不得出现伪造的 OA 成本。
 6. Staging write-flow audit：真实银行流水确认后运行 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/verify.sh infra-smoke`，必须证明退休页面 refresh/dirty delta 为零；随后对银行明细、账户余额、关联台和成本统计执行只读结果与延迟验证。
 7. 全部流水已存在 -> 显示“无需导入”与真实 0 -> 确认禁用 -> confirm/job/operation barrier 均为零；账户冲突、疑似或解析错误不得被该状态掩盖。
-8. 流水录入 -> 选择设置中的账户并填写完整账号与该银行官方参考号 -> 添加多笔 -> 预览逐笔判重 -> 只确认 created file ids -> durable `file_import` job -> canonical bank transaction；关闭/返回修改先 discard，重复或疑似流水不写入。
+8. 流水录入 -> 选择设置中的账户并填写完整账号与交易字段（无银行流水标识）-> 添加多笔 -> 预览按正式弱 identity 逐笔判重 -> 只确认 created file ids -> durable `file_import` job -> canonical bank transaction；关闭/返回修改先 discard，重复或疑似流水不写入。
 
 ## 现有验证命令
 

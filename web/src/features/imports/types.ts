@@ -222,7 +222,6 @@ export type ManualInvoiceEntryBatchPreview = {
 };
 
 export type ManualBankTransactionDirection = "inflow" | "outflow";
-export type ManualBankReferenceFieldKey = "bankSerialNo" | "accountDetailNo" | "enterpriseSerialNo";
 
 export type ManualBankTransactionEntryValues = {
   bankMappingId: string;
@@ -241,9 +240,6 @@ export type ManualBankTransactionEntryValues = {
   counterpartyBankName: string;
   summary: string;
   remark: string;
-  referenceFieldKey: ManualBankReferenceFieldKey | "";
-  referenceFieldLabel: string;
-  referenceValue: string;
 };
 
 export type ManualBankTransactionEntryBatchPreview = {

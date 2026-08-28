@@ -2,7 +2,8 @@
 
 ## 2026-08-28 - 手工多笔流水录入复用正式导入链
 
-- 页面新增“流水录入”右侧抽屉，使用现有银行账户设置与 HeroUI 表单；一次最多 50 笔，银行选择只决定有明确合同的官方参考号字段，其余为统一 canonical 必填字段。
+- 页面“流水录入”右侧抽屉使用现有银行账户设置与 HeroUI 表单，一次最多 50 笔。2026-08-29 起手工录入移除银行流水标识：银行选择只绑定账户 mapping，用户填写完整账号和交易字段；正式文件导入中的官方参考号合同保持不变。
+- 手工录入不生成占位参考号，也不另建 identity 算法；复用 `BankTransactionIdentityService` 的无参考号弱指纹。同批弱指纹重复在 preview session 创建前拒绝，命中既有 canonical 弱指纹时进入 `suspected_duplicate` 且不可确认。
 - 服务端要求完整本方账号且尾号与 mapping 一致，不从仅有的四位尾号猜造账号；各笔先统一归一，再一次批量预载 canonical identity。已有重复和疑似重复只展示，不进入可确认 file ids；同批强 identity 重复在 session 创建前拒绝。
 - 每笔映射为独立 preview file，确认、幂等、preview stale、durable job、canonical 写入、审计和 discard 全部复用既有 file/session 边界；未新增表、migration、worker、read model、第二流水池、隐藏 fallback 或数据库备份。
 

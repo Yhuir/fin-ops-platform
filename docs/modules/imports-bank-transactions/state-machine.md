@@ -27,7 +27,7 @@
 
 - `files_selected -> files_configured`：银行流水模式下每个文件都选择有效银行账户映射。
 - `files_configured -> previewing -> preview_ready`：文件上传成功，后端能识别模板或保留文件级错误。
-- `manual_editing -> manual_previewing -> manual_preview_ready`：全部表单通过前端基础校验后，服务端再次校验 mapping、完整账号、秒级时间、银行参考号并批量判重；重复/疑似项展示但不进入可确认 file ids。
+- `manual_editing -> manual_previewing -> manual_preview_ready`：全部表单通过前端基础校验后，服务端再次校验 mapping、完整账号、秒级时间和 canonical 必填字段并批量判重；重复/疑似项展示但不进入可确认 file ids。
 - `manual_preview_ready -> queued`：至少一笔为 `created`，确认仍走现有 `/imports/files/confirm`；返回修改或关闭抽屉时先 discard，再回到 `manual_editing` 或关闭。
 - `preview_ready -> preview_no_changes`：`original_count > 0`、`confirmable_count=0`、`existing_duplicate_count=original_count`，且疑似、错误、账户冲突均为零；页面显示“无需导入”并保持零 confirm/job。
 - `previewing -> mapping_required -> preview_ready`：自动归一不完整时，用户提交当前文件的字段映射；后端重新校验并解析。相同标准化表头签名后续可直接复用已保存人工映射。
@@ -41,7 +41,7 @@
 ### 禁止流转
 
 - 没有银行账户映射时禁止预览银行流水文件。
-- 手工录入缺完整本方账号、账号尾号不匹配、银行官方参考号、秒级交易时间或 canonical 必填字段时禁止创建 preview；未知银行模板不得套用通用参考号字段；同批强 identity 重复在创建 session 前拒绝。
+- 手工录入缺完整本方账号、账号尾号不匹配、秒级交易时间或 canonical 必填字段时禁止创建 preview；不得为缺失的银行流水标识生成占位值；同批弱指纹重复在创建 session 前拒绝。
 - 任一 selected file 缺少银行映射时禁止预览。
 - 核心字段映射不完整、同一源列映射到多个互斥核心字段或映射列不存在时禁止产生 preview rows 和确认。
 - 银行流水页面禁止使用旧 `/imports/preview`、`/imports/confirm` JSON 状态流；页面 I/O 只能进入 file/session 状态机。
@@ -58,8 +58,8 @@
 | 状态 | 页面行为 |
 | --- | --- |
 | settings loading | 银行流水模式进入页面后加载银行账户映射；未完成前不能完整配置文件。 |
-| manual editing | 抽屉按“流水 1…50”切换草稿；选择银行后只显示该 mapping 对应的明确官方参考号字段。所有表单字段留在浏览器草稿中，不写 canonical facts。 |
-| manual preview | 逐笔展示银行账户、时间、收支金额、对方、官方参考号和去重结果；重复/疑似项不可确认，合法项可一次提交。返回修改或关闭必须先成功 discard 当前 session。 |
+| manual editing | 抽屉按“流水 1…50”切换草稿；选择银行后填写完整本方账号和交易字段，不显示银行流水标识。所有表单字段留在浏览器草稿中，不写 canonical facts。 |
+| manual preview | 逐笔展示银行账户、时间、收支金额、对方和去重结果；重复/疑似项不可确认，合法项可一次提交。返回修改或关闭必须先成功 discard 当前 session。 |
 | empty | 未选择文件时展示上传区域和说明；不创建 session。 |
 | selected | 展示文件列表和每文件银行选择；清空/移除文件会清空 preview。 |
 | previewing | 预览按钮 loading，禁用重复预览和确认。 |

@@ -95,7 +95,6 @@ def manual_bank_transaction_payload(**overrides: str) -> dict[str, str]:
         "trade_time": "2026-08-28T09:01:02",
         "currency": "CNY",
         "counterparty_name": "测试供应商",
-        "account_detail_no": "CCB-API-001",
     }
     values.update(overrides)
     return values
@@ -135,7 +134,7 @@ class ImportFileApiTests(unittest.TestCase):
 
         self.assertEqual(preview_response.status_code, 200)
         preview_payload = json.loads(preview_response.body)
-        self.assertEqual(preview_payload["values"][0]["reference_field_key"], "account_detail_no")
+        self.assertNotIn("reference_field_key", preview_payload["values"][0])
         self.assertEqual(len(preview_payload["file_ids"]), 1)
         self.assertEqual(
             preview_payload["import_session"]["files"][0]["template_code"],
@@ -159,7 +158,8 @@ class ImportFileApiTests(unittest.TestCase):
         import_queue.process_all()
         transactions = app._import_service.list_transactions()  # type: ignore[attr-defined]
         self.assertEqual(len(transactions), 1)
-        self.assertEqual(transactions[0].account_detail_no, "CCB-API-001")
+        self.assertIsNone(transactions[0].account_detail_no)
+        self.assertTrue(transactions[0].data_fingerprint.startswith("bank:"))
         self.assertEqual(str(transactions[0].amount), "100.00")
 
     def test_postgres_discard_synchronizes_local_session_without_full_runtime_reload(self) -> None:

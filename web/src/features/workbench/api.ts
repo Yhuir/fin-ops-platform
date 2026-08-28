@@ -362,10 +362,6 @@ type ApiWorkbenchSettings = {
     last4: string;
     bank_name: string;
     short_name?: string | null;
-    manual_entry_reference_field?: {
-      key?: string | null;
-      label?: string | null;
-    } | null;
   }>;
   workbench_column_layouts?: Partial<WorkbenchColumnLayouts>;
   oa_retention?: {
@@ -1944,26 +1940,12 @@ function mapWorkbenchSettings(payload: ApiWorkbenchSettings): WorkbenchSettings 
       completed: payload.projects.completed.map(mapProjectSetting),
       completedProjectIds: payload.projects.completed_project_ids,
     },
-    bankAccountMappings: payload.bank_account_mappings.map((mapping) => {
-      const rawReferenceKey = mapping.manual_entry_reference_field?.key;
-      const referenceKey = rawReferenceKey === "bank_serial_no"
-        ? "bankSerialNo"
-        : rawReferenceKey === "account_detail_no"
-          ? "accountDetailNo"
-          : rawReferenceKey === "enterprise_serial_no"
-            ? "enterpriseSerialNo"
-            : null;
-      const referenceLabel = mapping.manual_entry_reference_field?.label?.trim();
-      return {
-        id: mapping.id,
-        last4: mapping.last4,
-        bankName: mapping.bank_name,
-        shortName: mapping.short_name ?? "",
-        ...(referenceKey && referenceLabel
-          ? { manualEntryReferenceField: { key: referenceKey, label: referenceLabel } }
-          : {}),
-      };
-    }),
+    bankAccountMappings: payload.bank_account_mappings.map((mapping) => ({
+      id: mapping.id,
+      last4: mapping.last4,
+      bankName: mapping.bank_name,
+      shortName: mapping.short_name ?? "",
+    })),
     workbenchColumnLayouts: {
       oa: Array.isArray(rawLayouts.oa) ? rawLayouts.oa.map((item) => String(item)) : [],
       bank: Array.isArray(rawLayouts.bank) ? rawLayouts.bank.map((item) => String(item)) : [],

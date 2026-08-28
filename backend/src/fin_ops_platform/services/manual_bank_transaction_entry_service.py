@@ -48,24 +48,6 @@ class ManualBankTransactionEntryBatchPreview:
     values: list[dict[str, str]]
 
 
-BANK_REFERENCE_FIELDS: tuple[tuple[tuple[str, ...], dict[str, str]], ...] = (
-    (("建设银行", "中国建设银行"), {"key": "account_detail_no", "label": "账户明细编号-交易流水号"}),
-    (("民生银行", "中国民生银行"), {"key": "bank_serial_no", "label": "交易流水号"}),
-    (("平安银行",), {"key": "bank_serial_no", "label": "核心唯一流水号"}),
-    (("光大银行", "中国光大银行"), {"key": "enterprise_serial_no", "label": "企业流水号"}),
-    (("工商银行", "中国工商银行"), {"key": "bank_serial_no", "label": "银行流水号"}),
-    (("交通银行",), {"key": "bank_serial_no", "label": "银行流水号"}),
-)
-
-
-def manual_bank_reference_field(bank_name: str) -> dict[str, str] | None:
-    normalized = str(bank_name or "").strip()
-    for markers, field in BANK_REFERENCE_FIELDS:
-        if any(marker in normalized for marker in markers):
-            return dict(field)
-    return None
-
-
 class ManualBankTransactionEntryService:
     def __init__(
         self,
@@ -97,21 +79,21 @@ class ManualBankTransactionEntryService:
             if str(item.get("id") or "").strip()
         }
         normalized_entries = [self._normalize_payload(payload, mappings=mappings) for payload in payloads]
-        identities: set[str] = set()
+        suspected_identities: set[str] = set()
         for _values, row in normalized_entries:
             identity = self._identity_service.identity_for_mapping(row)
-            if not identity.identity_key:
+            if not identity.suspected_key:
                 raise ManualBankTransactionEntryError(
                     "manual_bank_transaction_identity_incomplete",
-                    "流水缺少可用于正式去重的银行流水标识。",
+                    "流水缺少可用于正式去重的账户、时间、收支方向、金额或对方户名。",
                 )
-            if identity.identity_key in identities:
+            if identity.suspected_key in suspected_identities:
                 raise ManualBankTransactionEntryError(
                     "manual_bank_transaction_batch_duplicate",
                     "本次录入中存在重复流水，请修改或删除重复项后再预览。",
                     status_code=HTTPStatus.CONFLICT,
                 )
-            identities.add(identity.identity_key)
+            suspected_identities.add(identity.suspected_key)
 
         session = self._file_import_service.preview_manual_bank_transaction_entries(
             imported_by=imported_by,
@@ -162,14 +144,6 @@ class ManualBankTransactionEntryService:
         if not re.fullmatch(r"[A-Z]{3}", currency):
             raise ManualBankTransactionEntryError("manual_bank_transaction_currency_invalid", "币种必须为三位英文代码。")
 
-        reference_field = manual_bank_reference_field(bank_name)
-        if reference_field is None:
-            raise ManualBankTransactionEntryError(
-                "manual_bank_transaction_bank_not_supported",
-                f"{bank_name}尚未配置手工流水录入字段，请先补齐银行模板。",
-            )
-        reference_key = reference_field["key"]
-        reference_value = self._required_text(payload, reference_key, f"请填写{reference_field['label']}。")
         values = {
             "bank_mapping_id": mapping_id,
             "bank_name": bank_name,
@@ -187,9 +161,6 @@ class ManualBankTransactionEntryService:
             "counterparty_bank_name": self._text(payload.get("counterparty_bank_name")),
             "summary": self._text(payload.get("summary")),
             "remark": self._text(payload.get("remark")),
-            "reference_field_key": reference_key,
-            "reference_field_label": reference_field["label"],
-            "reference_value": reference_value,
         }
         row: dict[str, Any] = {
             "account_no": account_no,
@@ -207,7 +178,6 @@ class ManualBankTransactionEntryService:
             "counterparty_bank_name": values["counterparty_bank_name"],
             "summary": values["summary"],
             "remark": values["remark"],
-            reference_key: reference_value,
             "selected_bank_mapping_id": mapping_id,
             "selected_bank_name": bank_name,
             "selected_bank_short_name": short_name,

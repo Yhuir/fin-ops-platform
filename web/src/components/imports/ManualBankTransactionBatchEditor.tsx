@@ -8,7 +8,6 @@ import {
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
 import type {
-  ManualBankReferenceFieldKey,
   ManualBankTransactionEntryBatchPreview,
   ManualBankTransactionEntryValues,
 } from "../../features/imports/types";
@@ -33,9 +32,6 @@ export const EMPTY_MANUAL_BANK_TRANSACTION_VALUES: ManualBankTransactionEntryVal
   counterpartyBankName: "",
   summary: "",
   remark: "",
-  referenceFieldKey: "",
-  referenceFieldLabel: "",
-  referenceValue: "",
 };
 
 type Entry = { id: number; values: ManualBankTransactionEntryValues };
@@ -80,7 +76,6 @@ function normalizeTradeTimeInput(value: string) {
 function validateEntry(values: ManualBankTransactionEntryValues, index: number) {
   const label = `流水 ${index + 1}`;
   if (!values.bankMappingId) return `${label}：请选择银行账户。`;
-  if (!values.referenceFieldKey || !values.referenceFieldLabel) return `${label}：所选银行缺少手工录入字段配置。`;
   if (!/^\d+$/.test(values.accountNo.trim())) return `${label}：请填写完整的本方账号。`;
   if (!values.accountNo.trim().endsWith(values.last4)) return `${label}：本方账号尾号与所选账户不一致。`;
   if (!values.amount.trim() || Number(values.amount) <= 0) return `${label}：金额必须大于 0。`;
@@ -88,7 +83,6 @@ function validateEntry(values: ManualBankTransactionEntryValues, index: number) 
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(values.tradeTime)) return `${label}：交易时间必须精确到秒。`;
   if (!values.counterpartyName.trim()) return `${label}：请填写对方户名。`;
   if (!/^[A-Za-z]{3}$/.test(values.currency.trim())) return `${label}：币种必须为三位英文代码。`;
-  if (!values.referenceValue.trim()) return `${label}：请填写${values.referenceFieldLabel}。`;
   return null;
 }
 
@@ -133,16 +127,12 @@ export default function ManualBankTransactionBatchEditor({
   function selectBank(mappingId: string) {
     const account = bankAccountMap.get(mappingId);
     if (!account) return;
-    const reference = account.manualEntryReferenceField;
     updateCurrent({
       bankMappingId: account.id,
       bankName: account.bankName,
       bankShortName: account.shortName,
       last4: account.last4,
       accountNo: "",
-      referenceFieldKey: reference?.key ?? "",
-      referenceFieldLabel: reference?.label ?? "",
-      referenceValue: "",
     });
   }
 
@@ -246,7 +236,6 @@ export default function ManualBankTransactionBatchEditor({
                     <div><dt>交易时间</dt><dd>{values?.tradeTime.replace("T", " ") || "—"}</dd></div>
                     <div><dt>收支金额</dt><dd>{values ? `${values.direction === "outflow" ? "支出" : "收入"} ${values.amount}` : "—"}</dd></div>
                     <div><dt>对方户名</dt><dd>{values?.counterpartyName || "—"}</dd></div>
-                    <div><dt>{values?.referenceFieldLabel || "银行流水标识"}</dt><dd>{values?.referenceValue || "—"}</dd></div>
                     <div><dt>结果</dt><dd>{file.rowResults[0]?.decisionReason || file.message || "—"}</dd></div>
                   </dl>
                 </section>
@@ -307,7 +296,7 @@ export default function ManualBankTransactionBatchEditor({
           </div>
 
           <div className="manual-bank-entry__section-heading">
-            <div><strong>流水 {entries.findIndex((entry) => entry.id === selectedId) + 1}</strong><span>银行账户与正式去重字段</span></div>
+            <div><strong>流水 {entries.findIndex((entry) => entry.id === selectedId) + 1}</strong><span>银行账户信息</span></div>
             <span>{entries.length} / {MAX_ENTRIES}</span>
           </div>
           <div className="manual-bank-entry__form">
@@ -338,15 +327,6 @@ export default function ManualBankTransactionBatchEditor({
             </Field>
             <Field label="本方户名">
               <Input aria-label="本方户名" disabled={disabled || busy} value={current.values.accountName} onChange={(event) => updateCurrent({ accountName: event.currentTarget.value })} />
-            </Field>
-            <Field label={current.values.referenceFieldLabel || "银行流水标识"} required>
-              <Input
-                aria-label={current.values.referenceFieldLabel || "银行流水标识"}
-                disabled={disabled || busy || !current.values.referenceFieldKey}
-                placeholder={current.values.referenceFieldKey ? "填写银行原始标识" : "先选择银行账户"}
-                value={current.values.referenceValue}
-                onChange={(event) => updateCurrent({ referenceValue: event.currentTarget.value })}
-              />
             </Field>
           </div>
 

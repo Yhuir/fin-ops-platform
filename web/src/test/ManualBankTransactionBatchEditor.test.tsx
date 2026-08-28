@@ -23,9 +23,6 @@ const previewPayload: ManualBankTransactionEntryBatchPreview = {
     counterpartyBankName: "",
     summary: "电子转账",
     remark: "人工录入",
-    referenceFieldKey: "accountDetailNo",
-    referenceFieldLabel: "账户明细编号-交易流水号",
-    referenceValue: "CCB-UI-001",
   }],
   fileIds: ["manual_bank_file_1"],
   importSession: {
@@ -72,7 +69,7 @@ const previewPayload: ManualBankTransactionEntryBatchPreview = {
 };
 
 describe("ManualBankTransactionBatchEditor", () => {
-  test("derives the bank-specific reference field and submits one canonical preview batch", async () => {
+  test("submits one canonical preview batch without a bank reference input", async () => {
     const user = userEvent.setup();
     const previewTransactions = vi.fn().mockResolvedValue(previewPayload);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -84,10 +81,6 @@ describe("ManualBankTransactionBatchEditor", () => {
           bankName: "中国建设银行",
           shortName: "建行",
           last4: "8106",
-          manualEntryReferenceField: {
-            key: "accountDetailNo",
-            label: "账户明细编号-交易流水号",
-          },
         }]}
         onCancel={vi.fn()}
         onPreviewSessionChange={onPreviewSessionChange}
@@ -98,9 +91,8 @@ describe("ManualBankTransactionBatchEditor", () => {
 
     await user.click(screen.getByLabelText("银行账户"));
     await user.click(await screen.findByRole("option", { name: "建行 8106" }));
-    expect(screen.getByLabelText("账户明细编号-交易流水号")).toBeEnabled();
+    expect(screen.queryByLabelText("银行流水标识")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("本方完整账号"), { target: { value: "6227000012348106" } });
-    fireEvent.change(screen.getByLabelText("账户明细编号-交易流水号"), { target: { value: "CCB-UI-001" } });
     fireEvent.change(screen.getByLabelText("金额"), { target: { value: "100" } });
     fireEvent.change(screen.getByLabelText("余额"), { target: { value: "900" } });
     fireEvent.change(screen.getByLabelText("交易时间"), { target: { value: "2026-08-28T09:01" } });
@@ -113,8 +105,6 @@ describe("ManualBankTransactionBatchEditor", () => {
         accountNo: "6227000012348106",
         direction: "outflow",
         tradeTime: "2026-08-28T09:01:00",
-        referenceFieldKey: "accountDetailNo",
-        referenceValue: "CCB-UI-001",
       }),
     ]));
     expect(onPreviewSessionChange).toHaveBeenCalledWith("manual_bank_session_1");

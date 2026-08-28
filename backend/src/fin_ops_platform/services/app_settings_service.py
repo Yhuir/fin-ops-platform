@@ -24,7 +24,6 @@ from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     SETTINGS_KEY as INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
     normalize_payment_status_rules_settings,
 )
-from fin_ops_platform.services.manual_bank_transaction_entry_service import manual_bank_reference_field
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleSyncConfigurationError,
     OARoleSyncService,
@@ -1760,9 +1759,6 @@ class AppSettingsService:
                 "last4": str(item.get("last4") or ""),
                 "bank_name": str(item.get("bank_name") or ""),
                 "short_name": str(item.get("short_name") or ""),
-                "manual_entry_reference_field": manual_bank_reference_field(
-                    str(item.get("bank_name") or "")
-                ),
             }
             for item in self._snapshot["bank_account_mappings"]
         ]

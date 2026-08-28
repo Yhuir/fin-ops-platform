@@ -203,9 +203,6 @@ type ApiManualBankTransactionEntryValues = {
   counterparty_bank_name?: string;
   summary?: string;
   remark?: string;
-  reference_field_key?: string;
-  reference_field_label?: string;
-  reference_value?: string;
 };
 
 async function requestJson<T>(url: string, init: RequestInit = {}) {
@@ -533,17 +530,6 @@ export async function previewManualInvoicesAtEndpoint(
 function mapManualBankTransactionEntryValues(
   payload: ApiManualBankTransactionEntryValues,
 ): ManualBankTransactionEntryValues {
-  const rawReferenceKey = payload.reference_field_key;
-  const referenceFieldKey = rawReferenceKey === "bank_serial_no"
-    ? "bankSerialNo"
-    : rawReferenceKey === "account_detail_no"
-      ? "accountDetailNo"
-      : rawReferenceKey === "enterprise_serial_no"
-        ? "enterpriseSerialNo"
-        : null;
-  if (!referenceFieldKey) {
-    throw new Error("流水预览返回了未知的银行流水标识字段。");
-  }
   if (payload.direction !== "inflow" && payload.direction !== "outflow") {
     throw new Error("流水预览返回了未知的收支方向。");
   }
@@ -564,20 +550,10 @@ function mapManualBankTransactionEntryValues(
     counterpartyBankName: stringOrEmpty(payload.counterparty_bank_name),
     summary: stringOrEmpty(payload.summary),
     remark: stringOrEmpty(payload.remark),
-    referenceFieldKey,
-    referenceFieldLabel: stringOrEmpty(payload.reference_field_label),
-    referenceValue: stringOrEmpty(payload.reference_value),
   };
 }
 
 function serializeManualBankTransactionEntryValues(values: ManualBankTransactionEntryValues) {
-  const referenceFieldKey = values.referenceFieldKey === "bankSerialNo"
-    ? "bank_serial_no"
-    : values.referenceFieldKey === "accountDetailNo"
-      ? "account_detail_no"
-      : values.referenceFieldKey === "enterpriseSerialNo"
-        ? "enterprise_serial_no"
-        : "";
   return {
     bank_mapping_id: values.bankMappingId,
     account_no: values.accountNo,
@@ -592,7 +568,6 @@ function serializeManualBankTransactionEntryValues(values: ManualBankTransaction
     counterparty_bank_name: values.counterpartyBankName,
     summary: values.summary,
     remark: values.remark,
-    ...(referenceFieldKey ? { [referenceFieldKey]: values.referenceValue } : {}),
   };
 }
 
