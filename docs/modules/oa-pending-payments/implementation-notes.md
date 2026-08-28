@@ -703,6 +703,14 @@
 - 未测风险：未连接真实 OA MySQL/Mongo，不覆盖真实网络超时、账号权限、生产锁等待、真实 OA 字段变体和 worker drain；需要 staging 用真实进行中 OA、候选流水和 `t_payment_simple` 样本 smoke。
 - 后续事项：部署前配置 `FIN_OPS_OA_PAYMENT_STATUS_*` 环境变量并在 staging 验证 `flow_id` 解析命中率、confirm-paid 审计链和 2 秒目标 refresh。
 
+## 2026-08-28 - 撤回关系后 OA 支付状态收敛
+
+- 根因：relation writer 旧实现只从变更后的 relation payload 提取 reconcile OA ID；撤回 OA+流水+发票关系后，新 payload 只剩流水+发票，被移出的 OA 无法进入 `oa.payment_status.reconcile`，因此外部 OA 仍停留在 `已支付`。
+- 收口：writer 对本次精确变更的 case 批量读取变更前 relation，并从变更前后 typed members 并集提取 OA ID；worker 继续只按最新 active topology 判断，有 active outflow 写 `已支付`，否则写 `待支付`。金额与历史写入者均不参与门禁。
+- 旧链删除：不新增补偿任务、HTTP fallback、人工写回或状态所有权字段；after-only OA 提取不再作为事件生成依据。
+- 数据安全：无 migration、无数据库备份、无主数据库删除或直接业务数据修补；生产验证必须通过正常确认/撤回命令闭环并最终保持撤回状态。
+- 测试：新增 repository 回归，覆盖 before 为 OA+bank+invoice、after 为 bank+invoice 时仍对被移出的 OA 生成一次 reconcile 事件；并复跑 command、route、idempotency、rollback restore、OA payment reconcile 和页面 API 回归。
+
 ## 2026-06-17 - OA待付款Browser e2e闭环
 
 - 目标：补齐 OA 待付款核对页面真实浏览器层的首屏、筛选/排序和详情抽屉保护，降低只靠 Vitest 时漏掉实际导航、drawer、请求参数编码或规则抽屉复用 endpoint 回归的风险。

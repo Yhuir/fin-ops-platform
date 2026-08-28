@@ -637,14 +637,9 @@ class PostgresWorkbenchRelationRepository:
                 for case_id, payload in iter_mapping(relations)
                 if changed_ids is None or case_id in changed_ids
             ]
-            reconcile_candidates = [
-                (case_id, payload, event_payload)
-                for case_id, payload in selected_relations
-                if (event_payload := _oa_payment_reconcile_payload(case_id, payload)) is not None
-            ]
-            existing_reconcile_signatures = _existing_reconcile_signatures(
+            existing_reconcile_relations = _existing_reconcile_relations(
                 connection,
-                [case_id for case_id, _payload, _event_payload in reconcile_candidates],
+                [case_id for case_id, _payload in selected_relations],
             )
             reconcile_events: list[tuple[str, dict[str, Any]]] = []
             for case_id, payload in selected_relations:
@@ -696,11 +691,18 @@ class PostgresWorkbenchRelationRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
-                event_payload = _oa_payment_reconcile_payload(case_id, payload)
+                previous_payload = existing_reconcile_relations.get(case_id)
+                event_payload = _oa_payment_reconcile_payload(
+                    case_id,
+                    payload,
+                    previous_payload=previous_payload,
+                )
                 if (
                     event_payload is not None
-                    and existing_reconcile_signatures.get(case_id)
-                    != _reconcile_signature(payload)
+                    and (
+                        previous_payload is None
+                        or _reconcile_signature(previous_payload) != _reconcile_signature(payload)
+                    )
                 ):
                     reconcile_events.append((case_id, event_payload))
             history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
@@ -827,17 +829,31 @@ class PostgresWorkbenchRelationRepository:
         return sorted(set(case_ids))
 
 
-def _oa_payment_reconcile_payload(case_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-    row_ids = text_list(payload.get("row_ids"))
-    row_types = text_list(payload.get("row_types"))
-    if len(row_ids) != len(row_types):
+def _oa_payment_reconcile_payload(
+    case_id: str,
+    payload: dict[str, Any],
+    *,
+    previous_payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    relation_members = [_relation_members(payload)]
+    if previous_payload is not None:
+        relation_members.append(_relation_members(previous_payload))
+    if any(members is None for members in relation_members):
         return None
-    oa_row_ids = [
-        row_id
-        for row_id, row_type in zip(row_ids, row_types, strict=True)
-        if row_type in {"oa", "oa_application"}
-    ]
-    has_bank = any(row_type in {"bank", "bank_transaction"} for row_type in row_types)
+    valid_members = [members for members in relation_members if members is not None]
+    oa_row_ids = list(
+        dict.fromkeys(
+            row_id
+            for members in valid_members
+            for row_id, row_type in members
+            if row_type in {"oa", "oa_application"}
+        )
+    )
+    has_bank = any(
+        row_type in {"bank", "bank_transaction"}
+        for members in valid_members
+        for _row_id, row_type in members
+    )
     if not oa_row_ids or not has_bank:
         return None
     return {
@@ -849,10 +865,18 @@ def _oa_payment_reconcile_payload(case_id: str, payload: dict[str, Any]) -> dict
     }
 
 
-def _existing_reconcile_signatures(
+def _relation_members(payload: dict[str, Any]) -> list[tuple[str, str]] | None:
+    row_ids = text_list(payload.get("row_ids"))
+    row_types = text_list(payload.get("row_types"))
+    if len(row_ids) != len(row_types):
+        return None
+    return list(zip(row_ids, row_types, strict=True))
+
+
+def _existing_reconcile_relations(
     connection: Any,
     case_ids: list[str],
-) -> dict[str, tuple[str, int, tuple[str, ...], tuple[str, ...]]]:
+) -> dict[str, dict[str, Any]]:
     normalized_case_ids = text_list(case_ids)
     if not normalized_case_ids:
         return {}
@@ -865,12 +889,12 @@ def _existing_reconcile_signatures(
         (normalized_case_ids,),
     )
     return {
-        case_id: (
-            text(row.get("status")) or "active",
-            int_value(row.get("version"), 1),
-            tuple(text_list(row.get("row_ids"))),
-            tuple(text_list(row.get("row_types"))),
-        )
+        case_id: {
+            "status": text(row.get("status")) or "active",
+            "version": int_value(row.get("version"), 1),
+            "row_ids": text_list(row.get("row_ids")),
+            "row_types": text_list(row.get("row_types")),
+        }
         for row in rows
         if (case_id := text(row.get("case_id")))
     }

@@ -112,7 +112,8 @@ closed
 
 ```text
 formal relation transaction commits
-  -> enqueue oa.payment_status.reconcile with typed OA ids
+  -> compare exact changed case before/after typed members
+  -> enqueue oa.payment_status.reconcile with unioned typed OA ids
   -> oa-sync worker loads canonical OA + latest active relation topology
   -> resolve exact flow id; failed/missing facts fail closed
   -> active outflow ? mark paid : mark pending
@@ -120,6 +121,7 @@ formal relation transaction commits
 ```
 
 - 金额不等只保留关系异常，不参与 paid gate；inflow 不算支付证据。
+- relation writer 必须从同一事务中的变更前后 typed members 并集提取受影响 OA；撤回后 OA 即使已不在新 relation payload 中，也必须进入 reconcile，禁止只看 after snapshot 而漏写 `待支付`。
 - 最新 topology 没有 active outflow 时统一写 `待支付`，不判断该状态此前由 App 还是外部系统写入。
 - `pay_status=2`、OA/flow id/canonical bank 缺失明确失败，禁止覆盖或静默跳过。
 - 同一 flow 的重复 OA row 只执行一次外部写；同 ID completed/in-progress 冲突时 completed 优先。

@@ -93,7 +93,7 @@
 | in-progress OA relation create/extend | OA pending command -> Workbench relation UoW | formal owner transaction commit 后下一次页面 GET 可见；无 promotion 阶段 |
 | admission terminal cleanup | OA source snapshot -> Workbench relation command | OA 不再属于 completed 或 admitted 时，从 active case 移除该 OA；剩余成员仍构成有效组则保留原 case，否则取消 relation |
 | bank/invoice import or correction | canonical import owners | commit 后下一次页面 GET 可见 |
-| active relation topology change | Workbench relation repository -> `oa.payment_status.reconcile` -> oa-sync worker | 有 active outflow 自动写 `已支付`；无 active outflow 自动写 `待支付`；金额不等不阻断，失败状态不覆盖 |
+| active relation topology change | Workbench relation repository -> `oa.payment_status.reconcile` -> oa-sync worker | writer 对本次变更 case 批量读取变更前 relation；事件中的 typed OA ID 取变更前后成员并集，确保撤回后已脱离 case 的 OA 仍进入 reconcile。有 active outflow 自动写 `已支付`；无 active outflow 自动写 `待支付`；金额不等不阻断，失败状态不覆盖 |
 
 任何 writer 都不能要求本页面 freshness enqueue/polling 才能达到正确结果。外部系统未同步到 PostgreSQL 属于 integration lag，不允许通过页面 fallback 绕过。
 

@@ -1896,3 +1896,8 @@
 - 边界：首屏 combined initial 继续在同一只读快照内计算 canonical 统计，但删除独立 `invoice_inventory` response object，全部前端消费统一走 `statistics`；ETC 折叠、可见性、搜索和组内成员 I/O 不变。
 - 性能：删除 ETC 批次额外聚合和五项无消费统计，不增加查询、缓存、worker、依赖、数据库迁移或备份。
 - 测试：repository 合同测试保护 canonical invoice statistics 及旧 CTE/字段删除；API mapper 和发票栏交互测试保护新五项展示并禁止旧标签回流。
+
+## 2026-08-28 - 撤回 relation 保留受影响 OA 身份
+
+- Workbench relation writer 在保存本次精确 changed case 前批量读取旧 relation，支付状态 reconcile 事件使用变更前后 typed OA 成员并集；这使 OA 被撤出关系后仍可由 oa-sync 根据最新 topology 写回 `待支付`。
+- relation canonical payload、确认/撤回 API、版本冲突、审计历史和页面 DTO 不变；不新增第二条写回链、补偿任务、read model、worker、cache、migration 或 fallback。

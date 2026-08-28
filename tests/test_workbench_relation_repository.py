@@ -72,6 +72,23 @@ def _oa_bank_snapshot(
     }
 
 
+def _bank_invoice_snapshot(*, version: int = 2) -> dict[str, object]:
+    return {
+        "pair_relations": {
+            "CASE-OA-BANK": {
+                "case_id": "CASE-OA-BANK",
+                "relation_mode": "manual_confirmed",
+                "status": "active",
+                "version": version,
+                "month_scope": "2026-08",
+                "row_ids": ["bank-1", "invoice-1"],
+                "row_types": ["bank", "invoice"],
+            }
+        },
+        "pair_relation_history": [],
+    }
+
+
 class QueueRecordingConnection(RecordingConnection):
     def __init__(self, *, existing_relation: dict[str, object] | None = None) -> None:
         super().__init__()
@@ -171,7 +188,8 @@ def test_relation_save_persists_only_canonical_facts_and_history() -> None:
     assert any("insert into app.workbench_pair_relation_history" in sql for sql in execute_sql)
     assert any("on conflict (id) do nothing" in sql for sql in execute_sql)
     assert not connection.fetch_one_calls
-    assert not connection.fetch_all_calls
+    assert len(connection.fetch_all_calls) == 1
+    assert connection.fetch_all_calls[0][1] == (["CASE-1"],)
     assert not any("job.read_model_dirty_scopes" in sql or "job.outbox_events" in sql for sql in execute_sql)
 
 
@@ -192,7 +210,8 @@ def test_relation_save_filters_to_changed_case_ids_without_page_fan_out() -> Non
     assert len(relation_params) == 1
     assert relation_params[0][0] == "CASE-2"
     assert not connection.fetch_one_calls
-    assert not connection.fetch_all_calls
+    assert len(connection.fetch_all_calls) == 1
+    assert connection.fetch_all_calls[0][1] == (["CASE-2"],)
 
 
 def test_relation_delta_save_has_the_same_canonical_only_io_boundary() -> None:
@@ -251,6 +270,35 @@ def test_cancelled_oa_bank_relation_enqueues_pending_reconcile_event() -> None:
     payload = queue_calls[0][1][7]
     assert payload["oa_row_ids"] == ["oa-1"]
     assert payload["relation_status"] == "cancelled"
+    assert payload["relation_version"] == 2
+
+
+def test_withdrawn_oa_member_enqueues_pending_reconcile_for_previous_oa() -> None:
+    connection = QueueRecordingConnection(
+        existing_relation={
+            "case_id": "CASE-OA-BANK",
+            "status": "active",
+            "version": 1,
+            "row_ids": ["oa-1", "bank-1", "invoice-1"],
+            "row_types": ["oa", "bank", "invoice"],
+        }
+    )
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relation_delta(
+        _bank_invoice_snapshot(),
+        changed_case_ids={"CASE-OA-BANK"},
+    )
+
+    queue_calls = [
+        (sql, params)
+        for sql, params in connection.fetch_one_calls
+        if "insert into job.outbox_events" in " ".join(sql.lower().split())
+    ]
+    assert len(queue_calls) == 1
+    payload = queue_calls[0][1][7]
+    assert payload["oa_row_ids"] == ["oa-1"]
+    assert payload["relation_status"] == "active"
     assert payload["relation_version"] == 2
 
 
