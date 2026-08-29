@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { Button } from "@heroui/react";
 
 import {
   buildWorkbenchGroupDisplayLayout,
@@ -64,6 +65,8 @@ type RelationGroupGridProps = {
     action: WorkbenchInlineAction,
     group: WorkbenchRelationGroup,
   ) => void;
+  onPrintReceipt?: (group: WorkbenchRelationGroup) => void;
+  receiptPrintPendingCaseId?: string | null;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canRequestNextPage?: boolean;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
@@ -86,6 +89,8 @@ type RelationGroupGridProps = {
   allowInvoiceEntryInReadOnly?: boolean;
   hidePaneHeaders?: boolean;
 };
+
+const RECEIPT_ACTION_LABEL = "打印收据";
 
 type CollapsedSummaryCopy = {
   detailLabel: string;
@@ -155,6 +160,8 @@ function RelationGroupGrid({
   onSelectRow,
   onOpenDetail,
   onRowAction,
+  onPrintReceipt,
+  receiptPrintPendingCaseId = null,
   onEnsureGroupDetail,
   canRequestNextPage = false,
   onRequestNextPage,
@@ -194,6 +201,28 @@ function RelationGroupGrid({
     invoice: { left: 0, ratio: null },
   });
   const normalizedSearchQuery = displayState.searchQuery.trim();
+  const renderReceiptAction = useCallback((group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) => {
+    const receiptAction = group.receiptAction;
+    if (zoneId !== "paired" || paneId !== "oa" || !receiptAction?.eligible) {
+      return null;
+    }
+    const isPending = receiptPrintPendingCaseId === receiptAction.caseId;
+    return (
+      <div className="candidate-group-receipt-action">
+        <span className="candidate-group-receipt-status">{receiptAction.label}</span>
+        <Button
+          aria-label={`${RECEIPT_ACTION_LABEL} ${receiptAction.caseId}`}
+          isDisabled={!canMutateData || !onPrintReceipt || isPending}
+          isPending={isPending}
+          onPress={() => onPrintReceipt?.(group)}
+          size="sm"
+          variant="primary"
+        >
+          {RECEIPT_ACTION_LABEL}
+        </Button>
+      </div>
+    );
+  }, [canMutateData, onPrintReceipt, receiptPrintPendingCaseId, zoneId]);
   useLayoutEffect(() => {
     searchGenerationRef.current += 1;
     setExpandedPaneGroups(new Set());
@@ -574,6 +603,7 @@ function RelationGroupGrid({
                           gridRow: segmentIndex + 1,
                         }}
                       >
+                        {segmentIndex === 0 ? renderReceiptAction(group, paneId) : null}
                         <RelationGroupCell
                           columnGridStyle={paneGridStyleByPane[paneId]}
                           columns={columnsByPane[paneId]}
@@ -614,6 +644,7 @@ function RelationGroupGrid({
                       gridRow: `1 / span ${segmentCount}`,
                     }}
                   >
+                    {renderReceiptAction(group, paneId)}
                     <RelationGroupCell
                       columnGridStyle={paneGridStyleByPane[paneId]}
                       columns={columnsByPane[paneId]}
@@ -691,10 +722,13 @@ function RelationGroupGrid({
           >
             {panes.map((pane, paneIndex) => {
               const paneId = pane.id as WorkbenchRecordType;
-              const requirementLabel = missingRequirementLabel(group, paneId);
+              const requirementLabel = group.receiptAction?.eligible && paneId === "oa"
+                ? null
+                : missingRequirementLabel(group, paneId);
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet" data-pane-id={paneId}>
+                    {renderReceiptAction(group, paneId)}
                     {requirementLabel ? (
                       <span
                         aria-label={requirementLabel}

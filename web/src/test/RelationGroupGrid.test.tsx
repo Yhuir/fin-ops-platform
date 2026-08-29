@@ -610,6 +610,49 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByRole("status", { name: "待补 OA" })).toBeInTheDocument();
   });
 
+  test("offers receipt printing instead of a generic missing-OA marker for eligible income relations", () => {
+    const group = createNoOaCollapsedGroup();
+    const onPrintReceipt = vi.fn();
+    render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[{
+          ...group,
+          id: "case:CASE-RECEIPT-001",
+          receiptAction: {
+            eligible: true,
+            caseId: "CASE-RECEIPT-001",
+            label: "待补收据",
+            actionLabel: "打印收据",
+          },
+          completion: {
+            isComplete: false,
+            missingRecordTypes: ["oa"],
+            blockingReasons: ["missing_oa"],
+          },
+        }]}
+        onOpenDetail={() => undefined}
+        onPrintReceipt={onPrintReceipt}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: [] },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: [] },
+        ]}
+        rowTemplateColumns="1fr 1fr 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    expect(screen.getByText("待补收据")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "待补 OA" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "打印收据 CASE-RECEIPT-001" }));
+    expect(onPrintReceipt).toHaveBeenCalledOnce();
+  });
+
   function buildNoOaWorkbenchPayload() {
     return {
       month: "all",

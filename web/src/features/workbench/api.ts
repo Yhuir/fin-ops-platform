@@ -461,6 +461,12 @@ type ApiWorkbenchGroup = {
   relation_note?: string | null;
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
   workbench_anomaly?: ApiWorkbenchAnomaly | null;
+  receipt_action?: {
+    eligible?: boolean | null;
+    case_id?: string | null;
+    label?: string | null;
+    action_label?: string | null;
+  } | null;
   special_metadata?: Record<string, unknown> | null;
   completion?: {
     is_complete?: boolean | null;
@@ -1456,6 +1462,16 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     relationNote: toDisplayValue(group.relation_note, "") || undefined,
     amountCheck,
     workbenchAnomaly,
+    receiptAction: group.receipt_action?.eligible === true
+      && typeof group.receipt_action.case_id === "string"
+      && group.receipt_action.case_id.trim()
+      ? {
+        eligible: true,
+        caseId: group.receipt_action.case_id.trim(),
+        label: toDisplayValue(group.receipt_action.label, "待补收据"),
+        actionLabel: toDisplayValue(group.receipt_action.action_label, "打印收据"),
+      }
+      : undefined,
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     completion: group.completion && typeof group.completion === "object"
       ? {
@@ -2102,6 +2118,17 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   manual_invoice_batch_changed: "发票池状态已变化，整批未录入，请重新校验。",
   manual_invoice_relation_oa_mismatch: "当前关联关系不包含该 OA 付款项，请刷新后重试。",
   manual_invoice_supplement_unavailable: "手工发票录入暂时不可用，请稍后重试。",
+  invalid_receipt_request: "缺少需要打印收据的关联关系。",
+  receipt_relation_not_eligible: "仅无 OA 的收入加销项发票关联关系可以打印收据。",
+  receipt_relation_members_incomplete: "关联关系成员已变化，请刷新后重试。",
+  receipt_relation_not_income: "该关联关系包含非收入流水，不能打印收据。",
+  receipt_income_amount_invalid: "收入流水金额必须大于零，请核对关系成员。",
+  receipt_relation_not_output_invoice: "该关联关系包含非销项发票，不能打印收据。",
+  receipt_invoice_number_missing: "销项发票缺少发票号码，不能打印收据。",
+  receipt_currency_not_supported: "收据当前仅支持单一人民币币种。",
+  receipt_payer_missing: "收入流水缺少付款方名称，不能打印收据。",
+  receipt_invoice_group_ambiguous: "发票无法唯一归入付款方与日期分组，请核对关系成员。",
+  workbench_receipt_service_unavailable: "收据打印服务暂时不可用，请稍后重试。",
 };
 
 function requestIdFromPayload(payload: unknown) {
@@ -3487,6 +3514,36 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
     body: JSON.stringify(requestBody),
   });
   return mapWorkbenchActionResult(result);
+}
+
+export async function printWorkbenchReceipt(caseId: string): Promise<Blob> {
+  const response = await fetch(apiUrl("/api/workbench/actions/print-receipt"), {
+    method: "POST",
+    credentials: "include",
+    headers: withWorkbenchAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ case_id: caseId }),
+  });
+  if (!response.ok) {
+    let payload: { error?: unknown; message?: unknown; request_id?: unknown; requestId?: unknown } = {};
+    try {
+      payload = await response.json() as typeof payload;
+    } catch {
+      payload = {};
+    }
+    const code = String(payload.error ?? "workbench_receipt_print_failed").trim();
+    const requestId = requestIdFromPayload(payload) || response.headers.get("X-Request-ID") || "";
+    const message = String(payload.message ?? WORKBENCH_API_ERROR_MESSAGES[code] ?? "收据生成失败，请稍后重试。").trim();
+    throw new WorkbenchApiError(message, {
+      status: response.status,
+      code,
+      requestId,
+    });
+  }
+  const contentType = String(response.headers.get("Content-Type") ?? "").toLowerCase();
+  if (!contentType.includes("application/pdf")) {
+    throw new Error("收据服务未返回 PDF 文件。");
+  }
+  return response.blob();
 }
 
 export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<WorkbenchActionResult> {

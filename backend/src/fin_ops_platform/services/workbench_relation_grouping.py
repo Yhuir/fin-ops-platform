@@ -10,6 +10,9 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     normalize_oa_attachment_expense_item_ids,
 )
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
+from fin_ops_platform.services.workbench_relation_receipt_eligibility import (
+    workbench_relation_receipt_action,
+)
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
@@ -327,6 +330,13 @@ class WorkbenchRelationGroupingService:
         )
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
+        receipt_action = workbench_relation_receipt_action(
+            rows_by_type,
+            case_id=case_id,
+            zone=zone,
+        )
+        if receipt_action is not None:
+            group["receipt_action"] = receipt_action
         return group
 
     @staticmethod

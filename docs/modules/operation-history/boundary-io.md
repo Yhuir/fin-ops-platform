@@ -10,6 +10,7 @@
 | 边界 | 输入 | 输出/约束 |
 | --- | --- | --- |
 | 写操作审计 | 服务端解析出的 actor id/name/account、HTTP route/request id、结果；领域服务前后值；操作发生时的有界证据快照 | 由后端语义注册表把 route 归一为稳定 `action_code/action_label/object_label/description` 后追加写 `audit.events`；同一 HTTP mutation 内的领域审计继承 request id 并聚合为一条逻辑操作；requested 写失败时业务 mutation fail closed；敏感键被递归移除；客户端不能覆盖 actor |
+| 关系收据审计 | 收据 service 的服务端 actor、relation case、receipt id、内容指纹、付款方/日期/金额/发票号快照 | 首次持久化新指纹时追加 `receipt_generated`；每次服务端成功返回 PDF 时追加 `receipt_print_requested`。相同指纹重放不得重复文件或 generated 事件；系统永不声称浏览器已经完成打印，不记录伪 `receipt_printed`。 |
 | 财务事实修正 | 数据库 transaction-local actor/reason | `app.financial_fact_corrections` + `audit.events` 同事务追加；无 reason 拒绝关键字段更新/删除 |
 | 列表 API `GET /api/operations/history` | 005 session、日期/人员/页面/搜索/cursor | 在数据库内先按 `request_id` 合并 requested/completed，再筛选和翻页；最多 200 条，稳定时间+operation key 游标；只返回覆盖点之后的数据 |
 | 操作人 API `GET /api/operations/history/actors` | 005 session | 返回审计事实中完整、去重的操作人 id/name/account 选项 |

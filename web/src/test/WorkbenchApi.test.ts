@@ -20,6 +20,7 @@ import {
   previewWorkbenchConfirmLink,
   previewWorkbenchManualInvoices,
   previewWorkbenchWithdrawLink,
+  printWorkbenchReceipt,
   refreshManualOaImportAttachments,
   removeManualOaImport,
   reviewWorkbenchAnomaly,
@@ -76,6 +77,46 @@ test("submits explicit invoice ownership through the dedicated command contract"
     anomaly_fingerprint: "a".repeat(64),
     idempotency_key: "assign-ownership-1",
   });
+  fetchSpy.mockRestore();
+});
+
+test("requests a relation receipt through the PDF action contract", async () => {
+  const pdfBody = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(pdfBody, {
+      status: 200,
+      headers: { "Content-Type": "application/pdf" },
+    }),
+  );
+
+  const result = await printWorkbenchReceipt("CASE-RECEIPT-001");
+
+  expect(fetchSpy).toHaveBeenCalledWith(
+    "/api/workbench/actions/print-receipt",
+    expect.objectContaining({
+      method: "POST",
+      credentials: "include",
+    }),
+  );
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+    case_id: "CASE-RECEIPT-001",
+  });
+  expect(result.type).toBe("application/pdf");
+  expect(result.size).toBe(pdfBody.byteLength);
+  fetchSpy.mockRestore();
+});
+
+test("rejects a successful receipt response that is not a PDF", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+
+  await expect(printWorkbenchReceipt("CASE-RECEIPT-001")).rejects.toThrow(
+    "收据服务未返回 PDF 文件。",
+  );
   fetchSpy.mockRestore();
 });
 

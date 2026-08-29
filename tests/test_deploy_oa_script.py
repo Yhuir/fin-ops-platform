@@ -1030,7 +1030,7 @@ class DeployOAScriptTest(unittest.TestCase):
         )
         self.assertIn("production remains in maintenance for forward repair", rollback)
         self.assertIn(
-            'forward_only_versions = {"0149", "0160", "0161", "0162"}',
+            'forward_only_versions = {"0149", "0160", "0161", "0162", "0163"}',
             script,
         )
         for operation in (

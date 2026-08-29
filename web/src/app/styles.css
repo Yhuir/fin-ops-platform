@@ -14137,6 +14137,28 @@ body.column-layout-dragging {
   pointer-events: none;
 }
 
+.candidate-group-receipt-action {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 5px 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--fp-warning) 34%, var(--fp-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--fp-warning-soft) 72%, var(--fp-surface));
+  box-shadow: 0 6px 18px rgba(37, 50, 72, 0.1);
+}
+
+.candidate-group-receipt-status {
+  color: var(--fp-warning);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .candidate-group-pane-slot-filler {
   background: #fbfdff;
 }
@@ -15840,6 +15862,10 @@ body.column-layout-dragging {
   }
 
   .workbench-zone-slot .candidate-group-missing-requirement {
+    top: 38px;
+  }
+
+  .workbench-zone-slot .candidate-group-receipt-action {
     top: 38px;
   }
 }

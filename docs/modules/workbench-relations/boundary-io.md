@@ -1,12 +1,13 @@
 # Workbench 正式关系边界与 I/O
 
-日期：2026-08-20
+日期：2026-08-29
 
 ## Owner
 
 | 事实 | Owner | 说明 |
 | --- | --- | --- |
 | `app.workbench_pair_relations` | workbench-relations | 当前/历史关系实体；只有 active 拥有成员 |
+| `app.workbench_relation_receipts` | reconciliation-workbench 派生收据模块 | 只保存 active relation canonical 快照及 PDF 文件引用；relation 模块仅提供输入事实，打印收据不得改变关系拓扑、成员、版本或状态 |
 | `app.workbench_pair_relation_history` | workbench-relations | confirm/extend/replace/cancel/withdraw/repair 审计历史 |
 | `read_model.workbench_relation_*` | read-models + workbench-relations projection | 下游 linked/unlinked 投影，不是写事实源 |
 
@@ -44,6 +45,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | persisted completion requirement | reconciliation-workbench | 普通 relation 必须同时含银行流水才可能进入 `paired`；OA+发票的 active immutable ownership 在缺银行时保持同 case但进入 `unpaired`，并返回 `missing_row_types=["bank"]`。含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定其余缺项，缺失 fail closed。材料满足后，关系内全部 OA 仍须 `workflow_status=completed`；任一进行中 OA 返回 `blocking_reasons=["oa_in_progress"]` 并保持原 case 在 `unpaired`。只有显式 `relation_mode=batch_accounting` 保留已登记完成豁免；ETC batch identity 只证明汇总行的 canonical owner，不绕过 requirements 或实际成员类型。持久化分类事实变化继续原子更新既有关系；规则语义变化由 durable incremental job 更新命中关系并追加 history。下游 linked ownership 仍只由 active status 决定。 |
 | history | Audit/withdraw/operation-history | before/after、actor、event、timestamp、reason、rule/provenance；人工确认附带服务端 request id 与选择项 before/after 业务投影，供操作历史详情读取，不改变 relation 事实 |
 | command result | caller | relation/version/affected rows/months/idempotent replay；relation topology 的 status 或 typed member set 每次发生变化时 version 单调推进，新关系从 1 开始，取消在当前 version 上 +1，恢复 predecessor 使用 `max(数据库当前 predecessor version, history snapshot version)+1`。普通关系操作的 `freshness_targets` / `operation_barrier_targets` 为空，月份/scope 只作读侧重校验提示。 |
+| active relation receipt snapshot | reconciliation-workbench 派生收据模块 | 只读返回一个 active relation 的精确 typed members 与当前 canonical 流水/发票字段，用于服务端资格重验和内容指纹。关系状态、成员或展示内容变化时不得复用旧指纹；旧收据快照只保留审计，不反向成为 relation 事实源。 |
 | ETC relation enrichment | Workbench direct query/Audit | 人工确认折叠 ETC summary 时，relation UoW 在同一事务重读 canonical selected rows，并把唯一 `external_etc_batch_id` 写入 `special_metadata`；自动补全继续由 `special_metadata.etc_batch_link` 保存 external/business/submission/OA identity、发票数量与金额。一个 external batch 只能有一个 active relation owner，Audit 只认可 batch identity 与确定性 `etc-summary-<batch>` row id 同时匹配。 |
 | access-time refresh request | durable runtime | 普通 confirm/withdraw/split/exception/ignore/cash/relation 写入不 enqueue 任何页面 read model。消费页的正常 GET 比较 canonical relation source version 与已发布证明，只对当前访问 scope 通过正式 gateway 入队 |
 | read distribution | downstream pages | 只有 `linked` / `unlinked`；non-fresh 不能返回为业务空集合 |

@@ -282,6 +282,13 @@ export type WorkbenchRelationMode = "no_oa_bank_batch" | (string & {});
 
 export type WorkbenchDisplayMode = "collapsed_summary" | "normal" | (string & {});
 
+export type WorkbenchReceiptAction = {
+  eligible: boolean;
+  caseId: string;
+  label: string;
+  actionLabel: string;
+};
+
 export type WorkbenchRelationGroup = {
   id: string;
   detailKey?: string;
@@ -303,6 +310,7 @@ export type WorkbenchRelationGroup = {
   relationNote?: string;
   amountCheck?: WorkbenchAmountCheck;
   workbenchAnomaly?: WorkbenchAnomaly;
+  receiptAction?: WorkbenchReceiptAction;
   specialMetadata?: Record<string, unknown>;
   completion?: {
     isComplete: boolean;

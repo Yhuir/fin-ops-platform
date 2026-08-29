@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from fin_ops_platform.services.workbench_invoice_direction import normalize_invoice_kind_from_row
+
+
+def workbench_relation_receipt_action(
+    rows_by_type: dict[str, list[dict[str, Any]]],
+    *,
+    case_id: str,
+    zone: str,
+) -> dict[str, Any] | None:
+    """Return the single receipt action exposed by an eligible active relation."""
+
+    oa_rows = rows_by_type.get("oa", [])
+    bank_rows = rows_by_type.get("bank", [])
+    invoice_rows = rows_by_type.get("invoice", [])
+    if zone != "paired" or oa_rows or not bank_rows or not invoice_rows:
+        return None
+    if any(str(row.get("txn_direction") or "").strip().lower() != "inflow" for row in bank_rows):
+        return None
+    try:
+        if any(Decimal(str(row.get("amount"))) <= Decimal("0") for row in bank_rows):
+            return None
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if any(normalize_invoice_kind_from_row(row) != "output" for row in invoice_rows):
+        return None
+    if any(
+        not str(
+            row.get("digital_invoice_no")
+            or row.get("digitalInvoiceNo")
+            or row.get("invoice_no")
+            or row.get("invoiceNo")
+            or ""
+        ).strip()
+        for row in invoice_rows
+    ):
+        return None
+    currencies = {
+        str(row.get("currency") or "").strip().upper()
+        for row in [*bank_rows, *invoice_rows]
+    }
+    if currencies != {"CNY"}:
+        return None
+    if any(
+        not str(
+            row.get("counterparty_name_raw")
+            or row.get("normalized_counterparty_name")
+            or row.get("counterparty_name")
+            or ""
+        ).strip()
+        for row in bank_rows
+    ):
+        return None
+    return {
+        "eligible": True,
+        "case_id": case_id,
+        "label": "待补收据",
+        "action_label": "打印收据",
+    }

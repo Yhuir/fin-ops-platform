@@ -335,6 +335,9 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_relation_receipt import (
+    PostgresWorkbenchRelationReceiptRepository,
+)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
     APP_SETTINGS_KEY,
     PostgresOpsTaxEtcRepository,
@@ -439,6 +442,10 @@ from fin_ops_platform.services.workbench_invoice_supplement_service import (
     WorkbenchInvoiceSupplementError,
     WorkbenchInvoiceSupplementService,
 )
+from fin_ops_platform.services.workbench_relation_receipt_pdf import WorkbenchReceiptPdfRenderer
+from fin_ops_platform.services.workbench_relation_receipt_service import (
+    WorkbenchRelationReceiptService,
+)
 from fin_ops_platform.services.workbench_oa_retention_date_parser import WorkbenchOaRetentionDateParser
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     SupportingDocumentUpload,
@@ -509,6 +516,7 @@ _REQUEST_AUDIT_EVIDENCE: ContextVar[dict[str, Any] | None] = ContextVar(
 
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
 
 @dataclass(slots=True)
 class Response:
@@ -1112,6 +1120,7 @@ class Application:
             invoice_expense_item_assignment_service_provider=(
                 self._workbench_invoice_expense_item_assignment_service
             ),
+            receipt_service_provider=self._workbench_relation_receipt_service,
         )
         self._turnover_ledger_api_routes = TurnoverLedgerApiRoutes(
             ledger_service=self._turnover_ledger_service,
@@ -1882,6 +1891,13 @@ class Application:
                 status=response.status_code,
             )
             return response
+        if method == "POST" and route_path == "/api/workbench/actions/print-receipt":
+            return self._handle_api_workbench_print_receipt(
+                body,
+                request_id=request_id or "no-request-id",
+                headers=headers,
+                access_session=access_session,
+            )
         if (
             method == "POST"
             and route_path == "/api/workbench/actions/assign-invoice-expense-items"
@@ -2208,6 +2224,7 @@ class Application:
                 "/api/workbench/settings/data-reset/jobs/{job_id}",
                 "/api/workbench/rows/{row_id}",
                 "/api/workbench/actions/confirm-link",
+                "/api/workbench/actions/print-receipt",
                 "/api/workbench/actions/assign-invoice-expense-items",
                 "/api/workbench/actions/cancel-link",
                 "/api/workbench/actions/confirm-personal-advance-repayment",
@@ -6476,6 +6493,7 @@ class Application:
                 invoice_expense_item_assignment_service_provider=(
                     self._workbench_invoice_expense_item_assignment_service
                 ),
+                receipt_service_provider=self._workbench_relation_receipt_service,
             )
         result = self._workbench_action_api_routes.withdraw_link(
             payload,
@@ -7594,6 +7612,62 @@ class Application:
         if unit_of_work is None:
             raise RuntimeError("Workbench invoice expense-item assignment requires PostgreSQL storage.")
         return WorkbenchInvoiceExpenseItemAssignmentService(unit_of_work=unit_of_work)
+
+    def _workbench_relation_receipt_service(self) -> WorkbenchRelationReceiptService:
+        state_store = self._state_store
+        connection = getattr(state_store, "_connection", None)
+        if state_store is None or connection is None:
+            raise RuntimeError("Workbench receipt service requires PostgreSQL storage.")
+        return WorkbenchRelationReceiptService(
+            repository=PostgresWorkbenchRelationReceiptRepository(connection),
+            file_store=state_store,
+            audit_repository=PostgresOperationsAuditRepository(connection),
+            renderer=WorkbenchReceiptPdfRenderer(),
+        )
+
+    def _handle_api_workbench_print_receipt(
+        self,
+        body: str | None,
+        *,
+        request_id: str,
+        headers: dict[str, str] | None,
+        access_session: OARequestSession | None,
+    ) -> Response:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        auth_context = self._workbench_write_auth_context(headers, session=access_session)
+        if isinstance(auth_context, Response):
+            return auth_context
+        actor_id, _tenant_id = auth_context
+        request_actor_id, actor_name, actor_account = _REQUEST_AUDIT_ACTOR.get()
+        if request_actor_id != actor_id or not actor_account:
+            return self._json_response(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "oa_identity_unavailable", "message": "当前 OA 账户身份信息不完整，无法打印收据。"},
+            )
+        status_code, result = self._workbench_action_api_routes.print_receipt(
+            payload,
+            actor_id=actor_id,
+            actor_account=actor_account,
+            actor_name=actor_name,
+            request_id=request_id,
+        )
+        if status_code != HTTPStatus.OK:
+            return self._json_response(status_code, result)
+        return Response(
+            status_code=int(HTTPStatus.OK),
+            body=result.content,
+            headers={
+                "Content-Type": "application/pdf",
+                "Content-Disposition": f'inline; filename="{quote(result.file_name)}"',
+                "Content-Length": str(len(result.content)),
+                "X-Receipt-ID": result.receipt_id,
+                "X-Receipt-Count": str(result.receipt_count),
+                "X-Receipt-Reused": "true" if result.reused else "false",
+                "X-Request-ID": request_id,
+            },
+        )
 
     def _handle_workbench_manual_invoice_supplement(
         self,

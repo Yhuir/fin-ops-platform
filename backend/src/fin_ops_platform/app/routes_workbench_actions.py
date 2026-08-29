@@ -15,6 +15,7 @@ from fin_ops_platform.services.workbench_idempotency import (
 from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
     WorkbenchInvoiceExpenseItemAssignmentError,
 )
+from fin_ops_platform.services.workbench_relation_receipt_service import WorkbenchReceiptError
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
 
 
@@ -27,12 +28,40 @@ class WorkbenchActionApiRoutes:
         write_facade_provider: Callable[[], Any],
         anomaly_review_service: WorkbenchAnomalyReviewService | None = None,
         invoice_expense_item_assignment_service_provider: Callable[[], Any] | None = None,
+        receipt_service_provider: Callable[[], Any] | None = None,
     ) -> None:
         self._write_facade_provider = write_facade_provider
         self._anomaly_review_service = anomaly_review_service
         self._invoice_expense_item_assignment_service_provider = (
             invoice_expense_item_assignment_service_provider
         )
+        self._receipt_service_provider = receipt_service_provider
+
+    def print_receipt(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+        actor_account: str,
+        actor_name: str,
+        request_id: str,
+    ) -> tuple[HTTPStatus, Any]:
+        if self._receipt_service_provider is None:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "workbench_receipt_service_unavailable",
+                "message": "收据服务暂时不可用。",
+            }
+        try:
+            result = self._receipt_service_provider().print_receipt(
+                case_id=str(payload.get("case_id") or ""),
+                actor_id=actor_id,
+                actor_account=actor_account,
+                actor_name=actor_name,
+                request_id=request_id,
+            )
+        except WorkbenchReceiptError as exc:
+            return HTTPStatus(exc.status_code), {"error": exc.code, "message": exc.message}
+        return HTTPStatus.OK, result
 
     def assign_invoice_expense_items(
         self,

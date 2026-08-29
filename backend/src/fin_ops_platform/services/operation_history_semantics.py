@@ -307,6 +307,13 @@ _EXACT_ROUTES = {
 
 
 _WORKBENCH_ACTIONS = {
+    "print-receipt": _semantic(
+        "workbench.receipt.print_request",
+        "打印收据",
+        "workbench_relation_receipt",
+        "关联台收据",
+        "为无 OA 的收入加销项发票关联关系生成并请求打印收据。",
+    ),
     "assign-invoice-expense-items": _semantic(
         "workbench.invoice_expense_items.assign",
         "归属发票 OA 明细",

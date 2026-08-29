@@ -1320,6 +1320,50 @@ class PostgresStateStore:
     def read_workbench_oa_supporting_document(self, storage_uri: str) -> bytes:
         return self._read_file(storage_uri)
 
+    def store_workbench_relation_receipt(
+        self,
+        *,
+        receipt_id: str,
+        file_name: str,
+        content: bytes,
+        content_type: str,
+    ) -> dict[str, Any]:
+        content_bytes = bytes(content or b"")
+        if self._object_storage_repository is not None:
+            storage_uri = self._store_object_file(
+                namespace="workbench_relation_receipts",
+                file_id=receipt_id,
+                file_name=file_name,
+                content=content_bytes,
+                content_type=content_type,
+            )
+            file_object_id = self._file_object_id_for_storage_uri(storage_uri)
+        else:
+            storage_uri = self._store_local_file(
+                "workbench_relation_receipts", receipt_id, file_name, content_bytes
+            )
+            file_object_id = self._save_file_object(
+                file_id=receipt_id,
+                file_name=file_name,
+                stored_file_path=storage_uri,
+                content=content_bytes,
+            )
+            self._connection.execute(
+                "update app.file_objects set content_type = %s, uploaded_at = now() where id = %s::uuid",
+                (content_type, file_object_id),
+            )
+        if not file_object_id:
+            raise RuntimeError("receipt file object was not registered")
+        return {
+            "file_object_id": file_object_id,
+            "storage_uri": storage_uri,
+            "sha256": hashlib.sha256(content_bytes).hexdigest(),
+            "size_bytes": len(content_bytes),
+        }
+
+    def read_workbench_relation_receipt(self, storage_uri: str) -> bytes:
+        return self._read_file(storage_uri)
+
     def delete_workbench_oa_supporting_document(self, storage_uri: str) -> None:
         if self._is_object_storage_ref(storage_uri):
             self._delete_object_file(storage_uri)

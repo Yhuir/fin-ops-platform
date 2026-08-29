@@ -1,6 +1,15 @@
 # 关联台测试与验证
 
-日期：2026-08-27
+日期：2026-08-29
+
+## 2026-08-29 无 OA 收入 + 销项发票收据打印
+
+- Business core：`tests/test_workbench_relation_receipt_eligibility.py` 保护 active paired relation 必须无 OA、至少一条且全部为收入流水、至少一张且全部为销项发票、金额为正、付款方/发票号完整并且唯一币种为 CNY；混合方向、进项发票、缺字段或非 CNY 均不得显示动作。`tests/test_workbench_relation_receipt_pdf.py` 保护付款方/日期/币种分组、收入金额口径、多页发票清单、中文大写金额和 A5 横向双联收据。
+- Service / Repository：`tests/test_workbench_relation_receipt_service.py` 与 `tests/test_workbench_relation_receipt_repository.py` 保护服务端重新读取并重验 active relation、内容指纹幂等复用、关系事实变化生成新快照、文件持久化、生成/打印请求审计，以及非法关系零写入。
+- API contract：action route 只接受 relation case id，返回 `application/pdf` 和稳定文件名；权限、not found、资格冲突和存储失败按明确错误映射，不返回 base64 或页面 read-model 字段。
+- Frontend interaction：`web/src/test/RelationGroupGrid.test.tsx` 与 `web/src/test/WorkbenchApi.test.ts` 保护按钮只出现在合格 paired 关系的 OA 栏、旧“待补 OA”不同时出现、PDF blob 映射正确；页面点击在异步请求前同步打开窗口，成功后调用原生打印，失败关闭窗口并反馈错误。
+- E2E：本地覆盖 canonical relation -> eligibility DTO -> receipt API -> PDF/file/audit 链路；发布后使用生产现有合格关系验证按钮、PDF 和打印调用，不创建或修改业务关系。
+- Existing regression：关联台三栏金额、选择、确认/撤回、异常、发票归属和统计不因派生收据改变；read model/cache/worker/background job 不适用，因为收据只读取当前 canonical relation 并同步生成或复用文件快照。
 
 ## 2026-08-28 关系异常唯一入口与确认备注
 

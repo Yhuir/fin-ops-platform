@@ -173,6 +173,8 @@ EXPECTED_MIGRATION_FILES = [
     "0159_oa_payment_status_runtime_grant.sql",
     "0160_remove_oa_payment_status_writeback_ownership.sql",
     "0161_converge_formal_bank_relation_requirements.sql",
+    "0162_cost_statistics_unit_manual_allocations.sql",
+    "0163_workbench_relation_receipts.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (
@@ -205,6 +207,7 @@ TEST_TABLES = (
     "app.matching_results",
     "app.workbench_pair_relations",
     "app.cost_statistics_manual_allocations",
+    "app.workbench_relation_receipts",
     "app.workbench_pair_relation_history",
     "app.workbench_row_overrides",
     "app.workbench_exception_cases",

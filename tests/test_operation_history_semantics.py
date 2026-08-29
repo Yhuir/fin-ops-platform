@@ -12,6 +12,7 @@ class OperationHistorySemanticsTests(unittest.TestCase):
     def test_known_mutations_have_stable_user_facing_semantics(self) -> None:
         cases = (
             ("POST", "/api/workbench/actions/confirm-link", "确认关联", "关联关系"),
+            ("POST", "/api/workbench/actions/print-receipt", "打印收据", "关联台收据"),
             ("PUT", "/api/bank-details/auto-tag-rules", "保存自动标签规则", "流水标签规则"),
             ("POST", "/imports/invoices/manual/preview", "预览发票录入", "发票录入"),
             ("POST", "/imports/bank-transactions/manual/preview", "预览流水录入", "流水录入"),

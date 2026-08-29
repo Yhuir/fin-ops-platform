@@ -1,6 +1,6 @@
 # 页面架构与页面间影响关系
 
-日期：2026-08-15
+日期：2026-08-29
 
 ## 代码事实源
 
@@ -15,7 +15,7 @@
 
 | 页面域 | 主要 canonical 来源 | 后台 owner |
 | --- | --- | --- |
-| 关联台/批量账务 | OA、银行、发票、ETC、active pair relations | Workbench matching 只负责领域匹配 |
+| 关联台/批量账务 | OA、银行、发票、ETC、active pair relations；合格的无 OA 收入+销项关系可同步派生 relation-scoped 收据 PDF | Workbench matching 只负责领域匹配；收据无 read model/worker |
 | 银行明细/余额/流水规则 | 银行流水、分类/标签、账户映射、active relations | settings-maintenance 只负责要求重算 |
 | 待找发票/进项使用/销项收款 | 银行流水、发票 lifecycle、规则、active relations | import 只负责导入 |
 | OA 待付款 | OA canonical snapshot、银行/发票、active relations | OA sync |

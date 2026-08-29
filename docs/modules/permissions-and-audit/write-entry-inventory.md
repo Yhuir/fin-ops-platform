@@ -83,6 +83,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `提交审批` | ETC approval submit |
 | `提交批次` | no-OA/batch submit |
 | `人工提交` | ETC manual submit |
+| `打印收据` | Workbench 无 OA 收入＋销项发票配对关系生成并请求打印收据 |
 
 ## Source write-control keyword sentinels
 
@@ -103,6 +104,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `取消现金处理` | `web/src/components/workbench/RowActions.tsx` | 关联台现金特殊处理回滚行级菜单。 |
 | `确认买票` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | 关联台买票成本确认弹窗。 |
 | `留在未配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 关联台异常决定保持未配对。 |
+| `打印收据` | `web/src/components/workbench/RelationGroupGrid.tsx` | 关联台无 OA 收入＋销项发票配对关系生成并请求打印收据。 |
 | `接受异常并进入已配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 接受服务端当前异常证据并进入已配对。 |
 | `撤回到未配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 已配对异常撤回未配对。 |
 | `留在未配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 关联台异常人工保留。 |
@@ -138,7 +140,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `pendingInvoices/api.ts` | `pending-invoices` | 待找发票规则、选择发票和收入状态写入口。 |
 | `tax/api.ts` | `tax-offset` | 税金计划保存和已认证发票导入。 |
 | `turnoverLedger/api.ts` | `turnover-ledger` | 外部往来标签、闭环、撤回和 extra 写入口。 |
-| `workbench/api.ts` | `reconciliation-workbench`, `settings` | 关联台 relation/异常/发票 OA 明细归属 command、settings 保存和访问控制写入口。 |
+| `workbench/api.ts` | `reconciliation-workbench`, `settings` | 关联台 relation/异常/发票 OA 明细归属 command、关系级收据生成与打印请求审计、settings 保存和访问控制写入口。 |
 
 后端兼容 `POST /api/workbench/exception/apply` 仍属于 `reconciliation-workbench` mutation 边界，用于既有自动异常/行级异常流程，不代表恢复已删除的未配对工具栏人工“异常处理”入口。其 actor 只来自服务端认证 session，request body 的 `actor` / `confirmed_by` 不属于身份或审计事实源。
 

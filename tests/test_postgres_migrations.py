@@ -174,6 +174,7 @@ EXPECTED_MIGRATIONS = [
     "0160_remove_oa_payment_status_writeback_ownership.sql",
     "0161_converge_formal_bank_relation_requirements.sql",
     "0162_cost_statistics_unit_manual_allocations.sql",
+    "0163_workbench_relation_receipts.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -206,6 +207,7 @@ EXPECTED_TABLES = [
     "app.matching_results",
     "app.workbench_pair_relations",
     "app.cost_statistics_manual_allocations",
+    "app.workbench_relation_receipts",
     "app.workbench_pair_relation_history",
     "app.workbench_row_overrides",
     "app.workbench_exception_cases",
@@ -336,7 +338,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 163)],
+            [f"{number:04d}" for number in range(1, 164)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -482,6 +484,47 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("non_cost_amount <= net_outflow_total", normalized_sql)
         self.assertNotIn("delete from", normalized_sql)
         self.assertNotIn("drop table", normalized_sql)
+
+    def test_workbench_relation_receipts_are_append_only_and_owned_by_file_objects(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0163_workbench_relation_receipts.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("create table if not exists app.workbench_relation_receipts", normalized_sql)
+        self.assertIn(
+            "relation_id uuid not null references app.workbench_pair_relations(id)",
+            normalized_sql,
+        )
+        self.assertIn(
+            "file_object_id uuid not null references app.file_objects(id)",
+            normalized_sql,
+        )
+        self.assertIn("source_fingerprint ~ '^[0-9a-f]{64}$'", normalized_sql)
+        self.assertIn("unique (case_id, source_fingerprint)", normalized_sql)
+        self.assertIn("receipt_count > 0", normalized_sql)
+        self.assertIn("total_amount >= 0", normalized_sql)
+        self.assertIn("raw_payload jsonb not null default '{}'::jsonb", normalized_sql)
+        self.assertIn(
+            "grant select, insert on app.workbench_relation_receipts to fin_ops_api, app_runtime",
+            normalized_sql,
+        )
+        self.assertIn(
+            "grant select on app.workbench_relation_receipts to fin_ops_readonly",
+            normalized_sql,
+        )
+        self.assertIn(
+            "grant select, insert, update, delete on app.workbench_relation_receipts to fin_ops_migrator",
+            normalized_sql,
+        )
+        self.assertNotIn(
+            "grant delete on app.workbench_relation_receipts to fin_ops_api",
+            normalized_sql,
+        )
+        self.assertNotIn(
+            "grant delete on app.workbench_relation_receipts to app_runtime",
+            normalized_sql,
+        )
 
     def test_oa_payment_status_auto_reconcile_backfill_is_bounded_and_event_only(self) -> None:
         sql = (

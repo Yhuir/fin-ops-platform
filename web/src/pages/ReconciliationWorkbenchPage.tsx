@@ -33,6 +33,7 @@ import {
   fetchWorkbenchSettings,
   previewWorkbenchConfirmLink,
   previewWorkbenchWithdrawLink,
+  printWorkbenchReceipt,
   resolveWorkbenchActionErrorMessage,
   saveWorkbenchSettings,
   reviewWorkbenchAnomaly,
@@ -364,6 +365,7 @@ export default function ReconciliationWorkbenchPage() {
   const loadMoreAbortControllerRef = useRef<Record<"paired" | "unpaired", AbortController | null>>({ paired: null, unpaired: null });
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
+  const [receiptPrintPendingCaseId, setReceiptPrintPendingCaseId] = useState<string | null>(null);
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [relationPreviewRequestKind, setRelationPreviewRequestKind] = useState<RelationPreviewRequestKind | null>(null);
   const relationPreviewRequestKindRef = useRef<RelationPreviewRequestKind | null>(null);
@@ -1806,6 +1808,51 @@ export default function ReconciliationWorkbenchPage() {
     return true;
   }, [openActionResultDialog, workbenchWriteGate]);
 
+  const handlePrintReceipt = useCallback(async (group: WorkbenchRelationGroup) => {
+    const receiptAction = group.receiptAction;
+    if (!receiptAction?.eligible || receiptPrintPendingCaseId !== null) {
+      return;
+    }
+    if (!ensureCanWriteWorkbench()) {
+      return;
+    }
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      openActionResultDialog("浏览器阻止了打印窗口，请允许此站点打开弹窗后重试。", "无法打开打印窗口");
+      return;
+    }
+    printWindow.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>正在生成收据</title><style>html,body{height:100%;margin:0;font-family:system-ui,sans-serif;color:#334155}body{display:grid;place-items:center;background:#f8fafc}</style></head><body>正在生成收据…</body></html>`);
+    printWindow.document.close();
+    setReceiptPrintPendingCaseId(receiptAction.caseId);
+    try {
+      const pdf = await printWorkbenchReceipt(receiptAction.caseId);
+      const pdfUrl = URL.createObjectURL(pdf);
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>打印收据</title><style>html,body,iframe{width:100%;height:100%;margin:0;border:0;overflow:hidden}</style></head><body><iframe id="receipt-pdf" title="收据 PDF"></iframe></body></html>`);
+      printWindow.document.close();
+      const frame = printWindow.document.getElementById("receipt-pdf") as HTMLIFrameElement | null;
+      if (!frame) {
+        throw new Error("打印窗口初始化失败。");
+      }
+      frame.addEventListener("load", () => {
+        window.setTimeout(() => {
+          frame.contentWindow?.focus();
+          frame.contentWindow?.print();
+        }, 100);
+      }, { once: true });
+      frame.src = pdfUrl;
+      printWindow.addEventListener("beforeunload", () => URL.revokeObjectURL(pdfUrl), { once: true });
+    } catch (error) {
+      printWindow.close();
+      openActionResultDialog(
+        resolveWorkbenchActionErrorMessage(error, "收据生成失败，请稍后重试。"),
+        "收据打印失败",
+      );
+    } finally {
+      setReceiptPrintPendingCaseId(null);
+    }
+  }, [ensureCanWriteWorkbench, openActionResultDialog, receiptPrintPendingCaseId]);
+
   const executeWorkbenchActionAndReread = useCallback(async ({
     loadingMessage,
     action,
@@ -2428,6 +2475,8 @@ export default function ReconciliationWorkbenchPage() {
       primarySelectionActionPendingLabel="正在准备撤回预览"
       selectionActionNotice={pairedSelectionActionNotice}
       onRowAction={handleRowAction}
+      onPrintReceipt={handlePrintReceipt}
+      receiptPrintPendingCaseId={receiptPrintPendingCaseId}
       onSelectRow={handleSelectRow}
       displayState={pairedDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
