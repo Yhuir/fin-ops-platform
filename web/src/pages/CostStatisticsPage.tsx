@@ -1623,9 +1623,9 @@ export default function CostStatisticsPage() {
           >
             <div className="cost-view-switcher" role="group" aria-label="成本统计视图切换">
               <div className="cost-view-switcher-group">
-                <span className="cost-view-switcher-label">配对归集</span>
+                <span className="cost-view-switcher-label">OA 配对</span>
                 <ToggleButtonGroup
-                  aria-label="配对归集视图"
+                  aria-label="OA 配对统计视图"
                   className="cost-view-tabs"
                   onSelectionChange={(keys) => {
                     const [key] = Array.from(keys);
@@ -1644,9 +1644,9 @@ export default function CostStatisticsPage() {
               </div>
               <span aria-hidden="true" className="cost-view-switcher-divider" />
               <div className="cost-view-switcher-group">
-                <span className="cost-view-switcher-label">流水分析</span>
+                <span className="cost-view-switcher-label">银行流水</span>
                 <ToggleButtonGroup
-                  aria-label="流水分析视图"
+                  aria-label="银行流水统计视图"
                   className="cost-view-tabs"
                   onSelectionChange={(keys) => {
                     const [key] = Array.from(keys);

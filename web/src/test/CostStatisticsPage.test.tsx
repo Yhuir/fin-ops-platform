@@ -82,9 +82,9 @@ function expectProjectCostShell() {
   expect(viewSwitcher).toHaveClass("cost-view-switcher");
   expect(viewSwitcher).not.toHaveClass("MuiTabs-root");
   expect(heading.closest(".page-header")).toContainElement(viewSwitcher);
-  const pairedViews = within(viewSwitcher).getByRole("radiogroup", { name: "配对归集视图" });
+  const pairedViews = within(viewSwitcher).getByRole("radiogroup", { name: "OA 配对统计视图" });
   expect(within(pairedViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按项目", "按银行", "按费用类型"]);
-  const bankViews = within(viewSwitcher).getByRole("radiogroup", { name: "流水分析视图" });
+  const bankViews = within(viewSwitcher).getByRole("radiogroup", { name: "银行流水统计视图" });
   expect(within(bankViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按标签", "按时间"]);
 }
 
@@ -197,7 +197,14 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-finance-table \.finance-table__row\s*{[^}]*min-height:\s*52px/s);
     expect(css).toMatch(/\.cost-view-tabs\s*{[^}]*border:\s*1px solid var\(--fp-border-subtle\)[^}]*background:\s*var\(--fp-surface\)/s);
     expect(css).toMatch(/\.cost-view-switcher\s*{[^}]*display:\s*inline-grid[^}]*grid-template-columns:\s*max-content 1px max-content/s);
+    expect(css).toMatch(/\.cost-view-switcher-group\s*{[^}]*align-items:\s*stretch/s);
+    expect(css).toMatch(/\.cost-view-switcher-label\s*{[^}]*width:\s*100%[^}]*text-align:\s*center/s);
     expect(css).toMatch(/\.cost-view-switcher-divider\s*{[^}]*width:\s*1px[^}]*background:\s*var\(--fp-border\)/s);
+    expect(css).toMatch(/\.cost-page-header\s*{[^}]*align-items:\s*flex-start/s);
+    expect(css).toMatch(/\.cost-page-header-main\s*{[^}]*align-items:\s*flex-start/s);
+    expect(css).not.toMatch(/\.cost-page-header\s*{[^}]*(?:transform:|margin-(?:top|right|bottom|left):\s*-)/s);
+    expect(css).not.toMatch(/\.cost-page-header-main\s*{[^}]*(?:transform:|margin-(?:top|right|bottom|left):\s*-)/s);
+    expect(css).not.toMatch(/\.cost-view-switcher-label\s*{[^}]*(?:position:\s*absolute|transform:|margin-(?:top|right|bottom|left):\s*-)/s);
     expect(css).not.toContain(".cost-manual-allocation-footer");
     expect(css).toMatch(/\.cost-view-tab\s*{[^}]*transition:[^}]*var\(--motion-fast\)/s);
     expect(css).toMatch(/\.business-period-picker\s*{[^}]*--business-period-control-height:\s*40px/s);
@@ -302,8 +309,10 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expectProjectCostShell();
-    expect(screen.getByText("配对归集")).toBeInTheDocument();
-    expect(screen.getByText("流水分析")).toBeInTheDocument();
+    expect(screen.getByText("OA 配对")).toBeInTheDocument();
+    expect(screen.getByText("银行流水")).toBeInTheDocument();
+    expect(screen.queryByText("配对归集")).not.toBeInTheDocument();
+    expect(screen.queryByText("流水分析")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "按时间" })).toHaveAttribute("aria-checked", "true");
     expect(screen.queryByText(/以已配对的支出流水为基准/)).not.toBeInTheDocument();
     expect(screen.queryByText("费用类型数")).not.toBeInTheDocument();
