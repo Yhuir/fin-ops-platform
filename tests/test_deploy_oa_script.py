@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import contextlib
-from datetime import UTC, datetime
-import io
 import importlib.util
+import io
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
@@ -14,8 +12,9 @@ import tarfile
 import tempfile
 import time
 import unittest
+from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import patch
-
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "deploy_oa.py"
 ENSURE_WORKERS_SCRIPT_PATH = (
@@ -1030,7 +1029,7 @@ class DeployOAScriptTest(unittest.TestCase):
         )
         self.assertIn("production remains in maintenance for forward repair", rollback)
         self.assertIn(
-            'forward_only_versions = {"0149", "0160", "0161", "0162", "0163"}',
+            'forward_only_versions = {"0149", "0160", "0161", "0162", "0163", "0164"}',
             script,
         )
         for operation in (

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
-import unicodedata
 from zoneinfo import ZoneInfo
 
 from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
+)
+from fin_ops_platform.services.import_audit_contracts import (
+    FILE_IMPORT_AUDIT_CONTRACT_REVISION,
+    MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION,
+    MANUAL_BANK_ENTRY_TEMPLATE_KIND,
 )
 from fin_ops_platform.services.import_preview_audit import (
     BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON,
@@ -23,7 +28,6 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     evaluate_audit_issues,
     use_audit_snapshot,
 )
-
 
 ACTIVE_JOB_STATUSES = frozenset({"pending", "processing"})
 ACTIVE_OUTBOX_STATUSES = frozenset({"pending", "processing", "failed", "dead_lettered"})
@@ -39,7 +43,13 @@ KNOWN_BATCH_STATUSES = frozenset(
 )
 KNOWN_DECISIONS = frozenset({"created", "status_updated", "duplicate_skipped", "suspected_duplicate", "error"})
 TERMINAL_BATCH_STATUSES = frozenset({"completed", "completed_with_errors"})
-IMPORT_AUDIT_CONTRACT_REVISION = "import-page-audit.v1"
+IMPORT_AUDIT_CONTRACT_REVISION = FILE_IMPORT_AUDIT_CONTRACT_REVISION
+BANK_IMPORT_AUDIT_CONTRACT_REVISIONS = frozenset(
+    {
+        FILE_IMPORT_AUDIT_CONTRACT_REVISION,
+        MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION,
+    }
+)
 BANK_IMPORT_LOCAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
@@ -258,7 +268,7 @@ def formal_bank_import_files(
         row
         for row in bank_import_files(files, batches=batches)
         if _text(row.get("audit_contract_revision"))
-        == IMPORT_AUDIT_CONTRACT_REVISION
+        in BANK_IMPORT_AUDIT_CONTRACT_REVISIONS
     ]
 
 
@@ -295,11 +305,45 @@ def _file_issues(
         if not session_id:
             issues.append(_issue("bank_import_file_session_missing", file_id, None))
         if _text(row.get("status")) != "deleted":
-            if not _text(row.get("file_object_id")):
+            is_manual_entry = (
+                _text(row.get("audit_contract_revision"))
+                == MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION
+            )
+            if is_manual_entry:
+                if _text(row.get("template_kind")) != MANUAL_BANK_ENTRY_TEMPLATE_KIND:
+                    issues.append(
+                        _issue(
+                            "bank_manual_entry_contract_template_invalid",
+                            file_id,
+                            {"template_kind": row.get("template_kind")},
+                        )
+                    )
+                if (
+                    _text(row.get("file_object_id"))
+                    or _text(row.get("storage_uri"))
+                    or _text(row.get("sha256"))
+                    or _text(row.get("stored_file_path"))
+                    or row.get("size_bytes") is not None
+                ):
+                    issues.append(
+                        _issue(
+                            "bank_manual_entry_file_provenance_unexpected",
+                            file_id,
+                            None,
+                        )
+                    )
+            elif not _text(row.get("file_object_id")):
                 issues.append(_issue("bank_import_file_object_missing", file_id, None))
-            if not _text(row.get("storage_uri")) or not _text(row.get("sha256")) or row.get("size_bytes") is None:
+            if not is_manual_entry and (
+                not _text(row.get("storage_uri"))
+                or not _text(row.get("sha256"))
+                or row.get("size_bytes") is None
+            ):
                 issues.append(_issue("bank_import_file_hash_registration_incomplete", file_id, None))
-            elif len(_text(row.get("sha256"))) != 64 or _int(row.get("size_bytes"), -1) < 0:
+            elif not is_manual_entry and (
+                len(_text(row.get("sha256"))) != 64
+                or _int(row.get("size_bytes"), -1) < 0
+            ):
                 issues.append(
                     _issue(
                         "bank_import_file_hash_registration_invalid",

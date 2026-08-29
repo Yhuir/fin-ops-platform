@@ -175,6 +175,7 @@ EXPECTED_MIGRATIONS = [
     "0161_converge_formal_bank_relation_requirements.sql",
     "0162_cost_statistics_unit_manual_allocations.sql",
     "0163_workbench_relation_receipts.sql",
+    "0164_manual_bank_entry_audit_contract.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -338,7 +339,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 164)],
+            [f"{number:04d}" for number in range(1, 165)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -525,6 +526,25 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
             "grant delete on app.workbench_relation_receipts to app_runtime",
             normalized_sql,
         )
+
+    def test_manual_bank_entry_audit_contract_is_precise_and_non_destructive(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0164_manual_bank_entry_audit_contract.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("update app.import_files", normalized_sql)
+        self.assertIn("set audit_contract_revision = 'manual-bank-entry-audit.v1'", normalized_sql)
+        self.assertIn("template_kind = 'manual_bank_transaction_entry'", normalized_sql)
+        self.assertIn("audit_contract_revision = 'import-page-audit.v1'", normalized_sql)
+        self.assertIn("file_object_id is null", normalized_sql)
+        self.assertIn("coalesce(btrim(stored_file_path), '') = ''", normalized_sql)
+        self.assertIn(
+            "raw_payload #>> '{normalized_payload,template_code}'",
+            normalized_sql,
+        )
+        self.assertNotIn("delete from", normalized_sql)
+        self.assertNotIn("drop table", normalized_sql)
 
     def test_oa_payment_status_auto_reconcile_backfill_is_bounded_and_event_only(self) -> None:
         sql = (

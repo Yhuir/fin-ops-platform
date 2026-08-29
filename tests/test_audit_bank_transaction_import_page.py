@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from copy import deepcopy
 import json
 import unittest
+from contextlib import contextmanager
+from copy import deepcopy
 
 from fin_ops_platform.services.import_preview_audit import (
     BANK_TRANSACTION_LEGACY_CONFIRM_DUPLICATE_REASON,
 )
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories import bank_transaction_import_page_audit
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 
 
@@ -413,6 +413,65 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
         report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
 
         self.assertIn("bank_import_file_hash_registration_incomplete", report["summary"]["issue_sample_counts_by_code"])
+
+    def test_manual_bank_entry_does_not_require_uploaded_file_provenance(self) -> None:
+        connection = FakeConnection()
+        file_row = connection.files[0]
+        file_row.update(
+            {
+                "audit_contract_revision": (
+                    bank_transaction_import_page_audit.MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION
+                ),
+                "template_kind": bank_transaction_import_page_audit.MANUAL_BANK_ENTRY_TEMPLATE_KIND,
+                "original_filename": "新流水1",
+                "stored_file_path": None,
+                "file_object_id": None,
+                "storage_uri": None,
+                "sha256": None,
+                "size_bytes": None,
+            }
+        )
+        file_row["raw_payload"]["normalized_payload"].update(
+            {
+                "file_name": "新流水1",
+                "stored_file_path": None,
+                "template_code": bank_transaction_import_page_audit.MANUAL_BANK_ENTRY_TEMPLATE_KIND,
+            }
+        )
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertEqual(
+            report["audit_status"],
+            {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        )
+        self.assertNotIn("bank_import_file_object_missing", report["summary"]["issue_sample_counts_by_code"])
+        self.assertNotIn(
+            "bank_import_file_hash_registration_incomplete",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+        self.assertNotIn(
+            "bank_manual_entry_file_provenance_unexpected",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
+    def test_manual_bank_entry_rejects_uploaded_file_provenance(self) -> None:
+        connection = FakeConnection()
+        file_row = connection.files[0]
+        file_row["audit_contract_revision"] = (
+            bank_transaction_import_page_audit.MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION
+        )
+        file_row["template_kind"] = bank_transaction_import_page_audit.MANUAL_BANK_ENTRY_TEMPLATE_KIND
+        file_row["raw_payload"]["normalized_payload"]["template_code"] = (
+            bank_transaction_import_page_audit.MANUAL_BANK_ENTRY_TEMPLATE_KIND
+        )
+
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+
+        self.assertIn(
+            "bank_manual_entry_file_provenance_unexpected",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
 
     def test_transaction_field_drift_is_blocking(self) -> None:
         connection = FakeConnection()

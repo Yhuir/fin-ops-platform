@@ -13,6 +13,11 @@ from fin_ops_platform.domain.enums import (
     TransactionDirection,
 )
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatchRowResult, Invoice
+from fin_ops_platform.services.import_audit_contracts import (
+    FILE_IMPORT_AUDIT_CONTRACT_REVISION,
+    MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION,
+    MANUAL_BANK_ENTRY_TEMPLATE_KIND,
+)
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_expense_item_links import InvoiceSourceLinksCasConflict
@@ -1361,9 +1366,34 @@ def test_save_file_imports_persists_session_owner_for_recovery() -> None:
 
     params = connection.executed_params[-1]
     payload = getattr(params[-1], "obj", params[-1])
-    assert params[-2] == "YNSYLP005"
+    assert params[-3] == "YNSYLP005"
+    assert params[-2] == FILE_IMPORT_AUDIT_CONTRACT_REVISION
     assert payload["normalized_payload"]["imported_by"] == "YNSYLP005"
     assert payload["normalized_payload"]["created_at"] == "2026-08-11T05:00:00+00:00"
+
+
+def test_save_manual_bank_entry_uses_non_file_audit_contract() -> None:
+    connection = NotificationConnection()
+    repository = PostgresCoreRepository(connection)
+
+    repository.save_file_imports({
+        "sessions": {
+            "manual_session": {
+                "id": "manual_session",
+                "imported_by": "YNSYLP005",
+                "status": "preview_ready",
+                "files": [{
+                    "id": "manual_file",
+                    "file_name": "新流水1",
+                    "template_code": MANUAL_BANK_ENTRY_TEMPLATE_KIND,
+                    "status": "reverted",
+                }],
+            }
+        }
+    })
+
+    params = connection.executed_params[-1]
+    assert params[-2] == MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION
 
 
 def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:

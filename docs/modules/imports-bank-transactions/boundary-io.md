@@ -18,7 +18,7 @@
 - 账户选择冲突必须在 confirm 前后端双重阻断；识别结果只用于校验，不能让误选 mapping 覆盖文件中的真实完整账号。
 
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
-- 银行流水手工录入的表单归一与预览：只接受设置中存在的账户 mapping，校验完整本方账号尾号、秒级时间和 canonical 必填字段，再进入同一 file/session 导入链。手工输入不接收或生成银行流水标识；使用正式 identity service 的弱指纹执行保守判重。
+- 银行流水手工录入的表单归一与预览：只接受设置中存在的账户 mapping，校验完整本方账号尾号、秒级时间和 canonical 必填字段，再进入同一 file/session 导入链。手工输入不接收或生成银行流水标识；使用正式 identity service 的弱指纹执行保守判重。手工录入的 synthetic file 必须显式登记 `manual-bank-entry-audit.v1`，且不得伪造 file object、storage URI、SHA-256 或文件大小；真实上传文件继续登记 `import-page-audit.v1` 并严格证明完整文件 provenance。
 - 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
 - 记录导入预览审计。
 - 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只允许在同一事务内将未确认 preview session/file/batch 终结为 `reverted`。
@@ -175,5 +175,5 @@ worker 更新导入 background job 的 running/progress/terminal 状态时，只
 ## Audit v19 provenance 版本边界（2026-07-12）
 
 - migration 0101 为新 `app.import_files` 设置 `audit_contract_revision=import-page-audit.v1` 默认值，但不回填历史行。
-- 当前 revision 的新导入必须严格证明 file object/hash/session/batch/row/canonical transaction 全链路与双向 expected-set；任何缺失均阻断 Audit。
+- 当前真实文件 revision 的新导入必须严格证明 file object/hash/session/batch/row/canonical transaction 全链路与双向 expected-set；任何缺失均阻断 Audit。手工流水 revision 必须证明 template/session/payload 合同一致且文件 provenance 全部为空；混入任何文件对象字段同样阻断 Audit。
 - revision 为 NULL 的 pre-contract 历史只输出 `legacy_provenance_unproven` warning；不得补造文件对象、hash 或 session。历史 canonical 银行流水仍由银行明细及下游页面 Audit 证明。

@@ -17,6 +17,11 @@ from fin_ops_platform.domain.enums import (
     TransactionStatus,
 )
 from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatch, ImportedBatchRowResult, Invoice
+from fin_ops_platform.services.import_audit_contracts import (
+    FILE_IMPORT_AUDIT_CONTRACT_REVISION,
+    MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION,
+    MANUAL_BANK_ENTRY_TEMPLATE_KIND,
+)
 from fin_ops_platform.services.import_file_service import (
     FileImportPreviewItem,
     FileImportSession,
@@ -1608,13 +1613,19 @@ class PostgresCoreRepository:
                 file_id = self._text(raw_file.get("id"))
                 if not file_id:
                     continue
+                template_kind = self._text(raw_file.get("template_code"))
+                audit_contract_revision = (
+                    MANUAL_BANK_ENTRY_AUDIT_CONTRACT_REVISION
+                    if template_kind == MANUAL_BANK_ENTRY_TEMPLATE_KIND
+                    else FILE_IMPORT_AUDIT_CONTRACT_REVISION
+                )
                 connection.execute(
                     """
                     insert into app.import_files(
                         legacy_mongo_id, session_id, stored_file_path, original_filename,
-                        template_kind, status, uploaded_by, raw_payload
+                        template_kind, status, uploaded_by, audit_contract_revision, raw_payload
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (legacy_mongo_id) do update set
                         session_id = excluded.session_id,
                         stored_file_path = excluded.stored_file_path,
@@ -1622,6 +1633,7 @@ class PostgresCoreRepository:
                         template_kind = excluded.template_kind,
                         status = excluded.status,
                         uploaded_by = excluded.uploaded_by,
+                        audit_contract_revision = excluded.audit_contract_revision,
                         raw_payload = excluded.raw_payload
                     """,
                     (
@@ -1629,9 +1641,10 @@ class PostgresCoreRepository:
                         self._text(session_payload.get("id") or session_id),
                         self._text(raw_file.get("stored_file_path")),
                         self._text(raw_file.get("file_name")) or file_id,
-                        self._text(raw_file.get("template_code")),
+                        template_kind,
                         self._text(raw_file.get("status")) or "stored",
                         self._text(session_payload.get("imported_by")),
+                        audit_contract_revision,
                         _jsonb(
                             {
                                 "normalized_payload": {
