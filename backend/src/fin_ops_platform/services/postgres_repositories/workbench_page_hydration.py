@@ -627,6 +627,8 @@ class PostgresWorkbenchPageHydrationRepository:
                         'status', 'unpaired',
                         'trade_time', coalesce(bank.trade_time, bank.txn_date::timestamptz)::text,
                         'txn_direction', bank.txn_direction,
+                        'amount', bank.amount::text,
+                        'currency', coalesce(nullif(bank.currency, ''), 'CNY'),
                         'direction', case
                             when lower(coalesce(bank.txn_direction, '')) in
                                  ('out', 'outflow', 'debit', 'expense', '支出')
@@ -736,6 +738,7 @@ class PostgresWorkbenchPageHydrationRepository:
                         'buyer_name', invoice.buyer_name,
                         'buyer_tax_no', invoice.buyer_tax_no,
                         'amount', invoice.amount::text,
+                        'currency', coalesce(nullif(invoice.currency, ''), 'CNY'),
                         'tax_rate', invoice.tax_rate,
                         'tax_amount', invoice.tax_amount,
                         'total_with_tax', coalesce(invoice.total_with_tax, invoice.amount)::text,

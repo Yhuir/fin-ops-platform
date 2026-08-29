@@ -14,13 +14,6 @@ def normalize_receipt_currency(value: Any) -> str:
     return "CNY" if normalized in _CNY_ALIASES else normalized
 
 
-def _detail_value(row: dict[str, Any], key: str) -> Any:
-    detail_fields = row.get("detail_fields")
-    if not isinstance(detail_fields, dict):
-        return None
-    return detail_fields.get(key)
-
-
 def workbench_relation_receipt_action(
     rows_by_type: dict[str, list[dict[str, Any]]],
     *,
@@ -34,10 +27,10 @@ def workbench_relation_receipt_action(
     invoice_rows = rows_by_type.get("invoice", [])
     if zone != "paired" or oa_rows or not bank_rows or not invoice_rows:
         return None
-    if any(str(_detail_value(row, "txn_direction") or "").strip().lower() != "inflow" for row in bank_rows):
+    if any(str(row.get("txn_direction") or "").strip().lower() != "inflow" for row in bank_rows):
         return None
     try:
-        if any(Decimal(str(_detail_value(row, "amount"))) <= Decimal("0") for row in bank_rows):
+        if any(Decimal(str(row.get("amount"))) <= Decimal("0") for row in bank_rows):
             return None
     except (InvalidOperation, TypeError, ValueError):
         return None
@@ -55,7 +48,7 @@ def workbench_relation_receipt_action(
     ):
         return None
     currencies = {
-        normalize_receipt_currency(_detail_value(row, "currency"))
+        normalize_receipt_currency(row.get("currency"))
         for row in [*bank_rows, *invoice_rows]
     }
     if currencies != {"CNY"}:

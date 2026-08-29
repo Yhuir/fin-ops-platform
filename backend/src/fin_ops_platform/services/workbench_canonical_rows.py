@@ -826,7 +826,7 @@ class WorkbenchCanonicalRowsBuilder:
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, account_no, account_name,
                    txn_direction, counterparty_name_raw, amount, txn_date, trade_time,
-                   summary, remark, project_id, raw_payload
+                   currency, summary, remark, project_id, raw_payload
             from app.bank_transactions
             where txn_month = %s::date
               and status <> 'deleted'
@@ -848,7 +848,7 @@ class WorkbenchCanonicalRowsBuilder:
             """
             select coalesce(legacy_mongo_id, id::text) as row_id, account_no, account_name,
                    txn_direction, counterparty_name_raw, amount, signed_amount, txn_date, trade_time,
-                   pay_receive_time, summary, remark, project_id, raw_payload
+                   pay_receive_time, currency, summary, remark, project_id, raw_payload
             from app.bank_transactions
             where coalesce(legacy_mongo_id, id::text) = any(%s)
               and status <> 'deleted'
@@ -878,6 +878,9 @@ class WorkbenchCanonicalRowsBuilder:
             "source_kind": "bank_transaction",
             "status": "unpaired",
             "case_id": None,
+            "txn_direction": direction,
+            "amount": str(amount or ""),
+            "currency": row.get("currency") or "CNY",
             "trade_time": _date_text(row.get("trade_time") or row.get("txn_date")),
             "account_no": account_no,
             "account_name": account_name,
@@ -910,7 +913,7 @@ class WorkbenchCanonicalRowsBuilder:
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
                    buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
-                   workbench_visibility, tags, source_links, raw_payload
+                   currency, workbench_visibility, tags, source_links, raw_payload
             from app.invoices invoices
             where invoices.invoice_month = %s::date
               and invoices.status <> 'deleted'
@@ -937,7 +940,7 @@ class WorkbenchCanonicalRowsBuilder:
             select coalesce(legacy_mongo_id, id::text) as row_id, invoice_type, invoice_no, invoice_code,
                    digital_invoice_no, invoice_date, counterparty_name, seller_name, seller_tax_no,
                    buyer_name, buyer_tax_no, amount, tax_rate, tax_amount, total_with_tax, status,
-                   workbench_visibility, tags, source_links, raw_payload
+                   currency, workbench_visibility, tags, source_links, raw_payload
             from app.invoices invoices
             where coalesce(invoices.legacy_mongo_id, invoices.id::text) = any(%s)
               and invoices.status <> 'deleted'
@@ -1042,6 +1045,7 @@ class WorkbenchCanonicalRowsBuilder:
             "buyer_name": row.get("buyer_name"),
             "buyer_tax_no": row.get("buyer_tax_no"),
             "amount": str(row.get("amount") or ""),
+            "currency": row.get("currency") or "CNY",
             "tax_rate": tax_rate,
             "tax_amount": tax_amount,
             "total_with_tax": str(row.get("total_with_tax") or row.get("amount") or ""),

@@ -1015,6 +1015,10 @@ def test_compact_hydration_exposes_the_same_external_oa_identity_aliases() -> No
     assert "from app.oa_source_aliases alias_row" in connection.sql
     assert "oa.normalized_payload->>'expense_type'" in connection.sql
     assert "admission.source_payload->>'expense_type'" in connection.sql
+    assert "'txn_direction', bank.txn_direction" in connection.sql
+    assert "'amount', bank.amount::text" in connection.sql
+    assert "'currency', coalesce(nullif(bank.currency, ''), 'CNY')" in connection.sql
+    assert "'currency', coalesce(nullif(invoice.currency, ''), 'CNY')" in connection.sql
     assert connection.sql.count("'oa_expense_item_invoice'") >= 3
     assert "'supporting_documents'" not in connection.sql
     assert "'first_invoice'" not in connection.sql
