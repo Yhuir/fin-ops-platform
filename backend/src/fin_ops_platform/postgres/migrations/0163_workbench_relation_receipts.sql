@@ -23,6 +23,19 @@ create table if not exists app.workbench_relation_receipts (
 create index workbench_relation_receipts_relation_idx
     on app.workbench_relation_receipts (relation_id, generated_at desc);
 
-grant select, insert on app.workbench_relation_receipts to fin_ops_api, app_runtime;
-grant select on app.workbench_relation_receipts to fin_ops_readonly;
-grant select, insert, update, delete on app.workbench_relation_receipts to fin_ops_migrator;
+do $$
+begin
+    if exists (select 1 from pg_roles where rolname = 'fin_ops_api') then
+        grant select, insert on app.workbench_relation_receipts to fin_ops_api;
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'fin_ops_app_runtime') then
+        grant select, insert on app.workbench_relation_receipts to fin_ops_app_runtime;
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'fin_ops_readonly') then
+        grant select on app.workbench_relation_receipts to fin_ops_readonly;
+    end if;
+    if exists (select 1 from pg_roles where rolname = 'fin_ops_migrator') then
+        grant select, insert, update, delete on app.workbench_relation_receipts to fin_ops_migrator;
+    end if;
+end
+$$;

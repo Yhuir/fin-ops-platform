@@ -507,7 +507,11 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("total_amount >= 0", normalized_sql)
         self.assertIn("raw_payload jsonb not null default '{}'::jsonb", normalized_sql)
         self.assertIn(
-            "grant select, insert on app.workbench_relation_receipts to fin_ops_api, app_runtime",
+            "grant select, insert on app.workbench_relation_receipts to fin_ops_api",
+            normalized_sql,
+        )
+        self.assertIn(
+            "grant select, insert on app.workbench_relation_receipts to fin_ops_app_runtime",
             normalized_sql,
         )
         self.assertIn(
@@ -523,9 +527,10 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
             normalized_sql,
         )
         self.assertNotIn(
-            "grant delete on app.workbench_relation_receipts to app_runtime",
+            "grant delete on app.workbench_relation_receipts to fin_ops_app_runtime",
             normalized_sql,
         )
+        self.assertNotIn(" app_runtime", normalized_sql)
 
     def test_manual_bank_entry_audit_contract_is_precise_and_non_destructive(self) -> None:
         sql = (
