@@ -139,6 +139,7 @@ type ApiMockOptions = {
   workbenchInvoiceAssignmentScenario?: boolean;
   workbenchOaExpenseItemsScenario?: boolean;
   workbenchOaInvoiceUnparsedScenario?: boolean;
+  workbenchReceiptScenario?: boolean;
   workbenchWithdrawSubmitDelayMs?: number;
 };
 
@@ -714,6 +715,133 @@ function buildIncompleteUnpairedRelationGroup(includeCashSpecialActions = false)
       missing_row_types: [],
       blocking_reasons: ["browser_e2e_incomplete_relation"],
     },
+  };
+}
+
+function buildReceiptWorkbenchGroup(zone: WorkbenchZone) {
+  const caseId = zone === "paired" ? "CASE-RECEIPT-PAIRED" : "CASE-RECEIPT-UNPAIRED";
+  const bank = {
+    ...workbenchRows().bank,
+    id: `bank-receipt-${zone}`,
+    case_id: caseId,
+    txn_direction: "inflow",
+    debit_amount: null,
+    credit_amount: "100.00",
+    counterparty_name: `${zone === "paired" ? "已配对" : "未配对"}收据客户`,
+    trade_time: "2026-08-30 10:18",
+    pay_receive_time: "2026-08-30 10:18",
+  };
+  const invoice = {
+    ...workbenchRows().invoice,
+    id: `invoice-receipt-${zone}`,
+    case_id: caseId,
+    invoice_type: "output",
+    invoice_no: zone === "paired" ? "26532000000809302741" : "26532000000809302742",
+    digital_invoice_no: zone === "paired" ? "26532000000809302741" : "26532000000809302742",
+    seller_name: "云南溯源科技有限公司",
+    buyer_name: bank.counterparty_name,
+    issue_date: "2026-08-30",
+    amount: "100.00",
+    total_with_tax: "100.00",
+  };
+  return withWorkbenchDetailKey({
+    group_id: `case:${caseId}`,
+    group_type: "relation",
+    match_confidence: "high",
+    reason: `browser_e2e_receipt_${zone}`,
+    oa_rows: [],
+    bank_rows: [bank],
+    invoice_rows: [invoice],
+    formal_member_ids: [bank.id, invoice.id],
+    formal_member_types: ["bank", "invoice"],
+    can_withdraw: true,
+    receipt_action: {
+      eligible: true,
+      case_id: caseId,
+      action_label: "编辑并打印收据",
+    },
+    ...(zone === "unpaired" ? {
+      completion: {
+        is_complete: false,
+        missing_row_types: [],
+        blocking_reasons: ["browser_e2e_receipt_unpaired"],
+      },
+    } : {}),
+  });
+}
+
+function receiptWorkbenchGroupsPayload(zone: WorkbenchZone) {
+  const groups = [buildReceiptWorkbenchGroup(zone)];
+  return {
+    groups,
+    total: groups.length,
+    row_counts: countWorkbenchRows(groups),
+    page_size: 10,
+    has_more: false,
+    next_cursor: null,
+  };
+}
+
+function receiptWorkbenchInitialPayload() {
+  const payload = workbenchInitialPayload(false);
+  return {
+    ...payload,
+    summary: {
+      ...payload.summary,
+      oa_count: 0,
+      bank_count: 2,
+      invoice_count: 2,
+      paired_count: 1,
+      unpaired_count: 1,
+    },
+    statistics: {
+      ...payload.statistics,
+      oa_count: 0,
+      bank_transaction_count: 2,
+      input_invoice_count: 0,
+      output_invoice_count: 2,
+      paired_group_count: 1,
+      unpaired_object_count: 1,
+      income_transaction_count: 2,
+      paired_oa_count: 0,
+      paired_bank_transaction_count: 1,
+      paired_invoice_count: 1,
+    },
+    paired: receiptWorkbenchGroupsPayload("paired"),
+    unpaired: receiptWorkbenchGroupsPayload("unpaired"),
+  };
+}
+
+function receiptDraftPayload(caseId: string) {
+  const zone = caseId === "CASE-RECEIPT-PAIRED" ? "paired" : "unpaired";
+  const payer = `${zone === "paired" ? "已配对" : "未配对"}收据客户`;
+  return {
+    case_id: caseId,
+    relation_version: 7,
+    source_fingerprint: "f".repeat(64),
+    total_amount: "100.00",
+    can_print: true,
+    receipts: [{
+      receipt_key: `receipt-${zone}`,
+      payer,
+      date: "2026-08-30",
+      currency: "CNY",
+      income_amount: "100.00",
+      line_total: "100.00",
+      balanced: true,
+      handler: "",
+      supervisor: "",
+      bank_transaction_ids: [`bank-receipt-${zone}`],
+      lines: [{
+        summary: "技术服务费",
+        amount: "100.00",
+        note: "",
+        invoice_no: zone === "paired" ? "26532000000809302741" : "26532000000809302742",
+        source_invoice_ids: [`invoice-receipt-${zone}`],
+      }],
+    }],
+    issues: [],
+    reversal_adjustments: [],
   };
 }
 
@@ -9712,6 +9840,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           return "";
         }
       };
+      if (options.workbenchReceiptScenario) {
+        return json(route, receiptWorkbenchInitialPayload());
+      }
       if (options.workbenchInvoiceAssignmentScenario) {
         const payload = workbenchInitialPayload(workbenchInvoiceAssignmentCommitted);
         const groups = [withWorkbenchDetailKey(buildInvoiceAssignmentWorkbenchGroup(
@@ -10104,6 +10235,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const requestedCursor = url.searchParams.get("cursor");
       const requestedPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "50", 10);
       const exceptionBucket = url.searchParams.get("exception_bucket");
+      if (options.workbenchReceiptScenario) {
+        return json(route, receiptWorkbenchGroupsPayload(zone));
+      }
       if (exceptionBucket && options.workbenchExceptionDatasetSize) {
         const decisionMatchesZone = zone === "paired"
           ? workbenchAmountMismatchDecision === "accept_paired"
@@ -10335,6 +10469,24 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         case_id: "CASE-AUTO-0185",
         invoice_row_id: "inv_imported_0983",
         source_expense_item_ids: ["oa-exp-2413:item:1:0a8ca0a3b508"],
+      });
+    }
+
+    if (path === "/api/workbench/actions/receipt-draft") {
+      const body = request.postDataJSON() as { case_id?: unknown };
+      return json(route, receiptDraftPayload(String(body.case_id ?? "")));
+    }
+
+    if (path === "/api/workbench/actions/print-receipt") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        headers: {
+          "X-Receipt-ID": "receipt-e2e-1",
+          "X-Receipt-Count": "1",
+          "X-Receipt-Reused": "false",
+        },
+        body: "%PDF-1.4\n%%EOF",
       });
     }
 

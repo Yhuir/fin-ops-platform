@@ -83,7 +83,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `提交审批` | ETC approval submit |
 | `提交批次` | no-OA/batch submit |
 | `人工提交` | ETC manual submit |
-| `打印收据` | Workbench 无 OA 收入＋销项发票配对关系生成并请求打印收据 |
+| `打印收据` | Workbench 无 OA 收入＋销项发票 active relation 在编辑抽屉生成并请求打印收据 |
 
 ## Source write-control keyword sentinels
 
@@ -104,7 +104,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `取消现金处理` | `web/src/components/workbench/RowActions.tsx` | 关联台现金特殊处理回滚行级菜单。 |
 | `确认买票` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | 关联台买票成本确认弹窗。 |
 | `留在未配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 关联台异常决定保持未配对。 |
-| `打印收据` | `web/src/components/workbench/RelationGroupGrid.tsx` | 关联台无 OA 收入＋销项发票配对关系生成并请求打印收据。 |
+| `打印收据` | `web/src/components/workbench/WorkbenchReceiptDrawer.tsx` | 关联台无 OA 收入＋销项发票 active relation 在编辑抽屉生成并请求打印收据。 |
 | `接受异常并进入已配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 接受服务端当前异常证据并进入已配对。 |
 | `撤回到未配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 已配对异常撤回未配对。 |
 | `留在未配对` | `web/src/components/workbench/WorkbenchExceptionDrawer.tsx` | 关联台异常人工保留。 |
@@ -193,7 +193,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 
 | Module | 写入口 | 当前状态 | 当前证据 | 下一步 |
 | --- | --- | --- | --- | --- |
-| `reconciliation-workbench` | manual confirm、paired/unpaired active-relation withdraw、异常接受进入已配对/留在未配对/撤回、待归属发票显式选择 OA 明细、行级忽略、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save；未配对工具栏人工“异常处理”已删除 | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对关系并打开统一异常抽屉，断言确认和关系级撤回禁用、未配对工具栏人工“异常处理”不存在、异常决定/撤回入口隐藏；现金处理 mutation 同样为零，并复跑 DOM 写控件候选扫描。 | 新增 relation、异常审阅、发票明细归属、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
+| `reconciliation-workbench` | manual confirm、paired/unpaired active-relation withdraw、异常接受进入已配对/留在未配对/撤回、待归属发票显式选择 OA 明细、无 OA 收入收据编辑/打印、行级忽略、no-OA withdraw、cash pass-through/ticket purchase/cancel、column layout reorder/settings save；未配对工具栏人工“异常处理”已删除 | `covered-browser` | `web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/workbench-receipt-flow.spec.ts`；role matrix 在 read-export 下断言列拖拽 handle 全部 disabled、尝试拖拽不进入 dragging 且 `POST /api/workbench/settings` 零调用，也会选择未配对/已配对关系并打开统一异常抽屉，断言确认和关系级撤回禁用、未配对工具栏人工“异常处理”不存在、异常决定/撤回入口隐藏；receipt flow 另以双分区合格关系证明收据入口禁用且 draft/print 零调用；现金处理 mutation 同样为零。 | 新增 relation、异常审阅、发票明细归属、收据、现金处理 command 或隐式 settings 写入口时补同类 Browser 断言。 |
 | `bank-details` | 分类保存/清除、候选确认/撤回、人工待分类、自动标签规则保存/reapply | `covered-browser` | `web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/bank-details-auto-tag-rules-flow.spec.ts`；本轮 `web/e2e/permissions-role-matrix.spec.ts` 会在 read-export 下打开自动标签规则抽屉并分别进入待确认分类和未匹配待分类状态，断言新增标签/reapply/保存禁用、待确认/待分类按钮禁用、分类菜单不打开、category-confirmation/category-assignment 零 mutation，并复跑 DOM 写控件候选扫描 | 新增批量分类或规则入口时补 read-export 零 mutation。 |
 | `imports-bank-transactions` | 文件选择、文件 preview/confirm import、账户冲突确认、人工流水 preview/discard/confirm | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 read-export 文件导入 controls disabled，并证明 `流水录入` opener 不存在；`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖 full_access 文件导入主链路，人工流水组件/API 测试覆盖 preview/confirm/dedupe | 人工流水 Drawer 若改为只读可打开，必须补动态 opener 和内部控件扫描。 |
 | `imports-invoices` | 文件选择、preview、confirm import | `covered-browser` | `web/e2e/permissions-role-matrix.spec.ts` 覆盖 import controls disabled；`web/e2e/imports-invoices-flow.spec.ts` 覆盖 full_access 主链路 | 同上。 |

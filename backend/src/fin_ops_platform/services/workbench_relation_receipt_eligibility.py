@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -14,20 +15,32 @@ def normalize_receipt_currency(value: Any) -> str:
     return "CNY" if normalized in _CNY_ALIASES else normalized
 
 
+def _has_receipt_date(row: dict[str, Any]) -> bool:
+    value = row.get("pay_receive_time") or row.get("trade_time") or row.get("txn_date")
+    if isinstance(value, (date, datetime)):
+        return True
+    try:
+        datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
 def workbench_relation_receipt_action(
     rows_by_type: dict[str, list[dict[str, Any]]],
     *,
     case_id: str,
-    zone: str,
 ) -> dict[str, Any] | None:
     """Return the single receipt action exposed by an eligible active relation."""
 
     oa_rows = rows_by_type.get("oa", [])
     bank_rows = rows_by_type.get("bank", [])
     invoice_rows = rows_by_type.get("invoice", [])
-    if zone != "paired" or oa_rows or not bank_rows or not invoice_rows:
+    if oa_rows or not bank_rows or not invoice_rows:
         return None
     if any(str(row.get("txn_direction") or "").strip().lower() != "inflow" for row in bank_rows):
+        return None
+    if any(not _has_receipt_date(row) for row in bank_rows):
         return None
     try:
         if any(Decimal(str(row.get("amount"))) <= Decimal("0") for row in bank_rows):
@@ -66,6 +79,5 @@ def workbench_relation_receipt_action(
     return {
         "eligible": True,
         "case_id": case_id,
-        "label": "待补收据",
-        "action_label": "打印收据",
+        "action_label": "编辑并打印收据",
     }

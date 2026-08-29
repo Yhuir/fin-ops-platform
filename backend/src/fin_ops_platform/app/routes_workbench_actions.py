@@ -37,6 +37,32 @@ class WorkbenchActionApiRoutes:
         )
         self._receipt_service_provider = receipt_service_provider
 
+    def receipt_draft(
+        self, payload: dict[str, Any]
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        if self._receipt_service_provider is None:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "workbench_receipt_service_unavailable",
+                "message": "收据服务暂时不可用。",
+            }
+        try:
+            service = self._receipt_service_provider()
+        except RuntimeError:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "workbench_receipt_service_unavailable",
+                "message": "收据服务暂时不可用。",
+            }
+        try:
+            result = service.draft_receipt(
+                case_id=str(payload.get("case_id") or ""),
+            )
+        except WorkbenchReceiptError as exc:
+            return HTTPStatus(exc.status_code), {
+                "error": exc.code,
+                "message": exc.message,
+            }
+        return HTTPStatus.OK, result
+
     def print_receipt(
         self,
         payload: dict[str, Any],
@@ -52,8 +78,19 @@ class WorkbenchActionApiRoutes:
                 "message": "收据服务暂时不可用。",
             }
         try:
-            result = self._receipt_service_provider().print_receipt(
+            service = self._receipt_service_provider()
+        except RuntimeError:
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "workbench_receipt_service_unavailable",
+                "message": "收据服务暂时不可用。",
+            }
+        try:
+            result = service.print_receipt(
                 case_id=str(payload.get("case_id") or ""),
+                relation_version=payload.get("relation_version"),
+                source_fingerprint=str(payload.get("source_fingerprint") or ""),
+                receipts=payload.get("receipts"),
+                issues_acknowledged=payload.get("issues_acknowledged") is True,
                 actor_id=actor_id,
                 actor_account=actor_account,
                 actor_name=actor_name,

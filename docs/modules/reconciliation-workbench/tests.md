@@ -1,15 +1,16 @@
 # 关联台测试与验证
 
-日期：2026-08-29
+日期：2026-08-30
 
-## 2026-08-29 无 OA 收入 + 销项发票收据打印
+## 2026-08-30 无 OA 收入 + 销项发票收据编辑与打印
 
-- Business core：`tests/test_workbench_relation_receipt_eligibility.py` 保护 active paired relation 必须无 OA、至少一条且全部为收入流水、至少一张且全部为销项发票、金额为正、付款方/发票号完整并且唯一币种为 CNY；混合方向、进项发票、缺字段或非 CNY 均不得显示动作。`tests/test_workbench_relation_receipt_pdf.py` 保护付款方/日期/币种分组、收入金额口径、多页发票清单、中文大写金额和 A5 横向双联收据。
-- Service / Repository：`tests/test_workbench_relation_receipt_service.py` 与 `tests/test_workbench_relation_receipt_repository.py` 保护服务端重新读取并重验 active relation、内容指纹幂等复用、关系事实变化生成新快照、文件持久化、生成/打印请求审计，以及非法关系零写入。
-- API contract：action route 只接受 relation case id，返回 `application/pdf` 和稳定文件名；权限、not found、资格冲突和存储失败按明确错误映射，不返回 base64 或页面 read-model 字段。
-- Frontend interaction：`web/src/test/RelationGroupGrid.test.tsx` 与 `web/src/test/WorkbenchApi.test.ts` 保护按钮只出现在合格 paired 关系的 OA 栏、旧“待补 OA”不同时出现、PDF blob 映射正确；页面点击在异步请求前同步打开窗口，成功后调用原生打印，失败关闭窗口并反馈错误。
-- E2E：本地覆盖 canonical relation -> eligibility DTO -> receipt API -> PDF/file/audit 链路；发布后使用生产现有合格关系验证按钮、PDF 和打印调用，不创建或修改业务关系。
-- Existing regression：关联台三栏金额、选择、确认/撤回、异常、发票归属和统计不因派生收据改变；read model/cache/worker/background job 不适用，因为收据只读取当前 canonical relation 并同步生成或复用文件快照。
+- Business core：`tests/test_workbench_relation_receipt_eligibility.py` 保护 paired/unpaired 的合格 active relation 都输出唯一“编辑并打印收据”，同时拒绝 singleton、OA、支出、进项、缺字段和非 CNY。`tests/test_workbench_relation_receipt_service.py` 保护收入固定金额、用户编辑后逐张平衡、20 位明确蓝票号码的全额/部分冲销、异常确认、关系版本和来源指纹冲突。`tests/test_workbench_relation_receipt_pdf.py` 保护模板字段、五行续页、中文大写金额、A5 横向和一联输出。
+- Service / Repository：`tests/test_workbench_relation_receipt_service.py` 与 `tests/test_workbench_relation_receipt_repository.py` 保护每次 draft/print 重读 active relation、红蓝票号码批量精确查询、编辑文档指纹幂等复用、来源或编辑内容变化生成新快照、文件持久化、生成/打印请求审计，以及非法关系零写入。
+- API contract：draft action 接受 relation case id 并返回 relation version、source fingerprint、分组收据、冲销结果和异常；print action 接受上述并发证据与编辑后 receipts，成功返回 `application/pdf` 和稳定文件名。权限、not found、资格/版本/来源/金额冲突和存储失败按明确错误映射，不返回 base64 或页面 read-model 字段。
+- Read model / cache / background job：不适用。草稿和提交都直接读取当前 canonical relation；PDF 同步生成或按文档指纹复用，不新增 read model、cache、queue 或 worker。
+- Frontend interaction：`web/src/test/RelationGroupGrid.test.tsx` 保护两个分区的合格 relation OA 栏各只有一个新动作且旧“待补收据”消失；`web/src/test/WorkbenchApi.test.ts` 保护 draft 严格映射和 print 请求体/PDF blob；`web/src/test/WorkbenchReceiptDrawer.test.tsx` 保护模板加载、字段编辑、金额不平衡禁用、冲销异常确认、dirty close 和最终提交编辑值。
+- E2E business flow：`web/e2e/workbench-receipt-flow.spec.ts` 在真实 Chromium 覆盖 paired/unpaired 双入口、抽屉编辑、金额失衡禁用、打印 popup、编辑后请求体，以及 read-export 双入口禁用且 draft/print 零调用；后端 service/API 测试覆盖 PDF/file/audit。发布后仍使用生产现有合格关系验证真实单联 PDF 和物理打印调用，不创建或修改业务关系。
+- Existing regression：关联台 singleton、三栏金额、选择、确认/撤回、异常、发票归属和统计不因派生收据改变；旧直接打印函数、旧状态标签和双联版式不得恢复。
 
 ## 2026-08-28 关系异常唯一入口与确认备注
 

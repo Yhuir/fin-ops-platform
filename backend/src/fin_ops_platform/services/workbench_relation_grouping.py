@@ -333,7 +333,6 @@ class WorkbenchRelationGroupingService:
         receipt_action = workbench_relation_receipt_action(
             rows_by_type,
             case_id=case_id,
-            zone=zone,
         )
         if receipt_action is not None:
             group["receipt_action"] = receipt_action

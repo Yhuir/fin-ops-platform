@@ -106,6 +106,20 @@ class PostgresWorkbenchRelationReceiptRepositoryTests(unittest.TestCase):
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(second["source_fingerprint"], "fingerprint-1")
 
+    def test_loads_reversal_targets_in_one_exact_number_query(self) -> None:
+        connection = _Connection()
+        repository = PostgresWorkbenchRelationReceiptRepository(connection)
+
+        rows = repository.load_output_invoices_by_numbers(["26532000000809302711"])
+
+        self.assertEqual([row["id"] for row in rows], ["invoice-id"])
+        sql, params = connection.calls[-1]
+        self.assertIn("digital_invoice_no = any", sql)
+        self.assertEqual(params, (
+            ["26532000000809302711"],
+            ["26532000000809302711"],
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

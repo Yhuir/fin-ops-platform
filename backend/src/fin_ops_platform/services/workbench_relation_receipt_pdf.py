@@ -10,10 +10,19 @@ import fitz
 
 _PAGE = (595.28, 419.53)
 _FONT = "china-s"
+_LEFT = 56.69
+_RIGHT = 14.17
+_TOP = 48.19
+_ROW_HEIGHT = 21.0
+_COLUMN_WIDTHS = (8.0, 7.125, 9.0, 3.5, 7.5, 3.625, 8.5, 7.0, 18.25, 13.5)
+_THIN = 0.55
+_MEDIUM = 1.15
 
 
 def _money(value: Any) -> Decimal:
-    return Decimal(str(value or "0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return Decimal(str(value or "0")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
 
 def _money_text(value: Any) -> str:
@@ -61,7 +70,9 @@ def _uppercase_rmb(value: Any) -> str:
             continue
         if integer_parts and (zero_between or chunk_value < 1000):
             integer_parts.append("零")
-        integer_parts.append(f"{four_digit_text(chunks[group_index])}{large_units[group_index]}")
+        integer_parts.append(
+            f"{four_digit_text(chunks[group_index])}{large_units[group_index]}"
+        )
         zero_between = False
     integer_text = "".join(integer_parts) or "零"
     jiao, fen = int(fraction[0]), int(fraction[1])
@@ -75,37 +86,53 @@ def _uppercase_rmb(value: Any) -> str:
     return f"人民币 {integer_text}元{fraction_text or '整'}"
 
 
-def _date_text(value: Any) -> str:
+def _date_parts(value: Any) -> tuple[str, str, str]:
     if isinstance(value, datetime):
         value = value.date()
-    if isinstance(value, date):
-        return value.strftime("%Y年%m月%d日")
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return parsed.strftime("%Y年%m月%d日")
+    if not isinstance(value, date):
+        value = datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    return str(value.year), str(value.month), str(value.day)
+
+
+def _column_positions() -> tuple[float, ...]:
+    available_width = _PAGE[0] - _LEFT - _RIGHT
+    scale = available_width / sum(_COLUMN_WIDTHS)
+    positions = [_LEFT]
+    for width in _COLUMN_WIDTHS:
+        positions.append(positions[-1] + width * scale)
+    return tuple(positions)
+
+
+_X = _column_positions()
 
 
 class WorkbenchReceiptPdfRenderer:
-    """Render the approved A5 landscape receipt layout as a printable PDF."""
+    """Render the versioned 银行收据!A1:J12 layout on A5 landscape pages."""
 
     def render(self, snapshot: dict[str, Any]) -> bytes:
         document = fitz.open()
         for receipt in snapshot["receipts"]:
-            lines = list(receipt["invoice_lines"])
-            chunks = [lines[index : index + 5] for index in range(0, len(lines), 5)] or [[]]
-            for copy_label in ("收款人留存", "付款人留存"):
-                for page_index, chunk in enumerate(chunks, start=1):
-                    self._draw_page(
-                        document.new_page(width=_PAGE[0], height=_PAGE[1]),
-                        receipt,
-                        chunk,
-                        copy_label=copy_label,
-                        page_index=page_index,
-                        page_count=len(chunks),
-                    )
+            lines = list(receipt["lines"])
+            chunks = [lines[index : index + 5] for index in range(0, len(lines), 5)]
+            for page_index, chunk in enumerate(chunks, start=1):
+                self._draw_page(
+                    document.new_page(width=_PAGE[0], height=_PAGE[1]),
+                    receipt,
+                    chunk,
+                    page_index=page_index,
+                    page_count=len(chunks),
+                )
         buffer = BytesIO()
         document.save(buffer, garbage=4, deflate=True)
         document.close()
         return buffer.getvalue()
+
+    @staticmethod
+    def _cell_rect(
+        row_index: int, start_column: int, end_column: int
+    ) -> tuple[float, float, float, float]:
+        top = _TOP + _ROW_HEIGHT * row_index
+        return (_X[start_column], top, _X[end_column], top + _ROW_HEIGHT)
 
     @staticmethod
     def _text(
@@ -113,52 +140,147 @@ class WorkbenchReceiptPdfRenderer:
         rect: tuple[float, float, float, float],
         text: str,
         *,
-        size: float = 10,
+        size: float = 11,
         align: int = 0,
+        inset: float = 2.5,
+        font: str = _FONT,
     ) -> None:
-        page.insert_textbox(fitz.Rect(*rect), text, fontname=_FONT, fontsize=size, align=align, color=(0, 0, 0))
+        box = fitz.Rect(rect)
+        box.x0 += inset
+        box.x1 -= inset
+        box.y0 += max(0.5, (_ROW_HEIGHT - size * 1.25) / 2)
+        page.insert_textbox(
+            box,
+            str(text),
+            fontname=font,
+            fontsize=size,
+            align=align,
+            color=(0, 0, 0),
+            lineheight=1.0,
+        )
+
+    @classmethod
+    def _draw_table_grid(cls, page: fitz.Page) -> None:
+        cell_spans = {
+            3: ((0, 1), (1, 8), (8, 10)),
+            4: ((0, 8), (8, 9), (9, 10)),
+            5: ((0, 8), (8, 9), (9, 10)),
+            6: ((0, 8), (8, 9), (9, 10)),
+            7: ((0, 8), (8, 9), (9, 10)),
+            8: ((0, 8), (8, 9), (9, 10)),
+            9: ((0, 8), (8, 9), (9, 10)),
+            10: ((0, 1), (1, 2), (2, 8), (8, 9), (9, 10)),
+        }
+        for row_index, spans in cell_spans.items():
+            for start_column, end_column in spans:
+                page.draw_rect(
+                    fitz.Rect(cls._cell_rect(row_index, start_column, end_column)),
+                    color=(0, 0, 0),
+                    width=_THIN,
+                )
+        top = _TOP + _ROW_HEIGHT * 3
+        bottom = _TOP + _ROW_HEIGHT * 11
+        page.draw_line((_X[0], top), (_X[10], top), color=(0, 0, 0), width=_MEDIUM)
+        page.draw_line((_X[0], bottom), (_X[10], bottom), color=(0, 0, 0), width=_MEDIUM)
+        page.draw_line((_X[0], top), (_X[0], bottom), color=(0, 0, 0), width=_MEDIUM)
+        page.draw_line((_X[10], top), (_X[10], bottom), color=(0, 0, 0), width=_MEDIUM)
 
     def _draw_page(
         self,
         page: fitz.Page,
         receipt: dict[str, Any],
-        invoice_lines: list[dict[str, Any]],
+        lines: list[dict[str, Any]],
         *,
-        copy_label: str,
         page_index: int,
         page_count: int,
     ) -> None:
-        page.draw_rect(fitz.Rect(22, 14, 573, 403), color=(0.1, 0.1, 0.1), width=0.8)
-        self._text(page, (24, 18, 571, 39), "云南溯源科技有限公司", size=11, align=1)
-        self._text(page, (24, 34, 571, 75), "收  据", size=20, align=1)
-        self._text(page, (40, 74, 555, 92), _date_text(receipt["date"]), size=10, align=1)
-        self._text(page, (40, 94, 555, 116), f"兹收到 {receipt['payer']} 交来如下款项", size=11)
+        self._text(
+            page,
+            self._cell_rect(0, 0, 10),
+            "云南溯源科技有限公司",
+            size=16,
+            align=1,
+            inset=0,
+        )
+        self._text(
+            page,
+            self._cell_rect(1, 0, 10),
+            "收    据",
+            size=16,
+            align=1,
+            inset=0,
+        )
+        year, month, day = _date_parts(receipt["date"])
+        for column, text in ((2, year), (3, "年"), (4, month), (5, "月"), (6, day), (7, "日")):
+            self._text(
+                page,
+                self._cell_rect(2, column, column + 1),
+                text,
+                align=1,
+                font="helv" if text.isascii() else _FONT,
+            )
         if page_count > 1:
-            self._text(page, (455, 70, 555, 89), f"第 {page_index}/{page_count} 页", size=8, align=2)
+            self._text(
+                page,
+                self._cell_rect(2, 8, 10),
+                f"第 {page_index}/{page_count} 页",
+                size=8,
+                align=2,
+            )
 
-        left, top, right, row_height = 40, 121, 555, 32
-        columns = (left, 330, 430, right)
-        for x in columns:
-            page.draw_line((x, top), (x, top + row_height * 7), color=(0.25, 0.25, 0.25), width=0.6)
-        for index in range(8):
-            y = top + row_height * index
-            page.draw_line((left, y), (right, y), color=(0.25, 0.25, 0.25), width=0.6)
-        self._text(page, (left + 4, top + 7, 330, top + 28), "摘要", size=10, align=1)
-        self._text(page, (334, top + 7, 430, top + 28), "金额", size=10, align=1)
-        self._text(page, (434, top + 7, right, top + 28), "备注", size=10, align=1)
+        self._draw_table_grid(page)
+        self._text(page, self._cell_rect(3, 0, 1), "兹收到", align=1)
+        self._text(page, self._cell_rect(3, 1, 8), receipt["payer"], align=1)
+        self._text(page, self._cell_rect(3, 8, 10), "交来下列款项", align=1)
+        self._text(page, self._cell_rect(4, 0, 8), "摘                  要", align=1)
+        self._text(page, self._cell_rect(4, 8, 9), "金额", align=1)
+        self._text(page, self._cell_rect(4, 9, 10), "备注", align=1)
 
-        for index, line in enumerate(invoice_lines):
-            y = top + row_height * (index + 1)
-            summary = f"销项发票 {line['invoice_no']}"
-            self._text(page, (left + 5, y + 6, 326, y + 29), summary, size=8.5)
-            self._text(page, (334, y + 6, 426, y + 29), _money_text(line["amount"]), size=9, align=2)
-            self._text(page, (434, y + 6, 551, y + 29), str(line.get("note") or ""), size=8)
+        for index, line in enumerate(lines):
+            row_index = 5 + index
+            self._text(page, self._cell_rect(row_index, 0, 8), line["summary"], size=10)
+            self._text(
+                page,
+                self._cell_rect(row_index, 8, 9),
+                _money_text(line["amount"]),
+                size=10,
+                align=2,
+                font="helv",
+            )
+            self._text(
+                page,
+                self._cell_rect(row_index, 9, 10),
+                line.get("note") or "",
+                size=9,
+            )
 
-        total_y = top + row_height * 6
-        self._text(page, (left + 5, total_y + 7, 125, total_y + 29), "合计：", size=10, align=1)
-        self._text(page, (125, total_y + 7, 330, total_y + 29), _uppercase_rmb(receipt["amount"]), size=8.5)
-        self._text(page, (334, total_y + 7, 426, total_y + 29), _money_text(receipt["amount"]), size=10, align=2)
-        footer_y = top + row_height * 7 + 12
-        self._text(page, (40, footer_y, 240, footer_y + 22), f"主管：{receipt.get('supervisor') or ''}", size=9)
-        self._text(page, (280, footer_y, 470, footer_y + 22), f"经手人：{receipt.get('handler') or ''}", size=9)
-        self._text(page, (470, footer_y, 555, footer_y + 22), copy_label, size=8, align=2)
+        is_last_page = page_index == page_count
+        self._text(
+            page,
+            self._cell_rect(10, 0, 1),
+            "合计：" if is_last_page else "续页：",
+            align=2,
+        )
+        if is_last_page:
+            uppercase = _uppercase_rmb(receipt["amount"]).removeprefix("人民币 ")
+            self._text(page, self._cell_rect(10, 1, 2), "人民币")
+            self._text(page, self._cell_rect(10, 2, 8), uppercase, size=10)
+            self._text(
+                page,
+                self._cell_rect(10, 8, 9),
+                f"¥{_money_text(receipt['amount'])}",
+                size=10,
+                align=2,
+                font="helv",
+            )
+
+        self._text(
+            page,
+            self._cell_rect(11, 0, 4),
+            f"主管：{receipt.get('supervisor') or ''}",
+        )
+        self._text(
+            page,
+            self._cell_rect(11, 6, 10),
+            f"经手人：{receipt.get('handler') or ''}",
+        )

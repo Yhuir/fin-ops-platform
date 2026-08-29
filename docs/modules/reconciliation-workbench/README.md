@@ -27,6 +27,8 @@ OA 附件状态固定为“发票附件缺失 / 发票附件未解析 / 发票�
 
 补充凭证资源同时向发票导入页提供全局只读 gallery：每页最多九条 active 元数据，按上传时间和 ID 倒序游标分页；图片和 PDF 首页缩略图按需生成，完整内容仍走既有鉴权 content API。统一入口不改变本模块按 OA 子付款项上传、列表和软删除的上下文边界。
 
+无 OA、全部为收入流水和销项发票、币种为人民币且必要字段完整的 active relation，无论当前位于 `paired` 还是 `unpaired`，都在 OA 栏显示唯一的“编辑并打印收据”动作；无 active relation 的 singleton 不显示。动作先读取当前 canonical 草稿并打开单一右侧编辑抽屉，用户核对付款单位、日期、摘要、金额、备注、主管和经手人后再请求生成一联 A5 横向 PDF。服务端以收入流水金额为固定合计，提交时重验关系版本、来源指纹和明细合计；关系或来源变化、金额不平或红蓝票异常未确认时 fail closed。收据快照不改变 relation、发票、统计或页面分区。
+
 候选菜单使用紧凑的 HeroUI Popover/SearchField/Checkbox 布局并允许长标签自然换行。OA 申请事由直接显示完整文本，不再创建 hover 浮层，避免浮层测量导致表格滚动条抖动。
 
 OA 栏在已配对和未配对区域都只承担行选择与详情查看，不存在逐行“确认关联”“异常处理”或撤回按钮，也不显示操作列。确认从未配对区域表头选择动作进入；已配对和未配对 active relation 的撤回都从关系级选择动作进入，并恢复上一可证明的稳定拓扑。未配对工具栏“异常处理”及其人工 drawer 触发链已删除；自动识别的 OA/发票异常仍只走右上统一异常抽屉。银行流水和发票保留各自独立的行级能力合同。
@@ -50,7 +52,7 @@ ETC 批次在折叠态只显示 canonical `summaryRow`，不显示任何真实�
 
 ## 代码入口
 
-- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`、`WorkbenchInvoiceAssignmentDrawer.tsx`
+- 前端：`web/src/pages/ReconciliationWorkbenchPage.tsx`、`web/src/components/workbench/RelationGroupGrid.tsx`、`RelationGroupCell.tsx`、`WorkbenchExceptionDrawer.tsx`、`WorkbenchInvoiceAssignmentDrawer.tsx`、`WorkbenchReceiptDrawer.tsx`
 - API：`web/src/features/workbench/api.ts`、`backend/src/fin_ops_platform/app/routes_workbench.py`、`routes_workbench_actions.py`
 - Direct page SQL：`backend/src/fin_ops_platform/services/postgres_repositories/workbench_page_query.py`、`workbench_page_hydration.py`
 - 分组：`backend/src/fin_ops_platform/services/workbench_relation_grouping.py`

@@ -13,6 +13,7 @@ import {
   fetchWorkbenchGroupsPage,
   fetchWorkbenchInitialPage,
   fetchWorkbenchOaSyncStatus,
+  fetchWorkbenchReceiptDraft,
   fetchWorkbenchRowDetail,
   getManualOaImportAttachmentRefreshStatus,
   importManualOaRows,
@@ -89,7 +90,20 @@ test("requests a relation receipt through the PDF action contract", async () => 
     }),
   );
 
-  const result = await printWorkbenchReceipt("CASE-RECEIPT-001");
+  const result = await printWorkbenchReceipt({
+    caseId: "CASE-RECEIPT-001",
+    relationVersion: 3,
+    sourceFingerprint: "source-fingerprint-1",
+    issuesAcknowledged: false,
+    receipts: [{
+      receiptKey: "receipt-key-1",
+      payer: "付款单位",
+      date: "2026-08-30",
+      handler: "经手人",
+      supervisor: "主管",
+      lines: [{ summary: "技术服务费", amount: "100.00", note: "" }],
+    }],
+  });
 
   expect(fetchSpy).toHaveBeenCalledWith(
     "/api/workbench/actions/print-receipt",
@@ -100,6 +114,17 @@ test("requests a relation receipt through the PDF action contract", async () => 
   );
   expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
     case_id: "CASE-RECEIPT-001",
+    relation_version: 3,
+    source_fingerprint: "source-fingerprint-1",
+    issues_acknowledged: false,
+    receipts: [{
+      receipt_key: "receipt-key-1",
+      payer: "付款单位",
+      date: "2026-08-30",
+      handler: "经手人",
+      supervisor: "主管",
+      lines: [{ summary: "技术服务费", amount: "100.00", note: "" }],
+    }],
   });
   expect(result.type).toBe("application/pdf");
   expect(result.size).toBe(pdfBody.byteLength);
@@ -114,9 +139,83 @@ test("rejects a successful receipt response that is not a PDF", async () => {
     }),
   );
 
-  await expect(printWorkbenchReceipt("CASE-RECEIPT-001")).rejects.toThrow(
+  await expect(printWorkbenchReceipt({
+    caseId: "CASE-RECEIPT-001",
+    relationVersion: 3,
+    sourceFingerprint: "source-fingerprint-1",
+    issuesAcknowledged: false,
+    receipts: [{
+      receiptKey: "receipt-key-1",
+      payer: "付款单位",
+      date: "2026-08-30",
+      handler: "",
+      supervisor: "",
+      lines: [{ summary: "技术服务费", amount: "100.00", note: "" }],
+    }],
+  })).rejects.toThrow(
     "收据服务未返回 PDF 文件。",
   );
+  fetchSpy.mockRestore();
+});
+
+test("loads and maps the editable relation receipt draft contract", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({
+      case_id: "CASE-RECEIPT-001",
+      relation_version: 3,
+      source_fingerprint: "source-fingerprint-1",
+      total_amount: "182400.00",
+      can_print: true,
+      receipts: [{
+        receipt_key: "receipt-key-1",
+        payer: "付款单位",
+        date: "2026-08-30",
+        currency: "CNY",
+        income_amount: "182400.00",
+        line_total: "182400.00",
+        balanced: true,
+        handler: "",
+        supervisor: "",
+        bank_transaction_ids: ["bank-1"],
+        lines: [{
+          source_invoice_ids: ["invoice-effective"],
+          invoice_no: "26532000000809302712",
+          summary: "技术服务费",
+          amount: "182400.00",
+          note: "",
+        }],
+      }],
+      issues: [],
+      reversal_adjustments: [{
+        kind: "full",
+        red_invoice_id: "invoice-red",
+        red_invoice_no: "26532000000809302713",
+        blue_invoice_id: "invoice-blue",
+        blue_invoice_no: "26532000000809302711",
+        amount: "182400.00",
+      }],
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+
+  const draft = await fetchWorkbenchReceiptDraft("CASE-RECEIPT-001");
+
+  expect(fetchSpy).toHaveBeenCalledWith(
+    "/api/workbench/actions/receipt-draft",
+    expect.objectContaining({ method: "POST", credentials: "include" }),
+  );
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+    case_id: "CASE-RECEIPT-001",
+  });
+  expect(draft).toMatchObject({
+    caseId: "CASE-RECEIPT-001",
+    relationVersion: 3,
+    canPrint: true,
+    receipts: [{ payer: "付款单位", lines: [{ summary: "技术服务费" }] }],
+    reversalAdjustments: [{ kind: "full" }],
+  });
   fetchSpy.mockRestore();
 });
 

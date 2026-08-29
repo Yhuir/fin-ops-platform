@@ -266,8 +266,8 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     const viewSwitcher = page.locator(".cost-page-header").getByRole("group", { name: "成本统计视图切换" });
     await expect(viewSwitcher).toBeVisible();
-    await expect(viewSwitcher.getByText("配对归集")).toBeVisible();
-    await expect(viewSwitcher.getByText("流水分析")).toBeVisible();
+    await expect(viewSwitcher.getByText("OA 配对")).toBeVisible();
+    await expect(viewSwitcher.getByText("银行流水")).toBeVisible();
     await expect(page.getByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeVisible();
     await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);

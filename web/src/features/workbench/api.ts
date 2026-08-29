@@ -52,6 +52,8 @@ import type {
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
   WorkbenchOaSupportingDocumentGalleryPage,
+  WorkbenchReceiptDraft,
+  WorkbenchReceiptPrintPayload,
 } from "./types";
 import {
   WORKBENCH_AMOUNT_ANOMALY_CODES,
@@ -464,7 +466,6 @@ type ApiWorkbenchGroup = {
   receipt_action?: {
     eligible?: boolean | null;
     case_id?: string | null;
-    label?: string | null;
     action_label?: string | null;
   } | null;
   special_metadata?: Record<string, unknown> | null;
@@ -473,6 +474,17 @@ type ApiWorkbenchGroup = {
     missing_row_types?: unknown[] | null;
     blocking_reasons?: unknown[] | null;
   } | null;
+};
+
+type ApiWorkbenchReceiptDraft = {
+  case_id?: unknown;
+  relation_version?: unknown;
+  source_fingerprint?: unknown;
+  total_amount?: unknown;
+  can_print?: unknown;
+  receipts?: unknown;
+  issues?: unknown;
+  reversal_adjustments?: unknown;
 };
 
 type ApiWorkbenchRelationAmountCheck = {
@@ -822,6 +834,112 @@ function toDisplayValue(value: unknown, fallback = "--") {
     return fallback;
   }
   return String(value);
+}
+
+function requiredReceiptText(value: unknown, field: string) {
+  const text = typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
+  if (!text) {
+    throw new Error(`收据草稿缺少${field}。`);
+  }
+  return text;
+}
+
+function receiptStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim())
+    : [];
+}
+
+function mapWorkbenchReceiptDraft(payload: ApiWorkbenchReceiptDraft): WorkbenchReceiptDraft {
+  if (!Array.isArray(payload.receipts) || payload.receipts.length === 0) {
+    throw new Error("收据草稿没有可编辑的收据内容。");
+  }
+  const receipts = payload.receipts.map((value) => {
+    if (!value || typeof value !== "object") {
+      throw new Error("收据草稿内容格式无效。");
+    }
+    const receipt = value as Record<string, unknown>;
+    if (!Array.isArray(receipt.lines)) {
+      throw new Error("收据草稿明细格式无效。");
+    }
+    return {
+      receiptKey: requiredReceiptText(receipt.receipt_key, "分组标识"),
+      payer: requiredReceiptText(receipt.payer, "付款单位"),
+      date: requiredReceiptText(receipt.date, "日期"),
+      currency: "CNY" as const,
+      incomeAmount: requiredReceiptText(receipt.income_amount, "收入金额"),
+      lineTotal: requiredReceiptText(receipt.line_total, "明细合计"),
+      balanced: receipt.balanced === true,
+      handler: typeof receipt.handler === "string" ? receipt.handler : "",
+      supervisor: typeof receipt.supervisor === "string" ? receipt.supervisor : "",
+      bankTransactionIds: receiptStringArray(receipt.bank_transaction_ids),
+      lines: receipt.lines.map((lineValue) => {
+        if (!lineValue || typeof lineValue !== "object") {
+          throw new Error("收据草稿明细格式无效。");
+        }
+        const line = lineValue as Record<string, unknown>;
+        return {
+          summary: requiredReceiptText(line.summary, "摘要"),
+          amount: requiredReceiptText(line.amount, "明细金额"),
+          note: typeof line.note === "string" ? line.note : "",
+          invoiceNo: typeof line.invoice_no === "string" ? line.invoice_no : undefined,
+          sourceInvoiceIds: receiptStringArray(line.source_invoice_ids),
+        };
+      }),
+    };
+  });
+  const issues = Array.isArray(payload.issues)
+    ? payload.issues.map((value) => {
+      if (!value || typeof value !== "object") {
+        throw new Error("收据草稿异常信息格式无效。");
+      }
+      const issue = value as Record<string, unknown>;
+      return {
+        code: requiredReceiptText(issue.code, "异常代码"),
+        message: requiredReceiptText(issue.message, "异常说明"),
+        invoiceIds: receiptStringArray(issue.invoice_ids),
+      };
+    })
+    : [];
+  const reversalAdjustments = Array.isArray(payload.reversal_adjustments)
+    ? payload.reversal_adjustments.map((value) => {
+      if (!value || typeof value !== "object") {
+        throw new Error("收据草稿冲销结果格式无效。");
+      }
+      const adjustment = value as Record<string, unknown>;
+      const kind = adjustment.kind === "full" || adjustment.kind === "partial"
+        ? adjustment.kind as "full" | "partial"
+        : null;
+      if (!kind) {
+        throw new Error("收据草稿冲销类型无效。");
+      }
+      return {
+        kind,
+        redInvoiceId: requiredReceiptText(adjustment.red_invoice_id, "红票标识"),
+        redInvoiceNo: requiredReceiptText(adjustment.red_invoice_no, "红票号码"),
+        blueInvoiceId: requiredReceiptText(adjustment.blue_invoice_id, "蓝票标识"),
+        blueInvoiceNo: requiredReceiptText(adjustment.blue_invoice_no, "蓝票号码"),
+        amount: requiredReceiptText(adjustment.amount, "冲销金额"),
+      };
+    })
+    : [];
+  const relationVersion = Number(payload.relation_version);
+  if (!Number.isInteger(relationVersion)) {
+    throw new Error("收据草稿关系版本无效。");
+  }
+  return {
+    caseId: requiredReceiptText(payload.case_id, "关系编号"),
+    relationVersion,
+    sourceFingerprint: requiredReceiptText(payload.source_fingerprint, "来源指纹"),
+    totalAmount: requiredReceiptText(payload.total_amount, "收入总额"),
+    canPrint: payload.can_print === true,
+    receipts,
+    issues,
+    reversalAdjustments,
+  };
 }
 
 function toWorkbenchAmountDisplayValue(value: unknown, fallback = "--") {
@@ -1465,11 +1583,12 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     receiptAction: group.receipt_action?.eligible === true
       && typeof group.receipt_action.case_id === "string"
       && group.receipt_action.case_id.trim()
+      && typeof group.receipt_action.action_label === "string"
+      && group.receipt_action.action_label.trim()
       ? {
         eligible: true,
         caseId: group.receipt_action.case_id.trim(),
-        label: toDisplayValue(group.receipt_action.label, "待补收据"),
-        actionLabel: toDisplayValue(group.receipt_action.action_label, "打印收据"),
+        actionLabel: group.receipt_action.action_label.trim(),
       }
       : undefined,
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
@@ -2118,16 +2237,29 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   manual_invoice_batch_changed: "发票池状态已变化，整批未录入，请重新校验。",
   manual_invoice_relation_oa_mismatch: "当前关联关系不包含该 OA 付款项，请刷新后重试。",
   manual_invoice_supplement_unavailable: "手工发票录入暂时不可用，请稍后重试。",
-  invalid_receipt_request: "缺少需要打印收据的关联关系。",
-  receipt_relation_not_eligible: "仅无 OA 的收入加销项发票关联关系可以打印收据。",
+  invalid_receipt_request: "收据请求信息不完整，请重新打开收据编辑页。",
+  receipt_relation_not_eligible: "仅无 OA 的收入加销项发票关联关系可以编辑并打印收据。",
   receipt_relation_members_incomplete: "关联关系成员已变化，请刷新后重试。",
-  receipt_relation_not_income: "该关联关系包含非收入流水，不能打印收据。",
+  receipt_relation_not_income: "该关联关系包含非收入流水，不能编辑收据。",
   receipt_income_amount_invalid: "收入流水金额必须大于零，请核对关系成员。",
-  receipt_relation_not_output_invoice: "该关联关系包含非销项发票，不能打印收据。",
-  receipt_invoice_number_missing: "销项发票缺少发票号码，不能打印收据。",
+  receipt_transaction_date_missing: "收入流水缺少有效交易日期，不能编辑收据。",
+  receipt_relation_not_output_invoice: "该关联关系包含非销项发票，不能编辑收据。",
+  receipt_invoice_number_missing: "销项发票缺少发票号码，不能编辑收据。",
   receipt_currency_not_supported: "收据当前仅支持单一人民币币种。",
-  receipt_payer_missing: "收入流水缺少付款方名称，不能打印收据。",
+  receipt_payer_missing: "付款单位不能为空，请核对收据内容。",
   receipt_invoice_group_ambiguous: "发票无法唯一归入付款方与日期分组，请核对关系成员。",
+  receipt_relation_version_conflict: "关联关系已变化，请重新打开收据编辑页。",
+  receipt_source_conflict: "流水或发票来源数据已变化，请重新打开收据编辑页。",
+  receipt_reversal_issue_unacknowledged: "请先核对并确认收据中的发票冲销异常。",
+  receipt_reversal_target_unresolved: "红票指向的蓝票无法唯一定位，请人工核对后再打印。",
+  receipt_reversal_amount_invalid: "红票冲销金额超过蓝票剩余金额，请人工核对后再打印。",
+  invalid_receipt_document: "收据内容与当前关系不一致，请重新打开收据编辑页。",
+  invalid_receipt_date: "收据日期无效，请重新填写。",
+  receipt_lines_empty: "收据至少需要一条款项明细。",
+  invalid_receipt_line: "收据明细格式无效，请重新填写。",
+  receipt_line_summary_missing: "收据摘要不能为空。",
+  receipt_line_amount_invalid: "收据明细金额必须是大于零且最多两位小数的数字。",
+  receipt_amount_unbalanced: "收据明细合计必须与收入金额一致。",
   workbench_receipt_service_unavailable: "收据打印服务暂时不可用，请稍后重试。",
 };
 
@@ -3516,12 +3648,39 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   return mapWorkbenchActionResult(result);
 }
 
-export async function printWorkbenchReceipt(caseId: string): Promise<Blob> {
-  const response = await fetch(apiUrl("/api/workbench/actions/print-receipt"), {
+export async function fetchWorkbenchReceiptDraft(caseId: string): Promise<WorkbenchReceiptDraft> {
+  const result = await requestJson<ApiWorkbenchReceiptDraft>("/api/workbench/actions/receipt-draft", {
     method: "POST",
     credentials: "include",
     headers: withWorkbenchAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ case_id: caseId }),
+  });
+  return mapWorkbenchReceiptDraft(result);
+}
+
+export async function printWorkbenchReceipt(payload: WorkbenchReceiptPrintPayload): Promise<Blob> {
+  const response = await fetch(apiUrl("/api/workbench/actions/print-receipt"), {
+    method: "POST",
+    credentials: "include",
+    headers: withWorkbenchAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      case_id: payload.caseId,
+      relation_version: payload.relationVersion,
+      source_fingerprint: payload.sourceFingerprint,
+      issues_acknowledged: payload.issuesAcknowledged,
+      receipts: payload.receipts.map((receipt) => ({
+        receipt_key: receipt.receiptKey,
+        payer: receipt.payer,
+        date: receipt.date,
+        handler: receipt.handler,
+        supervisor: receipt.supervisor,
+        lines: receipt.lines.map((line) => ({
+          summary: line.summary,
+          amount: line.amount,
+          note: line.note,
+        })),
+      })),
+    }),
   });
   if (!response.ok) {
     let payload: { error?: unknown; message?: unknown; request_id?: unknown; requestId?: unknown } = {};

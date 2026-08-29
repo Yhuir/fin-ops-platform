@@ -9,6 +9,7 @@ _READ_ONLY_POST_ROUTES = frozenset(
         "/api/pending-invoices/invoice-candidates/batch",
         "/api/tax-offset/calculate",
         "/api/workbench/actions/confirm-link/preview",
+        "/api/workbench/actions/receipt-draft",
         "/api/workbench/actions/withdraw-link/preview",
         "/imports/invoices/manual/recognize",
     }

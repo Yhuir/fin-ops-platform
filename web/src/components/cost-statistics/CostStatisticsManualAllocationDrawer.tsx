@@ -15,6 +15,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../common/AppDrawer";
 import {
+  FinanceTable,
+  FinanceTableBody,
+  FinanceTableCell,
+  FinanceTableColumn,
+  FinanceTableHeader,
+  FinanceTableRow,
+} from "../common/FinanceTable";
+import {
   fetchCostStatisticsManualAllocations,
   saveCostStatisticsManualAllocation,
 } from "../../features/cost-statistics/api";
@@ -473,17 +481,20 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                               </div>
                             </section>
                             <div className="cost-manual-allocation-table-wrap">
-                              <table className="cost-manual-allocation-table">
-                                <thead>
-                                  <tr>
-                                    <th>OA 项</th>
-                                    <th>分配金额</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
+                              <FinanceTable
+                                ariaLabel={`${taskLabel(task)}人工分配明细`}
+                                className="cost-manual-allocation-table"
+                                minWidth={560}
+                                selectableText
+                              >
+                                <FinanceTableHeader>
+                                  <FinanceTableColumn columnRole="description" id="oa-unit" isRowHeader>OA 项</FinanceTableColumn>
+                                  <FinanceTableColumn columnRole="amount" id="amount">分配金额</FinanceTableColumn>
+                                </FinanceTableHeader>
+                                <FinanceTableBody>
                                   {task.units.map((unit) => (
-                                    <tr key={unit.unitId}>
-                                      <th scope="row">
+                                    <FinanceTableRow id={unit.unitId} key={unit.unitId} textValue={unitTitle(unit)}>
+                                      <FinanceTableCell columnRole="description" textValue={unitTitle(unit)}>
                                         <strong>{unitTitle(unit)}</strong>
                                         <span>{unit.expenseType || "未填写费用类型"}</span>
                                         <small>
@@ -491,8 +502,8 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                                           {unit.oaApplicant ? ` · ${unit.oaApplicant}` : ""}
                                           {` · OA 金额 ${unit.oaOriginalAmount}`}
                                         </small>
-                                      </th>
-                                      <td>
+                                      </FinanceTableCell>
+                                      <FinanceTableCell columnRole="amount" textValue={draft.allocations[unit.unitId] ?? ""}>
                                         <Input
                                           aria-label={`${unitTitle(unit)}分配金额`}
                                           disabled={!canSave || !task.canSave || saving}
@@ -508,11 +519,11 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                                           placeholder="0.00"
                                           value={draft.allocations[unit.unitId] ?? ""}
                                         />
-                                      </td>
-                                    </tr>
+                                      </FinanceTableCell>
+                                    </FinanceTableRow>
                                   ))}
-                                </tbody>
-                              </table>
+                                </FinanceTableBody>
+                              </FinanceTable>
                             </div>
                             <div className="cost-manual-allocation-non-cost">
                               <Checkbox

@@ -984,6 +984,65 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 - 成功返回 `200` 与 `success=true`、`changed`、`case_id`、`invoice_row_id`、排序后的 `targets`；实际写入时还返回 `previous_anomaly_fingerprint`。精确相同 targets 的幂等重放可返回 `changed=false`。写入只保留原有非显式来源并追加所选 `oa_expense_item_invoice` 边和 operation audit，不修改 relation topology 或 canonical amounts。
 - 前端成功后只执行一次 canonical Workbench GET；不得在浏览器本地删除异常、移动分区或拼装同行。失败不得自动重试 mutation。该 action 不新增 schema、read model、worker、queue 或 cache。
 
+`POST /api/workbench/actions/receipt-draft` 为收据编辑器读取当前草稿。请求体只含 `case_id`。目标必须是 active relation，且没有 OA、全部银行成员为正数 `inflow`、全部发票成员为 `output`、币种唯一且为 CNY，银行交易日期、付款方和发票号完整；关系位于 paired/unpaired 不影响资格，无 active relation 的 singleton 不可调用。成功响应包含：
+
+```json
+{
+  "case_id": "CASE-1",
+  "relation_version": 7,
+  "source_fingerprint": "<sha256>",
+  "total_amount": "182400.00",
+  "can_print": true,
+  "receipts": [
+    {
+      "receipt_key": "<stable group key>",
+      "payer": "付款单位",
+      "date": "2026-08-30",
+      "currency": "CNY",
+      "income_amount": "182400.00",
+      "line_total": "182400.00",
+      "balanced": true,
+      "handler": "",
+      "supervisor": "",
+      "bank_transaction_ids": ["bank-1"],
+      "lines": [{"summary": "技术服务费", "amount": "182400.00", "note": "", "invoice_no": "26532000000809302712", "source_invoice_ids": ["invoice-1"]}]
+    }
+  ],
+  "reversal_adjustments": [],
+  "issues": []
+}
+```
+
+- 收据按规范化付款方、银行交易日期和币种分组；`income_amount`/`total_amount` 只来自正收入流水，是提交时的固定核对金额。`receipt_key` 绑定该组银行成员，不允许客户端增加、删除或替换收据分组。
+- 销项红票只解析备注中精确的 `被红冲蓝字数电发票号码：<20位号码>`；服务端一次批量精确查询蓝票号码。目标必须唯一、为正数销项发票且冲销额不超过剩余蓝票金额。全额冲销后红蓝票都不生成行，部分冲销只输出蓝票净额；其它情况写入 `issues[]`，不得用号码片段、金额、购方、日期或文本相似度兜底。
+- draft 是直接 canonical read，不持久化草稿，不创建 file/audit/read-model/cache/queue/worker；但入口只向拥有 Workbench 写权限且通过全局/OA 安全 gate 的用户开放，因为它只能从后续打印动作进入。
+
+`POST /api/workbench/actions/print-receipt` 接收 draft 的并发证据和用户确认后的收据内容：
+
+```json
+{
+  "case_id": "CASE-1",
+  "relation_version": 7,
+  "source_fingerprint": "<draft sha256>",
+  "issues_acknowledged": false,
+  "receipts": [
+    {
+      "receipt_key": "<stable group key>",
+      "payer": "编辑后的付款单位",
+      "date": "2026-08-30",
+      "handler": "经手人",
+      "supervisor": "主管",
+      "lines": [{"summary": "技术服务费", "amount": "182400.00", "note": ""}]
+    }
+  ]
+}
+```
+
+- 服务端先重读 active relation 并重建 draft；`relation_version` 或 `source_fingerprint` 变化返回 `409`。存在 `issues[]` 时必须显式提交 `issues_acknowledged=true`，否则拒绝。
+- receipts 必须与服务器分组 exact-set 一致。付款单位、有效 ISO 日期、至少一条明细、非空摘要和正数两位小数金额必填；每张明细合计必须精确等于对应 `income_amount`。客户端平衡提示不是安全边界，服务端重复验证。
+- 成功按 `银行收据!A1:J12` 生成 A5 横向一联 PDF；超过五条明细分页，合计只在末页。最终快照包含原始草稿、编辑后文档、冲销结果/异常和确认状态；相同编辑快照按文档指纹复用 `app.workbench_relation_receipts`/`app.file_objects`，不同编辑内容生成新快照。
+- 响应为 `application/pdf` blob，header 携带收据 id/count/reused 事实。成功首次生成写 `receipt_generated`，每次请求写 `receipt_print_requested`；二者只表示生成和请求打印，不表示浏览器或物理打印机已完成。该动作不修改 relation、canonical invoice、统计、分区或其它页面 read model。
+
 ## 发票生命周期状态
 
 待找发票、进项发票使用情况、OA 待付款核对、销项发票收款情况和税金抵扣的 lifecycle 字段保持原响应 shape：

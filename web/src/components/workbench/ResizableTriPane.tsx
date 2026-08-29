@@ -43,8 +43,7 @@ type ResizableTriPaneProps = {
     action: WorkbenchInlineAction,
     group: WorkbenchRelationGroup,
   ) => void;
-  onPrintReceipt?: (group: WorkbenchRelationGroup) => void;
-  receiptPrintPendingCaseId?: string | null;
+  onEditReceipt?: (group: WorkbenchRelationGroup) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canRequestNextPage?: boolean;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
@@ -81,8 +80,7 @@ function ResizableTriPane({
   onSelectRow,
   onOpenDetail,
   onRowAction,
-  onPrintReceipt,
-  receiptPrintPendingCaseId,
+  onEditReceipt,
   onEnsureGroupDetail,
   canRequestNextPage = false,
   onRequestNextPage,
@@ -153,8 +151,7 @@ function ResizableTriPane({
         loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
-        onPrintReceipt={onPrintReceipt}
-        receiptPrintPendingCaseId={receiptPrintPendingCaseId}
+        onEditReceipt={onEditReceipt}
         onEnsureGroupDetail={onEnsureGroupDetail}
         canRequestNextPage={canRequestNextPage}
         onRequestNextPage={onRequestNextPage}

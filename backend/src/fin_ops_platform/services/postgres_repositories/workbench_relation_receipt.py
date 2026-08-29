@@ -46,6 +46,24 @@ class PostgresWorkbenchRelationReceiptRepository:
         )
         return relation
 
+    def load_output_invoices_by_numbers(
+        self, invoice_nos: list[str]
+    ) -> list[dict[str, Any]]:
+        if not invoice_nos:
+            return []
+        return self._connection.fetch_all(
+            """
+            select id::text as id, legacy_mongo_id, invoice_type, invoice_no,
+                   digital_invoice_no, invoice_date, buyer_name, counterparty_name,
+                   total_with_tax, amount, currency, raw_payload, updated_at
+            from app.invoices
+            where digital_invoice_no = any(%s::text[])
+               or invoice_no = any(%s::text[])
+            order by invoice_date, invoice_no, id
+            """,
+            (invoice_nos, invoice_nos),
+        )
+
     def find_by_fingerprint(self, case_id: str, fingerprint: str) -> dict[str, Any] | None:
         return self._connection.fetch_one(
             """

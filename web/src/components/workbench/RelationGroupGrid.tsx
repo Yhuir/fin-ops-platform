@@ -65,8 +65,7 @@ type RelationGroupGridProps = {
     action: WorkbenchInlineAction,
     group: WorkbenchRelationGroup,
   ) => void;
-  onPrintReceipt?: (group: WorkbenchRelationGroup) => void;
-  receiptPrintPendingCaseId?: string | null;
+  onEditReceipt?: (group: WorkbenchRelationGroup) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canRequestNextPage?: boolean;
   onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
@@ -89,8 +88,6 @@ type RelationGroupGridProps = {
   allowInvoiceEntryInReadOnly?: boolean;
   hidePaneHeaders?: boolean;
 };
-
-const RECEIPT_ACTION_LABEL = "打印收据";
 
 type CollapsedSummaryCopy = {
   detailLabel: string;
@@ -160,8 +157,7 @@ function RelationGroupGrid({
   onSelectRow,
   onOpenDetail,
   onRowAction,
-  onPrintReceipt,
-  receiptPrintPendingCaseId = null,
+  onEditReceipt,
   onEnsureGroupDetail,
   canRequestNextPage = false,
   onRequestNextPage,
@@ -203,26 +199,23 @@ function RelationGroupGrid({
   const normalizedSearchQuery = displayState.searchQuery.trim();
   const renderReceiptAction = useCallback((group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) => {
     const receiptAction = group.receiptAction;
-    if (zoneId !== "paired" || paneId !== "oa" || !receiptAction?.eligible) {
+    if (paneId !== "oa" || !receiptAction?.eligible) {
       return null;
     }
-    const isPending = receiptPrintPendingCaseId === receiptAction.caseId;
     return (
       <div className="candidate-group-receipt-action">
-        <span className="candidate-group-receipt-status">{receiptAction.label}</span>
         <Button
-          aria-label={`${RECEIPT_ACTION_LABEL} ${receiptAction.caseId}`}
-          isDisabled={!canMutateData || !onPrintReceipt || isPending}
-          isPending={isPending}
-          onPress={() => onPrintReceipt?.(group)}
+          aria-label={`${receiptAction.actionLabel} ${receiptAction.caseId}`}
+          isDisabled={!canMutateData || !onEditReceipt}
+          onPress={() => onEditReceipt?.(group)}
           size="sm"
           variant="primary"
         >
-          {RECEIPT_ACTION_LABEL}
+          {receiptAction.actionLabel}
         </Button>
       </div>
     );
-  }, [canMutateData, onPrintReceipt, receiptPrintPendingCaseId, zoneId]);
+  }, [canMutateData, onEditReceipt]);
   useLayoutEffect(() => {
     searchGenerationRef.current += 1;
     setExpandedPaneGroups(new Set());

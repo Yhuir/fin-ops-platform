@@ -285,8 +285,70 @@ export type WorkbenchDisplayMode = "collapsed_summary" | "normal" | (string & {}
 export type WorkbenchReceiptAction = {
   eligible: boolean;
   caseId: string;
-  label: string;
   actionLabel: string;
+};
+
+export type WorkbenchReceiptLine = {
+  summary: string;
+  amount: string;
+  note: string;
+  invoiceNo?: string;
+  sourceInvoiceIds?: string[];
+};
+
+export type WorkbenchReceiptDraftReceipt = {
+  receiptKey: string;
+  payer: string;
+  date: string;
+  currency: "CNY";
+  incomeAmount: string;
+  lineTotal: string;
+  balanced: boolean;
+  handler: string;
+  supervisor: string;
+  bankTransactionIds: string[];
+  lines: WorkbenchReceiptLine[];
+};
+
+export type WorkbenchReceiptIssue = {
+  code: string;
+  message: string;
+  invoiceIds: string[];
+};
+
+export type WorkbenchReceiptReversalAdjustment = {
+  kind: "full" | "partial";
+  redInvoiceId: string;
+  redInvoiceNo: string;
+  blueInvoiceId: string;
+  blueInvoiceNo: string;
+  amount: string;
+};
+
+export type WorkbenchReceiptDraft = {
+  caseId: string;
+  relationVersion: number;
+  sourceFingerprint: string;
+  totalAmount: string;
+  canPrint: boolean;
+  receipts: WorkbenchReceiptDraftReceipt[];
+  issues: WorkbenchReceiptIssue[];
+  reversalAdjustments: WorkbenchReceiptReversalAdjustment[];
+};
+
+export type WorkbenchReceiptPrintPayload = {
+  caseId: string;
+  relationVersion: number;
+  sourceFingerprint: string;
+  issuesAcknowledged: boolean;
+  receipts: Array<{
+    receiptKey: string;
+    payer: string;
+    date: string;
+    handler: string;
+    supervisor: string;
+    lines: Array<Pick<WorkbenchReceiptLine, "summary" | "amount" | "note">>;
+  }>;
 };
 
 export type WorkbenchRelationGroup = {

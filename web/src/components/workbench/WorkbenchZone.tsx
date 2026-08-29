@@ -42,8 +42,7 @@ type WorkbenchZoneProps = {
     action: WorkbenchInlineAction,
     group: WorkbenchRelationGroup,
   ) => void;
-  onPrintReceipt?: (group: WorkbenchRelationGroup) => void;
-  receiptPrintPendingCaseId?: string | null;
+  onEditReceipt?: (group: WorkbenchRelationGroup) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canMutateData: boolean;
   highlightedRowId?: string | null;
@@ -124,8 +123,7 @@ function WorkbenchZone({
   onSelectRow,
   onOpenDetail,
   onRowAction,
-  onPrintReceipt,
-  receiptPrintPendingCaseId,
+  onEditReceipt,
   onEnsureGroupDetail,
   canMutateData,
   highlightedRowId,
@@ -387,8 +385,7 @@ function WorkbenchZone({
         loadFilterOptions={loadFilterOptions}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
-        onPrintReceipt={onPrintReceipt}
-        receiptPrintPendingCaseId={receiptPrintPendingCaseId}
+        onEditReceipt={onEditReceipt}
         onEnsureGroupDetail={onEnsureGroupDetail}
         canRequestNextPage={canRequestNextPage}
         onColumnFilterChange={onColumnFilterChange}

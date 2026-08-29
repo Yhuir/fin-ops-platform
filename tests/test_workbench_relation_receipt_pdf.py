@@ -16,12 +16,10 @@ class WorkbenchRelationReceiptPdfTests(unittest.TestCase):
         self.assertEqual(_uppercase_rmb("1001.05"), "人民币 壹仟零壹元零伍分")
         self.assertEqual(_uppercase_rmb("100010001.10"), "人民币 壹亿零壹万零壹元壹角")
 
-    def test_renderer_creates_two_copies_and_continuation_pages_without_dropping_invoices(self) -> None:
-        invoice_lines = [
+    def test_renderer_creates_one_template_copy_and_continuation_pages_without_dropping_lines(self) -> None:
+        lines = [
             {
-                "id": f"invoice-{index}",
-                "invoice_no": f"265320000000000000{index:02d}",
-                "date": "2026-08-28",
+                "summary": f"技术服务费 {index}",
                 "amount": f"{index}.00",
                 "note": f"备注 {index}",
             }
@@ -38,13 +36,13 @@ class WorkbenchRelationReceiptPdfTests(unittest.TestCase):
                 "handler": "",
                 "supervisor": "",
                 "bank_transaction_ids": ["bank-1"],
-                "invoice_lines": invoice_lines,
+                "lines": lines,
             }],
         })
 
         document = fitz.open(stream=content, filetype="pdf")
         try:
-            self.assertEqual(document.page_count, 4)
+            self.assertEqual(document.page_count, 2)
             for page in document:
                 self.assertAlmostEqual(page.rect.width, 595.28, places=1)
                 self.assertAlmostEqual(page.rect.height, 419.53, places=1)
@@ -53,13 +51,14 @@ class WorkbenchRelationReceiptPdfTests(unittest.TestCase):
             document.close()
 
         self.assertIn("云南溯源科技有限公司", all_text)
-        self.assertIn("收  据", all_text)
+        self.assertIn("收    据", all_text)
         self.assertIn("成都智领趋势科技有限公司", all_text)
-        self.assertIn("人民币 陆佰元整", all_text)
-        self.assertIn("收款人留存", all_text)
-        self.assertIn("付款人留存", all_text)
-        for line in invoice_lines:
-            self.assertEqual(all_text.count(line["invoice_no"]), 2)
+        self.assertIn("人民币", all_text)
+        self.assertIn("陆佰元整", all_text)
+        self.assertNotIn("收款人留存", all_text)
+        self.assertNotIn("付款人留存", all_text)
+        for line in lines:
+            self.assertEqual(all_text.count(line["summary"]), 1)
 
 
 if __name__ == "__main__":

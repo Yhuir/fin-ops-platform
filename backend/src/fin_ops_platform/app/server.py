@@ -1891,6 +1891,12 @@ class Application:
                 status=response.status_code,
             )
             return response
+        if method == "POST" and route_path == "/api/workbench/actions/receipt-draft":
+            return self._handle_api_workbench_receipt_draft(
+                body,
+                headers=headers,
+                access_session=access_session,
+            )
         if method == "POST" and route_path == "/api/workbench/actions/print-receipt":
             return self._handle_api_workbench_print_receipt(
                 body,
@@ -2224,6 +2230,7 @@ class Application:
                 "/api/workbench/settings/data-reset/jobs/{job_id}",
                 "/api/workbench/rows/{row_id}",
                 "/api/workbench/actions/confirm-link",
+                "/api/workbench/actions/receipt-draft",
                 "/api/workbench/actions/print-receipt",
                 "/api/workbench/actions/assign-invoice-expense-items",
                 "/api/workbench/actions/cancel-link",
@@ -7624,6 +7631,26 @@ class Application:
             audit_repository=PostgresOperationsAuditRepository(connection),
             renderer=WorkbenchReceiptPdfRenderer(),
         )
+
+    def _handle_api_workbench_receipt_draft(
+        self,
+        body: str | None,
+        *,
+        headers: dict[str, str] | None,
+        access_session: OARequestSession | None,
+    ) -> Response:
+        auth_context = self._workbench_write_auth_context(
+            headers, session=access_session
+        )
+        if isinstance(auth_context, Response):
+            return auth_context
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        status_code, result = self._workbench_action_api_routes.receipt_draft(
+            payload
+        )
+        return self._json_response(status_code, result)
 
     def _handle_api_workbench_print_receipt(
         self,

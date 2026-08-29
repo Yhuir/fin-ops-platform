@@ -73,6 +73,7 @@ class _Repository:
         self.relation = relation
         self.rows: dict[tuple[str, str], dict[str, object]] = {}
         self.insert_calls = 0
+        self.external_invoices: list[dict[str, object]] = []
 
     def load_active_relation(self, case_id: str) -> dict[str, object] | None:
         if self.relation is None or case_id != self.relation["case_id"]:
@@ -82,6 +83,13 @@ class _Repository:
     def find_by_fingerprint(self, case_id: str, fingerprint: str) -> dict[str, object] | None:
         row = self.rows.get((case_id, fingerprint))
         return deepcopy(row) if row is not None else None
+
+    def load_output_invoices_by_numbers(self, invoice_nos: list[str]) -> list[dict[str, object]]:
+        return [
+            deepcopy(row)
+            for row in self.external_invoices
+            if str(row.get("digital_invoice_no") or row.get("invoice_no") or "") in invoice_nos
+        ]
 
     def insert(self, payload: dict[str, object]) -> tuple[dict[str, object], bool]:
         self.insert_calls += 1
@@ -164,8 +172,13 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
 
     @staticmethod
     def _print(service: WorkbenchRelationReceiptService) -> WorkbenchReceiptFile:
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
         return service.print_receipt(
             case_id="CASE-RECEIPT-1",
+            relation_version=draft["relation_version"],
+            source_fingerprint=str(draft["source_fingerprint"]),
+            receipts=draft["receipts"],
+            issues_acknowledged=False,
             actor_id="finance-user",
             actor_account="YNSYLP007",
             actor_name="财务用户",
@@ -193,7 +206,9 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
         receipt = snapshot["receipts"][0]
         self.assertEqual(receipt["amount"], "180.00")
         self.assertEqual(receipt["bank_transaction_ids"], ["bank-1", "bank-2"])
-        self.assertEqual([line["invoice_no"] for line in receipt["invoice_lines"]], ["INV-1", "INV-2"])
+        original_receipt = snapshot["original_receipts"][0]
+        self.assertEqual([line["invoice_no"] for line in original_receipt["lines"]], ["INV-1", "INV-2"])
+        self.assertEqual([line["amount"] for line in receipt["lines"]], ["120.00", "60.00"])
         self.assertEqual(result.content, b"%PDF-receipt")
         self.assertEqual(repository.insert_calls, 1)
         self.assertEqual(file_store.store_calls, 1)
@@ -201,6 +216,275 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
             "receipt_generated",
             "receipt_print_requested",
         ])
+
+    def test_exact_red_blue_pair_is_removed_and_only_effective_invoice_remains(self) -> None:
+        reversed_blue_no = "26532000000809302711"
+        effective_blue_no = "26532000000809302712"
+        reversed_blue = _invoice(
+            "invoice-blue-reversed",
+            buyer="付款单位",
+            amount="182400.00",
+            invoice_no=reversed_blue_no,
+        )
+        red = {
+            **_invoice(
+                "invoice-red",
+                buyer="付款单位",
+                amount="-182400.00",
+                invoice_no="26532000000809302713",
+            ),
+            "raw_payload": {
+                "备注": f"被红冲蓝字数电发票号码：{reversed_blue_no}",
+            },
+        }
+        effective_blue = {
+            **_invoice(
+                "invoice-blue-effective",
+                buyer="付款单位",
+                amount="182400.00",
+                invoice_no=effective_blue_no,
+            ),
+            "raw_payload": {
+                "normalized_payload": {"taxable_item_name": "技术服务费"},
+            },
+        }
+        service, _repository, _file_store, _renderer, _audit = self._service(
+            _relation(
+                banks=[_bank("bank-1", payer="付款单位", amount="182400.00")],
+                invoices=[reversed_blue, red, effective_blue],
+            )
+        )
+
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
+
+        self.assertTrue(draft["can_print"])
+        self.assertEqual(draft["issues"], [])
+        self.assertEqual(draft["reversal_adjustments"][0]["kind"], "full")
+        self.assertEqual(draft["receipts"][0]["lines"], [{
+            "source_invoice_ids": ["invoice-blue-effective"],
+            "invoice_no": effective_blue_no,
+            "summary": "技术服务费",
+            "amount": "182400.00",
+            "note": "",
+        }])
+
+    def test_partial_red_blue_pair_keeps_only_the_blue_net_amount(self) -> None:
+        blue_no = "26532000000809302721"
+        blue = _invoice(
+            "invoice-blue", buyer="付款单位", amount="200.00", invoice_no=blue_no
+        )
+        red = {
+            **_invoice(
+                "invoice-red",
+                buyer="付款单位",
+                amount="-50.00",
+                invoice_no="26532000000809302722",
+            ),
+            "raw_payload": {"remark": f"被红冲蓝字数电发票号码：{blue_no}"},
+        }
+        service, *_ = self._service(
+            _relation(
+                banks=[_bank("bank-1", payer="付款单位", amount="150.00")],
+                invoices=[blue, red],
+            )
+        )
+
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
+
+        self.assertTrue(draft["can_print"])
+        self.assertEqual(draft["reversal_adjustments"][0]["kind"], "partial")
+        self.assertEqual(
+            [(line["invoice_no"], line["amount"]) for line in draft["receipts"][0]["lines"]],
+            [(blue_no, "150.00")],
+        )
+
+    def test_unresolved_red_invoice_requires_acknowledgement_and_manual_correction(self) -> None:
+        blue = _invoice(
+            "invoice-blue", buyer="付款单位", amount="150.00", invoice_no="INV-BLUE"
+        )
+        red = _invoice(
+            "invoice-red", buyer="付款单位", amount="-50.00", invoice_no="INV-RED"
+        )
+        service, *_ = self._service(
+            _relation(
+                banks=[_bank("bank-1", payer="付款单位", amount="100.00")],
+                invoices=[blue, red],
+            )
+        )
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
+
+        self.assertFalse(draft["can_print"])
+        self.assertEqual(draft["issues"][0]["code"], "receipt_reversal_target_unresolved")
+        with self.assertRaises(WorkbenchReceiptError) as raised:
+            service.print_receipt(
+                case_id="CASE-RECEIPT-1",
+                relation_version=draft["relation_version"],
+                source_fingerprint=draft["source_fingerprint"],
+                receipts=draft["receipts"],
+                issues_acknowledged=False,
+                actor_id="finance-user",
+                actor_account="YNSYLP007",
+                actor_name="财务用户",
+                request_id="request-1",
+            )
+        self.assertEqual(raised.exception.code, "receipt_reversal_issue_unacknowledged")
+
+        corrected = deepcopy(draft["receipts"])
+        corrected[0]["lines"] = [{"summary": "人工核对后的服务费", "amount": "100.00", "note": ""}]
+        result = service.print_receipt(
+            case_id="CASE-RECEIPT-1",
+            relation_version=draft["relation_version"],
+            source_fingerprint=draft["source_fingerprint"],
+            receipts=corrected,
+            issues_acknowledged=True,
+            actor_id="finance-user",
+            actor_account="YNSYLP007",
+            actor_name="财务用户",
+            request_id="request-2",
+        )
+        self.assertEqual(result.content, b"%PDF-receipt")
+
+    def test_exact_reversal_can_resolve_a_blue_invoice_outside_the_relation(self) -> None:
+        blue_no = "26532000000809302731"
+        red = {
+            **_invoice(
+                "invoice-red",
+                buyer="付款单位",
+                amount="-80.00",
+                invoice_no="26532000000809302732",
+            ),
+            "raw_payload": {"备注": f"被红冲蓝字数电发票号码：{blue_no}"},
+        }
+        effective = _invoice(
+            "invoice-effective",
+            buyer="付款单位",
+            amount="120.00",
+            invoice_no="26532000000809302733",
+        )
+        service, repository, *_ = self._service(
+            _relation(
+                banks=[_bank("bank-1", payer="付款单位", amount="120.00")],
+                invoices=[red, effective],
+            )
+        )
+        repository.external_invoices = [
+            _invoice(
+                "invoice-blue-external",
+                buyer="付款单位",
+                amount="80.00",
+                invoice_no=blue_no,
+            )
+        ]
+
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
+
+        self.assertTrue(draft["can_print"])
+        self.assertEqual(draft["reversal_adjustments"][0]["kind"], "full")
+        self.assertEqual(
+            [line["invoice_no"] for line in draft["receipts"][0]["lines"]],
+            ["26532000000809302733"],
+        )
+
+    def test_print_rejects_stale_source_and_unbalanced_edits(self) -> None:
+        relation = _relation(
+            banks=[_bank("bank-1", payer="付款单位", amount="88.00")],
+            invoices=[
+                _invoice(
+                    "invoice-1", buyer="付款单位", amount="88.00", invoice_no="INV-88"
+                )
+            ],
+        )
+        service, repository, *_ = self._service(relation)
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
+
+        with self.assertRaises(WorkbenchReceiptError) as raised:
+            service.print_receipt(
+                case_id="CASE-RECEIPT-1",
+                relation_version=int(draft["relation_version"]) - 1,
+                source_fingerprint=draft["source_fingerprint"],
+                receipts=draft["receipts"],
+                issues_acknowledged=False,
+                actor_id="finance-user",
+                actor_account="YNSYLP007",
+                actor_name="财务用户",
+                request_id="request-version",
+            )
+        self.assertEqual(raised.exception.code, "receipt_relation_version_conflict")
+
+        unbalanced_receipts = deepcopy(draft["receipts"])
+        unbalanced_receipts[0]["lines"][0]["amount"] = "87.99"
+        with self.assertRaises(WorkbenchReceiptError) as raised:
+            service.print_receipt(
+                case_id="CASE-RECEIPT-1",
+                relation_version=draft["relation_version"],
+                source_fingerprint=draft["source_fingerprint"],
+                receipts=unbalanced_receipts,
+                issues_acknowledged=False,
+                actor_id="finance-user",
+                actor_account="YNSYLP007",
+                actor_name="财务用户",
+                request_id="request-1",
+            )
+        self.assertEqual(raised.exception.code, "receipt_amount_unbalanced")
+
+        assert repository.relation is not None
+        repository.relation["bank_rows"][0]["amount"] = "89.00"
+        with self.assertRaises(WorkbenchReceiptError) as raised:
+            service.print_receipt(
+                case_id="CASE-RECEIPT-1",
+                relation_version=draft["relation_version"],
+                source_fingerprint=draft["source_fingerprint"],
+                receipts=draft["receipts"],
+                issues_acknowledged=False,
+                actor_id="finance-user",
+                actor_account="YNSYLP007",
+                actor_name="财务用户",
+                request_id="request-2",
+            )
+        self.assertEqual(raised.exception.code, "receipt_source_conflict")
+
+    def test_print_rejects_invalid_edited_receipt_fields(self) -> None:
+        service, *_ = self._service(
+            _relation(
+                banks=[_bank("bank-1", payer="付款单位", amount="88.00")],
+                invoices=[
+                    _invoice(
+                        "invoice-1",
+                        buyer="付款单位",
+                        amount="88.00",
+                        invoice_no="INV-88",
+                    )
+                ],
+            )
+        )
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
+        cases = (
+            ("payer", "", "receipt_payer_missing"),
+            ("date", "2026-02-31", "invalid_receipt_date"),
+            ("lines", [], "receipt_lines_empty"),
+            ("summary", "", "receipt_line_summary_missing"),
+            ("amount", "not-money", "receipt_line_amount_invalid"),
+        )
+        for field, value, expected_code in cases:
+            with self.subTest(field=field):
+                receipts = deepcopy(draft["receipts"])
+                if field in {"payer", "date", "lines"}:
+                    receipts[0][field] = value
+                else:
+                    receipts[0]["lines"][0][field] = value
+                with self.assertRaises(WorkbenchReceiptError) as raised:
+                    service.print_receipt(
+                        case_id="CASE-RECEIPT-1",
+                        relation_version=draft["relation_version"],
+                        source_fingerprint=draft["source_fingerprint"],
+                        receipts=receipts,
+                        issues_acknowledged=False,
+                        actor_id="finance-user",
+                        actor_account="YNSYLP007",
+                        actor_name="财务用户",
+                        request_id="request-invalid",
+                    )
+                self.assertEqual(raised.exception.code, expected_code)
 
     def test_accepts_the_canonical_renminbi_currency_label(self) -> None:
         relation = _relation(
@@ -258,7 +542,10 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
         receipts = renderer.snapshots[0]["receipts"]
         self.assertEqual({receipt["payer"] for receipt in receipts}, {"付款方 A", "付款方 B"})
         self.assertEqual(
-            {receipt["payer"]: receipt["invoice_lines"][0]["invoice_no"] for receipt in receipts},
+            {
+                receipt["payer"]: receipt["lines"][0]["invoice_no"]
+                for receipt in renderer.snapshots[0]["original_receipts"]
+            },
             {"付款方 A": "INV-A", "付款方 B": "INV-B"},
         )
 
@@ -304,6 +591,10 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
                 banks=[{**_bank("bank-1", payer="付款方", amount="1"), "currency": None}],
                 invoices=[_invoice("invoice-1", buyer="付款方", amount="1", invoice_no="INV")],
             ),
+            "missing_date": _relation(
+                banks=[{**_bank("bank-1", payer="付款方", amount="1"), "pay_receive_time": None}],
+                invoices=[_invoice("invoice-1", buyer="付款方", amount="1", invoice_no="INV")],
+            ),
             "nonpositive_income": _relation(
                 banks=[_bank("bank-1", payer="付款方", amount="0")],
                 invoices=[_invoice("invoice-1", buyer="付款方", amount="1", invoice_no="INV")],
@@ -318,6 +609,7 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
             "outflow": "receipt_relation_not_income",
             "input_invoice": "receipt_relation_not_output_invoice",
             "missing_currency": "receipt_currency_not_supported",
+            "missing_date": "receipt_transaction_date_missing",
             "nonpositive_income": "receipt_income_amount_invalid",
             "missing_invoice_number": "receipt_invoice_number_missing",
         }
@@ -350,7 +642,13 @@ class WorkbenchRelationReceiptActionRouteTests(unittest.TestCase):
         )
 
         status, result = routes.print_receipt(
-            {"case_id": "CASE-RECEIPT-1"},
+            {
+                "case_id": "CASE-RECEIPT-1",
+                "relation_version": 3,
+                "source_fingerprint": "source-1",
+                "issues_acknowledged": True,
+                "receipts": [{"receipt_key": "receipt-key-1"}],
+            },
             actor_id="finance-user",
             actor_account="YNSYLP007",
             actor_name="财务用户",
@@ -361,11 +659,34 @@ class WorkbenchRelationReceiptActionRouteTests(unittest.TestCase):
         self.assertEqual(result.content, b"%PDF")
         self.assertEqual(calls, [{
             "case_id": "CASE-RECEIPT-1",
+            "relation_version": 3,
+            "source_fingerprint": "source-1",
+            "issues_acknowledged": True,
+            "receipts": [{"receipt_key": "receipt-key-1"}],
             "actor_id": "finance-user",
             "actor_account": "YNSYLP007",
             "actor_name": "财务用户",
             "request_id": "request-1",
         }])
+
+    def test_draft_action_returns_structured_receipt_without_generating_pdf(self) -> None:
+        calls: list[dict[str, str]] = []
+
+        class _Service:
+            def draft_receipt(self, **kwargs: str) -> dict[str, object]:
+                calls.append(kwargs)
+                return {"case_id": kwargs["case_id"], "receipts": [{"lines": []}]}
+
+        routes = WorkbenchActionApiRoutes(
+            write_facade_provider=lambda: None,
+            receipt_service_provider=_Service,
+        )
+
+        status, result = routes.receipt_draft({"case_id": "CASE-RECEIPT-1"})
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(result["case_id"], "CASE-RECEIPT-1")
+        self.assertEqual(calls, [{"case_id": "CASE-RECEIPT-1"}])
 
     def test_action_maps_domain_error_and_fails_closed_without_service(self) -> None:
         class _Service:
@@ -394,6 +715,17 @@ class WorkbenchRelationReceiptActionRouteTests(unittest.TestCase):
             actor_name="name",
             request_id="request",
         )
+        self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(payload["error"], "workbench_receipt_service_unavailable")
+
+        def unavailable_provider() -> object:
+            raise RuntimeError("postgres unavailable")
+
+        unavailable = WorkbenchActionApiRoutes(
+            write_facade_provider=lambda: None,
+            receipt_service_provider=unavailable_provider,
+        )
+        status, payload = unavailable.receipt_draft({"case_id": "CASE-1"})
         self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
         self.assertEqual(payload["error"], "workbench_receipt_service_unavailable")
 

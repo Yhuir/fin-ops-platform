@@ -14,6 +14,7 @@ class RouteAccessPolicyTests(unittest.TestCase):
             ("HEAD", "/api/workbench"),
             ("OPTIONS", "/api/workbench/exceptions/review"),
             ("POST", "/api/workbench/actions/confirm-link/preview"),
+            ("POST", "/api/workbench/actions/receipt-draft"),
             ("POST", "/api/workbench/actions/withdraw-link/preview"),
             ("POST", "/api/pending-invoices/invoice-candidates/batch"),
             ("POST", "/api/pending-invoices/rows/row-1/attach-existing-invoice/preview"),
