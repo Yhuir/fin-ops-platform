@@ -12,16 +12,20 @@ def _rows() -> dict[str, list[dict[str, object]]]:
         "oa": [],
         "bank": [{
             "id": "bank-1",
-            "txn_direction": "inflow",
-            "counterparty_name_raw": "付款单位",
-            "amount": "100.00",
-            "currency": "CNY",
+            "counterparty_name": "付款单位",
+            "credit_amount": "100.00",
+            "detail_fields": {
+                "txn_direction": "inflow",
+                "counterparty_name_raw": "付款单位",
+                "amount": "100.00",
+                "currency": "人民币元",
+            },
         }],
         "invoice": [{
             "id": "invoice-1",
             "invoice_type": "output",
             "invoice_no": "INV-1",
-            "currency": "CNY",
+            "detail_fields": {"currency": "CNY"},
         }],
     }
 
@@ -46,19 +50,19 @@ class WorkbenchRelationReceiptEligibilityTests(unittest.TestCase):
         with_oa["oa"] = [{"id": "oa-1"}]
         cases.append((with_oa, "paired"))
         outflow = _rows()
-        outflow["bank"][0]["txn_direction"] = "outflow"
+        outflow["bank"][0]["detail_fields"]["txn_direction"] = "outflow"
         cases.append((outflow, "paired"))
         input_invoice = _rows()
         input_invoice["invoice"][0]["invoice_type"] = "input"
         cases.append((input_invoice, "paired"))
         missing_payer = _rows()
-        missing_payer["bank"][0]["counterparty_name_raw"] = ""
+        missing_payer["bank"][0]["counterparty_name"] = ""
         cases.append((missing_payer, "paired"))
         missing_currency = _rows()
-        missing_currency["bank"][0]["currency"] = None
+        missing_currency["bank"][0]["detail_fields"]["currency"] = None
         cases.append((missing_currency, "paired"))
         nonpositive_income = _rows()
-        nonpositive_income["bank"][0]["amount"] = "0"
+        nonpositive_income["bank"][0]["detail_fields"]["amount"] = "0"
         cases.append((nonpositive_income, "paired"))
         missing_invoice_number = _rows()
         missing_invoice_number["invoice"][0]["invoice_no"] = ""

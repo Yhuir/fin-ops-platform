@@ -202,6 +202,21 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
             "receipt_print_requested",
         ])
 
+    def test_accepts_the_canonical_renminbi_currency_label(self) -> None:
+        relation = _relation(
+            banks=[{
+                **_bank("bank-1", payer="付款单位", amount="88.00"),
+                "currency": "人民币元",
+            }],
+            invoices=[_invoice("invoice-1", buyer="付款单位", amount="88.00", invoice_no="INV-88")],
+        )
+        service, _repository, _file_store, renderer, _audit = self._service(relation)
+
+        result = self._print(service)
+
+        self.assertEqual(result.receipt_count, 1)
+        self.assertEqual(renderer.snapshots[0]["receipts"][0]["currency"], "CNY")
+
     def test_repeated_print_reuses_same_snapshot_without_regenerating_file(self) -> None:
         relation = _relation(
             banks=[_bank("bank-1", payer="付款单位", amount="88.00")],

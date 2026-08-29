@@ -9,6 +9,9 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from fin_ops_platform.services.workbench_invoice_direction import normalize_invoice_kind
+from fin_ops_platform.services.workbench_relation_receipt_eligibility import (
+    normalize_receipt_currency,
+)
 
 
 class WorkbenchReceiptError(ValueError):
@@ -146,7 +149,10 @@ class WorkbenchRelationReceiptService:
             raise WorkbenchReceiptError("receipt_relation_not_output_invoice", "该关联关系包含非销项发票，不能打印收据。", 409)
         if any(not str(row.get("digital_invoice_no") or row.get("invoice_no") or "").strip() for row in invoice_rows):
             raise WorkbenchReceiptError("receipt_invoice_number_missing", "销项发票缺少发票号码，不能打印收据。", 409)
-        currencies = {str(row.get("currency") or "").strip().upper() for row in [*bank_rows, *invoice_rows]}
+        currencies = {
+            normalize_receipt_currency(row.get("currency"))
+            for row in [*bank_rows, *invoice_rows]
+        }
         if currencies != {"CNY"}:
             raise WorkbenchReceiptError("receipt_currency_not_supported", "收据当前仅支持单一人民币币种。", 409)
 
@@ -156,7 +162,7 @@ class WorkbenchRelationReceiptService:
             payer = str(row.get("normalized_counterparty_name") or row.get("counterparty_name_raw") or "").strip()
             if not payer:
                 raise WorkbenchReceiptError("receipt_payer_missing", "收入流水缺少付款方名称，不能打印收据。", 409)
-            key = (_normalized_name(payer), _date_key(row), str(row["currency"]).strip().upper())
+            key = (_normalized_name(payer), _date_key(row), normalize_receipt_currency(row.get("currency")))
             groups.setdefault(key, []).append(row)
             payer_labels.setdefault(key, payer)
 
