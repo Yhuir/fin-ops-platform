@@ -2247,7 +2247,7 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   receipt_invoice_number_missing: "销项发票缺少发票号码，不能编辑收据。",
   receipt_currency_not_supported: "收据当前仅支持单一人民币币种。",
   receipt_payer_missing: "付款单位不能为空，请核对收据内容。",
-  receipt_invoice_group_ambiguous: "发票无法唯一归入付款方与日期分组，请核对关系成员。",
+  receipt_payer_ambiguous: "同一关联关系包含多个付款单位，不能合并为一张收据。",
   receipt_relation_version_conflict: "关联关系已变化，请重新打开收据编辑页。",
   receipt_source_conflict: "流水或发票来源数据已变化，请重新打开收据编辑页。",
   receipt_reversal_issue_unacknowledged: "请先核对并确认收据中的发票冲销异常。",

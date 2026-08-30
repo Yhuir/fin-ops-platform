@@ -335,12 +335,12 @@ class WorkbenchRelationReceiptService:
                 409,
             )
 
-        groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-        payer_labels: dict[tuple[str, str, str], str] = {}
+        payer_labels: dict[str, str] = {}
         for row in bank_rows:
             payer = str(
                 row.get("normalized_counterparty_name")
                 or row.get("counterparty_name_raw")
+                or row.get("counterparty_name")
                 or ""
             ).strip()
             if not payer:
@@ -349,42 +349,13 @@ class WorkbenchRelationReceiptService:
                     "收入流水缺少付款方名称，不能编辑收据。",
                     409,
                 )
-            key = (
-                _normalized_name(payer),
-                _date_key(row),
-                normalize_receipt_currency(row.get("currency")),
+            payer_labels.setdefault(_normalized_name(payer), payer)
+        if len(payer_labels) != 1:
+            raise WorkbenchReceiptError(
+                "receipt_payer_ambiguous",
+                "同一关联关系包含多个付款单位，不能合并为一张收据。",
+                409,
             )
-            groups.setdefault(key, []).append(row)
-            payer_labels.setdefault(key, payer)
-
-        invoices_by_group: dict[tuple[str, str, str], list[dict[str, Any]]] = {
-            key: [] for key in groups
-        }
-        if len(groups) == 1:
-            invoices_by_group[next(iter(groups))] = invoice_rows
-        else:
-            for invoice in invoice_rows:
-                buyer_key = _normalized_name(
-                    invoice.get("buyer_name") or invoice.get("counterparty_name")
-                )
-                invoice_date = str(invoice.get("invoice_date") or "").strip()
-                payer_candidates = [key for key in groups if key[0] == buyer_key]
-                candidates = (
-                    payer_candidates
-                    if len(payer_candidates) == 1
-                    else [
-                        key
-                        for key in payer_candidates
-                        if invoice_date and key[1] == invoice_date
-                    ]
-                )
-                if len(candidates) != 1:
-                    raise WorkbenchReceiptError(
-                        "receipt_invoice_group_ambiguous",
-                        f"发票 {_invoice_no(invoice) or invoice.get('id')} 无法唯一归入付款方与日期分组。",
-                        409,
-                    )
-                invoices_by_group[candidates[0]].append(invoice)
 
         target_invoice_nos = reversal_target_invoice_nos(
             _invoice_remark(row) for row in invoice_rows
@@ -399,47 +370,42 @@ class WorkbenchRelationReceiptService:
             [*invoice_rows, *reversal_target_rows],
         )
 
-        receipts: list[dict[str, Any]] = []
-        total_amount = Decimal("0.00")
-        for key in sorted(groups, key=lambda item: (item[1], item[0])):
-            bank_group = groups[key]
-            income_amount = sum(
-                (_decimal(row.get("amount")) for row in bank_group), Decimal("0.00")
-            )
-            total_amount += income_amount
-            lines = []
-            for row in invoices_by_group[key]:
-                row_id = str(row["id"])
-                amount = net_amounts[row_id]
-                if amount == Decimal("0.00"):
-                    continue
-                lines.append(
-                    {
-                        "source_invoice_ids": [row_id],
-                        "invoice_no": _invoice_no(row),
-                        "summary": _invoice_summary(row),
-                        "amount": f"{amount:.2f}",
-                        "note": "",
-                    }
-                )
-            line_total = sum(
-                (_decimal(line["amount"]) for line in lines), Decimal("0.00")
-            )
-            receipts.append(
+        total_amount = sum(
+            (_decimal(row.get("amount")) for row in bank_rows), Decimal("0.00")
+        )
+        lines = []
+        for row in invoice_rows:
+            row_id = str(row["id"])
+            amount = net_amounts[row_id]
+            if amount == Decimal("0.00"):
+                continue
+            lines.append(
                 {
-                    "receipt_key": _receipt_key(bank_group),
-                    "payer": payer_labels[key],
-                    "date": key[1],
-                    "currency": key[2],
-                    "income_amount": f"{income_amount:.2f}",
-                    "line_total": f"{line_total:.2f}",
-                    "balanced": bool(lines) and line_total == income_amount,
-                    "handler": "",
-                    "supervisor": "",
-                    "bank_transaction_ids": [str(row["id"]) for row in bank_group],
-                    "lines": lines,
+                    "source_invoice_ids": [row_id],
+                    "invoice_no": _invoice_no(row),
+                    "summary": _invoice_summary(row),
+                    "amount": f"{amount:.2f}",
+                    "note": "",
                 }
             )
+        line_total = sum(
+            (_decimal(line["amount"]) for line in lines), Decimal("0.00")
+        )
+        receipts = [
+            {
+                "receipt_key": _receipt_key(bank_rows),
+                "payer": next(iter(payer_labels.values())),
+                "date": max(_date_key(row) for row in bank_rows),
+                "currency": "CNY",
+                "income_amount": f"{total_amount:.2f}",
+                "line_total": f"{line_total:.2f}",
+                "balanced": bool(lines) and line_total == total_amount,
+                "handler": "",
+                "supervisor": "",
+                "bank_transaction_ids": [str(row["id"]) for row in bank_rows],
+                "lines": lines,
+            }
+        ]
 
         source_payload = {
             "case_id": str(relation["case_id"]),

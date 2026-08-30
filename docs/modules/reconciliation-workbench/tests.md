@@ -4,7 +4,7 @@
 
 ## 2026-08-30 无 OA 收入 + 销项发票收据编辑与打印
 
-- Business core：`tests/test_workbench_relation_receipt_eligibility.py` 保护 paired/unpaired 的合格 active relation 都输出唯一“编辑并打印收据”，同时拒绝 singleton、OA、支出、进项、缺字段和非 CNY。`tests/test_workbench_relation_receipt_service.py` 保护收入固定金额、用户编辑后逐张平衡、20 位明确蓝票号码的全额/部分冲销、异常确认、关系版本和来源指纹冲突。`tests/test_workbench_relation_receipt_pdf.py` 保护模板字段、五行续页、中文大写金额、A5 横向和一联输出。
+- Business core：`tests/test_workbench_relation_receipt_eligibility.py` 保护 paired/unpaired 的合格 active relation 都输出唯一“编辑并打印收据”，同时拒绝 singleton、OA、支出、进项、缺字段、多个付款方和非 CNY。`tests/test_workbench_relation_receipt_service.py` 保护一个 relation 只生成一张收据、多笔同付款方收入取合计与最新日期、多个付款方 fail closed、用户编辑后平衡、20 位明确蓝票号码的全额/部分冲销、异常确认、关系版本和来源指纹冲突。`tests/test_workbench_relation_receipt_pdf.py` 保护模板字段、五行续页、中文大写金额、A5 横向和一联输出。
 - Service / Repository：`tests/test_workbench_relation_receipt_service.py` 与 `tests/test_workbench_relation_receipt_repository.py` 保护每次 draft/print 重读 active relation、红蓝票号码批量精确查询、编辑文档指纹幂等复用、来源或编辑内容变化生成新快照、文件持久化、生成/打印请求审计，以及非法关系零写入。
 - API contract：draft action 接受 relation case id 并返回 relation version、source fingerprint、分组收据、冲销结果和异常；print action 接受上述并发证据与编辑后 receipts，成功返回 `application/pdf` 和稳定文件名。权限、not found、资格/版本/来源/金额冲突和存储失败按明确错误映射，不返回 base64 或页面 read-model 字段。
 - Read model / cache / background job：不适用。草稿和提交都直接读取当前 canonical relation；PDF 同步生成或按文档指纹复用，不新增 read model、cache、queue 或 worker。

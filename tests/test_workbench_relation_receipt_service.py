@@ -523,7 +523,7 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
             "receipt_print_requested",
         ])
 
-    def test_multiple_payers_assign_invoices_by_unique_buyer(self) -> None:
+    def test_multiple_payers_are_rejected_instead_of_guessing_receipt_ownership(self) -> None:
         relation = _relation(
             banks=[
                 _bank("bank-a", payer="付款方 A", amount="100.00", occurred_at="2026-08-27T09:00:00+08:00"),
@@ -534,22 +534,15 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
                 _invoice("invoice-b", buyer="付款方 B", amount="200.00", invoice_no="INV-B", invoice_date="2026-01-01"),
             ],
         )
-        service, _repository, _file_store, renderer, _audit = self._service(relation)
+        service, *_ = self._service(relation)
 
-        result = self._print(service)
+        with self.assertRaises(WorkbenchReceiptError) as raised:
+            service.draft_receipt(case_id="CASE-RECEIPT-1")
 
-        self.assertEqual(result.receipt_count, 2)
-        receipts = renderer.snapshots[0]["receipts"]
-        self.assertEqual({receipt["payer"] for receipt in receipts}, {"付款方 A", "付款方 B"})
-        self.assertEqual(
-            {
-                receipt["payer"]: receipt["lines"][0]["invoice_no"]
-                for receipt in renderer.snapshots[0]["original_receipts"]
-            },
-            {"付款方 A": "INV-A", "付款方 B": "INV-B"},
-        )
+        self.assertEqual(raised.exception.code, "receipt_payer_ambiguous")
+        self.assertEqual(raised.exception.status_code, HTTPStatus.CONFLICT)
 
-    def test_same_payer_on_multiple_dates_requires_an_unambiguous_invoice_date(self) -> None:
+    def test_same_payer_on_multiple_dates_produces_one_receipt_using_latest_income_date(self) -> None:
         relation = _relation(
             banks=[
                 _bank("bank-1", payer="付款方", amount="100.00", occurred_at="2026-08-27T09:00:00+08:00"),
@@ -559,13 +552,15 @@ class WorkbenchRelationReceiptServiceTests(unittest.TestCase):
                 _invoice("invoice-1", buyer="付款方", amount="300.00", invoice_no="INV-1", invoice_date="2026-08-26"),
             ],
         )
-        service, _repository, _file_store, _renderer, _audit = self._service(relation)
+        service, *_ = self._service(relation)
 
-        with self.assertRaises(WorkbenchReceiptError) as raised:
-            self._print(service)
+        draft = service.draft_receipt(case_id="CASE-RECEIPT-1")
 
-        self.assertEqual(raised.exception.code, "receipt_invoice_group_ambiguous")
-        self.assertEqual(raised.exception.status_code, HTTPStatus.CONFLICT)
+        self.assertEqual(draft["total_amount"], "300.00")
+        self.assertEqual(len(draft["receipts"]), 1)
+        self.assertEqual(draft["receipts"][0]["date"], "2026-08-28")
+        self.assertEqual(draft["receipts"][0]["income_amount"], "300.00")
+        self.assertTrue(draft["receipts"][0]["balanced"])
 
     def test_rejects_relations_outside_the_income_output_invoice_contract(self) -> None:
         invalid_relations = {

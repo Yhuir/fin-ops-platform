@@ -76,6 +76,19 @@ def workbench_relation_receipt_action(
         for row in bank_rows
     ):
         return None
+    payer_keys = {
+        "".join(
+            str(
+                row.get("normalized_counterparty_name")
+                or row.get("counterparty_name_raw")
+                or row.get("counterparty_name")
+                or ""
+            ).split()
+        ).casefold()
+        for row in bank_rows
+    }
+    if len(payer_keys) != 1:
+        return None
     return {
         "eligible": True,
         "case_id": case_id,

@@ -725,6 +725,7 @@ describe("workbench api bank amount mapping", () => {
     ["workbench_detail_unavailable", 503, "关联台详情暂时不可用，请稍后重试。"],
     ["workbench_anomaly_changed", 409, "异常内容已变化，请刷新后重新审阅。"],
     ["workbench_anomaly_review_blocked", 409, "该关系仍有未解决的配对条件，不能进入已配对。"],
+    ["receipt_payer_ambiguous", 409, "同一关联关系包含多个付款单位，不能合并为一张收据。"],
     ["relation_preview_rows_missing", 400, "关联预览无效，请刷新后重新选择。"],
     ["relation_preview_rows_ambiguous", 409, "所选关联台记录内容不一致，请刷新后重试。"],
     ["unknown_auth_error", 401, "登录状态已失效，请重新登录。"],

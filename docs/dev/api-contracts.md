@@ -1013,7 +1013,7 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 }
 ```
 
-- 收据按规范化付款方、银行交易日期和币种分组；`income_amount`/`total_amount` 只来自正收入流水，是提交时的固定核对金额。`receipt_key` 绑定该组银行成员，不允许客户端增加、删除或替换收据分组。
+- 一个 active relation 固定生成一张收据；多条收入流水必须属于同一规范化付款方，否则明确返回 `receipt_payer_ambiguous`，不得按发票购买方或日期猜测拆分。收据日期默认取该关系最新收入交易日期；`income_amount`/`total_amount` 是全部正收入流水合计，也是提交时的固定核对金额。`receipt_key` 绑定该关系全部银行成员，不允许客户端增加、删除或替换收据。
 - 销项红票只解析备注中精确的 `被红冲蓝字数电发票号码：<20位号码>`；服务端一次批量精确查询蓝票号码。目标必须唯一、为正数销项发票且冲销额不超过剩余蓝票金额。全额冲销后红蓝票都不生成行，部分冲销只输出蓝票净额；其它情况写入 `issues[]`，不得用号码片段、金额、购方、日期或文本相似度兜底。
 - draft 是直接 canonical read，不持久化草稿，不创建 file/audit/read-model/cache/queue/worker；但入口只向拥有 Workbench 写权限且通过全局/OA 安全 gate 的用户开放，因为它只能从后续打印动作进入。
 
@@ -1039,7 +1039,7 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 ```
 
 - 服务端先重读 active relation 并重建 draft；`relation_version` 或 `source_fingerprint` 变化返回 `409`。存在 `issues[]` 时必须显式提交 `issues_acknowledged=true`，否则拒绝。
-- receipts 必须与服务器分组 exact-set 一致。付款单位、有效 ISO 日期、至少一条明细、非空摘要和正数两位小数金额必填；每张明细合计必须精确等于对应 `income_amount`。客户端平衡提示不是安全边界，服务端重复验证。
+- receipts 必须与服务器返回的唯一收据 exact-set 一致。付款单位、有效 ISO 日期、至少一条明细、非空摘要和正数两位小数金额必填；明细合计必须精确等于 `income_amount`。客户端平衡提示不是安全边界，服务端重复验证。
 - 成功按 `银行收据!A1:J12` 生成 A5 横向一联 PDF；超过五条明细分页，合计只在末页。最终快照包含原始草稿、编辑后文档、冲销结果/异常和确认状态；相同编辑快照按文档指纹复用 `app.workbench_relation_receipts`/`app.file_objects`，不同编辑内容生成新快照。
 - 响应为 `application/pdf` blob，header 携带收据 id/count/reused 事实。成功首次生成写 `receipt_generated`，每次请求写 `receipt_print_requested`；二者只表示生成和请求打印，不表示浏览器或物理打印机已完成。该动作不修改 relation、canonical invoice、统计、分区或其它页面 read model。
 

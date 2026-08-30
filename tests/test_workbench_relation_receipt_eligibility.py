@@ -65,6 +65,13 @@ class WorkbenchRelationReceiptEligibilityTests(unittest.TestCase):
         missing_invoice_number = _rows()
         missing_invoice_number["invoice"][0]["invoice_no"] = ""
         cases.append(missing_invoice_number)
+        multiple_payers = _rows()
+        multiple_payers["bank"].append({
+            **multiple_payers["bank"][0],
+            "id": "bank-2",
+            "counterparty_name": "另一付款单位",
+        })
+        cases.append(multiple_payers)
 
         for rows in cases:
             with self.subTest(rows=rows):
