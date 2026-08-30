@@ -148,43 +148,71 @@ async function chooseScopeOption(user: ReturnType<typeof userEvent.setup>, trigg
   await user.click(within(picker).getByRole("button", { name: optionName }));
 }
 
-function expectInlineTimeSelection(optionName: string) {
-  const picker = screen.getByRole("group", { name: "时间统计时间范围" });
-  expect(within(picker).getByRole("button", { name: optionName })).toHaveAttribute("aria-pressed", "true");
+function expectCompactTimeSelection(optionName: string) {
+  const month = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"].indexOf(optionName) + 1;
+  expect(screen.getByRole("button", { name: `时间统计时间范围：2026年${month}月` })).toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "时间统计时间范围选择器" })).not.toBeInTheDocument();
 }
 
 describe("Cost statistics page", () => {
-  test("loads only from an overflowing table near its bottom and keeps retry local", async () => {
+  test("uses explicit compact pagination and never requests another page from scrolling", async () => {
     const user = userEvent.setup();
-    const onRequestNextPage = vi.fn();
-    const requestAnimationFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const onPageChange = vi.fn();
+    const onRetryPage = vi.fn();
     const props = {
-      ariaLabel: "自动加载测试表",
+      ariaLabel: "显式分页测试表",
       columns: [{ key: "label", header: "内容", render: (row: { id: string }) => row.id }],
       rows: [{ id: "row-1" }],
       getRowKey: (row: { id: string }) => row.id,
-      hasNextPage: true,
-      onRequestNextPage,
+      page: 1,
+      pageSize: 1,
+      total: 3,
+      onPageChange,
+      onRetryPage,
     };
     const rendered = render(<CostStatisticsTable {...props} />);
-    const scrollSurface = screen.getByRole("grid", { name: "自动加载测试表" }).closest(".finance-table__scroll");
+    const scrollSurface = screen.getByRole("grid", { name: "显式分页测试表" }).closest(".finance-table__scroll");
     expect(scrollSurface).not.toBeNull();
-    const scrollElement = scrollSurface as HTMLElement;
-    expect(onRequestNextPage).not.toHaveBeenCalled();
+    fireEvent.scroll(scrollSurface as HTMLElement);
+    expect(onPageChange).not.toHaveBeenCalled();
+    expect(screen.getByText("显示 1-1 / 3")).toBeInTheDocument();
+    expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /下一页/ }));
+    expect(onPageChange).toHaveBeenCalledWith(2);
 
-    Object.defineProperties(scrollElement, {
-      clientHeight: { configurable: true, value: 400 },
-      scrollHeight: { configurable: true, value: 1000 },
-      scrollTop: { configurable: true, value: 500 },
-    });
-    fireEvent.scroll(scrollElement);
-
-    await waitFor(() => expect(onRequestNextPage).toHaveBeenCalledTimes(1));
-
-    rendered.rerender(<CostStatisticsTable {...props} loadMoreError="下一页加载失败" />);
+    rendered.rerender(<CostStatisticsTable {...props} pageError="下一页加载失败" />);
     await user.click(screen.getByRole("button", { name: "重试" }));
-    expect(onRequestNextPage).toHaveBeenCalledTimes(2);
-    requestAnimationFrame.mockRestore();
+    expect(onRetryPage).toHaveBeenCalledTimes(1);
+  });
+
+  test("replaces rows through cursor pagination and keeps a failed page request local", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      costExplorerExtraTimeRows: 25,
+      costExplorerNextPageFailuresBeforeSuccess: 1,
+    });
+
+    renderCostStatisticsPage();
+    await findCostStatisticsHeading();
+
+    expect(screen.getByText(/显示 1-20 \/ \d+/)).toBeInTheDocument();
+    expect(screen.getByText(/第 1 \/ \d+ 页/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /下一页/ }));
+
+    expect(await screen.findByText("成本统计分页加载暂时失败，请重试。")).toBeInTheDocument();
+    expect(screen.getByText(/显示 1-20 \/ \d+/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByText(/第 2 \/ \d+ 页/)).toBeInTheDocument();
+    expect(screen.getByText(/显示 21-\d+ \/ \d+/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&cursor=mock%3A20&page_size=20&include_statistics=false",
+      expect.any(Object),
+    );
+
+    await user.click(screen.getByRole("button", { name: /上一页/ }));
+    expect(await screen.findByText(/第 1 \/ \d+ 页/)).toBeInTheDocument();
   });
 
   test("locks compact premium surface and motion styling contracts", () => {
@@ -341,10 +369,10 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("总金额 20560.00")).not.toBeInTheDocument();
     expect(await within(timeGrid).findByRole("button", { name: "查看银行流水 项目客户 2026-03-22 10:30:00 2000.00" })).toBeInTheDocument();
     expect(within(timeGrid).getByText("2000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
-    expectInlineTimeSelection("三月");
+    expectCompactTimeSelection("三月");
     expect(screen.queryByRole("button", { name: /加载更多/ })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=20&include_statistics=false",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
@@ -361,9 +389,9 @@ describe("Cost statistics page", () => {
     const nextTimeGrid = await screen.findByRole("grid", { name: "按时间统计表" });
     expectProjectCostTable("按时间统计表");
     expect(await within(nextTimeGrid).findByRole("button", { name: "查看银行流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
-    expectInlineTimeSelection("四月");
+    expectCompactTimeSelection("四月");
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-04&view=time&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-04&view=time&page_size=20&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -530,7 +558,7 @@ describe("Cost statistics page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        `/api/cost-statistics/explorer?scope=2026-03&view=time&query=${encodeURIComponent("昆明设备")}&page_size=50&include_statistics=false`,
+        `/api/cost-statistics/explorer?scope=2026-03&view=time&query=${encodeURIComponent("昆明设备")}&page_size=20&include_statistics=false`,
         expect.any(Object),
       );
     });
@@ -571,7 +599,7 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=20&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -685,7 +713,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按项目" }));
     expect(await screen.findByRole("button", { name: "项目统计时间范围：年月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=project&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=all&view=project&page_size=20&include_statistics=false",
       expect.any(Object),
     );
     expect(screen.getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
@@ -1073,7 +1101,7 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findAllByText("当前时间范围没有收入或支出流水。")).toHaveLength(1);
     expect(screen.queryByText("当前时间范围没有可用于流水统计的收入或支出流水。")).not.toBeInTheDocument();
-    expectInlineTimeSelection("五月");
+    expectCompactTimeSelection("五月");
     await chooseScopeOption(user, "时间统计时间范围：2026年5月", "三月");
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
   });
@@ -1149,7 +1177,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按时间" }));
     await chooseScopeOption(user, "时间统计时间范围：2026年3月", "四月");
     await screen.findByRole("grid", { name: "按时间统计表" });
-    expectInlineTimeSelection("四月");
+    expectCompactTimeSelection("四月");
     expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "查看银行流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
 
@@ -1159,11 +1187,11 @@ describe("Cost statistics page", () => {
     expect(await screen.findByText("交通费")).toBeInTheDocument();
 
     await user.click(screen.getByRole("radio", { name: "按时间" }));
-    expectInlineTimeSelection("四月");
+    expectCompactTimeSelection("四月");
     expect(await screen.findByRole("button", { name: "查看银行流水 云南冶金集团股份有限公司 2026-04-16 09:15:08 4800.00" })).toBeInTheDocument();
   });
 
-  test("time view keeps its period picker permanently visible in the fixed left rail", async () => {
+  test("time view keeps a compact period picker in the fixed left rail", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch();
@@ -1176,7 +1204,8 @@ describe("Cost statistics page", () => {
     const rail = document.querySelector(".cost-time-filter-rail");
     expect(rail).not.toBeNull();
     expect(within(rail as HTMLElement).getByRole("button", { name: "全部" })).toBeInTheDocument();
-    expect(within(rail as HTMLElement).getByRole("button", { name: "三月" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(rail as HTMLElement).getByRole("button", { name: "时间统计时间范围：2026年3月" })).toHaveClass("is-active");
+    expect(within(rail as HTMLElement).queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "时间统计时间范围选择器" })).not.toBeInTheDocument();
   });
 
@@ -1233,7 +1262,7 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     await chooseScopeOption(user, "时间统计时间范围：2026年3月", "四月");
 
-    expectInlineTimeSelection("四月");
+    expectCompactTimeSelection("四月");
     expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
     expect(screen.getByLabelText("正在加载成本统计内容")).toHaveAttribute("aria-busy", "true");
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
@@ -1270,7 +1299,7 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("成本统计数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeEnabled();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=20&include_statistics=false",
       expect.any(Object),
     );
   });
@@ -1291,7 +1320,7 @@ describe("Cost statistics page", () => {
       () => {
         const explorerCalls = fetchMock.mock.calls.filter(([request]) => (
           String(request)
-            === "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false"
+            === "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=20&include_statistics=false"
         ));
         expect(explorerCalls).toHaveLength(1);
       },
@@ -1303,7 +1332,7 @@ describe("Cost statistics page", () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    const initialUrl = "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=50&include_statistics=false";
+    const initialUrl = "/api/cost-statistics/explorer?scope=2026-03&view=time&page_size=20&include_statistics=false";
 
     renderCostStatisticsPage();
 

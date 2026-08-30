@@ -20744,28 +20744,30 @@ body.column-layout-dragging {
   min-width: 100%;
 }
 
-.cost-auto-load-status {
-  display: flex;
-  min-height: 30px;
+.cost-table-pagination-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: center;
-  gap: var(--fp-space-2);
-  padding: 5px var(--fp-space-3);
+  gap: var(--fp-space-3);
+  padding: var(--fp-space-2) var(--fp-space-3);
   border-top: 1px solid var(--fp-border-subtle);
-  color: var(--fp-text-muted);
-  background: var(--fp-surface-raised);
-  font-size: 12px;
-  font-weight: 700;
+  background: var(--fp-surface);
 }
 
-.cost-auto-load-status button {
-  padding: 2px 8px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-accent);
-  font: inherit;
-  cursor: pointer;
+.cost-table-page-status {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+  color: var(--fp-text-muted);
+  font-size: var(--fp-text-label);
+  font-weight: var(--fp-weight-semibold);
+  white-space: nowrap;
+}
+
+.cost-table-page-status [data-slot="button"] {
+  min-height: 30px;
 }
 
 .cost-table {
@@ -20863,6 +20865,24 @@ body.column-layout-dragging {
   color: var(--fp-text-primary);
   font-size: 13px;
   font-weight: var(--fp-weight-semibold);
+}
+
+.cost-time-filter-rail .business-period-picker--segmented {
+  width: 100%;
+}
+
+.cost-time-filter-rail .business-period-trigger {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .cost-table-pagination-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cost-table-page-status {
+    justify-content: flex-start;
+  }
 }
 
 .cost-analysis-layout.single-column {

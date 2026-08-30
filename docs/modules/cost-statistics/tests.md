@@ -12,14 +12,14 @@
 | Runtime regression | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/scope/worker tests | 旧 Cost read-model 链路保持删除 |
 | OA 归一化 | `tests/test_mongo_oa_adapter.py` | 支付申请精确读取可配置 `category`、日常报销明细精确读取 `purposeType`、表单字段互不覆盖、空/未知值不伪造“其他” |
 | Settings | `tests/test_app_settings_service.py` | time/tag 默认 all 与独立 CAS、无 OA 项目数组默认空、稳定 ID/名称/至少一个标签/标签互斥、旧单项目配置一次性归一化、候选校验、历史标签不静默丢失 |
-| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx`、`CostExplorerList.test.tsx`、`CostEntryDetailPanel.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | 初始 loading/empty/error、标题行 tabs、Disclosure 懒展开、支付申请整单/日常报销逐明细输入、每关系独立保存、`X` checkbox 条件展示与原因校验、400/409 保留草稿、已分配编辑、正常上海时间、搜索/分页/权限/窄屏、五视图口径、导出与旧规则抽屉回归 |
+| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx`、`CostExplorerList.test.tsx`、`CostEntryDetailPanel.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | 初始 loading/empty/error、标题行 tabs、紧凑 HeroUI 时间 Popover、Disclosure 懒展开、支付申请整单/日常报销逐明细输入、每关系独立保存、`X` checkbox 条件展示与原因校验、400/409 保留草稿、已分配编辑、正常上海时间、五视图右侧明细显式 cursor 分页、分页错误局部重试、滚动不触发请求、搜索/权限/窄屏、五视图口径、导出与旧规则抽屉回归 |
 
 ## 候选发布门禁
 
 1. 后端定向测试、前端定向测试、lint、build 全部通过。
 2. 全仓 pytest collection 不得引用已删除模块。
 3. whole-repo 扫描不得保留 OA mismatch 自动缩放、默认项目/首项兜底、OA-first 金额、OA 日期 scope、“混合支付账户”、按 view 推断详情、旧单抽屉 `/tag-rules` 或 `bank_flow_rows -> cost allocations` 耦合；production runtime 也不得出现 Cost read-model event/worker/gateway/manifest。
-4. 部署后验证 explorer 五种视图、query 搜索、cursor 下一页、两类详情、预览、导出、无 OA 候选/空默认和 Audit。
+4. 部署后验证 explorer 五种视图、query 搜索、右侧明细显式 cursor 上一页/下一页、两类详情、预览、导出、无 OA 候选/空默认和 Audit。
 5. 多次测量 API duration，报告 p50/p95/max。
 6. 验证 Cost 请求前后没有新增 Cost outbox/dirty scope，其他关键页面 smoke 正常。
 7. 生产数据在相同 scope 下验证 `project/expense_type=C`、`bank/bank_tag/time=N`；抽样验证 `O=N` 的 1×1、3×3、3×2 关系都不进入待分配，`O!=N` 全量进入 pending，人工保存满足 `C+X=N`。确认支付申请只输入一次、日常报销逐明细输入一次、各关系独立保存，项目/费用时间锚点不被解释为银行来源归属。

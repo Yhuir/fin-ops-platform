@@ -22,6 +22,8 @@ type MockApiOptions = {
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
+  costExplorerNextPageFailuresBeforeSuccess?: number;
+  costExplorerExtraTimeRows?: number;
   costExplorerDelayMs?: number;
   costDetailFailuresBeforeSuccess?: number;
   costDetailDelayMs?: number;
@@ -4680,6 +4682,7 @@ function isBinaryLikeResponse(value: MockFetchResult): value is Response {
 
 export function installMockApiFetch(options: MockApiOptions = {}) {
   let costExplorerFailuresRemaining = Math.max(0, options.costExplorerFailuresBeforeSuccess ?? 0);
+  let costExplorerNextPageFailuresRemaining = Math.max(0, options.costExplorerNextPageFailuresBeforeSuccess ?? 0);
   let costDetailFailuresRemaining = Math.max(0, options.costDetailFailuresBeforeSuccess ?? 0);
   let latestImportSession = buildImportPreviewPayload(
     options.initialImportPreviewFileNames ?? [],
@@ -5947,6 +5950,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/cost-statistics/explorer": ({ url }) => {
       const scope = url.searchParams.get("scope") ?? "all";
       const month = scope.startsWith("year:") ? "all" : scope;
+      if (url.searchParams.has("cursor") && costExplorerNextPageFailuresRemaining > 0) {
+        costExplorerNextPageFailuresRemaining -= 1;
+        return {
+          status: 503,
+          body: {
+            error: "cost_statistics_explorer_page_temporarily_unavailable",
+            message: "成本统计分页加载暂时失败，请重试。",
+          },
+        };
+      }
       if (costExplorerFailuresRemaining > 0 && month !== "all") {
         costExplorerFailuresRemaining -= 1;
         return {
@@ -5960,14 +5973,21 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.costErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "cost statistics failed" } };
       }
-      return {
-        body: buildCostStatisticsExplorerPagePayload(
-          url,
-          buildCostStatisticsExplorerPayload(month, {
-            duplicateTransactionRows: options.costDuplicateTransactionRows,
-          }),
-        ),
-      };
+      const payload = buildCostStatisticsExplorerPayload(month, {
+        duplicateTransactionRows: options.costDuplicateTransactionRows,
+      });
+      const template = payload.bank_flow_time_rows[0];
+      if (template && options.costExplorerExtraTimeRows) {
+        payload.bank_flow_time_rows = [
+          ...payload.bank_flow_time_rows,
+          ...Array.from({ length: options.costExplorerExtraTimeRows }, (_, index) => ({
+            ...template,
+            transaction_id: `cost-pagination-${index + 1}`,
+            counterparty_name: `分页流水 ${index + 1}`,
+          })),
+        ];
+      }
+      return { body: buildCostStatisticsExplorerPagePayload(url, payload) };
     },
     "/api/cost-statistics/manual-allocations": ({ url }) => {
       const cursor = url.searchParams.get("cursor");

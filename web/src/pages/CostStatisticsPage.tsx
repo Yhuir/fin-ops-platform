@@ -69,6 +69,7 @@ type ExplorerScopeSelection = {
 };
 type EffectiveCostPageState = "fresh" | "loading" | "error";
 type ExplorerTransitionScope = "surface" | "children" | "rows" | null;
+const EXPLORER_PAGE_SIZE = 20;
 
 function isAbortLikeError(caught: unknown) {
   if (caught instanceof DOMException && caught.name === "AbortError") {
@@ -290,7 +291,10 @@ function getScopeDateRange(
 function getCostStatisticsLoadErrorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
     const message = error.message.trim();
-    if (message && error.code === "cost_statistics_explorer_temporarily_unavailable") {
+    if (message && [
+      "cost_statistics_explorer_temporarily_unavailable",
+      "cost_statistics_explorer_page_temporarily_unavailable",
+    ].includes(error.code)) {
       return message;
     }
     if (message && (error.status === 401 || error.status === 403 || error.code === "invalid_oa_session")) {
@@ -390,8 +394,11 @@ export default function CostStatisticsPage() {
   const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExportReferenceData | null>(null);
   const [entryDetail, setEntryDetail] = useState<CostEntryDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [explorerPage, setExplorerPage] = useState(1);
+  const [explorerPageCursors, setExplorerPageCursors] = useState<Record<number, string | undefined>>({ 1: undefined });
+  const [isExplorerPageLoading, setIsExplorerPageLoading] = useState(false);
+  const [explorerPageError, setExplorerPageError] = useState<string | null>(null);
+  const [failedExplorerPage, setFailedExplorerPage] = useState<number | null>(null);
   const [isExportReferenceLoading, setIsExportReferenceLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -471,7 +478,7 @@ export default function CostStatisticsPage() {
   const exportReferenceRequestRef = useRef<AbortController | null>(null);
   const exportRequestRef = useRef<AbortController | null>(null);
   const exportPreviewRequestRef = useRef<AbortController | null>(null);
-  const loadMoreRequestRef = useRef<AbortController | null>(null);
+  const paginationRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
   const loadedStatisticsRefreshKeyRef = useRef<string | undefined>(undefined);
 
@@ -526,7 +533,7 @@ export default function CostStatisticsPage() {
   const explorerRequest: CostStatisticsExplorerPageRequest = {
     scope: explorerScope,
     view: explorerView,
-    pageSize: 50,
+    pageSize: EXPLORER_PAGE_SIZE,
     ...(viewMode === "project" && selectedProjectName ? { projectName: selectedProjectName } : {}),
     ...(viewMode === "project" && selectedProjectExpenseType ? { expenseType: selectedProjectExpenseType } : {}),
     ...(viewMode === "bank" && selectedBankAccountLabel ? { paymentAccountLabel: selectedBankAccountLabel } : {}),
@@ -550,8 +557,6 @@ export default function CostStatisticsPage() {
   const invalidateExportReferenceData = useCallback(() => {
     exportReferenceRequestRef.current?.abort();
     exportReferenceRequestRef.current = null;
-    loadMoreRequestRef.current?.abort();
-    loadMoreRequestRef.current = null;
     setExportReferenceData(null);
     setIsExportReferenceLoading(false);
   }, []);
@@ -594,10 +599,6 @@ export default function CostStatisticsPage() {
       if (normalizedQuery === searchQuery) {
         return;
       }
-      loadMoreRequestRef.current?.abort();
-      loadMoreRequestRef.current = null;
-      setIsLoadingMore(false);
-      setLoadMoreError(null);
       resetExplorerSelection(viewMode);
       setSearchQuery(normalizedQuery);
     }, 200);
@@ -785,10 +786,13 @@ export default function CostStatisticsPage() {
     explorerRequestRef.current = controller;
 
     async function loadExplorer() {
-      loadMoreRequestRef.current?.abort();
-      loadMoreRequestRef.current = null;
-      setIsLoadingMore(false);
-      setLoadMoreError(null);
+      paginationRequestRef.current?.abort();
+      paginationRequestRef.current = null;
+      setExplorerPage(1);
+      setExplorerPageCursors({ 1: undefined });
+      setIsExplorerPageLoading(false);
+      setExplorerPageError(null);
+      setFailedExplorerPage(null);
       setLoadError(null);
       setExportFeedback(null);
       resetDetailSelection();
@@ -803,6 +807,9 @@ export default function CostStatisticsPage() {
         });
         if (!controller.signal.aborted) {
           setLoadedExplorer({ requestKey: explorerRequestKey, payload });
+          setExplorerPageCursors(payload.nextCursor
+            ? { 1: undefined, 2: payload.nextCursor }
+            : { 1: undefined });
           setIsExplorerLoading(false);
         }
       } catch (caught) {
@@ -858,49 +865,55 @@ export default function CostStatisticsPage() {
     };
   }, [active, statisticsRefreshKey]);
 
-  async function loadMoreExplorerRows() {
+  async function loadExplorerPage(targetPage: number) {
+    const totalPages = Math.max(1, Math.ceil((explorerData?.rowCount ?? 0) / EXPLORER_PAGE_SIZE));
     if (
-      !explorerData?.nextCursor
+      targetPage === explorerPage
+      || targetPage < 1
+      || targetPage > totalPages
       || loadedExplorer?.requestKey !== explorerRequestKey
-      || isLoadingMore
-    ) {
-      return;
-    }
-    loadMoreRequestRef.current?.abort();
+      || isExplorerPageLoading
+    ) return;
+
+    const cursor = targetPage === explorerPage + 1
+      ? explorerData?.nextCursor
+      : explorerPageCursors[targetPage];
+    if (targetPage > 1 && !cursor) return;
+
+    paginationRequestRef.current?.abort();
     const controller = new AbortController();
-    loadMoreRequestRef.current = controller;
-    setIsLoadingMore(true);
-    setLoadMoreError(null);
+    paginationRequestRef.current = controller;
+    setIsExplorerPageLoading(true);
+    setExplorerPageError(null);
+    setFailedExplorerPage(targetPage);
+    resetDetailSelection();
     try {
       const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
-      const nextPage = await fetchCostStatisticsExplorerPage({
+      const payload = await fetchCostStatisticsExplorerPage({
         ...request,
-        cursor: explorerData.nextCursor,
+        ...(cursor ? { cursor } : {}),
         includeStatistics: false,
         signal: controller.signal,
       });
-      if (controller.signal.aborted) {
-        return;
-      }
+      if (controller.signal.aborted) return;
       setLoadedExplorer((current) => current?.requestKey === explorerRequestKey
-        ? {
-            requestKey: explorerRequestKey,
-            payload: {
-              ...current.payload,
-              rows: [...current.payload.rows, ...nextPage.rows],
-              nextCursor: nextPage.nextCursor,
-              rowCount: nextPage.rowCount,
-            },
-          }
+        ? { requestKey: explorerRequestKey, payload }
         : current);
+      setExplorerPage(targetPage);
+      setExplorerPageCursors((current) => ({
+        ...current,
+        [targetPage]: cursor,
+        ...(payload.nextCursor ? { [targetPage + 1]: payload.nextCursor } : {}),
+      }));
+      setFailedExplorerPage(null);
     } catch (caught) {
       if (!controller.signal.aborted) {
-        setLoadMoreError(getCostStatisticsLoadErrorMessage(caught));
+        setExplorerPageError(getCostStatisticsLoadErrorMessage(caught));
       }
     } finally {
-      if (loadMoreRequestRef.current === controller) {
-        loadMoreRequestRef.current = null;
-        setIsLoadingMore(false);
+      if (paginationRequestRef.current === controller) {
+        paginationRequestRef.current = null;
+        setIsExplorerPageLoading(false);
       }
     }
   }
@@ -910,7 +923,7 @@ export default function CostStatisticsPage() {
     exportReferenceRequestRef.current?.abort();
     exportRequestRef.current?.abort();
     exportPreviewRequestRef.current?.abort();
-    loadMoreRequestRef.current?.abort();
+    paginationRequestRef.current?.abort();
     detailRequestRef.current?.abort();
   }, []);
 
@@ -1150,7 +1163,11 @@ export default function CostStatisticsPage() {
     exportReferenceRequestRef.current = null;
     setIsExportReferenceLoading(false);
     setLoadError(null);
-    setLoadMoreError(null);
+    paginationRequestRef.current?.abort();
+    paginationRequestRef.current = null;
+    setIsExplorerPageLoading(false);
+    setExplorerPageError(null);
+    setFailedExplorerPage(null);
     setExportFeedback(null);
     setSearchDraft("");
     setSearchQuery("");
@@ -1574,12 +1591,17 @@ export default function CostStatisticsPage() {
       value={searchDraft}
     />
   );
-  const autoLoadTableProps = {
+  const tablePaginationProps = {
     fitContainer: true,
-    hasNextPage: Boolean(explorerData?.nextCursor),
-    loadingMore: isLoadingMore,
-    loadMoreError,
-    onRequestNextPage: () => void loadMoreExplorerRows(),
+    page: explorerPage,
+    pageSize: EXPLORER_PAGE_SIZE,
+    total: explorerData?.rowCount ?? 0,
+    isPageLoading: isExplorerPageLoading,
+    pageError: explorerPageError,
+    onPageChange: (page: number) => void loadExplorerPage(page),
+    onRetryPage: failedExplorerPage === null
+      ? undefined
+      : () => void loadExplorerPage(failedExplorerPage),
   };
   const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading;
   const visibleStatistics = pageStatistics;
@@ -1768,7 +1790,6 @@ export default function CostStatisticsPage() {
                   <h2>时间范围</h2>
                   <BusinessPeriodPicker
                     ariaLabel="时间统计时间范围"
-                    inline
                     onChange={(selection) => updateScopeSelection("time", selection)}
                     selection={{ mode: timeScopeMode, year: timeScopeYear, month: timeScopeMonth }}
                     years={availableScopeYears}
@@ -1798,7 +1819,7 @@ export default function CostStatisticsPage() {
                       emptyLabel="当前时间范围没有收入或支出流水。"
                       onRowClick={(row) => void openEntryDetail(row, "time")}
                       getRowActionLabel={costEntryActionLabel}
-                      {...autoLoadTableProps}
+                      {...tablePaginationProps}
                     />
                   )}
                 </section>
@@ -1891,7 +1912,7 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openEntryDetail(row, "project")}
                         getRowActionLabel={costEntryActionLabel}
                         emptyLabel="该费用类型下暂无成本明细。"
-                        {...autoLoadTableProps}
+                        {...tablePaginationProps}
                       />
                     ) : <div className="cost-explorer-empty">依次选择项目和费用类型</div>}
                   </section>
@@ -1984,7 +2005,7 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openEntryDetail(row, "bank")}
                         getRowActionLabel={costEntryActionLabel}
                         emptyLabel="该项目下暂无成本明细。"
-                        {...autoLoadTableProps}
+                        {...tablePaginationProps}
                       />
                     ) : <div className="cost-explorer-empty">依次选择银行账户和项目</div>}
                   </section>
@@ -2054,7 +2075,7 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openEntryDetail(row, "expenseType")}
                         getRowActionLabel={costEntryActionLabel}
                         emptyLabel="该费用类型下暂无成本明细。"
-                        {...autoLoadTableProps}
+                        {...tablePaginationProps}
                       />
                     ) : <div className="cost-explorer-empty">选择费用类型查看成本明细</div>}
                   </section>
@@ -2161,7 +2182,7 @@ export default function CostStatisticsPage() {
                         onRowClick={(row) => void openEntryDetail(row, "bankTag")}
                         getRowActionLabel={costEntryActionLabel}
                         emptyLabel="该流水标签下暂无流水。"
-                        {...autoLoadTableProps}
+                        {...tablePaginationProps}
                       />
                     ) : <div className="cost-explorer-empty">依次选择主标签和子标签</div>}
                   </section>

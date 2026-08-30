@@ -190,6 +190,15 @@ async function expectVerticalScroll(locator: Locator, label: string) {
   expect(result.scrollTop, `${label} should scroll vertically: ${JSON.stringify(result)}`).toBeGreaterThan(0);
 }
 
+async function expectExplicitTablePagination(grid: Locator, label: string) {
+  const shell = grid.locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' cost-table-shell ')][1]");
+  const footer = shell.locator(".cost-table-pagination-footer");
+  await expect(footer, `${label} should expose explicit pagination`).toBeVisible();
+  await expect(footer.getByText(/显示 \d+-\d+ \/ \d+/)).toBeVisible();
+  await expect(footer.getByRole("button", { name: /上一页/ })).toBeVisible();
+  await expect(footer.getByRole("button", { name: /下一页/ })).toBeVisible();
+}
+
 test.describe("cost statistics browser flow", () => {
   test("saves no-OA rules without a barrier or refreshing the unrelated raw-bank view", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
@@ -199,6 +208,7 @@ test.describe("cost statistics browser flow", () => {
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expectExplicitTablePagination(page.getByRole("grid", { name: "按时间统计表" }), "time view");
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
 
     const drawer = page.getByRole("dialog", { name: "无 OA 成本范围" });
@@ -466,9 +476,12 @@ test.describe("cost statistics browser flow", () => {
       visibleLabel: "时间统计时间范围：2026年3月 -> 四月",
       actionType: "click",
     }, async (mark) => {
-      await timePicker.getByRole("button", { name: "四月" }).click();
+      await timePicker.getByRole("button", { name: "时间统计时间范围：2026年3月" }).click();
+      const picker = page.getByRole("dialog", { name: "时间统计时间范围选择器" });
+      await expect(picker).toBeVisible();
+      await picker.getByRole("button", { name: "四月" }).click();
       await mark("apiLatencyMs", aprilResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(timePicker.getByRole("button", { name: "四月" })).toHaveAttribute("aria-pressed", "true"));
+      await mark("firstVisibleResponseLatencyMs", expect(timePicker.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: costTransactionLabels.office })).toBeVisible());
     });
     expect((await aprilResponse).status()).toBe(200);
@@ -592,6 +605,7 @@ test.describe("cost statistics browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "流水标签对应流水表" })).toBeVisible());
     });
     const bankTagTransactions = page.getByRole("grid", { name: "流水标签对应流水表" });
+    await expectExplicitTablePagination(bankTagTransactions, "bank-tag view");
     await expect(bankTagTransactions.getByRole("columnheader", { name: "时间" })).toHaveCount(0);
     await expect(bankTagTransactions.locator(".cost-transaction-time-chip").first()).toBeVisible();
     const laneHeights = await page.locator(".cost-explorer-grid.bank-tag > .cost-explorer-lane").evaluateAll((lanes) => (
@@ -643,6 +657,7 @@ test.describe("cost statistics browser flow", () => {
       await mark("firstVisibleResponseLatencyMs", expect(projectRows).toBeVisible());
       await mark("finalSettledLatencyMs", expect(projectRows.getByRole("button", { name: costTransactionLabels.oaExpense })).toBeVisible());
     });
+    await expectExplicitTablePagination(projectRows, "project view");
 
     const detailRequest = page.waitForRequest((request) =>
       decodeURIComponent(requestPath(request.url())).endsWith("/api/cost-statistics/allocations/oa:cost-txn-e2e-001"),
@@ -741,6 +756,7 @@ test.describe("cost statistics browser flow", () => {
     await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
     const bankRows = page.getByRole("grid", { name: "银行成本明细表" });
     await expect(bankRows).toBeVisible();
+    await expectExplicitTablePagination(bankRows, "bank view");
     await expect(bankRows).toContainText("PLC 模块采购");
     await expect(bankRows).toContainText("浏览器成本申请人");
     await expect(bankRows).not.toContainText("浏览器设备供应商");
@@ -764,6 +780,7 @@ test.describe("cost statistics browser flow", () => {
     await page.getByRole("button", { name: /设备货款及材料费/ }).first().click();
     const expenseRows = page.getByRole("grid", { name: "按费用类型成本明细表" });
     await expect(expenseRows).toBeVisible();
+    await expectExplicitTablePagination(expenseRows, "expense-type view");
     await expect(expenseRows).toContainText("云南溯源科技");
     await expect(expenseRows).toContainText("PLC 模块采购");
 
@@ -805,11 +822,30 @@ test.describe("cost statistics browser flow", () => {
     await expectVisibleAndUncovered(page.getByRole("button", { name: "导出中心" }), "narrow export center button");
     const timeGrid = page.getByRole("grid", { name: "按时间统计表" });
     await expect(timeGrid).toBeVisible();
+    await expectExplicitTablePagination(timeGrid, "large time view");
+    const firstPageActionLabel = await timeGrid.getByRole("button").first().getAttribute("aria-label");
+    expect(firstPageActionLabel).toBeTruthy();
     const timeTableScroll = page.locator(".cost-table-section").filter({ has: timeGrid }).locator(".finance-table__scroll").first();
+    const explorerCallsBeforeTimeScroll = api.count("GET /api/cost-statistics/explorer");
     await timeTableScroll.evaluate((element) => {
       element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
-    await expect(timeGrid).toContainText("大型成本流水费用内容 120");
+    await expect(timeGrid).not.toContainText("大型成本流水费用内容 120");
+    expect(api.count("GET /api/cost-statistics/explorer")).toBe(explorerCallsBeforeTimeScroll);
+
+    const nextPageResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/explorer")
+        && url.searchParams.get("cursor") === "mock:20"
+        && url.searchParams.get("page_size") === "20";
+    });
+    await page.locator(".cost-table-section").filter({ has: timeGrid }).getByRole("button", { name: /下一页/ }).click();
+    await nextPageResponse;
+    await expect(page.locator(".cost-table-section").filter({ has: timeGrid }).getByText(/显示 21-40 \/ \d+/)).toBeVisible();
+    await expect(timeGrid).toContainText("大型成本流水费用内容");
+    await expect(timeGrid.getByRole("button", { name: firstPageActionLabel ?? "", exact: true })).toHaveCount(0);
 
     await expectHorizontalScroll(timeTableScroll, "large time-view cost table");
     await expectInViewport(timeGrid.getByRole("columnheader", { name: "流水摘要" }), "time-view rightmost cost column");

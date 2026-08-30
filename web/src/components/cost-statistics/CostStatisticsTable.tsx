@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
@@ -10,6 +11,7 @@ import {
   FinanceTableCell,
   FinanceTableColumn,
   FinanceTableHeader,
+  FinanceTablePagination,
   FinanceTableRow,
   type FinanceTableColumnRole,
 } from "../common/FinanceTable";
@@ -42,10 +44,13 @@ type CostStatisticsTableProps<Row extends object> = {
   onRowClick?: (row: Row) => void;
   getRowActionLabel?: (row: Row) => string;
   fitContainer?: boolean;
-  hasNextPage?: boolean;
-  loadingMore?: boolean;
-  loadMoreError?: string | null;
-  onRequestNextPage?: () => void;
+  page: number;
+  pageSize: number;
+  total: number;
+  isPageLoading?: boolean;
+  pageError?: string | null;
+  onPageChange: (page: number) => void;
+  onRetryPage?: () => void;
 };
 
 export default function CostStatisticsTable<Row extends object>({
@@ -57,47 +62,22 @@ export default function CostStatisticsTable<Row extends object>({
   onRowClick,
   getRowActionLabel,
   fitContainer = false,
-  hasNextPage = false,
-  loadingMore = false,
-  loadMoreError,
-  onRequestNextPage,
+  page,
+  pageSize,
+  total,
+  isPageLoading = false,
+  pageError,
+  onPageChange,
+  onRetryPage,
 }: CostStatisticsTableProps<Row>) {
   const minWidth = columns.reduce((total, column) => total + (column.width ?? (column.flex ? 180 : 140)), 0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const requestNextPageRef = useRef(onRequestNextPage);
-  requestNextPageRef.current = onRequestNextPage;
 
   useEffect(() => {
-    const scrollElement = scrollRef.current;
-    if (
-      !scrollElement
-      || rows.length === 0
-      || !hasNextPage
-      || loadingMore
-      || loadMoreError
-    ) {
-      return undefined;
-    }
-    let requested = false;
-    const requestIfNearBottom = () => {
-      if (scrollElement.scrollHeight <= scrollElement.clientHeight) {
-        return;
-      }
-      const remaining = scrollElement.scrollHeight
-        - scrollElement.scrollTop
-        - scrollElement.clientHeight;
-      if (!requested && remaining <= 160) {
-        requested = true;
-        requestNextPageRef.current?.();
-      }
-    };
-    scrollElement.addEventListener("scroll", requestIfNearBottom, { passive: true });
-    const frameId = window.requestAnimationFrame(requestIfNearBottom);
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      scrollElement.removeEventListener("scroll", requestIfNearBottom);
-    };
-  }, [hasNextPage, loadMoreError, loadingMore, rows.length]);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
 
   return (
     <div className="cost-table-shell cost-finance-table-shell">
@@ -198,18 +178,28 @@ export default function CostStatisticsTable<Row extends object>({
           })}
         </FinanceTableBody>
       </FinanceTable>
-      {loadingMore || loadMoreError ? (
-        <div aria-live="polite" className="cost-auto-load-status">
-          {loadMoreError ? (
+      <footer className="cost-table-pagination-footer">
+        <FinanceTablePagination
+          compact
+          isDisabled={isPageLoading}
+          onPageChange={onPageChange}
+          page={page}
+          pageSize={pageSize}
+          total={total}
+        />
+        <div aria-live="polite" className="cost-table-page-status">
+          {pageError ? (
             <>
-              <span>{loadMoreError}</span>
-              <button onClick={onRequestNextPage} type="button">重试</button>
+              <span>{pageError}</span>
+              {onRetryPage ? (
+                <Button onPress={onRetryPage} size="sm" variant="secondary">重试</Button>
+              ) : null}
             </>
           ) : (
-            <span>正在加载更多流水…</span>
+            <span>{isPageLoading ? "正在加载下一页" : `第 ${Math.min(Math.max(page, 1), totalPages)} / ${totalPages} 页`}</span>
           )}
         </div>
-      ) : null}
+      </footer>
     </div>
   );
 }

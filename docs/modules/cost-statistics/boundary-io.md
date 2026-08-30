@@ -64,7 +64,7 @@ HTTP PUT /manual-allocations/{case_id}
 - 银行流水详情与 OA 分摊详情分别把当前 `scope`、`view` 和 `include_statistics=false` 下推到同一个 canonical repository；禁止为单条详情重新加载全期间 snapshot。所有视图都可能出现银行流水行，详情类型必须读行级 `row_kind`，不得按 view 推断。
 - explorer 的 `query` 在 service 中折叠空白、将纯金额归一为无千分位文本并限制为 200 字符，写入 cursor identity；policy 先过滤当前视图事实行，再计算 summary、facets、row count 和分页。`project|bank|expense_type` 搜索银行事件拆出的归因行，`time|bank_tag` 搜索独立标签规则过滤后的原始银行事实；输出金额统一使用无千分位两位小数。
 - 前端将后续请求限制在内容区：范围/视图只替换统计 surface，左栏选择只加载中/右栏，中栏选择只加载右栏；只有首次数据尚未验证时才使用页面内交互锁。
-- 前端搜索使用 IME-safe 200ms debounce 和请求取消；搜索、下钻和时间范围变化都只替换受影响内容区。明细表在内部滚动容器距底部 160px 内复用现有 cursor 追加请求，正常态无手动加载按钮，下一页失败保留已有 rows 并提供局部重试。
+- 前端搜索使用 IME-safe 200ms debounce 和请求取消；搜索、下钻和时间范围变化都只替换受影响内容区并回到第一页。五个视图仅右侧明细固定每页 20 条，使用显式上一页/下一页和稳定 cursor 替换当前页；左侧、中间分面列表不分页。分页失败保留当前已确认 rows 并提供目标页局部重试，禁止滚动触发、行追加或全量前端缓存。
 - API 失败时明确返回错误；用户再次刷新会重新打开数据库快照并完整重试。
 - `CostStatisticsPolicy` 将支付申请整张 OA 原始金额作为一个权重单元，将日常报销 canonical `expense_items` 逐项作为权重单元。项目或正数权重缺失时整组不分摊；费用类型缺失不再排除，而是进入“未填写 OA 费用类型”。权重合计非正只做内部除零保护，不新增产品状态。
 - active relation 中只要有一张 OA 不是明确完成态，整组银行流水从三种归因视图排除，也不得作为无 OA 流水；原始 `time|bank_tag` 仍展示这些银行事实。关系声明的 OA 成员没有被 canonical snapshot 完整加载时同样整组 fail closed，且银行成员继续受 OA 保护。全部 OA 完成时，关系净支出 `N = 支出合计 B - 同关系明确“付错退款”R`；普通收入不进入净额，退款不生成独立归因行。

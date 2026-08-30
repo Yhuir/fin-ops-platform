@@ -15,9 +15,9 @@ ready
   -> searching / changing-surface
       -> ready（只替换内容区）
       -> error（保留已加载上游内容）
-  -> loading-next-page
-      -> ready（追加 rows）
-      -> next-page-error（保留已有 rows，可局部重试）
+  -> loading-page
+      -> ready（成功后原子替换当前页 rows）
+      -> page-error（保留当前已确认页，可局部重试）
 
 detail-closed
   -> detail-loading（抽屉立即打开）
@@ -57,8 +57,8 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - `ready`：响应全部来自同一个数据库一致性快照。
 - `error`：本次请求失败，不显示旧数据为 fresh。
 - `searching / changing-surface`：当前视图搜索、范围或下钻请求进行中，只显示内容区反馈，不清空页头或刷新整个页面。
-- `loading-next-page`：表格内部接近底部后自动追加 cursor 下一页；同一 cursor 同时只允许一个请求。
-- `next-page-error`：下一页失败不丢弃已加载 rows，只在明细区提供重试。
+- `loading-page`：用户显式点击上一页或下一页后，使用目标页 cursor 请求固定 20 条；同一时间只允许一个分页请求，当前已确认页保持可见但分页操作禁用。
+- `page-error`：目标页失败不提交页码、不丢弃当前 rows，只在明细区提供目标页重试；滚动不触发请求。
 - `detail-loading`：只在右侧抽屉展示无文字 skeleton；不显示“正在加载流水”，不修改 explorer/导出 loading 状态。
 - `detail-error`：错误与重试按钮只存在于抽屉；已加载统计内容保持不变。
 - `no-oa-drawer-ready`：只显示当前实际无 active OA 关系的支出标签；名称和标签默认都为空。选择标签后必须填写虚拟项目名，未选择标签时名称可为空。
