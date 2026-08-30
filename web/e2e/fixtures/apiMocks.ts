@@ -5480,7 +5480,7 @@ function costStatisticsExplorerPagePayload(
 
   const projectGroups = new Map<string, { rows: typeof costRows; total: number; expenseTypes: Set<string> }>();
   const expenseGroups = new Map<string, { rows: typeof costRows; total: number; projects: Set<string> }>();
-  const bankGroups = new Map<string, { rows: typeof costRows; total: number; projects: Set<string> }>();
+  const bankGroups = new Map<string, { rows: typeof bankFlowRows; expense: number; income: number }>();
   for (const row of costRows) {
     const project = projectGroups.get(row.project_name) ?? { rows: [], total: 0, expenseTypes: new Set<string>() };
     project.rows.push(row);
@@ -5492,15 +5492,21 @@ function costStatisticsExplorerPagePayload(
     expense.total += amount(row.amount);
     expense.projects.add(row.project_name);
     expenseGroups.set(row.expense_type, expense);
-    const account = bankGroups.get(row.payment_account_label) ?? { rows: [], total: 0, projects: new Set<string>() };
+  }
+  for (const row of bankFlowRows) {
+    const accountLabel = row.payment_account_label || "未识别账户";
+    const account = bankGroups.get(accountLabel) ?? { rows: [], expense: 0, income: 0 };
     account.rows.push(row);
-    account.total += amount(row.amount);
-    account.projects.add(row.project_name);
-    bankGroups.set(row.payment_account_label, account);
+    if (row.direction === "收入") {
+      account.income += amount(row.amount);
+    } else {
+      account.expense += amount(row.amount);
+    }
+    bankGroups.set(accountLabel, account);
   }
   for (const account of payload.bank_accounts) {
     if (!bankGroups.has(account.payment_account_label)) {
-      bankGroups.set(account.payment_account_label, { rows: [], total: 0, projects: new Set<string>() });
+      bankGroups.set(account.payment_account_label, { rows: [], expense: 0, income: 0 });
     }
   }
   const total = costRows.reduce((sum, row) => sum + amount(row.amount), 0);
@@ -5520,11 +5526,18 @@ function costStatisticsExplorerPagePayload(
   })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
   const bankAccounts = Array.from(bankGroups.entries()).map(([label, group]) => ({
     payment_account_label: label,
-    total_amount: formatAmount(group.total),
+    expense_amount: formatAmount(group.expense),
+    income_amount: formatAmount(group.income),
+    net_outflow_amount: formatAmount(group.expense - group.income),
     transaction_count: group.rows.length,
-    project_count: group.projects.size,
-    percentage_label: percentage(group.total, total),
-  })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
+    expense_percentage_label: percentage(
+      group.expense,
+      Array.from(bankGroups.values()).reduce((sum, bucket) => sum + bucket.expense, 0),
+    ),
+  })).sort((left, right) => (
+    amount(right.expense_amount) - amount(left.expense_amount)
+    || amount(right.income_amount) - amount(left.income_amount)
+  ));
 
   const selectedProjectRows = projectGroups.get(projectName)?.rows ?? [];
   const selectedProjectTotal = selectedProjectRows.reduce((sum, row) => sum + amount(row.amount), 0);
@@ -5540,18 +5553,6 @@ function costStatisticsExplorerPagePayload(
     };
   }).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
   const selectedBankRows = bankGroups.get(paymentAccountLabel)?.rows ?? [];
-  const selectedBankTotal = selectedBankRows.reduce((sum, row) => sum + amount(row.amount), 0);
-  const bankProjects = Array.from(new Set(selectedBankRows.map((row) => row.project_name))).map((name) => {
-    const rows = selectedBankRows.filter((row) => row.project_name === name);
-    const rowTotal = rows.reduce((sum, row) => sum + amount(row.amount), 0);
-    return {
-      project_name: name,
-      total_amount: formatAmount(rowTotal),
-      transaction_count: rows.length,
-      expense_type_count: new Set(rows.map((row) => row.expense_type)).size,
-      percentage_label: percentage(rowTotal, selectedBankTotal),
-    };
-  }).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
 
   const directionFacet = (rows: typeof bankFlowRows) => ({
     expense_amount: sumCostAmounts(rows.filter((row) => row.direction === "支出")),
@@ -5580,8 +5581,8 @@ function costStatisticsExplorerPagePayload(
   let matchedRows = view === "time" ? bankFlowRows : [];
   if (view === "project" && projectName && expenseType) {
     matchedRows = costRows.filter((row) => row.project_name === projectName && row.expense_type === expenseType);
-  } else if (view === "bank" && paymentAccountLabel && projectName) {
-    matchedRows = costRows.filter((row) => row.payment_account_label === paymentAccountLabel && row.project_name === projectName);
+  } else if (view === "bank" && paymentAccountLabel) {
+    matchedRows = selectedBankRows;
   } else if (view === "expense_type" && expenseType) {
     matchedRows = costRows.filter((row) => row.expense_type === expenseType);
   } else if (view === "bank_tag" && primaryLabel && subLabel) {
@@ -5590,11 +5591,11 @@ function costStatisticsExplorerPagePayload(
       && (row.bank_tag_sub_label || row.bank_tag_label || primaryLabel) === subLabel
     ));
   }
-  const summaryRows = view === "time" || view === "bank_tag" ? bankFlowRows : costRows;
+  const summaryRows = view === "time" || view === "bank" || view === "bank_tag" ? bankFlowRows : costRows;
   const expenseRows = summaryRows.filter((row) => row.direction === "支出");
   const incomeRows = summaryRows.filter((row) => row.direction === "收入");
   const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize).map((row) => {
-    if (view === "time" || view === "bank_tag") {
+    if (view === "time" || view === "bank" || view === "bank_tag") {
       return {
         ...row,
         entry_id: row.transaction_id,
@@ -5618,7 +5619,10 @@ function costStatisticsExplorerPagePayload(
     summary: {
       row_count: summaryRows.length,
       transaction_count: summaryRows.length,
-      total_amount: sumCostAmounts(summaryRows),
+      total_amount: formatAmount(
+        expenseRows.reduce((sum, row) => sum + amount(row.amount), 0)
+        - incomeRows.reduce((sum, row) => sum + amount(row.amount), 0),
+      ),
       expense_amount: sumCostAmounts(expenseRows),
       income_amount: sumCostAmounts(incomeRows),
       expense_transaction_count: expenseRows.length,
@@ -5627,7 +5631,7 @@ function costStatisticsExplorerPagePayload(
     available_years: Array.from(new Set([...payload.time_rows, ...payload.bank_flow_time_rows]
       .map((row) => row.trade_time.slice(0, 4)))).sort().reverse(),
     facets: {
-      projects: view === "project" ? projects : view === "bank" && paymentAccountLabel ? bankProjects : [],
+      projects: view === "project" ? projects : [],
       expense_types: view === "expense_type" ? expenseTypes : view === "project" && projectName ? projectExpenseTypes : [],
       bank_accounts: view === "bank" ? bankAccounts : [],
       bank_tag_primary: view === "bank_tag" ? bankTagPrimary : [],

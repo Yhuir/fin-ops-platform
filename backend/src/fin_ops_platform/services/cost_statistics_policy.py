@@ -1691,26 +1691,42 @@ def _bank_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             label,
             {
                 "payment_account_label": label,
-                "total": ZERO,
+                "expense_amount": ZERO,
+                "income_amount": ZERO,
                 "transactions": set(),
-                "projects": set(),
             },
         )
-        bucket["total"] += _decimal(row["amount"]) or ZERO
+        amount = abs(_decimal(row["amount"]) or ZERO)
+        if row.get("direction") == "收入":
+            bucket["income_amount"] += amount
+        else:
+            bucket["expense_amount"] += amount
         bucket["transactions"].add(_row_identity(row))
-        bucket["projects"].add(row["project_name"])
-    total = sum((bucket["total"] for bucket in buckets.values()), start=ZERO)
+    expense_total = sum(
+        (bucket["expense_amount"] for bucket in buckets.values()),
+        start=ZERO,
+    )
     return [
         {
             "payment_account_label": bucket["payment_account_label"],
-            "total_amount": _money(bucket["total"]),
+            "expense_amount": _money(bucket["expense_amount"]),
+            "income_amount": _money(bucket["income_amount"]),
+            "net_outflow_amount": _money(
+                bucket["expense_amount"] - bucket["income_amount"]
+            ),
             "transaction_count": len(bucket["transactions"]),
-            "project_count": len(bucket["projects"]),
-            "percentage_label": _percentage(bucket["total"], total),
+            "expense_percentage_label": _percentage(
+                bucket["expense_amount"],
+                expense_total,
+            ),
         }
         for bucket in sorted(
             buckets.values(),
-            key=lambda item: (-item["total"], item["payment_account_label"]),
+            key=lambda item: (
+                -item["expense_amount"],
+                -item["income_amount"],
+                item["payment_account_label"],
+            ),
         )
     ]
 

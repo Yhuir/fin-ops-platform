@@ -143,6 +143,56 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             self.assertEqual(page["summary"]["income_amount"], "60.00")
             self.assertEqual(page["summary"]["total_amount"], "540.00")
 
+    def test_bank_view_groups_canonical_bank_rows_without_project_facets(self) -> None:
+        policy = self._policy(
+            [
+                self._group(
+                    oa_rows=[self._oa("oa-90", amount="90.00")],
+                    bank_rows=[
+                        self._bank("bank-out", "100.00"),
+                        self._bank("bank-in", "10.00", direction="inflow"),
+                    ],
+                )
+            ]
+        )
+
+        page = policy.explorer_page(
+            scope_kind="all",
+            scope_value=None,
+            view="bank",
+            filters={},
+            cursor_values=None,
+            page_size=50,
+        )
+
+        self.assertEqual(page["secondary_facets"], [])
+        self.assertEqual(
+            page["primary_facets"],
+            [
+                {
+                    "payment_account_label": "建设银行 8106",
+                    "expense_amount": "100.00",
+                    "income_amount": "10.00",
+                    "net_outflow_amount": "90.00",
+                    "transaction_count": 2,
+                    "expense_percentage_label": "100.0%",
+                }
+            ],
+        )
+        selected = policy.explorer_page(
+            scope_kind="all",
+            scope_value=None,
+            view="bank",
+            filters={"payment_account_label": "建设银行 8106"},
+            cursor_values=None,
+            page_size=50,
+        )
+        self.assertEqual(
+            {row["transaction_id"] for row in selected["rows"]},
+            {"bank-out", "bank-in"},
+        )
+        self.assertEqual({row["row_kind"] for row in selected["rows"]}, {"bank_transaction"})
+
     def test_mismatched_oa_total_waits_for_manual_allocation_without_scaling(self) -> None:
         group = self._group(
                     oa_rows=[
@@ -559,7 +609,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
         view_filters = {
             "project": {"project_name": "项目A", "expense_type": "设备采购"},
-            "bank": {"payment_account_label": "建设银行 8106", "project_name": "项目A"},
+            "bank": {"payment_account_label": "建设银行 8106"},
             "expense_type": {"expense_type": "设备采购"},
             "bank_tag": {"bank_tag_primary_label": "未标记", "bank_tag_sub_label": "未标记"},
             "time": {},

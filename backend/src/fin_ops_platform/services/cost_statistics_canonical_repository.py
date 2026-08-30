@@ -52,7 +52,7 @@ class PostgresCostStatisticsCanonicalRepository:
             relation_only_all_scope = (
                 not include_statistics
                 and scope_kind == "all"
-                and view not in {"time", "bank_tag"}
+                and view not in {"time", "bank", "bank_tag"}
                 and not _has_no_oa_project_tag_assignments(settings)
             )
             relations = _postgres_relations(transaction) if relation_only_all_scope else []
@@ -78,7 +78,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 else _bank_available_years(bank_rows)
             )
             bank_ids = _bank_row_ids(bank_rows)
-            if view in {"time", "bank_tag"}:
+            if view in {"time", "bank", "bank_tag"}:
                 categories_by_transaction_id = (
                     PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
                         transaction,
@@ -374,12 +374,6 @@ class LocalCostStatisticsCanonicalRepository:
                 scope_value=scope_value if not include_statistics else None,
             )
         ]
-        all_relations = [
-            dict(relation)
-            for relation in self._relations_provider()
-            if isinstance(relation, dict)
-            and str(relation.get("status") or "active").strip().lower() == "active"
-        ]
         no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
         _apply_bank_tags(
             (
@@ -389,7 +383,7 @@ class LocalCostStatisticsCanonicalRepository:
             ),
             category_provider=self._category_provider,
         )
-        if view in {"time", "bank_tag"}:
+        if view in {"time", "bank", "bank_tag"}:
             return _build_snapshot(
                 settings=settings,
                 bank_rows=scoped_bank_rows,
@@ -397,6 +391,12 @@ class LocalCostStatisticsCanonicalRepository:
                 relations=[],
                 available_years=bank_available_years,
             )
+        all_relations = [
+            dict(relation)
+            for relation in self._relations_provider()
+            if isinstance(relation, dict)
+            and str(relation.get("status") or "active").strip().lower() == "active"
+        ]
         scoped_bank_ids = set(_bank_row_ids(scoped_bank_rows))
         relations = [
             relation

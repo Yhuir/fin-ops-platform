@@ -276,7 +276,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     const viewSwitcher = page.locator(".cost-page-header").getByRole("group", { name: "成本统计视图切换" });
     await expect(viewSwitcher).toBeVisible();
-    await expect(viewSwitcher.getByText("OA 配对")).toBeVisible();
+    await expect(viewSwitcher.getByText("成本归因")).toBeVisible();
     await expect(viewSwitcher.getByText("银行流水")).toBeVisible();
     await expect(page.getByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeVisible();
     await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
@@ -753,26 +753,25 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("button", { name: /民生银行 账户 9486/ })).toBeVisible();
 
     await page.getByRole("button", { name: /工商银行 账户 0001/ }).click();
-    await page.getByRole("button", { name: /云南溯源科技/ }).first().click();
-    const bankRows = page.getByRole("grid", { name: "银行成本明细表" });
+    const bankRows = page.getByRole("grid", { name: "银行流水明细表" });
     await expect(bankRows).toBeVisible();
     await expectExplicitTablePagination(bankRows, "bank view");
     await expect(bankRows).toContainText("PLC 模块采购");
-    await expect(bankRows).toContainText("浏览器成本申请人");
-    await expect(bankRows).not.toContainText("浏览器设备供应商");
+    await expect(bankRows).toContainText("浏览器设备供应商");
+    await expect(bankRows).not.toContainText("浏览器成本申请人");
 
     const bankDetailRequest = page.waitForRequest((request) =>
-      decodeURIComponent(requestPath(request.url())).endsWith("/api/cost-statistics/allocations/oa:cost-txn-e2e-001"),
+      decodeURIComponent(requestPath(request.url())).endsWith("/api/cost-statistics/bank-transactions/cost-txn-e2e-001"),
     );
-    await bankRows.getByRole("button", { name: costTransactionLabels.oaExpense }).click();
+    await bankRows.getByRole("button", { name: costTransactionLabels.expense }).click();
     const bankDetailUrl = new URL((await bankDetailRequest).url());
     expect(bankDetailUrl.searchParams.has("project_scope")).toBe(false);
-    const bankDetailDialog = page.getByRole("dialog", { name: "OA 成本归集明细" });
+    const bankDetailDialog = page.getByRole("dialog", { name: "银行流水详情" });
     await expect(bankDetailDialog).toBeVisible();
     await expect(bankDetailDialog.getByText("PLC 模块采购").first()).toBeVisible();
     await expect(bankDetailDialog.getByText("浏览器成本统计明细").first()).toBeVisible();
-    await bankDetailDialog.getByRole("button", { name: "关闭OA 成本归集明细" }).click();
-    await expect(page.getByRole("dialog", { name: "OA 成本归集明细" })).toHaveCount(0);
+    await bankDetailDialog.getByRole("button", { name: "关闭银行流水详情" }).click();
+    await expect(page.getByRole("dialog", { name: "银行流水详情" })).toHaveCount(0);
 
     await page.getByRole("radio", { name: "按费用类型" }).click();
     await expect(page.getByRole("heading", { name: "按费用类型统计" })).toBeVisible();
@@ -932,7 +931,7 @@ test.describe("cost statistics browser flow", () => {
     await bankExplorerResponsePromise;
     const largeBankAccount = page.getByRole("button", { name: /招商银行 成本大数据测试账户 880001/ }).first();
     await expectVisibleAndUncovered(largeBankAccount, "large cost bank selector");
-    const bankProjectsResponsePromise = page.waitForResponse((response) => {
+    const bankRowsResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "GET"
         && url.pathname.endsWith("/api/cost-statistics/explorer")
@@ -940,28 +939,15 @@ test.describe("cost statistics browser flow", () => {
         && url.searchParams.get("payment_account_label") === "招商银行 成本大数据测试账户 880001";
     });
     await largeBankAccount.click();
-    await bankProjectsResponsePromise;
-    const bankProject = page.getByRole("button", { name: /大型成本浏览器稳定性项目/ }).first();
-    await expectVisibleAndUncovered(bankProject, "large bank project selector");
-    const bankProjectItem = bankProject.locator("..");
-    const collapsedBankProjectHeight = await bankProjectItem.evaluate((element) => element.getBoundingClientRect().height);
-    const explorerCallsBeforeBankProjectDisclosure = api.count("GET /api/cost-statistics/explorer");
-    await recordLatency({
-      operationId: "cost-statistics.expand-bank-project-name-inline",
-      visibleLabel: "按银行展开项目名完整内容",
-      actionType: "click",
-    }, async (mark) => {
-      await bankProjectItem.getByRole("button", { name: "展开项目名完整内容" }).click();
-      await mark("firstVisibleResponseLatencyMs", expect(bankProjectItem).toHaveClass(/is-expanded/));
-      await mark("finalSettledLatencyMs", expect(bankProjectItem.locator("strong")).toHaveCSS("white-space", "normal"));
-    });
-    expect(await bankProjectItem.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(
-      collapsedBankProjectHeight,
-    );
-    await expect(page.getByRole("dialog", { name: "项目名完整内容" })).toHaveCount(0);
-    await bankProjectItem.getByRole("button", { name: "折叠项目名完整内容" }).click();
-    await expect(bankProjectItem).not.toHaveClass(/is-expanded/);
-    expect(api.count("GET /api/cost-statistics/explorer")).toBe(explorerCallsBeforeBankProjectDisclosure);
+    await bankRowsResponsePromise;
+    await expect(page.getByRole("heading", { name: "项目名" })).toHaveCount(0);
+    const bankRows = page.getByRole("grid", { name: "银行流水明细表" });
+    await expect(bankRows).toBeVisible();
+    await expect(bankRows).toContainText("大型成本流水费用内容");
+    await expectExplicitTablePagination(bankRows, "large bank view");
+    const bankTableScroll = page.locator(".cost-explorer-lane-table").locator(".finance-table__scroll").first();
+    await expectHorizontalScroll(bankTableScroll, "large bank transaction table");
+    await expectVerticalScroll(bankTableScroll, "large bank transaction table");
     expect(browserErrors).toEqual([]);
   });
 });

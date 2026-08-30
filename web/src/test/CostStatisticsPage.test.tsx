@@ -82,10 +82,10 @@ function expectProjectCostShell() {
   expect(viewSwitcher).toHaveClass("cost-view-switcher");
   expect(viewSwitcher).not.toHaveClass("MuiTabs-root");
   expect(heading.closest(".page-header")).toContainElement(viewSwitcher);
-  const pairedViews = within(viewSwitcher).getByRole("radiogroup", { name: "OA 配对统计视图" });
-  expect(within(pairedViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按项目", "按银行", "按费用类型"]);
+  const pairedViews = within(viewSwitcher).getByRole("radiogroup", { name: "成本归因统计视图" });
+  expect(within(pairedViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按项目", "按费用类型"]);
   const bankViews = within(viewSwitcher).getByRole("radiogroup", { name: "银行流水统计视图" });
-  expect(within(bankViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按标签", "按时间"]);
+  expect(within(bankViews).getAllByRole("radio").map((button) => button.textContent)).toEqual(["按银行", "按标签", "按时间"]);
 }
 
 function expectProjectCostTable(name: string) {
@@ -337,8 +337,9 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     expectProjectCostShell();
-    expect(screen.getByText("OA 配对")).toBeInTheDocument();
+    expect(screen.getByText("成本归因")).toBeInTheDocument();
     expect(screen.getByText("银行流水")).toBeInTheDocument();
+    expect(screen.queryByText("OA 配对")).not.toBeInTheDocument();
     expect(screen.queryByText("配对归集")).not.toBeInTheDocument();
     expect(screen.queryByText("流水分析")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "按时间" })).toHaveAttribute("aria-checked", "true");
@@ -1106,7 +1107,7 @@ describe("Cost statistics page", () => {
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
   });
 
-  test("bank view supports all-time, year, and month drilldown from bank to project to transaction", async () => {
+  test("bank view supports all-time, year, and month drilldown directly from account to canonical bank rows", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
     installMockApiFetch();
@@ -1125,28 +1126,27 @@ describe("Cost statistics page", () => {
     expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByText("44.4%")).toBeInTheDocument();
     expect(screen.getByLabelText("支出金额 28160.00")).toBeInTheDocument();
+    expect(screen.getByLabelText("收入金额 2000.00")).toBeInTheDocument();
+    expect(screen.getByLabelText("净流出 26160.00")).toBeInTheDocument();
     expect(within(bankLane as HTMLElement).getByLabelText("支出 12500.00")).toHaveClass("cost-direction-amount--aligned");
+    expect(within(bankLane as HTMLElement).getByLabelText("收入 2000.00")).toBeInTheDocument();
+    expect(within(bankLane as HTMLElement).getByLabelText("净流出 10500.00")).toBeInTheDocument();
 
     await user.click(within(bankLane as HTMLElement).getByRole("button", { name: /工商银行 账户 0001/ }));
 
-    const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
-    expect(projectLane).not.toBeNull();
-    expect(within(projectLane as HTMLElement).getByText("云南溯源科技")).toBeInTheDocument();
-    expect(within(projectLane as HTMLElement).getByText("100.0%")).toBeInTheDocument();
-
-    await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
-    const transactionTable = screen.getByRole("grid", { name: "银行成本明细表" });
-    expectProjectCostTable("银行成本明细表");
-    expect(within(transactionTable).getByRole("columnheader", { name: "申请/报销人" })).toBeInTheDocument();
-    expect(within(transactionTable).getByText("张三、李四")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "项目名" })).not.toBeInTheDocument();
+    const transactionTable = screen.getByRole("grid", { name: "银行流水明细表" });
+    expectProjectCostTable("银行流水明细表");
+    expect(within(transactionTable).getByRole("columnheader", { name: "时间" })).toBeInTheDocument();
+    expect(within(transactionTable).getByRole("columnheader", { name: "流水标签" })).toBeInTheDocument();
+    expect(within(transactionTable).getAllByText("昆明设备供应商")).not.toHaveLength(0);
     expect(
-      await within(transactionTable).findByRole("button", { name: "查看OA 成本归集 云南溯源科技 2026-03-10 21:27:55 10000.00" }),
+      await within(transactionTable).findByRole("button", { name: "查看银行流水 昆明设备供应商 2026-03-10 21:27:55 10000.00" }),
     ).toBeInTheDocument();
     expect(
-      await within(transactionTable).findByRole("button", { name: "查看OA 成本归集 云南溯源科技 2026-03-12 08:40:12 2500.00" }),
+      await within(transactionTable).findByRole("button", { name: "查看银行流水 昆明设备供应商 2026-03-12 08:40:12 2500.00" }),
     ).toBeInTheDocument();
-    expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
-    expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
+    expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-table-row-trigger");
 
     await chooseScopeOption(user, "银行统计时间范围：年月", "2026年");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();

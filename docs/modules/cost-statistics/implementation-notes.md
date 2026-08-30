@@ -18,17 +18,17 @@
 - 仍沿用的只有全局任务列表、`pending|allocated` 状态、按关系独立保存、乐观版本、事实指纹和同事务审计边界。
 - 人工分配只保存逐 OA 单元成本金额及可选不计入成本金额；流水只提供净支出证据，不用于伪造 OA 单元的账户、标签、期间或资金来源归属。
 - schema 已通过后继 migration 收敛为当前 `unit_allocations`、`non_cost_amount`、`non_cost_reason` 合同；不得兼容读取旧聚合 JSON 或保留并行 fallback。
-- Drawer 的保存动作归属当前关系，五个视图仍按“OA 配对 / 银行流水”分组；金额与视图口径以本文件首节为唯一依据。
+- Drawer 的保存动作归属当前关系，五个视图按“成本归因 / 银行流水”分组；金额与视图口径以本文件首节为唯一依据。
 
 ## 2026-08-27：OA 与净支出不等改为显式人工分配
 
 > 本节的“仅 O!=N 进入人工分配”、Popover、单元总额 DTO 和合成比例矩阵已由 2026-08-28 决策取代；表、审计与乐观并发边界继续有效。
 
-- 保留 `按标签`、`按时间`的原始银行事实链不变；`按项目`、`按银行`、`按费用类型`继续只消费已完成 OA 的 active relation 与显式无 OA 项目。五个 HeroUI 切换按钮在同一扁平工具区按“OA 配对/银行流水”分组，不增加页面、卡片或请求层。
+- `按银行`、`按标签`、`按时间`共用原始 canonical 银行事实链；`按项目`、`按费用类型`只消费已完成 OA 的 active relation 与显式无 OA 项目。五个 HeroUI 切换按钮在同一扁平工具区按“成本归因/银行流水”分组，不增加页面、卡片或请求层。
 - 关系净支出定义 `N=支出合计-同关系明确付错退款` 继续有效；本段当时复用比例/最大余数算法的决定已由 2026-08-28 首节撤销。当前 `O=N` 按 canonical OA 单元原金额自动形成成本，`O!=N` 进入 pending/stale，禁止恢复比例路径。
 - 新增唯一持久化边界 `app.cost_statistics_manual_allocations`，以 relation case、source fingerprint 和乐观 version 保存完整稳定 OA 单元金额。Popover 首次输入为空且按需加载；允许显式零，不预填、不推荐、不做前端比例计算。服务端在单事务内锁定当前 case，校验完整单元集合、非负两位小数与合计严格等于 N，并同时写入 `audit.events`。
 - 当时尝试过把 OA 单元金额合成到各流水来源；该做法已删除。当前只校验逐 OA 单元成本 `C`、可选不计入成本金额 `X` 与关系净支出 `N` 的 `C+X=N`，不得推断 OA 单元来自哪条流水、账户或标签。关系成员、OA 单元或金额变化仍会改变 fingerprint，使旧记录 stale 并要求重新填写；不提供自动比例、首项默认、旧值沿用或任何 fallback。
-- canonical repository 对三种归因视图一次批量读取人工分配；`time|bank_tag` 在 OA/关系查询前返回并跳过该表。保存只锁定当前 case，不新增 read model、worker、cache、queue、数据库备份或跨页面 I/O。
+- canonical repository 对两种归因视图一次批量读取人工分配；`bank|time|bank_tag` 在 OA/关系查询前返回并跳过该表。保存只锁定当前 case，不新增 read model、worker、cache、queue、数据库备份或跨页面 I/O。
 
 ## 2026-08-21：分面长文本改为条目内展开
 
@@ -45,16 +45,16 @@
 
 ## 2026-08-18：付错退款收口为关系净支出
 
-- 三种归因视图先在 active 关系内计算 `净支出 N = 支出原额 B - 明确付错退款 R`；普通收入不参与。删除把退款收入独立拆成负成本行的旧路径，右栏、搜索、汇总、分页和导出统一只消费净归因行。
+- 两种归因视图先在 active 关系内计算 `净支出 N = 支出原额 B - 明确付错退款 R`；普通收入不参与。删除把退款收入独立拆成负成本行的旧路径，右栏、搜索、汇总、分页和导出统一只消费净归因行。
 - 当时为保留多支出、多账户日期而做的两级比例归因已由 2026-08-28 首节删除；当前不得把 OA 单元映射到具体流水、账户或标签。银行、标签、时间只消费真实 `N`，项目、费用类型只消费 canonical OA 单元成本 `C`。
 - 当时 `O!=N` 使用 `OA 单元原额 × N / O` 自动缩放的路径已删除；当前只有 `O=N` 自动，`O!=N` 必须经人工逐 OA 单元分配并满足 `C+X=N`。
-- allocation detail API shape 不变，付款证据仍保留原始正金额和方向；成本抽屉把退款显示为 `-35.00`，同时展示本项净成本、支出原额和关系净支出。`time|bank_tag` 仍展示真实 1050 支出与 35 收入。
+- allocation detail API shape 不变，付款证据仍保留原始正金额和方向；成本抽屉把退款显示为 `-35.00`，同时展示本项净成本、支出原额和关系净支出。`bank|time|bank_tag` 仍展示真实 1050 支出与 35 收入。
 - 未新增数据库、repository 查询、worker、read model、cache、兼容分支或前端隐藏逻辑；旧的独立退款成本事件循环已从唯一 policy 链删除。
 
 ## 2026-08-18：成本统计复用银行规范分类投影
 
 - 生产 PostgreSQL 路径删除成本专属 `_postgres_category_provider`、分类/确认表重复装载和 Python 自动重分类。
-- `PostgresCostStatisticsCanonicalRepository` 在原有 `REPEATABLE READ READ ONLY` 快照内，对当前银行流水 ID 一次调用银行分类 owner 的 `effective_category_projection_rows(...)`；`time|bank_tag` 仍不读取 OA/关系，三种归因视图仍只扩展命中关系的完整成员。
+- `PostgresCostStatisticsCanonicalRepository` 在原有 `REPEATABLE READ READ ONLY` 快照内，对当前银行流水 ID 一次调用银行分类 owner 的 `effective_category_projection_rows(...)`；`bank|time|bank_tag` 不读取 OA/关系，两种归因视图只扩展命中关系的完整成员。
 - canonical-only confirmation 通过规范分类 SQL 的 UUID/legacy identity 连接解析为公开流水 ID；人工确认不再错误落入“未标记”，内部转账也不再由成本模块维护第二套算法。
 - 自动识别和人工覆盖的 `internal_transfer` 统一形成一个“内部往来款”主/子标签；无 effective code 的外部往来候选即使携带展示文案也继续归入“未标记”。
 - API shape、五视图人口和金额口径不变；空银行集合跳过分类查询，不新增 cache、read model、worker、migration 或 fallback。
@@ -67,7 +67,7 @@
 - 每条银行事件独立按关系内 OA 原始金额比例拆到 OA 归集单元，按分采用最大余数法闭合。详情公开 OA 原始金额、比例、银行事件原额，以及关系总支出、退款、实际现金成本、差额和现金比例。
 - 关系中存在进行中 OA 时整组不统计；零/缺失权重只保留内部防除零判断，不新增“待分摊”或“数据异常”产品状态。真实 OA 费用类型缺失时进入“未填写 OA 费用类型”，不再用质量排除隐藏。
 - 原有“成本统计标签规则”抽屉原位收敛为“无 OA 成本范围”：虚拟项目名和标签默认空；候选仅来自当前实际无 active OA 关系的支出流水标签；命中选中标签后仍按每笔流水复核无 OA。设置对全部历史期间生效。
-- `按 OA 费用类型`更名为`按费用类型`，无 OA 行进入“无 OA 分类”。三种归因视图右栏更名为“成本明细”，详情请求由行级 `row_kind` 决定。
+- `按 OA 费用类型`更名为`按费用类型`，无 OA 行进入“无 OA 分类”。两种归因视图右栏更名为“成本明细”，详情请求由行级 `row_kind` 决定。
 - 删除旧 OA-first 金额、OA 完成日期范围、混合支付账户、完整银行收支 time/tag、默认全选标签、按页签推断详情类型和标签归档时静默移除成本选择等旧链路；不新增表、read model、worker、cache、endpoint 或第二个抽屉。
 
 ## 2026-08-18：支付申请费用类型读取修复
@@ -151,7 +151,7 @@
 > 本节的两套事实域描述已由 2026-08-18 的统一银行成本事件取代；其中自动滚动分页合同已由 2026-08-31 的显式分页取代。
 
 - explorer 增加一个最长 200 字符的规范化 `query`，并将其绑定 cursor；policy 在聚合、facets、summary 和分页之前过滤当前视图事实行，不增加 repository 查询。
-- `project / bank / expense_type` 只搜索 OA 配对 allocation；`time / bank_tag` 只搜索完整 canonical 银行事实。`time` 不再渲染“未配对OA / 未分类”占位字段。
+- `project / expense_type` 只搜索成本归因 allocation；`bank / time / bank_tag` 只搜索完整 canonical 银行事实。三个银行流水视图不渲染“未配对OA / 未分类”占位字段。
 - 主标签和子标签复用同一个仅支出、混合、仅收入、零金额排序键；UI 将支出放在收入上方，用独立笔数字段和既有方向颜色表达。
 - 五个视图复用一个紧凑搜索框，使用 200ms debounce、IME composition 保护和 AbortController；项目/银行三栏采用 `24% / 24% / 52%`，右侧明细禁止横向滚动。
 - 历史实现曾复用 cursor API 在表格接近底部时自动追加；该交互和对应滚动监听现已删除，不再是当前合同。

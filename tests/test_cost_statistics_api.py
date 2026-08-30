@@ -103,7 +103,6 @@ class CostStatisticsApiTests(unittest.TestCase):
             "bank": (
                 "/api/cost-statistics/explorer?scope=2026-03&view=bank"
                 f"&payment_account_label={time_row['payment_account_label']}"
-                "&project_name=云南溯源科技"
             ),
             "expense_type": (
                 "/api/cost-statistics/explorer?scope=2026-03&view=expense_type"
@@ -124,6 +123,23 @@ class CostStatisticsApiTests(unittest.TestCase):
                 self.assertNotIn("read_model_status", payload)
                 self.assertNotIn("read_model_version", payload)
                 self.assertNotIn("refresh_scope_keys", payload)
+
+        status, bank_payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=bank"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(bank_payload["facets"]["projects"], [])
+        self.assertEqual(
+            bank_payload["facets"]["bank_accounts"][0],
+            {
+                "payment_account_label": time_row["payment_account_label"],
+                "expense_amount": "1250.00",
+                "income_amount": "0.00",
+                "net_outflow_amount": "1250.00",
+                "transaction_count": 1,
+                "expense_percentage_label": "100.0%",
+            },
+        )
 
     def test_project_view_and_detail_use_the_same_active_relation(self) -> None:
         status, page = self._json(

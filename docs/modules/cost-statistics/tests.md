@@ -12,7 +12,7 @@
 | Runtime regression | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/scope/worker tests | 旧 Cost read-model 链路保持删除 |
 | OA 归一化 | `tests/test_mongo_oa_adapter.py` | 支付申请精确读取可配置 `category`、日常报销明细精确读取 `purposeType`、表单字段互不覆盖、空/未知值不伪造“其他” |
 | Settings | `tests/test_app_settings_service.py` | time/tag 默认 all 与独立 CAS、无 OA 项目数组默认空、稳定 ID/名称/至少一个标签/标签互斥、旧单项目配置一次性归一化、候选校验、历史标签不静默丢失 |
-| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx`、`CostExplorerList.test.tsx`、`CostEntryDetailPanel.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | 初始 loading/empty/error、标题行 tabs、紧凑 HeroUI 时间 Popover、Disclosure 懒展开、支付申请整单/日常报销逐明细输入、每关系独立保存、`X` checkbox 条件展示与原因校验、400/409 保留草稿、已分配编辑、正常上海时间、五视图右侧明细显式 cursor 分页、分页错误局部重试、滚动不触发请求、搜索/权限/窄屏、五视图口径、导出与旧规则抽屉回归 |
+| Frontend | `web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx`、`CostExplorerList.test.tsx`、`CostEntryDetailPanel.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | 初始 loading/empty/error、标题行 tabs、成本归因/银行流水层级、按银行“账户→canonical 流水”两栏下钻、紧凑 HeroUI 时间 Popover、Disclosure 懒展开、支付申请整单/日常报销逐明细输入、每关系独立保存、`X` checkbox 条件展示与原因校验、400/409 保留草稿、已分配编辑、正常上海时间、五视图右侧明细显式 cursor 分页、分页错误局部重试、滚动不触发请求、搜索/权限/窄屏、五视图口径、导出与旧规则抽屉回归 |
 
 ## 候选发布门禁
 

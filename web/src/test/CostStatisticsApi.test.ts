@@ -294,6 +294,60 @@ describe("Cost statistics export API", () => {
     });
   });
 
+  test("maps the bank facet contract and omits the removed bank-project filter", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        scope: "all",
+        view: "bank",
+        summary: {
+          row_count: 2,
+          transaction_count: 2,
+          total_amount: "90.00",
+          expense_amount: "100.00",
+          income_amount: "10.00",
+          expense_transaction_count: 1,
+          income_transaction_count: 1,
+        },
+        available_years: ["2026"],
+        facets: {
+          projects: [],
+          bank_accounts: [{
+            payment_account_label: "建设银行 8106",
+            expense_amount: "100.00",
+            income_amount: "10.00",
+            net_outflow_amount: "90.00",
+            transaction_count: 2,
+            expense_percentage_label: "100.00%",
+          }],
+        },
+        rows: [],
+        row_count: 0,
+        next_cursor: null,
+      }), { status: 200 }),
+    ) as typeof fetch;
+
+    const payload = await fetchCostStatisticsExplorerPage({
+      scope: "all",
+      view: "bank",
+      paymentAccountLabel: "建设银行 8106",
+      projectName: "旧项目筛选不应发送",
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=bank&payment_account_label=%E5%BB%BA%E8%AE%BE%E9%93%B6%E8%A1%8C+8106",
+      expect.any(Object),
+    );
+    expect(payload.facets.projects).toEqual([]);
+    expect(payload.facets.bankAccounts[0]).toEqual({
+      paymentAccountLabel: "建设银行 8106",
+      expenseAmount: "100.00",
+      incomeAmount: "10.00",
+      netOutflowAmount: "90.00",
+      transactionCount: 2,
+      expensePercentageLabel: "100.00%",
+    });
+  });
+
   test("loads and saves independent time/tag and no-OA rules", async () => {
     global.fetch = vi.fn(async (input, init) => {
       const url = String(input);

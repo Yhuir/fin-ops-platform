@@ -457,21 +457,49 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(snapshot["cost_groups"], [])
 
     def test_scoped_bank_flow_skips_oa_relation_io(self) -> None:
-        connection = _Connection()
+        for view in ("time", "bank", "bank_tag"):
+            with self.subTest(view=view):
+                connection = _Connection()
 
-        PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+                PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+                    scope_kind="month",
+                    scope_value="2026-03",
+                    view=view,
+                    include_statistics=False,
+                )
+
+                sql = "\n".join(connection.snapshot_transaction.fetched)
+                self.assertIn("from app.bank_transactions", sql)
+                self.assertIn("txn_month >= %s and txn_month < %s", sql)
+                self.assertNotIn("from app.workbench_pair_relations", sql)
+                self.assertNotIn("from app.oa_applications", sql)
+                self.assertNotIn("from app.cost_statistics_manual_allocations", sql)
+
+    def test_local_bank_view_does_not_load_oa_relations_or_allocations(self) -> None:
+        repository = LocalCostStatisticsCanonicalRepository(
+            bank_rows_provider=lambda: [
+                {
+                    "id": "bank-raw",
+                    "amount": "8.00",
+                    "txn_direction": "outflow",
+                    "trade_time": "2026-03-20 10:00:00",
+                }
+            ],
+            relations_provider=lambda: self.fail("Bank view must not load relations."),
+            oa_rows_by_ids_provider=lambda _ids: self.fail("Bank view must not load OA rows."),
+            settings_provider=lambda: {},
+            category_provider=_CategoryProvider(),
+        )
+
+        snapshot = repository.load_snapshot(
             scope_kind="month",
             scope_value="2026-03",
-            view="time",
+            view="bank",
             include_statistics=False,
         )
 
-        sql = "\n".join(connection.snapshot_transaction.fetched)
-        self.assertIn("from app.bank_transactions", sql)
-        self.assertIn("txn_month >= %s and txn_month < %s", sql)
-        self.assertNotIn("from app.workbench_pair_relations", sql)
-        self.assertNotIn("from app.oa_applications", sql)
-        self.assertNotIn("from app.cost_statistics_manual_allocations", sql)
+        self.assertEqual([row["id"] for row in snapshot["bank_rows"]], ["bank-raw"])
+        self.assertEqual(snapshot["cost_groups"], [])
 
     def test_scoped_cost_view_uses_bounded_seven_query_bank_date_snapshot(self) -> None:
         connection = _PopulatedCostConnection()

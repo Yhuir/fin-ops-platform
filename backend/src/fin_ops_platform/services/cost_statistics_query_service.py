@@ -112,7 +112,6 @@ class CostStatisticsQueryService:
                 primary,
                 list(raw_page.get("bank_accounts") or []),
             )
-            facets["projects"] = secondary
         elif normalized_view == "expense_type":
             facets["expense_types"] = primary
         elif normalized_view == "bank_tag":
@@ -732,24 +731,37 @@ class CostStatisticsQueryService:
         )
         if len(query) > 200:
             raise ValueError("query must be at most 200 characters")
-        return (
-            normalized_view,
-            {
-                key: (
-                    query
-                    if key == "query"
-                    else str(filters.get(key) or "").strip()
-                )
-                for key in (
-                    "project_name",
-                    "expense_type",
-                    "payment_account_label",
-                    "bank_tag_primary_label",
-                    "bank_tag_sub_label",
-                    "query",
-                )
-            },
-        )
+        normalized_filters = {
+            "project_name": "",
+            "expense_type": "",
+            "payment_account_label": "",
+            "bank_tag_primary_label": "",
+            "bank_tag_sub_label": "",
+            "query": query,
+        }
+        if normalized_view == "project":
+            normalized_filters["project_name"] = str(
+                filters.get("project_name") or ""
+            ).strip()
+            normalized_filters["expense_type"] = str(
+                filters.get("expense_type") or ""
+            ).strip()
+        elif normalized_view == "expense_type":
+            normalized_filters["expense_type"] = str(
+                filters.get("expense_type") or ""
+            ).strip()
+        elif normalized_view == "bank":
+            normalized_filters["payment_account_label"] = str(
+                filters.get("payment_account_label") or ""
+            ).strip()
+        elif normalized_view == "bank_tag":
+            normalized_filters["bank_tag_primary_label"] = str(
+                filters.get("bank_tag_primary_label") or ""
+            ).strip()
+            normalized_filters["bank_tag_sub_label"] = str(
+                filters.get("bank_tag_sub_label") or ""
+            ).strip()
+        return normalized_view, normalized_filters
 
     @staticmethod
     def _page_query_binding(
@@ -830,10 +842,11 @@ class CostStatisticsQueryService:
             merged.append(
                 {
                     "payment_account_label": label,
-                    "total_amount": "0.00",
+                    "expense_amount": "0.00",
+                    "income_amount": "0.00",
+                    "net_outflow_amount": "0.00",
                     "transaction_count": 0,
-                    "project_count": 0,
-                    "percentage_label": "0.0%",
+                    "expense_percentage_label": "0.0%",
                 }
             )
         return merged
@@ -1470,10 +1483,6 @@ class CostStatisticsQueryService:
 def _cost_row_tags_required(view: str, filters: dict[str, str]) -> bool:
     if view == "project":
         return bool(filters.get("project_name") and filters.get("expense_type"))
-    if view == "bank":
-        return bool(
-            filters.get("payment_account_label") and filters.get("project_name")
-        )
     if view == "expense_type":
         return bool(filters.get("expense_type"))
     return True

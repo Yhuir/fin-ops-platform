@@ -19,6 +19,6 @@
 | `COST-E2E-015` | covered | `tests/test_cost_statistics_canonical_repository.py` 的全关系银行证据/声明 OA 成员；`tests/test_cost_statistics_policy.py` 的跨月退款与 partial OA fail-closed |
 | `COST-E2E-016` | covered | `tests/test_cost_statistics_api.py` 的逐 OA 单元 DTO、非法来源字段、`C+X=N`、X 原因/范围、source-version conflict、审计与 pending/allocated；`web/src/test/CostStatisticsPage.test.tsx` 的 lazy GET、Disclosure、每关系保存、条件 X 和编辑入口 |
 | `COST-E2E-017` | covered | `tests/test_cost_statistics_policy.py` 的 C/N 分离、禁止伪造资金来源归属及最新支出时间锚点；`tests/test_cost_statistics_api.py` 的详情/导出合同 |
-| `COST-E2E-018` | automated-covered / visual-measure | `web/src/test/CostStatisticsPage.test.tsx` 的分组语义与视图切换；候选/生产由浏览器桌面和窄视口截图补证 |
+| `COST-E2E-018` | automated-covered / visual-measure | `web/src/test/CostStatisticsPage.test.tsx` 的分组语义、“银行账户→canonical 流水”两栏下钻与视图切换；候选/生产由浏览器桌面和窄视口截图补证 |
 
 候选门禁使用成本统计后端/API/Audit/边界测试、前端定向测试和生产 build；真实正确性、抽屉视觉与性能由部署后的集中生产验证补齐。

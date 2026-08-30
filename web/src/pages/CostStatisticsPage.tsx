@@ -105,7 +105,6 @@ function getExplorerTransitionScope(
   }
   if (
     (next.view === "project" && previous.projectName !== next.projectName)
-    || (next.view === "bank" && previous.paymentAccountLabel !== next.paymentAccountLabel)
     || (next.view === "bank_tag" && previous.bankTagPrimaryLabel !== next.bankTagPrimaryLabel)
   ) {
     return "children";
@@ -167,7 +166,7 @@ function DirectionAmount({
   amount: string;
   hideWhenZero?: boolean;
   label: string;
-  tone: "expense" | "income";
+  tone: "expense" | "income" | "neutral";
 }) {
   const numericAmount = Number(amount.replace(/,/g, ""));
   if (hideWhenZero && Number.isFinite(numericAmount) && numericAmount === 0) {
@@ -459,7 +458,6 @@ export default function CostStatisticsPage() {
   const [selectedProjectExpenseType, setSelectedProjectExpenseType] = useState<string | null>(null);
   const [selectedProjectEntryId, setSelectedProjectEntryId] = useState<string | null>(null);
   const [selectedBankAccountLabel, setSelectedBankAccountLabel] = useState<string | null>(null);
-  const [selectedBankProjectName, setSelectedBankProjectName] = useState<string | null>(null);
   const [selectedBankEntryId, setSelectedBankEntryId] = useState<string | null>(null);
   const [selectedExpenseType, setSelectedExpenseType] = useState<string | null>(null);
   const [selectedExpenseEntryId, setSelectedExpenseEntryId] = useState<string | null>(null);
@@ -537,7 +535,6 @@ export default function CostStatisticsPage() {
     ...(viewMode === "project" && selectedProjectName ? { projectName: selectedProjectName } : {}),
     ...(viewMode === "project" && selectedProjectExpenseType ? { expenseType: selectedProjectExpenseType } : {}),
     ...(viewMode === "bank" && selectedBankAccountLabel ? { paymentAccountLabel: selectedBankAccountLabel } : {}),
-    ...(viewMode === "bank" && selectedBankProjectName ? { projectName: selectedBankProjectName } : {}),
     ...(viewMode === "expenseType" && selectedExpenseType ? { expenseType: selectedExpenseType } : {}),
     ...(viewMode === "bankTag" && selectedBankTagPrimaryLabel
       ? { bankTagPrimaryLabel: selectedBankTagPrimaryLabel }
@@ -581,7 +578,6 @@ export default function CostStatisticsPage() {
       setSelectedProjectExpenseType(null);
     } else if (targetView === "bank") {
       setSelectedBankAccountLabel(null);
-      setSelectedBankProjectName(null);
     } else if (targetView === "expenseType") {
       setSelectedExpenseType(null);
     } else if (targetView === "bankTag") {
@@ -741,7 +737,7 @@ export default function CostStatisticsPage() {
       setTimeTagRules(result);
       setTimeTagDraftMode(result.mode);
       setTimeTagDraftCodes(result.selectedTagCodes);
-      if (viewMode === "time" || viewMode === "bankTag") setDomainRefreshNonce((current) => current + 1);
+      if (viewMode === "time" || viewMode === "bank" || viewMode === "bankTag") setDomainRefreshNonce((current) => current + 1);
       setIsTimeTagRulesOpen(false);
     } catch (caught) {
       setTimeTagRulesError(getCostStatisticsActionErrorMessage(caught));
@@ -768,7 +764,7 @@ export default function CostStatisticsPage() {
       });
       setNoOaRules(result);
       setNoOaDraftProjects(result.projects);
-      if (viewMode === "project" || viewMode === "bank" || viewMode === "expenseType") setDomainRefreshNonce((current) => current + 1);
+      if (viewMode === "project" || viewMode === "expenseType") setDomainRefreshNonce((current) => current + 1);
       setIsNoOaRulesOpen(false);
     } catch (caught) {
       setNoOaRulesError(getCostStatisticsActionErrorMessage(caught));
@@ -935,21 +931,23 @@ export default function CostStatisticsPage() {
   const projectRows = explorerData?.facets.projects ?? [];
   const projectExpenseTypeRows = isChildrenTransition ? [] : explorerData?.facets.expenseTypes ?? [];
   const bankRows = explorerData?.facets.bankAccounts ?? [];
-  const bankProjectRows = isChildrenTransition ? [] : explorerData?.facets.projects ?? [];
   const expenseTypeRows = explorerData?.facets.expenseTypes ?? [];
   const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
   const bankTagSubRows = isChildrenTransition ? [] : explorerData?.facets.bankTagSub ?? [];
   const selectedProjectTransactionRows = selectedProjectName && selectedProjectExpenseType ? pageRows : [];
-  const selectedBankProjectRows = selectedBankAccountLabel && selectedBankProjectName ? pageRows : [];
+  const selectedBankRows = selectedBankAccountLabel ? pageRows : [];
   const selectedExpenseTypeRows = selectedExpenseType ? pageRows : [];
   const selectedBankTagSubRows = selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? pageRows : [];
   const timeDirectionSummary = {
     expenseAmount: explorerData?.summary.expenseAmount ?? "0.00",
     incomeAmount: explorerData?.summary.incomeAmount ?? "0.00",
   };
+  const bankDirectionSummary = {
+    ...timeDirectionSummary,
+    netOutflowAmount: explorerData?.summary.totalAmount ?? "0.00",
+  };
   const bankTagDirectionSummary = timeDirectionSummary;
   const projectTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
-  const bankTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
   const expenseTypeTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
 
   useEffect(() => {
@@ -1645,22 +1643,21 @@ export default function CostStatisticsPage() {
           >
             <div className="cost-view-switcher" role="group" aria-label="成本统计视图切换">
               <div className="cost-view-switcher-group">
-                <span className="cost-view-switcher-label">OA 配对</span>
+                <span className="cost-view-switcher-label">成本归因</span>
                 <ToggleButtonGroup
-                  aria-label="OA 配对统计视图"
+                  aria-label="成本归因统计视图"
                   className="cost-view-tabs"
                   onSelectionChange={(keys) => {
                     const [key] = Array.from(keys);
-                    if (key === "project" || key === "bank" || key === "expenseType") handleViewModeChange(key);
+                    if (key === "project" || key === "expenseType") handleViewModeChange(key);
                   }}
                   selectedKeys={new Set(
-                    viewMode === "project" || viewMode === "bank" || viewMode === "expenseType" ? [viewMode] : [],
+                    viewMode === "project" || viewMode === "expenseType" ? [viewMode] : [],
                   )}
                   selectionMode="single"
                   size="sm"
                 >
                   <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
-                  <ToggleButton className="cost-view-tab" id="bank">按银行</ToggleButton>
                   <ToggleButton className="cost-view-tab" id="expenseType">按费用类型</ToggleButton>
                 </ToggleButtonGroup>
               </div>
@@ -1672,12 +1669,15 @@ export default function CostStatisticsPage() {
                   className="cost-view-tabs"
                   onSelectionChange={(keys) => {
                     const [key] = Array.from(keys);
-                    if (key === "bankTag" || key === "time") handleViewModeChange(key);
+                    if (key === "bank" || key === "bankTag" || key === "time") handleViewModeChange(key);
                   }}
-                  selectedKeys={new Set(viewMode === "bankTag" || viewMode === "time" ? [viewMode] : [])}
+                  selectedKeys={new Set(
+                    viewMode === "bank" || viewMode === "bankTag" || viewMode === "time" ? [viewMode] : [],
+                  )}
                   selectionMode="single"
                   size="sm"
                 >
+                  <ToggleButton className="cost-view-tab" id="bank">按银行</ToggleButton>
                   <ToggleButton className="cost-view-tab" id="bankTag">按标签</ToggleButton>
                   <ToggleButton className="cost-view-tab" id="time">按时间</ToggleButton>
                 </ToggleButtonGroup>
@@ -1926,7 +1926,11 @@ export default function CostStatisticsPage() {
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按银行统计</h2>
-                    <DirectionAmount amount={bankTotalAmount} label="支出金额" tone="expense" />
+                    <div className="cost-direction-summary" aria-label="银行统计方向金额">
+                      <DirectionAmount amount={bankDirectionSummary.expenseAmount} label="支出金额" tone="expense" />
+                      <DirectionAmount amount={bankDirectionSummary.incomeAmount} label="收入金额" tone="income" />
+                      <DirectionAmount amount={bankDirectionSummary.netOutflowAmount} label="净流出" tone="neutral" />
+                    </div>
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     <BusinessPeriodPicker
@@ -1941,7 +1945,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
                 ) : (
-                <div className="cost-explorer-grid project grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]">
+                <div className="cost-explorer-grid bank grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(260px,0.9fr)_minmax(0,2.6fr)]">
                   <CostExplorerList<CostBankExplorerRow>
                     title="银行账户"
                     count={bankRows.length}
@@ -1951,38 +1955,17 @@ export default function CostStatisticsPage() {
                     isActive={(row) => row.paymentAccountLabel === selectedBankAccountLabel}
                     onSelect={(row) => {
                       setSelectedBankAccountLabel(row.paymentAccountLabel);
-                      setSelectedBankProjectName(null);
                       setSelectedBankEntryId(null);
                       setEntryDetail(null);
                     }}
                     getPrimaryText={(row) => row.paymentAccountLabel}
-                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.projectCount} 个项目`}
+                    renderSecondary={(row) => `${row.transactionCount} 条流水`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        {row.percentageLabel ? <CostPercentageChip label={row.percentageLabel} /> : null}
-                      </div>
-                    )}
-                  />
-                  <CostExplorerList<CostProjectExplorerRow>
-                    title="项目名"
-                    count={bankProjectRows.length}
-                    items={bankProjectRows}
-                    loading={isChildrenTransition}
-                    emptyLabel={selectedBankAccountLabel ? "该账户下暂无项目归集。" : "请先在左侧选择银行账户。"}
-                    getKey={(row) => row.projectName}
-                    isActive={(row) => row.projectName === selectedBankProjectName}
-                    onSelect={(row) => {
-                      setSelectedBankProjectName(row.projectName);
-                      setSelectedBankEntryId(null);
-                      setEntryDetail(null);
-                    }}
-                    getPrimaryText={(row) => row.projectName}
-                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.expenseTypeCount} 类费用`}
-                    renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        {row.percentageLabel ? <CostPercentageChip label={row.percentageLabel} /> : null}
+                        <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" />
+                        <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" />
+                        <DirectionAmount amount={row.netOutflowAmount} label="净流出" tone="neutral" />
+                        <CostPercentageChip label={row.expensePercentageLabel} />
                       </div>
                     )}
                   />
@@ -1991,23 +1974,23 @@ export default function CostStatisticsPage() {
                     className="cost-explorer-lane cost-explorer-lane-table"
                   >
                     <header className="cost-explorer-lane-header">
-                      <h2>成本明细</h2>
-                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankProjectRows.length} />
+                      <h2>银行流水明细</h2>
+                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankRows.length} />
                     </header>
                     {isRowsTransition ? (
                       <div className="cost-explorer-empty" />
-                    ) : selectedBankAccountLabel && selectedBankProjectName ? (
+                    ) : selectedBankAccountLabel ? (
                       <CostStatisticsTable
-                        ariaLabel="银行成本明细表"
-                        columns={entryColumns}
-                        rows={selectedBankProjectRows}
+                        ariaLabel="银行流水明细表"
+                        columns={timeColumns}
+                        rows={selectedBankRows}
                         getRowKey={getCostEntryRowRenderKey}
                         onRowClick={(row) => void openEntryDetail(row, "bank")}
                         getRowActionLabel={costEntryActionLabel}
-                        emptyLabel="该项目下暂无成本明细。"
+                        emptyLabel="该账户暂无银行流水。"
                         {...tablePaginationProps}
                       />
-                    ) : <div className="cost-explorer-empty">依次选择银行账户和项目</div>}
+                    ) : <div className="cost-explorer-empty">选择银行账户查看流水明细</div>}
                   </section>
                 </div>
                 )}

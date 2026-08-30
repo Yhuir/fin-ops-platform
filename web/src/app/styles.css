@@ -21025,6 +21025,10 @@ body.column-layout-dragging {
   color: var(--fp-success) !important;
 }
 
+.cost-direction-amount--neutral {
+  color: var(--fp-text-secondary) !important;
+}
+
 .cost-section-heading-copy {
   display: flex;
   min-width: 0;

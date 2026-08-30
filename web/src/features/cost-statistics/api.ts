@@ -72,10 +72,11 @@ type ApiCostExpenseTypeExplorerRow = {
 
 type ApiCostBankExplorerRow = {
   payment_account_label: string;
-  total_amount: string;
+  expense_amount: string;
+  income_amount: string;
+  net_outflow_amount: string;
   transaction_count: number;
-  project_count: number;
-  percentage_label: string;
+  expense_percentage_label: string;
 };
 
 type ApiCostBankTagPrimaryExplorerRow = {
@@ -465,11 +466,11 @@ export async function fetchCostStatisticsExplorerPage(
     buildScopedUrl("/api/cost-statistics/explorer", {
       scope: request.scope,
       view: request.view,
-      project_name: request.projectName,
-      expense_type: request.expenseType,
-      payment_account_label: request.paymentAccountLabel,
-      bank_tag_primary_label: request.bankTagPrimaryLabel,
-      bank_tag_sub_label: request.bankTagSubLabel,
+      project_name: request.view === "project" ? request.projectName : undefined,
+      expense_type: request.view === "project" || request.view === "expense_type" ? request.expenseType : undefined,
+      payment_account_label: request.view === "bank" ? request.paymentAccountLabel : undefined,
+      bank_tag_primary_label: request.view === "bank_tag" ? request.bankTagPrimaryLabel : undefined,
+      bank_tag_sub_label: request.view === "bank_tag" ? request.bankTagSubLabel : undefined,
       query: request.query,
       cursor: request.cursor,
       page_size: request.pageSize ? String(request.pageSize) : undefined,
@@ -514,10 +515,11 @@ export async function fetchCostStatisticsExplorerPage(
       })),
       bankAccounts: (facets.bank_accounts ?? []).map<CostBankExplorerRow>((row) => ({
         paymentAccountLabel: row.payment_account_label,
-        totalAmount: row.total_amount,
+        expenseAmount: row.expense_amount,
+        incomeAmount: row.income_amount,
+        netOutflowAmount: row.net_outflow_amount,
         transactionCount: row.transaction_count,
-        projectCount: row.project_count,
-        percentageLabel: row.percentage_label,
+        expensePercentageLabel: row.expense_percentage_label,
       })),
       bankTagPrimary: (facets.bank_tag_primary ?? []).map<CostBankTagPrimaryExplorerRow>((row) => ({
         primaryLabel: row.primary_label,

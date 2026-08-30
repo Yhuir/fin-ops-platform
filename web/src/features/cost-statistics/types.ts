@@ -43,10 +43,11 @@ export type CostExplorerEntryRow = {
 
 export type CostBankExplorerRow = {
   paymentAccountLabel: string;
-  totalAmount: string;
+  expenseAmount: string;
+  incomeAmount: string;
+  netOutflowAmount: string;
   transactionCount: number;
-  projectCount: number;
-  percentageLabel: string;
+  expensePercentageLabel: string;
 };
 
 export type CostProjectExplorerRow = {
