@@ -33,7 +33,7 @@ test.describe("workbench exception browser flow", () => {
       .click();
 
     const drawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(drawer.getByText("状态总计 51 项 · 当前 10 / 51 项")).toBeVisible();
+    await expect(drawer.getByText("显示 10 / 51")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(1);
     expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
     expect(groupRequestUrls[0]?.searchParams.get("exception_view")).toBe("amount");
@@ -44,7 +44,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("GET /api/workbench/groups/detail")).toBe(1);
 
     await drawer.getByRole("button", { name: "加载更多异常" }).click();
-    await expect(drawer.getByText("状态总计 51 项 · 当前 20 / 51 项")).toBeVisible();
+    await expect(drawer.getByText("显示 20 / 51")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(2);
     const loadMoreUrl = groupRequestUrls.find((url) => url.searchParams.has("cursor"));
     expect(loadMoreUrl?.searchParams.get("cursor")).toBeTruthy();
@@ -205,22 +205,11 @@ test.describe("workbench exception browser flow", () => {
     const bucketLoadsBeforeAccept = api.count("GET /api/workbench/groups");
     await drawer.getByRole("button", { name: "接受异常并进入已配对" }).click();
 
-    await expect(drawer.getByRole("radio", { name: "已配对异常" })).toHaveAttribute("aria-checked", "true");
+    await expect(drawer.getByRole("radio", { name: "未配对异常 0" })).toHaveAttribute("aria-checked", "true");
+    await expect(drawer.getByText("当前分类没有金额异常。")).toBeVisible();
     await expect(pairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     })).toBeVisible();
-    await collapsedIndicator.hover();
-    const reviewedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
-    await expect(reviewedPopover.getByText("已接受该异常风险")).toBeVisible();
-    await expect(reviewedPopover.getByText("操作账户")).toBeVisible();
-    await expect(reviewedPopover.getByText("E2E-REVIEWER（浏览器测试员）")).toBeVisible();
-    await expect(reviewedPopover.getByText("操作时间")).toBeVisible();
-    await expect(reviewedPopover.getByText("2026-08-25 17:03:47")).toBeVisible();
-    await expect(reviewedPopover).not.toContainText("+08:00");
-    await page.keyboard.press("Escape");
-    await expect(unpairedZone.getByRole("button", {
-      name: "该发票有 1 项异常，查看详情",
-    })).toHaveCount(0);
     expect(api.count("POST /api/workbench/exceptions/review")).toBe(1);
     expect(api.lastBody("POST /api/workbench/exceptions/review")).toMatchObject({
       month: "all",
@@ -235,12 +224,27 @@ test.describe("workbench exception browser flow", () => {
       name: "未配对异常 0 | 已配对异常 1",
     })).toBeVisible();
 
+    await drawer.getByRole("radio", { name: "已配对异常 1" }).click();
+    await collapsedIndicator.hover();
+    const reviewedPopover = page.getByRole("dialog", { name: "该关联组异常详情" });
+    await expect(reviewedPopover.getByText("已接受该异常风险")).toBeVisible();
+    await expect(reviewedPopover.getByText("操作账户")).toBeVisible();
+    await expect(reviewedPopover.getByText("E2E-REVIEWER（浏览器测试员）")).toBeVisible();
+    await expect(reviewedPopover.getByText("操作时间")).toBeVisible();
+    await expect(reviewedPopover.getByText("2026-08-25 17:03:47")).toBeVisible();
+    await expect(reviewedPopover).not.toContainText("+08:00");
+    await page.keyboard.press("Escape");
+    await expect(unpairedZone.getByRole("button", {
+      name: "该发票有 1 项异常，查看详情",
+    })).toHaveCount(0);
+
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     const bucketLoadsBeforeWithdraw = api.count("GET /api/workbench/groups");
     await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
     await drawer.getByRole("button", { name: "撤回到未配对" }).click();
 
-    await expect(drawer.getByRole("radio", { name: "未配对异常" })).toHaveAttribute("aria-checked", "true");
+    await expect(drawer.getByRole("radio", { name: "已配对异常 0" })).toHaveAttribute("aria-checked", "true");
+    await expect(drawer.getByText("当前分类没有金额异常。")).toBeVisible();
     await expect(unpairedZone.getByRole("button", {
       name: "该发票有 1 项异常，查看详情",
     })).toBeVisible();
@@ -282,9 +286,13 @@ test.describe("workbench exception browser flow", () => {
     const drawer = page.getByRole("dialog", { name: "异常处理" });
     await expect(drawer).toBeVisible();
     const expectExceptionFilterLayout = async () => {
+      const header = drawer.locator(".finance-drawer__header");
+      const bucketControls = drawer.getByRole("radiogroup", { name: "异常状态" });
       const exceptionType = drawer.getByRole("radiogroup", { name: "异常类型" });
       const amountFilters = drawer.locator(".workbench-anomaly-drawer__amount-filters");
 
+      await expect(header.getByRole("heading", { name: "异常处理" })).toBeVisible();
+      await expect(bucketControls).toBeVisible();
       await expect(exceptionType).toBeVisible();
       await expect(amountFilters).toBeVisible();
       for (const title of AMOUNT_RULE_FAMILY_TITLES) {
@@ -309,6 +317,18 @@ test.describe("workbench exception browser flow", () => {
       await expect.poll(async () => amountFilters.evaluate(
         (element) => element.scrollWidth - element.clientWidth,
       )).toBeLessThanOrEqual(1);
+      await expect.poll(async () => {
+        const [headerBox, bucketBox] = await Promise.all([
+          header.boundingBox(),
+          bucketControls.boundingBox(),
+        ]);
+        if (!headerBox || !bucketBox) {
+          return Number.POSITIVE_INFINITY;
+        }
+        return Math.abs(
+          (bucketBox.y + bucketBox.height / 2) - (headerBox.y + headerBox.height / 2),
+        );
+      }).toBeLessThanOrEqual(2);
       await expect.poll(async () => drawer.evaluate(
         (element) => element.scrollWidth - element.clientWidth,
       )).toBeLessThanOrEqual(1);

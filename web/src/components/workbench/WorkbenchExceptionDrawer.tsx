@@ -27,6 +27,7 @@ import WorkbenchAnomalyIndicator from "./WorkbenchAnomalyIndicator";
 type WorkbenchExceptionDrawerProps = {
   open: boolean;
   bucket: "unpaired" | "paired";
+  bucketCounts: Record<"unpaired" | "paired", number>;
   view: WorkbenchExceptionView;
   selectedExceptionCode: WorkbenchAmountAnomalyCode | null;
   exceptionCounts: WorkbenchExceptionCounts | null;
@@ -58,16 +59,41 @@ const PANE_LABELS: Record<WorkbenchRecordType, string> = {
   bank: "流水",
   invoice: "发票",
 };
-const AMOUNT_RULE_FAMILY_START_LABELS: Partial<Record<WorkbenchAmountAnomalyCode, string>> = {
-  oa_bank_equal_invoice_more: "OA = 流水",
-  oa_invoice_equal_bank_more: "OA = 发票",
-  bank_invoice_equal_oa_less: "流水 = 发票",
-  all_amounts_different: "三项互异",
+const AMOUNT_RULE_FAMILIES: Array<{
+  label: string;
+  codes: WorkbenchAmountAnomalyCode[];
+}> = [
+  {
+    label: "OA = 流水",
+    codes: ["oa_bank_equal_invoice_more", "oa_bank_equal_invoice_less"],
+  },
+  {
+    label: "OA = 发票",
+    codes: ["oa_invoice_equal_bank_more", "oa_invoice_equal_bank_less"],
+  },
+  {
+    label: "流水 = 发票",
+    codes: ["bank_invoice_equal_oa_less", "bank_invoice_equal_oa_more"],
+  },
+  {
+    label: "三项互异",
+    codes: ["all_amounts_different"],
+  },
+];
+const AMOUNT_RULE_SHORT_LABELS: Record<WorkbenchAmountAnomalyCode, string> = {
+  oa_bank_equal_invoice_more: "票多",
+  oa_bank_equal_invoice_less: "票少",
+  oa_invoice_equal_bank_more: "付多",
+  oa_invoice_equal_bank_less: "付少",
+  bank_invoice_equal_oa_less: "OA 提少",
+  bank_invoice_equal_oa_more: "OA 提多",
+  all_amounts_different: "三项不一致",
 };
 const DRAWER_DETAIL_COLUMNS = "minmax(320px, 1fr) 1px minmax(320px, 1fr) 1px minmax(320px, 1fr)";
 export default function WorkbenchExceptionDrawer({
   open,
   bucket,
+  bucketCounts,
   view,
   selectedExceptionCode,
   exceptionCounts,
@@ -96,7 +122,7 @@ export default function WorkbenchExceptionDrawer({
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
   const detailRequestsRef = useRef(new Set<string>());
   const detailGenerationRef = useRef(0);
-  const toolbarRef = useRef<HTMLDivElement>(null);
+  const bucketControlsRef = useRef<HTMLDivElement>(null);
   const visibleGroups = groups;
 
   useEffect(() => {
@@ -156,7 +182,7 @@ export default function WorkbenchExceptionDrawer({
   }, [detailGroups, expandedKeys, onEnsureGroupDetail, visibleGroups]);
 
   const runGroupAction = async (groupId: string, action: () => Promise<void> | void) => {
-    const currentBucketControl = toolbarRef.current?.querySelector<HTMLElement>(
+    const currentBucketControl = bucketControlsRef.current?.querySelector<HTMLElement>(
       '[role="radio"][aria-checked="true"]',
     );
     if (currentBucketControl?.isConnected) {
@@ -170,99 +196,110 @@ export default function WorkbenchExceptionDrawer({
     }
   };
 
+  const bucketControls = (
+    <div className="workbench-anomaly-drawer__bucket-controls" ref={bucketControlsRef}>
+      <ToggleButtonGroup
+        aria-label="异常状态"
+        className="workbench-anomaly-drawer__bucket-segmented"
+        disallowEmptySelection
+        selectedKeys={new Set<Key>([bucket])}
+        selectionMode="single"
+        size="sm"
+        onSelectionChange={(keys) => {
+          const [next] = Array.from(keys);
+          if (next === "unpaired" || next === "paired") {
+            onBucketChange(next);
+          }
+        }}
+      >
+        <ToggleButton id="unpaired">未配对异常 {bucketCounts.unpaired}</ToggleButton>
+        <ToggleButton id="paired">
+          <ToggleButtonGroup.Separator />
+          已配对异常 {bucketCounts.paired}
+        </ToggleButton>
+      </ToggleButtonGroup>
+    </div>
+  );
+
   return (
     <AppDrawer
       ariaBusy={loading}
       className="workbench-anomaly-drawer"
+      headerActions={bucketControls}
       open={open}
       title="异常处理"
       width="min(1740px, 96vw)"
       onClose={onClose}
     >
-      <div className="workbench-anomaly-drawer__toolbar" ref={toolbarRef}>
-        <ToggleButtonGroup
-          aria-label="异常状态"
-          className="workbench-anomaly-drawer__segmented"
-          disallowEmptySelection
-          selectedKeys={new Set<Key>([bucket])}
-          selectionMode="single"
-          size="sm"
-          onSelectionChange={(keys) => {
-            const [next] = Array.from(keys);
-            if (next === "unpaired" || next === "paired") {
-              onBucketChange(next);
-            }
-          }}
-        >
-          <ToggleButton id="unpaired">未配对异常</ToggleButton>
-          <ToggleButton id="paired">
-            <ToggleButtonGroup.Separator />
-            已配对异常
-          </ToggleButton>
-        </ToggleButtonGroup>
-        <span aria-live="polite" className="workbench-anomaly-drawer__count">
-          状态总计 {exceptionCounts?.total ?? 0} 项
-          <span aria-hidden="true"> · </span>
-          当前 {visibleGroups.length < total ? `${visibleGroups.length} / ${total}` : total} 项
-        </span>
-      </div>
-
       <div className="workbench-anomaly-drawer__filters">
-        <ToggleButtonGroup
-          aria-label="异常类型"
-          className="workbench-anomaly-drawer__view-segmented"
-          disallowEmptySelection
-          selectedKeys={new Set<Key>([view])}
-          selectionMode="single"
-          size="sm"
-          onSelectionChange={(keys) => {
-            const [next] = Array.from(keys);
-            if (next === "amount" || next === "document_only") {
-              onViewChange(next);
-            }
-          }}
-        >
-          <ToggleButton id="amount">金额异常 {exceptionCounts?.amountTotal ?? 0}</ToggleButton>
-          <ToggleButton id="document_only">
-            <ToggleButtonGroup.Separator />
-            仅资料异常 {exceptionCounts?.documentOnly ?? 0}
-          </ToggleButton>
-        </ToggleButtonGroup>
-        {view === "amount" ? (
+        <div className="workbench-anomaly-drawer__view-row">
           <ToggleButtonGroup
-            aria-label="金额异常分类"
-            className="workbench-anomaly-drawer__amount-filters"
+            aria-label="异常类型"
+            className="workbench-anomaly-drawer__view-segmented"
             disallowEmptySelection
-            selectedKeys={selectedExceptionCode ? new Set<Key>([selectedExceptionCode]) : new Set<Key>()}
+            selectedKeys={new Set<Key>([view])}
             selectionMode="single"
             size="sm"
             onSelectionChange={(keys) => {
               const [next] = Array.from(keys);
-              if (WORKBENCH_AMOUNT_ANOMALY_CODES.some((code) => code === next)) {
-                onExceptionCodeChange(next as WorkbenchAmountAnomalyCode);
+              if (next === "amount" || next === "document_only") {
+                onViewChange(next);
               }
             }}
           >
-            {WORKBENCH_AMOUNT_ANOMALY_CODES.map((code) => {
-              const count = exceptionCounts?.byCode[code] ?? 0;
-              const familyLabel = AMOUNT_RULE_FAMILY_START_LABELS[code];
-              return (
-                <ToggleButton
-                  aria-label={`${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${count}`}
-                  id={code}
-                  key={code}
-                >
-                  {familyLabel ? (
-                    <span aria-hidden="true" className="workbench-anomaly-drawer__amount-family-label">
-                      {familyLabel}
-                    </span>
-                  ) : null}
-                  <span aria-hidden="true">{WORKBENCH_AMOUNT_ANOMALY_LABELS[code]}</span>
-                  <strong aria-hidden="true">{count}</strong>
-                </ToggleButton>
-              );
-            })}
+            <ToggleButton id="amount">金额异常 {exceptionCounts?.amountTotal ?? 0}</ToggleButton>
+            <ToggleButton id="document_only">
+              <ToggleButtonGroup.Separator />
+              仅资料异常 {exceptionCounts?.documentOnly ?? 0}
+            </ToggleButton>
           </ToggleButtonGroup>
+          <span aria-live="polite" className="workbench-anomaly-drawer__count">
+            {visibleGroups.length < total ? `显示 ${visibleGroups.length} / ${total}` : `共 ${total} 项`}
+          </span>
+        </div>
+        {view === "amount" ? (
+          <section aria-labelledby="amount-anomaly-category-title" className="workbench-anomaly-drawer__amount-section">
+            <h3 className="workbench-anomaly-drawer__filter-heading" id="amount-anomaly-category-title">
+              金额异常分类
+            </h3>
+            <ToggleButtonGroup
+              aria-label="金额异常分类"
+              className="workbench-anomaly-drawer__amount-filters"
+              disallowEmptySelection
+              selectedKeys={selectedExceptionCode ? new Set<Key>([selectedExceptionCode]) : new Set<Key>()}
+              selectionMode="single"
+              size="sm"
+              onSelectionChange={(keys) => {
+                const [next] = Array.from(keys);
+                if (WORKBENCH_AMOUNT_ANOMALY_CODES.some((code) => code === next)) {
+                  onExceptionCodeChange(next as WorkbenchAmountAnomalyCode);
+                }
+              }}
+            >
+              {AMOUNT_RULE_FAMILIES.map((family) => (
+                <div className="workbench-anomaly-drawer__amount-family" key={family.label}>
+                  <span className="workbench-anomaly-drawer__amount-family-heading">
+                    {family.label}
+                  </span>
+                  <div className="workbench-anomaly-drawer__amount-family-options">
+                    {family.codes.map((code) => {
+                      const count = exceptionCounts?.byCode[code] ?? 0;
+                      return (
+                        <ToggleButton
+                          aria-label={`${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${count}`}
+                          id={code}
+                          key={code}
+                        >
+                          <span aria-hidden="true">{AMOUNT_RULE_SHORT_LABELS[code]}</span>
+                          <strong aria-hidden="true">{count}</strong>
+                        </ToggleButton>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </ToggleButtonGroup>
+          </section>
         ) : null}
       </div>
 

@@ -91,6 +91,10 @@ function renderDrawer(
   render(
     <WorkbenchExceptionDrawer
       bucket={bucket}
+      bucketCounts={{
+        unpaired: bucket === "unpaired" ? 1 : 0,
+        paired: bucket === "paired" ? 1 : 0,
+      }}
       canMutateData={canMutateData}
       contentGeneration={1}
       error={null}
@@ -125,8 +129,8 @@ async function expandFirstGroup(user: ReturnType<typeof userEvent.setup>) {
 describe("WorkbenchExceptionDrawer", () => {
   it("uses status tabs, view counts, and seven compact server-classification entries", () => {
     renderDrawer("unpaired");
-    expect(screen.getByText("未配对异常")).toBeInTheDocument();
-    expect(screen.getByText("已配对异常")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "未配对异常 1" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "已配对异常 0" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "金额异常 1" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "仅资料异常 0" })).toBeInTheDocument();
     const amountFilters = screen.getByRole("radiogroup", { name: "金额异常分类" });
@@ -138,13 +142,13 @@ describe("WorkbenchExceptionDrawer", () => {
       )),
     );
     expect(
-      Array.from(amountFilters.querySelectorAll(".workbench-anomaly-drawer__amount-family-label")).map(
+      Array.from(amountFilters.querySelectorAll(".workbench-anomaly-drawer__amount-family-heading")).map(
         (label) => label.textContent,
       ),
     ).toEqual(["OA = 流水", "OA = 发票", "流水 = 发票", "三项互异"]);
     expect(document.querySelector(".workbench-anomaly-drawer__amount-filter-scroll")).not.toBeInTheDocument();
     expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "状态总计 1 项 · 当前 1 项",
+      "共 1 项",
     );
   });
 

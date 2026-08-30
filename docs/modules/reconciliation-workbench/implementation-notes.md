@@ -1907,3 +1907,9 @@
 
 - Workbench relation writer 在保存本次精确 changed case 前批量读取旧 relation，支付状态 reconcile 事件使用变更前后 typed OA 成员并集；这使 OA 被撤出关系后仍可由 oa-sync 根据最新 topology 写回 `待支付`。
 - relation canonical payload、确认/撤回 API、版本冲突、审计历史和页面 DTO 不变；不新增第二条写回链、补偿任务、read model、worker、cache、migration 或 fallback。
+## 2026-08-31 - 异常抽屉层级与操作后停留
+
+- 根因：异常审阅成功后前端按决定显式切换到关系迁入的 bucket，导致用户处理未配对队列时被打断；筛选区同时把 bucket、异常类型和七分类平铺，旧绝对定位父标签无法表达层级。
+- 收口：最外层“未配对异常 / 已配对异常”复用 `AppDrawer.headerActions` 放到标题同行；其下保留“金额异常 / 仅资料异常”，金额视图再按四个父组组织七个服务端分类。删除旧 body toolbar、绝对定位分类标签和目标 bucket 自动切换；审阅后保留当前 bucket/view/code，只让当前项迁移并刷新当前列表。
+- I/O 与性能：继续使用一个 review POST、一个 canonical direct GET 和一个当前异常 bucket GET；不增加 API、SQL、状态源、依赖、数据库、read model、worker 或 fallback。当前分类列表数量单独显示，bucket 数量继续来自 canonical summary/服务端 facets。
+- 验证：前端组件测试保护标题同行 bucket、四组七分类和 HeroUI 受控切换；页面交互测试保护 accept/withdraw 后保持当前 bucket、目标项移除、当前 bucket 恰好一次 no-store 回读和 canonical 恰好一次回读。发布后用生产浏览器复核 1440/1024px 层级、键盘焦点、控制台和认证 HTTP 延迟。

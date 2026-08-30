@@ -1977,12 +1977,12 @@ describe("Workbench row selection and detail drawer", () => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     })).toHaveLength(initialBucketReads + 1));
-    expect(within(drawer).getByRole("radio", { name: "未配对异常" })).toHaveAttribute("aria-checked", "true");
+    expect(within(drawer).getByRole("radio", { name: /^未配对异常 \d+$/ })).toHaveAttribute("aria-checked", "true");
     await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
     expect(within(drawer).getByRole("button", { name: "接受异常并进入已配对" })).toBeEnabled();
   });
 
-  test("amount mismatch decisions reread the canonical page and exactly one fresh destination bucket", async () => {
+  test("amount mismatch decisions reread the canonical page and refresh the visible bucket without switching tabs", async () => {
     const user = userEvent.setup();
     let anomalyState: "unpaired" | "paired" = "unpaired";
     const fetchMock = installMockApiFetch({
@@ -2020,27 +2020,33 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
     await user.click(within(drawer).getByRole("button", { name: "接受异常并进入已配对" }));
-    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
-    expect(await within(drawer).findByRole("button", { name: "撤回到未配对" })).toBeInTheDocument();
+    expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
+    expect(within(drawer).getByRole("radio", { name: "未配对异常 0" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
 
     const currentBucketReads = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     });
-    expect(currentBucketReads).toHaveLength(initialBucketReads.length);
+    expect(currentBucketReads).toHaveLength(initialBucketReads.length + 1);
+    currentBucketReads.slice(-1).forEach(([, init]) => {
+      expect(init).toMatchObject({ method: "GET", cache: "no-store" });
+      expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
+    });
     const pairedReadsAfterAccept = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "paired";
     });
-    expect(pairedReadsAfterAccept).toHaveLength(1);
-    pairedReadsAfterAccept.forEach(([, init]) => {
-      expect(init).toMatchObject({ method: "GET", cache: "no-store" });
-      expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
-    });
+    expect(pairedReadsAfterAccept).toHaveLength(0);
     expect(fetchMock.mock.calls.filter(([input]) => (
       fetchPath(input) === "/api/workbench/exceptions/review"
     ))).toHaveLength(1);
 
+    await user.click(within(drawer).getByRole("radio", { name: "已配对异常 1" }));
+    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
+    expect(await within(drawer).findByRole("button", { name: "撤回到未配对" })).toBeInTheDocument();
     const pairedReadsBeforeWithdraw = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "paired";
@@ -2048,19 +2054,22 @@ describe("Workbench row selection and detail drawer", () => {
     expect(pairedReadsBeforeWithdraw).toBe(1);
 
     await user.click(within(drawer).getByRole("button", { name: "撤回到未配对" }));
-    await user.click(await within(drawer).findByRole("button", { name: "展开异常明细" }));
-    expect(await within(drawer).findByRole("button", { name: "接受异常并进入已配对" })).toBeInTheDocument();
+    expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
+    expect(within(drawer).getByRole("radio", { name: "已配对异常 0" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
     const pairedReadsAfterWithdraw = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "paired";
     });
-    expect(pairedReadsAfterWithdraw).toHaveLength(pairedReadsBeforeWithdraw);
+    expect(pairedReadsAfterWithdraw).toHaveLength(pairedReadsBeforeWithdraw + 1);
     const unpairedReadsAfterWithdraw = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
       return url.pathname === "/api/workbench/groups" && url.searchParams.get("exception_bucket") === "unpaired";
     });
     expect(unpairedReadsAfterWithdraw).toHaveLength(initialBucketReads.length + 1);
-    unpairedReadsAfterWithdraw.slice(-1).forEach(([, init]) => {
+    pairedReadsAfterWithdraw.slice(-1).forEach(([, init]) => {
       expect(init).toMatchObject({ method: "GET", cache: "no-store" });
       expect(new Headers(init?.headers).get("Cache-Control")).toBe("no-cache");
     });
@@ -2109,16 +2118,16 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await screen.findByRole("button", { name: /未配对异常 51 \| 已配对异常 0/ }));
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "状态总计 51 项 · 当前 10 / 51 项",
+      "显示 10 / 51",
     );
     await user.click(within(drawer).getByRole("button", { name: "加载更多异常" }));
     await waitFor(() => expect(loadMoreStarted).toBe(true));
 
-    await user.click(within(drawer).getByRole("radio", { name: "已配对异常" }));
+    await user.click(within(drawer).getByRole("radio", { name: /^已配对异常 \d+$/ }));
     await waitFor(() => expect(loadMoreAborted).toBe(true));
     expect(await within(drawer).findByText("当前没有金额异常。")).toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("radio", { name: "未配对异常" }));
+    await user.click(within(drawer).getByRole("radio", { name: /^未配对异常 \d+$/ }));
     const loadMoreButton = await within(drawer).findByRole("button", { name: "加载更多异常" });
     expect(loadMoreButton).toBeEnabled();
     expect(loadMoreButton).not.toHaveAttribute("aria-busy", "true");
@@ -2141,13 +2150,13 @@ describe("Workbench row selection and detail drawer", () => {
       "true",
     );
     expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "状态总计 1 项 · 当前 1 项",
+      "共 1 项",
     );
 
     await user.click(within(drawer).getByRole("radio", { name: "三项不一致 0" }));
     expect(await within(drawer).findByText("当前分类没有金额异常。")).toBeInTheDocument();
     expect(drawer.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
-      "状态总计 1 项 · 当前 0 项",
+      "共 0 项",
     );
     const categoryRead = [...fetchMock.mock.calls].reverse().find(([input]) => {
       const url = new URL(fetchPath(input), "http://localhost");
@@ -2246,7 +2255,7 @@ describe("Workbench row selection and detail drawer", () => {
     const drawer = await screen.findByRole("dialog", { name: "异常处理" });
     await user.click(within(drawer).getByRole("button", { name: "展开异常明细" }));
     await waitFor(() => expect(staleDetailSignal).not.toBeNull());
-    await user.click(within(drawer).getByRole("radio", { name: "已配对异常" }));
+    await user.click(within(drawer).getByRole("radio", { name: /^已配对异常 \d+$/ }));
     await waitFor(() => expect(staleDetailSignal?.aborted).toBe(true));
     expect(await within(drawer).findByText("当前没有金额异常。")).toBeInTheDocument();
 

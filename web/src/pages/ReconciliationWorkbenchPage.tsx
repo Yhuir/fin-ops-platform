@@ -2339,14 +2339,14 @@ export default function ReconciliationWorkbenchPage() {
         } catch {
           throw new Error("异常处理已写入，但关联台重新读取失败；请勿重复提交，稍后刷新确认。");
         }
-        const nextBucket = decision === "accept_paired" ? "paired" : "unpaired";
+        const currentView = exceptionDrawerViewRef.current;
+        const currentExceptionCode = exceptionDrawerSelectedCodeRef.current;
         exceptionDrawerOpenRef.current = true;
         setExceptionDrawerRequestedCode(
-          exceptionDrawerViewRef.current === "amount"
-            ? exceptionDrawerSelectedCodeRef.current
+          currentView === "amount"
+            ? currentExceptionCode
             : null,
         );
-        setExceptionDrawerBucket(nextBucket);
         setExceptionDrawerOpen(true);
         setExceptionDrawerReloadGeneration((current) => current + 1);
         return actionResultMessage(result);
@@ -2617,6 +2617,10 @@ export default function ReconciliationWorkbenchPage() {
       ) : null}
       <WorkbenchExceptionDrawer
         bucket={exceptionDrawerBucket}
+        bucketCounts={{
+          unpaired: workbenchData?.summary.unpairedExceptionCount ?? 0,
+          paired: pairedExceptionCount,
+        }}
         canMutateData={canWriteWorkbench}
         contentGeneration={exceptionDrawerContentGeneration}
         error={exceptionDrawerError}

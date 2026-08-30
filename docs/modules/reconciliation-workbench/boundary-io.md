@@ -159,7 +159,7 @@ requested tenant/scope
 - mount：一个 combined initial、权威 OA sync status、settings；不请求 `/api/workbench/refresh-status`。
 - query/filter/sort 变化：abort 上一请求，只重取受影响 zone 并清空该区 cursor；不重复读取 summary 和另一 zone。
 - pagination/filter options/detail：每个 owner single-flight 或 latest-wins，有界 payload。
-- mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。异常审阅把列表返回的可选 `detail_key` 原样提交以精确定位组；跨月关系写入全局决定，随后只读取决定对应的一个异常 bucket，并保留当前异常 view/code。异常抽屉展开态默认仍是只读三栏；具备写权限时，“发票附件未解析”开放既有 `enter-invoice`，“发票待归属”开放 `assign-invoice-expense-items`。两者都必须先关闭异常抽屉再打开各自单一 action drawer，禁止双 overlay/focus trap。归属抽屉默认零选择、允许多选同 relation OA 明细；成功后只走上述一个 POST + 一个 canonical GET，不应用本地 operation projection。
+- mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。异常审阅把列表返回的可选 `detail_key` 原样提交以精确定位组；跨月关系写入全局决定，随后只刷新用户当前可见的一个异常 bucket，并保留当前 bucket/view/code，不自动读取或切换到关系迁入的目标 bucket。异常抽屉展开态默认仍是只读三栏；具备写权限时，“发票附件未解析”开放既有 `enter-invoice`，“发票待归属”开放 `assign-invoice-expense-items`。两者都必须先关闭异常抽屉再打开各自单一 action drawer，禁止双 overlay/focus trap。归属抽屉默认零选择、允许多选同 relation OA 明细；成功后只走上述一个 POST + 一个 canonical GET，不应用本地 operation projection。
 - 保留 OA sync safety poll、全局 App Health 与 background jobs provider；它们不是 Workbench page read model，不能借本迁移删除。
 - OA 父记录的申请人栏始终显示时间 chip：有权威申请时间时只做原字符串格式化（包括移除 PostgreSQL `+08`/标准 offset 后缀，不做浏览器时区换算），缺失时明确显示“时间缺失”；日常报销子付款项不重复显示父 OA 申请人和时间。
 - OA 子付款项/附件发票同行只在当前页 DTO 内做纯函数图分组；禁止为此新增逐项 API、React effect、read model、worker 或页面缓存。共享异常感叹号组件通过 HeroUI `Link`（`target="_blank" rel="noopener noreferrer"`）打开 OA，禁止轮询或操纵 OA SPA DOM 自动点击详情。

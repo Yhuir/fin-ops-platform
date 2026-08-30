@@ -89,8 +89,8 @@
 - Business core / PostgreSQL：`test_workbench_query_postgres_integration.py` 构造七种金额分类各一个关系、一个同时含金额与资料异常的关系、一个含多个资料 item 的纯资料关系；保护 `amount_total=sum(by_code)`、`total=amount_total+document_only`、混合关系只进金额分类、纯资料关系只计一次，以及 SQL/Python fingerprint 与 paired/unpaired 分区一致。
 - Repository / cursor：`test_workbench_page_query_repository.py` 与 `test_workbench_page_cursor.py` 保护同一 page SQL 返回完整七类零值、默认首个非零分类、显式零数量分类空页及 query-bound cursor。默认首屏未显式传 code 时，resolved code 被完整性校验地封存在 cursor；第二页继续省略 code 并强制复用原分类，即使最新首个非零分类已经变化。把自动 code 回填成新的显式 query 必须被拒绝。
 - API contract：`test_workbench_routes.py`、`test_workbench_v2_api.py` 覆盖 `exception_view=amount|document_only` 与七类 `exception_code` 白名单、非法组合拒绝、route/server/facade 透传，以及 additive `selected_exception_code/exception_counts` 结构。
-- Frontend component / interaction：`WorkbenchApi.test.ts`、`WorkbenchExceptionDrawer.test.tsx`、`WorkbenchSelection.test.tsx` 覆盖 URL/DTO 映射、两类视图、七分类数量、空分类、切换时 latest-wins、默认分类 cursor 续读不回填 code、bucket 总数不被当前分类 `page.total` 覆盖，以及抽屉内仅开放具备权限的既有“录入发票”动作。
-- Browser E2E：`workbench-exception-flow.spec.ts` 保护首开金额分类、游标加载更多仍省略自动 code、切换仅资料视图、录票前关闭异常抽屉，以及既有 accept/keep/withdraw、Popover 和响应式链路。
+- Frontend component / interaction：`WorkbenchApi.test.ts`、`WorkbenchExceptionDrawer.test.tsx`、`WorkbenchSelection.test.tsx` 覆盖 URL/DTO 映射、标题同行的最外层 bucket、两类视图、四个父组下的七分类数量、空分类、切换时 latest-wins、默认分类 cursor 续读不回填 code、bucket 总数不被当前分类 `page.total` 覆盖，以及接受/撤回后保持当前 bucket/view/code 并只刷新当前列表。
+- Browser E2E：`workbench-exception-flow.spec.ts` 保护首开金额分类、四组七分类层级、游标加载更多仍省略自动 code、切换仅资料视图、录票前关闭异常抽屉，以及 accept/keep/withdraw 不自动跳转、Popover 和响应式链路。
 - Regression：旧 WEX/row-ignore、人工分类字段和已退役 ignore/restore routes 继续不能进入新 counts、bucket 或 marker；personal advance settlement 等仍有现行消费者的 exception repository 能力保持不变，不做误删。
 - 性能：`http_slo_probe.py` 默认加入未配对金额、未配对仅资料和已配对金额三个认证只读 probe；每个 probe 继续服从 p95 `<=1000ms`、p99 `<=2000ms`、错误为零。新筛选不增加 schema、read model、cache、worker、队列或逐组 SQL。
 
@@ -99,7 +99,7 @@
 - Business core：`test_workbench_amount_check_service.py` 覆盖七种互斥三栏分类、分精度、净额/外部往来本金、方向未知/冲突不猜测、局部差异不生成第八类，以及附件缺失/未解析/待归属；精确单行与歧义 group scope 均有断言。
 - Service/repository/API：`test_workbench_anomaly_review_service.py` 保护服务端重取 canonical bundle 并自行持久化 evidence fingerprints/detected codes，忽略客户端旧人工字段；fingerprint、其他 blocker、跨月 scope、幂等和审计不变。`WorkbenchApi.test.ts` 保护 review request 不再发送人工分类或逐项 fingerprints。
 - Frontend interaction：`WorkbenchAnomalyIndicator.test.tsx`、`WorkbenchExceptionDrawer.test.tsx`、`RelationGroupGrid.test.tsx` 保护主表/抽屉复用同一三栏定位，默认只显示感叹号；hover/键盘 focus 临时打开，显示时首次点击关闭且当前停留期间不自动重开，再次点击持续打开，离开后恢复下一次 hover；无先行 hover 的鼠标/触屏式点击也能独立开关。Popover 只展示 HeroUI Chip；折叠态不新增栏，展开态无重复 Chip、复选框或人工下拉，只读权限无 mutation。
-- E2E/regression：`workbench-exception-flow.spec.ts` 保护自动分类的接受、目标 bucket 单次重读、撤回及 1440/1024px 边界；权限套件保护 read-export/App Health blocked 下证据可见且零写入。`WorkbenchSelection.test.tsx` 保护写成功但重读失败不重复提交。
+- E2E/regression：`workbench-exception-flow.spec.ts` 保护自动分类的接受、当前可见 bucket 单次重读且不自动跳转、撤回及 1440/1024px 边界；权限套件保护 read-export/App Health blocked 下证据可见且零写入。`WorkbenchSelection.test.tsx` 保护写成功但重读失败不重复提交。
 - 性能与边界：分类为现有 group 内固定规模纯计算，前端定位为单次 Map/Set 遍历；未新增 API round-trip、逐行 I/O、表、migration、read model、worker、cache 或依赖。PostgreSQL candidate 仍在分页前用三栏总额、成员和附件状态计算 review fingerprint，但不再为全量关系递归构建费用项—发票连通分量；该图只在已分页的当前组内存中用于感叹号定位。PostgreSQL integration 同时保护 SQL/Python fingerprint 一致、旧递归 CTE 缺席和 summary/detail 分区一致。
 - 旧链删除：删除 `workbench_exception_classifier.py` 及其测试、客户端人工分类/逐项审阅状态、请求字段和旧 CSS；dead-code guard 将旧 classifier 列为禁止恢复模块。
 
