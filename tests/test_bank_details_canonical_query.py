@@ -241,6 +241,8 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         )[0]
         self.assertIn("'{}'::jsonb as normalized_payload", source_sql)
         self.assertNotIn("bank.raw_payload,", source_sql)
+        self.assertIn("as imported_bank_name", source_sql)
+        self.assertIn("as imported_bank_last4", source_sql)
         self.assertIn("or bank.txn_date >= %s::date", source_sql)
         self.assertNotIn("coalesce(bank.txn_date, bank.txn_month)", source_sql)
 

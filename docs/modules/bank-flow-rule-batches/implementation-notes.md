@@ -612,3 +612,10 @@
 - 修复只删除该旧空范围分支：精确月份继续使用 ±2 天边界窗口，省略月份时在同一 `REPEATABLE READ / READ ONLY` snapshot 内一次集合读取全部 non-deleted 银行流水、当前分类、正式历史和 active relation；共享 live builder、状态校验、排序、summary 与分页保持唯一实现。
 - 不新增前端月份 fan-out、后端逐月 N+1、缓存、read model、worker、表或兼容 fallback；“全部”继续由前端省略 `month` 表达。
 - 回归保护跨月 draft + submitted 同时可见、固定查询数、API 参数合同和页面从当前月份切换“全部”后的请求；发布必须以生产数据一致性和 p95 性能复测为门禁。
+
+# 2026-08-31 银行身份 canonical 修复
+
+- 根因是 `defer_full_payload=True` 将分类 CTE 的 `normalized_payload` 清空后，流水批量查询仍从该字段读取银行名称与账户 key，导致有真实银行事实的流水显示为“未知银行8106”，并把账户身份错误拼成 `未知银行:8106`。
+- 共享分类 CTE 现在始终只保留导入银行名称和尾号两个标量，不恢复完整 payload；流水批量查询直接使用由完整账号生成的 canonical `candidate.account_key`，删除旧的名称加尾号身份重建。
+- 已提交历史不做数据库迁移或 payload 改写；列表与详情仅用同一 canonical snapshot 中已读取的成员流水修正银行显示名称，历史 batch id、account key、成员、金额、关系和事件保持不变。
+- 查询次数、snapshot 边界和前端 API 均未改变；没有新增自连接、N+1、cache、read model、worker、migration 或 fallback。

@@ -38,7 +38,7 @@
 | 批次详情 | `GET /api/bank-flow-rule-batches/{batch_id}` | 正式批次直接读取持久化 batch、成员、关系和 events；请求内 live candidate 传 `scope_month=YYYY-MM`，由列表与提交共用的 canonical builder 按 batch id 确定性重算。月份非法 fail fast；候选已消失或 identity 改变返回 not-found/conflict，不读取 persisted draft。 |
 | 正式批次事实 | `app.bank_flow_rule_batches` | 只读取 submitted/withdrawn/stale 批次、成员、金额、版本和冻结 `normalized_payload`；persisted draft/unsubmitted 不参与列表、提交或 Audit expected set。 |
 | 批次事件 | `app.bank_flow_rule_batch_events` | 详情按 batch id 一次集合查询，保持 submitted/withdrawn/audit history。 |
-| 银行流水 | `app.bank_transactions` | 精确月份在边界窗口内批量读取 non-deleted 当前行；省略月份时一次读取全部 non-deleted 当前行；正式详情按 batch member ids 集合读取。 |
+| 银行流水 | `app.bank_transactions` | 精确月份在边界窗口内批量读取 non-deleted 当前行；省略月份时一次读取全部 non-deleted 当前行；正式详情按 batch member ids 集合读取。共享分类 CTE 即使延迟完整 payload，也必须保留导入银行名称和账户尾号两个标量；候选账户身份直接使用由完整账号生成的 canonical `account_key`，禁止从银行名称与尾号重新拼接。 |
 | 当前有效分类 | `app.bank_transactions`、`app.bank_transaction_category_confirmations`、`app.bank_transaction_categories`、`app_settings.bank_transaction_tags` | repository 对请求范围内全部 non-deleted 银行流水复用银行明细 owner 的 `bank_category_classification_cte(...)`，在同一 canonical snapshot 内集合式得出 effective category；不按人工分类预筛，也不在 Python 对同一批流水再次执行自动分类。confirmation、manual 与 auto 的优先级和银行明细共用一个 SQL compiler。 |
 | 标签与 paired policy | `app.app_settings` | active tags 与 `requirements_by_tag_code` 同一次 canonical snapshot 读取；缺规则默认需要 OA 和发票。 |
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用；submitted 批次始终允许撤回，关系已缺失时 relation cancel 按幂等完成处理，仍提交批次状态和事件。禁止使用 `workbench_relation` projection。 |
@@ -51,7 +51,7 @@
 
 | 输出 | 合同 |
 | --- | --- |
-| 列表 | 只返回 `summary`、`batches`、`pagination`。不返回 `read_model_status`、`read_model_version`、stale reason、source version、refresh enqueue 或 operation-barrier target。 |
+| 列表 | 只返回 `summary`、`batches`、`pagination`。不返回 `read_model_status`、`read_model_version`、stale reason、source version、refresh enqueue 或 operation-barrier target。正式历史的银行显示名称可由同一 snapshot 中的当前 canonical member row 修正，但不得改写已冻结的 batch identity、成员、金额、状态或数据库 payload。 |
 | Summary | 对同一 live builder 的完整 summary filter 范围聚合，不能从当前页推算；包含各状态 batch count、row count、金额和冻结历史标签。 |
 | 详情 | 返回 batch、银行 rows、tag/direction counts、行级分类与 events。正式批次读取持久化历史；live candidate 使用列表项 `scope_month` 从同一 canonical snapshot 重算，列表生成的 candidate 不得因没有 persisted draft 而返回“批次不存在”。linked 提示可携带机器用 `relation_case_ids`，页面只展示业务提示和 OA/发票数量。 |
 | 规则保存 | 返回规则版本、`requirement_changed_tag_codes` 和可见 `recalculation_job`；关系月份由 worker 从实际命中的 active relation 得出，不由保存热路径扫描或猜测。 |
@@ -70,6 +70,7 @@
 - submitted 的可撤回性由 canonical batch 状态决定；active relation 已缺失不能阻断批次收口。
 - 内部转账维持一收一支、不同账户、48 小时窗口；金额只计单边。跨月配对以最早成员所在月份作为唯一 owner month：例如 5 月 31 日与 6 月 1 日配对只属于 5 月请求，6 月请求不得重复生成相邻月份候选。
 - 页面查询不新增 cache、materialized view、queue、worker、fallback 或双读；只有 EXPLAIN 证明确有需要时才统一新增索引 migration。
+- 银行身份标量从现有 `app.bank_transactions.raw_payload` 同行读取，不恢复完整 payload、不增加自连接或额外 SELECT；列表对正式历史的显示修正使用已加载候选行的 O(1) identity 索引，不增加数据库 I/O。
 
 ## 持久化和写边界
 

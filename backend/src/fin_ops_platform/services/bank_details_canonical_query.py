@@ -1192,6 +1192,27 @@ def bank_category_classification_cte(
             bank.summary,
             bank.remark,
             bank.bank_text_fields,
+            coalesce(
+              nullif(
+                bank.raw_payload->'normalized_payload'->>'imported_bank_name',
+                ''
+              ),
+              nullif(bank.raw_payload->'normalized_payload'->>'bank_name', ''),
+              nullif(bank.raw_payload->>'imported_bank_name', ''),
+              nullif(bank.raw_payload->>'bank_name', '')
+            ) as imported_bank_name,
+            coalesce(
+              nullif(
+                bank.raw_payload->'normalized_payload'->>'imported_bank_last4',
+                ''
+              ),
+              nullif(
+                bank.raw_payload->'normalized_payload'->>'account_last4',
+                ''
+              ),
+              nullif(bank.raw_payload->>'imported_bank_last4', ''),
+              nullif(bank.raw_payload->>'account_last4', '')
+            ) as imported_bank_last4,
             {normalized_payload_sql} as normalized_payload,
             manual.category as manual_category_code,
             manual.source as manual_category_source,
@@ -1282,12 +1303,14 @@ def bank_category_classification_cte(
               ''
             ) as normalized_account_no,
             coalesce(
+              nullif(source.imported_bank_name, ''),
               nullif(source.normalized_payload->>'imported_bank_name', ''),
               nullif(source.normalized_payload->>'bank_name', ''),
               '未知银行'
             ) as bank_name,
             right(
               coalesce(
+                nullif(source.imported_bank_last4, ''),
                 nullif(source.normalized_payload->>'imported_bank_last4', ''),
                 nullif(source.normalized_payload->>'account_last4', ''),
                 nullif(

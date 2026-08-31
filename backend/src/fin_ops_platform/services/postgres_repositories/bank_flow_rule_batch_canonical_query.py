@@ -29,10 +29,7 @@ _CLASSIFIED_CANDIDATE_ROWS_SQL = """
         candidate.note_text as remark,
         candidate.bank_name,
         candidate.account_last4,
-        coalesce(
-            nullif(candidate.normalized_payload->>'account_key', ''),
-            candidate.bank_name || ':' || candidate.account_last4
-        ) as account_key,
+        candidate.account_key as account_key,
         candidate.effective_category_code as category_code,
         candidate.effective_category_source as category_source,
         coalesce(
@@ -263,17 +260,21 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         active_relations = active_relations if isinstance(active_relations, list) else []
         formal_items = source_result.get("formal_items")
         formal_items = formal_items if isinstance(formal_items, list) else []
+        resolved_candidate_rows, bank_rows_by_id = self._bank_row_payloads(
+            candidate_rows
+        )
         return {
-            "candidate_rows": [
-                self._bank_row_payload(row)
-                for row in candidate_rows
-                if isinstance(row, dict)
-            ],
+            "candidate_rows": resolved_candidate_rows,
             "active_relations": [
                 dict(row) for row in active_relations if isinstance(row, dict)
             ],
             "formal_items": [
-                self._batch_payload(row) for row in formal_items if isinstance(row, dict)
+                self._batch_with_bank_identity(
+                    self._batch_payload(row),
+                    bank_rows_by_id,
+                )
+                for row in formal_items
+                if isinstance(row, dict)
             ],
             "tag_policy": tag_policy,
             "tag_dictionary": tag_sources["tag_dictionary"],
@@ -440,7 +441,6 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             )
             if not isinstance(batch_row, dict):
                 return None
-            batch = self._batch_payload(batch_row)
             row_ids = text_list(batch_row.get("bank_transaction_ids"))
             bank_rows = transaction.fetch_all(
                 """
@@ -533,9 +533,13 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 """,
                 (normalized_batch_id,),
             )
+        resolved_bank_rows, bank_rows_by_id = self._bank_row_payloads(bank_rows)
         return {
-            "batch": batch,
-            "rows": [self._bank_row_payload(row) for row in bank_rows],
+            "batch": self._batch_with_bank_identity(
+                self._batch_payload(batch_row),
+                bank_rows_by_id,
+            ),
+            "rows": resolved_bank_rows,
             "events": [self._event_payload(row) for row in events],
             "tag_policy": tag_policy,
             "tag_dictionary": tag_sources["tag_dictionary"],
@@ -762,6 +766,50 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 "linked_invoice_count": int_value(row.get("linked_invoice_count"), 0),
             }
         )
+        return result
+
+    @classmethod
+    def _bank_row_payloads(
+        cls,
+        rows: list[object],
+    ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
+        payloads: list[dict[str, object]] = []
+        rows_by_id: dict[str, dict[str, object]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            payload = cls._bank_row_payload(row)
+            payloads.append(payload)
+            for row_id in {
+                text(row.get("id")),
+                text(row.get("transaction_id")),
+            }:
+                if row_id:
+                    rows_by_id[row_id] = payload
+        return payloads, rows_by_id
+
+    @staticmethod
+    def _batch_with_bank_identity(
+        batch: dict[str, object],
+        bank_rows_by_id: dict[str, dict[str, object]],
+    ) -> dict[str, object]:
+        result = dict(batch)
+        bank_row = next(
+            (
+                bank_rows_by_id[row_id]
+                for row_id in text_list(result.get("row_ids"))
+                if row_id in bank_rows_by_id
+            ),
+            None,
+        )
+        if not isinstance(bank_row, dict):
+            return result
+        bank_name = text(bank_row.get("bank_name"))
+        account_last4 = text(bank_row.get("account_last4"))
+        if bank_name and bank_name != "未知银行":
+            result["bank_name"] = bank_name
+        if account_last4 and account_last4 != "unknown":
+            result["account_last4"] = account_last4
         return result
 
     @staticmethod

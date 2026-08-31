@@ -2,6 +2,13 @@
 
 状态：covered-close。页面列表、summary、分页、详情和写后回读已切到 PostgreSQL canonical query boundary；页面 API 不再返回 read-model status/version、refresh enqueue 或 operation-barrier targets，前端不再轮询 freshness。
 
+## 2026-08-31 银行身份标量与 canonical account key 回归
+
+- `tests/test_bank_details_canonical_query.py` 保护 `defer_full_payload=True` 只延迟完整 JSON，仍从 canonical 银行行投影 `imported_bank_name` 与 `imported_bank_last4` 两个轻量标量。
+- `tests/test_bank_flow_rule_batch_canonical_query_repository.py` 保护 live candidate 直接使用 canonical `candidate.account_key`，禁止恢复 `bank_name:last4` 身份拼接；同时验证银行名称、尾号和固定查询数。
+- 同一 repository 回归验证已提交历史只修正 API 银行显示名称，不改写旧 `account_key`、成员、金额或数据库记录。
+- 第 1、2、3、7 类适用；第 4 类仅做负向边界确认，因为没有新增 read model、cache 或 worker；第 5 类无需修改运行时代码，既有页面测试负责 DTO 直出展示；第 6 类复跑现有提交/撤回 E2E。
+
 ## 2026-08-10 “全部”范围完整性回归
 
 - `tests/test_bank_flow_rule_batch_canonical_query_repository.py` 保护省略月份时不再拼接旧 `and false`，一次 canonical snapshot 读取完整 non-deleted 候选输入，查询数不随月份增长。

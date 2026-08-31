@@ -63,8 +63,14 @@ class _Transaction:
 
 
 class _Connection:
-    def __init__(self, *, empty_page: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        empty_page: bool = False,
+        include_formal_item: bool = False,
+    ) -> None:
         self.empty_page = empty_page
+        self.include_formal_item = include_formal_item
         self.transaction_enters = 0
         self.transaction_exits = 0
         self.executed: list[tuple[str, tuple[object, ...]]] = []
@@ -95,19 +101,43 @@ class _Connection:
                     {
                         "transaction_id": "bank-1",
                         "account_no": "622200008106",
+                        "account_key": "acct:527d1b9348772d1d415d60dc",
+                        "bank_name": "建设银行",
+                        "account_last4": "8106",
                         "txn_direction": "outflow",
                         "amount": "8.80",
                         "trade_time": datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
                         "category_code": "fee",
                         "category_source": "auto_confirmation",
-                        "payload": {
-                            "bank_name": "建设银行",
-                            "account_last4": "8106",
-                        },
+                        "payload": {},
                     }
                 ],
                 "active_relations": [],
-                "formal_items": [],
+                "formal_items": (
+                    [
+                        {
+                            "batch_id": "batch-submitted-fee",
+                            "status": "submitted",
+                            "status_bucket": "submitted",
+                            "version": 1,
+                            "scope_month": date(2026, 5, 1),
+                            "account_key": "未知银行:8106",
+                            "total_amount": "8.80",
+                            "bank_transaction_ids": ["bank-1"],
+                            "has_active_relation": True,
+                            "payload": {
+                                "batch_id": "batch-submitted-fee",
+                                "batch_type": "fee",
+                                "bank_name": "未知银行",
+                                "account_last4": "8106",
+                                "row_ids": ["bank-1"],
+                                "row_count": 1,
+                            },
+                        }
+                    ]
+                    if self.include_formal_item
+                    else []
+                ),
             }
         if "from app.bank_flow_rule_batches batch" in normalized and "where batch.batch_id = %s" in normalized:
             return {
@@ -220,6 +250,9 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
 
     assert result["candidate_rows"][0]["id"] == "bank-1"
     assert result["candidate_rows"][0]["category_code"] == "fee"
+    assert result["candidate_rows"][0]["bank_name"] == "建设银行"
+    assert result["candidate_rows"][0]["account_last4"] == "8106"
+    assert result["candidate_rows"][0]["account_key"] == "acct:527d1b9348772d1d415d60dc"
     assert result["active_relations"] == []
     assert result["formal_items"] == []
     assert connection.transaction_enters == connection.transaction_exits == 1
@@ -241,6 +274,8 @@ def test_page_query_uses_one_repeatable_read_snapshot_and_two_fixed_selects() ->
         if "candidate_rows" in sql and "formal_items" in sql
     )
     assert "coalesce(candidate.txn_date, candidate.txn_month)" in source_sql
+    assert "candidate.account_key as account_key" in source_sql
+    assert "candidate.bank_name || ':' || candidate.account_last4" not in source_sql
     assert "2026-05-01" in source_params
     assert "2026-05-31" in source_params
     assert source_params[-1] == "2026-05-01"
@@ -319,6 +354,8 @@ def test_submit_guard_reuses_the_same_canonical_sql_classifier() -> None:
     )
     assert result["candidate_rows"] == []
     assert "from classified_with_semantics candidate" in source_sql
+    assert "candidate.account_key as account_key" in source_sql
+    assert "candidate.bank_name || ':' || candidate.account_last4" not in source_sql
     assert "category_resolution_authority" in source_sql
     assert "relation.row_ids && candidate_ids.row_ids" in source_sql
     assert "confirmed_category_candidates" not in source_sql
@@ -335,6 +372,19 @@ def test_page_query_returns_an_explicit_empty_result() -> None:
     assert result["candidate_rows"] == []
     assert result["active_relations"] == []
     assert result["formal_items"] == []
+
+
+def test_page_query_repairs_historical_bank_display_without_rewriting_identity() -> None:
+    repository = BankFlowRuleBatchCanonicalQueryRepository(
+        _Connection(include_formal_item=True)
+    )
+
+    result = repository.read_page({"month": "2026-05"})
+
+    batch = result["formal_items"][0]
+    assert batch["bank_name"] == "建设银行"
+    assert batch["account_last4"] == "8106"
+    assert batch["account_key"] == "未知银行:8106"
 
 
 def test_page_query_returns_live_candidate_inputs_in_the_same_snapshot() -> None:
@@ -401,6 +451,9 @@ def test_detail_reads_bank_rows_events_and_only_active_canonical_relations() -> 
 
     assert detail is not None
     assert detail["batch"]["can_withdraw"] is True
+    assert detail["batch"]["bank_name"] == "建设银行"
+    assert detail["batch"]["account_last4"] == "8106"
+    assert detail["batch"]["account_key"] == "建设银行:8106"
     assert detail["rows"][0]["relation_status"] == "linked"
     assert detail["rows"][0]["relation_case_ids"] == ["batch-fee"]
     assert detail["events"][0]["event_type"] == "submit"
