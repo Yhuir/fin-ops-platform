@@ -69,6 +69,11 @@ class SettingsNormalizationOpsTests(unittest.TestCase):
                     "display_name": "旧无 OA 项目",
                     "selected_tag_codes": ["salary"],
                 },
+                "cost_statistics_time_tag_selection": {
+                    "version": 1,
+                    "mode": "all",
+                    "selected_tag_codes": [],
+                },
             }
         )
         stdout = StringIO()
@@ -93,10 +98,8 @@ class SettingsNormalizationOpsTests(unittest.TestCase):
             {"version": 1, "requirements_by_tag_code": {}},
         )
         self.assertNotIn("cost_statistics_tag_selection", saved)
-        self.assertEqual(
-            saved["cost_statistics_no_oa_projects"]["projects"][0]["display_name"],
-            "旧无 OA 项目",
-        )
+        self.assertNotIn("cost_statistics_time_tag_selection", saved)
+        self.assertEqual(saved["cost_statistics_no_oa_projects"]["projects"], [])
 
 
 if __name__ == "__main__":

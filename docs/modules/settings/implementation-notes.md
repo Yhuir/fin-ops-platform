@@ -5,7 +5,7 @@
 - 成本统计已收敛为项目、费用类型、银行账户三个成本视图，不再提供原始银行按时间/标签视图。
 - 删除 `cost_statistics_time_tag_selection` 的 service 方法、normalization、公开 payload、state-store/PostgreSQL persistence、audit 语义和 HTTP route；历史持久化字段不作为 runtime fallback。
 - `cost_statistics_no_oa_projects` 保持不变，仍是成本统计唯一设置 family。下文 2026-08-18 的“两套规则”只作历史记录，不是当前合同。
-- Migration `0165_remove_cost_statistics_time_tag_selection.sql` 从 canonical payload 和 `raw_payload.normalized_payload` 精确删除旧键，避免持久化旧状态污染 Settings Audit；不创建备份、不修改其他设置。
+- 发布前使用 root-owned `settings-normalize <exact release> --dry-run/--execute` 从 canonical payload 和 `raw_payload.normalized_payload` 删除旧键；dry-run 必须只报告该键，避免持久化旧状态污染 Settings Audit，且不创建备份。
 - 不影响银行明细模块自己的标签与自动标签规则。
 
 ## 2026-08-18 - 成本统计两套规则拆分

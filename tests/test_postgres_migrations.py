@@ -176,7 +176,6 @@ EXPECTED_MIGRATIONS = [
     "0162_cost_statistics_unit_manual_allocations.sql",
     "0163_workbench_relation_receipts.sql",
     "0164_manual_bank_entry_audit_contract.sql",
-    "0165_remove_cost_statistics_time_tag_selection.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -340,7 +339,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 166)],
+            [f"{number:04d}" for number in range(1, 165)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -549,22 +548,6 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
             "raw_payload #>> '{normalized_payload,template_code}'",
             normalized_sql,
         )
-        self.assertNotIn("delete from", normalized_sql)
-        self.assertNotIn("drop table", normalized_sql)
-
-    def test_removed_cost_statistics_setting_migration_is_precise(self) -> None:
-        sql = (
-            MIGRATIONS_DIR / "0165_remove_cost_statistics_time_tag_selection.sql"
-        ).read_text(encoding="utf-8").lower()
-        normalized_sql = " ".join(sql.split())
-
-        self.assertIn("update app.app_settings", normalized_sql)
-        self.assertIn(
-            "settings_payload - 'cost_statistics_time_tag_selection'",
-            normalized_sql,
-        )
-        self.assertIn("'{normalized_payload}'", normalized_sql)
-        self.assertIn("where settings_key = 'app_settings'", normalized_sql)
         self.assertNotIn("delete from", normalized_sql)
         self.assertNotIn("drop table", normalized_sql)
 

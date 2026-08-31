@@ -8,7 +8,7 @@
 - 三个 view 必须基于同一成本事件集合，根汇总人口与金额一致。`按银行账户`采用“账户→项目→成本明细”三栏，不再等同于银行明细页的原始流水列表。
 - OA 成本关系只用支出流水确定账户：恰好一个非空账户时归该账户；零个或多个不同账户时归`银行账户未确定`；退款账户忽略。无 OA 成本使用来源支出账户。
 - 旧 `time|bank|bank_tag` view、前端状态/页签、方向统计、time/tag 规则抽屉、`/time-tag-rules` route 和 `cost_statistics_time_tag_selection` 持久化/归一化链完整删除，不提供兼容 fallback。银行标签仍可用于退款识别和无 OA 资格，不代表恢复按标签统计。
-- Migration `0165_remove_cost_statistics_time_tag_selection.sql` 精确删除 canonical settings 与 formal raw mirror 中的退役设置键；不修改其他配置，不创建备份，也不保留兼容读取。
+- 发布前使用 root-owned `settings-normalize <exact release> --dry-run/--execute` 清理 canonical settings 与 formal raw mirror 中的退役设置键；dry-run 必须只报告该键，执行不创建备份，也不保留兼容读取。
 - 继续复用现有 canonical repository、policy、query service、分页和导出边界；不新增层、表、worker、cache 或依赖。
 - 银行明细继续是原始流水唯一页面；成本统计只消费成本事件。跨模块回归以银行明细、Workbench、导入、往来款、设置和权限的定向测试保护。
 
