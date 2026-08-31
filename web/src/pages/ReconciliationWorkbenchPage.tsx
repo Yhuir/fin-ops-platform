@@ -1,5 +1,5 @@
 import { Button, Input, TextArea } from "@heroui/react";
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import AppDrawer from "../components/common/AppDrawer";
 import AppDialog from "../components/common/AppDialog";
@@ -220,6 +220,24 @@ function normalizedAmountForInput(value: string) {
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
+const WORKBENCH_SEARCH_DEBOUNCE_MS = 250;
+
+function useDebouncedWorkbenchSearchQuery(value: string) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    if (!value.trim()) {
+      setDebouncedValue(value);
+      return undefined;
+    }
+    const timeout = window.setTimeout(() => {
+      setDebouncedValue(value);
+    }, WORKBENCH_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [value]);
+
+  return value.trim() ? debouncedValue : value;
+}
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
   return JSON.stringify(query);
@@ -457,15 +475,31 @@ export default function ReconciliationWorkbenchPage() {
   const previousOaSyncStatusRef = useRef<WorkbenchOaSyncStatus | null>(null);
   const oaSyncStatusAbortControllerRef = useRef<AbortController | null>(null);
   const oaSyncStatusRequestSeqRef = useRef(0);
-  const deferredPairedDisplayState = useDeferredValue(pairedDisplayState);
-  const deferredOpenDisplayState = useDeferredValue(openDisplayState);
+  const debouncedPairedSearchQuery = useDebouncedWorkbenchSearchQuery(
+    pairedDisplayState.searchQuery,
+  );
+  const debouncedOpenSearchQuery = useDebouncedWorkbenchSearchQuery(
+    openDisplayState.searchQuery,
+  );
+  const pairedServerDisplayState = useMemo(
+    () => pairedDisplayState.searchQuery === debouncedPairedSearchQuery
+      ? pairedDisplayState
+      : { ...pairedDisplayState, searchQuery: debouncedPairedSearchQuery },
+    [debouncedPairedSearchQuery, pairedDisplayState],
+  );
+  const openServerDisplayState = useMemo(
+    () => openDisplayState.searchQuery === debouncedOpenSearchQuery
+      ? openDisplayState
+      : { ...openDisplayState, searchQuery: debouncedOpenSearchQuery },
+    [debouncedOpenSearchQuery, openDisplayState],
+  );
   const pairedServerPageQuery = useMemo(
-    () => buildWorkbenchServerPageQuery(deferredPairedDisplayState),
-    [deferredPairedDisplayState],
+    () => buildWorkbenchServerPageQuery(pairedServerDisplayState),
+    [pairedServerDisplayState],
   );
   const openServerPageQuery = useMemo(
-    () => buildWorkbenchServerPageQuery(deferredOpenDisplayState),
-    [deferredOpenDisplayState],
+    () => buildWorkbenchServerPageQuery(openServerDisplayState),
+    [openServerDisplayState],
   );
   const zoneServerPageQueries = useMemo<Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>>(
     () => ({
@@ -480,10 +514,10 @@ export default function ReconciliationWorkbenchPage() {
   );
   const latestZoneServerPageQueries = useMemo<Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>>(
     () => ({
-      paired: buildWorkbenchServerPageQuery(pairedDisplayState),
-      unpaired: buildWorkbenchServerPageQuery(openDisplayState),
+      paired: buildWorkbenchServerPageQuery(pairedServerDisplayState),
+      unpaired: buildWorkbenchServerPageQuery(openServerDisplayState),
     }),
-    [openDisplayState, pairedDisplayState],
+    [openServerDisplayState, pairedServerDisplayState],
   );
   const latestZoneServerPageQueriesRef = useRef(latestZoneServerPageQueries);
   latestZoneServerPageQueriesRef.current = latestZoneServerPageQueries;
@@ -930,8 +964,8 @@ export default function ReconciliationWorkbenchPage() {
   const handleLoadMoreZone = useCallback(async (zone: "paired" | "unpaired") => {
     const pageInfo = zonePages[zone];
     const displayStatePending = zone === "paired"
-      ? pairedDisplayState !== deferredPairedDisplayState
-      : openDisplayState !== deferredOpenDisplayState;
+      ? pairedDisplayState.searchQuery !== debouncedPairedSearchQuery
+      : openDisplayState.searchQuery !== debouncedOpenSearchQuery;
     if (
       !workbenchData
       || !pageInfo.hasMore
@@ -996,8 +1030,8 @@ export default function ReconciliationWorkbenchPage() {
       }
     }
   }, [
-    deferredOpenDisplayState,
-    deferredPairedDisplayState,
+    debouncedOpenSearchQuery,
+    debouncedPairedSearchQuery,
     loadedZoneServerPageQueryKeys,
     openDisplayState,
     pairedDisplayState,
@@ -1307,7 +1341,7 @@ export default function ReconciliationWorkbenchPage() {
   const displayPairedGroups = useMemo(
     () => buildWorkbenchDisplayGroups(
       workbenchData?.paired.groups ?? [],
-      deferredPairedDisplayState,
+      pairedServerDisplayState,
       {
         serverFiltered:
           loadedZoneServerPageQueryKeys?.paired === zoneServerPageQueryKeys.paired
@@ -1315,7 +1349,7 @@ export default function ReconciliationWorkbenchPage() {
       },
     ),
     [
-      deferredPairedDisplayState,
+      pairedServerDisplayState,
       loadedZoneServerPageQueryKeys?.paired,
       pairedServerPageQuery,
       workbenchData,
@@ -1326,7 +1360,7 @@ export default function ReconciliationWorkbenchPage() {
   const displayOpenGroups = useMemo(
     () => buildWorkbenchDisplayGroups(
       visibleOpenGroups,
-      deferredOpenDisplayState,
+      openServerDisplayState,
       {
         serverFiltered:
           loadedZoneServerPageQueryKeys?.unpaired === zoneServerPageQueryKeys.unpaired
@@ -1334,7 +1368,7 @@ export default function ReconciliationWorkbenchPage() {
       },
     ),
     [
-      deferredOpenDisplayState,
+      openServerDisplayState,
       loadedZoneServerPageQueryKeys?.unpaired,
       openServerPageQuery,
       visibleOpenGroups,
@@ -2391,9 +2425,9 @@ export default function ReconciliationWorkbenchPage() {
     : null;
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
   const unpairedZoneItemCount = resolveZoneItemCount(zonePages.unpaired, workbenchData?.summary.zoneCounts.unpaired);
-  const pairedSearchPending = pairedDisplayState !== deferredPairedDisplayState
+  const pairedSearchPending = pairedDisplayState.searchQuery !== debouncedPairedSearchQuery
     || zoneQueryLoadingByZone.paired;
-  const unpairedSearchPending = openDisplayState !== deferredOpenDisplayState
+  const unpairedSearchPending = openDisplayState.searchQuery !== debouncedOpenSearchQuery
     || zoneQueryLoadingByZone.unpaired;
   const retryZoneSearch = (zone: "paired" | "unpaired") => {
     void loadZoneFirstPage(zone, zoneServerPageQueries[zone], zoneServerPageQueryKeys[zone]);

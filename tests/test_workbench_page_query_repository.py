@@ -782,9 +782,30 @@ def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases
     assert "source_identity_aliases" in anomaly_sql
     assert "'Mongo文档ID'" in canonical_sql
     assert "'oa-exp-' || value" in anomaly_sql
-    assert "from app.oa_application_items item" in canonical_sql
-    assert "from app.oa_attachments attachment" in canonical_sql
-    assert "from app.oa_source_aliases alias_row" in canonical_sql
+    assert "join app.oa_application_items item" in canonical_sql
+    assert "join app.oa_attachments attachment" in canonical_sql
+    assert "join app.oa_source_aliases alias_row" in canonical_sql
+
+
+def test_canonical_spine_rolls_completed_oa_source_aliases_set_based_once() -> None:
+    sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split()).lower()
+    alias_sql = sql.split(
+        "completed_oa_source_alias_values as materialized (", 1
+    )[1].split("completed_oa_source_aliases as materialized (", 1)[0]
+    candidate_sql = sql.split(
+        "oa_candidate_facts as materialized (", 1
+    )[1].split("oa_duplicate_ids as materialized (", 1)[0]
+
+    assert "completed_oa_facts as materialized" in sql
+    assert alias_sql.count("join app.oa_application_items item") == 1
+    assert alias_sql.count("join app.oa_attachments attachment") == 1
+    assert alias_sql.count("join app.oa_source_aliases alias_row") == 1
+    assert "cross join lateral (values" in alias_sql
+    assert "array_agg( distinct source.alias_value order by source.alias_value )" in sql
+    assert "from completed_oa_facts oa" in candidate_sql
+    assert "left join completed_oa_source_aliases source_aliases" in candidate_sql
+    assert "from app.oa_applications oa" not in candidate_sql
+    assert "select distinct source_alias.alias_value" not in candidate_sql
 
 
 def test_canonical_spine_defers_supporting_documents_to_page_hydration() -> None:

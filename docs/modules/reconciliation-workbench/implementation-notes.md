@@ -1913,3 +1913,11 @@
 - 收口：最外层“未配对异常 / 已配对异常”复用 `AppDrawer.headerActions` 放到标题同行；其下保留“金额异常 / 仅资料异常”，金额视图再按四个父组组织七个服务端分类。删除旧 body toolbar、绝对定位分类标签和目标 bucket 自动切换；审阅后保留当前 bucket/view/code，只让当前项迁移并刷新当前列表。
 - I/O 与性能：继续使用一个 review POST、一个 canonical direct GET 和一个当前异常 bucket GET；不增加 API、SQL、状态源、依赖、数据库、read model、worker 或 fallback。当前分类列表数量单独显示，bucket 数量继续来自 canonical summary/服务端 facets。
 - 验证：前端组件测试保护标题同行 bucket、四组七分类和 HeroUI 受控切换；页面交互测试保护 accept/withdraw 后保持当前 bucket、目标项移除、当前 bucket 恰好一次 no-store 回读和 canonical 恰好一次回读。发布后用生产浏览器复核 1440/1024px 层级、键盘焦点、控制台和认证 HTTP 延迟。
+
+## 2026-09-01 - OA 来源别名集合化与区域搜索请求收敛
+
+- 生产基线显示关联台 combined initial、区域列表、金额搜索和异常列表在 4 并发下由 PostgreSQL execute/fetch 主导；连接获取接近零，详情接口已明显低于合同，因此不引入 Redis、read model、缓存、额外 worker 或新的详情链路。
+- 根因一：canonical spine 对每条已完成 OA 分别查询付款项、附件和历史 alias 表，同一首屏会产生按 OA 数量放大的相关子查询。现将当前 scope 所需 OA 先物化为窄事实集，再各扫描一次付款项、附件和 alias 表并按 OA 集合化归并；附件三个历史来源字段在同一次扫描中展开。删除列表热路径对 `oa_source_aliases_sql(...)` 的逐行调用，异常身份、父 OA bridge 和 API DTO 不变。
+- 根因二：React `useDeferredValue` 只调整渲染优先级，并不保证时间防抖；连续输入会发出多次完整区域搜索。区域搜索改为本页私有的 250ms 尾沿防抖，清空立即生效，筛选、排序、分页、选择和提交后原位重读仍使用现有单一 server query 状态。
+- 本地全 migration、生产规模样本的只读 `EXPLAIN (ANALYZE, BUFFERS)`：首屏共享缓冲访问约从 `4698` 降至 `481`，热执行中位约 `116.9ms`；搜索约从 `13990` 降至 `9773`，热执行中位约 `129.8ms`。同一 repeatable-read 快照下旧/新首屏与搜索 SQL 返回逐行一致。最终 HTTP p95/p99 以发布后的 authenticated 生产样本为准。
+- 本次无数据库 migration、索引、备份或生产业务数据修改；关系确认、撤回、异常审阅的锁、版本、fingerprint、幂等和审计写链未改。模块职责、API I/O 和页面路由不变，因此 boundary 文档不需要修改。

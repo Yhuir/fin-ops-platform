@@ -23,9 +23,6 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql impo
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )
-from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
-    oa_source_aliases_sql,
-)
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
 )
@@ -855,6 +852,68 @@ needed_keys as materialized (
     select 'oa'::text, owner.oa_row_id
     from scoped_invoice_unique_owners owner
 ),
+completed_oa_facts as materialized (
+    select
+        oa.id,
+        oa.row_id,
+        oa.scope_month,
+        oa.application_date,
+        oa.updated_at,
+        oa.applicant,
+        oa.project_name,
+        oa.normalized_payload,
+        oa.amount
+    from app.oa_applications oa
+    join needed_keys needed
+      on needed.row_type = 'oa'
+     and needed.row_id = oa.row_id
+    where oa.status <> 'deleted'
+      and {_COMPLETED_OA_SQL}
+),
+completed_oa_source_alias_values as materialized (
+    select oa.row_id, payload_alias.value as alias_value
+    from completed_oa_facts oa
+    cross join lateral jsonb_array_elements_text(
+        case when jsonb_typeof(oa.normalized_payload->'source_aliases') = 'array'
+             then oa.normalized_payload->'source_aliases'
+             else '[]'::jsonb end
+    ) payload_alias(value)
+    union all
+    select
+        oa.row_id,
+        split_part(
+            nullif(item.normalized_payload->>'source_expense_item_id', ''),
+            ':item:',
+            1
+        )
+    from completed_oa_facts oa
+    join app.oa_application_items item on item.oa_application_id = oa.id
+    union all
+    select oa.row_id, split_part(nullif(alias.value, ''), ':item:', 1)
+    from completed_oa_facts oa
+    join app.oa_attachments attachment on attachment.oa_application_id = oa.id
+    cross join lateral (values
+        (attachment.normalized_payload->>'source_expense_item_id'),
+        (attachment.normalized_payload->>'derived_from_oa_id'),
+        (attachment.normalized_payload->>'source_oa_id')
+    ) alias(value)
+    union all
+    select oa.row_id, alias_row.alias_row_id
+    from completed_oa_facts oa
+    join app.oa_source_aliases alias_row
+      on alias_row.canonical_row_id = oa.row_id
+     and alias_row.status = 'active'
+),
+completed_oa_source_aliases as materialized (
+    select
+        source.row_id,
+        to_jsonb(array_agg(
+            distinct source.alias_value order by source.alias_value
+        )) as source_aliases
+    from completed_oa_source_alias_values source
+    where nullif(btrim(source.alias_value), '') is not null
+    group by source.row_id
+),
 oa_candidate_facts as materialized (
     select
         oa.row_id,
@@ -893,7 +952,7 @@ oa_candidate_facts as materialized (
         case when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
              then oa.normalized_payload->'expense_items'
              else '[]'::jsonb end as oa_expense_items,
-        to_jsonb({oa_source_aliases_sql("oa", "oa.normalized_payload")}) as oa_source_aliases,
+        coalesce(source_aliases.source_aliases, '[]'::jsonb) as oa_source_aliases,
         array_remove(array[
             oa.row_id,
             oa.normalized_payload->>'oa_row_id',
@@ -916,10 +975,9 @@ oa_candidate_facts as materialized (
         null::numeric as invoice_total_with_tax,
         null::text as invoice_direction,
         '[]'::jsonb as invoice_source_links
-    from app.oa_applications oa
-    join needed_keys needed on needed.row_type = 'oa' and needed.row_id = oa.row_id
-    where oa.status <> 'deleted'
-      and {_COMPLETED_OA_SQL}
+    from completed_oa_facts oa
+    left join completed_oa_source_aliases source_aliases
+      on source_aliases.row_id = oa.row_id
     union all
     select
         admission.oa_id,

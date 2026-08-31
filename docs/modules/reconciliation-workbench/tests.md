@@ -68,6 +68,7 @@
 - PostgreSQL integration：`tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_unified_search_covers_visible_oa_bank_and_invoice_columns` 在全 migration disposable PostgreSQL 上复现 completed OA `counterparty_name=张丽芬`，并逐项验证 OA 父项/子付款项、流水、发票字段命中后返回完整组；同文件 pending OA 用例同时保护进行中流程标签及其对方户名、事由和子付款项字段。
 - Frontend：`groupDisplayModel.ts` 不再对浏览器当前已加载页执行第二套 search membership；输入 search 后由 zone direct API 唯一决定组命中，旧页在请求期间保持稳定，响应到达后保留服务端返回的完整 relation context。金额 canonicalize、高亮、列/时间筛选和排序仍走各自现役边界。
 - 性能/边界：search 继续复用既有 `needed_keys` materialized 候选和一次 source-hit CTE；没有新增 SQL round-trip、API、索引、表、read model、worker、cache、依赖或数据库写入。
+- 2026-09-01 性能回归：`tests/test_workbench_page_query_repository.py::test_canonical_spine_rolls_completed_oa_source_aliases_set_based_once` 禁止列表热路径恢复逐 OA 的付款项/附件/alias 相关子查询；`web/src/test/WorkbenchSelection.test.tsx` 保护连续输入只产生一次最终区域搜索、清空立即恢复结果，并继续覆盖搜索期间的选择与 OA 原位重读。
 
 ## 2026-08-25 OA 附件发票 current-item 展示分组
 

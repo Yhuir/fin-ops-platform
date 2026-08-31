@@ -2425,7 +2425,7 @@ describe("Workbench row selection and detail drawer", () => {
 
   test("zone search scans every pane while keeping singleton unpaired groups isolated", async () => {
     const user = userEvent.setup();
-    installMockApiFetch();
+    const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
@@ -2434,21 +2434,35 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getAllByRole("searchbox")).toHaveLength(1);
     await user.type(zoneSearch, "智能工厂");
 
+    expect(within(unpairedZone).getByLabelText("搜索中")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(unpairedZone).queryAllByText("杭州张三广告有限公司")).toHaveLength(0);
+    });
     expect(within(unpairedZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
     expect(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
     expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeInTheDocument();
     expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeInTheDocument();
     expect(within(unpairedZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
     expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeInTheDocument();
-    expect(within(unpairedZone).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
+    const intelligentFactoryRequests = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(fetchPath(input), "http://localhost");
+      return url.pathname === "/api/workbench/groups"
+        && url.searchParams.get("zone") === "unpaired"
+        && url.searchParams.get("search") === "智能工厂";
+    });
+    expect(intelligentFactoryRequests).toHaveLength(1);
 
     await user.click(within(unpairedZone).getByRole("button", { name: "清空搜索" }));
 
-    expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    });
 
     await user.type(zoneSearch, "91330108");
 
-    expect(within(unpairedZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(unpairedZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
+    });
     expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
     expect(within(unpairedZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
     expect(zoneSearch).toHaveValue("91330108");
