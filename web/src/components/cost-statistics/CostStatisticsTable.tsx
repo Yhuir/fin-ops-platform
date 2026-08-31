@@ -1,11 +1,11 @@
-import { Button } from "@heroui/react";
+import { Button, Chip } from "@heroui/react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
-import DirectionTag from "../DirectionTag";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 import {
   EmptyValue,
+  FinanceDirectionTag,
   FinanceTable,
   FinanceTableBody,
   FinanceTableCell,
@@ -257,16 +257,20 @@ function renderTableCellContent(content: ReactNode | CostStatisticsAmountCell) {
     return (
       <span className="money-cell-stack">
         <span className={`money-cell-value ${amountToneClass}`.trim()}>
+          {direction ? (
+            <FinanceDirectionTag direction={direction}>
+              {direction === "收入" ? "收" : direction === "支出" ? "支" : direction}
+            </FinanceDirectionTag>
+          ) : null}
           <span>{amount}</span>
         </span>
-        {direction || shouldShowAccount ? (
+        {shouldShowAccount ? (
           <span className="money-cell-meta-row">
-            {direction ? <DirectionTag direction={direction} /> : null}
-            {shouldShowAccount ? (
-              <span className="money-cell-account">
-                <BankAccountValue value={paymentAccountLabel} variant="tag" />
-              </span>
-            ) : null}
+            <span className="money-cell-account">
+              <Chip className="cost-bank-account-chip" color="default" size="sm" variant="soft">
+                <Chip.Label><BankAccountValue value={paymentAccountLabel} /></Chip.Label>
+              </Chip>
+            </span>
           </span>
         ) : null}
       </span>

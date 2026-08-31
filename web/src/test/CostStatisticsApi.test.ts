@@ -160,9 +160,7 @@ describe("Cost statistics export API", () => {
             projects: [{
               project_name: "云南溯源科技",
               total_amount: "100.00",
-              transaction_count: 1,
               expense_type_count: 1,
-              percentage_label: "100.0%",
             }],
           },
           rows: [],
@@ -246,6 +244,9 @@ describe("Cost statistics export API", () => {
           total_amount: "145.00",
         },
         statistics: {
+          transaction_count: 12500,
+          expense_transaction_count: 11000,
+          income_transaction_count: 1500,
           project_count: 4,
           expense_type_count: 8,
           bank_account_count: 3,
@@ -284,6 +285,9 @@ describe("Cost statistics export API", () => {
       expenseTypeCount: 8,
       bankAccountCount: 3,
       costTransactionCount: 12000,
+      transactionCount: 12500,
+      expenseTransactionCount: 11000,
+      incomeTransactionCount: 1500,
     }));
     expect(payload.rows[0]).toMatchObject({
       oaApplicant: "报销成员甲",
@@ -400,16 +404,12 @@ describe("Cost statistics export API", () => {
           projects: [{
             project_name: "云南溯源科技",
             total_amount: "90.00",
-            transaction_count: 1,
             expense_type_count: 1,
-            percentage_label: "100.0%",
           }],
           bank_accounts: [{
             bank_account_label: "建设银行 8106",
             total_amount: "90.00",
-            transaction_count: 1,
             project_count: 1,
-            percentage_label: "100.0%",
           }],
         },
         rows: [],
@@ -433,9 +433,7 @@ describe("Cost statistics export API", () => {
     expect(payload.facets.bankAccounts[0]).toEqual({
       bankAccountLabel: "建设银行 8106",
       totalAmount: "90.00",
-      transactionCount: 1,
       projectCount: 1,
-      percentageLabel: "100.0%",
     });
   });
 

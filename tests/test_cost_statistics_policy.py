@@ -181,9 +181,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 {
                     "bank_account_label": "建设银行 8106",
                     "total_amount": "90.00",
-                    "transaction_count": 1,
                     "project_count": 1,
-                    "percentage_label": "100.0%",
                 }
             ],
         )

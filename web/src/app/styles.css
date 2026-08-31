@@ -21069,18 +21069,61 @@ body.column-layout-dragging {
 }
 
 .cost-direction-amount--aligned {
-  display: grid;
-  grid-template-columns: auto minmax(82px, max-content);
-  align-items: baseline;
-  gap: var(--fp-space-2);
-}
-
-.cost-direction-amount-label {
-  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-1);
 }
 
 .cost-direction-amount-value {
   text-align: right;
+}
+
+.cost-direction-chip {
+  min-width: 22px;
+  min-height: 20px;
+  justify-content: center;
+  padding-inline: 5px;
+  font-family: var(--fp-font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cost-transaction-time-chip {
+  width: fit-content;
+  min-height: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cost-bank-tag-chip,
+.cost-bank-account-chip {
+  width: fit-content;
+  max-width: 100%;
+  height: auto;
+}
+
+.cost-bank-tag-chip [data-slot="chip-label"] {
+  max-width: 100%;
+  padding-block: 2px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.cost-bank-account-chip [data-slot="chip-label"] {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  padding-block: 2px;
+}
+
+.cost-bank-account-chip .bank-account-value {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
 }
 
 .cost-direction-amount--expense,
@@ -21091,10 +21134,6 @@ body.column-layout-dragging {
 .cost-direction-amount--income,
 .cost-flow-amount--income {
   color: var(--fp-success) !important;
-}
-
-.cost-direction-amount--neutral {
-  color: var(--fp-text-secondary) !important;
 }
 
 .cost-section-heading-copy {
@@ -21664,21 +21703,28 @@ body.column-layout-dragging {
 }
 
 .cost-explorer-list {
-  --cost-explorer-disclosure-gutter: 52px;
-
+  display: grid;
+  align-content: start;
+  gap: 0;
   min-width: 0;
+  padding: 0;
+  outline: none;
 }
 
 .cost-explorer-item {
-  position: relative;
+  display: block;
   width: 100%;
   height: auto;
   min-width: 0;
   max-width: 100%;
   min-height: 66px;
   border-bottom: 1px solid var(--fp-border-subtle);
+  border-radius: 0;
   background: var(--fp-surface);
   color: var(--fp-text);
+  cursor: pointer;
+  padding: 0;
+  outline: none;
   transition:
     background-color var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-fast) var(--ease-standard);
@@ -21699,14 +21745,9 @@ body.column-layout-dragging {
   background: transparent;
   color: inherit;
   text-align: left;
-  cursor: pointer;
   -webkit-user-select: text;
   user-select: text;
   transition: transform var(--motion-fast) var(--ease-out-quart);
-}
-
-.cost-explorer-item-content {
-  padding-right: calc(var(--fp-space-3) + var(--cost-explorer-disclosure-gutter));
 }
 
 .cost-explorer-item:last-child {
@@ -21717,57 +21758,19 @@ body.column-layout-dragging {
   background: var(--fp-surface-raised);
 }
 
-.cost-explorer-item-content:active {
+.cost-explorer-item:active .cost-explorer-item-content {
   transform: translateY(1px);
 }
 
-.cost-explorer-item-content:focus-visible {
+.cost-explorer-item[data-focus-visible] {
   outline: 2px solid color-mix(in srgb, var(--fp-accent) 38%, transparent);
   outline-offset: -2px;
 }
 
-.cost-explorer-item.active {
+.cost-explorer-item[data-selected] {
   background: var(--fp-accent-soft);
   color: var(--fp-accent-strong);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fp-accent) 38%, transparent);
-}
-
-.cost-explorer-item-disclosure {
-  position: absolute;
-  z-index: 2;
-  top: 19px;
-  right: var(--fp-space-2);
-  display: inline-flex;
-  width: 44px;
-  min-width: 44px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: var(--fp-radius-sm);
-  background: transparent;
-  color: var(--fp-accent);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  transition:
-    background-color var(--motion-fast) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard),
-    color var(--motion-fast) var(--ease-standard);
-}
-
-.cost-explorer-item-disclosure:hover,
-.cost-explorer-item-disclosure[aria-expanded="true"] {
-  background: var(--fp-accent-soft);
-  color: var(--fp-accent-strong);
-}
-
-.cost-explorer-item-disclosure:focus-visible {
-  border-color: var(--fp-accent);
-  outline: 2px solid color-mix(in srgb, var(--fp-accent) 28%, transparent);
-  outline-offset: 1px;
 }
 
 .cost-explorer-item-main {
@@ -21780,28 +21783,19 @@ body.column-layout-dragging {
 
 .cost-explorer-item-main strong {
   min-width: 0;
-  overflow: hidden;
   font-size: 12px;
   line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cost-explorer-item.is-expanded .cost-explorer-item-main strong {
-  overflow: visible;
   overflow-wrap: anywhere;
-  text-overflow: clip;
   white-space: normal;
 }
 
 .cost-explorer-item-main span {
   min-width: 0;
-  overflow: hidden;
   color: var(--fp-text-muted);
   font-size: 12px;
   line-height: 1.55;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .cost-explorer-item-meta {
@@ -21825,11 +21819,6 @@ body.column-layout-dragging {
   gap: var(--fp-space-1);
 }
 
-.cost-explorer-item-meta-stack .cost-direction-amount,
-.cost-direction-meta .cost-direction-amount {
-  min-width: 138px;
-}
-
 .cost-direction-meta .cost-direction-amount {
   font-size: 12px;
 }
@@ -21851,19 +21840,6 @@ body.column-layout-dragging {
 .cost-surface-skeleton {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   min-height: 520px;
-}
-
-.cost-explorer-percentage-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 20px;
-  padding-inline: 7px;
-  border-radius: var(--fp-radius-pill);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-  white-space: nowrap;
 }
 
 .cost-explorer-empty {
@@ -21891,6 +21867,19 @@ body.column-layout-dragging {
   text-align: right !important;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.cost-table-cell-money .money-cell-value {
+  justify-content: flex-end;
+  gap: var(--fp-space-1);
+}
+
+.cost-table-cell-money .finance-direction-tag {
+  min-width: 22px;
+  min-height: 20px;
+  justify-content: center;
+  padding-inline: 5px;
+  font-size: 12px;
 }
 
 .cost-table-empty {

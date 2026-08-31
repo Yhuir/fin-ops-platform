@@ -118,6 +118,15 @@ class CostStatisticsApiTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertGreaterEqual(payload["row_count"], 1)
                 self.assertEqual(payload["summary"]["total_amount"], "1250.00")
+                self.assertEqual(payload["statistics"]["transaction_count"], 1)
+                self.assertEqual(
+                    payload["statistics"]["expense_transaction_count"],
+                    1,
+                )
+                self.assertEqual(
+                    payload["statistics"]["income_transaction_count"],
+                    0,
+                )
                 self.assertNotIn("read_model_status", payload)
                 self.assertNotIn("read_model_version", payload)
                 self.assertNotIn("refresh_scope_keys", payload)
@@ -131,9 +140,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             {
                 "bank_account_label": account_label,
                 "total_amount": "1250.00",
-                "transaction_count": 1,
                 "project_count": 1,
-                "percentage_label": "100.0%",
             },
         )
 

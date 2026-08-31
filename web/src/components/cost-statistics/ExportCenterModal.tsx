@@ -455,7 +455,6 @@ export default function ExportCenterModal({
                     <>
                       <span>支出 {formatCostAmount(preview.summary.expenseAmount ?? "0.00")}</span>
                       <span>收入 {formatCostAmount(preview.summary.incomeAmount ?? "0.00")}</span>
-                      <span>净支出 {formatCostAmount(preview.summary.totalAmount)}</span>
                     </>
                   ) : <span>总金额 {formatCostAmount(preview.summary.totalAmount)}</span>}
                 </div>

@@ -21,7 +21,7 @@ test.describe("cost statistics relation browser fan-out", () => {
     await expect(page.getByText("智能工厂项目")).toHaveCount(0);
     await expect(page.getByText("智能工厂设备尾款")).toHaveCount(0);
 
-    await expect(page.getByRole("button", { name: /智能工厂项目/ })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: /智能工厂项目/ })).toHaveCount(0);
     const explorerRequestCountBeforeConfirm = api.count("GET /api/cost-statistics/explorer");
 
     await confirmWorkbenchRelation(page);
@@ -31,12 +31,12 @@ test.describe("cost statistics relation browser fan-out", () => {
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThan(explorerRequestCountBeforeConfirm);
 
-    const linkedProject = page.getByRole("button", { name: /智能工厂项目/ });
+    const linkedProject = page.getByRole("option", { name: /智能工厂项目/ });
     await expect(linkedProject).toBeVisible();
     await expect(linkedProject).toContainText("58000.00");
     await linkedProject.click();
 
-    const linkedExpenseType = page.getByRole("button", { name: /设备货款及材料费/ });
+    const linkedExpenseType = page.getByRole("option", { name: /设备货款及材料费/ });
     await expect(linkedExpenseType).toBeVisible();
     await expect(linkedExpenseType).toContainText("58000.00");
     await linkedExpenseType.click();

@@ -228,7 +228,12 @@ class CostStatisticsPolicy:
             "statistics": (
                 self.bank_flow_statistics
                 if include_statistics and bank_flow_view
-                else self.statistics if include_statistics else None
+                else {
+                    **self.statistics,
+                    **self.bank_direction_statistics,
+                }
+                if include_statistics
+                else None
             ),
             "available_years": self._available_years or sorted(
                 {
@@ -426,6 +431,19 @@ class CostStatisticsPolicy:
         }
 
     @property
+    def bank_direction_statistics(self) -> dict[str, int]:
+        rows = self.bank_flow_rows
+        return {
+            "transaction_count": len({_row_identity(row) for row in rows}),
+            "expense_transaction_count": len(
+                {_row_identity(row) for row in rows if row["direction"] == "支出"}
+            ),
+            "income_transaction_count": len(
+                {_row_identity(row) for row in rows if row["direction"] == "收入"}
+            ),
+        }
+
+    @property
     def bank_flow_statistics(self) -> dict[str, int]:
         rows = self.bank_flow_rows
         tagged = [
@@ -435,13 +453,7 @@ class CostStatisticsPolicy:
             not in {"", COST_STATISTICS_UNCATEGORIZED_TAG_CODE}
         ]
         return {
-            "transaction_count": len({_row_identity(row) for row in rows}),
-            "expense_transaction_count": len(
-                {_row_identity(row) for row in rows if row["direction"] == "支出"}
-            ),
-            "income_transaction_count": len(
-                {_row_identity(row) for row in rows if row["direction"] == "收入"}
-            ),
+            **self.bank_direction_statistics,
             "untagged_transaction_count": len(
                 {_row_identity(row) for row in rows}
                 - {_row_identity(row) for row in tagged}
@@ -1593,21 +1605,16 @@ def _project_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "project_name": name,
                 "total": ZERO,
-                "transactions": set(),
                 "expense_types": set(),
             },
         )
         bucket["total"] += _decimal(row["amount"]) or ZERO
-        bucket["transactions"].add(_row_identity(row))
         bucket["expense_types"].add(row["expense_type"])
-    total = sum((bucket["total"] for bucket in buckets.values()), start=ZERO)
     return [
         {
             "project_name": bucket["project_name"],
             "total_amount": _money(bucket["total"]),
-            "transaction_count": len(bucket["transactions"]),
             "expense_type_count": len(bucket["expense_types"]),
-            "percentage_label": _percentage(bucket["total"], total),
         }
         for bucket in sorted(
             buckets.values(),
@@ -1632,14 +1639,12 @@ def _expense_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bucket["total"] += _decimal(row["amount"]) or ZERO
         bucket["transactions"].add(_row_identity(row))
         bucket["projects"].add(row["project_name"])
-    total = sum((bucket["total"] for bucket in buckets.values()), start=ZERO)
     return [
         {
             "expense_type": bucket["expense_type"],
             "total_amount": _money(bucket["total"]),
             "transaction_count": len(bucket["transactions"]),
             "project_count": len(bucket["projects"]),
-            "percentage_label": _percentage(bucket["total"], total),
         }
         for bucket in sorted(
             buckets.values(),
@@ -1657,24 +1662,16 @@ def _bank_account_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "bank_account_label": label,
                 "total": ZERO,
-                "transactions": set(),
                 "projects": set(),
             },
         )
         bucket["total"] += _decimal(row["amount"]) or ZERO
-        bucket["transactions"].add(_row_identity(row))
         bucket["projects"].add(row["project_name"])
-    total = sum(
-        (bucket["total"] for bucket in buckets.values()),
-        start=ZERO,
-    )
     return [
         {
             "bank_account_label": bucket["bank_account_label"],
             "total_amount": _money(bucket["total"]),
-            "transaction_count": len(bucket["transactions"]),
             "project_count": len(bucket["projects"]),
-            "percentage_label": _percentage(bucket["total"], total),
         }
         for bucket in sorted(
             buckets.values(),
@@ -1983,12 +1980,6 @@ def _row_identity(row: dict[str, Any]) -> str:
         or row.get("transaction_id")
         or row.get("row_key")
     )
-
-
-def _percentage(value: Decimal, total: Decimal) -> str:
-    if total == ZERO:
-        return "0.0%"
-    return f"{(value / total * Decimal('100')):.1f}%"
 
 
 def _clean_text(value: Any) -> str:

@@ -161,29 +161,30 @@ function DirectionAmount({
   amount: string;
   hideWhenZero?: boolean;
   label: string;
-  tone: "expense" | "income" | "neutral";
+  tone: "expense" | "income";
 }) {
   const numericAmount = Number(amount.replace(/,/g, ""));
   if (hideWhenZero && Number.isFinite(numericAmount) && numericAmount === 0) {
     return null;
   }
   const formattedAmount = formatCostAmount(amount);
+  const directionLabel = tone === "income" ? "收" : "支";
   return (
     <span
       aria-label={`${label} ${formattedAmount}`}
       className={`cost-direction-amount cost-direction-amount--aligned cost-direction-amount--${tone}`}
     >
-      <span className="cost-direction-amount-label">{label}</span>
+      <Chip
+        aria-hidden="true"
+        className="cost-direction-chip"
+        color={tone === "income" ? "success" : "danger"}
+        size="sm"
+        variant="soft"
+      >
+        <Chip.Label>{directionLabel}</Chip.Label>
+      </Chip>
       <span className="cost-direction-amount-value">{formattedAmount}</span>
     </span>
-  );
-}
-
-function CostPercentageChip({ label }: { label: string }) {
-  return (
-    <Chip className="cost-explorer-percentage-badge" color="accent" size="sm" variant="soft">
-      <Chip.Label>{label}</Chip.Label>
-    </Chip>
   );
 }
 
@@ -231,12 +232,16 @@ function EntryIdentity({
           {secondaryLabel}
         </span>
       ) : null}
-      <time
-        className="cost-transaction-time-chip inline-flex min-h-5 items-center whitespace-nowrap rounded-sm border border-[var(--fp-border)] bg-[var(--fp-surface-muted)] px-1.5 text-xs font-semibold leading-none text-[var(--fp-text-muted)] tabular-nums"
-        dateTime={occurredAt}
+      <Chip
+        className="cost-transaction-time-chip"
+        color="default"
+        size="sm"
+        variant="soft"
       >
-        {formattedTradeTime || "--"}
-      </time>
+        <Chip.Label>
+          <time dateTime={occurredAt}>{formattedTradeTime || "--"}</time>
+        </Chip.Label>
+      </Chip>
     </span>
   );
 }
@@ -857,7 +862,6 @@ export default function CostStatisticsPage() {
   const bankTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
   const projectTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
   const expenseTypeTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
-  const bankFlowTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
   const bankFlowExpenseAmount = explorerData?.summary.expenseAmount ?? "0.00";
   const bankFlowIncomeAmount = explorerData?.summary.incomeAmount ?? "0.00";
 
@@ -1475,7 +1479,11 @@ export default function CostStatisticsPage() {
             header: "银行标签",
             flex: 0.9,
             getTextValue: (row) => row.bankTagLabelPath.join(" / "),
-            render: (row) => row.bankTagLabelPath.join(" / ") || "未标记",
+            render: (row) => (
+              <Chip className="cost-bank-tag-chip" color="default" size="sm" variant="soft">
+                <Chip.Label>{row.bankTagLabelPath.join(" / ") || "未标记"}</Chip.Label>
+              </Chip>
+            ),
           },
           { key: "expenseContent", header: "摘要 / 备注", flex: 1.1, render: (row) => row.expenseContent },
         ];
@@ -1505,7 +1513,7 @@ export default function CostStatisticsPage() {
         identityColumn,
         {
           key: "amount",
-          header: "成本金额",
+          header: "支出金额",
           width: 180,
           cellClassName: "cost-table-cell-money",
           render: (row) => ({
@@ -1563,28 +1571,18 @@ export default function CostStatisticsPage() {
       : () => void loadExplorerPage(failedExplorerPage),
   };
   const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading;
-  const visibleStatistics = pageStatistics;
   const isBankFlowView = viewMode === "time" || viewMode === "bankTag";
   const titleAccessory = (
     <div className="page-title-accessory-group">
       <PageStatisticsPopover
         ariaLabel="成本统计数据统计"
         loading={isExplorerLoading && !pageStatistics}
-        coreItems={isBankFlowView ? [
-          { label: "银行流水", value: visibleStatistics?.transactionCount, unit: "条" },
-          { label: "支出流水", value: visibleStatistics?.expenseTransactionCount, unit: "条" },
-          { label: "收入流水", value: visibleStatistics?.incomeTransactionCount, unit: "条" },
-        ] : [
-          { label: "成本明细", value: visibleStatistics?.costTransactionCount, unit: "条" },
-          { label: "项目", value: visibleStatistics?.projectCount, unit: "个" },
-          { label: "费用类型", value: visibleStatistics?.expenseTypeCount, unit: "类" },
+        coreItems={[
+          { label: "银行流水", value: pageStatistics?.transactionCount, unit: "条" },
+          { label: "支出流水", value: pageStatistics?.expenseTransactionCount, unit: "条" },
+          { label: "收入流水", value: pageStatistics?.incomeTransactionCount, unit: "条" },
         ]}
-        detailItems={isBankFlowView ? [
-          { label: "银行标签", value: visibleStatistics?.bankTagCount, unit: "个" },
-          { label: "未标记流水", value: visibleStatistics?.untaggedTransactionCount, unit: "条" },
-        ] : [
-          { label: "银行账户", value: visibleStatistics?.bankAccountCount, unit: "个" },
-        ]}
+        detailItems={[]}
       />
     </div>
   );
@@ -1777,13 +1775,10 @@ export default function CostStatisticsPage() {
                       setEntryDetail(null);
                     }}
                     getPrimaryText={(row) => row.projectName}
-                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.expenseTypeCount} 类费用`}
+                    renderSecondary={(row) => `${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        {row.percentageLabel ? (
-                          <CostPercentageChip label={row.percentageLabel} />
-                        ) : null}
+                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
                       </div>
                     )}
                   />
@@ -1801,11 +1796,10 @@ export default function CostStatisticsPage() {
                       setEntryDetail(null);
                     }}
                     getPrimaryText={(row) => row.expenseType}
-                    renderSecondary={(row) => `${row.transactionCount} 条归集`}
+                    renderSecondary={(row) => `${row.transactionCount} 条明细`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        {row.percentageLabel ? <CostPercentageChip label={row.percentageLabel} /> : null}
+                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
                       </div>
                     )}
                   />
@@ -1842,7 +1836,7 @@ export default function CostStatisticsPage() {
                 <div className="cost-section-heading cost-view-scope-heading">
                   <div className="cost-section-heading-copy">
                     <h2>按银行账户统计</h2>
-                    <DirectionAmount amount={bankTotalAmount} label="成本金额" tone="expense" />
+                    <DirectionAmount amount={bankTotalAmount} label="支出金额" tone="expense" />
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     <BusinessPeriodPicker
@@ -1872,11 +1866,10 @@ export default function CostStatisticsPage() {
                       setEntryDetail(null);
                     }}
                     getPrimaryText={(row) => row.bankAccountLabel}
-                    renderSecondary={(row) => `${row.transactionCount} 条成本 / ${row.projectCount} 个项目`}
+                    renderSecondary={(row) => `${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="成本" tone="expense" />
-                        <CostPercentageChip label={row.percentageLabel} />
+                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
                       </div>
                     )}
                   />
@@ -1894,11 +1887,10 @@ export default function CostStatisticsPage() {
                       setEntryDetail(null);
                     }}
                     getPrimaryText={(row) => row.projectName}
-                    renderSecondary={(row) => `${row.transactionCount} 条成本 / ${row.expenseTypeCount} 类费用`}
+                    renderSecondary={(row) => `${row.expenseTypeCount} 类费用`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="成本" tone="expense" />
-                        {row.percentageLabel ? <CostPercentageChip label={row.percentageLabel} /> : null}
+                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
                       </div>
                     )}
                   />
@@ -1964,11 +1956,10 @@ export default function CostStatisticsPage() {
                       setEntryDetail(null);
                     }}
                     getPrimaryText={(row) => row.expenseType}
-                    renderSecondary={(row) => `${row.transactionCount} 条归集 / ${row.projectCount} 个项目`}
+                    renderSecondary={(row) => `${row.projectCount} 个项目`}
                     renderMeta={(row) => (
                       <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出" tone="expense" />
-                        <CostPercentageChip label={row.percentageLabel} />
+                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
                       </div>
                     )}
                   />
@@ -2007,7 +1998,6 @@ export default function CostStatisticsPage() {
                     <h2>按时间统计</h2>
                     <DirectionAmount amount={bankFlowExpenseAmount} label="支出" tone="expense" />
                     <DirectionAmount amount={bankFlowIncomeAmount} label="收入" tone="income" />
-                    <DirectionAmount amount={bankFlowTotalAmount} label="净支出" tone="neutral" />
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     <BusinessPeriodPicker
@@ -2049,7 +2039,6 @@ export default function CostStatisticsPage() {
                     <h2>按标签统计</h2>
                     <DirectionAmount amount={bankFlowExpenseAmount} label="支出" tone="expense" />
                     <DirectionAmount amount={bankFlowIncomeAmount} label="收入" tone="income" />
-                    <DirectionAmount amount={bankFlowTotalAmount} label="净支出" tone="neutral" />
                   </div>
                   <div className="cost-section-heading-actions cost-project-scope-actions">
                     <BusinessPeriodPicker
@@ -2079,12 +2068,11 @@ export default function CostStatisticsPage() {
                         setEntryDetail(null);
                       }}
                       getPrimaryText={(row) => row.primaryLabel}
-                      renderSecondary={(row) => `${row.transactionCount} 条流水 / ${row.subTagCount} 个子标签`}
+                      renderSecondary={(row) => `${row.subTagCount} 个子标签`}
                       renderMeta={(row) => (
                         <div className="cost-explorer-item-meta-stack">
                           <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" hideWhenZero />
                           <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" hideWhenZero />
-                          <DirectionAmount amount={row.netOutflowAmount} label="净额" tone="neutral" />
                         </div>
                       )}
                     />
@@ -2107,7 +2095,6 @@ export default function CostStatisticsPage() {
                         <div className="cost-explorer-item-meta-stack">
                           <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" hideWhenZero />
                           <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" hideWhenZero />
-                          <DirectionAmount amount={row.netOutflowAmount} label="净额" tone="neutral" />
                         </div>
                       )}
                     />

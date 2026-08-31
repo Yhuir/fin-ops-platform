@@ -107,7 +107,14 @@ describe("Cost statistics page", () => {
       "按标签",
       "按时间",
     ]);
+    const statistics = screen.getByLabelText("成本统计数据统计");
+    expect(within(statistics).getByText("银行流水")).toBeInTheDocument();
+    expect(within(statistics).getByText("支出流水")).toBeInTheDocument();
+    expect(within(statistics).getByText("收入流水")).toBeInTheDocument();
+    expect(within(statistics).queryByText("成本明细")).not.toBeInTheDocument();
     expect(screen.queryByText("成本归因")).not.toBeInTheDocument();
+    expect(screen.queryByText(/条归集/)).not.toBeInTheDocument();
+    expect(screen.queryByText("展开")).not.toBeInTheDocument();
   });
 
   test("keeps bank labels and OA expense types distinct in manual allocation", async () => {
@@ -149,16 +156,18 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按时间" }));
     expect(await screen.findByRole("heading", { name: "按时间统计" })).toBeInTheDocument();
     expect(await screen.findByRole("grid", { name: "按时间银行流水表" })).toBeInTheDocument();
-    expect(screen.getAllByText("收入").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("收", { exact: true }).length).toBeGreaterThan(0);
+    expect(screen.queryByText("净支出", { exact: true })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("view=time"),
       expect.any(Object),
     );
 
     await user.click(screen.getByRole("radio", { name: "按标签" }));
-    await user.click(await screen.findByRole("button", { name: "选择主标签 项目开销" }));
-    await user.click(await screen.findByRole("button", { name: "选择子标签 设备材料" }));
+    await user.click(await screen.findByRole("option", { name: "选择主标签 项目开销" }));
+    await user.click(await screen.findByRole("option", { name: "选择子标签 设备材料" }));
     expect(await screen.findByRole("grid", { name: "按标签银行流水表" })).toBeInTheDocument();
+    expect(screen.queryByText("净额", { exact: true })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringMatching(/view=bank_tag.*bank_tag_primary_label=.*bank_tag_sub_label=/),
       expect.any(Object),
@@ -171,8 +180,8 @@ describe("Cost statistics page", () => {
     renderPage();
     await waitUntilReady();
 
-    await user.click(screen.getByRole("button", { name: "选择项目名 云南溯源科技" }));
-    await user.click(await screen.findByRole("button", { name: "选择费用类型 设备货款及材料费" }));
+    await user.click(screen.getByRole("option", { name: "选择项目名 云南溯源科技" }));
+    await user.click(await screen.findByRole("option", { name: "选择费用类型 设备货款及材料费" }));
     expect(await screen.findByRole("grid", { name: "项目成本明细表" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("view=project&project_name="),
@@ -191,9 +200,9 @@ describe("Cost statistics page", () => {
     await waitUntilReady();
 
     await user.click(screen.getByRole("radio", { name: "按银行账户" }));
-    const account = await screen.findByRole("button", { name: "选择银行账户 工商银行 账户 0001" });
+    const account = await screen.findByRole("option", { name: "选择银行账户 工商银行 账户 0001" });
     await user.click(account);
-    await user.click(await screen.findByRole("button", { name: /选择项目 云南溯源科技/ }));
+    await user.click(await screen.findByRole("option", { name: /选择项目 云南溯源科技/ }));
 
     expect(await screen.findByRole("grid", { name: "银行账户项目成本明细表" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -209,7 +218,7 @@ describe("Cost statistics page", () => {
     await waitUntilReady();
 
     await user.click(screen.getByRole("radio", { name: "按费用类型" }));
-    await user.click(await screen.findByRole("button", { name: "选择费用类型 设备货款及材料费" }));
+    await user.click(await screen.findByRole("option", { name: "选择费用类型 设备货款及材料费" }));
     expect(await screen.findByRole("grid", { name: "按费用类型成本明细表" })).toBeInTheDocument();
   });
 

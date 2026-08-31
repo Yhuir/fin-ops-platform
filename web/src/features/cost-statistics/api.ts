@@ -56,9 +56,7 @@ type ApiCostExplorerEntryRow = {
 type ApiCostProjectExplorerRow = {
   project_name: string;
   total_amount: string;
-  transaction_count: number;
   expense_type_count: number;
-  percentage_label?: string | null;
 };
 
 type ApiCostExpenseTypeExplorerRow = {
@@ -66,15 +64,12 @@ type ApiCostExpenseTypeExplorerRow = {
   total_amount: string;
   transaction_count: number;
   project_count: number;
-  percentage_label: string;
 };
 
 type ApiCostBankExplorerRow = {
   bank_account_label: string;
   total_amount: string;
-  transaction_count: number;
   project_count: number;
-  percentage_label: string;
 };
 
 type ApiCostBankTagPrimaryExplorerRow = {
@@ -491,23 +486,18 @@ export async function fetchCostStatisticsExplorerPage(
       projects: (facets.projects ?? []).map<CostProjectExplorerRow>((row) => ({
         projectName: row.project_name,
         totalAmount: row.total_amount,
-        transactionCount: row.transaction_count,
         expenseTypeCount: row.expense_type_count,
-        percentageLabel: optionalString(row.percentage_label),
       })),
       expenseTypes: (facets.expense_types ?? []).map<CostExpenseTypeExplorerRow>((row) => ({
         expenseType: row.expense_type,
         totalAmount: row.total_amount,
         transactionCount: row.transaction_count,
         projectCount: row.project_count,
-        percentageLabel: row.percentage_label,
       })),
       bankAccounts: (facets.bank_accounts ?? []).map<CostBankExplorerRow>((row) => ({
         bankAccountLabel: row.bank_account_label,
         totalAmount: row.total_amount,
-        transactionCount: row.transaction_count,
         projectCount: row.project_count,
-        percentageLabel: row.percentage_label,
       })),
       bankTagPrimary: (facets.bank_tag_primary ?? []).map<CostBankTagPrimaryExplorerRow>((row) => ({
         primaryLabel: row.primary_label,

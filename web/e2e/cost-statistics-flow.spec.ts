@@ -68,8 +68,8 @@ test.describe("cost statistics browser flow", () => {
     await timeResponse;
     const timeGrid = page.getByRole("grid", { name: "按时间银行流水表" });
     await expect(timeGrid).toBeVisible();
-    await expect(timeGrid).toContainText("收入");
-    await expect(page.getByRole("heading", { name: "按时间统计" }).locator("..")).toContainText("净支出");
+    await expect(timeGrid.getByText("收", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "按时间统计" }).locator("..")).not.toContainText("净支出");
 
     const tagRootResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "bank_tag");
     await page.getByRole("radio", { name: "按标签" }).click();
@@ -78,14 +78,14 @@ test.describe("cost statistics browser flow", () => {
       url.searchParams.get("view") === "bank_tag"
       && url.searchParams.get("bank_tag_primary_label") === "项目开销"
     ));
-    await page.getByRole("button", { name: "选择主标签 项目开销" }).click();
+    await page.getByRole("option", { name: "选择主标签 项目开销" }).click();
     await subTagResponse;
     const tagRowsResponse = waitForExplorer(page, (url) => (
       url.searchParams.get("view") === "bank_tag"
       && url.searchParams.get("bank_tag_primary_label") === "项目开销"
       && url.searchParams.get("bank_tag_sub_label") === "设备材料"
     ));
-    await page.getByRole("button", { name: "选择子标签 设备材料" }).click();
+    await page.getByRole("option", { name: "选择子标签 设备材料" }).click();
     await tagRowsResponse;
     await expect(page.getByRole("grid", { name: "按标签银行流水表" })).toContainText("PLC 模块采购");
   });
@@ -100,7 +100,7 @@ test.describe("cost statistics browser flow", () => {
       url.searchParams.get("view") === "project"
       && url.searchParams.get("project_name") === "云南溯源科技"
     ));
-    await page.getByRole("button", { name: "选择项目名 云南溯源科技" }).click();
+    await page.getByRole("option", { name: "选择项目名 云南溯源科技" }).click();
     await expenseTypesResponse;
 
     const rowsResponse = waitForExplorer(page, (url) => (
@@ -108,7 +108,7 @@ test.describe("cost statistics browser flow", () => {
       && url.searchParams.get("project_name") === "云南溯源科技"
       && url.searchParams.get("expense_type") === "设备货款及材料费"
     ));
-    await page.getByRole("button", { name: "选择费用类型 设备货款及材料费" }).click();
+    await page.getByRole("option", { name: "选择费用类型 设备货款及材料费" }).click();
     await rowsResponse;
 
     const grid = page.getByRole("grid", { name: "项目成本明细表" });
@@ -133,7 +133,7 @@ test.describe("cost statistics browser flow", () => {
       url.searchParams.get("view") === "bank_account"
       && url.searchParams.get("bank_account_label") === "工商银行 账户 0001"
     ));
-    await page.getByRole("button", { name: "选择银行账户 工商银行 账户 0001" }).click();
+    await page.getByRole("option", { name: "选择银行账户 工商银行 账户 0001" }).click();
     await projectListResponse;
 
     const rowsResponse = waitForExplorer(page, (url) => (
@@ -141,7 +141,7 @@ test.describe("cost statistics browser flow", () => {
       && url.searchParams.get("bank_account_label") === "工商银行 账户 0001"
       && url.searchParams.get("project_name") === "云南溯源科技"
     ));
-    await page.getByRole("button", { name: "选择项目 云南溯源科技" }).click();
+    await page.getByRole("option", { name: "选择项目 云南溯源科技" }).click();
     await rowsResponse;
 
     const grid = page.getByRole("grid", { name: "银行账户项目成本明细表" });
@@ -161,7 +161,7 @@ test.describe("cost statistics browser flow", () => {
       url.searchParams.get("view") === "expense_type"
       && url.searchParams.get("expense_type") === "设备货款及材料费"
     ));
-    await page.getByRole("button", { name: "选择费用类型 设备货款及材料费" }).click();
+    await page.getByRole("option", { name: "选择费用类型 设备货款及材料费" }).click();
     await rowsResponse;
     await expect(page.getByRole("grid", { name: "按费用类型成本明细表" })).toContainText("云南溯源科技");
   });
@@ -185,7 +185,9 @@ test.describe("cost statistics browser flow", () => {
     await dialog.getByRole("button", { name: "仅预览" }).click();
     await flowPreviewResponse;
     await expect(dialog.getByText(/预计导出 \d+ 条银行流水/)).toBeVisible();
-    await expect(dialog.getByText(/净支出/)).toBeVisible();
+    await expect(dialog.getByText(/支出/).first()).toBeVisible();
+    await expect(dialog.getByText(/收入/).first()).toBeVisible();
+    await expect(dialog.getByText(/净支出/)).toHaveCount(0);
 
     await tabs.getByRole("button", { name: "按银行账户" }).click();
 
