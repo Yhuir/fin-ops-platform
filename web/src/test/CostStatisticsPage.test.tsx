@@ -174,6 +174,29 @@ describe("Cost statistics page", () => {
     );
   });
 
+  test("refreshes the basic header statistics when the active time scope changes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderPage();
+    await waitUntilReady();
+
+    await user.click(screen.getByRole("radio", { name: "按时间" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/scope=2026-03&view=time&page_size=1(?:&|$)/),
+        expect.any(Object),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "全部" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/scope=all&view=time&page_size=1(?:&|$)/),
+        expect.any(Object),
+      );
+    });
+  });
+
   test("drills from project to expense type to cost detail", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

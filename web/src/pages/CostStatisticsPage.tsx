@@ -528,7 +528,7 @@ export default function CostStatisticsPage() {
     ...(searchQuery ? { query: searchQuery } : {}),
   };
   const explorerRequestKey = JSON.stringify(explorerRequest);
-  const statisticsRefreshKey = `${activationGeneration}:${domainRefreshNonce}:${explorerView}`;
+  const statisticsRefreshKey = `${activationGeneration}:${domainRefreshNonce}:${explorerView}:${explorerScope}`;
   const explorerData = loadedExplorer?.payload ?? null;
   const explorerTransitionScope = getExplorerTransitionScope(
     loadedExplorer?.requestKey,
