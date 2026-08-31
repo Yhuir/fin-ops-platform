@@ -808,6 +808,24 @@ def test_canonical_spine_rolls_completed_oa_source_aliases_set_based_once() -> N
     assert "select distinct source_alias.alias_value" not in candidate_sql
 
 
+def test_canonical_spine_expands_bank_account_mappings_once() -> None:
+    sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split()).lower()
+    mapping_sql = sql.split(
+        "requested_bank_account_mappings as materialized (", 1
+    )[1].split("canonical_invoice_facts as materialized (", 1)[0]
+    bank_sql = sql.split("bank_candidates as materialized (", 1)[1].split(
+        "requested_invoice_hard_identities as materialized (", 1
+    )[0]
+
+    assert mapping_sql.count("jsonb_array_elements(") == 1
+    assert "with ordinality mapping(value, ordinality)" in mapping_sql
+    assert "distinct on (nullif(btrim(mapping.value->>'last4'), ''))" in mapping_sql
+    assert "left join requested_bank_account_mappings account_mapping" in bank_sql
+    assert "cross join requested_settings settings" not in bank_sql
+    assert "left join lateral" not in bank_sql
+    assert "jsonb_array_elements" not in bank_sql
+
+
 def test_canonical_spine_defers_supporting_documents_to_page_hydration() -> None:
     canonical_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split())
 
@@ -1746,6 +1764,20 @@ def test_source_search_uses_canonical_invoice_source_labels_and_flow_aliases() -
     assert "not (exists" in " ".join(manual_sql.split()).lower()
     assert "purchase" in input_sql
     assert "invoice.invoice_type like '%%进%%'" in input_sql
+
+
+def test_source_search_reuses_preexpanded_bank_account_mappings() -> None:
+    search_sql, _params, _hit_name = (
+        PostgresWorkbenchPageQueryRepository._source_search_hit_ctes(
+            prefix="bank_mapping",
+            search="建设银行",
+        )
+    )
+    normalized_sql = " ".join(search_sql.split()).lower()
+
+    assert "left join requested_bank_account_mappings search_account_mapping" in normalized_sql
+    assert "search_account_mapping.bank_name" in normalized_sql
+    assert "from app.app_settings search_settings" not in normalized_sql
 
 
 def test_etc_summary_search_uses_batch_ids_invoice_numbers_and_exact_amount() -> None:

@@ -476,6 +476,24 @@ requested_settings as materialized (
         limit 1
     ), '{{}}'::jsonb) as settings_payload
 ),
+requested_bank_account_mappings as materialized (
+    select distinct on (nullif(btrim(mapping.value->>'last4'), ''))
+        nullif(btrim(mapping.value->>'last4'), '') as account_last4,
+        coalesce(
+            nullif(btrim(mapping.value->>'bank_name'), ''),
+            nullif(btrim(mapping.value->>'bankName'), '')
+        ) as bank_name
+    from requested_settings settings
+    cross join lateral jsonb_array_elements(
+        case
+            when jsonb_typeof(settings.settings_payload->'bank_account_mappings') = 'array'
+                then settings.settings_payload->'bank_account_mappings'
+            else '[]'::jsonb
+        end
+    ) with ordinality mapping(value, ordinality)
+    where nullif(btrim(mapping.value->>'last4'), '') is not null
+    order by nullif(btrim(mapping.value->>'last4'), ''), mapping.ordinality
+),
 canonical_invoice_facts as materialized (
     select
         invoice.id,
@@ -1132,22 +1150,8 @@ bank_candidates as materialized (
     join needed_keys needed
       on needed.row_type = 'bank'
      and needed.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
-    cross join requested_settings settings
-    left join lateral (
-        select coalesce(
-            nullif(btrim(mapping.value->>'bank_name'), ''),
-            nullif(btrim(mapping.value->>'bankName'), '')
-        ) as bank_name
-        from jsonb_array_elements(
-            case
-                when jsonb_typeof(settings.settings_payload->'bank_account_mappings') = 'array'
-                    then settings.settings_payload->'bank_account_mappings'
-                else '[]'::jsonb
-            end
-        ) mapping(value)
-        where nullif(btrim(mapping.value->>'last4'), '') = right(bank.account_no, 4)
-        limit 1
-    ) account_mapping on true
+    left join requested_bank_account_mappings account_mapping
+      on account_mapping.account_last4 = right(bank.account_no, 4)
     where bank.status <> 'deleted'
 ),
 requested_invoice_hard_identities as materialized (
@@ -5417,21 +5421,7 @@ class PostgresWorkbenchPageQueryRepository:
         pending_params.extend(pending_expense_params)
 
         bank_name_sql = """coalesce(
-            (
-                select mapping.value->>'bank_name'
-                from app.app_settings search_settings
-                cross join lateral jsonb_array_elements(
-                    case
-                        when jsonb_typeof(search_settings.settings_payload->'bank_account_mappings') = 'array'
-                            then search_settings.settings_payload->'bank_account_mappings'
-                        else '[]'::jsonb
-                    end
-                ) mapping(value)
-                where search_settings.settings_key = 'app_settings'
-                  and mapping.value->>'last4' = right(bank.account_no, 4)
-                order by mapping.value->>'bank_name'
-                limit 1
-            ),
+            search_account_mapping.bank_name,
             case
                 when bank.account_no like '6225%%' then '招商银行'
                 when bank.account_no like '6222%%' then '工商银行'
@@ -5648,6 +5638,8 @@ class PostgresWorkbenchPageQueryRepository:
                 join needed_keys needed
                   on needed.row_type = 'bank'
                  and needed.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
+                left join requested_bank_account_mappings search_account_mapping
+                  on search_account_mapping.account_last4 = right(bank.account_no, 4)
                 where bank.status <> 'deleted'
                   and ({' or '.join(bank_predicates)})
                 union

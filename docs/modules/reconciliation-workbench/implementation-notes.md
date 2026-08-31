@@ -1921,3 +1921,10 @@
 - 根因二：React `useDeferredValue` 只调整渲染优先级，并不保证时间防抖；连续输入会发出多次完整区域搜索。区域搜索改为本页私有的 250ms 尾沿防抖，清空立即生效，筛选、排序、分页、选择和提交后原位重读仍使用现有单一 server query 状态。
 - 本地全 migration、生产规模样本的只读 `EXPLAIN (ANALYZE, BUFFERS)`：首屏共享缓冲访问约从 `4698` 降至 `481`，热执行中位约 `116.9ms`；搜索约从 `13990` 降至 `9773`，热执行中位约 `129.8ms`。同一 repeatable-read 快照下旧/新首屏与搜索 SQL 返回逐行一致。最终 HTTP p95/p99 以发布后的 authenticated 生产样本为准。
 - 本次无数据库 migration、索引、备份或生产业务数据修改；关系确认、撤回、异常审阅的锁、版本、fingerprint、幂等和审计写链未改。模块职责、API I/O 和页面路由不变，因此 boundary 文档不需要修改。
+
+## 2026-09-01 - 银行账户配置单次展开
+
+- 第一轮发布后的生产 App Health 与只读 `EXPLAIN (ANALYZE, BUFFERS)` 进一步确认：连接池获取约为零，但 canonical spine 仍会对 1219 条银行流水反复解释同一份 `bank_account_mappings` JSON；银行分支约占主查询 `316ms`。搜索链还用另一段相关子查询重复解析同一设置。
+- 收口为同一 canonical SQL 内的一个 materialized 窄映射：设置数组按原顺序展开一次，以账号尾号保留首个配置；银行候选和银行搜索共同左连接该映射。删除逐流水 lateral JSON 解析和搜索专用设置子查询，不新增全局 helper、表、索引、cache、Redis、read model、worker 或兼容分支。
+- 生产只读同一 repeatable-read 快照对 paired、unpaired、金额搜索、两类异常及筛选候选逐字段校验，旧/新 payload 全部一致；paired 主 SQL 的 `EXPLAIN` 执行约从 `745ms` 降至 `443ms`，银行分支约从 `316ms` 降至 `25ms`。最终 HTTP 合同仍以发布后的真实页面参数和四并发样本判定。
+- 本次仍无 API DTO、模块 I/O、业务写链、数据库 migration、备份或生产数据修改，boundary 文档不适用。

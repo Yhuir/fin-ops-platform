@@ -680,3 +680,8 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - Service / transaction：`tests/test_oa_pending_payment_source_snapshot_repository.py` 保护 admission/completed OA 匹配相关变化与 matching dirty scope 同事务提交，队列写失败整体回滚，payment-status-only 更新零 matching I/O。
 - App Health regression：`tests/test_app_health_alert_service.py`、`tests/test_app_status_overview_service.py` 保护 failed scope 显式告警、stale matching 不再显示 Workbench ready，同时不设置全局写门禁。
 - API/UI/Read model 不适用：本次不改变 HTTP response shape、页面组件或页面 read model；既有 Workbench direct API、OA pending API 和页面回归继续保护其它页面链路。
+
+## 2026-09-01 - 银行账户配置集合化回归
+
+- `tests/test_workbench_page_query_repository.py::test_canonical_spine_expands_bank_account_mappings_once` 保护 canonical spine 只在独立 materialized CTE 中展开设置数组，银行候选不得恢复逐流水 lateral JSON 解析。
+- `tests/test_workbench_page_query_repository.py::test_source_search_reuses_preexpanded_bank_account_mappings` 保护搜索复用同一映射，禁止恢复 `app_settings` 相关子查询；disposable PostgreSQL 全量 integration 继续保护查询可解析、银行名称和所有页面合同不变。
