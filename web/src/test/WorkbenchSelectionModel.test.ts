@@ -26,6 +26,33 @@ function row(id: string, recordType: WorkbenchRecord["recordType"], amount = "10
   };
 }
 
+function directionalRow(
+  id: string,
+  recordType: WorkbenchRecord["recordType"],
+  amount: string,
+  amountDirection: "payment" | "receipt",
+): WorkbenchRecord {
+  return Object.assign(row(id, recordType, amount), { amountDirection });
+}
+
+function authoritativeAmountCheck(
+  oaTotal: string,
+  bankTotal: string,
+  invoiceTotal: string,
+): NonNullable<WorkbenchRelationGroup["amountCheck"]> {
+  return {
+    status: "matched",
+    direction: "payment",
+    bankAmount: bankTotal,
+    oaAmount: oaTotal,
+    oaTotal,
+    bankTotal,
+    invoiceTotal,
+    amountDelta: "0.00",
+    requiresNote: false,
+  };
+}
+
 function group(id: string): WorkbenchRelationGroup {
   return {
     id,
@@ -71,6 +98,209 @@ describe("buildWorkbenchSelectionContext", () => {
     });
   });
 
+  test("nets refund receipts against payment bank rows without changing the selected row count", () => {
+    const selectedRows = [
+      directionalRow("oa-payment", "oa", "2100.00", "payment"),
+      directionalRow("bank-payment-1", "bank", "2100.00", "payment"),
+      directionalRow("bank-refund", "bank", "2100.00", "receipt"),
+      directionalRow("bank-payment-2", "bank", "2100.00", "payment"),
+    ];
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: selectedRows,
+      sourceGroups: [],
+      zoneId: "unpaired",
+    });
+
+    expect(context.summary).toMatchObject({
+      explicitTotal: 4,
+      total: 4,
+      oa: 1,
+      bank: 3,
+      invoice: 0,
+      amounts: { oa: "2100.00", bank: "2100.00", invoice: "0.00" },
+    });
+  });
+
+  test("nets payment reversals against receipt bank rows", () => {
+    const selectedRows = [
+      directionalRow("oa-receipt", "oa", "2100.00", "receipt"),
+      directionalRow("bank-receipt-1", "bank", "2100.00", "receipt"),
+      directionalRow("bank-reversal", "bank", "600.00", "payment"),
+      directionalRow("bank-receipt-2", "bank", "600.00", "receipt"),
+    ];
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: selectedRows,
+      sourceGroups: [],
+      zoneId: "unpaired",
+    });
+
+    expect(context.summary.amounts.bank).toBe("2100.00");
+  });
+
+  test("does not guess a comparison amount for mixed bank directions without a principal direction", () => {
+    const selectedRows = [
+      directionalRow("bank-payment", "bank", "2100.00", "payment"),
+      directionalRow("bank-receipt", "bank", "2100.00", "receipt"),
+    ];
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: selectedRows,
+      sourceGroups: [],
+      zoneId: "unpaired",
+    });
+
+    expect(context.summary).toMatchObject({
+      total: 2,
+      bank: 2,
+      amounts: { bank: "--" },
+    });
+  });
+
+  test("does not guess a comparison amount when non-bank rows disagree on the principal direction", () => {
+    const selectedRows = [
+      directionalRow("oa-payment-conflict", "oa", "2100.00", "payment"),
+      directionalRow("invoice-receipt-conflict", "invoice", "2100.00", "receipt"),
+      directionalRow("bank-payment-conflict", "bank", "2100.00", "payment"),
+    ];
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: selectedRows,
+      sourceGroups: [],
+      zoneId: "unpaired",
+    });
+
+    expect(context.summary).toMatchObject({
+      total: 3,
+      bank: 1,
+      amounts: { bank: "--" },
+    });
+  });
+
+  test("uses the authoritative amount check for a fully hydrated formal relation", () => {
+    const formalOa = directionalRow("formal-net-oa", "oa", "2100.00", "payment");
+    const formalBankRows = [
+      directionalRow("formal-net-payment-1", "bank", "2100.00", "payment"),
+      directionalRow("formal-net-refund", "bank", "2100.00", "receipt"),
+      directionalRow("formal-net-payment-2", "bank", "2100.00", "payment"),
+    ];
+    const sourceGroup: WorkbenchRelationGroup = {
+      id: "case:formal-authoritative-net",
+      groupType: "paired",
+      rawGroupType: "relation",
+      relationMode: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      formalMemberIdentities: [formalOa, ...formalBankRows].map((record) => ({
+        id: record.id,
+        recordType: record.recordType,
+      })),
+      rows: { oa: [formalOa], bank: formalBankRows, invoice: [] },
+      amountCheck: {
+        status: "matched",
+        direction: "payment",
+        bankAmount: "2100.00",
+        oaAmount: "2100.00",
+        oaTotal: "2100.00",
+        bankTotal: "2100.00",
+        invoiceTotal: "0.00",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
+    };
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [formalBankRows[0]],
+      sourceGroups: [sourceGroup],
+      zoneId: "paired",
+    });
+
+    expect(context.summary).toMatchObject({
+      total: 4,
+      oa: 1,
+      bank: 3,
+      amounts: { oa: "2100.00", bank: "2100.00", invoice: "0.00" },
+    });
+  });
+
+  test("keeps a fully hydrated formal relation selectable without inferring a missing amount check", () => {
+    const formalOa = directionalRow("formal-missing-amount-oa", "oa", "2100.00", "payment");
+    const formalBank = directionalRow(
+      "formal-missing-amount-bank",
+      "bank",
+      "2100.00",
+      "payment",
+    );
+    const sourceGroup: WorkbenchRelationGroup = {
+      id: "case:formal-missing-amount-check",
+      groupType: "paired",
+      rawGroupType: "relation",
+      relationMode: "manual_confirmed",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      formalMemberIdentities: [formalOa, formalBank].map((record) => ({
+        id: record.id,
+        recordType: record.recordType,
+      })),
+      rows: { oa: [formalOa], bank: [formalBank], invoice: [] },
+    };
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [formalBank],
+      sourceGroups: [sourceGroup],
+      zoneId: "paired",
+    });
+
+    expect(context.includedRows).toEqual([formalOa, formalBank]);
+    expect(context.summary).toMatchObject({
+      total: 2,
+      oa: 1,
+      bank: 1,
+      amounts: { oa: "--", bank: "--", invoice: "0.00" },
+    });
+  });
+
+  test("preserves the authoritative principal-side amount for a turnover closure", () => {
+    const formalOa = directionalRow("closure-oa", "oa", "240000.00", "payment");
+    const formalBankRows = [
+      directionalRow("closure-payment", "bank", "240000.00", "payment"),
+      directionalRow("closure-receipt", "bank", "240000.00", "receipt"),
+    ];
+    const sourceGroup: WorkbenchRelationGroup = {
+      id: "case:turnover-closure-authoritative",
+      groupType: "paired",
+      rawGroupType: "relation",
+      relationMode: "turnover_manual_closure",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      formalMemberIdentities: [formalOa, ...formalBankRows].map((record) => ({
+        id: record.id,
+        recordType: record.recordType,
+      })),
+      rows: { oa: [formalOa], bank: formalBankRows, invoice: [] },
+      amountCheck: {
+        status: "matched",
+        direction: "payment",
+        bankAmount: "240000.00",
+        oaAmount: "240000.00",
+        oaTotal: "240000.00",
+        bankTotal: "240000.00",
+        invoiceTotal: "0.00",
+        amountDelta: "0.00",
+        requiresNote: false,
+      },
+    };
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [formalBankRows[0]],
+      sourceGroups: [sourceGroup],
+      zoneId: "paired",
+    });
+
+    expect(context.summary.amounts.bank).toBe("240000.00");
+  });
+
   test("paired zone selection keeps a formal two-pane relation as one selectable group", () => {
     const sourceGroup: WorkbenchRelationGroup = {
       id: "case:CASE-PARTIAL",
@@ -88,6 +318,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: [row("bank-partial", "bank")],
         invoice: [],
       },
+      amountCheck: authoritativeAmountCheck("100.00", "100.00", "0.00"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -129,6 +360,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: [sharedBankRow],
         invoice: [],
       },
+      amountCheck: authoritativeAmountCheck("100.00", "100.00", "0.00"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -164,6 +396,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: bankRows,
         invoice: [],
       },
+      amountCheck: authoritativeAmountCheck("0.00", "50000.00", "0.00"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -200,6 +433,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: [formalBank],
         invoice: [formalInvoice],
       },
+      amountCheck: authoritativeAmountCheck("125.00", "125.00", "125.00"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -250,6 +484,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: [collapsedDetail],
         invoice: [],
       },
+      amountCheck: authoritativeAmountCheck("200.00", "200.00", "0.00"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -302,6 +537,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: [],
         invoice: [detailOne, detailTwo],
       },
+      amountCheck: authoritativeAmountCheck("2411.25", "2411.25", "2411.25"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -373,6 +609,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: [formalBank],
         invoice: [displayInvoice],
       },
+      amountCheck: authoritativeAmountCheck("137.95", "137.95", "0.00"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -413,6 +650,7 @@ describe("buildWorkbenchSelectionContext", () => {
         { id: "bank-detail-2", recordType: "bank" },
       ],
       rows: { oa: [], bank: [summaryRow], invoice: [] },
+      amountCheck: authoritativeAmountCheck("0.00", "124.50", "0.00"),
     };
 
     const context = buildWorkbenchSelectionContext({
@@ -436,7 +674,7 @@ describe("buildWorkbenchSelectionContext", () => {
     });
   });
 
-  test("fails closed when a relation formal-member contract is missing or unresolved", () => {
+  test("keeps valid formal identities selectable when hydration and amount display are incomplete", () => {
     const formalOa = row("fail-closed-oa", "oa", "100.00");
     const displayInvoice = row("fail-closed-display", "invoice", "100.00");
     const sourceGroup: WorkbenchRelationGroup = {
@@ -459,8 +697,18 @@ describe("buildWorkbenchSelectionContext", () => {
     });
 
     expect(context.explicitRows).toEqual([displayInvoice]);
-    expect(context.includedRows).toEqual([]);
-    expect(context.summary).toMatchObject({ total: 0, oa: 0, bank: 0, invoice: 0 });
+    expect(context.includedRows).toEqual([formalOa]);
+    expect(context.includedRowIdentityKeys).toEqual([
+      "oa\u001ffail-closed-oa",
+      "bank\u001fmissing-bank",
+    ]);
+    expect(context.summary).toMatchObject({
+      total: 2,
+      oa: 1,
+      bank: 1,
+      invoice: 0,
+      amounts: { oa: "--", bank: "--", invoice: "0.00" },
+    });
   });
 
   test("deduplicates repeated explicit and formal rows by typed identity", () => {
@@ -481,6 +729,7 @@ describe("buildWorkbenchSelectionContext", () => {
         bank: [formalBank],
         invoice: [],
       },
+      amountCheck: authoritativeAmountCheck("88.00", "88.00", "0.00"),
     };
 
     const context = buildWorkbenchSelectionContext({

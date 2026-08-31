@@ -93,6 +93,38 @@ type TestWorkbenchApiGroup = {
   invoice_rows: Array<Record<string, unknown>>;
 };
 
+function selectionAmountCheck(oaTotal: string, bankTotal: string, invoiceTotal: string) {
+  return {
+    status: "matched",
+    direction: "payment",
+    oa_amount: oaTotal,
+    bank_amount: bankTotal,
+    oa_total: oaTotal,
+    bank_total: bankTotal,
+    invoice_total: invoiceTotal,
+    amount_delta: "0.00",
+    requires_note: false,
+  };
+}
+
+function withPairedSelectionAmountCheck(payload: Record<string, unknown>) {
+  const paired = payload.paired as { groups: Array<Record<string, unknown>> };
+  return {
+    ...payload,
+    paired: {
+      ...paired,
+      groups: paired.groups.map((group) => (
+        group.group_id === "case:CASE-202603-001"
+          ? {
+            ...group,
+            amount_check: selectionAmountCheck("128000.00", "128000.00", "144640.00"),
+          }
+          : group
+      )),
+    },
+  };
+}
+
 function withUnpairedActiveRelations(memberIdSets: string[][]) {
   return (payload: Record<string, unknown>) => {
     const unpaired = payload.unpaired as { groups: TestWorkbenchApiGroup[] };
@@ -172,6 +204,7 @@ function withUnpairedFormalRelationDisplayInvoice(payload: Record<string, unknow
         zone: "unpaired",
         match_confidence: "high",
         reason: "active_formal_relation_incomplete",
+        amount_check: selectionAmountCheck("58000.00", "58000.00", "0.00"),
         oa_rows: [formalOa],
         bank_rows: [formalBank],
         invoice_rows: [{
@@ -550,6 +583,7 @@ function withFormalRelationDisplayAlias(payload: Record<string, unknown>) {
         group.group_id === "case:CASE-202603-001"
           ? {
             ...group,
+            amount_check: selectionAmountCheck("128000.00", "128000.00", "0.00"),
             formal_member_ids: ["oa-p-202603-001", "bk-p-202603-001"],
             formal_member_types: ["oa", "bank"],
             invoice_rows: (group.invoice_rows as Array<Record<string, unknown>>).map((invoiceRow) => ({
@@ -1535,7 +1569,9 @@ describe("Workbench row selection and detail drawer", () => {
 
   test("paired selection stays withdrawable after pane filters hide the explicitly selected row", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: withPairedSelectionAmountCheck,
+    });
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
@@ -4069,7 +4105,7 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
-  test("compact bank-flow summary keeps exact totals and uses only the dedicated batch withdrawal", async () => {
+  test("compact bank-flow summary keeps canonical counts and uses only the dedicated batch withdrawal", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       transformWorkbenchPayload: withCompactBankFlowRelation,
@@ -4092,7 +4128,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(summaryRow).toHaveAttribute("data-row-state", "selected");
     expect(within(pairedZone).getByText("已选 1")).toBeInTheDocument();
-    expect(within(pairedZone).getByText("流水 2 / 128000.00")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("流水 2 / --")).toBeInTheDocument();
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
 
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));

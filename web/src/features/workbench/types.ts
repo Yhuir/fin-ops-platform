@@ -5,6 +5,8 @@ import type {
 
 export type WorkbenchRecordType = "oa" | "bank" | "invoice";
 
+export type WorkbenchAmountDirection = "payment" | "receipt";
+
 export type WorkbenchSourceKind =
   | "etc_invoice_summary"
   | "etc_invoice"
@@ -167,6 +169,7 @@ export type WorkbenchRecord = {
   statusCode: string;
   statusTone: string;
   exceptionHandled: boolean;
+  amountDirection?: WorkbenchAmountDirection;
   amount: string;
   counterparty: string;
   tableValues: Record<string, string>;

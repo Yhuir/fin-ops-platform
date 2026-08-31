@@ -178,6 +178,40 @@ describe("WorkbenchZone", () => {
     expect(onAuxiliaryAction).toHaveBeenCalledTimes(1);
   });
 
+  test("renders a direction-netted bank amount without changing the selected bank count", () => {
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        primarySelectionActionLabel="确认关联"
+        selectionSummary={{
+          explicitTotal: 4,
+          total: 4,
+          oa: 1,
+          bank: 3,
+          invoice: 0,
+          amounts: { oa: "2100.00", bank: "2100.00", invoice: "0.00" },
+        }}
+        title="未配对"
+        tone="warning"
+        searchQuery=""
+        onSearchQueryChange={() => {}}
+        onClearSelection={() => {}}
+        onOpenDetail={() => {}}
+        onPrimarySelectionAction={() => {}}
+        onRowAction={() => {}}
+        onSelectRow={() => {}}
+        panes={panes}
+        zoneId="unpaired"
+      />,
+    );
+
+    const toolbar = screen.getByText("已选 4").closest(".zone-selection-toolbar");
+    expect(toolbar).not.toBeNull();
+    expect(within(toolbar as HTMLElement).getByText("OA 1 / 2100.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByText("流水 3 / 2100.00")).toBeInTheDocument();
+    expect(within(toolbar as HTMLElement).getByText("发票 0 / 0.00")).toBeInTheDocument();
+  });
+
   test("renders an accessible busy primary selection action on the next render", () => {
     render(
       <WorkbenchZone

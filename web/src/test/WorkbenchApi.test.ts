@@ -45,6 +45,46 @@ test("keeps the combined initial and subsequent group pages at a 10-group first 
   expect(WORKBENCH_GROUP_PAGE_SIZE).toBe(10);
 });
 
+test("normalizes Workbench amount directions at the API boundary", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({
+      month: "all",
+      zone: "unpaired",
+      page_size: 10,
+      total: 1,
+      row_counts: { oa: 2, bank: 2, invoice: 3 },
+      has_more: false,
+      next_cursor: null,
+      groups: [{
+        group_id: "direction-fixtures",
+        group_type: "unpaired",
+        match_confidence: "low",
+        reason: "direction_fixtures",
+        oa_rows: [
+          { id: "oa-payment", type: "oa", apply_type: "支付申请", amount: "10.00" },
+          { id: "oa-receipt", type: "oa", apply_type: "收款申请", amount: "10.00" },
+        ],
+        bank_rows: [
+          { id: "bank-payment", type: "bank", direction: "支出", debit_amount: "10.00" },
+          { id: "bank-receipt", type: "bank", direction: "收入", credit_amount: "10.00" },
+        ],
+        invoice_rows: [
+          { id: "invoice-input", type: "invoice", invoice_type: "进项发票", total_with_tax: "10.00" },
+          { id: "invoice-output", type: "invoice", invoice_type: "销项发票", total_with_tax: "10.00" },
+          { id: "invoice-unknown", type: "invoice", invoice_type: "电子发票", total_with_tax: "10.00" },
+        ],
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+
+  const page = await fetchWorkbenchGroupsPage("all", "unpaired", null, 10);
+  const rows = page.groups[0].rows;
+
+  expect(rows.oa.map((record) => record.amountDirection)).toEqual(["payment", "receipt"]);
+  expect(rows.bank.map((record) => record.amountDirection)).toEqual(["payment", "receipt"]);
+  expect(rows.invoice.map((record) => record.amountDirection)).toEqual(["payment", "receipt", undefined]);
+});
+
 test("submits explicit invoice ownership through the dedicated command contract", async () => {
   const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify({ success: true }), {

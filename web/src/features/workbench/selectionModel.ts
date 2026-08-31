@@ -1,4 +1,5 @@
 import type {
+  WorkbenchAmountDirection,
   WorkbenchRecordIdentity,
   WorkbenchRelationGroup,
   WorkbenchRecord,
@@ -7,6 +8,8 @@ import type {
 import { formatMoney } from "../money";
 
 const paneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
+
+type WorkbenchSelectionAmountCents = Record<WorkbenchRecordType, number | undefined>;
 
 export type WorkbenchSelectionSummary = {
   explicitTotal: number;
@@ -84,18 +87,20 @@ export function buildWorkbenchSelectionContext({
   const includedRowsByIdentity = new Map<string, WorkbenchRecord>();
   const includedIdentitiesByKey = new Map<string, WorkbenchRecordIdentity>();
   const selectedRelationGroups = new Map<string, WorkbenchRelationGroup>();
-  const amountCents: Record<WorkbenchRecordType, number> = { oa: 0, bank: 0, invoice: 0 };
+  const independentRows: WorkbenchRecord[] = [];
 
   explicitRowsByIdentity.forEach((row, identityKey) => {
     const relationGroup = relationGroupBySelectableRowIdentity.get(identityKey);
     if (!relationGroup) {
       includedRowsByIdentity.set(identityKey, row);
       includedIdentitiesByKey.set(identityKey, { id: row.id, recordType: row.recordType });
-      amountCents[row.recordType] += workbenchComparableAmountCents(row);
+      independentRows.push(row);
       return;
     }
     selectedRelationGroups.set(relationGroup.id, relationGroup);
   });
+
+  const amountCents = sumIndependentWorkbenchSelectionAmounts(independentRows);
 
   selectedRelationGroups.forEach((group) => {
     const selection = resolveFormalRelationSelection(group);
@@ -108,9 +113,7 @@ export function buildWorkbenchSelectionContext({
     selection.rows.forEach((relationRow) => {
       includedRowsByIdentity.set(workbenchRowIdentityKey(relationRow), relationRow);
     });
-    paneIds.forEach((paneId) => {
-      amountCents[paneId] += selection.amountCents[paneId];
-    });
+    mergeWorkbenchSelectionAmountCents(amountCents, selection.amountCents);
   });
 
   const includedRows = Array.from(includedRowsByIdentity.values());
@@ -179,6 +182,81 @@ function sumWorkbenchAmountCents(rows: WorkbenchRecord[]) {
   return rows.reduce((total, row) => total + workbenchComparableAmountCents(row), 0);
 }
 
+function sumIndependentWorkbenchSelectionAmounts(
+  rows: WorkbenchRecord[],
+): WorkbenchSelectionAmountCents {
+  const oaRows = rows.filter((row) => row.recordType === "oa");
+  const bankRows = rows.filter((row) => row.recordType === "bank");
+  const invoiceRows = rows.filter((row) => row.recordType === "invoice");
+  return {
+    oa: sumWorkbenchAmountCents(oaRows),
+    bank: sumWorkbenchBankComparisonAmountCents(bankRows, rows),
+    invoice: sumWorkbenchAmountCents(invoiceRows),
+  };
+}
+
+function sumWorkbenchBankComparisonAmountCents(
+  bankRows: WorkbenchRecord[],
+  selectedRows: WorkbenchRecord[],
+): number | undefined {
+  if (bankRows.length === 0) {
+    return 0;
+  }
+  if (bankRows.some((row) => row.amountDirection === undefined)) {
+    return undefined;
+  }
+  const direction = resolveWorkbenchSelectionAmountDirection(selectedRows);
+  if (!direction) {
+    return undefined;
+  }
+  let gross = 0;
+  let contra = 0;
+  bankRows.forEach((row) => {
+    if (row.amountDirection === direction) {
+      gross += workbenchComparableAmountCents(row);
+    } else {
+      contra += workbenchComparableAmountCents(row);
+    }
+  });
+  return gross - contra;
+}
+
+function resolveWorkbenchSelectionAmountDirection(
+  rows: WorkbenchRecord[],
+): WorkbenchAmountDirection | undefined {
+  const nonBankDirections = new Set(
+    rows
+      .filter((row) => row.recordType !== "bank")
+      .map((row) => row.amountDirection)
+      .filter((direction): direction is WorkbenchAmountDirection => direction !== undefined),
+  );
+  if (nonBankDirections.size === 1) {
+    return nonBankDirections.values().next().value;
+  }
+  if (nonBankDirections.size > 1) {
+    return undefined;
+  }
+  const directions = new Set(
+    rows
+      .map((row) => row.amountDirection)
+      .filter((direction): direction is WorkbenchAmountDirection => direction !== undefined),
+  );
+  return directions.size === 1 ? directions.values().next().value : undefined;
+}
+
+function mergeWorkbenchSelectionAmountCents(
+  target: WorkbenchSelectionAmountCents,
+  source: WorkbenchSelectionAmountCents,
+) {
+  paneIds.forEach((paneId) => {
+    const targetValue = target[paneId];
+    const sourceValue = source[paneId];
+    target[paneId] = targetValue === undefined || sourceValue === undefined
+      ? undefined
+      : targetValue + sourceValue;
+  });
+}
+
 export function workbenchComparableAmountCents(row: WorkbenchRecord): number {
   if (row.recordType === "invoice") {
     const grossAmount = row.tableValues.grossAmount?.trim();
@@ -196,7 +274,7 @@ function flattenWorkbenchGroup(group: WorkbenchRelationGroup) {
 function resolveFormalRelationSelection(group: WorkbenchRelationGroup): {
   identities: WorkbenchRecordIdentity[];
   rows: WorkbenchRecord[];
-  amountCents: Record<WorkbenchRecordType, number>;
+  amountCents: WorkbenchSelectionAmountCents;
 } | undefined {
   const identities = group.formalMemberIdentities;
   if (!Array.isArray(identities) || identities.length === 0) {
@@ -218,35 +296,21 @@ function resolveFormalRelationSelection(group: WorkbenchRelationGroup): {
     }
     seen.add(identityKey);
   }
-  const resolvedAmountCents = resolvedRows.length === identities.length
-    ? sumWorkbenchAmountsByType(resolvedRows)
-    : resolveAuthoritativeRelationAmountCents(group, identities);
-  if (!resolvedAmountCents) {
-    return undefined;
-  }
+  const resolvedAmountCents = resolveAuthoritativeRelationAmountCents(group, identities);
   return { identities, rows: resolvedRows, amountCents: resolvedAmountCents };
 }
 
 function resolveAuthoritativeRelationAmountCents(
   group: WorkbenchRelationGroup,
   identities: WorkbenchRecordIdentity[],
-): Record<WorkbenchRecordType, number> | undefined {
+): WorkbenchSelectionAmountCents {
   const counts = countWorkbenchIdentitiesByType(identities);
   const amountValues: Partial<Record<WorkbenchRecordType, string>> = {
     oa: group.amountCheck?.oaTotal,
     bank: group.amountCheck?.bankTotal,
     invoice: group.amountCheck?.invoiceTotal,
   };
-  const summaryRow = group.summaryRow;
-  const isExactSinglePaneSummary = Boolean(
-    summaryRow
-    && identities.every((identity) => identity.recordType === summaryRow.recordType)
-    && (
-      summaryRow.sourceKind === "bank_flow_rule_batch_summary"
-      || summaryRow.sourceKind === "etc_invoice_summary"
-    ),
-  );
-  const resolved: Record<WorkbenchRecordType, number> = { oa: 0, bank: 0, invoice: 0 };
+  const resolved: WorkbenchSelectionAmountCents = { oa: 0, bank: 0, invoice: 0 };
   for (const paneId of paneIds) {
     if (counts[paneId] === 0) {
       continue;
@@ -256,11 +320,7 @@ function resolveAuthoritativeRelationAmountCents(
       resolved[paneId] = exactAmount;
       continue;
     }
-    if (isExactSinglePaneSummary && summaryRow?.recordType === paneId) {
-      resolved[paneId] = workbenchComparableAmountCents(summaryRow);
-      continue;
-    }
-    return undefined;
+    resolved[paneId] = undefined;
   }
   return resolved;
 }
@@ -277,14 +337,6 @@ function parseExactWorkbenchAmountCents(value: string | undefined) {
   return Number.isFinite(amount) ? Math.round(amount * 100) : undefined;
 }
 
-function sumWorkbenchAmountsByType(rows: WorkbenchRecord[]) {
-  return {
-    oa: sumWorkbenchAmountCents(rows.filter((row) => row.recordType === "oa")),
-    bank: sumWorkbenchAmountCents(rows.filter((row) => row.recordType === "bank")),
-    invoice: sumWorkbenchAmountCents(rows.filter((row) => row.recordType === "invoice")),
-  };
-}
-
 function countWorkbenchIdentitiesByType(identities: WorkbenchRecordIdentity[]) {
   return {
     oa: identities.filter((identity) => identity.recordType === "oa").length,
@@ -295,7 +347,7 @@ function countWorkbenchIdentitiesByType(identities: WorkbenchRecordIdentity[]) {
 
 function summarizeWorkbenchIdentities(
   identities: WorkbenchRecordIdentity[],
-  amountCents: Record<WorkbenchRecordType, number>,
+  amountCents: WorkbenchSelectionAmountCents,
   explicitTotal: number,
 ): WorkbenchSelectionSummary {
   const counts = countWorkbenchIdentitiesByType(identities);
@@ -304,11 +356,15 @@ function summarizeWorkbenchIdentities(
     total: identities.length,
     ...counts,
     amounts: {
-      oa: formatWorkbenchAmountCents(amountCents.oa),
-      bank: formatWorkbenchAmountCents(amountCents.bank),
-      invoice: formatWorkbenchAmountCents(amountCents.invoice),
+      oa: formatWorkbenchSelectionAmountCents(amountCents.oa),
+      bank: formatWorkbenchSelectionAmountCents(amountCents.bank),
+      invoice: formatWorkbenchSelectionAmountCents(amountCents.invoice),
     },
   };
+}
+
+function formatWorkbenchSelectionAmountCents(cents: number | undefined) {
+  return cents === undefined ? "--" : formatWorkbenchAmountCents(cents);
 }
 
 function flattenWorkbenchGroupSelectionRows(group: WorkbenchRelationGroup) {

@@ -1,5 +1,6 @@
 import type {
   WorkbenchActionVariant,
+  WorkbenchAmountDirection,
   WorkbenchRelationGroup,
   WorkbenchDetailField,
   BankAccountMapping,
@@ -1381,6 +1382,51 @@ function resolveBankDirection(row: ApiWorkbenchRow) {
   return "未识别";
 }
 
+const inputInvoiceDirectionAliases = new Set([
+  "input",
+  "input_invoice",
+  "in_invoice",
+  "purchase",
+  "purchase_invoice",
+  "payable",
+]);
+
+const outputInvoiceDirectionAliases = new Set([
+  "output",
+  "output_invoice",
+  "out_invoice",
+  "sales",
+  "sale",
+  "sales_invoice",
+  "receivable",
+]);
+
+function resolveWorkbenchAmountDirection(
+  row: ApiWorkbenchRow,
+): WorkbenchAmountDirection | undefined {
+  if (row.type === "oa") {
+    const applyType = toDisplayValue(row.apply_type, "");
+    return applyType.includes("收") && !applyType.includes("付") ? "receipt" : "payment";
+  }
+  if (row.type === "bank") {
+    const direction = resolveBankDirection(row);
+    return direction === "支出" ? "payment" : direction === "收入" ? "receipt" : undefined;
+  }
+  const invoiceType = toDisplayValue(row.invoice_type, "");
+  const normalizedInvoiceType = invoiceType.toLowerCase().replace(/[- ]/g, "_");
+  if (outputInvoiceDirectionAliases.has(normalizedInvoiceType) || invoiceType.includes("销项")) {
+    return "receipt";
+  }
+  if (
+    inputInvoiceDirectionAliases.has(normalizedInvoiceType)
+    || invoiceType.includes("进项")
+    || row.source_kind === "oa_attachment_invoice"
+  ) {
+    return "payment";
+  }
+  return undefined;
+}
+
 function resolveBankAmount(row: ApiWorkbenchRow) {
   const debitAmount = toBankAmountDisplayValue(row.debit_amount, "");
   if (debitAmount !== "") {
@@ -1411,6 +1457,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     statusCode: rowRelation(row)?.code ?? "pending",
     statusTone: rowRelation(row)?.tone ?? "warn",
     exceptionHandled: Boolean(row.handled_exception),
+    amountDirection: resolveWorkbenchAmountDirection(row),
     amount: rowAmount(row),
     counterparty: rowCounterparty(row),
     tableValues: mapTableValues(row),

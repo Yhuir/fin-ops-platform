@@ -128,6 +128,7 @@ requested tenant/scope
 | --- | --- | --- |
 | combined initial | 前端 | `month,scope_key,summary,statistics,paired,unpaired`；两区使用相同 zone page shape。`statistics` 的发票统计只输出统一发票事实总数、进项、销项、人工导入、OA 解析新增入池；`invoice_inventory` 及普通可见、已提交 ETC 隐藏、额外 ETC、ETC 折叠批次、宽泛 OA 附件来源等旧诊断合同已删除。禁止 `read_model_status/read_model_version/active_generation_id/source_versions/refresh_enqueued/job`。 |
 | zone page | 前端 | `groups,total,row_counts,page_size,has_more,next_cursor`；`row_counts.invoice` 是展示对象数，`row_counts.canonical_invoice` 是按 canonical ID 去重的业务统计数，`row_counts.rows` 继续只服务展示分页。列表只含 compact summary DTO。异常 bucket 请求 additive 返回服务端选中 code 和按唯一关系计算的双视图/七分类 counts。 |
+| selection summary | 前端工具栏 | 数量按去重后的 canonical typed members；临时选择先由 OA/发票确定付款或收款主方向，银行金额按同向金额减反向金额计算。正式关系金额只读取组级 `amount_check.oa_total/bank_total/invoice_total`，包括 `turnover_manual_closure` 的本金侧口径；方向未知、冲突或权威金额缺失时显示 `--`，禁止绝对值合计或本地正式关系重算。 |
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；圆形感叹号是关系异常的唯一入口，原始系统分类 Chip、审阅审计及 `manual_confirmed` 的非空确认备注都只在该 Popover 展示。审阅人格式为 `操作账户（姓名）`，时间格式为 Asia/Shanghai `YYYY-MM-DD HH:mm:ss`，不得显示内部 actor id 或原始 ISO offset。精确归属于组内 OA、但不是正式 relation member 的发票可作为 `source_owned_display` 展示；它不改变正式成员、状态或动作。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton、由精确当前 item owner 证明的 OA+发票 source-owned 展示组，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；正式关系本身不被删除或拆散，展示组也不伪装为正式配对。 |
@@ -159,6 +160,7 @@ requested tenant/scope
 - mount：一个 combined initial、权威 OA sync status、settings；不请求 `/api/workbench/refresh-status`。
 - query/filter/sort 变化：abort 上一请求，只重取受影响 zone 并清空该区 cursor；不重复读取 summary 和另一 zone。
 - pagination/filter options/detail：每个 owner single-flight 或 latest-wins，有界 payload。
+- selection：只消费当前已加载 DTO 与正式关系 `amount_check`，按成员数 `O(n)` 纯计算；点击、取消或整组展开选择都不新增 HTTP、数据库、read model、cache 或 worker I/O。
 - mutation：一个 POST；成功后清 selection/cursor，并执行一次 normal direct GET。异常审阅把列表返回的可选 `detail_key` 原样提交以精确定位组；跨月关系写入全局决定，随后只刷新用户当前可见的一个异常 bucket，并保留当前 bucket/view/code，不自动读取或切换到关系迁入的目标 bucket。异常抽屉展开态默认仍是只读三栏；具备写权限时，“发票附件未解析”开放既有 `enter-invoice`，“发票待归属”开放 `assign-invoice-expense-items`。两者都必须先关闭异常抽屉再打开各自单一 action drawer，禁止双 overlay/focus trap。归属抽屉默认零选择、允许多选同 relation OA 明细；成功后只走上述一个 POST + 一个 canonical GET，不应用本地 operation projection。
 - 保留 OA sync safety poll、全局 App Health 与 background jobs provider；它们不是 Workbench page read model，不能借本迁移删除。
 - OA 父记录的申请人栏始终显示时间 chip：有权威申请时间时只做原字符串格式化（包括移除 PostgreSQL `+08`/标准 offset 后缀，不做浏览器时区换算），缺失时明确显示“时间缺失”；日常报销子付款项不重复显示父 OA 申请人和时间。
