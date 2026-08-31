@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 from io import BytesIO
 import json
 import unittest
@@ -35,7 +36,16 @@ class FakeApplication:
         self.closed = True
 
 
-def invoke(adapter: WsgiHttpAdapter, *, method: str = "GET", path: str = "/health", body: bytes = b"", content_type: str = "application/json", request_id: str = ""):
+def invoke(
+    adapter: WsgiHttpAdapter,
+    *,
+    method: str = "GET",
+    path: str = "/health",
+    body: bytes = b"",
+    content_type: str = "application/json",
+    request_id: str = "",
+    request_headers: dict[str, str] | None = None,
+):
     status: list[str] = []
     headers: dict[str, str] = {}
 
@@ -53,6 +63,8 @@ def invoke(adapter: WsgiHttpAdapter, *, method: str = "GET", path: str = "/healt
     }
     if request_id:
         environ["HTTP_X_REQUEST_ID"] = request_id
+    for key, value in dict(request_headers or {}).items():
+        environ[f"HTTP_{key.upper().replace('-', '_')}"] = value
     response_body = b"".join(adapter(environ, start_response))
     return status[0], headers, response_body
 
@@ -110,6 +122,85 @@ class WsgiHttpAdapterTests(unittest.TestCase):
         self.assertEqual(status, "503 Service Unavailable")
         self.assertEqual(headers["Retry-After"], "1")
         self.assertEqual(json.loads(body)["error"], "database_backpressure")
+
+    def test_compresses_large_workbench_json_when_the_client_accepts_gzip(self) -> None:
+        raw_body = json.dumps({"groups": ["流水" * 1000]}, ensure_ascii=False)
+        application = FakeApplication(
+            Response(
+                200,
+                raw_body,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+            )
+        )
+
+        status, headers, body = invoke(
+            WsgiHttpAdapter(application),
+            path="/api/workbench",
+            request_headers={"Accept-Encoding": "br, gzip; q=1.0"},
+        )
+
+        self.assertEqual(status, "200 OK")
+        self.assertEqual(headers["Content-Encoding"], "gzip")
+        self.assertEqual(headers["Vary"], "Accept-Encoding")
+        self.assertEqual(headers["Content-Length"], str(len(body)))
+        self.assertEqual(gzip.decompress(body).decode("utf-8"), raw_body)
+
+    def test_does_not_compress_workbench_json_when_gzip_is_disabled(self) -> None:
+        raw_body = json.dumps({"groups": ["流水" * 1000]}, ensure_ascii=False)
+        application = FakeApplication(
+            Response(
+                200,
+                raw_body,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+            )
+        )
+
+        _status, headers, body = invoke(
+            WsgiHttpAdapter(application),
+            path="/api/workbench/groups",
+            request_headers={"Accept-Encoding": "gzip; q=0"},
+        )
+
+        self.assertNotIn("Content-Encoding", headers)
+        self.assertEqual(body.decode("utf-8"), raw_body)
+
+    def test_does_not_compress_other_page_json(self) -> None:
+        raw_body = json.dumps({"rows": ["流水" * 1000]}, ensure_ascii=False)
+        application = FakeApplication(
+            Response(
+                200,
+                raw_body,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+            )
+        )
+
+        _status, headers, body = invoke(
+            WsgiHttpAdapter(application),
+            path="/api/bank-details",
+            request_headers={"Accept-Encoding": "gzip"},
+        )
+
+        self.assertNotIn("Content-Encoding", headers)
+        self.assertEqual(body.decode("utf-8"), raw_body)
+
+    def test_does_not_compress_a_route_that_only_shares_the_workbench_prefix(self) -> None:
+        raw_body = json.dumps({"rows": ["流水" * 1000]}, ensure_ascii=False)
+        application = FakeApplication(
+            Response(
+                200,
+                raw_body,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+            )
+        )
+
+        _status, headers, body = invoke(
+            WsgiHttpAdapter(application),
+            path="/api/workbench-audit",
+            request_headers={"Accept-Encoding": "gzip"},
+        )
+
+        self.assertNotIn("Content-Encoding", headers)
+        self.assertEqual(body.decode("utf-8"), raw_body)
 
     def test_close_releases_application_resources(self) -> None:
         application = FakeApplication()

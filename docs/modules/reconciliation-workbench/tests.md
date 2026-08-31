@@ -685,3 +685,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 - `tests/test_workbench_page_query_repository.py::test_canonical_spine_expands_bank_account_mappings_once` 保护 canonical spine 只在独立 materialized CTE 中展开设置数组，银行候选不得恢复逐流水 lateral JSON 解析。
 - `tests/test_workbench_page_query_repository.py::test_source_search_reuses_preexpanded_bank_account_mappings` 保护搜索复用同一映射，禁止恢复 `app_settings` 相关子查询；disposable PostgreSQL 全量 integration 继续保护查询可解析、银行名称和所有页面合同不变。
+
+## 2026-09-01 - canonical SQL 集合化与 gzip 回归
+
+- `tests/test_workbench_page_query_repository.py` 保护 OA 外部身份使用 `jsonb_to_record` 按对象一次解码、ETC 两类强身份使用独立等值 anti-join、发票费用项候选与筛选组 canonical 发票计数均为集合计算，并锁住 `all` scope 删除 5 个冗余 `needed_keys` 回连、月度 scope 继续保留原范围。
+- `tests/test_http_adapter.py` 保护大 Workbench GET JSON 在客户端支持时压缩且解码结果完全一致，`gzip;q=0` 不压缩，其他页面 JSON 不受影响。
+- `tests/test_workbench_query_postgres_integration.py` 在 disposable PostgreSQL 全量运行，保护 initial/groups/detail、搜索、筛选、ETC 折叠和异常指纹的真实 SQL 解析与业务结果。发布后必须再运行 authenticated 生产四并发 HTTP 样本、gzip 响应体校验和读链闭环；没有 test-owned 可回滚数据时不对生产财务关系做破坏性写入压测。

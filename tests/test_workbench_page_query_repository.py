@@ -11,7 +11,10 @@ from fin_ops_platform.services.bank_details_canonical_query import (
 from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
     _ANOMALY_STATE_CTES,
     _SCOPED_CANONICAL_GROUPS_CTE,
+    _VISIBLE_INVOICE_SQL,
     _anomaly_state_ctes,
+    _canonical_invoice_count_for_keyed_groups_sql,
+    _scoped_canonical_groups_cte,
     PostgresWorkbenchPageQueryRepository,
     WORKBENCH_GROUP_PAGE_SIZE,
 )
@@ -780,11 +783,58 @@ def test_set_based_anomaly_query_bridges_historical_oa_attachment_parent_aliases
     anomaly_sql = " ".join(_ANOMALY_STATE_CTES.split())
 
     assert "source_identity_aliases" in anomaly_sql
-    assert "'Mongo文档ID'" in canonical_sql
+    assert '"Mongo文档ID" text' in canonical_sql
+    assert "jsonb_to_record" in canonical_sql
     assert "'oa-exp-' || value" in anomaly_sql
     assert "join app.oa_application_items item" in canonical_sql
     assert "join app.oa_attachments attachment" in canonical_sql
     assert "join app.oa_source_aliases alias_row" in canonical_sql
+
+
+def test_canonical_spine_decodes_external_oa_alias_objects_once() -> None:
+    sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split())
+
+    assert sql.count("jsonb_to_record(") == 8
+    assert "normalized_payload->>'Mongo文档ID'" not in sql
+    assert "payload->>'Mongo文档ID'" not in sql
+
+
+def test_visible_invoice_checks_each_etc_identity_with_an_equality_anti_join() -> None:
+    sql = " ".join(_VISIBLE_INVOICE_SQL.split()).lower()
+
+    assert sql.count("from app.etc_invoices etc_invoice") == 2
+    assert "etc_invoice.invoice_no = coalesce(" in sql
+    assert "etc_invoice.invoice_code = invoice.invoice_code" in sql
+    assert "etc_invoice.invoice_no = invoice.invoice_no" in sql
+    first_identity, second_identity = sql.split(
+        "from app.etc_invoices etc_invoice", 2
+    )[1:]
+    first_identity = first_identity.split(") and not exists (", 1)[0]
+    assert "invoice.invoice_code" not in first_identity
+    assert "coalesce(invoice.digital_invoice_no" not in second_identity
+
+
+def test_anomaly_query_resolves_unique_invoice_items_with_one_set_join() -> None:
+    sql = " ".join(_ANOMALY_STATE_CTES.split()).lower()
+    normalized_sql = sql.split(
+        "normalized_invoice_anomaly_facts as materialized (", 1
+    )[1].split("normalized_invoice_item_links as materialized (", 1)[0]
+
+    assert "left join invoice_item_candidates candidate" in normalized_sql
+    assert "candidate.candidate_count = 1" in normalized_sql
+    assert "select candidate.item_id" not in normalized_sql
+
+
+def test_filtered_canonical_invoice_count_expands_keyed_groups_once() -> None:
+    count_sql = " ".join(
+        _canonical_invoice_count_for_keyed_groups_sql("keyed_groups").split()
+    ).lower()
+
+    assert count_sql.count("from keyed_groups selected") == 2
+    assert "left join lateral" not in count_sql
+    assert "count(distinct expanded.canonical_invoice_row_id)" in count_sql
+    with pytest.raises(ValueError, match="Unsupported Workbench keyed-group CTE"):
+        _canonical_invoice_count_for_keyed_groups_sql("untrusted_identifier")
 
 
 def test_canonical_spine_rolls_completed_oa_source_aliases_set_based_once() -> None:
@@ -824,6 +874,18 @@ def test_canonical_spine_expands_bank_account_mappings_once() -> None:
     assert "cross join requested_settings settings" not in bank_sql
     assert "left join lateral" not in bank_sql
     assert "jsonb_array_elements" not in bank_sql
+
+
+def test_all_scope_does_not_join_source_rows_back_through_needed_keys() -> None:
+    all_scope_sql = " ".join(_scoped_canonical_groups_cte("all").split()).lower()
+    month_scope_sql = " ".join(
+        _scoped_canonical_groups_cte("2026-08").split()
+    ).lower()
+
+    assert all_scope_sql.count("join needed_keys needed") == 0
+    assert month_scope_sql.count("join needed_keys needed") == 5
+    assert "needed_keys as materialized" in all_scope_sql
+    assert "needed_keys as materialized" in month_scope_sql
 
 
 def test_canonical_spine_defers_supporting_documents_to_page_hydration() -> None:

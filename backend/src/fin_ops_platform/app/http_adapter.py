@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 
 LOGGER = logging.getLogger("fin_ops_platform.http")
 BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+WORKBENCH_GZIP_MIN_BYTES = 1024
 
 
 @dataclass(frozen=True)
@@ -60,7 +62,29 @@ class WsgiHttpAdapter:
             status_code = int(response.status_code)
             response.headers["X-Request-ID"] = request_id
             encoded = response.body.encode("utf-8") if isinstance(response.body, str) else bytes(response.body)
-            response.headers.setdefault("Content-Length", str(len(encoded)))
+            if self._should_compress_workbench_json(
+                method=method,
+                path=path,
+                request_headers=self._headers(environ),
+                response=response,
+                encoded=encoded,
+            ):
+                encoded = gzip.compress(encoded, compresslevel=1)
+                response.headers["Content-Encoding"] = "gzip"
+                vary = str(response.headers.get("Vary") or "").strip()
+                response.headers["Vary"] = (
+                    "Accept-Encoding"
+                    if not vary
+                    else ", ".join(
+                        dict.fromkeys(
+                            [
+                                *[item.strip() for item in vary.split(",") if item.strip()],
+                                "Accept-Encoding",
+                            ]
+                        )
+                    )
+                )
+            response.headers["Content-Length"] = str(len(encoded))
             start_response(
                 f"{status_code} {HTTPStatus(status_code).phrase}",
                 [(str(key), str(value)) for key, value in response.headers.items()],
@@ -208,6 +232,42 @@ class WsgiHttpAdapter:
     def _request_id(environ: dict[str, Any]) -> str:
         _ = environ
         return uuid4().hex
+
+    @staticmethod
+    def _should_compress_workbench_json(
+        *,
+        method: str,
+        path: str,
+        request_headers: dict[str, str],
+        response: Response,
+        encoded: bytes,
+    ) -> bool:
+        route_path = path.split("?", 1)[0]
+        if method != "GET" or (
+            route_path != "/api/workbench"
+            and not route_path.startswith("/api/workbench/")
+        ):
+            return False
+        if len(encoded) < WORKBENCH_GZIP_MIN_BYTES:
+            return False
+        if "json" not in str(response.headers.get("Content-Type") or "").lower():
+            return False
+        if str(response.headers.get("Content-Encoding") or "").strip():
+            return False
+        accepted = str(request_headers.get("Accept-Encoding") or "").lower()
+        for token in accepted.split(","):
+            parts = [part.strip() for part in token.split(";") if part.strip()]
+            if not parts or parts[0] != "gzip":
+                continue
+            quality = 1.0
+            for parameter in parts[1:]:
+                if parameter.startswith("q="):
+                    try:
+                        quality = float(parameter.removeprefix("q="))
+                    except ValueError:
+                        return False
+            return quality > 0
+        return False
 
     @staticmethod
     def _json_error(

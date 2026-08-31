@@ -102,14 +102,37 @@ def _literal_ilike_pattern(value: str) -> str:
     return f"%{escaped}%"
 
 
-def _anomaly_oa_external_alias_values_sql(source_payload: str) -> str:
-    return ",\n                ".join(
-        "nullif(btrim("
-        f"{source_payload}{path}->>'{field_name}'"
-        "), '')"
-        for path in ("", "->'detail_fields'", "->'summary_fields'", "->'metadata'")
+def _anomaly_oa_external_aliases_sql(source_payload: str) -> str:
+    """Extract OA external identities without repeatedly decoding the payload."""
+
+    record_columns = ", ".join(
+        f'"{field_name.replace(chr(34), chr(34) * 2)}" text'
         for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES
     )
+    records: list[str] = []
+    values: list[str] = []
+    for index, path in enumerate(
+        ("", "->'detail_fields'", "->'summary_fields'", "->'metadata'")
+    ):
+        alias = f"identity_source_{index}"
+        payload = f"{source_payload}{path}"
+        join_prefix = "" if index == 0 else "cross join lateral "
+        records.append(
+            f"{join_prefix}jsonb_to_record("
+            f"case when jsonb_typeof({payload}) = 'object' "
+            f"then {payload} else '{{}}'::jsonb end"
+            f") as {alias}({record_columns})"
+        )
+        values.extend(
+            f'({alias}."{field_name.replace(chr(34), chr(34) * 2)}")'
+            for field_name in OA_EXTERNAL_SOURCE_ID_FIELD_NAMES
+        )
+    return f"""coalesce((
+        select array_agg(identity.value)
+        from {' '.join(records)}
+        cross join lateral (values {', '.join(values)}) identity(value)
+        where nullif(btrim(identity.value), '') is not null
+    ), array[]::text[])"""
 
 
 def _canonical_oa_item_id_sql(item_value: str) -> str:
@@ -166,18 +189,25 @@ and not exists (
     from app.etc_invoices etc_invoice
     left join app.etc_business_batches batch
       on batch.business_batch_id = etc_invoice.business_batch_id
-    where (
-            (
-                nullif(coalesce(invoice.digital_invoice_no, invoice.invoice_no), '') is not null
-                and etc_invoice.invoice_no = coalesce(invoice.digital_invoice_no, invoice.invoice_no)
-            )
+    where nullif(coalesce(invoice.digital_invoice_no, invoice.invoice_no), '') is not null
+      and etc_invoice.invoice_no = coalesce(invoice.digital_invoice_no, invoice.invoice_no)
+      and (
+            batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
             or (
-                nullif(invoice.invoice_code, '') is not null
-                and nullif(invoice.invoice_no, '') is not null
-                and etc_invoice.invoice_code = invoice.invoice_code
-                and etc_invoice.invoice_no = invoice.invoice_no
+                etc_invoice.status = 'submitted'
+                and coalesce(batch.status, '') <> 'deleted'
             )
           )
+)
+and not exists (
+    select 1
+    from app.etc_invoices etc_invoice
+    left join app.etc_business_batches batch
+      on batch.business_batch_id = etc_invoice.business_batch_id
+    where nullif(invoice.invoice_code, '') is not null
+      and nullif(invoice.invoice_no, '') is not null
+      and etc_invoice.invoice_code = invoice.invoice_code
+      and etc_invoice.invoice_no = invoice.invoice_no
       and (
             batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
             or (
@@ -978,9 +1008,8 @@ oa_candidate_facts as materialized (
             oa.normalized_payload->>'source_oa_row_id',
             oa.normalized_payload->>'object_identity_key'
         ]::text[], null) as oa_exact_identity_aliases,
-        array_remove(array[
-            {_anomaly_oa_external_alias_values_sql('oa.normalized_payload')}
-        ]::text[], null) as oa_external_identity_aliases,
+        {_anomaly_oa_external_aliases_sql('oa.normalized_payload')}
+            as oa_external_identity_aliases,
         coalesce(
             oa.normalized_payload->>'apply_type',
             oa.normalized_payload->>'application_type',
@@ -1046,9 +1075,7 @@ oa_candidate_facts as materialized (
             admission.source_payload->>'source_oa_row_id',
             admission.source_payload->>'object_identity_key'
         ]::text[], null),
-        array_remove(array[
-            {_anomaly_oa_external_alias_values_sql('admission.source_payload')}
-        ]::text[], null),
+        {_anomaly_oa_external_aliases_sql('admission.source_payload')},
         coalesce(
             admission.source_payload->>'apply_type',
             admission.source_payload->>'application_type',
@@ -1580,6 +1607,38 @@ canonical_group_members as materialized (
 """
 
 
+def _scoped_canonical_groups_cte(scope_key: str) -> str:
+    """Return the canonical spine without redundant key joins for all scope."""
+
+    if scope_key != "all":
+        return _SCOPED_CANONICAL_GROUPS_CTE
+    sql = _SCOPED_CANONICAL_GROUPS_CTE
+    redundant_joins = (
+        """    join needed_keys needed
+      on needed.row_type = 'oa'
+     and needed.row_id = oa.row_id
+""",
+        """    join needed_keys needed on needed.row_type = 'oa' and needed.row_id = admission.oa_id
+""",
+        """    join needed_keys needed
+      on needed.row_type = 'bank'
+     and needed.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
+""",
+        """    join needed_keys needed
+      on needed.row_type = 'invoice'
+     and needed.row_id = invoice.row_id
+""",
+        """    join needed_keys needed
+      on needed.row_type = 'invoice' and needed.row_id = summary.row_id
+""",
+    )
+    for join_sql in redundant_joins:
+        if sql.count(join_sql) != 1:
+            raise RuntimeError("Workbench all-scope key join contract changed.")
+        sql = sql.replace(join_sql, "", 1)
+    return sql
+
+
 # These CTEs consume the already-built canonical group spine and keep anomaly
 # evaluation in PostgreSQL.  They emit one compact state row per anomalous
 # relation; no all-scope member JSON is copied into the application process.
@@ -1875,19 +1934,18 @@ normalized_invoice_anomaly_facts as materialized (
     select
         invoice.*,
         coalesce(
-            (
-                select candidate.item_id
-                from invoice_item_candidates candidate
-                where candidate.internal_key = invoice.internal_key
-                  and candidate.invoice_row_id = invoice.invoice_row_id
-                  and candidate.source_expense_item_id is not distinct from invoice.source_expense_item_id
-                  and candidate.source_expense_row_index is not distinct from invoice.source_expense_row_index
-                  and candidate.candidate_count = 1
-                limit 1
-            ),
+            candidate.item_id,
             invoice.source_expense_item_id
         ) as canonical_expense_item_id
     from invoice_anomaly_facts invoice
+    left join invoice_item_candidates candidate
+      on candidate.internal_key = invoice.internal_key
+     and candidate.invoice_row_id = invoice.invoice_row_id
+     and candidate.source_expense_item_id
+            is not distinct from invoice.source_expense_item_id
+     and candidate.source_expense_row_index
+            is not distinct from invoice.source_expense_row_index
+     and candidate.candidate_count = 1
 ),
 normalized_invoice_item_links as materialized (
     select distinct
@@ -2344,26 +2402,38 @@ scoped_canonical_invoice_inventory as materialized (
 """
 
 
-_CANONICAL_INVOICE_MEMBERS_FOR_KEYED_GROUPS_JOIN = """
-left join lateral (
-    select member.row_id as canonical_invoice_row_id
-    from canonical_group_members member
-    where member.internal_key = groups.internal_key
-      and member.row_type = 'invoice'
-      and not exists (
-          select 1
-          from etc_summary_keys summary
-          where summary.row_id = member.row_id
-      )
-    union
-    select summary_member.canonical_invoice_row_id
-    from canonical_group_members member
-    join etc_summary_canonical_invoice_members summary_member
-      on summary_member.summary_row_id = member.row_id
-    where member.internal_key = groups.internal_key
-      and member.row_type = 'invoice'
-) canonical_invoice on true
-"""
+def _canonical_invoice_count_for_keyed_groups_sql(keyed_groups_name: str) -> str:
+    """Count canonical invoices once for a known filtered-group CTE."""
+
+    if keyed_groups_name not in {
+        "keyed_groups",
+        "paired_keyed_groups",
+        "unpaired_keyed_groups",
+    }:
+        raise ValueError("Unsupported Workbench keyed-group CTE.")
+    return f"""
+        select count(distinct expanded.canonical_invoice_row_id)::bigint
+        from (
+            select member.row_id as canonical_invoice_row_id
+            from {keyed_groups_name} selected
+            join canonical_group_members member
+              on member.internal_key = selected.internal_key
+             and member.row_type = 'invoice'
+            where not exists (
+                select 1
+                from etc_summary_keys summary
+                where summary.row_id = member.row_id
+            )
+            union all
+            select summary_member.canonical_invoice_row_id
+            from {keyed_groups_name} selected
+            join canonical_group_members member
+              on member.internal_key = selected.internal_key
+             and member.row_type = 'invoice'
+            join etc_summary_canonical_invoice_members summary_member
+              on summary_member.summary_row_id = member.row_id
+        ) expanded
+    """
 
 
 class PostgresWorkbenchPageQueryRepository:
@@ -2465,7 +2535,7 @@ class PostgresWorkbenchPageQueryRepository:
             raise ValueError("Initial Workbench query does not accept exception_bucket.")
         rows = self._connection.fetch_all(
             f"""
-            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_scoped_canonical_groups_cte(normalized_scope)},
             {_ANOMALY_STATE_CTES},
             {_EFFECTIVE_GROUPS_CTES},
             {_CANONICAL_INVOICE_GROUP_MEMBER_CTES},
@@ -2872,6 +2942,11 @@ class PostgresWorkbenchPageQueryRepository:
                 from overall_member_summary
             """
         else:
+            canonical_invoice_count_sql = (
+                _canonical_invoice_count_for_keyed_groups_sql(
+                    f"{prefix}_keyed_groups"
+                )
+            )
             exact_totals_sql = f"""
                 select count(*)::bigint as total_count
                 from {prefix}_keyed_groups
@@ -2884,12 +2959,10 @@ class PostgresWorkbenchPageQueryRepository:
                         filter (where member.row_type = 'bank')::bigint as bank_count,
                     count(distinct (member.row_type, member.row_id))
                         filter (where member.row_type = 'invoice')::bigint as invoice_count,
-                    count(distinct canonical_invoice.canonical_invoice_row_id)::bigint
-                        as canonical_invoice_count
+                    ({canonical_invoice_count_sql})::bigint as canonical_invoice_count
                 from {prefix}_keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
-                {_CANONICAL_INVOICE_MEMBERS_FOR_KEYED_GROUPS_JOIN}
             """
         filtered_groups_select_sql = (
             PostgresWorkbenchPageQueryRepository._filtered_groups_select_sql(
@@ -3153,13 +3226,9 @@ class PostgresWorkbenchPageQueryRepository:
                 select inventory.{normalized_zone}_canonical_invoice_count
                 from scoped_canonical_invoice_inventory inventory
             """
-            canonical_invoice_members_join_sql = ""
         else:
             canonical_invoice_count_sql = (
-                "count(distinct canonical_invoice.canonical_invoice_row_id)"
-            )
-            canonical_invoice_members_join_sql = (
-                _CANONICAL_INVOICE_MEMBERS_FOR_KEYED_GROUPS_JOIN
+                _canonical_invoice_count_for_keyed_groups_sql("keyed_groups")
             )
         filtered_group_cte_name = "filtered_groups"
         exception_query_cte_sql = ""
@@ -3244,7 +3313,7 @@ class PostgresWorkbenchPageQueryRepository:
         )
         rows = self._connection.fetch_all(
             f"""
-            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_scoped_canonical_groups_cte(normalized_scope)},
             {search_ctes}
             {_group_page_anomaly_state_ctes(exception_bucket=normalized_exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
@@ -3284,7 +3353,6 @@ class PostgresWorkbenchPageQueryRepository:
                 from keyed_groups groups
                 left join canonical_group_members member
                   on member.internal_key = groups.internal_key
-                {canonical_invoice_members_join_sql}
             )
             select page_groups.*,
                    exact_totals.total_count,
@@ -4384,7 +4452,7 @@ class PostgresWorkbenchPageQueryRepository:
             ]
         rows = self._connection.fetch_all(
             f"""
-            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_scoped_canonical_groups_cte(normalized_scope)},
             {search_ctes}
             {_filter_option_anomaly_state_ctes(exception_bucket=normalized_exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
@@ -4524,7 +4592,7 @@ class PostgresWorkbenchPageQueryRepository:
             member_order_sql = "order by member.row_id"
         rows = self._connection.fetch_all(
             f"""
-            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_scoped_canonical_groups_cte(scope_key)},
             {search_ctes}
             {_filter_option_anomaly_state_ctes(exception_bucket=exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},
@@ -5243,7 +5311,7 @@ class PostgresWorkbenchPageQueryRepository:
         )
         candidate_rows = self._connection.fetch_all(
             f"""
-            with recursive {_SCOPED_CANONICAL_GROUPS_CTE},
+            with recursive {_scoped_canonical_groups_cte(scope_key)},
             {search_ctes}
             {_filter_option_anomaly_state_ctes(exception_bucket=exception_bucket)},
             {_EFFECTIVE_GROUPS_CTES},

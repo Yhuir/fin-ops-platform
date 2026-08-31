@@ -1928,3 +1928,11 @@
 - 收口为同一 canonical SQL 内的一个 materialized 窄映射：设置数组按原顺序展开一次，以账号尾号保留首个配置；银行候选和银行搜索共同左连接该映射。删除逐流水 lateral JSON 解析和搜索专用设置子查询，不新增全局 helper、表、索引、cache、Redis、read model、worker 或兼容分支。
 - 生产只读同一 repeatable-read 快照对 paired、unpaired、金额搜索、两类异常及筛选候选逐字段校验，旧/新 payload 全部一致；paired 主 SQL 的 `EXPLAIN` 执行约从 `745ms` 降至 `443ms`，银行分支约从 `316ms` 降至 `25ms`。最终 HTTP 合同仍以发布后的真实页面参数和四并发样本判定。
 - 本次仍无 API DTO、模块 I/O、业务写链、数据库 migration、备份或生产数据修改，boundary 文档不适用。
+
+## 2026-09-01 - canonical 集合化与 Workbench 传输收窄
+
+- 第二轮发布后的生产四并发长样本显示，连接获取和详情接口不是瓶颈；初始页、区域列表、金额搜索与异常列表仍由 canonical SQL/JSON 计算主导，且初始页未压缩 JSON 约 `195KB`。
+- SQL 只做等价收窄：ETC 发票可见性的两类强身份分拆为可使用等值索引的 anti-join；OA 外部身份每个 JSON 对象只解析一次；发票费用项唯一候选与筛选组 canonical 发票计数改为集合连接；`all` scope 不再把已是全量的源行重复回连 `needed_keys`，月度 scope 仍保留原精确范围。被替换的相关子查询和重复 JSON 取值旧路径已删除。
+- HTTP 层仅对客户端明确声明 `Accept-Encoding: gzip`、大于 `1KB` 的 Workbench GET JSON 使用 level 1 gzip；本地候选版实测完整解码结果逐字节一致，初始页网络传输约由 `194849` 降至 `29130` 字节。其他页面、Workbench 写接口、小响应和不支持 gzip 的客户端均不受影响。
+- 同一生产数据库 `repeatable read / read only` 快照中，旧/新候选对初始页、paired、unpaired、金额搜索、金额异常、资料异常、申请人筛选和筛选+搜索共 8 条路径的完整 payload 全部一致。候选版的本机应用+跨 SSH 生产数据库压测不作发布结论，最终 p95/p99 以发布后生产同机数据库的 authenticated HTTP 样本为准。
+- 不接入 Redis：该页面仍遵守 canonical direct-read 事实源合同，而 OA、流水、发票、关联和异常审阅写入都会改变结果；新增 Redis 会引入失效、版本和陈旧读责任，不能修复当前 SQL 或传输瓶颈。本次不新增表、索引、migration、read model、cache、worker、队列、依赖、fallback 或数据库备份。API response shape、模块职责和其他页面 I/O 不变，boundary 文档不适用。
