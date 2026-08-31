@@ -129,6 +129,10 @@ Migration `0162_cost_statistics_unit_manual_allocations.sql` 同样是 forward-o
 依赖已退役列，不能在 0162 schema 上安全运行；若 0162 激活后的验证失败，保持 maintenance 并向前修复，
 不得自动切回旧 release。
 
+Migration `0165_remove_cost_statistics_time_tag_selection.sql` 是 forward-only：它从 Settings canonical/formal-raw
+payload 删除已退役的成本时间/标签设置。旧 release 会重新补入该设置并要求 Audit 中存在，迁移后不得回滚到
+旧 binary；候选失败时保持 maintenance 并向前修复。
+
 ## Release checkpoint
 
 每个 checkpoint 必须同时证明：
