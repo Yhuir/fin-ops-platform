@@ -104,12 +104,6 @@ DEFAULT_BATCH_ACCOUNTING_TAG_SELECTION = {
 }
 COST_STATISTICS_UNCATEGORIZED_TAG_CODE = "__uncategorized__"
 COST_STATISTICS_RULES_SCHEMA_VERSION = 1
-DEFAULT_COST_STATISTICS_TIME_TAG_SELECTION = {
-    "version": 1,
-    "schema_version": COST_STATISTICS_RULES_SCHEMA_VERSION,
-    "mode": "all",
-    "selected_tag_codes": [],
-}
 DEFAULT_COST_STATISTICS_NO_OA_PROJECTS = {
     "version": 1,
     "schema_version": COST_STATISTICS_RULES_SCHEMA_VERSION,
@@ -248,10 +242,6 @@ class AppSettingsService:
             ),
             "batch_accounting_tag_selection": self._public_batch_accounting_tag_selection(
                 self._snapshot["batch_accounting_tag_selection"],
-                bank_transaction_tags=self._snapshot["bank_transaction_tags"],
-            ),
-            "cost_statistics_time_tag_selection": self._public_cost_statistics_time_tag_selection(
-                self._snapshot["cost_statistics_time_tag_selection"],
                 bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             ),
             "cost_statistics_no_oa_projects": self._public_cost_statistics_no_oa_projects(
@@ -507,7 +497,6 @@ class AppSettingsService:
                 "bank_flow_rule_batch_tag_rules": self._snapshot.get("bank_flow_rule_batch_tag_rules", {}),
                 "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
                 "batch_accounting_tag_selection": self._snapshot.get("batch_accounting_tag_selection", {}),
-                "cost_statistics_time_tag_selection": self._snapshot.get("cost_statistics_time_tag_selection", {}),
                 "cost_statistics_no_oa_projects": self._snapshot.get("cost_statistics_no_oa_projects", {}),
                 INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self._snapshot.get(
                     INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
@@ -1377,36 +1366,6 @@ class AppSettingsService:
             if str(code).strip()
         ]
 
-    def get_cost_statistics_time_tag_selection_payload(
-        self,
-        *,
-        can_save: bool = True,
-    ) -> dict[str, Any]:
-        self._refresh_snapshot_from_state_store()
-        return self.cost_statistics_time_tag_selection_payload_from_settings(
-            self._snapshot,
-            can_save=can_save,
-        )
-
-    @staticmethod
-    def cost_statistics_time_tag_selection_payload_from_settings(
-        settings_payload: dict[str, Any],
-        *,
-        can_save: bool = False,
-    ) -> dict[str, Any]:
-        payload = AppSettingsService._public_cost_statistics_time_tag_selection(
-            settings_payload.get("cost_statistics_time_tag_selection")
-            if isinstance(settings_payload.get("cost_statistics_time_tag_selection"), dict)
-            else {},
-            bank_transaction_tags=(
-                settings_payload.get("bank_transaction_tags")
-                if isinstance(settings_payload.get("bank_transaction_tags"), dict)
-                else {}
-            ),
-        )
-        payload["can_save"] = bool(can_save)
-        return payload
-
     def get_cost_statistics_no_oa_projects_payload(
         self,
         *,
@@ -1436,50 +1395,6 @@ class AppSettingsService:
         )
         payload["can_save"] = bool(can_save)
         return payload
-
-    def update_cost_statistics_time_tag_selection(
-        self,
-        payload: dict[str, Any],
-        *,
-        actor_id: str,
-        allowed_tag_codes: set[str],
-    ) -> dict[str, Any]:
-        self._refresh_snapshot_from_state_store()
-        current = self._snapshot["cost_statistics_time_tag_selection"]
-        requested_version = BankTransactionCategoryService._normalize_version(
-            payload.get("expected_version", payload.get("version", 0))
-        )
-        if requested_version != int(current.get("version") or 1):
-            raise AppSettingsValidationError(
-                "cost_statistics_time_tag_selection_version_conflict",
-                "Cost statistics time/tag selection version conflict.",
-            )
-        next_selection = self._normalize_cost_statistics_time_tag_selection(
-            {
-                "version": int(current.get("version") or 1) + 1,
-                "schema_version": COST_STATISTICS_RULES_SCHEMA_VERSION,
-                "mode": payload.get("mode"),
-                "selected_tag_codes": payload.get("selected_tag_codes"),
-            },
-            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
-            validate=True,
-            allowed_tag_codes=allowed_tag_codes,
-        )
-        next_snapshot = {
-            **self._snapshot,
-            "cost_statistics_time_tag_selection": next_selection,
-        }
-        if self._state_store is not None:
-            self._state_store.save_app_settings(next_snapshot)
-        self._snapshot = next_snapshot
-        self._record_cost_statistics_rules_audit(
-            actor_id=actor_id,
-            action="cost_statistics_time_tag_rules_updated",
-            entity_id="cost_statistics_time_tag_selection",
-            before=current,
-            after=next_selection,
-        )
-        return self.get_cost_statistics_time_tag_selection_payload(can_save=True)
 
     def update_cost_statistics_no_oa_projects(
         self,
@@ -1662,7 +1577,6 @@ class AppSettingsService:
             "bank_flow_rule_batch_tag_rules",
             "turnover_ledger_tag_selection",
             "batch_accounting_tag_selection",
-            "cost_statistics_time_tag_selection",
             "cost_statistics_no_oa_projects",
         )
         try:
@@ -2063,40 +1977,7 @@ class AppSettingsService:
             validate=False,
             default_all_active="batch_accounting_tag_selection" not in raw_payload,
         )
-        cost_statistics_time_tag_selection = (
-            AppSettingsService._normalize_cost_statistics_time_tag_selection(
-                raw_payload.get(
-                    "cost_statistics_time_tag_selection",
-                    DEFAULT_COST_STATISTICS_TIME_TAG_SELECTION,
-                ),
-                bank_transaction_tags=bank_transaction_tags,
-                validate=False,
-            )
-        )
-        legacy_cost_selection = raw_payload.get("cost_statistics_tag_selection")
         no_oa_source = raw_payload.get("cost_statistics_no_oa_projects")
-        if not isinstance(no_oa_source, dict) and isinstance(legacy_cost_selection, dict):
-            legacy_name = str(legacy_cost_selection.get("display_name") or "").strip()
-            legacy_codes = [
-                str(code).strip()
-                for code in list(legacy_cost_selection.get("selected_tag_codes") or [])
-                if str(code).strip()
-            ]
-            no_oa_source = {
-                "version": int(legacy_cost_selection.get("version") or 1),
-                "schema_version": COST_STATISTICS_RULES_SCHEMA_VERSION,
-                "projects": (
-                    [
-                        {
-                            "id": "legacy",
-                            "display_name": legacy_name,
-                            "tag_codes": legacy_codes,
-                        }
-                    ]
-                    if legacy_name and legacy_codes
-                    else []
-                ),
-            }
         cost_statistics_no_oa_projects = (
             AppSettingsService._normalize_cost_statistics_no_oa_projects(
                 no_oa_source or DEFAULT_COST_STATISTICS_NO_OA_PROJECTS,
@@ -2132,7 +2013,6 @@ class AppSettingsService:
             "bank_flow_rule_batch_tag_rules": bank_flow_rule_batch_tag_rules,
             "turnover_ledger_tag_selection": turnover_ledger_tag_selection,
             "batch_accounting_tag_selection": batch_accounting_tag_selection,
-            "cost_statistics_time_tag_selection": cost_statistics_time_tag_selection,
             "cost_statistics_no_oa_projects": cost_statistics_no_oa_projects,
             INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: input_invoice_usage_payment_rules,
             **oa_draft_prefill_profiles,
@@ -2555,99 +2435,6 @@ class AppSettingsService:
             }
         )
         return active_tags
-
-    @staticmethod
-    def _normalize_cost_statistics_time_tag_selection(
-        value: Any,
-        *,
-        bank_transaction_tags: dict[str, Any],
-        validate: bool,
-        allowed_tag_codes: set[str] | None = None,
-    ) -> dict[str, Any]:
-        raw_payload = value if isinstance(value, dict) else {}
-        version = BankTransactionCategoryService._normalize_version(
-            raw_payload.get("version", DEFAULT_COST_STATISTICS_TIME_TAG_SELECTION["version"])
-        )
-        if version <= 0:
-            version = int(DEFAULT_COST_STATISTICS_TIME_TAG_SELECTION["version"])
-        mode = str(raw_payload.get("mode") or "all").strip().lower()
-        if mode not in {"all", "custom"}:
-            if validate:
-                raise AppSettingsValidationError(
-                    "invalid_cost_statistics_time_tag_mode",
-                    "Cost statistics time/tag mode must be all or custom.",
-                )
-            mode = "all"
-        known_tags = AppSettingsService._cost_statistics_tag_definitions(
-            bank_transaction_tags
-        )
-        active_codes = (
-            {
-                str(code).strip()
-                for code in allowed_tag_codes
-                if str(code).strip()
-            }
-            if allowed_tag_codes is not None
-            else {
-                str(tag.get("code") or "").strip()
-                for tag in known_tags
-                if str(tag.get("code") or "").strip()
-            }
-        )
-        selected_tag_codes: list[str] = []
-        seen: set[str] = set()
-        for item in list(raw_payload.get("selected_tag_codes") or []):
-            tag_code = str(item or "").strip()
-            if not tag_code or tag_code in seen:
-                continue
-            if tag_code not in active_codes:
-                if validate:
-                    raise AppSettingsValidationError(
-                        "unknown_cost_statistics_tag",
-                        f"Unknown bank transaction tag code in cost statistics selection: {tag_code}",
-                    )
-                selected_tag_codes.append(tag_code)
-                seen.add(tag_code)
-                continue
-            seen.add(tag_code)
-            selected_tag_codes.append(tag_code)
-        return {
-            "version": version,
-            "schema_version": COST_STATISTICS_RULES_SCHEMA_VERSION,
-            "mode": mode,
-            "selected_tag_codes": selected_tag_codes if mode == "custom" else [],
-        }
-
-    @staticmethod
-    def _public_cost_statistics_time_tag_selection(
-        payload: dict[str, Any],
-        *,
-        bank_transaction_tags: dict[str, Any],
-    ) -> dict[str, Any]:
-        available_tags = AppSettingsService._cost_statistics_tag_definitions(
-            bank_transaction_tags
-        )
-        known_codes = {
-            str(tag.get("code") or "").strip()
-            for tag in available_tags
-            if str(tag.get("code") or "").strip()
-        }
-        selected = [
-            str(code).strip()
-            for code in list(payload.get("selected_tag_codes") or [])
-            if str(code).strip()
-        ]
-        return {
-            "version": int(payload.get("version") or 1),
-            "schema_version": COST_STATISTICS_RULES_SCHEMA_VERSION,
-            "bank_auto_tag_rules_version": int(bank_transaction_tags.get("version") or 1),
-            "mode": str(payload.get("mode") or "all"),
-            "selected_tag_codes": selected,
-            "inactive_selected_tag_codes": [
-                code for code in selected if code not in known_codes
-            ],
-            "available_tags": available_tags,
-        }
 
     @staticmethod
     def _normalize_cost_statistics_no_oa_projects(

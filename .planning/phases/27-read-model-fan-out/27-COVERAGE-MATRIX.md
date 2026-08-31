@@ -21,7 +21,7 @@
 | Page key | Route | Query / read-model owner | Writes and Drawer coverage | Access-time target | Probe id |
 | --- | --- | --- | --- | --- | --- |
 | `reconciliation-workbench` | `/` | `WorkbenchQueryFacade`; `workbench`, `workbench_relation` | relation/exception/cash/settings actions；`DetailDrawer`、`WorkbenchExceptionDrawer` | active generation + v7 complete exact-month proof（relation/control/claim、OA/bank/invoice 跨月成员、ETC、consumed settings）；并发同 scope 只合并 active proof，完成后不缓存；激活时 query，non-fresh 显示 refreshing | `p27-page-workbench` |
-| `cost-statistics` | `/cost-statistics` | `CostStatisticsQueryService`; `cost_statistics` | 按标签/按时间规则、无 OA 成本范围、成本人工分配 Drawer | parent + requested view/month dependency gate；规则保存只改 rule version | `p27-page-cost` |
+| `cost-statistics` | `/cost-statistics` | `CostStatisticsQueryService`; direct canonical read | 无 OA 成本范围、成本人工分配 Drawer | 单次 repeatable-read snapshot；项目/费用类型/银行账户三个成本 view | `p27-page-cost` |
 | `bank-details` | `/bank-details` | `BankDetailsApplicationService`; `bank_detail`, `bank_account_balance` | 自动标签规则 Drawer、分类确认/人工分类 | requested month 与 all-only balance 分别 proof；不因任意写重建所有页 | `p27-page-bank` |
 | `oa-pending-payments` | `/oa-pending-payments` | `OaPendingPaymentReadModelService`; `oa_pending_payment` | 确认写回、关联支出、规则区域 | requested month/all shard set proof | `p27-page-oa-pending` |
 | `bank-flow-rule-batches` | `/bank-flow-rule-batches` | `BankFlowRuleBatchApplicationService`; `bank_flow_rule_batch` | 标签 Drawer、submit/withdraw/reset | requested month/all shard set proof | `p27-page-bank-flow-batch` |
@@ -76,8 +76,7 @@
 | `bankFlowRuleBatches/api.ts#submitBankFlowRuleBatch`<br>`bankFlowRuleBatches/api.ts#submitBankFlowRuleBatchSelection`<br>`bankFlowRuleBatches/api.ts#withdrawBankFlowRuleBatch` | `/api/bank-flow-rule-batches/**`; page batch controls | `explicit-batch` | batch/relation facts + changed batch ids/months | `bank_flow_rule_batch`; relation/workbench consumers on access | commit batch delta; delete broad lifecycle and cross-page wait | `test_bank_flow_rule_batch_*`; `p27-op-bank-flow-batch` |
 | `batchAccounting/api.ts#submitBatchAccounting`<br>`batchAccounting/api.ts#withdrawBatchAccounting` | `/api/batch-accounting/**`; OA selection/submitted bucket | `fact-write` | canonical Workbench relation case/row ids + months | `workbench_relation`; workbench/cost/invoice consumers on access | relation commit only + exact visible-page reconcile | `test_batch_accounting_*`; `p27-op-batch-accounting` |
 | `batchAccounting/api.ts#saveBatchAccountingTagRules` | `/api/batch-accounting/tag-rules`; tag rules Drawer | `rule-write` | settings 内稳定标签代码集合与 CAS version | none；batch accounting 直接查询 current-effective 分类 | 语义保存后只重新查询当前可见页；不 fan-out、不 rebuild read model | `test_batch_accounting_*`; `p27-op-batch-accounting-tag-rule` |
-| `cost-statistics/api.ts#saveCostStatisticsTimeTagRules` | `/api/cost-statistics/time-tag-rules`; 按标签/按时间规则 Drawer | `rule-write` | 独立 app settings version；只过滤原始银行流水视图 | none for rebuild; time/bank_tag query reads rule | PUT 后仅重取当前原始流水视图 | `test_cost_statistics_*`; `p27-op-cost-time-tag-rule` |
-| `cost-statistics/api.ts#saveCostStatisticsNoOaRules` | `/api/cost-statistics/no-oa-rules`; 无 OA 成本范围 Drawer | `rule-write` | 独立 app settings version；只扩展三个成本归因视图 | none for rebuild; project/bank/expense_type query reads rule | PUT 后仅重取当前成本归因视图 | `test_cost_statistics_*`; `p27-op-cost-no-oa-rule` |
+| `cost-statistics/api.ts#saveCostStatisticsNoOaRules` | `/api/cost-statistics/no-oa-rules`; 无 OA 成本范围 Drawer | `rule-write` | 独立 app settings version；扩展三个项目成本视图 | none; direct canonical query reads rule | PUT 后重取当前成本视图 | `test_cost_statistics_*`; `p27-op-cost-no-oa-rule` |
 | `cost-statistics/api.ts#saveCostStatisticsManualAllocation` | `/api/cost-statistics/manual-allocations`; 成本人工分配 Drawer | `fact-write` | relation-scoped project allocation rows + CAS version | none；成本统计直接查询 allocation fact | 保存后仅重取当前成本归因视图，不 rebuild read model | `test_cost_statistics_*`; `p27-op-cost-manual-allocation` |
 | `etc/api.ts#previewEtcZipFiles`<br>`etc/api.ts#importEtcZipFiles` | `/api/etc/import/preview`; import preview | `read-like-command` | transient preview/session only; no canonical business fact | none | no dirty/enqueue/barrier | `test_etc_*`; `p27-op-etc-preview` |
 | `etc/api.ts#confirmEtcImportSession` | `/api/etc/import/confirm`; import confirm | `explicit-batch` | import session/job + exact imported identities | affected invoice/search resources | durable job acceptance; access-driven consumers | `test_etc_import_*`; `p27-op-etc-import` |
@@ -121,7 +120,6 @@
 | `web/src/components/batchAccounting/BatchAccountingTagRulesDrawer.tsx` | batch accounting | `writable` | `saveBatchAccountingTagRules` | read-export 只读；CAS 保存后只刷新当前页，不 fan-out |
 | `web/src/components/common/OaDraftPrefillDrawer.tsx` | ETC / input usage | `writable` | `saveOaDraftPrefill` | 仅 admin 展示入口和保存；两个独立 setting family 使用 version CAS，零 read-model fan-out |
 | `web/src/components/cost-statistics/CostEntryDetailDrawer.tsx` | cost | `read-only` | none | canonical OA allocation / quality detail read only；不得 mutation、dirty 或 fan-out |
-| `web/src/components/cost-statistics/CostStatisticsTimeTagRulesDrawer.tsx` | cost | `writable` | `saveCostStatisticsTimeTagRules` | 独立 rule version save；不 rebuild read model |
 | `web/src/components/cost-statistics/CostStatisticsNoOaRulesDrawer.tsx` | cost | `writable` | `saveCostStatisticsNoOaRules` | 独立 rule version save；不 rebuild read model |
 | `web/src/components/cost-statistics/CostStatisticsManualAllocationDrawer.tsx` | cost | `writable` | `saveCostStatisticsManualAllocation` | read-export 可打开并展开，但分配金额、不计入成本控件及逐关系保存均 disabled；只写 relation-scoped allocation fact，不 rebuild read model |
 | `web/src/components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer.tsx` | input usage | `read-only` | none | freshness-gated detail read only |
@@ -159,7 +157,6 @@
 | `reconciliation-workbench:paired-withdraw-actions` | `writable` | workbench withdraw |
 | `reconciliation-workbench:cash-special-actions` | `writable` | workbench cash facts |
 | `bank-details:auto-tag-rules` | `writable` | bank rule save/reapply |
-| `cost-statistics:time-tag-rules` | `writable` | time/bank_tag rule save |
 | `cost-statistics:no-oa-rules` | `writable` | no-OA virtual project rule save |
 | `cost-statistics:manual-allocations` | `writable` | relation-scoped manual cost allocation |
 | `bank-details:category-confirmation` | `writable` | bank classification fact |

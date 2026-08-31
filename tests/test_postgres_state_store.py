@@ -1174,7 +1174,6 @@ class PostgresStateStoreTests(unittest.TestCase):
         repository.replace_normalized_app_settings_in_transaction(
             {
                 "allowed_usernames": ["attempted-replacement"],
-                "cost_statistics_time_tag_selection": {"version": 1, "mode": "all"},
                 "cost_statistics_no_oa_projects": {"version": 4, "projects": []},
             },
             transaction=connection,
@@ -1184,7 +1183,7 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertNotIn("cost_statistics_tag_selection", saved)
         self.assertEqual(saved["allowed_usernames"], ["YNSYLP005", "legacy-user"])
         self.assertEqual(saved["access_control_version"], 7)
-        self.assertEqual(saved["cost_statistics_time_tag_selection"]["mode"], "all")
+        self.assertEqual(saved["cost_statistics_no_oa_projects"]["version"], 4)
 
     def test_postgres_store_snapshot_methods_round_trip_without_full_state_fallback(self) -> None:
         with TemporaryDirectory() as temp_dir, patch.dict(

@@ -13,17 +13,20 @@ import {
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 
-export type ExportCenterMode = "time" | "bank_tag" | "project" | "expense_type";
+export type ExportCenterMode = "bank_account" | "project" | "expense_type";
 export type ExportRangeMode = "month" | "custom";
 
 type ExportCenterModalProps = {
   mode: ExportCenterMode;
   projectOptions: string[];
   expenseTypeOptions: string[];
-  timeRangeMode: ExportRangeMode;
-  timeMonth: string;
-  timeStartDate: string;
-  timeEndDate: string;
+  bankAccountOptions: string[];
+  bankAccountRangeMode: ExportRangeMode;
+  bankAccountMonth: string;
+  bankAccountStartDate: string;
+  bankAccountEndDate: string;
+  bankAccountSelections: string[];
+  bankAccountProjectNames: string[];
   projectNames: string[];
   projectAggregateBy: "month" | "year";
   projectExpenseTypes: string[];
@@ -39,10 +42,12 @@ type ExportCenterModalProps = {
   isBusy: boolean;
   onClose: () => void;
   onModeChange: (mode: ExportCenterMode) => void;
-  onTimeRangeModeChange: (mode: ExportRangeMode) => void;
-  onTimeMonthChange: (month: string) => void;
-  onTimeStartDateChange: (date: string) => void;
-  onTimeEndDateChange: (date: string) => void;
+  onBankAccountRangeModeChange: (mode: ExportRangeMode) => void;
+  onBankAccountMonthChange: (month: string) => void;
+  onBankAccountStartDateChange: (date: string) => void;
+  onBankAccountEndDateChange: (date: string) => void;
+  onBankAccountSelectionsChange: (bankAccounts: string[]) => void;
+  onBankAccountProjectNamesChange: (projectNames: string[]) => void;
   onProjectNamesChange: (projectNames: string[]) => void;
   onProjectAggregateByChange: (aggregateBy: "month" | "year") => void;
   onProjectExpenseTypesChange: (expenseTypes: string[]) => void;
@@ -139,10 +144,13 @@ export default function ExportCenterModal({
   mode,
   projectOptions,
   expenseTypeOptions,
-  timeRangeMode,
-  timeMonth,
-  timeStartDate,
-  timeEndDate,
+  bankAccountOptions,
+  bankAccountRangeMode,
+  bankAccountMonth,
+  bankAccountStartDate,
+  bankAccountEndDate,
+  bankAccountSelections,
+  bankAccountProjectNames,
   projectNames,
   projectAggregateBy,
   projectExpenseTypes,
@@ -158,10 +166,12 @@ export default function ExportCenterModal({
   isBusy,
   onClose,
   onModeChange,
-  onTimeRangeModeChange,
-  onTimeMonthChange,
-  onTimeStartDateChange,
-  onTimeEndDateChange,
+  onBankAccountRangeModeChange,
+  onBankAccountMonthChange,
+  onBankAccountStartDateChange,
+  onBankAccountEndDateChange,
+  onBankAccountSelectionsChange,
+  onBankAccountProjectNamesChange,
   onProjectNamesChange,
   onProjectAggregateByChange,
   onProjectExpenseTypesChange,
@@ -198,22 +208,13 @@ export default function ExportCenterModal({
         <div className="export-center-modal-body">
           <div className="export-center-view-switcher" role="tablist" aria-label="导出视图切换">
             <Button
-              aria-pressed={mode === "bank_tag"}
+              aria-pressed={mode === "bank_account"}
               className="cost-view-tab"
-              onPress={() => onModeChange("bank_tag")}
+              onPress={() => onModeChange("bank_account")}
               size="sm"
-              variant={mode === "bank_tag" ? "primary" : "secondary"}
+              variant={mode === "bank_account" ? "primary" : "secondary"}
             >
-              按标签
-            </Button>
-            <Button
-              aria-pressed={mode === "time"}
-              className="cost-view-tab"
-              onPress={() => onModeChange("time")}
-              size="sm"
-              variant={mode === "time" ? "primary" : "secondary"}
-            >
-              按时间
+              按银行账户
             </Button>
             <Button
               aria-pressed={mode === "project"}
@@ -235,13 +236,13 @@ export default function ExportCenterModal({
             </Button>
           </div>
 
-          {mode === "time" || mode === "bank_tag" ? (
+          {mode === "bank_account" ? (
             <div className="export-center-config-grid">
               <section className="export-center-section">
                 <div className="export-center-section-header">
                   <h3>时间范围</h3>
                 </div>
-                <RadioGroup aria-label="时间范围" className="project-export-radio-group" onChange={(value) => onTimeRangeModeChange(value as ExportRangeMode)} value={timeRangeMode}>
+                <RadioGroup aria-label="银行账户成本时间范围" className="project-export-radio-group" onChange={(value) => onBankAccountRangeModeChange(value as ExportRangeMode)} value={bankAccountRangeMode}>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
@@ -251,24 +252,36 @@ export default function ExportCenterModal({
                     <span>自定义时间区间（精确到日）</span>
                   </Radio>
                 </RadioGroup>
-                {timeRangeMode === "month" ? (
+                {bankAccountRangeMode === "month" ? (
                   <BusinessPeriodPicker
                     allowAll={false}
                     allowedModes={["month"]}
                     ariaLabel="统计月份"
-                    onChange={(selection) => onTimeMonthChange(selection.month)}
-                    selection={{ mode: "month", year: timeMonth.slice(0, 4), month: timeMonth }}
-                    years={nearbyBusinessYears(timeMonth)}
+                    onChange={(selection) => onBankAccountMonthChange(selection.month)}
+                    selection={{ mode: "month", year: bankAccountMonth.slice(0, 4), month: bankAccountMonth }}
+                    years={nearbyBusinessYears(bankAccountMonth)}
                   />
                 ) : (
                   <DateRangeFields
-                    startDate={timeStartDate}
-                    endDate={timeEndDate}
-                    onStartDateChange={onTimeStartDateChange}
-                    onEndDateChange={onTimeEndDateChange}
+                    startDate={bankAccountStartDate}
+                    endDate={bankAccountEndDate}
+                    onStartDateChange={onBankAccountStartDateChange}
+                    onEndDateChange={onBankAccountEndDateChange}
                   />
                 )}
               </section>
+              <ExpenseTypeSelector
+                title="银行账户"
+                options={bankAccountOptions}
+                selected={bankAccountSelections}
+                onChange={onBankAccountSelectionsChange}
+              />
+              <ExpenseTypeSelector
+                title="项目（可选）"
+                options={projectOptions}
+                selected={bankAccountProjectNames}
+                onChange={onBankAccountProjectNamesChange}
+              />
             </div>
           ) : null}
 
@@ -357,18 +370,9 @@ export default function ExportCenterModal({
             ) : preview ? (
               <div className="export-center-preview-body">
                 <div className="export-center-preview-summary">
-                  <strong>预计导出 {preview.summary.transactionCount} 条流水</strong>
+                  <strong>预计导出 {preview.summary.transactionCount} 条成本明细</strong>
                   <span>预计 {preview.summary.sheetCount} 个 sheet</span>
-                  {preview.view === "time" || preview.view === "bank_tag" ? (
-                    <>
-                      <span className="cost-direction-amount cost-direction-amount--expense">
-                        支出金额 {formatCostAmount(preview.summary.expenseAmount ?? "0.00")}
-                      </span>
-                      <span className="cost-direction-amount cost-direction-amount--income">
-                        收入金额 {formatCostAmount(preview.summary.incomeAmount ?? "0.00")}
-                      </span>
-                    </>
-                  ) : <span>总金额 {formatCostAmount(preview.summary.totalAmount)}</span>}
+                  <span>总金额 {formatCostAmount(preview.summary.totalAmount)}</span>
                 </div>
                 <div className="export-center-sheet-list">
                   {preview.sheetNames.map((sheetName) => (

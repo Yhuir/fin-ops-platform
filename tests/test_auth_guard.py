@@ -177,8 +177,8 @@ class AuthGuardTests(unittest.TestCase):
             )
             headers = {"Authorization": "Bearer readonly-user"}
             readable_routes = [
-                ("GET", "/api/cost-statistics/export-preview?month=all&view=time", None),
-                ("GET", "/api/cost-statistics/export?month=all&view=time", None),
+                ("GET", "/api/cost-statistics/export-preview?month=all&view=bank_account&bank_account_label=银行账户未确定", None),
+                ("GET", "/api/cost-statistics/export?month=all&view=bank_account&bank_account_label=银行账户未确定", None),
                 ("GET", "/api/turnover-ledger/export-preview?family=company", None),
                 ("GET", "/api/turnover-ledger/export?family=company", None),
                 ("GET", "/api/pending-invoices/export-preview?direction=expense", None),
@@ -227,7 +227,9 @@ class AuthGuardTests(unittest.TestCase):
                     self.assertIn(payload["error"], {"permission_denied", "admin_only"})
 
         responses_by_route = dict(readable_responses)
-        cost_export_response = responses_by_route["/api/cost-statistics/export?month=all&view=time"]
+        cost_export_response = responses_by_route[
+            "/api/cost-statistics/export?month=all&view=bank_account&bank_account_label=银行账户未确定"
+        ]
         self.assertEqual(cost_export_response.status_code, 200)
         self.assertEqual(
             cost_export_response.headers.get("Content-Type"),

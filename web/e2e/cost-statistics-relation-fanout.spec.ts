@@ -17,12 +17,10 @@ test.describe("cost statistics relation browser fan-out", () => {
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByText("智能工厂项目")).toHaveCount(0);
     await expect(page.getByText("智能工厂设备尾款")).toHaveCount(0);
 
-    await page.getByRole("radio", { name: "按项目" }).click();
-    await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByRole("button", { name: /智能工厂项目/ })).toHaveCount(0);
     const explorerRequestCountBeforeConfirm = api.count("GET /api/cost-statistics/explorer");
 
@@ -33,7 +31,6 @@ test.describe("cost statistics relation browser fan-out", () => {
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThan(explorerRequestCountBeforeConfirm);
 
-    await page.getByRole("radio", { name: "按项目" }).click();
     const linkedProject = page.getByRole("button", { name: /智能工厂项目/ });
     await expect(linkedProject).toBeVisible();
     await expect(linkedProject).toContainText("58000.00");

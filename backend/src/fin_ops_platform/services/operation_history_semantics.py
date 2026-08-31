@@ -68,13 +68,6 @@ _EXACT_ROUTES = {
     ("PATCH", "/api/bank-details/transactions/categories"): _semantic(
         "bank.transactions.update_category", "更新流水分类", "bank_transaction", "银行流水", "批量更新银行流水分类。"
     ),
-    ("PUT", "/api/cost-statistics/time-tag-rules"): _semantic(
-        "cost_statistics.time_tag_rules.update",
-        "保存按标签/按时间标签规则",
-        "cost_time_tag_rule",
-        "按标签/按时间标签规则",
-        "更新按标签和按时间统计的银行流水标签范围。",
-    ),
     ("PUT", "/api/cost-statistics/no-oa-rules"): _semantic(
         "cost_statistics.no_oa_rules.update",
         "保存无 OA 成本范围",

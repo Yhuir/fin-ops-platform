@@ -99,7 +99,7 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增 OA 待付款 rows 临时失败恢复 Browser 覆盖：首屏 `/api/oa-pending-payments/rows` 暂时 503 时显示错误 alert 和错误态空行，不显示普通空态；点击刷新后等待 rows 200/fresh，业务行和分页恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 OA Mongo/MySQL、PostgreSQL durable queue/systemd worker drain。
 
-本轮新增成本统计 explorer 临时失败恢复 Browser 覆盖：首屏 `/api/cost-statistics/explorer?month=2026-03&project_scope=active` 暂时 503 时显示“成本统计数据加载暂时失败，请刷新后重试。”，不显示普通空态、不渲染按时间表、不允许打开导出中心；点击刷新后等待 explorer 200/fresh，按时间成本流水和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty / export 防伪成功风险，不替代真实 PostgreSQL durable queue/systemd worker drain 或真实网络中断恢复。
+成本统计 explorer 临时失败恢复 Browser 覆盖：首个 `project` 内容请求暂时 503 时显示明确错误，不显示普通空态并禁用导出中心；点击刷新后等待 explorer 200，按项目 surface 和导出入口恢复。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty / export 防伪成功风险，不替代真实 PostgreSQL 或真实网络中断恢复。
 
 本轮新增批量账务 GET 临时失败恢复 Browser 覆盖：首屏 `/api/batch-accounting` 暂时 503 时显示“批量账务数据加载暂时失败，请刷新后重试。”，不显示普通“当前年份暂无批量账务流水”空态；点击刷新后等待列表 200/fresh，批量账务银行行、可关联 OA 表和未选择时禁用的提交按钮恢复，失败文案清除。该证据覆盖本地 `NETWORK-RECOVERY` / false-empty 风险，不替代真实 PostgreSQL durable queue/systemd worker drain 或真实网络中断恢复。
 
@@ -193,13 +193,13 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增进项发票使用当前筛选导出 Browser 覆盖：export-preview 和 export 请求携带当前 keyword/sort/filter、不带 `page`/`page_size`，真实 download event 产生 `input-invoice-usage.xlsx`，下载内容包含发票、供应商、OA、relation case 和 payment 字段；row-limit 返回结构化错误时不生成下载，export read model 非 fresh 时禁用下载。
 
-本轮新增成本统计导出 Browser 覆盖：`read_export_only` 用户可在 time-view 打开导出中心，export-preview 和 export 请求携带 `view=time`、`month=2026-03`、`project_scope=active` 且不带 `page`/`page_size`，真实 download event 产生 `成本统计_全部期间_按时间统计.xlsx`，下载内容包含流水 ID、项目、费用类型、费用内容、对方户名、支付账户和筛选字段；row-limit 错误反馈仍保留。
+成本统计导出 Browser 覆盖：导出中心只提供 `bank_account|project|expense_type`，preview/download 复用当前成本人口与账户归属，不带 explorer 分页参数；row-limit 错误反馈保持明确，`read_export_only` 用户可读和导出但没有写入口。
 
-成本统计按银行/按费用类型 Browser baseline：`cost-statistics-flow` 从按时间切到按银行，选择银行账户和项目后打开 OA 成本归集详情；随后切到按费用类型，选择费用类型并打开同一归集详情。按时间与按标签另外保护真实银行流水详情。该测试覆盖 `COST-E2E-001` 的 bank/expense 归集基线与两类详情边界，并收集 console/pageerror/requestfailed/dialog。
+成本统计 Browser baseline：`cost-statistics-flow` 覆盖项目→费用类型→成本详情、银行账户→项目→同一成本人口、费用类型独立下钻、银行账户导出预览和无 OA 设置保存后刷新。旧按时间、按标签与原始按银行 UI 必须不存在；原始银行流水由银行明细 E2E 独立保护。
 
 成本统计现在直接读取 canonical snapshot，不再存在 Cost non-fresh 409。Browser 覆盖要求 bank transaction/allocation detail、export-preview 和 export 失败时不复用旧详情或旧预览、不触发伪下载，并将错误限制在对应抽屉/导出区；其他 console/page/request/dialog 错误仍会失败。
 
-本轮新增成本统计大数据窄屏 Browser 覆盖：`cost-statistics-flow` 在 390px Chromium 下启用 120+ 行长字段成本数据，等待 `/api/cost-statistics/explorer` 返回 `read_model_status=fresh` 后验证按时间表和项目下钻表均可横向/纵向滚动，右侧列在 viewport 内，导出入口、长项目和费用类型选择器未被遮挡，且没有 console/page/request/dialog 错误。该测试覆盖 `COST-E2E-008` 的本地 Browser 布局与交互风险；真实生产超大数据查询/下载耗时和 worker drain 仍走 `infra-smoke` / staging gate。
+成本统计大数据与窄屏继续由共享 Finance Table、`CostStatisticsTable` 显式分页测试和页面响应式 smoke 保护；真实生产大数据查询/下载耗时必须在发布后用三个当前 view 的 SLO probe 验证，不再以旧 time-view 或 Cost worker 状态作为成功条件。
 
 本轮新增 Finance Table System Browser 覆盖：AppHealth 代表性共享宽表在 390px 窄屏下必须可以横向滚动到请求性能和 read model 表格右侧列，刷新按钮不被遮挡，read model/worker 表格值可读，且没有 console/page error。该测试证明共享表格浏览器布局回归，不替代真实大数据 worker drain。
 

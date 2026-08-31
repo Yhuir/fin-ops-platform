@@ -298,31 +298,17 @@ test.describe("bank transaction import browser flow", () => {
     });
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     await expectDirectCanonicalResponse(Promise.resolve(costRowsPayload!));
-    const allTimeResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "GET"
-        && url.pathname.endsWith("/api/cost-statistics/explorer")
-        && url.searchParams.get("scope") === "all"
-        && url.searchParams.get("view") === "time"
-        && response.status() === 200;
-    });
-    await page.getByRole("group", { name: "时间统计时间范围" })
-      .getByRole("button", { name: "全部" })
-      .click();
-    await allTimeResponse;
-    await expect(page.getByRole("grid", { name: "按时间统计表" })).toContainText("银行流水导入成本");
-
     await recordLatency({
       route: "/cost-statistics",
       pageKey: "cost-statistics",
       module: "cost-statistics",
-      operationId: "cost-statistics.switch-project-view-after-bank-import",
-      visibleLabel: "按项目",
-      actionType: "click",
+      operationId: "cost-statistics.verify-project-view-after-bank-import",
+      visibleLabel: "按项目统计",
+      actionType: "read",
     }, async (mark) => {
-      await page.getByRole("radio", { name: "按项目" }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /银行导入成本项目/ })).toHaveCount(0));
+      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible());
     });
+    await expect(page.getByRole("button", { name: /银行导入成本项目/ })).toHaveCount(0);
     await expect(page.getByText("银行流水导入成本")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 

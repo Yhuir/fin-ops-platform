@@ -618,20 +618,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await page.getByRole("link", { name: "成本统计" }).click();
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
     await costExplorerResponse;
-    const allTimeResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "GET"
-        && responsePathMatches(response.url(), "/api/cost-statistics/explorer")
-        && url.searchParams.get("scope") === "all"
-        && url.searchParams.get("view") === "time"
-        && response.status() === 200;
-    });
-    await page.getByRole("group", { name: "时间统计时间范围" })
-      .getByRole("button", { name: "全部" })
-      .click();
-    await allTimeResponse;
-    await expect(page.getByRole("grid", { name: "按时间统计表" })).toContainText("网银手续费");
-    await page.getByRole("radio", { name: "按项目" }).click();
+    await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
     await expect(page.getByRole("button", { name: /流水规则手续费成本项目/ })).toHaveCount(0);
     await expect(page.getByText("网银手续费")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);

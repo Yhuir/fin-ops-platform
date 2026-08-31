@@ -80,10 +80,7 @@ class CostStatisticsQueryService:
                 scope_value=scope_value,
                 view=normalized_view,
                 include_statistics=include_statistics,
-                include_cost_row_tags=_cost_row_tags_required(
-                    normalized_view,
-                    normalized_filters,
-                ),
+                include_cost_row_tags=False,
             ),
         )
         raw_page = policy.explorer_page(
@@ -99,24 +96,17 @@ class CostStatisticsQueryService:
             "projects": [],
             "expense_types": [],
             "bank_accounts": [],
-            "bank_tag_primary": [],
-            "bank_tag_sub": [],
         }
         primary = list(raw_page.get("primary_facets") or [])
         secondary = list(raw_page.get("secondary_facets") or [])
         if normalized_view == "project":
             facets["projects"] = primary
             facets["expense_types"] = secondary
-        elif normalized_view == "bank":
-            facets["bank_accounts"] = self._merge_bank_account_facets(
-                primary,
-                list(raw_page.get("bank_accounts") or []),
-            )
+        elif normalized_view == "bank_account":
+            facets["bank_accounts"] = primary
+            facets["projects"] = secondary
         elif normalized_view == "expense_type":
             facets["expense_types"] = primary
-        elif normalized_view == "bank_tag":
-            facets["bank_tag_primary"] = primary
-            facets["bank_tag_sub"] = secondary
         next_cursor_values = raw_page.get("next_cursor_values")
         payload = {
             "scope": normalized_scope,
@@ -226,8 +216,10 @@ class CostStatisticsQueryService:
     ) -> dict[str, Any]:
         scope_kind, scope_value, _normalized_scope = self._normalize_page_scope(scope)
         normalized_view, _filters = self._normalize_page_query(view, {})
-        if normalized_view not in {"project", "bank", "expense_type"}:
-            raise ValueError("allocation detail requires project, bank, or expense_type view")
+        if normalized_view not in {"project", "bank_account", "expense_type"}:
+            raise ValueError(
+                "allocation detail requires project, bank_account, or expense_type view"
+            )
         normalized_allocation_id = str(allocation_id or "").strip()
         if not normalized_allocation_id:
             raise KeyError(allocation_id)
@@ -263,6 +255,7 @@ class CostStatisticsQueryService:
                     "amount",
                     "counterparty_name",
                     "payment_account_label",
+                    "bank_account_label",
                     "oa_applicant",
                     "oa_original_amount",
                     "oa_allocation_weight",
@@ -283,17 +276,6 @@ class CostStatisticsQueryService:
         )
         return policy.no_oa_tag_candidates()
 
-    def get_time_tag_candidates(self) -> list[dict[str, Any]]:
-        policy = CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(
-                scope_kind="all",
-                scope_value=None,
-                view="time",
-                include_statistics=False,
-            )
-        )
-        return policy.time_tag_candidates()
-
     def get_export_preview(self, **kwargs: Any) -> dict[str, Any]:
         view = str(kwargs.get("view") or "").strip()
         month = str(kwargs.get("month") or "all").strip() or "all"
@@ -306,18 +288,23 @@ class CostStatisticsQueryService:
             )
         )
         expense_types = self._normalize_text_set(kwargs.get("expense_types"))
+        bank_account_labels = self._normalize_text_set(
+            kwargs.get("bank_account_labels")
+        )
         range_kwargs = self._range_kwargs(kwargs)
-        if view not in {"time", "bank_tag", "project", "expense_type"}:
-            raise ValueError(
-                "view must be time, bank_tag, project, or expense_type."
-            )
+        if view not in {"bank_account", "project", "expense_type"}:
+            raise ValueError("view must be bank_account, project, or expense_type.")
         if view == "project" and not project_names:
             raise ValueError("project_name is required for project export preview")
         if view == "expense_type" and not expense_types:
             raise ValueError(
                 "expense_type is required for expense_type export preview"
             )
-        row_shape = "raw_bank" if view in {"time", "bank_tag"} else "raw_cost"
+        if view == "bank_account" and not bank_account_labels:
+            raise ValueError(
+                "bank_account_label is required for bank_account export preview"
+            )
+        row_shape = "raw_cost"
         policy = self._policy(view=view)
         page = policy.export_page(
             month=month,
@@ -327,6 +314,7 @@ class CostStatisticsQueryService:
             offset=0,
             page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
             include_summary=True,
+            bank_account_labels=sorted(bank_account_labels),
             **range_kwargs,
         )
         summary = self._export_page_summary(page)
@@ -337,42 +325,34 @@ class CostStatisticsQueryService:
             for row in list(page.get("rows") or [])[:COST_STATISTICS_EXPORT_PREVIEW_SIZE]
         ]
         scope_label = self._build_scope_label(month=month, **range_kwargs)
-        if view == "time":
+        if view == "bank_account":
             columns = [
-                "时间",
+                "成本日期",
+                "银行账户",
                 "项目名称",
                 "费用类型",
                 "金额",
                 "费用内容",
-                "资金方向",
-                "对方户名",
-                "支付账户",
+                "申请/报销人",
             ]
-            rows = [self._time_row_from_entry(entry) for entry in entries]
-            sheet_names = ["按时间统计"]
+            rows = [
+                [
+                    entry["trade_time"],
+                    entry["bank_account_label"],
+                    entry["project_name"],
+                    entry["expense_type"],
+                    _plain_money(entry["amount_decimal"]),
+                    entry["expense_content"],
+                    entry["oa_applicant"],
+                ]
+                for entry in entries
+            ]
+            sheet_names = ["按银行账户统计"]
             file_name = self._build_filename(
                 month=scope_label,
                 view=view,
             )
-            extra = self._directional_summary_from_export_summary(summary)
-        elif view == "bank_tag":
-            columns = [
-                "时间",
-                "主标签",
-                "子标签",
-                "资金方向",
-                "金额",
-                "费用内容",
-                "对方户名",
-                "支付账户",
-            ]
-            rows = [self._bank_tag_row_from_entry(entry) for entry in entries]
-            sheet_names = ["按标签统计"]
-            file_name = self._build_filename(
-                month=scope_label,
-                view=view,
-            )
-            extra = self._directional_summary_from_export_summary(summary)
+            extra = {}
         elif view == "project":
             project_name = sorted(project_names)[0]
             columns = [
@@ -471,14 +451,16 @@ class CostStatisticsQueryService:
             )
         )
         expense_types = self._normalize_text_set(kwargs.get("expense_types"))
+        bank_account_labels = self._normalize_text_set(
+            kwargs.get("bank_account_labels")
+        )
         aggregate_by = self._normalize_project_aggregate_by(
             kwargs.get("aggregate_by")
         )
         range_kwargs = self._range_kwargs(kwargs)
         if view not in {
             "month",
-            "time",
-            "bank_tag",
+            "bank_account",
             "project",
             "expense_type",
         }:
@@ -489,11 +471,11 @@ class CostStatisticsQueryService:
             raise ValueError(
                 "expense_type is required for expense_type export"
             )
+        if view == "bank_account" and not bank_account_labels:
+            raise ValueError("bank_account_label is required for bank_account export")
         row_shape = "raw_cost"
         export_month = month
-        if view in {"time", "bank_tag"}:
-            row_shape = "raw_bank"
-        elif view == "month":
+        if view == "month":
             row_shape = "month_summary"
         elif view == "project" and (
             aggregate_by is not None or len(project_names) > 1
@@ -513,6 +495,7 @@ class CostStatisticsQueryService:
             offset=0,
             page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
             include_summary=True,
+            bank_account_labels=sorted(bank_account_labels),
             **range_kwargs,
         )
         summary = self._export_page_summary(page)
@@ -528,39 +511,30 @@ class CostStatisticsQueryService:
             for row in list(page.get("rows") or [])
         ]
         scope_label = self._build_scope_label(month=month, **range_kwargs)
-        if view == "time":
+        if view == "bank_account":
             workbook = self._table_workbook(
-                "按时间统计",
+                "按银行账户统计",
                 [
-                    "时间",
+                    "成本日期",
+                    "银行账户",
                     "项目名称",
                     "费用类型",
                     "金额",
                     "费用内容",
-                    "资金方向",
-                    "对方户名",
-                    "支付账户",
+                    "申请/报销人",
                 ],
-                (self._time_row_from_entry(entry) for entry in entries),
-            )
-            filename = self._build_filename(
-                month=scope_label,
-                view=view,
-            )
-        elif view == "bank_tag":
-            workbook = self._table_workbook(
-                "按标签统计",
-                [
-                    "时间",
-                    "主标签",
-                    "子标签",
-                    "资金方向",
-                    "金额",
-                    "费用内容",
-                    "对方户名",
-                    "支付账户",
-                ],
-                (self._bank_tag_row_from_entry(entry) for entry in entries),
+                (
+                    [
+                        entry["trade_time"],
+                        entry["bank_account_label"],
+                        entry["project_name"],
+                        entry["expense_type"],
+                        entry["amount"],
+                        entry["expense_content"],
+                        entry["oa_applicant"],
+                    ]
+                    for entry in entries
+                ),
             )
             filename = self._build_filename(
                 month=scope_label,
@@ -683,11 +657,14 @@ class CostStatisticsQueryService:
         return filename, self._serialize_workbook(workbook)
 
     def _policy(self, *, view: str) -> CostStatisticsPolicy:
-        snapshot_view = "bank_tag" if view == "bank_tag" else view
+        snapshot_view = view
         if snapshot_view in {"month", "expense_type"}:
             snapshot_view = "project"
         return CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(view=snapshot_view)
+            self._canonical_repository.load_snapshot(
+                view=snapshot_view,
+                include_cost_row_tags=False,
+            )
         )
 
     @staticmethod
@@ -715,17 +692,9 @@ class CostStatisticsQueryService:
         view: str,
         filters: dict[str, str | None],
     ) -> tuple[str, dict[str, str]]:
-        normalized_view = str(view or "time").strip().lower() or "time"
-        if normalized_view not in {
-            "time",
-            "project",
-            "bank",
-            "expense_type",
-            "bank_tag",
-        }:
-            raise ValueError(
-                "view must be time, project, bank, expense_type, or bank_tag"
-            )
+        normalized_view = str(view or "project").strip().lower() or "project"
+        if normalized_view not in {"project", "expense_type", "bank_account"}:
+            raise ValueError("view must be project, expense_type, or bank_account")
         query = normalize_money_search_query(
             " ".join(str(filters.get("query") or "").split())
         )
@@ -734,9 +703,7 @@ class CostStatisticsQueryService:
         normalized_filters = {
             "project_name": "",
             "expense_type": "",
-            "payment_account_label": "",
-            "bank_tag_primary_label": "",
-            "bank_tag_sub_label": "",
+            "bank_account_label": "",
             "query": query,
         }
         if normalized_view == "project":
@@ -750,16 +717,12 @@ class CostStatisticsQueryService:
             normalized_filters["expense_type"] = str(
                 filters.get("expense_type") or ""
             ).strip()
-        elif normalized_view == "bank":
-            normalized_filters["payment_account_label"] = str(
-                filters.get("payment_account_label") or ""
+        elif normalized_view == "bank_account":
+            normalized_filters["bank_account_label"] = str(
+                filters.get("bank_account_label") or ""
             ).strip()
-        elif normalized_view == "bank_tag":
-            normalized_filters["bank_tag_primary_label"] = str(
-                filters.get("bank_tag_primary_label") or ""
-            ).strip()
-            normalized_filters["bank_tag_sub_label"] = str(
-                filters.get("bank_tag_sub_label") or ""
+            normalized_filters["project_name"] = str(
+                filters.get("project_name") or ""
             ).strip()
         return normalized_view, normalized_filters
 
@@ -822,36 +785,6 @@ class CostStatisticsQueryService:
         return tuple(str(value) for value in values)  # type: ignore[return-value]
 
     @staticmethod
-    def _merge_bank_account_facets(
-        observed: list[dict[str, Any]],
-        configured: list[Any],
-    ) -> list[dict[str, Any]]:
-        merged = [
-            dict(item) for item in observed if isinstance(item, dict)
-        ]
-        labels = {
-            str(item.get("payment_account_label") or "") for item in merged
-        }
-        for item in configured:
-            if not isinstance(item, dict):
-                continue
-            label = str(item.get("payment_account_label") or "").strip()
-            if not label or label in labels:
-                continue
-            labels.add(label)
-            merged.append(
-                {
-                    "payment_account_label": label,
-                    "expense_amount": "0.00",
-                    "income_amount": "0.00",
-                    "net_outflow_amount": "0.00",
-                    "transaction_count": 0,
-                    "expense_percentage_label": "0.0%",
-                }
-            )
-        return merged
-
-    @staticmethod
     def empty_explorer_page_payload(
         scope: str,
         view: str,
@@ -863,10 +796,6 @@ class CostStatisticsQueryService:
                 "row_count": 0,
                 "transaction_count": 0,
                 "total_amount": "0.00",
-                "expense_amount": "0.00",
-                "income_amount": "0.00",
-                "expense_transaction_count": 0,
-                "income_transaction_count": 0,
             },
             "statistics": {},
             "available_years": [],
@@ -874,8 +803,6 @@ class CostStatisticsQueryService:
                 "projects": [],
                 "expense_types": [],
                 "bank_accounts": [],
-                "bank_tag_primary": [],
-                "bank_tag_sub": [],
             },
             "rows": [],
             "row_count": 0,
@@ -916,31 +843,6 @@ class CostStatisticsQueryService:
         amount = _decimal_from_value(raw_row.get("amount")) or Decimal(
             "0.00"
         )
-        primary = (
-            str(
-                raw_row.get("bank_tag_primary_label")
-                or raw_row.get("bank_tag_label")
-                or ""
-            ).strip()
-            or "未标记"
-        )
-        sub = (
-            str(
-                raw_row.get("bank_tag_sub_label")
-                or raw_row.get("bank_tag_label")
-                or ""
-            ).strip()
-            or primary
-        )
-        label_path = [
-            str(item).strip()
-            for item in list(raw_row.get("bank_tag_label_path") or [])
-            if str(item).strip()
-        ]
-        if not label_path:
-            label_path = (
-                [primary] if primary == sub else [primary, sub]
-            )
         return {
             "entry_id": str(
                 raw_row.get("entry_id")
@@ -977,20 +879,13 @@ class CostStatisticsQueryService:
             "payment_account_label": str(
                 raw_row.get("payment_account_label") or ""
             ).strip(),
+            "bank_account_label": str(
+                raw_row.get("bank_account_label") or ""
+            ).strip(),
             "remark": str(raw_row.get("remark") or "").strip(),
             "oa_applicant": str(
                 raw_row.get("oa_applicant") or ""
             ).strip(),
-            "bank_tag_code": str(
-                raw_row.get("bank_tag_code") or ""
-            ).strip(),
-            "bank_tag_label": str(
-                raw_row.get("bank_tag_label") or sub
-            ).strip()
-            or sub,
-            "bank_tag_primary_label": primary,
-            "bank_tag_sub_label": sub,
-            "bank_tag_label_path": label_path,
             "period_label": str(raw_row.get("period_label") or "—"),
             "transaction_count": int(
                 raw_row.get("transaction_count") or 0
@@ -1086,55 +981,6 @@ class CostStatisticsQueryService:
             "sheet_names": sheet_names,
             "columns": columns,
             "rows": rows[:COST_STATISTICS_EXPORT_PREVIEW_SIZE],
-        }
-
-    @staticmethod
-    def _time_row_from_entry(entry: dict[str, Any]) -> list[Any]:
-        return [
-            entry["trade_time"],
-            entry["project_name"],
-            entry["expense_type"],
-            _plain_money(entry["amount_decimal"]),
-            entry["expense_content"],
-            entry["direction"],
-            entry["counterparty_name"],
-            entry["payment_account_label"],
-        ]
-
-    @staticmethod
-    def _bank_tag_row_from_entry(
-        entry: dict[str, Any],
-    ) -> list[Any]:
-        return [
-            entry["trade_time"],
-            entry["bank_tag_primary_label"],
-            entry["bank_tag_sub_label"],
-            entry["direction"],
-            _plain_money(entry["amount_decimal"]),
-            entry["expense_content"],
-            entry["counterparty_name"],
-            entry["payment_account_label"],
-        ]
-
-    @staticmethod
-    def _directional_summary_from_export_summary(
-        summary: dict[str, Any],
-    ) -> dict[str, Any]:
-        return {
-            "expense_amount": _plain_money(
-                _decimal_from_value(summary.get("expense_amount"))
-                or Decimal("0.00")
-            ),
-            "income_amount": _plain_money(
-                _decimal_from_value(summary.get("income_amount"))
-                or Decimal("0.00")
-            ),
-            "expense_transaction_count": int(
-                summary.get("expense_transaction_count") or 0
-            ),
-            "income_transaction_count": int(
-                summary.get("income_transaction_count") or 0
-            ),
         }
 
     @staticmethod
@@ -1448,10 +1294,8 @@ class CostStatisticsQueryService:
             if (month or "").strip().lower() == "all"
             else month
         )
-        if view == "time":
-            return f"成本统计_{month_segment}_按时间统计.xlsx"
-        if view == "bank_tag":
-            return f"成本统计_{month_segment}_按标签统计.xlsx"
+        if view == "bank_account":
+            return f"成本统计_{month_segment}_按银行账户统计.xlsx"
         if view == "month":
             return f"成本统计_{month_segment}_月份汇总.xlsx"
         if view == "project":
@@ -1478,14 +1322,6 @@ class CostStatisticsQueryService:
                 f"{_sanitize_filename(expense_type or '未命名费用类型')}.xlsx"
             )
         raise ValueError(f"unsupported export view: {view}")
-
-
-def _cost_row_tags_required(view: str, filters: dict[str, str]) -> bool:
-    if view == "project":
-        return bool(filters.get("project_name") and filters.get("expense_type"))
-    if view == "expense_type":
-        return bool(filters.get("expense_type"))
-    return True
 
 
 def _plain_money(value: Decimal) -> str:

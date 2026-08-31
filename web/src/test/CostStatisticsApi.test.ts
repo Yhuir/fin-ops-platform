@@ -6,10 +6,8 @@ import {
   fetchCostStatisticsExplorerPage,
   fetchCostStatisticsExportPreview,
   fetchCostStatisticsNoOaRules,
-  fetchCostStatisticsTimeTagRules,
   saveCostStatisticsNoOaRules,
   saveCostStatisticsManualAllocation,
-  saveCostStatisticsTimeTagRules,
 } from "../features/cost-statistics/api";
 
 const originalFetch = global.fetch;
@@ -113,17 +111,18 @@ describe("Cost statistics export API", () => {
         status: 200,
         headers: {
           "Content-Disposition":
-            "attachment; filename=\"cost_statistics_export.xlsx\"; filename*=UTF-8''%E6%88%90%E6%9C%AC%E7%BB%9F%E8%AE%A1_2026-03_%E6%8C%89%E6%97%B6%E9%97%B4%E7%BB%9F%E8%AE%A1.xlsx",
+            "attachment; filename=\"cost_statistics_export.xlsx\"; filename*=UTF-8''%E6%88%90%E6%9C%AC%E7%BB%9F%E8%AE%A1_2026-03_%E6%8C%89%E9%93%B6%E8%A1%8C%E8%B4%A6%E6%88%B7.xlsx",
         },
       }),
     ) as typeof fetch;
 
     const result = await exportCostStatisticsView({
       month: "2026-03",
-      view: "time",
+      view: "bank_account",
+      bankAccountLabels: ["建设银行 8106"],
     });
 
-    expect(result.fileName).toBe("成本统计_2026-03_按时间统计.xlsx");
+    expect(result.fileName).toBe("成本统计_2026-03_按银行账户.xlsx");
   });
 
   test("surfaces backend row-limit messages from failed export downloads", async () => {
@@ -140,7 +139,8 @@ describe("Cost statistics export API", () => {
 
     await expect(exportCostStatisticsView({
       month: "all",
-      view: "time",
+      view: "bank_account",
+      bankAccountLabels: ["建设银行 8106"],
     })).rejects.toThrow("导出结果超过 20000 行，请缩小筛选范围后重试。");
   });
 
@@ -173,7 +173,7 @@ describe("Cost statistics export API", () => {
       }
       if (url.startsWith("/api/cost-statistics/export-preview")) {
         return new Response(JSON.stringify({
-          view: "time",
+          view: "project",
           file_name: "preview.xlsx",
           scope_label: "全部期间",
           summary: {
@@ -205,11 +205,15 @@ describe("Cost statistics export API", () => {
     });
     await fetchCostStatisticsExportPreview({
       month: "all",
-      view: "time",
+      view: "project",
+      projectNames: ["云南溯源科技"],
+      aggregateBy: "month",
     });
     await exportCostStatisticsView({
       month: "all",
-      view: "time",
+      view: "project",
+      projectNames: ["云南溯源科技"],
+      aggregateBy: "month",
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
@@ -217,11 +221,11 @@ describe("Cost statistics export API", () => {
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/export-preview?month=all&view=time",
+      `/api/cost-statistics/export-preview?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month`,
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/export?month=all&view=time",
+      `/api/cost-statistics/export?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&include_oa_details=true&include_invoice_details=true&include_exception_rows=true&include_ignored_rows=true&include_expense_content_summary=true&sort_by=time`,
       expect.any(Object),
     );
     expect(page.availableYears).toEqual(["2026", "2025"]);
@@ -232,22 +236,21 @@ describe("Cost statistics export API", () => {
     expect(page.nextCursor).toBe("cursor-2");
   });
 
-  test("maps canonical statistics and bank-tag fields from page rows", async () => {
+  test("maps canonical cost statistics and attributed bank account from page rows", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         scope: "2026-03",
-        view: "time",
+        view: "project",
         summary: {
           row_count: 1,
           transaction_count: 1,
           total_amount: "145.00",
         },
         statistics: {
-          transaction_count: "12000",
-          expense_transaction_count: 7000,
-          income_transaction_count: 5000,
-          cost_group_count: -1,
-          tagged_transaction_count: 4.5,
+          project_count: 4,
+          expense_type_count: 8,
+          bank_account_count: 3,
+          cost_transaction_count: 12000,
         },
         available_years: ["2026"],
         facets: {},
@@ -262,12 +265,8 @@ describe("Cost statistics export API", () => {
           counterparty_name: "陈佳玉",
           oa_applicant: "报销成员甲",
           payment_account_label: "建行 8106",
+          bank_account_label: "建行 8106",
           remark: "报销",
-          bank_tag_code: "travel_transport",
-          bank_tag_label: "交通费",
-          bank_tag_primary_label: "差旅交通",
-          bank_tag_sub_label: "交通费",
-          bank_tag_label_path: ["差旅交通", "交通费"],
         }],
         row_count: 1,
         next_cursor: null,
@@ -276,48 +275,48 @@ describe("Cost statistics export API", () => {
 
     const payload = await fetchCostStatisticsExplorerPage({
       scope: "2026-03",
-      view: "time",
+      view: "project",
+      projectName: "云南溯源科技",
+      expenseType: "交通费",
     });
 
     expect(payload.statistics).toEqual(expect.objectContaining({
-      transactionCount: 12000,
-      expenseTransactionCount: 7000,
-      incomeTransactionCount: 5000,
+      projectCount: 4,
+      expenseTypeCount: 8,
+      bankAccountCount: 3,
+      costTransactionCount: 12000,
     }));
     expect(payload.rows[0]).toMatchObject({
-      bankTagCode: "travel_transport",
-      bankTagLabel: "交通费",
-      bankTagPrimaryLabel: "差旅交通",
-      bankTagSubLabel: "交通费",
-      bankTagLabelPath: ["差旅交通", "交通费"],
       oaApplicant: "报销成员甲",
+      bankAccountLabel: "建行 8106",
     });
   });
 
-  test("maps the bank facet contract and omits the removed bank-project filter", async () => {
+  test("maps the bank-account facet contract and sends the project drill-down", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         scope: "all",
-        view: "bank",
+        view: "bank_account",
         summary: {
-          row_count: 2,
-          transaction_count: 2,
+          row_count: 1,
+          transaction_count: 1,
           total_amount: "90.00",
-          expense_amount: "100.00",
-          income_amount: "10.00",
-          expense_transaction_count: 1,
-          income_transaction_count: 1,
         },
         available_years: ["2026"],
         facets: {
-          projects: [],
+          projects: [{
+            project_name: "云南溯源科技",
+            total_amount: "90.00",
+            transaction_count: 1,
+            expense_type_count: 1,
+            percentage_label: "100.0%",
+          }],
           bank_accounts: [{
-            payment_account_label: "建设银行 8106",
-            expense_amount: "100.00",
-            income_amount: "10.00",
-            net_outflow_amount: "90.00",
-            transaction_count: 2,
-            expense_percentage_label: "100.00%",
+            bank_account_label: "建设银行 8106",
+            total_amount: "90.00",
+            transaction_count: 1,
+            project_count: 1,
+            percentage_label: "100.0%",
           }],
         },
         rows: [],
@@ -328,55 +327,28 @@ describe("Cost statistics export API", () => {
 
     const payload = await fetchCostStatisticsExplorerPage({
       scope: "all",
-      view: "bank",
-      paymentAccountLabel: "建设银行 8106",
-      projectName: "旧项目筛选不应发送",
+      view: "bank_account",
+      bankAccountLabel: "建设银行 8106",
+      projectName: "云南溯源科技",
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?scope=all&view=bank&payment_account_label=%E5%BB%BA%E8%AE%BE%E9%93%B6%E8%A1%8C+8106",
+      "/api/cost-statistics/explorer?scope=all&view=bank_account&project_name=%E4%BA%91%E5%8D%97%E6%BA%AF%E6%BA%90%E7%A7%91%E6%8A%80&bank_account_label=%E5%BB%BA%E8%AE%BE%E9%93%B6%E8%A1%8C+8106",
       expect.any(Object),
     );
-    expect(payload.facets.projects).toEqual([]);
+    expect(payload.facets.projects[0].projectName).toBe("云南溯源科技");
     expect(payload.facets.bankAccounts[0]).toEqual({
-      paymentAccountLabel: "建设银行 8106",
-      expenseAmount: "100.00",
-      incomeAmount: "10.00",
-      netOutflowAmount: "90.00",
-      transactionCount: 2,
-      expensePercentageLabel: "100.00%",
+      bankAccountLabel: "建设银行 8106",
+      totalAmount: "90.00",
+      transactionCount: 1,
+      projectCount: 1,
+      percentageLabel: "100.0%",
     });
   });
 
-  test("loads and saves independent time/tag and no-OA rules", async () => {
+  test("loads and saves no-OA rules", async () => {
     global.fetch = vi.fn(async (input, init) => {
       const url = String(input);
-      if (url === "/api/cost-statistics/time-tag-rules") {
-        return new Response(JSON.stringify({
-          version: 2,
-          bank_auto_tag_rules_version: 8,
-          mode: init?.method === "PUT" ? "custom" : "all",
-          selected_tag_codes: init?.method === "PUT" ? ["fee"] : [],
-          inactive_selected_tag_codes: [],
-          available_tags: [
-            {
-              code: "fee",
-              label: "费用",
-              path: ["费用", "材料"],
-              output_primary_label: "费用",
-              output_sub_label: "材料",
-            },
-            {
-              code: "__uncategorized__",
-              label: "未标记流水",
-              path: ["未标记流水"],
-              output_primary_label: "未标记流水",
-              output_sub_label: "未标记流水",
-            },
-          ],
-          can_save: true,
-        }), { status: 200 });
-      }
       if (url === "/api/cost-statistics/no-oa-rules") {
         return new Response(JSON.stringify({
           version: 3,
@@ -396,33 +368,13 @@ describe("Cost statistics export API", () => {
       return new Response(null, { status: 404 });
     }) as typeof fetch;
 
-    const timeRules = await fetchCostStatisticsTimeTagRules();
-    const savedTimeRules = await saveCostStatisticsTimeTagRules({
-      expectedVersion: timeRules.version,
-      mode: "custom",
-      selectedTagCodes: ["fee"],
-    });
     const noOaRules = await fetchCostStatisticsNoOaRules();
     const savedNoOaRules = await saveCostStatisticsNoOaRules({
       expectedVersion: noOaRules.version,
       projects: [{ id: "travel", displayName: "差旅无 OA", tagCodes: ["fee"] }],
     });
 
-    expect(timeRules.mode).toBe("all");
-    expect(timeRules.availableTags.map((tag) => tag.label)).toEqual(["费用", "未标记流水"]);
-    expect(savedTimeRules.selectedTagCodes).toEqual(["fee"]);
     expect(savedNoOaRules.projects[0]).toEqual({ id: "travel", displayName: "差旅无 OA", tagCodes: ["fee"] });
-    expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/time-tag-rules",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({
-          expected_version: 2,
-          mode: "custom",
-          selected_tag_codes: ["fee"],
-        }),
-      }),
-    );
     expect(global.fetch).toHaveBeenCalledWith(
       "/api/cost-statistics/no-oa-rules",
       expect.objectContaining({
@@ -439,7 +391,7 @@ describe("Cost statistics export API", () => {
     global.fetch = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({
         scope: "2026-03",
-        view: "time",
+        view: "bank_account",
         summary: {
           row_count: 0,
           transaction_count: 0,
@@ -453,8 +405,8 @@ describe("Cost statistics export API", () => {
       }), { status: 200 }),
     ) as typeof fetch;
 
-    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time" });
-    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time" });
+    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "bank_account" });
+    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "bank_account" });
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });

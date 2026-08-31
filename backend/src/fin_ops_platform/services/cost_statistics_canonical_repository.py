@@ -52,7 +52,6 @@ class PostgresCostStatisticsCanonicalRepository:
             relation_only_all_scope = (
                 not include_statistics
                 and scope_kind == "all"
-                and view not in {"time", "bank", "bank_tag"}
                 and not _has_no_oa_project_tag_assignments(settings)
             )
             relations = _postgres_relations(transaction) if relation_only_all_scope else []
@@ -78,25 +77,6 @@ class PostgresCostStatisticsCanonicalRepository:
                 else _bank_available_years(bank_rows)
             )
             bank_ids = _bank_row_ids(bank_rows)
-            if view in {"time", "bank", "bank_tag"}:
-                categories_by_transaction_id = (
-                    PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
-                        transaction,
-                        settings=settings,
-                        transaction_ids=bank_ids,
-                    )
-                )
-                _apply_bank_category_projection(
-                    bank_rows,
-                    categories_by_transaction_id=categories_by_transaction_id,
-                )
-                return _build_snapshot(
-                    settings=settings,
-                    bank_rows=bank_rows,
-                    oa_rows=[],
-                    relations=[],
-                    available_years=available_years,
-                )
             if not relation_only_all_scope:
                 if scoped:
                     relations = _postgres_relations(
@@ -383,14 +363,6 @@ class LocalCostStatisticsCanonicalRepository:
             ),
             category_provider=self._category_provider,
         )
-        if view in {"time", "bank", "bank_tag"}:
-            return _build_snapshot(
-                settings=settings,
-                bank_rows=scoped_bank_rows,
-                oa_rows=[],
-                relations=[],
-                available_years=bank_available_years,
-            )
         all_relations = [
             dict(relation)
             for relation in self._relations_provider()

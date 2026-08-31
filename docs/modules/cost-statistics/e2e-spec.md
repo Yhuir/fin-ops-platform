@@ -2,37 +2,30 @@
 
 ## 核心合同
 
-`/cost-statistics` 的 explorer、详情、导出预览和导出下载每次请求都从同一个 PostgreSQL
-`REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、active 正式关系、标签和设置。
-
-页面不依赖其它页面 payload/read model，也不存在 Cost version、freshness、scope、queue、worker 或后台轮询。
+`/cost-statistics` 只提供`项目成本`分组，分组内只有`按项目`、`按费用类型`、`按银行账户`。三个视图从同一 PostgreSQL 一致性快照生成同一个成本事件集合，不依赖 Cost read model、queue、worker 或缓存。
 
 ## 验收场景
 
 | ID | 场景 | 验收标准 |
 | --- | --- | --- |
-| `COST-E2E-001` | 五种视图 | project/expense_type 返回成本 `C`；bank/bank_tag/time 返回真实银行净支出 `N`；人工关系另满足 `C+X=N`。不得把 OA 单元按流水比例伪造账户、标签或月份来源 |
-| `COST-E2E-002` | 关系确认与撤回 | 下一次 Cost 请求读取更新后的 active relation；写后无 Cost fan-out |
-| `COST-E2E-003` | 下钻 | explorer 与 bank transaction/allocation detail 使用一致 snapshot 口径；点击行立即打开对应右侧抽屉，详情 loading/error 不污染页面状态 |
-| `COST-E2E-004` | 导出 | preview/download 与当前视图、筛选和权限一致；归因导出存在 pending/stale 时必须包含明确说明和数量，不能静默漏数 |
-| `COST-E2E-005` | 加载失败恢复 | 请求失败显示明确错误；页面刷新发起全新请求并可恢复 |
-| `COST-E2E-006` | 隔离 | Cost 请求不读取或触发其它页面 read model，不影响其它页面 API |
-| `COST-E2E-007` | 性能 | 候选发布记录各视图多次请求耗时；本任务不设 3 秒硬门槛 |
-| `COST-E2E-008` | 自动/人工资格 | `N=支出合计-明确付错退款`；`O=N` 时 1×1、3×3、3×2 等任意拓扑都按 OA 单元原金额自动归因；`O!=N` 才待人工；`N=0` 排除，`N<0` 返回冲突 |
-| `COST-E2E-009` | 付错退款 | 只有与支出、OA 在同一 active 关系且标签明确为“付错退款”的收入才冲减净支出；1050-35=1015。退款不生成右栏成本行，只在详情显示负数证据；普通收入不进入，time/bank_tag 原始 1050 支出与 35 收入不变 |
-| `COST-E2E-010` | OA 完成态与期间 | 进行中 OA 关系仍出现在 bank/time/bank_tag 原始流水视图，但不进入两个归因视图或无 OA 虚拟项目；五视图统一按银行交易日期筛选 |
-| `COST-E2E-011` | 完整性 | 零/缺失权重只内部防除零且不新增页面状态；同一 OA 单元或银行流水跨 active relation 重复时整次响应返回 409 |
-| `COST-E2E-012` | 无 OA 虚拟项目 | 项目数组默认空；支持多个稳定 ID 的虚拟项目，名称唯一且标签全局互斥；候选只来自实际无 active OA 的支出标签；保存后仍逐笔排除有 OA 流水，费用类型为“无 OA 分类” |
-| `COST-E2E-013` | OA 费用类型 | 支付申请读取权威 `category`，日常报销明细读取 `purposeType`；真实缺失显示“未填写 OA 费用类型”，不猜测或统一填“其他” |
-| `COST-E2E-014` | 银行流水标签规则 | 默认 `all` 包含收入、支出、历史标签与未标记流水，未来新增标签自动纳入；改为 custom 只影响 bank/time/bank_tag，不影响两个归因视图 |
-| `COST-E2E-015` | 关系完整证据 | 月份 scope 命中关系任一银行成员后批量加载全部银行成员用于退款证据；跨月退款回溯冲减原支出月份且退款月无归因行；声明的 OA 成员缺失时整组 fail closed，且银行流水仍受 OA 保护，不落入无 OA 项目 |
-| `COST-E2E-016` | 人工分配闭环 | Drawer 打开后才加载全局队列；pending/stale 输入为空，allocated 可编辑；支付申请整单/日常报销逐明细各输入一次；每关系独立保存；可选 `X` 仅在 checkbox 勾选后显示且原因必填；保存严格校验 `C+X=N`、source fingerprint、expected version，并与 audit 同事务提交 |
-| `COST-E2E-017` | 口径与时间锚点 | policy 消费逐 OA 单元成本，不伪造 OA 单元到资金来源的归属；project/expense_type 对账为 `C`，bank/bank_tag/time 对账为 `N`。项目/费用使用最新有效支出时间作确定性事件锚点，但不得据此声称资金来源归属 |
-| `COST-E2E-018` | 视图口径分组 | HeroUI 切换区以“成本归因”承载项目/费用类型，以“银行流水”承载银行/标签/时间；按银行采用“账户→canonical 流水”的两栏下钻，不存在项目中栏；窄屏可折行且无横向溢出 |
+| `COST-E2E-001` | 三视图人口 | 相同 scope/query 下三个根视图的 `summary.total_amount`、`transaction_count` 一致，只改变分组维度 |
+| `COST-E2E-002` | 项目下钻 | 项目→费用类型→成本明细，详情使用同一成本事件合同 |
+| `COST-E2E-003` | 费用类型下钻 | 费用类型→成本明细，项目名和申请/报销人字段正确 |
+| `COST-E2E-004` | 银行账户下钻 | 银行账户→项目→成本明细，不展示原始收入/流水列表，不调用银行明细 read model |
+| `COST-E2E-005` | 账户归属 | 单一支出账户归属该账户；无账户/多支出账户归入`银行账户未确定`；退款账户不参与；无 OA 行用自身账户 |
+| `COST-E2E-006` | 成本资格 | `O=N` 自动、`O!=N` 人工且 `C+X=N`；进行中/不完整关系 fail closed；`N=0` 排除、`N<0` 失败 |
+| `COST-E2E-007` | 无 OA 成本 | 只有明确配置到虚拟项目且无 active OA 的支出进入成本；费用类型为“无 OA 分类”；保存后当前 explorer 重新读取 |
+| `COST-E2E-008` | 导出 | preview/download 只接受三种 view，复用相同账户归属和成本人口，行数上限错误明确 |
+| `COST-E2E-009` | 旧路径删除 | `time|bank|bank_tag` 返回 400；`/time-tag-rules` 不存在；UI 无按时间、按标签、原始按银行和旧规则抽屉 |
+| `COST-E2E-010` | 错误与权限 | 首屏失败不伪装空数据，可刷新恢复；只读用户可读/导出但无写入口；非法 cursor/参数明确失败 |
+| `COST-E2E-011` | 模块隔离 | 银行明细、导入、Workbench、往来款和设置页面原 API/行为不变；成本请求不产生跨页面写 I/O |
+| `COST-E2E-012` | 性能 | repository 无 N+1；三个 view 多次生产请求报告 p50/p95/max；账户→项目→明细每步有界返回 |
 
 ## 生产验证
 
-- Audit 通过，关系成员不存在/形状异常必须阻断。
-- Cost API 成功响应不含 `read_model_status`、`read_model_version` 或 refresh scope。
-- `job.outbox_events`、`job.read_model_dirty_scopes` 和 worker registry 无当前 Cost 任务。
-- 同批验证 Workbench、外部往来、银行明细等关键页面只读 API 不受影响。
+- 用已部署版本读取三个根视图并核对 summary 人口与金额一致。
+- 从生产 `bank_account` facet 选择一个账户，再选择一个项目，确认返回成本明细且每次响应 view/scope/filter 正确。
+- 抽样 `银行账户未确定`（若生产存在）并确认其不计入已确定账户数但金额仍计入总成本。
+- 验证旧 view 400、旧 time-tag endpoint 404。
+- 多次测量三个根视图和两步下钻的 API 耗时，记录 p50/p95/max。
+- 运行关键只读 runtime smoke，确认其它页面与服务保持正常。

@@ -78,10 +78,6 @@ class CostStatisticsApiRoutes:
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> Any | None:
-        if method == "GET" and route_path == "/api/cost-statistics/time-tag-rules":
-            return self.handle_time_tag_rules(headers)
-        if method == "PUT" and route_path == "/api/cost-statistics/time-tag-rules":
-            return self.handle_update_time_tag_rules(body, headers)
         if method == "GET" and route_path == "/api/cost-statistics/no-oa-rules":
             return self.handle_no_oa_rules(headers)
         if method == "PUT" and route_path == "/api/cost-statistics/no-oa-rules":
@@ -107,9 +103,7 @@ class CostStatisticsApiRoutes:
                 view=query.get("view", [None])[0],
                 project_name=query.get("project_name", [None])[0],
                 expense_type=query.get("expense_type", [None])[0],
-                payment_account_label=query.get("payment_account_label", [None])[0],
-                bank_tag_primary_label=query.get("bank_tag_primary_label", [None])[0],
-                bank_tag_sub_label=query.get("bank_tag_sub_label", [None])[0],
+                bank_account_label=query.get("bank_account_label", [None])[0],
                 search_query=query.get("query", [None])[0],
                 cursor=query.get("cursor", [None])[0],
                 page_size=query.get("page_size", [None])[0],
@@ -121,6 +115,7 @@ class CostStatisticsApiRoutes:
                 view=query.get("view", [None])[0],
                 project_names=query.get("project_name", []),
                 expense_types=query.get("expense_type", []),
+                bank_account_labels=query.get("bank_account_label", []),
                 start_month=query.get("start_month", [None])[0],
                 end_month=query.get("end_month", [None])[0],
                 start_date=query.get("start_date", [None])[0],
@@ -133,6 +128,7 @@ class CostStatisticsApiRoutes:
                 view=query.get("view", [None])[0],
                 project_names=query.get("project_name", []),
                 expense_types=query.get("expense_type", []),
+                bank_account_labels=query.get("bank_account_label", []),
                 start_month=query.get("start_month", [None])[0],
                 end_month=query.get("end_month", [None])[0],
                 start_date=query.get("start_date", [None])[0],
@@ -241,49 +237,6 @@ class CostStatisticsApiRoutes:
             raise RuntimeError("cost statistics manual allocation service is not configured")
         return self._manual_allocation_service
 
-    def handle_time_tag_rules(self, headers: dict[str, str] | None) -> Any:
-        session, error = self._read_session(headers)
-        if error is not None:
-            return error
-        service = self._settings_service()
-        candidates = self._query_service.get_time_tag_candidates()
-        payload = _merge_tag_candidates(
-            service.get_cost_statistics_time_tag_selection_payload(
-                can_save=bool(session is None or session.can_mutate_data),
-            ),
-            candidates,
-            include_definitions=True,
-        )
-        return self._json_response(HTTPStatus.OK, payload)
-
-    def handle_update_time_tag_rules(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        session, error = self._write_session(headers)
-        if error is not None:
-            return error
-        payload, body_error = self._load_body(body)
-        if body_error is not None:
-            return body_error
-        service = self._settings_service()
-        try:
-            candidates = self._query_service.get_time_tag_candidates()
-            current = service.get_cost_statistics_time_tag_selection_payload(can_save=True)
-            allowed_codes = _candidate_codes(candidates)
-            allowed_codes.update(_candidate_codes(list(current.get("available_tags") or [])))
-            result = service.update_cost_statistics_time_tag_selection(
-                payload,
-                actor_id=actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "cost_statistics"),
-                allowed_tag_codes=allowed_codes,
-            )
-            result = _merge_tag_candidates(
-                result,
-                candidates,
-                include_definitions=True,
-            )
-        except AppSettingsValidationError as exc:
-            status = HTTPStatus.CONFLICT if exc.error_code.endswith("version_conflict") else HTTPStatus.BAD_REQUEST
-            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
-        return self._json_response(HTTPStatus.OK, result)
-
     def handle_no_oa_rules(self, headers: dict[str, str] | None) -> Any:
         session, error = self._read_session(headers)
         if error is not None:
@@ -347,9 +300,7 @@ class CostStatisticsApiRoutes:
         view: str | None,
         project_name: str | None,
         expense_type: str | None,
-        payment_account_label: str | None,
-        bank_tag_primary_label: str | None,
-        bank_tag_sub_label: str | None,
+        bank_account_label: str | None,
         search_query: str | None,
         cursor: str | None,
         page_size: str | None,
@@ -370,9 +321,7 @@ class CostStatisticsApiRoutes:
                 filters={
                     "project_name": project_name,
                     "expense_type": expense_type,
-                    "payment_account_label": payment_account_label,
-                    "bank_tag_primary_label": bank_tag_primary_label,
-                    "bank_tag_sub_label": bank_tag_sub_label,
+                    "bank_account_label": bank_account_label,
                     "query": search_query,
                 },
                 cursor=cursor,
@@ -402,6 +351,7 @@ class CostStatisticsApiRoutes:
         view: str | None,
         project_names: list[str] | None,
         expense_types: list[str] | None,
+        bank_account_labels: list[str] | None,
         start_month: str | None = None,
         end_month: str | None = None,
         start_date: str | None = None,
@@ -415,12 +365,12 @@ class CostStatisticsApiRoutes:
         sort_by: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
-        if view not in {"month", "time", "bank_tag", "project", "expense_type"}:
+        if view not in {"month", "bank_account", "project", "expense_type"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_export_request",
-                    "message": "view must be month, time, bank_tag, project, or expense_type.",
+                    "message": "view must be month, bank_account, project, or expense_type.",
                 },
             )
         try:
@@ -429,6 +379,7 @@ class CostStatisticsApiRoutes:
                 view=view,
                 project_names=project_names,
                 expense_types=expense_types,
+                bank_account_labels=bank_account_labels,
                 start_month=start_month,
                 end_month=end_month,
                 start_date=start_date,
@@ -462,6 +413,7 @@ class CostStatisticsApiRoutes:
         view: str | None,
         project_names: list[str] | None,
         expense_types: list[str] | None,
+        bank_account_labels: list[str] | None,
         start_month: str | None = None,
         end_month: str | None = None,
         start_date: str | None = None,
@@ -469,12 +421,12 @@ class CostStatisticsApiRoutes:
         aggregate_by: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
-        if view not in {"time", "bank_tag", "project", "expense_type"}:
+        if view not in {"bank_account", "project", "expense_type"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_export_preview_request",
-                    "message": "view must be time, bank_tag, project, or expense_type.",
+                    "message": "view must be bank_account, project, or expense_type.",
                 },
             )
         try:
@@ -483,6 +435,7 @@ class CostStatisticsApiRoutes:
                 view=view,
                 project_names=project_names,
                 expense_types=expense_types,
+                bank_account_labels=bank_account_labels,
                 start_month=start_month,
                 end_month=end_month,
                 start_date=start_date,
@@ -510,12 +463,12 @@ class CostStatisticsApiRoutes:
         scope: str | None,
     ) -> Any:
         normalized_view = str(view or "").strip().lower()
-        if normalized_view not in {"time", "bank_tag", "project", "bank", "expense_type"}:
+        if normalized_view not in {"project", "bank_account", "expense_type"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_bank_transaction_request",
-                    "message": "view must be time, bank_tag, project, bank, or expense_type.",
+                    "message": "view must be project, bank_account, or expense_type.",
                 },
             )
         try:
@@ -548,12 +501,12 @@ class CostStatisticsApiRoutes:
         scope: str | None,
     ) -> Any:
         normalized_view = str(view or "").strip().lower()
-        if normalized_view not in {"project", "bank", "expense_type"}:
+        if normalized_view not in {"project", "bank_account", "expense_type"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_allocation_request",
-                    "message": "view must be project, bank, or expense_type.",
+                    "message": "view must be project, bank_account, or expense_type.",
                 },
             )
         try:
@@ -613,19 +566,7 @@ class CostStatisticsApiRoutes:
 
 def _explorer_entry_count(payload: dict[str, Any]) -> int:
     rows = payload.get("rows")
-    if isinstance(rows, list):
-        return len(rows)
-    time_rows = payload.get("time_rows")
-    if isinstance(time_rows, list):
-        return len(time_rows)
-    summary = payload.get("summary")
-    if isinstance(summary, dict):
-        raw_count = summary.get("transaction_count", summary.get("row_count", 0))
-        try:
-            return int(raw_count)
-        except (TypeError, ValueError):
-            return 0
-    return 0
+    return len(rows) if isinstance(rows, list) else 0
 
 
 def _candidate_codes(candidates: list[dict[str, Any]]) -> set[str]:
@@ -639,8 +580,6 @@ def _candidate_codes(candidates: list[dict[str, Any]]) -> set[str]:
 def _merge_tag_candidates(
     payload: dict[str, Any],
     candidates: list[dict[str, Any]],
-    *,
-    include_definitions: bool = False,
 ) -> dict[str, Any]:
     result = dict(payload)
     definitions = {
@@ -670,18 +609,6 @@ def _merge_tag_candidates(
         if str(tag.get("code") or "")
     }
     result["available_tags"] = [
-        *(
-            [
-                {
-                    **definition,
-                    "status": str(definition.get("status") or "available"),
-                }
-                for code, definition in definitions.items()
-                if code not in candidate_by_code
-            ]
-            if include_definitions
-            else []
-        ),
         *[
             {
                 **definitions.get(code, {}),

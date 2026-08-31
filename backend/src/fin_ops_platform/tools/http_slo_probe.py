@@ -181,7 +181,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("tax_offset_rows", f"/api/tax-offset?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
     HttpProbe(
         "cost_statistics_explorer_all",
-        f"/api/cost-statistics/explorer?scope={DEFAULT_BUSINESS_MONTH}&view=time&include_statistics=false",
+        f"/api/cost-statistics/explorer?scope={DEFAULT_BUSINESS_MONTH}&view=bank_account&include_statistics=false",
         expected_statuses=(200, 202),
     ),
     HttpProbe(

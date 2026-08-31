@@ -170,7 +170,7 @@ _CONSUMER_PATHS = {
     "input-invoice-usage": "/api/input-invoice-usage/rows?page=1&page_size=20",
     "output-invoice-collections": "/api/output-invoice-collections/rows?page=1&page_size=20",
     "oa-pending-payments": "/api/oa-pending-payments/rows?page=1&page_size=20",
-    "cost-statistics": "/api/cost-statistics/explorer?scope=2026-07&view=time",
+    "cost-statistics": "/api/cost-statistics/explorer?scope=2026-07&view=project",
     "tax-offset": "/api/tax-offset?month=2026-07",
     "turnover-ledger": "/api/turnover-ledger?view=grouped&page=1&page_size=20",
 }
@@ -2753,7 +2753,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 write_operation_e2e_smoke.ConsumerProbe(
                     probe=http_slo_probe.HttpProbe(
                         "cost-all",
-                        "/api/cost-statistics/explorer?scope=all&view=time",
+                        "/api/cost-statistics/explorer?scope=all&view=project",
                         target_ms=1000,
                     ),
                     assertions=(

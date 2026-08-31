@@ -1,7 +1,5 @@
 import type {
   CostBankExplorerRow,
-  CostBankTagPrimaryExplorerRow,
-  CostBankTagSubExplorerRow,
   CostExpenseTypeExplorerRow,
   CostProjectExplorerRow,
   CostStatisticsExportPreview,
@@ -11,14 +9,12 @@ import type {
   CostStatisticsManualAllocationPage,
   CostStatisticsManualAllocationPageRequest,
   CostStatisticsManualAllocationTask,
-  CostStatisticsTimeTagRules,
   CostStatisticsTagRuleTag,
   CostStatisticsView,
   CostExplorerEntryRow,
   CostEntryDetail,
   SaveCostStatisticsNoOaRulesRequest,
   SaveCostStatisticsManualAllocationRequest,
-  SaveCostStatisticsTimeTagRulesRequest,
 } from "./types";
 import { apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 
@@ -26,10 +22,6 @@ type ApiCostSummary = {
   row_count: number;
   transaction_count: number;
   total_amount: string;
-  expense_amount?: string | null;
-  income_amount?: string | null;
-  expense_transaction_count?: number | null;
-  income_transaction_count?: number | null;
 };
 
 type ApiCostExplorerEntryRow = {
@@ -46,12 +38,8 @@ type ApiCostExplorerEntryRow = {
   counterparty_name: string;
   oa_applicant: string;
   payment_account_label: string;
+  bank_account_label: string;
   remark: string;
-  bank_tag_code?: string | null;
-  bank_tag_label?: string | null;
-  bank_tag_primary_label?: string | null;
-  bank_tag_sub_label?: string | null;
-  bank_tag_label_path?: string[] | null;
 };
 
 type ApiCostProjectExplorerRow = {
@@ -71,30 +59,11 @@ type ApiCostExpenseTypeExplorerRow = {
 };
 
 type ApiCostBankExplorerRow = {
-  payment_account_label: string;
-  expense_amount: string;
-  income_amount: string;
-  net_outflow_amount: string;
+  bank_account_label: string;
+  total_amount: string;
   transaction_count: number;
-  expense_percentage_label: string;
-};
-
-type ApiCostBankTagPrimaryExplorerRow = {
-  primary_label: string;
-  expense_amount: string;
-  income_amount: string;
-  expense_transaction_count: number;
-  income_transaction_count: number;
-  sub_tag_count: number;
-};
-
-type ApiCostBankTagSubExplorerRow = {
-  primary_label: string;
-  sub_label: string;
-  expense_amount: string;
-  income_amount: string;
-  expense_transaction_count: number;
-  income_transaction_count: number;
+  project_count: number;
+  percentage_label: string;
 };
 
 type ApiCostStatisticsExplorerPage = {
@@ -102,13 +71,9 @@ type ApiCostStatisticsExplorerPage = {
   view: CostStatisticsExplorerPage["view"];
   summary: ApiCostSummary;
   statistics?: {
-    transaction_count?: number | null;
-    expense_transaction_count?: number | null;
-    income_transaction_count?: number | null;
-    untagged_transaction_count?: number | null;
     project_count?: number | null;
     expense_type_count?: number | null;
-    bank_tag_count?: number | null;
+    bank_account_count?: number | null;
     cost_transaction_count?: number | null;
   } | null;
   available_years?: string[] | null;
@@ -116,8 +81,6 @@ type ApiCostStatisticsExplorerPage = {
     projects?: ApiCostProjectExplorerRow[] | null;
     expense_types?: ApiCostExpenseTypeExplorerRow[] | null;
     bank_accounts?: ApiCostBankExplorerRow[] | null;
-    bank_tag_primary?: ApiCostBankTagPrimaryExplorerRow[] | null;
-    bank_tag_sub?: ApiCostBankTagSubExplorerRow[] | null;
   } | null;
   rows?: ApiCostExplorerEntryRow[] | null;
   row_count: number;
@@ -190,6 +153,7 @@ type ApiCostBankTransactionDetail = {
     amount: string;
     counterparty_name: string;
     payment_account_label: string;
+    bank_account_label: string;
     remark: string;
     bank_tag_code?: string | null;
     bank_tag_label?: string | null;
@@ -217,6 +181,7 @@ type ApiCostAllocationDetail = {
     amount: string;
     counterparty_name: string;
     payment_account_label: string;
+    bank_account_label: string;
     oa_applicant: string;
     oa_original_amount: string;
     oa_allocation_weight: string;
@@ -246,7 +211,7 @@ type ApiCostAllocationDetail = {
 };
 
 type ApiCostStatisticsExportPreview = {
-  view: "time" | "bank_tag" | "project" | "expense_type";
+  view: "bank_account" | "project" | "expense_type";
   file_name: string;
   scope_label: string;
   summary: ApiCostSummary & {
@@ -277,10 +242,6 @@ type ApiCostStatisticsRulesBase = {
   can_save?: boolean | null;
 };
 
-type ApiCostStatisticsTimeTagRules = ApiCostStatisticsRulesBase & {
-  mode?: "all" | "custom" | null;
-};
-
 type ApiCostStatisticsNoOaRules = ApiCostStatisticsRulesBase & {
   projects?: Array<{
     id: string;
@@ -294,10 +255,6 @@ function mapSummary(summary: ApiCostSummary) {
     rowCount: summary.row_count,
     transactionCount: summary.transaction_count,
     totalAmount: summary.total_amount,
-    expenseAmount: optionalString(summary.expense_amount),
-    incomeAmount: optionalString(summary.income_amount),
-    expenseTransactionCount: summary.expense_transaction_count ?? undefined,
-    incomeTransactionCount: summary.income_transaction_count ?? undefined,
   };
 }
 
@@ -354,8 +311,8 @@ function mapCostExplorerEntryRow(row: ApiCostExplorerEntryRow): CostExplorerEntr
     counterpartyName: row.counterparty_name,
     oaApplicant: row.oa_applicant,
     paymentAccountLabel: row.payment_account_label,
+    bankAccountLabel: row.bank_account_label,
     remark: row.remark,
-    ...bankTagFields(row),
   };
 }
 
@@ -369,18 +326,6 @@ function mapTagRuleTag(row: ApiCostStatisticsTagRuleTag): CostStatisticsTagRuleT
     direction: optionalString(row.direction) ?? "any",
     outputPrimaryLabel: optionalString(row.output_primary_label) ?? optionalString(row.label) ?? row.code,
     outputSubLabel: optionalString(row.output_sub_label) ?? optionalString(row.label) ?? "",
-  };
-}
-
-function mapTimeTagRules(payload: ApiCostStatisticsTimeTagRules): CostStatisticsTimeTagRules {
-  return {
-    version: Number(payload.version || 1),
-    bankAutoTagRulesVersion: Number(payload.bank_auto_tag_rules_version || 1),
-    mode: payload.mode === "custom" ? "custom" : "all",
-    selectedTagCodes: stringList(payload.selected_tag_codes) ?? [],
-    inactiveSelectedTagCodes: stringList(payload.inactive_selected_tag_codes) ?? [],
-    availableTags: (payload.available_tags ?? []).map(mapTagRuleTag).filter((tag) => tag.code.trim()),
-    canSave: payload.can_save !== false,
   };
 }
 
@@ -466,11 +411,9 @@ export async function fetchCostStatisticsExplorerPage(
     buildScopedUrl("/api/cost-statistics/explorer", {
       scope: request.scope,
       view: request.view,
-      project_name: request.view === "project" ? request.projectName : undefined,
+      project_name: request.view === "project" || request.view === "bank_account" ? request.projectName : undefined,
       expense_type: request.view === "project" || request.view === "expense_type" ? request.expenseType : undefined,
-      payment_account_label: request.view === "bank" ? request.paymentAccountLabel : undefined,
-      bank_tag_primary_label: request.view === "bank_tag" ? request.bankTagPrimaryLabel : undefined,
-      bank_tag_sub_label: request.view === "bank_tag" ? request.bankTagSubLabel : undefined,
+      bank_account_label: request.view === "bank_account" ? request.bankAccountLabel : undefined,
       query: request.query,
       cursor: request.cursor,
       page_size: request.pageSize ? String(request.pageSize) : undefined,
@@ -488,13 +431,9 @@ export async function fetchCostStatisticsExplorerPage(
     view: payload.view,
     summary: mapSummary(payload.summary),
     statistics: payload.statistics ? {
-      transactionCount: optionalCount(payload.statistics.transaction_count),
-      expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
-      incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
-      untaggedTransactionCount: optionalCount(payload.statistics.untagged_transaction_count),
       projectCount: optionalCount(payload.statistics.project_count),
       expenseTypeCount: optionalCount(payload.statistics.expense_type_count),
-      bankTagCount: optionalCount(payload.statistics.bank_tag_count),
+      bankAccountCount: optionalCount(payload.statistics.bank_account_count),
       costTransactionCount: optionalCount(payload.statistics.cost_transaction_count),
     } : undefined,
     availableYears: stringList(payload.available_years) ?? [],
@@ -514,28 +453,11 @@ export async function fetchCostStatisticsExplorerPage(
         percentageLabel: row.percentage_label,
       })),
       bankAccounts: (facets.bank_accounts ?? []).map<CostBankExplorerRow>((row) => ({
-        paymentAccountLabel: row.payment_account_label,
-        expenseAmount: row.expense_amount,
-        incomeAmount: row.income_amount,
-        netOutflowAmount: row.net_outflow_amount,
+        bankAccountLabel: row.bank_account_label,
+        totalAmount: row.total_amount,
         transactionCount: row.transaction_count,
-        expensePercentageLabel: row.expense_percentage_label,
-      })),
-      bankTagPrimary: (facets.bank_tag_primary ?? []).map<CostBankTagPrimaryExplorerRow>((row) => ({
-        primaryLabel: row.primary_label,
-        expenseAmount: row.expense_amount,
-        incomeAmount: row.income_amount,
-        expenseTransactionCount: row.expense_transaction_count,
-        incomeTransactionCount: row.income_transaction_count,
-        subTagCount: row.sub_tag_count,
-      })),
-      bankTagSub: (facets.bank_tag_sub ?? []).map<CostBankTagSubExplorerRow>((row) => ({
-        primaryLabel: row.primary_label,
-        subLabel: row.sub_label,
-        expenseAmount: row.expense_amount,
-        incomeAmount: row.income_amount,
-        expenseTransactionCount: row.expense_transaction_count,
-        incomeTransactionCount: row.income_transaction_count,
+        projectCount: row.project_count,
+        percentageLabel: row.percentage_label,
       })),
     },
     rows: (payload.rows ?? []).map(mapCostExplorerEntryRow),
@@ -596,29 +518,6 @@ export async function saveCostStatisticsManualAllocation(
     },
   );
   return mapManualAllocationTask(payload);
-}
-
-export async function fetchCostStatisticsTimeTagRules(signal?: AbortSignal): Promise<CostStatisticsTimeTagRules> {
-  const payload = await requestJson<ApiCostStatisticsTimeTagRules>("/api/cost-statistics/time-tag-rules", {
-    method: "GET",
-    signal,
-  });
-  return mapTimeTagRules(payload);
-}
-
-export async function saveCostStatisticsTimeTagRules(
-  request: SaveCostStatisticsTimeTagRulesRequest,
-): Promise<CostStatisticsTimeTagRules> {
-  const payload = await requestJson<ApiCostStatisticsTimeTagRules>("/api/cost-statistics/time-tag-rules", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      expected_version: request.expectedVersion,
-      mode: request.mode,
-      selected_tag_codes: request.selectedTagCodes,
-    }),
-  });
-  return mapTimeTagRules(payload);
 }
 
 export async function fetchCostStatisticsNoOaRules(signal?: AbortSignal): Promise<CostStatisticsNoOaRules> {
@@ -703,6 +602,7 @@ export async function fetchCostEntryDetail(
       amount: allocation.amount,
       counterpartyName: allocation.counterparty_name,
       paymentAccountLabel: allocation.payment_account_label,
+      bankAccountLabel: allocation.bank_account_label,
       oaApplicant: allocation.oa_applicant,
       oaOriginalAmount: allocation.oa_original_amount,
       oaAllocationWeight: allocation.oa_allocation_weight,
@@ -749,7 +649,9 @@ export type ProjectCostExportParams = {
 export type CostExportParams =
   | {
       month: string;
-      view: "time" | "bank_tag";
+      view: "bank_account";
+      bankAccountLabels: string[];
+      projectNames?: string[];
       startMonth?: string;
       endMonth?: string;
       startDate?: string;
@@ -788,7 +690,7 @@ function parseContentDispositionFileName(contentDisposition: string | null) {
 }
 
 function buildFallbackExportFileName(params: CostExportParams) {
-  if (params.view === "time" || params.view === "bank_tag") {
+  if (params.view === "bank_account") {
     const scopeLabel =
       params.startDate && params.endDate
         ? `${params.startDate}至${params.endDate}`
@@ -797,7 +699,7 @@ function buildFallbackExportFileName(params: CostExportParams) {
         : params.month === "all"
             ? "全部期间"
             : params.month;
-    return `成本统计_${scopeLabel}_${params.view === "bank_tag" ? "按标签统计" : "按时间统计"}.xlsx`;
+    return `成本统计_${scopeLabel}_按银行账户统计.xlsx`;
   }
   if (params.view === "month") {
     return `成本统计_${params.month}_月份汇总.xlsx`;
@@ -807,6 +709,7 @@ function buildFallbackExportFileName(params: CostExportParams) {
       params.projectNames.length === 1 ? params.projectNames[0] : `${params.projectNames[0]}等${params.projectNames.length}个项目`;
     return `成本统计_全部期间_按项目统计_按${params.aggregateBy === "month" ? "月" : "年"}_${projectLabel}.xlsx`;
   }
+
   if (params.view === "expense_type") {
     const scopeLabel =
       params.startDate && params.endDate
@@ -820,7 +723,7 @@ function buildFallbackExportFileName(params: CostExportParams) {
       params.expenseTypes.length === 1 ? params.expenseTypes[0] : `${params.expenseTypes[0]}等${params.expenseTypes.length}类`;
     return `成本统计_${scopeLabel}_按费用类型统计_${expenseTypeLabel}.xlsx`;
   }
-  throw new Error(`unsupported cost statistics export view: ${params.view}`);
+  throw new Error("unsupported cost statistics export view");
 }
 
 function buildCostStatisticsQuery(
@@ -863,6 +766,15 @@ function buildCostStatisticsQuery(
       query.set("include_ignored_rows", String(projectParams.includeIgnoredRows ?? true));
       query.set("include_expense_content_summary", String(projectParams.includeExpenseContentSummary ?? true));
       query.set("sort_by", projectParams.sortBy ?? "time");
+    }
+  }
+
+  if (params.view === "bank_account") {
+    for (const bankAccountLabel of params.bankAccountLabels) {
+      query.append("bank_account_label", bankAccountLabel);
+    }
+    for (const projectName of params.projectNames ?? []) {
+      query.append("project_name", projectName);
     }
   }
 
@@ -964,7 +876,9 @@ export async function exportCostStatisticsView(params: CostExportParams, signal?
 export type PreviewCostExportParams =
   | {
       month: string;
-      view: "time" | "bank_tag";
+      view: "bank_account";
+      bankAccountLabels: string[];
+      projectNames?: string[];
       startMonth?: string;
       endMonth?: string;
       startDate?: string;
@@ -1008,10 +922,6 @@ export async function fetchCostStatisticsExportPreview(
       rowCount: payload.summary.row_count,
       transactionCount: payload.summary.transaction_count,
       totalAmount: payload.summary.total_amount,
-      expenseAmount: optionalString(payload.summary.expense_amount),
-      incomeAmount: optionalString(payload.summary.income_amount),
-      expenseTransactionCount: payload.summary.expense_transaction_count ?? undefined,
-      incomeTransactionCount: payload.summary.income_transaction_count ?? undefined,
       sheetCount: payload.summary.sheet_count,
     },
     sheetNames: payload.sheet_names,

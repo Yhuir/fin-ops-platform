@@ -98,26 +98,20 @@ test("成本统计项目文字可选择且拖选不会切换项目", async ({ pa
   await page.addInitScript(() => {
     const now = Date.now();
     sessionStorage.setItem("finops:pageSession:v1:e2e-user:cost-statistics:explorerState", JSON.stringify({
-      version: 3,
+      version: 4,
       updatedAt: now,
       expiresAt: now + 60 * 60 * 1000,
       value: {
         viewMode: "project",
-        timeScopeMode: "month",
-        timeScopeYear: "2026",
-        timeScopeMonth: "2026-03",
         projectScopeMode: "month",
         projectScopeYear: "2026",
         projectScopeMonth: "2026-03",
-        bankScopeMode: "all",
-        bankScopeYear: "2026",
-        bankScopeMonth: "2026-03",
+        bankAccountScopeMode: "all",
+        bankAccountScopeYear: "2026",
+        bankAccountScopeMonth: "2026-03",
         expenseTypeScopeMode: "month",
         expenseTypeScopeYear: "2026",
         expenseTypeScopeMonth: "2026-03",
-        bankTagScopeMode: "month",
-        bankTagScopeYear: "2026",
-        bankTagScopeMonth: "2026-03",
       },
     }));
   });

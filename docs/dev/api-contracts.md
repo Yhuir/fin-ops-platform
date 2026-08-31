@@ -90,23 +90,24 @@
 
 `GET /api/cost-statistics/explorer`
 
-- query 保持 `scope`、`view`、筛选、cursor 与 `page_size` 合同；可选 `query` 会折叠空白并限制为 200 字符。旧 `project_scope` 已移除，项目完成状态不再过滤历史成本。
-- 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、正式关系、标签和设置，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
-- `include_statistics=false` 时 `statistics=null`，repository 可按当前 scope 下推事实读取。成本统计首屏先用该模式取得可见内容，再以独立 `page_size=1` 请求非阻塞加载全局 statistics；辅助统计失败不得清空或重新锁住已返回的内容。
-- `query` 只搜索当前 view 的事实域，并在 summary、facets、row count 和 cursor 分页之前生效；cursor identity 必须包含规范化 query，禁止跨搜索条件复用。
-- `project|expense_type` 消费成本金额 `C`，`bank|bank_tag|time` 消费关系净支出 `N`；其中 `C + X = N`，`X` 为明确保存的不计入成本金额。项目/费用事件使用关系最新有效支出时间作为确定性期间锚点，但该时间只用于排序和期间归集，不证明 OA 单元来自该流水、账户或标签。无 OA 银行行继续按无 OA 成本范围进入相应视图。
-- 对已完成 OA 的 active relation，`O=N` 时不区分 1:1、1:N、N:1 或 N:M，直接按 canonical OA 单元原金额形成 `C`；`O!=N` 时该关系在有效人工分配前不进入项目/费用成本人口。`N=0` 不形成成本或人工任务，`N<0` 返回完整性错误，不取绝对值或其它 fallback。
-- `project|expense_type` 的根层总额为 `C`；`bank|bank_tag|time` 的根层总额为 `N`。只有同一口径内要求对账，禁止用 OA 单元按流水比例合成账户、标签、月份或资金来源归属。
+- `view` 只接受 `project|expense_type|bank_account`。旧 `time|bank|bank_tag` 返回 `400 invalid_cost_statistics_query`。
+- 共用 query 为 `scope`、`view`、可选 `query`、`cursor`、`page_size` 与 `include_statistics`。`query` 折叠空白、最长 200 字符，并参与 cursor identity。
+- `project` 可接受 `project_name` 和其后的 `expense_type`；`expense_type` 可接受 `expense_type`；`bank_account` 可接受 `bank_account_label` 和其后的 `project_name`。旧 `payment_account_label` 与标签筛选参数不是 explorer 合同。
+- 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、active relation、人工分配和无 OA 设置，生成唯一成本事件集合，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
+- 三个根 view 的 `summary.total_amount` 与 `transaction_count` 在相同 scope/query 下必须相等；只改变聚合维度。`statistics` 只包含 `project_count`、`expense_type_count`、`bank_account_count`、`cost_transaction_count`。
+- `bank_account` 分面按成本事件 `bank_account_label` 聚合。OA 关系的支出账户恰好一个时归该账户；零个或多个不同支出账户归`银行账户未确定`；收入/退款账户忽略。无 OA 成本使用来源支出账户。
+- 对已完成 OA 的 active relation，`O=N` 时按 canonical OA 单元原金额形成成本；`O!=N` 时在有效人工分配前不进入成本人口。`N=0` 不形成成本或任务，`N<0` 返回完整性错误，不使用绝对值、旧值或其它 fallback。
+- `include_statistics=false` 时 `statistics=null`；内容请求不被辅助全局统计阻塞。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
 - 数据库或业务计算失败必须返回明确错误；浏览器刷新会重新执行完整请求，不读取旧 payload 伪装成功。
 
 `GET /api/cost-statistics/bank-transactions/{transaction_id}`
 
-- 服务五个 view 中 `row_kind=bank_transaction` 的行，返回对应 canonical 银行流水详情；无 OA 行可包含虚拟项目名和“无 OA 分类”。必须携带当前 `view` 与 `scope`；非法参数返回 `400 invalid_cost_statistics_bank_transaction_request`，未找到返回 `404`。
+- 服务三个 view 中无 OA `row_kind=bank_transaction` 的成本行，返回其 canonical 来源支出详情；它不提供原始银行统计列表。必须携带当前 `view` 与 `scope`；非法参数返回 400，未找到返回 404。
 
 `GET /api/cost-statistics/allocations/{allocation_id}`
 
-- 只服务 `project|bank|expense_type` 中 `row_kind=oa_allocation` 的行，返回 OA 单元成本、同一正式关系组的支出/付错退款证据和金额核对。接口不得返回或暗示不能由 canonical facts 证明的 OA 单元资金来源归属；银行证据只说明关系层净支出，项目/费用事件时间也只是最新有效支出时间锚点。证据中的退款 `amount` 保持正数并以 `direction=收入` 表意，成本详情 UI 显示为负数。
+- 服务 `project|expense_type|bank_account` 中 `row_kind=oa_allocation` 的行，返回 OA 单元成本、同一正式关系组的支出/付错退款证据和金额核对。银行账户分组是关系层观察维度，不得暗示 OA 单元到具体流水的资金来源归属。
 - 两个详情接口都从同一 canonical snapshot 计算，按请求的 `scope`、`view` 有界读取且不加载全局 statistics；不跨页面 API/read model fallback。
 
 `GET /api/cost-statistics/manual-allocations`
@@ -123,19 +124,16 @@
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 
-- 复用 explorer 相同事实源和筛选口径；preview 最多 8 行，download 受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
+- 只接受 `project|expense_type|bank_account`，复用 explorer 的成本事件、银行账户归属与筛选口径；preview 最多 8 行，download 受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 导出不入队、不等待 worker，也不读取旧 Cost 投影。
-
-`GET|PUT /api/cost-statistics/time-tag-rules`
-
-- 只控制 `time|bank_tag`。写 owner 为 `AppSettingsService`，保持独立 version conflict、权限与 audit 合同。
-- 默认 `{mode: "all", selected_tag_codes: []}`，表示当前和未来新增标签、历史仍被事实引用的标签及 `__uncategorized__` 都进入；`mode=custom` 时仅保留 `selected_tag_codes`。
 
 `GET|PUT /api/cost-statistics/no-oa-rules`
 
-- 只控制 `project|bank|expense_type` 的无 OA 例外。默认 `projects=[]`；每项包含稳定 `id`、非空 `display_name` 与 `tag_codes`。
+- 控制三个成本 view 的无 OA 例外。默认 `projects=[]`；每项包含稳定 `id`、非空 `display_name` 与 `tag_codes`。
 - GET 候选仅来自当前全历史实际无 active OA 关系的支出流水标签。PUT 由服务端校验项目 ID/名称、候选范围与 tag→project 全局互斥；已保存但当前不可用的 code 仍可返回并由用户显式取消。
-- 两套规则保存都不触发 Cost read-model refresh；下一次 canonical snapshot 直接应用。保存任一规则不会修改或刷新另一套统计集合。
+- 保存不触发 Cost read-model refresh；页面重新 GET 后从 canonical snapshot 直接应用。
+
+旧 `/api/cost-statistics/time-tag-rules` endpoint 已删除并返回 404；旧 `cost_statistics_time_tag_selection` 不参与 runtime settings normalization 或 persistence。
 
 ## Workbench 设置 API
 

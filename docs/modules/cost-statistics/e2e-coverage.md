@@ -2,23 +2,17 @@
 
 | ID | 状态 | 自动化证据 |
 | --- | --- | --- |
-| `COST-E2E-001` | covered | `tests/test_cost_statistics_api.py`、`tests/test_cost_statistics_policy.py` 的 `project/expense_type=C`、`bank/bank_tag/time=N` 与 `C+X=N` 口径 |
-| `COST-E2E-002` | covered | `tests/test_cost_statistics_api.py::CostStatisticsApiTests::test_next_request_observes_relation_withdrawal_without_refresh_job`、写操作影响矩阵测试 |
-| `COST-E2E-003` | covered | `tests/test_cost_statistics_api.py::CostStatisticsApiTests::test_project_view_and_detail_use_the_same_active_relation` |
-| `COST-E2E-004` | covered | `tests/test_cost_statistics_api.py` 的 pending/stale export preview/说明、`web/src/test/CostStatisticsApi.test.ts` |
-| `COST-E2E-005` | covered | `web/src/test/CostStatisticsPage.test.tsx` |
-| `COST-E2E-006` | covered | `tests/test_platform_runtime_boundary_guards.py`、registry/manifest/deploy 回归 |
-| `COST-E2E-007` | local-covered / production-measure | 本地 API budget 测试；发布后记录生产多次请求分布 |
-| `COST-E2E-008` | covered | `tests/test_cost_statistics_policy.py` 的 `O=N` 任意拓扑自动、`O!=N` pending、`N=0`/`N<0` 边界；`tests/test_cost_statistics_api.py` |
-| `COST-E2E-009` | covered | `tests/test_cost_statistics_policy.py` 的同关系付错退款/普通收入隔离、无退款归因行与原始流水不变；`tests/test_cost_statistics_api.py` 的 explorer/detail contract；`web/src/test/CostEntryDetailPanel.test.tsx` 的负数退款证据 |
-| `COST-E2E-010` | covered | `tests/test_cost_statistics_policy.py` 的进行中关系只从归因集合排除与银行日期；`tests/test_cost_statistics_api.py` 的原始流水/归因集合隔离 |
-| `COST-E2E-011` | covered | `tests/test_cost_statistics_policy.py` 的零权重保护与 duplicate ownership；`tests/test_cost_statistics_api.py` 的冲突合同 |
-| `COST-E2E-012` | covered | `tests/test_cost_statistics_api.py` 的真实候选、默认空、多项目保存、互斥校验及同标签有/无 OA 逐笔隔离；`tests/test_app_settings_service.py`；前端抽屉组件测试 |
-| `COST-E2E-013` | covered / production-measure | `tests/test_mongo_oa_adapter.py` 的 form-specific 字段；发布后以 OA v8 同步和生产有效源字段恢复量补证 |
-| `COST-E2E-014` | covered | `tests/test_cost_statistics_api.py` 的默认 all/custom 空选择与旧 endpoint 404；`web/src/test/CostStatisticsPage.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` 的两套规则互不影响 |
-| `COST-E2E-015` | covered | `tests/test_cost_statistics_canonical_repository.py` 的全关系银行证据/声明 OA 成员；`tests/test_cost_statistics_policy.py` 的跨月退款与 partial OA fail-closed |
-| `COST-E2E-016` | covered | `tests/test_cost_statistics_api.py` 的逐 OA 单元 DTO、非法来源字段、`C+X=N`、X 原因/范围、source-version conflict、审计与 pending/allocated；`web/src/test/CostStatisticsPage.test.tsx` 的 lazy GET、Disclosure、每关系保存、条件 X 和编辑入口 |
-| `COST-E2E-017` | covered | `tests/test_cost_statistics_policy.py` 的 C/N 分离、禁止伪造资金来源归属及最新支出时间锚点；`tests/test_cost_statistics_api.py` 的详情/导出合同 |
-| `COST-E2E-018` | automated-covered / visual-measure | `web/src/test/CostStatisticsPage.test.tsx` 的分组语义、“银行账户→canonical 流水”两栏下钻与视图切换；候选/生产由浏览器桌面和窄视口截图补证 |
+| `COST-E2E-001` | covered | `tests/test_cost_statistics_policy.py`、`tests/test_cost_statistics_api.py` 三视图根汇总对账 |
+| `COST-E2E-002` | covered | policy/API 定向测试；`CostStatisticsPage.test.tsx`；`cost-statistics-flow.spec.ts` |
+| `COST-E2E-003` | covered | API mapper、组件与浏览器费用类型下钻测试 |
+| `COST-E2E-004` | covered | bank_account API 合同、组件与浏览器账户→项目→明细测试 |
+| `COST-E2E-005` | covered | policy 单一/缺失/多账户/退款忽略/无 OA 账户测试 |
+| `COST-E2E-006` | covered | policy 与 manual-allocation API 的自动/人工/金额/完整性测试 |
+| `COST-E2E-007` | covered | no-OA policy/settings/API 测试及浏览器保存后刷新测试 |
+| `COST-E2E-008` | covered | API preview/download、前端 mapper、组件和浏览器预览测试 |
+| `COST-E2E-009` | covered | API 负面测试、旧 route 404、源码全仓扫描、前端旧 UI 不存在测试 |
+| `COST-E2E-010` | covered | API 错误/权限测试、组件错误恢复和只读权限测试、权限矩阵 |
+| `COST-E2E-011` | covered | 跨模块 E2E 与 runtime boundary tests；发布后 runtime smoke 补证 |
+| `COST-E2E-012` | local-covered / production-measure | repository 查询预算、本地 API budget、`http_slo_probe`；发布后记录生产分位数 |
 
-候选门禁使用成本统计后端/API/Audit/边界测试、前端定向测试和生产 build；真实正确性、抽屉视觉与性能由部署后的集中生产验证补齐。
+生产性能与真实数据抽样在每次改变成本人口或查询链后重新执行；本地 mock 结果不能替代生产证据。

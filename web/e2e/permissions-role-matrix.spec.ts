@@ -271,22 +271,6 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
     },
   },
   {
-    id: "cost-statistics:time-tag-rules",
-    label: "cost statistics time/tag rules drawer",
-    verify: async (page) => {
-      await page.goto("/cost-statistics");
-      await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
-      await page.getByRole("button", { name: "按标签/按时间标签规则" }).click();
-      const drawer = page.getByRole("dialog", { name: "按标签/按时间标签规则" });
-      await expect(drawer).toBeVisible();
-      await expect(drawer.getByRole("button", { name: "全选" })).toBeDisabled();
-      await expect(drawer.getByRole("button", { name: "清空" })).toBeDisabled();
-      await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
-      await expectNoEnabledWriteControlCandidates(page);
-      await drawer.getByRole("button", { name: "关闭抽屉" }).click();
-    },
-  },
-  {
     id: "cost-statistics:no-oa-rules",
     label: "cost statistics no-OA rules drawer",
     verify: async (page) => {

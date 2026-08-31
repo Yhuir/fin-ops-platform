@@ -139,7 +139,6 @@ class ApplicationStateStore:
             "pending_invoice_tag_groups": {},
             "pending_output_invoice_tag_groups": {},
             "bank_flow_rule_batch_tag_rules": {},
-            "cost_statistics_time_tag_selection": {},
             "cost_statistics_no_oa_projects": {},
             "input_invoice_usage_payment_status_rules": {},
             "etc_oa_draft_prefill": {},
@@ -179,20 +178,9 @@ class ApplicationStateStore:
             normalized_payload["no_oa_bank_batch_tag_selection"] = dict(
                 loaded.get("no_oa_bank_batch_tag_selection") or {}
             )
-        if "cost_statistics_time_tag_selection" in loaded:
-            normalized_payload["cost_statistics_time_tag_selection"] = dict(
-                loaded.get("cost_statistics_time_tag_selection") or {}
-            )
         if "cost_statistics_no_oa_projects" in loaded:
             normalized_payload["cost_statistics_no_oa_projects"] = dict(
                 loaded.get("cost_statistics_no_oa_projects") or {}
-            )
-        if (
-            "cost_statistics_tag_selection" in loaded
-            and "cost_statistics_no_oa_projects" not in loaded
-        ):
-            normalized_payload["cost_statistics_tag_selection"] = dict(
-                loaded.get("cost_statistics_tag_selection") or {}
             )
         if "turnover_ledger_tag_selection" in loaded:
             normalized_payload["turnover_ledger_tag_selection"] = dict(
@@ -232,9 +220,6 @@ class ApplicationStateStore:
             "pending_invoice_tag_groups": dict(payload.get("pending_invoice_tag_groups") or {}),
             "pending_output_invoice_tag_groups": dict(payload.get("pending_output_invoice_tag_groups") or {}),
             "bank_flow_rule_batch_tag_rules": dict(payload.get("bank_flow_rule_batch_tag_rules") or {}),
-            "cost_statistics_time_tag_selection": dict(
-                payload.get("cost_statistics_time_tag_selection") or {}
-            ),
             "cost_statistics_no_oa_projects": dict(
                 payload.get("cost_statistics_no_oa_projects") or {}
             ),

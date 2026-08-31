@@ -2,20 +2,12 @@ export type CostSummary = {
   rowCount: number;
   transactionCount: number;
   totalAmount: string;
-  expenseAmount?: string;
-  incomeAmount?: string;
-  expenseTransactionCount?: number;
-  incomeTransactionCount?: number;
 };
 
 export type CostStatisticsPageStatistics = {
-  transactionCount?: number;
-  expenseTransactionCount?: number;
-  incomeTransactionCount?: number;
-  untaggedTransactionCount?: number;
   projectCount?: number;
   expenseTypeCount?: number;
-  bankTagCount?: number;
+  bankAccountCount?: number;
   costTransactionCount?: number;
 };
 
@@ -33,21 +25,16 @@ export type CostExplorerEntryRow = {
   counterpartyName: string;
   oaApplicant: string;
   paymentAccountLabel: string;
+  bankAccountLabel: string;
   remark: string;
-  bankTagCode: string;
-  bankTagLabel: string;
-  bankTagPrimaryLabel: string;
-  bankTagSubLabel: string;
-  bankTagLabelPath: string[];
 };
 
 export type CostBankExplorerRow = {
-  paymentAccountLabel: string;
-  expenseAmount: string;
-  incomeAmount: string;
-  netOutflowAmount: string;
+  bankAccountLabel: string;
+  totalAmount: string;
   transactionCount: number;
-  expensePercentageLabel: string;
+  projectCount: number;
+  percentageLabel: string;
 };
 
 export type CostProjectExplorerRow = {
@@ -66,25 +53,7 @@ export type CostExpenseTypeExplorerRow = {
   percentageLabel: string;
 };
 
-export type CostBankTagPrimaryExplorerRow = {
-  primaryLabel: string;
-  expenseAmount: string;
-  incomeAmount: string;
-  expenseTransactionCount: number;
-  incomeTransactionCount: number;
-  subTagCount: number;
-};
-
-export type CostBankTagSubExplorerRow = {
-  primaryLabel: string;
-  subLabel: string;
-  expenseAmount: string;
-  incomeAmount: string;
-  expenseTransactionCount: number;
-  incomeTransactionCount: number;
-};
-
-export type CostStatisticsView = "time" | "project" | "bank" | "expense_type" | "bank_tag";
+export type CostStatisticsView = "project" | "expense_type" | "bank_account";
 
 export type CostStatisticsExplorerPage = {
   scope: string;
@@ -96,8 +65,6 @@ export type CostStatisticsExplorerPage = {
     projects: CostProjectExplorerRow[];
     expenseTypes: CostExpenseTypeExplorerRow[];
     bankAccounts: CostBankExplorerRow[];
-    bankTagPrimary: CostBankTagPrimaryExplorerRow[];
-    bankTagSub: CostBankTagSubExplorerRow[];
   };
   rows: CostExplorerEntryRow[];
   allocationQuality?: {
@@ -187,9 +154,7 @@ export type CostStatisticsExplorerPageRequest = {
   view: CostStatisticsView;
   projectName?: string;
   expenseType?: string;
-  paymentAccountLabel?: string;
-  bankTagPrimaryLabel?: string;
-  bankTagSubLabel?: string;
+  bankAccountLabel?: string;
   query?: string;
   cursor?: string;
   pageSize?: number;
@@ -235,6 +200,7 @@ export type CostAllocationDetail = {
     amount: string;
     counterpartyName: string;
     paymentAccountLabel: string;
+    bankAccountLabel: string;
     oaApplicant: string;
     oaOriginalAmount: string;
     oaAllocationWeight: string;
@@ -266,17 +232,13 @@ export type CostAllocationDetail = {
 export type CostEntryDetail = CostBankTransactionDetail | CostAllocationDetail;
 
 export type CostStatisticsExportPreview = {
-  view: "time" | "bank_tag" | "project" | "expense_type";
+  view: "bank_account" | "project" | "expense_type";
   fileName: string;
   scopeLabel: string;
   summary: {
     rowCount: number;
     transactionCount: number;
     totalAmount: string;
-    expenseAmount?: string;
-    incomeAmount?: string;
-    expenseTransactionCount?: number;
-    incomeTransactionCount?: number;
     sheetCount: number;
   };
   sheetNames: string[];
@@ -293,22 +255,6 @@ export type CostStatisticsTagRuleTag = {
   direction: string;
   outputPrimaryLabel: string;
   outputSubLabel: string;
-};
-
-export type CostStatisticsTimeTagRules = {
-  version: number;
-  bankAutoTagRulesVersion: number;
-  mode: "all" | "custom";
-  selectedTagCodes: string[];
-  inactiveSelectedTagCodes: string[];
-  availableTags: CostStatisticsTagRuleTag[];
-  canSave: boolean;
-};
-
-export type SaveCostStatisticsTimeTagRulesRequest = {
-  expectedVersion: number;
-  mode: "all" | "custom";
-  selectedTagCodes: string[];
 };
 
 export type CostStatisticsNoOaProject = {

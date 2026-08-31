@@ -602,7 +602,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(restored["turnover_ledger_tag_selection"], previous_state)
         self.assertEqual(app._audit_service.as_dicts()[-1]["action"], "turnover_ledger_tag_selection_updated")
 
-    def test_cost_statistics_rules_default_to_all_time_tags_and_no_virtual_projects(self) -> None:
+    def test_cost_statistics_no_oa_rules_default_to_no_virtual_projects(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
                 temp_dir,
@@ -613,25 +613,9 @@ class AppSettingsServiceTests(unittest.TestCase):
             )
             app = build_application(data_dir=Path(temp_dir))
 
-            time_selection = app._app_settings_service.get_cost_statistics_time_tag_selection_payload()
             no_oa = app._app_settings_service.get_cost_statistics_no_oa_projects_payload()
 
-            self.assertEqual(time_selection["mode"], "all")
-            self.assertEqual(time_selection["selected_tag_codes"], [])
             self.assertEqual(no_oa["projects"], [])
-
-            saved = app._app_settings_service.update_cost_statistics_time_tag_selection(
-                {
-                    "expected_version": time_selection["version"],
-                    "mode": "custom",
-                    "selected_tag_codes": ["fee", "__uncategorized__"],
-                },
-                actor_id="cost-owner",
-                allowed_tag_codes={"fee", "income_refund", "__uncategorized__"},
-            )
-
-            self.assertEqual(saved["mode"], "custom")
-            self.assertEqual(saved["selected_tag_codes"], ["fee", "__uncategorized__"])
             with self.assertRaises(AppSettingsValidationError) as context:
                 app._app_settings_service.update_cost_statistics_no_oa_projects(
                     {
@@ -692,7 +676,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(payload["projects"][0]["tag_codes"], ["fee"])
         self.assertFalse(payload["can_save"])
 
-    def test_cost_statistics_legacy_selection_migrates_to_one_virtual_project(self) -> None:
+    def test_cost_statistics_legacy_selection_is_not_loaded_as_a_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
                 temp_dir,
@@ -717,12 +701,9 @@ class AppSettingsServiceTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             selection = app._app_settings_service.get_cost_statistics_no_oa_projects_payload()
 
-            self.assertEqual(selection["version"], 4)
+            self.assertEqual(selection["version"], 1)
             self.assertEqual(selection["schema_version"], 1)
-            self.assertEqual(
-                selection["projects"],
-                [{"id": "legacy", "display_name": "旧无 OA 项目", "tag_codes": ["fee"]}],
-            )
+            self.assertEqual(selection["projects"], [])
 
     def test_file_rule_replacement_detaches_pending_invoice_and_no_oa_archived_codes_atomically(self) -> None:
         fixture = json.loads(
