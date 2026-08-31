@@ -7584,7 +7584,10 @@ class Application:
             {
                 "values": preview.values,
                 "file_ids": preview.file_ids,
-                "import_session": self._serialize_file_session(preview.session),
+                "import_session": self._serialize_file_session(
+                    preview.session,
+                    include_row_decisions=True,
+                ),
             },
         )
 
@@ -8928,12 +8931,28 @@ class Application:
             self._workbench_exception_case_service.snapshot(),
         )
 
-    def _serialize_file_session(self, session: object) -> dict[str, object]:
+    def _serialize_file_session(
+        self,
+        session: object,
+        *,
+        include_row_decisions: bool = False,
+    ) -> dict[str, object]:
         files = []
         for item in list(getattr(session, "files", []) or []):
             payload = self._serialize_value(item)
             payload.pop("row_results", None)
             payload.pop("normalized_rows", None)
+            if include_row_decisions:
+                payload["row_results"] = [
+                    {
+                        "id": result.id,
+                        "row_no": result.row_no,
+                        "source_record_type": result.source_record_type,
+                        "decision": self._serialize_value(result.decision),
+                        "decision_reason": result.decision_reason,
+                    }
+                    for result in list(getattr(item, "row_results", []) or [])
+                ]
             files.append(payload)
         return {
             "session": {

@@ -109,6 +109,7 @@ describe("ManualBankTransactionBatchEditor", () => {
     ]));
     expect(onPreviewSessionChange).toHaveBeenCalledWith("manual_bank_session_1");
     expect(screen.getAllByText("可录入")).toHaveLength(2);
+    expect(screen.getByText("0 笔")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "录入 1 笔流水" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(previewPayload));
   });

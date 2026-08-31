@@ -8,6 +8,7 @@ import {
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
 import type {
+  ImportRowDecision,
   ManualBankTransactionEntryBatchPreview,
   ManualBankTransactionEntryValues,
 } from "../../features/imports/types";
@@ -86,11 +87,18 @@ function validateEntry(values: ManualBankTransactionEntryValues, index: number) 
   return null;
 }
 
-function previewTone(decision: string | null | undefined) {
-  if (decision === "created") return { label: "可录入", color: "success" as const };
-  if (decision === "duplicate_skipped") return { label: "已存在", color: "default" as const };
-  if (decision === "suspected_duplicate") return { label: "疑似重复", color: "warning" as const };
-  return { label: "不可录入", color: "danger" as const };
+function previewTone(decision: ImportRowDecision) {
+  switch (decision) {
+    case "created":
+      return { label: "可录入", color: "success" as const };
+    case "duplicate_skipped":
+      return { label: "已存在", color: "default" as const };
+    case "suspected_duplicate":
+      return { label: "疑似重复", color: "warning" as const };
+    case "status_updated":
+    case "error":
+      return { label: "不可录入", color: "danger" as const };
+  }
 }
 
 export default function ManualBankTransactionBatchEditor({
@@ -223,7 +231,7 @@ export default function ManualBankTransactionBatchEditor({
           <div className="manual-bank-entry__preview-list">
             {preview.importSession.files.map((file, index) => {
               const values = preview.values[index];
-              const decision = file.rowResults[0]?.decision;
+              const decision = file.rowResults[0].decision;
               const tone = previewTone(decision);
               return (
                 <section className="manual-bank-entry__preview-item" key={file.id}>
@@ -236,7 +244,7 @@ export default function ManualBankTransactionBatchEditor({
                     <div><dt>交易时间</dt><dd>{values?.tradeTime.replace("T", " ") || "—"}</dd></div>
                     <div><dt>收支金额</dt><dd>{values ? `${values.direction === "outflow" ? "支出" : "收入"} ${values.amount}` : "—"}</dd></div>
                     <div><dt>对方户名</dt><dd>{values?.counterpartyName || "—"}</dd></div>
-                    <div><dt>结果</dt><dd>{file.rowResults[0]?.decisionReason || file.message || "—"}</dd></div>
+                    <div><dt>结果</dt><dd>{file.rowResults[0].decisionReason || file.message || "—"}</dd></div>
                   </dl>
                 </section>
               );

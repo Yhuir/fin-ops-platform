@@ -583,11 +583,20 @@ export async function previewManualBankTransactions(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ transactions: values.map(serializeManualBankTransactionEntryValues) }),
   });
-  return {
+  const preview = {
     values: payload.values.map(mapManualBankTransactionEntryValues),
     fileIds: payload.file_ids.map(String),
     importSession: mapImportPayload(payload.import_session),
   };
+  const confirmableFileIds = new Set(preview.fileIds);
+  const responseIsConsistent = preview.importSession.files.every((file) => (
+    file.rowResults.length === 1
+    && (file.rowResults[0].decision === "created") === confirmableFileIds.has(file.id)
+  ));
+  if (!responseIsConsistent) {
+    throw new Error("流水预览响应不完整，请重新预览。");
+  }
+  return preview;
 }
 
 export async function previewImportFiles(

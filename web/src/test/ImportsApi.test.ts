@@ -66,7 +66,13 @@ describe("imports api", () => {
           duplicate_count: 0,
           suspected_duplicate_count: 0,
           updated_count: 0,
-          row_results: [],
+          row_results: [{
+            id: "row-1",
+            row_no: 1,
+            source_record_type: "bank_transaction",
+            decision: "created",
+            decision_reason: "Ready to create new bank transaction.",
+          }],
         }],
       },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -95,6 +101,12 @@ describe("imports api", () => {
     expect(preview.values[0]).toMatchObject({
       direction: "outflow",
     });
+    expect(preview.importSession.files[0].rowResults).toEqual([
+      expect.objectContaining({
+        decision: "created",
+        decisionReason: "Ready to create new bank transaction.",
+      }),
+    ]);
     expect(fetchMock).toHaveBeenCalledWith(
       "/imports/bank-transactions/manual/preview",
       expect.objectContaining({ method: "POST" }),
@@ -107,6 +119,37 @@ describe("imports api", () => {
       }],
     });
     expect(JSON.parse(String(request.body)).transactions[0]).not.toHaveProperty("account_detail_no");
+  });
+
+  test("rejects a manual bank preview that omits its row decision", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      values: [{ direction: "outflow" }],
+      file_ids: ["manual_bank_file_1"],
+      import_session: {
+        session: {
+          id: "manual_bank_session_1",
+          imported_by: "web_finance_user",
+          file_count: 1,
+          status: "preview_ready",
+          created_at: "2026-08-28T09:02:00+08:00",
+        },
+        files: [{
+          id: "manual_bank_file_1",
+          file_name: "新流水1",
+          status: "preview_ready",
+          message: "预览成功",
+          row_count: 1,
+          success_count: 1,
+          error_count: 0,
+          duplicate_count: 0,
+          suspected_duplicate_count: 0,
+          updated_count: 0,
+          row_results: [],
+        }],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+    await expect(previewManualBankTransactions([])).rejects.toThrow("流水预览响应不完整，请重新预览。");
   });
 
   test("maps OCR prefill and serializes the server-authoritative manual invoice preview", async () => {

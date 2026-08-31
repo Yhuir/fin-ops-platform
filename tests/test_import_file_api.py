@@ -136,10 +136,21 @@ class ImportFileApiTests(unittest.TestCase):
         preview_payload = json.loads(preview_response.body)
         self.assertNotIn("reference_field_key", preview_payload["values"][0])
         self.assertEqual(len(preview_payload["file_ids"]), 1)
+        preview_file = preview_payload["import_session"]["files"][0]
+        self.assertEqual(preview_file["template_code"], "manual_bank_transaction_entry")
         self.assertEqual(
-            preview_payload["import_session"]["files"][0]["template_code"],
-            "manual_bank_transaction_entry",
+            preview_file["row_results"],
+            [{
+                "id": preview_file["row_results"][0]["id"],
+                "row_no": 1,
+                "source_record_type": "bank_transaction",
+                "decision": "created",
+                "decision_reason": "Ready to create new bank transaction.",
+            }],
         )
+        self.assertNotIn("normalized_rows", preview_file)
+        self.assertNotIn("raw_payload", preview_file["row_results"][0])
+        self.assertNotIn("normalized_payload", preview_file["row_results"][0])
 
         confirm_response = app.handle_request(
             "POST",
