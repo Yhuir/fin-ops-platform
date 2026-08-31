@@ -865,7 +865,6 @@ export default function EtcTicketManagementPage() {
       return undefined;
     }
     const controller = new AbortController();
-    setSelectedTask(null);
     setDetailLoading(true);
     setTaskLoading(Boolean(selectedBusinessBatchTaskId));
     setTaskListError(selectedBusinessBatchTaskId ? null : "当前批次缺少绑定的 ETC 流程，请刷新后重试。");

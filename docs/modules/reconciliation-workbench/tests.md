@@ -670,7 +670,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - API contract：`test_workbench_invoice_supplement_api.py` 与 `WorkbenchApi.test.ts` 保护专用 preview endpoint、完整 session/file target 透传和原全局导入 endpoint 不变；`WorkbenchInvoiceEntryDrawer.test.tsx` 保护抽屉默认进入发票录入，补充凭证降为次级且不预加载其列表。
 - Read/SQL parity：`test_oa_attachment_invoice_linking.py`、`test_workbench_amount_check_service.py` 和 `test_workbench_query_postgres_integration.py` 保护显式 `oa_expense_item_invoice` 优先于历史 attachment 归属，SQL/Python hydration 对齐，目标付款项不再显示附件异常和录入按钮。
 - Relation/UoW：`test_workbench_pair_relation_service.py`、`test_workbench_relation_command_service.py`、`test_workbench_uow_contract.py`、repository adapter tests 与 `test_workbench_write_characterization.py` 保护已有 immutable OA+invoice 加入流水时保留 formal/binding metadata，差额 note 提交成功，数据库 commit 后才发布 runtime delta，回滚不留半写。
-- Frontend interaction：`WorkbenchSelection.test.tsx` 保护 OA 状态变化发生在多选、preview request/drawer 或发票编辑期间时不清空用户交互；响应落地前再次检查竞态，全部交互结束后只补一次 canonical GET，post-commit 写成功仍只做一次强制回读。
+- Frontend interaction：`WorkbenchSelection.test.tsx` 与 `workbench-stale-error-flow.spec.ts` 保护 OA 状态变化发生在多选、详情、异常/收据/preview/现金/发票编辑等抽屉或对话框期间时不清空用户交互；响应落地前再次检查竞态，全部交互结束后只补一次 canonical GET，post-commit 写成功仍只做一次强制回读。异常审阅写后只刷新当前异常列表，不再依赖“主数据重读先关闭、随后重新打开抽屉”的旧补偿链路。
 - Existing regression / performance：发票全局导入、补充凭证文件链、普通相等确认、withdraw、异常七分类、筛选分页与权限合同不变；所有新增处理均为固定项或当前页/当前关系有界操作，没有轮询加速、额外列表 N+1、read model、worker、Redis 或数据库 schema 变化。
 
 ## 2026-08-24 - 进行中 OA 自动正式关系闭环

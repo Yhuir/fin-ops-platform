@@ -34,6 +34,7 @@
 - 普通写不发送 window event/BroadcastChannel，也不触发其它页面请求。
 - OA sync/import/maintenance progress 和 App Health 使用自己的 bounded polling，不作为页面事实来源。
 - 前端请求必须能 abort/淘汰旧 generation，迟到响应不能覆盖更新的 query/result。
+- 后台状态变化只更新状态或安排当前页数据重读；存在抽屉、对话框、详情、选择或未提交输入时不得导航、刷新文档或重置交互状态。需要重读的页面应延后到交互结束，或只替换数据事实并保留当前交互上下文。
 
 ## 页面 I/O 合同
 

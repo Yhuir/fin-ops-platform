@@ -46,7 +46,7 @@
 - `external_fail`：任一最新 evidence revoked/expired、contract/coverage 非法，或存在 missing/extra/duplicate/field/control mismatch；即使内部 `overall_status=pass` 也必须保持 `end_to_end_source_truth=unproven`，不得回退旧 evidence。
 - `issues_found`：任一子页 integrity/queue、dashboard inventory、manifest/status registry、required worker 或 current outbox 不一致；不得显示系统通过。
 - `request_failed`：snapshot/SQL/runtime observation 不可执行，HTTP 返回 fail-closed error；不能用上一次绿色替代。
-- Audit result 是不可变历史快照证据。系统页面下一次普通 dashboard refresh 会清除本地 Audit 绿色；后续写入不能沿用旧 `system_audit_id`。
+- Audit result 是带 snapshot/generated-at 的不可变历史快照证据。普通 dashboard refresh 不清除用户正在查看的结果；只有用户再次运行 Audit 才替换本地证据，后续写入仍不能沿用旧 `system_audit_id`。
 
 ## UI 状态
 

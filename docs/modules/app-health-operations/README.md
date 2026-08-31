@@ -66,7 +66,7 @@
 - System Audit 的子页 proof：只读 registry 登记的 canonical source/relation/job 表，不读取已退役 projection，也不 enqueue；`*_sample_count` 只是有上限的问题样本，不能把 50/100/150 当成精确问题总数。OA 待付款等依赖外部 OA/银行系统的页面仍需要外部 evidence/runbook 证明来源系统本身完整。
 - 导入历史：只读取 `app.import_batches` 的 `bank_transaction`、`input_invoice`、`output_invoice` 批次成功数。
 - 前端只展示后端事实；不能用当前 route、表格 loading、组件本地状态推导全局状态。
-- App Health System Audit 成功后用响应内同一 snapshot 的 `page_projection` 更新 dashboard；后续普通 dashboard refresh 会清除旧 Audit 状态，避免把历史快照继续显示为当前绿色。
+- App Health System Audit 成功后用响应内同一 snapshot 的 `page_projection` 更新 dashboard；后续普通 dashboard refresh 只更新 dashboard，不清空用户正在查看的 Audit 结果。Audit 自带 snapshot/generated-at 语义，只有用户再次运行 Audit 才替换该结果。
 - 外部 manifest 的 validate/register/revoke 仅通过运维 CLI 和独立 service/repository 边界执行；System Audit、页面 route 和 UI 都没有登记或修复能力。具体合同和授权门禁见 `docs/operations/external-control-evidence.md`。
 
 ## 关键 fan-out

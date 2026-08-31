@@ -412,10 +412,16 @@ export default function ReconciliationWorkbenchPage() {
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<WorkbenchOaInvoiceSupplementTarget | null>(null);
   const [invoiceAssignmentTarget, setInvoiceAssignmentTarget] = useState<WorkbenchInvoiceExpenseItemAssignmentTarget | null>(null);
-  const hasOaSyncRefreshBlockingInteraction = explicitSelectedPairedRows.length > 0
+  const hasOaSyncRefreshBlockingInteraction = detailRow !== null
+    || isDetailLoading
+    || explicitSelectedPairedRows.length > 0
     || explicitSelectedOpenRows.length > 0
+    || actionDialog !== null
+    || receiptEditorCaseId !== null
     || relationPreviewRequestKind !== null
     || relationPreviewDialog !== null
+    || exceptionDrawerOpen
+    || cashTicketPurchaseDialog !== null
     || invoiceEntryTarget !== null
     || invoiceAssignmentTarget !== null;
   const hasOaSyncRefreshBlockingInteractionRef = useRef(hasOaSyncRefreshBlockingInteraction);
@@ -767,7 +773,7 @@ export default function ReconciliationWorkbenchPage() {
     }
   }
 
-  function applyWorkbenchInitialPageResult(
+  function applyWorkbenchPageResult(
     workbenchPayload: WorkbenchInitialPageResult,
     resolvedZoneQueries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
   ) {
@@ -793,29 +799,6 @@ export default function ReconciliationWorkbenchPage() {
     const nextCanonicalEpoch = canonicalEpochRef.current;
     setCanonicalEpoch(nextCanonicalEpoch);
     relationPreviewContextKeyRef.current = `canonical:${nextCanonicalEpoch}`;
-    clearSelection();
-    setSelectionSourceGroups({ paired: [], unpaired: [] });
-    detailRequestSeqRef.current += 1;
-    detailRequestAbortControllerRef.current?.abort();
-    detailRequestAbortControllerRef.current = null;
-    setIsDetailLoading(false);
-    setDetailError(null);
-    relationPreviewAbortControllerRef.current?.abort();
-    relationPreviewAbortControllerRef.current = null;
-    relationPreviewRequestKindRef.current = null;
-    setRelationPreviewRequestKind(null);
-    setRelationPreviewDialog(null);
-    setCashTicketPurchaseDialog(null);
-    exceptionDrawerRequestRef.current?.abort();
-    exceptionDrawerRequestRef.current = null;
-    exceptionDrawerRequestGenerationRef.current += 1;
-    exceptionDrawerOpenRef.current = false;
-    setExceptionDrawerOpen(false);
-    setExceptionDrawerLoading(false);
-    setExceptionDrawerLoadingMore(false);
-    setExceptionDrawerGroups([]);
-    setExceptionDrawerPage(createInitialZonePageInfo(exceptionDrawerBucketRef.current));
-    setExceptionDrawerCounts(null);
 
     setWorkbenchData(workbenchPayload.data);
     setPairedExceptionCount(workbenchPayload.data.summary.pairedExceptionCount);
@@ -877,7 +860,7 @@ export default function ReconciliationWorkbenchPage() {
         setIsRefreshing(false);
         return null;
       }
-      applyWorkbenchInitialPageResult(workbenchPayload, resolvedZoneQueries);
+      applyWorkbenchPageResult(workbenchPayload, resolvedZoneQueries);
       setBackgroundLoadError(null);
       if (!background) {
         setIsLoading(false);
@@ -2341,13 +2324,11 @@ export default function ReconciliationWorkbenchPage() {
         }
         const currentView = exceptionDrawerViewRef.current;
         const currentExceptionCode = exceptionDrawerSelectedCodeRef.current;
-        exceptionDrawerOpenRef.current = true;
         setExceptionDrawerRequestedCode(
           currentView === "amount"
             ? currentExceptionCode
             : null,
         );
-        setExceptionDrawerOpen(true);
         setExceptionDrawerReloadGeneration((current) => current + 1);
         return actionResultMessage(result);
       },

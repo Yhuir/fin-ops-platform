@@ -737,8 +737,6 @@ export default function AppHealthOperationsPage() {
     try {
       const nextPayload = await fetchAppHealthDashboard(controller.signal);
       setPayload(nextPayload);
-      setAuditPayload(null);
-      setAuditError(null);
       setLoadError(null);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {

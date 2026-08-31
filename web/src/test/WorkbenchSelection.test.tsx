@@ -2997,10 +2997,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(screen.getByRole("button", { name: "重新读取" }));
     await waitFor(() => {
       expect(screen.queryByText("关联台服务暂时不可用，请稍后重试。")).not.toBeInTheDocument();
-      expect(within(unpairedZone).getByText("已选 0")).toBeInTheDocument();
+      expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
     });
-    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
-    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
     expect(confirmButton).toBeEnabled();
   }, 8_000);
 

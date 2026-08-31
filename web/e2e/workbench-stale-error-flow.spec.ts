@@ -130,6 +130,42 @@ test.describe("workbench direct error browser flow", () => {
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
   });
 
+  test("keeps the exception drawer open across OA sync and rereads after it closes", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchAmountMismatchScenario: true,
+      workbenchInitialRelationConfirmed: true,
+    });
+
+    await page.goto("/");
+
+    await page
+      .getByTestId("zone-unpaired")
+      .getByRole("button", { name: /未配对异常 \d+ \| 已配对异常 \d+/ })
+      .click();
+    const drawer = page.getByRole("dialog", { name: "异常处理" });
+    await expect(drawer).toBeVisible();
+    await expect.poll(() => api.count("GET /api/oa-sync/status")).toBeGreaterThan(0);
+
+    const workbenchLoadsBeforeSync = api.count("GET /api/workbench");
+    const oaStatusLoadsBeforeSync = api.count("GET /api/oa-sync/status");
+    api.advanceOaSyncRevision();
+    await expect.poll(
+      () => api.count("GET /api/oa-sync/status"),
+      { timeout: 5_000 },
+    ).toBeGreaterThan(oaStatusLoadsBeforeSync);
+    await page.waitForTimeout(250);
+
+    await expect(drawer).toBeVisible();
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync);
+
+    await drawer.getByRole("button", { name: "关闭抽屉" }).click();
+    await expect(drawer).toHaveCount(0);
+    await expect.poll(() => api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
+    await page.waitForTimeout(300);
+    expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync + 1);
+  });
+
   test("blocks Workbench writes while OA sync is dirty", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",

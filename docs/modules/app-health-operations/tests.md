@@ -8,7 +8,7 @@
 
 | 层级 | 当前入口 | 必须保护的合同 |
 | --- | --- | --- |
-| App Health 页面 | `web/src/pages/AppHealthOperationsPage.tsx` | admin-only、只读 dashboard；唯一 System Audit 按钮；普通 dashboard refresh 清除旧 Audit 结果；unknown 显示 `--` |
+| App Health 页面 | `web/src/pages/AppHealthOperationsPage.tsx` | admin-only、只读 dashboard；唯一 System Audit 按钮；普通 dashboard refresh 保留带 snapshot 时间语义的 Audit 结果；unknown 显示 `--` |
 | System Audit 前端 API | `web/src/features/appHealth/api.ts` | 只暴露固定 `fetchAppHealthSystemAudit()`，只请求 `page=app-health-operations`；不得恢复任意 page-key client |
 | 业务页面 | `web/src/pages/*`、`web/src/components/*` | 不展示 Page Audit 控件，不依赖 Audit 结果，不产生额外 Audit I/O；原有加载、筛选、分页、抽屉和写后 canonical GET 保持不变 |
 | Global App Status | `AppHealthStatusContext`、`features/appStatus/*`、`AppStatusIndicator` | 状态只来自 session、jobs、required workers、通用 outbox、dependencies、alerts；DTO/runtime summary 不恢复 read-model/readiness 字段 |
@@ -22,7 +22,7 @@
 - 管理员打开 App Health：dashboard 成功加载；点击 System Audit 只发送一次固定 GET，不产生 `POST/PUT/PATCH/DELETE`。
 - 非管理员、forbidden 或 expired session：不请求 admin dashboard/System Audit。
 - System Audit：内部 18 页合同与外部 evidence 分开呈现；external unknown 不能伪装端到端通过；任一子页、inventory、worker 或 outbox 问题 fail closed。
-- 普通 dashboard refresh：清除上一份本地 Audit 结果，避免历史 snapshot 冒充当前状态。
+- 普通 dashboard refresh：只更新 dashboard，保留带 snapshot/generated-at 标识的 Audit 结果；只有用户再次运行 Audit 才替换该结果。
 - 业务/财务/导入/设置页：管理员身份下也没有 Audit 按钮；页面仍只执行本模块原有 canonical API 链路。
 - App Status：worker `working` 不计问题；stale/missing/mismatch/unavailable 与 queue pending/processing/failed/backlog 按后端状态机展示；不存在 read-model summary。
 - Workbench matching：stale/rebuilding/error 把 Workbench domain 标为 busy；failed dirty scope 产生 critical alert；两者都不恢复旧 matching BackgroundJob 或阻断全局写入。

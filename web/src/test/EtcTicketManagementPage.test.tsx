@@ -3432,6 +3432,27 @@ describe("ETC ticket management page", () => {
     });
   });
 
+  test("keeps manual reconciliation context while the current batch refreshes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await openEtcDisclosure(page, user, /人工处理/);
+    await user.click(await within(page).findByText("财付通-微信支付-贵州黔通智联"));
+    const reviewNote = within(page).getByLabelText("处理说明");
+    await user.type(reviewNote, "继续处理当前明细");
+    const batchLoadsBeforeRefresh = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?")).length;
+
+    await user.click(within(page).getByRole("button", { name: /^刷新$/ }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?")).length).toBeGreaterThan(batchLoadsBeforeRefresh);
+    });
+    expect(reviewNote).toHaveValue("继续处理当前明细");
+    expect(within(page).getAllByText("财付通-微信支付-贵州黔通智联").length).toBeGreaterThan(0);
+  });
+
   test("keeps manual reconciliation actions disabled until required selections exist and validates notes", async () => {
     const user = userEvent.setup();
     installMockApiFetch();

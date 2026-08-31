@@ -119,9 +119,10 @@ describe("AppHealthOperationsPage", () => {
 
     await userEvent.click(refreshButton);
     await waitFor(() => {
-      expect(audit).toHaveTextContent("未验证");
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/operations/app-health-dashboard")).length).toBeGreaterThanOrEqual(2);
     });
-    expect(within(audit).queryByText("App 内部 pass")).not.toBeInTheDocument();
+    expect(audit).toHaveTextContent("App 内部 pass");
+    expect(audit).not.toHaveTextContent("未验证");
 
     const requests = screen.getByTestId("app-health-requests");
     expectProjectSection(requests);

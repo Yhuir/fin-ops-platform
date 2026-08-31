@@ -71,14 +71,14 @@ route entry                      -> 一次 combined canonical GET
 query/filter/sort change         -> abort 旧请求，只重取受影响 zone 首页
 page cursor                      -> 绑定 query hash 的 keyset GET；不做 OFFSET fallback
 write committed                  -> 清空 selection/cursor，恰好一次 normal canonical GET
-OA sync changed + active selection/preview/editor
+OA sync changed + active selection/drawer/dialog/editor
                                 -> 保留交互状态，只合并一个 pending canonical refresh
 active interaction closed       -> 消费 pending，恰好一次 normal canonical GET
 direct query unavailable/timeout -> 显示可重试读错误，不回退 projection/cache
 hidden/focus/visible             -> 不触发 Workbench business status I/O
 ```
 
-普通 writer 只提交 canonical facts/relation/version/audit/idempotency 与必要的独立领域任务。Workbench page 不拥有 queue、worker、generation、freshness polling 或 Redis payload cache；3 秒 OA status safety poll 只用于写门禁和触发 direct canonical reread。它不得在用户已选择记录、打开关系预览或正在录入发票时替换页面并清空交互；这些变化只折叠为一个 pending refresh，交互结束后执行一次。写成功后的 post-commit reread 仍优先执行并清空旧选择。OA sync、App Health、background jobs、`workbench_relation` 与 `workbench-matching` 保持各自 owner 合同。
+普通 writer 只提交 canonical facts/relation/version/audit/idempotency 与必要的独立领域任务。Workbench page 不拥有 queue、worker、generation、freshness polling 或 Redis payload cache；3 秒 OA status safety poll 只用于写门禁和触发 direct canonical reread。它不得在用户已选择记录，或打开详情、异常、收据、关系预览、现金票据、录入发票、发票归属、结果对话框时替换页面并清空交互；这些变化只折叠为一个 pending refresh，全部交互结束后执行一次。数据结果安装与交互状态重置是两个边界：普通后台/写后重读只更新 canonical 数据，只有页面 mount、query 切换或明确业务动作可以清理对应交互。写成功后的 post-commit reread 仍优先执行，关系写动作继续显式清空旧选择。OA sync、App Health、background jobs、`workbench_relation` 与 `workbench-matching` 保持各自 owner 合同。
 
 ### 发票费用明细归属
 
