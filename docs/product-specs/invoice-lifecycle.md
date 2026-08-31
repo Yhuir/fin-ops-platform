@@ -18,6 +18,7 @@
 - 销项发票收款情况是显式例外：它不读取 `invoice_lifecycle` 或页面 read model，而是在同一 canonical PostgreSQL snapshot 中根据销项发票、收入流水和 active Workbench 关系直接派生 `collectionStatus`。
 - 销项红字发票原始备注中精确标记的“被红冲蓝字数电发票号码”是销项页面红蓝票关系的业务证据，同时驱动列表、详情、搜索、导出和 `collectionStatus`。号码必须唯一命中一张正数 canonical 销项发票；不按金额、税额、购销方或日期兜底猜测。
 - 现有页面 API shape 保持明确：待找发票返回 `invoice_acquisition_status`，进项使用返回 `paymentStatus`，OA 待付款返回 `paymentStatus`，销项收款返回 `collectionStatus`，税金抵扣返回认证字段。
+- 关联台发票详情的关系状态只读取当前 `invoice_bank_relation`；`app.invoices.status` 的通用 `pending` 不属于关联台用户状态，详情不得展示或翻译它。明确的发票种类与来源值在关联台展示边界转换为中文，例如 `input/output` 与 `manual_invoice_entry`；其它生命周期页面继续使用各自明确字段。
 - 页面自己的 read model 仍保留筛选、分页、导出和页面 DTO；生命周期 read model 只分发生命周期结果，不替代业务页面 read model。
 
 需要接入生命周期的页面：

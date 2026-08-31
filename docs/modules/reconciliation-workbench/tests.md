@@ -2,6 +2,13 @@
 
 日期：2026-08-31
 
+## 2026-08-31 发票详情移除原始 pending 状态
+
+- API / business contract：`web/src/test/WorkbenchApi.test.ts` 使用生产同形的未配对发票，保护关系状态仍来自 `invoice_bank_relation=待匹配流水`，同时 `detail_fields.status=pending` 不进入公共详情模型；`input/output` 与 `manual_invoice_entry` 在既有 Workbench 映射边界中文化，已是用户值的来源标签保持不变。
+- Frontend interaction：`web/src/test/WorkbenchSelection.test.tsx` 保护从真实页面行打开“发票详情”后不出现 `pending`，并显示“发票种类 / 进项发票”和“发票来源 / 人工录入”。
+- 性能与隔离：映射只在当前详情字段数组执行一次线性过滤与常量表查询，不新增 HTTP、React state/effect、后端 SQL、数据库、read model、worker、cache 或依赖；共享 `EntityDetailContent` 和其它页面不修改。
+- 非适用：没有写操作、API response shape、持久化、权限或跨模块数据流变化，因此不新增事务/幂等、迁移、后台任务或写链路 E2E；现有关联台页面回归与共享详情测试承担旧功能隔离验证。
+
 ## 2026-08-31 三栏选择流水按关系方向净额
 
 - Business core：`web/src/test/WorkbenchSelectionModel.test.ts` 保护截图样例 `OA 2100 + 流水支出 2100 + 收入 2100 + 支出 2100` 的选择数量仍为 4、流水数量仍为 3，但付款方向银行金额为 `2100.00`；同时覆盖收款方向的反向抵减、无主方向、OA/发票主方向冲突和未知金额不猜测。

@@ -1333,16 +1333,44 @@ function mapTableValues(row: ApiWorkbenchRow): Record<string, string> {
   };
 }
 
-function mapDetailFields(detailFields?: Record<string, unknown>): WorkbenchDetailField[] {
+const invoiceDetailValueLabels: Record<string, Record<string, string>> = {
+  invoice_type: {
+    input: "进项发票",
+    output: "销项发票",
+  },
+  invoice_source: {
+    manual_invoice_entry: "人工录入",
+  },
+};
+
+function mapDetailFieldValue(
+  recordType: WorkbenchRecordType,
+  label: string,
+  value: unknown,
+) {
+  if (recordType === "invoice" && typeof value === "string") {
+    const localizedValue = invoiceDetailValueLabels[label]?.[value];
+    if (localizedValue) {
+      return localizedValue;
+    }
+  }
+  return toDetailDisplayValue(value);
+}
+
+function mapDetailFields(
+  detailFields: Record<string, unknown> | undefined,
+  recordType: WorkbenchRecordType,
+): WorkbenchDetailField[] {
   if (!detailFields) {
     return [];
   }
 
   const seenLabels = new Set<string>();
   return Object.entries(detailFields)
+    .filter(([label]) => recordType !== "invoice" || label !== "status")
     .map(([label, value]) => ({
       label: normalizeDetailFieldLabel(label),
-      value: toDetailDisplayValue(value),
+      value: mapDetailFieldValue(recordType, label, value),
     }))
     .filter((field) => {
       if (seenLabels.has(field.label)) {
@@ -1461,7 +1489,7 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     amount: rowAmount(row),
     counterparty: rowCounterparty(row),
     tableValues: mapTableValues(row),
-    detailFields: mapDetailFields(row.detail_fields),
+    detailFields: mapDetailFields(row.detail_fields, row.type),
     actionVariant: rowActionVariant(row, availableActions),
     availableActions,
     tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag).trim()).filter(Boolean) : [],

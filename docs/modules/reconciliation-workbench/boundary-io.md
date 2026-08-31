@@ -118,6 +118,7 @@ requested tenant/scope
 - 历史 OA 附件 parent identity 仍可在 matching、异常定位与 hydration 的单元格对齐中共用 alias 边界；但 source-owned 展示分组必须在任何 alias/`row_index` normalize 之前读取原始 source links，并只认当前 item exact ID。`id / row_id / expense_item_id` 有多个非空值时必须全部相同，否则该 item fail closed。summary/full/detail 必须输出相同展示归属；不得按金额、项目、文件名、历史 row index 或展示顺序猜测 owner。
 - group detail 按 active case/group typed owner 窄查；row detail 按 typed identity 与 active relation membership 窄查。`scope=all` 的 source-owned group 和 relation detail 必须先以目标 OA 的 exact-current item 集合一次性发现来源发票月份，再按这些有限月份集合水合全部 display-only 发票；不得退回全 scope group spine、cache fallback 或逐成员查询。
 - detail 读取 latest committed 事实，不接受 `expected_read_model_version`，不构建全 scope group CTE。
+- 发票 row detail 的用户可见关系状态只认 `invoice_bank_relation`。前端 Workbench API 映射必须从发票 `detail_fields` 删除通用原始键 `status`，并把已知 `invoice_type=input|output`、`invoice_source=manual_invoice_entry` 转为中文展示值；不得改共享详情组件、翻译 `pending` 或删除明确命名的其它发票状态字段。
 - summary 列表禁止携带 raw payload、OCR/附件全文和完整 detail fields；折叠内容只在用户展开后读取。
 
 ## 输出 I/O

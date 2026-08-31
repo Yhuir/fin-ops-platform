@@ -86,6 +86,53 @@ test("normalizes Workbench amount directions at the API boundary", async () => {
   expect(rows.invoice.map((record) => record.amountDirection)).toEqual(["payment", "receipt", undefined]);
 });
 
+test("publishes invoice details without the legacy raw status", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({
+      month: "all",
+      zone: "unpaired",
+      page_size: 10,
+      total: 1,
+      row_counts: { oa: 0, bank: 0, invoice: 1 },
+      has_more: false,
+      next_cursor: null,
+      groups: [{
+        group_id: "unpaired:invoice:01384952",
+        group_type: "unpaired",
+        match_confidence: "low",
+        reason: "no_active_relation",
+        oa_rows: [],
+        bank_rows: [],
+        invoice_rows: [{
+          id: "invoice-01384952",
+          type: "invoice",
+          invoice_type: "input",
+          invoice_no: "01384952",
+          invoice_bank_relation: { code: "pending_collection", label: "待匹配流水", tone: "warn" },
+          detail_fields: {
+            status: "pending",
+            invoice_type: "input",
+            invoice_source: "manual_invoice_entry",
+            invoice_status: "normal",
+            source_label: "ETC导入",
+          },
+        }],
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+
+  const page = await fetchWorkbenchGroupsPage("all", "unpaired", null, 10);
+  const [invoice] = page.groups[0].rows.invoice;
+
+  expect(invoice.status).toBe("待匹配流水");
+  expect(invoice.detailFields).toEqual([
+    { label: "invoice_type", value: "进项发票" },
+    { label: "invoice_source", value: "人工录入" },
+    { label: "invoice_status", value: "normal" },
+    { label: "source_label", value: "ETC导入" },
+  ]);
+});
+
 test("nets the production bank-only turnover relation inside an OA payment selection", async () => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify({

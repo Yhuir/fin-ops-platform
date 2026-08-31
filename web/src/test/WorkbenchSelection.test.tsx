@@ -867,6 +867,24 @@ describe("Workbench row selection and detail drawer", () => {
     expect(screen.queryByRole("dialog", { name: "发票详情" })).not.toBeInTheDocument();
   });
 
+  test("invoice drawer omits raw status and localizes controlled import values", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const invoiceRow = await screen.findByRole("row", {
+      name: /91310110MA1F99088Q.*华东设备供应商/,
+    });
+    await user.click(within(invoiceRow).getByRole("button", { name: /查看发票 .* 详情/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "发票详情" });
+    expect(within(dialog).queryByText("pending")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("发票种类")).toBeInTheDocument();
+    expect(within(dialog).getByText("进项发票")).toBeInTheDocument();
+    expect(within(dialog).getByText("发票来源")).toBeInTheDocument();
+    expect(within(dialog).getByText("人工录入")).toBeInTheDocument();
+  });
+
   test("OA attachment invoice detail shows source expense item and attachment fields", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
