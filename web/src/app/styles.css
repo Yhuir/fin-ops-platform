@@ -21703,9 +21703,7 @@ body.column-layout-dragging {
 }
 
 .cost-explorer-list {
-  display: grid;
-  align-content: start;
-  gap: 0;
+  display: block;
   min-width: 0;
   padding: 0;
   outline: none;
