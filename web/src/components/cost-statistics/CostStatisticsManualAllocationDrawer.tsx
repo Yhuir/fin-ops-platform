@@ -50,9 +50,8 @@ type TaskDraft = {
 };
 
 type DraftSummary = {
-  allocatedCents: bigint;
   valid: boolean;
-  message: string;
+  message: string | null;
 };
 
 function moneyToCents(value: string) {
@@ -72,12 +71,6 @@ function taskLabel(task: CostStatisticsManualAllocationTask) {
   if (projects.length === 1) return projects[0];
   const counterparty = task.bankEvents.find((event) => event.counterpartyName)?.counterpartyName;
   return counterparty || "未填写业务名称";
-}
-
-function taskStatusLabel(task: CostStatisticsManualAllocationTask) {
-  if (task.status === "allocated") return "人工已分配";
-  if (task.status === "stale") return "待重新分配";
-  return "待分配";
 }
 
 function buildTaskDraft(task: CostStatisticsManualAllocationTask): TaskDraft {
@@ -112,43 +105,53 @@ function draftsEqual(left: TaskDraft | undefined, right: TaskDraft) {
 
 function summarizeDraft(task: CostStatisticsManualAllocationTask, draft: TaskDraft): DraftSummary {
   const values = task.units.map((unit) => draft.allocations[unit.unitId] ?? "");
+  const hasAllocationInput = values.some((value) => value.trim());
   const allocatedCents = values
     .filter((value) => MONEY_PATTERN.test(value))
     .reduce((total, value) => total + moneyToCents(value), 0n);
   const netOutflowCents = moneyToCents(task.netOutflowTotal);
-  if (values.some((value) => !MONEY_PATTERN.test(value))) {
-    return {
-      allocatedCents,
-      valid: false,
-      message: "每项分配金额均需填写为非负数，并保留两位小数。",
-    };
+  if (values.some((value) => value && !MONEY_PATTERN.test(value))) {
+    return { valid: false, message: "请输入非负金额（两位小数）" };
   }
   let nonCostCents = 0n;
   if (draft.hasNonCostAmount) {
     if (!MONEY_PATTERN.test(draft.nonCostAmount) || moneyToCents(draft.nonCostAmount) <= 0n) {
-      return { allocatedCents, valid: false, message: "不计入成本金额必须大于 0.00，并保留两位小数。" };
+      return { valid: false, message: "请输入不计入成本金额（两位小数）" };
     }
     if (!draft.nonCostReason.trim()) {
-      return { allocatedCents, valid: false, message: "请填写不计入成本说明。" };
+      return { valid: false, message: "请填写不计入成本说明" };
     }
     nonCostCents = moneyToCents(draft.nonCostAmount);
   }
   const totalCents = allocatedCents + nonCostCents;
+  const differenceCents = netOutflowCents - totalCents;
+  if (values.some((value) => !value)) {
+    if (!hasAllocationInput && !draft.hasNonCostAmount && task.status !== "allocated") {
+      return { valid: false, message: null };
+    }
+    if (differenceCents === 0n) {
+      return { valid: false, message: "请填写每项分配金额" };
+    }
+    return {
+      valid: false,
+      message: differenceCents > 0n
+        ? `待分配 ${formatCents(differenceCents)}`
+        : `超出 ${formatCents(-differenceCents)}`,
+    };
+  }
+  if (differenceCents === 0n) {
+    return { valid: true, message: null };
+  }
   return {
-    allocatedCents,
-    valid: totalCents === netOutflowCents,
-    message: totalCents === netOutflowCents
-      ? `已分配 ${formatCents(allocatedCents)} / 净支出 ${task.netOutflowTotal}`
-      : `分配金额${draft.hasNonCostAmount ? "与不计入成本金额合计" : "合计"} ${formatCents(totalCents)}，需等于净支出 ${task.netOutflowTotal}。`,
+    valid: false,
+    message: differenceCents > 0n
+      ? `待分配 ${formatCents(differenceCents)}`
+      : `超出 ${formatCents(-differenceCents)}`,
   };
 }
 
 function unitTitle(unit: CostStatisticsManualAllocationUnit) {
   return unit.projectName || unit.expenseContent || unit.expenseType || "未填写 OA 项";
-}
-
-function isPaymentApplication(unit: CostStatisticsManualAllocationUnit) {
-  return unit.oaApplyType === "支付申请";
 }
 
 export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved }: Props) {
@@ -430,6 +433,10 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                 const draft = draftsByCase[task.relationCaseId] ?? buildTaskDraft(task);
                 const summary = summarizeDraft(task, draft);
                 const saving = savingCaseIds.has(task.relationCaseId);
+                const hasMultipleProjects = new Set(
+                  task.units.map((unit) => unit.projectName).filter(Boolean),
+                ).size > 1;
+                const hasRefund = moneyToCents(task.wrongPaymentRefundTotal) > 0n;
                 return (
                   <Disclosure className="cost-manual-allocation-group" id={task.relationCaseId} key={task.relationCaseId}>
                     <Disclosure.Heading className="cost-manual-allocation-heading">
@@ -444,13 +451,9 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                           <strong title={taskLabel(task)}>{taskLabel(task)}</strong>
                           <span>OA 合计 <b>{task.oaTotal}</b></span>
                           <span>净支出 <b>{task.netOutflowTotal}</b></span>
-                          <Chip
-                            color={task.status === "allocated" ? "success" : task.status === "stale" ? "warning" : "default"}
-                            size="sm"
-                            variant="soft"
-                          >
-                            {taskStatusLabel(task)}
-                          </Chip>
+                          {task.status === "stale" ? (
+                            <Chip color="warning" size="sm" variant="soft">待重新分配</Chip>
+                          ) : null}
                           <Disclosure.Indicator className="cost-manual-allocation-indicator" />
                         </span>
                       </Button>
@@ -459,23 +462,31 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                       <Disclosure.Body className="cost-manual-allocation-detail">
                         {expanded ? (
                           <>
-                            <div className="cost-manual-allocation-facts">
-                              <span>OA 合计<strong>{task.oaTotal}</strong></span>
-                              <span>
-                                净支出<strong>{task.netOutflowTotal}</strong>
-                                <small>流水支出 {task.grossOutflowTotal} · 付错退款 {task.wrongPaymentRefundTotal}</small>
-                              </span>
-                            </div>
                             <section className="cost-manual-allocation-sources" aria-label="流水明细">
-                              <h3>流水</h3>
+                              <header>
+                                <h3>流水</h3>
+                                {hasRefund ? (
+                                  <span>支出 {task.grossOutflowTotal} · 退款 {task.wrongPaymentRefundTotal}</span>
+                                ) : null}
+                              </header>
                               <div>
                                 {task.bankEvents.map((event, index) => (
                                   <article key={`${event.eventKind}:${event.transactionId}`}>
-                                    <strong>{event.eventKind === "wrong_payment_refund" ? `付错退款 ${index + 1}` : `流水 ${index + 1}`} · {event.amount}</strong>
-                                    <span>{event.counterpartyName || "未填写对方户名"}</span>
-                                    <span>{formatDateTimeText(event.tradeTime)}</span>
-                                    {event.summary ? <small>{event.summary}</small> : null}
-                                    {event.tags.length > 0 ? <small>{event.tags.join(" · ")}</small> : null}
+                                    <div className="cost-manual-allocation-event-heading">
+                                      <Chip color={event.eventKind === "wrong_payment_refund" ? "warning" : "default"} size="sm" variant="soft">
+                                        {event.eventKind === "wrong_payment_refund" ? "付错退款" : `流水${index + 1}`}
+                                      </Chip>
+                                      <strong>{event.amount}</strong>
+                                    </div>
+                                    {event.counterpartyName ? <span>{event.counterpartyName}</span> : null}
+                                    <Chip className="cost-manual-allocation-meta-chip" color="default" size="sm" variant="soft">
+                                      <Chip.Label>{formatDateTimeText(event.tradeTime)}</Chip.Label>
+                                    </Chip>
+                                    {event.tags.length > 0 ? (
+                                      <Chip className="cost-manual-allocation-tag-chip" color="default" size="sm" variant="soft">
+                                        <Chip.Label>{event.tags.join(" / ")}</Chip.Label>
+                                      </Chip>
+                                    ) : null}
                                   </article>
                                 ))}
                               </div>
@@ -495,12 +506,18 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                                   {task.units.map((unit) => (
                                     <FinanceTableRow id={unit.unitId} key={unit.unitId} textValue={unitTitle(unit)}>
                                       <FinanceTableCell columnRole="description" textValue={unitTitle(unit)}>
-                                        <strong>{unitTitle(unit)}</strong>
-                                        <span>{unit.expenseType || "未填写费用类型"}</span>
+                                        {hasMultipleProjects ? <strong>{unit.projectName}</strong> : null}
+                                        <div className="cost-manual-allocation-oa-tags">
+                                          {unit.oaApplyType ? (
+                                            <Chip color="default" size="sm" variant="soft">{unit.oaApplyType}</Chip>
+                                          ) : null}
+                                          {unit.expenseType ? (
+                                            <Chip color="default" size="sm" variant="soft">{unit.expenseType}</Chip>
+                                          ) : null}
+                                        </div>
                                         <small>
-                                          {isPaymentApplication(unit) ? "支付申请" : "日常报销子付款项"}
-                                          {unit.oaApplicant ? ` · ${unit.oaApplicant}` : ""}
-                                          {` · OA 金额 ${unit.oaOriginalAmount}`}
+                                          {unit.oaApplicant ? `${unit.oaApplicant} · ` : ""}
+                                          {`OA 金额 ${unit.oaOriginalAmount}`}
                                         </small>
                                       </FinanceTableCell>
                                       <FinanceTableCell columnRole="amount" textValue={draft.allocations[unit.unitId] ?? ""}>
@@ -537,7 +554,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                                 }))}
                               >
                                 <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                                <span>存在不计入成本金额</span>
+                                <span>不计入成本</span>
                               </Checkbox>
                               {draft.hasNonCostAmount ? (
                                 <div>
@@ -581,7 +598,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, onSaved 
                               <p className="cost-manual-allocation-error" role="alert">{taskErrors[task.relationCaseId]}</p>
                             ) : null}
                             <div className="cost-manual-allocation-actions">
-                              <span className={summary.valid ? "is-balanced" : ""}>{summary.message}</span>
+                              {summary.message ? <span>{summary.message}</span> : null}
                               <Button
                                 isDisabled={!canSave || !task.canSave || !summary.valid}
                                 isPending={saving}

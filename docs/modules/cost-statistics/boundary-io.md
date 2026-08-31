@@ -49,6 +49,13 @@ PUT manual allocation
   -> allocation + audit.events in one transaction
 ```
 
+### 人工分配展示合同
+
+- relation-only snapshot 对关系内全部银行流水 ID 去重后执行一次批量有效分类投影；支出与付错退款都消费同一银行分类 owner，不逐行读取。
+- `bank_events.tags` 是 canonical 银行标签层级路径；流水 DTO 不再输出旧 `summary`，前端不得用摘要、备注或 OA 费用类型补写标签。
+- OA 单元以 Chip 展示 `oa_apply_type` 与 `expense_type`；流水以 Chip 展示顺序号/退款类型、交易时间和 `tags`，两组分类 I/O 不互相推导。
+- 前端只在金额输入后按当前差额展示简短校验；初始空白和已平衡状态不显示常驻说明。多项目关系才在 OA 单元旁保留项目名用于消歧。
+
 ### Explorer 合同
 
 - `view` 接受 `time|bank_tag|project|expense_type|bank_account`；原始 `bank` 明确拒绝。
@@ -103,6 +110,7 @@ PUT manual allocation
 - 原始 `按银行` view 及其前端状态、类型和请求参数。
 - `/api/cost-statistics/time-tag-rules` 的 GET/PUT 路由及 App Settings family。
 - `time_rows`、`bank_flow_rows`、`bank_flow_time_rows` 响应兼容读取。
+- 人工分配银行流水的旧 `summary` DTO、前端 mapper、展示与测试 fixture。
 
 历史 migration 和明确验证“旧合同被拒绝”的负面测试可以保留；生产 runtime 和 UI 不得保留并行旧路径。
 

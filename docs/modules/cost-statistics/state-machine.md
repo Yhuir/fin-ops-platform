@@ -65,7 +65,7 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - `saving / save-error`：使用 settings version CAS；冲突或失败不得伪报成功，也不得清空用户输入。保存成功后下一次 canonical GET 对全部历史期间逐笔应用规则。
 - `manual-allocation-loading`：只有用户在三个项目成本 view 中打开“待分配” Drawer 后才读取全局队列的有界任务页；两个流水 view 不显示该入口，也不读取人工分配。
 - `pending / allocated`：pending 视图包含 pending 与 stale，allocated 只含当前有效人工分配；两者都使用服务端 search 和稳定 cursor，计数来自同一次全局任务快照，不由浏览过的成本项累积。
-- `editing`：每个关系以 Disclosure 独立展开并维护自己的草稿和保存按钮。支付申请整单一个输入；日常报销逐 canonical 子付款项一个输入，不按流水重复。pending/stale 不预填数字、不自动计算；allocated 显示已保存值并允许编辑。勾选“不计入成本金额”后才显示 `X` 和原因；显式 `0.00` 有效，空值与零值必须区分。
+- `editing`：每个关系以 Disclosure 独立展开并维护自己的草稿和保存按钮。支付申请整单一个输入；日常报销逐 canonical 子付款项一个输入，不按流水重复。pending/stale 不预填数字、不自动计算；allocated 显示已保存值并允许编辑。勾选“不计入成本”后才显示 `X` 和原因；显式 `0.00` 有效，空值与零值必须区分。初始空白和金额已平衡时不显示说明；输入后只显示非法金额、待分配或超出差额。
 - `saving`：服务端在单个写事务内锁定当前关系事实，校验 source fingerprint、expected version、完整 OA 单元集合、非负两位小数及 `C+X=N`；`X>0` 时原因必填，`X=0` 时原因不得提交。成功后只移动/刷新当前关系并写 allocation 与 audit。
 - `validation-error`：格式、缺项、负数或合计错误返回明确 400；页面保留用户输入。
 - `conflict`：事实或版本已变化返回明确 409；旧输入不得作为 fallback 写入，重新加载后以新的空白任务为准。

@@ -295,7 +295,11 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await expect(drawer).toBeVisible();
       await drawer.getByRole("button", { name: "展开权限测试项目人工分配" }).click();
       await expect(drawer.getByLabel("权限测试项目分配金额")).toBeDisabled();
-      await expect(drawer.getByRole("checkbox", { name: "存在不计入成本金额" })).toBeDisabled();
+      await expect(drawer.getByText("流水1", { exact: true })).toBeVisible();
+      await expect(drawer.getByText("项目开销 / 材料费", { exact: true })).toBeVisible();
+      await expect(drawer.getByText("日常报销", { exact: true })).toBeVisible();
+      await expect(drawer.getByText("材料费", { exact: true })).toBeVisible();
+      await expect(drawer.getByRole("checkbox", { name: "不计入成本" })).toBeDisabled();
       await expect(drawer.getByRole("button", { name: "保存分配" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page);
     },

@@ -139,7 +139,6 @@ export type CostStatisticsManualAllocationBankEvent = {
   amount: string;
   tradeTime: string;
   counterpartyName: string;
-  summary: string;
   tags: string[];
 };
 

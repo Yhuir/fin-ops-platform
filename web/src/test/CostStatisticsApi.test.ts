@@ -46,7 +46,6 @@ describe("Cost statistics export API", () => {
         amount: "5.00",
         counterparty_name: "供应商",
         trade_time: "2026-08-27T10:00:00+08:00",
-        summary: "付错退款",
         tags: ["退款"],
       }],
       allocations: [],
@@ -81,10 +80,10 @@ describe("Cost statistics export API", () => {
       bankEvents: [{
         transactionId: "bank-1",
         eventKind: "wrong_payment_refund",
-        summary: "付错退款",
         tags: ["退款"],
       }],
     });
+    expect(page.items[0].bankEvents[0]).not.toHaveProperty("summary");
 
     await saveCostStatisticsManualAllocation({
       relationCaseId: "relation-1",

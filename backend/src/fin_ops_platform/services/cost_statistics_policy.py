@@ -1028,7 +1028,6 @@ def _manual_allocation_bank_event(
         "amount": _money(amount),
         "trade_time": serialized["trade_time"],
         "counterparty_name": serialized["counterparty_name"],
-        "summary": serialized["remark"] or serialized["expense_content"],
         "tags": list(dict.fromkeys(tag_path)),
     }
 

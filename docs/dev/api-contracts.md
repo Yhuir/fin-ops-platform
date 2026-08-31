@@ -115,6 +115,7 @@
 
 - 从一次 relation-only canonical snapshot 全量识别人工任务，不依赖用户浏览过哪些成本项，也不读取 read model、worker 或 cache。`status=pending|allocated` 必填；`query` 规范化后最长 200 字符；`page_size` 为 1..50；cursor 绑定状态、搜索条件和稳定排序。
 - 响应返回全局 `pending_count`、`allocated_count`、当前页 `items` 和 `next_cursor`。每个 item 包含关系级 OA 合计、支出、付错退款、净支出、canonical OA 单元、银行流水证据、当前人工分配、可选不计入成本金额、version 与事实指纹；不展示内部 relation ID，但写接口继续使用稳定 `relation_case_id`。
+- `bank_events[*]` 固定返回 `transaction_id`、`event_kind`、`amount`、`trade_time`、`counterparty_name` 和 canonical `tags` 标签路径；不返回旧 `summary`，也不从 OA 费用类型、摘要或备注推导标签。关系内全部流水在同一 snapshot 中使用一次批量有效分类投影，不做逐流水查询。
 - `pending` 只包含 `O!=N` 且 `N>0` 的已完成 OA active relation；`allocated` 只包含当前事实指纹仍有效的人工记录。`O=N` 任意拓扑自动归因，`N=0` 不产生任务，`N<0` 返回完整性错误。
 
 `PUT /api/cost-statistics/manual-allocations/{relation_case_id}`

@@ -110,6 +110,36 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("成本归因")).not.toBeInTheDocument();
   });
 
+  test("keeps bank labels and OA expense types distinct in manual allocation", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderPage();
+    await waitUntilReady();
+
+    await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
+    const drawer = await screen.findByRole("dialog", { name: "成本人工分配" });
+    await user.click(within(drawer).getByRole("button", { name: "展开项目 A 等 2 个项目人工分配" }));
+
+    expect(within(drawer).getByText("流水1", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).getByText("流水2", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).getByText("2026-08-27 09:30:00", { exact: true }).closest(".cost-manual-allocation-meta-chip")).not.toBeNull();
+    expect(within(drawer).getAllByText("项目开销 / 设备材料 / 设备采购", { exact: true })).toHaveLength(2);
+    expect(within(drawer).getByText("支付申请", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).getByText("日常报销", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).getByText("材料费", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).getByText("交通费", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).queryByText("设备采购", { exact: true })).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("每项分配金额均需填写为非负数，并保留两位小数。")).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("checkbox", { name: "不计入成本" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "保存分配" })).toBeDisabled();
+
+    await user.type(within(drawer).getByLabelText("项目 A分配金额"), "600.00");
+    expect(await within(drawer).findByText("待分配 400.00")).toBeInTheDocument();
+    await user.type(within(drawer).getByLabelText("项目 B分配金额"), "400.00");
+    expect(within(drawer).queryByText("待分配 400.00", { exact: true })).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "保存分配" })).toBeEnabled();
+  });
+
   test("shows signed bank flows by time and drills from tag to raw rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();

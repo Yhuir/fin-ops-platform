@@ -160,7 +160,6 @@ type ApiCostStatisticsManualAllocationTask = {
     amount: string;
     trade_time: string;
     counterparty_name: string;
-    summary: string;
     tags: string[];
   }>;
   allocations: Array<{
@@ -419,7 +418,6 @@ function mapManualAllocationTask(
       amount: event.amount,
       tradeTime: event.trade_time,
       counterpartyName: event.counterparty_name,
-      summary: event.summary,
       tags: event.tags,
     })),
     allocations: task.allocations.map((line) => ({

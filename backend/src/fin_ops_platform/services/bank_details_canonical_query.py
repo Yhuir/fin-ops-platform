@@ -265,6 +265,7 @@ class PostgresBankDetailsCanonicalQueryRepository:
                 effective_category_label,
                 effective_category_primary_label,
                 effective_category_sub_label,
+                effective_category_third_label,
                 effective_category_source
             from classified_with_semantics
             where row_id = any(%s::text[])
@@ -272,7 +273,20 @@ class PostgresBankDetailsCanonicalQueryRepository:
             (*cte_params, normalized_ids),
         )
         return {
-            str(row.get("row_id") or ""): dict(row)
+            str(row.get("row_id") or ""): {
+                **dict(row),
+                "effective_category_label_path": list(
+                    dict.fromkeys(
+                        text_list(
+                            [
+                                row.get("effective_category_primary_label"),
+                                row.get("effective_category_sub_label"),
+                                row.get("effective_category_third_label"),
+                            ]
+                        )
+                    )
+                ),
+            }
             for row in rows
             if str(row.get("row_id") or "").strip()
         }

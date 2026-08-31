@@ -244,11 +244,20 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
 
     def test_single_unit_single_outflow_mismatch_requires_manual_allocation(self) -> None:
+        bank_row = self._bank(
+            "bank-1",
+            "100.00",
+            tag_code="lodging",
+            tag_label="住宿费",
+        )
+        bank_row["bank_tag_primary_label"] = "项目开销"
+        bank_row["bank_tag_sub_label"] = "住宿费"
+        bank_row["bank_tag_label_path"] = ["项目开销", "住宿费"]
         policy = self._policy(
             [
                 self._group(
                     oa_rows=[self._oa("oa-a", amount="120.00")],
-                    bank_rows=[self._bank("bank-1", "100.00")],
+                    bank_rows=[bank_row],
                 )
             ]
         )
@@ -256,6 +265,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(policy.serialized_cost_rows, [])
         self.assertEqual(len(policy.manual_allocation_tasks), 1)
         self.assertEqual(policy.manual_allocation_tasks[0]["net_outflow_total"], "100.00")
+        event = policy.manual_allocation_tasks[0]["bank_events"][0]
+        self.assertEqual(event["tags"], ["项目开销", "住宿费"])
+        self.assertNotIn("summary", event)
 
     def test_valid_manual_allocation_drives_mismatched_cost_rows(self) -> None:
         group = self._group(

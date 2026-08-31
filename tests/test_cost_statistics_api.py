@@ -307,6 +307,9 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertTrue(
             all(isinstance(event["tags"], list) for event in task["bank_events"])
         )
+        self.assertTrue(
+            all("summary" not in event for event in task["bank_events"])
+        )
 
         saved = self.app.handle_request(
             "PUT",

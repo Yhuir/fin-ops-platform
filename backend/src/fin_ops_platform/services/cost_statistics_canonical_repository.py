@@ -199,9 +199,7 @@ class PostgresCostStatisticsCanonicalRepository:
             categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
                 transaction,
                 settings=settings,
-                transaction_ids=_bank_row_ids(
-                    [row for row in bank_rows if _direction(row) == "inflow"]
-                ),
+                transaction_ids=_bank_row_ids(bank_rows),
             )
             _apply_bank_category_projection(
                 bank_rows,

@@ -61,6 +61,7 @@ class _PopulatedCostSnapshotTransaction(_SnapshotTransaction):
                     "effective_category_label": "工资",
                     "effective_category_primary_label": "薪资社保福利",
                     "effective_category_sub_label": "工资",
+                    "effective_category_third_label": "工资代发",
                     "effective_category_source": "manual_confirmation",
                 }
             ]
@@ -411,7 +412,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertIn("row_ids && %s::text[]", relation_sql)
         self.assertIn("unnest(row_ids, row_types)", relation_sql)
 
-    def test_manual_allocation_snapshot_loads_only_relation_bank_rows(self) -> None:
+    def test_manual_allocation_snapshot_loads_and_classifies_only_relation_bank_rows(self) -> None:
         connection = _PopulatedCostConnection()
 
         snapshot = PostgresCostStatisticsCanonicalRepository(
@@ -426,11 +427,16 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             and "select row_id, effective_category_code" not in query
         )
         self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
-        self.assertFalse(
-            any(
-                "select row_id, effective_category_code" in query
-                for query in connection.snapshot_transaction.fetched
-            )
+        projection_params = [
+            params
+            for query, params in connection.snapshot_transaction.fetch_calls
+            if "select row_id, effective_category_code" in query
+        ]
+        self.assertEqual(len(projection_params), 1)
+        self.assertEqual(projection_params[0][-1], ["bank-1"])
+        self.assertEqual(
+            snapshot["bank_rows"][0]["bank_tag_label_path"],
+            ["薪资社保福利", "工资", "工资代发"],
         )
 
     def test_no_oa_candidate_snapshot_skips_oa_payload_and_classifies_only_candidates(self) -> None:
