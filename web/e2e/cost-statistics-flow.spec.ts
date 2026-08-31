@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const now = Date.now();
     sessionStorage.setItem("finops:pageSession:v1:e2e-user:cost-statistics:explorerState", JSON.stringify({
-      version: 4,
+      version: 5,
       updatedAt: now,
       expiresAt: now + 60 * 60 * 1000,
       value: {
@@ -30,13 +30,16 @@ test.beforeEach(async ({ page }) => {
         expenseTypeScopeMode: "month",
         expenseTypeScopeYear: "2026",
         expenseTypeScopeMonth: "2026-03",
+        bankFlowScopeMode: "month",
+        bankFlowScopeYear: "2026",
+        bankFlowScopeMonth: "2026-03",
       },
     }));
   });
 });
 
 test.describe("cost statistics browser flow", () => {
-  test("exposes one project-cost group with only the three supported views", async ({ page }) => {
+  test("exposes three project-cost views and two bank-flow views", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
     await page.goto("/cost-statistics");
@@ -48,9 +51,43 @@ test.describe("cost statistics browser flow", () => {
     await expect(views.getByRole("radio", { name: "按项目" })).toBeVisible();
     await expect(views.getByRole("radio", { name: "按费用类型" })).toBeVisible();
     await expect(views.getByRole("radio", { name: "按银行账户" })).toBeVisible();
+    await expect(switcher.getByText("银行流水")).toBeVisible();
+    const bankFlowViews = switcher.getByRole("radiogroup", { name: "银行流水统计视图" });
+    await expect(bankFlowViews.getByRole("radio")).toHaveCount(2);
+    await expect(bankFlowViews.getByRole("radio", { name: "按标签" })).toBeVisible();
+    await expect(bankFlowViews.getByRole("radio", { name: "按时间" })).toBeVisible();
     await expect(page.getByText("成本归因")).toHaveCount(0);
-    await expect(page.getByText("按时间", { exact: true })).toHaveCount(0);
-    await expect(page.getByText("按标签", { exact: true })).toHaveCount(0);
+  });
+
+  test("shows signed raw flows by time and drills from tags to bank rows", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+
+    await page.goto("/cost-statistics");
+    const timeResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "time");
+    await page.getByRole("radio", { name: "按时间" }).click();
+    await timeResponse;
+    const timeGrid = page.getByRole("grid", { name: "按时间银行流水表" });
+    await expect(timeGrid).toBeVisible();
+    await expect(timeGrid).toContainText("收入");
+    await expect(page.getByRole("heading", { name: "按时间统计" }).locator("..")).toContainText("净支出");
+
+    const tagRootResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "bank_tag");
+    await page.getByRole("radio", { name: "按标签" }).click();
+    await tagRootResponse;
+    const subTagResponse = waitForExplorer(page, (url) => (
+      url.searchParams.get("view") === "bank_tag"
+      && url.searchParams.get("bank_tag_primary_label") === "项目开销"
+    ));
+    await page.getByRole("button", { name: "选择主标签 项目开销" }).click();
+    await subTagResponse;
+    const tagRowsResponse = waitForExplorer(page, (url) => (
+      url.searchParams.get("view") === "bank_tag"
+      && url.searchParams.get("bank_tag_primary_label") === "项目开销"
+      && url.searchParams.get("bank_tag_sub_label") === "设备材料"
+    ));
+    await page.getByRole("button", { name: "选择子标签 设备材料" }).click();
+    await tagRowsResponse;
+    await expect(page.getByRole("grid", { name: "按标签银行流水表" })).toContainText("PLC 模块采购");
   });
 
   test("drills from project through expense type to OA cost detail", async ({ page }) => {
@@ -129,7 +166,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("grid", { name: "按费用类型成本明细表" })).toContainText("云南溯源科技");
   });
 
-  test("previews a bank-account export using cost rows", async ({ page }) => {
+  test("previews bank-flow and bank-account exports", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 
     await page.goto("/cost-statistics");
@@ -137,7 +174,19 @@ test.describe("cost statistics browser flow", () => {
     const dialog = page.getByRole("dialog", { name: "导出中心" });
     await expect(dialog).toBeVisible();
     const tabs = dialog.getByRole("tablist", { name: "导出视图切换" });
-    await expect(tabs.getByRole("button")).toHaveCount(3);
+    await expect(tabs.getByRole("button")).toHaveCount(5);
+    await tabs.getByRole("button", { name: "按时间" }).click();
+    const flowPreviewResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname.endsWith("/api/cost-statistics/export-preview")
+        && url.searchParams.get("view") === "time";
+    });
+    await dialog.getByRole("button", { name: "仅预览" }).click();
+    await flowPreviewResponse;
+    await expect(dialog.getByText(/预计导出 \d+ 条银行流水/)).toBeVisible();
+    await expect(dialog.getByText(/净支出/)).toBeVisible();
+
     await tabs.getByRole("button", { name: "按银行账户" }).click();
 
     const previewResponse = page.waitForResponse((response) => {

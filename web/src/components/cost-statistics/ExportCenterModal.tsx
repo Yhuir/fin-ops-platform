@@ -13,7 +13,7 @@ import {
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 
-export type ExportCenterMode = "bank_account" | "project" | "expense_type";
+export type ExportCenterMode = "time" | "bank_tag" | "bank_account" | "project" | "expense_type";
 export type ExportRangeMode = "month" | "custom";
 
 type ExportCenterModalProps = {
@@ -35,6 +35,10 @@ type ExportCenterModalProps = {
   expenseTypeStartDate: string;
   expenseTypeEndDate: string;
   expenseTypeSelections: string[];
+  bankFlowRangeMode: ExportRangeMode;
+  bankFlowMonth: string;
+  bankFlowStartDate: string;
+  bankFlowEndDate: string;
   preview: CostStatisticsExportPreview | null;
   feedback: { tone: "success" | "error"; message: string } | null;
   isPreviewLoading: boolean;
@@ -56,6 +60,10 @@ type ExportCenterModalProps = {
   onExpenseTypeStartDateChange: (date: string) => void;
   onExpenseTypeEndDateChange: (date: string) => void;
   onExpenseTypeSelectionsChange: (expenseTypes: string[]) => void;
+  onBankFlowRangeModeChange: (mode: ExportRangeMode) => void;
+  onBankFlowMonthChange: (month: string) => void;
+  onBankFlowStartDateChange: (date: string) => void;
+  onBankFlowEndDateChange: (date: string) => void;
   onPreview: () => void;
   onExport: () => void;
 };
@@ -159,6 +167,10 @@ export default function ExportCenterModal({
   expenseTypeStartDate,
   expenseTypeEndDate,
   expenseTypeSelections,
+  bankFlowRangeMode,
+  bankFlowMonth,
+  bankFlowStartDate,
+  bankFlowEndDate,
   preview,
   feedback,
   isPreviewLoading,
@@ -180,6 +192,10 @@ export default function ExportCenterModal({
   onExpenseTypeStartDateChange,
   onExpenseTypeEndDateChange,
   onExpenseTypeSelectionsChange,
+  onBankFlowRangeModeChange,
+  onBankFlowMonthChange,
+  onBankFlowStartDateChange,
+  onBankFlowEndDateChange,
   onPreview,
   onExport,
 }: ExportCenterModalProps) {
@@ -208,6 +224,24 @@ export default function ExportCenterModal({
         <div className="export-center-modal-body">
           <div className="export-center-view-switcher" role="tablist" aria-label="导出视图切换">
             <Button
+              aria-pressed={mode === "time"}
+              className="cost-view-tab"
+              onPress={() => onModeChange("time")}
+              size="sm"
+              variant={mode === "time" ? "primary" : "secondary"}
+            >
+              按时间
+            </Button>
+            <Button
+              aria-pressed={mode === "bank_tag"}
+              className="cost-view-tab"
+              onPress={() => onModeChange("bank_tag")}
+              size="sm"
+              variant={mode === "bank_tag" ? "primary" : "secondary"}
+            >
+              按标签
+            </Button>
+            <Button
               aria-pressed={mode === "bank_account"}
               className="cost-view-tab"
               onPress={() => onModeChange("bank_account")}
@@ -235,6 +269,48 @@ export default function ExportCenterModal({
               按费用类型
             </Button>
           </div>
+
+          {mode === "time" || mode === "bank_tag" ? (
+            <div className="export-center-config-grid">
+              <section className="export-center-section">
+                <div className="export-center-section-header">
+                  <h3>银行流水时间范围</h3>
+                </div>
+                <RadioGroup
+                  aria-label="银行流水导出时间范围"
+                  className="project-export-radio-group"
+                  onChange={(value) => onBankFlowRangeModeChange(value as ExportRangeMode)}
+                  value={bankFlowRangeMode}
+                >
+                  <Radio className="project-export-choice" value="month">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
+                    <span>自定义月份</span>
+                  </Radio>
+                  <Radio className="project-export-choice" value="custom">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
+                    <span>自定义时间区间（精确到日）</span>
+                  </Radio>
+                </RadioGroup>
+                {bankFlowRangeMode === "month" ? (
+                  <BusinessPeriodPicker
+                    allowAll={false}
+                    allowedModes={["month"]}
+                    ariaLabel="银行流水统计月份"
+                    onChange={(selection) => onBankFlowMonthChange(selection.month)}
+                    selection={{ mode: "month", year: bankFlowMonth.slice(0, 4), month: bankFlowMonth }}
+                    years={nearbyBusinessYears(bankFlowMonth)}
+                  />
+                ) : (
+                  <DateRangeFields
+                    startDate={bankFlowStartDate}
+                    endDate={bankFlowEndDate}
+                    onStartDateChange={onBankFlowStartDateChange}
+                    onEndDateChange={onBankFlowEndDateChange}
+                  />
+                )}
+              </section>
+            </div>
+          ) : null}
 
           {mode === "bank_account" ? (
             <div className="export-center-config-grid">
@@ -370,9 +446,18 @@ export default function ExportCenterModal({
             ) : preview ? (
               <div className="export-center-preview-body">
                 <div className="export-center-preview-summary">
-                  <strong>预计导出 {preview.summary.transactionCount} 条成本明细</strong>
+                  <strong>
+                    预计导出 {preview.summary.transactionCount} 条
+                    {preview.view === "time" || preview.view === "bank_tag" ? "银行流水" : "成本明细"}
+                  </strong>
                   <span>预计 {preview.summary.sheetCount} 个 sheet</span>
-                  <span>总金额 {formatCostAmount(preview.summary.totalAmount)}</span>
+                  {preview.view === "time" || preview.view === "bank_tag" ? (
+                    <>
+                      <span>支出 {formatCostAmount(preview.summary.expenseAmount ?? "0.00")}</span>
+                      <span>收入 {formatCostAmount(preview.summary.incomeAmount ?? "0.00")}</span>
+                      <span>净支出 {formatCostAmount(preview.summary.totalAmount)}</span>
+                    </>
+                  ) : <span>总金额 {formatCostAmount(preview.summary.totalAmount)}</span>}
                 </div>
                 <div className="export-center-sheet-list">
                   {preview.sheetNames.map((sheetName) => (
@@ -392,7 +477,7 @@ export default function ExportCenterModal({
                     <FinanceTableBody>
                       {preview.rows.length === 0 ? (
                         <FinanceTableRow id="empty">
-                          {preview.columns.map((column, index) => <FinanceTableCell className={index === 0 ? "cost-table-empty" : undefined} columnRole={column.includes("金额") ? "amount" : index === 0 ? "identity" : "description"} key={column}>{index === 0 ? "当前条件下没有可导出的成本数据。" : "-"}</FinanceTableCell>)}
+                          {preview.columns.map((column, index) => <FinanceTableCell className={index === 0 ? "cost-table-empty" : undefined} columnRole={column.includes("金额") ? "amount" : index === 0 ? "identity" : "description"} key={column}>{index === 0 ? `当前条件下没有可导出的${preview.view === "time" || preview.view === "bank_tag" ? "银行流水" : "成本数据"}。` : "-"}</FinanceTableCell>)}
                         </FinanceTableRow>
                       ) : (
                         preview.rows.map((row, rowIndex) => (

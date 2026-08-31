@@ -88,7 +88,7 @@ describe("Cost statistics page", () => {
     rendered.unmount();
   });
 
-  test("shows one project-cost group with exactly three supported views", async () => {
+  test("keeps project-cost views and restores the two bank-flow views", async () => {
     installMockApiFetch();
     renderPage();
     await waitUntilReady();
@@ -101,9 +101,38 @@ describe("Cost statistics page", () => {
       "按费用类型",
       "按银行账户",
     ]);
+    expect(within(switcher).getByText("银行流水")).toBeInTheDocument();
+    const bankFlowViews = within(switcher).getByRole("radiogroup", { name: "银行流水统计视图" });
+    expect(within(bankFlowViews).getAllByRole("radio").map((item) => item.textContent)).toEqual([
+      "按标签",
+      "按时间",
+    ]);
     expect(screen.queryByText("成本归因")).not.toBeInTheDocument();
-    expect(screen.queryByText("按时间")).not.toBeInTheDocument();
-    expect(screen.queryByText("按标签")).not.toBeInTheDocument();
+  });
+
+  test("shows signed bank flows by time and drills from tag to raw rows", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderPage();
+    await waitUntilReady();
+
+    await user.click(screen.getByRole("radio", { name: "按时间" }));
+    expect(await screen.findByRole("heading", { name: "按时间统计" })).toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "按时间银行流水表" })).toBeInTheDocument();
+    expect(screen.getAllByText("收入").length).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("view=time"),
+      expect.any(Object),
+    );
+
+    await user.click(screen.getByRole("radio", { name: "按标签" }));
+    await user.click(await screen.findByRole("button", { name: "选择主标签 项目开销" }));
+    await user.click(await screen.findByRole("button", { name: "选择子标签 设备材料" }));
+    expect(await screen.findByRole("grid", { name: "按标签银行流水表" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/view=bank_tag.*bank_tag_primary_label=.*bank_tag_sub_label=/),
+      expect.any(Object),
+    );
   });
 
   test("drills from project to expense type to cost detail", async () => {
@@ -164,7 +193,7 @@ describe("Cost statistics page", () => {
     expect(screen.getByRole("heading", { name: "按项目统计" })).toBeInTheDocument();
   });
 
-  test("export center offers only the three cost views and supports bank-account preview", async () => {
+  test("export center offers cost and bank-flow views and supports both previews", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderPage();
@@ -174,10 +203,19 @@ describe("Cost statistics page", () => {
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     const tabs = within(dialog).getByRole("tablist", { name: "导出视图切换" });
     expect(within(tabs).getAllByRole("button").map((item) => item.textContent)).toEqual([
+      "按时间",
+      "按标签",
       "按银行账户",
       "按项目",
       "按费用类型",
     ]);
+    await user.click(within(tabs).getByRole("button", { name: "按时间" }));
+    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
+    expect(await within(dialog).findByText(/预计导出 \d+ 条银行流水/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/export-preview\?month=2026-03&view=time/),
+      expect.any(Object),
+    );
     await user.click(within(tabs).getByRole("button", { name: "按银行账户" }));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
     expect(await within(dialog).findByText(/预计导出 \d+ 条成本明细/)).toBeInTheDocument();

@@ -90,12 +90,13 @@
 
 `GET /api/cost-statistics/explorer`
 
-- `view` 只接受 `project|expense_type|bank_account`。旧 `time|bank|bank_tag` 返回 `400 invalid_cost_statistics_query`。
+- `view` 接受 `time|bank_tag|project|expense_type|bank_account`。旧原始 `bank` 返回 `400 invalid_cost_statistics_query`。
 - 共用 query 为 `scope`、`view`、可选 `query`、`cursor`、`page_size` 与 `include_statistics`。`query` 折叠空白、最长 200 字符，并参与 cursor identity。
-- `project` 可接受 `project_name` 和其后的 `expense_type`；`expense_type` 可接受 `expense_type`；`bank_account` 可接受 `bank_account_label` 和其后的 `project_name`。旧 `payment_account_label` 与标签筛选参数不是 explorer 合同。
-- 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical 银行流水、OA、active relation、人工分配和无 OA 设置，生成唯一成本事件集合，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。
+- `project` 可接受 `project_name` 和其后的 `expense_type`；`expense_type` 可接受 `expense_type`；`bank_account` 可接受 `bank_account_label` 和其后的 `project_name`；`bank_tag` 可接受 `bank_tag_primary_label` 和其后的 `bank_tag_sub_label`；`time` 无额外下钻参数。旧 `payment_account_label`、`tag_code`、`primary_tag`、`sub_tag` 不是 explorer 合同。
+- 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical facts，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。`time|bank_tag` 只读取范围内银行流水和一次批量有效标签投影，并在 OA、active relation、人工分配查询前返回；三个项目成本 view 才生成唯一成本事件集合。
 - 三个根 view 的 `summary.total_amount` 与 `transaction_count` 在相同 scope/query 下必须相等；只改变聚合维度。`statistics` 只包含 `project_count`、`expense_type_count`、`bank_account_count`、`cost_transaction_count`。
 - `bank_account` 分面按成本事件 `bank_account_label` 聚合。OA 关系的支出账户恰好一个时归该账户；零个或多个不同支出账户归`银行账户未确定`；收入/退款账户忽略。无 OA 成本使用来源支出账户。
+- `time|bank_tag` 使用同一真实银行流水人口。`summary.total_amount=expense_amount-income_amount`；金额保持正数、方向单独返回。`bank_tag` 的主/子标签 facets 同时返回支出、收入、净支出和方向交易数。
 - 对已完成 OA 的 active relation，`O=N` 时按 canonical OA 单元原金额形成成本；`O!=N` 时在有效人工分配前不进入成本人口。`N=0` 不形成成本或任务，`N<0` 返回完整性错误，不使用绝对值、旧值或其它 fallback。
 - `include_statistics=false` 时 `statistics=null`；内容请求不被辅助全局统计阻塞。
 - 成功固定返回 `200`；不返回 `read_model_status`、`statistics_status`、Cost scope/version，也不返回 `202/409 read model not fresh`。
@@ -103,7 +104,7 @@
 
 `GET /api/cost-statistics/bank-transactions/{transaction_id}`
 
-- 服务三个 view 中无 OA `row_kind=bank_transaction` 的成本行，返回其 canonical 来源支出详情；它不提供原始银行统计列表。必须携带当前 `view` 与 `scope`；非法参数返回 400，未找到返回 404。
+- 服务 `time|bank_tag` 的真实流水行和三个项目成本 view 中无 OA `row_kind=bank_transaction` 的成本行。必须携带当前 `view` 与 `scope`；非法参数返回 400，未找到返回 404。
 
 `GET /api/cost-statistics/allocations/{allocation_id}`
 
@@ -124,7 +125,7 @@
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 
-- 只接受 `project|expense_type|bank_account`，复用 explorer 的成本事件、银行账户归属与筛选口径；preview 最多 8 行，download 受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
+- 接受 `time|bank_tag|project|expense_type|bank_account`。两个流水 view 导出真实方向、标签、账户并使用净支出汇总；三个项目成本 view 复用成本事件、银行账户归属与筛选口径。preview 最多 8 行，download 受 `COST_STATISTICS_EXPORT_ROW_LIMIT` 保护。
 - 导出不入队、不等待 worker，也不读取旧 Cost 投影。
 
 `GET|PUT /api/cost-statistics/no-oa-rules`

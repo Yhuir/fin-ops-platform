@@ -77,6 +77,10 @@ class CostStatisticsPolicy:
         )
 
     @cached_property
+    def bank_flow_rows(self) -> list[dict[str, Any]]:
+        return [_serialize_bank_row(row) for row in self._bank_rows]
+
+    @cached_property
     def serialized_cost_rows(self) -> list[dict[str, Any]]:
         return [_serialize_cost_entry(entry) for entry in self._raw_cost_entries]
 
@@ -123,9 +127,11 @@ class CostStatisticsPolicy:
         page_size: int,
         include_statistics: bool = True,
     ) -> dict[str, Any]:
+        bank_flow_view = view in {"time", "bank_tag"}
+        source_rows = self.bank_flow_rows if bank_flow_view else self.serialized_cost_rows
         base_rows = [
             row
-            for row in self.serialized_cost_rows
+            for row in source_rows
             if _row_in_scope(
                 row,
                 scope_kind=scope_kind,
@@ -141,11 +147,15 @@ class CostStatisticsPolicy:
         project_name = _clean_text(filters.get("project_name"))
         expense_type = _clean_text(filters.get("expense_type"))
         bank_account_label = _clean_text(filters.get("bank_account_label"))
+        tag_primary = _clean_text(filters.get("bank_tag_primary_label"))
+        tag_sub = _clean_text(filters.get("bank_tag_sub_label"))
 
         primary_facets: list[dict[str, Any]] = []
         secondary_facets: list[dict[str, Any]] = []
         row_matches: list[dict[str, Any]] = []
-        if view == "project":
+        if view == "time":
+            row_matches = base_rows
+        elif view == "project":
             primary_facets = _project_facets(base_rows)
             if project_name:
                 secondary_facets = _expense_facets(
@@ -183,8 +193,23 @@ class CostStatisticsPolicy:
                 row_matches = [
                     row for row in base_rows if row["expense_type"] == expense_type
                 ]
+        elif view == "bank_tag":
+            primary_facets = _bank_tag_primary_facets(base_rows)
+            if tag_primary:
+                primary_rows = [
+                    row for row in base_rows if _tag_primary(row) == tag_primary
+                ]
+                secondary_facets = _bank_tag_sub_facets(primary_rows)
+            if tag_primary and tag_sub:
+                row_matches = [
+                    row
+                    for row in base_rows
+                    if _tag_primary(row) == tag_primary and _tag_sub(row) == tag_sub
+                ]
         else:
-            raise ValueError("view must be project, expense_type, or bank_account")
+            raise ValueError(
+                "view must be time, project, expense_type, bank_account, or bank_tag"
+            )
 
         matched_row_count = len(row_matches)
         if cursor_values is not None:
@@ -197,12 +222,18 @@ class CostStatisticsPolicy:
         has_more = len(page_rows) > page_size
         page_rows = page_rows[:page_size]
         return {
-            "summary": _summary(base_rows),
-            "statistics": self.statistics if include_statistics else None,
+            "summary": (
+                _bank_flow_summary(base_rows) if bank_flow_view else _summary(base_rows)
+            ),
+            "statistics": (
+                self.bank_flow_statistics
+                if include_statistics and bank_flow_view
+                else self.statistics if include_statistics else None
+            ),
             "available_years": self._available_years or sorted(
                 {
                     str(row.get("month") or "")[:4]
-                    for row in self.serialized_cost_rows
+                    for row in source_rows
                     if re.fullmatch(r"\d{4}", str(row.get("month") or "")[:4])
                 },
                 reverse=True,
@@ -214,7 +245,7 @@ class CostStatisticsPolicy:
             "next_cursor_values": _cursor_tuple(page_rows[-1])
             if has_more and page_rows
             else None,
-            "allocation_quality": self.allocation_quality,
+            "allocation_quality": None if bank_flow_view else self.allocation_quality,
         }
 
     def export_page(
@@ -234,13 +265,15 @@ class CostStatisticsPolicy:
         bank_account_labels: list[str] | None = None,
     ) -> dict[str, Any]:
         if row_shape not in {
+            "raw_bank",
             "raw_cost",
             "project_month",
             "project_year",
             "month_summary",
         }:
             raise ValueError("invalid cost statistics export row shape")
-        source = self.serialized_cost_rows
+        bank_flow_export = row_shape == "raw_bank"
+        source = self.bank_flow_rows if bank_flow_export else self.serialized_cost_rows
         normalized_project_names = {
             _clean_text(value) for value in project_names if _clean_text(value)
         }
@@ -282,7 +315,9 @@ class CostStatisticsPolicy:
             result_rows = _aggregate_export_rows(rows, row_shape=row_shape)
         else:
             result_rows = rows
-        summary = _summary(rows) if include_summary else None
+        summary = (
+            _bank_flow_summary(rows) if bank_flow_export else _summary(rows)
+        ) if include_summary else None
         if summary is not None:
             summary.update(
                 {
@@ -293,12 +328,13 @@ class CostStatisticsPolicy:
                     ),
                 }
             )
-            summary.update(
-                {
-                    "pending_manual_allocation_count": self.pending_manual_allocation_count,
-                    "stale_manual_allocation_count": self.stale_manual_allocation_count,
-                }
-            )
+            if not bank_flow_export:
+                summary.update(
+                    {
+                        "pending_manual_allocation_count": self.pending_manual_allocation_count,
+                        "stale_manual_allocation_count": self.stale_manual_allocation_count,
+                    }
+                )
         page_rows = result_rows[offset : offset + page_size]
         return {
             "summary": summary,
@@ -387,6 +423,30 @@ class CostStatisticsPolicy:
                 {_row_identity(row) for row in cost_rows}
             ),
             "active_relation_count": self._active_relation_count,
+        }
+
+    @property
+    def bank_flow_statistics(self) -> dict[str, int]:
+        rows = self.bank_flow_rows
+        tagged = [
+            row
+            for row in rows
+            if _clean_text(row.get("bank_tag_code"))
+            not in {"", COST_STATISTICS_UNCATEGORIZED_TAG_CODE}
+        ]
+        return {
+            "transaction_count": len({_row_identity(row) for row in rows}),
+            "expense_transaction_count": len(
+                {_row_identity(row) for row in rows if row["direction"] == "支出"}
+            ),
+            "income_transaction_count": len(
+                {_row_identity(row) for row in rows if row["direction"] == "收入"}
+            ),
+            "untagged_transaction_count": len(
+                {_row_identity(row) for row in rows}
+                - {_row_identity(row) for row in tagged}
+            ),
+            "bank_tag_count": len({_tag_sub(row) for row in tagged}),
         }
 
     def no_oa_tag_candidates(self) -> list[dict[str, Any]]:
@@ -1628,6 +1688,124 @@ def _bank_account_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _bank_tag_primary_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        label = _tag_primary(row)
+        bucket = buckets.setdefault(
+            label,
+            {
+                "primary_label": label,
+                "expense_amount": ZERO,
+                "income_amount": ZERO,
+                "expense_transactions": set(),
+                "income_transactions": set(),
+                "sub_tags": set(),
+            },
+        )
+        amount = abs(_decimal(row.get("amount")) or ZERO)
+        if row.get("direction") == "收入":
+            bucket["income_amount"] += amount
+            bucket["income_transactions"].add(_row_identity(row))
+        else:
+            bucket["expense_amount"] += amount
+            bucket["expense_transactions"].add(_row_identity(row))
+        bucket["sub_tags"].add(_tag_sub(row))
+    return [
+        {
+            "primary_label": bucket["primary_label"],
+            "expense_amount": _money(bucket["expense_amount"]),
+            "income_amount": _money(bucket["income_amount"]),
+            "net_outflow_amount": _money(
+                bucket["expense_amount"] - bucket["income_amount"]
+            ),
+            "expense_transaction_count": len(bucket["expense_transactions"]),
+            "income_transaction_count": len(bucket["income_transactions"]),
+            "transaction_count": len(
+                bucket["expense_transactions"] | bucket["income_transactions"]
+            ),
+            "sub_tag_count": len(bucket["sub_tags"]),
+        }
+        for bucket in sorted(
+            buckets.values(),
+            key=lambda item: _bank_tag_facet_sort_key(
+                item,
+                label_key="primary_label",
+            ),
+        )
+    ]
+
+
+def _bank_tag_sub_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    buckets: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (_tag_primary(row), _tag_sub(row))
+        bucket = buckets.setdefault(
+            key,
+            {
+                "primary_label": key[0],
+                "sub_label": key[1],
+                "expense_amount": ZERO,
+                "income_amount": ZERO,
+                "expense_transactions": set(),
+                "income_transactions": set(),
+            },
+        )
+        amount = abs(_decimal(row.get("amount")) or ZERO)
+        if row.get("direction") == "收入":
+            bucket["income_amount"] += amount
+            bucket["income_transactions"].add(_row_identity(row))
+        else:
+            bucket["expense_amount"] += amount
+            bucket["expense_transactions"].add(_row_identity(row))
+    return [
+        {
+            "primary_label": bucket["primary_label"],
+            "sub_label": bucket["sub_label"],
+            "expense_amount": _money(bucket["expense_amount"]),
+            "income_amount": _money(bucket["income_amount"]),
+            "net_outflow_amount": _money(
+                bucket["expense_amount"] - bucket["income_amount"]
+            ),
+            "expense_transaction_count": len(bucket["expense_transactions"]),
+            "income_transaction_count": len(bucket["income_transactions"]),
+            "transaction_count": len(
+                bucket["expense_transactions"] | bucket["income_transactions"]
+            ),
+        }
+        for bucket in sorted(
+            buckets.values(),
+            key=lambda item: _bank_tag_facet_sort_key(item, label_key="sub_label"),
+        )
+    ]
+
+
+def _bank_tag_facet_sort_key(
+    item: dict[str, Any],
+    *,
+    label_key: str,
+) -> tuple[int, Decimal, int, str]:
+    expense_amount = item["expense_amount"]
+    income_amount = item["income_amount"]
+    if expense_amount > ZERO and income_amount == ZERO:
+        direction_rank = 0
+    elif expense_amount > ZERO and income_amount > ZERO:
+        direction_rank = 1
+    elif income_amount > ZERO:
+        direction_rank = 2
+    else:
+        direction_rank = 3
+    transaction_count = len(item["expense_transactions"]) + len(
+        item["income_transactions"]
+    )
+    return (
+        direction_rank,
+        -(expense_amount + income_amount),
+        -transaction_count,
+        str(item[label_key]),
+    )
+
+
 def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = sum(
         (abs(_decimal(row.get("amount")) or ZERO) for row in rows),
@@ -1639,6 +1817,32 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             {_row_identity(row) for row in rows}
         ),
         "total_amount": _money(total),
+    }
+
+
+def _bank_flow_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    expense_rows = [row for row in rows if row.get("direction") == "支出"]
+    income_rows = [row for row in rows if row.get("direction") == "收入"]
+    expense_total = sum(
+        (abs(_decimal(row.get("amount")) or ZERO) for row in expense_rows),
+        start=ZERO,
+    )
+    income_total = sum(
+        (abs(_decimal(row.get("amount")) or ZERO) for row in income_rows),
+        start=ZERO,
+    )
+    return {
+        "row_count": len(rows),
+        "transaction_count": len({_row_identity(row) for row in rows}),
+        "total_amount": _money(expense_total - income_total),
+        "expense_amount": _money(expense_total),
+        "income_amount": _money(income_total),
+        "expense_transaction_count": len(
+            {_row_identity(row) for row in expense_rows}
+        ),
+        "income_transaction_count": len(
+            {_row_identity(row) for row in income_rows}
+        ),
     }
 
 
@@ -1759,6 +1963,20 @@ def _cursor_tuple(row: dict[str, Any]) -> tuple[str, str, str, str]:
     return _row_sort_key(row)
 
 
+def _tag_primary(row: dict[str, Any]) -> str:
+    return (
+        _clean_text(row.get("bank_tag_primary_label") or row.get("bank_tag_label"))
+        or "未标记"
+    )
+
+
+def _tag_sub(row: dict[str, Any]) -> str:
+    return (
+        _clean_text(row.get("bank_tag_sub_label") or row.get("bank_tag_label"))
+        or _tag_primary(row)
+    )
+
+
 def _row_identity(row: dict[str, Any]) -> str:
     return _clean_text(
         row.get("entry_id")
@@ -1798,6 +2016,9 @@ def _row_matches_query(row: dict[str, Any], query: str) -> bool:
         "project_name",
         "expense_type",
         "oa_applicant",
+        "bank_tag_primary_label",
+        "bank_tag_sub_label",
+        "bank_tag_label",
     )
     return query in "\n".join(
         _clean_text(row.get(field)) for field in searchable_fields

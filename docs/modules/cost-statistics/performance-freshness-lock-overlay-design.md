@@ -1,12 +1,12 @@
 # 成本统计性能与加载设计
 
-> 本文只记录当前有效设计。旧 Cost read model、worker、freshness gate、五视图和全量 payload 方案已经退休，不得作为实现依据。
+> 本文只记录当前有效设计。旧 Cost read model、worker、freshness gate、原始 `bank` view 和全量兼容 payload 方案已经退休，不得作为实现依据。
 
 日期：2026-08-31
 
 ## 结论
 
-当前成本统计采用最短闭环：canonical snapshot → 纯 policy → view-specific page DTO。三个 view 共用一个成本人口，不新增缓存、read model、worker、表或依赖。
+当前成本统计采用最短闭环：canonical snapshot → 纯 policy → view-specific page DTO。三个项目成本 view 共用一个成本人口；两个流水 view 共用一个 canonical 银行人口。不新增缓存、read model、worker、表或依赖。
 
 ## 热路径
 
@@ -15,8 +15,9 @@ HTTP GET explorer
   -> parse/validate view + scope + filters + cursor
   -> open one REPEATABLE READ READ ONLY transaction
   -> batch-load bounded canonical facts
-  -> build cost events once
-  -> filter/group/page for project | expense_type | bank_account
+  -> time | bank_tag: batch-project labels and return before OA/relation/manual allocation reads
+  -> project | expense_type | bank_account: build cost events once
+  -> filter/group/page for requested view
   -> return JSON
 ```
 
@@ -27,6 +28,7 @@ HTTP GET explorer
 - scope 尽早下推；命中关系后只扩展完整性和退款需要的关系成员。
 - policy 对已加载事实线性遍历。
 - `bank_account` 在成本事件上读取预先确定的 `bank_account_label`，不二次访问数据库。
+- `time|bank_tag` 只对当前范围流水执行一次集合式有效标签投影，不读取 OA、关系或人工分配。
 - Explorer 与导出关闭成本行标签投影；详情、退款识别和无 OA 规则按各自合同读取必要标签。
 - search 在聚合与分页前执行；cursor 绑定规范化 query 和全部下钻筛选。
 - 右栏每页 20 条；前端不累计全量 rows，也不以滚动触发加载。
@@ -61,10 +63,13 @@ HTTP GET explorer
 1. `project` 根视图；
 2. `expense_type` 根视图；
 3. `bank_account` 根视图；
-4. 一个账户的项目 facets；
-5. 一个账户+项目的成本 rows；
-6. allocation detail；
-7. export preview。
+4. `time` 根视图；
+5. `bank_tag` 根视图；
+6. 一个标签的子标签与流水 rows；
+7. 一个账户的项目 facets；
+8. 一个账户+项目的成本 rows；
+9. allocation/bank detail；
+10. 两类 export preview。
 
 每项多次采样并报告 p50、p95、max、HTTP 状态和关键 row/facet 数。性能目标不是用额外门禁代替测量：如果生产长尾不达预期，先依据 query timing/plan 定位具体热点，再评估索引或 SQL 优化；没有实测证据不得引入缓存或异步投影。
 
@@ -73,7 +78,7 @@ HTTP GET explorer
 - Cost 请求前后没有新增 Cost queue/dirty scope/worker I/O。
 - 银行明细仍能独立浏览原始银行流水。
 - Workbench、导入、往来款、设置及权限关键只读 smoke 正常。
-- 旧 view 返回 400，旧 time-tag endpoint 返回 404。
+- 旧 `bank` view 返回 400，旧 time-tag endpoint 返回 404。
 
 ## 数据安全
 

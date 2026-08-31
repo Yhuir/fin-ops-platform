@@ -137,6 +137,81 @@ class CostStatisticsApiTests(unittest.TestCase):
             },
         )
 
+    def test_bank_flow_views_and_exports_use_signed_expense_minus_income(self) -> None:
+        preview = self.app._import_service.preview_import(  # noqa: SLF001
+            batch_type=BatchType.BANK_TRANSACTION,
+            source_name="cost-statistics-signed-bank-flow.json",
+            imported_by="cost-statistics-test",
+            rows=[
+                {
+                    "account_no": "62228888",
+                    "txn_date": "2026-03-11",
+                    "trade_time": "2026-03-11 09:00:00",
+                    "counterparty_name": "昆明设备供应商",
+                    "debit_amount": "2100.00",
+                    "credit_amount": "",
+                    "bank_serial_no": "COST-SIGNED-OUT-001",
+                    "summary": "住宿费",
+                    "remark": "住宿费",
+                },
+                {
+                    "account_no": "62228888",
+                    "txn_date": "2026-03-12",
+                    "trade_time": "2026-03-12 09:00:00",
+                    "counterparty_name": "昆明设备供应商",
+                    "debit_amount": "",
+                    "credit_amount": "1250.00",
+                    "bank_serial_no": "COST-SIGNED-IN-001",
+                    "summary": "退款",
+                    "remark": "退款",
+                },
+            ],
+        )
+        self.app._import_service.confirm_import(preview.id)  # noqa: SLF001
+
+        status, time_payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=time"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(time_payload["row_count"], 3)
+        self.assertEqual(time_payload["summary"]["expense_amount"], "3350.00")
+        self.assertEqual(time_payload["summary"]["income_amount"], "1250.00")
+        self.assertEqual(time_payload["summary"]["total_amount"], "2100.00")
+        self.assertEqual(
+            {row["direction"] for row in time_payload["rows"]},
+            {"收入", "支出"},
+        )
+
+        status, tag_payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=bank_tag"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(tag_payload["summary"], time_payload["summary"])
+        self.assertGreaterEqual(len(tag_payload["facets"]["bank_tag_primary"]), 1)
+        self.assertTrue(
+            all(
+                "net_outflow_amount" in facet
+                for facet in tag_payload["facets"]["bank_tag_primary"]
+            )
+        )
+
+        status, export_preview = self._json(
+            "/api/cost-statistics/export-preview?month=2026-03&view=time"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(export_preview["summary"]["row_count"], 3)
+        self.assertEqual(export_preview["summary"]["expense_amount"], "3350.00")
+        self.assertEqual(export_preview["summary"]["income_amount"], "1250.00")
+        self.assertEqual(export_preview["summary"]["total_amount"], "2100.00")
+        self.assertIn("资金方向", export_preview["columns"])
+
+        response = self._get(
+            "/api/cost-statistics/export?month=2026-03&view=bank_tag"
+        )
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(filename=__import__("io").BytesIO(response.body))
+        self.assertIn("按标签统计", workbook.sheetnames)
+
     def test_project_view_and_detail_use_the_same_active_relation(self) -> None:
         status, page = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"
@@ -734,7 +809,7 @@ class CostStatisticsApiTests(unittest.TestCase):
                 self.assertEqual(status, 400)
                 self.assertEqual(payload["error"], error_code)
 
-    def test_removed_raw_views_and_time_tag_rules_fail_closed(self) -> None:
+    def test_removed_bank_view_and_time_tag_rules_stay_closed(self) -> None:
         self.assertEqual(
             self.app.handle_request("GET", "/api/cost-statistics/time-tag-rules").status_code,
             404,
@@ -747,13 +822,11 @@ class CostStatisticsApiTests(unittest.TestCase):
             ).status_code,
             404,
         )
-        for view in ("time", "bank", "bank_tag"):
-            with self.subTest(view=view):
-                status, payload = self._json(
-                    f"/api/cost-statistics/explorer?scope=2026-03&view={view}"
-                )
-                self.assertEqual(status, 400)
-                self.assertEqual(payload["error"], "invalid_cost_statistics_query")
+        status, payload = self._json(
+            "/api/cost-statistics/explorer?scope=2026-03&view=bank"
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "invalid_cost_statistics_query")
 
     def test_no_oa_scope_defaults_empty_and_includes_only_unpaired_rows_after_save(self) -> None:
         preview = self.app._import_service.preview_import(  # noqa: SLF001

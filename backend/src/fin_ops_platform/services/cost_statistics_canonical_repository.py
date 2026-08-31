@@ -48,10 +48,12 @@ class PostgresCostStatisticsCanonicalRepository:
     ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
             settings = _settings_payload(transaction)
-            scoped = not include_statistics and scope_kind != "all"
+            bank_flow_view = view in {"time", "bank_tag"}
+            scoped = (bank_flow_view or not include_statistics) and scope_kind != "all"
             relation_only_all_scope = (
                 not include_statistics
                 and scope_kind == "all"
+                and not bank_flow_view
                 and not _has_no_oa_project_tag_assignments(settings)
             )
             relations = _postgres_relations(transaction) if relation_only_all_scope else []
@@ -77,6 +79,25 @@ class PostgresCostStatisticsCanonicalRepository:
                 else _bank_available_years(bank_rows)
             )
             bank_ids = _bank_row_ids(bank_rows)
+            if bank_flow_view:
+                categories_by_transaction_id = (
+                    PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                        transaction,
+                        settings=settings,
+                        transaction_ids=bank_ids,
+                    )
+                )
+                _apply_bank_category_projection(
+                    bank_rows,
+                    categories_by_transaction_id=categories_by_transaction_id,
+                )
+                return _build_snapshot(
+                    settings=settings,
+                    bank_rows=bank_rows,
+                    oa_rows=[],
+                    relations=[],
+                    available_years=available_years,
+                )
             if not relation_only_all_scope:
                 if scoped:
                     relations = _postgres_relations(
@@ -338,6 +359,7 @@ class LocalCostStatisticsCanonicalRepository:
         include_cost_row_tags: bool = True,
     ) -> dict[str, Any]:
         settings = dict(self._settings_provider() or {})
+        bank_flow_view = view in {"time", "bank_tag"}
         account_resolver = _bank_account_resolver(settings)
         all_bank_rows = [
             _bank_row_from_object(row, account_resolver=account_resolver)
@@ -350,10 +372,26 @@ class LocalCostStatisticsCanonicalRepository:
             for row in all_bank_rows
             if _bank_row_in_scope(
                 row,
-                scope_kind=scope_kind if not include_statistics else "all",
-                scope_value=scope_value if not include_statistics else None,
+                scope_kind=(
+                    scope_kind if bank_flow_view or not include_statistics else "all"
+                ),
+                scope_value=(
+                    scope_value if bank_flow_view or not include_statistics else None
+                ),
             )
         ]
+        if bank_flow_view:
+            _apply_bank_tags(
+                scoped_bank_rows,
+                category_provider=self._category_provider,
+            )
+            return _build_snapshot(
+                settings=settings,
+                bank_rows=scoped_bank_rows,
+                oa_rows=[],
+                relations=[],
+                available_years=bank_available_years,
+            )
         no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
         _apply_bank_tags(
             (

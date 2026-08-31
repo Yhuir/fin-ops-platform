@@ -104,6 +104,8 @@ class CostStatisticsApiRoutes:
                 project_name=query.get("project_name", [None])[0],
                 expense_type=query.get("expense_type", [None])[0],
                 bank_account_label=query.get("bank_account_label", [None])[0],
+                bank_tag_primary_label=query.get("bank_tag_primary_label", [None])[0],
+                bank_tag_sub_label=query.get("bank_tag_sub_label", [None])[0],
                 search_query=query.get("query", [None])[0],
                 cursor=query.get("cursor", [None])[0],
                 page_size=query.get("page_size", [None])[0],
@@ -301,6 +303,8 @@ class CostStatisticsApiRoutes:
         project_name: str | None,
         expense_type: str | None,
         bank_account_label: str | None,
+        bank_tag_primary_label: str | None,
+        bank_tag_sub_label: str | None,
         search_query: str | None,
         cursor: str | None,
         page_size: str | None,
@@ -322,6 +326,8 @@ class CostStatisticsApiRoutes:
                     "project_name": project_name,
                     "expense_type": expense_type,
                     "bank_account_label": bank_account_label,
+                    "bank_tag_primary_label": bank_tag_primary_label,
+                    "bank_tag_sub_label": bank_tag_sub_label,
                     "query": search_query,
                 },
                 cursor=cursor,
@@ -365,12 +371,22 @@ class CostStatisticsApiRoutes:
         sort_by: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
-        if view not in {"month", "bank_account", "project", "expense_type"}:
+        if view not in {
+            "month",
+            "time",
+            "bank_tag",
+            "bank_account",
+            "project",
+            "expense_type",
+        }:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_export_request",
-                    "message": "view must be month, bank_account, project, or expense_type.",
+                    "message": (
+                        "view must be month, time, bank_tag, bank_account, "
+                        "project, or expense_type."
+                    ),
                 },
             )
         try:
@@ -421,12 +437,21 @@ class CostStatisticsApiRoutes:
         aggregate_by: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
-        if view not in {"bank_account", "project", "expense_type"}:
+        if view not in {
+            "time",
+            "bank_tag",
+            "bank_account",
+            "project",
+            "expense_type",
+        }:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_export_preview_request",
-                    "message": "view must be bank_account, project, or expense_type.",
+                    "message": (
+                        "view must be time, bank_tag, bank_account, project, "
+                        "or expense_type."
+                    ),
                 },
             )
         try:
@@ -463,12 +488,21 @@ class CostStatisticsApiRoutes:
         scope: str | None,
     ) -> Any:
         normalized_view = str(view or "").strip().lower()
-        if normalized_view not in {"project", "bank_account", "expense_type"}:
+        if normalized_view not in {
+            "time",
+            "bank_tag",
+            "project",
+            "bank_account",
+            "expense_type",
+        }:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_bank_transaction_request",
-                    "message": "view must be project, bank_account, or expense_type.",
+                    "message": (
+                        "view must be time, bank_tag, project, bank_account, "
+                        "or expense_type."
+                    ),
                 },
             )
         try:

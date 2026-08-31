@@ -5288,6 +5288,44 @@ function costAttributedRows(
   }));
 }
 
+function costBankTagForRow(row: { expense_type: string }) {
+  if (row.expense_type === "交通费") {
+    return {
+      bank_tag_code: "travel_transport",
+      bank_tag_label: "交通费",
+      bank_tag_primary_label: "差旅交通",
+      bank_tag_sub_label: "交通费",
+      bank_tag_label_path: ["差旅交通", "交通费"],
+    };
+  }
+  return {
+    bank_tag_code: "project_material",
+    bank_tag_label: "设备材料",
+    bank_tag_primary_label: "项目开销",
+    bank_tag_sub_label: "设备材料",
+    bank_tag_label_path: ["项目开销", "设备材料"],
+  };
+}
+
+function costBankFlowRows(
+  month: string,
+  relationConfirmed = false,
+  includeWorkbenchRelationEvidence = false,
+  includeLargeCostDataset = false,
+) {
+  return costTimeRows(
+    month,
+    relationConfirmed,
+    includeWorkbenchRelationEvidence,
+    includeLargeCostDataset,
+  ).map((row) => ({
+    ...row,
+    direction: row.transaction_id === "cost-txn-e2e-002" ? "收入" : "支出",
+    bank_account_label: row.payment_account_label,
+    ...costBankTagForRow(row),
+  }));
+}
+
 function costStatisticsExplorerPayload(
   month: string,
   relationConfirmed = false,
@@ -5351,11 +5389,14 @@ function costStatisticsExplorerPagePayload(
   const projectName = url.searchParams.get("project_name") ?? "";
   const expenseType = url.searchParams.get("expense_type") ?? "";
   const bankAccountLabel = url.searchParams.get("bank_account_label") ?? "";
+  const bankTagPrimaryLabel = url.searchParams.get("bank_tag_primary_label") ?? "";
+  const bankTagSubLabel = url.searchParams.get("bank_tag_sub_label") ?? "";
   const inScope = <Row extends { trade_time: string }>(rows: Row[]) => rows.filter((row) => (
     scope === "all"
     || (scope.startsWith("year:") ? row.trade_time.startsWith(`${scope.slice(5)}-`) : row.trade_time.startsWith(scope))
   ));
   const costRows = inScope(payload.cost_rows);
+  const bankFlowRows = inScope(costBankFlowRows(payload.month));
   const amount = (value: string) => Number(value.replace(/,/g, "")) || 0;
   const formatAmount = (value: number) => value.toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -5408,6 +5449,45 @@ function costStatisticsExplorerPagePayload(
     project_count: group.projects.size,
     percentage_label: percentage(group.total, total),
   })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
+  const directionAmounts = (rows: typeof bankFlowRows) => ({
+    expense: rows.filter((row) => row.direction === "支出").reduce((sum, row) => sum + amount(row.amount), 0),
+    income: rows.filter((row) => row.direction === "收入").reduce((sum, row) => sum + amount(row.amount), 0),
+  });
+  const primaryGroups = new Map<string, typeof bankFlowRows>();
+  for (const row of bankFlowRows) {
+    primaryGroups.set(row.bank_tag_primary_label, [...(primaryGroups.get(row.bank_tag_primary_label) ?? []), row]);
+  }
+  const bankTagPrimary = Array.from(primaryGroups.entries()).map(([label, groupRows]) => {
+    const amounts = directionAmounts(groupRows);
+    return {
+      primary_label: label,
+      expense_amount: formatAmount(amounts.expense),
+      income_amount: formatAmount(amounts.income),
+      net_outflow_amount: formatAmount(amounts.expense - amounts.income),
+      expense_transaction_count: groupRows.filter((row) => row.direction === "支出").length,
+      income_transaction_count: groupRows.filter((row) => row.direction === "收入").length,
+      transaction_count: groupRows.length,
+      sub_tag_count: new Set(groupRows.map((row) => row.bank_tag_sub_label)).size,
+    };
+  });
+  const selectedPrimaryRows = bankFlowRows.filter((row) => row.bank_tag_primary_label === bankTagPrimaryLabel);
+  const subGroups = new Map<string, typeof bankFlowRows>();
+  for (const row of selectedPrimaryRows) {
+    subGroups.set(row.bank_tag_sub_label, [...(subGroups.get(row.bank_tag_sub_label) ?? []), row]);
+  }
+  const bankTagSub = Array.from(subGroups.entries()).map(([label, groupRows]) => {
+    const amounts = directionAmounts(groupRows);
+    return {
+      primary_label: bankTagPrimaryLabel,
+      sub_label: label,
+      expense_amount: formatAmount(amounts.expense),
+      income_amount: formatAmount(amounts.income),
+      net_outflow_amount: formatAmount(amounts.expense - amounts.income),
+      expense_transaction_count: groupRows.filter((row) => row.direction === "支出").length,
+      income_transaction_count: groupRows.filter((row) => row.direction === "收入").length,
+      transaction_count: groupRows.length,
+    };
+  });
 
   const selectedProjectRows = projectGroups.get(projectName)?.rows ?? [];
   const selectedProjectTotal = selectedProjectRows.reduce((sum, row) => sum + amount(row.amount), 0);
@@ -5442,27 +5522,47 @@ function costStatisticsExplorerPagePayload(
     matchedRows = costRows.filter((row) => row.expense_type === expenseType);
   } else if (view === "bank_account" && bankAccountLabel && projectName) {
     matchedRows = selectedBankRows.filter((row) => row.project_name === projectName);
+  } else if (view === "time") {
+    matchedRows = bankFlowRows;
+  } else if (view === "bank_tag" && bankTagPrimaryLabel && bankTagSubLabel) {
+    matchedRows = selectedPrimaryRows.filter((row) => row.bank_tag_sub_label === bankTagSubLabel);
   }
   const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize).map((row) => {
+    const bankFlowView = view === "time" || view === "bank_tag";
     const allocationId = `oa:${row.transaction_id}`;
     return {
       ...row,
-      entry_id: allocationId,
-      row_kind: "oa_allocation",
-      allocation_id: allocationId,
+      entry_id: bankFlowView ? row.transaction_id : allocationId,
+      row_kind: bankFlowView ? "bank_transaction" : "oa_allocation",
+      allocation_id: bankFlowView ? "" : allocationId,
       occurred_at: row.trade_time,
     };
   });
   const nextOffset = cursorOffset + rows.length;
+  const flowAmounts = directionAmounts(bankFlowRows);
   return {
     scope,
     view,
-    summary: {
+    summary: view === "time" || view === "bank_tag" ? {
+      row_count: bankFlowRows.length,
+      transaction_count: bankFlowRows.length,
+      total_amount: formatAmount(flowAmounts.expense - flowAmounts.income),
+      expense_amount: formatAmount(flowAmounts.expense),
+      income_amount: formatAmount(flowAmounts.income),
+      expense_transaction_count: bankFlowRows.filter((row) => row.direction === "支出").length,
+      income_transaction_count: bankFlowRows.filter((row) => row.direction === "收入").length,
+    } : {
       row_count: costRows.length,
       transaction_count: costRows.length,
       total_amount: formatAmount(total),
     },
-    statistics: {
+    statistics: view === "time" || view === "bank_tag" ? {
+      transaction_count: bankFlowRows.length,
+      expense_transaction_count: bankFlowRows.filter((row) => row.direction === "支出").length,
+      income_transaction_count: bankFlowRows.filter((row) => row.direction === "收入").length,
+      untagged_transaction_count: 0,
+      bank_tag_count: new Set(bankFlowRows.map((row) => row.bank_tag_sub_label)).size,
+    } : {
       project_count: projectGroups.size,
       expense_type_count: expenseGroups.size,
       bank_account_count: Array.from(bankGroups.keys()).filter((label) => label !== "银行账户未确定").length,
@@ -5473,6 +5573,8 @@ function costStatisticsExplorerPagePayload(
       projects: view === "project" ? projects : view === "bank_account" && bankAccountLabel ? bankProjects : [],
       expense_types: view === "expense_type" ? expenseTypes : view === "project" && projectName ? projectExpenseTypes : [],
       bank_accounts: view === "bank_account" ? bankAccounts : [],
+      bank_tag_primary: view === "bank_tag" ? bankTagPrimary : [],
+      bank_tag_sub: view === "bank_tag" ? bankTagSub : [],
     },
     rows,
     row_count: matchedRows.length,
@@ -5572,25 +5674,57 @@ function costStatisticsExportPreviewPayload(
     .filter((row) => (projectNames.size > 0 ? projectNames.has(row.project_name) : true))
     .filter((row) => (expenseTypes.size > 0 ? expenseTypes.has(row.expense_type) : true))
     .filter((row) => (bankAccountLabels.size > 0 ? bankAccountLabels.has(row.bank_account_label) : true));
-  const fileName = view === "project"
+  const bankFlowRows = costBankFlowRows(month, relationConfirmed, includeWorkbenchRelationEvidence);
+  const bankFlowExpense = bankFlowRows
+    .filter((row) => row.direction === "支出")
+    .reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
+  const bankFlowIncome = bankFlowRows
+    .filter((row) => row.direction === "收入")
+    .reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
+  const formatAmount = (value: number) => value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const fileName = view === "time"
+    ? "成本统计_全部期间_按时间统计.xlsx"
+    : view === "bank_tag"
+      ? "成本统计_全部期间_按标签统计.xlsx"
+      : view === "project"
     ? "成本统计_全部期间_按项目统计_按月_云南溯源科技.xlsx"
     : view === "bank_account"
       ? "成本统计_全部期间_按银行账户统计.xlsx"
       : "成本统计_全部期间_按费用类型统计.xlsx";
-  const columns = ["时间", "银行账户", "项目名称", "费用类型", "金额", "费用内容"];
+  const bankFlowView = view === "time" || view === "bank_tag";
+  const columns = view === "time"
+    ? ["交易时间", "资金方向", "金额", "主标签", "子标签", "对方户名", "摘要/备注", "银行账户"]
+    : view === "bank_tag"
+      ? ["交易时间", "主标签", "子标签", "资金方向", "金额", "对方户名", "摘要/备注", "银行账户"]
+      : ["时间", "银行账户", "项目名称", "费用类型", "金额", "费用内容"];
   return {
     view,
     file_name: fileName,
     scope_label: month === "all" ? "全部期间" : month,
     summary: {
-      row_count: rows.length,
-      transaction_count: rows.length,
-      total_amount: sumCostAmounts(rows),
+      row_count: bankFlowView ? bankFlowRows.length : rows.length,
+      transaction_count: bankFlowView ? bankFlowRows.length : rows.length,
+      total_amount: bankFlowView ? formatAmount(bankFlowExpense - bankFlowIncome) : sumCostAmounts(rows),
+      ...(bankFlowView ? {
+        expense_amount: formatAmount(bankFlowExpense),
+        income_amount: formatAmount(bankFlowIncome),
+        expense_transaction_count: bankFlowRows.filter((row) => row.direction === "支出").length,
+        income_transaction_count: bankFlowRows.filter((row) => row.direction === "收入").length,
+      } : {}),
       sheet_count: view === "project" ? 8 : 1,
     },
-    sheet_names: view === "project" ? ["导出说明", "项目汇总", "成本明细"] : [view === "bank_account" ? "按银行账户统计" : "按费用类型统计"],
+    sheet_names: view === "project"
+      ? ["导出说明", "项目汇总", "成本明细"]
+      : [view === "bank_account" ? "按银行账户统计" : view === "time" ? "按时间统计" : view === "bank_tag" ? "按标签统计" : "按费用类型统计"],
     columns,
-    rows: rows.map((row) => [row.trade_time, row.bank_account_label, row.project_name, row.expense_type, row.amount, row.expense_content]),
+    rows: bankFlowView
+      ? bankFlowRows.map((row) => view === "time"
+        ? [row.trade_time, row.direction, row.amount, row.bank_tag_primary_label, row.bank_tag_sub_label, row.counterparty_name, row.expense_content, row.payment_account_label]
+        : [row.trade_time, row.bank_tag_primary_label, row.bank_tag_sub_label, row.direction, row.amount, row.counterparty_name, row.expense_content, row.payment_account_label])
+      : rows.map((row) => [row.trade_time, row.bank_account_label, row.project_name, row.expense_type, row.amount, row.expense_content]),
   };
 }
 

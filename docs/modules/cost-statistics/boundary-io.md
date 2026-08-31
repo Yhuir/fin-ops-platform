@@ -5,9 +5,9 @@
 ## 模块状态
 
 - 状态：closed
-- 页面职责：对同一项目成本集合提供项目、费用类型、银行账户三个观察维度。
-- 不负责：浏览原始银行流水、按标签/时间分析银行收支、维护银行标签规则、构建 Cost read model。
-- 旧路径：`time`、`bank`、`bank_tag` view、`time-tag-rules` API/设置/前端抽屉已经删除，禁止兼容回退。
+- 页面职责：对同一项目成本集合提供项目、费用类型、银行账户三个观察维度，并对同一 canonical 银行流水集合提供时间、标签两个收支观察维度。
+- 不负责：银行账户余额、银行流水维护、成本专属标签规则、构建 Cost read model。
+- 旧路径：原始 `bank` view、`time-tag-rules` API/设置/前端抽屉已经删除，禁止兼容回退；`time|bank_tag` 是当前正式只读 view。
 
 ## 分层边界
 
@@ -15,19 +15,19 @@
 | --- | --- | --- | --- |
 | Route | HTTP query/body、权限 session | HTTP 状态、JSON 或导出文件 | SQL、业务聚合、队列写入 |
 | Canonical repository | scope、一个 PostgreSQL connection | 单个一致性 snapshot | read model、Redis、RabbitMQ、HTTP、逐行查询 |
-| Policy | canonical snapshot、无 OA/人工分配事实 | 唯一成本事件集合、聚合、详情 | 数据库、网络、全局状态、fallback |
+| Policy | canonical snapshot、无 OA/人工分配事实 | 唯一成本事件集合或真实流水集合、聚合、详情 | 数据库、网络、全局状态、fallback |
 | Query service | repository、policy、view/filter/cursor | 稳定 API DTO | freshness gate、worker、旧 view 兼容 |
 | Manual allocation service | relation case、逐 OA 单元金额、`X`、version/fingerprint、actor | versioned allocation 与 audit | HTTP、页面状态、比例建议、半写入 |
-| Frontend | API DTO、用户选择 | 三视图、详情、导出、错误/重试 | 业务金额重算、跨页面 I/O、旧页签 |
+| Frontend | API DTO、用户选择 | 五视图、详情、导出、错误/重试 | 业务金额重算、跨页面 I/O、旧规则 UI |
 
 ## Canonical 输入
 
-单个 `REPEATABLE READ READ ONLY` snapshot 按请求范围批量读取：
+单个 `REPEATABLE READ READ ONLY` snapshot 按请求范围批量读取。两个流水 view 只读取银行流水和批量有效分类投影并立即返回；三个项目成本 view 再按需读取其余事实：
 
 - `app.bank_transactions`
 - `app.oa_applications.normalized_payload` 的成本字段和 canonical `expense_items`
 - `app.workbench_pair_relations` 中 `status='active'` 的正式关系
-- `app.bank_transaction_categories` 与 confirmations（用于退款与无 OA 资格，不用于提供按标签视图）
+- `app.bank_transaction_categories` 与 confirmations 的批量有效分类投影
 - `app.app_settings` 中银行账户映射和 `cost_statistics_no_oa_projects`
 - `app.cost_statistics_manual_allocations`
 
@@ -51,15 +51,18 @@ PUT manual allocation
 
 ### Explorer 合同
 
-- `view` 仅接受 `project|expense_type|bank_account`。
+- `view` 接受 `time|bank_tag|project|expense_type|bank_account`；原始 `bank` 明确拒绝。
 - 共用 `scope`、`query`、`cursor`、`page_size` 和 `include_statistics`。
 - `project` 下钻参数：可选 `project_name`，选中项目后可选 `expense_type`。
 - `expense_type` 下钻参数：可选 `expense_type`。
 - `bank_account` 下钻参数：可选 `bank_account_label`，选中账户后可选 `project_name`。
-- 旧 `payment_account_label`、`tag_code`、`primary_tag`、`sub_tag`、时间栏参数不是 explorer 合同。
-- 响应固定包含 `summary`、可选 `statistics`、`facets`、`rows`、`row_count`、`next_cursor`；不包含旧 `time_rows`、`bank_flow_rows`、方向汇总或 read-model 状态。
+- `time` 无额外下钻参数，直接分页返回当前 scope/query 的流水；`bank_tag` 可接受 `bank_tag_primary_label`，选中主标签后可接受 `bank_tag_sub_label`。
+- 旧 `payment_account_label`、`tag_code`、`primary_tag`、`sub_tag` 和客户端时间栏私有参数不是 explorer 合同。
+- 响应固定包含 `summary`、可选 `statistics`、`facets`、`rows`、`row_count`、`next_cursor`；不包含旧 `time_rows`、`bank_flow_rows` 或 read-model 状态。
 - `summary.total_amount` 与 `transaction_count` 在三个根视图上必须相等；分面只改变分组，不改变成本人口。
 - `statistics` 只包含项目数、费用类型数、已确定银行账户数和成本明细数；`银行账户未确定`不计入已确定账户数，但其成本仍计入总额。
+- 两个流水 view 的 `summary.total_amount` 表示净支出，并同时返回 `expense_amount`、`income_amount` 和两个方向的交易数。`bank_tag` 分面同样返回支出、收入、净支出，禁止使用绝对值总和替代净额。
+- 两个流水 view 的 `statistics` 返回流水数、支出数、收入数、未标记数和标签数；不触发项目成本构建。
 
 ### 银行账户归属合同
 
@@ -72,8 +75,8 @@ PUT manual allocation
 ### 详情与导出
 
 - OA 成本行打开 `/allocations/{id}`，展示 OA 单元成本和关系层付款证据；银行账户归属不等于 OA 单元到某条流水的分配。
-- 无 OA 成本行可打开 `/bank-transactions/{id}`；该 endpoint 不等于恢复原始银行统计页。
-- preview 与 download 复用 explorer 的成本事件和三个 view；旧 view 明确返回 400。
+- 两个流水 view 和无 OA 成本行可打开 `/bank-transactions/{id}`；OA 成本行打开 `/allocations/{id}`。
+- preview 与 download 接受五个正式 view。项目成本导出复用成本事件；流水导出复用真实银行集合和方向净额。
 - 预览最多 8 行，下载受行数上限保护。
 
 ## 设置边界
@@ -97,7 +100,7 @@ PUT manual allocation
 ## 已删除旧链路
 
 - Cost read model、refresh service、runtime worker、source version、SQL projection与缓存链。
-- 页面 `按时间`、`按标签`、原始 `按银行` 视图及其前端状态、类型和请求参数。
+- 原始 `按银行` view 及其前端状态、类型和请求参数。
 - `/api/cost-statistics/time-tag-rules` 的 GET/PUT 路由及 App Settings family。
 - `time_rows`、`bank_flow_rows`、`bank_flow_time_rows` 响应兼容读取。
 
@@ -105,8 +108,8 @@ PUT manual allocation
 
 ## 跨模块影响
 
-- 银行明细：功能不变，仍是原始流水唯一浏览入口。
+- 银行明细：功能不变，继续拥有账户余额、账户维度筛选和流水维护；成本统计只读同一 canonical 流水做时间/标签收支分析。
 - Workbench/OA：关系确认、撤回或 OA 状态改变后，下一次 Cost GET 读取新事实；不新增 fan-out。
 - 设置：只删除成本统计旧 time/tag family，不影响银行明细自己的自动标签设置。
 - 权限/审计：无 OA 与人工分配写入口保持现有权限和审计合同。
-- 数据库：无 schema migration。发布前通过 root-owned `settings-normalize <exact release> --dry-run/--execute` 在单一事务内规范化 Settings canonical/formal-raw payload；执行前必须证明唯一 changed key 为退役设置键。无备份工件、无主库删除 I/O。
+- 数据库：无 schema migration、无设置写入、无备份工件、无主库删除 I/O。

@@ -611,6 +611,88 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(september["primary_facets"], [])
         self.assertEqual(all_time["summary"]["total_amount"], "1015.00")
 
+    def test_bank_flow_views_use_signed_expense_minus_income_totals(self) -> None:
+        policy = self._policy(
+            [],
+            bank_rows=[
+                self._bank(
+                    "bank-out-1",
+                    "2100.00",
+                    trade_time="2026-08-01 15:24:03",
+                    tag_code="lodging",
+                    tag_label="住宿费",
+                ),
+                self._bank(
+                    "bank-in-1",
+                    "2100.00",
+                    direction="inflow",
+                    trade_time="2026-08-03 12:00:13",
+                    tag_code="lodging",
+                    tag_label="住宿费",
+                ),
+                self._bank(
+                    "bank-out-2",
+                    "2100.00",
+                    trade_time="2026-08-03 15:43:00",
+                    tag_code="lodging",
+                    tag_label="住宿费",
+                ),
+            ],
+        )
+
+        time_page = policy.explorer_page(
+            scope_kind="month",
+            scope_value="2026-08",
+            view="time",
+            filters={},
+            cursor_values=None,
+            page_size=50,
+        )
+        tag_root = policy.explorer_page(
+            scope_kind="month",
+            scope_value="2026-08",
+            view="bank_tag",
+            filters={},
+            cursor_values=None,
+            page_size=50,
+        )
+        tag_detail = policy.explorer_page(
+            scope_kind="month",
+            scope_value="2026-08",
+            view="bank_tag",
+            filters={
+                "bank_tag_primary_label": "住宿费",
+                "bank_tag_sub_label": "住宿费",
+            },
+            cursor_values=None,
+            page_size=50,
+        )
+
+        for page in (time_page, tag_root, tag_detail):
+            self.assertEqual(page["summary"]["transaction_count"], 3)
+            self.assertEqual(page["summary"]["expense_amount"], "4200.00")
+            self.assertEqual(page["summary"]["income_amount"], "2100.00")
+            self.assertEqual(page["summary"]["total_amount"], "2100.00")
+        self.assertEqual(time_page["row_count"], 3)
+        self.assertEqual(tag_root["row_count"], 0)
+        self.assertEqual(tag_root["primary_facets"], [
+            {
+                "primary_label": "住宿费",
+                "expense_amount": "4200.00",
+                "income_amount": "2100.00",
+                "net_outflow_amount": "2100.00",
+                "expense_transaction_count": 2,
+                "income_transaction_count": 1,
+                "transaction_count": 3,
+                "sub_tag_count": 1,
+            }
+        ])
+        self.assertEqual(tag_detail["row_count"], 3)
+        self.assertEqual(
+            {row["direction"] for row in tag_detail["rows"]},
+            {"收入", "支出"},
+        )
+
     def test_all_cost_views_use_bank_trade_date_and_same_total(self) -> None:
         policy = self._policy(
             [self._group(oa_rows=[self._oa("oa-1", completed_at="2026-05-25 09:00:00")], bank_rows=[self._bank("bank-1", "100.00", trade_time="2026-06-01 09:00:00")])]

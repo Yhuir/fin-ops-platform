@@ -292,6 +292,100 @@ describe("Cost statistics export API", () => {
     });
   });
 
+  test("maps signed bank-flow summaries and tag drill-down filters", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        scope: "2026-08",
+        view: "bank_tag",
+        summary: {
+          row_count: 3,
+          transaction_count: 3,
+          total_amount: "2100.00",
+          expense_amount: "4200.00",
+          income_amount: "2100.00",
+          expense_transaction_count: 2,
+          income_transaction_count: 1,
+        },
+        statistics: {
+          transaction_count: 3,
+          expense_transaction_count: 2,
+          income_transaction_count: 1,
+          untagged_transaction_count: 0,
+          bank_tag_count: 1,
+        },
+        available_years: ["2026"],
+        facets: {
+          bank_tag_primary: [{
+            primary_label: "住宿费",
+            expense_amount: "4200.00",
+            income_amount: "2100.00",
+            net_outflow_amount: "2100.00",
+            expense_transaction_count: 2,
+            income_transaction_count: 1,
+            transaction_count: 3,
+            sub_tag_count: 1,
+          }],
+          bank_tag_sub: [{
+            primary_label: "住宿费",
+            sub_label: "住宿费",
+            expense_amount: "4200.00",
+            income_amount: "2100.00",
+            net_outflow_amount: "2100.00",
+            expense_transaction_count: 2,
+            income_transaction_count: 1,
+            transaction_count: 3,
+          }],
+        },
+        rows: [{
+          entry_id: "bank-out-1",
+          row_kind: "bank_transaction",
+          transaction_id: "bank-out-1",
+          trade_time: "2026-08-03 15:43:00",
+          direction: "支出",
+          amount: "2100.00",
+          counterparty_name: "张丽芬",
+          bank_account_label: "建行 8106",
+          bank_tag_code: "lodging",
+          bank_tag_label: "住宿费",
+          bank_tag_primary_label: "住宿费",
+          bank_tag_sub_label: "住宿费",
+          bank_tag_label_path: ["住宿费"],
+          remark: "住宿费",
+        }],
+        row_count: 3,
+        next_cursor: null,
+        allocation_quality: null,
+      }), { status: 200 }),
+    ) as typeof fetch;
+
+    const payload = await fetchCostStatisticsExplorerPage({
+      scope: "2026-08",
+      view: "bank_tag",
+      bankTagPrimaryLabel: "住宿费",
+      bankTagSubLabel: "住宿费",
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=2026-08&view=bank_tag&bank_tag_primary_label=%E4%BD%8F%E5%AE%BF%E8%B4%B9&bank_tag_sub_label=%E4%BD%8F%E5%AE%BF%E8%B4%B9",
+      expect.any(Object),
+    );
+    expect(payload.summary).toMatchObject({
+      totalAmount: "2100.00",
+      expenseAmount: "4200.00",
+      incomeAmount: "2100.00",
+    });
+    expect(payload.facets.bankTagPrimary[0]).toMatchObject({
+      primaryLabel: "住宿费",
+      netOutflowAmount: "2100.00",
+      transactionCount: 3,
+    });
+    expect(payload.rows[0]).toMatchObject({
+      rowKind: "bank_transaction",
+      direction: "支出",
+      bankTagPrimaryLabel: "住宿费",
+    });
+  });
+
   test("maps the bank-account facet contract and sends the project drill-down", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

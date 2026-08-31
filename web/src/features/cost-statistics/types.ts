@@ -2,6 +2,10 @@ export type CostSummary = {
   rowCount: number;
   transactionCount: number;
   totalAmount: string;
+  expenseAmount?: string;
+  incomeAmount?: string;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
 };
 
 export type CostStatisticsPageStatistics = {
@@ -9,6 +13,11 @@ export type CostStatisticsPageStatistics = {
   expenseTypeCount?: number;
   bankAccountCount?: number;
   costTransactionCount?: number;
+  transactionCount?: number;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
+  untaggedTransactionCount?: number;
+  bankTagCount?: number;
 };
 
 export type CostExplorerEntryRow = {
@@ -27,6 +36,11 @@ export type CostExplorerEntryRow = {
   paymentAccountLabel: string;
   bankAccountLabel: string;
   remark: string;
+  bankTagCode: string;
+  bankTagLabel: string;
+  bankTagPrimaryLabel: string;
+  bankTagSubLabel: string;
+  bankTagLabelPath: string[];
 };
 
 export type CostBankExplorerRow = {
@@ -53,7 +67,34 @@ export type CostExpenseTypeExplorerRow = {
   percentageLabel: string;
 };
 
-export type CostStatisticsView = "project" | "expense_type" | "bank_account";
+export type CostBankTagPrimaryExplorerRow = {
+  primaryLabel: string;
+  expenseAmount: string;
+  incomeAmount: string;
+  netOutflowAmount: string;
+  expenseTransactionCount: number;
+  incomeTransactionCount: number;
+  transactionCount: number;
+  subTagCount: number;
+};
+
+export type CostBankTagSubExplorerRow = {
+  primaryLabel: string;
+  subLabel: string;
+  expenseAmount: string;
+  incomeAmount: string;
+  netOutflowAmount: string;
+  expenseTransactionCount: number;
+  incomeTransactionCount: number;
+  transactionCount: number;
+};
+
+export type CostStatisticsView =
+  | "time"
+  | "project"
+  | "expense_type"
+  | "bank_account"
+  | "bank_tag";
 
 export type CostStatisticsExplorerPage = {
   scope: string;
@@ -65,6 +106,8 @@ export type CostStatisticsExplorerPage = {
     projects: CostProjectExplorerRow[];
     expenseTypes: CostExpenseTypeExplorerRow[];
     bankAccounts: CostBankExplorerRow[];
+    bankTagPrimary: CostBankTagPrimaryExplorerRow[];
+    bankTagSub: CostBankTagSubExplorerRow[];
   };
   rows: CostExplorerEntryRow[];
   allocationQuality?: {
@@ -155,6 +198,8 @@ export type CostStatisticsExplorerPageRequest = {
   projectName?: string;
   expenseType?: string;
   bankAccountLabel?: string;
+  bankTagPrimaryLabel?: string;
+  bankTagSubLabel?: string;
   query?: string;
   cursor?: string;
   pageSize?: number;
@@ -232,7 +277,7 @@ export type CostAllocationDetail = {
 export type CostEntryDetail = CostBankTransactionDetail | CostAllocationDetail;
 
 export type CostStatisticsExportPreview = {
-  view: "bank_account" | "project" | "expense_type";
+  view: "time" | "bank_tag" | "bank_account" | "project" | "expense_type";
   fileName: string;
   scopeLabel: string;
   summary: {
@@ -240,6 +285,10 @@ export type CostStatisticsExportPreview = {
     transactionCount: number;
     totalAmount: string;
     sheetCount: number;
+    expenseAmount?: string;
+    incomeAmount?: string;
+    expenseTransactionCount?: number;
+    incomeTransactionCount?: number;
   };
   sheetNames: string[];
   columns: string[];

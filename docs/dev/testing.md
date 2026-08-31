@@ -193,13 +193,13 @@ python3 scripts/package_production_browser_smoke.py \
 
 本轮新增进项发票使用当前筛选导出 Browser 覆盖：export-preview 和 export 请求携带当前 keyword/sort/filter、不带 `page`/`page_size`，真实 download event 产生 `input-invoice-usage.xlsx`，下载内容包含发票、供应商、OA、relation case 和 payment 字段；row-limit 返回结构化错误时不生成下载，export read model 非 fresh 时禁用下载。
 
-成本统计导出 Browser 覆盖：导出中心只提供 `bank_account|project|expense_type`，preview/download 复用当前成本人口与账户归属，不带 explorer 分页参数；row-limit 错误反馈保持明确，`read_export_only` 用户可读和导出但没有写入口。
+成本统计导出 Browser 覆盖：导出中心提供 `time|bank_tag|bank_account|project|expense_type`。流水 preview/download 包含真实方向并按`支出-收入`汇总净支出；项目成本导出复用当前成本人口与账户归属；全部不带 explorer 分页参数。row-limit 错误反馈保持明确，`read_export_only` 用户可读和导出但没有写入口。
 
-成本统计 Browser baseline：`cost-statistics-flow` 覆盖项目→费用类型→成本详情、银行账户→项目→同一成本人口、费用类型独立下钻、银行账户导出预览和无 OA 设置保存后刷新。旧按时间、按标签与原始按银行 UI 必须不存在；原始银行流水由银行明细 E2E 独立保护。
+成本统计 Browser baseline：`cost-statistics-flow` 覆盖项目→费用类型→成本详情、银行账户→项目→同一成本人口、费用类型独立下钻、按时间正负流水、主标签→子标签→真实流水、流水/银行账户导出预览和无 OA 设置保存后刷新。旧原始按银行与 time-tag 规则 UI 必须不存在；银行明细的账户级浏览和维护由其 E2E 独立保护。
 
 成本统计现在直接读取 canonical snapshot，不再存在 Cost non-fresh 409。Browser 覆盖要求 bank transaction/allocation detail、export-preview 和 export 失败时不复用旧详情或旧预览、不触发伪下载，并将错误限制在对应抽屉/导出区；其他 console/page/request/dialog 错误仍会失败。
 
-成本统计大数据与窄屏继续由共享 Finance Table、`CostStatisticsTable` 显式分页测试和页面响应式 smoke 保护；真实生产大数据查询/下载耗时必须在发布后用三个当前 view 的 SLO probe 验证，不再以旧 time-view 或 Cost worker 状态作为成功条件。
+成本统计大数据与窄屏继续由共享 Finance Table、`CostStatisticsTable` 显式分页测试和页面响应式 smoke 保护；真实生产大数据查询/下载耗时必须在发布后用五个当前 view 的 SLO probe 验证，不以 Cost worker 状态作为成功条件。
 
 本轮新增 Finance Table System Browser 覆盖：AppHealth 代表性共享宽表在 390px 窄屏下必须可以横向滚动到请求性能和 read model 表格右侧列，刷新按钮不被遮挡，read model/worker 表格值可读，且没有 console/page error。该测试证明共享表格浏览器布局回归，不替代真实大数据 worker drain。
 

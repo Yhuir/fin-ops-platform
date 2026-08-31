@@ -534,6 +534,82 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(snapshot["bank_rows"], [])
         self.assertEqual(snapshot["cost_groups"], [])
 
+    def test_postgres_bank_flow_view_reads_scoped_rows_and_skips_cost_relations(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            scope_kind="month",
+            scope_value="2026-03",
+            view="bank_tag",
+            include_statistics=True,
+        )
+
+        self.assertEqual(connection.transaction_count, 1)
+        sql = "\n".join(connection.snapshot_transaction.fetched)
+        self.assertIn("txn_month >= %s and txn_month < %s", sql)
+        self.assertIn("select row_id, effective_category_code", sql)
+        self.assertNotIn("from app.oa_applications", sql)
+        self.assertNotIn("from app.workbench_pair_relations", sql)
+        self.assertNotIn("from app.cost_statistics_manual_allocations", sql)
+        self.assertEqual(snapshot["cost_groups"], [])
+        self.assertEqual(snapshot["manual_allocations"], {})
+        self.assertEqual(snapshot["bank_rows"][0]["bank_tag_code"], "salary")
+
+    def test_local_bank_flow_view_classifies_once_without_loading_cost_dependencies(self) -> None:
+        classified_row_ids: list[str] = []
+
+        class RecordingCategoryProvider:
+            def bulk_get_for_rows(self, rows):
+                classified_row_ids.extend(row["id"] for row in rows)
+                return {
+                    "bank-march": {
+                        "effective_category_code": "fee",
+                        "effective_category_label": "手续费",
+                        "effective_category_primary_label": "运营费用",
+                        "effective_category_sub_label": "手续费",
+                    }
+                }
+
+        repository = LocalCostStatisticsCanonicalRepository(
+            bank_rows_provider=lambda: [
+                {
+                    "id": "bank-march",
+                    "amount": "8.00",
+                    "txn_direction": "outflow",
+                    "trade_time": "2026-03-20 10:00:00",
+                },
+                {
+                    "id": "bank-april",
+                    "amount": "9.00",
+                    "txn_direction": "outflow",
+                    "trade_time": "2026-04-20 10:00:00",
+                },
+            ],
+            relations_provider=lambda: self.fail(
+                "Bank-flow views must not load OA relations."
+            ),
+            oa_rows_by_ids_provider=lambda _ids: self.fail(
+                "Bank-flow views must not load OA payloads."
+            ),
+            settings_provider=lambda: {},
+            category_provider=RecordingCategoryProvider(),
+            manual_allocations_provider=lambda _case_ids: self.fail(
+                "Bank-flow views must not load manual allocations."
+            ),
+        )
+
+        snapshot = repository.load_snapshot(
+            scope_kind="month",
+            scope_value="2026-03",
+            view="time",
+            include_statistics=True,
+        )
+
+        self.assertEqual(classified_row_ids, ["bank-march"])
+        self.assertEqual([row["id"] for row in snapshot["bank_rows"]], ["bank-march"])
+        self.assertEqual(snapshot["bank_rows"][0]["bank_tag_primary_label"], "运营费用")
+        self.assertEqual(snapshot["cost_groups"], [])
+
     def test_scoped_cost_view_uses_bounded_seven_query_bank_date_snapshot(self) -> None:
         connection = _PopulatedCostConnection()
 
