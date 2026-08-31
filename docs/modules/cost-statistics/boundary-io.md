@@ -22,7 +22,7 @@
 
 ## Canonical 输入
 
-单个 `REPEATABLE READ READ ONLY` snapshot 按请求范围批量读取。两个流水 view 只读取银行流水和批量有效分类投影并立即返回；三个项目成本 view 再按需读取其余事实：
+单个 `REPEATABLE READ READ ONLY` snapshot 按请求范围批量读取。两个流水 view 只读取银行流水和批量有效分类投影并立即返回；三个项目成本 view 再按需读取其余事实。未配置无 OA 项目时，项目成本只加载关系成员，并以同一 snapshot 内的一次基础聚合读取全量流水收支数量和可用年份；该聚合不执行标签分类：
 
 - `app.bank_transactions`
 - `app.oa_applications.normalized_payload` 的成本字段和 canonical `expense_items`
@@ -68,7 +68,7 @@ PUT manual allocation
 - 响应固定包含 `summary`、可选 `statistics`、`facets`、`rows`、`row_count`、`next_cursor`；不包含旧 `time_rows`、`bank_flow_rows` 或 read-model 状态。
 - `summary.total_amount` 与 `transaction_count` 在三个根视图上必须相等；分面只改变分组，不改变成本人口。
 - 项目与银行账户分面不再返回无消费方的 `percentage_label` 和明细数；费用类型分面保留下钻所需的明细数与项目数。
-- 三个项目成本 view 的 `statistics` 在既有项目数、费用类型数、已确定银行账户数和成本明细数之外，返回同一 snapshot 已加载银行流水的总数、支出数和收入数；不新增查询或跨页统计 I/O。`银行账户未确定`不计入已确定账户数，但其成本仍计入总额。
+- 三个项目成本 view 的 `statistics` 在既有项目数、费用类型数、已确定银行账户数和成本明细数之外，返回同一 snapshot 的银行流水总数、支出数和收入数。无 OA 项目为空时使用无标签分类的基础聚合替代完整无关流水读取；`银行账户未确定`不计入已确定账户数，但其成本仍计入总额。
 - 两个流水 view 的 `summary.total_amount` 表示净支出，并同时返回 `expense_amount`、`income_amount` 和两个方向的交易数。`bank_tag` 分面同样返回支出、收入、净支出，禁止使用绝对值总和替代净额。
 - 两个流水 view 的 `statistics` 返回流水数、支出数、收入数、未标记数和标签数；不触发项目成本构建。
 

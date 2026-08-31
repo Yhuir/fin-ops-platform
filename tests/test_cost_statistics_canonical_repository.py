@@ -28,6 +28,13 @@ class _SnapshotTransaction:
         self.fetch_calls.append((normalized, _params))
         if "from app.app_settings" in normalized:
             return {"settings_payload": {}}
+        if "from app.bank_transactions" in normalized and "count(*)" in normalized:
+            return {
+                "transaction_count": 1219,
+                "expense_transaction_count": 1056,
+                "income_transaction_count": 163,
+                "available_years": [2026, 2025],
+            }
         return None
 
     def fetch_all(self, sql: str, _params: tuple = ()):
@@ -352,6 +359,40 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             )
         )
 
+    def test_statistics_view_uses_relation_rows_and_aggregate_bank_overview(self) -> None:
+        connection = _PopulatedCostConnection()
+
+        snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            view="project",
+            include_statistics=True,
+            include_cost_row_tags=False,
+        )
+
+        bank_sql, bank_params = next(
+            (query, params)
+            for query, params in connection.snapshot_transaction.fetch_calls
+            if "from app.bank_transactions" in query
+            and "count(*)" not in query
+            and "select row_id, effective_category_code" not in query
+        )
+        self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
+        self.assertIn(["bank-1"], bank_params)
+        overview_sql = next(
+            query
+            for query in connection.snapshot_transaction.fetched
+            if "from app.bank_transactions" in query and "count(*)" in query
+        )
+        self.assertIn("expense_transaction_count", overview_sql)
+        self.assertEqual(
+            snapshot["bank_statistics"],
+            {
+                "transaction_count": 1219,
+                "expense_transaction_count": 1056,
+                "income_transaction_count": 163,
+            },
+        )
+        self.assertEqual(snapshot["available_years"], ["2026", "2025"])
+
     def test_all_scope_with_no_oa_assignment_skips_linked_outflow_projection(self) -> None:
         connection = _ConfiguredNoOaCostConnection()
 
@@ -520,7 +561,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot()
 
         self.assertEqual(connection.transaction_count, 1)
-        self.assertEqual(resolver_class.call_count, 1)
+        self.assertEqual(resolver_class.call_count, 0)
         self.assertEqual(
             connection.snapshot_transaction.executed,
             [
@@ -534,7 +575,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertNotIn("from app.bank_transaction_categories", sql)
         self.assertNotIn("from app.bank_transaction_category_confirmations", sql)
         self.assertNotIn("from app.oa_applications", sql)
-        self.assertNotIn("from app.workbench_pair_relations", sql)
+        self.assertIn("from app.workbench_pair_relations", sql)
         self.assertNotIn("read_model.", sql)
         self.assertNotIn("job.", sql)
         self.assertEqual(snapshot["bank_rows"], [])

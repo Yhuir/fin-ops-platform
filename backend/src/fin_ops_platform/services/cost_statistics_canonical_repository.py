@@ -49,12 +49,12 @@ class PostgresCostStatisticsCanonicalRepository:
         with self._snapshot_transaction() as transaction:
             settings = _settings_payload(transaction)
             bank_flow_view = view in {"time", "bank_tag"}
+            has_no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
             scoped = (bank_flow_view or not include_statistics) and scope_kind != "all"
             relation_only_all_scope = (
-                not include_statistics
-                and scope_kind == "all"
-                and not bank_flow_view
-                and not _has_no_oa_project_tag_assignments(settings)
+                not bank_flow_view
+                and not has_no_oa_assignments
+                and (include_statistics or scope_kind == "all")
             )
             relations = _postgres_relations(transaction) if relation_only_all_scope else []
             relation_only_bank_ids = (
@@ -73,9 +73,16 @@ class PostgresCostStatisticsCanonicalRepository:
                     transaction_ids=relation_only_bank_ids,
                 )
             )
+            bank_overview = (
+                _postgres_bank_overview(transaction)
+                if relation_only_all_scope
+                else None
+            )
             available_years = (
-                _postgres_bank_available_years(transaction)
-                if scoped or relation_only_all_scope
+                list(bank_overview["available_years"])
+                if bank_overview is not None
+                else _postgres_bank_available_years(transaction)
+                if scoped
                 else _bank_available_years(bank_rows)
             )
             bank_ids = _bank_row_ids(bank_rows)
@@ -131,7 +138,6 @@ class PostgresCostStatisticsCanonicalRepository:
                 if scoped
                 else bank_rows
             )
-            no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
             if include_cost_row_tags:
                 category_rows = [*bank_rows, *relation_bank_rows]
             else:
@@ -141,7 +147,7 @@ class PostgresCostStatisticsCanonicalRepository:
                     if _direction(row) == "inflow"
                     and _text(row.get("id")) in relation_bank_ids
                 ]
-                if no_oa_assignments:
+                if has_no_oa_assignments:
                     category_rows.extend(
                         row
                         for row in bank_rows
@@ -180,6 +186,11 @@ class PostgresCostStatisticsCanonicalRepository:
                 relations=relations,
                 manual_allocations=manual_allocations,
                 available_years=available_years,
+                bank_statistics=(
+                    dict(bank_overview["statistics"])
+                    if bank_overview is not None
+                    else None
+                ),
             )
 
     def load_manual_allocation_task_snapshot(self) -> dict[str, Any]:
@@ -560,6 +571,58 @@ def _postgres_bank_available_years(connection: Any) -> list[str]:
     ]
 
 
+def _postgres_bank_overview(connection: Any) -> dict[str, Any]:
+    row = connection.fetch_one(
+        """
+        select
+            count(*)::integer as transaction_count,
+            count(*) filter (where direction = 'outflow')::integer
+                as expense_transaction_count,
+            count(*) filter (where direction = 'inflow')::integer
+                as income_transaction_count,
+            coalesce(
+                array_agg(
+                    distinct extract(year from txn_month)::integer
+                    order by extract(year from txn_month)::integer desc
+                ) filter (where txn_month is not null),
+                array[]::integer[]
+            ) as available_years
+        from (
+            select
+                txn_month,
+                case
+                    when lower(coalesce(txn_direction, '')) in (
+                        'income', 'credit', 'inflow', '收入', '收', '进'
+                    ) then 'inflow'
+                    when lower(coalesce(txn_direction, '')) in (
+                        'expense', 'debit', 'outflow', '支出', '支', '出'
+                    ) then 'outflow'
+                    when signed_amount > 0 then 'inflow'
+                    else 'outflow'
+                end as direction
+            from app.bank_transactions
+            where status <> 'deleted'
+        ) bank
+        """
+    )
+    payload = dict(row) if isinstance(row, dict) else {}
+    return {
+        "statistics": {
+            "transaction_count": int(payload.get("transaction_count") or 0),
+            "expense_transaction_count": int(
+                payload.get("expense_transaction_count") or 0
+            ),
+            "income_transaction_count": int(
+                payload.get("income_transaction_count") or 0
+            ),
+        },
+        "available_years": [
+            str(int(value))
+            for value in list(payload.get("available_years") or [])
+        ],
+    }
+
+
 def _bank_row_filter(
     *,
     scope_kind: str,
@@ -841,6 +904,7 @@ def _build_snapshot(
     relations: list[dict[str, Any]],
     manual_allocations: dict[str, dict[str, Any]] | None = None,
     available_years: list[str] | None = None,
+    bank_statistics: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     banks_by_id = {
         _text(row.get("id") or row.get("transaction_id") or row.get("row_id")): row
@@ -913,11 +977,33 @@ def _build_snapshot(
     return {
         "settings": settings,
         "bank_rows": list(banks_by_id.values()),
+        "bank_statistics": (
+            dict(bank_statistics)
+            if bank_statistics is not None
+            else _bank_statistics_from_rows(bank_rows)
+        ),
         "cost_groups": groups,
         "oa_related_bank_ids": sorted(oa_related_bank_ids),
         "active_relation_count": len(relations),
         "available_years": list(available_years or []),
         "manual_allocations": dict(manual_allocations or {}),
+    }
+
+
+def _bank_statistics_from_rows(bank_rows: list[dict[str, Any]]) -> dict[str, int]:
+    row_ids_by_direction = {"inflow": set(), "outflow": set()}
+    for row in bank_rows:
+        row_id = _text(
+            row.get("id") or row.get("transaction_id") or row.get("row_id")
+        )
+        if row_id:
+            row_ids_by_direction[_direction(row)].add(row_id)
+    return {
+        "transaction_count": len(
+            row_ids_by_direction["inflow"] | row_ids_by_direction["outflow"]
+        ),
+        "expense_transaction_count": len(row_ids_by_direction["outflow"]),
+        "income_transaction_count": len(row_ids_by_direction["inflow"]),
     }
 
 
@@ -931,6 +1017,7 @@ def _no_oa_tag_candidate_snapshot(
     return {
         "settings": settings,
         "bank_rows": candidate_rows,
+        "bank_statistics": _bank_statistics_from_rows(candidate_rows),
         "cost_groups": [],
         "oa_related_bank_ids": sorted(oa_related_bank_ids),
         "active_relation_count": active_relation_count,

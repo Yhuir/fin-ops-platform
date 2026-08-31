@@ -2,7 +2,7 @@
 
 ## 2026-09-01：五视图信息密度与基础流水统计统一
 
-- 五个视图页头统一只展示银行流水、支出流水和收入流水。三个项目成本 view 直接扫描同一 canonical snapshot 已加载的原始 `bank_rows`，只做 ID 去重和收支方向归一，不物化带标签的 `bank_flow_rows`，也不新增 API、SQL、缓存、read model 或 worker。
+- 五个视图页头统一只展示银行流水、支出流水和收入流水。两个银行流水 view 直接使用当前范围的 canonical `bank_rows`；三个项目成本 view 在存在无 OA 项目时复用完整候选流水，在未配置无 OA 项目时只加载关系成员，并在同一只读 snapshot 用一条基础聚合取得全量收支数量。该聚合不执行标签分类；不物化带标签的 `bank_flow_rows`，也不新增 API、缓存、read model 或 worker。
 - 左中栏统一使用 HeroUI `ListBox` 和 `Chip`。项目、费用类型、银行账户与标签名称完整自然换行；金额右对齐并以“支/收”短 Chip 标识方向。删除百分比、归集数、成本数、净额和所有文本展开/折叠按钮。
 - 旧的溢出测量、`ResizeObserver`、animation frame、展开状态和 disclosure 样式已从运行时代码与测试删除，不保留兼容分支。人工分配 Drawer 的关系级 Disclosure 是编辑导航，不属于统计列表文字展开，继续保留。
 - `银行账户未确定`是零个或多个付款账户时的确定性归因结果，不是第六个真实银行账户加载失败；页面保留该事实分组。

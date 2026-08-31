@@ -205,7 +205,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
         self.assertEqual([row["amount"] for row in detail["rows"]], ["90.00"])
 
-    def test_cost_view_statistics_count_raw_bank_directions_without_materializing_tag_rows(self) -> None:
+    def test_cost_view_statistics_use_snapshot_counts_without_materializing_tag_rows(self) -> None:
         policy = self._policy(
             [],
             bank_rows=[
@@ -882,6 +882,23 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             {
                 "settings": settings or {},
                 "bank_rows": snapshot_bank_rows,
+                "bank_statistics": {
+                    "transaction_count": len(snapshot_bank_rows),
+                    "expense_transaction_count": len(
+                        [
+                            row
+                            for row in snapshot_bank_rows
+                            if str(row.get("txn_direction") or "") == "outflow"
+                        ]
+                    ),
+                    "income_transaction_count": len(
+                        [
+                            row
+                            for row in snapshot_bank_rows
+                            if str(row.get("txn_direction") or "") == "inflow"
+                        ]
+                    ),
+                },
                 "cost_groups": groups,
                 "oa_related_bank_ids": list(oa_related_bank_ids or []),
                 "active_relation_count": len(groups),

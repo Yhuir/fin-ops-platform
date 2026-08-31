@@ -43,6 +43,18 @@ class CostStatisticsPolicy:
             for row in list(snapshot.get("bank_rows") or [])
             if isinstance(row, dict)
         ]
+        bank_statistics = snapshot.get("bank_statistics")
+        if not isinstance(bank_statistics, dict):
+            raise ValueError("Cost statistics snapshot is missing bank_statistics.")
+        self._bank_statistics = {
+            "transaction_count": int(bank_statistics.get("transaction_count") or 0),
+            "expense_transaction_count": int(
+                bank_statistics.get("expense_transaction_count") or 0
+            ),
+            "income_transaction_count": int(
+                bank_statistics.get("income_transaction_count") or 0
+            ),
+        }
         self._groups = [
             dict(group)
             for group in list(snapshot.get("cost_groups") or [])
@@ -432,24 +444,7 @@ class CostStatisticsPolicy:
 
     @property
     def bank_direction_statistics(self) -> dict[str, int]:
-        rows = self._bank_rows
-        return {
-            "transaction_count": len({_bank_transaction_id(row) for row in rows}),
-            "expense_transaction_count": len(
-                {
-                    _bank_transaction_id(row)
-                    for row in rows
-                    if _bank_flow_direction(row) == "支出"
-                }
-            ),
-            "income_transaction_count": len(
-                {
-                    _bank_transaction_id(row)
-                    for row in rows
-                    if _bank_flow_direction(row) == "收入"
-                }
-            ),
-        }
+        return dict(self._bank_statistics)
 
     @property
     def bank_flow_statistics(self) -> dict[str, int]:
