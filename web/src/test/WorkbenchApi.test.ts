@@ -37,6 +37,7 @@ import {
   countWorkbenchGroupRows,
   createEmptyWorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
+import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
 
 const workbenchPanes: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
@@ -83,6 +84,83 @@ test("normalizes Workbench amount directions at the API boundary", async () => {
   expect(rows.oa.map((record) => record.amountDirection)).toEqual(["payment", "receipt"]);
   expect(rows.bank.map((record) => record.amountDirection)).toEqual(["payment", "receipt"]);
   expect(rows.invoice.map((record) => record.amountDirection)).toEqual(["payment", "receipt", undefined]);
+});
+
+test("nets the production bank-only turnover relation inside an OA payment selection", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({
+      month: "all",
+      zone: "unpaired",
+      page_size: 10,
+      total: 3,
+      row_counts: { oa: 1, bank: 3, invoice: 0 },
+      has_more: false,
+      next_cursor: null,
+      groups: [
+        {
+          group_id: "case:turnover:turnover-rel-2100",
+          group_type: "relation",
+          match_confidence: "high",
+          reason: "active_formal_relation",
+          formal_member_ids: ["turnover-payment", "turnover-receipt"],
+          formal_member_types: ["bank", "bank"],
+          amount_check: {
+            status: "matched",
+            direction: "unknown",
+            bank_total: "4200.00",
+            bank_amount: "4200.00",
+          },
+          oa_rows: [],
+          bank_rows: [
+            { id: "turnover-payment", type: "bank", direction: "支出", debit_amount: "2100.00" },
+            { id: "turnover-receipt", type: "bank", direction: "收入", credit_amount: "2100.00" },
+          ],
+          invoice_rows: [],
+        },
+        {
+          group_id: "unpaired:bank:payment-2100",
+          group_type: "unpaired",
+          match_confidence: "low",
+          reason: "unpaired_fact",
+          oa_rows: [],
+          bank_rows: [
+            { id: "bank-payment-2100", type: "bank", direction: "支出", debit_amount: "2100.00" },
+          ],
+          invoice_rows: [],
+        },
+        {
+          group_id: "unpaired:oa:payment-2100",
+          group_type: "unpaired",
+          match_confidence: "low",
+          reason: "unpaired_fact",
+          oa_rows: [
+            { id: "oa-payment-2100", type: "oa", apply_type: "支付申请", amount: "2100.00" },
+          ],
+          bank_rows: [],
+          invoice_rows: [],
+        },
+      ],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  );
+
+  const page = await fetchWorkbenchGroupsPage("all", "unpaired", null, 10);
+  const context = buildWorkbenchSelectionContext({
+    explicitRows: [
+      page.groups[0].rows.bank[0],
+      page.groups[1].rows.bank[0],
+      page.groups[2].rows.oa[0],
+    ],
+    sourceGroups: page.groups,
+    zoneId: "unpaired",
+  });
+
+  expect(context.summary).toMatchObject({
+    total: 4,
+    oa: 1,
+    bank: 3,
+    invoice: 0,
+    amounts: { oa: "2100.00", bank: "2100.00", invoice: "0.00" },
+  });
 });
 
 test("submits explicit invoice ownership through the dedicated command contract", async () => {

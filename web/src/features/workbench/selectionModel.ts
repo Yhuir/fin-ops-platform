@@ -100,8 +100,11 @@ export function buildWorkbenchSelectionContext({
     selectedRelationGroups.set(relationGroup.id, relationGroup);
   });
 
-  const amountCents = sumIndependentWorkbenchSelectionAmounts(independentRows);
-
+  const resolvedFormalSelections: Array<{
+    group: WorkbenchRelationGroup;
+    identities: WorkbenchRecordIdentity[];
+    rows: WorkbenchRecord[];
+  }> = [];
   selectedRelationGroups.forEach((group) => {
     const selection = resolveFormalRelationSelection(group);
     if (!selection) {
@@ -113,12 +116,26 @@ export function buildWorkbenchSelectionContext({
     selection.rows.forEach((relationRow) => {
       includedRowsByIdentity.set(workbenchRowIdentityKey(relationRow), relationRow);
     });
-    mergeWorkbenchSelectionAmountCents(amountCents, selection.amountCents);
+    resolvedFormalSelections.push({ group, ...selection });
   });
 
   const includedRows = Array.from(includedRowsByIdentity.values());
   const includedRowIdentities = Array.from(includedIdentitiesByKey.values());
   const includedRowIdentityKeys = Array.from(includedIdentitiesByKey.keys());
+  const selectionDirection = resolveWorkbenchSelectionAmountDirection(
+    includedRows,
+    resolvedFormalSelections.map(({ group }) => group),
+  );
+  const amountCents = sumIndependentWorkbenchSelectionAmounts(
+    independentRows,
+    selectionDirection,
+  );
+  resolvedFormalSelections.forEach(({ group, identities, rows }) => {
+    mergeWorkbenchSelectionAmountCents(
+      amountCents,
+      resolveFormalRelationAmountCents(group, identities, rows, selectionDirection),
+    );
+  });
   const relatedRowIdentityKeySet = new Set(
     includedRowIdentityKeys
       .filter((identityKey) => !explicitRowIdentityKeySet.has(identityKey)),
@@ -184,20 +201,21 @@ function sumWorkbenchAmountCents(rows: WorkbenchRecord[]) {
 
 function sumIndependentWorkbenchSelectionAmounts(
   rows: WorkbenchRecord[],
+  direction: WorkbenchAmountDirection | undefined,
 ): WorkbenchSelectionAmountCents {
   const oaRows = rows.filter((row) => row.recordType === "oa");
   const bankRows = rows.filter((row) => row.recordType === "bank");
   const invoiceRows = rows.filter((row) => row.recordType === "invoice");
   return {
     oa: sumWorkbenchAmountCents(oaRows),
-    bank: sumWorkbenchBankComparisonAmountCents(bankRows, rows),
+    bank: sumWorkbenchBankComparisonAmountCents(bankRows, direction),
     invoice: sumWorkbenchAmountCents(invoiceRows),
   };
 }
 
 function sumWorkbenchBankComparisonAmountCents(
   bankRows: WorkbenchRecord[],
-  selectedRows: WorkbenchRecord[],
+  direction: WorkbenchAmountDirection | undefined,
 ): number | undefined {
   if (bankRows.length === 0) {
     return 0;
@@ -205,7 +223,6 @@ function sumWorkbenchBankComparisonAmountCents(
   if (bankRows.some((row) => row.amountDirection === undefined)) {
     return undefined;
   }
-  const direction = resolveWorkbenchSelectionAmountDirection(selectedRows);
   if (!direction) {
     return undefined;
   }
@@ -223,6 +240,7 @@ function sumWorkbenchBankComparisonAmountCents(
 
 function resolveWorkbenchSelectionAmountDirection(
   rows: WorkbenchRecord[],
+  formalGroups: WorkbenchRelationGroup[],
 ): WorkbenchAmountDirection | undefined {
   const nonBankDirections = new Set(
     rows
@@ -234,6 +252,19 @@ function resolveWorkbenchSelectionAmountDirection(
     return nonBankDirections.values().next().value;
   }
   if (nonBankDirections.size > 1) {
+    return undefined;
+  }
+  const formalDirections = new Set(
+    formalGroups
+      .map((group) => group.amountCheck?.direction)
+      .filter((direction): direction is WorkbenchAmountDirection => (
+        direction === "payment" || direction === "receipt"
+      )),
+  );
+  if (formalDirections.size === 1) {
+    return formalDirections.values().next().value;
+  }
+  if (formalDirections.size > 1) {
     return undefined;
   }
   const directions = new Set(
@@ -274,7 +305,6 @@ function flattenWorkbenchGroup(group: WorkbenchRelationGroup) {
 function resolveFormalRelationSelection(group: WorkbenchRelationGroup): {
   identities: WorkbenchRecordIdentity[];
   rows: WorkbenchRecord[];
-  amountCents: WorkbenchSelectionAmountCents;
 } | undefined {
   const identities = group.formalMemberIdentities;
   if (!Array.isArray(identities) || identities.length === 0) {
@@ -296,13 +326,14 @@ function resolveFormalRelationSelection(group: WorkbenchRelationGroup): {
     }
     seen.add(identityKey);
   }
-  const resolvedAmountCents = resolveAuthoritativeRelationAmountCents(group, identities);
-  return { identities, rows: resolvedRows, amountCents: resolvedAmountCents };
+  return { identities, rows: resolvedRows };
 }
 
-function resolveAuthoritativeRelationAmountCents(
+function resolveFormalRelationAmountCents(
   group: WorkbenchRelationGroup,
   identities: WorkbenchRecordIdentity[],
+  rows: WorkbenchRecord[],
+  selectionDirection: WorkbenchAmountDirection | undefined,
 ): WorkbenchSelectionAmountCents {
   const counts = countWorkbenchIdentitiesByType(identities);
   const amountValues: Partial<Record<WorkbenchRecordType, string>> = {
@@ -321,6 +352,12 @@ function resolveAuthoritativeRelationAmountCents(
       continue;
     }
     resolved[paneId] = undefined;
+  }
+  if (counts.bank > 0 && group.amountCheck?.direction === "unknown") {
+    const bankRows = rows.filter((row) => row.recordType === "bank");
+    resolved.bank = bankRows.length === counts.bank
+      ? sumWorkbenchBankComparisonAmountCents(bankRows, selectionDirection)
+      : undefined;
   }
   return resolved;
 }

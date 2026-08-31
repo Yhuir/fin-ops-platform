@@ -178,6 +178,96 @@ describe("buildWorkbenchSelectionContext", () => {
     });
   });
 
+  test("nets an unknown-direction bank-only formal relation inside a payment selection", () => {
+    const formalBankRows = [
+      directionalRow("turnover-payment", "bank", "2100.00", "payment"),
+      directionalRow("turnover-receipt", "bank", "2100.00", "receipt"),
+    ];
+    const formalGroup: WorkbenchRelationGroup = {
+      id: "case:turnover:turnover-rel-2100",
+      groupType: "unpaired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      formalMemberIdentities: formalBankRows.map((record) => ({
+        id: record.id,
+        recordType: record.recordType,
+      })),
+      rows: { oa: [], bank: formalBankRows, invoice: [] },
+      amountCheck: {
+        status: "matched",
+        direction: "unknown",
+        bankAmount: "4200.00",
+        oaAmount: "--",
+        bankTotal: "4200.00",
+        amountDelta: "--",
+        requiresNote: false,
+      },
+    };
+    const oaPayment = directionalRow("oa-payment-2100", "oa", "2100.00", "payment");
+    const independentBankPayment = directionalRow(
+      "bank-payment-2100",
+      "bank",
+      "2100.00",
+      "payment",
+    );
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [formalBankRows[0], oaPayment, independentBankPayment],
+      sourceGroups: [formalGroup],
+      zoneId: "unpaired",
+    });
+
+    expect(context.summary).toMatchObject({
+      explicitTotal: 3,
+      total: 4,
+      oa: 1,
+      bank: 3,
+      invoice: 0,
+      amounts: { oa: "2100.00", bank: "2100.00", invoice: "0.00" },
+    });
+  });
+
+  test("does not use an absolute formal bank total when its principal direction is unknown", () => {
+    const formalBankRows = [
+      directionalRow("unknown-payment", "bank", "2100.00", "payment"),
+      directionalRow("unknown-receipt", "bank", "2100.00", "receipt"),
+    ];
+    const formalGroup: WorkbenchRelationGroup = {
+      id: "case:turnover:unknown-direction",
+      groupType: "unpaired",
+      rawGroupType: "relation",
+      matchConfidence: "high",
+      reason: "active_formal_relation",
+      formalMemberIdentities: formalBankRows.map((record) => ({
+        id: record.id,
+        recordType: record.recordType,
+      })),
+      rows: { oa: [], bank: formalBankRows, invoice: [] },
+      amountCheck: {
+        status: "matched",
+        direction: "unknown",
+        bankAmount: "4200.00",
+        oaAmount: "--",
+        bankTotal: "4200.00",
+        amountDelta: "--",
+        requiresNote: false,
+      },
+    };
+
+    const context = buildWorkbenchSelectionContext({
+      explicitRows: [formalBankRows[0]],
+      sourceGroups: [formalGroup],
+      zoneId: "unpaired",
+    });
+
+    expect(context.summary).toMatchObject({
+      total: 2,
+      bank: 2,
+      amounts: { bank: "--" },
+    });
+  });
+
   test("uses the authoritative amount check for a fully hydrated formal relation", () => {
     const formalOa = directionalRow("formal-net-oa", "oa", "2100.00", "payment");
     const formalBankRows = [

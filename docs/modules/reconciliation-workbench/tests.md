@@ -5,7 +5,7 @@
 ## 2026-08-31 三栏选择流水按关系方向净额
 
 - Business core：`web/src/test/WorkbenchSelectionModel.test.ts` 保护截图样例 `OA 2100 + 流水支出 2100 + 收入 2100 + 支出 2100` 的选择数量仍为 4、流水数量仍为 3，但付款方向银行金额为 `2100.00`；同时覆盖收款方向的反向抵减、无主方向、OA/发票主方向冲突和未知金额不猜测。
-- Formal relation / regression：同一测试保护完整正式关系始终消费服务端 `amount_check`，不从已加载成员反推 `6300.00`；`turnover_manual_closure` 保留本金侧金额；正式关系缺少权威金额时仍可按完整 typed members 选择，但三栏金额显示 `--`，不写本地兜底。
+- Formal relation / regression：同一测试保护普通完整正式关系消费服务端 `amount_check`，`turnover_manual_closure` 保留本金侧金额；同时按生产真实拓扑覆盖“纯银行正式关系（支出 2100 + 收入 2100，服务端未知方向绝对值 4200）+ 独立支出 2100 + OA 付款 2100”，确认完整选择仍显示流水净额 `2100.00`。未知方向纯银行关系单独选择时显示 `--`，不退回 `4200.00`；正式关系缺少权威金额时仍可按完整 typed members 选择，但三栏金额显示 `--`，不写本地兜底。
 - API / frontend interaction：`web/src/test/WorkbenchApi.test.ts` 保护 OA、流水和进销项发票在 API 边界规范化为 `payment|receipt`，未知方向保持未知；`web/src/test/WorkbenchZone.test.tsx` 保护用户可见工具栏精确显示 `已选 4 / OA 1 / 2100.00 / 流水 3 / 2100.00 / 发票 0 / 0.00`。既有 `WorkbenchSelection.test.tsx` 继续保护确认、撤回、分页关系选择和 500 成员关系。
 - 性能与边界：选择汇总只遍历已加载 typed members，时间复杂度 `O(n)`，不新增 HTTP、数据库、read model、cache、worker、React effect 或依赖；旧的正式关系本地逐行绝对值求和函数已经删除。
 - 非适用：未修改后端 API shape、数据库 schema、repository、mutation、权限、read model、worker、queue 或其它页面，因此不新增 migration、事务/幂等、后台任务或跨页面数据修复测试；后端既有 amount-check 用例继续保护 canonical 净额与外部往来本金口径。

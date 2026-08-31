@@ -63,7 +63,7 @@
 - 发票来源与发票归属是两个独立合同。`source_kinds[]` 保留同一 canonical 发票的全部来源证据，`source_kind` 继续作为单值结构兼容字段，不能覆盖复数来源；页面只显示一个主来源 Chip：存在 `oa_attachment_invoice` 时显示“OA附件”，否则存在 `manual_invoice_import` 时显示“人工导入”，不再显示“导入记录”。`oa_expense_item_invoice` 仍作为独立的“明细归属”Chip。只有 `source_expense_item_ids[]` 决定发票与 OA 子付款项同行；OA 附件来源必须能通过当前 OA 显式身份、owned item/attachment parent identity 或 active OA source alias 精确恢复到当前子付款项，否则保持待归属异常，禁止按金额或顺序猜测。OA 附件来源和显式明细归属必须在后续 Excel 导入中保留；未知来源不得默认伪装为“人工导入”。
 - 已配对区和未配对区的 active 正式关系都可以按关系组撤回；请求成员必须精确等于当前完整 active relation，未配对 singleton 不能撤回。未配对区选择至少 2 个不同 canonical 成员即可发起人工正式配对；旧“撤回候选”概念和入口不存在。
 - 未配对工具栏只保留关系确认/撤回等关系动作。系统统一计算金额和 OA 附件异常；右上入口固定为 `未配对异常 n | 已配对异常 m`。
-- 三栏选择汇总的数量按去重后的 canonical typed members 统计，不因收支抵消而减少。临时选择的付款关系中，银行金额按“支出减收入”显示；收款关系反向按“收入减支出”显示。正式关系必须直接显示服务端组级 `amount_check` 的三栏金额，包含 `turnover_manual_closure` 的本金侧口径，不得按当前已加载明细重新求和。主方向未知或冲突时金额显示 `--`，禁止退回绝对值合计；该汇总只基于已加载 DTO 计算，不新增请求。
+- 三栏选择汇总的数量按去重后的 canonical typed members 统计，不因收支抵消而减少。付款选择的银行金额按“支出减收入”显示；收款选择反向按“收入减支出”显示。正式关系通常直接显示服务端组级 `amount_check` 的三栏金额，包含 `turnover_manual_closure` 的本金侧口径；但 `amount_check.direction=unknown` 的纯银行正式关系加入主方向明确的组合选择时，必须按该组合主方向对完整已加载的正式银行成员做收支净额，不能沿用该关系脱离上下文时的绝对值总额。主方向未知、冲突或正式银行成员不完整时金额显示 `--`，禁止退回绝对值合计；该汇总只基于已加载 DTO 计算，不新增请求。
 - 关系 provenance、规则版本、证据摘要、actor 和时间只用于审计，不拆分用户可见关系状态。
 - `workbench_relation` 下游只输出 `linked` / `unlinked`。只有 active 正式关系能驱动已支付、已关联、成本、待找发票、OA 待付款或银行关系标签。
 - direct query 超时或依赖不可用时不得返回部分数据或伪装空结果；页面必须显示明确的读取错误。写入口继续独立服从 session/permission、系统 mutation block、OA sync 安全状态和 canonical preview/CAS，不依赖页面 generation/freshness。
