@@ -109,4 +109,4 @@ PUT manual allocation
 - Workbench/OA：关系确认、撤回或 OA 状态改变后，下一次 Cost GET 读取新事实；不新增 fan-out。
 - 设置：只删除成本统计旧 time/tag family，不影响银行明细自己的自动标签设置。
 - 权限/审计：无 OA 与人工分配写入口保持现有权限和审计合同。
-- 数据库：本次无 schema/data migration、无备份、无主库删除 I/O。
+- 数据库：migration `0165` 只从 `app.app_settings` 的 canonical/formal-raw JSON 删除退役设置键；无表结构变化、无备份工件、无主库删除 I/O。
