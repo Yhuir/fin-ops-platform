@@ -94,7 +94,7 @@
 - 共用 query 为 `scope`、`view`、可选 `query`、`cursor`、`page_size` 与 `include_statistics`。`query` 折叠空白、最长 200 字符，并参与 cursor identity。
 - `project` 可接受 `project_name` 和其后的 `expense_type`；`expense_type` 可接受 `expense_type`；`bank_account` 可接受 `bank_account_label` 和其后的 `project_name`；`bank_tag` 可接受 `bank_tag_primary_label` 和其后的 `bank_tag_sub_label`；`time` 无额外下钻参数。旧 `payment_account_label`、`tag_code`、`primary_tag`、`sub_tag` 不是 explorer 合同。
 - 每个请求从一个 PostgreSQL `REPEATABLE READ READ ONLY` snapshot 读取 canonical facts，再返回 `summary`、`statistics`、`facets`、`rows`、`row_count` 与 `next_cursor`。`time|bank_tag` 只读取范围内银行流水和一次批量有效标签投影，并在 OA、active relation、人工分配查询前返回；三个项目成本 view 才生成唯一成本事件集合。
-- 三个根 view 的 `summary.total_amount` 与 `transaction_count` 在相同 scope/query 下必须相等；只改变聚合维度。`statistics` 只包含 `project_count`、`expense_type_count`、`bank_account_count`、`cost_transaction_count`。
+- 三个根 view 的 `summary.total_amount` 与 `transaction_count` 在相同 scope/query 下必须相等；只改变聚合维度。三个项目成本 view 的 `statistics` 包含 `project_count`、`expense_type_count`、`bank_account_count`、`cost_transaction_count`，并直接基于同一 canonical `bank_rows` 输出 `transaction_count`、`expense_transaction_count`、`income_transaction_count`；该基础流水计数不得触发银行标签分类或额外 I/O。两个银行流水 view 继续附带其标签覆盖统计。
 - `bank_account` 分面按成本事件 `bank_account_label` 聚合。OA 关系的支出账户恰好一个时归该账户；零个或多个不同支出账户归`银行账户未确定`；收入/退款账户忽略。无 OA 成本使用来源支出账户。
 - `time|bank_tag` 使用同一真实银行流水人口。`summary.total_amount=expense_amount-income_amount`；金额保持正数、方向单独返回。`bank_tag` 的主/子标签 facets 同时返回支出、收入、净支出和方向交易数。
 - 对已完成 OA 的 active relation，`O=N` 时按 canonical OA 单元原金额形成成本；`O!=N` 时在有效人工分配前不进入成本人口。`N=0` 不形成成本或任务，`N<0` 返回完整性错误，不使用绝对值、旧值或其它 fallback。

@@ -432,14 +432,22 @@ class CostStatisticsPolicy:
 
     @property
     def bank_direction_statistics(self) -> dict[str, int]:
-        rows = self.bank_flow_rows
+        rows = self._bank_rows
         return {
-            "transaction_count": len({_row_identity(row) for row in rows}),
+            "transaction_count": len({_bank_transaction_id(row) for row in rows}),
             "expense_transaction_count": len(
-                {_row_identity(row) for row in rows if row["direction"] == "支出"}
+                {
+                    _bank_transaction_id(row)
+                    for row in rows
+                    if _bank_flow_direction(row) == "支出"
+                }
             ),
             "income_transaction_count": len(
-                {_row_identity(row) for row in rows if row["direction"] == "收入"}
+                {
+                    _bank_transaction_id(row)
+                    for row in rows
+                    if _bank_flow_direction(row) == "收入"
+                }
             ),
         }
 
@@ -1230,13 +1238,7 @@ def _serialize_bank_row(row: dict[str, Any]) -> dict[str, Any]:
     amount = _decimal(row.get("cost_amount_decimal"))
     if amount is None:
         amount = abs(_decimal(row.get("amount")) or ZERO)
-    direction = str(row.get("direction") or "").strip()
-    if direction not in {"收入", "支出"}:
-        direction = (
-            "收入"
-            if str(row.get("txn_direction") or "").strip().lower() == "inflow"
-            else "支出"
-        )
+    direction = _bank_flow_direction(row)
     trade_time = _clean_text(
         row.get("trade_time")
         or row.get("pay_receive_time")
@@ -1271,6 +1273,17 @@ def _serialize_bank_row(row: dict[str, Any]) -> dict[str, Any]:
         "oa_applicant": "",
         **bank_tag_context_from_row(row),
     }
+
+
+def _bank_flow_direction(row: dict[str, Any]) -> str:
+    direction = str(row.get("direction") or "").strip()
+    if direction in {"收入", "支出"}:
+        return direction
+    return (
+        "收入"
+        if str(row.get("txn_direction") or "").strip().lower() == "inflow"
+        else "支出"
+    )
 
 
 def _resolve_cost_bank_account_label(outflows: list[dict[str, Any]]) -> str:

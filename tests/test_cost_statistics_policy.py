@@ -205,6 +205,29 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
         self.assertEqual([row["amount"] for row in detail["rows"]], ["90.00"])
 
+    def test_cost_view_statistics_count_raw_bank_directions_without_materializing_tag_rows(self) -> None:
+        policy = self._policy(
+            [],
+            bank_rows=[
+                self._bank("bank-out", "100.00"),
+                self._bank("bank-in", "30.00", direction="inflow"),
+            ],
+        )
+
+        page = policy.explorer_page(
+            scope_kind="all",
+            scope_value=None,
+            view="project",
+            filters={},
+            cursor_values=None,
+            page_size=50,
+        )
+
+        self.assertEqual(page["statistics"]["transaction_count"], 2)
+        self.assertEqual(page["statistics"]["expense_transaction_count"], 1)
+        self.assertEqual(page["statistics"]["income_transaction_count"], 1)
+        self.assertNotIn("bank_flow_rows", policy.__dict__)
+
     def test_mismatched_oa_total_waits_for_manual_allocation_without_scaling(self) -> None:
         group = self._group(
                     oa_rows=[
