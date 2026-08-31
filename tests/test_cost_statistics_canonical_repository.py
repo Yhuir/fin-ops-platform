@@ -227,6 +227,65 @@ class _NoOaCandidateConnection(_Connection):
         self.snapshot_transaction = _NoOaCandidateTransaction()
 
 
+class _ConfiguredMixedCostSnapshotTransaction(_NoOaCandidateTransaction):
+    def fetch_one(self, sql: str, params: tuple = ()):
+        normalized = " ".join(sql.lower().split())
+        self.fetched.append(normalized)
+        self.fetch_calls.append((normalized, params))
+        if "from app.app_settings" in normalized:
+            return {
+                "settings_payload": {
+                    "cost_statistics_no_oa_projects": {
+                        "version": 1,
+                        "schema_version": 1,
+                        "projects": [
+                            {
+                                "id": "no-oa-project",
+                                "display_name": "无 OA 项目",
+                                "tag_codes": ["fee"],
+                            }
+                        ],
+                    },
+                }
+            }
+        return None
+
+    def fetch_all(self, sql: str, params: tuple = ()):
+        normalized = " ".join(sql.lower().split())
+        self.fetched.append(normalized)
+        self.reads.append((normalized, params))
+        if "select row_id, effective_category_code" in normalized:
+            return []
+        if "from app.workbench_pair_relations" in normalized:
+            return [
+                {
+                    "case_id": "case-protected",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["oa-1", "bank-protected", "bank-linked-refund"],
+                    "row_types": ["oa", "bank", "bank"],
+                    "month_scope": "2026-03",
+                    "special_metadata": {},
+                    "raw_payload": {},
+                }
+            ]
+        if "from app.oa_applications" in normalized:
+            return []
+        if "from app.bank_transactions" in normalized:
+            return [
+                self._bank_row("bank-unpaired-outflow", "outflow", "8.00"),
+                self._bank_row("bank-protected", "outflow", "9.00"),
+                self._bank_row("bank-linked-refund", "inflow", "3.00"),
+                self._bank_row("bank-unpaired-income", "inflow", "10.00"),
+            ]
+        return []
+
+
+class _ConfiguredMixedCostConnection(_Connection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.snapshot_transaction = _ConfiguredMixedCostSnapshotTransaction()
+
+
 class _CategoryProvider:
     def bulk_get_for_rows(self, _rows):
         return {}
@@ -292,7 +351,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             )
         )
 
-    def test_all_scope_with_no_oa_assignment_keeps_full_bank_scan(self) -> None:
+    def test_all_scope_with_no_oa_assignment_skips_linked_outflow_projection(self) -> None:
         connection = _ConfiguredNoOaCostConnection()
 
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
@@ -308,11 +367,30 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             and "select row_id, effective_category_code" not in query
         )
         self.assertNotIn("legacy_mongo_id = any(%s::text[])", bank_sql)
-        self.assertTrue(
+        self.assertFalse(
             any(
                 "select row_id, effective_category_code" in query
                 for query in connection.snapshot_transaction.fetched
             )
+        )
+
+    def test_list_projection_classifies_only_unpaired_outflows_and_linked_inflows(self) -> None:
+        connection = _ConfiguredMixedCostConnection()
+
+        PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
+            view="bank_account",
+            include_statistics=True,
+            include_cost_row_tags=False,
+        )
+
+        projection_params = next(
+            params
+            for query, params in connection.snapshot_transaction.reads
+            if "select row_id, effective_category_code" in query
+        )
+        self.assertEqual(
+            projection_params[-1],
+            ["bank-linked-refund", "bank-unpaired-outflow"],
         )
 
     def test_scoped_relation_filter_uses_gin_prefilter_and_exact_member_types(self) -> None:

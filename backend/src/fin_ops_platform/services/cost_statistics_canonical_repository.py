@@ -111,22 +111,22 @@ class PostgresCostStatisticsCanonicalRepository:
                 else bank_rows
             )
             no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
-            category_rows = [
-                *(
-                    bank_rows
-                    if include_cost_row_tags or no_oa_assignments
-                    else [row for row in bank_rows if _direction(row) == "inflow"]
-                ),
-                *(
-                    relation_bank_rows
-                    if include_cost_row_tags
-                    else [
+            if include_cost_row_tags:
+                category_rows = [*bank_rows, *relation_bank_rows]
+            else:
+                category_rows = [
+                    row
+                    for row in relation_bank_rows
+                    if _direction(row) == "inflow"
+                    and _text(row.get("id")) in relation_bank_ids
+                ]
+                if no_oa_assignments:
+                    category_rows.extend(
                         row
-                        for row in relation_bank_rows
-                        if _direction(row) == "inflow"
-                    ]
-                ),
-            ]
+                        for row in bank_rows
+                        if _direction(row) == "outflow"
+                        and _text(row.get("id")) not in relation_bank_ids
+                    )
             category_ids = _bank_row_ids(category_rows)
             categories_by_transaction_id = (
                 PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
