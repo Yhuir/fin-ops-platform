@@ -272,7 +272,6 @@ class PostgresWorkbenchPageHydrationRepository:
                 "Canonical Workbench page members changed during hydration: "
                 + ",".join(f"{row_type}:{row_id}" for row_type, row_id in missing)
             )
-        normalize_oa_attachment_expense_item_ids(list(rows_by_typed_id.values()))
         grouped = builder.build_page_groups(
             scope_key=scope_key,
             rows_by_typed_id=rows_by_typed_id,
@@ -1288,7 +1287,6 @@ class PostgresWorkbenchPageHydrationRepository:
                 connection=connection,
                 settings=settings,
             )
-        normalize_oa_attachment_expense_item_ids(list(rows_by_typed_id.values()))
         grouped = WorkbenchCanonicalRowsBuilder(
             connection=connection
         ).build_page_groups(
@@ -1545,7 +1543,10 @@ class PostgresWorkbenchPageHydrationRepository:
 
     @staticmethod
     def _with_group_counts(group: dict[str, Any]) -> dict[str, Any]:
-        payload = deepcopy(group)
+        # Counts only add top-level fields.  The compact serializer below owns
+        # the recursive response copy, so duplicating every nested row here
+        # made list reads pay for the full page payload twice.
+        payload = dict(group)
         fact_counts = {
             pane: sum(
                 1 for row in list(payload.get(f"{pane}_rows") or []) if isinstance(row, dict)

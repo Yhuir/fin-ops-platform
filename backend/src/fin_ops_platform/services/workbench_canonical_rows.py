@@ -165,7 +165,9 @@ class WorkbenchCanonicalRowsBuilder:
     ) -> dict[str, Any]:
         """Apply canonical Workbench domain policies to one selected page batch."""
 
-        normalized_relations = deepcopy(relations)
+        # Only row_ids is replaced below; nested relation metadata is copied
+        # at the response boundary when it is actually emitted.
+        normalized_relations = [dict(relation) for relation in relations]
         formal_members = {
             (self._normalized_page_row_type(row_type), str(row_id).strip())
             for relation in normalized_relations

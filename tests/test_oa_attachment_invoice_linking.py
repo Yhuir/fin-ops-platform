@@ -266,3 +266,37 @@ def test_leaves_ambiguous_or_foreign_attachment_sources_unassigned() -> None:
 
     assert rows[1]["source_expense_item_ids"] == ["oa-exp-other:item:0:old"]
     assert "source_oa_id" not in rows[1]
+
+
+def test_shared_parent_alias_remains_ambiguous() -> None:
+    rows = [
+        {
+            "id": "oa-a",
+            "type": "oa",
+            "source_aliases": ["oa-historical"],
+            "expense_items": [{"id": "oa-a:item:0", "row_index": "0"}],
+        },
+        {
+            "id": "oa-b",
+            "type": "oa",
+            "source_aliases": ["oa-historical"],
+            "expense_items": [{"id": "oa-b:item:0", "row_index": "0"}],
+        },
+        {
+            "id": "invoice-ambiguous-parent",
+            "type": "invoice",
+            "source_kind": "oa_attachment_invoice",
+            "source_links": [
+                {
+                    "source_type": "oa_attachment_invoice",
+                    "source_expense_item_id": "oa-historical:item:0:old",
+                    "source_expense_row_index": "0",
+                }
+            ],
+        },
+    ]
+
+    normalize_oa_attachment_expense_item_ids(rows)
+
+    assert "source_oa_id" not in rows[2]
+    assert "source_expense_item_ids" not in rows[2]

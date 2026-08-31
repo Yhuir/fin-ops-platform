@@ -691,3 +691,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `tests/test_workbench_page_query_repository.py` 保护 OA 外部身份使用 `jsonb_to_record` 按对象一次解码、ETC 两类强身份使用独立等值 anti-join、发票费用项候选与筛选组 canonical 发票计数均为集合计算，并锁住 `all` scope 删除 5 个冗余 `needed_keys` 回连、月度 scope 继续保留原范围。
 - `tests/test_http_adapter.py` 保护大 Workbench GET JSON 在客户端支持时压缩且解码结果完全一致，`gzip;q=0` 不压缩，其他页面 JSON 不受影响。
 - `tests/test_workbench_query_postgres_integration.py` 在 disposable PostgreSQL 全量运行，保护 initial/groups/detail、搜索、筛选、ETC 折叠和异常指纹的真实 SQL 解析与业务结果。发布后必须再运行 authenticated 生产四并发 HTTP 样本、gzip 响应体校验和读链闭环；没有 test-owned 可回滚数据时不对生产财务关系做破坏性写入压测。
+
+## 2026-09-01 - 列表热路径与整数金额搜索回归
+
+- `tests/test_workbench_page_query_repository.py` 保护普通 initial/groups 不构造未消费的 `column_values`，列筛选与筛选候选仍显式启用该投影；详情描述符保持原四项 scope 参数合同。
+- `tests/test_search_query.py` 与 `tests/test_workbench_routes.py` 保护 `2100`、`1320` 等整数金额保留尾零，`202.00` 等小数金额继续归一为等价搜索值。
+- `tests/test_oa_attachment_invoice_linking.py` 保护父 source 候选索引不改变唯一匹配，并让共享父 source 的多个 OA 继续判定为歧义。
+- `tests/test_workbench_query_postgres_integration.py`、pending OA relation lock、异常历史 snapshot 与 reviewer identity migration 在本机 disposable PostgreSQL 全量执行，覆盖 initial/groups/detail、搜索、确认关系和异常状态链；生产验证仅使用只读数据，真实财务关系写操作由 test-owned PostgreSQL 集成与发布门禁覆盖。

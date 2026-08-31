@@ -235,7 +235,6 @@ class WorkbenchRelationGroupingService:
             self._relation_row(rows_by_id[row_id], relation, zone=base_zone)
             for row_id in relation["row_ids"]
         ]
-        normalize_oa_attachment_expense_item_ids(rows)
         rows_by_type = {
             row_type: [row for row in rows if str(row.get("type")) == row_type]
             for row_type in ROW_TYPES

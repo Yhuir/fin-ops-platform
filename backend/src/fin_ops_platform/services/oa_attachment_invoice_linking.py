@@ -193,6 +193,10 @@ def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None
     """
 
     oa_rows = [row for row in rows if str(row.get("type") or "").strip() == "oa"]
+    oa_rows_by_source_id: dict[str, list[dict[str, Any]]] = {}
+    for oa_row in oa_rows:
+        for source_id in oa_row_source_ids(oa_row):
+            oa_rows_by_source_id.setdefault(source_id, []).append(oa_row)
     for invoice_row in (row for row in rows if str(row.get("type") or "").strip() == "invoice"):
         source_links = [
             source_link
@@ -213,8 +217,35 @@ def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None
             and str(invoice_row.get("source_kind") or "").strip() != "oa_attachment_invoice"
         ):
             continue
+        explicit_source_rows = [
+            source_link
+            for source_link in source_links
+            if str(source_link.get("source_type") or "").strip()
+            == "oa_expense_item_invoice"
+        ]
+        attachment_source_rows = [
+            source_link
+            for source_link in source_links
+            if str(source_link.get("source_type") or "").strip()
+            == "oa_attachment_invoice"
+        ]
+        source_rows = explicit_source_rows or attachment_source_rows or [invoice_row]
+        candidate_oa_rows = {
+            str(oa_row.get("id") or "").strip(): oa_row
+            for source_row in source_rows
+            if (
+                source_item_id := _first_field_value(
+                    source_row,
+                    "source_expense_item_id",
+                )
+            )
+            for oa_row in oa_rows_by_source_id.get(
+                oa_attachment_parent_oa_id(source_item_id),
+                [],
+            )
+        }
         matches: set[tuple[str, tuple[str, ...]]] = set()
-        for oa_row in oa_rows:
+        for oa_row in candidate_oa_rows.values():
             canonical_item_ids = canonical_oa_expense_item_ids(
                 oa_row=oa_row,
                 invoice_row=invoice_row,

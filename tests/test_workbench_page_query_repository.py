@@ -197,6 +197,7 @@ def test_groups_page_uses_exact_totals_keyset_and_page_only_hydration() -> None:
     assert "exception_counts" not in connection.sql
     assert "offset" not in connection.sql.lower()
     assert "limit %s" in connection.sql.lower()
+    assert connection.params[4] is False
     filtered_groups_sql = connection.sql.split(
         "filtered_groups as materialized (", 1
     )[1].split("keyed_groups as materialized (", 1)[0]
@@ -246,6 +247,7 @@ def test_groups_page_default_sort_skips_member_sort_aggregation_but_keeps_exists
     assert "null::date as oa_sort_min" in filtered_groups_sql
     assert "exists (select 1 from canonical_group_members source_member" in filtered_groups_sql
     assert "exists (select 1 from canonical_group_members filter_member" in filtered_groups_sql
+    assert connection.params[4] is True
 
 
 def test_exception_amount_view_returns_additive_counts_and_auto_code_cursor() -> None:
@@ -301,6 +303,7 @@ def test_exception_amount_view_returns_additive_counts_and_auto_code_cursor() ->
         },
     }
     assert len(connection.calls) == 1
+    assert connection.calls[0][1][4] is False
     assert "base_filtered_groups" in connection.sql
     assert "group_page_anomaly_groups" not in connection.sql
     assert "exception_counts" in connection.sql
@@ -1946,7 +1949,7 @@ def test_oa_grouped_filter_options_include_type_status_expense_and_project() -> 
         },
     ]
     assert "from filter_option_anomaly_groups groups" in applicant_connection.sql
-    assert applicant_connection.params[4] == "oa"
+    assert applicant_connection.params[5] == "oa"
     projection_sql = applicant_connection.sql.split(
         "filtered_groups as materialized (", 1
     )[1]
@@ -2011,7 +2014,7 @@ def test_plain_filter_options_also_narrow_anomalies_to_the_target_pane() -> None
     assert "from filter_option_anomaly_groups groups" in connection.sql
     assert "groups.group_kind = 'relation'" in connection.sql
     assert "and groups.zone = 'paired'" in connection.sql
-    assert connection.params[4] == "bank"
+    assert connection.params[5] == "bank"
 
 
 def test_oa_applicant_options_keep_unknown_workflow_and_empty_applicant() -> None:
@@ -2154,7 +2157,7 @@ def test_bank_grouped_options_use_account_mapping_and_canonical_tag(
         },
     ]
     assert "from filter_option_anomaly_groups groups" in connection.sql
-    assert connection.params[4] == "bank"
+    assert connection.params[5] == "bank"
 
 
 def test_bank_tag_filter_resolves_only_canonical_matching_rows(
@@ -2196,4 +2199,4 @@ def test_bank_tag_filter_resolves_only_canonical_matching_rows(
     ) == ["bank-1"]
     assert "bankTag:" not in str(connection.params)
     assert "from filter_option_anomaly_groups groups" in connection.sql
-    assert connection.params[4] == "bank"
+    assert connection.params[5] == "bank"

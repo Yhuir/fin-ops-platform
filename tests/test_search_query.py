@@ -9,6 +9,7 @@ def test_canonicalize_money_search_query_canonicalizes_equivalent_amounts() -> N
     for query in ("202", "202.0", "202.00", "￥202.00", "¥202.00"):
         assert canonicalize_money_search_query(query) == "202"
     assert canonicalize_money_search_query(" 4,311.00 ") == "4311"
+    assert canonicalize_money_search_query("2100") == "2100"
     assert canonicalize_money_search_query("-0.00") == "0"
     assert canonicalize_money_search_query("云南,公司") == "云南,公司"
 

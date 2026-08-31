@@ -27,7 +27,9 @@ def canonicalize_money_search_query(value: Any) -> str:
     if not _MONEY_QUERY_RE.fullmatch(money_text):
         return text
     try:
-        normalized = format(Decimal(money_text.replace(",", "")), "f").rstrip("0").rstrip(".")
+        normalized = format(Decimal(money_text.replace(",", "")), "f")
+        if "." in normalized:
+            normalized = normalized.rstrip("0").rstrip(".")
     except InvalidOperation:
         return text
     return "0" if normalized in {"", "-0", "+0"} else normalized

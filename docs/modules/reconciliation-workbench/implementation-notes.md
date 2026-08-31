@@ -1936,3 +1936,10 @@
 - HTTP 层仅对客户端明确声明 `Accept-Encoding: gzip`、大于 `1KB` 的 Workbench GET JSON 使用 level 1 gzip；本地候选版实测完整解码结果逐字节一致，初始页网络传输约由 `194849` 降至 `29130` 字节。其他页面、Workbench 写接口、小响应和不支持 gzip 的客户端均不受影响。
 - 同一生产数据库 `repeatable read / read only` 快照中，旧/新候选对初始页、paired、unpaired、金额搜索、金额异常、资料异常、申请人筛选和筛选+搜索共 8 条路径的完整 payload 全部一致。候选版的本机应用+跨 SSH 生产数据库压测不作发布结论，最终 p95/p99 以发布后生产同机数据库的 authenticated HTTP 样本为准。
 - 不接入 Redis：该页面仍遵守 canonical direct-read 事实源合同，而 OA、流水、发票、关联和异常审阅写入都会改变结果；新增 Redis 会引入失效、版本和陈旧读责任，不能修复当前 SQL 或传输瓶颈。本次不新增表、索引、migration、read model、cache、worker、队列、依赖、fallback 或数据库备份。API response shape、模块职责和其他页面 I/O 不变，boundary 文档不适用。
+
+## 2026-09-01 - 列表计算与金额搜索收口
+
+- 列表主查询只在存在列筛选或筛选候选请求时构造 `column_values`；普通 initial/groups/detail descriptor 不再为不会消费的筛选 JSON 支付逐行计算成本。最终 DTO、筛选语义和详情下钻合同不变。
+- hydration 删除重复的 OA 附件费用项归一化；canonical rows 与组统计只复制会被当前层修改的容器，不再递归复制随后还会由 compact DTO 重新拥有的数据。OA 附件发票匹配先按父 source identity 建立候选索引，再执行原唯一/歧义判定；同一父 source 多个 OA 仍 fail closed 为歧义。
+- 修复金额搜索规范化把无小数点整数尾零删除的问题：`2100` 保持 `2100`，只有小数部分的无意义尾零会被删除；删除旧 `2100 -> 21` 行为和对应错误测试口径。
+- 不新增 Redis、read model、cache、worker、表、索引、migration、依赖、fallback 或数据库备份；确认、撤回、异常审阅写链以及其它页面 I/O 均未修改，boundary 文档不适用。

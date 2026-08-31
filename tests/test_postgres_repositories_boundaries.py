@@ -296,7 +296,26 @@ class WorkbenchRelationWriteConnection(RecordingConnection):
         self.fetch_one_calls: list[tuple[str, tuple]] = []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-        self.fetch_one_calls.append((" ".join(sql.split()), params))
+        normalized_sql = " ".join(sql.split())
+        self.fetch_one_calls.append((normalized_sql, params))
+        if "insert into job.outbox_events" in normalized_sql:
+            return {
+                "event_id": "event-1",
+                "tenant_id": params[0],
+                "event_type": params[1],
+                "aggregate_type": params[2],
+                "aggregate_id": params[3],
+                "scope_type": params[4],
+                "scope_key": params[5],
+                "dedupe_key": params[6],
+                "payload": {},
+                "attempts": 0,
+                "status": "pending",
+                "schema_version": 1,
+                "source_version": params[9],
+                "priority": params[10],
+                "trace_id": params[11],
+            }
         return {"source_version": 3}
 
 

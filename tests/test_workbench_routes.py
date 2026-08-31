@@ -232,6 +232,14 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                 self.assertEqual(status, HTTPStatus.OK)
                 self.assertEqual(facade.calls[0]["search"], "202")
 
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+        status, _payload = routes.groups("all", zone="unpaired", search="2100")
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(facade.calls[0]["search"], "2100")
+
     def test_groups_normalizes_exception_view_and_code(self) -> None:
         facade = FakeWorkbenchQueryFacade()
         routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
@@ -358,7 +366,7 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                     "page_size": 100,
                     "status": None,
                     "source_kind": None,
-                    "search": "132",
+                    "search": "1320",
                     "column_filters": {
                         "oa": {"applicant": ["杨丽萍"], "projectName": ["大理项目"]}
                     },

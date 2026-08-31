@@ -496,7 +496,8 @@ requested_scope as (
     select
         %s::text as scope_key,
         case when %s::text = 'all' then null else %s::date end as scope_month,
-        %s::text as tenant_id
+        %s::text as tenant_id,
+        %s::boolean as include_column_values
 ),
 requested_settings as materialized (
     select coalesce((
@@ -971,7 +972,8 @@ oa_candidate_facts as materialized (
         oa.application_date as sort_date,
         oa.updated_at,
         'completed'::text as workflow_status,
-        jsonb_strip_nulls(jsonb_build_object(
+        case when (select include_column_values from requested_scope)
+        then jsonb_strip_nulls(jsonb_build_object(
             'applicant', oa.applicant,
             'applicationTime', oa.application_date::text,
             'projectName', oa.project_name,
@@ -995,7 +997,7 @@ oa_candidate_facts as materialized (
             ),
             'reconciliationStatus', '待关联',
             'workflowStatus', 'completed'
-        )) as column_values,
+        )) else '{{}}'::jsonb end as column_values,
         null::text as external_etc_batch_id,
         case when jsonb_typeof(oa.normalized_payload->'expense_items') = 'array'
              then oa.normalized_payload->'expense_items'
@@ -1037,7 +1039,8 @@ oa_candidate_facts as materialized (
         ),
         admission.updated_at,
         'in_progress'::text,
-        jsonb_strip_nulls(jsonb_build_object(
+        case when (select include_column_values from requested_scope)
+        then jsonb_strip_nulls(jsonb_build_object(
             'applicant', admission.applicant,
             'applicationTime', {pending_oa_application_time_sql('admission')},
             'projectName', coalesce(admission.project_name_display, admission.project_name),
@@ -1060,7 +1063,7 @@ oa_candidate_facts as materialized (
             'counterparty', admission.source_payload->>'counterparty_name',
             'reconciliationStatus', '待关联',
             'workflowStatus', 'in_progress'
-        )),
+        )) else '{{}}'::jsonb end,
         null::text,
         case when jsonb_typeof(admission.source_payload->'expense_items') = 'array'
              then admission.source_payload->'expense_items'
@@ -1118,7 +1121,8 @@ bank_candidates as materialized (
         coalesce(bank.trade_time::date, bank.txn_date) as sort_date,
         bank.updated_at,
         null::text as workflow_status,
-        jsonb_strip_nulls(jsonb_build_object(
+        case when (select include_column_values from requested_scope)
+        then jsonb_strip_nulls(jsonb_build_object(
             'transactionTime', coalesce(bank.trade_time::date, bank.txn_date)::text,
             'direction', case
                 when lower(coalesce(bank.txn_direction, '')) in
@@ -1149,7 +1153,7 @@ bank_candidates as materialized (
             ),
             'invoiceRelationStatus', '待关联发票',
             'loanRepaymentDate', bank.raw_payload->>'repayment_date'
-        )) as column_values,
+        )) else '{{}}'::jsonb end as column_values,
         null::text as external_etc_batch_id,
         '[]'::jsonb as oa_expense_items,
         '[]'::jsonb as oa_source_aliases,
@@ -1224,12 +1228,13 @@ invoice_candidates as materialized (
         invoice.invoice_date as sort_date,
         invoice.updated_at,
         null::text as workflow_status,
-        jsonb_strip_nulls(jsonb_build_object(
+        case when (select include_column_values from requested_scope)
+        then jsonb_strip_nulls(jsonb_build_object(
             'sellerName', invoice.seller_name,
             'buyerName', invoice.buyer_name,
             'invoiceType', invoice.invoice_type,
             'issueDate', invoice.invoice_date::text
-        )) as column_values,
+        )) else '{{}}'::jsonb end as column_values,
         invoice.hard_identity,
         active_member.row_id is not null as active_relation_member,
         null::text as external_etc_batch_id,
@@ -1280,12 +1285,13 @@ etc_summary_candidates as materialized (
         summary.scope_month as sort_date,
         summary.updated_at,
         null::text as workflow_status,
-        jsonb_build_object(
+        case when (select include_column_values from requested_scope)
+        then jsonb_build_object(
             'sellerName', 'ETC批次',
             'buyerName', summary.external_batch_id,
             'invoiceType', '进项发票',
             'issueDate', summary.scope_month::text
-        ) as column_values,
+        ) else '{{}}'::jsonb end as column_values,
         summary.external_batch_id as external_etc_batch_id,
         '[]'::jsonb as oa_expense_items,
         '[]'::jsonb as oa_source_aliases,
@@ -2740,7 +2746,13 @@ class PostgresWorkbenchPageQueryRepository:
             """,
             tuple(
                 [
-                    *self._scope_params(normalized_scope),
+                    *self._scope_params(
+                        normalized_scope,
+                        include_column_values=(
+                            paired_plan["include_column_values"]
+                            or unpaired_plan["include_column_values"]
+                        ),
+                    ),
                     *paired_plan["search_params"],
                     *paired_plan["where_params"],
                     WORKBENCH_GROUP_PAGE_SIZE + 1,
@@ -2872,6 +2884,7 @@ class PostgresWorkbenchPageQueryRepository:
             "query_hash": workbench_query_hash(normalized_query),
             "search_ctes": search_ctes,
             "search_params": search_params,
+            "include_column_values": bool(normalized_columns),
             "exception_bucket": exception_bucket,
             "uses_unfiltered_zone_counts": not any(
                 (
@@ -3369,7 +3382,10 @@ class PostgresWorkbenchPageQueryRepository:
             """,
             tuple(
                 [
-                    *self._scope_params(normalized_scope),
+                    *self._scope_params(
+                        normalized_scope,
+                        include_column_values=bool(normalized_columns),
+                    ),
                     *search_params,
                     *exception_params,
                     *where_params,
@@ -3626,6 +3642,7 @@ class PostgresWorkbenchPageQueryRepository:
         returned relation members and never issues a per-member lookup.
         """
 
+        normalized_scope = self._scope_key(scope_key)
         normalized_row_id = str(row_id or "").strip()
         normalized_row_type = str(row_type or "").strip().lower()
         normalized_case_id = str(case_id or "").strip()
@@ -4269,7 +4286,10 @@ class PostgresWorkbenchPageQueryRepository:
             """,
             tuple(
                 [
-                    *self._scope_params(scope_key),
+                    normalized_scope,
+                    normalized_scope,
+                    None if normalized_scope == "all" else month_start(normalized_scope),
+                    self._tenant_id,
                     normalized_row_id,
                     normalized_row_type,
                     normalized_case_id,
@@ -5330,7 +5350,10 @@ class PostgresWorkbenchPageQueryRepository:
             """,
             tuple(
                 [
-                    *self._scope_params(scope_key),
+                    *self._scope_params(
+                        scope_key,
+                        include_column_values=bool(filters_without_tags),
+                    ),
                     *search_params,
                     "bank",
                     *where_params,
@@ -6024,13 +6047,19 @@ class PostgresWorkbenchPageQueryRepository:
     def _scope_key(scope_key: str | None) -> str:
         return normalize_workbench_scope_key(scope_key)
 
-    def _scope_params(self, scope_key: str) -> list[Any]:
+    def _scope_params(
+        self,
+        scope_key: str,
+        *,
+        include_column_values: bool = True,
+    ) -> list[Any]:
         normalized = self._scope_key(scope_key)
         return [
             normalized,
             normalized,
             None if normalized == "all" else month_start(normalized),
             self._tenant_id,
+            include_column_values,
         ]
 
     @staticmethod
