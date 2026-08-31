@@ -7433,7 +7433,7 @@ textarea {
 
 .bank-flow-rule-batches-filter {
   display: grid;
-  grid-template-columns: minmax(290px, max-content) minmax(220px, 280px) minmax(180px, max-content) max-content minmax(0, 1fr);
+  grid-template-columns: minmax(290px, max-content) minmax(220px, 280px) minmax(180px, max-content) minmax(0, 1fr);
   align-items: end;
   gap: var(--fp-space-2);
   padding: 1px var(--fp-space-1);
@@ -7509,6 +7509,14 @@ textarea {
   line-height: 1.3;
 }
 
+.bank-flow-rule-batches-selection-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fp-space-2);
+}
+
 .bank-flow-rule-batches-pagination {
   display: inline-flex;
   min-height: 30px;
@@ -7563,7 +7571,7 @@ textarea {
   display: grid;
   align-items: start;
   gap: var(--fp-space-3);
-  grid-template-columns: minmax(150px, 0.72fr) minmax(150px, 0.72fr) minmax(0, 3.8fr);
+  grid-template-columns: minmax(190px, 220px) minmax(170px, 190px) minmax(0, 1fr);
 }
 
 .bank-flow-rule-batches-rail {
@@ -7714,19 +7722,6 @@ textarea {
   line-height: 1.25;
 }
 
-.bank-flow-rule-batches-transactions__account {
-  margin: 0;
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-caption);
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.bank-flow-rule-batches-transactions__account {
-  flex: 0 0 auto;
-  font-weight: 700;
-}
-
 .bank-flow-rule-batches-transactions__list {
   display: grid;
   max-height: calc(100vh - 214px);
@@ -7747,7 +7742,7 @@ textarea {
 }
 
 .bank-flow-rule-batches-batch--selected {
-  background: color-mix(in srgb, var(--fp-primary-soft) 70%, var(--fp-surface));
+  background: color-mix(in srgb, var(--fp-primary-soft) 36%, var(--fp-surface));
   box-shadow: inset 3px 0 0 var(--fp-primary);
 }
 
@@ -7866,14 +7861,9 @@ textarea {
   color: var(--fp-danger);
 }
 
-.bank-flow-rule-batches-table-wrap {
-  height: clamp(220px, 36dvh, 360px);
-  min-height: 0;
-  overflow: hidden;
-  background: var(--fp-surface);
-}
-
 .bank-flow-rule-batches-table .finance-table__content {
+  width: 100%;
+  table-layout: fixed;
   font-size: var(--fp-text-body);
 }
 
@@ -7902,17 +7892,78 @@ textarea {
 .bank-flow-rule-batches-table__check {
   width: 42px;
   text-align: center;
+  vertical-align: middle !important;
 }
 
 .bank-flow-rule-batches-table .bank-flow-rule-batches-table__amount {
+  width: 132px;
   text-align: right;
 }
 
+.bank-flow-rule-batches-table__counterparty {
+  width: clamp(180px, 24vw, 300px);
+  overflow-wrap: anywhere;
+}
+
+.bank-flow-rule-batches-table__time {
+  width: 170px;
+  color: var(--fp-text-secondary) !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bank-flow-rule-batches-table__relation {
+  width: 154px;
+}
+
+.bank-flow-rule-batches-table__description {
+  min-width: 220px;
+}
+
 .bank-flow-rule-batches-checkbox {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--fp-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+}
+
+.bank-flow-rule-batches-checkbox--table {
+  width: 32px;
+  height: 32px;
+}
+
+.bank-flow-rule-batches-checkbox__control {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--fp-border);
+  border-radius: 4px;
+  background: var(--fp-surface);
+  color: var(--fp-surface);
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart);
+}
+
+.bank-flow-rule-batches-checkbox[data-selected="true"] .bank-flow-rule-batches-checkbox__control,
+.bank-flow-rule-batches-checkbox[data-indeterminate="true"] .bank-flow-rule-batches-checkbox__control {
+  border-color: var(--fp-primary);
+  background: var(--fp-primary);
+}
+
+.bank-flow-rule-batches-checkbox:focus-within .bank-flow-rule-batches-checkbox__control {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
+}
+
+.bank-flow-rule-batches-checkbox[data-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.bank-flow-rule-batches-table__row--selected .finance-table__cell {
+  background: color-mix(in srgb, var(--fp-primary-soft) 48%, var(--fp-surface));
 }
 
 .bank-flow-rule-batches-amount-cell,
@@ -7942,36 +7993,32 @@ textarea {
   min-width: 28px;
 }
 
-.bank-flow-rule-batches-tag--bank {
-  background: transparent;
-  color: var(--fp-text-secondary);
-  font-weight: 700;
-}
-
 .bank-flow-rule-batches-summary-cell__summary {
   color: var(--fp-text-primary);
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .bank-flow-rule-batches-summary-cell__memo {
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
-.bank-flow-rule-batches-bank-tags,
 .bank-flow-rule-batches-relation-cell {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
   gap: var(--fp-space-1);
-  padding-top: 2px;
 }
 
-.bank-flow-rule-batches-tag--bank-detail {
-  border-color: color-mix(in srgb, var(--fp-primary) 22%, var(--fp-border));
-  background: color-mix(in srgb, var(--fp-primary) 8%, var(--fp-surface));
-  color: var(--fp-primary-hover);
+.bank-flow-rule-batches-relation-cell__counts,
+.bank-flow-rule-batches-empty-value {
+  color: var(--fp-text-secondary);
+  font-size: var(--fp-text-caption);
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .bank-flow-rule-batches-drawer .finance-drawer__body {
@@ -8169,13 +8216,19 @@ textarea {
   .bank-flow-rule-batches-filter,
   .bank-flow-rule-batches-segment,
   .bank-flow-rule-batches-pagination,
-  .bank-flow-rule-batches-button {
+  .bank-flow-rule-batches-button,
+  .bank-flow-rule-batches-selection-actions {
     width: 100%;
   }
 
   .bank-flow-rule-batches-filter {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .bank-flow-rule-batches-selection-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .bank-flow-rule-batches-layout {

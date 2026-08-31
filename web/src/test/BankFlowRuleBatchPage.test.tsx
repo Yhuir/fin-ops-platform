@@ -414,6 +414,7 @@ function largeListPayload(total = 205) {
 function installFetchMock(
   payload = listPayload,
   options: {
+    feeDetail?: typeof feeDetailPayload;
     listFailuresBeforeSuccess?: number;
     tagSelection?: Record<string, unknown>;
     tagSelectionResponses?: Array<{ delay?: Promise<void>; payload?: Record<string, unknown> }>;
@@ -466,7 +467,7 @@ function installFetchMock(
       return jsonResponse(withPagination(payload, url));
     }
     if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
-      return jsonResponse(feeDetailPayload);
+      return jsonResponse(options.feeDetail ?? feeDetailPayload);
     }
     if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-holiday") {
       return jsonResponse({ batch: payload.batches[1], tag_counts: { holiday_bonus: 5 }, direction_counts: { expense: 5 }, rows: [] });
@@ -604,15 +605,16 @@ describe("BankFlowRuleBatchPage", () => {
     const railItemRule = cssRule(styles, ".bank-flow-rule-batches-rail__item");
     const transactionRule = cssRule(styles, ".bank-flow-rule-batches-transactions");
     const transactionListRule = cssRule(styles, ".bank-flow-rule-batches-transactions__list");
+    const layoutRule = cssRule(styles, ".bank-flow-rule-batches-layout");
     const batchRule = cssRule(styles, ".bank-flow-rule-batches-batch");
     const selectedBatchRule = cssRule(styles, ".bank-flow-rule-batches-batch--selected");
-    const tableWrapRule = cssRule(styles, ".bank-flow-rule-batches-table-wrap");
     const tableCellRule = cssRule(styles, ".bank-flow-rule-batches-table th,\\n.bank-flow-rule-batches-table td");
     const tableHeadRule = cssRule(styles, ".bank-flow-rule-batches-table th");
     const amountRule = cssRule(styles, ".bank-flow-rule-batches-table .bank-flow-rule-batches-table__amount");
     const tagRule = cssRule(styles, ".bank-flow-rule-batches-status,\\n.bank-flow-rule-batches-tag");
-    const bankTagsRule = cssRule(styles, ".bank-flow-rule-batches-bank-tags,\\n.bank-flow-rule-batches-relation-cell");
-    const bankDetailTagRule = cssRule(styles, ".bank-flow-rule-batches-tag--bank-detail");
+    const checkboxControlRule = cssRule(styles, ".bank-flow-rule-batches-checkbox__control");
+    const selectedRowRule = cssRule(styles, ".bank-flow-rule-batches-table__row--selected .finance-table__cell");
+    const relationRule = cssRule(styles, ".bank-flow-rule-batches-relation-cell");
     const drawerGridWrapRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid-wrap");
     const drawerGridRule = cssRule(styles, ".bank-flow-rule-batches-drawer__grid .finance-table__content");
     const drawerDirectionColRule = cssRule(styles, ".bank-flow-rule-batches-drawer__direction-col");
@@ -637,17 +639,23 @@ describe("BankFlowRuleBatchPage", () => {
     expect(toastButtonRule).toContain("var(--motion-fast)");
 
     expect(railRule).toContain("border-radius: var(--fp-radius-sm)");
+    expect(layoutRule).toContain("minmax(190px, 220px) minmax(170px, 190px) minmax(0, 1fr)");
     expect(transactionRule).not.toContain("border-radius");
     expect(transactionListRule).toContain("max-height: calc(100vh - 214px)");
+    expect(transactionListRule).toContain("overflow: auto");
     expect(selectedBatchRule).toContain("inset 3px 0 0 var(--fp-primary)");
-    expect(tableWrapRule).toContain("overflow: hidden");
-    expect(tableWrapRule).not.toContain("border-radius");
     expect(tableHeadRule).toContain("color-mix(in srgb, var(--fp-surface-muted)");
     expect(amountRule).toContain("text-align: right");
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
     expect(tagRule).toContain("background: var(--fp-surface-muted)");
-    expect(bankTagsRule).toContain("flex-wrap: wrap");
-    expect(bankDetailTagRule).toContain("var(--fp-primary)");
+    expect(checkboxControlRule).toContain("width: 18px");
+    expect(checkboxControlRule).toContain("height: 18px");
+    expect(selectedRowRule).toContain("var(--fp-primary-soft)");
+    expect(relationRule).toContain("flex-direction: column");
+    expect(pageSource).toContain("<Checkbox.Control");
+    expect(pageSource).toContain("isIndeterminate={regionIndeterminate}");
+    expect(pageSource).not.toContain("bank-flow-rule-batches-table-wrap");
+    expect(pageSource).not.toContain("bankDetailTagLabels");
     expect(drawerGridWrapRule).toContain("overflow: hidden");
     expect(pageSource).toContain('minWidth={720} scrollMode="contained"');
     expect(drawerGridRule).toContain("background: var(--fp-surface)");
@@ -699,7 +707,8 @@ describe("BankFlowRuleBatchPage", () => {
     });
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
-    expect(within(transactionRegion).getAllByText("建设银行8106").length).toBeGreaterThan(0);
+    expect(within(transactionRegion).getByText("费用 / 手续费")).toBeInTheDocument();
+    expect(within(transactionRegion).getAllByText("建设银行8106")).toHaveLength(1);
     expect(await within(transactionRegion).findByText("网银手续费")).toBeInTheDocument();
     expect(within(transactionRegion).getByText("2026-05-03 10:20:00")).toBeInTheDocument();
     expect(within(transactionRegion).queryByText("2026-05-03T10:20:00+08:00")).not.toBeInTheDocument();
@@ -709,13 +718,57 @@ describe("BankFlowRuleBatchPage", () => {
     });
     expect(detailGet).toBeTruthy();
     expect(new URL(String(detailGet?.[0]), "http://localhost").searchParams.get("scope_month")).toBe("2026-05");
-    const bankTagGroup = within(transactionRegion).getByLabelText("银行明细标签 建设银行 2026-05-03 10:20:00 建设银行 8106");
-    expect(within(bankTagGroup).getByText("费用")).toBeInTheDocument();
-    expect(within(bankTagGroup).getByText("手续费")).toBeInTheDocument();
-    expect(within(transactionRegion).getByRole("checkbox", { name: "建设银行8106全选" })).toBeInTheDocument();
-    expect(within(transactionRegion).getByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ })).toBeInTheDocument();
+    expect(within(transactionRegion).queryByLabelText(/银行明细标签/)).not.toBeInTheDocument();
+    const selectAll = within(transactionRegion).getByRole("checkbox", { name: "建设银行8106全选" });
+    const rowCheckbox = within(transactionRegion).getByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ });
+    expect(selectAll.closest("label")?.querySelector(".bank-flow-rule-batches-checkbox__control")).toBeInTheDocument();
+    expect(rowCheckbox.closest("label")?.querySelector(".bank-flow-rule-batches-checkbox__control")).toBeInTheDocument();
+    expect(within(transactionRegion).queryByRole("button", { name: "全选" })).not.toBeInTheDocument();
+    expect(within(transactionRegion).queryByRole("button", { name: "清空" })).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("分类来源")).not.toBeInTheDocument();
     expect(within(transactionRegion).queryByText("自动")).not.toBeInTheDocument();
+  });
+
+  test("uses the table checkbox as the single select-all control and exposes partial selection", async () => {
+    const user = userEvent.setup();
+    const secondRow = {
+      ...feeDetailPayload.rows[0],
+      transaction_id: "bank-row-002",
+      trade_time: "2026-05-04T11:30:00+08:00",
+      counterparty_name: "银联商务",
+      amount: "79.20",
+      summary: "服务费",
+    };
+    installFetchMock(listPayload, {
+      feeDetail: {
+        ...feeDetailPayload,
+        rows: [feeDetailPayload.rows[0], secondRow],
+      },
+    });
+    renderPage();
+
+    const transactionRegion = screen.getByRole("region", { name: "流水" });
+    const selectAll = await within(transactionRegion).findByRole("checkbox", { name: "建设银行8106全选" });
+    const firstRow = within(transactionRegion).getByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80/ });
+    const secondRowCheckbox = within(transactionRegion).getByRole("checkbox", { name: /^选择流水 银联商务 2026-05-04 11:30:00 79\.20/ });
+
+    await user.click(firstRow);
+    expect(firstRow).toBeChecked();
+    expect(secondRowCheckbox).not.toBeChecked();
+    expect(selectAll.closest("label")).toHaveAttribute("data-indeterminate", "true");
+    expect(screen.getByText("已选 1 条")).toBeInTheDocument();
+
+    await user.click(selectAll);
+    expect(firstRow).toBeChecked();
+    expect(secondRowCheckbox).toBeChecked();
+    expect(selectAll).toBeChecked();
+    expect(screen.getByText("已选 2 条")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "清空选择" }));
+    expect(firstRow).not.toBeChecked();
+    expect(secondRowCheckbox).not.toBeChecked();
+    expect(selectAll).not.toBeChecked();
+    expect(screen.queryByText(/已选 \d+ 条/)).not.toBeInTheDocument();
   });
 
   test("requests the complete batch scope when the user switches from a month to all", async () => {

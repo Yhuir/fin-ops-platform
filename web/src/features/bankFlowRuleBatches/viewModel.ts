@@ -63,13 +63,6 @@ export function pageRange(page: number, pageSize: number, total: number) {
   return `${start}-${end} / ${total}`;
 }
 
-export function bankTagLabel(row: { bankName?: string; accountLast4?: string; accountKey?: string }) {
-  if (row.accountLast4) {
-    return `${row.bankName || "银行"}${row.accountLast4}`;
-  }
-  return row.bankName || row.accountKey || "-";
-}
-
 export function directionTagLabel(row: { direction?: string; directionLabel?: string }) {
   return row.directionLabel || (row.direction === "income" ? "收" : row.direction === "expense" ? "支" : "-");
 }
@@ -239,19 +232,5 @@ export function relationContextLabels(row: BankFlowRuleBatchDetailRow) {
   if (row.relationStatus !== "linked" && row.relationCaseIds.length === 0) {
     return [];
   }
-  return ["已有未撤回关联", `OA ${row.linkedOaCount}`, `发票 ${row.linkedInvoiceCount}`];
-}
-
-export function bankDetailTagLabels(row: BankFlowRuleBatchDetailRow) {
-  const labelPath = row.categoryLabelPath.map((label) => label.trim()).filter(Boolean);
-  if (labelPath.length > 0) {
-    return Array.from(new Set(labelPath));
-  }
-  const fallbackLabels = [
-    row.categoryPrimaryLabel,
-    row.categorySubLabel,
-    row.categoryLabel,
-    row.categoryCode,
-  ].map((label) => label.trim()).filter(Boolean);
-  return Array.from(new Set(fallbackLabels));
+  return ["已关联", `OA ${row.linkedOaCount}`, `发票 ${row.linkedInvoiceCount}`];
 }

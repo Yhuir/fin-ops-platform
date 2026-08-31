@@ -2,6 +2,13 @@
 
 状态：covered-close。页面列表、summary、分页、详情和写后回读已切到 PostgreSQL canonical query boundary；页面 API 不再返回 read-model status/version、refresh enqueue 或 operation-barrier targets，前端不再轮询 freshness。
 
+## 2026-09-01 三栏流水表与选择控件回归
+
+- `web/src/test/BankFlowRuleBatchPage.test.tsx` 保护固定三栏比例、右栏单一纵向滚动、对方户名/交易时间/金额/关联/摘要列职责、旧行内银行账户与分类标签删除、可见 checkbox control/indicator，以及单选 -> 半选 -> 全选 -> 顶部清空选择闭环。
+- `web/src/test/BankFlowRuleBatchPolicy.test.ts` 保护关联展示只输出“已关联”和 OA/发票计数，不泄露内部 case id。
+- `web/e2e/bank-flow-rule-batches-flow.spec.ts` 在真实 Chromium 中校验列顺序、旧重复信息消失、逐行 checkbox 可见且 control 宽度至少 18px；既有普通批次矩阵继续覆盖所有可选批次类型。
+- 适用第 5 类 frontend component/interaction 和第 7 类 existing regression；第 1–4 类不适用，因为业务规则、service/API、数据库、read model、cache 和 worker 均未改变；第 6 类复跑既有提交 -> 关联台 -> 撤回 E2E，不新增跨模块链路。
+
 ## 2026-08-31 银行身份标量与 canonical account key 回归
 
 - `tests/test_bank_details_canonical_query.py` 保护 `defer_full_payload=True` 只延迟完整 JSON，仍从 canonical 银行行投影 `imported_bank_name` 与 `imported_bank_last4` 两个轻量标量。

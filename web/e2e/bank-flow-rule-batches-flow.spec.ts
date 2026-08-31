@@ -338,6 +338,24 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(draftTable).toBeVisible();
     await expect(draftTable.getByText("网银手续费")).toBeVisible();
     await expect(draftTable.getByText("浏览器 e2e 月结手续费")).toBeVisible();
+    await expect(draftTable.getByRole("columnheader")).toHaveText([
+      "",
+      "对方户名",
+      "交易时间",
+      "金额",
+      "摘要/用途/备注",
+    ]);
+    await expect(draftTable.getByText("建设银行8106", { exact: true })).toHaveCount(0);
+    await expect(draftTable.getByText("费用", { exact: true })).toHaveCount(0);
+    await expect(draftTable.getByText("手续费", { exact: true })).toHaveCount(0);
+    const visibleRowCheckbox = draftTable.getByRole("checkbox", {
+      name: "选择流水 建设银行 2026-05-03 10:20:00 8.80 建设银行 8106",
+    });
+    await expect(visibleRowCheckbox).toBeVisible();
+    const checkboxControl = visibleRowCheckbox.locator("xpath=ancestor::label[1]")
+      .locator(".bank-flow-rule-batches-checkbox__control");
+    await expect(checkboxControl).toBeVisible();
+    await expect.poll(async () => (await checkboxControl.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(18);
     await expect(page.getByText("当前标签下暂无流水")).toHaveCount(0);
 
     const settledListReads = api.count("GET /api/bank-flow-rule-batches");

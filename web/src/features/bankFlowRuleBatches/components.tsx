@@ -129,7 +129,7 @@ export function LabelRail({
                 onKeyDown={(event) => handleButtonKeyDown(event, () => onSelect(group.key))}
                 type="button"
               >
-                <span className="bank-flow-rule-batches-rail__item-label">
+                <span className="bank-flow-rule-batches-rail__item-label" title={group.label}>
                   {group.label}
                 </span>
                 <span

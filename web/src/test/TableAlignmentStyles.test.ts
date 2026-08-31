@@ -53,7 +53,6 @@ describe("finance table alignment styles", () => {
       ".turnover-ledger-table-wrap",
       ".turnover-ledger-export-dialog__table-wrap",
       ".bank-flow-rule-batches-transactions",
-      ".bank-flow-rule-batches-table-wrap",
       ".app-health-section",
       ".app-health-inventory-panel",
       ".import-workflow-panel--table",

@@ -38,8 +38,6 @@ import { BatchStatusTag, LabelRail, PageControls } from "../features/bankFlowRul
 import type { LabelRailGroup } from "../features/bankFlowRuleBatches/components";
 import {
   accountLabel,
-  bankDetailTagLabels,
-  bankTagLabel,
   batchBlockingReason,
   buildTagDrawerRows,
   categoryCountForBucket,
@@ -798,21 +796,34 @@ export default function BankFlowRuleBatchPage() {
           total={listPagination.total}
         />
         {bucket === "unsubmitted" && canMutateData ? (
-          <Button
-            className="bank-flow-rule-batches-button bank-flow-rule-batches-button--primary"
-            isDisabled={selectedTransactionIds.size === 0 || mutating}
-            onPress={handleSubmitSelected}
-            size="sm"
-            variant="primary"
-          >
-            提交批次
-          </Button>
+          <div className="bank-flow-rule-batches-selection-actions">
+            {selectedTransactionIds.size > 0 ? (
+              <>
+                <span className="bank-flow-rule-batches-selected-count">
+                  已选 {selectedTransactionIds.size} 条
+                </span>
+                <Button
+                  className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
+                  isDisabled={mutating}
+                  onPress={clearSelection}
+                  size="sm"
+                  variant="secondary"
+                >
+                  清空选择
+                </Button>
+              </>
+            ) : null}
+            <Button
+              className="bank-flow-rule-batches-button bank-flow-rule-batches-button--primary"
+              isDisabled={selectedTransactionIds.size === 0 || mutating}
+              onPress={handleSubmitSelected}
+              size="sm"
+              variant="primary"
+            >
+              提交批次
+            </Button>
+          </div>
         ) : null}
-          {selectedTransactionIds.size > 0 ? (
-            <span className="bank-flow-rule-batches-selected-count">
-              已选 {selectedTransactionIds.size} 条
-            </span>
-          ) : null}
       </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
@@ -871,7 +882,12 @@ export default function BankFlowRuleBatchPage() {
               const selected = selectedBatchId === batch.batchId;
               const rowSelectionEnabled = canSelectBatchRows(batch, bucket);
               const internalTransferSubmitEnabled = canSubmitInternalTransferBatch(batch, bucket);
-              const regionChecked = rowSelectionEnabled && rows.length > 0 && rows.every((row) => selectedTransactionIds.has(row.transactionId));
+              const selectedRowCount = rowSelectionEnabled
+                ? rows.reduce((count, row) => count + Number(selectedTransactionIds.has(row.transactionId)), 0)
+                : 0;
+              const regionChecked = rowSelectionEnabled && rows.length > 0 && selectedRowCount === rows.length;
+              const regionIndeterminate = selectedRowCount > 0 && selectedRowCount < rows.length;
+              const showRelationColumn = rows.some((row) => relationContextLabels(row).length > 0);
               const blockingReason = batchBlockingReason(batch);
               return (
                 <section
@@ -902,26 +918,6 @@ export default function BankFlowRuleBatchPage() {
                           >
                             查看流水
                           </button>
-                        ) : null}
-                        {selected && rowSelectionEnabled ? (
-                          <>
-                            <button
-                              className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
-                              disabled={!canMutateData || rows.length === 0 || mutating}
-                              onClick={() => setRegionSelection(rows, true)}
-                              type="button"
-                            >
-                              全选
-                            </button>
-                            <button
-                              className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
-                              disabled={!canMutateData || rows.length === 0 || mutating}
-                              onClick={() => setRegionSelection(rows, false)}
-                              type="button"
-                            >
-                              清空
-                            </button>
-                          </>
                         ) : null}
                         {internalTransferSubmitEnabled && canMutateData ? (
                           <button
@@ -964,44 +960,69 @@ export default function BankFlowRuleBatchPage() {
                     {selected && !detail && !detailErrors[batch.batchId] ? <StatePanel compact tone="loading" title="正在加载流水明细" /> : null}
                     {selected && detail && rows.length === 0 ? <StatePanel compact tone="empty" title="暂无流水明细" /> : null}
                     {selected && rows.length > 0 ? (
-                      <FinanceTable ariaLabel={`${accountLabel(batch)}流水`} className="bank-flow-rule-batches-table bank-flow-rule-batches-table-wrap" minWidth={820} scrollMode="contained">
+                      <FinanceTable
+                        ariaLabel={`${accountLabel(batch)}流水`}
+                        className="bank-flow-rule-batches-table"
+                        minWidth={showRelationColumn ? 920 : 780}
+                      >
                           <FinanceTableHeader>
                               {rowSelectionEnabled ? (
                                 <FinanceTableColumn className="bank-flow-rule-batches-table__check" columnRole="selection">
                                   <Checkbox
                                     aria-label={`${accountLabel(batch)}全选`}
-                                    className="bank-flow-rule-batches-checkbox"
+                                    className="bank-flow-rule-batches-checkbox bank-flow-rule-batches-checkbox--table"
                                     isDisabled={!canMutateData}
+                                    isIndeterminate={regionIndeterminate}
                                     isSelected={regionChecked}
                                     slot="selection"
                                     onChange={(selected) => setRegionSelection(rows, selected)}
-                                  />
+                                  >
+                                    <Checkbox.Control className="bank-flow-rule-batches-checkbox__control">
+                                      <Checkbox.Indicator />
+                                    </Checkbox.Control>
+                                  </Checkbox>
                                 </FinanceTableColumn>
                               ) : null}
-                              <FinanceTableColumn columnRole="date">交易时间</FinanceTableColumn>
-                              <FinanceTableColumn columnRole="identity" isRowHeader>对方户名</FinanceTableColumn>
+                              <FinanceTableColumn className="bank-flow-rule-batches-table__counterparty" columnRole="identity" isRowHeader>对方户名</FinanceTableColumn>
+                              <FinanceTableColumn className="bank-flow-rule-batches-table__time" columnRole="date">交易时间</FinanceTableColumn>
                               <FinanceTableColumn className="bank-flow-rule-batches-table__amount" columnRole="amount">金额</FinanceTableColumn>
-                              <FinanceTableColumn columnRole="description">摘要/用途/备注</FinanceTableColumn>
+                              {showRelationColumn ? (
+                                <FinanceTableColumn className="bank-flow-rule-batches-table__relation" columnRole="status">关联</FinanceTableColumn>
+                              ) : null}
+                              <FinanceTableColumn className="bank-flow-rule-batches-table__description" columnRole="description">摘要/用途/备注</FinanceTableColumn>
                           </FinanceTableHeader>
                           <FinanceTableBody>
                             {rows.map((row) => {
-                              const rowTagLabels = bankDetailTagLabels(row);
                               const relationLabels = relationContextLabels(row);
+                              const rowSelected = selectedTransactionIds.has(row.transactionId);
+                              const memoText = Array.from(new Set(
+                                [row.purpose, row.remark]
+                                  .map((value) => value.trim())
+                                  .filter(Boolean),
+                              )).join(" / ");
                               return (
-                                <FinanceTableRow id={row.transactionId} key={row.transactionId}>
+                                <FinanceTableRow
+                                  className={cx(rowSelected && "bank-flow-rule-batches-table__row--selected")}
+                                  id={row.transactionId}
+                                  key={row.transactionId}
+                                >
                                   {rowSelectionEnabled ? (
                                     <FinanceTableCell className="bank-flow-rule-batches-table__check" columnRole="selection">
                                       <Checkbox
                                         aria-label={`选择流水 ${row.counterpartyName || "未知对方"} ${formatDateTimeText(row.tradeTime)} ${formatMoney(row.amount)} ${row.bankName || "未知银行"} ${row.accountLast4 || ""}`}
-                                        className="bank-flow-rule-batches-checkbox"
+                                        className="bank-flow-rule-batches-checkbox bank-flow-rule-batches-checkbox--table"
                                         isDisabled={!canMutateData}
-                                        isSelected={selectedTransactionIds.has(row.transactionId)}
+                                        isSelected={rowSelected}
                                         onChange={(selected) => toggleTransaction(row, selected)}
-                                      />
+                                      >
+                                        <Checkbox.Control className="bank-flow-rule-batches-checkbox__control">
+                                          <Checkbox.Indicator />
+                                        </Checkbox.Control>
+                                      </Checkbox>
                                     </FinanceTableCell>
                                   ) : null}
-                                  <FinanceTableCell columnRole="date">{formatDateTimeText(row.tradeTime)}</FinanceTableCell>
-                                  <FinanceTableCell columnRole="identity">{row.counterpartyName || "-"}</FinanceTableCell>
+                                  <FinanceTableCell className="bank-flow-rule-batches-table__counterparty" columnRole="identity">{row.counterpartyName || "—"}</FinanceTableCell>
+                                  <FinanceTableCell className="bank-flow-rule-batches-table__time" columnRole="date">{formatDateTimeText(row.tradeTime)}</FinanceTableCell>
                                   <FinanceTableCell className="bank-flow-rule-batches-table__amount" columnRole="amount">
                                     <div className="bank-flow-rule-batches-amount-cell">
                                       <div className="bank-flow-rule-batches-amount-cell__main">
@@ -1010,29 +1031,24 @@ export default function BankFlowRuleBatchPage() {
                                         </span>
                                         <span className="bank-flow-rule-batches-amount">{formatMoney(row.amount)}</span>
                                       </div>
-                                      <span className="bank-flow-rule-batches-tag bank-flow-rule-batches-tag--bank">
-                                        {bankTagLabel(row)}
-                                      </span>
                                     </div>
                                   </FinanceTableCell>
-                                  <FinanceTableCell columnRole="description">
-                                    <div className="bank-flow-rule-batches-summary-cell">
-                                      <span className="bank-flow-rule-batches-summary-cell__summary">{row.summary || "-"}</span>
-                                      <span className="bank-flow-rule-batches-summary-cell__memo">{[row.purpose, row.remark].filter(Boolean).join(" / ") || "-"}</span>
-                                      {rowTagLabels.length > 0 ? (
-                                        <div aria-label={`银行明细标签 ${row.counterpartyName || "未知对方"} ${formatDateTimeText(row.tradeTime)} ${row.bankName || "未知银行"} ${row.accountLast4 || ""}`} className="bank-flow-rule-batches-bank-tags">
-                                          {rowTagLabels.map((label) => (
-                                            <span className="bank-flow-rule-batches-tag bank-flow-rule-batches-tag--bank-detail" key={label}>{label}</span>
-                                          ))}
-                                        </div>
-                                      ) : null}
+                                  {showRelationColumn ? (
+                                    <FinanceTableCell className="bank-flow-rule-batches-table__relation" columnRole="status">
                                       {relationLabels.length > 0 ? (
                                         <div className="bank-flow-rule-batches-relation-cell">
-                                          {relationLabels.map((label) => (
-                                            <span className="bank-flow-rule-batches-tag" key={label}>{label}</span>
-                                          ))}
+                                          <span className="bank-flow-rule-batches-tag">{relationLabels[0]}</span>
+                                          <span className="bank-flow-rule-batches-relation-cell__counts">
+                                            {relationLabels.slice(1).join(" · ")}
+                                          </span>
                                         </div>
-                                      ) : null}
+                                      ) : <span className="bank-flow-rule-batches-empty-value">—</span>}
+                                    </FinanceTableCell>
+                                  ) : null}
+                                  <FinanceTableCell className="bank-flow-rule-batches-table__description" columnRole="description">
+                                    <div className="bank-flow-rule-batches-summary-cell">
+                                      <span className="bank-flow-rule-batches-summary-cell__summary">{row.summary.trim() || "—"}</span>
+                                      {memoText ? <span className="bank-flow-rule-batches-summary-cell__memo">{memoText}</span> : null}
                                     </div>
                                   </FinanceTableCell>
                                 </FinanceTableRow>

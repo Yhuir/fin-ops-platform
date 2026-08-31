@@ -95,7 +95,7 @@ describe("bank flow rule batch policy", () => {
       linkedInvoiceCount: 0,
     } as BankFlowRuleBatchDetailRow);
 
-    expect(labels).toEqual(["已有未撤回关联", "OA 0", "发票 0"]);
+    expect(labels).toEqual(["已关联", "OA 0", "发票 0"]);
     expect(labels.join(" ")).not.toContain("bank_flow_rule_batch_");
   });
 });

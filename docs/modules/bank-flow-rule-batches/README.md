@@ -48,7 +48,10 @@
 - 页面提交的是银行流水批量关系事实。由于未提交资格已经排除需单据标签，新 relation 的 requirement 必须为双 false；active relation 决定 ownership。关系仍持久化规则证明，但当前活跃关系会在相关标签的 OA/发票要求发生语义变化后，由 durable 后台任务增量重算。
 - 规则保存只比较 `requires_oa/requires_invoice` 的真实语义差异；仅扫描持久化 tag proof 命中变化标签的 active 正式 relation，并用关系内完整标签集合做 OR 重算。正式性由 active `status` 与 `relation_mode` 判定，不以 `case_id` 历史前缀判定。设置 CAS、可见 background job 与 outbox event 在同一事务提交；页面等待该任务成功后刷新并提示“已重算”。已提交/已撤回批次历史 payload 不改写。
 - 从本页面提交且银行流水超过 3 条时，关联台只折叠银行栏；1 到 3 条直接完整展示，不生成通用 preview 或详情加载入口。
-- 本页 linked 提示只显示“已有未撤回关联”和 OA/发票数量，不向用户渲染内部 relation case id；case id 仍保留在 API 数据与 Audit 证据中。
+- 页面固定使用“主标签 → 子标签 → 账户批次/流水”三栏；表格列顺序为选择、对方户名、交易时间、金额、按需出现的关联、摘要/用途/备注。主/子标签只在 rail 与右栏标题路径显示一次，行内不重复标签或银行账户。
+- 可选流水只使用表头 checkbox 统一全选/半选与逐行 checkbox；顶部仅在已有选择时显示选择数和“清空选择”。checkbox 必须渲染可见 control/indicator，不得只留下隐藏 input。
+- 本页 linked 提示只显示“已关联”和 OA/发票数量，不向用户渲染内部 relation case id；case id 仍保留在 API 数据与 Audit 证据中。
+- 右栏只有流水列表承担纵向滚动，表格不再创建嵌套纵向滚动区；窄屏按单列布局降级。
 
 ## 不属于本模块事实源
 
