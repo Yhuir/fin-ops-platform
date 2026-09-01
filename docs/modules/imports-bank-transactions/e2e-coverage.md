@@ -4,7 +4,7 @@
 
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
 | --- | --- | --- | --- |
-| `IMPORT-BANK-E2E-001` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_platform_runtime_boundary_guards.py` | Browser 覆盖独立路由、文件选择后才可预览、每文件账户选择；boundary guard 锁定页面入口为 `mode="bank_transaction"`。 |
+| `IMPORT-BANK-E2E-001` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_platform_runtime_boundary_guards.py` | Browser 覆盖独立路由、fresh entry、无历史 preview 恢复、当前 preview discard 后回到 fresh、文件选择后才可预览和每文件账户选择；boundary guard 锁定页面入口为 `mode="bank_transaction"`。 |
 | `IMPORT-BANK-E2E-002` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportsApi.test.ts`、`tests/test_import_file_api.py`、`tests/test_platform_runtime_boundary_guards.py` | Browser 覆盖真实 file input、账户 mapping override、preview API、audit counts、preview grid，以及慢预览期间进入“预览中...”状态，预览/清空/确认动作禁用且只提交一次 preview；boundary guard 防止前端回到旧 `/imports/preview`、`/imports/confirm` JSON API。 |
 | `IMPORT-BANK-E2E-003` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`tests/test_import_file_service.py` | Browser 覆盖重复项 tab、重复明细、损坏文件 file-level error、未导入项明细，以及 confirm 只提交正常可导入文件；后端覆盖 240 行合成重复组只允许一个 confirmable representative。 |
 | `IMPORT-BANK-E2E-004` | `covered` | `web/e2e/imports-bank-transactions-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_import_file_service.py` | Browser 覆盖冲突文案、确认按钮禁用、零 confirm/零 operation barrier；后端再次拒绝绕过页面直接确认，不再存在“强制继续导入”旧路径。 |

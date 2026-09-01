@@ -256,6 +256,7 @@ class AuthGuardTests(unittest.TestCase):
             ("POST", "/api/background-jobs/job-1/retry"),
             ("POST", "/api/etc/import/preview"),
             ("POST", "/api/etc/import/confirm"),
+            ("POST", "/api/etc/import/discard"),
             ("POST", "/api/etc/reconciliation-tasks"),
             ("DELETE", "/api/etc/reconciliation-tasks/task-1"),
             ("DELETE", "/api/etc/reconciliation-tasks/task-1/source-files/file-1"),

@@ -337,3 +337,10 @@
 - 重复项和未处理项复用现有 review API，仅在用户打开 HeroUI 右侧抽屉后加载；预览完成到抽屉打开前不发起 detail request，不新增 API、worker、read model、缓存或第二条写链。
 - 统计口径固定为 `本次识别 = 本次将处理 + 本次不处理`；`APP 内已存在` 可能与其它不处理原因交叠，不参与该等式。
 - Browser 回归覆盖预览、按需加载、文件损坏、账户冲突、慢预览锁定、stale/confirm failure、异步确认及下游页面隔离。
+
+## 2026-09-01 - fresh entry 与真实预览统计
+
+- 根因：共享导入上下文会把 preview 写入 sessionStorage，页面还会请求服务端最新活跃 session；因此未选文件时仍可恢复上次 853 条结果，本地“清空”也会被后续恢复覆盖。
+- 修复：每次页面激活都创建空白本地草稿，删除浏览器持久化和活跃 session 自动恢复 HTTP 入口。显式清空只对当前页面生成的 preview 调用既有 owner-bound discard，成功后才清本地状态；离开后才返回的 preview 响应丢弃。
+- UI 只直接展示后端审计事实：常驻“新增”和“APP 已存在”，只在有值时显示更新、本批重复或需检查；前端不用旧计数反推缺失字段。
+- 不新增 Redis、read model、worker、数据库迁移、兼容分支或 fallback；导入 session 仍是 PostgreSQL 中的持久审计/确认事实，但不再是页面入口状态。

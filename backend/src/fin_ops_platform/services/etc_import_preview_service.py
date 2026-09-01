@@ -39,7 +39,13 @@ class EtcImportPreviewService:
         self._task_service = task_service
         self._session_store = session_store
 
-    def preview(self, *, task_id: str, uploads: list[UploadedEtcZipFile]) -> dict[str, Any]:
+    def preview(
+        self,
+        *,
+        task_id: str,
+        uploads: list[UploadedEtcZipFile],
+        imported_by: str,
+    ) -> dict[str, Any]:
         task = self._task_service.get_task(task_id)
         payload, reconciliation_preview, filtered_uploads = self._build_preview(task=task, uploads=uploads)
         session_id = uuid4().hex
@@ -73,14 +79,17 @@ class EtcImportPreviewService:
             preview_files=[dict(item) for item in list(payload.get("files") or []) if isinstance(item, dict)],
             reconciliation_filter=reconciliation_preview.to_payload(),
             uploads=stored_uploads,
+            imported_by=str(imported_by or "").strip(),
         )
         self._session_store.save_preview(session)
         return {**payload, "sessionId": session_id}
 
-    def validate(self, *, session_id: str, task_id: str) -> ValidatedEtcImportPreview:
+    def validate(self, *, session_id: str, task_id: str, imported_by: str) -> ValidatedEtcImportPreview:
         session = self._session_store.get(session_id)
         if session is None:
             raise KeyError("etc_import_session_not_found")
+        if session.imported_by != str(imported_by or "").strip():
+            raise PermissionError("ETC import session belongs to another user")
         if session.task_id != str(task_id or "").strip():
             raise StaleReconciliationPreviewError("stale_reconciliation_task_preview")
         if session.status not in {"preview_ready", "queued", "processing", "failed"}:
@@ -135,6 +144,9 @@ class EtcImportPreviewService:
             imported_by=imported_by,
             last_error=last_error,
         )
+
+    def discard(self, *, session_id: str, imported_by: str) -> None:
+        self._session_store.discard_preview(session_id, imported_by=imported_by)
 
     def _build_preview(
         self,

@@ -69,14 +69,13 @@ async function expectDirectCanonicalResponse(responsePromise: Promise<{ json(): 
 async function previewBankStatementFiles(
   page: Page,
   options: {
-    expectedAudit?: { importable: number; original: number; skipped: number };
+    expectedAudit?: { importable: number; existing: number };
     recordLatency?: OperationLatencyRecorder;
   } = {},
 ) {
   const expectedAudit = options.expectedAudit ?? {
     importable: 14,
-    original: 18,
-    skipped: 4,
+    existing: 2,
   };
   await stageBankStatementFilesForPreview(page, options.recordLatency);
 
@@ -91,16 +90,15 @@ async function previewBankStatementFiles(
       const previewResponse = waitForImportPreview(page);
       await previewButton.click();
       await mark("apiLatencyMs", previewResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel(`本次识别 ${expectedAudit.original}`)).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByLabel(`本次将处理 ${expectedAudit.importable}`)).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel(`新增 ${expectedAudit.importable}`)).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByLabel(`APP 已存在 ${expectedAudit.existing}`)).toBeVisible());
     });
   } else {
     await previewButton.click();
   }
 
-  await expect(page.getByLabel(`本次识别 ${expectedAudit.original}`)).toBeVisible();
-  await expect(page.getByLabel(`本次将处理 ${expectedAudit.importable}`)).toBeVisible();
-  await expect(page.getByLabel(`本次不处理 ${expectedAudit.original - expectedAudit.importable}`)).toBeVisible();
+  await expect(page.getByLabel(`新增 ${expectedAudit.importable}`)).toBeVisible();
+  await expect(page.getByLabel(`APP 已存在 ${expectedAudit.existing}`)).toBeVisible();
   await expect(page.getByRole("grid", { name: "导入预览结果" })).toHaveCount(0);
   await expect(page.getByText("已完成 2 个文件的预览识别。")).toHaveCount(0);
 }
@@ -170,6 +168,21 @@ async function stageBankStatementFilesForPreview(
 }
 
 test.describe("bank transaction import browser flow", () => {
+  test("clear discards the current preview and returns to a fresh page", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      bankImportNoAccountConflict: true,
+      sessionMode: "full_access",
+    });
+
+    await previewBankStatementFiles(page);
+    await page.getByRole("button", { name: "清空" }).click();
+
+    await expect(page.getByText("当前还没有选择文件。")).toBeVisible();
+    await expect(page.getByLabel("新增 14")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "清空" })).toBeDisabled();
+    expect(api.count("POST /imports/files/discard")).toBe(1);
+  });
+
   test("shows an all-existing bank preview as a no-op without creating an import job", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
@@ -179,10 +192,12 @@ test.describe("bank transaction import browser flow", () => {
     });
 
     await previewBankStatementFiles(page, {
-      expectedAudit: { importable: 0, original: 48, skipped: 48 },
+      expectedAudit: { importable: 0, existing: 48 },
     });
 
-    await expect(page.getByText("已检查 48 笔流水，全部已存在于 APP，无需重复导入。")).toBeVisible();
+    await expect(page.getByLabel("新增 0")).toBeVisible();
+    await expect(page.getByLabel("APP 已存在 48")).toBeVisible();
+    await expect(page.getByText("已检查 48 笔流水，全部已存在于 APP，无需重复导入。")).toHaveCount(0);
     await expect(page.getByLabel("文件处理结果")).toContainText("无需导入");
     await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
     expect(api.count("POST /imports/files/preview")).toBe(1);
@@ -343,7 +358,7 @@ test.describe("bank transaction import browser flow", () => {
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
     await previewBankStatementFiles(page, {
-      expectedAudit: { importable: 7, original: 10, skipped: 1 },
+      expectedAudit: { importable: 7, existing: 0 },
       recordLatency,
     });
 
@@ -412,12 +427,12 @@ test.describe("bank transaction import browser flow", () => {
       await expect(page.getByRole("button", { name: "清空" })).toBeDisabled();
       await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
       await mark("apiLatencyMs", previewResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByLabel("本次识别 18")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByLabel("新增 14")).toBeVisible());
     });
     expect(api.count("POST /imports/files/preview")).toBe(1);
 
-    await expect(page.getByLabel("本次识别 18")).toBeVisible();
-    await expect(page.getByRole("button", { name: "开始预览" })).toBeEnabled();
+    await expect(page.getByLabel("新增 14")).toBeVisible();
+    await expect(page.getByRole("button", { name: "开始预览" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "清空" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
     expect(api.count("POST /imports/files/preview")).toBe(1);

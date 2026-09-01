@@ -6,7 +6,7 @@
 
 | 影响面 | 需要保护的行为 | 当前测试入口 |
 | --- | --- | --- |
-| 前端页面/共享工作流 | 独立路由、银行账户映射加载、每文件银行选择、手工多笔增删/无银行流水标识/预览确认、字段映射 retry、preview stale 错误、session restore、read-only 导入门禁、视觉/CSS 契约 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ManualBankTransactionBatchEditor.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` |
+| 前端页面/共享工作流 | 独立路由、银行账户映射加载、每文件银行选择、手工多笔增删/无银行流水标识/预览确认、字段映射 retry、preview stale 错误、fresh 进入、显式清空、read-only 导入门禁、视觉/CSS 契约 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ManualBankTransactionBatchEditor.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` |
 | 前端 API mapper | multipart `file_overrides`、Authorization/credentials、session/confirm/retry/fetch、嵌套 `field_mapping`、duplicate groups、skipped rows、preview stale message | `web/src/test/ImportsApi.test.ts` |
 | 文件预览 API | 损坏 Excel、模板识别、银行流水模板、per-file override、银行选择冲突、只确认 selected files | `tests/test_import_file_api.py` |
 | 手工流水录入 service/API | 1–50 笔、无银行流水标识、完整账号尾号、金额/余额/秒级时间、同批弱指纹重复、既有弱指纹疑似重复、批量 identity preload、预览后正式 durable confirm | `tests/test_manual_bank_transaction_entry_service.py`、`tests/test_import_file_api.py` |

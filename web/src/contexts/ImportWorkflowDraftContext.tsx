@@ -1,9 +1,7 @@
-import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useMemo } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } from "react";
 
 import type { EtcImportPreviewResult } from "../features/etc/types";
-import type { ImportWorkflowMode } from "../features/imports/importRoutes";
 import type { ImportBatchType, ImportSessionPayload } from "../features/imports/types";
-import { usePageSessionState } from "./PageSessionStateContext";
 
 export type FileSelectionState = Record<
   string,
@@ -29,12 +27,6 @@ export type ImportWorkflowDraft = {
   isConfirming: boolean;
 };
 
-type PersistedImportSession = {
-  sessionId: string | null;
-};
-
-const IMPORT_DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
-
 function createEmptyDraft(): ImportWorkflowDraft {
   return {
     selectedFiles: [],
@@ -50,48 +42,12 @@ function createEmptyDraft(): ImportWorkflowDraft {
   };
 }
 
-function supportsSessionRestore(mode: ImportWorkflowMode) {
-  return mode === "bank_transaction" || mode === "invoice";
-}
-
-function persistedSessionInitialValue(): PersistedImportSession {
-  return { sessionId: null };
-}
-
-function isPersistedImportSession(value: unknown): value is PersistedImportSession {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const payload = value as Record<string, unknown>;
-  return payload.sessionId === null || typeof payload.sessionId === "string";
-}
-
-export function ImportWorkflowDraftProvider({ children }: { children: ReactNode }) {
-  return children;
-}
-
-export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
-  const memoryDraft = usePageSessionState<ImportWorkflowDraft>({
-    pageKey: `imports.${mode}`,
-    stateKey: "draft.memory",
-    version: 1,
-    initialValue: createEmptyDraft(),
-    ttlMs: IMPORT_DRAFT_TTL_MS,
-    storage: "memory",
-  });
-  const persistedSession = usePageSessionState<PersistedImportSession>({
-    pageKey: `imports.${mode}`,
-    stateKey: "previewSession",
-    version: 1,
-    initialValue: persistedSessionInitialValue(),
-    ttlMs: IMPORT_DRAFT_TTL_MS,
-    storage: supportsSessionRestore(mode) ? "session" : "memory",
-    validate: isPersistedImportSession,
-  });
+export function useImportWorkflowDraft() {
+  const [draft, setDraft] = useState<ImportWorkflowDraft>(createEmptyDraft);
 
   const updateDraft = useCallback((updater: SetStateAction<ImportWorkflowDraft>) => {
-    memoryDraft.setValue(updater);
-  }, [memoryDraft.setValue]);
+    setDraft(updater);
+  }, []);
 
   const createSetter = useCallback(<Key extends keyof ImportWorkflowDraft>(key: Key) => (
     (updater: SetStateAction<ImportWorkflowDraft[Key]>) => {
@@ -104,25 +60,9 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
     }
   ), [updateDraft]);
 
-  const clearPersistedSession = useCallback(() => {
-    persistedSession.reset();
-  }, [persistedSession.reset]);
-
   const resetDraft = useCallback(() => {
-    memoryDraft.reset();
-    persistedSession.reset();
-  }, [memoryDraft.reset, persistedSession.reset]);
-
-  const readPersistedSessionId = useCallback(() => (
-    supportsSessionRestore(mode) ? persistedSession.value.sessionId : null
-  ), [mode, persistedSession.value.sessionId]);
-
-  const persistSessionId = useCallback((sessionId: string) => {
-    if (!supportsSessionRestore(mode)) {
-      return;
-    }
-    persistedSession.setValue({ sessionId });
-  }, [mode, persistedSession.setValue]);
+    setDraft(createEmptyDraft());
+  }, []);
 
   const draftSetters = useMemo(() => ({
     setSelectedFiles: createSetter("selectedFiles"),
@@ -138,14 +78,9 @@ export function useImportWorkflowDraft(mode: ImportWorkflowMode) {
   }), [createSetter]);
 
   return {
-    draft: memoryDraft.value,
-    restoreState: memoryDraft.restoreState,
-    persistedSessionRestoreState: persistedSession.restoreState,
+    draft,
     updateDraft,
     resetDraft,
-    clearPersistedSession,
-    readPersistedSessionId,
-    persistSessionId,
     ...draftSetters,
   };
 }

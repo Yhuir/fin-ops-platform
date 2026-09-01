@@ -75,7 +75,7 @@
 
 | 改动点 | 必查影响 |
 | --- | --- |
-| 页面上传、选择银行、手工多笔录入、预览、确认、session restore | `ImportCenterPage.test.tsx`、`ManualBankTransactionBatchEditor.test.tsx`、`ImportsApi.test.ts`、`ImportWorkflowPage` |
+| 页面上传、选择银行、手工多笔录入、预览、确认、fresh 进入与显式清空 | `ImportCenterPage.test.tsx`、`ManualBankTransactionBatchEditor.test.tsx`、`ImportsApi.test.ts`、`ImportWorkflowPage` |
 | `/imports/files/*` contract | `tests/test_import_file_api.py`、`tests/test_import_file_service.py`、`web/src/features/imports/api.ts` |
 | 银行流水 parser/normalizer/identity/字段映射 | `tests/test_import_api.py`、`tests/test_import_file_service.py`、`tests/test_import_service.py`、`tests/test_import_preview_audit.py`、`web/src/test/ImportCenterPage.test.tsx` |
 | confirm job / import worker | `tests/test_import_job_queue.py`、`runtime_worker_registry.py`、`runtime_worker_handlers.py` |

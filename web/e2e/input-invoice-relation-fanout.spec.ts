@@ -197,9 +197,9 @@ test.describe("input invoice usage relation browser fan-out", () => {
       actionType: "click",
     }, async (mark) => {
       await page.getByRole("radio", { name: "按项目" }).click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /智能工厂项目/ })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("option", { name: /智能工厂项目/ })).toBeVisible());
     });
-    const linkedProject = page.getByRole("button", { name: /智能工厂项目/ });
+    const linkedProject = page.getByRole("option", { name: /智能工厂项目/ });
     await expect(linkedProject).toBeVisible();
     await expect(linkedProject).toContainText("58000.00");
     await recordLatency({
@@ -211,9 +211,9 @@ test.describe("input invoice usage relation browser fan-out", () => {
       actionType: "click",
     }, async (mark) => {
       await linkedProject.click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("button", { name: /设备货款及材料费/ })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("option", { name: /设备货款及材料费/ })).toBeVisible());
     });
-    const linkedExpenseType = page.getByRole("button", { name: /设备货款及材料费/ });
+    const linkedExpenseType = page.getByRole("option", { name: /设备货款及材料费/ });
     await expect(linkedExpenseType).toBeVisible();
     await expect(linkedExpenseType).toContainText("58000.00");
     await recordLatency({

@@ -14,10 +14,6 @@ class FakeLifecycleRepository:
     def list_events(self, *, page: int, page_size: int):
         return self.rows, len(self.rows)
 
-    def list_active_sessions(self, *, imported_by: str, mode: str | None):
-        return self.rows
-
-
 class FakeDiscardTransaction:
     def __init__(self, *, rows: list[dict[str, object]], active_job: dict[str, object] | None = None) -> None:
         self.rows = rows
@@ -80,23 +76,6 @@ class ImportLifecycleServiceTests(unittest.TestCase):
         )
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 3, "total": 7, "total_pages": 3})
 
-    def test_active_session_with_confirmable_file_remains_recoverable(self) -> None:
-        service = ImportLifecycleService(
-            FakeLifecycleRepository(
-                [{
-                    "session_id": "session-1",
-                    "imported_by": "user-1",
-                    "file_count": 2,
-                    "session_status": "preview_ready_with_errors",
-                    "has_confirmable_file": True,
-                }]
-            )  # type: ignore[arg-type]
-        )
-
-        sessions = service.list_active_sessions(imported_by="user-1", mode="invoice")
-
-        self.assertEqual(sessions[0]["status"], "awaiting_confirmation")
-
     def test_postgres_discard_is_atomic_owned_and_rejects_active_job(self) -> None:
         rows = [{"id": "file-1", "status": "preview_ready", "imported_by": "user-1", "batch_id": "batch-1"}]
         transaction = FakeDiscardTransaction(rows=rows)
@@ -124,10 +103,9 @@ class ImportLifecycleServiceTests(unittest.TestCase):
         repository = PostgresImportLifecycleRepository(connection)
 
         repository.list_events()
-        repository.list_active_sessions(imported_by="user-1", mode="invoice")
 
         job_queries = [sql for sql in connection.queries if "job.import_jobs" in sql]
-        self.assertEqual(len(job_queries), 2)
+        self.assertEqual(len(job_queries), 1)
         self.assertTrue(all("import_job.id::text as import_job_id" in sql for sql in job_queries))
         self.assertTrue(all("import_job.import_job_id" not in sql for sql in job_queries))
         history_query = job_queries[0]

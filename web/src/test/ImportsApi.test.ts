@@ -3,7 +3,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   confirmImportFiles,
   discardImportSession,
-  fetchActiveImportSessions,
   fetchImportReviewRows,
   fetchImportSession,
   previewManualInvoices,
@@ -16,6 +15,21 @@ import {
 import { ApiClientError } from "../features/apiClient";
 
 const originalFetch = global.fetch;
+const EMPTY_API_AUDIT = {
+  original_count: 0,
+  unique_count: 0,
+  duplicate_count: 0,
+  duplicate_in_file_count: 0,
+  duplicate_across_files_count: 0,
+  existing_duplicate_count: 0,
+  importable_count: 0,
+  update_count: 0,
+  merge_count: 0,
+  suspected_duplicate_count: 0,
+  error_count: 0,
+  confirmable_count: 0,
+  skipped_count: 0,
+};
 
 afterEach(() => {
   global.fetch = originalFetch;
@@ -52,6 +66,7 @@ describe("imports api", () => {
           file_count: 1,
           status: "preview_ready",
           created_at: "2026-08-28T09:02:00+08:00",
+          audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
         },
         files: [{
           id: "manual_bank_file_1",
@@ -66,6 +81,7 @@ describe("imports api", () => {
           duplicate_count: 0,
           suspected_duplicate_count: 0,
           updated_count: 0,
+          audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
           row_results: [{
             id: "row-1",
             row_no: 1,
@@ -132,6 +148,7 @@ describe("imports api", () => {
           file_count: 1,
           status: "preview_ready",
           created_at: "2026-08-28T09:02:00+08:00",
+          audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
         },
         files: [{
           id: "manual_bank_file_1",
@@ -144,6 +161,7 @@ describe("imports api", () => {
           duplicate_count: 0,
           suspected_duplicate_count: 0,
           updated_count: 0,
+          audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
           row_results: [],
         }],
       },
@@ -185,6 +203,7 @@ describe("imports api", () => {
             file_count: 1,
             status: "awaiting_confirmation",
             created_at: "2026-08-14T10:00:00+08:00",
+            audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
           },
           files: [{
             id: "manual_file_1",
@@ -199,6 +218,7 @@ describe("imports api", () => {
             duplicate_count: 0,
             suspected_duplicate_count: 0,
             updated_count: 0,
+            audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
             row_results: [],
           }],
         },
@@ -279,6 +299,7 @@ describe("imports api", () => {
             file_count: 1,
             status: "preview_ready",
             created_at: "2026-04-14T10:00:00Z",
+            audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
           },
           files: [
             {
@@ -294,6 +315,7 @@ describe("imports api", () => {
               duplicate_count: 0,
               suspected_duplicate_count: 0,
               updated_count: 0,
+              audit: { ...EMPTY_API_AUDIT, original_count: 1, unique_count: 1, importable_count: 1, confirmable_count: 1 },
               row_results: [],
             },
           ],
@@ -339,6 +361,7 @@ describe("imports api", () => {
             file_count: 1,
             status: "preview_ready",
             created_at: "2026-04-14T10:00:00Z",
+            audit: EMPTY_API_AUDIT,
           },
           files: [],
         }),
@@ -361,7 +384,6 @@ describe("imports api", () => {
     });
     await confirmImportFiles("import_session_0001", ["import_file_0001"]);
     await fetchImportSession("import_session_0001");
-    await fetchActiveImportSessions("invoice");
     await discardImportSession("import_session_0001");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -393,11 +415,6 @@ describe("imports api", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "/imports/files/sessions?mode=invoice",
-      expect.objectContaining({ method: "GET", credentials: "include" }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      5,
       "/imports/files/discard",
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );
@@ -428,6 +445,7 @@ describe("imports api", () => {
             status: "preview_ready",
             created_at: "2026-04-14T10:00:00Z",
             audit: {
+              ...EMPTY_API_AUDIT,
               original_count: 2,
               unique_count: 1,
               duplicate_count: 1,
@@ -435,7 +453,6 @@ describe("imports api", () => {
               duplicate_across_files_count: 0,
               existing_duplicate_count: 0,
               importable_count: 1,
-              error_count: 0,
               confirmable_count: 1,
               skipped_count: 1,
             },
@@ -454,6 +471,16 @@ describe("imports api", () => {
               duplicate_count: 1,
               suspected_duplicate_count: 0,
               updated_count: 0,
+              audit: {
+                ...EMPTY_API_AUDIT,
+                original_count: 2,
+                unique_count: 1,
+                duplicate_count: 1,
+                duplicate_in_file_count: 1,
+                importable_count: 1,
+                confirmable_count: 1,
+                skipped_count: 1,
+              },
               row_results: [
                 {
                   id: "row_1",

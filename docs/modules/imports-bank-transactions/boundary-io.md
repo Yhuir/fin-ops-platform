@@ -21,7 +21,7 @@
 - 银行流水手工录入的表单归一与预览：只接受设置中存在的账户 mapping，校验完整本方账号尾号、秒级时间和 canonical 必填字段，再进入同一 file/session 导入链。手工输入不接收或生成银行流水标识；使用正式 identity service 的弱指纹执行保守判重。手工录入的 synthetic file 必须显式登记 `manual-bank-entry-audit.v1`，且不得伪造 file object、storage URI、SHA-256 或文件大小；真实上传文件继续登记 `import-page-audit.v1` 并严格证明完整文件 provenance。
 - 导入完成后返回精确 affected scopes；direct-canonical 下游页面下次请求在同一只读 snapshot 直接看到新 facts，只有保留的 `workbench_relation` read-model consumer 使用自己的 freshness gateway，关联台页面不使用。
 - 记录导入预览审计。
-- 以服务端 session/file/batch/job 事实恢复当前用户待确认预览；用户显式放弃时，只允许在同一事务内将未确认 preview session/file/batch 终结为 `reverted`。
+- 每次进入页面都创建空白本地草稿，不从浏览器存储或活跃 session 列表恢复历史预览；用户显式放弃时，只允许在同一事务内将当前认证用户拥有的未确认 preview session/file/batch 终结为 `reverted`。
 - 以 SHA-256 阻断同批或历史已确认的同内容文件；文件名变化不绕过文件级防重。
 - 银行有官方参考号时默认使用 `bank-v3`：账户、官方参考号种类/值和业务字段指纹摘要共同形成强 identity。若既有 `bank-v3` 键冲突，但双方非空余额或币种明确证明是不同账单位置，只为该冲突事实生成确定性的 `bank-v4` statement-position 键；重放同一位置必须命中同一 `bank-v4`，不得穿透数据库 `source_unique_key` 唯一约束。若历史 canonical 行尚无 `bank-v4` 键，仅当账户、秒级交易时间、方向、金额、账后余额、币种六项全部存在且只命中一条时，才作为 legacy statement-position duplicate；多条命中进入 `suspected_duplicate`，缺字段不自动合并。历史 `bank-v2` 只在业务指纹一致、双方官方参考号存在唯一交集时迁移判重；缺失或多义证据进入 `suspected_duplicate`。没有官方参考号时业务字段指纹仍只产生人工复核。
 - `preview_stale` 不只比较汇总计数。confirm 前必须逐行比较 decision、linked object type 和 linked object id；即使总重复数/可导入数未变，只要任一行换了 canonical owner 也必须拒绝旧预览。错误只报告变化字段及数量，不输出业务值或内部 ID。
@@ -50,7 +50,7 @@
 | 上传文件/模板选择 | `ImportBankTransactionsPage.tsx` | 文件只进入 import API/service |
 | 文件预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水文件只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；`preview_ready` 只证明解析完成，前端仅提交 `audit.confirmable_count > 0` 且账户无冲突的文件；全量已存在时不调用 confirm、不创建 job |
 | 手工流水预览 | `POST /imports/bank-transactions/manual/preview` | body 为 `{transactions:[...]}`，1–50 笔。每笔必须绑定现有 `bank_mapping_id`，填写与 mapping 尾号一致的完整本方账号、收支、正金额、余额、秒级交易时间、三位币种和对方户名；不接收银行流水标识。服务端一次批量预载 canonical identities，再为每笔生成独立 preview file。既有弱指纹命中为 `suspected_duplicate`，同批弱指纹重复在 session 创建前拒绝；只返回 `created` 文件的 `file_ids`。 |
-| 预览恢复/放弃 | `GET /imports/files/sessions?mode=bank_transaction`、`POST /imports/files/discard` | 只返回当前认证用户的可恢复会话。放弃必须校验 owner，对已确认文件或 pending/processing/succeeded job fail closed，重复放弃幂等。 |
+| 当前预览读取/放弃 | `GET /imports/files/sessions/{session_id}`、`POST /imports/files/discard` | 只读取页面本次访问创建并持有 id 的 session；不提供活跃 session 列表或自动恢复。放弃必须校验 owner，对已确认文件或 pending/processing/succeeded job fail closed，重复放弃幂等。 |
 | 复核明细分页 | `GET /imports/files/sessions/{session_id}/review-rows?kind=duplicate|unimported&offset&limit` | `limit` 最大 100；返回当前 session 的稳定切片和 `total/has_more`。session 摘要不携带无界 `row_results`、`normalized_rows` 或 `duplicate_groups`，页面不得从摘要恢复全量复核列表。 |
 | 不完整表头字段映射 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 后端返回 `header_signature`、`mapping_candidates`、`mapping_fields`、`field_mapping`；页面只向 `/imports/files/retry` 提交当前文件的 canonical 字段到源列映射，不提交已解析交易事实。 |
 | 页面手动刷新 | `ImportWorkflowPage.tsx` | 重新读取银行映射配置；有持久化 preview session 时同时精确重读该 session，保留当前草稿和文件选择，不执行浏览器 reload 或跨页面 refresh。 |

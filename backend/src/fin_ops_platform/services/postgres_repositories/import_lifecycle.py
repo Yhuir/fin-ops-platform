@@ -88,66 +88,6 @@ class PostgresImportLifecycleRepository:
         ) or []
         return [dict(row) for row in rows], int(total_row.get("total") or 0)
 
-    def list_active_sessions(
-        self,
-        *,
-        imported_by: str,
-        mode: str | None = None,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        normalized_limit = min(max(int(limit), 1), 50)
-        params: list[Any] = [str(imported_by)]
-        mode_clause = ""
-        if mode == "bank_transaction":
-            mode_clause = "and payload.data->>'batch_type' = 'bank_transaction'"
-        elif mode == "invoice":
-            mode_clause = "and payload.data->>'batch_type' in ('input_invoice', 'output_invoice')"
-        rows = self._connection.fetch_all(
-            f"""
-            with active_sessions as (
-              select
-                import_file.session_id,
-                max(import_file.uploaded_at) as updated_at,
-                max(payload.data->>'created_at') as created_at,
-                max(payload.data->>'session_status') as session_status,
-                max(payload.data->>'batch_type') as batch_type,
-                max(coalesce(payload.data->>'imported_by', import_file.uploaded_by)) as imported_by,
-                bool_or(import_file.status = 'preview_ready') as has_confirmable_file,
-                count(*)::bigint as file_count
-              from app.import_files import_file
-              cross join lateral (
-                select coalesce(
-                  import_file.raw_payload->'normalized_payload',
-                  import_file.raw_payload,
-                  '{{}}'::jsonb
-                ) as data
-              ) payload
-              where import_file.status not in ('confirmed', 'skipped', 'reverted', 'withdrawn', 'deleted')
-                and coalesce(payload.data->>'imported_by', import_file.uploaded_by) = %s
-                {mode_clause}
-              group by import_file.session_id
-            )
-            select
-              active_sessions.*,
-              latest_job.import_job_id,
-              latest_job.status as job_status,
-              latest_job.stage as job_stage,
-              latest_job.last_error as job_error
-            from active_sessions
-            left join lateral (
-              select import_job.id::text as import_job_id, status, stage, last_error
-              from job.import_jobs import_job
-              where import_job.import_session_id = active_sessions.session_id
-              order by import_job.created_at desc, import_job.id desc
-              limit 1
-            ) latest_job on true
-            order by active_sessions.updated_at desc, active_sessions.session_id desc
-            limit %s
-            """,
-            (*params, normalized_limit),
-        ) or []
-        return [dict(row) for row in rows]
-
     def discard_preview_session(self, *, session_id: str, imported_by: str) -> int:
         with self._connection.transaction() as transaction:
             rows = transaction.fetch_all(

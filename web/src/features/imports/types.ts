@@ -25,20 +25,7 @@ export type ImportSessionSummary = {
   fileCount: number;
   status: string;
   createdAt: string;
-  audit?: ImportPreviewAuditCounts;
-};
-
-export type ActiveImportSession = {
-  sessionId: string;
-  importedBy: string;
-  fileCount: number;
-  batchType?: ImportBatchType | null;
-  createdAt: string;
-  updatedAt: string;
-  status: "awaiting_confirmation" | "preview_failed" | "failed" | string;
-  jobId?: string | null;
-  jobStage?: string | null;
-  error?: string | null;
+  audit: ImportPreviewAuditCounts;
 };
 
 export type ImportPreviewAuditCounts = {
@@ -123,7 +110,7 @@ export type ImportFilePreview = {
   duplicateCount: number;
   suspectedDuplicateCount: number;
   updatedCount: number;
-  audit?: ImportPreviewAuditCounts;
+  audit: ImportPreviewAuditCounts;
   previewBatchId?: string | null;
   batchId?: string | null;
   storedFilePath?: string | null;

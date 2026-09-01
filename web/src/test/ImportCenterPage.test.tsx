@@ -169,7 +169,7 @@ describe("Import pages", () => {
     expect(previewButton).toBeEnabled();
     await user.click(previewButton);
 
-    expect(await screen.findByLabelText("本次识别 18")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 14")).toBeInTheDocument();
     const formData = getPreviewFormData(fetchMock);
     expect((formData.getAll("files") as File[]).map((file) => file.name)).toEqual([
       "historydetail14080.xlsx",
@@ -220,11 +220,10 @@ describe("Import pages", () => {
     await user.selectOptions(screen.getByLabelText("对应账户 2026-01-01至2026-01-31交易明细.xlsx"), "bank_mapping_8826");
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText("本次识别 18")).toBeInTheDocument();
-    expectProjectSummaryMetric("本次识别 18");
-    expect(screen.getByLabelText("本次将处理 14")).toBeInTheDocument();
-    expect(screen.getByLabelText("本次不处理 4")).toBeInTheDocument();
-    expect(screen.getByText("APP 内已存在 2")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 14")).toBeInTheDocument();
+    expectProjectSummaryMetric("新增 14");
+    expect(screen.getByLabelText("APP 已存在 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("本批重复 3")).toBeInTheDocument();
     expect(screen.queryByRole("grid", { name: "导入预览结果" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/review-rows"))).toBe(false);
 
@@ -256,11 +255,9 @@ describe("Import pages", () => {
     );
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText("本次识别 48")).toBeInTheDocument();
-    expect(screen.getByLabelText("本次将处理 0")).toBeInTheDocument();
-    expect(screen.getByLabelText("本次不处理 48")).toBeInTheDocument();
-    expect(screen.getByText("APP 内已存在 48")).toBeInTheDocument();
-    expect(screen.getByText("已检查 48 笔流水，全部已存在于 APP，无需重复导入。")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 0")).toBeInTheDocument();
+    expect(screen.getByLabelText("APP 已存在 48")).toBeInTheDocument();
+    expect(screen.queryByText("已检查 48 笔流水，全部已存在于 APP，无需重复导入。")).not.toBeInTheDocument();
     expect(screen.getByLabelText("文件处理结果")).toHaveTextContent("无需导入");
     expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/imports/files/confirm")).toHaveLength(0);
@@ -347,7 +344,7 @@ describe("Import pages", () => {
     await user.selectOptions(screen.getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
     await user.click(previewButton);
 
-    expect(await screen.findByLabelText("本次识别 28")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 22")).toBeInTheDocument();
     expect(getFileOverrides(getPreviewFormData(fetchMock))).toEqual([
       {
         file_name: "一月发票.xlsx",
@@ -392,7 +389,7 @@ describe("Import pages", () => {
     ]);
     await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
     await user.click(screen.getByRole("button", { name: "开始预览" }));
-    expect(await screen.findByLabelText("本次识别 14")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 11")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "确认导入" }));
     expect(await screen.findByText("已确认导入")).toBeInTheDocument();
@@ -443,11 +440,11 @@ describe("Import pages", () => {
     await user.selectOptions(screen.getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText("本次识别 28")).toBeInTheDocument();
-    expectProjectSummaryMetric("本次识别 28");
-    expect(screen.getByLabelText("本次将处理 22")).toBeInTheDocument();
-    expect(screen.getByLabelText("本次不处理 6")).toBeInTheDocument();
-    expect(screen.getByText("APP 内已存在 2")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 22")).toBeInTheDocument();
+    expectProjectSummaryMetric("新增 22");
+    expect(screen.getByLabelText("APP 已存在 2")).toBeInTheDocument();
+    expect(screen.getByLabelText("本批重复 3")).toBeInTheDocument();
+    expect(screen.getByLabelText("需检查 2")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/review-rows"))).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "查看未处理明细" }));
@@ -474,14 +471,14 @@ describe("Import pages", () => {
     ]);
     await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
     await user.click(screen.getByRole("button", { name: "开始预览" }));
-    expect(await screen.findByLabelText("本次识别 14")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 11")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "确认导入" }));
 
     expect(await screen.findByText("预览后数据已变化，请重新预览后再确认。")).toBeInTheDocument();
   });
 
-  test("invoice import keeps selected files and preview when navigating away and back", async () => {
+  test("invoice import opens fresh after navigating away and back", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
 
@@ -497,54 +494,42 @@ describe("Import pages", () => {
     await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText("本次识别 14")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 11")).toBeInTheDocument();
     expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("14").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("link", { name: "设置" }));
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("link", { name: "发票导入" }));
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    expect(screen.getByLabelText("本次识别 14")).toBeInTheDocument();
-    expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("14").length).toBeGreaterThan(0);
-  });
-
-  test("invoice import restores preview from sessionStorage after remount", async () => {
-    const fetchMock = installMockApiFetchWithInvoicePreviewSession();
-    seedInvoicePreviewSession();
-    renderAppAt("/imports/invoices");
-
-    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("14").length).toBeGreaterThan(0);
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/sessions/import_session_0001")).toBe(true);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "清空" })).toBeEnabled();
-    });
-    await userEvent.click(screen.getByRole("button", { name: "清空" }));
-    expect(await screen.findByText("已放弃服务端导入预览。")).toBeInTheDocument();
-    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
+    expect(screen.queryByLabelText("新增 11")).not.toBeInTheDocument();
     expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+    expect(screen.getByText("当前还没有选择文件。")).toBeInTheDocument();
   });
 
-  test("invoice import recovers an active server preview without browser storage", async () => {
-    const fetchMock = installMockApiFetchWithInvoicePreviewSession();
-    renderAppAt("/imports/invoices");
-
-    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/sessions?mode=invoice")).toBe(true);
-    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
-  });
-
-  test("invoice import refreshes the persisted preview without clearing the draft", async () => {
-    const user = userEvent.setup();
+  test("invoice import ignores legacy browser and server preview sessions", async () => {
     const fetchMock = installMockApiFetchWithInvoicePreviewSession();
     seedInvoicePreviewSession();
     renderAppAt("/imports/invoices");
 
-    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^新增 /)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/imports/files/sessions"))).toBe(false);
+  });
+
+  test("invoice import refreshes only the preview created on the current page visit", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/imports/invoices");
+
+    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice-output"], "一月发票.xlsx", { lastModified: 1 }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    expect(await screen.findByLabelText("新增 11")).toBeInTheDocument();
     const sessionPath = "/imports/files/sessions/import_session_0001";
     const initialSessionReads = fetchMock.mock.calls.filter(([url]) => String(url) === sessionPath).length;
 
@@ -555,31 +540,30 @@ describe("Import pages", () => {
     });
     expect(await screen.findByText("导入预览已刷新。")).toBeInTheDocument();
     expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
-    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
   });
 
-  test("invoice import clears persisted preview when files are cleared", async () => {
-    installMockApiFetchWithInvoicePreviewSession();
-    seedInvoicePreviewSession();
-    const { unmount } = renderAppAt("/imports/invoices");
-
-    expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
-    expect((await screen.findAllByText("一月发票.xlsx")).length).toBeGreaterThan(0);
-
-    await userEvent.click(screen.getByRole("button", { name: "清空" }));
-    expect(await screen.findByText("已放弃服务端导入预览。")).toBeInTheDocument();
-    expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toBeNull();
-    expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
-
-    unmount();
+  test("invoice import clear discards the current preview and returns to a fresh page", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
     renderAppAt("/imports/invoices");
 
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+    await user.upload(getUploadInput("上传发票文件", "上传文件"), [
+      new File(["invoice-output"], "一月发票.xlsx", { lastModified: 1 }),
+    ]);
+    await user.selectOptions(screen.getByLabelText("票据方向 一月发票.xlsx"), "output_invoice");
+    await user.click(screen.getByRole("button", { name: "开始预览" }));
+    expect(await screen.findByLabelText("新增 11")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "清空" }));
+    await waitFor(() => expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument());
+    expect(screen.queryByLabelText(/^新增 /)).not.toBeInTheDocument();
+    expect(screen.getByText("当前还没有选择文件。")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/imports/files/discard")).toBe(true);
+    expect(screen.getByRole("button", { name: "清空" })).toBeDisabled();
   });
 
-  test("invoice import keeps preview result when navigating away before preview finishes", async () => {
+  test("invoice import ignores a preview response that finishes after navigation", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ importPreviewDelayMs: 80 });
 
@@ -597,15 +581,13 @@ describe("Import pages", () => {
     await user.click(screen.getByRole("link", { name: "设置" }));
 
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(window.sessionStorage.getItem(INVOICE_DRAFT_STORAGE_KEY)).toContain("import_session_0001");
-    });
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
 
     await user.click(screen.getByRole("link", { name: "发票导入" }));
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    expect(await screen.findByLabelText("本次识别 14")).toBeInTheDocument();
-    expect(screen.getAllByText("一月发票.xlsx").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("14").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/^新增 /)).not.toBeInTheDocument();
+    expect(screen.queryByText("一月发票.xlsx")).not.toBeInTheDocument();
+    expect(screen.getByText("当前还没有选择文件。")).toBeInTheDocument();
   });
 
   test("ETC invoice import rejects non-zip files on the standalone route", async () => {
@@ -709,7 +691,7 @@ describe("Import pages", () => {
     ]);
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText("本次识别 4")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 1")).toBeInTheDocument();
     expect(screen.queryByRole("grid", { name: "ETC导入预览结果" })).not.toBeInTheDocument();
     expect(screen.queryByText("etc_import_session_0001")).not.toBeInTheDocument();
 
@@ -745,11 +727,12 @@ describe("Import pages", () => {
     ]);
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText("本次识别 4")).toBeInTheDocument();
-    expectProjectSummaryMetric("本次识别 4");
-    expect(screen.getByLabelText("本次将处理 2")).toBeInTheDocument();
-    expect(screen.getByLabelText("本次不处理 2")).toBeInTheDocument();
-    expect(screen.getByText("APP 内已存在 1")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 1")).toBeInTheDocument();
+    expectProjectSummaryMetric("新增 1");
+    expect(screen.getByLabelText("APP 已存在 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("补齐附件 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("本批重复 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("需检查 1")).toBeInTheDocument();
     expect(screen.queryByRole("grid", { name: "ETC导入预览结果" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "查看未处理明细" }));
     expectProjectPreviewTable("ETC导入预览结果");
@@ -809,7 +792,7 @@ describe("Import pages", () => {
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
     ]);
     await user.click(screen.getByRole("button", { name: "开始预览" }));
-    expect(await screen.findByLabelText(/^本次识别 /)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^新增 /)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "确认导入" }));
 
@@ -828,12 +811,12 @@ describe("Import pages", () => {
       new File(["zip-a"], "etc-2026-03.zip", { type: "application/zip" }),
     ]);
     await user.click(screen.getByRole("button", { name: "开始预览" }));
-    expect(await screen.findByLabelText(/^本次识别 /)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^新增 /)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "确认导入" }));
 
     expect(await screen.findByText("对账任务已更新，请重新预览 ETC zip 后再确认导入。")).toBeInTheDocument();
-    expect(screen.queryByLabelText(/^本次识别 /)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^新增 /)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "开始预览" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
   });
@@ -851,7 +834,7 @@ describe("Import pages", () => {
     ]);
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText(/^本次识别 /)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/^新增 /)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /确认导入/ }));
 
     await waitFor(() => {
@@ -882,15 +865,14 @@ describe("Import pages", () => {
 
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.queryByLabelText(/^本次识别 /)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^新增 /)).not.toBeInTheDocument();
     });
 
     await user.click(screen.getByRole("link", { name: "ETC发票导入" }));
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "开始预览" })).toBeEnabled();
-    });
-    expect(screen.queryByLabelText(/^本次识别 /)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始预览" })).toBeDisabled();
+    expect(screen.getByLabelText("ETC对账任务")).toHaveValue("");
+    expect(screen.queryByLabelText(/^新增 /)).not.toBeInTheDocument();
     expect(screen.queryByText("etc_import_session_0001")).not.toBeInTheDocument();
     expect(screen.queryByText("ETC-2026-005")).not.toBeInTheDocument();
   });

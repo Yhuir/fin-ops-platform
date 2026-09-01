@@ -7,7 +7,7 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | 页面入口 | `web/src/pages/imports/ImportInvoicesPage.tsx` | 只传 `mode="invoice"`，共享工作流改动会同时影响银行流水和 ETC 导入 |
-| 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx`、`ManualInvoiceEntryDrawer.tsx` | 每文件票据方向、单张人工录入、可选 OCR、preview stale、重复审计、session restore、route unmount cleanup、job feedback、read-only 导入门禁 |
+| 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx`、`ManualInvoiceEntryDrawer.tsx` | 每文件票据方向、单张人工录入、可选 OCR、preview stale、重复审计、fresh entry、当前 preview discard、route unmount cleanup、job feedback、read-only 导入门禁 |
 | 补充凭证只读画廊 | `SupportingDocumentGalleryDrawer.tsx`、`features/workbench/api.ts` | 入口只在 invoice mode；打开前零请求、9 条 cursor page、日期分组、3/2/1 列、图片/PDF同抽屉预览、只读用户可见且无 mutation |
 | Browser e2e | `web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 覆盖文件、方向、预览、确认、错误与权限；确认后打开各下游页面验证 canonical 结果，并证明单独发票导入不会形成 OA 项目成本。 |
 | 前端 API mapper | `web/src/features/imports/api.ts` | multipart `file_overrides`、`batch_type`、snake_case/camelCase、`preview_stale` 错误映射、job/session shape |
@@ -26,7 +26,7 @@
 - read_export_only 用户必须能打开发票导入页但不能选择文件、预览或确认导入。
 - read_export_only 用户仍可打开补充凭证画廊；画廊只读并不得出现上传/删除。关闭、重开和分页请求必须 abort/latest-wins，不能刷新导入主体或污染其它导入模式。
 - 预览必须显示重复审计 counts、duplicate groups 和 review copy。
-- 路由切换、卸载、重挂载、sessionStorage 恢复时不能丢失已选文件、预览结果或 in-flight preview 结果。
+- 每次进入或重新激活页面必须从空白本地草稿开始，不读取 sessionStorage，不请求服务端活跃 session 列表；离开后才返回的 preview 结果必须丢弃。
 - `preview_stale` 必须映射为重新预览提示，不能继续确认旧结果，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。
 - stale gate 必须逐行比较 decision、linked object type/id；duplicate/importable 汇总不变但 canonical invoice owner 调换时仍必须拒绝确认。
 - `suspected_duplicate` preview 可显示候选 invoice，但 confirm 后 terminal row 必须清空该非权威 link；created、status_updated、duplicate_skipped 的正式引用不能被清空。
@@ -53,7 +53,7 @@
 | 2. Service-layer tests | 适用 | `tests/test_import_file_service.py`、`tests/test_import_job_queue.py`、`tests/test_import_formalization_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_import_audit_repair_ops.py`、`tests/test_postgres_repositories_core.py` | 覆盖 file/session preview/confirm、stale preview、header/detail sheet I/O、job queue、retry/original file retention、derived lifecycle fan-out，以及修复 dry-run/CAS/队列刷新。 |
 | 3. API contract tests | 适用 | `tests/test_import_api.py`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_output_invoice_collection_api.py` | 覆盖 import API shape、`batch_type`、`preview_stale`、job payload、read-model 下游状态字段，以及税金抵扣 canonical snapshot token/无旧状态字段。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、invoice lifecycle 顺序、仍存在的 read-model 下游 App Status/readiness，并用 `invoice_import_confirmed` write-operation profile保护共享下游；税金抵扣页面读取不再属于本类。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ManualInvoiceEntryDrawer.test.tsx`、`web/src/test/SupportingDocumentGalleryDrawer.test.tsx`、`web/src/test/WorkbenchApi.test.ts`、`web/src/test/ImportsApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖每文件方向、人工录入、补充凭证惰性分页/预览/只读权限、预览审计、错误提示、session restore、API mapper和既有浏览器导入回归。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ManualInvoiceEntryDrawer.test.tsx`、`web/src/test/SupportingDocumentGalleryDrawer.test.tsx`、`web/src/test/WorkbenchApi.test.ts`、`web/src/test/ImportsApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖每文件方向、人工录入、补充凭证惰性分页/预览/只读权限、预览审计、错误提示、fresh entry、显式清空/discard、延迟响应隔离、API mapper 和既有浏览器导入回归。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale preview protection -> Workbench 与其它 direct-canonical 下游 normal GET；前端导入流程不主动请求 Workbench 页面，用户进入关联台时直接读取已提交事实。真实 import/matching worker drain 仍需 staging/后续 smoke。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，以及下游模块测试矩阵、`web/e2e/imports-invoices-flow.spec.ts` | 每次改 shared import、invoice fact、lifecycle、read model 或 App Status 时，都必须回归发票导入和下游页面旧行为。 |
 
@@ -69,7 +69,7 @@
 | 历史 submitted ETC 批次先存在，正式进项发票后导入导致关联台重复散票 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_input_invoice_import_links_existing_submitted_etc_metadata_when_formal_invoice_arrives_later`、`tests/test_etc_batch_invoice_link_service.py`、`tests/test_postgres_repositories_core.py::test_find_submitted_etc_invoice_by_identity_returns_active_batch_metadata`、`tests/test_postgres_repositories_core.py::test_upsert_etc_batch_invoice_link_is_idempotent_by_batch_identity`、`tests/test_workbench_query_postgres_integration.py::WorkbenchQueryPostgresIntegrationTests::test_page_etc_hydration_is_one_statement_and_matches_legacy_dto`、`tests/test_repair_submitted_etc_invoice_overlaps_tool.py` |
 | 预览后源事实变化仍允许确认 | `tests/test_import_file_service.py::ImportFileServiceTests::test_confirm_session_rejects_stale_preview_when_existing_records_change`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
 | 大重复组被全部当作可确认行 | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_bounds_large_invoice_duplicate_group_to_one_confirmable_row` |
-| 发票导入路由重挂载丢失预览或选择 | `web/src/test/ImportCenterPage.test.tsx` 中 invoice import session restore / navigating away tests |
+| 发票导入路由重挂载恢复历史预览，或延迟响应污染 fresh 页面 | `web/src/test/ImportCenterPage.test.tsx` 中 fresh entry / late preview response 回归 |
 | 发票慢预览期间用户重复触发 preview、清空或确认造成重复请求/半写状态 | `web/e2e/imports-invoices-flow.spec.ts` 的 slow preview Browser 回归，断言预览/清空/确认动作锁定且只提交一次 preview |
 | 损坏发票文件导致整个 preview 崩溃，或 confirm 误提交不可导入文件 | `web/e2e/imports-invoices-flow.spec.ts` 的 corrupt mixed Browser 回归，断言 file-level error、未导入项明细和 `selected_file_ids` 只包含正常文件 |
 | 发票导入后成本统计伪造项目成本 | `web/e2e/imports-invoices-flow.spec.ts` 断言 direct-canonical 成功，但“按项目”不存在仅由发票导入生成的成本。 |
@@ -187,8 +187,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 
 - `web/src/test/ImportCenterPage.test.tsx` 继续保护发票专用复核字段和共享工作区交互，避免视觉收敛恢复银行流水字段污染。
 
-## 2026-08-11 预览生命周期回归
+## 2026-09-01 fresh entry 与显式放弃回归
 
-- `tests/test_import_lifecycle_service.py` 覆盖 batch/file/session/job 状态聚合、分页、可恢复会话和 PostgreSQL 事务化放弃。
-- `tests/test_import_file_service.py` 与 `tests/test_import_file_api.py` 覆盖 owner 隔离、幂等 discard、discard 后禁止 confirm 和 active session API。
-- `web/src/test/ImportCenterPage.test.tsx` 覆盖无浏览器 key 时从服务端恢复，以及放弃成功后才清本地预览。
+- `tests/test_import_lifecycle_service.py` 覆盖 batch/file/session/job 状态聚合、分页和 PostgreSQL 事务化 discard；页面不再暴露“取最新活跃 session”读接口。
+- `tests/test_import_file_service.py` 与 `tests/test_import_file_api.py` 覆盖 owner 隔离、幂等 discard 及 discard 后禁止 confirm。
+- `web/src/test/ImportCenterPage.test.tsx` 覆盖每次进入 fresh、不读历史 sessionStorage、不请求活跃 session 列表、只刷新当前页面创建的 session，以及 discard 成功后才清本地预览。

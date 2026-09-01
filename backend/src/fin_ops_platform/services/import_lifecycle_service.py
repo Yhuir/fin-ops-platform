@@ -29,25 +29,6 @@ class ImportLifecycleService:
             },
         }
 
-    def list_active_sessions(self, *, imported_by: str, mode: str | None = None) -> list[dict[str, Any]]:
-        rows = self._repository.list_active_sessions(imported_by=imported_by, mode=mode)
-        return [
-            {
-                "session_id": str(row.get("session_id") or ""),
-                "imported_by": str(row.get("imported_by") or ""),
-                "file_count": int(row.get("file_count") or 0),
-                "batch_type": str(row.get("batch_type") or ""),
-                "created_at": self._timestamp(row.get("created_at") or row.get("updated_at")),
-                "updated_at": self._timestamp(row.get("updated_at")),
-                "status": self._display_state(row),
-                "job_id": str(row.get("import_job_id") or "") or None,
-                "job_stage": str(row.get("job_stage") or "") or None,
-                "error": str(row.get("job_error") or "") or None,
-            }
-            for row in rows
-            if self._display_state(row) in {"awaiting_confirmation", "preview_failed", "failed"}
-        ]
-
     def discard_session(self, *, session_id: str, imported_by: str) -> int:
         return self._repository.discard_preview_session(session_id=session_id, imported_by=imported_by)
 

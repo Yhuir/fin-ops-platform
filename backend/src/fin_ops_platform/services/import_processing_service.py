@@ -217,7 +217,11 @@ class ImportProcessingService:
             )
 
         try:
-            validated_preview = self._etc_import_preview_service.validate(session_id=session_id, task_id=task_id)
+            validated_preview = self._etc_import_preview_service.validate(
+                session_id=session_id,
+                task_id=task_id,
+                imported_by=owner_user_id,
+            )
             self._etc_reconciliation_task_service.begin_import(
                 task_id=task_id,
                 task_version=task_version,

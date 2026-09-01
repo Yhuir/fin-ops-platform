@@ -9,6 +9,7 @@ import {
   deleteEtcBusinessBatch,
   deleteEtcReconciliationTask,
   deleteEtcReconciliationTaskImportedInvoices,
+  discardEtcImportSession,
   downloadEtcBusinessBatchInvoicePdf,
   fetchEtcBusinessBatchDetail,
   fetchEtcBusinessBatches,
@@ -31,6 +32,21 @@ import {
 import * as etcApi from "../features/etc/api";
 
 const originalFetch = global.fetch;
+const API_IMPORT_AUDIT = {
+  original_count: 4,
+  unique_count: 3,
+  duplicate_count: 1,
+  duplicate_in_file_count: 1,
+  duplicate_across_files_count: 0,
+  existing_duplicate_count: 1,
+  importable_count: 1,
+  update_count: 0,
+  merge_count: 1,
+  suspected_duplicate_count: 0,
+  error_count: 1,
+  confirmable_count: 2,
+  skipped_count: 2,
+};
 
 afterEach(() => {
   global.fetch = originalFetch;
@@ -521,6 +537,8 @@ describe("etc api", () => {
           duplicatesSkipped: 2,
           attachmentsCompleted: 3,
           failed: 4,
+          audit: API_IMPORT_AUDIT,
+          importAudit: API_IMPORT_AUDIT,
           reconciliationFilter: {
             taskId: "etc_task_ready_001",
             taskVersion: 9,
@@ -574,12 +592,8 @@ describe("etc api", () => {
       "etc-2026-04.zip",
     ]);
     expect((init.body as FormData).get("task_id")).toBe("etc_task_ready_001");
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       sessionId: "etc_import_session_001",
-      imported: 1,
-      duplicatesSkipped: 2,
-      attachmentsCompleted: 3,
-      failed: 4,
       reconciliationFilter: {
         taskId: "etc_task_ready_001",
         taskVersion: 9,
@@ -622,6 +636,8 @@ describe("etc api", () => {
               attachmentsCompleted: 0,
               failed: 0,
             },
+            audit: { ...API_IMPORT_AUDIT, original_count: 1, unique_count: 1, duplicate_count: 0, duplicate_in_file_count: 0, existing_duplicate_count: 0, importable_count: 1, merge_count: 0, error_count: 0, confirmable_count: 1, skipped_count: 0 },
+            importAudit: { ...API_IMPORT_AUDIT, original_count: 1, unique_count: 1, duplicate_count: 0, duplicate_in_file_count: 0, existing_duplicate_count: 0, importable_count: 1, merge_count: 0, error_count: 0, confirmable_count: 1, skipped_count: 0 },
             items: [
               {
                 invoiceNumber: "ETC-2026-006",
@@ -650,7 +666,6 @@ describe("etc api", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await expect(pendingPreview).resolves.toMatchObject({
       sessionId: "etc_import_session_001",
-      imported: 1,
       items: [{ invoiceNumber: "ETC-2026-006", fileName: "large-etc.zip" }],
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -659,60 +674,29 @@ describe("etc api", () => {
     );
   });
 
-  test("confirms ETC import session with Authorization header and maps snake_case fallback fields", async () => {
+  test("discards an ETC import preview with Authorization header", async () => {
     document.cookie = "Admin-Token=mock-cookie-token";
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          session_id: "etc_import_session_001",
-          summary: {
-            imported: 1,
-            duplicates_skipped: 2,
-            attachments_completed: 3,
-            failed: 4,
-          },
-          items: [
-            {
-              invoice_number: "ETC-2026-006",
-              file_name: "etc-2026-03.zip",
-              status: "duplicate_skipped",
-              message: "发票号码已存在",
-            },
-          ],
-        }),
+        JSON.stringify({ sessionId: "etc_import_session_001", status: "reverted" }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
     global.fetch = fetchMock as typeof fetch;
 
-    const result = await confirmEtcImportSession("etc_import_session_001", "etc_task_ready_001");
+    await discardEtcImportSession("etc_import_session_001");
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/import/confirm",
+      "/api/etc/import/discard",
       expect.objectContaining({
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({ sessionId: "etc_import_session_001", taskId: "etc_task_ready_001" }),
+        body: JSON.stringify({ sessionId: "etc_import_session_001" }),
       }),
     );
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect((init.headers as Headers).get("Authorization")).toBe("Bearer mock-cookie-token");
     expect((init.headers as Headers).get("Content-Type")).toBe("application/json");
-    expect(result).toEqual({
-      sessionId: "etc_import_session_001",
-      imported: 1,
-      duplicatesSkipped: 2,
-      attachmentsCompleted: 3,
-      failed: 4,
-      items: [
-        {
-          invoiceNumber: "ETC-2026-006",
-          fileName: "etc-2026-03.zip",
-          status: "duplicate_skipped",
-          reason: "发票号码已存在",
-        },
-      ],
-    });
   });
 
   test("confirms ETC import session and maps background job response", async () => {

@@ -1293,6 +1293,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             self.assertNotIn(endpoint, server_source)
 
     def test_bank_transaction_import_frontend_uses_file_session_api_only(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         page_source = (WEB_SRC_ROOT / "pages" / "imports" / "ImportBankTransactionsPage.tsx").read_text(encoding="utf-8")
         api_source = (WEB_SRC_ROOT / "features" / "imports" / "api.ts").read_text(encoding="utf-8")
         runtime_files = [
@@ -1314,6 +1315,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             for legacy_endpoint in ('"/imports/preview"', '"/imports/confirm"', "'/imports/preview'", "'/imports/confirm'"):
                 if legacy_endpoint in source:
                     violations.append(f"{_relative(path)} references legacy JSON import endpoint {legacy_endpoint}")
+        if 'route_path == "/imports/files/sessions"' in server_source:
+            violations.append("server.py reintroduced automatic active import session discovery")
+        if "fetchActiveImportSessions" in api_source:
+            violations.append("imports API reintroduced automatic active import session discovery")
 
         self.assertEqual(violations, [])
 
@@ -3289,6 +3294,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_owner_route = _function_source(route_tree, route_source, "route")
         route_owner_preview = _function_source(route_tree, route_source, "preview")
         route_owner_confirm = _function_source(route_tree, route_source, "confirm")
+        route_owner_discard = _function_source(route_tree, route_source, "discard")
 
         violations: list[str] = []
         if "EtcImportApiRoutes" not in server_source:
@@ -3318,6 +3324,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for required_route in (
             'route_path == "/api/etc/import/preview"',
             'route_path == "/api/etc/import/confirm"',
+            'route_path == "/api/etc/import/discard"',
         ):
             if required_route not in route_owner_route:
                 violations.append(f"ETC import route owner missing dispatch branch {required_route}")
@@ -3327,6 +3334,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC import route owner confirm does not create idempotent background job")
         if "self._preview_service.validate(" not in route_owner_confirm:
             violations.append("ETC import route owner confirm does not validate the durable preview")
+        if "self._preview_service.discard(" not in route_owner_discard:
+            violations.append("ETC import route owner discard does not delegate to the durable preview service")
         if "begin_import" in route_owner_confirm or "run_job" in route_owner_confirm:
             violations.append("ETC import route owner reintroduced task mutation or inline processing")
         if 'route_path == "/api/etc/import"' in route_owner_route:

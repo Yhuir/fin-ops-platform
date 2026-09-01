@@ -195,14 +195,6 @@ export type EtcManualOaStatusPayload = {
   candidateOaRowId?: string;
 };
 
-export type EtcImportSummary = {
-  imported: number;
-  duplicatesSkipped: number;
-  attachmentsCompleted: number;
-  failed: number;
-  items: unknown[];
-};
-
 export type EtcImportItemStatus =
   | "created"
   | "duplicate_skipped"
@@ -246,17 +238,13 @@ export type EtcReconciliationFilterPreview = {
 
 export type EtcImportPreviewResult = {
   sessionId: string;
-  imported: number;
-  duplicatesSkipped: number;
-  attachmentsCompleted: number;
-  failed: number;
-  audit?: ImportPreviewAuditCounts;
-  importAudit?: ImportPreviewAuditCounts;
+  audit: ImportPreviewAuditCounts;
+  importAudit: ImportPreviewAuditCounts;
   reconciliationFilter?: EtcReconciliationFilterPreview;
   items: EtcImportItem[];
 };
 
-export type EtcImportConfirmResult = EtcImportPreviewResult & {
+export type EtcImportConfirmResult = {
   job?: BackgroundJob;
 };
 

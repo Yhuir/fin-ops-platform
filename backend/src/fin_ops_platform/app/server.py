@@ -1839,7 +1839,7 @@ class Application:
         if method == "POST" and route_path.startswith("/api/background-jobs/") and route_path.endswith("/retry"):
             job_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._handle_api_background_job_retry(job_id, request_actor_id)
-        if route_path in {"/api/etc/import/preview", "/api/etc/import/confirm"}:
+        if route_path in {"/api/etc/import/preview", "/api/etc/import/confirm", "/api/etc/import/discard"}:
             return self._etc_import_routes().route(method, route_path, body, headers, actor_id=request_actor_id)
         if route_path == "/api/etc/reconciliation-tasks" or route_path.startswith("/api/etc/reconciliation-tasks/"):
             return self._etc_reconciliation_routes().route(method, route_path, body, headers, actor_id=request_actor_id)
@@ -2057,8 +2057,6 @@ class Application:
             return self._handle_import_file_retry(body, owner_user_id=request_actor_id)
         if method == "POST" and route_path == "/imports/files/discard":
             return self._handle_import_file_discard(body, owner_user_id=request_actor_id)
-        if method == "GET" and route_path == "/imports/files/sessions":
-            return self._handle_import_file_active_sessions(query, owner_user_id=request_actor_id)
         if method == "GET" and route_path.startswith("/imports/files/sessions/"):
             session_path = route_path.removeprefix("/imports/files/sessions/")
             if session_path.endswith("/review-rows"):
@@ -2194,6 +2192,7 @@ class Application:
                 "/api/background-jobs/{job_id}/acknowledge",
                 "/api/etc/import/preview",
                 "/api/etc/import/confirm",
+                "/api/etc/import/discard",
                 "/api/etc/invoices",
                 "/api/etc/reconciliation-tasks/{task_id}",
                 "/api/etc/reconciliation-tasks/{task_id}/ticket-root-texts",
@@ -8249,44 +8248,6 @@ class Application:
             )
         self._persist_import_preview_delta(session.id)
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
-
-    def _handle_import_file_active_sessions(
-        self,
-        query: dict[str, list[str]],
-        *,
-        owner_user_id: str,
-    ) -> Response:
-        mode = str((query.get("mode") or [""])[0] or "").strip() or None
-        if mode not in {None, "bank_transaction", "invoice"}:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_import_session_mode", "message": "mode must be bank_transaction or invoice."},
-            )
-        connection = getattr(self._state_store, "_connection", None)
-        if connection is not None:
-            sessions = ImportLifecycleService(PostgresImportLifecycleRepository(connection)).list_active_sessions(
-                imported_by=owner_user_id,
-                mode=mode,
-            )
-        else:
-            sessions = [
-                {
-                    "session_id": session.id,
-                    "imported_by": session.imported_by,
-                    "file_count": session.file_count,
-                    "created_at": self._serialize_value(session.created_at),
-                    "updated_at": self._serialize_value(session.created_at),
-                    "status": "preview_failed" if session.status == "preview_ready_with_errors" else "awaiting_confirmation",
-                    "job_id": None,
-                    "job_stage": None,
-                    "error": None,
-                }
-                for session in self._file_import_service.list_active_sessions(
-                    imported_by=owner_user_id,
-                    mode=mode,
-                )
-            ]
-        return self._json_response(HTTPStatus.OK, {"sessions": sessions})
 
     def _handle_import_file_discard(self, body: str | bytes | None, *, owner_user_id: str) -> Response:
         payload, error = self._load_json_body(body)

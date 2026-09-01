@@ -5412,7 +5412,11 @@ class EtcApiTests(unittest.TestCase):
                 app._build_etc_oa_client = lambda _headers: fake_oa
                 task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
                 session_id = str(preview_payload["sessionId"])
-                validated_preview = app._etc_import_preview_service.validate(session_id=session_id, task_id=task_id)
+                validated_preview = app._etc_import_preview_service.validate(
+                    session_id=session_id,
+                    task_id=task_id,
+                    imported_by="test_finops_user",
+                )
                 app._etc_reconciliation_task_service.begin_import(
                     task_id=task_id,
                     task_version=validated_preview.session.task_version,
@@ -5578,6 +5582,35 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(completed_job["result_summary"]["imported"], 2)
         self.assertEqual(completed_job["result_summary"]["total"], 2)
         self.assertEqual(json.loads(query_response.body)["total"], 2)
+
+    def test_etc_preview_can_be_discarded_idempotently_before_confirm(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001"])
+            session_id = preview_payload["sessionId"]
+
+            discard_response = app.handle_request(
+                "POST",
+                "/api/etc/import/discard",
+                json.dumps({"sessionId": session_id}),
+            )
+            repeated_response = app.handle_request(
+                "POST",
+                "/api/etc/import/discard",
+                json.dumps({"sessionId": session_id}),
+            )
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/etc/import/confirm",
+                json.dumps({"sessionId": session_id, "taskId": task_id}),
+            )
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(discard_response.status_code, 200)
+        self.assertEqual(json.loads(discard_response.body)["status"], "reverted")
+        self.assertEqual(repeated_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 409)
+        self.assertEqual(json.loads(confirm_response.body)["error"], "stale_reconciliation_task_preview")
 
     def test_etc_import_links_existing_canonical_invoices_and_dedupes_manual_invoice(self) -> None:
         with TemporaryDirectory() as temp_dir:

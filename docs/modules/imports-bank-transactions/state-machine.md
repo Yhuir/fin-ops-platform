@@ -64,14 +64,14 @@
 | selected | 展示文件列表和每文件银行选择；清空/移除文件会清空 preview。 |
 | previewing | 预览按钮 loading，禁用重复预览和确认。 |
 | preview_ready | 展示 audit counts、文件状态、重复组、跳过明细、银行选择冲突；只允许确认 `preview_ready` 文件。 |
-| preview_no_changes | 保留真实的“本次将处理 0”和重复明细，文件显示“无需导入”，提示全部已存在，并禁用确认；账户冲突、疑似和错误状态优先，不得被该提示掩盖。 |
+| preview_no_changes | 保留真实的“新增 0”和“APP 已存在”统计及重复明细，文件显示“无需导入”，并禁用确认；账户冲突、疑似和错误状态优先，不得被该提示掩盖。 |
 | mapping required | 在当前文件下展示 HeroUI 字段选择；保存只重试该文件，成功后回到 `preview_ready`，失败保留映射草稿和明确错误。 |
 | account conflict blocked | 文件识别账号与用户选择账号冲突时显示明确警告并禁用确认；清空预览、改选正确账户、重新预览后才能进入 confirm。旧冲突确认弹窗已删除。 |
 | confirming | 确认按钮 loading；App Health `blocksMutations` 时禁止确认并提示重新进入。 |
 | job queued | 返回 `job` 时显示“已开始后台导入”，不立即宣称下游刷新完成。 |
 | success | inline 完成时提示导入完成；仅当响应声明 `operation_barrier_targets` 时等待这些 targets，禁止请求 Workbench 页面探测刷新。后台 job 由 App Status/Health 展示进度。 |
 | error | preview/confirm/retry/session fetch 失败展示错误；`preview_stale` 使用固定“重新预览”提示。 |
-| session restore | 有本地 session id 时精确恢复；本地缺失/失效时从 `GET /imports/files/sessions?mode=bank_transaction` 恢复当前用户最新活跃 preview。离开/返回页面不能保留 in-flight 请求。 |
+| fresh entry | 每次页面激活都清空本地文件、选择、preview 和反馈；不读 sessionStorage，也不请求活跃 session 列表。离开页面后才完成的 preview 响应必须丢弃，返回页面仍为空白。 |
 | discard | 点击清空已预览内容时先调用服务端 discard；成功后才清本地，失败则保留预览并显示错误。 |
 | permission disabled/hidden | 当前页面通过 App Health `blocksMutations` 做系统不可用防护；若后续接入细粒度权限，需补 API 403 和前端 disabled/hidden。 |
 

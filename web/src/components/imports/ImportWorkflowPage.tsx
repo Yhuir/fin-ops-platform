@@ -24,14 +24,18 @@ import SupportingDocumentGalleryDrawer from "./SupportingDocumentGalleryDrawer";
 import {
   confirmImportFiles,
   discardImportSession,
-  fetchActiveImportSessions,
   fetchImportReviewRows,
   fetchImportSession,
   previewImportFiles,
   retryImportFiles,
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
-import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
+import {
+  confirmEtcImportSession,
+  discardEtcImportSession,
+  fetchReadyEtcReconciliationTasks,
+  previewEtcZipFiles,
+} from "../../features/etc/api";
 import { formatMoney } from "../../features/money";
 import { formatDateTimeText } from "../../features/dateTime";
 import { fetchWorkbenchSettings } from "../../features/workbench/api";
@@ -338,67 +342,8 @@ function formatSelectedBankAccountLabel(file: Pick<ImportFilePreview, "selectedB
   return `${file.selectedBankName ?? ""} ${file.selectedBankLast4 ?? ""}`.trim();
 }
 
-function emptyAuditCounts(): ImportPreviewAuditCounts {
-  return {
-    originalCount: 0,
-    uniqueCount: 0,
-    duplicateCount: 0,
-    duplicateInFileCount: 0,
-    duplicateAcrossFilesCount: 0,
-    existingDuplicateCount: 0,
-    importableCount: 0,
-    updateCount: 0,
-    mergeCount: 0,
-    suspectedDuplicateCount: 0,
-    errorCount: 0,
-    confirmableCount: 0,
-    skippedCount: 0,
-  };
-}
-
-function addAuditCounts(left: ImportPreviewAuditCounts, right: ImportPreviewAuditCounts): ImportPreviewAuditCounts {
-  return {
-    originalCount: left.originalCount + right.originalCount,
-    uniqueCount: left.uniqueCount + right.uniqueCount,
-    duplicateCount: left.duplicateCount + right.duplicateCount,
-    duplicateInFileCount: left.duplicateInFileCount + right.duplicateInFileCount,
-    duplicateAcrossFilesCount: left.duplicateAcrossFilesCount + right.duplicateAcrossFilesCount,
-    existingDuplicateCount: left.existingDuplicateCount + right.existingDuplicateCount,
-    importableCount: left.importableCount + right.importableCount,
-    updateCount: left.updateCount + right.updateCount,
-    mergeCount: left.mergeCount + right.mergeCount,
-    suspectedDuplicateCount: left.suspectedDuplicateCount + right.suspectedDuplicateCount,
-    errorCount: left.errorCount + right.errorCount,
-    confirmableCount: left.confirmableCount + right.confirmableCount,
-    skippedCount: left.skippedCount + right.skippedCount,
-  };
-}
-
-function legacyFileAudit(file: ImportFilePreview): ImportPreviewAuditCounts {
-  const duplicateCount = file.duplicateCount ?? 0;
-  const importableCount = file.successCount ?? 0;
-  const updateCount = file.updatedCount ?? 0;
-  const suspectedDuplicateCount = file.suspectedDuplicateCount ?? 0;
-  const errorCount = file.errorCount ?? 0;
-  return {
-    originalCount: file.rowCount ?? 0,
-    uniqueCount: Math.max(0, (file.rowCount ?? 0) - duplicateCount),
-    duplicateCount,
-    duplicateInFileCount: duplicateCount,
-    duplicateAcrossFilesCount: 0,
-    existingDuplicateCount: 0,
-    importableCount,
-    updateCount,
-    mergeCount: 0,
-    suspectedDuplicateCount,
-    errorCount,
-    confirmableCount: importableCount + updateCount,
-    skippedCount: duplicateCount + suspectedDuplicateCount + errorCount,
-  };
-}
-
 function fileAudit(file: ImportFilePreview): ImportPreviewAuditCounts {
-  return file.audit ?? legacyFileAudit(file);
+  return file.audit;
 }
 
 function isAllExistingBankAudit(audit: ImportPreviewAuditCounts | null) {
@@ -413,59 +358,31 @@ function isAllExistingBankAudit(audit: ImportPreviewAuditCounts | null) {
 }
 
 function importSessionAudit(payload: ImportSessionPayload | null): ImportPreviewAuditCounts | null {
-  if (!payload) {
-    return null;
-  }
-  if (payload.session.audit) {
-    return payload.session.audit;
-  }
-  return payload.files.reduce((total, file) => addAuditCounts(total, fileAudit(file)), emptyAuditCounts());
-}
-
-function etcAudit(payload: EtcImportPreviewResult | null): ImportPreviewAuditCounts | null {
-  if (!payload) {
-    return null;
-  }
-  if (payload.audit) {
-    return payload.audit;
-  }
-  const duplicateCount = payload.duplicatesSkipped ?? 0;
-  const importableCount = payload.imported ?? 0;
-  const mergeCount = payload.attachmentsCompleted ?? 0;
-  const errorCount = payload.failed ?? 0;
-  return {
-    originalCount: importableCount + duplicateCount + mergeCount + errorCount,
-    uniqueCount: importableCount + duplicateCount + mergeCount,
-    duplicateCount,
-    duplicateInFileCount: duplicateCount,
-    duplicateAcrossFilesCount: 0,
-    existingDuplicateCount: duplicateCount,
-    importableCount,
-    updateCount: 0,
-    mergeCount,
-    suspectedDuplicateCount: 0,
-    errorCount,
-    confirmableCount: importableCount + mergeCount,
-    skippedCount: duplicateCount + errorCount,
-  };
+  return payload?.session.audit ?? null;
 }
 
 function ImportSummaryPanel({
   audit,
+  mode,
   onOpenReview,
 }: {
   audit: ImportPreviewAuditCounts | null;
+  mode: ImportWorkflowMode;
   onOpenReview?: () => void;
 }) {
   if (!audit) {
     return <p className="import-workflow-summary-empty">选择文件并开始预览后，将在这里显示导入统计。</p>;
   }
-  const items = [
-    ["本次识别", audit.originalCount],
-    ["本次将处理", audit.confirmableCount],
-    ["本次不处理", Math.max(0, audit.originalCount - audit.confirmableCount)],
-  ] as const;
-  const skippedCount = Math.max(0, audit.originalCount - audit.confirmableCount);
+  const batchDuplicateCount = audit.duplicateInFileCount + audit.duplicateAcrossFilesCount;
+  const reviewCount = audit.suspectedDuplicateCount + audit.errorCount;
+  const items: Array<readonly [string, number]> = [
+    ["新增", audit.importableCount],
+    ["APP 已存在", audit.existingDuplicateCount],
+  ];
+  if (audit.updateCount > 0) items.push(["更新", audit.updateCount]);
+  if (audit.mergeCount > 0) items.push([mode === "etc_invoice" ? "补齐附件" : "补齐", audit.mergeCount]);
+  if (batchDuplicateCount > 0) items.push(["本批重复", batchDuplicateCount]);
+  if (reviewCount > 0) items.push(["需检查", reviewCount]);
   return (
     <div className="import-workflow-summary" aria-label="导入统计">
       <div className="import-workflow-summary__metrics">
@@ -480,15 +397,14 @@ function ImportSummaryPanel({
           </div>
         ))}
       </div>
-      <div className="import-workflow-summary__footer">
-        <ImportChip>{`APP 内已存在 ${audit.existingDuplicateCount}`}</ImportChip>
-        {onOpenReview && skippedCount > 0 ? (
+      {onOpenReview && audit.skippedCount > 0 ? (
+        <div className="import-workflow-summary__footer">
           <Button onPress={onOpenReview} size="sm" type="button" variant="secondary">
             <Search aria-hidden="true" size={15} />
             查看未处理明细
           </Button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -724,9 +640,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     draft,
     updateDraft,
     resetDraft,
-    clearPersistedSession,
-    readPersistedSessionId,
-    persistSessionId,
     setSelectedFiles,
     setFileSelections,
     setPreviewPayload,
@@ -737,7 +650,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setErrorMessage,
     setIsPreviewing,
     setIsConfirming,
-  } = useImportWorkflowDraft(mode);
+  } = useImportWorkflowDraft();
   const healthStatus = useAppHealthStatus();
   const { canMutateData } = useSessionPermissions();
   const {
@@ -772,6 +685,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   const [supportingDocumentGalleryOpen, setSupportingDocumentGalleryOpen] = useState(false);
   const [reviewDrawerOpen, setReviewDrawerOpen] = useState(false);
   const mountedRef = useRef(false);
+  const pageActiveRef = useRef(pageActive);
+  const activationGenerationRef = useRef(activationGeneration);
+  const lastFreshGenerationRef = useRef<number | null>(null);
+  pageActiveRef.current = pageActive;
+  activationGenerationRef.current = activationGeneration;
 
   const title = TITLES[mode];
   const uploadLabel = UPLOAD_LABELS[mode];
@@ -789,6 +707,21 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       }
     };
   }, [mode, updateDraft]);
+
+  useEffect(() => {
+    if (!pageActive || lastFreshGenerationRef.current === activationGeneration) {
+      return;
+    }
+    lastFreshGenerationRef.current = activationGeneration;
+    resetDraft();
+    setIsDragActive(false);
+    setMappingDrafts({});
+    setMappingRetryingFileId(null);
+    setPreviewDetailOffset(0);
+    setPreviewDetailPage(null);
+    setPreviewDetailError(null);
+    setReviewDrawerOpen(false);
+  }, [activationGeneration, pageActive, resetDraft]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -852,68 +785,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }, [activationGeneration, contextRefreshToken, mode, pageActive, setErrorMessage]);
 
   useEffect(() => {
-    if (!pageActive || mode === "etc_invoice" || selectedFiles.length > 0 || previewPayload) {
-      return undefined;
-    }
-    let active = true;
-    setIsPreviewing(true);
-    setErrorMessage(null);
-    void (async () => {
-      const persistedSessionId = readPersistedSessionId();
-      try {
-        let sessionId = persistedSessionId;
-        if (!sessionId) {
-          sessionId = (await fetchActiveImportSessions(mode))[0]?.sessionId ?? null;
-        }
-        if (!sessionId) {
-          if (active) setIsPreviewing(false);
-          return;
-        }
-        let payload: ImportSessionPayload;
-        try {
-          payload = await fetchImportSession(sessionId);
-        } catch (error) {
-          const fallbackSessionId = (await fetchActiveImportSessions(mode))
-            .find((session) => session.sessionId !== sessionId)?.sessionId;
-          if (!fallbackSessionId) throw error;
-          sessionId = fallbackSessionId;
-          payload = await fetchImportSession(sessionId);
-        }
-        if (!active) return;
-        persistSessionId(sessionId);
-        setPreviewPayload(payload);
-        setFeedbackMessage(null);
-      } catch {
-        if (!active) return;
-        clearPersistedSession();
-        resetDraft();
-        setErrorMessage("上次预览会话已失效，请重新选择文件。");
-      } finally {
-        if (active) setIsPreviewing(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [
-    activationGeneration,
-    clearPersistedSession,
-    contextRefreshToken,
-    mode,
-    pageActive,
-    previewPayload,
-    readPersistedSessionId,
-    resetDraft,
-    selectedFiles.length,
-    setErrorMessage,
-    setFeedbackMessage,
-    setIsPreviewing,
-    setPreviewPayload,
-    persistSessionId,
-  ]);
-
-  useEffect(() => {
     const sessionId = previewPayload?.session.id;
     if (!pageActive || mode === "etc_invoice" || !reviewDrawerOpen || !sessionId) {
       setPreviewDetailPage(null);
@@ -948,6 +819,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     [readyEtcTasks, selectedEtcTaskId],
   );
   const hasSelectedEtcTask = mode !== "etc_invoice" || Boolean(selectedEtcTask);
+  const hasPreview = Boolean(previewPayload || etcPreviewPayload);
 
   const canUseBankImport = mode !== "bank_transaction" || bankOptions.length > 0;
   const allFilesConfigured = selectedFiles.length > 0 && selectedFiles.every((file) => {
@@ -961,6 +833,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     && canMutateData
     && hasSelectedEtcTask
     && allFilesConfigured
+    && !hasPreview
     && !isPreviewing
     && !isConfirming
     && !isDiscarding
@@ -1024,10 +897,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     [previewPayload],
   );
   const previewAudit = useMemo(() => importSessionAudit(previewPayload), [previewPayload]);
-  const allBankTransactionsAlreadyExist = mode === "bank_transaction"
-    && conflictingPreviewFiles.length === 0
-    && isAllExistingBankAudit(previewAudit);
-  const etcPreviewAudit = useMemo(() => etcAudit(etcPreviewPayload), [etcPreviewPayload]);
 
   const previewDetailRows = previewDetailPage?.rows ?? [];
   const previewDetailPageSize = previewDetailPage?.limit ?? 100;
@@ -1059,7 +928,6 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setPreviewDetailPage(null);
     setPreviewDetailError(null);
     setReviewDrawerOpen(false);
-    clearPersistedSession();
   }
 
   function updateFiles(nextFiles: File[]) {
@@ -1086,7 +954,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   function handleDropzoneDragOver(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
-    if (canMutateData && !isPreviewing && !isConfirming) {
+    if (canMutateData && !hasPreview && !isPreviewing && !isConfirming) {
       setIsDragActive(true);
     }
   }
@@ -1101,7 +969,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   function handleDropzoneDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setIsDragActive(false);
-    if (!canMutateData || isPreviewing || isConfirming) {
+    if (!canMutateData || hasPreview || isPreviewing || isConfirming) {
       return;
     }
     const nextFiles = Array.from(event.dataTransfer.files ?? []);
@@ -1153,13 +1021,21 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }
 
   async function handleClearFiles() {
-    if (mode !== "etc_invoice" && previewPayload?.session.id) {
+    if (mode === "etc_invoice" && etcImported) {
+      resetDraft();
+      return;
+    }
+    const sessionId = mode === "etc_invoice" ? etcPreviewPayload?.sessionId : previewPayload?.session.id;
+    if (sessionId) {
       setIsDiscarding(true);
       setErrorMessage(null);
       try {
-        await discardImportSession(previewPayload.session.id);
+        if (mode === "etc_invoice") {
+          await discardEtcImportSession(sessionId);
+        } else {
+          await discardImportSession(sessionId);
+        }
         resetDraft();
-        setFeedbackMessage("已放弃服务端导入预览。");
       } catch (error) {
         setErrorMessage(resolveImportApiErrorMessage(error, "放弃导入预览失败，预览内容已保留。"));
       } finally {
@@ -1167,9 +1043,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       }
       return;
     }
-    setSelectedFiles([]);
-    setFileSelections({});
-    resetPreviewState();
+    resetDraft();
   }
 
   async function handleRefresh() {
@@ -1211,6 +1085,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }
 
   async function handlePreview() {
+    const requestGeneration = activationGenerationRef.current;
+    const isCurrentRequest = () => mountedRef.current
+      && pageActiveRef.current
+      && activationGenerationRef.current === requestGeneration;
     if (mode === "etc_invoice") {
       if (!selectedEtcTask) {
         setErrorMessage("请选择已确认的 ETC 对账任务后再预览 ETC zip。");
@@ -1229,7 +1107,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       setFeedbackMessage(null);
       try {
         const payload = await previewEtcZipFiles(selectedFiles, selectedEtcTask.taskId);
-        if (!mountedRef.current) {
+        if (!isCurrentRequest()) {
           return;
         }
         updateDraft((current) => ({
@@ -1241,12 +1119,12 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           errorMessage: null,
         }));
       } catch (error) {
-        if (!mountedRef.current) {
+        if (!isCurrentRequest()) {
           return;
         }
         setErrorMessage(resolveImportApiErrorMessage(error, "ETC zip 预览失败，请稍后重试。"));
       } finally {
-        if (mountedRef.current) {
+        if (isCurrentRequest()) {
           setIsPreviewing(false);
         }
       }
@@ -1266,7 +1144,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setFeedbackMessage(null);
     try {
       const payload = await previewImportFiles(selectedFiles, "web_finance_user", buildPreviewOverrides());
-      persistSessionId(payload.session.id);
+      if (!isCurrentRequest()) {
+        return;
+      }
       updateDraft((current) => ({
         ...current,
         previewPayload: payload,
@@ -1274,9 +1154,14 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         errorMessage: null,
       }));
     } catch (error) {
+      if (!isCurrentRequest()) {
+        return;
+      }
       setErrorMessage(resolveImportApiErrorMessage(error, "文件预览失败，请稍后重试。"));
     } finally {
-      setIsPreviewing(false);
+      if (isCurrentRequest()) {
+        setIsPreviewing(false);
+      }
     }
   }
 
@@ -1507,7 +1392,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 {mode === "etc_invoice" ? (
                   <div className="import-workflow-field-stack">
                     <ImportSelect
-                      disabled={isPreviewing || isConfirming || readyEtcTasksLoading || readyEtcTasks.length === 0}
+                      disabled={hasPreview || isPreviewing || isConfirming || readyEtcTasksLoading || readyEtcTasks.length === 0}
                       id="etc-reconciliation-task"
                       label="ETC对账任务"
                       onChange={handleEtcTaskChange}
@@ -1531,7 +1416,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 ) : null}
 
                 <label
-                  className={`import-workflow-upload-zone${isDragActive ? " import-workflow-upload-zone--active" : ""}${!canMutateData || isPreviewing || isConfirming ? " import-workflow-upload-zone--disabled" : ""}`}
+                  className={`import-workflow-upload-zone${isDragActive ? " import-workflow-upload-zone--active" : ""}${!canMutateData || hasPreview || isPreviewing || isConfirming ? " import-workflow-upload-zone--disabled" : ""}`}
                   htmlFor={inputId}
                   aria-label={uploadLabel}
                   onDragEnter={handleDropzoneDragOver}
@@ -1549,7 +1434,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     multiple
                     type="file"
                     accept={mode === "etc_invoice" ? ".zip,application/zip" : ".xlsx,.xls"}
-                    disabled={!canMutateData || isPreviewing || isConfirming}
+                    disabled={!canMutateData || hasPreview || isPreviewing || isConfirming}
                     onChange={(event) => {
                       setIsDragActive(false);
                       applyDroppedFiles(Array.from(event.currentTarget.files ?? []));
@@ -1581,7 +1466,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                               </div>
                               <Button
                                 className="import-workflow-file-row__remove"
-                                isDisabled={isPreviewing || isConfirming}
+                                isDisabled={hasPreview || isPreviewing || isConfirming}
                                 onPress={() => handleRemoveFile(file)}
                                 size="sm"
                                 type="button"
@@ -1594,7 +1479,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
                             {mode === "bank_transaction" ? (
                               <ImportSelect
-                                disabled={isPreviewing || isConfirming || bankOptions.length === 0}
+                                disabled={hasPreview || isPreviewing || isConfirming || bankOptions.length === 0}
                                 id={`${key}-bank`}
                                 label={`对应账户 ${file.name}`}
                                 onChange={(value) => handleSelectionChange(file, "bankMappingId", value)}
@@ -1609,7 +1494,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                               </ImportSelect>
                             ) : mode === "invoice" ? (
                               <ImportSelect
-                                disabled={isPreviewing || isConfirming}
+                                disabled={hasPreview || isPreviewing || isConfirming}
                                 id={`${key}-invoice`}
                                 label={`票据方向 ${file.name}`}
                                 onChange={(value) => handleSelectionChange(file, "invoiceBatchType", value)}
@@ -1647,7 +1532,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 {mode === "etc_invoice" ? (
                   <div className="import-workflow-preview-stack">
                     <ImportSummaryPanel
-                      audit={etcPreviewPayload?.importAudit ?? etcPreviewAudit}
+                      audit={etcPreviewPayload?.importAudit ?? null}
+                      mode={mode}
                       onOpenReview={() => setReviewDrawerOpen(true)}
                     />
                     {etcBlockingIssues.length > 0 ? (
@@ -1660,17 +1546,13 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                   <div className="import-workflow-preview-stack">
                     <ImportSummaryPanel
                       audit={previewAudit}
+                      mode={mode}
                       onOpenReview={() => {
                         setPreviewDetailOffset(0);
                         setPreviewDetailPage(null);
                         setReviewDrawerOpen(true);
                       }}
                     />
-                    {allBankTransactionsAlreadyExist ? (
-                      <ImportNotice tone="success">
-                        {`已检查 ${previewAudit?.originalCount ?? 0} 笔流水，全部已存在于 APP，无需重复导入。`}
-                      </ImportNotice>
-                    ) : null}
                     <ImportPreviewFileList files={previewPayload?.files ?? []} mode={mode} />
                     {mappingRequiredFiles.map((file) => {
                       const values = { ...file.fieldMapping, ...(mappingDrafts[file.id] ?? {}) };

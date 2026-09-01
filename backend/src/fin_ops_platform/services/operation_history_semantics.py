@@ -265,6 +265,13 @@ _EXACT_ROUTES = {
         "ETC 发票导入",
         "解析并预览 ETC 发票数据。",
     ),
+    ("POST", "/api/etc/import/discard"): _semantic(
+        "etc.import.discard",
+        "放弃 ETC 发票导入预览",
+        "etc_import",
+        "ETC 发票导入",
+        "放弃尚未确认的 ETC 发票导入预览。",
+    ),
     ("POST", "/api/etc/business-batches"): _semantic(
         "etc.business_batch.create",
         "新建 ETC 业务批次",

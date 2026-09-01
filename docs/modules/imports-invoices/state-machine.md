@@ -52,7 +52,7 @@
 - stale/refreshing：`preview_stale` 显示重新预览提示；下游页面 stale/refreshing 由各自 read model status 呈现。
 - permission disabled/hidden：当前导入写权限由后端 contract 决定；若未来增加前端权限显示，必须补隐藏/禁用交互测试。
 - manual entry：只读账号不显示入口；识别、预览、返回编辑和确认期间锁定关闭。返回编辑必须先成功 discard 服务端预览；确认弹窗只读且最终确认仍走普通 file confirm job。
-- session persistence：同一路由重挂载先使用本地 session id，本地缺失/失效时从服务端恢复当前用户最新活跃 preview。清空已预览内容必须先成功调用 discard，再清理本地状态；discard 失败时保留预览。
+- fresh session：每次页面激活都清空文件、方向、preview 和反馈，不从 sessionStorage 或服务端活跃 session 列表恢复；离开页面后才完成的 preview 响应必须丢弃。清空已预览内容必须先成功调用 discard，再清理本地状态；discard 失败时保留预览。
 
 ## Read Model / Worker 状态
 
@@ -84,7 +84,7 @@
 | --- | --- | --- | --- |
 | 2026-08-20 | suspected duplicate 候选引用只保留到 preview | confirm 后 terminal suspected row 清空非权威 invoice 引用；created、status_updated、duplicate_skipped 保持正式引用 | `tests/test_import_service.py` |
 | 2026-08-14 | 新增单张发票人工录入并删除待找发票旧写链 | 可选附件识别只预填；服务端预览、重复校验、红蓝字金额和普通 confirm job 形成单一闭环；不自动绑定银行流水 | `tests/test_manual_invoice_entry_service.py`、`tests/test_import_file_api.py`、`web/src/test/ManualInvoiceEntryDrawer.test.tsx`、`web/src/test/ImportCenterPage.test.tsx` |
-| 2026-08-11 | 导入生命周期以服务端恢复并支持显式放弃 | 浏览器本地状态不再是唯一恢复入口；放弃的 preview 不再永久显示 pending，确认链仍复用既有 durable job/outbox | `tests/test_import_lifecycle_service.py`、`test_preview_session_can_be_recovered_and_discarded_before_confirm`、`ImportCenterPage.test.tsx` |
+| 2026-09-01 | 导入页面每次进入 fresh，并保留显式放弃 | 删除浏览器/活跃 session 自动恢复；放弃当前 preview 仍走 durable owner/discard 合同，确认链继续复用既有 durable job/outbox | `tests/test_import_lifecycle_service.py`、`test_preview_session_can_be_discarded_before_confirm`、`ImportCenterPage.test.tsx` |
 | 2026-08-11 | 放弃状态 formal payload 原子闭环 | batch/file/session 的 canonical 列与 normalized payload 同时进入 `reverted`；历史精确 mismatch 通过指纹绑定工具修复，不扫描 canonical 发票 | `tests/test_import_lifecycle_service.py`、`tests/test_audit_invoice_import_page.py`、`tests/test_import_audit_repair_ops.py` |
 | 2026-07-22 | preview 持久化收窄为 session-scoped exact delta | stale API 后续预览不能覆盖另一进程已确认的 file/session/batch；batch 与 file/session 同事务提交 | `test_stale_api_preview_cannot_downgrade_another_process_confirmed_import`、`test_save_import_delta_rolls_back_batch_when_file_write_fails` |
 | 2026-06-16 | 补齐发票确认 job 的 App Status domain/route contract | `file_import` 发票确认不再落到泛化导入页面，跨页状态反馈可回到 `/imports/invoices`；共享 `import.process.requested` 仍作为多导入域兜底 | `tests/test_import_file_api.py::ImportFileApiTests::test_confirm_files_imports_only_selected_files_from_session`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |

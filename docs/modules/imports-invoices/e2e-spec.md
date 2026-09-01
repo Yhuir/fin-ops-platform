@@ -4,7 +4,7 @@
 
 | Spec ID | 业务流程 | Browser 验收 |
 | --- | --- | --- |
-| `IMPORT-INVOICE-E2E-001` | 页面入口和每文件方向 | 进入 `/imports/invoices` 后显示“发票导入”；未选择文件时不创建 session；每个文件必须选择 `input_invoice` 或 `output_invoice` 后才允许预览。 |
+| `IMPORT-INVOICE-E2E-001` | 页面入口和每文件方向 | 进入 `/imports/invoices` 后显示“发票导入”且每次都是 fresh，不恢复浏览器或服务端历史 preview；未选择文件时不创建 session；每个文件必须选择 `input_invoice` 或 `output_invoice` 后才允许预览。对当前 preview 点击清空时，先 discard 成功再回到 fresh。 |
 | `IMPORT-INVOICE-E2E-002` | 预览和 audit | 上传 XLS/XLSX 后调用 `/imports/files/preview`，带 `invoice_export` 与每文件 `batch_type` override；页面展示 audit counts、可导入数、异常数、需复核文案和 preview grid；慢预览期间预览、清空、确认都必须锁定，且只能提交一次 preview 请求。 |
 | `IMPORT-INVOICE-E2E-003` | 重复/未导入明细 | 文件内重复、跨文件重复、已存在、异常或需复核行必须进入明细表；损坏发票文件必须作为 file-level error 展示，不能让整个 preview 崩溃；页面不能把 skipped/duplicate/error 行展示成可确认导入，confirm 只能提交有效文件 id。 |
 | `IMPORT-INVOICE-E2E-004` | preview stale | 预览后底层发票事实变化时，confirm 返回 `preview_stale`；页面必须提示重新预览，不创建 import job，也不调用 operation barrier 或 Workbench 页面 API。 |

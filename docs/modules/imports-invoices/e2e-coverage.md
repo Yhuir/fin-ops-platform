@@ -4,7 +4,7 @@
 
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
 | --- | --- | --- | --- |
-| `IMPORT-INVOICE-E2E-001` | `covered` | `web/e2e/imports-invoices-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | Browser 覆盖独立路由、真实 file input、文件选择后才可预览、每文件进/销项方向选择。 |
+| `IMPORT-INVOICE-E2E-001` | `covered` | `web/e2e/imports-invoices-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx` | Browser 覆盖独立路由、fresh entry、无历史 preview 恢复、当前 preview discard 后回到 fresh、真实 file input、文件选择后才可预览和每文件进/销项方向选择。 |
 | `IMPORT-INVOICE-E2E-002` | `covered` | `web/e2e/imports-invoices-flow.spec.ts`、`web/src/test/ImportsApi.test.ts`、`tests/test_import_file_api.py` | Browser 覆盖 preview API、`invoice_export`/`batch_type` 行为、audit counts、异常数、需复核文案、preview grid，以及慢预览期间预览/清空/确认动作锁定且只提交一次 preview。 |
 | `IMPORT-INVOICE-E2E-003` | `covered` | `web/e2e/imports-invoices-flow.spec.ts`、`tests/test_import_file_service.py`、`tests/test_import_preview_audit.py` | Browser 覆盖重复项 tab、重复明细、损坏文件 + 正常文件混合、file-level error、未导入项明细和 confirm 只提交正常文件 ID；后端覆盖发票 identity、重复审计和大重复组只允许一个 confirmable representative。 |
 | `IMPORT-INVOICE-E2E-004` | `covered` | `web/e2e/imports-invoices-flow.spec.ts`、`web/src/test/ImportsApi.test.ts`、`tests/test_import_file_service.py`、`tests/test_workbench_v2_api.py` | Browser 覆盖 `preview_stale` 错误可见、无 success、零 operation barrier、零 Workbench 页面请求；API/mapper 覆盖固定“重新预览”文案。 |

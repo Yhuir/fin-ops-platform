@@ -28,10 +28,10 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | 页面入口 | `web/src/pages/imports/ImportEtcInvoicesPage.tsx` | 只传 `mode="etc_invoice"`，共享 `ImportWorkflowPage` 改动会影响银行流水和发票导入 |
-| 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx` | zip-only 上传、ready task selector、unavailable task reason、preview stale、job feedback、route unmount cleanup、read-only 导入门禁 |
+| 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx` | zip-only 上传、ready task selector、unavailable task reason、preview stale、fresh entry、owner-bound discard、job feedback、route unmount cleanup、read-only 导入门禁 |
 | Browser e2e | `web/e2e/imports-etc-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 覆盖 ready task、zip 预览/确认、失败恢复和权限；确认后验证 ETC 票据和税金结果，并证明单独 ETC 发票导入不产生 OA 项目成本。 |
-| 前端 ETC API mapper | `web/src/features/etc/api.ts` | `/api/etc/import/preview` multipart、长超时、`task_id`、snake_case/camelCase、background job payload、stale error 映射 |
-| HTTP routes | `server.py` `/api/etc/import/preview`、`/api/etc/import/confirm`、`/api/etc/reconciliation-tasks*`、`/api/etc/business-batches*` | task version/hash 校验、structured error、idempotent job、queue unavailable、legacy import route |
+| 前端 ETC API mapper | `web/src/features/etc/api.ts` | `/api/etc/import/preview` multipart、`/api/etc/import/discard`、长超时、`task_id`、strict audit shape、background job payload、stale error 映射 |
+| HTTP routes | `server.py` `/api/etc/import/preview`、`/api/etc/import/confirm`、`/api/etc/import/discard`、`/api/etc/reconciliation-tasks*`、`/api/etc/business-batches*` | owner 校验、task version/hash 校验、structured error、idempotent discard/job、queue unavailable、legacy import route |
 | Reconciliation task service | `EtcReconciliationTaskService` | ready/importing/imported/closed、confirmed item set hash、missing requirements、source files、delete/reopen invalidating preview |
 | Zip parser/filter | `etc_document_parsers.py`、`etc_reconciliation_zip_filter.py`、`EtcService.inspect_import_zips(...)` | corrupted zip、重复发票、组合金额匹配、多 requirement 分配、非 ETC evidence |
 | ETC import service | `EtcService.preview_import_zips(...)`、`confirm_business_batch_import(...)` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success |
@@ -50,6 +50,7 @@
 - 缺票阻塞必须返回精确缺失行程数、缺少发票数、金额和处理提示；非法 ZIP 必须阻止确认，单个 malformed XML 继续作为文件级失败项而不拖死其它有效票。
 - ETC preview/confirm/import worker 不得调用 OA attachment upload 或 OA draft create；OA 草稿仅由后续独立人工动作触发。
 - Browser e2e 必须覆盖 ready task selector、zip preview、audit/review copy、confirm job feedback、preview stale、stale task preview、confirm failure、ETC 票据/税金结果、OA 成本隔离，以及 ETC 导入不误走通用 files import API。
+- Browser e2e 必须覆盖页面每次进入 fresh，不恢复历史 task/ZIP/preview；对当前 preview 点击清空时必须先 owner-bound discard，成功后回到 fresh。
 - read_export_only 用户必须能打开 ETC 发票导入页但不能选择 zip、预览或确认导入。
 - 120 张合成 ETC 发票混合 zip preview 必须把有效发票、同包重复 XML、malformed XML file-level failure 分开计数，且 preview 不持久化发票记录。
 - task reopen、task version/hash 变化、已存在 canonical invoice 关系变化或 import session 变化后，confirm 必须返回 `stale_reconciliation_task_preview` 或 `preview_stale`；页面不能展示“已开始后台导入”，其中 stale task preview 必须清空旧 preview 并要求重新预览。
@@ -68,8 +69,8 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_etc_reconciliation_service.py`、`tests/test_etc_backend.py` | 覆盖 task 状态、zip filter/matching、金额组合、重复发票、business batch 状态、manual OA status、delete/release。 |
-| 2. Service-layer tests | 适用 | `tests/test_etc_backend.py`、`tests/test_import_job_queue.py`、`tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`、`tests/test_cleanup_orphan_etc_reconciliation_tasks_tool.py` | 覆盖 ETC service、import job processor、reconciliation task cleanup、business batch delete、deterministic ETC relation enrichment/idempotency。 |
-| 3. API contract tests | 适用 | `tests/test_etc_backend.py`、`web/src/test/EtcApi.test.ts` | 覆盖 `/api/etc/import/*`、reconciliation task API、business batch API、structured errors、background job payload。 |
+| 2. Service-layer tests | 适用 | `tests/test_etc_backend.py`、`tests/test_etc_import_session_store.py`、`tests/test_import_job_queue.py`、`tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`、`tests/test_cleanup_orphan_etc_reconciliation_tasks_tool.py` | 覆盖 ETC service、session owner/discard、import job processor、reconciliation task cleanup、business batch delete、deterministic ETC relation enrichment/idempotency。 |
+| 3. API contract tests | 适用 | `tests/test_etc_backend.py`、`web/src/test/EtcApi.test.ts` | 覆盖 `/api/etc/import/*`、preview/confirm/discard owner 合同、reconciliation task API、business batch API、structured errors、background job payload。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_tax_offset_api.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 mutation-sensitive existing link、精确 scope、`etc_import_confirmed`/`etc_business_batch_status_changed` lifecycle、Tax/Workbench 显式 import scope、Cost 页面访问时 exact Workbench+requested Cost登记与 worker dependency gate、App Status job/readiness；旧 write-operation profile 的 publish fan-out expectation 不是当前合同，由 Phase 27-06 删除门禁处理。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-etc-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖 ETC standalone route、preview/confirm/stale/unmount、API mapper、business batch UI、global job status，以及真实浏览器 ready task/zip/confirm job、preview stale、stale task preview、confirm failure、ETC 票据/税金/成本下游 fresh read model 交互、成功后无导入失败/后台导入失败/read model 失败可见残留和 read-only 导入门禁。 |
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_etc_backend.py`、`tests/test_workbench_v2_api.py`、`web/e2e/imports-etc-invoices-flow.spec.ts` | 覆盖 task-aware zip import -> business batch -> ETC metadata/附件 -> Workbench summary/open row -> submitted/delete recovery；Browser e2e 覆盖导入页 preview/confirm、ETC 票据和税金结果，并证明无 OA 关系时成本项目不受污染；真实 worker 完成仍需 staging。 |

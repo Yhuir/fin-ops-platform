@@ -54,6 +54,8 @@ class EtcImportSessionStorePort(Protocol):
         last_error: str | None = None,
     ) -> StoredEtcImportSession: ...
 
+    def discard_preview(self, session_id: str, *, imported_by: str) -> None: ...
+
 
 class InMemoryEtcImportSessionStore:
     """Explicit unit-test/local adapter; production composition must use a durable adapter."""
@@ -93,6 +95,19 @@ class InMemoryEtcImportSessionStore:
         )
         self._sessions[updated.session_id] = _copy_session(updated)
         return _copy_session(updated)
+
+    def discard_preview(self, session_id: str, *, imported_by: str) -> None:
+        current = self._sessions.get(str(session_id or "").strip())
+        if current is None:
+            raise KeyError(session_id)
+        if current.imported_by != str(imported_by or "").strip():
+            raise PermissionError("ETC import session belongs to another user")
+        if current.status == "reverted":
+            return
+        if current.status not in {"preview_ready", "failed"}:
+            raise ValueError(f"ETC import session cannot be discarded from status: {current.status}")
+        updated = replace(current, status="reverted", last_error=None)
+        self._sessions[updated.session_id] = _copy_session(updated)
 
 
 class PostgresEtcImportSessionStore:
@@ -207,6 +222,12 @@ class PostgresEtcImportSessionStore:
         if loaded is None:
             raise KeyError(session_id)
         return loaded
+
+    def discard_preview(self, session_id: str, *, imported_by: str) -> None:
+        self._repository.discard_preview(
+            str(session_id or "").strip(),
+            imported_by=str(imported_by or "").strip(),
+        )
 
 
 def build_etc_import_session_store(state_store: Any) -> EtcImportSessionStorePort:

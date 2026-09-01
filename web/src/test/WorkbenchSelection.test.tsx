@@ -3669,7 +3669,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(previewButton).toBeEnabled();
     await user.click(previewButton);
 
-    expect(await screen.findByLabelText("本次识别 18")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 14")).toBeInTheDocument();
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;
@@ -3721,7 +3721,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.selectOptions(screen.getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
     await user.click(previewButton);
 
-    expect(await screen.findByLabelText("本次识别 28")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 22")).toBeInTheDocument();
     const previewCall = fetchMock.mock.calls.find(([url]) => String(url) === "/imports/files/preview");
     expect(previewCall).toBeTruthy();
     const formData = (previewCall?.[1] as RequestInit).body as FormData;
@@ -3779,7 +3779,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.upload(input, [etcZip]);
     await user.click(screen.getByRole("button", { name: "开始预览" }));
 
-    expect(await screen.findByLabelText("本次识别 4")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 1")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /确认导入/ }));
 
     await waitFor(() => {
@@ -3812,7 +3812,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.upload(input, [inputFile]);
     await user.selectOptions(screen.getByLabelText("票据方向 二月发票.xlsx"), "input_invoice");
     await user.click(screen.getByRole("button", { name: "开始预览" }));
-    expect(await screen.findByLabelText("本次识别 14")).toBeInTheDocument();
+    expect(await screen.findByLabelText("新增 11")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /确认导入/ }));
 

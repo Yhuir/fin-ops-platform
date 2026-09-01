@@ -76,16 +76,13 @@ async function expectDirectCanonicalResponse(
 async function previewInvoiceFiles(
   page: Page,
   options: {
-    expectedAudit?: { error: number; importable: number; original: number; review: number; skipped: number };
+    expectedAudit?: { importable: number; existing: number };
     recordLatency?: OperationLatencyRecorder;
   } = {},
 ) {
   const expectedAudit = options.expectedAudit ?? {
-    error: 1,
     importable: 22,
-    original: 28,
-    review: 2,
-    skipped: 4,
+    existing: 2,
   };
   await stageInvoiceFilesForPreview(page, options.recordLatency);
 
@@ -100,16 +97,15 @@ async function previewInvoiceFiles(
       const previewResponse = waitForImportPreview(page);
       await previewButton.click();
       await mark("apiLatencyMs", previewResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel(`本次识别 ${expectedAudit.original}`)).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByLabel(`本次将处理 ${expectedAudit.importable}`)).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel(`新增 ${expectedAudit.importable}`)).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByLabel(`APP 已存在 ${expectedAudit.existing}`)).toBeVisible());
     });
   } else {
     await previewButton.click();
   }
 
-  await expect(page.getByLabel(`本次识别 ${expectedAudit.original}`)).toBeVisible();
-  await expect(page.getByLabel(`本次将处理 ${expectedAudit.importable}`)).toBeVisible();
-  await expect(page.getByLabel(`本次不处理 ${expectedAudit.original - expectedAudit.importable}`)).toBeVisible();
+  await expect(page.getByLabel(`新增 ${expectedAudit.importable}`)).toBeVisible();
+  await expect(page.getByLabel(`APP 已存在 ${expectedAudit.existing}`)).toBeVisible();
   await expect(page.getByRole("grid", { name: "导入预览结果" })).toHaveCount(0);
   await expect(page.getByText("已完成 2 个文件的预览识别。")).toHaveCount(0);
 }
@@ -175,6 +171,18 @@ async function stageInvoiceFilesForPreview(page: Page, recordLatency?: Operation
 }
 
 test.describe("invoice import browser flow", () => {
+  test("clear discards the current preview and returns to a fresh page", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+
+    await previewInvoiceFiles(page);
+    await page.getByRole("button", { name: "清空" }).click();
+
+    await expect(page.getByText("当前还没有选择文件。")).toBeVisible();
+    await expect(page.getByLabel("新增 22")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "清空" })).toBeDisabled();
+    expect(api.count("POST /imports/files/discard")).toBe(1);
+  });
+
   test("previews and confirms input/output invoice files without cross-page barriers", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
@@ -398,7 +406,7 @@ test.describe("invoice import browser flow", () => {
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 
     await previewInvoiceFiles(page, {
-      expectedAudit: { error: 1, importable: 11, original: 15, review: 2, skipped: 2 },
+      expectedAudit: { importable: 11, existing: 1 },
       recordLatency,
     });
 
@@ -466,12 +474,12 @@ test.describe("invoice import browser flow", () => {
       await expect(page.getByRole("button", { name: "清空" })).toBeDisabled();
       await expect(page.getByRole("button", { name: "确认导入" })).toBeDisabled();
       await mark("apiLatencyMs", previewResponse);
-      await mark("finalSettledLatencyMs", expect(page.getByLabel("本次识别 28")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByLabel("新增 22")).toBeVisible());
     });
     expect(api.count("POST /imports/files/preview")).toBe(1);
 
-    await expect(page.getByLabel("本次识别 28")).toBeVisible();
-    await expect(page.getByRole("button", { name: "开始预览" })).toBeEnabled();
+    await expect(page.getByLabel("新增 22")).toBeVisible();
+    await expect(page.getByRole("button", { name: "开始预览" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "清空" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
     expect(api.count("POST /imports/files/preview")).toBe(1);

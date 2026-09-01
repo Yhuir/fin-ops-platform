@@ -8923,6 +8923,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, etcImportPayload(false));
     }
 
+    if (path === "/api/etc/import/discard") {
+      return json(route, { sessionId: "etc_import_session_e2e_001", status: "reverted" });
+    }
+
     if (path === "/api/etc/import/confirm") {
       if (options.etcImportConfirmStaleReconciliationTask) {
         return json(route, {
@@ -9935,6 +9939,15 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         corruptInvoiceFile: latestImportScenario === "invoice" && options.invoiceImportIncludeCorruptFile === true,
         noBankAccountConflict: options.bankImportNoAccountConflict,
       }));
+    }
+
+    if (path === "/imports/files/discard") {
+      return json(route, {
+        session: {
+          id: importSessionIds[latestImportScenario],
+          status: "reverted",
+        },
+      });
     }
 
     const importReviewMatch = path.match(/^\/imports\/files\/sessions\/([^/]+)\/review-rows$/);

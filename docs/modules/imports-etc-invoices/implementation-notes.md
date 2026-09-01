@@ -260,3 +260,10 @@
 - 删除旧预览成功解释、session 标识、七项审计汇总和常驻预览宽表；缺失行程、缺票、匹配阻塞和文件级错误只在用户打开 HeroUI 右侧抽屉时展示。
 - ETC 继续走专用 `/api/etc/import/preview` 与 durable confirm job；未新增 API、worker、read model、缓存、数据库表或兼容链。
 - Browser 回归覆盖 ready task、紧凑统计、按需明细、stale preview、对账任务变化、confirm failure、后台 job 和下游 canonical 页面隔离。
+
+## 2026-09-01 - fresh entry、owner discard 与真实预览统计
+
+- ETC 导入现与共享导入页保持相同用户语义：每次进入从空白 task/ZIP/preview 开始，不恢复浏览器或服务端历史 session，延迟 preview 响应不得污染新页面。
+- 新增窄 `POST /api/etc/import/discard` 边界：preview 持久化当前认证 owner，confirm/discard 都必须匹配同一 owner；只允许幂等终结未确认且无活跃/成功 job 的 session。清空失败保留 preview，不伪装为 fresh。
+- 预览汇总不再显示“本次识别/本次将处理/本次不处理”加工口径，而是直接使用严格 audit 字段展示“新增”、“APP 已存在”及有值的补齐/本批重复/需检查。
+- 没有新增 Redis、read model、worker、数据库迁移、兼容分支或 fallback；仅补齐 ETC 与通用 file/session 已有的显式放弃语义。

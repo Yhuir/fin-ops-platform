@@ -16,7 +16,6 @@ import type {
   EtcImportConfirmResult,
   EtcImportItem,
   EtcImportPreviewResult,
-  EtcImportSummary,
   EtcReconciliationBlockingIssue,
   EtcReconciliationFilterPreview,
   EtcInvoice,
@@ -237,20 +236,6 @@ type ApiEtcImportSummary = {
   job?: ApiBackgroundJob;
   sessionId?: string;
   session_id?: string;
-  summary?: {
-    imported?: number;
-    duplicatesSkipped?: number;
-    duplicates_skipped?: number;
-    attachmentsCompleted?: number;
-    attachments_completed?: number;
-    failed?: number;
-  };
-  imported?: number;
-  duplicatesSkipped?: number;
-  duplicates_skipped?: number;
-  attachmentsCompleted?: number;
-  attachments_completed?: number;
-  failed?: number;
   audit?: ApiEtcImportAuditCounts | null;
   importAudit?: ApiEtcImportAuditCounts | null;
   import_audit?: ApiEtcImportAuditCounts | null;
@@ -726,24 +711,31 @@ function optionalCount(value: unknown): number | undefined {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-function mapAuditCounts(payload?: ApiEtcImportAuditCounts | null): ImportPreviewAuditCounts | undefined {
+function requiredAuditCount(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`ETC 导入预览统计响应缺少有效字段：${field}`);
+  }
+  return Number(value);
+}
+
+function mapAuditCounts(payload: ApiEtcImportAuditCounts | null | undefined): ImportPreviewAuditCounts {
   if (!payload) {
-    return undefined;
+    throw new Error("ETC 导入预览统计响应缺少 audit。请刷新后重试。");
   }
   return {
-    originalCount: numberOrZero(payload.original_count),
-    uniqueCount: numberOrZero(payload.unique_count),
-    duplicateCount: numberOrZero(payload.duplicate_count),
-    duplicateInFileCount: numberOrZero(payload.duplicate_in_file_count),
-    duplicateAcrossFilesCount: numberOrZero(payload.duplicate_across_files_count),
-    existingDuplicateCount: numberOrZero(payload.existing_duplicate_count),
-    importableCount: numberOrZero(payload.importable_count),
-    updateCount: numberOrZero(payload.update_count),
-    mergeCount: numberOrZero(payload.merge_count),
-    suspectedDuplicateCount: numberOrZero(payload.suspected_duplicate_count),
-    errorCount: numberOrZero(payload.error_count),
-    confirmableCount: numberOrZero(payload.confirmable_count),
-    skippedCount: numberOrZero(payload.skipped_count),
+    originalCount: requiredAuditCount(payload.original_count, "original_count"),
+    uniqueCount: requiredAuditCount(payload.unique_count, "unique_count"),
+    duplicateCount: requiredAuditCount(payload.duplicate_count, "duplicate_count"),
+    duplicateInFileCount: requiredAuditCount(payload.duplicate_in_file_count, "duplicate_in_file_count"),
+    duplicateAcrossFilesCount: requiredAuditCount(payload.duplicate_across_files_count, "duplicate_across_files_count"),
+    existingDuplicateCount: requiredAuditCount(payload.existing_duplicate_count, "existing_duplicate_count"),
+    importableCount: requiredAuditCount(payload.importable_count, "importable_count"),
+    updateCount: requiredAuditCount(payload.update_count, "update_count"),
+    mergeCount: requiredAuditCount(payload.merge_count, "merge_count"),
+    suspectedDuplicateCount: requiredAuditCount(payload.suspected_duplicate_count, "suspected_duplicate_count"),
+    errorCount: requiredAuditCount(payload.error_count, "error_count"),
+    confirmableCount: requiredAuditCount(payload.confirmable_count, "confirmable_count"),
+    skippedCount: requiredAuditCount(payload.skipped_count, "skipped_count"),
   };
 }
 
@@ -936,23 +928,13 @@ function mapEtcReconciliationFilter(payload?: ApiEtcReconciliationFilterPreview 
 }
 
 function mapEtcImportResult(payload: ApiEtcImportSummary): EtcImportPreviewResult {
-  const summary = payload.summary ?? {};
   const audit = mapAuditCounts(payload.audit);
   const importAudit = mapAuditCounts(payload.importAudit ?? payload.import_audit);
   const reconciliationFilter = mapEtcReconciliationFilter(payload.reconciliationFilter ?? payload.reconciliation_filter);
   return {
     sessionId: payload.sessionId ?? payload.session_id ?? "",
-    imported: payload.imported ?? summary.imported ?? 0,
-    duplicatesSkipped: payload.duplicatesSkipped ?? payload.duplicates_skipped ?? summary.duplicatesSkipped ?? summary.duplicates_skipped ?? 0,
-    attachmentsCompleted:
-      payload.attachmentsCompleted
-      ?? payload.attachments_completed
-      ?? summary.attachmentsCompleted
-      ?? summary.attachments_completed
-      ?? 0,
-    failed: payload.failed ?? summary.failed ?? 0,
-    ...(audit ? { audit } : {}),
-    ...(importAudit ? { importAudit } : {}),
+    audit,
+    importAudit,
     ...(reconciliationFilter ? { reconciliationFilter } : {}),
     items: (payload.items ?? []).map(mapEtcImportItem),
   };
@@ -960,7 +942,6 @@ function mapEtcImportResult(payload: ApiEtcImportSummary): EtcImportPreviewResul
 
 function mapEtcImportConfirmResult(payload: ApiEtcImportSummary): EtcImportConfirmResult {
   return {
-    ...mapEtcImportResult(payload),
     ...(payload.job ? { job: mapBackgroundJob(payload.job) } : {}),
   };
 }
@@ -1628,10 +1609,6 @@ export async function deleteEtcBusinessBatch(
   });
 }
 
-export async function importEtcZipFiles(files: File[], taskId?: string): Promise<EtcImportSummary> {
-  return previewEtcZipFiles(files, taskId);
-}
-
 export async function previewEtcZipFiles(files: File[], taskId?: string): Promise<EtcImportPreviewResult> {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
@@ -1661,4 +1638,14 @@ export async function confirmEtcImportSession(sessionId: string, taskId?: string
     timeoutMessage: "ETC zip 确认导入超时，请检查后端导入状态后再刷新页面。",
   });
   return mapEtcImportConfirmResult(payload);
+}
+
+export async function discardEtcImportSession(sessionId: string): Promise<void> {
+  await requestJson<{ sessionId: string; status: "reverted" }>("/api/etc/import/discard", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sessionId }),
+  });
 }

@@ -150,6 +150,55 @@ class PostgresEtcImportSessionRepository:
             raise KeyError(session_id)
         return row
 
+    def discard_preview(self, session_id: str, *, imported_by: str) -> None:
+        def discard(connection: Any) -> None:
+            current = connection.fetch_one(
+                """
+                select status, imported_by, raw_payload
+                from app.etc_import_sessions
+                where session_id = %s
+                for update
+                """,
+                (session_id,),
+            )
+            if current is None:
+                raise KeyError(session_id)
+            if str(current.get("imported_by") or "") != imported_by:
+                raise PermissionError("ETC import session belongs to another user")
+            status = str(current.get("status") or "")
+            if status == "reverted":
+                return
+            if status not in {"preview_ready", "failed"}:
+                raise ValueError(f"ETC import session cannot be discarded from status: {status}")
+            active_job = connection.fetch_one(
+                """
+                select status
+                from job.import_jobs
+                where import_session_id = %s
+                  and status in ('pending', 'processing', 'succeeded')
+                order by created_at desc, id desc
+                limit 1
+                """,
+                (session_id,),
+            )
+            if active_job:
+                raise ValueError(f"ETC import session has an active or completed job: {active_job['status']}")
+            raw_payload = current.get("raw_payload") if isinstance(current.get("raw_payload"), dict) else {}
+            normalized = raw_payload.get("normalized_payload")
+            payload = dict(normalized) if isinstance(normalized, dict) else dict(raw_payload)
+            payload["status"] = "reverted"
+            payload["last_error"] = None
+            connection.execute(
+                """
+                update app.etc_import_sessions
+                set status = 'reverted', last_error = null, raw_payload = %s, updated_at = now()
+                where session_id = %s
+                """,
+                (_jsonb({"normalized_payload": payload}), session_id),
+            )
+
+        run_in_transaction(self._connection, discard)
+
 
 def _datetime_text(value: Any) -> str | None:
     if isinstance(value, datetime):

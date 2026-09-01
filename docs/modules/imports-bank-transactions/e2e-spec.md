@@ -4,7 +4,7 @@
 
 | Spec ID | 业务流程 | Browser 验收 |
 | --- | --- | --- |
-| `IMPORT-BANK-E2E-001` | 页面入口和配置 | 进入 `/imports/bank-transactions` 后显示“银行流水导入”；未选择文件时不创建 session；每个文件必须选择银行账户后才允许预览。 |
+| `IMPORT-BANK-E2E-001` | 页面入口和配置 | 进入 `/imports/bank-transactions` 后显示“银行流水导入”且每次都是 fresh，不恢复浏览器或服务端历史 preview；未选择文件时不创建 session；每个文件必须选择银行账户后才允许预览。对当前 preview 点击清空时，先 discard 成功再回到 fresh。 |
 | `IMPORT-BANK-E2E-002` | 预览和 audit | 上传 XLS/XLSX 后调用 `/imports/files/preview`，带 `bank_transaction` 与每文件账户 mapping override；页面展示 audit counts、可导入数、重复数和 preview grid；慢预览期间预览按钮必须显示进行中状态，预览/清空/确认动作全部禁用，不能重复提交或中断成半状态。 |
 | `IMPORT-BANK-E2E-003` | 重复/未导入明细 | 文件内重复、跨文件重复、已存在、损坏文件、异常或需复核行必须进入明细表；页面不能把 skipped/duplicate/error 行展示成可确认导入；损坏文件 + 正常文件混合上传时，确认只能提交正常文件 ID。 |
 | `IMPORT-BANK-E2E-004` | 银行账户冲突 | 文件识别账号与所选账号不一致时必须阻止确认；用户清空预览并选择识别到的正确账户后才能重新预览和导入，前后端都不得保留强制继续入口。 |

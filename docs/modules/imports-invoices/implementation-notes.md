@@ -307,3 +307,10 @@
 - 重复项和未处理项复用现有 review API，仅在用户打开 HeroUI 右侧抽屉后加载；预览完成到抽屉打开前不发起 detail request，不新增 API、worker、read model、缓存或第二条写链。
 - 统计口径固定为 `本次识别 = 本次将处理 + 本次不处理`；`APP 内已存在` 可能与其它不处理原因交叠，不参与该等式。
 - Browser 回归覆盖预览、按需加载、损坏文件部分确认、慢预览锁定、stale/confirm failure、异步确认与下游 canonical 页面隔离。
+
+## 2026-09-01 - fresh entry 与真实预览统计
+
+- 发票导入与银行流水共用同一页面生命周期：每次进入从空白本地草稿开始，不读 sessionStorage，不请求服务端活跃 session 列表，延迟 preview 响应不得污染已离开或重新进入的页面。
+- 清空已预览内容时继续使用 file/session owner-bound discard；只在服务端成功终结当前 preview 后清理本地 UI，避免用户看到“已清空”但 session 仍可确认的分裂状态。
+- 预览汇总直接消费后端 audit contract，常驻“新增”与“APP 已存在”，只在有值时展示更新、本批重复、需检查；缺失 audit 字段直接报合同错误，不用旧行数转换为假统计。
+- 无 Redis、read model、worker、数据库迁移、兼容分支或 fallback。

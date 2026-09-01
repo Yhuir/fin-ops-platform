@@ -9,7 +9,6 @@ import BackgroundProgressBlock from "../components/common/BackgroundProgressBloc
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { AppHealthStatusProvider } from "../contexts/AppHealthStatusContext";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
-import { ImportWorkflowDraftProvider } from "../contexts/ImportWorkflowDraftContext";
 import { ImportProgressProvider } from "../contexts/ImportProgressContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
@@ -205,17 +204,15 @@ export default function App() {
         <ImportProgressProvider>
           <SessionProvider>
             <PageSessionStateProvider>
-              <ImportWorkflowDraftProvider>
-                <AppChromeProvider initialShellHeaderMounted>
-                  <BackgroundJobProgressProvider>
-                    <AppHealthStatusProvider>
-                      <GlobalOperationOverlayProvider>
-                        <AppShell />
-                      </GlobalOperationOverlayProvider>
-                    </AppHealthStatusProvider>
-                  </BackgroundJobProgressProvider>
-                </AppChromeProvider>
-              </ImportWorkflowDraftProvider>
+              <AppChromeProvider initialShellHeaderMounted>
+                <BackgroundJobProgressProvider>
+                  <AppHealthStatusProvider>
+                    <GlobalOperationOverlayProvider>
+                      <AppShell />
+                    </GlobalOperationOverlayProvider>
+                  </AppHealthStatusProvider>
+                </BackgroundJobProgressProvider>
+              </AppChromeProvider>
             </PageSessionStateProvider>
           </SessionProvider>
         </ImportProgressProvider>

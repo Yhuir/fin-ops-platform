@@ -41,12 +41,20 @@ class EtcImportApiRoutes:
         actor_id: str,
     ) -> Any:
         if method == "POST" and route_path == "/api/etc/import/preview":
-            return self.preview(body, headers)
+            return self.preview(body, headers, owner_user_id=actor_id)
         if method == "POST" and route_path == "/api/etc/import/confirm":
             return self.confirm(body, owner_user_id=actor_id)
+        if method == "POST" and route_path == "/api/etc/import/discard":
+            return self.discard(body, owner_user_id=actor_id)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_etc_import_route"})
 
-    def preview(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+    def preview(
+        self,
+        body: str | bytes | None,
+        headers: dict[str, str] | None,
+        *,
+        owner_user_id: str,
+    ) -> Any:
         fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
             return error
@@ -66,7 +74,11 @@ class EtcImportApiRoutes:
         if not task_id:
             return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "task_id_required", "message": "task_id is required."})
         try:
-            payload = self._preview_service.preview(task_id=task_id, uploads=uploads)
+            payload = self._preview_service.preview(
+                task_id=task_id,
+                uploads=uploads,
+                imported_by=owner_user_id,
+            )
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
         except ValueError as error:
@@ -98,12 +110,18 @@ class EtcImportApiRoutes:
             validated_preview = self._preview_service.validate(
                 session_id=normalized_session_id,
                 task_id=normalized_task_id,
+                imported_by=owner_user_id,
             )
             total = validated_preview.item_total
         except KeyError:
             return self._json_response(
                 HTTPStatus.NOT_FOUND,
                 {"error": "etc_import_session_not_found", "message": "ETC import session not found."},
+            )
+        except PermissionError as error:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "etc_import_session_forbidden", "message": str(error)},
             )
         except EtcImportPreviewStaleError as error:
             return self._json_response(HTTPStatus.CONFLICT, {"error": "preview_stale", "message": str(error)})
@@ -192,3 +210,39 @@ class EtcImportApiRoutes:
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 {"error": "import_queue_unavailable", "message": str(exc), "job": failed_job.to_payload()},
             )
+
+    def discard(self, body: str | bytes | None, *, owner_user_id: str) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        session_id = payload.get("sessionId") or payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id.strip():
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_etc_import_request", "message": "sessionId is required."},
+            )
+        normalized_session_id = session_id.strip()
+        try:
+            self._preview_service.discard(
+                session_id=normalized_session_id,
+                imported_by=owner_user_id,
+            )
+        except KeyError:
+            return self._json_response(
+                HTTPStatus.NOT_FOUND,
+                {"error": "etc_import_session_not_found", "message": "ETC import session not found."},
+            )
+        except PermissionError as error:
+            return self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "etc_import_session_forbidden", "message": str(error)},
+            )
+        except ValueError as error:
+            return self._json_response(
+                HTTPStatus.CONFLICT,
+                {"error": "etc_import_session_not_discardable", "message": str(error)},
+            )
+        return self._json_response(
+            HTTPStatus.OK,
+            {"sessionId": normalized_session_id, "status": "reverted"},
+        )

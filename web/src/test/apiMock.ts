@@ -691,6 +691,21 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
           confirmable_count: 2,
           skipped_count: 2,
         },
+        importAudit: {
+          original_count: 4,
+          unique_count: 3,
+          duplicate_count: 1,
+          duplicate_in_file_count: 1,
+          duplicate_across_files_count: 0,
+          existing_duplicate_count: 1,
+          importable_count: 1,
+          update_count: 0,
+          merge_count: 1,
+          suspected_duplicate_count: 0,
+          error_count: 1,
+          confirmable_count: 2,
+          skipped_count: 2,
+        },
         items: [
           {
             invoiceNumber: "ETC-2026-005",
@@ -1251,6 +1266,21 @@ function buildImportPreviewPayload(
           duplicate_count: 0,
           suspected_duplicate_count: 0,
           updated_count: 0,
+          audit: {
+            original_count: 0,
+            unique_count: 0,
+            duplicate_count: 0,
+            duplicate_in_file_count: 0,
+            duplicate_across_files_count: 0,
+            existing_duplicate_count: 0,
+            importable_count: 0,
+            update_count: 0,
+            merge_count: 0,
+            suspected_duplicate_count: 0,
+            error_count: 0,
+            confirmable_count: 0,
+            skipped_count: 0,
+          },
           preview_batch_id: null,
           batch_id: null,
           row_results: [],
@@ -1299,6 +1329,21 @@ function buildImportPreviewPayload(
           duplicate_count: 0,
           suspected_duplicate_count: 0,
           updated_count: 0,
+          audit: {
+            original_count: 0,
+            unique_count: 0,
+            duplicate_count: 0,
+            duplicate_in_file_count: 0,
+            duplicate_across_files_count: 0,
+            existing_duplicate_count: 0,
+            importable_count: 0,
+            update_count: 0,
+            merge_count: 0,
+            suspected_duplicate_count: 0,
+            error_count: 0,
+            confirmable_count: 0,
+            skipped_count: 0,
+          },
           preview_batch_id: null,
           batch_id: null,
           selected_bank_mapping_id: selectedBankMappingId,
@@ -6081,6 +6126,12 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         body: etcInvoiceStore.confirmImport(),
       };
     },
+    "/api/etc/import/discard": ({ jsonBody }) => ({
+      body: {
+        sessionId: String(jsonBody?.sessionId ?? jsonBody?.session_id ?? ""),
+        status: "reverted",
+      },
+    }),
     "/api/bank-details/accounts": ({ url }) => {
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
@@ -7701,24 +7752,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           ? buildCostStatisticsBankTransactionPayload(entryId)
           : buildCostStatisticsAllocationPayload(entryId),
       );
-    }
-    if (url.pathname === "/imports/files/sessions") {
-      const isActive = ["preview_ready", "preview_ready_with_errors"].includes(latestImportSession.session.status);
-      return jsonResponse({
-        body: {
-          sessions: isActive && latestImportSession.files.length > 0
-            ? [{
-                session_id: latestImportSession.session.id,
-                imported_by: latestImportSession.session.imported_by,
-                file_count: latestImportSession.session.file_count,
-                batch_type: latestImportSession.files[0]?.batch_type,
-                created_at: latestImportSession.session.created_at,
-                updated_at: latestImportSession.session.created_at,
-                status: "awaiting_confirmation",
-              }]
-            : [],
-        },
-      });
     }
     const importReviewRowsMatch = url.pathname.match(/^\/imports\/files\/sessions\/([^/]+)\/review-rows$/);
     if (importReviewRowsMatch) {

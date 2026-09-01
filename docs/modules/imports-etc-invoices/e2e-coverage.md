@@ -4,7 +4,7 @@
 
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
 | --- | --- | --- | --- |
-| `IMPORT-ETC-E2E-001` | `covered` | `web/e2e/imports-etc-invoices-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/src/test/EtcApi.test.ts` | Browser 覆盖 standalone route、ready task 加载和未选 task 禁用 preview；组件测试覆盖 unavailable task blocker。 |
+| `IMPORT-ETC-E2E-001` | `covered` | `web/e2e/imports-etc-invoices-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`tests/test_etc_backend.py` | Browser 覆盖 standalone route、fresh entry、无历史 task/ZIP/preview 恢复、owner-bound discard 后回到 fresh、ready task 加载和未选 task 禁用 preview；组件测试覆盖 unavailable task blocker。 |
 | `IMPORT-ETC-E2E-002` | `covered` | `web/src/test/ImportCenterPage.test.tsx`、`tests/test_etc_backend.py` | 前端和后端覆盖非 zip 拒绝；Browser smoke 间接断言 ETC 导入不走通用 `/imports/files/*`。 |
 | `IMPORT-ETC-E2E-003` | `covered` | `web/e2e/imports-etc-invoices-flow.spec.ts`、`web/src/test/EtcApi.test.ts`、`tests/test_etc_backend.py` | Browser 覆盖真实 file input、ready task selector、ETC preview API、session、audit counts、review copy 和 preview grid。 |
 | `IMPORT-ETC-E2E-004` | `covered` | `web/e2e/imports-etc-invoices-flow.spec.ts`、`web/src/test/ImportCenterPage.test.tsx`、`tests/test_etc_backend.py` | Browser 覆盖 included、duplicate、attachment_completed、failed 文案；组件/后端覆盖 missing requirements 和 blocker。真实大 zip、对象存储和更多异常组合归入 `IMPORT-ETC-E2E-011` 的 external-risk。 |

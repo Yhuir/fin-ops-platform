@@ -4,7 +4,7 @@
 
 | Spec ID | 业务流程 | Browser 验收 |
 | --- | --- | --- |
-| `IMPORT-ETC-E2E-001` | 页面入口和 ready task | 进入 `/imports/etc-invoices` 后显示“ETC发票导入”；没有选择已确认且可导入的 ETC 对账任务时不能预览；unavailable task 必须解释 blocker。 |
+| `IMPORT-ETC-E2E-001` | 页面入口和 ready task | 进入 `/imports/etc-invoices` 后显示“ETC发票导入”且每次都是 fresh，不恢复历史 task、ZIP 或 preview；没有选择已确认且可导入的 ETC 对账任务时不能预览；unavailable task 必须解释 blocker。对当前 preview 点击清空时，先通过 owner-bound discard 成功再回到 fresh。 |
 | `IMPORT-ETC-E2E-002` | zip 文件约束 | 页面只接受 `.zip`；非 zip 文件必须被拒绝，且不能调用 ETC preview API 或通用 `/imports/files/*` API。 |
 | `IMPORT-ETC-E2E-003` | preview 和 audit | 上传 zip 后调用 `/api/etc/import/preview`，带 `task_id`；页面展示 session、audit counts、可导入数、重复数、需复核文案和 `ETC导入预览结果` grid。 |
 | `IMPORT-ETC-E2E-004` | 过滤/缺失/异常明细 | preview 必须展示 confirmed reconciliation task 过滤后的 included、duplicate、attachment_completed、failed、missing requirement 或 blocking issue；页面不能把 skipped/failed 行展示成可确认导入。 |

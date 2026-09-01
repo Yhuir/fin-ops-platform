@@ -33,6 +33,7 @@ def _session() -> StoredEtcImportSession:
         preview_audit=audit,
         preview_files=[{"fileName": "input.zip", "audit": audit}],
         reconciliation_filter={"taskId": "task-1", "taskVersion": 3},
+        imported_by="finance-user",
         uploads=(
             StoredEtcImportUpload(
                 file_id="etc-import-0001",
@@ -58,6 +59,26 @@ class EtcImportSessionStoreTests(unittest.TestCase):
         self.assertEqual(loaded, saved)
         self.assertIsNot(loaded, saved)
         self.assertEqual(loaded.uploads[0].content, _session().uploads[0].content)
+
+    def test_discard_is_owned_idempotent_and_rejects_non_preview_state(self) -> None:
+        store = InMemoryEtcImportSessionStore()
+        store.save_preview(_session())
+
+        store.discard_preview("session-1", imported_by="finance-user")
+        store.discard_preview("session-1", imported_by="finance-user")
+        discarded = store.get("session-1")
+
+        self.assertEqual(discarded.status, "reverted")
+        other_owner_store = InMemoryEtcImportSessionStore()
+        other_owner_store.save_preview(_session())
+        with self.assertRaises(PermissionError):
+            other_owner_store.discard_preview("session-1", imported_by="other-user")
+
+        completed_store = InMemoryEtcImportSessionStore()
+        completed_store.save_preview(_session())
+        completed_store.update_status("session-1", status="succeeded", imported_by="finance-user")
+        with self.assertRaises(ValueError):
+            completed_store.discard_preview("session-1", imported_by="finance-user")
 
     def test_durable_save_does_not_redownload_archives_after_verified_write(self) -> None:
         class Repository:
@@ -90,6 +111,27 @@ class EtcImportSessionStoreTests(unittest.TestCase):
 
         self.assertEqual(saved.uploads[0].stored_file_path, "minio://bucket/etc-import-0001")
         self.assertEqual(saved.uploads[0].content, _session().uploads[0].content)
+
+    def test_durable_discard_does_not_redownload_archives(self) -> None:
+        class Repository:
+            discarded: tuple[str, str] | None = None
+
+            def discard_preview(self, session_id: str, *, imported_by: str) -> None:
+                self.discarded = (session_id, imported_by)
+
+            def get(self, _session_id: str) -> dict:
+                raise AssertionError("discard_preview must not reload persisted archive bytes")
+
+        class ArchiveStore:
+            def read_etc_import_archive(self, _stored_file_path: str) -> bytes:
+                raise AssertionError("discard_preview must not reload persisted archive bytes")
+
+        repository = Repository()
+        store = PostgresEtcImportSessionStore(repository=repository, archive_store=ArchiveStore())
+
+        store.discard_preview("session-1", imported_by="finance-user")
+
+        self.assertEqual(repository.discarded, ("session-1", "finance-user"))
 
 
 class PostgresEtcImportSessionStoreTests(unittest.TestCase):
@@ -134,6 +176,24 @@ class PostgresEtcImportSessionStoreTests(unittest.TestCase):
         self.assertEqual(third.status, "succeeded")
         self.assertEqual(third.imported_by, "worker")
         self.assertIsNone(third.last_error)
+
+    def test_discard_persists_reverted_status_and_enforces_owner(self) -> None:
+        first = build_etc_import_session_store(self._state_store())
+        first.save_preview(_session())
+
+        second = build_etc_import_session_store(self._state_store())
+        with self.assertRaises(PermissionError):
+            second.discard_preview("session-1", imported_by="other-user")
+
+        second.discard_preview("session-1", imported_by="finance-user")
+        build_etc_import_session_store(self._state_store()).discard_preview(
+            "session-1",
+            imported_by="finance-user",
+        )
+        reverted = build_etc_import_session_store(self._state_store()).get("session-1")
+
+        self.assertEqual(reverted.status, "reverted")
+        self.assertEqual(reverted.imported_by, "finance-user")
 
 
 if __name__ == "__main__":

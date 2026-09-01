@@ -131,7 +131,7 @@ Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.plan
 | `bankDetails/api.ts` | `bank-details` | 银行明细分类、自动标签、关系入口等写入口。 |
 | `batchAccounting/api.ts` | `batch-accounting` | 批量账务标签规则保存、提交和撤回。 |
 | `cost-statistics/api.ts` | `cost-statistics` | 无 OA 规则 PUT 与配对金额人工分配写入；导出仍为只读能力。 |
-| `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口。 |
+| `etc/api.ts` | `etc-tickets`, `imports-etc-invoices` | ETC 票据管理、ETC 导入、对账和业务批次写入口；清空仅放弃当前用户尚未确认的预览，不触碰业务事实。 |
 | `imports/api.ts` | `imports-bank-transactions`, `imports-invoices`, `imports-etc-invoices` | 文件导入 preview/confirm/template；人工流水 preview 仅创建当前用户的临时预览 session，属于 read-like command，确认/放弃复用既有 import batch/session 边界。 |
 | `inputInvoiceUsage/api.ts` | `input-invoice-usage` | 支付规则、OA reverse 草稿/批次/状态写入口。 |
 | `bankFlowRuleBatches/api.ts` | `bank-flow-rule-batches` | 流水规则批量处理标签规则、提交、撤回和内部往来迁移底座写入口。 |

@@ -5,7 +5,6 @@ import App from "../app/App";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import { ImportProgressProvider } from "../contexts/ImportProgressContext";
-import { ImportWorkflowDraftProvider } from "../contexts/ImportWorkflowDraftContext";
 import { MonthProvider } from "../contexts/MonthContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
@@ -84,25 +83,23 @@ export function renderAuthenticatedAppAt(
         <ImportProgressProvider>
           <SessionContext.Provider value={sessionContext}>
             <PageSessionStateProvider>
-              <ImportWorkflowDraftProvider>
-                <AppChromeProvider initialShellHeaderMounted>
-                  <GlobalOperationOverlayProvider>
-                    <nav aria-label="测试导航">
-                      <Link to="/settings">设置</Link>
-                      <Link to="/imports/invoices">发票导入</Link>
-                      <Link to="/imports/bank-transactions">银行流水导入</Link>
-                      <Link to="/imports/etc-invoices">ETC发票导入</Link>
-                      <Link to="/bank-details">银行明细</Link>
-                      <Link to="/input-invoice-usage">进项发票使用情况</Link>
-                      <Link to="/output-invoice-collections">销项发票收款情况</Link>
-                      <Link to="/bank-flow-rule-batches">流水规则批量处理</Link>
-                    </nav>
-                    <main>
-                      <AppRouter />
-                    </main>
-                  </GlobalOperationOverlayProvider>
-                </AppChromeProvider>
-              </ImportWorkflowDraftProvider>
+              <AppChromeProvider initialShellHeaderMounted>
+                <GlobalOperationOverlayProvider>
+                  <nav aria-label="测试导航">
+                    <Link to="/settings">设置</Link>
+                    <Link to="/imports/invoices">发票导入</Link>
+                    <Link to="/imports/bank-transactions">银行流水导入</Link>
+                    <Link to="/imports/etc-invoices">ETC发票导入</Link>
+                    <Link to="/bank-details">银行明细</Link>
+                    <Link to="/input-invoice-usage">进项发票使用情况</Link>
+                    <Link to="/output-invoice-collections">销项发票收款情况</Link>
+                    <Link to="/bank-flow-rule-batches">流水规则批量处理</Link>
+                  </nav>
+                  <main>
+                    <AppRouter />
+                  </main>
+                </GlobalOperationOverlayProvider>
+              </AppChromeProvider>
             </PageSessionStateProvider>
           </SessionContext.Provider>
         </ImportProgressProvider>

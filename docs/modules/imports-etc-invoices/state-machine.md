@@ -23,10 +23,13 @@
 
 | 状态 | 含义 | 允许流转 |
 | --- | --- | --- |
+| `fresh` | 每次页面激活后本地文件、task 选择、preview 与反馈均为空 | `task_selected`；不从浏览器或服务端自动恢复历史 preview |
 | `task_selected` | 前端已选择 ready task | `zip_selected`、切换 task |
 | `zip_selected` | 本地选择一个或多个 zip 文件 | `previewing`、清空 |
 | `previewing` | 调用 `/api/etc/import/preview` | `preview_ready`、`preview_blocked`、`error`、unmount cleanup |
-| `preview_ready` | durable session 已冻结 task/version/hash、ZIP identity、filter/match/count/fingerprint | `confirming`、重新预览、清空 |
+| `preview_ready` | durable session 已冻结 owner、task/version/hash、ZIP identity、filter/match/count/fingerprint | `confirming`、重新预览、`discarding` |
+| `discarding` | owner 对当前 session 调用 `/api/etc/import/discard` | 成功进入 `fresh`；失败保留 `preview_ready` 便于用户重试 |
+| `reverted` | 未确认 session 已被 owner 幂等放弃 | 服务端终态，不可 confirm；页面展示为 `fresh` |
 | `preview_blocked` | 缺少必要 ETC 发票、匹配歧义或无 allowlist | 不能 confirm；需要修正 task/source/zip |
 | `preview_stale` | canonical invoice 或 import session 已变化 | 只能重新预览 |
 | `task_preview_stale` | task version/hash/source facts 已变化 | 清空 preview，重新读取 task 后再 preview |
@@ -69,6 +72,7 @@ ETC zip confirm 会创建或复用 task-scoped business batch。后续状态主�
 - loading：ready task 加载、zip preview、confirm、job polling、source task refresh 时展示局部 loading；route unmount 必须清理 in-flight preview 状态。
 - empty：没有 ready task 时展示不可导入原因，不显示可确认按钮。
 - error：非 zip、缺少 task、unknown task、storage unavailable、queue unavailable、job failed、manual status failed 必须有可见反馈。
+- fresh entry：每次页面激活都清空本地 task、ZIP、preview 和反馈，不读 sessionStorage，不自动查找服务端历史 session；离开后才返回的 preview 响应必须丢弃。
 - stale/refreshing：`stale_reconciliation_task_preview` 清空 preview 并要求重新预览；downstream stale/refreshing 由各自 read model status 呈现。
 - permission disabled/hidden：当前导入写权限由后端 contract 决定；若未来增加前端权限显示，必须补隐藏/禁用交互测试。
 

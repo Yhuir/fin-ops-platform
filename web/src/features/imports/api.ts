@@ -1,6 +1,5 @@
 import type {
   ImportFilePreviewOverride,
-  ActiveImportSession,
   ImportBatchType,
   ImportPreviewAuditCounts,
   ImportPreviewDuplicateGroup,
@@ -300,24 +299,31 @@ function mapPreviewDetailFields(row: {
   };
 }
 
-function mapAuditCounts(payload?: ApiImportPreviewAuditCounts | null): ImportPreviewAuditCounts | undefined {
+function requiredAuditCount(value: unknown, field: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`导入预览统计响应缺少有效字段：${field}`);
+  }
+  return Number(value);
+}
+
+function mapAuditCounts(payload: ApiImportPreviewAuditCounts | null | undefined): ImportPreviewAuditCounts {
   if (!payload) {
-    return undefined;
+    throw new Error("导入预览统计响应缺少 audit。请刷新后重试。");
   }
   return {
-    originalCount: numberOrZero(payload.original_count),
-    uniqueCount: numberOrZero(payload.unique_count),
-    duplicateCount: numberOrZero(payload.duplicate_count),
-    duplicateInFileCount: numberOrZero(payload.duplicate_in_file_count),
-    duplicateAcrossFilesCount: numberOrZero(payload.duplicate_across_files_count),
-    existingDuplicateCount: numberOrZero(payload.existing_duplicate_count),
-    importableCount: numberOrZero(payload.importable_count),
-    updateCount: numberOrZero(payload.update_count),
-    mergeCount: numberOrZero(payload.merge_count),
-    suspectedDuplicateCount: numberOrZero(payload.suspected_duplicate_count),
-    errorCount: numberOrZero(payload.error_count),
-    confirmableCount: numberOrZero(payload.confirmable_count),
-    skippedCount: numberOrZero(payload.skipped_count),
+    originalCount: requiredAuditCount(payload.original_count, "original_count"),
+    uniqueCount: requiredAuditCount(payload.unique_count, "unique_count"),
+    duplicateCount: requiredAuditCount(payload.duplicate_count, "duplicate_count"),
+    duplicateInFileCount: requiredAuditCount(payload.duplicate_in_file_count, "duplicate_in_file_count"),
+    duplicateAcrossFilesCount: requiredAuditCount(payload.duplicate_across_files_count, "duplicate_across_files_count"),
+    existingDuplicateCount: requiredAuditCount(payload.existing_duplicate_count, "existing_duplicate_count"),
+    importableCount: requiredAuditCount(payload.importable_count, "importable_count"),
+    updateCount: requiredAuditCount(payload.update_count, "update_count"),
+    mergeCount: requiredAuditCount(payload.merge_count, "merge_count"),
+    suspectedDuplicateCount: requiredAuditCount(payload.suspected_duplicate_count, "suspected_duplicate_count"),
+    errorCount: requiredAuditCount(payload.error_count, "error_count"),
+    confirmableCount: requiredAuditCount(payload.confirmable_count, "confirmable_count"),
+    skippedCount: requiredAuditCount(payload.skipped_count, "skipped_count"),
   };
 }
 
@@ -358,7 +364,7 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
       fileCount: payload.session.file_count,
       status: payload.session.status,
       createdAt: payload.session.created_at,
-      ...(sessionAudit ? { audit: sessionAudit } : {}),
+      audit: sessionAudit,
     },
     files: payload.files.map((file) => {
       const audit = mapAuditCounts(file.audit);
@@ -375,7 +381,7 @@ function mapImportPayload(payload: ApiImportSessionPayload): ImportSessionPayloa
         duplicateCount: file.duplicate_count,
         suspectedDuplicateCount: file.suspected_duplicate_count,
         updatedCount: file.updated_count,
-        ...(audit ? { audit } : {}),
+        audit,
         previewBatchId: file.preview_batch_id,
         batchId: file.batch_id,
         storedFilePath: file.stored_file_path,
@@ -700,44 +706,12 @@ export async function fetchImportSession(sessionId: string): Promise<ImportSessi
   return mapImportPayload(payload);
 }
 
-export async function fetchActiveImportSessions(
-  mode: "bank_transaction" | "invoice",
-): Promise<ActiveImportSession[]> {
-  const payload = await requestJson<{
-    sessions?: Array<{
-      session_id?: string;
-      imported_by?: string;
-      file_count?: number;
-      batch_type?: ImportBatchType | null;
-      created_at?: string;
-      updated_at?: string;
-      status?: string;
-      job_id?: string | null;
-      job_stage?: string | null;
-      error?: string | null;
-    }>;
-  }>(`/imports/files/sessions?mode=${encodeURIComponent(mode)}`, { method: "GET" });
-  return (payload.sessions ?? []).map((session) => ({
-    sessionId: stringOrEmpty(session.session_id),
-    importedBy: stringOrEmpty(session.imported_by),
-    fileCount: numberOrZero(session.file_count),
-    batchType: session.batch_type ?? null,
-    createdAt: stringOrEmpty(session.created_at),
-    updatedAt: stringOrEmpty(session.updated_at),
-    status: stringOrEmpty(session.status),
-    jobId: session.job_id ?? null,
-    jobStage: session.job_stage ?? null,
-    error: session.error ?? null,
-  }));
-}
-
-export async function discardImportSession(sessionId: string): Promise<ImportSessionPayload> {
-  const payload = await requestJson<ApiImportSessionPayload>("/imports/files/discard", {
+export async function discardImportSession(sessionId: string): Promise<void> {
+  await requestJson<unknown>("/imports/files/discard", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId }),
   });
-  return mapImportPayload(payload);
 }
 
 type ApiImportReviewRowsPage = {
