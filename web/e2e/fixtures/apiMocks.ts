@@ -5396,7 +5396,12 @@ function costStatisticsExplorerPagePayload(
     || (scope.startsWith("year:") ? row.trade_time.startsWith(`${scope.slice(5)}-`) : row.trade_time.startsWith(scope))
   ));
   const costRows = inScope(payload.cost_rows);
-  const bankFlowRows = inScope(costBankFlowRows(payload.month));
+  const bankFlowRows = costRows.map((row) => ({
+    ...row,
+    direction: row.transaction_id === "cost-txn-e2e-002" ? "收入" : "支出",
+    bank_account_label: row.payment_account_label,
+    ...costBankTagForRow(row),
+  }));
   const amount = (value: string) => Number(value.replace(/,/g, "")) || 0;
   const formatAmount = (value: number) => value.toLocaleString("en-US", {
     minimumFractionDigits: 2,

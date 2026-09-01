@@ -17822,7 +17822,7 @@ body.column-layout-dragging {
 }
 
 .cost-page {
-  --cost-workspace-height: clamp(600px, calc(100dvh - 144px), 840px);
+  --cost-workspace-height: clamp(520px, calc(100dvh - 180px), 840px);
   gap: var(--fp-space-3);
   min-width: 0;
 }
@@ -20906,41 +20906,24 @@ body.column-layout-dragging {
   gap: var(--fp-space-3);
 }
 
-.cost-analysis-layout.time-layout {
-  grid-template-columns: minmax(190px, 15%) minmax(0, 1fr);
-}
-
-.cost-time-workspace,
 .cost-explorer-grid {
   height: var(--cost-workspace-height);
 }
 
-.cost-time-filter-rail {
-  display: grid;
-  min-width: 0;
+.cost-explorer-grid.time {
   min-height: 0;
-  align-content: start;
-  gap: var(--fp-space-3);
-  padding: var(--fp-space-3);
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-md);
-  background: var(--fp-surface);
-  overflow: auto;
+  height: var(--cost-workspace-height);
 }
 
-.cost-time-filter-rail h2 {
-  margin: 0;
-  color: var(--fp-text-primary);
-  font-size: 13px;
-  font-weight: var(--fp-weight-semibold);
+.cost-explorer-grid.time > .cost-explorer-lane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
 }
 
-.cost-time-filter-rail .business-period-picker--segmented {
-  width: 100%;
-}
-
-.cost-time-filter-rail .business-period-trigger {
-  min-width: 0;
+.cost-explorer-grid.time .finance-table__scroll {
+  max-height: none;
 }
 
 @media (max-width: 720px) {
@@ -20962,39 +20945,17 @@ body.column-layout-dragging {
 }
 
 @media (min-width: 1025px) {
-  .cost-analysis-layout.time-layout,
   .cost-explorer-grid {
     align-items: stretch;
   }
 
-  .cost-analysis-layout.time-layout .cost-table-section {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    min-height: 0;
-  }
-
-  .cost-analysis-layout.time-layout .cost-table-shell,
-  .cost-analysis-layout.time-layout .cost-finance-table,
-  .cost-analysis-layout.time-layout .finance-table__scroll,
   .cost-explorer-grid > .cost-explorer-lane {
     min-height: 0;
   }
 
-  .cost-analysis-layout.time-layout .cost-table-shell,
   .cost-explorer-lane-table .cost-table-shell {
     display: grid;
     grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .cost-analysis-layout.time-layout .cost-table-shell,
-  .cost-analysis-layout.time-layout .cost-finance-table,
-  .cost-analysis-layout.time-layout .finance-table__scroll {
-    height: 100%;
-  }
-
-  .cost-analysis-layout.time-layout .finance-table__scroll {
-    max-height: none;
-    overflow-y: auto;
   }
 
   .cost-explorer-grid > .cost-explorer-lane {
@@ -21931,22 +21892,11 @@ body.column-layout-dragging {
   width: 48%;
 }
 
-@media (max-width: 1279px) {
-  .cost-time-workspace {
-    height: auto;
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .cost-time-filter-rail {
-    overflow: visible;
-  }
-
-  .cost-time-workspace .cost-table-section {
-    height: var(--cost-workspace-height);
-  }
-}
-
 @media (max-width: 1024px) {
+  .cost-explorer-grid.time {
+    height: clamp(280px, calc(100dvh - 424px), 600px);
+  }
+
   .cost-toolbar,
   .tax-layout {
     grid-template-columns: 1fr;
@@ -22049,7 +21999,6 @@ body.column-layout-dragging {
     grid-template-columns: 1fr;
   }
 
-  .cost-analysis-layout.time-layout,
   .cost-analysis-layout.explorer-layout,
   .cost-explorer-grid.project,
   .cost-explorer-grid.expense,

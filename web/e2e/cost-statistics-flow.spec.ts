@@ -90,6 +90,62 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByRole("grid", { name: "按标签银行流水表" })).toContainText("PLC 模块采购");
   });
 
+  test("keeps time pagination visible and scrolls only the current twenty rows", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      costStatisticsLargeDataset: true,
+    });
+
+    await page.goto("/cost-statistics");
+    const timeResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "time");
+    await page.getByRole("radio", { name: "按时间" }).click();
+    await timeResponse;
+
+    const timeGrid = page.getByRole("grid", { name: "按时间银行流水表" });
+    await expect(timeGrid.getByRole("row")).toHaveCount(21);
+    const pagination = page.getByRole("navigation", { name: "pagination" });
+    const nextPage = pagination.getByRole("button", { name: "下一页" });
+    await expect(pagination).toBeVisible();
+    await expect(page.getByText(/第 1 \/ \d+ 页/)).toBeVisible();
+    await expect(nextPage).toBeVisible();
+    for (const viewport of [
+      { width: 1728, height: 921 },
+      { width: 1440, height: 900 },
+      { width: 1280, height: 800 },
+      { width: 1024, height: 768 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const paginationBox = await pagination.boundingBox();
+      expect(paginationBox).not.toBeNull();
+      expect((paginationBox?.y ?? 0) + (paginationBox?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
+    }
+
+    const scrollSurface = timeGrid.locator(
+      "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' finance-table__scroll ')][1]",
+    );
+    const beforeScroll = await scrollSurface.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(beforeScroll.scrollHeight).toBeGreaterThan(beforeScroll.clientHeight);
+    const pageScrollBefore = await page.evaluate(() => window.scrollY);
+    await scrollSurface.evaluate((element) => {
+      element.scrollTop = Math.min(240, element.scrollHeight - element.clientHeight);
+    });
+    await expect.poll(() => scrollSurface.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.scrollY)).toBe(pageScrollBefore);
+
+    const nextPageResponse = waitForExplorer(page, (url) => (
+      url.searchParams.get("view") === "time"
+      && url.searchParams.get("cursor") === "mock:20"
+    ));
+    await nextPage.click();
+    await nextPageResponse;
+    await expect(page.getByText(/第 2 \/ \d+ 页/)).toBeVisible();
+    await expect(timeGrid.getByRole("row")).toHaveCount(21);
+    await expect.poll(() => scrollSurface.evaluate((element) => element.scrollTop)).toBe(0);
+  });
+
   test("drills from project through expense type to OA cost detail", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "full_access" });
 

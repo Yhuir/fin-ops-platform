@@ -155,7 +155,9 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("radio", { name: "按时间" }));
     expect(await screen.findByRole("heading", { name: "按时间统计" })).toBeInTheDocument();
-    expect(await screen.findByRole("grid", { name: "按时间银行流水表" })).toBeInTheDocument();
+    const timeGrid = await screen.findByRole("grid", { name: "按时间银行流水表" });
+    expect(timeGrid.closest(".cost-explorer-grid.time")).not.toBeNull();
+    expect(timeGrid.closest(".cost-table-shell")?.querySelector(".cost-table-pagination-footer")).not.toBeNull();
     expect(screen.getAllByText("收", { exact: true }).length).toBeGreaterThan(0);
     expect(screen.queryByText("净支出", { exact: true })).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(

@@ -2009,26 +2009,28 @@ export default function CostStatisticsPage() {
                     {costViewSearch}
                   </div>
                 </div>
-                {explorerTransitionScope === "surface" ? (
-                  <CostSurfaceSkeleton loading={isExplorerLoading} />
-                ) : (
-                  <section className="cost-explorer-lane cost-explorer-lane-table min-h-[520px]">
-                    <header className="cost-explorer-lane-header">
-                      <h2>银行流水明细</h2>
-                      <CostLaneCount value={explorerData?.rowCount ?? selectedTimeRows.length} />
-                    </header>
-                    <CostStatisticsTable
-                      ariaLabel="按时间银行流水表"
-                      columns={entryColumns}
-                      rows={selectedTimeRows}
-                      getRowKey={getCostEntryRowRenderKey}
-                      onRowClick={(row) => void openEntryDetail(row, "time")}
-                      getRowActionLabel={costEntryActionLabel}
-                      emptyLabel="当前时间范围没有银行流水。"
-                      {...tablePaginationProps}
-                    />
-                  </section>
-                )}
+                <div className="cost-explorer-grid time grid min-h-0 grid-cols-1">
+                  {explorerTransitionScope === "surface" ? (
+                    <CostSurfaceSkeleton loading={isExplorerLoading} />
+                  ) : (
+                    <section className="cost-explorer-lane cost-explorer-lane-table">
+                      <header className="cost-explorer-lane-header">
+                        <h2>银行流水明细</h2>
+                        <CostLaneCount value={explorerData?.rowCount ?? selectedTimeRows.length} />
+                      </header>
+                      <CostStatisticsTable
+                        ariaLabel="按时间银行流水表"
+                        columns={entryColumns}
+                        rows={selectedTimeRows}
+                        getRowKey={getCostEntryRowRenderKey}
+                        onRowClick={(row) => void openEntryDetail(row, "time")}
+                        getRowActionLabel={costEntryActionLabel}
+                        emptyLabel="当前时间范围没有银行流水。"
+                        {...tablePaginationProps}
+                      />
+                    </section>
+                  )}
+                </div>
               </div>
             ) : null}
 
