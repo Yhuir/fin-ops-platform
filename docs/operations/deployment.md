@@ -24,3 +24,6 @@ Migration 0149 删除旧 projection schema，是 forward-only。执行后禁止�
 
 Migration 0162 将成本人工分配从旧来源矩阵合同迁移为 OA 单元金额合同并重命名持久化列，同样属于
 forward-only；执行后禁止自动回滚到仍读取旧矩阵列的 release，失败时保持 maintenance 并向前修复。
+
+Migration 0165 将账户权限从旧访问层级一次性迁移为逐页面授权，并删除旧 JSON 字段与 OA 角色。旧 release
+无法读取新合同，因此也属于 forward-only；失败时保持 maintenance，由当前代码向前修复，禁止启动旧权限链路。
