@@ -2635,6 +2635,22 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual([item["taskId"] for item in payload["unavailableTasks"]], [task.task_id])
         self.assertEqual(payload["unavailableTasks"][0]["status"], "draft")
         self.assertEqual(
+            set(payload["unavailableTasks"][0]),
+            {
+                "taskId",
+                "status",
+                "version",
+                "title",
+                "periodStart",
+                "periodEnd",
+                "oaTotalAmount",
+                "etcInvoiceCount",
+                "supplementCount",
+                "vehiclePlates",
+                "importBlockers",
+            },
+        )
+        self.assertEqual(
             payload["unavailableTasks"][0]["importBlockers"],
             [
                 {

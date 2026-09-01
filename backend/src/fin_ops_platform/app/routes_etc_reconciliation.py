@@ -25,6 +25,8 @@ class EtcReconciliationTaskApiRoutes:
         load_multipart_body: Callable[[str | bytes | None, dict[str, str] | None], tuple[dict[str, list[str]], list[Any], Any | None]],
         task_payload: Callable[[Any], dict[str, Any]],
         unavailable_task_payload: Callable[[Any], dict[str, Any]],
+        import_task_summary_payload: Callable[[Any], dict[str, Any]],
+        unavailable_import_task_summary_payload: Callable[[Any], dict[str, Any]],
         cleanup_service: EtcReconciliationImportCleanupService,
         expected_version_from_payload: Callable[[dict[str, object]], int],
         expected_version_from_fields: Callable[[dict[str, list[str]]], int],
@@ -40,6 +42,8 @@ class EtcReconciliationTaskApiRoutes:
         self._load_multipart_body = load_multipart_body
         self._task_payload = task_payload
         self._unavailable_task_payload = unavailable_task_payload
+        self._import_task_summary_payload = import_task_summary_payload
+        self._unavailable_import_task_summary_payload = unavailable_import_task_summary_payload
         self._cleanup_service = cleanup_service
         self._expected_version_from_payload = expected_version_from_payload
         self._expected_version_from_fields = expected_version_from_fields
@@ -75,17 +79,25 @@ class EtcReconciliationTaskApiRoutes:
         )
 
     def ready_for_import(self) -> Any:
-        ready_tasks = self._task_service.list_ready_for_import_tasks()
+        summaries = self._task_service.list_import_task_summaries()
+        ready_tasks = [
+            task
+            for task in summaries
+            if getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) == "ready_for_import"
+        ]
         unavailable_tasks = [
             task
-            for task in self._task_service.list_tasks()
+            for task in summaries
             if getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")) != "ready_for_import"
         ]
         return self._json_response(
             HTTPStatus.OK,
             {
-                "tasks": [self._task_payload(task) for task in ready_tasks],
-                "unavailableTasks": [self._unavailable_task_payload(task) for task in unavailable_tasks],
+                "tasks": [self._import_task_summary_payload(task) for task in ready_tasks],
+                "unavailableTasks": [
+                    self._unavailable_import_task_summary_payload(task)
+                    for task in unavailable_tasks
+                ],
             },
         )
 

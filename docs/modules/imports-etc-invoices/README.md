@@ -58,7 +58,7 @@ ETC 导入 runtime 删除链路只清理 ETC task、import batch、business batc
 
 | 动作 | 事实源 / 事件 | 影响 |
 | --- | --- | --- |
-| ready task 查询 | `EtcReconciliationTaskService.list_ready_for_import_tasks()` | ETC 导入页 task selector |
+| ready task 查询 | `EtcReconciliationTaskService.list_import_task_summaries()` | ETC 导入页 task selector；单次读取窄摘要，不加载任务明细、文件或解析行 |
 | zip preview | `preview_etc_zip_for_task(...)` + `EtcService.preview_import_zips(...)` | 当前导入页 preview、missing requirements、duplicate audit |
 | preview stale | `stale_reconciliation_task_preview` 或 `preview_stale` | 当前导入页必须清空 preview 并要求重新预览 |
 | confirm queued | `etc_invoice_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status/App Health；job source 必须携带 `task_id`、`affected_domains=["imports_etc_invoices","etc_tickets"]` 和 route `/imports/etc-invoices` |

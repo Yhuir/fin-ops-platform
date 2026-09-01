@@ -365,6 +365,8 @@ class EtcReconciliationServiceTests(unittest.TestCase):
 
         payload = facade.task_payload(task)
         unavailable_payload = facade.unavailable_task_payload(task)
+        import_summary = facade.import_task_summary_payload(task)
+        unavailable_import_summary = facade.unavailable_import_task_summary_payload(task)
 
         self.assertEqual(payload["taskId"], task.task_id)
         self.assertEqual(payload["status"], "draft")
@@ -376,6 +378,22 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             unavailable_payload["importBlockers"],
             [{"code": "not_confirmed", "message": "请先在 ETC 对账页确认对账。"}],
         )
+        self.assertEqual(
+            set(import_summary),
+            {
+                "taskId",
+                "status",
+                "version",
+                "title",
+                "periodStart",
+                "periodEnd",
+                "oaTotalAmount",
+                "etcInvoiceCount",
+                "supplementCount",
+                "vehiclePlates",
+            },
+        )
+        self.assertEqual(unavailable_import_summary["importBlockers"], unavailable_payload["importBlockers"])
 
     def test_task_payload_facade_uses_import_batch_lookup_for_imported_summary(self) -> None:
         task = EtcReconciliationTask(

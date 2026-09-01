@@ -383,6 +383,9 @@ class PostgresStateStore:
     def get_etc_reconciliation_task_record(self, task_id: str) -> dict[str, Any] | None:
         return self._ops_tax_etc_repository.get_etc_reconciliation_task_record(task_id)
 
+    def list_etc_reconciliation_import_task_summaries(self) -> list[dict[str, Any]]:
+        return self._ops_tax_etc_repository.list_etc_reconciliation_import_task_summaries()
+
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_etc_state(snapshot)
 

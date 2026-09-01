@@ -560,6 +560,29 @@ class ApplicationStateStore:
         payload = self._serialize_value(value)
         return payload if isinstance(payload, dict) else None
 
+    def list_etc_reconciliation_import_task_summaries(self) -> list[dict[str, Any]]:
+        tasks = dict(self.load_etc_reconciliation_state().get("tasks") or {})
+        summaries: list[dict[str, Any]] = []
+        for task_id, value in tasks.items():
+            payload = self._serialize_value(value)
+            if not isinstance(payload, dict) or str(payload.get("status") or "") == "deleted":
+                continue
+            summaries.append({
+                "task_id": str(payload.get("task_id") or task_id),
+                "status": str(payload.get("status") or "draft"),
+                "version": int(payload.get("version") or 0),
+                "title": str(payload.get("title") or ""),
+                "period_start": payload.get("period_start"),
+                "period_end": payload.get("period_end"),
+                "oa_total_amount": payload.get("oa_total_amount"),
+                "etc_invoice_count": int(payload.get("etc_invoice_count") or 0),
+                "supplement_count": int(payload.get("supplement_count") or 0),
+                "vehicle_plates": list(payload.get("vehicle_plates") or []),
+                "updated_at": payload.get("updated_at"),
+            })
+        summaries.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return summaries
+
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         with self._local_pickle_lock:

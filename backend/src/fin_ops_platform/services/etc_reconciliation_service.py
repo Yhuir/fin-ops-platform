@@ -137,12 +137,15 @@ class EtcReconciliationTaskService:
             for task in sorted(self._active_tasks(), key=lambda item: item.created_at, reverse=True)
         ]
 
-    def list_ready_for_import_tasks(self) -> list[EtcReconciliationTask]:
-        self._reload_from_state_store()
+    def list_import_task_summaries(self) -> list[EtcReconciliationTask]:
+        if self._state_store is None:
+            return [
+                _copy_task(task)
+                for task in sorted(self._active_tasks(), key=lambda item: item.updated_at, reverse=True)
+            ]
         return [
-            _copy_task(task)
-            for task in sorted(self._active_tasks(), key=lambda item: item.updated_at, reverse=True)
-            if task.status == EtcReconciliationTaskStatus.READY_FOR_IMPORT
+            _task_from_snapshot(payload)
+            for payload in self._state_store.list_etc_reconciliation_import_task_summaries()
         ]
 
     def _active_tasks(self) -> list[EtcReconciliationTask]:

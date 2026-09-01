@@ -3968,6 +3968,8 @@ class Application:
             load_multipart_body=self._load_multipart_body,
             task_payload=payload_facade.task_payload,
             unavailable_task_payload=payload_facade.unavailable_task_payload,
+            import_task_summary_payload=payload_facade.import_task_summary_payload,
+            unavailable_import_task_summary_payload=payload_facade.unavailable_import_task_summary_payload,
             cleanup_service=self._etc_reconciliation_import_cleanup_service(),
             expected_version_from_payload=self._expected_version_from_payload,
             expected_version_from_fields=self._expected_version_from_fields,

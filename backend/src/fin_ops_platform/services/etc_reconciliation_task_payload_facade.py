@@ -62,6 +62,26 @@ class EtcReconciliationTaskPayloadFacade:
         return payload
 
     @staticmethod
+    def import_task_summary_payload(task: object) -> dict[str, object]:
+        return {
+            "taskId": getattr(task, "task_id", ""),
+            "status": getattr(getattr(task, "status", ""), "value", getattr(task, "status", "")),
+            "version": getattr(task, "version", 0),
+            "title": getattr(task, "title", ""),
+            "periodStart": getattr(task, "period_start", None),
+            "periodEnd": getattr(task, "period_end", None),
+            "oaTotalAmount": getattr(task, "oa_total_amount", None),
+            "etcInvoiceCount": getattr(task, "etc_invoice_count", 0),
+            "supplementCount": getattr(task, "supplement_count", 0),
+            "vehiclePlates": list(getattr(task, "vehicle_plates", []) or []),
+        }
+
+    def unavailable_import_task_summary_payload(self, task: object) -> dict[str, object]:
+        payload = self.import_task_summary_payload(task)
+        payload["importBlockers"] = self.import_blockers(task)
+        return payload
+
+    @staticmethod
     def import_blockers(task: object) -> list[dict[str, str]]:
         status = getattr(getattr(task, "status", ""), "value", getattr(task, "status", ""))
         if status in {"draft", "reviewing"}:

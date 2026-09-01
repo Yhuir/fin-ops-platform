@@ -184,3 +184,4 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 ## 2026-08-10 视觉回归
 
 - `web/src/test/ImportCenterPage.test.tsx` 保护共享工作区；既有 ETC backend/E2E 测试继续保护 ZIP、任务和确认链路。
+- `tests/test_postgres_repositories_boundaries.py` 保护 ready task 摘要查询只访问 `app.etc_reconciliation_tasks` 并且不加载 formal file rows；backend API 测试锁定 ready/unavailable exact summary keys，避免详情 DTO 再次污染导入首屏。

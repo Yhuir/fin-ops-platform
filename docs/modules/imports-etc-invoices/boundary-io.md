@@ -39,7 +39,7 @@
 
 ETC preview、confirm 与 discard 都是写入操作，必须在 multipart/JSON 解析前通过共享 mutation guard；owner 只取已认证 session username，不调用容错型 owner resolver，也不接受客户端 actor。
 | Reconciliation trigger | ETC services | 产生后续候选和 lifecycle |
-| Ready task selector | `EtcReconciliationTaskService.list_ready_for_import_tasks()` | 下拉标题使用 reconciliation task `title`；导入页不得自行缓存旧标题，手动刷新重新读取当前 ready tasks。 |
+| Ready task selector | `EtcReconciliationTaskService.list_import_task_summaries()` | 单次读取 ready 与 unavailable 摘要；PostgreSQL 只投影 task/status/version/title/期间/金额/票数/车牌，不加载 source files、解析行、核对明细或 audit events。下拉标题使用当前 reconciliation task `title`；导入页不得自行缓存旧标题。 |
 
 ## 输出 I/O
 
@@ -53,6 +53,7 @@ ETC preview、confirm 与 discard 都是写入操作，必须在 multipart/JSON 
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
+| Ready task API | `GET /api/etc/reconciliation-tasks/ready-for-import` | 只返回导入选择器消费的摘要字段和 unavailable blocker；禁止复用对账详情 DTO 或输出 source/credit-card/ticket/reconciled/parse/audit 明细 |
 | Existing canonical metadata delta | `ImportNormalizationService.upsert_etc_invoice(...)` -> `EtcExistingInvoiceLinkService` | 返回 `{invoice, changed}`；只有字段或 source link 真正变化的 invoice 才持久化并贡献 affected month。无 canonical match 或幂等重放必须返回空月份、零 refresh I/O |
 | Affected scope | 页面 owner / 必要领域任务 | 只按真实 changed months 返回精确影响；幂等重放为零影响，不在写路径展开 workbench/relation/tax/cost 页面 refresh jobs |
 | Job completion result envelope | background job result summary / ETC 票据页 | 返回 `affected_months`、`affected_scope_keys`；普通导入的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空，页面立即结束导入反馈，后续页面访问精确收敛 |

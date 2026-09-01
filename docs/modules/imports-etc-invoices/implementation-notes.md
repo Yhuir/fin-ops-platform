@@ -267,3 +267,9 @@
 - 新增窄 `POST /api/etc/import/discard` 边界：preview 持久化当前认证 owner，confirm/discard 都必须匹配同一 owner；只允许幂等终结未确认且无活跃/成功 job 的 session。清空失败保留 preview，不伪装为 fresh。
 - 预览汇总不再显示“本次识别/本次将处理/本次不处理”加工口径，而是直接使用严格 audit 字段展示“新增”、“APP 已存在”及有值的补齐/本批重复/需检查。
 - 没有新增 Redis、read model、worker、数据库迁移、兼容分支或 fallback；仅补齐 ETC 与通用 file/session 已有的显式放弃语义。
+
+## 2026-09-01 - ready task 首屏摘要查询
+
+- 生产四并发探针发现旧 `ready-for-import` 返回约 649KB，对每个 task 重复加载并序列化 source、信用卡、票根、核对、解析和审计明细，p95 超过 2.5s。
+- endpoint 收敛为导入选择器的单次摘要投影：ready 与 unavailable 共用一次查询，只返回标题、状态、期间、金额、票数、车牌和 blocker；ETC 对账详情仍走原 detail API。
+- 不新增 Redis、缓存、read model、索引、worker 或迁移；根因是错误 DTO/查询边界，直接删除无关 I/O。

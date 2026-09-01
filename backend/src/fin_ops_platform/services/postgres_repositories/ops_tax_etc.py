@@ -1309,6 +1309,43 @@ class PostgresOpsTaxEtcRepository:
         payload = row_payload(row, "raw_payload")
         return dict(payload) if isinstance(payload, dict) else None
 
+    def list_etc_reconciliation_import_task_summaries(self) -> list[dict[str, Any]]:
+        rows = self._connection.fetch_all(
+            """
+            select
+                task_id,
+                status,
+                version,
+                raw_payload #>> '{normalized_payload,title}' as title,
+                raw_payload #>> '{normalized_payload,period_start}' as period_start,
+                raw_payload #>> '{normalized_payload,period_end}' as period_end,
+                result_summary ->> 'oa_total_amount' as oa_total_amount,
+                result_summary ->> 'etc_invoice_count' as etc_invoice_count,
+                result_summary ->> 'supplement_count' as supplement_count,
+                result_summary -> 'vehicle_plates' as vehicle_plates,
+                updated_at
+            from app.etc_reconciliation_tasks
+            where status <> 'deleted'
+            order by updated_at desc, task_id
+            """
+        )
+        return [
+            {
+                "task_id": text(row.get("task_id")),
+                "status": text(row.get("status") or "draft"),
+                "version": int_value(row.get("version"), 0),
+                "title": text(row.get("title")),
+                "period_start": text(row.get("period_start")),
+                "period_end": text(row.get("period_end")),
+                "oa_total_amount": decimal_text(row.get("oa_total_amount")),
+                "etc_invoice_count": int_value(row.get("etc_invoice_count"), 0),
+                "supplement_count": int_value(row.get("supplement_count"), 0),
+                "vehicle_plates": list(row.get("vehicle_plates") or []),
+                "updated_at": row.get("updated_at"),
+            }
+            for row in rows
+        ]
+
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:
             normalized = serialize_value(snapshot)

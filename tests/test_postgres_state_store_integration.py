@@ -13,7 +13,10 @@ from psycopg.errors import ObjectNotInPrerequisiteState
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
-from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_models import (
+    EtcReconciliationTaskStatus,
+    SourceFileKind,
+)
 from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import (
@@ -1124,7 +1127,11 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             ["ETC-RECON-000001", "ETC-RECON-HIST-20260114"],
         )
         self.assertEqual(
-            [task.task_id for task in reconciliation.list_ready_for_import_tasks()],
+            [
+                task.task_id
+                for task in reconciliation.list_import_task_summaries()
+                if task.status == EtcReconciliationTaskStatus.READY_FOR_IMPORT
+            ],
             ["ETC-RECON-000001"],
         )
         historical_task = reconciliation.get_task("ETC-RECON-HIST-20260114")

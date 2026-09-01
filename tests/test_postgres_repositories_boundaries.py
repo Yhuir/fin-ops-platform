@@ -460,6 +460,30 @@ class EtcReconciliationDeletedFileReadConnection:
         return []
 
 
+class EtcReconciliationImportSummaryReadConnection:
+    def __init__(self) -> None:
+        self.sql = ""
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        self.sql = " ".join(sql.split())
+        assert params == ()
+        return [
+            {
+                "task_id": "ETC-RECON-000026",
+                "status": "ready_for_import",
+                "version": 7,
+                "title": "2026-08 ETC",
+                "period_start": "2026-08-01",
+                "period_end": "2026-08-31",
+                "oa_total_amount": "108.40",
+                "etc_invoice_count": "8",
+                "supplement_count": "1",
+                "vehicle_plates": ["云ADA0381"],
+                "updated_at": "2026-08-31T10:00:00+00:00",
+            }
+        ]
+
+
 class RebuildableCandidateReadConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         return [
@@ -1357,3 +1381,29 @@ def test_etc_reconciliation_load_ignores_deleted_formal_files_without_reusing_id
         }
     ]
     assert snapshot["file_counter"] == 62
+
+
+def test_etc_reconciliation_import_summary_read_avoids_full_task_and_file_payloads() -> None:
+    connection = EtcReconciliationImportSummaryReadConnection()
+    repository = PostgresOpsTaxEtcRepository(connection)
+
+    summaries = repository.list_etc_reconciliation_import_task_summaries()
+
+    assert summaries == [
+        {
+            "task_id": "ETC-RECON-000026",
+            "status": "ready_for_import",
+            "version": 7,
+            "title": "2026-08 ETC",
+            "period_start": "2026-08-01",
+            "period_end": "2026-08-31",
+            "oa_total_amount": "108.40",
+            "etc_invoice_count": 8,
+            "supplement_count": 1,
+            "vehicle_plates": ["云ADA0381"],
+            "updated_at": "2026-08-31T10:00:00+00:00",
+        }
+    ]
+    assert "from app.etc_reconciliation_tasks" in connection.sql
+    assert "from app.etc_reconciliation_files" not in connection.sql
+    assert "select task_id, status, version" in connection.sql
