@@ -63,10 +63,10 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
         self.assertEqual(delete_response.status_code, 200)
         self.assertEqual(deleted["credential"]["credentialStatus"], "unconfigured")
 
-    def test_full_access_non_admin_cannot_maintain_credentials(self) -> None:
+    def test_non_admin_cannot_maintain_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["YNSYLP006"])
+            configure_access_control(app, usernames=["YNSYLP006"])
             self._install_identity_resolver(app)
 
             response = app.handle_request(
@@ -89,7 +89,7 @@ class OaApplicantCredentialApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(payload["error"], "admin_access_required")
         self.assertEqual(list_response.status_code, 403)
 
     @staticmethod

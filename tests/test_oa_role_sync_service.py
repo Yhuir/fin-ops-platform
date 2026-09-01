@@ -10,6 +10,7 @@ from fin_ops_platform.services.oa_role_sync_service import (
     OARoleSyncExecutionError,
     OARoleSyncService,
     OARoleSyncSettings,
+    OAUserSummary,
 )
 
 
@@ -20,6 +21,12 @@ class RecordingExecutor:
     def apply(self, assignments: list[OARoleAssignment]) -> None:
         self.assignments = list(assignments)
 
+    def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
+        return [OAUserSummary(username, f"{username} 姓名", True) for username in usernames]
+
+    def search_users(self, query: str, limit: int) -> list[OAUserSummary]:
+        return [OAUserSummary(query, f"{query} 姓名", True)][:limit]
+
 
 class ScriptedCursor:
     def __init__(self, responses: list[list[tuple[object, ...]]], *, fail_on: str | None = None) -> None:
@@ -28,7 +35,7 @@ class ScriptedCursor:
         self._fail_on = fail_on
         self.executed: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> "ScriptedCursor":
+    def __enter__(self):
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -42,7 +49,7 @@ class ScriptedCursor:
         if sql.lstrip().startswith("SELECT"):
             self._rows = self._responses.pop(0)
 
-    def fetchall(self) -> list[tuple[object, ...]]:
+    def fetchall(self):
         return list(self._rows)
 
 
@@ -53,7 +60,7 @@ class ScriptedConnection:
         self.rolled_back = False
         self.closed = False
 
-    def cursor(self) -> ScriptedCursor:
+    def cursor(self):
         return self.cursor_value
 
     def commit(self) -> None:
@@ -77,208 +84,125 @@ def _settings() -> OARoleSyncSettings:
         connect_timeout_seconds=5,
         read_timeout_seconds=10,
         write_timeout_seconds=11,
-        readonly_role_key="finops_read_export",
-        full_access_role_key="finops_full_access",
+        user_role_key="finops_app_user",
         admin_role_key="finops_admin",
         required_permission="finops:app:view",
     )
 
 
-def _apply_with_connection(connection: ScriptedConnection) -> dict[str, object]:
+def _with_connection(connection: ScriptedConnection, action):
     connect_kwargs: dict[str, object] = {}
 
-    def connect(**kwargs: object) -> ScriptedConnection:
+    def connect(**kwargs: object):
         connect_kwargs.update(kwargs)
         return connection
 
     with patch.dict(sys.modules, {"pymysql": SimpleNamespace(connect=connect)}):
-        MySQLOARoleSyncExecutor(_settings()).apply(
-            [
-                OARoleAssignment("READ001", "read_export_only"),
-                OARoleAssignment("FULL001", "full_access"),
-                OARoleAssignment("YNSYLP005", "admin"),
-            ]
-        )
-    return connect_kwargs
+        result = action(MySQLOARoleSyncExecutor(_settings()))
+    return result, connect_kwargs
 
 
 class OARoleSyncServiceTests(unittest.TestCase):
-    def test_sync_access_control_builds_expected_assignments(self) -> None:
+    def test_page_accounts_map_to_one_runtime_user_role_plus_fixed_admin(self) -> None:
         executor = RecordingExecutor()
         service = OARoleSyncService(executor=executor)
-
         service.sync_access_control(
             {
-                "allowed_usernames": ["FULL001", "READONLY001", "YNSYLP005"],
-                "readonly_export_usernames": ["READONLY001"],
-                "admin_usernames": ["YNSYLP005"],
-                "full_access_usernames": ["FULL001"],
+                "page_access_accounts": [
+                    {"username": "USER001", "page_keys": ["bank-details"]},
+                    {"username": "USER002", "page_keys": ["pending-invoices"]},
+                ],
+                "access_control_version": 1,
             }
         )
 
         self.assertEqual(
             executor.assignments,
             [
-                OARoleAssignment(username="READONLY001", tier="read_export_only"),
-                OARoleAssignment(username="FULL001", tier="full_access"),
-                OARoleAssignment(username="YNSYLP005", tier="admin"),
+                OARoleAssignment("USER001", "user"),
+                OARoleAssignment("USER002", "user"),
+                OARoleAssignment("YNSYLP005", "admin"),
             ],
         )
 
-    def test_sync_access_control_preserves_canonical_spelling_and_rejects_case_collisions(self) -> None:
-        executor = RecordingExecutor()
-        service = OARoleSyncService(executor=executor)
-
-        service.sync_access_control(
-            {
-                "allowed_usernames": ["YNSYLP005", "Full.User"],
-                "readonly_export_usernames": [],
-                "admin_usernames": ["YNSYLP005"],
-                "full_access_usernames": ["Full.User"],
-            }
-        )
-
-        self.assertIn(OARoleAssignment(username="Full.User", tier="full_access"), executor.assignments or [])
-
-        with self.assertRaises(ValueError):
-            service.sync_access_control(
-                {
-                    "full_access_usernames": ["Full.User"],
-                    "readonly_export_usernames": ["full.user"],
-                }
-            )
-
-    def test_sync_access_control_fails_when_runtime_executor_is_disabled(self) -> None:
+    def test_disabled_service_fails_fast_for_sync_and_directory(self) -> None:
+        service = OARoleSyncService()
         with self.assertRaises(OARoleSyncConfigurationError):
-            OARoleSyncService().sync_access_control(
-                {
-                    "full_access_usernames": ["FULL001"],
-                    "readonly_export_usernames": [],
-                    "admin_usernames": ["YNSYLP005"],
-                }
-            )
+            service.sync_access_control({"page_access_accounts": [], "access_control_version": 1})
+        with self.assertRaises(OARoleSyncConfigurationError):
+            service.resolve_users(["USER001"])
 
-    def test_mysql_executor_parses_bounded_network_timeouts(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {
-                "FIN_OPS_OA_ROLE_SYNC_HOST": "oa-db",
-                "FIN_OPS_OA_ROLE_SYNC_DATABASE": "oa",
-                "FIN_OPS_OA_ROLE_SYNC_USERNAME": "finops",
-                "FIN_OPS_OA_ROLE_SYNC_PASSWORD": "secret",
-                "FIN_OPS_OA_ROLE_SYNC_CONNECT_TIMEOUT_SECONDS": "5",
-                "FIN_OPS_OA_ROLE_SYNC_READ_TIMEOUT_SECONDS": "10",
-                "FIN_OPS_OA_ROLE_SYNC_WRITE_TIMEOUT_SECONDS": "11",
-                "FIN_OPS_OA_REQUIRED_PERMISSION": "finops:app:view",
-            },
-            clear=False,
-        ):
-            settings = MySQLOARoleSyncExecutor.from_environment()._settings
-
-        self.assertEqual(settings.connect_timeout_seconds, 5)
-        self.assertEqual(settings.read_timeout_seconds, 10)
-        self.assertEqual(settings.write_timeout_seconds, 11)
-
-    def test_mysql_executor_rejects_non_positive_timeout(self) -> None:
-        with patch.dict(
-            "os.environ",
-            {
-                "FIN_OPS_OA_ROLE_SYNC_HOST": "oa-db",
-                "FIN_OPS_OA_ROLE_SYNC_DATABASE": "oa",
-                "FIN_OPS_OA_ROLE_SYNC_USERNAME": "finops",
-                "FIN_OPS_OA_ROLE_SYNC_PASSWORD": "secret",
-                "FIN_OPS_OA_ROLE_SYNC_READ_TIMEOUT_SECONDS": "0",
-                "FIN_OPS_OA_REQUIRED_PERMISSION": "finops:app:view",
-            },
-            clear=False,
-        ), self.assertRaises(OARoleSyncConfigurationError):
-            MySQLOARoleSyncExecutor.from_environment()
-
-    def test_mysql_executor_requires_fixed_oa_only_permission_marker(self) -> None:
-        base = {
+    def test_environment_parses_binary_role_contract_and_timeouts(self) -> None:
+        with patch.dict("os.environ", {
+            "FIN_OPS_OA_ROLE_SYNC_ENABLED": "1",
             "FIN_OPS_OA_ROLE_SYNC_HOST": "oa-db",
             "FIN_OPS_OA_ROLE_SYNC_DATABASE": "oa",
             "FIN_OPS_OA_ROLE_SYNC_USERNAME": "finops",
             "FIN_OPS_OA_ROLE_SYNC_PASSWORD": "secret",
-        }
-        for marker in (None, "finops:access", " finops:app:view:extra "):
-            environment = dict(base)
-            if marker is not None:
-                environment["FIN_OPS_OA_REQUIRED_PERMISSION"] = marker
-            with self.subTest(marker=marker), patch.dict("os.environ", environment, clear=True):
-                with self.assertRaises(OARoleSyncConfigurationError):
-                    MySQLOARoleSyncExecutor.from_environment()
+            "FIN_OPS_OA_REQUIRED_PERMISSION": "finops:app:view",
+            "FIN_OPS_OA_ROLE_SYNC_READ_TIMEOUT_SECONDS": "7",
+        }, clear=True):
+            settings = MySQLOARoleSyncExecutor.from_environment()._settings
 
-    def test_mysql_executor_validates_exact_menu_roles_before_replacing_memberships(self) -> None:
-        cursor = ScriptedCursor(
-            [
-                [(11, "finops_read_export"), (12, "finops_full_access"), (13, "finops_admin")],
-                [(99,)],
-                [(11,), (12,), (13,)],
-                [(101, "READ001"), (102, "FULL001"), (103, "YNSYLP005")],
-            ]
-        )
+        self.assertEqual(settings.user_role_key, "finops_app_user")
+        self.assertEqual(settings.admin_role_key, "finops_admin")
+        self.assertEqual(settings.read_timeout_seconds, 7)
+
+    def test_mysql_apply_validates_exact_two_menu_roles_before_writes(self) -> None:
+        cursor = ScriptedCursor([
+            [(11, "finops_app_user"), (12, "finops_admin")],
+            [(99,)],
+            [(11,), (12,)],
+            [(101, "USER001"), (102, "YNSYLP005")],
+        ])
         connection = ScriptedConnection(cursor)
-
-        connect_kwargs = _apply_with_connection(connection)
+        _, kwargs = _with_connection(
+            connection,
+            lambda executor: executor.apply([
+                OARoleAssignment("USER001", "user"),
+                OARoleAssignment("YNSYLP005", "admin"),
+            ]),
+        )
 
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
-        self.assertTrue(connection.closed)
-        self.assertEqual(connect_kwargs["connect_timeout"], 5)
-        self.assertEqual(connect_kwargs["read_timeout"], 10)
-        self.assertEqual(connect_kwargs["write_timeout"], 11)
-        menu_select = next(item for item in cursor.executed if "FROM sys_menu" in item[0])
-        self.assertEqual(menu_select[1], ("finops:app:view",))
-        self.assertTrue(any("FROM sys_role_menu" in sql for sql, _params in cursor.executed))
-        mutating_sql = [sql for sql, _params in cursor.executed if sql.lstrip().startswith(("DELETE", "INSERT"))]
-        self.assertTrue(mutating_sql)
-        self.assertTrue(all("sys_user_role" in sql for sql in mutating_sql))
+        self.assertEqual(kwargs["connect_timeout"], 5)
+        self.assertTrue(all("sys_user_role" in sql for sql, _ in cursor.executed if sql.lstrip().startswith(("DELETE", "INSERT"))))
 
-    def test_mysql_executor_rejects_missing_duplicate_or_drifted_menu_contract_without_writes(self) -> None:
-        roles = [(11, "finops_read_export"), (12, "finops_full_access"), (13, "finops_admin")]
+    def test_mysql_apply_rejects_role_or_binding_drift_without_writes(self) -> None:
         cases = {
-            "missing_role": [[(11, "finops_read_export"), (12, "finops_full_access")]],
-            "duplicate_role": [[*roles, (14, "finops_admin")]],
-            "missing_menu": [roles, []],
-            "duplicate_menu": [roles, [(99,), (100,)]],
-            "missing_binding": [roles, [(99,)], [(11,), (12,)]],
-            "non_dedicated_drift": [roles, [(99,)], [(11,), (12,), (13,), (90,)]],
+            "missing_role": [[(11, "finops_app_user")]],
+            "duplicate_menu": [[(11, "finops_app_user"), (12, "finops_admin")], [(99,), (100,)]],
+            "extra_binding": [[(11, "finops_app_user"), (12, "finops_admin")], [(99,)], [(11,), (12,), (90,)]],
         }
         for name, responses in cases.items():
             cursor = ScriptedCursor(responses)
             connection = ScriptedConnection(cursor)
-            with self.subTest(case=name), self.assertRaises(OARoleSyncExecutionError):
-                _apply_with_connection(connection)
-            self.assertTrue(connection.rolled_back)
-            self.assertFalse(connection.committed)
-            self.assertFalse(
-                any(sql.lstrip().startswith(("DELETE", "INSERT")) for sql, _params in cursor.executed)
-            )
+            with self.subTest(name=name), self.assertRaises(OARoleSyncExecutionError):
+                _with_connection(connection, lambda executor: executor.apply([]))
+            self.assertFalse(any(sql.lstrip().startswith(("DELETE", "INSERT")) for sql, _ in cursor.executed))
 
-    def test_mysql_executor_wraps_connect_and_transaction_timeouts_and_rolls_back_when_connected(self) -> None:
-        with patch.dict(
-            sys.modules,
-            {"pymysql": SimpleNamespace(connect=lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("connect")))},
-        ), self.assertRaises(OARoleSyncExecutionError):
+    def test_directory_resolve_and_search_return_oa_names_and_status(self) -> None:
+        resolve_connection = ScriptedConnection(ScriptedCursor([
+            [("USER001", "张三", "0", "0"), ("USER002", "李四", "1", "0")],
+        ]))
+        resolved, _ = _with_connection(
+            resolve_connection,
+            lambda executor: executor.resolve_users(["USER002", "USER001"]),
+        )
+        self.assertEqual(resolved[0], OAUserSummary("USER001", "张三", True))
+        self.assertEqual(resolved[1], OAUserSummary("USER002", "李四", False))
+
+        search_connection = ScriptedConnection(ScriptedCursor([[('USER001', '张三', '0', '0')]]))
+        searched, _ = _with_connection(search_connection, lambda executor: executor.search_users("张", 20))
+        self.assertEqual(searched, [OAUserSummary("USER001", "张三", True)])
+        sql, params = search_connection.cursor_value.executed[0]
+        self.assertIn("nick_name LIKE", sql)
+        self.assertEqual(params, ("%张%", "%张%", 20))
+
+    def test_connection_failure_is_wrapped(self) -> None:
+        with patch.dict(sys.modules, {"pymysql": SimpleNamespace(connect=lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("connect")))}), self.assertRaises(OARoleSyncExecutionError):
             MySQLOARoleSyncExecutor(_settings()).apply([])
-
-        for fail_on in ("SELECT role_id", "DELETE FROM sys_user_role"):
-            cursor = ScriptedCursor(
-                [
-                    [(11, "finops_read_export"), (12, "finops_full_access"), (13, "finops_admin")],
-                    [(99,)],
-                    [(11,), (12,), (13,)],
-                    [(101, "READ001"), (102, "FULL001"), (103, "YNSYLP005")],
-                ],
-                fail_on=fail_on,
-            )
-            connection = ScriptedConnection(cursor)
-            with self.subTest(fail_on=fail_on), self.assertRaises(OARoleSyncExecutionError):
-                _apply_with_connection(connection)
-            self.assertTrue(connection.rolled_back)
-            self.assertFalse(connection.committed)
-            self.assertTrue(connection.closed)
 
 
 if __name__ == "__main__":

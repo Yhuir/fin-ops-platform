@@ -30,10 +30,10 @@
 
 ### 访问控制
 
-- canonical snapshot：固定 `administrator=YNSYLP005`、独立 `access_control_version`、完整 `full_access` / `read_export_only` memberships；其他账号缺席即 `denied`，管理员不属于可写 membership。
-- 用户名：比较/去重使用共享 casefold key，输出保留 OA canonical spelling；collision、跨 tier overlap、控制字符与 protected-admin 输入直接 `validation_failed`。
+- canonical snapshot：固定 `administrator=YNSYLP005`、独立 `access_control_version`、完整 `page_access_accounts[{username,page_keys}]`；其他账号缺席或 page keys 为空即 `denied`，管理员不属于可写 accounts。
+- 用户名：新增时由 OA 搜索返回 canonical spelling 与显示姓名；比较/去重使用共享 casefold key，collision、控制字符、停用/不存在账号与 protected-admin 输入直接 `validation_failed`。
 - 消费：permissions evaluator 每次非管理员判断最多读取同一 snapshot 一次；ACL 删除后下一次 session/API 立即 denied，不依赖 OA identity cache。
-- 影响：权限不走 read model，但会影响所有写入按钮、导出、数据重置和运维修复入口；OA 三角色只投影菜单可见性，不能反向改变 APP tier。
+- 影响：权限不走 read model，只影响页面和 API 是否可进入；被授权页面保留正常业务能力。OA 两个角色只投影菜单可见性，不能反向改变 APP page grants。
 
 ### 业务规则和标签
 
@@ -82,7 +82,7 @@
 - empty：无手工项目、无凭据、无 pending invoice 规则时显示空状态，但保留创建入口。
 - error：settings save、凭据保存、data reset job、active job 恢复失败必须展示可理解错误。
 - job progress：设置页自身不是 read model 页面；显式 data reset job 展示 queued/running/failed/succeeded，OA 精确附件刷新展示 queued/processing/done/failed/dead-lettered。普通规则保存没有下游 refreshing。
-- permission disabled/hidden：readonly/full access 非 admin 不显示高风险 credential/reset 入口；API 仍必须二次校验。
+- permission disabled/hidden：非 005 账号不显示 access-control、credential/reset 等管理控制面；未获页面授权的账号不渲染对应页面，API 仍必须二次校验。
 - credential form：密码只存在于当前表单；保存成功后清空；列表只展示目标 OA 申请人、OA 登录账号和配置状态。
 - reset dialog：必须有动作说明、影响范围、确认密码、运行中 job progress、失败状态和重进恢复。
 
@@ -108,7 +108,7 @@
 | `validation_failed` | DTO、tier、username 或 canonical collision 非法 | 400；在 OA/PG I/O 前失败 |
 | `conflict` | critical section 锁定 snapshot 后发现 `expected_version` stale | 409/current_version；保留前端 draft；零 OA/PG 覆盖 |
 | `no_op` | 同一锁定 snapshot version 下 memberships 语义相同 | 200/changed=false；零 DB write、audit、OA |
-| `oa_target_failed` | 严格 menu/三角色目标未配置、漂移、超时或同步失败 | 502；transaction 回滚，canonical/audit 不变 |
+| `oa_target_failed` | 严格 menu/两角色目标未配置、漂移、超时或同步失败 | 502；transaction 回滚，canonical/audit 不变 |
 | `persistence_failed_compensated` | OA target 成功，ACL/audit commit 失败且旧 OA memberships 恢复成功 | 503 `access_control_persistence_failed`；canonical/audit 不半写，OA 回到旧 snapshot |
 | `commit_recovered` | commit ACK 丢失但 mutation audit 与 version+1 canonical snapshot 一致 | 200/changed=true；不重复提交或补偿 |
 | `commit_rolled_back_compensated` | ACK 丢失且确认无 audit/version 未变，旧 OA memberships 恢复成功 | 503 `access_control_persistence_failed`；保持旧 snapshot |
@@ -127,4 +127,4 @@
 | 2026-06-10 | 新增 OA 申请人凭据管理后端状态 | 设置页新增独立凭据事实源，admin-only，状态为 `已配置/未配置` | `tests.test_oa_applicant_credentials_service`、`tests.test_oa_applicant_credentials_api`、`tests.test_postgres_oa_applicant_credentials_repository`、`tests.test_postgres_migrations` |
 | 2026-06-10 | 落地 OA申请人凭据设置页 UI | 管理员可在设置页维护目标申请人凭据；保存走独立凭据 API；普通 settings save 不包含密码 | `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |
 | 2026-06-11 | 补齐 settings 测试闭环状态机 | 将项目、权限、规则、OA 凭据、data reset 和 read model/worker fan-out 纳入同一维护边界 | `tests.test_app_settings_service`、`tests.test_settings_data_reset_service`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-16 | 统一 settings mutation API 权限 gate | 项目同步/新增/删除和 OA 手动导入 mutation 必须校验 `can_mutate_data`；有 OA session 时 actor 来自 session，不接受 body 伪造 | `tests.test_workbench_settings_sync_api`、`tests.test_oa_manual_import_api` |
+| 2026-06-16 | 历史：统一 settings mutation API gate | 当时使用账户写能力字段；现已由 Settings 页面授权 + 005 管理控制面替代。actor 仍必须来自 session，不接受 body 伪造 | 历史记录；当前验证见 `tests.test_workbench_settings_sync_api`、`tests.test_oa_manual_import_api` |

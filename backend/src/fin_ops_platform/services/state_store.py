@@ -15,7 +15,6 @@ from typing import Any
 
 from fin_ops_platform.services.runtime_paths import default_data_dir as _default_data_dir
 from fin_ops_platform.services.state_store_protocol import (
-    PROTECTED_ADMIN_USERNAME,
     SETTINGS_ACCESS_CONTROL_KEYS,
     SettingsAccessControlVersionConflict,
     settings_access_control_from_payload,
@@ -126,10 +125,7 @@ class ApplicationStateStore:
             "manual_projects": [],
             "synced_projects": [],
             "bank_account_mappings": [],
-            "allowed_usernames": [PROTECTED_ADMIN_USERNAME],
-            "readonly_export_usernames": [],
-            "admin_usernames": [PROTECTED_ADMIN_USERNAME],
-            "full_access_usernames": [],
+            "page_access_accounts": [],
             "access_control_version": 1,
             "workbench_column_layouts": {},
             "oa_retention": {},

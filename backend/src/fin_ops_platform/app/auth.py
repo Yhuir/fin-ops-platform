@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from typing import Mapping
 
-from fin_ops_platform.services.access_control_service import AccessControlService, AccessTier
+from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.oa_identity_service import OAIdentityService, OAUserIdentity
 
 
@@ -31,10 +31,12 @@ class OARequestSession:
     token: str
     identity: OAUserIdentity
     allowed: bool
-    access_tier: AccessTier
     can_access_app: bool
-    can_mutate_data: bool
     can_admin_access: bool
+    allowed_page_keys: frozenset[str]
+
+    def can_access_page(self, page_key: str) -> bool:
+        return self.can_admin_access or page_key in self.allowed_page_keys
 
 
 def actor_id_for_session(session: OARequestSession, *, fallback: str = "system") -> str:
@@ -96,8 +98,7 @@ def resolve_oa_request_session(
         token=token,
         identity=identity,
         allowed=decision.allowed,
-        access_tier=decision.access_tier,
         can_access_app=decision.can_access_app,
-        can_mutate_data=decision.can_mutate_data,
         can_admin_access=decision.can_admin_access,
+        allowed_page_keys=decision.allowed_page_keys,
     )

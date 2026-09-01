@@ -476,7 +476,7 @@ class EtcServiceTests(unittest.TestCase):
             status=EtcBusinessBatchStatus.IMPORTED.value,
             invoice_ids=["invoice-1"],
         )
-        actor = EtcBusinessBatchActor(can_mutate_data=True)
+        actor = EtcBusinessBatchActor()
 
         action = evaluate_etc_oa_draft_action(batch, None, actor)
 
@@ -506,7 +506,6 @@ class EtcServiceTests(unittest.TestCase):
         session = SimpleNamespace(
             identity=SimpleNamespace(user_id="u-1", username="finance", dept_id="finance"),
             can_admin_access=True,
-            can_mutate_data=True,
         )
 
         for invalid in ("false", 0, None):
@@ -895,7 +894,7 @@ class EtcServiceTests(unittest.TestCase):
                 etc_service=etc_service,
                 reconciliation_task_service=task_service,
             )
-            actor = EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True)
+            actor = EtcBusinessBatchActor(can_admin_access=True)
 
             with self.assertRaisesRegex(RuntimeError, "persistence failed"):
                 application.create_oa_draft_payload(
@@ -969,7 +968,7 @@ class EtcServiceTests(unittest.TestCase):
                 etc_service=etc_service,
                 reconciliation_task_service=task_service,
             )
-            actor = EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True)
+            actor = EtcBusinessBatchActor(can_admin_access=True)
             recovery = {
                 "expected_version": unknown.version,
                 "reason": "OA 已核实",
@@ -4033,7 +4032,7 @@ class EtcApiTests(unittest.TestCase):
     def test_etc_business_batch_scope_uses_session_dept_id(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["OWNER", "OTHER"])
+            configure_access_control(app, usernames=["OWNER", "OTHER"])
 
             identities = {
                 "owner-token": OAUserIdentity(
@@ -5458,7 +5457,7 @@ class EtcApiTests(unittest.TestCase):
                     business_batch.business_batch_id,
                     idempotency_key="draft-durable-restart",
                     expected_version=business_batch.version,
-                    actor=EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True),
+                    actor=EtcBusinessBatchActor(can_admin_access=True),
                     headers={},
                 )
                 task = app._etc_reconciliation_task_service.get_task(task_id)

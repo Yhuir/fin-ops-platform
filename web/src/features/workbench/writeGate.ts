@@ -1,5 +1,4 @@
 export type WorkbenchWriteGateReason =
-  | "read_only"
   | "system_unavailable"
   | "direct_read_unavailable"
   | "oa_status_unavailable"
@@ -12,7 +11,6 @@ export type WorkbenchWriteGate = {
 };
 
 type WorkbenchWriteGateInput = {
-  canMutateData: boolean;
   mutationsBlocked: boolean;
   directReadAvailable: boolean;
   oaSyncReachable: boolean;
@@ -21,20 +19,12 @@ type WorkbenchWriteGateInput = {
 };
 
 export function resolveWorkbenchWriteGate({
-  canMutateData,
   mutationsBlocked,
   directReadAvailable,
   oaSyncReachable,
   oaSyncStatus,
   oaDirtyScopes,
 }: WorkbenchWriteGateInput): WorkbenchWriteGate {
-  if (!canMutateData) {
-    return {
-      allowed: false,
-      reason: "read_only",
-      message: "当前账号仅支持查看和导出，不能执行写操作。",
-    };
-  }
   if (mutationsBlocked) {
     return {
       allowed: false,

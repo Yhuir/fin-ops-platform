@@ -3,8 +3,8 @@ import type {
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
   WorkbenchAccessControl,
+  WorkbenchAccessUser,
   WorkbenchSettings,
-  WorkbenchAccessRole,
   WorkbenchOaImportSettings,
   WorkbenchProjectSetting,
   WorkbenchSettingsDataResetAction,
@@ -14,7 +14,9 @@ import type {
 export type ManagedAccessAccount = {
   id: string;
   username: string;
-  role: WorkbenchAccessRole;
+  displayName: string;
+  oaStatus: "active" | "inactive" | "missing";
+  pageKeys: string[];
 };
 
 export type SettingsSectionId =
@@ -138,12 +140,8 @@ export type SettingsAccessAccountsSectionProps = {
   isSaving: boolean;
   status: ProjectActionStatus | null;
   validationMessage: string | null;
-  accessUsernameDraft: string;
-  accessRoleDraft: WorkbenchAccessRole;
-  canAddAccessAccount: boolean;
-  onChangeAccessUsernameDraft: (value: string) => void;
-  onChangeAccessRoleDraft: (value: WorkbenchAccessRole) => void;
-  onAddAccessAccount: () => void;
+  onAddAccessAccount: (user: WorkbenchAccessUser) => void;
+  onSearchAccessUsers: (query: string, signal?: AbortSignal) => Promise<WorkbenchAccessUser[]>;
   onUpdateManagedAccessAccount: (
     accountId: string,
     updater: (account: ManagedAccessAccount) => ManagedAccessAccount,

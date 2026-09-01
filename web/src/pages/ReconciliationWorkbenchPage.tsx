@@ -18,7 +18,6 @@ import { useAppHealthStatus } from "../contexts/AppHealthStatusContext";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
-import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   cancelWorkbenchCashSpecial,
   confirmWorkbenchCashPassThrough,
@@ -290,7 +289,6 @@ export default function ReconciliationWorkbenchPage() {
   const { setWorkbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("reconciliation-workbench");
   const {
     detailRow,
@@ -352,7 +350,6 @@ export default function ReconciliationWorkbenchPage() {
     && zoneQueryErrorByZone.paired === null
     && zoneQueryErrorByZone.unpaired === null;
   const workbenchWriteGate = resolveWorkbenchWriteGate({
-    canMutateData,
     mutationsBlocked: healthStatus.blocksMutations,
     directReadAvailable,
     oaSyncReachable: oaSyncStatus !== null && oaSyncStatusError === null,
@@ -2442,7 +2439,7 @@ export default function ReconciliationWorkbenchPage() {
   };
   const pairedZoneElement = (
     <WorkbenchZone
-      canMutateData={canWriteWorkbench}
+      canOperateData={canWriteWorkbench}
       getRowState={getWorkbenchRowState}
       onClearSelection={handleClearPairedSelection}
       onOpenDetail={handleOpenDetail}
@@ -2489,7 +2486,7 @@ export default function ReconciliationWorkbenchPage() {
   const unpairedZoneElement = (
     <WorkbenchZone
       auxiliaryHeaderActions={openAuxiliaryHeaderActions}
-      canMutateData={canWriteWorkbench}
+      canOperateData={canWriteWorkbench}
       getRowState={getWorkbenchRowState}
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
@@ -2636,7 +2633,7 @@ export default function ReconciliationWorkbenchPage() {
           unpaired: workbenchData?.summary.unpairedExceptionCount ?? 0,
           paired: pairedExceptionCount,
         }}
-        canMutateData={canWriteWorkbench}
+        canOperateData={canWriteWorkbench}
         contentGeneration={exceptionDrawerContentGeneration}
         error={exceptionDrawerError}
         exceptionCounts={exceptionDrawerCounts}

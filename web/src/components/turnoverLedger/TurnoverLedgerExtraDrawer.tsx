@@ -70,7 +70,7 @@ export default function TurnoverLedgerExtraDrawer({
   detail,
   extra,
   dirty,
-  canMutateData,
+  canOperateData,
   loading,
   saving,
   mutating,
@@ -86,7 +86,7 @@ export default function TurnoverLedgerExtraDrawer({
   detail: TurnoverRelationDetail | null;
   extra: TurnoverLedgerExtra;
   dirty: boolean;
-  canMutateData: boolean;
+  canOperateData: boolean;
   loading: boolean;
   saving: boolean;
   mutating: boolean;
@@ -98,10 +98,10 @@ export default function TurnoverLedgerExtraDrawer({
   onWithdraw: () => void;
 }) {
   const relation = detail?.relation ?? null;
-  const canConfirm = canMutateData && relation?.status === "suggested";
-  const canWithdraw = canMutateData && relation?.status === "confirmed";
+  const canConfirm = canOperateData && relation?.status === "suggested";
+  const canWithdraw = canOperateData && relation?.status === "confirmed";
   const busy = loading || saving || mutating;
-  const editingDisabled = busy || !canMutateData || Boolean(error);
+  const editingDisabled = busy || !canOperateData || Boolean(error);
   const counterpartyName = cleanText(row?.counterpartyName)
     || cleanText(relation?.counterpartyName)
     || cleanText(detail?.bankRows[0]?.counterpartyName)

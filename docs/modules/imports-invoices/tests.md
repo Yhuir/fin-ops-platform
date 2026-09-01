@@ -23,8 +23,8 @@
 - 发票导入页必须发送每文件方向：`input_invoice` / `output_invoice`。
 - 单张人工录入必须覆盖纯手工、JPG/JPEG/PNG/PDF 点击或拖拽识别、OCR 后可编辑、20 位票号代码可选、传统票代码必填、0–100 数字税率、红字正数输入转 canonical 负数、金额平衡、精确重复阻断、返回编辑 discard 和普通 confirm job。
 - Browser e2e 必须覆盖发票导入页真实选择控件、预览按钮禁用/启用、慢预览 in-flight 动作锁定、审计汇总、重复项明细、未导入项明细、确认导入、显式 operation barrier 等待和零 Workbench 页面请求。
-- read_export_only 用户必须能打开发票导入页但不能选择文件、预览或确认导入。
-- read_export_only 用户仍可打开补充凭证画廊；画廊只读并不得出现上传/删除。关闭、重开和分页请求必须 abort/latest-wins，不能刷新导入主体或污染其它导入模式。
+- 未获发票导入页授权的用户不能打开页面、选择文件、预览或确认导入；获权用户可执行完整导入流程。
+- 补充凭证画廊仍按自身业务状态控制上传/删除；关闭、重开和分页请求必须 abort/latest-wins，不能刷新导入主体或污染其它导入模式。
 - 预览必须显示重复审计 counts、duplicate groups 和 review copy。
 - 每次进入或重新激活页面必须从空白本地草稿开始，不读取 sessionStorage，不请求服务端活跃 session 列表；离开后才返回的 preview 结果必须丢弃。
 - `preview_stale` 必须映射为重新预览提示，不能继续确认旧结果，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。

@@ -260,10 +260,9 @@ class AppHealthService:
                 "display_name": getattr(identity, "display_name", None),
             },
             "allowed": bool(getattr(session, "allowed", False)),
-            "access_tier": getattr(session, "access_tier", None),
             "can_access_app": bool(getattr(session, "can_access_app", False)),
-            "can_mutate_data": bool(getattr(session, "can_mutate_data", False)),
             "can_admin_access": bool(getattr(session, "can_admin_access", False)),
+            "allowed_page_keys": sorted(getattr(session, "allowed_page_keys", frozenset())),
         }
 
     @staticmethod

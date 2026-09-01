@@ -20,7 +20,7 @@ test.describe("workbench exception browser flow", () => {
       }
     });
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchAmountMismatchScenario: true,
       workbenchExceptionDatasetSize: 51,
       workbenchInitialRelationConfirmed: true,
@@ -62,7 +62,7 @@ test.describe("workbench exception browser flow", () => {
 
   test("keeps the existing invoice-entry action available in the document-only drawer", async ({ page }) => {
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchOaInvoiceUnparsedScenario: true,
     });
 
@@ -94,7 +94,7 @@ test.describe("workbench exception browser flow", () => {
 
   test("hands an unassigned invoice from the exception drawer to one OA-item drawer", async ({ page }) => {
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchInvoiceAssignmentScenario: true,
     });
 
@@ -120,7 +120,7 @@ test.describe("workbench exception browser flow", () => {
 
   test("reviews, accepts, and withdraws an automatically classified exact-cent mismatch", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchAmountMismatchScenario: true,
       workbenchMultiSourceScenario: true,
       workbenchInitialRelationConfirmed: true,
@@ -272,7 +272,7 @@ test.describe("workbench exception browser flow", () => {
 
   test("keeps the wider compact drawer inside the viewport without clipping review controls", async ({ page }) => {
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchAmountMismatchScenario: true,
       workbenchInitialRelationConfirmed: true,
     });

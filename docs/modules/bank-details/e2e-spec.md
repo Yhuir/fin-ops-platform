@@ -18,7 +18,7 @@
 | `BANK-E2E-006` | 自动标签规则保存/重应用 | P1 | drawer 保存或重应用成功后只重新 GET 当前 transactions；不请求 operation barrier、不等待 worker。 |
 | `BANK-E2E-007` | 候选确认和人工补分类 | P1 | 只能确认当前候选，只能人工补分类 unmatched 行；保存后页面刷新并保留 category version contract。 |
 | `BANK-E2E-008` | direct query loading/empty/error | P1 | direct GET 不自动轮询；空响应进入真实空态；网络失败显示错误并允许用户通过查询变化重试恢复。 |
-| `BANK-E2E-009` | 权限矩阵 | P1 | `read_export_only` 可读和导出但不能写分类/规则；`full_access/admin` 才能执行 mutation；denied/expired 进入 session gate。 |
+| `BANK-E2E-009` | 页面权限矩阵 | P1 | 获得银行明细页的账号可读、导出并执行分类/规则业务操作；未获本页授权、denied/expired 进入 gate 且 protected API 零调用。 |
 | `BANK-E2E-010` | 大表格滚动和视觉遮挡 | P2 | 长列表、宽列、分类浮层、导出菜单和表格滚动在桌面/窄屏不遮挡关键操作。 |
 
 ## 不属于本地 deterministic E2E 的风险

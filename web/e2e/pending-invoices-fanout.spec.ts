@@ -16,7 +16,7 @@ function createPendingInvoicesLatencyRecorder(page: Page, testInfo: TestInfo) {
 
 test.describe("pending invoices browser flow", () => {
   test("allows selecting text in the pending invoice table body", async ({ page }, testInfo) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
     await recordLatency({
@@ -43,7 +43,7 @@ test.describe("pending invoices browser flow", () => {
   });
 
   test("reflects workbench confirmed invoice relation in pending invoices", async ({ page }, testInfo) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
     await recordLatency({

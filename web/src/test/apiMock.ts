@@ -32,7 +32,8 @@ type MockApiOptions = {
   costDuplicateTransactionRows?: boolean;
   costNoOaRulesCanSave?: boolean;
   sessionMode?: "authorized" | "forbidden" | "expired" | "error";
-  sessionAccessTier?: "admin" | "full_access" | "read_export_only" | "denied";
+  sessionRole?: "admin" | "user" | "denied";
+  allowedPageKeys?: string[];
   sessionUsername?: string;
   sessionDisplayName?: string;
   actionDelayMs?: number;
@@ -4835,12 +4836,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     version: 1,
     administrator: {
       username: "YNSYLP005",
-      access_tier: "admin" as const,
+      display_name: "权限管理员",
+      oa_status: "active" as const,
       protected: true as const,
     },
     accounts: [] as Array<{
       username: string;
-      access_tier: "full_access" | "read_export_only";
+      display_name: string;
+      oa_status: "active" | "missing";
+      page_keys: string[];
     }>,
   };
   let oaApplicantCredentialsState = [
@@ -4879,28 +4883,35 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           },
         };
       }
-      const accessTier = options.sessionMode === "forbidden"
+      const sessionRole = options.sessionMode === "forbidden"
         ? "denied"
-        : options.sessionAccessTier ?? "full_access";
-      const allowed = accessTier !== "denied";
+        : options.sessionRole ?? "user";
+      const allowed = sessionRole !== "denied";
+      const allowedPageKeys = allowed
+        ? options.allowedPageKeys ?? [
+          "reconciliation-workbench", "cost-statistics", "bank-details", "oa-pending-payments",
+          "bank-flow-rule-batches", "batch-accounting", "turnover-ledger", "etc-tickets", "tax-offset",
+          "pending-invoices", "input-invoice-usage", "output-invoice-collections", "settings",
+          "app-health-operations", "imports.bank-transactions", "imports.invoices", "imports.etc-invoices",
+        ]
+        : [];
       return {
         body: {
           user: {
             user_id: "101",
-            username: options.sessionUsername ?? (allowed ? "liuji" : "YNSYLP006"),
+            username: options.sessionUsername ?? (sessionRole === "admin" ? "YNSYLP005" : allowed ? "liuji" : "YNSYLP006"),
             nickname: options.sessionDisplayName ?? (allowed ? "刘际涛" : "权限攻击样例"),
             display_name: options.sessionDisplayName ?? (allowed ? "刘际涛" : "权限攻击样例"),
             dept_id: "88",
             dept_name: "财务部",
             avatar: null,
           },
-          roles: allowed ? ["finance"] : ["finance", "business", "finops_full_access"],
+          roles: ["finance"],
           permissions: ["finops:app:view"],
           allowed,
-          access_tier: accessTier,
           can_access_app: allowed,
-          can_mutate_data: accessTier === "admin" || accessTier === "full_access",
-          can_admin_access: accessTier === "admin",
+          can_admin_access: sessionRole === "admin",
+          allowed_page_keys: allowedPageKeys,
         },
       };
     },
@@ -5546,10 +5557,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if ((init?.method ?? "GET").toUpperCase() === "POST" && jsonBody) {
         const forbiddenAclKeys = [
           "access_control",
+          "page_access_accounts",
           "allowed_usernames",
           "readonly_export_usernames",
           "admin_usernames",
-          "full_access_usernames",
+          "user_usernames",
           "access_control_version",
         ];
         if (forbiddenAclKeys.some((key) => Object.prototype.hasOwnProperty.call(jsonBody, key))) {
@@ -5634,7 +5646,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return { body: cloneJson(workbenchSettingsState) };
     },
     "/api/workbench/settings/access-control": ({ init, jsonBody }) => {
-      if (options.sessionAccessTier !== "admin") {
+      if (options.sessionRole !== "admin") {
         return {
           ok: false,
           status: 403,
@@ -5664,12 +5676,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         }
         const normalizedAccounts = accounts.map((account) => ({
           username: String((account as Record<string, unknown>).username ?? "").trim(),
-          access_tier: String((account as Record<string, unknown>).access_tier ?? ""),
+          display_name: String((account as Record<string, unknown>).display_name ?? "").trim(),
+          oa_status: "active" as const,
+          page_keys: Array.isArray((account as Record<string, unknown>).page_keys)
+            ? ((account as Record<string, unknown>).page_keys as unknown[]).map((pageKey) => String(pageKey))
+            : [],
         }));
         const invalid = normalizedAccounts.some((account) =>
           !account.username
           || account.username === "YNSYLP005"
-          || !["full_access", "read_export_only"].includes(account.access_tier),
+          || account.page_keys.length === 0,
         ) || new Set(normalizedAccounts.map((account) => account.username)).size !== normalizedAccounts.length;
         if (invalid) {
           return {
@@ -5689,6 +5705,21 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         }
       }
       return { body: cloneJson(workbenchAccessControlState) };
+    },
+    "/api/workbench/settings/access-control/users": ({ url }) => {
+      if (options.sessionRole !== "admin") {
+        return {
+          ok: false,
+          status: 403,
+          body: { error: "admin_access_required", message: "仅权限管理员 005 可维护访问账户。" },
+        };
+      }
+      const username = (url.searchParams.get("q") ?? "").trim().toUpperCase();
+      return {
+        body: {
+          users: username ? [{ username, display_name: `${username} 用户`, active: true }] : [],
+        },
+      };
     },
     "/api/workbench/settings/oa-applicant-credentials": () => ({
       body: {

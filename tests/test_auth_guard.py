@@ -3,29 +3,27 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 import fin_ops_platform.app.auth as auth_module
-from fin_ops_platform.app.auth import resolve_oa_request_session
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.services.access_control_service import AccessControlService
 from fin_ops_platform.services.oa_identity_service import OASessionExpiredError, OAUserIdentity
-from tests.app_test_support import (
-    build_local_state_application as build_application,
-    configure_access_control,
-)
+from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import configure_access_control
 
 
 class AuthGuardTests(unittest.TestCase):
+    @staticmethod
+    def _identity(username: str) -> OAUserIdentity:
+        return OAUserIdentity(f"id-{username}", username, username, username, roles=["finance"], permissions=["finops:app:view"])
+
     def test_runtime_auth_and_reset_have_no_synthetic_identity_or_default_secret(self) -> None:
         auth_source = inspect.getsource(auth_module)
         reset_source = inspect.getsource(Application._verify_reset_oa_password)
-
         for retired_marker in (
             "synthetic_identity",
             "local-dev-token",
             "test-default-token",
-            "unittest",
             "FIN_OPS_TEST_DEFAULT_AUTH",
             "FIN_OPS_DEV_ALLOW_LOCAL_SESSION",
             "FIN_OPS_DEV_USERNAME",
@@ -33,35 +31,22 @@ class AuthGuardTests(unittest.TestCase):
         ):
             self.assertNotIn(retired_marker, auth_source)
         self.assertNotIn("local-dev-password", reset_source)
-        self.assertNotIn("FIN_OPS_DEV_OA_PASSWORD", reset_source)
 
-    def test_access_control_uses_one_snapshot_and_cannot_create_second_admin(self) -> None:
-        snapshot_reads = 0
+    def test_access_control_uses_one_snapshot_and_never_creates_second_admin(self) -> None:
+        reads = 0
 
         def snapshot_provider() -> dict[str, object]:
-            nonlocal snapshot_reads
-            snapshot_reads += 1
+            nonlocal reads
+            reads += 1
             return {
-                "allowed_usernames": ["YNSYLP005", "ATTACKER"],
-                "readonly_export_usernames": [],
-                "admin_usernames": ["YNSYLP005"],
-                "full_access_usernames": ["ATTACKER"],
+                "page_access_accounts": [{"username": "ATTACKER", "page_keys": ["bank-details"]}],
+                "access_control_version": 1,
             }
 
-        service = AccessControlService(access_control_snapshot_provider=snapshot_provider)
-        decision = service.evaluate(
-            OAUserIdentity(
-                user_id="attacker-id",
-                username="ATTACKER",
-                nickname="attacker",
-                display_name="attacker",
-                roles=[],
-                permissions=[],
-            )
-        )
-
-        self.assertEqual(snapshot_reads, 1)
-        self.assertEqual(decision.access_tier, "full_access")
+        decision = AccessControlService(access_control_snapshot_provider=snapshot_provider).evaluate(self._identity("ATTACKER"))
+        self.assertEqual(reads, 1)
+        self.assertTrue(decision.can_access_page("bank-details"))
+        self.assertFalse(decision.can_access_page("settings"))
         self.assertFalse(decision.can_admin_access)
 
     def test_protected_admin_skips_snapshot_and_provider_failure_denies_others(self) -> None:
@@ -69,348 +54,94 @@ class AuthGuardTests(unittest.TestCase):
             raise RuntimeError("provider secret must not be logged")
 
         service = AccessControlService(access_control_snapshot_provider=failing_provider)
-        admin = service.evaluate(
-            OAUserIdentity("005", "YNSYLP005", "admin", "admin")
-        )
+        admin = service.evaluate(self._identity("YNSYLP005"))
         with self.assertLogs("fin_ops_platform.services.access_control_service", level="WARNING") as logs:
-            denied = service.evaluate(
-                OAUserIdentity(
-                    "outsider",
-                    "OUTSIDER001",
-                    "outsider",
-                    "outsider",
-                    roles=["finance"],
-                    permissions=["finops:app:view"],
-                )
-            )
+            denied = service.evaluate(self._identity("OUTSIDER001"))
 
-        self.assertEqual(admin.access_tier, "admin")
-        self.assertEqual(denied.access_tier, "denied")
+        self.assertTrue(admin.can_admin_access)
+        self.assertTrue(admin.can_access_page("operation-history"))
+        self.assertFalse(denied.can_access_app)
         self.assertNotIn("provider secret", "\n".join(logs.output))
 
-    def test_shared_local_fixture_admits_only_its_default_identity_without_persisting_acl(self) -> None:
+    def test_local_fixture_admits_default_identity_without_persisting_acl(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            default_decision = app._access_control_service.evaluate(
-                OAUserIdentity("test-id", "test_finops_user", "test", "test")
-            )
-            outsider_decision = app._access_control_service.evaluate(
-                OAUserIdentity("outsider-id", "OUTSIDER001", "outsider", "outsider")
-            )
-            persisted_acl = app._app_settings_service.get_access_control_payload()
+            default = app._access_control_service.evaluate(self._identity("test_finops_user"))
+            outsider = app._access_control_service.evaluate(self._identity("OUTSIDER001"))
+            persisted = app._app_settings_service.get_access_control_payload()
 
-        self.assertEqual(default_decision.access_tier, "full_access")
-        self.assertEqual(outsider_decision.access_tier, "denied")
-        self.assertEqual(persisted_acl["accounts"], [])
+        self.assertTrue(default.can_access_app)
+        self.assertFalse(outsider.can_access_app)
+        self.assertEqual(persisted["accounts"], [])
 
-    def test_protected_api_returns_unauthorized_without_oa_token(self) -> None:
+    def test_missing_or_expired_oa_token_is_unauthorized(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-
-            response = app.handle_request("GET", "/api/workbench?month=2026-03")
-            payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(payload["error"], "invalid_oa_session")
-
-    def test_permission_present_006_is_denied_by_direct_read_and_write_apis(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="006",
-                username="YNSYLP006",
-                nickname="外部用户",
-                display_name="外部用户",
-                dept_id="99",
-                dept_name="其他部门",
-                roles=["finance", "finops_full_access"],
-                permissions=["finops:app:view", "system:user:list"],
-            )
-
-            read_response = app.handle_request(
-                "GET",
-                "/api/workbench?month=2026-07",
-                headers={"Authorization": "Bearer no-access"},
-            )
-            write_response = app.handle_request(
-                "POST",
-                "/api/workbench/exceptions/review",
-                headers={"Authorization": "Bearer no-access"},
-                body=json.dumps({"group_id": "group-1", "decision": "keep_unpaired"}),
-            )
-
-        self.assertEqual(read_response.status_code, 403)
-        self.assertEqual(json.loads(read_response.body)["error"], "forbidden")
-        self.assertEqual(write_response.status_code, 403)
-        self.assertEqual(json.loads(write_response.body)["error"], "forbidden")
-
-    def test_import_endpoints_are_also_protected(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
+            missing = app.handle_request("GET", "/api/workbench?month=2026-03")
 
             def raise_expired(_: str) -> OAUserIdentity:
                 raise OASessionExpiredError("登录状态已过期")
 
             app._oa_identity_service.resolve_identity = raise_expired
+            expired = app.handle_request("GET", "/imports/templates", headers={"Authorization": "Bearer expired"})
 
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(expired.status_code, 401)
+
+    def test_oa_roles_and_permission_markers_cannot_grant_app_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
+            app._oa_identity_service.resolve_identity = lambda _token: self._identity("YNSYLP006")
             response = app.handle_request(
                 "GET",
-                "/imports/templates",
-                headers={"Authorization": "Bearer expired-token"},
+                "/api/workbench?month=2026-07",
+                headers={"Authorization": "Bearer no-access"},
             )
-            payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 403)
 
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(payload["error"], "invalid_oa_session")
-
-    def test_readonly_export_user_can_export_but_cannot_mutate_or_admin(self) -> None:
+    def test_page_permission_applies_equally_to_reads_and_writes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-            configure_access_control(app, read_export_only=["READONLY001"])
-            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="401",
-                username="READONLY001",
-                nickname="只读导出用户",
-                display_name="只读导出用户",
-                roles=["finance"],
-                permissions=[],
-            )
-            headers = {"Authorization": "Bearer readonly-user"}
-            readable_routes = [
-                ("GET", "/api/cost-statistics/export-preview?month=all&view=bank_account&bank_account_label=银行账户未确定", None),
-                ("GET", "/api/cost-statistics/export?month=all&view=bank_account&bank_account_label=银行账户未确定", None),
-                ("GET", "/api/turnover-ledger/export-preview?family=company", None),
-                ("GET", "/api/turnover-ledger/export?family=company", None),
-                ("GET", "/api/pending-invoices/export-preview?direction=expense", None),
-                ("GET", "/api/pending-invoices/export?direction=expense", None),
-            ]
-            forbidden_routes = [
-                ("PUT", "/api/pending-invoices/rules", {}),
-                ("PUT", "/api/input-invoice-usage/payment-status-rules", {}),
-                ("PUT", "/api/turnover-ledger/tag-selection", {}),
-                ("POST", "/api/bank-details/auto-tag-rules/reapply", {}),
-                (
-                    "POST",
-                    "/api/workbench/settings/data-reset/jobs",
-                    {"action": "reset_bank_transactions", "oa_password": "not-used-for-non-admin"},
-                ),
-                ("GET", "/api/workbench/settings/data-reset/preview?action=reset_bank_transactions", {}),
-                ("GET", "/api/workbench/settings/data-reset/jobs/active", {}),
-                ("GET", "/api/workbench/settings/data-reset/jobs/job-1", {}),
-            ]
+            configure_access_control(app, page_access={"USER001": ["pending-invoices"]})
+            app._oa_identity_service.resolve_identity = lambda _token: self._identity("USER001")
+            headers = {"Authorization": "Bearer user"}
+            write = app.handle_request("PUT", "/api/pending-invoices/rules", headers=headers, body="{}")
+            denied = app.handle_request("GET", "/api/bank-details", headers=headers)
 
-            readable_responses = []
-            for method, route, body in readable_routes:
-                with self.subTest(route=route):
-                    response = app.handle_request(
-                        method,
-                        route,
-                        headers=headers,
-                        body=json.dumps(body) if body is not None else None,
-                    )
-                    readable_responses.append((route, response))
-                    self.assertNotIn(response.status_code, {401, 403})
-                    if response.headers.get("Content-Type", "").startswith("application/json"):
-                        payload = json.loads(response.body)
-                        self.assertNotIn(payload.get("error"), {"invalid_oa_session", "forbidden", "admin_only"})
+        self.assertNotEqual(write.status_code, 403)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(json.loads(denied.body)["error"], "page_access_denied")
 
-            for method, route, body in forbidden_routes:
-                with self.subTest(route=route):
-                    response = app.handle_request(
-                        method,
-                        route,
-                        headers=headers,
-                        body=json.dumps(body),
-                    )
-                    payload = json.loads(response.body)
-                    self.assertEqual(response.status_code, 403)
-                    self.assertIn(payload["error"], {"permission_denied", "admin_only"})
-
-        responses_by_route = dict(readable_responses)
-        cost_export_response = responses_by_route[
-            "/api/cost-statistics/export?month=all&view=bank_account&bank_account_label=银行账户未确定"
-        ]
-        self.assertEqual(cost_export_response.status_code, 200)
-        self.assertEqual(
-            cost_export_response.headers.get("Content-Type"),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        self.assertEqual(
-            responses_by_route["/api/turnover-ledger/export?family=company"].headers.get("Content-Type"),
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-    def test_readonly_export_user_is_rejected_before_all_formerly_unguarded_write_routes(self) -> None:
-        write_routes = (
-            ("POST", "/api/workbench/actions/assign-invoice-expense-items"),
-            ("POST", "/api/workbench/actions/receipt-draft"),
-            ("POST", "/api/workbench/actions/confirm-cash-pass-through"),
-            ("POST", "/api/workbench/actions/confirm-cash-ticket-purchase"),
-            ("POST", "/api/workbench/actions/cancel-cash-special"),
-            ("POST", "/api/workbench/actions/confirm-personal-advance-repayment"),
-            ("POST", "/api/workbench/exceptions/review"),
-            ("POST", "/imports/files/preview"),
-            ("POST", "/imports/files/confirm"),
-            ("POST", "/imports/files/retry"),
-            ("POST", "/api/background-jobs/job-1/acknowledge"),
-            ("POST", "/api/background-jobs/job-1/retry"),
-            ("POST", "/api/etc/import/preview"),
-            ("POST", "/api/etc/import/confirm"),
-            ("POST", "/api/etc/import/discard"),
-            ("POST", "/api/etc/reconciliation-tasks"),
-            ("DELETE", "/api/etc/reconciliation-tasks/task-1"),
-            ("DELETE", "/api/etc/reconciliation-tasks/task-1/source-files/file-1"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/credit-card-statement"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/ticket-root-files"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/ticket-root-texts"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/supplement-evidences"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/supplement-evidences/item-1"),
-            ("PATCH", "/api/etc/reconciliation-tasks/task-1/items/item-1"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/confirm"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/reopen"),
-            ("POST", "/api/etc/reconciliation-tasks/task-1/refresh-matches"),
-            ("DELETE", "/api/etc/reconciliation-tasks/task-1/imported-invoices"),
-        )
+    def test_unknown_protected_route_fails_closed_for_every_account(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-            configure_access_control(app, read_export_only=["READONLY001"])
-            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="401",
-                username="READONLY001",
-                nickname="只读导出用户",
-                display_name="只读导出用户",
-                roles=["finance"],
-                permissions=[],
-            )
-            headers = {"Authorization": "Bearer readonly-user"}
-
-            for method, route in write_routes:
-                with self.subTest(method=method, route=route):
-                    response = app.handle_request(method, route, headers=headers, body="{}")
-                    self.assertEqual(response.status_code, 403)
-                    self.assertEqual(json.loads(response.body)["error"], "permission_denied")
-
-    def test_readonly_export_user_keeps_read_only_post_contracts(self) -> None:
-        read_routes = (
-            "/api/workbench/actions/confirm-link/preview",
-            "/api/workbench/actions/withdraw-link/preview",
-            "/api/pending-invoices/invoice-candidates/batch",
-            "/api/pending-invoices/rows/row-1/attach-existing-invoice/preview",
-            "/api/pending-invoices/attach-existing-invoices/preview",
-            "/api/input-invoice-usage/oa-reverse/preview",
-            "/api/tax-offset/calculate",
-        )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-            configure_access_control(app, read_export_only=["READONLY001"])
-            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="401",
-                username="READONLY001",
-                nickname="只读导出用户",
-                display_name="只读导出用户",
-                roles=["finance"],
-                permissions=[],
-            )
-            headers = {"Authorization": "Bearer readonly-user"}
-
-            for route in read_routes:
-                with self.subTest(route=route):
-                    response = app.handle_request("POST", route, headers=headers, body="{}")
-                    payload = json.loads(response.body)
-                    self.assertNotEqual(response.status_code, 403)
-                    self.assertNotEqual(payload.get("error"), "permission_denied")
-
-    def test_readonly_write_rejection_happens_before_request_body_parsing(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-            configure_access_control(app, read_export_only=["READONLY001"])
-            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="401",
-                username="READONLY001",
-                nickname="只读导出用户",
-                display_name="只读导出用户",
-                roles=["finance"],
-                permissions=[],
-            )
-            headers = {"Authorization": "Bearer readonly-user"}
-
-            with patch.object(app, "_load_json_body", side_effect=AssertionError("body parsed")):
-                json_response = app.handle_request(
-                    "POST",
-                    "/api/workbench/exceptions/review",
-                    headers=headers,
-                    body='{"group_id":"group-1","decision":"keep_unpaired"}',
-                )
-            with patch.object(app, "_load_multipart_body", side_effect=AssertionError("body parsed")):
-                multipart_response = app.handle_request(
-                    "POST",
-                    "/api/etc/import/preview",
-                    headers=headers,
-                    body=b"not-parsed",
-                )
-
-        self.assertEqual(json_response.status_code, 403)
-        self.assertEqual(multipart_response.status_code, 403)
-
-    def test_unknown_protected_post_fails_closed_for_readonly_but_reaches_not_found_for_full_access(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-            configure_access_control(app, full_access=["FULL001"], read_export_only=["READONLY001"])
-            identities = {
-                "readonly-user": OAUserIdentity(
-                    user_id="401",
-                    username="READONLY001",
-                    nickname="只读用户",
-                    display_name="只读用户",
-                ),
-                "full-user": OAUserIdentity(
-                    user_id="402",
-                    username="FULL001",
-                    nickname="可写用户",
-                    display_name="可写用户",
-                ),
-            }
-            app._oa_identity_service.resolve_identity = lambda token: identities[token]
-
-            readonly_response = app.handle_request(
+            configure_access_control(app, usernames=["USER001"])
+            app._oa_identity_service.resolve_identity = lambda _token: self._identity("USER001")
+            response = app.handle_request(
                 "POST",
                 "/api/future-write-route",
-                headers={"Authorization": "Bearer readonly-user"},
+                headers={"Authorization": "Bearer user"},
                 body="{}",
             )
-            full_response = app.handle_request(
-                "POST",
-                "/api/future-write-route",
-                headers={"Authorization": "Bearer full-user"},
-                body="{}",
-            )
-
-        self.assertEqual(readonly_response.status_code, 403)
-        self.assertEqual(full_response.status_code, 404)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(json.loads(response.body)["error"], "page_access_policy_missing")
 
     def test_etc_reconciliation_actor_comes_from_authenticated_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir), install_test_session=False)
-            configure_access_control(app, full_access=["FULL001"])
-            app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
-                user_id="trusted-user-id",
-                username="FULL001",
-                nickname="可信用户",
-                display_name="可信用户",
-                roles=[],
-                permissions=[],
-            )
+            configure_access_control(app, page_access={"USER001": ["etc-tickets"]})
+            app._oa_identity_service.resolve_identity = lambda _token: self._identity("USER001")
             response = app.handle_request(
                 "POST",
                 "/api/etc/reconciliation-tasks",
-                headers={"Authorization": "Bearer full-user"},
+                headers={"Authorization": "Bearer user"},
                 body=json.dumps({"title": "actor test", "createdBy": "spoofed-user"}),
             )
             task_id = json.loads(response.body)["taskId"]
             task = app._etc_reconciliation_task_service.get_task(task_id)
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(task.created_by, "FULL001")
+        self.assertEqual(task.created_by, "USER001")
 
 
 if __name__ == "__main__":

@@ -3267,15 +3267,13 @@ describe("Workbench row selection and detail drawer", () => {
   test("workbench settings can manage allowed app accounts", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
     });
     renderAuthenticatedAppAt("/", {
       session: {
-        accessTier: "admin",
         canAdminAccess: true,
-        canMutateData: true,
         user: {
           username: "YNSYLP005",
           nickname: "杨南山",
@@ -3324,13 +3322,15 @@ describe("Workbench row selection and detail drawer", () => {
     await user.clear(applicantInput);
     await user.type(applicantInput, "周洁莹、李四");
     await user.click(within(settingsTree).getByRole("treeitem", { name: /访问账户/ }));
-    expect(within(settingsPage).getByRole("heading", { name: "访问账户管理" })).toBeInTheDocument();
+    const accessRegion = within(settingsPage).getByRole("region", { name: "访问账户" });
+    expect(within(accessRegion).getByRole("heading", { name: "访问账户" })).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("新增访问账户"), "READONLY001");
-    await user.selectOptions(screen.getByLabelText("新增账户权限"), "read_export_only");
-    await user.click(screen.getByRole("button", { name: "新增账户" }));
-    await user.click(screen.getByRole("button", { name: "保存访问账户" }));
+    await user.type(within(accessRegion).getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
+    await user.click(await within(accessRegion).findByRole("option", { name: "新增账户 READONLY001" }));
+    await user.click(within(accessRegion).getByRole("checkbox", { name: "关联台" }));
+    await user.click(within(accessRegion).getByRole("button", { name: "保存访问权限" }));
     expect(await screen.findByText("已保存访问账户。")).toBeInTheDocument();
+    await user.click(within(settingsTree).getByRole("treeitem", { name: /项目状态/ }));
     await user.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -3339,7 +3339,7 @@ describe("Workbench row selection and detail drawer", () => {
         method: "PUT",
         body: JSON.stringify({
           expected_version: 1,
-          accounts: [{ username: "READONLY001", access_tier: "read_export_only" }],
+          accounts: [{ username: "READONLY001", page_keys: ["reconciliation-workbench"] }],
         }),
       }),
     );
@@ -3378,7 +3378,7 @@ describe("Workbench row selection and detail drawer", () => {
   test("YNSYKJ001 can see OA invoice offset settings without access account management", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "full_access",
+      sessionRole: "user",
       sessionUsername: "YNSYKJ001",
     });
     renderAppAt("/");
@@ -3394,7 +3394,7 @@ describe("Workbench row selection and detail drawer", () => {
   test("bank account settings can edit names without blanking the settings page", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
     });
     renderAppAt("/settings");
@@ -3429,7 +3429,7 @@ describe("Workbench row selection and detail drawer", () => {
     const user = userEvent.setup();
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
     });
@@ -3487,7 +3487,7 @@ describe("Workbench row selection and detail drawer", () => {
   test("admin data reset requires impact confirmation and current OA password", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
     });
@@ -3532,7 +3532,7 @@ describe("Workbench row selection and detail drawer", () => {
   test("admin data reset progress survives leaving and re-entering settings", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
       dataResetJobPollsBeforeComplete: 20,
@@ -3565,7 +3565,7 @@ describe("Workbench row selection and detail drawer", () => {
   test("data reset password failure does not show success feedback", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
       dataResetPasswordShouldFail: true,
@@ -3589,7 +3589,7 @@ describe("Workbench row selection and detail drawer", () => {
   test("canceling data reset password input does not call reset API or show success", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "杨南山",
     });
@@ -3615,7 +3615,7 @@ describe("Workbench row selection and detail drawer", () => {
   test("non-admin users do not see access account management in settings", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "full_access",
+      sessionRole: "user",
       sessionUsername: "FULL001",
     });
     renderAppAt("/");
@@ -3628,10 +3628,10 @@ describe("Workbench row selection and detail drawer", () => {
     expect(screen.queryByText("访问账户管理")).not.toBeInTheDocument();
   });
 
-  test("read-only export users do not see data reset tools in settings", async () => {
+  test("non-admin users do not see data reset tools in settings", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "read_only_export",
+      sessionRole: "user",
       sessionUsername: "EXPORT001",
     });
     renderAppAt("/");
@@ -4045,10 +4045,10 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).queryByRole("heading", { name: "未配对 0 项" })).not.toBeInTheDocument();
   }, 8_000);
 
-  test("read-only export users can search and view details but cannot see write actions", async () => {
+  test("a user assigned to the workbench gets its normal read and write actions", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "read_export_only",
+      sessionRole: "user",
       sessionUsername: "READONLY001",
     });
     renderAppAt("/");
@@ -4056,11 +4056,7 @@ describe("Workbench row selection and detail drawer", () => {
     const unpairedZone = await screen.findByTestId("zone-unpaired");
     const pairedZone = await screen.findByTestId("zone-paired");
 
-    expect(screen.queryByRole("button", { name: "银行流水导入" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "发票导入" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "ETC发票导入" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
     expect(within(unpairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
@@ -4068,13 +4064,12 @@ describe("Workbench row selection and detail drawer", () => {
     const invoiceRow = within(unpairedZone).getByRole("row", {
       name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
     });
-    expect(within(invoiceRow).queryByRole("button", { name: "忽略" })).not.toBeInTheDocument();
     await user.click(within(invoiceRow).getByRole("button", { name: /查看发票 .* 详情/ }));
     expect(await screen.findByRole("dialog", { name: "发票详情" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeDisabled();
+    expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeEnabled();
   });
 
   test("paired zone withdraw action enables when one row in a relation is selected", async () => {

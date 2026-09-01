@@ -6,7 +6,7 @@
 
 | 影响面 | 必须保护的行为 | 代表测试入口 |
 | --- | --- | --- |
-| OA identity / APP authorization | `Admin-Token` -> canonical username；OA role/permission（含 `finops:app:view`）只作信息；canonical ACL-only tier、direct API 403、即时撤权 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_oa_identity_service.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx` |
+| OA identity / APP authorization | `Admin-Token` -> canonical username；OA role/permission（含 `finops:app:view`）只作信息；canonical page ACL、direct API 403、即时撤权 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_oa_identity_service.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx` |
 | OA Mongo 只读 adapter | 付款申请/报销/项目映射、字段变体、断连空结果、read status、backoff、附件发票 cache；附件先经统一不可信文件签名/类型/资源边界，安全版本变化使旧 cache 精确失效 | `tests/test_mongo_oa_adapter.py`、`tests/test_oa_attachment_invoice_service.py`、`tests/test_untrusted_document_policy.py` |
 | 日常报销付款明细 identity | 每个 schedule item 稳定内部 ID、原 row index、项目/金额、附件 `source_expense_item_id`；历史数据通过 projection version bump 幂等重投 | `tests/test_mongo_oa_adapter.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_workbench_query_service.py` |
 | 表单专属费用类型 | 支付申请精确读取可配置 `category`；日常报销子项精确读取 `purposeType`；无关同名字段不覆盖，空/未知值不伪造“其他”；v8 历史重投幂等 | `tests/test_mongo_oa_adapter.py`、`tests/test_oa_projection_sync_service.py`、`tests/test_oa_projection_sql_runtime.py` |
@@ -17,7 +17,7 @@
 | 目标 OA 申请人登录 | RSA 加密、HTTP/网络/无效 JSON/无 token 失败、错误不泄露 password、缺凭据不尝试登录 | `tests/test_target_oa_applicant_token_provider.py` |
 | 进项发票 OA 反提 | preview hash、idempotency、目标申请人、草稿创建失败恢复、version conflict、人工 submitted/not_submitted、提交历史脱敏 | `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsagePage.test.tsx`、`web/src/test/InputInvoiceUsageFiltersAndDrawers.test.tsx` |
 | ETC OA 草稿 / 人工状态 | 草稿 payload、撤销本地绑定、manual status、删除本地批次不删除真实 OA、前端 OA review URL 清洗 | `tests/test_etc_backend.py`、`tests/test_etc_reconciliation_service.py`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcOaNavigation.test.ts` |
-| Runtime OA role projection | fixed selector、unique menu/三 role/exact 三 binding、只替换 dedicated members、disabled/missing/drift/timeout fail closed、compensation | `tests/test_oa_role_sync_service.py`、`tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py` |
+| Runtime OA role projection | fixed selector、unique menu/两个 dedicated role/exact 两 binding、只替换 dedicated members、disabled/missing/drift/timeout fail closed、compensation | `tests/test_oa_role_sync_service.py`、`tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py` |
 | Deploy ACL verification | 自动 profile、普通发布 005-only、retired env rejection、steady-state `eligible=true`、secret-safe artifact、OA exact topology | `tests/test_settings_access_control_preflight.py`、`tests/test_deploy_oa_script.py` |
 
 ## 七类测试适用性

@@ -321,7 +321,8 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         session = SimpleNamespace(
             allowed=True,
             can_access_app=True,
-            can_mutate_data=True,
+            can_admin_access=False,
+            can_access_page=lambda page_key: page_key == "settings",
             identity=SimpleNamespace(user_id=None, username="finance-admin"),
         )
 

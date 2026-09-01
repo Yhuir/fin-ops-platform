@@ -219,7 +219,7 @@ function AmountMismatchWarning({
 export default function BatchAccountingPage() {
   const { active, activationGeneration } = useOptionalPageActivation("batch-accounting");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const [bankYear, setBankYear] = useState(currentYear);
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
@@ -294,12 +294,12 @@ export default function BatchAccountingPage() {
     && differenceCents !== 0;
   const submittedAmountMismatch = bucket === "submitted" && selectedRelationAmountCheck?.status === "mismatch";
   const canSubmit = Boolean(selectedBankRow)
-    && canMutateData
+    && canOperateData
     && selectedOaRows.length > 0
     && isValidYear(bankYear)
     && !mutating
     && (differenceCents === 0 || differenceNote.trim().length > 0);
-  const canWithdraw = Boolean(selectedBankRow?.relationId) && canMutateData && !mutating;
+  const canWithdraw = Boolean(selectedBankRow?.relationId) && canOperateData && !mutating;
   const bankPagination = payload.pagination.bankRows ?? {
     page: bankPage,
     pageSize: BATCH_ACCOUNTING_PAGE_SIZE,
@@ -682,9 +682,9 @@ export default function BatchAccountingPage() {
       </div>
 
       {error ? <StatePanel tone="error" title={error} /> : null}
-      {!canMutateData ? (
+      {!canOperateData ? (
         <StatePanel compact tone="warning">
-          当前账号仅支持查看和导出，不能提交或撤回批量账务关联。
+          当前页面暂不可提交或撤回批量账务关联。
         </StatePanel>
       ) : null}
 

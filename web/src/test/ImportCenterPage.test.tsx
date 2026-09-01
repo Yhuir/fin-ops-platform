@@ -136,11 +136,10 @@ describe("Import pages", () => {
 
   test("bank transaction import uses the standalone route and sends bank mapping overrides", async () => {
     const user = userEvent.setup();
-    const fetchMock = installMockApiFetch({ sessionAccessTier: "admin" });
+    const fetchMock = installMockApiFetch({ sessionRole: "admin" });
 
     renderAppAt("/imports/bank-transactions", {
       session: {
-        accessTier: "admin",
         canAdminAccess: true,
       },
     });
@@ -359,18 +358,12 @@ describe("Import pages", () => {
     ]);
   });
 
-  test("invoice import hides manual entry from read-only users", async () => {
-    installMockApiFetch({ sessionAccessTier: "read_only" });
-
-    renderAppAt("/imports/invoices", {
-      session: {
-        accessTier: "read_only",
-        canMutateData: false,
-      },
-    });
+  test("invoice import exposes normal actions to a user assigned to the page", async () => {
+    installMockApiFetch({ sessionRole: "user" });
+    renderAppAt("/imports/invoices");
 
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "发票录入" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发票录入" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "补充凭证" })).toBeInTheDocument();
   });
 
@@ -400,11 +393,10 @@ describe("Import pages", () => {
   });
 
   test("invoice import does not expose a page Audit control", async () => {
-    installMockApiFetch({ sessionAccessTier: "admin" });
+    installMockApiFetch({ sessionRole: "admin" });
 
     const { unmount } = renderAppAt("/imports/invoices", {
       session: {
-        accessTier: "admin",
         canAdminAccess: true,
       },
     });
@@ -413,7 +405,7 @@ describe("Import pages", () => {
     expect(screen.queryByRole("button", { name: "Audit 发票导入" })).not.toBeInTheDocument();
     unmount();
 
-    installMockApiFetch({ sessionAccessTier: "full_access" });
+    installMockApiFetch({ sessionRole: "user" });
     renderAppAt("/imports/invoices");
     expect(await screen.findByRole("heading", { name: "发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Audit 发票导入" })).not.toBeInTheDocument();
@@ -609,16 +601,16 @@ describe("Import pages", () => {
   });
 
   test("ETC invoice import does not expose a page Audit control", async () => {
-    installMockApiFetch({ sessionAccessTier: "admin" });
+    installMockApiFetch({ sessionRole: "admin" });
     const { unmount } = renderAppAt("/imports/etc-invoices", {
-      session: { accessTier: "admin", canAdminAccess: true },
+      session: { canAdminAccess: true },
     });
 
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Audit ETC发票导入" })).not.toBeInTheDocument();
     unmount();
 
-    installMockApiFetch({ sessionAccessTier: "full_access" });
+    installMockApiFetch({ sessionRole: "user" });
     renderAppAt("/imports/etc-invoices");
     expect(await screen.findByRole("heading", { name: "ETC发票导入" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Audit ETC发票导入" })).not.toBeInTheDocument();

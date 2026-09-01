@@ -13,7 +13,7 @@ const workbenchRowIds = [
 test.describe("workbench withdraw browser flow", () => {
   test("withdraws one exact active relation directly from the unpaired zone", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchInitialIncompleteRelation: true,
       workbenchWithdrawPreviewDelayMs: 250,
       workbenchWithdrawSubmitDelayMs: 250,
@@ -67,7 +67,7 @@ test.describe("workbench withdraw browser flow", () => {
       costStatisticsRelationFanout: true,
       inputInvoiceUsageRelationFanout: true,
       oaPendingPaymentRelationFanout: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchWithdrawPreviewDelayMs: 250,
       workbenchWithdrawSubmitDelayMs: 1_000,
     });
@@ -172,7 +172,7 @@ test.describe("workbench withdraw browser flow", () => {
 
   test("restores withdraw preview controls after a safe error", async ({ page }) => {
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchInitialRelationConfirmed: true,
       workbenchWithdrawPreviewDelayMs: 250,
       workbenchWithdrawPreviewError: true,

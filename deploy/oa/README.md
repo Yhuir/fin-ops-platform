@@ -47,7 +47,7 @@ RabbitMQ/Redis 覆盖并强制 `FIN_OPS_QUEUE_BACKEND=postgres`。这一步发�
 - `FIN_OPS_ALLOWED_ROLES`
 - `FIN_OPS_READONLY_EXPORT_USERNAMES`
 
-访问账户、只读导出账户和全操作账户由 App 设置页维护。受保护管理员为 `YNSYLP005`。
+访问账户及其页面集合由 App 设置页维护。受保护管理员为 `YNSYLP005`；旧的只读/全操作层级不属于运行时合同。
 
 ## 当前 worker
 
@@ -180,8 +180,8 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 - OA 页面通过同域 cookie/token broker 复用会话；后端不向浏览器暴露 OA 密钥。
 - OA Mongo 只读；需要向 OA MySQL 写回的动作走专用 adapter、权限、幂等与审计边界。
 - OA 菜单模板：`deploy/oa/fin_ops_menu.mysql.sql`。
-- 菜单至少授予 `finops:app:view`；App 内细分权限来自同步后的账户 tier。
-- 不可见用户、只读导出用户、全操作用户和管理员都要做路由、API、隐藏/禁用按钮回归。
+- 菜单至少授予 `finops:app:view`；App 内页面权限只来自 canonical `page_access_accounts`，OA 角色不反向授予页面。
+- 无页面用户、单/多页面授权用户和固定 005 管理员都要做路由、API、侧栏过滤与 direct URL 回归。
 
 ## 首次安装控制面
 

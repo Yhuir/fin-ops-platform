@@ -3,7 +3,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import type { ImportWorkflowMode } from "../features/imports/importRoutes";
 
 export type WorkbenchHeaderActions = {
-  canMutateData: boolean;
+  canOperateData: boolean;
   onOpenImport: (mode: ImportWorkflowMode) => void;
   onOpenSettings: () => void;
 };

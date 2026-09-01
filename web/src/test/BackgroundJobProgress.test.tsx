@@ -152,7 +152,7 @@ describe("global background job page header", () => {
 
     expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
 
-    await user.click(screen.getByRole("link", { name: "银行明细" }));
+    await user.click(await screen.findByRole("link", { name: "银行明细" }));
 
     expect(await screen.findByRole("button", { name: "正在执行后台任务：正在导入 ETC发票 3/31" })).toBeInTheDocument();
     expect(screen.queryByTestId("background-progress-block")).not.toBeInTheDocument();

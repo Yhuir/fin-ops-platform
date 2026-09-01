@@ -1,22 +1,13 @@
-# 权限与审计 Spec-first E2E Coverage
+# 页面访问权限 E2E 覆盖
 
-本文件把 `e2e-spec.md` 的权限与审计横切合同映射到自动化覆盖。
+| Spec ID | 状态 | 自动化证据 |
+| --- | --- | --- |
+| `PERM-E2E-001` | covered | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`web/e2e/permissions-role-matrix.spec.ts` |
+| `PERM-E2E-002` | covered | `tests/test_route_access_policy.py`、`web/src/test/PageRouteHost.test.tsx`、`web/src/test/AppSidebar.test.tsx`、Browser matrix |
+| `PERM-E2E-003` | covered | 现有各页面 API/component/E2E 写入主链路；权限层不再重复维护页面内 write-control inventory |
+| `PERM-E2E-004` | covered | `tests/test_app_settings_service.py`、admin API tests、`web/src/test/SettingsPage.test.tsx`、Browser matrix |
+| `PERM-E2E-005` | covered | `tests/test_oa_role_sync_service.py`、settings service/API tests、Settings component test、Browser matrix |
+| `PERM-E2E-006` | covered | access-control service/session/settings CAS tests与 Browser 保存后切换 session |
+| `PERM-E2E-007` | covered | `tests/test_permissions_write_entry_inventory.py` 校验前端 registry、后端 page set 和 route policy 一致 |
 
-| Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
-| --- | --- | --- | --- |
-| `PERM-E2E-001` | `covered` | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/tax-offset-flow.spec.ts`、`web/src/test/SessionGate.test.tsx`、`tests/test_auth_guard.py`、`tests/test_session_api.py` | Browser 覆盖 admin/full/read-only/forbidden/expired shell gate、AppHealth protected dashboard API 零调用、银行明细/tax forbidden/expired 零 protected API；后端覆盖 session/auth 401/403 contract。 |
-| `PERM-E2E-002` | `covered` | `web/e2e/permissions-role-matrix.spec.ts` | Browser 覆盖 `read_export_only` 打开 16 个非 admin 页面并断言全程 mutation API 为 0、dashboard API 为 0、严格浏览器错误为 0。 |
-| `PERM-E2E-003` | `partial` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/workbench-receipt-flow.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/input-invoice-usage-flow.spec.ts`、`web/e2e/tax-offset-flow.spec.ts`、`docs/modules/permissions-and-audit/write-entry-inventory.md`、`tests/test_permissions_write_entry_inventory.py`、`web/src/test/*Page.test.tsx` | 已覆盖 settings/tax/三类 import/no-OA 高风险入口、Workbench 逐入口（含 paired/unpaired 收据入口）、银行明细分类/自动标签、成本统计两套规则、销项 canonical 三组只读页面、进项使用支付规则/OA reverse、税金保存/导入。role matrix 会扫描 read-export 可见 enabled 写控件，并通过 opener registry 覆盖关联台候选/撤回/现金处理/异常恢复；receipt flow 以专用双分区关系证明 read-export 收据入口禁用且 draft/print 零调用。其它银行分类与自动标签、成本统计按标签/按时间规则、无 OA 虚拟项目规则、pending 规则与收入批量、进项支付规则/OA reverse、销项 canonical 只读区域、OA pending、ETC 对账、batch accounting 和 turnover 动态区域保持覆盖；没有 dynamic opener 的导入页、tax-offset、settings 和 AppHealth 进入静态覆盖 registry。`tests/test_permissions_write_entry_inventory.py` 双向校验 page registry、inventory、role matrix、dynamic/static registry、Browser 证据路径、mutating feature API map、写控件关键词和源码 sentinel。销项页面旧状态/提醒/人工红蓝票/收据控件和 mutation 已删除，三种角色均只允许查询、详情和导出。OA reverse 与 Workbench receipt draft 是 read-like POST；receipt draft 仍由模块 handler 要求写权限且不产生 mutation audit。本项仍为 partial，因为尚未由 role matrix 自动打开的所有页面特定抽屉/弹窗，以及真实 OA/代理/生产审计，仍需 staging/production 或后续更深爬取。 |
-| `PERM-E2E-004` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/settings-data-reset-flow.spec.ts`、`web/e2e/app-shell.spec.ts`、settings/import/no-OA component tests | Browser 覆盖 `full_access` 可执行普通 settings 保存 POST、返回 200、显示成功反馈且无隐藏浏览器错误；同时可见 import file input、可见 no-OA 提交入口，但不能进入访问账户、数据重置或 AppHealth dashboard。 |
-| `PERM-E2E-005` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/app-shell.spec.ts`、settings/AppHealth component/API tests | Browser 覆盖 admin settings 访问账户/OA 凭据/data reset、AppHealth dashboard 可见且 admin-only API 被调用；访问账户通过独立 `PUT /api/workbench/settings/access-control` 保存 versioned accounts，普通 settings body 明确不含 ACL。full-access 直接向 generic 注入 ACL 得到 400、调用 dedicated API 得到 403；同时覆盖 OA 凭据不泄密和 data reset 权限。 |
-| `PERM-E2E-006` | `covered` | `tests/test_auth_guard.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_workbench_anomaly_review_service.py`、`tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_turnover_ledger_api.py` | 后端覆盖 read/write/admin guard、readonly export representative routes、server-authenticated Workbench anomaly review actor、data reset/OA credential/tax/pending/bank tag/turnover mutation 403 和下游写服务零调用。 |
-| `PERM-E2E-007` | `covered` | `tests/test_audit_service.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_read_model_architecture_guards.py`、relation/import/business service tests | 覆盖 actor/tenant/action/metadata、真实业务 owner 的 canonical audit/version、普通事务型 writer 零页面 dirty/outbox、访问 fresh gate 的授权 enqueue、idempotency 和 rollback 防半写。生产审计查询/导出仍为 `PERM-E2E-010`。 |
-| `PERM-E2E-008` | `covered` | `tests/test_postgres_migrations.py`、`tests/test_app_postgres_mode_integration.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_settings_data_reset_service.py`、settings/input/OA tests | 覆盖 SQL/ready payload secret safe、OA credentials 无密码回显、data reset 密码不泄露、settings payload 不含 OA secret。 |
-| `PERM-E2E-009` | `covered` | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/app-shell.spec.ts`、`web/e2e/bank-details-filtered-export-permissions.spec.ts`、page-level Browser specs | Role matrix 和 app-shell 现在捕获隐藏浏览器错误；expired session 的预期 401 resource error 只在 app-shell expired gate 中显式豁免。 |
-| `PERM-E2E-010` | `external-risk` | staging/production smoke、`bash scripts/verify.sh infra-smoke` 的 authenticated HTTP/SSE/runtime gates、后端 auth/audit tests | 真实 OA 菜单/角色同步、生产 token 过期、代理层下载 header、生产审计查询/导出和真实安全审计必须在 staging/production 验证。 |
-
-## 下一轮补测建议
-
-1. 把 `PERM-E2E-003` 的缺口继续收敛：新增页面/route、visible enabled 写控件和 opener registry 双向一致性已有 gate，下一步继续向 registry 增加更多页面特定抽屉/弹窗 opener，优先覆盖尚未由 role matrix 安全打开的深层 drawer/dialog。
-2. 持续维护 `write-entry-inventory.md`：从 `useSessionPermissions()` 调用点和 mutating API client 生成候选写入口清单，再映射到页面 E2E。
-3. staging 验证真实 OA role sync、真实 token 过期、真实导出 header 和生产审计查询/导出。
+生产发布后额外运行 access-control preflight、session/API latency 和浏览器视觉 smoke；本地 mock 不替代 OA/MySQL/PostgreSQL 真实结果。

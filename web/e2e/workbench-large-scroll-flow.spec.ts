@@ -189,7 +189,7 @@ async function selectFilterOptionWithKeyboardWithoutPageShift({
 test.describe("workbench large dataset browser flow", () => {
   test("sends every member when more than twenty rows are selected for confirmation", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchLargeDataset: true,
     });
     await page.goto("/");
@@ -223,7 +223,7 @@ test.describe("workbench large dataset browser flow", () => {
   test("shows grouped bank, applicant, and project filters without overlapping long labels", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchLargeDataset: true,
     });
     await page.goto("/");
@@ -279,7 +279,7 @@ test.describe("workbench large dataset browser flow", () => {
   test("keeps deep mouse and keyboard filter selection inside the popover scroll boundary", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchLargeDataset: true,
     });
     await page.goto("/");
@@ -316,7 +316,7 @@ test.describe("workbench large dataset browser flow", () => {
   test("keeps narrow-screen overflow inside the workbench panes", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchLargeDataset: true,
     });
 
@@ -352,7 +352,7 @@ test.describe("workbench large dataset browser flow", () => {
       }
     });
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchLargeDataset: true,
     });
 
@@ -462,7 +462,7 @@ test.describe("workbench large dataset browser flow", () => {
         workbenchWrites.push(`${request.method()} ${url.pathname}`);
       }
     });
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/");
     const openZone = page.getByTestId("zone-unpaired");
@@ -505,7 +505,7 @@ test.describe("workbench large dataset browser flow", () => {
 
   test("stops automatic retries after a page failure and resumes only when the user retries", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchGroupsFailuresBeforeSuccess: 1,
       workbenchLargeDataset: true,
     });

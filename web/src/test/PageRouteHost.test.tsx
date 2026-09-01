@@ -13,6 +13,29 @@ import {
   type AppPageRoute,
 } from "../app/pageRegistry";
 import { usePageActivation } from "../contexts/PageRuntimeContext";
+import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
+
+const routeSession: SessionContextValue = {
+  status: "authenticated",
+  session: {
+    allowed: true,
+    user: {
+      userId: "route-test-user",
+      username: "ROUTE001",
+      nickname: "路由测试",
+      displayName: "路由测试",
+      deptId: null,
+      deptName: null,
+      avatar: null,
+    },
+    roles: ["fin_ops_user"],
+    permissions: ["finops:app:view"],
+    canAccessApp: true,
+    canAdminAccess: false,
+    allowedPageKeys: ["page-a", "page-b", "cost-statistics", "root", "lazy-page"],
+  },
+  refresh: () => undefined,
+};
 
 function Harness({
   children,
@@ -22,9 +45,11 @@ function Harness({
   initialPath?: string;
 }) {
   return (
-    <MemoryRouter initialEntries={[initialPath]}>
-      {children}
-    </MemoryRouter>
+    <SessionContext.Provider value={routeSession}>
+      <MemoryRouter initialEntries={[initialPath]}>
+        {children}
+      </MemoryRouter>
+    </SessionContext.Provider>
   );
 }
 
@@ -59,11 +84,13 @@ describe("PageRouteHost", () => {
     }
 
     render(
-      <MemoryRouter initialEntries={["/cost-statistics"]}>
-        <main id="main-content" tabIndex={-1}>
-          <PageRouteHost routes={[createRoute("/cost-statistics", "cost-statistics", CostPage)]} />
-        </main>
-      </MemoryRouter>,
+      <SessionContext.Provider value={routeSession}>
+        <MemoryRouter initialEntries={["/cost-statistics"]}>
+          <main id="main-content" tabIndex={-1}>
+            <PageRouteHost routes={[createRoute("/cost-statistics", "cost-statistics", CostPage)]} />
+          </main>
+        </MemoryRouter>
+      </SessionContext.Provider>,
     );
 
     await waitFor(() => {

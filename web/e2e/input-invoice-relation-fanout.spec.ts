@@ -38,7 +38,7 @@ test.describe("input invoice usage relation browser fan-out", () => {
       costStatisticsRelationFanout: true,
       inputInvoiceUsageRelationFanout: true,
       oaPendingPaymentRelationFanout: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInputInvoiceUsageFanoutLatencyRecorder(page, testInfo);
 

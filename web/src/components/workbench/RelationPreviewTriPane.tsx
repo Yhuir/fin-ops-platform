@@ -231,7 +231,7 @@ function RelationPreviewTriPane({
                     scrollPaneId={pane.id}
                     scrollTestId={`relation-preview-candidate-scroll-${title}-${group.id}-${pane.id}`}
                     showWorkflowActions={false}
-                    canMutateData={false}
+                    canOperateData={false}
                     zoneId="paired"
                   />
                 </div>

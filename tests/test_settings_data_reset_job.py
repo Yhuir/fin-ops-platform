@@ -125,7 +125,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
-            configure_access_control(app, full_access=["YNSYLP006"])
+            configure_access_control(app, usernames=["YNSYLP006"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="finance-id",
                 username="YNSYLP006",
@@ -148,16 +148,15 @@ class SettingsDataResetJobTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "admin_only")
+        self.assertEqual(payload["error"], "admin_access_required")
         self.assertEqual(queue.events, [])
 
     def test_api_rejects_reset_without_reason_or_recovery_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
-            app._resolve_admin_session = lambda _headers: (
-                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
-                None,
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"
             )
 
             response = app.handle_request(
@@ -170,6 +169,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
                         "idempotency_key": "reset-request-1",
                     }
                 ),
+                headers={"Authorization": "Bearer admin-token"},
             )
 
         self.assertEqual(response.status_code, 400)
@@ -205,15 +205,14 @@ class SettingsDataResetJobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
-            app._resolve_admin_session = lambda _headers: (
-                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
-                None,
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"
             )
             app._verify_reset_oa_password = lambda _session, _password: None
             first_request = self._request_body(app)
             second_request = self._request_body(app, idempotency_key="reset-request-2")
 
-            headers = {"X-User": "YNSYLP005"}
+            headers = {"Authorization": "Bearer admin-token"}
             first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=first_request, headers=headers)
             second = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=second_request, headers=headers)
 
@@ -226,15 +225,15 @@ class SettingsDataResetJobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
-            app._resolve_admin_session = lambda _headers: (
-                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
-                None,
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"
             )
             app._verify_reset_oa_password = lambda _session, _password: None
             request = self._request_body(app)
 
-            first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request)
-            second = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request)
+            headers = {"Authorization": "Bearer admin-token"}
+            first = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request, headers=headers)
+            second = app.handle_request("POST", "/api/workbench/settings/data-reset/jobs", body=request, headers=headers)
             first_payload = json.loads(first.body)
             second_payload = json.loads(second.body)
 
@@ -248,9 +247,8 @@ class SettingsDataResetJobTests(unittest.TestCase):
             app = build_local_state_application(data_dir=Path(temp_dir))
             queue = install_durable_import_queue(app)
             queue.fail_next_enqueue = True
-            app._resolve_admin_session = lambda _headers: (
-                SimpleNamespace(identity=SimpleNamespace(user_id="admin-id", username="YNSYLP005")),
-                None,
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="admin-id", username="YNSYLP005", nickname="管理员", display_name="管理员"
             )
             app._verify_reset_oa_password = lambda _session, _password: None
 
@@ -258,6 +256,7 @@ class SettingsDataResetJobTests(unittest.TestCase):
                 "POST",
                 "/api/workbench/settings/data-reset/jobs",
                 body=self._request_body(app),
+                headers={"Authorization": "Bearer admin-token"},
             )
             payload = json.loads(response.body)
 

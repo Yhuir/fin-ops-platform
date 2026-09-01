@@ -725,9 +725,8 @@ def test_bank_flow_rule_batch_query_reads_canonical_tables_without_page_projecti
 def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transaction() -> None:
     connection = RecordingConnection()
     current_settings = {
-        "allowed_usernames": ["YNSYLP005", "concurrent-user"],
-        "admin_usernames": ["YNSYLP005"],
-        "full_access_usernames": ["concurrent-user"],
+        "page_access_accounts": [{"username": "concurrent-user", "page_keys": ["bank-flow-rule-batches"]}],
+        "access_control_version": 3,
         "bank_flow_rule_batch_tag_rules": {"version": 1},
     }
     connection.fetch_one = lambda sql, params=(): (  # type: ignore[method-assign]
@@ -749,11 +748,8 @@ def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transac
     )
 
     assert saved == {
-        "allowed_usernames": ["YNSYLP005", "concurrent-user"],
-        "readonly_export_usernames": [],
-        "admin_usernames": ["YNSYLP005"],
-        "full_access_usernames": ["concurrent-user"],
-        "access_control_version": 1,
+        "page_access_accounts": [{"username": "concurrent-user", "page_keys": ["bank-flow-rule-batches"]}],
+        "access_control_version": 3,
         "bank_flow_rule_batch_tag_rules": {"version": 2},
     }
     assert conflict is None
@@ -762,16 +758,15 @@ def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transac
     writes = [(sql, params) for sql, params in connection.executed if "insert into app.app_settings" in sql]
     assert len(writes) == 1
     persisted_payload = writes[0][1][1].obj
-    assert persisted_payload["allowed_usernames"] == ["YNSYLP005", "concurrent-user"]
+    assert persisted_payload["page_access_accounts"] == [
+        {"username": "concurrent-user", "page_keys": ["bank-flow-rule-batches"]}
+    ]
 
 
 def test_settings_generic_writer_preserves_acl_under_shared_session_lock() -> None:
     connection = RawSettingsConnection(
         {
-            "allowed_usernames": ["YNSYLP005", "existing"],
-            "readonly_export_usernames": ["existing"],
-            "admin_usernames": ["YNSYLP005"],
-            "full_access_usernames": [],
+            "page_access_accounts": [{"username": "existing", "page_keys": ["settings"]}],
             "access_control_version": 4,
             "workbench_column_layouts": {},
         }
@@ -781,15 +776,14 @@ def test_settings_generic_writer_preserves_acl_under_shared_session_lock() -> No
     repository.save_settings(
         "app_settings",
         {
-            "admin_usernames": ["attacker"],
+            "page_access_accounts": [{"username": "attacker", "page_keys": ["settings"]}],
             "access_control_version": 99,
             "workbench_column_layouts": {"invoice": ["amount"]},
         },
     )
 
-    assert connection.settings["admin_usernames"] == ["YNSYLP005"]
+    assert connection.settings["page_access_accounts"] == [{"username": "existing", "page_keys": ["settings"]}]
     assert connection.settings["access_control_version"] == 4
-    assert connection.settings["readonly_export_usernames"] == ["existing"]
     assert connection.settings["workbench_column_layouts"] == {"invoice": ["amount"]}
     sql = [statement for statement, _params in connection.statements]
     assert any("pg_advisory_lock" in statement for statement in sql)
@@ -800,10 +794,7 @@ def test_settings_generic_writer_preserves_acl_under_shared_session_lock() -> No
 def test_settings_acl_guard_commits_cas_and_audit_then_recovers_by_mutation_id() -> None:
     connection = RawSettingsConnection(
         {
-            "allowed_usernames": ["YNSYLP005"],
-            "readonly_export_usernames": [],
-            "admin_usernames": ["YNSYLP005"],
-            "full_access_usernames": [],
+            "page_access_accounts": [],
             "access_control_version": 1,
         }
     )
@@ -812,16 +803,13 @@ def test_settings_acl_guard_commits_cas_and_audit_then_recovers_by_mutation_id()
     with repository.begin_settings_acl_critical_section(1) as critical_section:
         committed = critical_section.commit(
             {
-                "allowed_usernames": ["YNSYLP005", "user-a"],
-                "readonly_export_usernames": [],
-                "admin_usernames": ["YNSYLP005"],
-                "full_access_usernames": ["user-a"],
+                "page_access_accounts": [{"username": "user-a", "page_keys": ["settings"]}],
             },
             {"mutation_id": "mutation-1", "actor_id": "YNSYLP005", "request_id": "request-1"},
         )
 
     assert committed["access_control_version"] == 2
-    assert connection.settings["full_access_usernames"] == ["user-a"]
+    assert connection.settings["page_access_accounts"] == [{"username": "user-a", "page_keys": ["settings"]}]
     assert connection.audits[0]["mutation_id"] == "mutation-1"
     assert repository.recover_settings_acl_commit("mutation-1") == {
         "access_control": committed,
@@ -835,10 +823,7 @@ def test_settings_acl_guard_commits_cas_and_audit_then_recovers_by_mutation_id()
 def test_settings_acl_guard_marks_commit_ack_loss_as_unknown() -> None:
     connection = RawSettingsConnection(
         {
-            "allowed_usernames": ["YNSYLP005"],
-            "readonly_export_usernames": [],
-            "admin_usernames": ["YNSYLP005"],
-            "full_access_usernames": [],
+            "page_access_accounts": [],
             "access_control_version": 1,
         }
     )
@@ -849,10 +834,7 @@ def test_settings_acl_guard_marks_commit_ack_loss_as_unknown() -> None:
         with repository.begin_settings_acl_critical_section(1) as critical_section:
             critical_section.commit(
                 {
-                    "allowed_usernames": ["YNSYLP005"],
-                    "readonly_export_usernames": [],
-                    "admin_usernames": ["YNSYLP005"],
-                    "full_access_usernames": [],
+                    "page_access_accounts": [],
                 },
                 {"mutation_id": "mutation-unknown", "actor_id": "YNSYLP005"},
             )

@@ -172,7 +172,7 @@ async function stageInvoiceFilesForPreview(page: Page, recordLatency?: Operation
 
 test.describe("invoice import browser flow", () => {
   test("clear discards the current preview and returns to a fresh page", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await previewInvoiceFiles(page);
     await page.getByRole("button", { name: "清空" }).click();
@@ -185,7 +185,7 @@ test.describe("invoice import browser flow", () => {
 
   test("previews and confirms input/output invoice files without cross-page barriers", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 
     await previewInvoiceFiles(page, { recordLatency });
@@ -221,7 +221,7 @@ test.describe("invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       invoiceImportDownstreamFanout: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 
@@ -401,7 +401,7 @@ test.describe("invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       invoiceImportIncludeCorruptFile: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 
@@ -454,7 +454,7 @@ test.describe("invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       invoiceImportPreviewDelayMs: 500,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 
@@ -490,7 +490,7 @@ test.describe("invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       invoiceImportConfirmPreviewStale: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 
@@ -517,7 +517,7 @@ test.describe("invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       invoiceImportConfirmError: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
 

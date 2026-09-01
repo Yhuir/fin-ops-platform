@@ -61,7 +61,7 @@ type ResizableTriPaneProps = {
     overKey: string,
     position: WorkbenchColumnDropPosition,
   ) => void;
-  canMutateData: boolean;
+  canOperateData: boolean;
 };
 
 function ResizableTriPane({
@@ -88,7 +88,7 @@ function ResizableTriPane({
   onColumnFilterChange,
   onTogglePaneSort,
   onReorderPaneColumns,
-  canMutateData,
+  canOperateData,
 }: ResizableTriPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -162,7 +162,7 @@ function ResizableTriPane({
         panes={visiblePanes}
         rowTemplateColumns={rowTemplateColumns}
         sourceGroups={sourceGroups ?? effectiveGroups}
-        canMutateData={canMutateData}
+        canOperateData={canOperateData}
         zoneId={zoneId}
       />
     </div>

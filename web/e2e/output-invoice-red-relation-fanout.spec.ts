@@ -5,7 +5,7 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 test.describe("销项发票自动红蓝票关系", () => {
   test("蓝票与红票读取同一正式关系并只打开只读详情", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/output-invoice-collections");

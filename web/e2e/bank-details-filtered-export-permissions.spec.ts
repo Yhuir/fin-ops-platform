@@ -12,9 +12,9 @@ function bankDetailProtectedCalls(calls: string[]) {
   return calls.filter((entry) => /^(GET|POST|PUT|DELETE) \/api\/bank-details/.test(entry));
 }
 
-test.describe("bank details filtered export and read-export permissions", () => {
+test.describe("bank details filtered export and non-admin permissions", () => {
   test("downloads the selected account with current keyword and category filters", async ({ page }, testInfo) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/bank-details");
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
@@ -83,7 +83,7 @@ test.describe("bank details filtered export and read-export permissions", () => 
   test("exports the selected month and filters after pagination changes without limiting to the current page", async ({ page }, testInfo) => {
     await installDeterministicApiMocks(page, {
       bankDetailsTransactionsTotal: 299,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-details");
@@ -197,38 +197,6 @@ test.describe("bank details filtered export and read-export permissions", () => 
     expect(content).toContain("智能工厂");
     expect(content).toContain("equipment_payment");
     await expect(page.getByText("已开始下载")).toBeVisible();
-    await expectNoUnexpectedSuccessUiErrors(page);
-  });
-
-  test("allows read-export users to download while keeping bank detail write entries disabled", async ({ page }, testInfo) => {
-    const api = await installDeterministicApiMocks(page, {
-      bankDetailsClassificationMode: "needs_confirmation",
-      sessionMode: "read_export_only",
-    });
-
-    await page.goto("/bank-details");
-    await expect(page.getByTestId("bank-details-page")).toBeVisible();
-    const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });
-    await expect(bankRow.getByRole("button", { name: "待确认" })).toBeDisabled();
-
-    await page.getByRole("button", { name: "导出", exact: true }).click();
-    const exportMenu = page.getByRole("menu", { name: "导出银行明细" });
-    await expect(exportMenu).toBeVisible();
-    const download = page.waitForEvent("download");
-    await exportMenu.getByRole("menuitem", { name: "导出全部银行" }).click();
-    const downloaded = await download;
-    const downloadPath = testInfo.outputPath(downloaded.suggestedFilename());
-    await downloaded.saveAs(downloadPath);
-    expect(await readXlsxText(downloadPath)).toContain("智能工厂设备商");
-
-    await page.getByRole("button", { name: /自动标签规则/ }).click();
-    const drawer = page.getByRole("dialog", { name: "自动标签规则" });
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "新增标签" })).toBeDisabled();
-    await expect(drawer.getByRole("button", { name: "重新应用规则" })).toBeDisabled();
-    await expect(drawer.getByRole("button", { name: "保存" })).toBeDisabled();
-
-    expect(bankDetailMutationCalls(api.calls)).toEqual([]);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 

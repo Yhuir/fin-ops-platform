@@ -1,5 +1,13 @@
 # 权限与审计 实施记录
 
+## 2026-09-02 - 页面级访问账户替代旧权限层级
+
+- 权限事实改为 `page_access_accounts[{username, page_keys}]`；普通账号只有“页面可访问/不可访问”，被授权页面内不再按账户拆分查看、导出和操作能力。
+- 固定 `YNSYLP005` 拥有全部页面和访问账户控制面；其他账号即使拥有 OA 角色或 permission marker，也只能得到 Settings 中明确勾选的页面。
+- 后端统一 route policy 同时保护读取与写入，未知 protected route fail closed；前端页面过滤、重定向和控件状态只是体验层，不替代后端校验。
+- OA 只保留 `finops_app_user` 与 `finops_admin` 两个菜单投影角色；旧分层字段/角色只在 `0165` 一次性迁移和部署切换预检中识别，不能回到运行时链路。
+- 历史记录中关于旧账户层级、只读写控件矩阵和三 OA 角色的内容只说明当时状态，均已被本节取代。
+
 ## 2026-08-20 - 批量账务 ETC summary Page Audit 事实对齐
 
 - Page Audit 的 `batch_accounting` proof 复用共享 canonical ETC summary SQL；只有 relation external batch 标识、规范化 `etc-summary-*` 行 ID 与已提交 ETC batch 事实精确一致时，虚拟 invoice 成员才视为存在。
@@ -12,12 +20,10 @@
 ## 当前决策
 
 - 权限事实源在后端 OA session + `AccessControlService`。前端权限 hook 只负责用户体验，不能作为安全边界。
-- 权限层级固定为 `denied`、`read_export_only`、`full_access`、`admin`；`YNSYLP005` 固定 admin，settings 中 admin 用户必须自动进入 allowed。
-- 写入 API 必须检查 `can_mutate_data`；数据重置、OA 凭据、访问账户管理、AppHealth 运维 dashboard 等高风险入口必须检查 `can_admin_access`。
+- 普通账号的唯一授权维度是页面集合；页面命中后，读取、导出和业务操作按该页面既有业务规则执行。`YNSYLP005` 固定拥有全部页面及管理控制面。
+- 后端 route policy 必须覆盖所有 protected route；访问账户、数据重置、OA 凭据等管理入口额外检查 `can_admin_access`。
 - 审计是 command/service 边界的一部分。重要业务写入应在同一事务或等价原子边界内提交业务事实、audit、dirty scope/outbox。
-- 本模块已建立 shared Spec-first 合同、覆盖映射和写入口 inventory；新增页面/route 漏登记、非 admin route 漏进 role matrix、role matrix 保留陈旧 route、covered row 缺 Browser 证据、Browser 证据路径指向已删除或改名的 Playwright spec、covered-browser row 缺 dynamic opener 或页面级静态证明、dynamic/static registry 引用无效模块或重复归类、dynamic opener 与 Playwright/inventory 不一致已有 `tests/test_permissions_write_entry_inventory.py` 机械 gate，read-export 首屏和已打开动态区域 visible enabled 写控件已有 `permissions-role-matrix` DOM 候选扫描。已打开动态区通过 role matrix opener registry 维护，包括关联台列顺序拖拽 settings 保存入口、关联台未配对候选动作、关联台已配对撤回动作、关联台现金处理行级菜单、关联台统一异常抽屉处理与恢复、银行分类确认、银行人工待分类、银行自动标签、no-OA 标签、pending 规则、收入批量、进项支付规则、进项 OA reverse、销项 canonical 只读区域、OA pending 进行中/规则、ETC 对账流程、batch accounting 选择与已提交撤回和 turnover。没有 dynamic opener 的 covered-browser 页面必须登记在页面级静态覆盖 registry。当前仍为 `spec-first-partial`，因为 `PERM-E2E-003` 尚未自动打开所有页面特定抽屉/弹窗。真实 OA 菜单、角色同步、生产 token 行为和代理层导出权限仍需 staging/生产 smoke。
-- `tests/test_permissions_write_entry_inventory.py` 还会扫描 `web/src/features/*/api.ts` 中的 POST/PUT/PATCH/DELETE client，并要求每个 mutating feature API 文件映射到 `write-entry-inventory.md` 的模块行；新增 frontend write client 不能绕过权限写入口 inventory 审核。写控件关键词也以 `write-entry-inventory.md` 的 `Write control keyword registry` 为事实源，测试会双向校验每个关键词都进入 `permissions-role-matrix` 的 DOM 扫描 pattern，且 pattern 中的每个字面关键词都已在 inventory 登记。
-- `pageRegistry.tsx` 与 `write-entry-inventory.md` 也已双向校验：新增页面必须有权限写入口 row，inventory 中的 row 也必须对应当前 app registry 页面，防止保留已删除或改名页面的陈旧覆盖声明。`write-entry-inventory.md` 中登记的 `web/e2e/...` Browser 证据必须解析到当前文件或至少匹配一个真实 glob，防止 coverage 继续引用已删除或改名的 Playwright spec。
+- `tests/test_permissions_write_entry_inventory.py` 只保留四项高价值机械约束：前后端 page registry 一致、canonical snapshot 唯一、旧层级不回流运行时、ACL 不新增 cache/queue/worker I/O。页面/API 行为由 service、API、component 与 Browser tests 直接证明，避免维护第二套庞大门禁清单。
 
 ## 2026-06-20 - admin 数据重置确认弹窗权限 smoke
 

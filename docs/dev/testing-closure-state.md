@@ -2,6 +2,12 @@
 
 本文是测试闭环 master goal 的控制状态。每轮只处理一个模块或共享边界；结束时必须更新本文件，再根据状态选择下一轮。
 
+## 2026-09-02 - 逐页面访问权限
+
+- 当前权限模型是逐页面二元授权；`read_export_only/full_access`、`access_tier` 和 `can_mutate_data` 已从运行时合同删除。
+- OA 账户 `005` 是唯一权限管理员并隐式拥有全部页面；普通账户只能访问设置中勾选的页面及其后端 API，未识别的受保护 API fail-closed。
+- 下方较早阶段中的旧权限层级和只读写入口矩阵只作历史证据，不得作为当前运行时或测试合同。
+
 ## 2026-08-13 - 关联台 direct canonical API
 
 - 当前 required runtime 精确为 `oa-sync`、`workbench-matching`、`workbench-relation`、`import`、`settings-maintenance` 五个实例；read-model registry/manifest 只登记共享 `workbench_relation`。

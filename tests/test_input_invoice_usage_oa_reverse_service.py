@@ -347,7 +347,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 "idempotencyKey": "create-key-1",
             },
             actor_id="user-1",
-            can_mutate=True,
         )
         second = service.create_batch(
             {
@@ -357,7 +356,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 "idempotencyKey": "create-key-1",
             },
             actor_id="user-1",
-            can_mutate=True,
         )
 
         self.assertEqual(first["batchId"], second["batchId"])
@@ -382,7 +380,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 "idempotencyKey": "one-step-key-1",
             },
             actor_id="login-user",
-            can_mutate=True,
             oa_client_provider=provider,
         )
 
@@ -411,7 +408,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(staged_batch["version"]),
             idempotency_key="draft-key-staged",
             actor_id="user-1",
-            can_mutate=True,
         )
         submitted_batch = self._create_batch(service, ["inv-submitted"])
         submitted_draft = service.create_oa_draft(
@@ -419,7 +415,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(submitted_batch["version"]),
             idempotency_key="draft-key-submitted",
             actor_id="user-1",
-            can_mutate=True,
         )
         service.manual_oa_status(
             str(submitted_draft["batchId"]),
@@ -428,7 +423,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(submitted_draft["version"]),
             idempotency_key="confirm-submitted-for-staged-list",
             actor_id="user-1",
-            can_mutate=True,
         )
 
         payload = service.staged_drafts()
@@ -454,7 +448,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                     "idempotencyKey": "one-step-missing-credential",
                 },
                 actor_id="login-user",
-                can_mutate=True,
                 oa_client_provider=provider,
             )
 
@@ -471,7 +464,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 expected_version=99,
                 idempotency_key="draft-key-1",
                 actor_id="user-1",
-                can_mutate=True,
                 oa_client=FakeOaDraftClient(),
             )
 
@@ -487,7 +479,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 expected_version=int(batch["version"]),
                 idempotency_key="draft-key-1",
                 actor_id="user-1",
-                can_mutate=True,
             )
 
         failed = service.get_batch(str(batch["batchId"]))
@@ -508,7 +499,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(batch["version"]),
             idempotency_key="draft-key-1",
             actor_id="user-1",
-            can_mutate=True,
         )
 
         revoked = service.revoke_oa_draft(
@@ -517,7 +507,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(drafted["version"]),
             idempotency_key="revoke-key-1",
             actor_id="user-1",
-            can_mutate=True,
         )
 
         self.assertEqual(revoked["status"], InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value)
@@ -545,7 +534,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 "idempotencyKey": "create-key-selected-applicant",
             },
             actor_id="login-user",
-            can_mutate=True,
         )
 
         drafted = service.create_oa_draft(
@@ -553,7 +541,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(batch["version"]),
             idempotency_key="draft-key-selected-applicant",
             actor_id="login-user",
-            can_mutate=True,
         )
 
         self.assertEqual(drafted["status"], "oa_draft_created")
@@ -583,7 +570,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(drafted["version"]),
             idempotency_key="confirm-submitted-key",
             actor_id="login-user",
-            can_mutate=True,
         )
 
         self.assertEqual(confirmed["status"], "submitted_confirmed")
@@ -609,7 +595,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(batch["version"]),
             idempotency_key="draft-key-1",
             actor_id="user-1",
-            can_mutate=True,
         )
 
         marked = service.manual_oa_status(
@@ -619,7 +604,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(drafted["version"]),
             idempotency_key="confirm-not-submitted-key",
             actor_id="user-1",
-            can_mutate=True,
         )
 
         self.assertEqual(marked["status"], InputInvoiceUsageOaReverseStatus.NOT_SUBMITTED.value)
@@ -643,7 +627,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(batch["version"]),
             idempotency_key="draft-key-1",
             actor_id="user-1",
-            can_mutate=True,
         )
         detecting = self._force_detection_state(service, str(drafted["batchId"]), int(drafted["version"]))
 
@@ -651,7 +634,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             str(batch["batchId"]),
             expected_version=int(detecting.version),
             actor_id="user-1",
-            can_mutate=True,
         )
 
         self.assertEqual(refreshed["status"], InputInvoiceUsageOaReverseStatus.OA_DETECTION_MISSING.value)
@@ -680,7 +662,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             expected_version=int(batch["version"]),
             idempotency_key="draft-key-1",
             actor_id="user-1",
-            can_mutate=True,
         )
         detecting = self._force_detection_state(service, str(drafted["batchId"]), int(drafted["version"]))
 
@@ -688,7 +669,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             str(batch["batchId"]),
             expected_version=int(detecting.version),
             actor_id="user-1",
-            can_mutate=True,
         )
 
         self.assertEqual(refreshed["status"], InputInvoiceUsageOaReverseStatus.OA_DETECTED.value)
@@ -714,7 +694,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
                 "idempotencyKey": f"create-key-{'-'.join(invoice_ids)}",
             },
             actor_id="user-1",
-            can_mutate=True,
         )
 
     @staticmethod

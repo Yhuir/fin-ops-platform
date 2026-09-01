@@ -1,3 +1,4 @@
+import hashlib
 import inspect
 import json
 import tempfile
@@ -20,7 +21,10 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleAssignment,
     OARoleSyncConfigurationError,
+    OARoleSyncService,
+    OAUserSummary,
 )
+from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
     INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
@@ -53,20 +57,14 @@ class RecordingSyncService:
         self.calls: list[list[OARoleAssignment]] = []
 
     def sync_access_control(self, snapshot: dict[str, object]) -> None:
-        readonly = [
-            OARoleAssignment(username=str(username), tier="read_export_only")
-            for username in list(snapshot.get("readonly_export_usernames") or [])
-        ]
-        full_access = [
-            OARoleAssignment(username=str(username), tier="full_access")
-            for username in list(snapshot.get("full_access_usernames") or [])
-        ]
-        admin = [
-            OARoleAssignment(username=str(username), tier="admin")
-            for username in list(snapshot.get("admin_usernames") or [])
-        ]
-        self.assignments = [*readonly, *full_access, *admin]
+        self.assignments = OARoleSyncService.build_assignments(snapshot)
         self.calls.append(list(self.assignments))
+
+    def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
+        return [OAUserSummary(username, f"{username} 用户", True) for username in usernames]
+
+    def search_users(self, query: str, *, limit: int = 20) -> list[OAUserSummary]:
+        return [OAUserSummary(query, f"{query} 用户", True)][:limit]
 
 
 class RecordingQueueRepository:
@@ -577,7 +575,7 @@ class AppSettingsServiceTests(unittest.TestCase):
             )
             store = ApplicationStateStore(Path(temp_dir))
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["boundary-owner"])
+            configure_access_control(app, usernames=["boundary-owner"])
             service = app._app_settings_service
             previous_state = service.get_turnover_ledger_tag_selection_state()
             normalized = service.normalize_turnover_ledger_tag_selection_update(
@@ -596,9 +594,9 @@ class AppSettingsServiceTests(unittest.TestCase):
             service.restore_turnover_ledger_tag_selection_state(previous_state)
             restored = store.load_app_settings()
 
-        self.assertIn("boundary-owner", committed["allowed_usernames"])
+        self.assertIn("boundary-owner", [row["username"] for row in committed["page_access_accounts"]])
         self.assertEqual(committed["turnover_ledger_tag_selection"]["selected_tag_codes"], [])
-        self.assertEqual(restored["allowed_usernames"], committed["allowed_usernames"])
+        self.assertEqual(restored["page_access_accounts"], committed["page_access_accounts"])
         self.assertEqual(restored["turnover_ledger_tag_selection"], previous_state)
         self.assertEqual(app._audit_service.as_dicts()[-1]["action"], "turnover_ledger_tag_selection_updated")
 
@@ -1735,19 +1733,13 @@ class AppSettingsServiceTests(unittest.TestCase):
 
             payload = configure_access_control(
                 app,
-                full_access=["FULL001"],
-                read_export_only=["READONLY001"],
+                usernames=["FULL001", "READONLY001"],
             )
 
         self.assertEqual(payload["administrator"]["username"], "YNSYLP005")
         self.assertTrue(payload["administrator"]["protected"])
-        self.assertEqual(
-            payload["accounts"],
-            [
-                {"username": "FULL001", "access_tier": "full_access"},
-                {"username": "READONLY001", "access_tier": "read_export_only"},
-            ],
-        )
+        self.assertEqual([account["username"] for account in payload["accounts"]], ["FULL001", "READONLY001"])
+        self.assertTrue(all(set(account["page_keys"]) == ASSIGNABLE_PAGE_KEYS for account in payload["accounts"]))
 
     def test_access_control_rejects_case_collisions_before_oa_sync(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1759,8 +1751,8 @@ class AppSettingsServiceTests(unittest.TestCase):
                 app._app_settings_service.update_access_control(
                     expected_version=1,
                     accounts=[
-                        {"username": "Full.User", "access_tier": "full_access"},
-                        {"username": "full.user", "access_tier": "read_export_only"},
+                        {"username": "Full.User", "page_keys": ["bank-details"]},
+                        {"username": "full.user", "page_keys": ["pending-invoices"]},
                     ],
                     actor_id="YNSYLP005",
                     actor_name="admin",
@@ -1772,7 +1764,7 @@ class AppSettingsServiceTests(unittest.TestCase):
     def test_generic_settings_save_preserves_dedicated_access_control(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["FULL001"])
+            configure_access_control(app, usernames=["FULL001"])
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
@@ -1785,10 +1777,8 @@ class AppSettingsServiceTests(unittest.TestCase):
             access_control = reloaded_app._app_settings_service.get_access_control_payload()
 
         self.assertNotIn("access_control", payload)
-        self.assertEqual(
-            access_control["accounts"],
-            [{"username": "FULL001", "access_tier": "full_access"}],
-        )
+        self.assertEqual(access_control["accounts"][0]["username"], "FULL001")
+        self.assertEqual(set(access_control["accounts"][0]["page_keys"]), ASSIGNABLE_PAGE_KEYS)
         self.assertEqual(
             payload["workbench_column_layouts"]["oa"],
             ["projectName", "applicant", "amount", "counterparty", "reason"],
@@ -1924,16 +1914,15 @@ class AppSettingsServiceTests(unittest.TestCase):
 
             configure_access_control(
                 app,
-                full_access=["FULL001"],
-                read_export_only=["READONLY001"],
+                usernames=["FULL001", "READONLY001"],
             )
 
         self.assertEqual(
             sync_service.assignments,
             [
-                OARoleAssignment(username="READONLY001", tier="read_export_only"),
-                OARoleAssignment(username="FULL001", tier="full_access"),
-                OARoleAssignment(username="YNSYLP005", tier="admin"),
+                OARoleAssignment(username="FULL001", role="user"),
+                OARoleAssignment(username="READONLY001", role="user"),
+                OARoleAssignment(username="YNSYLP005", role="admin"),
             ],
         )
 
@@ -1955,6 +1944,26 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(result["version"], 1)
         self.assertEqual(sync_service.calls, [])
 
+    def test_access_control_audit_hashes_accounts_whose_page_set_changes(self) -> None:
+        account_hash = hashlib.sha256(b"FULL001").hexdigest()
+
+        changed = AppSettingsService._changed_username_hashes(
+            {
+                "page_access_accounts": [
+                    {"username": "FULL001", "page_keys": ["bank-details"]},
+                ],
+                "access_control_version": 1,
+            },
+            {
+                "page_access_accounts": [
+                    {"username": "FULL001", "page_keys": ["pending-invoices"]},
+                ],
+                "access_control_version": 1,
+            },
+        )
+
+        self.assertEqual(changed, [account_hash])
+
     def test_access_control_real_change_requires_configured_oa_sync_before_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -1963,17 +1972,17 @@ class AppSettingsServiceTests(unittest.TestCase):
             with self.assertRaises(OARoleSyncConfigurationError):
                 app._app_settings_service.update_access_control(
                     expected_version=1,
-                    accounts=[{"username": "FULL001", "access_tier": "full_access"}],
+                    accounts=[{"username": "FULL001", "page_keys": ["bank-details"]}],
                     actor_id="YNSYLP005",
                     actor_name="admin",
                     request_id="missing-oa-sync",
                 )
 
-            payload = app._app_settings_service.get_access_control_payload()
+            payload = app._app_settings_service.get_access_control_snapshot()
             state_path = Path(temp_dir) / "app_settings.json"
             persisted = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
 
-        self.assertEqual(payload["accounts"], [])
+        self.assertEqual(payload["page_access_accounts"], [])
         self.assertEqual(persisted.get("_settings_acl_audit_events", []), [])
 
     def test_access_control_persistence_failure_compensates_oa_before_unlock(self) -> None:
@@ -1996,17 +2005,17 @@ class AppSettingsServiceTests(unittest.TestCase):
             with self.assertRaises(AppSettingsPersistenceError):
                 app._app_settings_service.update_access_control(
                     expected_version=1,
-                    accounts=[{"username": "FULL001", "access_tier": "full_access"}],
+                    accounts=[{"username": "FULL001", "page_keys": ["bank-details"]}],
                     actor_id="YNSYLP005",
                     actor_name="admin",
                     request_id="db-failure",
                 )
 
         self.assertEqual(len(sync_service.calls), 2)
-        self.assertIn(OARoleAssignment(username="FULL001", tier="full_access"), sync_service.calls[0])
+        self.assertIn(OARoleAssignment(username="FULL001", role="user"), sync_service.calls[0])
         self.assertEqual(
             sync_service.calls[1],
-            [OARoleAssignment(username="YNSYLP005", tier="admin")],
+            [OARoleAssignment(username="YNSYLP005", role="admin")],
         )
 
     def test_workbench_settings_api_rejects_legacy_access_control_fields(self) -> None:

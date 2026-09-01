@@ -64,7 +64,7 @@ test.describe("pending invoices income status browser flow", () => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceIncomeBatchRows: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
@@ -136,7 +136,7 @@ test.describe("pending invoices income status browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceIncomeBatchRows: true,
       pendingInvoiceIncomeStatusFailuresBeforeSuccess: 1,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
@@ -212,7 +212,7 @@ test.describe("pending invoices income status browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceIncomeBatchRows: true,
       pendingInvoiceIncomeStatusError: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 

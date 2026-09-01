@@ -24,7 +24,7 @@ function waitForRows(page: Page) {
 test.describe("OA pending payments canonical page states", () => {
   test("uses one stable response without legacy runtime metadata or polling", async ({ page }, testInfo) => {
     const diagnostics = startPageDiagnostics(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
     const rowsResponse = waitForRows(page);
 
@@ -57,7 +57,7 @@ test.describe("OA pending payments canonical page states", () => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentRowsFailuresBeforeSuccess: 2,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
 

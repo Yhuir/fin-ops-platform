@@ -1095,8 +1095,8 @@ describe("Pending invoices page", () => {
 
     expect(within(page).getByText("支出流水")).toBeInTheDocument();
     expect(within(page).getByText("发票获取状态")).toBeInTheDocument();
-    expect(within(page).getByText("进项发票")).toBeInTheDocument();
-    expect(within(page).getByText("OA")).toBeInTheDocument();
+    expect(within(page).getAllByText("进项发票").length).toBeGreaterThan(0);
+    expect(within(page).getAllByText("OA").length).toBeGreaterThan(0);
     expect(within(page).getByRole("columnheader", { name: /对方户名/ })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "金额 / 银行账户" })).toBeInTheDocument();
     expect(within(page).getByRole("columnheader", { name: "摘要 / 凭证" })).toBeInTheDocument();

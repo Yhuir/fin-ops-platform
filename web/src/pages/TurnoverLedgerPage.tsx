@@ -322,7 +322,7 @@ function tagSubLabel(tag: TurnoverLedgerTagDefinition) {
 export default function TurnoverLedgerPage() {
   const { active, activationGeneration } = useOptionalPageActivation("turnover-ledger");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
   const [page, setPage] = useState(1);
   const [ledger, setLedger] = useState<TurnoverLedgerGroupedResponse | null>(null);
@@ -395,13 +395,13 @@ export default function TurnoverLedgerPage() {
     return relationIds.size === 1 ? Array.from(relationIds)[0] : "";
   }, [selectedClosureRows, selectedRowsAllCashClosure]);
   const canWithdrawSelectedCashClosure = Boolean(
-    canMutateData
+    canOperateData
       && selectedRowsAllCashClosure
       && selectedCashClosureCaseId
       && !closureSubmitting
       && !mutatingRelation,
   );
-  const canOpenClosureDrawer = canMutateData
+  const canOpenClosureDrawer = canOperateData
     && selectedClosureRows.length >= 2
     && !selectedRowsContainCashClosure;
   const closureActionLabel = selectedRowsAllCashClosure ? "撤回闭环" : "确认闭环";
@@ -752,7 +752,7 @@ export default function TurnoverLedgerPage() {
     if (
       !activeEditor
       || activeEditor.relationId !== next.relationId
-      || !canMutateData
+      || !canOperateData
       || detailLoading
       || detailError
       || savingExtra
@@ -924,7 +924,7 @@ export default function TurnoverLedgerPage() {
   };
 
   const handleSaveTagSelection = async () => {
-    if (!canMutateData || tagSaving) {
+    if (!canOperateData || tagSaving) {
       return;
     }
     const selectedTagCodes = Array.from(draftSelectedTagCodes);
@@ -1030,7 +1030,7 @@ export default function TurnoverLedgerPage() {
           </>
         )}
       >
-        {!canMutateData ? (
+        {!canOperateData ? (
           <div className="turnover-ledger-page-notice turnover-ledger-page-notice--info" role="status">
             当前账号为只读权限，可查看台账与详情，不能确认或撤销归并。
           </div>
@@ -1127,7 +1127,7 @@ export default function TurnoverLedgerPage() {
               onEdit={handleOpenEditor}
               selectedFlowRowIds={selectedFlowRowIds}
               onToggleFlowSelection={handleToggleClosureRow}
-              actionsDisabled={!canMutateData}
+              actionsDisabled={!canOperateData}
             />
             <FinanceTablePagination
               page={ledger?.pagination.page ?? page}
@@ -1150,13 +1150,13 @@ export default function TurnoverLedgerPage() {
       >
         <div className="turnover-ledger-drawer__content">
           <div className="turnover-ledger-drawer__actions">
-            <Button className="turnover-ledger-button" isDisabled={!canMutateData || tagSaving} onPress={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} size="sm" variant="secondary">全选</Button>
-            <Button className="turnover-ledger-button" isDisabled={!canMutateData || tagSaving} onPress={() => setDraftSelectedTagCodes(new Set())} size="sm" variant="secondary">清空</Button>
-            <Button className="turnover-ledger-button turnover-ledger-button--primary" isDisabled={!canMutateData || tagSaving} isPending={tagSaving} onPress={() => void handleSaveTagSelection()} size="sm" variant="primary">保存</Button>
+            <Button className="turnover-ledger-button" isDisabled={!canOperateData || tagSaving} onPress={() => setDraftSelectedTagCodes(new Set(tagSelection.activeTags.map((tag) => tag.code)))} size="sm" variant="secondary">全选</Button>
+            <Button className="turnover-ledger-button" isDisabled={!canOperateData || tagSaving} onPress={() => setDraftSelectedTagCodes(new Set())} size="sm" variant="secondary">清空</Button>
+            <Button className="turnover-ledger-button turnover-ledger-button--primary" isDisabled={!canOperateData || tagSaving} isPending={tagSaving} onPress={() => void handleSaveTagSelection()} size="sm" variant="primary">保存</Button>
           </div>
-          {!canMutateData ? (
+          {!canOperateData ? (
             <div className="turnover-ledger-drawer__notice" role="status">
-              当前账号仅支持查看和导出，不能保存外部往来款标签设置。
+              当前页面暂不可保存外部往来款标签设置。
             </div>
           ) : null}
           {tagSelection.inactiveSelectedTagCodes.length > 0 ? (
@@ -1177,7 +1177,7 @@ export default function TurnoverLedgerPage() {
                     className="turnover-ledger-checkbox-row turnover-ledger-checkbox-row--primary"
                     isIndeterminate={checkedCount > 0 && !allChecked}
                     isSelected={allChecked}
-                    isDisabled={!canMutateData || tagSaving}
+                    isDisabled={!canOperateData || tagSaving}
                     onChange={(selected) => {
                       setDraftSelectedTagCodes((current) => {
                         const next = new Set(current);
@@ -1203,7 +1203,7 @@ export default function TurnoverLedgerPage() {
                       return (
                         <Checkbox
                           className="turnover-ledger-checkbox-row"
-                          isDisabled={!canMutateData || tagSaving}
+                          isDisabled={!canOperateData || tagSaving}
                           isSelected={draftSelectedTagCodes.has(tag.code)}
                           key={tag.code}
                           onChange={(selected) => {
@@ -1299,7 +1299,7 @@ export default function TurnoverLedgerPage() {
         detail={detail}
         extra={extraForm}
         dirty={extraDirty}
-        canMutateData={canMutateData}
+        canOperateData={canOperateData}
         loading={detailLoading}
         saving={savingExtra}
         mutating={mutatingRelation}

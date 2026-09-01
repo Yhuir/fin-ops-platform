@@ -81,8 +81,7 @@ class TaxOffsetApiTests(unittest.TestCase):
     ) -> None:
         configure_access_control(
             app,
-            full_access=[username] if allowed and not readonly else [],
-            read_export_only=[username] if allowed and readonly else [],
+            usernames=[username] if allowed else [],
         )
         app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
             user_id=f"{username}-id",
@@ -108,10 +107,13 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn(payload["error"], {"forbidden", "permission_denied"})
 
-    def test_tax_certified_import_preview_requires_write_permission(self) -> None:
+    def test_tax_certified_import_preview_requires_tax_offset_page(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            self._configure_tax_user(app, username="READONLY001", readonly=True)
+            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="LIMITED001-id", username="LIMITED001", nickname="受限用户", display_name="受限用户"
+            )
             preview_body, preview_headers = build_multipart_payload(
                 imported_by="spoofed-user",
                 files=[CERTIFIED_JAN],
@@ -127,7 +129,7 @@ class TaxOffsetApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(payload["error"], "page_access_denied")
 
     def test_certified_import_preview_returns_row_level_statuses(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -200,10 +202,13 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertNotIn("read_model_status", payload)
         self.assertNotIn("source_versions", payload)
 
-    def test_tax_offset_plan_save_requires_write_permission(self) -> None:
+    def test_tax_offset_plan_save_requires_tax_offset_page(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            self._configure_tax_user(app, username="READONLY001", readonly=True)
+            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="LIMITED001-id", username="LIMITED001", nickname="受限用户", display_name="受限用户"
+            )
 
             response = app.handle_request(
                 "POST",
@@ -220,7 +225,7 @@ class TaxOffsetApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(payload["error"], "page_access_denied")
 
     def test_tax_offset_plan_save_persists_calculated_result_idempotently(self) -> None:
         app = build_application()

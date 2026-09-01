@@ -7,17 +7,17 @@ const mocked = vi.hoisted(() => ({
   session: {
     status: "authenticated",
     session: {
-      canMutateData: true,
+      canOperateData: true,
       canAccessApp: true,
       canAdminAccess: false,
-      accessTier: "full_access",
+      sessionRole: "user",
     },
   } as any,
   permissions: {
-    canMutateData: true,
+    canOperateData: true,
     canAccessApp: true,
     canAdminAccess: false,
-    accessTier: "full_access",
+    sessionRole: "user",
   } as any,
   jobs: [] as Array<Record<string, unknown> & { status: string }>,
   connectionFailed: false,
@@ -96,17 +96,17 @@ describe("AppHealthStatusProvider", () => {
     mocked.session = {
       status: "authenticated",
       session: {
-        canMutateData: true,
+        canOperateData: true,
         canAccessApp: true,
         canAdminAccess: false,
-        accessTier: "full_access",
+        sessionRole: "user",
       },
     };
     mocked.permissions = {
-      canMutateData: true,
+      canOperateData: true,
       canAccessApp: true,
       canAdminAccess: false,
-      accessTier: "full_access",
+      sessionRole: "user",
     };
     mocked.jobs = [];
     mocked.connectionFailed = false;
@@ -117,7 +117,7 @@ describe("AppHealthStatusProvider", () => {
 
   it("reports yellow before local session validation finishes", () => {
     mocked.session = { status: "loading" };
-    mocked.permissions = { ...mocked.permissions, canMutateData: false };
+    mocked.permissions = { ...mocked.permissions, canOperateData: false };
     renderProbe();
     const status = screen.getByLabelText("health");
     expect(status).toHaveAttribute("data-level", "busy");
@@ -126,7 +126,7 @@ describe("AppHealthStatusProvider", () => {
 
   it("reports red when the local session is expired", () => {
     mocked.session = { status: "expired", message: "expired" };
-    mocked.permissions = { ...mocked.permissions, canMutateData: false };
+    mocked.permissions = { ...mocked.permissions, canOperateData: false };
     renderProbe();
     const status = screen.getByLabelText("health");
     expect(status).toHaveAttribute("data-level", "blocked");

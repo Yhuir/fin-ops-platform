@@ -308,7 +308,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             try:
-                configure_access_control(app, full_access=["NORMAL"])
+                configure_access_control(app, usernames=["NORMAL"])
                 app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                     user_id=f"{str(token).split('-')[0]}-id",
                     username="YNSYLP005" if token == "admin-token" else "NORMAL",
@@ -554,7 +554,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_local_state_application(data_dir=Path(temp_dir))
             try:
-                configure_access_control(app, full_access=["NORMAL"])
+                configure_access_control(app, usernames=["NORMAL"])
                 app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity(
                     user_id=f"{str(token).split('-')[0]}-id",
                     username="YNSYLP005" if token == "admin-token" else "NORMAL",

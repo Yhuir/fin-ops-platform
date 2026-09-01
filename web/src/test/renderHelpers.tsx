@@ -24,10 +24,14 @@ const defaultSession: SessionPayload = {
   },
   roles: ["fin_ops_user"],
   permissions: ["finops:app:view"],
-  accessTier: "full_access",
   canAccessApp: true,
-  canMutateData: true,
   canAdminAccess: false,
+  allowedPageKeys: [
+    "reconciliation-workbench", "cost-statistics", "bank-details", "oa-pending-payments",
+    "bank-flow-rule-batches", "batch-accounting", "turnover-ledger", "etc-tickets", "tax-offset",
+    "pending-invoices", "input-invoice-usage", "output-invoice-collections", "settings",
+    "app-health-operations", "imports.bank-transactions", "imports.invoices", "imports.etc-invoices",
+  ],
 };
 
 const defaultAuthenticatedAppSession: SessionPayload = {

@@ -8,7 +8,7 @@
 - `tests/test_oa_pending_payment_api.py` 覆盖 XLSX MIME/文件名/no-store、tenant、只读导出权限、无权限/未认证拒绝，以及只记录来源、数量和文件名的审计。
 - `tests/test_oa_pending_payment_postgres_integration.py` 在 disposable PostgreSQL 可用时覆盖 completed + in-progress canonical facts 到 XLSX，并证明导出不新增 outbox。
 - `web/src/test/OaPendingPaymentsPage.test.tsx` 覆盖默认全选、部分选择、零选择禁用、重复提交阻断、错误保留选择、文件下载，以及导出不继承 rows 条件/不刷新 rows。
-- `web/e2e/oa-pending-payments-flow.spec.ts` 覆盖 `read_export_only` 浏览器真实 download event、服务端文件名、部分来源 query、零 mutation 和零 rows refresh。
+- `web/e2e/oa-pending-payments-flow.spec.ts` 覆盖本页获权用户的真实 download event、服务端文件名、部分来源 query，以及下载不触发 mutation 或 rows refresh。
 - 七类映射：第 1 类适用于来源/上限/文件安全；第 2 类适用于 service/repository snapshot；第 3 类适用于下载和权限合同；第 4 类以“零 read model/queue/outbox 写入”负向覆盖；第 5 类覆盖抽屉交互；第 6 类覆盖 canonical facts -> API -> 浏览器下载；第 7 类覆盖既有 rows、写权限和其他事实不进入导出。
 
 ## 2026-08-06 formal relation 统一回归

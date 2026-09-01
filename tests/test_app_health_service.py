@@ -19,10 +19,9 @@ class FakeIdentity:
 class FakeSession:
     identity: FakeIdentity
     allowed: bool = True
-    access_tier: str = "admin"
     can_access_app: bool = True
-    can_mutate_data: bool = True
     can_admin_access: bool = True
+    allowed_page_keys: frozenset[str] = frozenset({"app-health-operations"})
 
 
 @dataclass(slots=True)

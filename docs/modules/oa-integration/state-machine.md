@@ -23,8 +23,7 @@
 | 状态 | 触发 | 允许行为 | UI/API contract |
 | --- | --- | --- | --- |
 | `loading` | 前端启动请求 `/api/session/me` | 不渲染业务页面 | `SessionGate` loading |
-| `allowed_read_export_only` | canonical Settings ACL tier 为 `read_export_only` | 查询、导出 | 写入按钮隐藏/禁用；API mutation `403 permission_denied` |
-| `allowed_full_access` | canonical Settings ACL tier 为 `full_access` | 普通业务写入 | admin-only 设置仍禁用 |
+| `allowed_pages` | canonical Settings ACL 为账号分配至少一个 page key | 只进入勾选页面；页面内按正常业务规则读写/导出 | 未勾选页面 API 403，admin-only 设置仍隐藏 |
 | `allowed_admin` | canonical username 精确为固定 `YNSYLP005` | 账户、凭据、数据重置、App Health 高风险入口 | 仍需二次确认和密码复核 |
 | `forbidden` | 非管理员缺席 canonical ACL，或 ACL provider fail closed | 无业务访问 | OA role/permission/menu 即使存在也不改变 denied；`/api/session/me` allowed false，业务 API 403 |
 | `expired_or_unavailable` | token 过期、OA userInfo 超时/失败 | retry / 重新登录 OA | 前端 error/expired，不渲染业务页面 |
@@ -117,7 +116,7 @@
 - empty：无 OA rows、无凭据、无手动导入记录、无可导入 OA 搜索结果。
 - error：OA session/OA login/Mongo/API structured error 必须可见，不吞掉。
 - syncing：显式 OA sync job 运行时展示任务进度；精确附件刷新展示 queued/processing/done/failed，并在组件卸载或新刷新开始时取消旧轮询；业务页面不伪造 read-model refreshing。
-- permission disabled/hidden：只读用户隐藏写入，full access 隐藏 admin-only，admin 才能维护 OA applicant credentials。
+- permission hidden：普通账号隐藏未勾选页面和 admin-only；被授权页面不再按账号分读写层级，admin 才能维护 OA applicant credentials。
 
 ## Canonical Projection / Worker 状态
 
@@ -126,8 +125,8 @@
 | 状态 | 触发/行为 | 下一状态或结果 |
 | --- | --- | --- |
 | `not_called` | generic settings、ACL no-op、权限/DTO 失败 | 零 OA I/O |
-| `target_validating` | 锁定唯一 `finops:app:view` menu、三个唯一专用 role 和 exact 三 binding | exact → `target_applied`；disabled/missing/drift/timeout → rollback + 502 |
-| `target_applied` | 只替换三个专用 role members；业务 role/member、menu/binding 零写 | PostgreSQL ACL/audit commit |
+| `target_validating` | 锁定唯一 `finops:app:view` menu、两个唯一专用 role 和 exact 两 binding | exact → `target_applied`；disabled/missing/drift/timeout → rollback + 502 |
+| `target_applied` | 只替换两个专用 role members；业务 role/member、menu/binding 零写 | PostgreSQL ACL/audit commit |
 | `committed` | Settings ACL 与 durable audit 原子提交 | success |
 | `compensating` | target applied 后 PostgreSQL/audit 失败 | previous snapshot 最多恢复一次 |
 | `compensated` | previous assignments read-back 成功 | persistence failure，未提交新 ACL |

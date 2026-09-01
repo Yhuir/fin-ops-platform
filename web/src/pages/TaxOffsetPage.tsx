@@ -60,7 +60,7 @@ function PageNote({ message, tone }: { message: string; tone: "info" | "success"
 export default function TaxOffsetPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("tax-offset");
   const currentMonthSession = usePageSessionState({
     pageKey: "tax-offset",
@@ -124,14 +124,14 @@ export default function TaxOffsetPage() {
 
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
-      canMutateData,
+      canOperateData,
       onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
       onOpenSettings: () => navigate("/settings"),
     });
     return () => {
       setWorkbenchHeaderActions(null);
     };
-  }, [canMutateData, navigate, setWorkbenchHeaderActions]);
+  }, [canOperateData, navigate, setWorkbenchHeaderActions]);
 
   const loadMonthData = useCallback(
     async (mode: "reset" | "refresh", signal?: AbortSignal) => {
@@ -385,7 +385,7 @@ export default function TaxOffsetPage() {
           {headerStatusMessage ? (
             <PageNote message={headerStatusMessage} tone={importFeedback || planFeedback ? "success" : "info"} />
           ) : null}
-          {canMutateData ? (
+          {canOperateData ? (
             <Button type="button" variant="outline" onPress={() => setIsCertifiedImportModalOpen(true)}>
               已认证发票导入
             </Button>
@@ -413,7 +413,7 @@ export default function TaxOffsetPage() {
           outputCount={monthData?.outputInvoices.length ?? 0}
           certifiedCount={(monthData?.certifiedMatchedInvoices.length ?? 0) + (monthData?.certifiedOutsidePlanInvoices.length ?? 0)}
           selectedPlanInputCount={selectedInputIds.length}
-          canSave={canMutateData}
+          canSave={canOperateData}
           isSaving={isSavingPlan}
           saveDisabled={isCalculating || isLoading || isRefreshing}
           onSave={handleSavePlan}

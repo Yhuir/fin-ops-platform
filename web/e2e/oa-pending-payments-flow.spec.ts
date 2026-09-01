@@ -85,7 +85,7 @@ test.describe("OA pending payments browser flow", () => {
   test("recovers rows after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentRowsFailuresBeforeSuccess: 2,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
 
@@ -134,7 +134,7 @@ test.describe("OA pending payments browser flow", () => {
   });
 
   test("filters, sorts, and opens OA, bank, invoice, and rules drawers", async ({ page }, testInfo) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
 
     await page.goto("/oa-pending-payments");
@@ -389,7 +389,7 @@ test.describe("OA pending payments browser flow", () => {
   });
 
   test("downloads only the selected OA fact sources without refreshing the page", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const mutationRequests: string[] = [];
     page.on("request", (request) => {
       if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
@@ -428,7 +428,7 @@ test.describe("OA pending payments browser flow", () => {
   });
 
   test("keeps column filter actions visible in compact viewports without mutation requests", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
     const mutationRequests: string[] = [];
     page.on("request", (request) => {
       if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {

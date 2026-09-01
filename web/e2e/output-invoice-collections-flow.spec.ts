@@ -26,7 +26,7 @@ test.describe("销项发票收款情况", () => {
     const browserErrors = captureBrowserErrors(page);
     const api = await installDeterministicApiMocks(page, {
       outputInvoiceCollectionListInteractions: true,
-      sessionMode: "read_export_only",
+      sessionMode: "user",
     });
 
     await page.goto("/output-invoice-collections");
@@ -99,7 +99,7 @@ test.describe("销项发票收款情况", () => {
   test("短暂读取失败后刷新可恢复且不会伪装为空数据", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       outputInvoiceCollectionRowsFailuresBeforeSuccess: 2,
-      sessionMode: "read_export_only",
+      sessionMode: "user",
     });
 
     await page.goto("/output-invoice-collections");
@@ -123,7 +123,7 @@ test.describe("销项发票收款情况", () => {
   test("固定表头内的收款状态筛选使用可点击的 Portal 并刷新结果", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       outputInvoiceCollectionListInteractions: true,
-      sessionMode: "read_export_only",
+      sessionMode: "user",
     });
 
     await page.goto("/output-invoice-collections");

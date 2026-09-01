@@ -49,7 +49,7 @@
 | bank import 写后零 direct-page refresh 事件；银行明细与关联台都通过下一次 canonical GET 收敛 | covered | `tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_impact_matrix.py`、各页面 canonical query/API tests |
 | 已完成纯新增批次撤回、owner 数量一致、业务引用阻断、正式 relation 清理、审计和幂等 | covered | `tests/test_bank_import_withdrawal_service.py`、`tests/test_app_health_api.py`、`web/src/test/AppHealthOperationsPage.test.tsx` |
 | Browser e2e 上传/预览/慢预览防重复提交/重复/损坏文件混合/账户冲突阻断/preview stale/confirm 失败/下游银行明细 | covered | `web/e2e/imports-bank-transactions-flow.spec.ts` |
-| read_export_only 不能上传/预览/确认导入 | covered | `web/e2e/permissions-role-matrix.spec.ts` |
+| 未获本页授权不能上传/预览/确认导入 | covered | `web/e2e/permissions-role-matrix.spec.ts` |
 
 ## 七类测试适用性
 

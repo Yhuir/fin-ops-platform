@@ -769,9 +769,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotIn("rollback_settings_access_control_menu_bindings", deploy_control)
         self.assertIn("DELETE FROM sys_user_role", user_sync)
         self.assertNotIn("DELETE FROM sys_role_menu", user_sync)
-        self.assertIn("finops_read_export", user_sync)
-        self.assertIn("finops_full_access", user_sync)
+        self.assertIn("finops_app_user", user_sync)
         self.assertIn("finops_admin", user_sync)
+        self.assertNotIn("finops_read_export", user_sync)
+        self.assertNotIn("finops_full_access", user_sync)
 
     def test_common_env_keeps_fixed_selector_and_retires_app_admission_lists(self) -> None:
         common = (OA_SQL_ROOT / "env" / "fin-ops.common.env.example").read_text(encoding="utf-8")

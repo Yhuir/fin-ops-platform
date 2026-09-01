@@ -18,12 +18,12 @@
 
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
-| 1. 业务核心 | 适用 | `tests/test_app_settings_service.py`、`tests/test_session_api.py`、`tests/test_oa_role_sync_service.py`：canonical accounts、casefold/overlap、005/full/read/denied、permission-present 006、no-op/version、严格三角色与补偿；成本统计无 OA 设置默认空、命名校验、schema v3、CAS 与标签归档保留 |
+| 1. 业务核心 | 适用 | `tests/test_app_settings_service.py`、`tests/test_session_api.py`、`tests/test_oa_role_sync_service.py`：canonical page accounts、casefold/重复、固定 005、页面允许/拒绝、permission-present 006、no-op/version、两个专用 OA 角色与补偿；成本统计无 OA 设置默认空、命名校验、schema v3、CAS 与标签归档保留 |
 | 2. Service/repository | 适用 | `tests/test_app_settings_service.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_settings_data_reset_service.py`、`tests/test_settings_data_reset_job.py`、`tests/test_oa_attachment_refresh_request_service.py`、`tests/test_postgres_oa_applicant_credentials_repository.py`：ACL critical section、durable audit、精确刷新 enqueue/status、commit recovery、OA target/compensation |
 | 3. API contract | 适用 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_workbench_settings_sync_api.py`、`tests/test_app_health_api.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_oa_manual_import_api.py`、`tests/test_settings_data_reset_job.py`：精确刷新 202/status/result/error、direct URL/API 403、generic 400、dedicated admin-only、409/502/503 shape |
 | 4. Read model/cache/worker | 适用（负向/共享） | `tests/test_runtime_queue.py`、`tests/test_oa_projection_sync_service.py`、唯一 inventory owner `tests/test_permissions_write_entry_inventory.py` + `tests/test_settings_data_reset_job.py`：精确 `oa.sync` terminal result、Settings API 零 Mongo/OCR/promoter、普通 save 零 dirty/read-model path，并锁定既有 worker/event 集合 |
 | 5. 前端交互 | 适用 | `web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx`、`web/src/test/App.test.tsx`、`web/src/test/PageRouteHost.test.tsx`、`web/src/test/SettingsPage.test.tsx`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx`：精确刷新 queued/processing/done/failed、轮询取消；所有 completed OA（含支付申请）保持可刷新，进行中日常报销可刷新但不可正式导入、进行中支付申请不可刷新，刷新后 `completed/in_progress` exact 唯一回读及 0/重复 fail closed，以及既有权限/路由/ACL UI |
-| 6. 端到端 | 适用 | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/settings-data-reset-flow.spec.ts`：admin/full/read/denied、direct protected API、admin-only controls、ACL save/restore/即时撤权及 reset 主链 |
+| 6. 端到端 | 适用 | `web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/settings-data-reset-flow.spec.ts`：005 管理员、普通页面授权、无页面拒绝、direct protected API、admin-only controls、ACL save/restore/即时撤权及 reset 主链 |
 | 7. 既有功能回归 | 适用 | 13-09 backend/inventory 与 13-11 frontend/Browser 证据；唯一 scanner 继续保护 AppHealth、OA credentials、data reset、权威路由注册、现有两个 read models/六个 workers和普通页面 I/O 不变 |
 
 ## 必须保留的负向断言

@@ -7,8 +7,8 @@
 ## 用户角色
 
 - `admin`：可以进入运维页和全部业务导航入口。
-- `full_access`：可以进入普通业务页，但不能越权进入 admin-only 运维能力。
-- `read_export_only`：可以读取允许的业务页和导出入口，但不能触发写入口；shell 本身必须稳定。
+- `page_authorized`：只能进入 Settings 明确分配的页面；获权页面内保留正常业务操作，不能越权进入未分配页或 005-only 控制面。
+- `denied`：没有任何页面时停在 session gate，不加载 protected page API；shell 本身必须稳定。
 - forbidden / expired session：不能渲染业务页面或触发受保护 API。
 
 ## Spec ID
@@ -36,7 +36,7 @@
 ## 权限规则
 
 - `admin` 可以进入 `/operations/app-health`。
-- `read_export_only`、forbidden、expired 不应触发 App Health dashboard protected API。
+- 非 005、forbidden、expired 不应触发 App Health dashboard protected API。
 - 页面级写入口权限由 `permissions-and-audit` 和页面模块覆盖；shell 只保护导航和 gate 不越权。
 
 ## API / Runtime 边界

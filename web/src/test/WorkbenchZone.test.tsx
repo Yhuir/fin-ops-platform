@@ -428,7 +428,7 @@ describe("WorkbenchZone", () => {
     };
     const zone = (
       <WorkbenchZone
-        canMutateData
+        canOperateData
         getRowState={() => "idle"}
         onOpenDetail={() => {}}
         onRequestNextPage={onRequestNextPage}

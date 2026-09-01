@@ -30,11 +30,11 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | Session/auth request | `auth.py`、session API | 运行时必须提供真实 OA Bearer/cookie token；OA 只解析 identity；roles/permissions 保留为信息字段，不参与 APP tier。退役 dev/test auth 环境变量不再被运行时代码读取，不能生成 identity。 |
-| Canonical ACL snapshot | Settings snapshot provider | 非管理员每次判断最多读取一次同一 `access_control_version`；完整 full/read memberships 决定 tier，缺席/非法/provider failure 一律 denied |
-| Permission check | `server.py` + `route_access_policy.py` + module-owned guard | 受保护 unsafe method 默认要求 mutation；只有登记的只读 POST 可豁免；module-owned OA pending guard 保持独立且必须等价 fail closed |
+| Canonical ACL snapshot | Settings snapshot provider | 非管理员每次判断最多读取一次同一 `access_control_version`；`page_access_accounts[].page_keys` 决定页面集合，账号缺席、空集合、非法 payload 或 provider failure 一律 denied |
+| Permission check | `server.py` + `route_access_policy.py` + module-owned guard | 每个 protected route 必须映射到一个或多个页面 key；命中任一授权页面才可进入，admin-only route 额外校验固定管理员；未知受保护路由 fail closed |
 | ACL audit event | Settings repository critical section | actor 来自后端 admin session，request id 来自受信 HTTP adapter；与 canonical version 同事务，no-op/失败无 success audit |
 | Audit event | business service/route | unsafe HTTP route 先经 operation history 语义注册表归一为稳定 action code/用户动作/对象文案，再记录服务端 session 的 actor id/name/account 快照和结果；需要在业务页面展示操作者的领域记录（包括 Workbench 异常审阅）必须在写入时固化同一身份快照，只向页面发布 account/name，不发布内部 actor id，也不在读取时反查或兜底；同一 HTTP mutation 中 service 级审计继承受信 request id，避免拆成重复逻辑操作；有界业务证据随 completion 固化；不信任 body actor |
-| OA facts export audit | OA pending read route | read-export/full/admin 成功下载后记录 `oa_pending_payment_source_export_downloaded`；只接收 session actor、来源、数量和文件名，不接收 OA 行内容。 |
+| OA facts export audit | OA pending read route | 页面授权账号或管理员成功下载后记录 `oa_pending_payment_source_export_downloaded`；只接收 session actor、来源、数量和文件名，不接收 OA 行内容。 |
 | Workbench exception compatibility command | `POST /api/workbench/exception/apply` | 兼容 API 继续保留自动异常/行级异常能力，但 route 的 actor 只来自已认证 session；body `actor` / `confirmed_by` 不能覆盖业务或审计身份。删除未配对工具栏人工“异常处理”不等于删除该后端兼容能力。 |
 | Workbench receipt draft / print | `POST /api/workbench/actions/receipt-draft` + `POST /api/workbench/actions/print-receipt` | draft 是无持久化的 read-only POST，因此不产生通用 mutation audit，但 handler 仍要求 Workbench 写权限并通过全局/OA 安全 gate；print 是受保护写动作，actor/account/name 和 request id 只来自已认证 session，service 记录生成与打印请求审计。客户端提交的付款单位、日期和明细不是 actor 来源。 |
 | Data reset audit | Settings request repository / settings-maintenance worker | queued 与 receipt 消费/job/outbox 同事务；started/success/partial/failed 由 worker durable audit 记录。actor 来自 admin session，reason 必填，记录 request/job/action/fingerprint/receipt，不记录 OA 密码。 |
@@ -47,8 +47,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| Session payload | frontend context | normalized `allowed/access_tier/capabilities` 只来自 fixed 005 或 canonical snapshot；OA roles/permissions 仅信息性返回 |
-| Access decision | global policy / module-owned guard | 同一 evaluator 的 admin/full/read/denied 结果，ACL 删除后下一次请求立即生效，provider failure fail closed |
+| Session payload | frontend context | normalized `allowed/can_access_app/can_admin_access/allowed_page_keys` 只来自 fixed 005 或 canonical snapshot；OA roles/permissions 仅信息性返回 |
+| Access decision | global policy / module-owned guard | 同一 evaluator 的 admin/page-set/denied 结果，ACL 删除后下一次请求立即生效，provider failure fail closed |
 | ACL audit record | `audit.events` | 记录 mutation id、actor、server request id、before/after version/outcome 与 changed username hashes；不泄露 secret/完整 ACL |
 | Audit record | `audit.events` | 所有受保护写 API 先写 requested 事件；失败则业务写不执行。完成事件记录 HTTP 结果；业务服务事件继续记录领域前后值且不泄露 secret。 |
 | System Audit report | App Health admin UI / release gate | 必须保留 proof availability、contract revision、snapshot、integrity/freshness/queue 和 external evidence 边界；权限通过不等于数据证明通过 |
@@ -93,7 +93,7 @@
 - 动态管理员 provider、`get_admin_usernames`、运行时 `FIN_OPS_ADMIN_USERNAMES` 和本地 auth clone 已删除；不得以兼容路径恢复。
 - dev/test auth 环境变量及其 runtime 分支已删除；遗留值必须保持无效，测试身份只能由 `tests/app_test_support.py` 显式注入，不能进入 runtime package。
 - permission/role/三项退役 env admission branch 已删除；`finops:app:view` 只允许出现在 OA selector、部署/测试/文档的明确路径中，唯一 whole-repo inventory owner 负责机械阻止恢复。
-- Settings 专用 ACL route 复用 admin session resolver；generic mutation resolver 仍服务 full-access 普通写，不能整体升级为 admin-only。
+- Settings 专用 ACL route 复用 admin session resolver；generic mutation resolver 仍服务拥有 settings 页面权限的普通账号，不能整体升级为 admin-only。
 - Audit owner 接收 settings transaction 提交的 session actor、版本摘要、changed username hashes、mutation id 和 server request id；不接收 token、密码或完整 ACL payload。
 - route access policy 的只读 POST allowlist 只能登记无 canonical 写入、无 durable job 创建、无状态持久化的查询/preview/calculate；导入 preview、ETC preview 和后台 job acknowledge/retry 均属于写入。
 - 后端 route 从已解析 session 传递 actor/owner；客户端 actor 字段不得重新成为业务或审计身份源。

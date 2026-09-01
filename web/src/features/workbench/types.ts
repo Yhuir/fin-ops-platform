@@ -608,18 +608,24 @@ export type WorkbenchGroupsPageResult = {
   exceptionCounts?: WorkbenchExceptionCounts;
 };
 
-export type WorkbenchAccessRole = "full_access" | "read_export_only";
-
 export type WorkbenchAccessAccount = {
   username: string;
-  accessTier: WorkbenchAccessRole;
+  displayName: string;
+  oaStatus: "active" | "inactive" | "missing";
+  pageKeys: string[];
+};
+
+export type WorkbenchAccessUser = {
+  username: string;
+  displayName: string;
+  active: boolean;
 };
 
 export type WorkbenchAccessControl = {
   version: number;
   administrator: {
     username: string;
-    accessTier: "admin";
+    displayName: string;
     protected: true;
   };
   accounts: WorkbenchAccessAccount[];

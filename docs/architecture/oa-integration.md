@@ -14,7 +14,7 @@
 - OA 身份接口：`/system/user/getInfo`
 - OA 动态菜单接口：`/system/menu/getRouters`
 
-OA identity adapter 只认证 token 对应的 canonical username，并保留 display name、department、roles 和 permissions 作为信息字段。APP 不自建登录页，也不信任前端自报 username；OA roles/permissions 不参与 APP tier 决策。
+OA identity adapter 只认证 token 对应的 canonical username，并保留 display name、department、roles 和 permissions 作为信息字段。APP 不自建登录页，也不信任前端自报 username；OA roles/permissions 不参与 APP page-set 决策。
 
 应用运行时不包含 synthetic dev/test session。本地开发与生产均必须提供真实 OA token；测试身份只由测试夹具显式注入。历史 dev/test auth 环境变量及其分支已从运行时代码删除，遗留配置不能生成身份。
 
@@ -22,9 +22,9 @@ OA identity adapter 只认证 token 对应的 canonical username，并保留 dis
 
 | 层 | Owner | 事实与责任 | 明确不负责 |
 | --- | --- | --- | --- |
-| OA identity | `OAIdentityService` / `auth.py` | 验证 token，取得 `sys_user.user_name` canonical spelling | 不授予 APP tier |
-| APP authorization | `AccessControlService` + Settings canonical ACL | 固定 `YNSYLP005` admin；其他账号按 ACL `full_access` / `read_export_only`，缺席即 denied | 不读取 OA role/permission/env 作为 fallback |
-| OA menu projection | `OARoleSyncService` | 把同一 canonical ACL 结果投影成一个固定菜单的三个专用角色成员 | 不写 APP ACL，不决定 API 权限 |
+| OA identity | `OAIdentityService` / `auth.py` | 验证 token，取得 `sys_user.user_name` canonical spelling | 不授予 APP 页面权限 |
+| APP authorization | `AccessControlService` + Settings canonical ACL | 固定 `YNSYLP005` admin；其他账号按 ACL `page_access_accounts[].page_keys`，缺席或空集合即 denied | 不读取 OA role/permission/env 作为 fallback |
+| OA menu projection | `OARoleSyncService` | 把同一 canonical ACL 结果投影成一个固定菜单的两个专用角色成员 | 不写 APP ACL，不决定 API 权限 |
 | Deployment verification | preflight collector + deploy control | 标准发布仅使用 005；双身份 preflight 可显式验证 fixed menu exact topology，但不是激活前置条件 | 不做 runtime member sync，不清理业务 role/member/menu |
 
 菜单可见性、前端 `SessionGate` 和后端 direct API denial 是独立强制层，但必须投影同一 canonical ACL 结果。菜单可见不等于 APP 已授权；菜单暂时可见的 denied 用户仍必须被 APP session/API 拒绝。
@@ -33,7 +33,7 @@ OA identity adapter 只认证 token 对应的 canonical username，并保留 dis
 
 - `YNSYLP005` 是固定 protected administrator。
 - `/settings` 的专用 ACL API 是唯一人工权限入口。
-- 非管理员只允许 `full_access` 或 `read_export_only`；账号不在 ACL 中派生为 `denied`。
+- 非管理员只允许保存 `username + page_keys`；账号不在 ACL 或页面集合为空派生为 `denied`。
 - username 等值与去重使用 casefold comparison key，对外及 OA assignment 保留 `sys_user.user_name` canonical spelling。
 - 每次非管理员判断最多读取一次 canonical ACL snapshot；缺失、格式错误或 provider 失败全部 fail closed。
 - OA identity cache 只缓存身份信息，不缓存 APP access decision；ACL 删除后下一次 session/API 判断立即 denied。
@@ -45,16 +45,14 @@ OA identity adapter 只认证 token 对应的 canonical username，并保留 dis
 
 OA 中只允许一个 `permission=finops:app:view` 的 menu，且该 menu 的 role binding key exact set 必须为：
 
-- `finops_read_export`
-- `finops_full_access`
+- `finops_app_user`
 - `finops_admin`
 
 三个 role key、menu 和三条 dedicated binding 都必须唯一。任何缺失、重复或额外 non-dedicated binding 都是 drift。
 
-真实 ACL 变化在一个 OA transaction 内先锁定并验证 fixed selector、唯一 menu、三个唯一专用 role、exact 三 binding 且无 non-dedicated binding。全部验证在任何 DML 前完成。通过后 runtime 只替换三个专用 role 的 `sys_user_role` members：
+真实 ACL 变化在一个 OA transaction 内先锁定并验证 fixed selector、唯一 menu、两个唯一专用 role、exact 两 binding 且无 non-dedicated binding。全部验证在任何 DML 前完成。通过后 runtime 只替换两个专用 role 的 `sys_user_role` members：
 
-- `read_export_only` → `finops_read_export`
-- `full_access` → `finops_full_access`
+- 至少一个页面的普通账号 → `finops_app_user`
 - 固定 `YNSYLP005` → `finops_admin`
 
 runtime 不创建或删除 menu/role/binding，不修改业务 role、业务 role members、其他 menu 或其他 binding。disabled、missing、selector/role/binding drift、连接/读/写 timeout 都必须 rollback/fail closed，不能返回保存成功。
@@ -71,14 +69,14 @@ runtime 不创建或删除 menu/role/binding，不修改业务 role、业务 rol
 
 ## Deployment-owned exact verification
 
-Runtime 发现 non-dedicated fixed-menu binding 会拒绝变更，不会自行清理。一次性 cleanup 已完成并从稳态发布链删除；标准部署只读取 005，并验证 migration/CHECK、strict env 与数据库 ACL guard。release-bound、root-owned `0600` 双身份 artifact 仅由显式专项验收生成，用于复核 canonical ACL、唯一 menu、三专用 role/binding/member 与 fresh OA router，不阻断标准激活。禁止 broad delete、legacy self-update 或任意手工 SQL fallback。
+Runtime 发现 non-dedicated fixed-menu binding 会拒绝变更，不会自行清理。旧分层角色一次性 cutover 由 migration `0165` 与发布 preflight 明确完成；标准部署只读取 005，并验证 migration、strict env 与数据库 ACL guard。release-bound、root-owned `0600` artifact 仅由显式专项验收生成，用于复核 canonical ACL、唯一 menu、两专用 role/binding/member 与 fresh OA router，不阻断标准激活。禁止 broad delete、legacy self-update 或任意手工 SQL fallback。
 
 ## App shell and direct access enforcement
 
 - 前端启动先请求 `/api/session/me`；`SessionGate` 在 loading/forbidden/expired/error 时不挂载业务 route。
-- 前端只消费 normalized `allowed`、`access_tier` 和 capabilities；OA roles/permissions 只展示为信息。
+- 前端只消费 normalized `allowed`、`allowed_page_keys` 和 `can_admin_access`；OA roles/permissions 只展示为信息。
 - 后端 global route policy 与模块自有 guard 消费同一 ACL outcome。直接输入 `/fin-ops/` 或调用受保护 `/fin-ops-api/*` 不能绕过授权。
-- `read_export_only` 只能查询和导出；业务 mutation 返回 `403 permission_denied`。
+- 普通账号只能访问 `allowed_page_keys` 对应的页面/API；被授权页面保留正常业务 mutation。
 - `YNSYLP005` 才能调用 ACL、App Health、OA credentials、data reset 等 admin-only control plane。
 
 OA 菜单撤销必须用角色投影后的新 `/system/menu/getRouters` 响应或新 OA shell session 验收；刷新前的旧浏览器 DOM 不是证据。APP denial 则以下一次 fresh APP session/direct API response 为边界，不等待 OA shell 刷新。

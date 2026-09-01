@@ -10,7 +10,7 @@ const PAGE_TIMEOUT = 3000;
 function renderOperationsPage(options: Parameters<typeof installMockApiFetch>[0] = {}) {
   window.history.pushState({}, "", "/operations/app-health");
   const fetchMock = installMockApiFetch({
-    sessionAccessTier: "admin",
+    sessionRole: "admin",
     sessionUsername: "admin.ops",
     sessionDisplayName: "运维管理员",
     ...options,
@@ -258,7 +258,7 @@ describe("AppHealthOperationsPage", () => {
 
   test("blocks non admin users without fetching dashboard data", async () => {
     const fetchMock = renderOperationsPage({
-      sessionAccessTier: "full_access",
+      sessionRole: "user",
       sessionUsername: "finance.user",
       sessionDisplayName: "财务用户",
     });
@@ -349,7 +349,7 @@ describe("AppHealthOperationsPage", () => {
     });
 
     const data = await screen.findByTestId("app-health-data", {}, { timeout: PAGE_TIMEOUT });
-    expect(within(data).getAllByText("--").length).toBeGreaterThan(2);
+    expect(within(data).getAllByText(/同步 --/).length).toBeGreaterThan(2);
     expect(within(data).getByRole("grid", { name: "发票统计" })).not.toHaveTextContent("口径未闭合");
     expect(screen.getByTestId("app-health-requests")).toHaveTextContent("--");
     expect(within(screen.getByTestId("app-health-requests")).getAllByText("--")[0].closest("td")).toHaveAttribute("data-tone", "unknown");

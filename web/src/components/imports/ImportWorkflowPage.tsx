@@ -652,7 +652,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     setIsConfirming,
   } = useImportWorkflowDraft();
   const healthStatus = useAppHealthStatus();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const {
     selectedFiles,
     fileSelections,
@@ -830,7 +830,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     return mode === "bank_transaction" ? Boolean(selection?.bankMappingId) : Boolean(selection?.invoiceBatchType);
   });
   const canPreview = canUseBankImport
-    && canMutateData
+    && canOperateData
     && hasSelectedEtcTask
     && allFilesConfigured
     && !hasPreview
@@ -870,13 +870,13 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     () => previewPayload?.files.filter((file) => file.status === "preview_ready" && file.bankSelectionConflict) ?? [],
     [previewPayload],
   );
-  const canConfirm = canMutateData
+  const canConfirm = canOperateData
     && confirmableFileIds.length > 0
     && conflictingPreviewFiles.length === 0
     && !isPreviewing
     && !isConfirming;
   const canConfirmEtc = Boolean(etcPreviewPayload?.sessionId)
-    && canMutateData
+    && canOperateData
     && Boolean(selectedEtcTaskId)
     && Boolean(selectedEtcTask)
     && etcBlockingIssues.length === 0
@@ -936,7 +936,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   }
 
   function applyDroppedFiles(files: File[]) {
-    if (!canMutateData) {
+    if (!canOperateData) {
       return;
     }
     const isSupportedFile = mode === "etc_invoice" ? isZipFile : isExcelFile;
@@ -954,7 +954,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   function handleDropzoneDragOver(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
-    if (canMutateData && !hasPreview && !isPreviewing && !isConfirming) {
+    if (canOperateData && !hasPreview && !isPreviewing && !isConfirming) {
       setIsDragActive(true);
     }
   }
@@ -969,7 +969,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
   function handleDropzoneDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setIsDragActive(false);
-    if (!canMutateData || hasPreview || isPreviewing || isConfirming) {
+    if (!canOperateData || hasPreview || isPreviewing || isConfirming) {
       return;
     }
     const nextFiles = Array.from(event.dataTransfer.files ?? []);
@@ -1290,7 +1290,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
               <ArrowLeft aria-hidden="true" size={16} strokeWidth={2.2} />
               返回关联台
             </RouterLink>
-            {mode === "invoice" && canMutateData ? (
+            {mode === "invoice" && canOperateData ? (
               <Button
                 isDisabled={healthStatus.blocksMutations || isPreviewing || isConfirming || isDiscarding}
                 onPress={() => setManualInvoiceEntryOpen(true)}
@@ -1302,7 +1302,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 发票录入
               </Button>
             ) : null}
-            {mode === "bank_transaction" && canMutateData ? (
+            {mode === "bank_transaction" && canOperateData ? (
               <Button
                 isDisabled={healthStatus.blocksMutations || isPreviewing || isConfirming || isDiscarding || settingsLoading}
                 onPress={() => setManualBankTransactionEntryOpen(true)}
@@ -1377,8 +1377,8 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
           {mode === "etc_invoice" && !readyEtcTasksLoading && readyEtcTasks.length > 0 && !selectedEtcTask ? (
             <ImportNotice tone="warning">请选择已确认的 ETC 对账任务后再预览 ETC zip。</ImportNotice>
           ) : null}
-          {!canMutateData ? (
-            <ImportNotice tone="accent">当前账号仅支持查看和导出，不能导入文件。</ImportNotice>
+          {!canOperateData ? (
+            <ImportNotice tone="accent">当前页面暂不可导入文件。</ImportNotice>
           ) : null}
 
           <div className="import-workflow-layout">
@@ -1416,7 +1416,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                 ) : null}
 
                 <label
-                  className={`import-workflow-upload-zone${isDragActive ? " import-workflow-upload-zone--active" : ""}${!canMutateData || hasPreview || isPreviewing || isConfirming ? " import-workflow-upload-zone--disabled" : ""}`}
+                  className={`import-workflow-upload-zone${isDragActive ? " import-workflow-upload-zone--active" : ""}${!canOperateData || hasPreview || isPreviewing || isConfirming ? " import-workflow-upload-zone--disabled" : ""}`}
                   htmlFor={inputId}
                   aria-label={uploadLabel}
                   onDragEnter={handleDropzoneDragOver}
@@ -1434,7 +1434,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
                     multiple
                     type="file"
                     accept={mode === "etc_invoice" ? ".zip,application/zip" : ".xlsx,.xls"}
-                    disabled={!canMutateData || hasPreview || isPreviewing || isConfirming}
+                    disabled={!canOperateData || hasPreview || isPreviewing || isConfirming}
                     onChange={(event) => {
                       setIsDragActive(false);
                       applyDroppedFiles(Array.from(event.currentTarget.files ?? []));
@@ -1618,7 +1618,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       {mode === "invoice" ? (
         <>
           <ManualInvoiceEntryDrawer
-            disabled={!canMutateData || healthStatus.blocksMutations}
+            disabled={!canOperateData || healthStatus.blocksMutations}
             onClose={() => setManualInvoiceEntryOpen(false)}
             onImportAccepted={(payload) => handleManualImportAccepted(payload, "发票")}
             open={manualInvoiceEntryOpen}
@@ -1633,7 +1633,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       {mode === "bank_transaction" ? (
         <ManualBankTransactionEntryDrawer
           bankAccounts={bankOptions}
-          disabled={!canMutateData || healthStatus.blocksMutations || settingsLoading}
+          disabled={!canOperateData || healthStatus.blocksMutations || settingsLoading}
           onClose={() => setManualBankTransactionEntryOpen(false)}
           onImportAccepted={(payload) => handleManualImportAccepted(payload, "流水")}
           open={manualBankTransactionEntryOpen}

@@ -32,7 +32,6 @@ class EtcBusinessBatchActor:
     display_name: str | None = None
     dept_id: str | None = None
     can_admin_access: bool = False
-    can_mutate_data: bool = False
 
     @property
     def actor_id(self) -> str:
@@ -48,8 +47,6 @@ def evaluate_etc_oa_draft_action(
     task: object | None,
     actor: EtcBusinessBatchActor,
 ) -> dict[str, object]:
-    if not actor.can_mutate_data:
-        return {"enabled": False, "code": "read_only", "message": "当前账号仅支持查看和导出，不能提交审批。"}
     status = str(getattr(batch, "status", "") or "")
     if status == EtcBusinessBatchStatus.OA_DRAFT_CREATING.value:
         return {"enabled": False, "code": "oa_draft_creating", "message": "草稿创建已发起，请确认 OA 中的实际处理结果。"}

@@ -119,7 +119,7 @@ test.describe("ETC ticket management browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {
       etcTicketBusinessBatchTotal: 121,
-      sessionMode: "read_export_only",
+      sessionMode: "user",
     });
 
     await page.goto("/etc-tickets");
@@ -147,7 +147,7 @@ test.describe("ETC ticket management browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {
       etcTicketInitialBusinessBatchStatus: "oa_confirmation_pending",
-      sessionMode: "read_export_only",
+      sessionMode: "user",
     });
     await page.route("**/api/etc/business-batches/etc-business-e2e-001/invoice-pdf", async (route) => {
       await route.fulfill({
@@ -176,7 +176,6 @@ test.describe("ETC ticket management browser flow", () => {
       expect(download.suggestedFilename()).toBe("ETC发票_3月批次_2张.pdf");
     });
 
-    await expect(page.getByText("当前账号仅支持查看和导出")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
@@ -185,7 +184,7 @@ test.describe("ETC ticket management browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {
       etcTicketInitialBusinessBatchStatus: "oa_draft_creating",
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/etc-tickets");
@@ -206,7 +205,7 @@ test.describe("ETC ticket management browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       etcTicketBusinessBatchesFailuresBeforeSuccess: 2,
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
@@ -273,7 +272,7 @@ test.describe("ETC ticket management browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       etcTicketBusinessBatchDeleteFailuresBeforeSuccess: 1,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
@@ -349,7 +348,7 @@ test.describe("ETC ticket management browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       etcTicketBusinessBatchDeleteFailuresBeforeSuccess: 1,
       etcTicketInitialBusinessBatchStatus: "manually_marked_submitted",
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
@@ -446,7 +445,7 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketReconciliationWorkflow: true,
       etcTicketSourceFileDeleteFailuresBeforeSuccess: 1,
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
@@ -527,7 +526,7 @@ test.describe("ETC ticket management browser flow", () => {
       etcTicketReconciliationWorkflow: true,
       etcTicketSourceFileUploadFailuresBeforeSuccess: 1,
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
@@ -614,7 +613,7 @@ test.describe("ETC ticket management browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       etcTicketOaDraftFailuresBeforeSuccess: 1,
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
@@ -692,7 +691,7 @@ test.describe("ETC ticket management browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       etcTicketManualStatusFailuresBeforeSuccess: 1,
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
@@ -784,7 +783,7 @@ test.describe("ETC ticket management browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       etcTicketWorkflowTaskMatchesBusinessBatch: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 

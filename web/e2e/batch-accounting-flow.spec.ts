@@ -59,7 +59,7 @@ test.describe("batch accounting browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       batchAccountingFailuresBeforeSuccess: 2,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
 
@@ -110,7 +110,7 @@ test.describe("batch accounting browser flow", () => {
   test("keeps the bank rail readable in a narrow desktop viewport", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await page.setViewportSize({ width: 1180, height: 720 });
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
 
     await recordLatency({
@@ -179,7 +179,7 @@ test.describe("batch accounting browser flow", () => {
 
   test("filters the bank rail through the compact canonical tag drawer", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
 
     await page.goto("/batch-accounting");
@@ -225,7 +225,7 @@ test.describe("batch accounting browser flow", () => {
 
   test("submits and withdraws daily reimbursement rows through page-access convergence", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
 
     await recordLatency({

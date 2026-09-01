@@ -27,10 +27,9 @@ const defaultSessionPayload: SessionPayload = {
   },
   roles: ["finance"],
   permissions: ["finops:app:view"],
-  accessTier: "full_access",
   canAccessApp: true,
-  canMutateData: true,
   canAdminAccess: false,
+  allowedPageKeys: ["demo"],
 };
 
 function createSession(userId = "101"): SessionContextValue {

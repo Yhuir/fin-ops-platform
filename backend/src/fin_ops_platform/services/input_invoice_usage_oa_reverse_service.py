@@ -95,10 +95,6 @@ class InputInvoiceUsageOaReverseInvalidTransitionError(InputInvoiceUsageOaRevers
         super().__init__(message)
 
 
-class InputInvoiceUsageOaReversePermissionError(InputInvoiceUsageOaReverseServiceError):
-    code = "oa_reverse_permission_denied"
-
-
 class InputInvoiceUsageOaReverseMissingClientError(InputInvoiceUsageOaReverseServiceError):
     code = "oa_reverse_missing_oa_client"
 
@@ -404,9 +400,7 @@ class InputInvoiceUsageOaReverseService:
         request: dict[str, Any],
         *,
         actor_id: str,
-        can_mutate: bool,
     ) -> dict[str, object]:
-        self._assert_mutation_permission(can_mutate)
         idempotency_key = _required_text(request.get("idempotencyKey"), "idempotencyKey")
         existing = self._repository.find_batch_by_create_idempotency_key(idempotency_key)
         if existing is not None:
@@ -469,10 +463,8 @@ class InputInvoiceUsageOaReverseService:
         request: dict[str, Any],
         *,
         actor_id: str,
-        can_mutate: bool,
         oa_client_provider: InputInvoiceUsageOaDraftClientProvider,
     ) -> dict[str, object]:
-        self._assert_mutation_permission(can_mutate)
         idempotency_key = _required_text(request.get("idempotencyKey"), "idempotencyKey")
         expected_hash = _required_text(request.get("expectedPreviewHash"), "expectedPreviewHash")
         preview_request = dict(request.get("previewRequest") if isinstance(request.get("previewRequest"), dict) else {})
@@ -505,14 +497,12 @@ class InputInvoiceUsageOaReverseService:
                 "idempotencyKey": f"{idempotency_key}:batch",
             },
             actor_id=actor_id,
-            can_mutate=can_mutate,
         )
         return self.create_oa_draft(
             str(batch_payload["batchId"]),
             expected_version=int(batch_payload["version"]),
             idempotency_key=f"{idempotency_key}:draft",
             actor_id=actor_id,
-            can_mutate=can_mutate,
             oa_client=client,
         )
 
@@ -543,10 +533,8 @@ class InputInvoiceUsageOaReverseService:
         expected_version: int | None,
         idempotency_key: str,
         actor_id: str,
-        can_mutate: bool,
         oa_client: InputInvoiceUsageOaDraftClient | None = None,
     ) -> dict[str, object]:
-        self._assert_mutation_permission(can_mutate)
         normalized_key = _required_text(idempotency_key, "idempotencyKey")
         batch = self._get_batch(batch_id)
         if self._is_operation_replay(batch, "create_oa_draft", normalized_key):
@@ -595,9 +583,7 @@ class InputInvoiceUsageOaReverseService:
         expected_version: int | None,
         idempotency_key: str,
         actor_id: str,
-        can_mutate: bool,
     ) -> dict[str, object]:
-        self._assert_mutation_permission(can_mutate)
         normalized_reason = _required_text(reason, "reason")
         normalized_key = _required_text(idempotency_key, "idempotencyKey")
         batch = self._get_batch(batch_id)
@@ -635,10 +621,8 @@ class InputInvoiceUsageOaReverseService:
         batch_id: str,
         *,
         actor_id: str,
-        can_mutate: bool,
         expected_version: int | None = None,
     ) -> dict[str, object]:
-        self._assert_mutation_permission(can_mutate)
         batch = self._get_batch(batch_id)
         self._assert_version(batch, expected_version)
         if batch.status not in DETECTION_STATUSES:
@@ -682,10 +666,8 @@ class InputInvoiceUsageOaReverseService:
         expected_version: int | None,
         idempotency_key: str,
         actor_id: str,
-        can_mutate: bool,
         candidate_oa_row_id: str | None = None,
     ) -> dict[str, object]:
-        self._assert_mutation_permission(can_mutate)
         normalized_key = _required_text(idempotency_key, "idempotencyKey")
         normalized_decision = str(decision or "").strip().lower()
         if normalized_decision not in {"submitted", "not_submitted"}:
@@ -997,11 +979,6 @@ class InputInvoiceUsageOaReverseService:
         if batch is None:
             raise InputInvoiceUsageOaReverseNotFoundError(f"Input invoice usage OA reverse batch not found: {batch_id}")
         return batch
-
-    @staticmethod
-    def _assert_mutation_permission(can_mutate: bool) -> None:
-        if not can_mutate:
-            raise InputInvoiceUsageOaReversePermissionError("Permission denied for input invoice usage OA reverse mutation.")
 
     @staticmethod
     def _assert_version(batch: InputInvoiceUsageOaReverseBatch, expected_version: int | None) -> None:

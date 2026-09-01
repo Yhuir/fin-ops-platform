@@ -107,10 +107,9 @@ def oa_session(username: str = "alice") -> OARequestSession:
             roles=("finance",),
         ),
         allowed=True,
-        access_tier="full_access",
         can_access_app=True,
-        can_mutate_data=True,
         can_admin_access=False,
+        allowed_page_keys=frozenset({"bank_flow_rule_batches"}),
     )
 
 

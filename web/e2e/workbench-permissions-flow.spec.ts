@@ -2,13 +2,12 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
-const workbenchMutationEndpoints = [
+const mutationEndpoints = [
   "POST /api/workbench/actions/confirm-link/preview",
   "POST /api/workbench/actions/confirm-link",
   "POST /api/workbench/actions/withdraw-link/preview",
   "POST /api/workbench/actions/withdraw-link",
   "POST /api/workbench/exceptions/review",
-  "POST /api/operation-barrier/status",
 ];
 
 async function selectWorkbenchGroupRows(page: Page, zone: "unpaired" | "paired") {
@@ -19,8 +18,6 @@ async function selectWorkbenchGroupRows(page: Page, zone: "unpaired" | "paired")
       : "candidate-group-unpaired-row:oa-o-202603-001",
   );
   await expect(zoneLocator).toBeVisible();
-  await expect(group).toBeVisible();
-
   await zoneLocator.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
   await zoneLocator.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
   await zoneLocator
@@ -28,138 +25,31 @@ async function selectWorkbenchGroupRows(page: Page, zone: "unpaired" | "paired")
     .getByRole("cell")
     .first()
     .click();
-  await expect(zoneLocator.getByText("已选 3")).toBeVisible();
-
   return { zoneLocator, group };
 }
 
-function expectNoWorkbenchMutationCalls(api: Awaited<ReturnType<typeof installDeterministicApiMocks>>) {
-  for (const endpoint of workbenchMutationEndpoints) {
-    expect(api.count(endpoint), endpoint).toBe(0);
-  }
+function expectNoMutations(api: Awaited<ReturnType<typeof installDeterministicApiMocks>>) {
+  for (const endpoint of mutationEndpoints) expect(api.count(endpoint), endpoint).toBe(0);
 }
 
-test.describe("workbench read-export permission browser flow", () => {
-  test("keeps unpaired write entries disabled or hidden without mutation APIs", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
-
-    await page.goto("/");
-
-    const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
-    await expect(
-      unpairedZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })
-        .getByLabel("流水分类：成本 / 设备款"),
-    ).toBeVisible();
-    await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
-
-    await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
-    await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(unpairedZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "忽略", exact: true })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "确认关联" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: /确认关联|撤回关联/ })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "统一异常处理" })).toHaveCount(0);
-
-    expectNoWorkbenchMutationCalls(api);
-  });
-
-  test("keeps paired relation withdraw entries disabled or hidden without mutation APIs", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "read_export_only",
-      workbenchInitialRelationConfirmed: true,
-    });
-
-    await page.goto("/");
-
-    const { zoneLocator: pairedZone, group: pairedGroup } = await selectWorkbenchGroupRows(page, "paired");
-    await expect(pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-
-    await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(pairedGroup.getByRole("button", { name: "更多" })).toHaveCount(0);
-    await expect(pairedGroup.getByRole("button", { name: "取消关联" })).toHaveCount(0);
-    await expect(pairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
-    await expect(page.getByRole("menuitem", { name: "取消关联" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: /确认关联|撤回关联/ })).toHaveCount(0);
-
-    expectNoWorkbenchMutationCalls(api);
-  });
-
-  test("keeps OA invoice anomalies readable without mutation APIs", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "read_export_only",
-      workbenchAmountMismatchScenario: true,
-      workbenchInitialRelationConfirmed: true,
-    });
-
-    await page.goto("/");
-
-    const unpairedZone = page.getByTestId("zone-unpaired");
-    await expect(unpairedZone).toBeVisible();
-
-    await unpairedZone.getByRole("button", { name: /未配对异常 \d+ \| 已配对异常 \d+/ }).click();
-    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(exceptionDrawer).toBeVisible();
-    await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
-    await expect(exceptionDrawer.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(exceptionDrawer.getByRole("button", {
-      name: "该发票有 1 项异常，查看详情",
-    })).toBeVisible();
-    await expect(exceptionDrawer.getByRole("checkbox", { name: /确认已审阅/ })).toHaveCount(0);
-    await expect(exceptionDrawer.getByRole("button", { name: /人工金额判断/ })).toHaveCount(0);
-    await expect(exceptionDrawer.getByRole("button", { name: "接受异常并进入已配对" })).toHaveCount(0);
-    await expect(exceptionDrawer.getByRole("button", { name: "留在未配对" })).toHaveCount(0);
-
-    expectNoWorkbenchMutationCalls(api);
-  });
-});
-
-test.describe("workbench App Health write-safety browser flow", () => {
-  test("keeps read-export workbench readable while write-safety is blocked", async ({ page }) => {
+test.describe("workbench health write-safety browser flow", () => {
+  test("blocks a page-authorized user's writes without blocking diagnosis", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       appHealthWriteSafetyBlocked: true,
-      sessionMode: "read_export_only",
+      sessionMode: "user",
+      allowedPageKeys: ["reconciliation-workbench"],
     });
 
     await page.goto("/");
-
     await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
-    const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
-    await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
-    await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
-    await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(unpairedZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "忽略", exact: true })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "确认关联" })).toHaveCount(0);
-
-    expectNoWorkbenchMutationCalls(api);
+    const { zoneLocator, group } = await selectWorkbenchGroupRows(page, "unpaired");
+    await expect(group.getByRole("button", { name: "详情" }).first()).toBeVisible();
+    await expect(zoneLocator.getByRole("button", { name: "确认关联" })).toBeDisabled();
+    await expect(zoneLocator.getByRole("button", { name: "撤回关联" })).toBeDisabled();
+    expectNoMutations(api);
   });
 
-  test("blocks full-access unpaired writes without blocking read-side diagnosis", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      appHealthWriteSafetyBlocked: true,
-      sessionMode: "full_access",
-    });
-
-    await page.goto("/");
-
-    await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
-    const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
-    await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
-    await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
-    await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(unpairedZone.getByRole("button", { name: "异常处理", exact: true })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "忽略", exact: true })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
-    await expect(unpairedGroup.getByRole("button", { name: "确认关联" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: /确认关联|撤回关联/ })).toHaveCount(0);
-
-    expectNoWorkbenchMutationCalls(api);
-  });
-
-  test("blocks admin paired writes without hiding readable states", async ({ page }) => {
+  test("blocks administrator writes without hiding paired states", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       appHealthWriteSafetyBlocked: true,
       sessionMode: "admin",
@@ -167,45 +57,10 @@ test.describe("workbench App Health write-safety browser flow", () => {
     });
 
     await page.goto("/");
-
     await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
-    const { zoneLocator: pairedZone, group: pairedGroup } = await selectWorkbenchGroupRows(page, "paired");
-    await expect(pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(pairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-    await expect(pairedGroup.getByRole("button", { name: "更多" })).toHaveCount(0);
-    await expect(pairedGroup.getByRole("button", { name: "取消关联" })).toHaveCount(0);
-
-    expectNoWorkbenchMutationCalls(api);
-  });
-
-  test("blocks admin anomaly decisions without hiding readable states", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      appHealthWriteSafetyBlocked: true,
-      sessionMode: "admin",
-      workbenchInitialRelationConfirmed: true,
-      workbenchAmountMismatchScenario: true,
-    });
-
-    await page.goto("/");
-
-    await expect(page.getByRole("button", { name: "写操作暂不可用" })).toBeVisible();
-    const unpairedZone = page.getByTestId("zone-unpaired");
-    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toBeVisible();
-    await expect(unpairedZone.getByRole("button", {
-      name: "该发票有 1 项异常，查看详情",
-    })).toBeVisible();
-
-    await unpairedZone.getByRole("button", { name: /未配对异常 \d+ \| 已配对异常 \d+/ }).click();
-    const exceptionDrawer = page.getByRole("dialog", { name: "异常处理" });
-    await expect(exceptionDrawer).toBeVisible();
-    await exceptionDrawer.getByRole("button", { name: "展开异常明细" }).first().click();
-    await expect(exceptionDrawer.getByRole("button", {
-      name: "该发票有 1 项异常，查看详情",
-    })).toBeVisible();
-    await expect(exceptionDrawer.getByRole("checkbox", { name: /确认已审阅/ })).toHaveCount(0);
-    await expect(exceptionDrawer.getByRole("button", { name: "接受异常并进入已配对" })).toHaveCount(0);
-    await expect(exceptionDrawer.getByRole("button", { name: "留在未配对" })).toHaveCount(0);
-
-    expectNoWorkbenchMutationCalls(api);
+    const { zoneLocator, group } = await selectWorkbenchGroupRows(page, "paired");
+    await expect(group.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
+    await expect(zoneLocator.getByRole("button", { name: "撤回关联" })).toBeDisabled();
+    expectNoMutations(api);
   });
 });

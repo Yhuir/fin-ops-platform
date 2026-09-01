@@ -96,7 +96,7 @@ test.describe("bank details large table and overlay browser flow", () => {
       bankDetailsClassificationMode: "unmatched",
       bankDetailsDenseCategoryMenu: true,
       bankDetailsLargeDataset: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-details");

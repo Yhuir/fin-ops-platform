@@ -5,7 +5,7 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 test.describe("pending invoice canonical read states", () => {
   test("loads canonical rows once without read-model diagnostics or polling", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/pending-invoices");
@@ -22,7 +22,7 @@ test.describe("pending invoice canonical read states", () => {
   test("treats a successful canonical zero-row response as a true empty set", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       pendingInvoiceRowsEmpty: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/pending-invoices");

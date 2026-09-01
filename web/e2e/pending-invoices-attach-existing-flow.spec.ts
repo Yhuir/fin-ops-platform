@@ -83,7 +83,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceAttachExistingBatchRows: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
@@ -239,7 +239,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceAttachExistingBatchRows: true,
       pendingInvoiceAttachExistingConfirmFailuresBeforeSuccess: 1,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
@@ -351,7 +351,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceAttachExistingPreviewConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 

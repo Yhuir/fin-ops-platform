@@ -42,7 +42,7 @@
 | page session 按 page/state/user 隔离 | 已覆盖 | `PageSessionStateContext.test.tsx` |
 | table pagination/sort/selection/scroll restore | 已覆盖 | `useFinanceTableSession.test.tsx` |
 | shell 中 workbench/tax/cost/settings/import/turnover 导航 | 已覆盖 | `App.test.tsx` |
-| 真实浏览器 admin/read_export_only/forbidden/expired shell gate | 已覆盖，2026-06-17 新增 | `web/e2e/app-shell.spec.ts` |
+| 真实浏览器 005/page-authorized/forbidden/expired shell gate | 已覆盖 | `web/e2e/app-shell.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` |
 | hostile OA role/permission 仍被 canonical ACL 拒绝，direct URL/API 403，ACL restore 后即时撤权 | 本地自动化已覆盖，2026-08-02 更新 | `SessionGate.test.tsx`、`App.test.tsx`、`PageRouteHost.test.tsx`、`permissions-role-matrix.spec.ts`、`tests/test_session_api.py`、`tests/test_auth_guard.py` |
 | fresh OA router/menu full→read→denied 与 finally restore | production external gate，尚未声明完成 | candidate-bound post-deploy artifact/hash；必须使用 fresh token/router/shell session |
 | 真实浏览器 compact drawer / embedded OA shell | 已覆盖，2026-06-17 新增 | `web/e2e/app-shell-responsive.spec.ts` |
@@ -78,7 +78,7 @@
 4. 从成本统计进入银行流水导入，路径变成 `/imports/bank-transactions`，导入 shortcut 不标记为 active。
 5. 点击底部当前 OA 账号打开身份弹层，展示用户名和部门，session 请求计数不增加。
 6. focus、visibility 与 BFCache 恢复不触发当前业务页面 reload；重新进入 route 仍重新 mount。
-7. 真实 Chromium 打开 `/operations/app-health`，admin 可以看到导航和 dashboard；read_export_only/forbidden/expired 不会触发受保护 dashboard API。
+7. 真实 Chromium 打开 `/operations/app-health`，005 可以看到导航和 dashboard；普通账号/forbidden/expired 不会触发受保护 dashboard API。
 8. 真实 Chromium 移动视口打开成本统计，打开主导航菜单，点击设置后 drawer 关闭并进入设置页。
 9. 真实 Chromium 打开 `/?embedded=oa`，shell 使用 embedded 样式；桌面侧栏默认折叠，只显示居中展开 toggle，可见 paper 可在 `232px/72px` 间双向平滑切换，业务页不参与逐帧宽度动画。
 10. 生产真实 Chromium 使用 full-access user cookie 打开 16 个核心路由，页面不能停在 session gate 或“正在加载页面”，不能产生隐藏浏览器错误、原生弹窗、非预期 requestfailed 或任何 mutating HTTP。

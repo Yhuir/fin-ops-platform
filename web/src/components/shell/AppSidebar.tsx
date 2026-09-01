@@ -3,7 +3,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
-import { useOptionalSessionPermissions } from "../../contexts/SessionContext";
+import { useOptionalSessionPermissions, useSession } from "../../contexts/SessionContext";
 import AppSidebarAccount from "./AppSidebarAccount";
 import AppStatusIndicator from "./AppStatusIndicator";
 import { isSidebarDisclosureItem, sidebarGroups, type SidebarItem } from "./sidebarItems";
@@ -79,7 +79,8 @@ export default function AppSidebar({
   onToggleExpanded,
 }: AppSidebarProps) {
   const location = useLocation();
-  const { canAdminAccess } = useOptionalSessionPermissions();
+  const session = useSession();
+  const { canAccessPage } = useOptionalSessionPermissions();
   const showExpandedContent = expanded || isCompact;
   const [importsExpanded, setImportsExpanded] = useState(() => location.pathname.startsWith("/imports"));
   const [openPopover, setOpenPopover] = useState<"status" | "account" | null>(null);
@@ -124,8 +125,8 @@ export default function AppSidebar({
 
       <Separator className="app-sidebar-separator" />
 
-      <nav className="app-sidebar-scroll" aria-label="主导航">
-        {sidebarGroups.map((group) => (
+      <nav className="app-sidebar-scroll" aria-busy={session.status === "loading"} aria-label="主导航">
+        {session.status === "authenticated" ? sidebarGroups.map((group) => (
           <section key={group.title} className="app-sidebar-group" aria-labelledby={`app-sidebar-group-${group.title}`}>
             <h2 id={`app-sidebar-group-${group.title}`} className="app-sidebar-group-title" aria-hidden={!showExpandedContent}>
               {group.title}
@@ -133,7 +134,10 @@ export default function AppSidebar({
             <ul className="app-sidebar-list" aria-label={group.title}>
               {group.items.map((item) => {
                 if (isSidebarDisclosureItem(item)) {
-                  const visibleChildren = item.children.filter((child) => !child.requiresAdmin || canAdminAccess);
+                  const visibleChildren = item.children.filter((child) => canAccessPage(child.pageKey));
+                  if (visibleChildren.length === 0) {
+                    return null;
+                  }
                   const routeActive = visibleChildren.some((child) => (
                     isSidebarItemActive(location.pathname, location.search, child.to, child.end)
                   ));
@@ -188,7 +192,7 @@ export default function AppSidebar({
                     </li>
                   );
                 }
-                if (item.requiresAdmin && !canAdminAccess) {
+                if (!canAccessPage(item.pageKey)) {
                   return null;
                 }
                 return (
@@ -205,7 +209,7 @@ export default function AppSidebar({
               })}
             </ul>
           </section>
-        ))}
+        )) : null}
       </nav>
 
       <div className="app-sidebar-account-footer">

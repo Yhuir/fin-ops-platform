@@ -129,10 +129,11 @@ export function useOptionalSessionPermissions() {
   const session = useContext(SessionContext);
   if (session === null) {
     return {
-      accessTier: "denied",
       canAccessApp: false,
-      canMutateData: false,
+      canOperateData: false,
       canAdminAccess: false,
+      allowedPageKeys: [] as string[],
+      canAccessPage: (_pageKey: string) => false,
     } as const;
   }
   return sessionPermissionsFromContext(session);
@@ -140,10 +141,13 @@ export function useOptionalSessionPermissions() {
 
 function sessionPermissionsFromContext(session: SessionContextValue) {
   const authenticatedSession = session.status === "authenticated" ? session.session : null;
+  const allowedPageKeys = authenticatedSession?.allowedPageKeys ?? [];
+  const canAdminAccess = authenticatedSession?.canAdminAccess ?? false;
   return {
-    accessTier: authenticatedSession?.accessTier ?? "denied",
     canAccessApp: authenticatedSession?.canAccessApp ?? false,
-    canMutateData: authenticatedSession?.canMutateData ?? false,
-    canAdminAccess: authenticatedSession?.canAdminAccess ?? false,
+    canOperateData: authenticatedSession?.canAccessApp ?? false,
+    canAdminAccess,
+    allowedPageKeys,
+    canAccessPage: (pageKey: string) => canAdminAccess || allowedPageKeys.includes(pageKey),
   } as const;
 }

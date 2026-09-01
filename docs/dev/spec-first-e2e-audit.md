@@ -27,7 +27,7 @@ Spec-first 的事实源顺序：
 - 模块目标和用户角色。
 - 页面入口、主要用户流程和核心业务动作。
 - 数据状态：loading、empty、error、refreshing、stale、fresh。
-- 权限规则：`admin`、`full_access`、`read_export_only`、forbidden/expired session。
+- 权限规则：无页面、逐页面授权、`005` 管理员、forbidden/expired session。
 - API/read model/worker/freshness 边界。
 - 跨页面 fan-out。
 - 失败场景和不可自动化风险。

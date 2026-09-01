@@ -8,10 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 PROTECTED_ADMIN_USERNAME = "YNSYLP005"
 SETTINGS_ACCESS_CONTROL_KEYS = frozenset(
     {
-        "allowed_usernames",
-        "readonly_export_usernames",
-        "admin_usernames",
-        "full_access_usernames",
+        "page_access_accounts",
         "access_control_version",
     }
 )
@@ -19,10 +16,7 @@ SETTINGS_ACCESS_CONTROL_KEYS = frozenset(
 
 def default_settings_access_control() -> dict[str, Any]:
     return {
-        "allowed_usernames": [PROTECTED_ADMIN_USERNAME],
-        "readonly_export_usernames": [],
-        "admin_usernames": [PROTECTED_ADMIN_USERNAME],
-        "full_access_usernames": [],
+        "page_access_accounts": [],
         "access_control_version": 1,
     }
 
@@ -44,59 +38,46 @@ def settings_access_control_from_payload(payload: object) -> dict[str, Any]:
     except (TypeError, ValueError):
         version = 1
 
-    def usernames(key: str) -> list[str]:
-        values = source.get(key)
-        if values is None:
-            return []
-        if not isinstance(values, list):
-            raise ValueError(f"Access-control {key} must be an array.")
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            canonical = str(value or "").strip()
-            comparison_key = settings_username_comparison_key(value)
-            if comparison_key in seen:
-                raise ValueError(f"Access-control {key} contains duplicate usernames.")
-            seen.add(comparison_key)
-            normalized.append(canonical)
-        return normalized
+    raw_accounts = source.get("page_access_accounts", [])
+    if not isinstance(raw_accounts, list):
+        raise ValueError("Access-control page_access_accounts must be an array.")
 
-    allowed = usernames("allowed_usernames")
-    readonly = usernames("readonly_export_usernames")
-    full_access = usernames("full_access_usernames")
-    admin = usernames("admin_usernames") if "admin_usernames" in source else [PROTECTED_ADMIN_USERNAME]
     protected_key = settings_username_comparison_key(PROTECTED_ADMIN_USERNAME)
+    seen_usernames: set[str] = set()
+    accounts: list[dict[str, Any]] = []
+    for raw_account in raw_accounts:
+        if not isinstance(raw_account, dict) or set(raw_account) != {"username", "page_keys"}:
+            raise ValueError("Access-control accounts must contain only username and page_keys.")
+        username = str(raw_account.get("username") or "").strip()
+        username_key = settings_username_comparison_key(username)
+        if username_key == protected_key:
+            raise ValueError("The protected administrator cannot be stored as an ordinary account.")
+        if username_key in seen_usernames:
+            raise ValueError("Access-control page_access_accounts contains duplicate usernames.")
+        seen_usernames.add(username_key)
 
-    if admin != [PROTECTED_ADMIN_USERNAME]:
-        raise ValueError("Only the protected administrator may have the admin tier.")
-
-    readonly_keys = {settings_username_comparison_key(name) for name in readonly}
-    full_access_keys = {settings_username_comparison_key(name) for name in full_access}
-    if protected_key in readonly_keys or protected_key in full_access_keys:
-        raise ValueError("The protected administrator cannot be assigned an ordinary access tier.")
-    if readonly_keys.intersection(full_access_keys):
-        raise ValueError("An access-control username cannot belong to multiple tiers.")
-
-    allowed_by_key = {settings_username_comparison_key(name): name for name in allowed}
-    if protected_key in allowed_by_key and allowed_by_key[protected_key] != PROTECTED_ADMIN_USERNAME:
-        raise ValueError("The protected administrator username must use canonical spelling.")
-    if "full_access_usernames" not in source:
-        full_access = [
-            name
-            for name in allowed
-            if settings_username_comparison_key(name) not in readonly_keys | {protected_key}
-        ]
-
-    expected_allowed = [PROTECTED_ADMIN_USERNAME, *full_access, *readonly]
-    expected_keys = {settings_username_comparison_key(name) for name in expected_allowed}
-    if allowed and set(allowed_by_key) != expected_keys:
-        raise ValueError("Access-control allowed usernames do not match canonical tier memberships.")
+        raw_page_keys = raw_account.get("page_keys")
+        if not isinstance(raw_page_keys, list) or not raw_page_keys:
+            raise ValueError("Access-control page_keys must be a non-empty array.")
+        page_keys: list[str] = []
+        seen_page_keys: set[str] = set()
+        for raw_page_key in raw_page_keys:
+            page_key = str(raw_page_key or "").strip()
+            if not page_key or len(page_key) > 128:
+                raise ValueError("Access-control page keys must contain 1 to 128 characters.")
+            if any(unicodedata.category(character) == "Cc" for character in page_key):
+                raise ValueError("Access-control page keys cannot contain control characters.")
+            if page_key in seen_page_keys:
+                raise ValueError("Access-control accounts cannot contain duplicate page keys.")
+            seen_page_keys.add(page_key)
+            page_keys.append(page_key)
+        accounts.append({"username": username, "page_keys": sorted(page_keys)})
 
     return {
-        "allowed_usernames": expected_allowed,
-        "readonly_export_usernames": readonly,
-        "admin_usernames": [PROTECTED_ADMIN_USERNAME],
-        "full_access_usernames": full_access,
+        "page_access_accounts": sorted(
+            accounts,
+            key=lambda account: settings_username_comparison_key(account["username"]),
+        ),
         "access_control_version": version,
     }
 

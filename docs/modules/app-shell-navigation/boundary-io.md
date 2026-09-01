@@ -33,7 +33,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | Page registry | `pageRegistry.tsx` | 页面 key、route、component、权限元数据 |
-| Session payload | session API/context | 只消费 canonical `allowed/access_tier/capabilities` 和身份展示字段；OA roles/permissions/menu 不成为 APP authority |
+| Session payload | session API/context | 只消费 canonical `allowed/allowed_page_keys/can_admin_access` 和身份展示字段；OA roles/permissions/menu 不成为 APP authority |
 | OA router/menu payload | 新 `/system/menu/getRouters` 或新 shell session | 只验收菜单可见性；旧 DOM/旧 payload 不作证据，也不替代 APP session/API denial |
 | Route lifecycle | route mount/unmount | 只挂载当前 route；重新进入 route 会重新 mount 页面 |
 | Page runtime identity | page runtime context | 只传递 page key、稳定 active 与初始 activation generation，不携带业务 DTO |

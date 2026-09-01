@@ -207,7 +207,6 @@ class PendingInvoiceApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有选择已有发票权限。")
         return self._application_service.confirm_attach_existing_invoice(
             transaction_id=transaction_id,
             payload=payload,
@@ -223,7 +222,6 @@ class PendingInvoiceApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有选择已有发票权限。")
         return self._application_service.confirm_attach_existing_invoices(
             payload=payload,
             actor_id=_actor_id(session, "pending_invoice"),
@@ -232,7 +230,7 @@ class PendingInvoiceApiRoutes:
     def rules(self, query: dict[str, list[str]], *, session: OARequestSession | None) -> dict[str, Any]:
         return self._rules_service.get_rules(
             direction=query.get("direction", ["expense"])[0],
-            can_save=bool(getattr(session, "can_mutate_data", True)),
+            can_save=True,
         )
 
     def update_rules(
@@ -242,7 +240,6 @@ class PendingInvoiceApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        self._require_mutation(session, "当前账户没有保存待找发票规则权限。")
         try:
             return HTTPStatus.OK, self._rules_service.update_rules(
                 direction=query.get("direction", ["expense"])[0],
@@ -265,7 +262,6 @@ class PendingInvoiceApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有标记收入流水开票状态权限。")
         return self._application_service.confirm_income_status_override(
             transaction_id=transaction_id,
             payload=payload,
@@ -278,7 +274,6 @@ class PendingInvoiceApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> dict[str, Any]:
-        self._require_mutation(session, "当前账户没有批量标记收入流水开票状态权限。")
         return self._application_service.confirm_income_status_overrides(
             payload=payload,
             actor_id=_actor_id(session, "pending_invoice_income_status"),
@@ -299,11 +294,6 @@ class PendingInvoiceApiRoutes:
             content=content,
             content_type=self._export_content_type,
         )
-
-    @staticmethod
-    def _require_mutation(session: OARequestSession | None, message: str) -> None:
-        if not bool(getattr(session, "can_mutate_data", True)):
-            raise PendingInvoiceError("permission_denied", message, status_code=HTTPStatus.FORBIDDEN)
 
     def _json_read(self, headers: dict[str, str] | None, action: Callable[[Any | None], tuple[HTTPStatus, dict[str, Any]]]) -> Any:
         session, auth_error = self._read_session(headers)

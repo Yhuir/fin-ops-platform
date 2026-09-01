@@ -676,7 +676,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
     def test_oa_reverse_full_flow_uses_admin_saved_target_applicant_credential(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["FULL001"])
+            configure_access_control(app, usernames=["FULL001"])
             self._install_identity_resolver(app)
             client = FakeOaDraftClient()
             login_client = RecordingOaLoginClient()

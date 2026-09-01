@@ -179,7 +179,7 @@ class CostStatisticsApiRoutes:
                 page_size=int(page_size or 50),
                 status=str(status or "pending"),
                 query=search_query,
-                can_save=bool(session is None or session.can_mutate_data),
+                can_save=True,
             )
         except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
             return self._integrity_error_response(exc)
@@ -250,7 +250,7 @@ class CostStatisticsApiRoutes:
             return self._integrity_error_response(exc)
         payload = _merge_tag_candidates(
             service.get_cost_statistics_no_oa_projects_payload(
-                can_save=bool(session is None or session.can_mutate_data),
+                can_save=True,
             ),
             candidates,
         )

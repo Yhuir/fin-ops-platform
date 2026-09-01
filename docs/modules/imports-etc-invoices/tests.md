@@ -51,7 +51,7 @@
 - ETC preview/confirm/import worker 不得调用 OA attachment upload 或 OA draft create；OA 草稿仅由后续独立人工动作触发。
 - Browser e2e 必须覆盖 ready task selector、zip preview、audit/review copy、confirm job feedback、preview stale、stale task preview、confirm failure、ETC 票据/税金结果、OA 成本隔离，以及 ETC 导入不误走通用 files import API。
 - Browser e2e 必须覆盖页面每次进入 fresh，不恢复历史 task/ZIP/preview；对当前 preview 点击清空时必须先 owner-bound discard，成功后回到 fresh。
-- read_export_only 用户必须能打开 ETC 发票导入页但不能选择 zip、预览或确认导入。
+- 未获 ETC 发票导入页授权的用户不能打开页面、选择 zip、预览或确认导入；获权用户可执行完整导入流程。
 - 120 张合成 ETC 发票混合 zip preview 必须把有效发票、同包重复 XML、malformed XML file-level failure 分开计数，且 preview 不持久化发票记录。
 - task reopen、task version/hash 变化、已存在 canonical invoice 关系变化或 import session 变化后，confirm 必须返回 `stale_reconciliation_task_preview` 或 `preview_stale`；页面不能展示“已开始后台导入”，其中 stale task preview 必须清空旧 preview 并要求重新预览。
 - confirm API/worker 入队失败必须错误可见，不能展示“已开始后台导入”，不能把下游 read model 伪装成 fresh。

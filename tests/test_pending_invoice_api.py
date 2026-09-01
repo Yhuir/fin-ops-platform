@@ -371,12 +371,12 @@ class PendingInvoiceApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             settings = app._app_settings_service.get_settings_payload()
-            configure_access_control(app, read_export_only=["READONLY001"])
+            configure_access_control(app, page_access={"LIMITED001": ["pending-invoices"]})
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="readonly-user-id",
-                username="READONLY001",
-                nickname="只读用户",
-                display_name="只读用户",
+                username="LIMITED001",
+                nickname="受限用户",
+                display_name="受限用户",
                 roles=["finance"],
                 permissions=[],
             )
@@ -402,18 +402,18 @@ class PendingInvoiceApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(payload["error"], "page_access_denied")
 
-    def test_pending_invoice_rules_update_requires_write_permission(self) -> None:
+    def test_pending_invoice_rules_update_requires_pending_invoice_page(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             current = app._app_settings_service.get_settings_payload()
-            configure_access_control(app, read_export_only=["READONLY001"])
+            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="readonly-user-id",
-                username="READONLY001",
-                nickname="只读用户",
-                display_name="只读用户",
+                username="LIMITED001",
+                nickname="受限用户",
+                display_name="受限用户",
                 roles=["finance"],
                 permissions=[],
             )
@@ -427,7 +427,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(payload["error"], "page_access_denied")
 
     def test_pending_invoice_rules_get_derives_requires_invoice_from_active_tag_complement(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

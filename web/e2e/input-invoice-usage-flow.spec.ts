@@ -168,7 +168,7 @@ test.describe("input invoice usage browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       inputInvoiceUsageRowsFailuresBeforeSuccess: 2,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
 
@@ -221,7 +221,7 @@ test.describe("input invoice usage browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       inputInvoiceUsageFilterSortRows: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
 
@@ -374,116 +374,11 @@ test.describe("input invoice usage browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps read-export users on read-only workflows without durable writes", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
-    const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "input-invoice-usage.open-page-read-export",
-      visibleLabel: "进项发票使用情况",
-      actionType: "navigate",
-    }, async (mark) => {
-      const rowsResponse = waitForInputInvoiceUsageRows(page);
-      await page.goto("/input-invoice-usage");
-      expect((await mark("apiLatencyMs", rowsResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByTestId("input-invoice-usage-page")).toBeVisible());
-    });
-    await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
-    await expect(page.getByRole("row", { name: /SD-INV-E2E-0001/ })).toBeVisible();
-
-    const exportDrawer = page.getByRole("dialog", { name: "筛选内容导出" });
-    await recordLatency({
-      operationId: "input-invoice-usage.open-export-preview-read-export",
-      visibleLabel: "筛选内容导出",
-      actionType: "click",
-    }, async (mark) => {
-      const exportPreviewResponsePromise = waitForInputInvoiceUsageExportPreview(page);
-      await page.getByRole("button", { name: "筛选内容导出" }).click();
-      expect((await mark("apiLatencyMs", exportPreviewResponsePromise)).status()).toBe(200);
-      await mark("firstVisibleResponseLatencyMs", expect(exportDrawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(exportDrawer.getByRole("button", { name: "下载导出" })).toBeEnabled());
-    });
-    await expect(exportDrawer).toBeVisible();
-    await expect(exportDrawer.getByRole("button", { name: "下载导出" })).toBeEnabled();
-    await recordLatency({
-      operationId: "input-invoice-usage.close-export-preview-read-export",
-      visibleLabel: "关闭进项发票使用情况导出",
-      actionType: "click",
-    }, async (mark) => {
-      await exportDrawer.getByRole("button", { name: "关闭进项发票使用情况导出" }).click();
-      await mark("finalSettledLatencyMs", expect(exportDrawer).toHaveCount(0));
-    });
-
-    const rulesDrawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
-    await recordLatency({
-      operationId: "input-invoice-usage.open-payment-rules-read-export",
-      visibleLabel: "发票与支付状态规则设置",
-      actionType: "click",
-    }, async (mark) => {
-      const rulesResponsePromise = waitForInputInvoiceUsagePaymentRules(page);
-      await page.getByRole("button", { name: "发票与支付状态规则设置" }).click();
-      expect((await mark("apiLatencyMs", rulesResponsePromise)).status()).toBe(200);
-      await mark("firstVisibleResponseLatencyMs", expect(rulesDrawer).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(rulesDrawer.getByText("只读")).toBeVisible());
-    });
-    await expect(rulesDrawer).toBeVisible();
-    await expect(rulesDrawer.getByText("只读")).toBeVisible();
-    await expect(rulesDrawer.getByText("待付款（自动识别有oa无流水）")).toBeVisible();
-    await expect(rulesDrawer.getByRole("button", { name: "保存" })).toHaveCount(0);
-    await expect(rulesDrawer.getByRole("button", { name: "还原" })).toHaveCount(0);
-    await expect(rulesDrawer.getByRole("textbox")).toHaveCount(0);
-    await recordLatency({
-      operationId: "input-invoice-usage.close-payment-rules-read-export",
-      visibleLabel: "关闭支付状态规则抽屉",
-      actionType: "click",
-    }, async (mark) => {
-      await rulesDrawer.getByRole("button", { name: "关闭支付状态规则抽屉" }).click();
-      await mark("finalSettledLatencyMs", expect(rulesDrawer).toHaveCount(0));
-    });
-
-    let previewResponse: Awaited<ReturnType<typeof waitForInputInvoiceUsageOaReversePreview>> | undefined;
-    await recordLatency({
-      operationId: "input-invoice-usage.open-oa-reverse-read-export",
-      visibleLabel: "以发票反提 OA",
-      actionType: "click",
-    }, async (mark) => {
-      const previewResponsePromise = waitForInputInvoiceUsageOaReversePreview(page);
-      await page.getByRole("button", { name: "以发票反提 OA" }).click();
-      previewResponse = await mark("apiLatencyMs", previewResponsePromise);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByLabel("以发票反提 OA 工作流", { exact: true })).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByLabel("以发票反提 OA 工作流", { exact: true }).getByRole("grid", { name: "反提 OA 候选发票清单" })).toBeVisible());
-    });
-    if (!previewResponse) {
-      throw new Error("missing OA reverse preview response");
-    }
-    expect(previewResponse.status()).toBe(200);
-    const previewPayload = await previewResponse.json() as { can_create_draft?: boolean; canCreateDraft?: boolean };
-    expect(previewPayload.can_create_draft ?? previewPayload.canCreateDraft).toBe(false);
-
-    const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
-    await expect(workflow).toBeVisible();
-    await expect(page.getByLabel("以发票反提 OA 提示")).toHaveCount(0);
-    await expect(workflow.getByRole("grid", { name: "反提 OA 候选发票清单" })).toBeVisible();
-    await expect(workflow.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
-
-    expect(api.count("GET /api/input-invoice-usage/export-preview")).toBe(1);
-    expect(api.count("GET /api/input-invoice-usage/export")).toBe(0);
-    expect(api.count("GET /api/input-invoice-usage/payment-status-rules")).toBe(1);
-    expect(api.count("PUT /api/input-invoice-usage/payment-status-rules")).toBe(0);
-    expect(api.count("POST /api/input-invoice-usage/oa-reverse/preview")).toBe(1);
-    expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
-    expect(api.count("POST /api/input-invoice-usage/oa-reverse/batches")).toBe(0);
-    expect(api.count("POST /api/input-invoice-usage/oa-reverse/batches/input-oa-reverse-batch-e2e-001/manual-oa-status")).toBe(0);
-    expect(durableWriteCalls(api.calls)).toEqual([]);
-    expect(browserErrors).toEqual([]);
-  });
-
-  test("refreshes current rows after full-access payment status rules are saved", async ({ page }, testInfo) => {
+  test("refreshes current rows after page-authorized payment status rules are saved", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       inputInvoiceUsagePaymentRulesSaveFlow: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
 
@@ -504,7 +399,7 @@ test.describe("input invoice usage browser flow", () => {
 
     const rulesDrawer = page.getByRole("dialog", { name: "发票与支付状态规则设置" });
     await recordLatency({
-      operationId: "input-invoice-usage.open-payment-rules-full-access",
+      operationId: "input-invoice-usage.open-payment-rules-page-authorized",
       visibleLabel: "发票与支付状态规则设置",
       actionType: "click",
     }, async (mark) => {
@@ -563,7 +458,7 @@ test.describe("input invoice usage browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       inputInvoiceUsageRelationDetailList: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
 
@@ -616,7 +511,7 @@ test.describe("input invoice usage browser flow", () => {
 
   test("downloads current filtered rows without paginating the export", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
 
     await recordLatency({
@@ -719,7 +614,7 @@ test.describe("input invoice usage browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       inputInvoiceUsageExportRowLimitError: true,
-      sessionMode: "read_export_only",
+      sessionMode: "user",
     });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
 
@@ -758,7 +653,7 @@ test.describe("input invoice usage browser flow", () => {
 
   test("creates an OA reverse draft from a selected invoice subset and records submitted history", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createInputInvoiceUsageLatencyRecorder(page, testInfo);
 
     await recordLatency({

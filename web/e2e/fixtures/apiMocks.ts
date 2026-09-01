@@ -2,9 +2,7 @@ import type { Page, Route } from "@playwright/test";
 
 import { createMinimalXlsx } from "./xlsx";
 
-export type AccessTier = "denied" | "read_export_only" | "full_access" | "admin";
-
-type SessionMode = "admin" | "full_access" | "read_export_only" | "forbidden" | "expired" | "error";
+type SessionMode = "admin" | "user" | "forbidden" | "expired" | "error";
 type OaSyncMockMode = "synced" | "dirty" | "refreshing" | "error";
 type OperationBarrierMockMode = "fresh" | "refreshing" | "blocked";
 type BankDetailClassificationMockMode = "auto_matched" | "needs_confirmation" | "unmatched";
@@ -113,6 +111,7 @@ type ApiMockOptions = {
   pendingInvoiceRowsEmpty?: boolean;
   sessionMode?: SessionMode;
   sessionUsername?: string;
+  allowedPageKeys?: string[];
   taxOffsetLargeDataset?: boolean;
   taxOffsetPlanSaveConflict?: boolean;
   dashboardError?: boolean;
@@ -190,32 +189,51 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
-function sessionPayload(accessTier: AccessTier, username?: string) {
-  const allowed = accessTier !== "denied";
+const assignablePageKeys = [
+  "reconciliation-workbench",
+  "cost-statistics",
+  "bank-details",
+  "oa-pending-payments",
+  "bank-flow-rule-batches",
+  "batch-accounting",
+  "turnover-ledger",
+  "etc-tickets",
+  "tax-offset",
+  "pending-invoices",
+  "input-invoice-usage",
+  "output-invoice-collections",
+  "settings",
+  "app-health-operations",
+  "imports.bank-transactions",
+  "imports.invoices",
+  "imports.etc-invoices",
+] as const;
+
+function sessionPayload(
+  accessKind: "denied" | "user" | "admin",
+  username?: string,
+  pageKeys: readonly string[] = assignablePageKeys,
+) {
+  const allowed = accessKind === "admin" || (accessKind === "user" && pageKeys.length > 0);
   const resolvedUsername = username ?? (
-    accessTier === "admin" ? "YNSYLP005" : accessTier === "denied" ? "YNSYLP006" : "E2EUSER001"
+    accessKind === "admin" ? "YNSYLP005" : accessKind === "denied" ? "YNSYLP006" : "E2EUSER001"
   );
   return {
     user: {
       user_id: "e2e-user",
       username: resolvedUsername,
-      nickname: accessTier === "admin" ? "管理员" : "浏览器测试用户",
-      display_name: accessTier === "admin" ? "管理员" : "浏览器测试用户",
+      nickname: accessKind === "admin" ? "管理员" : "浏览器测试用户",
+      display_name: accessKind === "admin" ? "管理员" : "浏览器测试用户",
       dept_id: "finance",
       dept_name: "财务部",
       avatar: null,
     },
-    roles: accessTier === "admin"
-      ? ["fin_ops_admin"]
-      : accessTier === "denied"
-        ? ["finance", "business", "finops_full_access"]
-        : ["fin_ops_user"],
+    roles: accessKind === "admin" ? ["finops_admin"] : accessKind === "denied" ? ["finance"] : ["finops_app_user"],
     permissions: ["finops:app:view"],
     allowed,
-    access_tier: accessTier,
     can_access_app: allowed,
-    can_mutate_data: accessTier === "admin" || accessTier === "full_access",
-    can_admin_access: accessTier === "admin",
+    can_admin_access: accessKind === "admin",
+    allowed_page_keys: accessKind === "admin" ? [...assignablePageKeys, "operation-history"] : allowed ? [...pageKeys] : [],
   };
 }
 
@@ -8613,35 +8631,39 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   };
   let activeSessionUsername = options.sessionUsername
     ?? (options.sessionMode === "admin" ? "YNSYLP005" : "E2EUSER001");
+  const initialPageKeys = [...(options.allowedPageKeys ?? assignablePageKeys)];
   let settingsAccessControl = {
     version: 1,
     administrator: {
       username: "YNSYLP005",
-      access_tier: "admin" as const,
+      display_name: "权限管理员",
       protected: true as const,
     },
     accounts: (
-      options.sessionMode === "full_access" || options.sessionMode === "read_export_only"
+      options.sessionMode === "user"
         ? [{
             username: activeSessionUsername,
-            access_tier: options.sessionMode,
+            display_name: "浏览器测试用户",
+            oa_status: "active" as const,
+            page_keys: initialPageKeys,
           }]
         : []
     ) as Array<{
       username: string;
-      access_tier: "full_access" | "read_export_only";
+      display_name: string;
+      oa_status: "active" | "inactive" | "missing";
+      page_keys: string[];
     }>,
   };
-  const configuredSessionTier = (): AccessTier => {
+  const configuredSessionKind = (): "admin" | "user" | "denied" => {
     if (activeSessionUsername === "YNSYLP005") {
       return "admin";
     }
     const configured = settingsAccessControl.accounts.find((account) => account.username === activeSessionUsername);
-    if (configured) {
-      return configured.access_tier;
-    }
-    return "denied";
+    return configured?.page_keys.length ? "user" : "denied";
   };
+  const configuredPageKeys = () => settingsAccessControl.accounts
+    .find((account) => account.username === activeSessionUsername)?.page_keys ?? [];
   let settingsDataResetJob: {
     action: SettingsDataResetAction;
     jobId: string;
@@ -8668,10 +8690,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.sessionMode === "error") {
         return json(route, { error: "session_error", message: "会话校验失败，请稍后重试。" }, 503);
       }
-      return json(route, sessionPayload(configuredSessionTier(), activeSessionUsername));
+      return json(route, sessionPayload(configuredSessionKind(), activeSessionUsername, configuredPageKeys()));
     }
 
-    if (configuredSessionTier() === "denied") {
+    if (configuredSessionKind() === "denied") {
       return json(route, { error: "forbidden", message: "当前账号无权访问财务运营平台。" }, 403);
     }
 
@@ -8698,7 +8720,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/settings/access-control") {
-      if (configuredSessionTier() !== "admin") {
+      if (configuredSessionKind() !== "admin") {
         return json(route, { error: "forbidden", message: "当前账号无权执行此操作。" }, 403);
       }
       if (request.method() === "PUT") {
@@ -8723,15 +8745,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           const item = account as Record<string, unknown>;
           return {
             username: String(item.username ?? "").trim(),
-            access_tier: String(item.access_tier ?? ""),
+            page_keys: Array.isArray(item.page_keys) ? item.page_keys.map(String) : [],
             keys: Object.keys(item).sort().join(","),
           };
         });
         const invalid = accounts.some((account) =>
-          account.keys !== "access_tier,username"
+          account.keys !== "page_keys,username"
           || !account.username
           || account.username === "YNSYLP005"
-          || !["full_access", "read_export_only"].includes(account.access_tier),
+          || account.page_keys.length === 0
+          || account.page_keys.some((pageKey) => !assignablePageKeys.includes(pageKey as typeof assignablePageKeys[number]))
+          || new Set(account.page_keys).size !== account.page_keys.length,
         ) || new Set(accounts.map((account) => account.username)).size !== accounts.length;
         if (invalid) {
           return json(route, {
@@ -8739,9 +8763,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             message: "Invalid access-control accounts.",
           }, 400);
         }
-        const nextAccounts = accounts.map(({ username, access_tier }) => ({
+        const nextAccounts = accounts.map(({ username, page_keys }) => ({
           username,
-          access_tier: access_tier as "full_access" | "read_export_only",
+          display_name: `${username} 用户`,
+          oa_status: "active" as const,
+          page_keys,
         }));
         if (JSON.stringify(nextAccounts) !== JSON.stringify(settingsAccessControl.accounts)) {
           settingsAccessControl = {
@@ -8754,11 +8780,21 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, settingsAccessControl);
     }
 
+    if (path === "/api/workbench/settings/access-control/users") {
+      if (configuredSessionKind() !== "admin") {
+        return json(route, { error: "forbidden", message: "当前账号无权执行此操作。" }, 403);
+      }
+      const query = (url.searchParams.get("q") ?? "").trim();
+      return json(route, {
+        users: query ? [{ username: query.toUpperCase(), display_name: `${query.toUpperCase()} 用户`, active: true }] : [],
+      });
+    }
+
     const oaDraftPrefillMatch = path.match(/^\/api\/workbench\/settings\/oa-draft-prefill\/(etc|input-invoice-usage)$/);
     if (oaDraftPrefillMatch) {
       const family = oaDraftPrefillMatch[1] === "etc" ? "etc" : "input_invoice_usage";
       if (request.method() === "PUT") {
-        if (configuredSessionTier() !== "admin") {
+        if (configuredSessionKind() !== "admin") {
           return json(route, { error: "forbidden", message: "当前账号无权执行此操作。" }, 403);
         }
         const body = parseJsonBody(request.postData()) as {
@@ -8787,7 +8823,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           invoice_kinds: [{ value: "Special_invoice", label: "普通发票/行政收据" }],
           projects: [{ value: "6486ca70cd6cae5d4e2b0b48", label: "云南溯源科技" }],
         },
-        can_save: configuredSessionTier() === "admin",
+        can_save: configuredSessionKind() === "admin",
       });
     }
 
@@ -9218,8 +9254,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/input-invoice-usage/payment-status-rules") {
-      const canSaveInputInvoicePaymentRules = options.sessionMode !== "read_export_only"
-        && options.sessionMode !== "forbidden"
+      const canSaveInputInvoicePaymentRules = options.sessionMode !== "forbidden"
         && options.sessionMode !== "expired"
         && options.sessionMode !== "error";
       if (request.method() === "GET") {
@@ -9271,8 +9306,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         invoiceIds?: string[];
         invoice_ids?: string[];
       };
-      const canCreateDraft = options.sessionMode !== "read_export_only"
-        && options.sessionMode !== "forbidden"
+      const canCreateDraft = options.sessionMode !== "forbidden"
         && options.sessionMode !== "expired"
         && options.sessionMode !== "error";
       return json(route, inputInvoiceOaReversePreviewPayload(
@@ -9407,7 +9441,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           output_primary_label: "费用",
           output_sub_label: "材料费",
         }],
-        can_save: configuredSessionTier() === "admin" || configuredSessionTier() === "full_access",
+        can_save: configuredSessionKind() !== "denied",
       });
     }
 
@@ -9431,7 +9465,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           project_name: "权限测试项目",
           expense_type: "材料费",
           expense_content: "测试材料",
-          oa_applicant: "只读用户",
+          oa_applicant: "测试用户",
           oa_original_amount: "120.00",
         }],
         bank_events: [{
@@ -9448,7 +9482,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         version: 0,
         updated_by: "",
         updated_at: "",
-        can_save: configuredSessionTier() === "admin" || configuredSessionTier() === "full_access",
+        can_save: configuredSessionKind() !== "denied",
       };
       return json(route, {
         items: status === "pending" ? [task] : [],
@@ -10589,8 +10623,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
-    const canSaveBankAutoTagRules = options.sessionMode !== "read_export_only"
-      && options.sessionMode !== "forbidden";
+    const canSaveBankAutoTagRules = options.sessionMode !== "forbidden";
     if (path === "/api/bank-details/auto-tag-rules/reapply") {
       return json(route, {
         ...bankAutoTagRulesPayload(canSaveBankAutoTagRules, {
@@ -10823,7 +10856,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             output_sub_label: "差旅费",
           },
         ],
-        can_save: configuredSessionTier() !== "read_export_only",
+        can_save: configuredSessionKind() !== "denied",
       });
     }
 
@@ -10845,7 +10878,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/operations/history") {
-      if (configuredSessionTier() !== "admin") {
+      if (configuredSessionKind() !== "admin") {
         return json(route, { error: "admin_only", message: "当前账号没有管理员权限。" }, 403);
       }
       return json(route, {

@@ -23,7 +23,7 @@ describe("OA session gate", () => {
 
     expect(screen.getByText("正在验证 OA 会话...")).toBeInTheDocument();
     expect(await screen.findByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "关联台" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "关联台" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/session/me", expect.any(Object));
   });
 
@@ -45,11 +45,11 @@ describe("OA session gate", () => {
     const response = await fetch("/api/session/me");
     const session = await response.json() as Record<string, unknown>;
     expect(session).toMatchObject({
-      roles: ["finance", "business", "finops_full_access"],
+      roles: ["finance"],
       permissions: ["finops:app:view"],
       allowed: false,
-      access_tier: "denied",
       can_access_app: false,
+      allowed_page_keys: [],
     });
   });
 
@@ -84,10 +84,9 @@ describe("OA session gate", () => {
         roles: ["finance"],
         permissions: ["finops:app:view"],
         allowed: true,
-        access_tier: "full_access",
         can_access_app: true,
-        can_mutate_data: true,
         can_admin_access: false,
+        allowed_page_keys: ["reconciliation-workbench"],
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },

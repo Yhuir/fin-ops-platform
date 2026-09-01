@@ -43,7 +43,7 @@ type WorkbenchRecordCardProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
-  canMutateData: boolean;
+  canOperateData: boolean;
   readOnly?: boolean;
   allowInvoiceEntryInReadOnly?: boolean;
   leadingControl?: ReactNode;
@@ -63,7 +63,7 @@ function WorkbenchRecordCard({
   onOpenDetail,
   onRowAction,
   showWorkflowActions,
-  canMutateData,
+  canOperateData,
   readOnly = false,
   allowInvoiceEntryInReadOnly = false,
   leadingControl,
@@ -79,7 +79,7 @@ function WorkbenchRecordCard({
   const unassignedInvoiceAnomaly = paneId === "invoice" && !row.displayOnly
     ? row.workbenchAnomalies?.find((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")
     : undefined;
-  const invoiceResolutionDisabled = readOnly ? !allowInvoiceEntryInReadOnly : !canMutateData;
+  const invoiceResolutionDisabled = readOnly ? !allowInvoiceEntryInReadOnly : !canOperateData;
   const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
     rowState === "selected"
@@ -110,7 +110,7 @@ function WorkbenchRecordCard({
             />
             {hasUnparsedAttachment && row.availableActions.includes("enter_invoice") ? (
                 <InvoiceEntryAction
-                  disabled={readOnly ? !allowInvoiceEntryInReadOnly : !canMutateData}
+                  disabled={readOnly ? !allowInvoiceEntryInReadOnly : !canOperateData}
                   onPress={() => onRowAction(row, "enter-invoice")}
                 />
               ) : null}
@@ -152,7 +152,7 @@ function WorkbenchRecordCard({
           <RowActions
             compact
             availableActions={row.availableActions}
-            canMutateData={canMutateData}
+            canOperateData={canOperateData}
             recordType={row.recordType}
             showDetailAction={!isSummaryRow && !showInlineDetail}
             showWorkflowActions={showWorkflowActions}
@@ -286,7 +286,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.searchQuery === nextProps.searchQuery
   && previousProps.sheetRowMode === nextProps.sheetRowMode
   && previousProps.showWorkflowActions === nextProps.showWorkflowActions
-  && previousProps.canMutateData === nextProps.canMutateData
+  && previousProps.canOperateData === nextProps.canOperateData
   && previousProps.readOnly === nextProps.readOnly
   && previousProps.allowInvoiceEntryInReadOnly === nextProps.allowInvoiceEntryInReadOnly
   && previousProps.leadingControl === nextProps.leadingControl

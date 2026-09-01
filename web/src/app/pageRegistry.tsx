@@ -36,6 +36,7 @@ export type AppPageRoute = {
 
 export type SidebarItem = {
   id?: string;
+  pageKey: string;
   label: string;
   to: string;
   icon: LucideIcon;
@@ -255,12 +256,21 @@ export const appPageRoutes: AppPageRoute[] = appPageDefinitions.map((definition)
   requiresAdmin: definition.requiresAdmin,
 }));
 
+export const assignablePageOptions = appPageDefinitions
+  .filter((definition) => !definition.requiresAdmin && definition.sidebar)
+  .map((definition) => ({
+    pageKey: definition.pageKey,
+    label: definition.sidebar?.label ?? definition.pageKey,
+    group: definition.sidebar?.group ?? "system",
+  }));
+
 function sidebarItemFromDefinition(definition: AppPageDefinition): SidebarItem | null {
   if (!definition.sidebar) {
     return null;
   }
   return {
     id: definition.sidebar.id,
+    pageKey: definition.pageKey,
     label: definition.sidebar.label,
     to: definition.path,
     icon: definition.sidebar.icon,

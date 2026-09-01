@@ -539,7 +539,7 @@ describe("Workbench candidate grouping layout", () => {
   ) {
     return render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={displayState}
         getRowState={() => "idle"}
         groups={[group]}
@@ -574,7 +574,7 @@ describe("Workbench candidate grouping layout", () => {
     const group = createNoOaCollapsedGroup();
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -616,7 +616,7 @@ describe("Workbench candidate grouping layout", () => {
       const onEditReceipt = vi.fn();
       const view = render(
         <RelationGroupGrid
-          canMutateData
+          canOperateData
           displayState={createEmptyWorkbenchZoneDisplayState()}
           getRowState={() => "idle"}
           groups={[{
@@ -976,7 +976,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         getRowState={() => "idle"}
         groups={[group]}
         onEnsureGroupDetail={ensureGroupDetail}
@@ -1006,7 +1006,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1063,7 +1063,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1119,7 +1119,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1223,7 +1223,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1348,7 +1348,7 @@ describe("Workbench candidate grouping layout", () => {
     render(
       <RelationGroupGrid
         allowInvoiceEntryInReadOnly
-        canMutateData={false}
+        canOperateData={false}
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1441,7 +1441,7 @@ describe("Workbench candidate grouping layout", () => {
 
     const view = render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1470,7 +1470,7 @@ describe("Workbench candidate grouping layout", () => {
 
     view.rerender(
       <RelationGroupGrid
-        canMutateData={false}
+        canOperateData={false}
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1517,7 +1517,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1564,7 +1564,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1612,7 +1612,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1704,7 +1704,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1767,7 +1767,7 @@ describe("Workbench candidate grouping layout", () => {
     state.searchQuery = "ETC";
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={state}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1822,7 +1822,7 @@ describe("Workbench candidate grouping layout", () => {
       state.searchQuery = searchQuery;
       return (
         <RelationGroupGrid
-          canMutateData
+          canOperateData
           displayState={state}
           getRowState={() => "idle"}
           groups={[group]}
@@ -1883,7 +1883,7 @@ describe("Workbench candidate grouping layout", () => {
     const ensureGroupDetail = vi.fn();
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -1928,7 +1928,7 @@ describe("Workbench candidate grouping layout", () => {
       const [group, setGroup] = useState(summaryGroup);
       return (
         <RelationGroupGrid
-          canMutateData
+          canOperateData
           displayState={createEmptyWorkbenchZoneDisplayState()}
           getRowState={() => "idle"}
           groups={[group]}
@@ -1977,7 +1977,7 @@ describe("Workbench candidate grouping layout", () => {
     compactGroup.collapsedRows = { invoice: [] };
     const renderGrid = (group: WorkbenchRelationGroup) => (
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -2020,7 +2020,7 @@ describe("Workbench candidate grouping layout", () => {
     const ensureGroupDetail = vi.fn().mockRejectedValue(new Error("stale"));
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -2060,7 +2060,7 @@ describe("Workbench candidate grouping layout", () => {
     const group = createEtcCollapsedGroup();
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -2112,7 +2112,7 @@ describe("Workbench candidate grouping layout", () => {
     group.rows.invoice = [createEtcInvoiceRecord("legacy-first", "LEGACY-FIRST", "23.50")];
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -2152,7 +2152,7 @@ describe("Workbench candidate grouping layout", () => {
     const group = createEtcCollapsedCountPrecedenceGroup();
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[group]}
@@ -2184,7 +2184,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <RelationGroupGrid
-        canMutateData
+        canOperateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[
@@ -2256,7 +2256,7 @@ describe("Workbench candidate grouping layout", () => {
 
     render(
       <WorkbenchRecordCard
-        canMutateData
+        canOperateData
         columnGridStyle={bankGridStyle}
         columns={bankColumns}
         paneId="bank"
@@ -2288,7 +2288,7 @@ describe("Workbench candidate grouping layout", () => {
     };
     render(
       <WorkbenchRecordCard
-        canMutateData
+        canOperateData
         columnGridStyle={getWorkbenchPaneGridStyle("bank")}
         columns={getWorkbenchColumns("bank")}
         paneId="bank"
@@ -2310,7 +2310,7 @@ describe("Workbench candidate grouping layout", () => {
   test("highlights a matching date-time phrase across compact display spans", () => {
     render(
       <WorkbenchRecordCard
-        canMutateData
+        canOperateData
         columnGridStyle={getWorkbenchPaneGridStyle("bank")}
         columns={getWorkbenchColumns("bank")}
         paneId="bank"
@@ -2397,7 +2397,7 @@ describe("Workbench candidate grouping layout", () => {
     render(
       <div>
         <RelationGroupCell
-          canMutateData
+          canOperateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
           getRowState={() => "idle"}
@@ -2412,7 +2412,7 @@ describe("Workbench candidate grouping layout", () => {
           zoneId="unpaired"
         />
         <RelationGroupCell
-          canMutateData
+          canOperateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
           getRowState={() => "idle"}
@@ -2453,7 +2453,7 @@ describe("Workbench candidate grouping layout", () => {
     render(
       <div>
         <WorkbenchRecordCard
-          canMutateData
+          canOperateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
           highlighted={false}
@@ -2467,7 +2467,7 @@ describe("Workbench candidate grouping layout", () => {
           zoneId="unpaired"
         />
         <WorkbenchRecordCard
-          canMutateData
+          canOperateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
           highlighted={false}
@@ -2481,7 +2481,7 @@ describe("Workbench candidate grouping layout", () => {
           zoneId="unpaired"
         />
         <WorkbenchRecordCard
-          canMutateData
+          canOperateData
           columnGridStyle={invoiceGridStyle}
           columns={invoiceColumns}
           highlighted

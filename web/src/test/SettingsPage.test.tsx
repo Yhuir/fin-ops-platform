@@ -265,22 +265,21 @@ describe("Settings page", () => {
     expect(screen.queryByRole("button", { name: "搜索" })).not.toBeInTheDocument();
   });
 
-  test("keeps read-only settings users from saving changes", async () => {
+  test("lets a user assigned to settings use normal settings actions", async () => {
     installMockApiFetch({
-      sessionAccessTier: "read_export_only",
+      sessionRole: "user",
       sessionUsername: "READONLY001",
     });
     renderAppAt("/settings");
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(await screen.findByText("当前账号仅支持查看和导出，不能保存设置。")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "保存设置" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "保存设置" })).toBeEnabled();
   });
 
   test("lets admin maintain OA applicant credentials through dedicated endpoints", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
     });
     renderAppAt("/settings");
@@ -335,9 +334,9 @@ describe("Settings page", () => {
     });
   });
 
-  test("keeps OA applicant credentials hidden from full-access non-admin users", async () => {
+  test("keeps OA applicant credentials hidden from non-admin users", async () => {
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "full_access",
+      sessionRole: "user",
       sessionUsername: "chen_xiuyun",
     });
     renderAppAt("/settings");
@@ -352,21 +351,21 @@ describe("Settings page", () => {
   test("saves access accounts only through the versioned admin endpoint", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
     });
     renderAppAt("/settings");
 
     const tree = await screen.findByRole("tree", { name: "设置分类" });
     await user.click(within(tree).getByRole("treeitem", { name: /访问账户/ }));
-    const region = screen.getByRole("region", { name: "访问账户管理" });
+    const region = screen.getByRole("region", { name: "访问账户" });
     expect(within(region).getByText("YNSYLP005")).toBeInTheDocument();
     expect(within(region).queryByRole("textbox", { name: "YNSYLP005 账户" })).not.toBeInTheDocument();
 
-    await user.type(within(region).getByRole("textbox", { name: "新增访问账户" }), "READONLY001");
-    await user.selectOptions(within(region).getByLabelText("新增账户权限"), "read_export_only");
-    await user.click(within(region).getByRole("button", { name: "新增账户" }));
-    await user.click(within(region).getByRole("button", { name: "保存访问账户" }));
+    await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
+    await user.click(await within(region).findByRole("option", { name: "新增账户 READONLY001" }));
+    await user.click(within(region).getByRole("checkbox", { name: "关联台" }));
+    await user.click(within(region).getByRole("button", { name: "保存访问权限" }));
     expect(await within(region).findByText("已保存访问账户。")).toBeInTheDocument();
 
     const accessSave = fetchMock.mock.calls.find(([input, init]) =>
@@ -375,14 +374,14 @@ describe("Settings page", () => {
     );
     expect(JSON.parse(String(accessSave?.[1]?.body ?? "{}"))).toEqual({
       expected_version: 1,
-      accounts: [{ username: "READONLY001", access_tier: "read_export_only" }],
+      accounts: [{ username: "READONLY001", page_keys: ["reconciliation-workbench"] }],
     });
   });
 
   test("keeps the access-account draft when CAS reports a conflict", async () => {
     const user = userEvent.setup();
     const baseFetch = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
     });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -403,20 +402,21 @@ describe("Settings page", () => {
 
     const tree = await screen.findByRole("tree", { name: "设置分类" });
     await user.click(within(tree).getByRole("treeitem", { name: /访问账户/ }));
-    const region = screen.getByRole("region", { name: "访问账户管理" });
-    await user.type(within(region).getByRole("textbox", { name: "新增访问账户" }), "CONFLICT001");
-    await user.click(within(region).getByRole("button", { name: "新增账户" }));
-    await user.click(within(region).getByRole("button", { name: "保存访问账户" }));
+    const region = screen.getByRole("region", { name: "访问账户" });
+    await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "CONFLICT001");
+    await user.click(await within(region).findByRole("option", { name: "新增账户 CONFLICT001" }));
+    await user.click(within(region).getByRole("checkbox", { name: "关联台" }));
+    await user.click(within(region).getByRole("button", { name: "保存访问权限" }));
 
     expect(await within(region).findByText("访问账户已被其他管理员更新，请保留当前编辑并刷新后重试。")).toBeInTheDocument();
     expect(within(region).queryByText(/当前版本 7/)).not.toBeInTheDocument();
-    expect(within(region).getByRole("textbox", { name: "CONFLICT001 账户" })).toHaveValue("CONFLICT001");
+    expect(within(region).getAllByText("CONFLICT001").length).toBeGreaterThan(0);
   });
 
   test("keeps data reset behind impact confirmation, OA password review, and job progress", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       dataResetJobPollsBeforeComplete: 1,
     });
@@ -487,7 +487,7 @@ describe("Settings page", () => {
   test("saves OA attachment invoice promotion mode from OA retention settings", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
     });
     renderAppAt("/settings");

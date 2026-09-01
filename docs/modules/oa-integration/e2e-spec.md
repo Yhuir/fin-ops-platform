@@ -6,7 +6,7 @@ OA 集成的 Spec-first 目标是证明真实 OA 登录、权限、Mongo 投影�
 
 | Spec ID | 用户可观察合同 | 必须证明 |
 | --- | --- | --- |
-| `OA-E2E-001` | OA iframe 或同域入口打开后，`/api/session/me` 能返回正确用户、access tier 和权限。 | 真实 OA token/session、app 内权限二次校验、expired/forbidden gate。 |
+| `OA-E2E-001` | OA iframe 或同域入口打开后，`/api/session/me` 能返回正确用户、页面集合和 005 管理标记。 | 真实 OA token/session、app 内页面权限二次校验、expired/forbidden gate。 |
 | `OA-E2E-002` | OA Mongo 同步/投影失败时，页面不能把旧 OA projection 伪装 fresh。 | Mongo read status、worker projection、App Status/read model freshness 一致。 |
 | `OA-E2E-003` | OA 待付款页面 rows/filter/detail 在 fresh/non-fresh/权限状态下表现正确。 | OA pending page Browser + API/read model tests。 |
 | `OA-E2E-004` | 进项发票 OA 反提使用目标申请人创建草稿，preview hash/version/idempotency/失败恢复正确。 | 目标申请人凭据、OA login token、draft create、submitted history。 |

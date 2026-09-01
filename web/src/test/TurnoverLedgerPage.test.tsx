@@ -30,10 +30,9 @@ const fullSession: SessionPayload = {
   },
   roles: ["fin_ops_user"],
   permissions: ["finops:app:view"],
-  accessTier: "full_access",
   canAccessApp: true,
-  canMutateData: true,
   canAdminAccess: false,
+  allowedPageKeys: ["turnover-ledger"],
 };
 
 function renderTurnoverLedgerPage(session: SessionPayload = fullSession) {

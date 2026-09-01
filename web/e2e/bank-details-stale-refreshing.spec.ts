@@ -4,7 +4,7 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 test.describe("bank details direct canonical query browser behavior", () => {
   test("loads rows once without legacy freshness polling", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/bank-details");
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
@@ -21,7 +21,7 @@ test.describe("bank details direct canonical query browser behavior", () => {
   test("treats a direct empty transaction response as the real empty state", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       bankDetailsTransactionsEmpty: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-details");
@@ -31,7 +31,7 @@ test.describe("bank details direct canonical query browser behavior", () => {
   });
 
   test("recovers transaction rows after a transient network failure and user retry", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/bank-details");
     await expect(page.getByTestId("bank-details-page")).toBeVisible();

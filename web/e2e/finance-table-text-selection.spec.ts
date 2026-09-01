@@ -28,7 +28,7 @@ test.beforeEach(async ({ context }) => {
 });
 
 test("待找发票业务文本可用鼠标选择并复制", async ({ page }) => {
-  const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
   await page.goto("/pending-invoices");
   const grid = page.getByRole("grid", { name: "待找发票四区表" });
   await expect(grid).toBeVisible();
@@ -43,7 +43,7 @@ test("待找发票业务文本可用鼠标选择并复制", async ({ page }) => 
 });
 
 test("进项发票业务文本可用鼠标选择并复制", async ({ page }) => {
-  const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
   await page.goto("/input-invoice-usage");
   const grid = page.getByRole("grid", { name: "进项发票使用情况表" });
   await expect(grid).toBeVisible();
@@ -62,7 +62,7 @@ test("进项发票业务文本可用鼠标选择并复制", async ({ page }) => 
 test("销项发票业务文本可用鼠标选择并复制", async ({ page }) => {
   const api = await installDeterministicApiMocks(page, {
     outputInvoiceCollectionListInteractions: true,
-    sessionMode: "full_access",
+    sessionMode: "user",
   });
   await page.goto("/output-invoice-collections");
   const grid = page.getByRole("grid", { name: "销项发票收款情况表" });
@@ -79,7 +79,7 @@ test("销项发票业务文本可用鼠标选择并复制", async ({ page }) => 
 });
 
 test("OA 待付款业务文本可用鼠标选择并复制", async ({ page }) => {
-  const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
   await page.goto("/oa-pending-payments");
   const grid = page.getByRole("grid", { name: "OA待付款核对表格" });
   await expectSelectableGrid(grid);
@@ -115,7 +115,7 @@ test("成本统计项目文字可选择且拖选不会切换项目", async ({ pa
       },
     }));
   });
-  const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+  const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
   await page.goto("/cost-statistics");
   const target = page.locator(".cost-explorer-item-main strong", { hasText: "云南溯源科技" }).first();
   await expect(target).toBeVisible();

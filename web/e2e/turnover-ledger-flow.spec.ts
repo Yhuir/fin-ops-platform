@@ -72,7 +72,7 @@ test.describe("turnover ledger browser flow", () => {
   test("reaches all turnover groups after the first 100", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {
-      sessionMode: "read_export_only",
+      sessionMode: "user",
       turnoverLedgerTotal: 121,
     });
 
@@ -103,7 +103,7 @@ test.describe("turnover ledger browser flow", () => {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],
     });
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       turnoverLedgerFailuresBeforeSuccess: 2,
     });
     const recordLatency = createTurnoverLatencyRecorder(page, testInfo);
@@ -155,7 +155,7 @@ test.describe("turnover ledger browser flow", () => {
   test("saves turnover tag selection and reloads the ledger through page access", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createTurnoverLatencyRecorder(page, testInfo);
 
@@ -220,7 +220,7 @@ test.describe("turnover ledger browser flow", () => {
   test("saves relation extra details and reloads only the visible turnover ledger", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createTurnoverLatencyRecorder(page, testInfo);
 
@@ -284,7 +284,7 @@ test.describe("turnover ledger browser flow", () => {
 
   test("keeps B active when delayed A requests finish and saves only B", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
     const putRequests: Array<{ path: string; body: Record<string, unknown> }> = [];
     let delayedExpenseRequestsFinished = 0;
 
@@ -385,7 +385,7 @@ test.describe("turnover ledger browser flow", () => {
   test("confirms and withdraws a manual turnover closure through page-access convergence", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       turnoverCostFanout: true,
     });
     const recordLatency = createTurnoverLatencyRecorder(page, testInfo);

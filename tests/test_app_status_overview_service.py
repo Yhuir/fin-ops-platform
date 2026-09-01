@@ -12,7 +12,6 @@ from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringReposi
 class FakeSession:
     allowed: bool = True
     can_access_app: bool = True
-    can_mutate_data: bool = True
 
 
 def healthy_dependencies() -> dict[str, dict[str, object]]:

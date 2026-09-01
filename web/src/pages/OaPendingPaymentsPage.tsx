@@ -70,7 +70,7 @@ function normalizeSummary(summary: OaPendingPaymentSummary | undefined, fallback
 }
 
 export default function OaPendingPaymentsPage() {
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const { active, activationGeneration } = useOptionalPageActivation("oa-pending-payments");
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
@@ -249,7 +249,7 @@ export default function OaPendingPaymentsPage() {
           aria-label="关联支出流水"
           onClick={() => setBankLinkDrawerOpen(true)}
           className="oa-pending-payments-button oa-pending-payments-button--primary"
-          disabled={!canMutateData || selectedOaRowIds.size === 0}
+          disabled={!canOperateData || selectedOaRowIds.size === 0}
           type="button"
         >
           <PanelRightOpen aria-hidden="true" size={16} />
@@ -276,7 +276,7 @@ export default function OaPendingPaymentsPage() {
         导出 OA
       </button>
     </div>
-  ), [canMutateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
+  ), [canOperateData, loadRows, loading, query.viewMode, refreshing, selectedOaRowIds.size]);
   const visibleError = error ?? actionError;
   const isEmpty = !loading && !refreshing && !visibleError && rows.length === 0;
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
@@ -363,9 +363,9 @@ export default function OaPendingPaymentsPage() {
               </div>
             ) : (
               <>
-                {!canMutateData ? (
+                {!canOperateData ? (
                   <StatePanel compact tone="warning">
-                    当前账号仅支持查看和导出，不能关联支出流水。
+                    当前页面暂不可关联支出流水。
                   </StatePanel>
                 ) : null}
                 {isEmpty ? <StatePanel tone="empty" compact>当前条件下暂无记录。</StatePanel> : null}
@@ -388,7 +388,7 @@ export default function OaPendingPaymentsPage() {
                   onPageSizeChange={(pageSize) => setQuery((current) => ({ ...current, page: 1, pageSize }))}
                   onOpenDetail={setDetailTarget}
                   selectedOaRowIds={selectedOaRowIds}
-                  onToggleOaSelection={canMutateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
+                  onToggleOaSelection={canOperateData && query.viewMode === "in_progress" ? handleToggleOaSelection : undefined}
                   emptyStateMessage={
                     error
                       ? "OA 待付款核对加载失败，请点击刷新重试。"
@@ -417,7 +417,7 @@ export default function OaPendingPaymentsPage() {
         onClose={() => setRulesOpen(false)}
       />
       <OaBankLinkDrawer
-        open={canMutateData && bankLinkDrawerOpen}
+        open={canOperateData && bankLinkDrawerOpen}
         selectedOaRowIds={selectedOaRowIdList}
         onLinked={handleBankLinkSuccess}
         onError={setError}

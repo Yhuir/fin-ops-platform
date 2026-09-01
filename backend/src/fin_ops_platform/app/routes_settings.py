@@ -127,6 +127,8 @@ class SettingsApiRoutes:
             return self.update_settings(body, headers)
         if method == "GET" and route_path == "/api/workbench/settings/access-control":
             return self.access_control(headers)
+        if method == "GET" and route_path == "/api/workbench/settings/access-control/users":
+            return self.access_control_users(query, headers)
         if method == "PUT" and route_path == "/api/workbench/settings/access-control":
             return self.update_access_control(body, headers, request_id=request_id or uuid4().hex)
         if route_path.startswith("/api/workbench/settings/oa-draft-prefill/"):
@@ -193,11 +195,12 @@ class SettingsApiRoutes:
 
         forbidden_acl_keys = {
             "access_control",
-            "allowed_usernames",
-            "readonly_export_usernames",
-            "admin_usernames",
-            "full_access_usernames",
+            "page_access_accounts",
             "access_control_version",
+            "admin_usernames",
+            "allowed_usernames",
+            "full_access_usernames",
+            "readonly_export_usernames",
         }
         if forbidden_acl_keys.intersection(payload):
             return self._json_response(
@@ -293,10 +296,39 @@ class SettingsApiRoutes:
         _session, auth_error = self._resolve_admin_session(headers)
         if auth_error is not None:
             return auth_error
-        return self._json_response(
-            HTTPStatus.OK,
-            self._app_settings_service().get_access_control_payload(),
-        )
+        try:
+            payload = self._app_settings_service().get_access_control_payload()
+        except OARoleSyncError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {"error": "oa_user_directory_failed", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
+
+    def access_control_users(
+        self,
+        query: dict[str, list[str]],
+        headers: dict[str, str] | None,
+    ) -> Any:
+        _session, auth_error = self._resolve_admin_session(headers)
+        if auth_error is not None:
+            return auth_error
+        search_query = str(query.get("q", [""])[0] or "").strip()
+        try:
+            limit = min(max(int(query.get("limit", ["20"])[0]), 1), 50)
+        except (TypeError, ValueError):
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_oa_user_search_limit", "message": "limit must be an integer from 1 to 50."},
+            )
+        try:
+            payload = self._app_settings_service().search_access_control_users(search_query, limit=limit)
+        except OARoleSyncError as exc:
+            return self._json_response(
+                HTTPStatus.BAD_GATEWAY,
+                {"error": "oa_user_directory_failed", "message": str(exc)},
+            )
+        return self._json_response(HTTPStatus.OK, payload)
 
     def oa_draft_prefill(self, family_slug: str, headers: dict[str, str] | None) -> Any:
         session, auth_error = self._resolve_read_session(headers)
@@ -967,11 +999,6 @@ class SettingsApiRoutes:
         session, auth_error = self._resolve_read_session(headers)
         if auth_error is not None:
             return None, auth_error
-        if session is not None and not session.can_mutate_data:
-            return None, self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": denied_message},
-            )
         return session, None
 
     def _oa_applicant_credential_error_response(self, exc: OaApplicantCredentialError) -> Any:

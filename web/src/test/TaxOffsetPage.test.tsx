@@ -77,7 +77,7 @@ function operationBarrierRequests(fetchMock: ReturnType<typeof installMockApiFet
 describe("Tax offset workbench", () => {
   test("does not expose a page Audit control to admins", async () => {
     window.history.pushState({}, "", "/tax-offset");
-    installMockApiFetch({ sessionAccessTier: "admin" });
+    installMockApiFetch({ sessionRole: "admin" });
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "税金抵扣计划与试算" })).toBeInTheDocument();
@@ -131,9 +131,8 @@ describe("Tax offset workbench", () => {
             roles: ["finance"],
             permissions: ["finops:app:view"],
             allowed: true,
-            access_tier: "full_access",
             can_access_app: true,
-            can_mutate_data: true,
+            allowed_page_keys: ["tax-offset"],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -262,7 +261,7 @@ describe("Tax offset workbench", () => {
           permissions: ["finops:app:view"],
           allowed: true,
           can_access_app: true,
-          can_mutate_data: true,
+          allowed_page_keys: ["tax-offset", "settings"],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url === "/api/settings") {
@@ -373,17 +372,17 @@ describe("Tax offset workbench", () => {
     expect(await screen.findByText("当前月份没有可用于计划与试算的发票数据。")).toBeInTheDocument();
   });
 
-  test("read-only export users can view tax offset data but cannot import certified invoices", async () => {
+  test("a user assigned to tax offset can use its normal actions", async () => {
     window.history.pushState({}, "", "/tax-offset");
     installMockApiFetch({
-      sessionAccessTier: "read_export_only",
+      sessionRole: "user",
       sessionUsername: "READONLY001",
     });
     render(<App />);
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "已认证发票导入" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "保存计划" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "已认证发票导入" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存计划" })).toBeInTheDocument();
   });
 
   test("previews and confirms certified invoice import inside the page modal, then refreshes plan and summary", async () => {
@@ -705,9 +704,8 @@ describe("Tax offset workbench", () => {
             roles: ["finance"],
             permissions: ["finops:app:view"],
             allowed: true,
-            access_tier: "full_access",
             can_access_app: true,
-            can_mutate_data: true,
+            allowed_page_keys: ["tax-offset"],
           }),
           {
             status: 200,
@@ -796,9 +794,8 @@ describe("Tax offset workbench", () => {
             roles: ["finance"],
             permissions: ["finops:app:view"],
             allowed: true,
-            access_tier: "full_access",
             can_access_app: true,
-            can_mutate_data: true,
+            allowed_page_keys: ["tax-offset"],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -1086,6 +1083,9 @@ describe("Tax offset workbench", () => {
             roles: ["finance"],
             permissions: ["finops:app:view"],
             allowed: true,
+            can_access_app: true,
+            can_admin_access: false,
+            allowed_page_keys: ["tax-offset"],
           }),
           {
             status: 200,
@@ -1191,7 +1191,7 @@ describe("Tax offset workbench", () => {
           permissions: ["finops:app:view"],
           allowed: true,
           can_access_app: true,
-          can_mutate_data: true,
+          allowed_page_keys: ["tax-offset"],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url === "/api/tax-offset?month=2026-03") {
@@ -1247,7 +1247,7 @@ describe("Tax offset workbench", () => {
           permissions: ["finops:app:view"],
           allowed: true,
           can_access_app: true,
-          can_mutate_data: true,
+          allowed_page_keys: ["tax-offset"],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url === "/api/tax-offset?month=2026-03") {

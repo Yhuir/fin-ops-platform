@@ -6,7 +6,7 @@ import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation and tax-offset boundary", () => {
   test("does not invent or remove tax-offset invoice facts after a relation change", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/tax-offset");
     await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();

@@ -290,7 +290,7 @@ test.describe("bank flow rule batches browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       bankFlowRuleBatchFailuresBeforeSuccess: 2,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-flow-rule-batches");
@@ -325,7 +325,7 @@ test.describe("bank flow rule batches browser flow", () => {
   test("loads canonical rows without background polling", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-flow-rule-batches");
@@ -375,7 +375,7 @@ test.describe("bank flow rule batches browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     await installDeterministicApiMocks(page, {
       bankFlowRuleBatchScenario: "ordinaryDraftMatrix",
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-flow-rule-batches");
@@ -409,7 +409,7 @@ test.describe("bank flow rule batches browser flow", () => {
   test("saves tag rules and reloads the canonical list once", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankFlowRuleBatchLatencyRecorder(page, testInfo);
 
@@ -486,7 +486,7 @@ test.describe("bank flow rule batches browser flow", () => {
   test("syncs the rule drawer labels after bank detail tags change", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-details");
@@ -520,7 +520,7 @@ test.describe("bank flow rule batches browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       bankFlowRuleBatchScenario: "internalTransferPairs",
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankFlowRuleBatchLatencyRecorder(page, testInfo);
 
@@ -578,7 +578,7 @@ test.describe("bank flow rule batches browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       bankFlowRuleCostFanout: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchBankFlowRuleBatchScenario: true,
       bankFlowRuleWorkbenchConvergence: true,
     });
@@ -730,7 +730,7 @@ test.describe("bank flow rule batches browser flow", () => {
   test("renders bank flow rule batches in workbench according to OA and invoice requirements", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchBankFlowRuleBatchScenario: true,
     });
 
@@ -812,7 +812,7 @@ test.describe("workbench direct commit visibility SLO", () => {
     let status = "draft";
     let submitAttempted = false;
     let recoveryCalls = 0;
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.route("**/api/bank-flow-rule-batches/ambiguous-submit-batch**", async (route) => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
@@ -883,7 +883,7 @@ test.describe("workbench direct commit visibility SLO", () => {
     if (mode === "isolated") {
       await installDeterministicApiMocks(page, {
         bankFlowRuleWorkbenchConvergence: true,
-        sessionMode: "full_access",
+        sessionMode: "user",
         workbenchBankFlowRuleBatchScenario: true,
       });
     }

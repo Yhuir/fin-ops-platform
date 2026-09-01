@@ -17,7 +17,7 @@ export type WorkbenchInlineAction =
 type RowActionsProps = {
   recordType: WorkbenchRecordType;
   showWorkflowActions: boolean;
-  canMutateData: boolean;
+  canOperateData: boolean;
   availableActions: string[];
   showDetailAction?: boolean;
   onOpenDetail: (event?: MouseEvent<HTMLButtonElement>) => void;
@@ -28,7 +28,7 @@ type RowActionsProps = {
 export default function RowActions({
   recordType,
   showWorkflowActions,
-  canMutateData,
+  canOperateData,
   availableActions = [],
   showDetailAction = true,
   onOpenDetail,
@@ -95,7 +95,7 @@ export default function RowActions({
   if (compact) {
     const actions: Array<{ id: WorkbenchInlineAction | "detail"; label: string; warning?: boolean }> = [];
     if (recordType === "bank" && showDetailAction) actions.push({ id: "detail", label: "详情" });
-    if (recordType === "bank" && canMutateData && showWorkflowActions) {
+    if (recordType === "bank" && canOperateData && showWorkflowActions) {
       actions.push({ id: "relation-status", label: "关联情况" });
       actions.push({ id: "unlink", label: "取消关联" });
       if (canConfirmCashPassThrough) actions.push({ id: "confirm-cash-pass-through", label: "确认为过账" });
@@ -150,7 +150,7 @@ export default function RowActions({
         </button>
       ) : null}
 
-      {recordType === "bank" && canMutateData && showWorkflowActions ? (
+      {recordType === "bank" && canOperateData && showWorkflowActions ? (
         <div ref={menuWrapRef} className="row-menu-wrap">
           <button
             aria-expanded={menuOpen}

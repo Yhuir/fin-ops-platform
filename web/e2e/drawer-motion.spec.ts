@@ -138,7 +138,7 @@ test.describe("right drawer motion", () => {
   test("travels without layout shift or close-triggered non-periodic business I/O", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchLargeDataset: true,
     });
     await page.goto("/");
@@ -187,7 +187,7 @@ test.describe("right drawer motion", () => {
 
   test("applies the same viewport motion to the migrated bank-flow modal", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/bank-flow-rule-batches");
     const opener = page.getByRole("button", { name: "流水规则标签管理" });
     await expect(opener).toBeEnabled();
@@ -212,7 +212,7 @@ test.describe("right drawer motion", () => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentBankLinkFlow: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     let releaseCandidates!: () => void;
     const candidatesGate = new Promise<void>((resolve) => {
@@ -257,7 +257,7 @@ test.describe("right drawer motion", () => {
 
   test("applies viewport motion and safe exit state to the production persistent drawer", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/input-invoice-usage");
     const opener = page.getByRole("button", { name: "以发票反提 OA" });
     await expect(opener).toBeEnabled();
@@ -283,7 +283,7 @@ test.describe("right drawer motion", () => {
   });
 
   test("keeps the tax results rail mounted and inert while collapsed", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/tax-offset");
     const rail = page.getByRole("complementary", { name: "已认证结果" });
     const body = rail.locator("#tax-certified-results-body");
@@ -310,7 +310,7 @@ test.describe("right drawer motion", () => {
   test("disables spatial transitions for reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchLargeDataset: true,
     });
     await page.goto("/");

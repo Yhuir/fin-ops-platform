@@ -9,7 +9,7 @@ test.describe("workbench relations OA pending payment browser fan-out", () => {
   test("refreshes OA pending payment rows after a workbench relation is confirmed", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentRelationFanout: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createOperationLatencyRecorder(page, testInfo, {
       route: "/oa-pending-payments",

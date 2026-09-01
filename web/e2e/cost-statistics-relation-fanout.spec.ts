@@ -12,7 +12,7 @@ test.describe("cost statistics relation browser fan-out", () => {
   test("excludes candidate rows and includes a confirmed OA-bank relation without an invoice", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       costStatisticsRelationFanout: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/cost-statistics");

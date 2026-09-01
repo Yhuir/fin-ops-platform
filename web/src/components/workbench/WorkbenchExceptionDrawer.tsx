@@ -38,7 +38,7 @@ type WorkbenchExceptionDrawerProps = {
   error: string | null;
   total: number;
   hasMore: boolean;
-  canMutateData: boolean;
+  canOperateData: boolean;
   onBucketChange: (bucket: "unpaired" | "paired") => void;
   onViewChange: (view: WorkbenchExceptionView) => void;
   onExceptionCodeChange: (code: WorkbenchAmountAnomalyCode) => void;
@@ -104,7 +104,7 @@ export default function WorkbenchExceptionDrawer({
   error,
   total,
   hasMore,
-  canMutateData,
+  canOperateData,
   onBucketChange,
   onViewChange,
   onExceptionCodeChange,
@@ -373,8 +373,8 @@ export default function WorkbenchExceptionDrawer({
                       {detailGroup ? (
                         <div className="workbench-anomaly-drawer__detail-grid">
                           <RelationGroupGrid
-                            allowInvoiceEntryInReadOnly={canMutateData}
-                            canMutateData={false}
+                            allowInvoiceEntryInReadOnly={canOperateData}
+                            canOperateData={false}
                             getRowState={() => "idle"}
                             groups={[detailGroup]}
                             hidePaneHeaders
@@ -401,7 +401,7 @@ export default function WorkbenchExceptionDrawer({
                       ) : null}
                       <ExceptionReviewPanel
                         bucket={bucket}
-                        canMutateData={canMutateData}
+                        canOperateData={canOperateData}
                         group={group}
                         pending={pendingGroupId === group.id}
                         onAction={(action) => runGroupAction(group.id, action)}
@@ -433,7 +433,7 @@ export default function WorkbenchExceptionDrawer({
 }
 
 function ExceptionReviewPanel({
-  canMutateData,
+  canOperateData,
   bucket,
   group,
   pending,
@@ -441,7 +441,7 @@ function ExceptionReviewPanel({
   onReviewAnomaly,
 }: Pick<
   WorkbenchExceptionDrawerProps,
-  | "canMutateData"
+  | "canOperateData"
   | "bucket"
   | "onReviewAnomaly"
 > & {
@@ -453,7 +453,7 @@ function ExceptionReviewPanel({
     onReviewAnomaly(group, decision)
   );
 
-  if (!canMutateData || !group.workbenchAnomaly) {
+  if (!canOperateData || !group.workbenchAnomaly) {
     return null;
   }
 

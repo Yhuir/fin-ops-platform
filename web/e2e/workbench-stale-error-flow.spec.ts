@@ -25,7 +25,7 @@ async function openConfirmRelationPreview(page: Page) {
 test.describe("workbench direct error browser flow", () => {
   test("defers one OA canonical reread until a multi-row selection is cleared", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/");
@@ -58,7 +58,7 @@ test.describe("workbench direct error browser flow", () => {
 
   test("keeps paired bank and invoice rows selected across OA sync during deferred search rendering", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchInitialRelationConfirmed: true,
     });
 
@@ -98,7 +98,7 @@ test.describe("workbench direct error browser flow", () => {
 
   test("keeps a relation preview open across OA sync and rereads once all interactions close", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/");
@@ -132,7 +132,7 @@ test.describe("workbench direct error browser flow", () => {
 
   test("keeps the exception drawer open across OA sync and rereads after it closes", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchAmountMismatchScenario: true,
       workbenchInitialRelationConfirmed: true,
     });
@@ -168,7 +168,7 @@ test.describe("workbench direct error browser flow", () => {
 
   test("blocks Workbench writes while OA sync is dirty", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       oaSyncMode: "dirty",
     });
 
@@ -186,7 +186,7 @@ test.describe("workbench direct error browser flow", () => {
 
   test("blocks Workbench writes while OA sync is refreshing", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       oaSyncMode: "refreshing",
     });
 
@@ -205,7 +205,7 @@ test.describe("workbench direct error browser flow", () => {
 
   test("keeps rows in place and allows retry when the mutation itself fails", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchConfirmSubmitError: true,
     });
 
@@ -224,7 +224,7 @@ test.describe("workbench direct error browser flow", () => {
 
   test("does not retry a committed mutation when the single combined reread fails", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchCombinedRereadError: true,
     });
 

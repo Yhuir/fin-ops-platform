@@ -135,27 +135,31 @@ class StateStoreContractTests(unittest.TestCase):
     def test_settings_access_control_uses_casefold_comparison_and_preserves_canonical_spelling(self) -> None:
         normalized = settings_access_control_from_payload(
             {
-                "allowed_usernames": ["YNSYLP005", "Full.User", "Read.User"],
-                "full_access_usernames": ["Full.User"],
-                "readonly_export_usernames": ["Read.User"],
-                "admin_usernames": ["YNSYLP005"],
+                "page_access_accounts": [
+                    {"username": "Full.User", "page_keys": ["settings", "bank-details"]},
+                    {"username": "Read.User", "page_keys": ["tax-offset"]},
+                ],
             }
         )
 
-        self.assertEqual(normalized["full_access_usernames"], ["Full.User"])
-        self.assertEqual(normalized["readonly_export_usernames"], ["Read.User"])
-        self.assertEqual(normalized["allowed_usernames"], ["YNSYLP005", "Full.User", "Read.User"])
+        self.assertEqual(
+            normalized["page_access_accounts"],
+            [
+                {"username": "Full.User", "page_keys": ["bank-details", "settings"]},
+                {"username": "Read.User", "page_keys": ["tax-offset"]},
+            ],
+        )
 
     def test_settings_access_control_rejects_invalid_or_ambiguous_usernames(self) -> None:
         invalid_payloads = (
-            {"full_access_usernames": [""]},
-            {"full_access_usernames": ["FULL\x00USER"]},
-            {"full_access_usernames": ["Full.User", "full.user"]},
-            {
-                "full_access_usernames": ["Full.User"],
-                "readonly_export_usernames": ["full.user"],
-            },
-            {"full_access_usernames": ["ynsylp005"]},
+            {"page_access_accounts": [{"username": "", "page_keys": ["settings"]}]},
+            {"page_access_accounts": [{"username": "FULL\x00USER", "page_keys": ["settings"]}]},
+            {"page_access_accounts": [
+                {"username": "Full.User", "page_keys": ["settings"]},
+                {"username": "full.user", "page_keys": ["bank-details"]},
+            ]},
+            {"page_access_accounts": [{"username": "Full.User", "page_keys": []}]},
+            {"page_access_accounts": [{"username": "ynsylp005", "page_keys": ["settings"]}]},
         )
 
         for payload in invalid_payloads:
@@ -183,11 +187,11 @@ class StateStoreContractTests(unittest.TestCase):
         for name, store in self._with_stores():
             with self.subTest(store=name):
                 settings = store.load_app_settings()
-                self.assertEqual(settings["admin_usernames"], ["YNSYLP005"])
-                self.assertIn("YNSYLP005", settings["allowed_usernames"])
-                settings["admin_usernames"] = ["attacker"]
+                self.assertEqual(settings["page_access_accounts"], [])
+                self.assertEqual(settings["access_control_version"], 1)
+                settings["page_access_accounts"] = [{"username": "attacker", "page_keys": ["settings"]}]
                 store.save_app_settings(settings)
-                self.assertEqual(store.load_app_settings()["admin_usernames"], ["YNSYLP005"])
+                self.assertEqual(store.load_app_settings()["page_access_accounts"], [])
 
                 store.save({"workbench_pair_relations": {"pair_relations": {"case-1": {"case_id": "case-1"}}}})
                 self.assertEqual(store.load()["workbench_pair_relations"]["pair_relations"]["case-1"]["case_id"], "case-1")
@@ -206,16 +210,18 @@ class StateStoreContractTests(unittest.TestCase):
                 self.assertEqual(critical_section.locked_current["access_control_version"], 1)
                 committed = critical_section.commit(
                     {
-                        "allowed_usernames": ["YNSYLP005", "user-a"],
-                        "readonly_export_usernames": [],
-                        "admin_usernames": ["YNSYLP005"],
-                        "full_access_usernames": ["user-a"],
+                        "page_access_accounts": [
+                            {"username": "user-a", "page_keys": ["bank-details", "settings"]}
+                        ],
                     },
                     {"mutation_id": "mutation-1", "actor_id": "YNSYLP005"},
                 )
 
             self.assertEqual(committed["access_control_version"], 2)
-            self.assertEqual(store.load_app_settings()["full_access_usernames"], ["user-a"])
+            self.assertEqual(
+                store.load_app_settings()["page_access_accounts"],
+                [{"username": "user-a", "page_keys": ["bank-details", "settings"]}],
+            )
             recovery = store.recover_settings_acl_commit("mutation-1")
             self.assertTrue(recovery["audit_present"])
             self.assertEqual(recovery["access_control"], committed)

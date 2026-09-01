@@ -4,7 +4,7 @@ import { Link as RouterLink } from "react-router-dom";
 import { importWorkflowPath, type ImportWorkflowMode } from "../../features/imports/importRoutes";
 
 type WorkbenchHeaderControlsProps = {
-  canMutateData: boolean;
+  canOperateData: boolean;
   className?: string;
   onOpenImport: (mode: ImportWorkflowMode) => void;
   onOpenSettings: () => void;
@@ -17,7 +17,7 @@ const IMPORT_ACTIONS: Array<{ label: string; mode: ImportWorkflowMode }> = [
 ];
 
 export default function WorkbenchHeaderControls({
-  canMutateData,
+  canOperateData,
   className,
   onOpenImport,
   onOpenSettings,
@@ -41,7 +41,7 @@ export default function WorkbenchHeaderControls({
       <button className="workbench-settings-entry" type="button" onClick={onOpenSettings}>
         设置
       </button>
-      {canMutateData ? (
+      {canOperateData ? (
         <div
           ref={importMenuRef}
           className={`workbench-import-entry${importMenuOpen ? " open" : ""}`}

@@ -424,15 +424,15 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertTrue(all(response.status_code == HTTPStatus.UNAUTHORIZED for response in responses))
         self.assertTrue(all(json.loads(response.body)["error"] == "invalid_oa_session" for response in responses))
 
-    def test_module_owned_write_auth_rejects_readonly_user(self) -> None:
+    def test_write_route_rejects_account_without_oa_pending_payments_page(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, read_export_only=["OA_READONLY"])
+            configure_access_control(app, page_access={"OA_LIMITED": ["bank-details"]})
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="oa-readonly-id",
-                username="OA_READONLY",
-                nickname="OA只读用户",
-                display_name="OA只读用户",
+                username="OA_LIMITED",
+                nickname="OA受限用户",
+                display_name="OA受限用户",
                 roles=[],
                 permissions=[],
             )
@@ -445,12 +445,12 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             )]
 
         self.assertTrue(all(response.status_code == HTTPStatus.FORBIDDEN for response in responses))
-        self.assertTrue(all(json.loads(response.body)["error"] == "permission_denied" for response in responses))
+        self.assertTrue(all(json.loads(response.body)["error"] == "page_access_denied" for response in responses))
 
     def test_export_route_allows_read_export_only_user(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, read_export_only=["OA_READONLY"])
+            configure_access_control(app, usernames=["OA_READONLY"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(  # noqa: SLF001
                 user_id="oa-readonly-id",
                 username="OA_READONLY",

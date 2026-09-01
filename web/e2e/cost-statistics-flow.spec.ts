@@ -40,7 +40,7 @@ test.beforeEach(async ({ page }) => {
 
 test.describe("cost statistics browser flow", () => {
   test("exposes three project-cost views and two bank-flow views", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
@@ -60,7 +60,7 @@ test.describe("cost statistics browser flow", () => {
   });
 
   test("shows signed raw flows by time and drills from tags to bank rows", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
     const timeResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "time");
@@ -92,7 +92,7 @@ test.describe("cost statistics browser flow", () => {
 
   test("keeps time pagination visible and scrolls only the current twenty rows", async ({ page }) => {
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       costStatisticsLargeDataset: true,
     });
 
@@ -147,7 +147,7 @@ test.describe("cost statistics browser flow", () => {
   });
 
   test("drills from project through expense type to OA cost detail", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();
@@ -177,7 +177,7 @@ test.describe("cost statistics browser flow", () => {
   });
 
   test("drills from bank account through project to the same cost population", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
     const accountListResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "bank_account");
@@ -206,7 +206,7 @@ test.describe("cost statistics browser flow", () => {
   });
 
   test("keeps expense-type analysis as an independent drill-down", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
     const expenseListResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "expense_type");
@@ -223,7 +223,7 @@ test.describe("cost statistics browser flow", () => {
   });
 
   test("previews bank-flow and bank-account exports", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
     await page.getByRole("button", { name: "导出中心" }).click();
@@ -261,7 +261,7 @@ test.describe("cost statistics browser flow", () => {
   });
 
   test("saves no-OA rules and refreshes the affected cost explorer", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
     await expect(page.getByRole("heading", { name: "按项目统计" })).toBeVisible();

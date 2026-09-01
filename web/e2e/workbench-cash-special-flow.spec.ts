@@ -48,7 +48,7 @@ function expectWorkbenchRowIds(body: Record<string, unknown>) {
 test.describe("workbench cash special browser flow", () => {
   test("handles cash pass-through, ticket purchase, and cancel special processing", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchInitialRelationConfirmed: true,
       workbenchCashSpecialActions: true,
     });

@@ -22,7 +22,7 @@ function defaultTransactionsRequest(url: URL) {
 
 test.describe("bank details initial browser state", () => {
   test("loads the current-year all-account view with balances, default columns, and relation fields", async ({ page }) => {
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     const accountsRequest = page.waitForRequest((request) => (
       request.method() === "GET" && defaultAccountsRequest(new URL(request.url()))
@@ -74,7 +74,7 @@ test.describe("bank details initial browser state", () => {
   test("shows a true empty state only when the fresh transaction result is empty", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       bankDetailsTransactionsEmpty: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await page.goto("/bank-details");

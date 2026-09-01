@@ -129,36 +129,6 @@ function startStrictBrowserErrorCapture(
 }
 
 test.describe("tax offset browser flow", () => {
-  test("keeps read-export users on read-only tax offset controls without write API calls", async ({ page }, testInfo) => {
-    const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
-    const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
-
-    await recordLatency({
-      operationId: "tax-offset.open-page-read-export",
-      visibleLabel: "税金抵扣计划与试算",
-      actionType: "navigate",
-    }, async (mark) => {
-      const response = waitForTaxOffset(page);
-      await page.goto("/tax-offset");
-      expect((await mark("apiLatencyMs", response)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible());
-    });
-
-    await expect(page.getByRole("heading", { name: "税金抵扣计划与试算" })).toBeVisible();
-    await expect(statCard(page, "销项税额").getByText("41600.00")).toBeVisible();
-    await expect(page.getByRole("grid", { name: "销项票开票情况" })).toBeVisible();
-    await expect(page.getByRole("grid", { name: "进项票认证计划" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "已认证发票导入" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "保存计划" })).toHaveCount(0);
-
-    expect(api.count("POST /api/tax-offset/calculate")).toBe(0);
-    expect(api.count("POST /api/tax-offset/plans")).toBe(0);
-    expect(api.count("POST /api/tax-offset/certified-import/preview")).toBe(0);
-    expect(api.count("POST /api/tax-offset/certified-import/confirm")).toBe(0);
-    expect(browserErrors).toEqual([]);
-  });
-
   for (const scenario of [
     {
       sessionMode: "forbidden",
@@ -225,10 +195,10 @@ test.describe("tax offset browser flow", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "已认证发票导入" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(dialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(dialog.getByText("当前账号仅支持查看和导出，不能导入已认证发票。")).toHaveCount(0));
+      await mark("finalSettledLatencyMs", expect(dialog.getByText("当前页面暂不可导入已认证发票。")).toHaveCount(0));
     });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("当前账号仅支持查看和导出，不能导入已认证发票。")).toHaveCount(0);
+    await expect(dialog.getByText("当前页面暂不可导入已认证发票。")).toHaveCount(0);
 
     expect(api.count("POST /api/tax-offset/plans")).toBe(0);
     expect(api.count("POST /api/tax-offset/certified-import/preview")).toBe(0);
@@ -238,7 +208,7 @@ test.describe("tax offset browser flow", () => {
   test("keeps large tax tables searchable, sortable, filterable, and horizontally scrollable on narrow screens", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       taxOffsetLargeDataset: true,
     });
     const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
@@ -356,7 +326,7 @@ test.describe("tax offset browser flow", () => {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 409 \(Conflict\)/],
     });
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       taxOffsetPlanSaveConflict: true,
     });
     const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
@@ -410,7 +380,7 @@ test.describe("tax offset browser flow", () => {
 
   test("recalculates and saves a tax plan, then imports certified invoices in the page modal", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createTaxOffsetLatencyRecorder(page, testInfo);
 
     await recordLatency({

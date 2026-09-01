@@ -11,9 +11,8 @@ from tests.app_test_support import build_local_state_application as build_applic
 from fin_ops_platform.services.state_store import ApplicationStateStore
 
 
-def _session(*, can_mutate_data: bool = True) -> SimpleNamespace:
+def _session() -> SimpleNamespace:
     return SimpleNamespace(
-        can_mutate_data=can_mutate_data,
         identity=SimpleNamespace(username="TESTFULL001", user_id="1"),
     )
 
@@ -359,7 +358,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertNotIn("refresh_reason", payload)
         self.assertNotIn("read_model_status", payload)
 
-    def test_reapply_endpoint_requires_mutation_permission(self) -> None:
+    def test_reapply_endpoint_uses_page_authorization_without_legacy_write_tier(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
@@ -367,13 +366,13 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         with patch.object(
             app,
             "_resolve_bank_details_read_session",
-            return_value=(_session(can_mutate_data=False), None),
+            return_value=(_session(), None),
         ):
             response = app.handle_request("POST", "/api/bank-details/auto-tag-rules/reapply", "{}")
 
         payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("version", payload)
         self.assertEqual(queue.enqueued, [])
 
     def test_confirmation_endpoint_rejects_single_auto_match_candidate(self) -> None:
@@ -1498,15 +1497,15 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             [{"group_id": "requires_invoice", "label": "需要开票", "tag_code": "salary"}],
         )
 
-    def test_put_requires_save_permission(self) -> None:
+    def test_put_reaches_business_validation_without_legacy_write_tier(self) -> None:
         app = build_application()
 
-        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(can_mutate_data=False), None)):
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
             response = self._update_auto_tag_rules_response(app, "{}", {})
 
         payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(payload["error"], "permission_denied")
+        self.assertEqual(response.status_code, 400)
+        self.assertNotEqual(payload["error"], "permission_denied")
 
 
 if __name__ == "__main__":

@@ -209,7 +209,8 @@ class ImportApiTests(unittest.TestCase):
 
         for path in ("/imports/preview", "/imports/confirm"):
             response = app.handle_request("POST", path, json.dumps({}))
-            self.assertEqual(response.status_code, 404, path)
+            self.assertEqual(response.status_code, 403, path)
+            self.assertEqual(json.loads(response.body)["error"], "page_access_policy_missing")
 
 
 if __name__ == "__main__":

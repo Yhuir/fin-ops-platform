@@ -30,7 +30,7 @@ test.describe("bank details category confirmation browser flow", () => {
   test("confirms only the current candidate and refreshes the row as manually confirmed", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       bankDetailsClassificationMode: "needs_confirmation",
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
@@ -100,7 +100,7 @@ test.describe("bank details category confirmation browser flow", () => {
   test("assigns an unmatched row from active rules with third-level turnover semantics", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       bankDetailsClassificationMode: "unmatched",
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
@@ -178,7 +178,7 @@ test.describe("bank details category confirmation browser flow", () => {
 
   test("replaces an automatic label with a persistent internal-transfer assignment", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 

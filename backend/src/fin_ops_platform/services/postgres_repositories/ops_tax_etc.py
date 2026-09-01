@@ -25,7 +25,6 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_brid
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_app_health_alerts
 from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.state_store_protocol import (
-    PROTECTED_ADMIN_USERNAME,
     SETTINGS_ACCESS_CONTROL_KEYS,
     SettingsAccessControlCommitOutcomeUnknown,
     SettingsAccessControlVersionConflict,
@@ -419,8 +418,6 @@ class PostgresOpsTaxEtcRepository:
         current_acl = settings_access_control_from_payload(current)
         candidate = settings_access_control_from_payload(next_access_control)
         candidate["access_control_version"] = current_acl["access_control_version"] + 1
-        if candidate["admin_usernames"] != [PROTECTED_ADMIN_USERNAME]:
-            raise ValueError("The protected administrator is immutable.")
         persisted = {**current, **candidate}
         audit_payload = {
             **serialize_value(durable_audit),

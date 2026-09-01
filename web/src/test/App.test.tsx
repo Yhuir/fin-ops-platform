@@ -36,22 +36,21 @@ function stubShellCompactMode(matches: boolean) {
 describe("Finance operations shell", () => {
   test.each([
     ["admin", true, true],
-    ["full_access", true, false],
-    ["read_export_only", false, false],
+    ["user", true, false],
     ["denied", false, false],
   ] as const)(
     "keeps Settings ACL controls on the canonical %s tier",
-    async (accessTier, canSaveSettings, canAdminAccess) => {
+    async (sessionRole, canSaveSettings, canAdminAccess) => {
       window.history.pushState({}, "", "/settings");
       installMockApiFetch({
-        sessionMode: accessTier === "denied" ? "forbidden" : "authorized",
-        sessionAccessTier: accessTier,
-        sessionUsername: accessTier === "admin" ? "YNSYLP005" : accessTier === "denied" ? "YNSYLP006" : "E2EUSER001",
+        sessionMode: sessionRole === "denied" ? "forbidden" : "authorized",
+        sessionRole: sessionRole,
+        sessionUsername: sessionRole === "admin" ? "YNSYLP005" : sessionRole === "denied" ? "YNSYLP006" : "E2EUSER001",
       });
 
       render(<App />);
 
-      if (accessTier === "denied") {
+      if (sessionRole === "denied") {
         expect(await screen.findByRole("heading", { name: "无权访问财务运营平台" })).toBeInTheDocument();
         expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
         return;

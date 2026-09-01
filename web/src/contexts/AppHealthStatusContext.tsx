@@ -271,7 +271,7 @@ function detailFromPayload(
 
 export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
   const session = useSession();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const { jobs, connectionFailed } = useBackgroundJobProgress();
   const { progress } = useImportProgress();
   const { workbenchStatus } = useAppChrome();
@@ -423,7 +423,7 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
           .filter((domain) => domain.level !== "ok")
           .map((domain) => domain.reason)
           .slice(0, 3),
-        blocksMutations: canMutateData ? appStatus.overall.blocksMutations : true,
+        blocksMutations: canOperateData ? appStatus.overall.blocksMutations : true,
         sources: {
           session: sessionSource,
           backgroundJobs,
@@ -458,10 +458,10 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
     };
     const detailReason = detailFromPayload(apiPayload, fallbackOaSync, workbenchStatus?.reason, jobs);
     const resolved = resolveAppHealthStatus(sources, detailReason);
-    return canMutateData ? resolved : { ...resolved, blocksMutations: true };
+    return canOperateData ? resolved : { ...resolved, blocksMutations: true };
   }, [
     apiPayload,
-    canMutateData,
+    canOperateData,
     connectionFailed,
     failureCount,
     fallbackOaSync,
@@ -491,9 +491,9 @@ export function useAppHealthStatus() {
 }
 
 export function useCanMutateWithHealth() {
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const healthStatus = useAppHealthStatus();
-  return canMutateData && !healthStatus.blocksMutations;
+  return canOperateData && !healthStatus.blocksMutations;
 }
 
 export function useAppStatusOverview() {

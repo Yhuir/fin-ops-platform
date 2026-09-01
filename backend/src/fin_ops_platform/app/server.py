@@ -37,7 +37,12 @@ from fin_ops_platform.app.auth import (
     tenant_id_for_session,
 )
 from fin_ops_platform.app.http_upload import MultipartBodyError, parse_multipart_body
-from fin_ops_platform.app.route_access_policy import requires_data_mutation
+from fin_ops_platform.app.route_access_policy import (
+    audit_page_key_for_route,
+    is_admin_only_route,
+    is_state_changing_request,
+    page_keys_for_route,
+)
 from fin_ops_platform.app.routes_bank_details import BankDetailsApiRoutes
 from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
 from fin_ops_platform.app.routes_batch_accounting import BatchAccountingApiRoutes
@@ -181,7 +186,6 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
     InputInvoiceUsageOaReverseInvalidTransitionError,
     InputInvoiceUsageOaReverseMissingClientError,
     InputInvoiceUsageOaReverseNotFoundError,
-    InputInvoiceUsageOaReversePermissionError,
     InputInvoiceUsageOaReverseService,
     InputInvoiceUsageOaReverseServiceError,
     InputInvoiceUsageOaReverseStalePreviewError,
@@ -512,6 +516,10 @@ _REQUEST_AUDIT_EVIDENCE: ContextVar[dict[str, Any] | None] = ContextVar(
     "request_audit_evidence",
     default=None,
 )
+_REQUEST_OA_SESSION: ContextVar[OARequestSession | None] = ContextVar(
+    "request_oa_session",
+    default=None,
+)
 
 
 def _truthy_env(name: str) -> bool:
@@ -588,11 +596,16 @@ class Application:
         return raw_value
 
     def _resolve_request_session(self, headers: dict[str, str] | None) -> OARequestSession:
-        return resolve_oa_request_session(
+        cached_session = _REQUEST_OA_SESSION.get()
+        if cached_session is not None:
+            return cached_session
+        session = resolve_oa_request_session(
             headers,
             identity_service=self._oa_identity_service,
             access_control_service=self._access_control_service,
         )
+        _REQUEST_OA_SESSION.set(session)
+        return session
 
     def _runtime_bootstrap_state(self) -> dict[str, object]:
         return {}
@@ -1484,7 +1497,7 @@ class Application:
     ) -> Response:
         request_started_at = monotonic()
         route_path = self._normalize_route_path(urlparse(path).path)
-        mutation_request = requires_data_mutation(method, route_path)
+        mutation_request = is_state_changing_request(method, route_path)
         request_audit_enabled = mutation_request and self._audit_service.is_durable
         effective_request_id = request_id or (uuid4().hex if request_audit_enabled else None)
         status_code = int(HTTPStatus.INTERNAL_SERVER_ERROR)
@@ -1493,6 +1506,7 @@ class Application:
         actor_token = _REQUEST_AUDIT_ACTOR.set(("", "", ""))
         request_id_token = _REQUEST_AUDIT_REQUEST_ID.set(effective_request_id)
         evidence_token = _REQUEST_AUDIT_EVIDENCE.set(None)
+        session_token = _REQUEST_OA_SESSION.set(None)
         with request_database_timing() as database_timing:
             try:
                 response = self._handle_request_untracked(
@@ -1547,6 +1561,7 @@ class Application:
                 _REQUEST_AUDIT_ACTOR.reset(actor_token)
                 _REQUEST_AUDIT_REQUEST_ID.reset(request_id_token)
                 _REQUEST_AUDIT_EVIDENCE.reset(evidence_token)
+                _REQUEST_OA_SESSION.reset(session_token)
                 self._api_performance_recorder.record_request(
                     method=method,
                     route_path=route_path,
@@ -1609,14 +1624,7 @@ class Application:
                     status="auth_error",
                 )
             return auth_error
-        if requires_data_mutation(method, route_path):
-            if access_session is None and self._route_has_module_owned_oa_access(route_path):
-                access_session, auth_error = self._resolve_fin_ops_read_session(
-                    headers,
-                    denied_message="当前账户没有访问权限。",
-                )
-                if auth_error is not None:
-                    return auth_error
+        if is_state_changing_request(method, route_path):
             actor_id = actor_id_for_session(access_session) if access_session is not None else ""
             identity = access_session.identity if access_session is not None else None
             actor_name = str(
@@ -4544,14 +4552,7 @@ class Application:
             session = self._resolve_request_session(headers)
         except OAAuthError as exc:
             return self._etc_business_response(HTTPStatus.UNAUTHORIZED, None, code="unauthorized", message=str(exc))
-        if require_mutation and not session.can_mutate_data:
-            return self._etc_business_response(
-                HTTPStatus.FORBIDDEN,
-                None,
-                code="permission_denied",
-                message="当前账户没有操作 ETC 批次的权限。",
-            )
-        if not require_mutation and not session.can_access_app:
+        if not session.can_access_app:
             return self._etc_business_response(
                 HTTPStatus.FORBIDDEN,
                 None,
@@ -4739,15 +4740,7 @@ class Application:
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
     def _etc_business_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
-        session = self._resolve_request_session(headers)
-        if not session.can_mutate_data:
-            return self._etc_business_response(
-                HTTPStatus.FORBIDDEN,
-                None,
-                code="permission_denied",
-                message="当前账户没有操作 ETC 批次的权限。",
-            )
-        return session
+        return self._resolve_request_session(headers)
 
     @staticmethod
     def _optional_int(value: object) -> int | None:
@@ -4892,10 +4885,9 @@ class Application:
                 "roles": list(session.identity.roles),
                 "permissions": list(session.identity.permissions),
                 "allowed": session.allowed,
-                "access_tier": session.access_tier,
                 "can_access_app": session.can_access_app,
-                "can_mutate_data": session.can_mutate_data,
                 "can_admin_access": session.can_admin_access,
+                "allowed_page_keys": sorted(session.allowed_page_keys),
             },
         )
 
@@ -4912,38 +4904,12 @@ class Application:
         return route_path.startswith(protected_prefixes)
 
     @staticmethod
-    def _route_has_module_owned_oa_access(route_path: str) -> bool:
-        return route_path == "/api/oa-pending-payments" or route_path.startswith("/api/oa-pending-payments/")
-
-    @staticmethod
     def _duration_ms(started_at: float) -> float:
         return round((monotonic() - started_at) * 1000, 3)
 
     @staticmethod
     def _audit_page_key_for_route(route_path: str) -> str:
-        route_page_prefixes = (
-            ("/api/workbench/settings/data-reset", "settings"),
-            ("/api/workbench", "reconciliation-workbench"),
-            ("/reconciliation", "reconciliation-workbench"),
-            ("/api/etc/", "etc-tickets"),
-            ("/api/no-oa-bank-batches", "bank-details"),
-            ("/api/oa-sync", "oa-pending-payments"),
-            ("/api/operations/history", "operation-history"),
-            ("/api/operations/app-health", "app-health-operations"),
-            ("/api/imports/bank-transaction-batches", "app-health-operations"),
-            ("/api/app-health", "app-health-operations"),
-            ("/imports/bank-transactions", "imports.bank-transactions"),
-            ("/imports/invoices", "imports.invoices"),
-            ("/imports/etc-invoices", "imports.etc-invoices"),
-        )
-        for prefix, page_key in route_page_prefixes:
-            normalized_prefix = prefix.rstrip("/")
-            if route_path == normalized_prefix or route_path.startswith(f"{normalized_prefix}/"):
-                return page_key
-        parts = [part for part in str(route_path or "").split("/") if part]
-        if parts and parts[0] == "api":
-            parts = parts[1:]
-        return parts[0] if parts else "application"
+        return audit_page_key_for_route(route_path)
 
     @staticmethod
     def _safe_list_count(value: object) -> int:
@@ -5055,8 +5021,6 @@ class Application:
         request_id: str | None = None,
         action_name: str | None = None,
     ) -> tuple[OARequestSession | None, Response | None]:
-        if self._route_has_module_owned_oa_access(route_path):
-            return None, None
         if not self._route_requires_oa_access(route_path):
             return None, None
         auth_started_at = monotonic()
@@ -5112,10 +5076,25 @@ class Application:
                     phase="oa_auth",
                     duration_ms=self._duration_ms(auth_started_at),
                 )
-        if requires_data_mutation(method, route_path) and not session.can_mutate_data:
+        if is_admin_only_route(route_path) and not session.can_admin_access:
             return None, self._json_response(
                 HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有修改数据的权限。"},
+                {"error": "admin_access_required", "message": "当前功能仅限权限管理员 005。"},
+            )
+        required_page_keys = page_keys_for_route(route_path)
+        if required_page_keys is None:
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {"error": "page_access_policy_missing", "message": "当前接口尚未登记页面权限。"},
+            )
+        if required_page_keys and not any(session.can_access_page(page_key) for page_key in required_page_keys):
+            return None, self._json_response(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "page_access_denied",
+                    "message": "当前账户没有访问该页面的权限。",
+                    "required_page_keys": list(required_page_keys),
+                },
             )
         return session, None
 
@@ -5130,11 +5109,6 @@ class Application:
                 session = self._resolve_request_session(headers)
             if not session.allowed:
                 raise ForbiddenOAAccessError("当前 OA 账户未被授权访问财务运营平台。")
-            if not session.can_mutate_data:
-                return self._json_response(
-                    HTTPStatus.FORBIDDEN,
-                    {"error": "permission_denied", "message": "当前账户没有修改工作台数据的权限。"},
-                )
         except UnauthorizedOASessionError as error:
             return self._json_response(
                 HTTPStatus.UNAUTHORIZED,
@@ -5437,18 +5411,13 @@ class Application:
         headers: dict[str, str] | None,
         *,
         denied_message: str,
-    ) -> tuple[str, bool, Response | None]:
+    ) -> tuple[str, Response | None]:
         session, auth_error = self._resolve_fin_ops_read_session(headers, denied_message=denied_message)
         if auth_error is not None:
-            return "", False, auth_error
-        if session is not None and not session.can_mutate_data:
-            return "", False, self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": denied_message},
-            )
+            return "", auth_error
         if session is None:
-            return "input_invoice_usage_oa_reverse", True, None
-        return str(session.identity.username or session.identity.user_id or "input_invoice_usage_oa_reverse"), True, None
+            return "input_invoice_usage_oa_reverse", None
+        return str(session.identity.username or session.identity.user_id or "input_invoice_usage_oa_reverse"), None
 
     def _record_input_invoice_usage_export_download(
         self,
@@ -5525,8 +5494,6 @@ class Application:
             status = HTTPStatus.NOT_FOUND
         elif isinstance(exc, (InputInvoiceUsageOaReverseVersionConflictError, InputInvoiceUsageOaReverseStalePreviewError)):
             status = HTTPStatus.CONFLICT
-        elif isinstance(exc, InputInvoiceUsageOaReversePermissionError):
-            status = HTTPStatus.FORBIDDEN
         elif isinstance(exc, InputInvoiceUsageOaReverseMissingClientError):
             status = HTTPStatus.SERVICE_UNAVAILABLE
         elif isinstance(exc, InputInvoiceUsageOaReverseInvalidTransitionError):
@@ -5926,11 +5893,6 @@ class Application:
         session, auth_error = self._resolve_cost_statistics_read_session(headers)
         if auth_error is not None:
             return None, auth_error
-        if session is not None and not session.can_mutate_data:
-            return None, self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存成本统计设置或人工分配权限。"},
-            )
         return session, None
 
     def _resolve_tax_offset_mutation_session(
@@ -5940,11 +5902,6 @@ class Application:
         session, auth_error = self._resolve_tax_offset_read_session(headers)
         if auth_error is not None:
             return None, auth_error
-        if session is not None and not session.can_mutate_data:
-            return None, self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有导入或保存税金抵扣数据权限。"},
-            )
         return session, None
 
     @staticmethod
@@ -6982,7 +6939,7 @@ class Application:
     ) -> Response:
         session = access_session or self._resolve_request_session(headers)
         status_code, result = self._batch_accounting_routes().tag_rules(
-            can_save=session.can_mutate_data,
+            can_save=True,
         )
         return self._json_response(status_code, result)
 
@@ -7028,13 +6985,7 @@ class Application:
         *,
         session: OARequestSession | None = None,
     ) -> OARequestSession | Response:
-        session = session or self._resolve_request_session(headers)
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有提交或撤回批量账务关联的权限。"},
-            )
-        return session
+        return session or self._resolve_request_session(headers)
 
     def _bank_transaction_tag_definition_current(self, code: str) -> dict[str, object] | None:
         tag_code = str(code or "").strip()
@@ -7062,13 +7013,7 @@ class Application:
         )
 
     def _no_oa_bank_batch_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
-        session = self._resolve_request_session(headers)
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有提交免OA流水批次的权限。"},
-            )
-        return session
+        return self._resolve_request_session(headers)
 
     @staticmethod
     def _optional_int(value: object) -> int | None:
@@ -7169,13 +7114,7 @@ class Application:
         return payload
 
     def _turnover_mutation_session(self, headers: dict[str, str] | None) -> OARequestSession | Response:
-        session = self._resolve_request_session(headers)
-        if not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有操作往来款关系的权限。"},
-            )
-        return session
+        return self._resolve_request_session(headers)
 
     def _bank_transaction_category_affected_months(self, transaction_ids: list[str]) -> list[str]:
         months: set[str] = set()

@@ -153,7 +153,7 @@ async function previewEtcZipFiles(page: Page, recordLatency?: OperationLatencyRe
 
 test.describe("ETC invoice import browser flow", () => {
   test("clear discards the current preview and returns to a fresh page", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await previewEtcZipFiles(page);
     await page.getByRole("button", { name: "清空" }).click();
@@ -166,7 +166,7 @@ test.describe("ETC invoice import browser flow", () => {
 
   test("previews ETC zip files for a ready task and confirms the import job", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createEtcImportLatencyRecorder(page, testInfo);
 
     await previewEtcZipFiles(page, recordLatency);
@@ -208,7 +208,7 @@ test.describe("ETC invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       etcImportDownstreamFanout: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcImportLatencyRecorder(page, testInfo);
 
@@ -321,7 +321,7 @@ test.describe("ETC invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       etcImportConfirmPreviewStale: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcImportLatencyRecorder(page, testInfo);
 
@@ -348,7 +348,7 @@ test.describe("ETC invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       etcImportConfirmStaleReconciliationTask: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcImportLatencyRecorder(page, testInfo);
 
@@ -377,7 +377,7 @@ test.describe("ETC invoice import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       etcImportConfirmError: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createEtcImportLatencyRecorder(page, testInfo);
 

@@ -7,22 +7,21 @@
 ### Session
 
 - `loading`：前端正在请求 `/api/session/me`。
-- `authenticated`：后端返回 allowed 且包含 user、roles、permissions、access tier。
+- `authenticated`：后端返回 allowed 且包含 user、roles、permissions、`allowed_page_keys`。
 - `forbidden`：后端识别身份，但 `allowed=false`。
 - `expired`：无 token、token 过期或 OA session invalid；API 返回 401。
 - `error`：OA 会话接口超时、网络失败或未知错误；前端提供 retry。
 
-### Access tier
+### Page access
 
-- `denied`：不可访问 app，不能读写。
-- `read_export_only`：可读、可导出；`can_mutate_data=false`。
-- `full_access`：可读写普通业务；`can_admin_access=false`。
-- `admin`：可读写、可管理账户、OA 凭据、数据重置、AppHealth 运维。
+- `denied`：普通账号没有任何 `allowed_page_keys`，不可访问 app。
+- `page_authorized`：普通账号至少有一个页面 key，只能进入勾选页面，页面内按原业务规则执行。
+- `admin`：固定 `YNSYLP005` 拥有全部页面，并可管理账户、OA 凭据、数据重置和操作历史。
 
 允许流转：
 
 - 精确 `YNSYLP005` 在 provider 前直接产出 `admin`；该状态不能通过 APP 流转。
-- 其他账号在同一 `access_control_version` snapshot 的完整 full/read memberships 中分别产出 `full_access` / `read_export_only`，缺席产出 `denied`。
+- 其他账号在同一 `access_control_version` snapshot 中按 `page_access_accounts[].page_keys` 产出允许页面集合；账号缺席或页面集合为空产出 `denied`。
 - Settings ACL commit 后，下一次 session/global guard/module guard 读取新 snapshot；删除账号立即从允许层级流转到 `denied`，不等待 OA identity cache。
 - snapshot provider 缺失、payload 非法或调用失败均流转为 `denied` 并记录固定 secret-safe warning；OA role/permission/env 不提供恢复边。
 - local dev auth 仅在显式 env 开启；unittest default auth 仅测试场景。
@@ -30,8 +29,7 @@
 禁止流转：
 
 - 前端 request body 中的 actor 覆盖后端 session actor。
-- read-only 用户执行写入、导入确认、数据重置、规则保存或 admin 运维。
-- full access 非 admin 维护 OA 凭据、访问账户管理、数据重置、AppHealth dashboard。
+- 普通账号访问未勾选页面或 admin-only control plane。
 - worker/service 直接 import HTTP auth、解析 cookie/header 或依赖 Flask response。
 
 ### Audit
@@ -54,18 +52,17 @@ ACL command 的审计与 Settings 状态机使用同一 snapshot version/outcome
 - empty：权限配置列表为空时允许 admin 添加；非 admin 不展示管理入口。
 - error：session 校验失败显示 retry；API 403/401 显示明确权限或会话错误。
 - stale/refreshing：权限本身不走 read model；如果 App Status blocked，`useCanMutateWithHealth` 会阻断写入。
-- permission disabled/hidden：readonly 隐藏/禁用写入；full access 隐藏 admin-only；admin 显示高风险入口。
-- export：readonly export 用户可进入导出流程；写入型 drawer/dialog 不可用。
+- permission hidden：普通账号隐藏未授权页面和 admin-only control plane；被授权页面不再按账户拆分读写能力。
+- health blocked：系统健康状态可以独立阻断写入，但不改变账户的页面授权。
 
 ## Read Model / Worker 状态
 
 ## ACL 权限判定
 
-| tier | generic settings POST | access-control GET/PUT | admin-only health/credentials/reset |
+| session decision | 已授权页面 API | access-control GET/PUT | admin-only credentials/reset/history |
 | --- | --- | --- | --- |
 | `admin`（仅 `YNSYLP005`） | 允许 | 允许 | 允许 |
-| `full_access` | 允许；ACL key 明确 400 | 403 | 403 |
-| `read_export_only` | 403 | 403 | 403 |
+| `page_authorized` | 页面 key 命中时允许 | 403 | 403 |
 | `denied` | 403 | 403 | 403 |
 
 页面隐藏只用于体验，所有状态都必须由后端再次判定。管理员身份没有 APP 内状态迁移。
@@ -73,8 +70,7 @@ ACL command 的审计与 Settings 状态机使用同一 snapshot version/outcome
 | evaluator 输入 | 结果 |
 | --- | --- |
 | username 精确为 `YNSYLP005` | `admin`；零 snapshot provider I/O |
-| username 在 snapshot full memberships | `full_access` |
-| username 在 snapshot read memberships | `read_export_only` |
+| username 在 snapshot 且 page keys 非空 | `page_authorized` + 精确页面集合 |
 | username 缺席 | `denied` |
 | provider 缺失、payload 非法或失败 | `denied`；固定 secret-safe warning |
 | OA role/permission、三项退役 env、`finops:app:view` marker | 信息/selector only；不得改变上述结果 |
@@ -88,7 +84,8 @@ ACL command 的审计与 Settings 状态机使用同一 snapshot version/outcome
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-09-02 | 页面级访问替代账户权限层级 | 普通账户只保存页面集合；勾选页面内保留正常业务能力；005 固定全页与管理控制面；旧权限字段只允许在一次性迁移/切换预检中读取 | `tests.test_auth_guard`、`tests.test_session_api`、`tests.test_route_access_policy`、`web/e2e/permissions-role-matrix.spec.ts` |
 | 2026-08-02 | 收敛 fixed 005 + canonical ACL evaluator 与审计结果 | 删除 permission/role/env grant；single snapshot fail closed；Settings 与 permissions 共用 version/no-op/conflict/projection/persistence/compensation outcome | `tests.test_session_api`、`tests.test_auth_guard`、`tests.test_permissions_write_entry_inventory`、`web/e2e/permissions-role-matrix.spec.ts` |
 | - | 初始骨架 | 待补充 | - |
-| 2026-06-17 | 补齐 Browser 权限角色矩阵 | 新增 read_export_only/full_access/admin 真实 Chromium 矩阵；只读用户逐页可读且不触发 mutation API，settings/tax/import/no-OA 写入口受控；同步修复导入页和免 OA 页 UI 权限门禁 | `cd web && npx playwright test e2e/permissions-role-matrix.spec.ts`、`cd web && npm test -- --run src/test/ImportCenterPage.test.tsx src/test/NoOaBankBatchPage.test.tsx src/test/WorkbenchSelection.test.tsx src/test/App.test.tsx src/test/SessionGate.test.tsx src/test/SessionApi.test.ts` |
+| 2026-06-17 | 历史：补齐旧角色矩阵 | 当时覆盖旧的读写分层；该模型已由 2026-09-02 页面级访问模型取代，不是当前合同 | 历史记录 |
 | 2026-06-11 | 补齐权限与审计测试闭环状态机 | 将 session、access tier、UI 权限、API guard、audit 原子性和敏感数据保护纳入统一维护边界 | `tests.test_auth_guard`、`tests.test_session_api`、`tests.test_audit_service`、`web/src/test/SessionGate.test.tsx`、`web/src/test/SettingsPage.test.tsx` |

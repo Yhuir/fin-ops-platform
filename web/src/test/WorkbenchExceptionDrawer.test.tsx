@@ -78,7 +78,7 @@ function group(zone: "paired" | "unpaired"): WorkbenchRelationGroup {
 function renderDrawer(
   bucket: "paired" | "unpaired",
   onReviewAnomaly = vi.fn(),
-  canMutateData = true,
+  canOperateData = true,
   anomalyGroup = group(bucket),
   options: {
     view?: WorkbenchExceptionView;
@@ -95,7 +95,7 @@ function renderDrawer(
         unpaired: bucket === "unpaired" ? 1 : 0,
         paired: bucket === "paired" ? 1 : 0,
       }}
-      canMutateData={canMutateData}
+      canOperateData={canOperateData}
       contentGeneration={1}
       error={null}
       exceptionCounts={options.counts === undefined ? exceptionCounts : options.counts}

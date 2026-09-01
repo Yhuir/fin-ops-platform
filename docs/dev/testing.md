@@ -2,6 +2,8 @@
 
 本文件是开发验证入口。测试闭环的全局状态见 `testing-closure-state.md`，跨页面/API/read model/worker 依赖地图见 `testing-closure-dependency-map.md`，Spec-first Browser e2e 审计规则见 `spec-first-e2e-audit.md`，审计队列见 `spec-first-e2e-inventory.md`，nightly CI 规则见 `nightly-ci.md`。
 
+> 2026-09-02 当前权限合同：访问账户已改为逐页面二元授权，删除 `read_export_only/full_access` 运行时层级；页面有权即保留该页面原有读、写、导出能力，未分配页面及其 API 返回 403。只有 OA 账户 `005` 管理访问账户并隐式拥有全部页面。下文包含旧层级名称的早期增量记录仅作历史测试演进证据，不得作为当前权限合同。
+
 > 2026-07-11 当前合同纠正：`tax_offset` 不消费 Workbench/红蓝票 relation。旧段落中的 “tax offset relation fan-out / relation 影响进项计划行 / tax/cost downstream” 描述已废止；当前证据是 `workbench-relations-tax-offset-isolation.spec.ts` 与 repository queue 隔离测试。发票/ETC/税务认证 canonical 写入只推进 source version，Tax 在访问时自行收敛。
 
 > 2026-07-22 Phase 27 当前合同：普通 import、relation、规则、Drawer 保存和 OA sync 写入零页面 dirty/outbox、零跨页 operation barrier；当前页重跑 normal GET，其它页在访问或重新激活时通过 fresh gate 精确收敛。下文历史 spec 文件名仍可能含 `fanout`，早期增量记录也可能描述旧 barrier；它们只作测试演进溯源，不得覆盖当前代码、模块边界和 Phase 27 verification 合同。

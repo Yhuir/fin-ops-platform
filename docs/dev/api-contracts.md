@@ -141,11 +141,11 @@
 
 ### 会话与直接 API 授权
 
-`GET /api/session/me` 保留 OA identity、roles 和 permissions 作为信息字段，但 `allowed` / `access_tier` / `can_access_app` / `can_mutate_data` / `can_admin_access` 只由固定 `YNSYLP005` 或当次 canonical Settings ACL snapshot 派生。除 `YNSYLP005` 外，ACL 缺席、payload 非法或 provider 失败均返回 `denied`；OA role/permission（包括 `finops:app:view`）不能 grant APP 访问。
+`GET /api/session/me` 保留 OA identity、roles 和 permissions 作为信息字段，但 `allowed` / `can_access_app` / `can_admin_access` / `allowed_page_keys` 只由固定 `YNSYLP005` 或当次 canonical Settings ACL snapshot 派生。除 `YNSYLP005` 外，ACL 缺席、页面集合为空、payload 非法或 provider 失败均返回 denied；OA role/permission（包括 `finops:app:view`）不能 grant APP 访问。
 
-全局 route policy 和模块自有 guard 消费同一 normalized session。`denied` 账号即使保留 `finops:app:view` 或业务角色，直接调用受保护 GET/写 API 仍返回 `403 permission_denied`。ACL 删除后下一次 session/API 判断立即使用新 snapshot，不从 OA identity cache 复用 APP tier。自动化回归已保留 permission-bearing `YNSYLP006` 的 denied 证据；这是已完成的合同证据，不代替后续生产发布验收。
+全局 route policy 和模块自有 guard 消费同一 normalized session。账号即使保留 `finops:app:view` 或业务角色，调用未授权页面 API 仍返回 `403 permission_denied`。ACL 删除后下一次 session/API 判断立即使用新 snapshot，不从 OA identity cache 复用 APP page set。
 
-用户名比较使用 casefold key，对外保留 OA `sys_user.user_name` canonical spelling。等值重复、跨 tier 重复、空值/控制字符或非 canonical protected-admin spelling 在 OA I/O 前返回 `400`。
+用户名比较使用 casefold key，对外保留 OA `sys_user.user_name` canonical spelling。等值重复、空值/控制字符、空/未知/重复 page keys 或 protected-admin 输入在 OA role 写入前返回 `400`。
 
 `GET /api/workbench/settings`
 
@@ -164,12 +164,13 @@
 
 ### Settings access-control 专用 API
 
-- `GET /api/workbench/settings/access-control` 仅 `can_admin_access=true` 可用，返回 `{version, administrator, accounts}`；`administrator` 固定为 `{username: "YNSYLP005", access_tier: "admin", protected: true}`。
-- `PUT /api/workbench/settings/access-control` 仅接受 `{expected_version, accounts}`。`accounts[]` 只有 `username` 与 `access_tier=full_access|read_export_only`；删除条目表示 denied，不接受 admin tier、protected admin、重复账户、body actor 或额外字段。actor 只来自当前后端 session，request ID 只来自受信 HTTP adapter。
+- `GET /api/workbench/settings/access-control` 仅 `can_admin_access=true` 可用，返回 `{version, administrator, accounts}`；`administrator` 固定为 `{username: "YNSYLP005", display_name, protected: true}`，普通 account 返回 `username/display_name/oa_status/page_keys`。
+- `GET /api/workbench/settings/access-control/users?q=...&limit=...` 仅管理员可用，从 OA `sys_user` 有界搜索账号与姓名。
+- `PUT /api/workbench/settings/access-control` 仅接受 `{expected_version, accounts}`。`accounts[]` 只有 `username` 与非空 `page_keys`；页面 key 必须来自可分配 registry。删除条目表示 denied，不接受 protected admin、重复账户、body actor 或额外字段。actor 只来自当前后端 session，request ID 只来自受信 HTTP adapter。
 - stale `expected_version` 返回 `409 access_control_version_conflict` 和 `current_version`。semantic no-op 返回 `200 changed=false` 且零 PostgreSQL/audit/OA I/O。
-- 真实变化先把目标 membership 投影到三个专用 OA 角色，再在 PostgreSQL ACL critical section 内以 CAS 同事务提交 canonical ACL 和 durable audit；audit 记录 session actor、version、变更账号摘要和 request ID，不记 token 或完整 ACL payload。
+- 真实变化先把目标 membership 投影到 `finops_app_user` / `finops_admin` 两个专用 OA 角色，再在 PostgreSQL ACL critical section 内以 CAS 同事务提交 canonical ACL 和 durable audit；audit 记录 session actor、version、变更账号摘要和 request ID，不记 token 或完整 ACL payload。
 - OA 未配置、超时或专用 role/menu exact-set 验证失败返回 `502 oa_role_sync_failed`，且不写 PostgreSQL/audit。OA 目标成功后 PG 失败会补偿到旧 membership；补偿或 commit outcome 无法确认返回 `503 access_control_sync_inconsistent`，普通持久化失败返回 `503 access_control_persistence_failed`。
-- `finops:app:view` 只是 OA menu selector。APP evaluator 不读 OA role/permission/env authority；部署负责历史 non-dedicated menu binding 的 exact-target 清理和回滚，runtime API 只验证严格投影目标并同步三个专用角色成员。
+- `finops:app:view` 只是 OA menu selector。APP evaluator 不读 OA role/permission/env authority；部署前 migration/preflight 负责旧角色 cutover，runtime API 只验证严格投影目标并同步两个专用角色成员。
 
 ### OA 草稿预填专用 API
 

@@ -1,43 +1,48 @@
 import unittest
 
-from fin_ops_platform.app.route_access_policy import requires_data_mutation
+from fin_ops_platform.app.route_access_policy import (
+    is_admin_only_route,
+    is_state_changing_request,
+    page_keys_for_route,
+)
 
 
 class RouteAccessPolicyTests(unittest.TestCase):
-    def test_safe_methods_and_known_read_only_posts_do_not_require_mutation(self) -> None:
-        for method, route_path in (
-            ("GET", "/api/workbench"),
-            ("GET", "/api/operations/app-health-dashboard"),
-            ("GET", "/api/workbench/settings/oa-applicant-credentials"),
-            ("GET", "/api/workbench/settings/data-reset/preview?action=reset_bank_transactions"),
-            ("GET", "/api/workbench/settings/data-reset/jobs/active"),
-            ("HEAD", "/api/workbench"),
-            ("OPTIONS", "/api/workbench/exceptions/review"),
-            ("POST", "/api/workbench/actions/confirm-link/preview"),
-            ("POST", "/api/workbench/actions/receipt-draft"),
-            ("POST", "/api/workbench/actions/withdraw-link/preview"),
-            ("POST", "/api/pending-invoices/invoice-candidates/batch"),
-            ("POST", "/api/pending-invoices/rows/row-1/attach-existing-invoice/preview"),
-            ("POST", "/api/pending-invoices/attach-existing-invoices/preview"),
-            ("POST", "/api/input-invoice-usage/oa-reverse/preview"),
-            ("POST", "/api/tax-offset/calculate"),
-        ):
-            with self.subTest(method=method, route_path=route_path):
-                self.assertFalse(requires_data_mutation(method, route_path))
+    def test_state_changing_classification_is_used_only_for_audit(self) -> None:
+        self.assertFalse(is_state_changing_request("GET", "/api/workbench"))
+        self.assertFalse(is_state_changing_request("POST", "/api/workbench/actions/confirm-link/preview"))
+        self.assertTrue(is_state_changing_request("POST", "/api/workbench/exceptions/review"))
+        self.assertTrue(is_state_changing_request("PUT", "/api/pending-invoices/rules"))
 
-    def test_every_other_unsafe_request_requires_mutation(self) -> None:
-        for method, route_path in (
-            ("POST", "/api/workbench/exceptions/review"),
-            ("POST", "/imports/files/preview"),
-            ("PUT", "/api/pending-invoices/rules"),
-            ("PATCH", "/api/etc/reconciliation-tasks/task-1/items/item-1"),
-            ("DELETE", "/api/etc/reconciliation-tasks/task-1"),
-            ("PUT", "/api/workbench/settings/oa-applicant-credentials/user-1"),
-            ("POST", "/api/workbench/settings/data-reset/jobs"),
-            ("POST", "/api/future-write-route"),
+    def test_routes_map_to_page_access_keys(self) -> None:
+        cases = {
+            "/api/workbench?month=2026-08": ("reconciliation-workbench",),
+            "/api/cost-statistics/export": ("cost-statistics",),
+            "/api/bank-details/auto-tag-rules": ("bank-details",),
+            "/api/input-invoice-usage/rows": ("input-invoice-usage",),
+            "/imports/files/preview": (
+                "imports.bank-transactions",
+                "imports.invoices",
+                "imports.etc-invoices",
+            ),
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(page_keys_for_route(path.split("?", 1)[0]), expected)
+
+    def test_control_plane_routes_remain_admin_only(self) -> None:
+        for path in (
+            "/api/workbench/settings/access-control",
+            "/api/workbench/settings/access-control/users",
+            "/api/workbench/settings/oa-applicant-credentials",
+            "/api/workbench/settings/data-reset/preview",
+            "/api/operations/history",
         ):
-            with self.subTest(method=method, route_path=route_path):
-                self.assertTrue(requires_data_mutation(method, route_path))
+            with self.subTest(path=path):
+                self.assertTrue(is_admin_only_route(path))
+
+        self.assertFalse(is_admin_only_route("/api/workbench/settings"))
+        self.assertFalse(is_admin_only_route("/api/bank-details"))
 
 
 if __name__ == "__main__":

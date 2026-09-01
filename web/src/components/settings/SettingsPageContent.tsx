@@ -8,7 +8,7 @@ import type {
   SaveOaApplicantCredentialRequest,
   WorkbenchAccessAccount,
   WorkbenchAccessControl,
-  WorkbenchAccessRole,
+  WorkbenchAccessUser,
   WorkbenchProjectSetting,
   WorkbenchSettings,
   WorkbenchSettingsDataResetAction,
@@ -59,6 +59,7 @@ type SettingsPageContentProps = {
     pendingInvoiceTagGroups: WorkbenchSettings["pendingInvoiceTagGroups"];
   }) => void;
   onSaveAccessControl: (accounts: WorkbenchAccessAccount[]) => Promise<void>;
+  onSearchAccessUsers: (query: string, signal?: AbortSignal) => Promise<WorkbenchAccessUser[]>;
   onDataReset: (payload: {
     action: WorkbenchSettingsDataResetAction;
     oaPassword: string;
@@ -88,8 +89,6 @@ type SettingsDraftSession = {
   last4Draft: string;
   projectCodeDraft: string;
   projectNameDraft: string;
-  accessUsernameDraft: string;
-  accessRoleDraft: WorkbenchAccessRole;
 };
 
 type DataResetDialogState =
@@ -111,8 +110,6 @@ function isSettingsDraftSession(value: unknown): value is SettingsDraftSession {
     && typeof session.last4Draft === "string"
     && typeof session.projectCodeDraft === "string"
     && typeof session.projectNameDraft === "string"
-    && typeof session.accessUsernameDraft === "string"
-    && typeof session.accessRoleDraft === "string"
     && (
       session.activeSectionId === "projects"
       || session.activeSectionId === "bank_accounts"
@@ -173,7 +170,9 @@ function buildManagedAccessAccounts(accessControl: WorkbenchAccessControl | null
     .map((account) => ({
       id: `access-${account.username}`,
       username: account.username,
-      role: account.accessTier,
+      displayName: account.displayName,
+      oaStatus: account.oaStatus,
+      pageKeys: account.pageKeys,
     }))
     .sort((left, right) => left.username.localeCompare(right.username, "zh-CN"));
 }
@@ -188,7 +187,9 @@ function normalizeManagedAccounts(accounts: ManagedAccessAccount[]) {
     deduped.set(username, {
       id: account.id || `access-${index}`,
       username,
-      role: account.role,
+      displayName: account.displayName,
+      oaStatus: account.oaStatus,
+      pageKeys: [...new Set(account.pageKeys)].sort(),
     });
   });
   return Array.from(deduped.values()).sort((left, right) => left.username.localeCompare(right.username, "zh-CN"));
@@ -262,6 +263,7 @@ export default function SettingsPageContent({
   onDeleteOaApplicantCredential,
   onSave,
   onSaveAccessControl,
+  onSearchAccessUsers,
   onSaveOaApplicantCredential,
   onSyncProjects,
 }: SettingsPageContentProps) {
@@ -269,7 +271,7 @@ export default function SettingsPageContent({
   const draftSession = usePageSessionState<SettingsDraftSession>({
     pageKey: "settings",
     stateKey: "safeDraft",
-    version: 1,
+    version: 2,
     initialValue: {
       activeSectionId: "projects",
       bankNameDraft: "",
@@ -277,8 +279,6 @@ export default function SettingsPageContent({
       last4Draft: "",
       projectCodeDraft: "",
       projectNameDraft: "",
-      accessUsernameDraft: "",
-      accessRoleDraft: "full_access",
     },
     ttlMs: 2 * 60 * 60 * 1000,
     storage: "session",
@@ -323,10 +323,6 @@ export default function SettingsPageContent({
   const [oaApplicantCodeDraft, setOaApplicantCodeDraft] = useState("");
   const [oaApplicantUsernameDraft, setOaApplicantUsernameDraft] = useState("");
   const [oaApplicantPasswordDraft, setOaApplicantPasswordDraft] = useState("");
-  const accessUsernameDraft = draftSession.value.accessUsernameDraft;
-  const setAccessUsernameDraft = (value: string) => setDraftField("accessUsernameDraft", value);
-  const accessRoleDraft = draftSession.value.accessRoleDraft;
-  const setAccessRoleDraft = (value: WorkbenchAccessRole) => setDraftField("accessRoleDraft", value);
   const activeSectionId = draftSession.value.activeSectionId;
   const setActiveSectionId = (value: SettingsSectionId) => setDraftField("activeSectionId", value);
   const [dataResetDialog, setDataResetDialog] = useState<DataResetDialogState>(null);
@@ -379,11 +375,11 @@ export default function SettingsPageContent({
   const canAddMapping =
     last4Draft.trim().length === 4 && /^\d{4}$/.test(last4Draft.trim()) && bankNameDraft.trim().length > 0;
   const canAddProject = projectCodeDraft.trim().length > 0 && projectNameDraft.trim().length > 0;
-  const canAddAccessAccount = accessUsernameDraft.trim().length > 0
-    && accessUsernameDraft.trim() !== accessControl?.administrator.username;
   const normalizedAccessAccounts = managedAccessAccounts.map((account) => ({
     username: account.username.trim(),
-    accessTier: account.role,
+    displayName: account.displayName,
+    oaStatus: account.oaStatus,
+    pageKeys: account.pageKeys,
   }));
   const normalizedAccessUsernames = normalizedAccessAccounts.map((account) => account.username);
   const accessControlValidationMessage = normalizedAccessUsernames.some((username) => !username)
@@ -392,7 +388,9 @@ export default function SettingsPageContent({
       ? "访问账户不能重复。"
       : normalizedAccessUsernames.includes(accessControl?.administrator.username ?? "")
         ? "受保护管理员不能作为普通访问账户编辑。"
-        : null;
+        : normalizedAccessAccounts.some((account) => account.pageKeys.length === 0)
+          ? "每个访问账户至少需要选择一个页面。"
+          : null;
   const canSaveOaApplicantCredential =
     oaApplicantNameDraft.trim().length > 0
     && oaApplicantCodeDraft.trim().length > 0
@@ -591,29 +589,27 @@ export default function SettingsPageContent({
     }
   }
 
-  function handleAddAccessAccount() {
-    const nextUsername = accessUsernameDraft.trim();
-    if (!nextUsername || controlsDisabled) {
+  function handleAddAccessAccount(user: WorkbenchAccessUser) {
+    const nextUsername = user.username.trim();
+    if (!nextUsername || controlsDisabled || nextUsername === accessControl?.administrator.username) {
       return;
     }
     setManagedAccessAccounts((current) => {
       const existingIndex = current.findIndex((item) => item.username === nextUsername);
       if (existingIndex >= 0) {
-        return current.map((item, index) =>
-          index === existingIndex ? { ...item, role: accessRoleDraft } : item,
-        );
+        return current;
       }
       return normalizeManagedAccounts([
         ...current,
         {
           id: `access-${nextUsername}`,
           username: nextUsername,
-          role: accessRoleDraft,
+          displayName: user.displayName,
+          oaStatus: user.active ? "active" : "inactive",
+          pageKeys: [],
         },
       ]);
     });
-    setAccessUsernameDraft("");
-    setAccessRoleDraft("full_access");
   }
 
   function handleSelectOaApplicantCredential(credential: OaApplicantCredentialSummary) {
@@ -805,11 +801,6 @@ export default function SettingsPageContent({
               <p>
                 管理关联台项目、账户、OA导入与高风险维护配置。
               </p>
-              {!canSave ? (
-                <div className="settings-inline-alert settings-inline-alert--warning" role="status">
-                  当前账号仅支持查看和导出，不能保存设置。
-                </div>
-              ) : null}
               {settingsActionStatus ? (
                 <div
                   className={`settings-inline-alert settings-inline-alert--${settingsActionStatus.tone}`}
@@ -819,7 +810,7 @@ export default function SettingsPageContent({
                 </div>
               ) : null}
             </div>
-            <div className="settings-save-actions">
+            {activeSectionId !== "access_accounts" ? <div className="settings-save-actions">
               <span>
                 {isSaving ? "正在保存变更" : "变更需手动保存"}
               </span>
@@ -832,7 +823,7 @@ export default function SettingsPageContent({
                 {isSaving ? <span className="settings-save-spinner" aria-hidden="true" /> : null}
                 {isSaving ? "保存中..." : "保存设置"}
               </button>
-            </div>
+            </div> : null}
           </header>
 
             {activeSectionId === "projects" ? (
@@ -948,12 +939,8 @@ export default function SettingsPageContent({
                   isSaving={isAccessControlSaving}
                   status={accessControlStatus}
                   validationMessage={accessControlValidationMessage}
-                  accessUsernameDraft={accessUsernameDraft}
-                  accessRoleDraft={accessRoleDraft}
-                  canAddAccessAccount={canAddAccessAccount}
-                  onChangeAccessUsernameDraft={setAccessUsernameDraft}
-                  onChangeAccessRoleDraft={setAccessRoleDraft}
                   onAddAccessAccount={handleAddAccessAccount}
+                  onSearchAccessUsers={onSearchAccessUsers}
                   onUpdateManagedAccessAccount={(accountId, updater) =>
                     setManagedAccessAccounts((current) => current.map((item) => (item.id === accountId ? updater(item) : item)))
                   }

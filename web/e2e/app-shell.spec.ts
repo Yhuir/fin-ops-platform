@@ -103,7 +103,7 @@ test.describe("app shell browser smoke", () => {
 
   test("hides operation history from non-admin users and redirects direct navigation", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/operations/history");
 
@@ -172,13 +172,13 @@ test.describe("app shell browser smoke", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("keeps AppHealth dashboard admin-only for read-export users", async ({ page }, testInfo) => {
+  test("keeps AppHealth dashboard admin-only for non-admin users", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "read_export_only" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createAppHealthLatencyRecorder(page, testInfo);
 
     await recordLatency({
-      operationId: "app-health.open-read-export-admin-gate",
+      operationId: "app-health.open-non-admin-admin-gate",
       visibleLabel: "系统状态",
       actionType: "navigate",
     }, async (mark) => {

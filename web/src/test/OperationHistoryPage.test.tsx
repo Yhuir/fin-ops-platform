@@ -8,7 +8,7 @@ describe("OperationHistoryPage", () => {
   test("only loads for an administrator and shows the durable event detail", async () => {
     window.history.pushState({}, "", "/operations/history");
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "权限管理员",
     });
@@ -45,7 +45,7 @@ describe("OperationHistoryPage", () => {
   test("redirects a non-admin away before loading audit data", async () => {
     window.history.pushState({}, "", "/operations/history");
     const fetchMock = installMockApiFetch({
-      sessionAccessTier: "full_access",
+      sessionRole: "user",
       sessionUsername: "YNSYLP006",
     });
     render(<App />);
@@ -58,7 +58,7 @@ describe("OperationHistoryPage", () => {
   test("shows the exact relation, invoice fields, and authenticated file preview", async () => {
     window.history.pushState({}, "", "/operations/history");
     const baseFetch = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "权限管理员",
     });
@@ -145,7 +145,7 @@ describe("OperationHistoryPage", () => {
   test("keeps the newest filter result when an older request finishes later", async () => {
     window.history.pushState({}, "", "/operations/history");
     const baseFetch = installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       sessionUsername: "YNSYLP005",
       sessionDisplayName: "权限管理员",
     });

@@ -220,8 +220,7 @@ class BankDetailsApiRoutes:
         }
 
     def auto_tag_rules(self, *, session: OARequestSession | None) -> tuple[HTTPStatus, dict[str, Any]]:
-        can_save = True if session is None else bool(session.can_mutate_data)
-        return HTTPStatus.OK, self._application_service.get_auto_tag_rules_payload(can_save=can_save)
+        return HTTPStatus.OK, self._application_service.get_auto_tag_rules_payload(can_save=True)
 
     def update_auto_tag_rules(
         self,
@@ -229,8 +228,6 @@ class BankDetailsApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        if session is not None and not session.can_mutate_data:
-            return self._permission_denied("当前账户没有保存自动标签规则权限。")
         try:
             updated = self._application_service.update_auto_tag_rules(
                 payload,
@@ -254,8 +251,6 @@ class BankDetailsApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        if session is not None and not session.can_mutate_data:
-            return self._permission_denied("当前账户没有替换自动标签规则权限。")
         try:
             updated = self._application_service.replace_auto_tag_rules_from_file_source(
                 source,
@@ -273,11 +268,9 @@ class BankDetailsApiRoutes:
         return HTTPStatus.OK, updated
 
     def reapply_auto_tag_rules(self, *, session: OARequestSession | None) -> tuple[HTTPStatus, dict[str, Any]]:
-        if session is not None and not session.can_mutate_data:
-            return self._permission_denied("当前账户没有重新应用自动标签规则权限。")
         payload = self._application_service.reapply_auto_tag_rules(
             actor_id=self._actor(session, "bank_auto_tag_rules_reapply"),
-            can_save=True if session is None else bool(session.can_mutate_data),
+            can_save=True,
         )
         return HTTPStatus.OK, payload
 
@@ -288,8 +281,6 @@ class BankDetailsApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        if session is not None and not session.can_mutate_data:
-            return self._permission_denied("当前账户没有确认银行明细标签权限。")
         try:
             result = self._application_service.confirm_category(
                 transaction_id,
@@ -306,8 +297,6 @@ class BankDetailsApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        if session is not None and not session.can_mutate_data:
-            return self._permission_denied("当前账户没有撤销银行明细标签确认权限。")
         try:
             result = self._application_service.revoke_category_confirmation(
                 transaction_id,
@@ -324,8 +313,6 @@ class BankDetailsApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        if session is not None and not session.can_mutate_data:
-            return self._permission_denied("当前账户没有设置银行明细标签权限。")
         try:
             result = self._application_service.assign_manual_category(
                 transaction_id,
@@ -342,8 +329,6 @@ class BankDetailsApiRoutes:
         *,
         session: OARequestSession | None,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
-        if session is not None and not session.can_mutate_data:
-            return self._permission_denied("当前账户没有撤销银行明细人工标签权限。")
         try:
             result = self._application_service.clear_manual_category(
                 transaction_id,
@@ -356,10 +341,6 @@ class BankDetailsApiRoutes:
     @staticmethod
     def _actor(session: OARequestSession | None, fallback: str) -> str:
         return str(session.identity.username or session.identity.user_id) if session is not None else fallback
-
-    @staticmethod
-    def _permission_denied(message: str) -> tuple[HTTPStatus, dict[str, Any]]:
-        return HTTPStatus.FORBIDDEN, {"error": "permission_denied", "message": message}
 
     @staticmethod
     def _category_error(exc: BankTransactionCategoryValidationError) -> tuple[HTTPStatus, dict[str, Any]]:
@@ -386,8 +367,6 @@ class BankDetailsApiRoutes:
         session, auth_error = self._resolve_read(headers)
         if auth_error is not None:
             return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._permission_response(permission_message)
         payload, error = self._load_body(body)
         if error is not None:
             return error
@@ -402,16 +381,12 @@ class BankDetailsApiRoutes:
         session, auth_error = self._resolve_read(headers)
         if auth_error is not None:
             return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._permission_response(permission_message)
         return self._json_response_for(*handler(session))
 
     def _replace_auto_tag_rules_from_file_route(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
         session, auth_error = self._resolve_read(headers)
         if auth_error is not None:
             return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._permission_response("当前账户没有替换自动标签规则权限。")
         if body not in (None, b"", ""):
             payload, error = self._load_body(body)
             if error is not None:

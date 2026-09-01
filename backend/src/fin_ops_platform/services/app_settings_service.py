@@ -18,6 +18,7 @@ from fin_ops_platform.services.bank_turnover_tag_semantics import (
     is_external_turnover_definition,
     normalize_turnover_action_type,
 )
+from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
     InputInvoiceUsagePaymentRulesValidationError,
@@ -283,6 +284,21 @@ class AppSettingsService:
     def get_access_control_payload(self) -> dict[str, Any]:
         return self._public_access_control_payload(self.get_access_control_snapshot())
 
+    def search_access_control_users(self, query: str, *, limit: int = 20) -> dict[str, Any]:
+        if self._oa_role_sync_service is None:
+            raise OARoleSyncConfigurationError("OA user directory is disabled or not configured.")
+        protected_key = settings_username_comparison_key(PROTECTED_ADMIN_USERNAME)
+        users = [
+            {
+                "username": user.username,
+                "display_name": user.display_name,
+                "active": user.active,
+            }
+            for user in self._oa_role_sync_service.search_users(query, limit=limit)
+            if settings_username_comparison_key(user.username) != protected_key
+        ]
+        return {"users": users}
+
     def update_access_control(
         self,
         *,
@@ -372,74 +388,108 @@ class AppSettingsService:
     def _access_control_from_accounts(accounts: list[dict[str, Any]]) -> dict[str, Any]:
         if not isinstance(accounts, list):
             raise AppSettingsValidationError("invalid_access_control_request", "accounts must be an array.")
-        full_access: list[str] = []
-        readonly: list[str] = []
+        normalized_accounts: list[dict[str, Any]] = []
         for account in accounts:
-            if not isinstance(account, dict) or set(account) != {"username", "access_tier"}:
+            if not isinstance(account, dict) or set(account) != {"username", "page_keys"}:
                 raise AppSettingsValidationError(
                     "invalid_access_control_request",
-                    "Each account must contain only username and access_tier.",
+                    "Each account must contain only username and page_keys.",
                 )
             username = account.get("username")
-            tier = str(account.get("access_tier") or "").strip()
-            if tier not in {"full_access", "read_export_only"}:
-                raise AppSettingsValidationError("invalid_access_control_tier", "Invalid account access_tier.")
-            (full_access if tier == "full_access" else readonly).append(username)
+            page_keys = account.get("page_keys")
+            if not isinstance(page_keys, list) or not page_keys:
+                raise AppSettingsValidationError(
+                    "invalid_access_control_pages",
+                    "Each account must contain at least one page key.",
+                )
+            unknown_page_keys = sorted(
+                {str(page_key or "").strip() for page_key in page_keys}.difference(ASSIGNABLE_PAGE_KEYS)
+            )
+            if unknown_page_keys:
+                raise AppSettingsValidationError(
+                    "invalid_access_control_pages",
+                    "Unknown or protected page keys: " + ", ".join(unknown_page_keys),
+                )
+            normalized_accounts.append({"username": username, "page_keys": page_keys})
         try:
             return settings_access_control_from_payload(
                 {
-                    "readonly_export_usernames": readonly,
-                    "full_access_usernames": full_access,
-                    "admin_usernames": [PROTECTED_ADMIN_USERNAME],
+                    "page_access_accounts": normalized_accounts,
                 }
             )
         except ValueError as exc:
             raise AppSettingsValidationError("invalid_access_control_username", str(exc)) from exc
 
     @staticmethod
-    def _access_control_memberships(access_control: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def _access_control_memberships(access_control: dict[str, Any]) -> tuple[tuple[str, tuple[str, ...]], ...]:
         normalized = settings_access_control_from_payload(access_control)
-        return (
-            tuple(sorted(settings_username_comparison_key(name) for name in normalized["full_access_usernames"])),
-            tuple(
-                sorted(settings_username_comparison_key(name) for name in normalized["readonly_export_usernames"])
-            ),
+        return tuple(
+            (
+                settings_username_comparison_key(account["username"]),
+                tuple(account["page_keys"]),
+            )
+            for account in normalized["page_access_accounts"]
         )
 
-    @staticmethod
-    def _public_access_control_payload(access_control: dict[str, Any]) -> dict[str, Any]:
+    def _public_access_control_payload(self, access_control: dict[str, Any]) -> dict[str, Any]:
         normalized = settings_access_control_from_payload(access_control)
-        accounts = [
-            *(
-                {"username": username, "access_tier": "full_access"}
-                for username in normalized["full_access_usernames"]
-            ),
-            *(
-                {"username": username, "access_tier": "read_export_only"}
-                for username in normalized["readonly_export_usernames"]
-            ),
+        if self._oa_role_sync_service is None:
+            raise OARoleSyncConfigurationError("OA user directory is disabled or not configured.")
+        usernames = [
+            PROTECTED_ADMIN_USERNAME,
+            *(str(account["username"]) for account in normalized["page_access_accounts"]),
         ]
+        users_by_key = {
+            settings_username_comparison_key(user.username): user
+            for user in self._oa_role_sync_service.resolve_users(usernames)
+        }
+        administrator = users_by_key.get(settings_username_comparison_key(PROTECTED_ADMIN_USERNAME))
+        accounts = []
+        for account in normalized["page_access_accounts"]:
+            user = users_by_key.get(settings_username_comparison_key(account["username"]))
+            accounts.append(
+                {
+                    **dict(account),
+                    "display_name": user.display_name if user is not None else "",
+                    "oa_status": "active" if user is not None and user.active else "missing",
+                }
+            )
         return {
             "version": normalized["access_control_version"],
             "administrator": {
                 "username": PROTECTED_ADMIN_USERNAME,
-                "access_tier": "admin",
                 "protected": True,
+                "display_name": administrator.display_name if administrator is not None else "",
             },
-            "accounts": sorted(accounts, key=lambda item: item["username"]),
+            "accounts": accounts,
         }
 
     @staticmethod
     def _changed_username_hashes(previous: dict[str, Any], target: dict[str, Any]) -> list[str]:
-        previous_names = set(previous.get("full_access_usernames") or []) | set(
-            previous.get("readonly_export_usernames") or []
-        )
-        target_names = set(target.get("full_access_usernames") or []) | set(
-            target.get("readonly_export_usernames") or []
-        )
+        def account_pages(snapshot: dict[str, Any]) -> dict[str, tuple[str, tuple[str, ...]]]:
+            normalized = settings_access_control_from_payload(snapshot)
+            return {
+                settings_username_comparison_key(account["username"]): (
+                    str(account["username"]),
+                    tuple(account["page_keys"]),
+                )
+                for account in normalized["page_access_accounts"]
+            }
+
+        previous_accounts = account_pages(previous)
+        target_accounts = account_pages(target)
+        changed_keys = {
+            username_key
+            for username_key in set(previous_accounts) | set(target_accounts)
+            if previous_accounts.get(username_key) != target_accounts.get(username_key)
+        }
+        changed_names = {
+            (target_accounts.get(username_key) or previous_accounts[username_key])[0]
+            for username_key in changed_keys
+        }
         return [
             hashlib.sha256(username.encode("utf-8")).hexdigest()
-            for username in sorted(previous_names.symmetric_difference(target_names))
+            for username in sorted(changed_names, key=settings_username_comparison_key)
         ]
 
     def update_settings(
@@ -463,10 +513,7 @@ class AppSettingsService:
             {
                 "completed_project_ids": completed_project_ids,
                 "bank_account_mappings": bank_account_mappings,
-                "allowed_usernames": self._snapshot["allowed_usernames"],
-                "readonly_export_usernames": self._snapshot["readonly_export_usernames"],
-                "admin_usernames": self._snapshot["admin_usernames"],
-                "full_access_usernames": self._snapshot["full_access_usernames"],
+                "page_access_accounts": self._snapshot["page_access_accounts"],
                 "access_control_version": self._snapshot["access_control_version"],
                 "workbench_column_layouts": workbench_column_layouts or {},
                 "oa_retention": oa_retention or {},

@@ -37,7 +37,7 @@
 - `PageRuntimeProvider` 对当前页面提供稳定的 `active: true`、`pageKey` 与初始 generation。它不监听 focus/visibility/BFCache，不协调业务页面刷新。
 - `AppPageRoute.preload()` 和 sidebar item `preload()` 只预加载 lazy route chunk。预加载失败不能改变当前 route，也不能阻塞点击导航。
 - 页面 session state 只保存当前浏览器标签页内的轻量 UI 状态，例如查询、筛选、分页、排序、tab、选中行、展开行和详情 drawer target；不保存 read model payload、业务事实、权限事实、loading/error/toast 或失败中的提交。
-- `SessionGate` 是 shell 级入口。它只消费 canonical session 的 `allowed/access_tier/capabilities`；OA roles/permissions 与 `finops:app:view` 不能授予 APP access。会话 loading/forbidden/expired/error 会阻止业务 route 渲染，但侧栏和全局 shell 仍按现有布局显示。
+- `SessionGate` 是 shell 级入口。它只消费 canonical session 的 `allowed/allowed_page_keys/can_admin_access`；OA roles/permissions 与 `finops:app:view` 不能授予 APP access。会话 loading/forbidden/expired/error 会阻止业务 route 渲染；侧栏仅在 session 完成后渲染获权页面，避免未授权页面闪现和布局跳动。
 - `SessionGate` 和 OA menu 都是 UX/visibility 强制层，不替代 backend authorization。denied 用户直接输入 `/fin-ops/` 不挂载业务 route；直接调用受保护 API 仍由 backend canonical ACL guard 返回 `403 permission_denied`。
 - OA 菜单变更只以 role projection 后的新 `/system/menu/getRouters` 响应或新 OA shell session 验收；刷新前的旧 DOM、旧 router payload 或截图不能证明撤权成功/失败。
 - `AppStatusIndicator` 在 shell 中消费后端 app status projection；路由切换不能改变全局状态事实。

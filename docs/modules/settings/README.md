@@ -41,9 +41,9 @@
 设置模块维护平台级配置事实，不只是设置页 UI。当前边界包括：
 
 - 项目范围：OA 项目同步、手工项目、已完成项目、本地删除 override。
-- 访问控制：`/settings` 的“访问账户权限”是唯一人工入口；独立 admin-only `GET/PUT /api/workbench/settings/access-control` 维护其他账号的完整 `full_access` / `read_export_only` 列表，列表缺席派生为 `denied`。唯一 protected administrator `YNSYLP005` 固定且不可由 APP 修改，generic settings 与 Workbench modal 均无 ACL I/O。
-- 用户名合同：等值、去重和跨 tier overlap 使用共享 casefold comparison key；输出保留 OA `sys_user.user_name` canonical spelling，碰撞、控制字符、重复和 protected-admin 输入在 OA I/O 前拒绝。
-- 写入合同：专用 PUT 使用独立 `access_control_version` / `expected_version`、PostgreSQL CAS 和同事务 durable audit；semantic no-op 零 PostgreSQL/audit/OA I/O。真实变化严格投影三个专用 OA 角色，OA target、PostgreSQL commit 和补偿按明确的 502/503 状态收敛。
+- 访问控制：`/settings` 的“访问账户”是唯一人工入口；独立 admin-only `GET/PUT /api/workbench/settings/access-control` 维护普通账号的 `username + page_keys` 完整集合。列表缺席或空页面集合表示无权访问。唯一权限管理员 `YNSYLP005` 固定且不可由 APP 修改，generic settings 与 Workbench modal 均无 ACL I/O。
+- OA 用户合同：新增账户必须通过 OA `sys_user` 搜索取得 canonical username 和显示姓名；比较与去重使用共享 casefold key，碰撞、控制字符、重复、停用账号和 protected-admin 输入在 OA role 写入前拒绝。
+- 写入合同：专用 PUT 使用独立 `access_control_version` / `expected_version`、PostgreSQL CAS 和同事务 durable audit；semantic no-op 零 PostgreSQL/audit/OA I/O。真实变化只投影 `finops_app_user` 与 `finops_admin` 两个 OA 角色，OA target、PostgreSQL commit 和补偿按明确的 502/503 状态收敛。
 - 关联台设置：列布局、银行账户映射、OA 留存时间、OA 导入表单类型/状态过滤、OA 附件发票 promotion 模式、OA 发票抵扣申请人。
 - 业务规则：待找发票标签组、免 OA 和往来款标签选择；银行明细自动标签规则只读返回给 settings 页面作为候选事实，`AppSettingsService.update_settings(...)` 不暴露 `bank_transaction_tags` 写参数，写入只能走银行明细 `自动标签规则` 抽屉/API。
 - 成本统计规则：只保留 `cost_statistics_no_oa_projects`，保存多个虚拟项目及互斥标签归属，默认项目数组为空。旧 `cost_statistics_time_tag_selection` 已从 runtime normalization、持久化和公开 payload 删除。无 OA 候选资格和逐笔 active OA 保护由成本统计 owner 从 canonical 银行/OA 关系计算；设置 owner 只负责 schema、CAS、持久化和审计。

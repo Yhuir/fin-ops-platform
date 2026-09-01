@@ -1,5 +1,12 @@
 # 设置 实施记录
 
+## 2026-09-02 - 访问账户改为页面集合
+
+- 设置页访问账户采用 OA 用户搜索 + 账户列表 + 页面 checkbox 双栏；固定 005 只读展示为权限管理员，普通账号必须至少勾选一个页面后才能保存。
+- canonical payload 改为 `page_access_accounts` 与独立 version；旧账户层级字段只由一次性迁移读取，运行时、API 和 UI 不再提供兼容分支。
+- Settings 仍复用现有 state store/CAS/audit 和 OA role-sync transaction，不新增表、cache、read model、worker 或页面 fan-out。
+- 下方历史记录中的旧 ACL 层级表述仅代表当时实现，均由本节取代。
+
 ## 2026-08-31 - 删除成本统计 time/tag 设置 family
 
 - 成本统计已收敛为项目、费用类型、银行账户三个成本视图，不再提供原始银行按时间/标签视图。
@@ -43,7 +50,7 @@
 - settings 是高扇出配置域，不按单页 UI 维护。每次改动必须先判断是否影响项目范围、权限、业务规则、data reset、OA 凭据、read model、worker 或 App Status。
 - 普通 app settings 仍以 `ApplicationStateStore` 为事实源；OA 申请人凭据使用独立 secret repository，不能进入普通 settings payload。
 - 数据重置属于高风险运维操作：必须 admin-only、密码确认、protected targets、job progress、失败不泄密，并在重置后避免旧 read model/cache 被展示为 fresh。
-- 规则和标签保存不应同步重建所有下游页面，但必须产生明确 dirty/lifecycle fan-out，并由 App Status/下游页面呈现 stale 或 refreshing。
+- 访问账户保存只更新 canonical ACL、audit 和二元 OA 菜单角色，不生成 read-model dirty scope 或页面 fan-out。
 - 本模块页面级 Spec-first 状态为 `spec-first-covered`：本地测试覆盖 service/API/UI contract、data reset Browser 用户路径和项目范围到成本统计 fresh fan-out；真实 OA、真实生产 reset、真实 worker drain 和多页面最终 smoke 仍需 staging/生产前验证。
 
 ## 记录模板

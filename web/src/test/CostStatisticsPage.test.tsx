@@ -30,10 +30,9 @@ const defaultSession: SessionPayload = {
   },
   roles: ["fin_ops_user"],
   permissions: ["finops:app:view"],
-  accessTier: "full_access",
   canAccessApp: true,
-  canMutateData: true,
   canAdminAccess: false,
+  allowedPageKeys: ["cost-statistics"],
 };
 
 const staticSession: SessionContextValue = {
@@ -289,18 +288,11 @@ describe("Cost statistics page", () => {
     );
   });
 
-  test("read-export users can read and export but do not see the no-OA write entry", async () => {
-    installMockApiFetch({ sessionAccessTier: "read_export_only" });
-    renderPage({
-      ...staticSession,
-      session: {
-        ...defaultSession,
-        accessTier: "read_export_only",
-        canMutateData: false,
-      },
-    });
+  test("a user assigned to the page can read, export, and use its normal actions", async () => {
+    installMockApiFetch({ sessionRole: "user" });
+    renderPage();
     await waitUntilReady();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "无 OA 归集设置" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "无 OA 成本范围" })).toBeInTheDocument();
   });
 });

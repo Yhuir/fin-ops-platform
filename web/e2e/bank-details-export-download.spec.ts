@@ -10,7 +10,7 @@ import { readXlsxText } from "./fixtures/xlsx";
 test.describe("bank details export browser download", () => {
   test("downloads current filtered bank rows with confirmed relation fields", async ({ page }, testInfo) => {
     const diagnostics = startPageDiagnostics(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createOperationLatencyRecorder(page, testInfo, {
       route: "/bank-details",
       pageKey: "bank-details",

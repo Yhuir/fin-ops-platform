@@ -339,7 +339,7 @@ export default function CostStatisticsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("cost-statistics");
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const defaultMonthBounds = buildMonthDateBounds(DEFAULT_MONTH);
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
     pageKey: "cost-statistics",
@@ -472,14 +472,14 @@ export default function CostStatisticsPage() {
 
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
-      canMutateData,
+      canOperateData,
       onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
       onOpenSettings: () => navigate("/settings"),
     });
     return () => {
       setWorkbenchHeaderActions(null);
     };
-  }, [canMutateData, navigate, setWorkbenchHeaderActions]);
+  }, [canOperateData, navigate, setWorkbenchHeaderActions]);
 
   const activeScopeMode = viewMode === "project"
     ? projectScopeMode
@@ -1668,7 +1668,7 @@ export default function CostStatisticsPage() {
           {!isBankFlowView ? (
             <>
               <CostStatisticsManualAllocationDrawer
-                canSave={canMutateData && !interactionLocked}
+                canSave={canOperateData && !interactionLocked}
                 onSaved={handleManualRefresh}
               />
               <Button
@@ -2153,7 +2153,7 @@ export default function CostStatisticsPage() {
       />
 
       <CostStatisticsNoOaRulesDrawer
-        canSave={canMutateData && !interactionLocked && (noOaRules?.canSave ?? true)}
+        canSave={canOperateData && !interactionLocked && (noOaRules?.canSave ?? true)}
         error={noOaRulesError}
         interactionLocked={interactionLocked}
         loading={isNoOaRulesLoading}

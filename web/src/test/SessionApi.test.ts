@@ -29,10 +29,9 @@ describe("session api", () => {
           roles: ["finance"],
           permissions: ["finops:app:view"],
           allowed: true,
-          access_tier: "read_export_only",
           can_access_app: true,
-          can_mutate_data: false,
           can_admin_access: false,
+          allowed_page_keys: ["bank-details"],
         }),
         {
           status: 200,
@@ -55,10 +54,9 @@ describe("session api", () => {
     expect(requestHeaders?.get("Authorization")).toBe("Bearer mock-cookie-token");
     expect(payload.user.username).toBe("liuji");
     expect(payload.allowed).toBe(true);
-    expect(payload.accessTier).toBe("read_export_only");
     expect(payload.canAccessApp).toBe(true);
-    expect(payload.canMutateData).toBe(false);
     expect(payload.canAdminAccess).toBe(false);
+    expect(payload.allowedPageKeys).toEqual(["bank-details"]);
   });
 
   test("keeps OA roles and permission informational when the canonical session is denied", async () => {
@@ -68,13 +66,12 @@ describe("session api", () => {
         username: "YNSYLP006",
         display_name: "权限攻击样例",
       },
-      roles: ["finance", "business", "finops_full_access"],
+      roles: ["finance", "business", "finops_user"],
       permissions: ["finops:app:view"],
       allowed: false,
-      access_tier: "denied",
       can_access_app: false,
-      can_mutate_data: false,
       can_admin_access: false,
+      allowed_page_keys: [],
     }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -83,13 +80,12 @@ describe("session api", () => {
     const payload = await fetchSessionMe();
 
     expect(payload).toMatchObject({
-      roles: ["finance", "business", "finops_full_access"],
+      roles: ["finance", "business", "finops_user"],
       permissions: ["finops:app:view"],
       allowed: false,
-      accessTier: "denied",
       canAccessApp: false,
-      canMutateData: false,
       canAdminAccess: false,
+      allowedPageKeys: [],
     });
   });
 

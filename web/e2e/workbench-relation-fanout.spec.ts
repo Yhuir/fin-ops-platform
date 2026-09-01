@@ -8,7 +8,7 @@ import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 test.describe("workbench relation browser flow", () => {
   test("opens one OA invoice supplement drawer with invoice entry as the primary mode", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchOaInvoiceUnparsedScenario: true,
     });
 
@@ -41,7 +41,7 @@ test.describe("workbench relation browser flow", () => {
 
   test("aligns an explicitly owned bank fanout with its parent OA", async ({ page }) => {
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchExplicitBankFanoutScenario: true,
     });
 
@@ -84,7 +84,7 @@ test.describe("workbench relation browser flow", () => {
 
   test("aligns an exact daily reimbursement invoice while OA items remain selectable", async ({ page }) => {
     await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchOaExpenseItemsScenario: true,
     });
 
@@ -157,7 +157,7 @@ test.describe("workbench relation browser flow", () => {
 
   test("rereads CASE-AUTO-0185 and aligns both invoices by explicit OA-item ownership", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchInvoiceAssignmentScenario: true,
     });
 
@@ -267,7 +267,7 @@ test.describe("workbench relation browser flow", () => {
 
   test("confirms a relation in workbench and reflects it in bank details", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchConfirmPreviewDelayMs: 250,
     });
     const recordLatency = createOperationLatencyRecorder(page, testInfo, {

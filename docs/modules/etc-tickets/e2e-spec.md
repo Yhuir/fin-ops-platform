@@ -9,8 +9,8 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 ## 用户角色
 
 - `admin`：可读取、创建批次、上传 source file、创建 OA 草稿、人工确认、删除/reset 和查看运维入口。
-- `full_access`：可执行 ETC 业务批次日常写操作和读取批次状态。
-- `read_export_only`：可读取允许的 ETC 批次视图，不得创建草稿、确认提交、上传 source file、删除/reset 或触发 import mutation。
+- `page_authorized`：可读取 ETC 批次状态并执行页面内日常业务操作。
+- 未获本页授权：不能进入 ETC 页面或调用其读取、草稿、确认、上传、删除/reset、import API。
 - forbidden/expired session：不能进入受保护页面或调用受保护 API。
 
 ## Spec 场景

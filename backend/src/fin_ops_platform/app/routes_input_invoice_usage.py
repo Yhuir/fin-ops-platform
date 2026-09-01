@@ -204,11 +204,6 @@ class InputInvoiceUsageApiRoutes:
         )
         if auth_error is not None:
             return auth_error
-        if session is not None and not session.can_mutate_data:
-            return self._json_response(
-                HTTPStatus.FORBIDDEN,
-                {"error": "permission_denied", "message": "当前账户没有保存进项发票支付状态规则权限。"},
-            )
         payload, error = self._load_json_body(body)
         if error is not None:
             return error

@@ -3,7 +3,6 @@ import { describe, expect, test } from "vitest";
 import { resolveWorkbenchWriteGate } from "../features/workbench/writeGate";
 
 const writableInput = {
-  canMutateData: true,
   mutationsBlocked: false,
   directReadAvailable: true,
   oaSyncReachable: true,
@@ -21,7 +20,6 @@ describe("resolveWorkbenchWriteGate", () => {
   });
 
   test.each([
-    [{ canMutateData: false }, "read_only", "当前账号仅支持查看和导出"],
     [{ mutationsBlocked: true }, "system_unavailable", "登录已失效或系统不可用"],
     [{ directReadAvailable: false }, "direct_read_unavailable", "关联台读取失败"],
     [{ oaSyncReachable: false }, "oa_status_unavailable", "OA 同步状态读取失败"],
@@ -32,17 +30,6 @@ describe("resolveWorkbenchWriteGate", () => {
       reason,
       message: expect.stringContaining(message),
     });
-  });
-
-  test("keeps permission failures ahead of system and OA states", () => {
-    expect(resolveWorkbenchWriteGate({
-      ...writableInput,
-      canMutateData: false,
-      mutationsBlocked: true,
-      directReadAvailable: false,
-      oaSyncReachable: false,
-      oaSyncStatus: "refreshing",
-    }).reason).toBe("read_only");
   });
 
   test.each([

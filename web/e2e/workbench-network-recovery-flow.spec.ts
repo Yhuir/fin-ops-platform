@@ -75,7 +75,7 @@ async function openWithdrawRelationPreview(page: Page) {
 test.describe("workbench network recovery and duplicate submit browser flow", () => {
   test("recovers from a transient confirm-link network failure through the same preview", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchConfirmSubmitFailuresBeforeSuccess: 1,
     });
 
@@ -104,7 +104,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
 
   test("does not retry a stale confirm-link preview after a 409 conflict", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchConfirmSubmitConflict: true,
     });
 
@@ -127,7 +127,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
 
   test("prevents duplicate confirm-link submissions while the preview is submitting", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchConfirmSubmitDelayMs: 500,
     });
 
@@ -151,7 +151,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
 
   test("prevents duplicate withdraw-link submissions while the preview is submitting", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchWithdrawSubmitDelayMs: 500,
     });
 

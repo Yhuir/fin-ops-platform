@@ -83,7 +83,7 @@ type RelationGroupGridProps = {
     overKey: string,
     position: WorkbenchColumnDropPosition,
   ) => void;
-  canMutateData: boolean;
+  canOperateData: boolean;
   readOnly?: boolean;
   allowInvoiceEntryInReadOnly?: boolean;
   hidePaneHeaders?: boolean;
@@ -165,7 +165,7 @@ function RelationGroupGrid({
   onColumnFilterChange = () => undefined,
   onTogglePaneSort = () => undefined,
   onReorderPaneColumns = () => undefined,
-  canMutateData,
+  canOperateData,
   readOnly = false,
   allowInvoiceEntryInReadOnly = false,
   hidePaneHeaders = false,
@@ -206,7 +206,7 @@ function RelationGroupGrid({
       <div className="candidate-group-receipt-action">
         <Button
           aria-label={`${receiptAction.actionLabel} ${receiptAction.caseId}`}
-          isDisabled={!canMutateData || !onEditReceipt}
+          isDisabled={!canOperateData || !onEditReceipt}
           onPress={() => onEditReceipt?.(group)}
           size="sm"
           variant="primary"
@@ -215,7 +215,7 @@ function RelationGroupGrid({
         </Button>
       </div>
     );
-  }, [canMutateData, onEditReceipt]);
+  }, [canOperateData, onEditReceipt]);
   useLayoutEffect(() => {
     searchGenerationRef.current += 1;
     setExpandedPaneGroups(new Set());
@@ -411,7 +411,7 @@ function RelationGroupGrid({
     paneId: WorkbenchRecordType,
     columnKey: string,
   ) => {
-    if (!canMutateData || event.button !== 0) {
+    if (!canOperateData || event.button !== 0) {
       return;
     }
     event.preventDefault();
@@ -477,7 +477,7 @@ function RelationGroupGrid({
 
     document.addEventListener("pointermove", handlePointerMove);
     document.addEventListener("pointerup", handlePointerUp);
-  }, [canMutateData, clearDragClasses, onReorderPaneColumns]);
+  }, [canOperateData, clearDragClasses, onReorderPaneColumns]);
 
   const gridBody = useMemo(() => (
     <div ref={gridBodyRef} className="candidate-grid-body" role="rowgroup">
@@ -612,7 +612,7 @@ function RelationGroupGrid({
                           scrollPaneId={paneId}
                           scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${segment.id}-${pane.id}`}
                           showWorkflowActions={zoneId !== "unpaired"}
-                          canMutateData={canMutateData}
+                          canOperateData={canOperateData}
                           readOnly={readOnly}
                           allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
                           zoneId={zoneId}
@@ -653,7 +653,7 @@ function RelationGroupGrid({
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
                       showWorkflowActions={zoneId !== "unpaired"}
-                      canMutateData={canMutateData}
+                      canOperateData={canOperateData}
                       readOnly={readOnly}
                       allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
                       zoneId={zoneId}
@@ -746,7 +746,7 @@ function RelationGroupGrid({
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
                       showWorkflowActions={zoneId !== "unpaired"}
-                      canMutateData={canMutateData}
+                      canOperateData={canOperateData}
                       readOnly={readOnly}
                       allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
                       zoneId={zoneId}
@@ -794,7 +794,7 @@ function RelationGroupGrid({
     </div>
   ), [
     allowInvoiceEntryInReadOnly,
-    canMutateData,
+    canOperateData,
     columnsByPane,
     displayState,
     expandedPaneGroups,
@@ -880,7 +880,7 @@ function RelationGroupGrid({
                         <button
                           aria-label={`拖动 ${column.label} 列`}
                           className="column-drag-handle"
-                          disabled={!canMutateData}
+                          disabled={!canOperateData}
                           type="button"
                           onPointerDown={(event) => handleStartColumnDrag(event, pane.id, column.key)}
                         >

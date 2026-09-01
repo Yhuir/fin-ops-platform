@@ -63,7 +63,7 @@ test.describe("app shell responsive browser smoke", () => {
 
   test("opens the compact navigation drawer and closes it after route navigation", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createAppShellLatencyRecorder(page, testInfo);
 
     await recordLatency({
@@ -172,7 +172,7 @@ test.describe("app shell responsive browser smoke", () => {
 
   test("keeps embedded OA shell collapsed but expandable on desktop", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createAppShellLatencyRecorder(page, testInfo);
 
     await recordLatency({

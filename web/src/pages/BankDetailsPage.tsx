@@ -986,7 +986,7 @@ function TypeCell({
   row,
   autoTagRules,
   confirming,
-  canMutateData,
+  canOperateData,
   onConfirm,
   onAssign,
   onRevoke,
@@ -995,7 +995,7 @@ function TypeCell({
   row: BankDetailTransaction;
   autoTagRules: BankAutoTagEditableRule[];
   confirming: boolean;
-  canMutateData: boolean;
+  canOperateData: boolean;
   onConfirm: (row: BankDetailTransaction, choice: ConfirmationChoice) => Promise<void>;
   onAssign: (row: BankDetailTransaction, choice: ConfirmationChoice) => Promise<void>;
   onRevoke: (row: BankDetailTransaction) => void;
@@ -1118,7 +1118,7 @@ function TypeCell({
   }, [anchorEl, updateConfirmationPanelPosition]);
 
   const closeConfirmationPanel = () => {
-    if (!canMutateData || confirming) {
+    if (!canOperateData || confirming) {
       return;
     }
     setAnchorEl(null);
@@ -1126,13 +1126,13 @@ function TypeCell({
     setStagedChoice(null);
   };
   const stageChoice = (choice: ConfirmationChoice) => {
-    if (!canMutateData || confirming) {
+    if (!canOperateData || confirming) {
       return;
     }
     setStagedChoice(choice);
   };
   const saveStagedChoice = () => {
-    if (!canMutateData || !stagedChoice || confirming) {
+    if (!canOperateData || !stagedChoice || confirming) {
       return;
     }
     const choice = stagedChoice;
@@ -1312,7 +1312,7 @@ function TypeCell({
             <button
               className="bank-category-confirmation-save"
               onClick={saveStagedChoice}
-              disabled={!canMutateData || !stagedChoice || confirming}
+              disabled={!canOperateData || !stagedChoice || confirming}
               type="button"
             >
               {confirming ? "保存中" : "保存"}
@@ -1323,7 +1323,7 @@ function TypeCell({
       document.body,
     ) : null;
     const openSelection = (event: MouseEvent<HTMLButtonElement>) => {
-      if (canMutateData && !confirming) {
+      if (canOperateData && !confirming) {
         setAnchorEl(event.currentTarget);
         updateConfirmationPanelPosition(event.currentTarget);
       }
@@ -1337,7 +1337,7 @@ function TypeCell({
             aria-expanded={anchorEl ? "true" : undefined}
             aria-haspopup="menu"
             className="bank-manual-category-revoke"
-            disabled={!canMutateData || confirming}
+            disabled={!canOperateData || confirming}
             onClick={openSelection}
             type="button"
           >
@@ -1355,9 +1355,9 @@ function TypeCell({
           aria-haspopup="menu"
           className="bank-category-confirmation-trigger"
           onClick={openSelection}
-          aria-disabled={!canMutateData || confirming ? "true" : undefined}
+          aria-disabled={!canOperateData || confirming ? "true" : undefined}
           data-tone={confirmationGroups.length > 0 ? "warning" : "info"}
-          disabled={!canMutateData || confirming}
+          disabled={!canOperateData || confirming}
           type="button"
         >
           {triggerLabel}
@@ -1382,7 +1382,7 @@ function TypeCell({
           type="button"
           className="bank-manual-category-revoke"
           onClick={() => {
-            if (!canMutateData) {
+            if (!canOperateData) {
               return;
             }
             if (row.effectiveCategorySource === "manual") {
@@ -1391,7 +1391,7 @@ function TypeCell({
               onRevoke(row);
             }
           }}
-          disabled={!canMutateData || confirming}
+          disabled={!canOperateData || confirming}
         >
           撤销
         </button>
@@ -1412,7 +1412,7 @@ function BankTextCell({ value }: { value: string }) {
 export default function BankDetailsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const selectedAccountSession = usePageSessionState<string | null>({
     pageKey: "bank-details",
     stateKey: "selectedAccountKey",
@@ -2343,7 +2343,7 @@ export default function BankDetailsPage() {
                             row={row}
                             autoTagRules={activeAutoTagRules}
                             confirming={categoryMutationId === row.id}
-                            canMutateData={canMutateData}
+                            canOperateData={canOperateData}
                             onConfirm={handleConfirmCategory}
                             onAssign={handleAssignCategory}
                             onRevoke={handleRevokeCategoryConfirmation}
@@ -2401,7 +2401,7 @@ export default function BankDetailsPage() {
         open={rulesDrawerOpen}
         onClose={() => setRulesDrawerOpen(false)}
         onSaved={() => undefined}
-        canMutateData={canMutateData}
+        canOperateData={canOperateData}
         saveAutoTagRules={saveAutoTagRulesWithRefresh}
         reapplyAutoTagRules={reapplyAutoTagRulesWithRefresh}
       />

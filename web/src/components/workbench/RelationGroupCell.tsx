@@ -24,7 +24,7 @@ type RelationGroupCellProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
-  canMutateData: boolean;
+  canOperateData: boolean;
   readOnly?: boolean;
   allowInvoiceEntryInReadOnly?: boolean;
   leadingControl?: ReactNode;
@@ -45,7 +45,7 @@ function RelationGroupCell({
   onOpenDetail,
   onRowAction,
   showWorkflowActions,
-  canMutateData,
+  canOperateData,
   readOnly = false,
   allowInvoiceEntryInReadOnly = false,
   leadingControl,
@@ -90,7 +90,7 @@ function RelationGroupCell({
             sheetRowMode={isSingleRecord ? "stretched" : "split"}
             leadingControl={index === 0 ? leadingControl : undefined}
             showWorkflowActions={showWorkflowActions}
-            canMutateData={canMutateData}
+            canOperateData={canOperateData}
             readOnly={readOnly}
             allowInvoiceEntryInReadOnly={allowInvoiceEntryInReadOnly}
             zoneId={zoneId}

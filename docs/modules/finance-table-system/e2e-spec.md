@@ -6,8 +6,8 @@
 
 ## 用户角色
 
-- `admin` / `full_access`：可以使用页面允许的表格操作、筛选、排序、分页、详情、导出和写入口。
-- `read_export_only`：可以读取和导出允许的数据，但写入口必须隐藏或禁用。
+- `page_authorized` / `admin`：可以使用获权页面允许的表格操作、筛选、排序、分页、详情、导出和写入口。
+- 未获页面授权：不能渲染该页表格，也不能调用对应 API。
 - forbidden / expired session：不能渲染受保护表格或触发 protected API。
 
 ## Spec ID
@@ -35,7 +35,7 @@
 
 ## 权限规则
 
-- `read_export_only` 可以读取/导出允许数据，但写入口隐藏或禁用，mutation endpoint 零调用。
+- 未获页面授权时页面表格不渲染，读取与 mutation endpoint 均为零调用。
 - admin-only 表格或运维表格必须由 `app-health-operations` / `permissions-and-audit` 保护。
 - forbidden/expired session 不触发表格 protected API。
 

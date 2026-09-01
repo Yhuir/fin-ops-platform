@@ -38,7 +38,7 @@
 ## BA-E2E-006 权限
 
 - 读取权限允许查看页面。
-- `read_export_only` 等无业务写权限 session 不显示或禁用 submit/withdraw，并且不得发出写请求。
+- 未获批量账务页面授权的 session 不能进入页面，也不得发出 submit/withdraw 请求；获权页面仍受系统健康状态的 write-safety 约束。
 
 ## BA-E2E-007 页面韧性与布局
 

@@ -1,20 +1,12 @@
-import { Trash2 } from "lucide-react";
+import { Button, Checkbox, Input } from "@heroui/react";
+import { Search, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { WorkbenchAccessRole } from "../../features/workbench/types";
-import {
-  FinanceTable,
-  FinanceTableBody,
-  FinanceTableCell,
-  FinanceTableColumn,
-  FinanceTableHeader,
-  FinanceTableRow,
-} from "../common/FinanceTable";
+import { assignablePageOptions } from "../../app/pageRegistry";
+import type { WorkbenchAccessUser } from "../../features/workbench/types";
 import type { SettingsAccessAccountsSectionProps } from "./types";
 
-const ACCESS_ROLE_OPTIONS: Array<{ value: WorkbenchAccessRole; label: string }> = [
-  { value: "full_access", label: "所有操作均可" },
-  { value: "read_export_only", label: "只可看和只可导出" },
-];
+const OA_SEARCH_DELAY_MS = 250;
 
 export default function SettingsAccessAccountsSection({
   controlsDisabled,
@@ -24,164 +16,174 @@ export default function SettingsAccessAccountsSection({
   isSaving,
   status,
   validationMessage,
-  accessUsernameDraft,
-  accessRoleDraft,
-  canAddAccessAccount,
-  onChangeAccessUsernameDraft,
-  onChangeAccessRoleDraft,
   onAddAccessAccount,
+  onSearchAccessUsers,
   onUpdateManagedAccessAccount,
   onDeleteManagedAccessAccount,
   onSave,
 }: SettingsAccessAccountsSectionProps) {
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<WorkbenchAccessUser[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  const selectedAccount = managedAccessAccounts.find((account) => account.id === selectedAccountId)
+    ?? managedAccessAccounts[0]
+    ?? null;
+
+  useEffect(() => {
+    if (selectedAccountId && managedAccessAccounts.some((account) => account.id === selectedAccountId)) return;
+    setSelectedAccountId(managedAccessAccounts[0]?.id ?? null);
+  }, [managedAccessAccounts, selectedAccountId]);
+
+  useEffect(() => {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      setResults([]);
+      setSearchError(null);
+      setIsSearching(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setIsSearching(true);
+      setSearchError(null);
+      onSearchAccessUsers(normalizedQuery, controller.signal)
+        .then((users) => {
+          if (controller.signal.aborted) return;
+          const existing = new Set(managedAccessAccounts.map((account) => account.username));
+          setResults(users.filter((user) => !existing.has(user.username) && user.username !== administrator?.username));
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setResults([]);
+            setSearchError("OA 账户查询失败，请稍后重试。");
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIsSearching(false);
+        });
+    }, OA_SEARCH_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [administrator?.username, managedAccessAccounts, onSearchAccessUsers, query]);
+
+  const pageGroups = useMemo(() => [
+    { key: "finance", label: "财务业务", pages: assignablePageOptions.filter((page) => page.group === "finance") },
+    { key: "system", label: "系统操作", pages: assignablePageOptions.filter((page) => page.group === "system") },
+  ], []);
+
+  const updateSelectedPages = (pageKeys: string[]) => {
+    if (!selectedAccount) return;
+    onUpdateManagedAccessAccount(selectedAccount.id, (account) => ({
+      ...account,
+      pageKeys: [...new Set(pageKeys)].sort(),
+    }));
+  };
+
+  const addUser = (user: WorkbenchAccessUser) => {
+    if (!user.active || controlsDisabled) return;
+    onAddAccessAccount(user);
+    setSelectedAccountId(`access-${user.username}`);
+    setQuery("");
+    setResults([]);
+  };
+
   return (
-    <section
-      aria-labelledby="settings-section-access-accounts-title"
-      className="settings-section-panel"
-      id="settings-section-access-accounts"
-      role="region"
-    >
-      <header className="settings-section-header">
-        <h3 id="settings-section-access-accounts-title">访问账户管理</h3>
+    <section aria-labelledby="settings-section-access-accounts-title" className="settings-section-panel settings-access-section" id="settings-section-access-accounts" role="region">
+      <header className="settings-section-header settings-access-header">
+        <div>
+          <h3 id="settings-section-access-accounts-title">访问账户</h3>
+          <p>为每个 OA 账户选择可进入的页面。页面内操作按原业务规则执行。</p>
+        </div>
+        <div className="settings-access-admin-inline" aria-label="权限管理员">
+          <ShieldCheck aria-hidden="true" size={16} />
+          <span><strong>{administrator?.username ?? "005"}</strong><small>{administrator?.displayName || "权限管理员"}</small></span>
+        </div>
       </header>
-      <div className="settings-section-body">
-        <div className="settings-access-admin-note" role="status">
-          <strong>权限管理员</strong>
-          <div className="settings-access-admin-list">
-            <span>{administrator?.username ?? "正在加载..."}</span>
-          </div>
-          <small>管理员为受保护账户，不可在 APP 内修改。</small>
-        </div>
 
-        {status ? (
-          <div
-            className={`settings-inline-alert settings-inline-alert--${status.tone}`}
-            role={status.tone === "error" ? "alert" : "status"}
-          >
-            {status.message}
-          </div>
-        ) : null}
-        {validationMessage ? (
-          <div className="settings-inline-alert settings-inline-alert--error" role="alert">
-            {validationMessage}
-          </div>
-        ) : null}
-        {isLoading ? (
-          <div className="settings-inline-alert settings-inline-alert--info" role="status">
-            正在加载访问账户...
-          </div>
-        ) : null}
+      {status ? <div className={`settings-inline-alert settings-inline-alert--${status.tone}`} role={status.tone === "error" ? "alert" : "status"}>{status.message}</div> : null}
+      {validationMessage ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{validationMessage}</div> : null}
+      {isLoading ? <div className="settings-inline-alert settings-inline-alert--info" role="status">正在加载访问账户...</div> : null}
 
-        <div className="settings-access-form">
-          <label className="settings-field">
-            <span>新增访问账户</span>
-            <input
-              disabled={controlsDisabled}
-              type="text"
-              value={accessUsernameDraft}
-              onChange={(event) => onChangeAccessUsernameDraft(event.currentTarget.value)}
-            />
-          </label>
-          <label className="settings-field">
-            <span>新增账户权限</span>
-            <select
-              aria-label="新增账户权限"
-              className="settings-select-control"
-              disabled={controlsDisabled}
-              value={accessRoleDraft}
-              onChange={(event) => onChangeAccessRoleDraft(event.currentTarget.value as WorkbenchAccessRole)}
-            >
-              {ACCESS_ROLE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+      <div className="settings-access-workspace">
+        <aside className="settings-access-account-pane" aria-label="账户列表">
+          <div className="settings-access-search">
+            <Search aria-hidden="true" size={15} />
+            <Input aria-label="搜索 OA 账户" disabled={controlsDisabled} placeholder="输入账户或姓名" type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </div>
+          {query.trim() ? (
+            <div className="settings-access-search-results" role="listbox" aria-label="OA 账户搜索结果">
+              {isSearching ? <span className="settings-access-search-state">正在查询 OA...</span> : null}
+              {!isSearching && searchError ? <span className="settings-access-search-state settings-access-search-state--error">{searchError}</span> : null}
+              {!isSearching && !searchError && results.length === 0 ? <span className="settings-access-search-state">未找到可新增的有效账户</span> : null}
+              {results.map((user) => (
+                <button key={user.username} aria-label={`新增账户 ${user.username}`} className="settings-access-search-result" disabled={!user.active || controlsDisabled} role="option" type="button" onClick={() => addUser(user)}>
+                  <UserPlus aria-hidden="true" size={15} />
+                  <span><strong>{user.username}</strong><small>{user.displayName || "未设置姓名"}</small></span>
+                  {!user.active ? <em>已停用</em> : null}
+                </button>
               ))}
-            </select>
-          </label>
-          <button
-            className="settings-primary-button"
-            disabled={!canAddAccessAccount || controlsDisabled}
-            type="button"
-            onClick={onAddAccessAccount}
-          >
-            新增账户
-          </button>
-        </div>
+            </div>
+          ) : null}
 
-        {managedAccessAccounts.length === 0 ? (
-          <div className="settings-inline-alert settings-inline-alert--info" role="status">
-            当前没有单独配置的可访问 OA 账户。
+          <div className="settings-access-account-list">
+            {managedAccessAccounts.length === 0 ? <div className="settings-access-empty">搜索 OA 账户并添加，然后在右侧选择页面。</div> : managedAccessAccounts.map((account) => (
+              <div key={account.id} className={`settings-access-account-row${selectedAccount?.id === account.id ? " is-selected" : ""}`}>
+                <button type="button" className="settings-access-account-select" onClick={() => setSelectedAccountId(account.id)}>
+                  <strong>{account.username}</strong>
+                  <small>{account.displayName || "OA 未返回姓名"}</small>
+                  <span>{account.pageKeys.length} 个页面{account.oaStatus !== "active" ? " · OA 状态异常" : ""}</span>
+                </button>
+                <Button aria-label={`删除账户 ${account.username}`} className="settings-access-delete" isDisabled={controlsDisabled} isIconOnly size="sm" variant="tertiary" onPress={() => onDeleteManagedAccessAccount(account.id)}>
+                  <Trash2 aria-hidden="true" size={15} />
+                </Button>
+              </div>
+            ))}
           </div>
-        ) : (
-          <div className="settings-native-table-shell">
-            <FinanceTable ariaLabel="访问账户" className="settings-native-table" minWidth={560}>
-              <FinanceTableHeader>
-                <FinanceTableColumn id="account" isRowHeader columnRole="identity">账户</FinanceTableColumn>
-                <FinanceTableColumn id="role" columnRole="status">权限级别</FinanceTableColumn>
-                <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
-              </FinanceTableHeader>
-              <FinanceTableBody>
-                {managedAccessAccounts.map((account) => (
-                  <FinanceTableRow id={account.id} key={account.id}>
-                    <FinanceTableCell columnRole="identity">
-                      <input
-                        aria-label={`${account.username} 账户`}
-                        className="settings-table-input"
-                        disabled={controlsDisabled}
-                        type="text"
-                        value={account.username}
-                        onChange={(event) => {
-                          const username = event.currentTarget.value;
-                          onUpdateManagedAccessAccount(account.id, (current) => ({
-                            ...current,
-                            username,
-                          }));
-                        }}
-                      />
-                    </FinanceTableCell>
-                    <FinanceTableCell columnRole="status">
-                      <select
-                        aria-label={`${account.username} 权限级别`}
-                        className="settings-select-control settings-table-select"
-                        disabled={controlsDisabled}
-                        value={account.role}
-                        onChange={(event) => {
-                          const role = event.currentTarget.value as WorkbenchAccessRole;
-                          onUpdateManagedAccessAccount(account.id, (current) => ({
-                            ...current,
-                            role,
-                          }));
-                        }}
-                      >
-                        {ACCESS_ROLE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </FinanceTableCell>
-                    <FinanceTableCell columnRole="action">
-                      <button
-                        aria-label={`${account.username} 删除`}
-                        className="settings-icon-button settings-icon-button--danger"
-                        disabled={controlsDisabled}
-                        type="button"
-                        onClick={() => onDeleteManagedAccessAccount(account.id)}
-                      >
-                        <Trash2 aria-hidden="true" size={16} />
-                      </button>
-                    </FinanceTableCell>
-                  </FinanceTableRow>
+        </aside>
+
+        <div className="settings-access-page-pane" aria-label="页面访问权限">
+          {selectedAccount ? (
+            <>
+              <div className="settings-access-page-toolbar">
+                <div><strong>{selectedAccount.username}</strong><span>可访问页面</span></div>
+                <div>
+                  <Button isDisabled={controlsDisabled} size="sm" variant="tertiary" onPress={() => updateSelectedPages(assignablePageOptions.map((page) => page.pageKey))}>全选</Button>
+                  <Button isDisabled={controlsDisabled} size="sm" variant="tertiary" onPress={() => updateSelectedPages([])}>清空</Button>
+                </div>
+              </div>
+              <div className="settings-access-page-groups">
+                {pageGroups.map((group) => (
+                  <section key={group.key} className="settings-access-page-group" aria-labelledby={`settings-access-group-${group.key}`}>
+                    <h4 id={`settings-access-group-${group.key}`}>{group.label}<span>{group.pages.filter((page) => selectedAccount.pageKeys.includes(page.pageKey)).length}/{group.pages.length}</span></h4>
+                    <div className="settings-access-page-list">
+                      {group.pages.map((page) => {
+                        const selected = selectedAccount.pageKeys.includes(page.pageKey);
+                        return (
+                          <Checkbox key={page.pageKey} className="settings-access-page-checkbox" isDisabled={controlsDisabled} isSelected={selected} slot={null} onChange={() => updateSelectedPages(selected ? selectedAccount.pageKeys.filter((key) => key !== page.pageKey) : [...selectedAccount.pageKeys, page.pageKey])}>
+                            <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>{page.label}</span>
+                          </Checkbox>
+                        );
+                      })}
+                    </div>
+                  </section>
                 ))}
-              </FinanceTableBody>
-            </FinanceTable>
-          </div>
-        )}
-        <button
-          className="settings-primary-button"
-          disabled={controlsDisabled || isLoading || isSaving || validationMessage !== null}
-          type="button"
-          onClick={onSave}
-        >
-          {isSaving ? "保存中..." : "保存访问账户"}
-        </button>
+              </div>
+            </>
+          ) : <div className="settings-access-page-empty">从左侧新增或选择一个账户。</div>}
+        </div>
       </div>
+
+      <footer className="settings-access-footer">
+        <span>005 为固定权限管理员，自动拥有全部页面且不可删除。</span>
+        <Button isDisabled={controlsDisabled || isLoading || isSaving || validationMessage !== null} isPending={isSaving} variant="primary" onPress={() => void onSave()}>
+          {isSaving ? "保存中..." : "保存访问权限"}
+        </Button>
+      </footer>
     </section>
   );
 }

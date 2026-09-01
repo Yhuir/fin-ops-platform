@@ -58,7 +58,7 @@ test.describe("pending invoices rules save browser flow", () => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceRulesSaveFlow: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
@@ -130,7 +130,7 @@ test.describe("pending invoices rules save browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceRulesSaveFailuresBeforeSuccess: 1,
       pendingInvoiceRulesSaveFlow: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 

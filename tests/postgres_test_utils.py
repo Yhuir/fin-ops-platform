@@ -176,6 +176,7 @@ EXPECTED_MIGRATION_FILES = [
     "0162_cost_statistics_unit_manual_allocations.sql",
     "0163_workbench_relation_receipts.sql",
     "0164_manual_bank_entry_audit_contract.sql",
+    "0165_page_access_accounts.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging")
 TEST_TABLES = (

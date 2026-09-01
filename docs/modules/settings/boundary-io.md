@@ -27,7 +27,7 @@
 - 不直接执行业务导入或 read model projection。
 - 不在前端保存敏感凭证。
 - 不绕过数据安全 reset service。
-- 不判定 APP tier；permissions-and-audit 拥有 evaluator，OA integration 只消费完整 normalized ACL snapshot。历史 menu binding cleanup 已完成并退休，稳态部署只断言严格拓扑，不再提供 cleanup/rollback 写路径。
+- 不判定 APP page set；permissions-and-audit 拥有 evaluator，OA integration 只消费完整 normalized ACL snapshot。历史 menu binding cleanup 已完成并退休，稳态部署只断言严格拓扑，不再提供 cleanup/rollback 写路径。
 
 ## 输入 I/O
 
@@ -35,9 +35,10 @@
 | --- | --- | --- |
 | 设置表单 | `SettingsPage.tsx`、`components/settings/*` | API 负责校验和权限 |
 | 普通 settings GET/POST | Settings page、Workbench 列布局等既有 caller | 不读取、返回或写 ACL；任一历史 ACL key 明确 `400 access_control_write_forbidden` |
-| ACL GET/PUT | 仅 `YNSYLP005` 的后端 admin session | GET 返回完整 snapshot；PUT 只接受正整数 `expected_version` 与完整 `accounts[]`，tier 仅 `full_access\|read_export_only`，列表缺席表示 denied |
+| ACL GET/PUT | 仅 `YNSYLP005` 的后端 admin session | GET 返回完整 snapshot 和 OA 名称/状态；PUT 只接受正整数 `expected_version` 与完整 `accounts[{username,page_keys}]`，page key 必须来自 17 个可分配页面，账号缺席表示 denied |
+| OA 账户搜索 | 仅 `YNSYLP005` 的 `GET /api/workbench/settings/access-control/users` | 从 OA `sys_user` 按账号或姓名有界查询；只返回 username、display_name、active，不返回凭据 |
 | OA 草稿预填 GET/PUT | ETC 票据、进项发票使用页面 | 两个独立 family 均允许已授权账号读取，只有 admin 可保存；PUT 只接受 `expected_version + configuration`，校验 OA 真实枚举 code、项目和申请事由模板 token |
-| OA canonical username | normalized ACL snapshot / OA `sys_user.user_name` | 共享 casefold key 负责比较与去重并保留 canonical spelling；collision、跨 tier overlap、控制字符和 protected admin 输入在 OA I/O 前失败 |
+| OA canonical username | normalized ACL snapshot / OA `sys_user.user_name` | 共享 casefold key 负责比较与去重并保留 canonical spelling；collision、重复、控制字符和 protected admin 输入在 OA I/O 前失败 |
 | OA credentials | settings/OA credential API | secret 不进入日志 |
 | OA 精确附件刷新 | `POST /api/workbench/settings/oa/manual-search/refresh-attachments` | mutation gate 后只把 canonical completed row IDs 或 canonical `in_progress + expense_claim` row IDs 登记为现有 `oa.sync(operation=refresh_attachments)` durable event；Settings route 不访问 Mongo、不执行 OCR/promotion、不以旧 projection 返回成功。当前 UI 保留所有 completed OA 的刷新动作，并只对 `in_progress + expense_claim` 扩展刷新；该能力不得复用 `can_import`。 |
 | 数据重置 preview/request | settings data reset dialogs | preview 只返回服务端 count/fingerprint 与恢复凭证状态。request 必须携带原因、同一 fingerprint/receipt、稳定 `idempotency_key` 并通过同身份 OA 登录复核；生产 PostgreSQL 在同一事务消费 receipt、写 job、durable outbox 与 queued audit，禁止 route 先存 job 再单独入队。 |
@@ -52,7 +53,7 @@
 | 设置 payload/result | 前端页面 | 不泄露 secret |
 | ACL result | Settings ACL UI、permissions evaluator | `{administrator, version, accounts}`；no-op 为 `changed=false`，stale 为 `409 current_version`，不提供兼容 payload |
 | Durable ACL audit | `audit.events` | 与 canonical ACL/version 同一 PostgreSQL transaction；记录 session actor、server request id、mutation/version 与 changed username hashes，不记录 token 或完整 ACL payload |
-| OA target / compensation | `OARoleSyncService` | 只替换三个专用角色 members；目标失败 502 且零 app write，PG 失败最多一次恢复旧 snapshot，无法确认则 503 inconsistent |
+| OA target / compensation | `OARoleSyncService` | 只替换 `finops_app_user` 与 `finops_admin` 两个专用角色 members；目标失败 502 且零 app write，PG 失败最多一次恢复旧 snapshot，无法确认则 503 inconsistent |
 | Reset job | process-owned `BackgroundJobService` / app health | 可查询、可恢复；OA reset 的 runtime service reload 必须复用同一 background-job owner，禁止在任务执行中替换实例、双写同一 job store 或把当前任务误标为进程重启中断。只有应用进程首次启动/真正重启才创建 owner 并执行 interrupted-job recovery。job `completed` 只证明清理和 durable lifecycle 登记完成；OA `rebuild_status` 在下游 fresh 前必须是 `pending`。 |
 | Affected scope/version | 调用页面 | 普通保存只返回业务 version 和信息性 affected scopes；不写页面 refresh queue |
 | OA manual import / attachment refresh result | 设置页 | manual import 仍只允许 `completed` 且 `can_import=true` 的 OA，并返回精确 affected scopes；附件刷新是独立能力，POST 返回 202/event id，GET 返回受控 durable status，只有 `done` 才含逐 row 计数、promotion summary 和 affected scopes。页面随后必须用 exact row ID、原 form type、`statuses=completed,in_progress` 和 `page_size=2` 回读，并同时要求 `total=1` 与 row ID 唯一命中；0/多条均 fail closed。`in_progress` 日常报销只显示“附件已解析，待 OA 完成后进入统一发票池”，不得启用正式导入。`freshness_targets` 与 `operation_barrier_targets` 为空；后续业务页面 normal GET 读取 canonical facts。 |
@@ -94,7 +95,7 @@
 
 - 允许依赖：settings/data reset service、credential repository、background job service 和 normalized ACL 的 OA role-sync port。
 - 必须通过：普通 settings service、专用 ACL command/CAS critical section 和 explicit reset job API；permissions evaluator 只通过 Settings snapshot provider 读取 ACL。
-- 禁止绕过：generic settings/Workbench modal/OA 管理后台新增 ACL 写入口；OA role/permission/env 反向授予 APP tier；前端直接保存 secret；settings API 直接清库、直接写/同步查询 read model、调用 Workbench 全页 builder 或自行/重复入队 matching dirty scope。精确 `refresh-attachments` 只登记 OA integration owner 的 existing durable operation；不得恢复 HTTP Mongo/OCR/promoter、动态能力探测或旧 projection success fallback。
+- 禁止绕过：generic settings/Workbench modal/OA 管理后台新增 ACL 写入口；OA role/permission/env 反向授予 APP 页面权限；前端直接保存 secret；settings API 直接清库、直接写/同步查询 read model、调用 Workbench 全页 builder 或自行/重复入队 matching dirty scope。精确 `refresh-attachments` 只登记 OA integration owner 的 existing durable operation；不得恢复 HTTP Mongo/OCR/promoter、动态能力探测或旧 projection success fallback。
 
 ## 测试与验证
 
@@ -125,10 +126,10 @@
 
 ## Access control canonical I/O
 
-- Input：generic settings 只接受普通设置 DTO；历史 ACL keys 一律 `400`。专用 ACL command 只接受 admin session、`expected_version` 和其他账户的 full/read 列表。
+- Input：generic settings 只接受普通设置 DTO；历史 ACL keys 一律 `400`。专用 ACL command 只接受 admin session、`expected_version` 和其他账户的 `username + page_keys` 列表。
 - Output：generic settings 不返回 ACL。专用 GET/PUT 返回固定 `administrator=YNSYLP005`、`version`、`accounts`，冲突返回 `409 current_version`。
 - Persistence：`app.app_settings` 是 canonical singleton；repository 在 shared advisory lock 和同一 PostgreSQL transaction 内只合并 ACL family、递增 `access_control_version` 并写 `audit.events`。migration `0133` 把 `allowed_usernames` 固定为 protected admin → full-access → readonly 的精确顺序，并以 validated CHECK 和 raw mirror 作为回滚安全底线。
-- Dependency direction：route 只做 HTTP/auth 映射；`AppSettingsService` 拥有 normalize/OA target/compensation 编排；repository 拥有 row lock/SQL/audit；permissions 只解析 identity/判定 tier；OA integration 只消费完整 normalized snapshot。
+- Dependency direction：route 只做 HTTP/auth 映射；`AppSettingsService` 拥有 normalize/OA target/compensation 编排；repository 拥有 row lock/SQL/audit；permissions 只解析 identity/判定 page set；OA integration 只消费完整 normalized snapshot。
 - Old code deletion：generic route/service/client/modal/column save/pending replay 不得携带 ACL；`dynamic_admin_usernames_provider`、`get_admin_usernames`、运行时 `FIN_OPS_ADMIN_USERNAMES` 和可写 admin tier 保持删除。不得新增兼容 fallback 或第二写入口。
 - 本变更不新增 read model、worker、dirty scope、outbox、cache 或其他页面 response 字段。
 

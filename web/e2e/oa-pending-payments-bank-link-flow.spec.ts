@@ -75,7 +75,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentBankLinkDelayMs: 300,
       oaPendingPaymentBankLinkFlow: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
 
@@ -201,7 +201,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       oaPendingPaymentBankLinkError: true,
       oaPendingPaymentBankLinkFlow: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createOaPendingLatencyRecorder(page, testInfo);
 

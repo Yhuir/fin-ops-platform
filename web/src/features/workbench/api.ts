@@ -49,6 +49,7 @@ import type {
   OaApplicantCredentialSummary,
   SaveOaApplicantCredentialRequest,
   WorkbenchAccessControl,
+  WorkbenchAccessUser,
   WorkbenchInvoiceExpenseItemAssignmentPayload,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
@@ -396,12 +397,22 @@ type ApiWorkbenchAccessControl = {
   version: number;
   administrator: {
     username: string;
-    access_tier: "admin";
+    display_name?: string;
     protected: true;
   };
   accounts: Array<{
     username: string;
-    access_tier: "full_access" | "read_export_only";
+    display_name?: string;
+    oa_status?: "active" | "inactive" | "missing";
+    page_keys: string[];
+  }>;
+};
+
+type ApiWorkbenchAccessUserList = {
+  users: Array<{
+    username: string;
+    display_name?: string;
+    active?: boolean;
   }>;
 };
 
@@ -3049,12 +3060,14 @@ function mapWorkbenchAccessControl(payload: ApiWorkbenchAccessControl): Workbenc
     version: payload.version,
     administrator: {
       username: payload.administrator.username,
-      accessTier: payload.administrator.access_tier,
+      displayName: payload.administrator.display_name ?? "",
       protected: payload.administrator.protected,
     },
     accounts: payload.accounts.map((account) => ({
       username: account.username,
-      accessTier: account.access_tier,
+      displayName: account.display_name ?? "",
+      oaStatus: account.oa_status ?? "missing",
+      pageKeys: account.page_keys ?? [],
     })),
   };
 }
@@ -3078,11 +3091,27 @@ export async function saveWorkbenchAccessControl(
         expected_version: accessControl.version,
         accounts: accessControl.accounts.map((account) => ({
           username: account.username,
-          access_tier: account.accessTier,
+          page_keys: account.pageKeys,
         })),
       }),
     },
   ));
+}
+
+export async function searchWorkbenchAccessUsers(
+  query: string,
+  signal?: AbortSignal,
+): Promise<WorkbenchAccessUser[]> {
+  const params = new URLSearchParams({ q: query, limit: "20" });
+  const payload = await requestJson<ApiWorkbenchAccessUserList>(
+    `/api/workbench/settings/access-control/users?${params.toString()}`,
+    { method: "GET", signal },
+  );
+  return payload.users.map((user) => ({
+    username: user.username,
+    displayName: user.display_name ?? "",
+    active: Boolean(user.active),
+  }));
 }
 
 export async function fetchOaApplicantCredentials(signal?: AbortSignal): Promise<OaApplicantCredentialSummary[]> {

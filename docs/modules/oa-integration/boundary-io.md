@@ -15,7 +15,7 @@
 ### 负责
 
 - OA token → canonical username 身份适配；roles/permissions 仅作为信息字段。
-- 把 Settings canonical ACL 投影到唯一 `finops:app:view` menu 的三个专用 OA role members。
+- 把 Settings canonical ACL 投影到唯一 `finops:app:view` menu 的两个专用 OA role members：有至少一个页面的普通账号进入 `finops_app_user`，固定 005 进入 `finops_admin`。
 - OA Mongo 读取、OA projection sync、OA 附件发票识别和 OA applicant credentials。
 - 对 OA 待付款、ETC、进项反提等模块提供外部系统 adapter。
 
@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | OA session/token | `auth.py`、session API | 只认证 canonical username；roles/permissions 仅为信息，不能 grant APP access |
 | OA password reauthentication | Settings data reset | 复用 OA login client 获取新 token，再经 identity endpoint 解析；只有 user id 与 canonical username 都等于当前 session 才成功。登录失败返回 false，配置/网络/未知响应 fail closed；禁止复用改密接口或凭 message/code 猜测成功。 |
-| Canonical ACL snapshot | Settings owner | casefold-preserve-canonical 的 full/read assignments，加固定 `YNSYLP005` admin；是 role sync 唯一输入 |
+| Canonical ACL snapshot | Settings owner | casefold-preserve-canonical 的 page-access accounts，加固定 `YNSYLP005` admin；是 role sync 唯一输入 |
 | Fixed menu target | fixed OA selector env、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、三个唯一专用 role和 exact 三 binding 必须在任何 DML 前成立 |
 | Deployment ACL preflight artifact | preflight/deploy control | 显式专项验收可接受 release-bound、secret-safe、SHA-256 绑定的 canonical ACL、migration/env 与 OA exact topology 只读证据；标准发布的任何 profile 都不消费 006 或该 artifact |
 | OA Mongo/query | `mongo_oa_adapter.py` | projection sync 只调用 `load_sync_application_batch(scope_key, retention_cutoff_month=...)`：每个启用 form/scope 单次读取；`all` 在字段校验和附件解析前排除 retention cutoff 以前的文档，然后输出 `projection_records` 与 `admission_records` 两个不可变视图。前者遵守通用 OA form/status 配置；后者固定接纳 completed + in-progress，不受通用 status filter 污染。任一 form 读取失败或保留期内 status/identity 无法稳定判定时整批 fail-closed，不得提交部分集合。合法 in-progress 草稿允许未填写 amount/applicant/reason，仍按稳定 identity 进入 admission，空金额持久化为 `NULL`；保留期内 completed 缺既有必填业务字段仍 fail-closed。费用类型必须按表单精确读取：支付申请父记录读取 `EtcOAFormFieldMapping.category` 对应的顶层字段（默认 `category`，环境可覆盖），日常报销明细只读取 `schedule[].purposeType`；不得恢复两种表单共用候选键或递归同名字段搜索。两者都复用 `oa_draft_prefill.OA_APPLICATION_TYPE_OPTIONS` 映射为真实中文费用类型。`schedule[].category`、`schedule[].feeType` 和 `data.detailReimbursementType` 均不得污染日常报销费用类型。只有 OA 显式返回 `13s` 时才是“其他”，未知码或无法从既有确定性文本规则判断时保持空值。 |
@@ -50,9 +50,9 @@
 | OA authoritative snapshot deletion | canonical OA repository -> Workbench relation command | 权威 snapshot 是 stale completed OA 的唯一删除 owner；删除必须保留 typed row identity，并在同一事务清理其 active relation。Workbench formal relation 写事务必须再次锁定并验证 OA canonical row 仍存在，使事务外读取的 matching plan 不能在删除后重新创建关系；禁止用页面刷新、后台补偿或 cache 作为一致性边界。 |
 | OA sync status/run facts | AppHealth/AppStatus/operations dashboard | `app.oa_sync_runs(sync_type='oa_projection')` 是每次 Mongo/projection run 的事实源；成功、失败都必须落 run，失败不得提交部分 projection/snapshot。`job.outbox_events` 和 worker heartbeat 表示 refreshing/error，不得使用进程内内存状态或行级 `app.oa_applications.synced_at` 覆盖运行事实 |
 | in-progress attachment handling | OA pending admission / explicit attachment refresh | 普通 month/all `oa.sync` 对唯一的 `in_progress + expense_claim` 复用 completed 日常报销的同一附件下载、证据解析、发票识别、OCR、parser cache 与正式发票 promotion 边界；Settings 精确刷新复用该链并只强制重解析指定 row。读取/搜索只消费已生成的 cache，不得在 HTTP 进程自建解析链。进行中结果必须先提交到 pending OA/子付款项 owner，再按明确 `source_expense_item_id` 关联或受设置控制地创建 canonical 发票并触发 matching reconciliation；精确提交必须在与全量快照相同的 tenant 锁内证明同 ID、同月份的 pending owner 恰好一条，否则失败并禁止把已失去全量准入资格的 OA 复活。普通同步只对 admission 事实真实变化的 scope 执行 promotion，支付状态单独变化不得重复扫描附件。流程变为 completed 后，由同一正常同步/精确刷新链原子迁移 owner并继续复用唯一 promotion 边界。`in_progress + payment_request` 不获得附件解析能力。相同 canonical OA ID 同时出现 completed 与 in-progress 时，必须在 cache/parser/OCR 前选择 completed；同一胜出状态仍有多份来源时 fail closed，不按时间、内容或金额猜测。PDF 必须逐页保留全部正式发票；只对文本未形成正式 identity 的页面执行 OCR。OCR 依赖初始化或推理失败必须中止本次任务且不得保存 current cache，禁止伪装成 `no_evidence`。 |
-| OA identity payload | frontend session | canonical username + 信息性 roles/permissions，不泄露 secret；normalized APP tier 来自独立 ACL evaluator |
-| Dedicated role assignments | OA `sys_user_role` | 只替换三个专用 role members；menu/role/binding、业务 role/member 与其他 menu 零写 |
-| ACL preflight/post-deploy evidence | root-owned release artifact | identity/tier/topology counts、hashes、fingerprints 与 restore 结果；不含 raw IDs、业务 role key、token、密码、DSN 或非受保护用户名 |
+| OA identity payload | frontend session | canonical username + 信息性 roles/permissions，不泄露 secret；normalized APP page set 来自独立 ACL evaluator |
+| Dedicated role assignments | OA `sys_user_role` | 只替换 `finops_app_user` 与 `finops_admin` members；menu/role/binding、业务 role/member 与其他 menu 零写 |
+| ACL preflight/post-deploy evidence | root-owned release artifact | identity/page-access/topology counts、hashes、fingerprints 与 restore 结果；不含 raw IDs、业务 role key、token、密码、DSN 或非受保护用户名 |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
 | Eligible OA attachment invoice promotion | canonical invoice repository / Workbench | parser cache 与 `app.oa_attachments` 无论谁先落库，都必须调用同一个 `oa_attachment_identity_bridge` 集合式 repository 边界：cache 写入按单个 cache key 修复，completed OA projection 只在真实变化记录的附件落库后按 OA row ids 修复；OA row scope 必须先收敛为受影响 cache keys，再仅对这些 keys 做全局 current-owner 唯一性判断和 stale derived bridge 清理，无关 key/row 不得被改写。bridge 要求 current attachment 的 item 存在于同一 `app.oa_application_items`，并以 parser 输出的每个 attachment occurrence 分组证明唯一 current attachment owner；一个 occurrence 即使候选都在同一 OA，只要对应多个 current attachment/item owner 也必须 fail closed。相同物理附件在同一 canonical OA 的多个 item occurrence 具有各自稳定 occurrence key 时仍合法并全部保留。重复执行零 bridge rewrite，禁止页面或周期任务全表扫描。桥接完成后，普通 `oa.sync` 只对本轮 completed projection 或 in-progress expense admission 真实变化 scope 内的 records 调用统一 promotion service；相同 snapshot 与仅支付状态变化必须零调用。设置页精确 `refresh-attachments` 由 OA worker 强制重解析指定 records：completed 与 `in_progress + expense_claim` 在各自 owner 提交后交给同一个 promotion service，并显式 `ensure_matching=true`。API 不持有 Mongo/OCR/promoter，也不维护第二套识别或写入规则。正式发票导入确认还必须只按本批强身份集合式反查当前 parser/schema 的 `attachment_identity_invoice` bridge，并在读取时再次验证 current `app.oa_applications + app.oa_attachments + app.oa_application_items`；raw `invoice/evidence/artifact` source 仅是 occurrence 输入，不能直接授权 promotion。该路径让 OA 先到、Excel 后到也能在同一导入事务补齐来源；不得下载/OCR、逐票查询、全库扫描或消费 stale / 未识别 cache。显式 `digital_invoice_no` 与 20 位纯数字 `invoice_no` 必须归一为同一强身份并一次批量加载 canonical 发票，依据 Settings mode link/create，保留每条 `derived_from_oa_id + source_expense_item_id + source_attachment_key` 来源边。结构化 expense item 是当前 owner 事实；外层 item id/row index 必须覆盖附件解析 payload 中残留的历史 owner 字段，同时保留其它 parser 字段。既有导入 provenance、OA 来源和显式明细归属必须合并保留；同一发票在同一 canonical OA 的不同非空 expense item 不再视为冲突，所有来源边都必须保留。只有 `app.oa_source_aliases.status='active'` 才能把 OA 系统的 ongoing/completed 生命周期重复归一为同一 canonical OA；历史 `derived_from_oa_id` 无论保存父 OA ID 还是 `父OA ID:item:...`，进入 alias 查询和冲突判断前都必须先归一为父 OA ID。未激活 alias 或不同 canonical OA 仍 fail closed，因为它可能代表重复报销。promotion 每批只做一次 alias 集合查询，禁止逐候选查询。重复同步/刷新/导入确认零重复来源写。promotion 异常使所属 event 失败重试，不得只报解析或导入成功。 |
 | ETC OA form attachment value | OA form draft | 同一规范化引用同时写入 `response.data` 与 `response.extra.filePath`；历史错误 absolute 引用只能由受控 dry-run/backup/CAS repair 操作修改，不重新提交 OA、不改金额、流程或附件成员 |
@@ -107,7 +107,7 @@
 
 - OA token/credential 变更必须同步 permissions/security docs。
 - sync service 的多次 list/month 扫描、adapter fingerprint polling、queue/search/matching collaborators 与 downstream fan-out 已删除；架构 guard 禁止恢复第二套 Mongo 扫描、部分结果 fallback 或混合变化集合 fan-out。
-- ACL role sync 输入只允许 settings canonical snapshot；输出仅为 OA `finops_read_export`、`finops_full_access`、`finops_admin` assignments。它不写 PostgreSQL、不解析 HTTP、不决定权限。
+- ACL role sync 输入只允许 settings canonical snapshot；输出仅为 OA `finops_app_user`、`finops_admin` assignments。它不写 PostgreSQL、不解析 HTTP、不决定页面权限。
 - disabled/missing/selector/menu/role/binding drift 和 connect/read/write timeout 必须在 runtime mutation 前失败。稳态 deployment 不提供 menu/role/binding cleanup；禁止恢复删除业务 role/member、其他 menu/binding 或任何宽目标的旧路径。
 - protected admin 固定为 `YNSYLP005`；generic settings、semantic no-op 和失败的输入校验不得触发 OA executor。
 

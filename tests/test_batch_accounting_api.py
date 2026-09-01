@@ -822,15 +822,15 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
         self.assertEqual(withdraw_status, 400)
         self.assertEqual(withdraw_payload["error"], "batch_accounting_idempotency_key_required")
 
-    def test_read_export_only_session_cannot_submit_or_update_tag_rules(self) -> None:
+    def test_account_without_batch_accounting_page_cannot_submit_or_update_tag_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, read_export_only=["READONLY001"])
+            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="202",
-                username="READONLY001",
-                nickname="只读用户",
-                display_name="只读用户",
+                username="LIMITED001",
+                nickname="受限用户",
+                display_name="受限用户",
                 roles=["finance"],
                 permissions=[],
             )
@@ -854,9 +854,9 @@ class BatchAccountingApiRouteTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(json.loads(response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(response.body)["error"], "page_access_denied")
         self.assertEqual(tag_rules_response.status_code, 403)
-        self.assertEqual(json.loads(tag_rules_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(tag_rules_response.body)["error"], "page_access_denied")
 
 
 if __name__ == "__main__":

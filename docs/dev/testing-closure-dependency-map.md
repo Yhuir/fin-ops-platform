@@ -448,42 +448,41 @@
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
 | OA token/session | `backend/src/fin_ops_platform/app/auth.py`、`web/src/features/session/api.ts` | `Admin-Token` / Authorization bearer、401/403、session timeout、local dev/test auth |
-| Access tier | `AccessControlService`、settings access control | denied/read_export_only/full_access/admin、admin 自动 allowed、dynamic provider fallback |
+| Page access | `AccessControlService`、`route_access_policy.py`、settings access control | 页面 key 白名单、005 固定管理员、未知受保护路由 fail-closed |
 | Frontend session | `SessionContext`、`SessionGate` | loading/forbidden/expired/error/retry、权限 hooks fail-closed |
-| API guard | `server.py` read/mutation/admin route helpers | read API 不信前端可见性；write API 查 `can_mutate_data`；admin-only 查 `can_admin_access` |
-| UI permissions | 各页面 `useSessionPermissions()` | readonly 隐藏写入，full access 隐藏 admin-only，admin 显示高风险入口 |
+| API guard | `server.py` 全局 route access guard | API 不信前端可见性；请求路径映射页面 key；访问账户和既有高风险入口仍查 `can_admin_access` |
+| UI permissions | `SessionContext`、`PageRouteHost`、`AppSidebar` | 只呈现已分配页面；直达无权页面重定向到首个有权页面；005 显示管理入口 |
 | Audit service/UoW | `AuditTrailService`、业务 service/UoW | actor/tenant/action/entity/metadata，业务事实、audit、dirty/outbox 不得半写入 |
 | Sensitive data | session/settings/credential/reset/logging | OA token、password、DSN、credential ciphertext、附件正文不能进 response/log/audit |
 
-权限层级影响：
+页面权限影响：
 
-| Access tier | 允许 | 禁止 | 典型测试 |
+| 身份 / 页面分配 | 允许 | 禁止 | 典型测试 |
 | --- | --- | --- | --- |
-| `denied` | 无 | 业务 API / 页面访问 | `tests/test_auth_guard.py`、`web/src/test/SessionGate.test.tsx` |
-| `read_export_only` | 查询、导出 | 写入、导入确认、数据重置、admin 运维 | `tests/test_session_api.py`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
-| `full_access` | 普通业务写入 | 账户管理、OA 凭据、数据重置、AppHealth dashboard | `tests/test_oa_applicant_credentials_api.py`、`web/src/test/SettingsPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
-| `admin` | 管理账户、OA 凭据、数据重置、AppHealth dashboard | 不能绕过二次确认/密码复核 | `tests/test_settings_data_reset_service.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
+| 无页面 | 无 | 业务 API / 页面访问 | `tests/test_auth_guard.py`、`web/src/test/SessionGate.test.tsx` |
+| 已分配页面 | 该页面完整现有业务能力 | 其它未分配页面及对应 API | `tests/test_session_api.py`、`tests/test_route_access_policy.py`、`web/e2e/permissions-role-matrix.spec.ts` |
+| `005` | 全部页面、访问账户及既有管理员入口 | 不能绕过二次确认/密码复核 | `tests/test_settings_data_reset_service.py`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/e2e/permissions-role-matrix.spec.ts` |
 
 `permissions-and-audit` 写入/审计 fan-out：
 
 | 动作 | 权限 / 审计要求 | 受影响旧功能 |
 | --- | --- | --- |
-| settings access control 保存 | admin-only；admin 自动 allowed；OA role sync | `/api/session/me`、所有页面按钮、导出、数据重置、AppHealth dashboard |
-| 业务写入 / 关系确认撤回 | `can_mutate_data`；actor/tenant 取后端 session；audit + dirty/outbox 同事务 | 关联台、待找发票、批量账务、往来款、免 OA、银行明细 |
-| 导出 | read_export_only 允许；错误/HTML 不当作文件 | 银行明细、成本、税金、进项/销项、往来款等导出 |
+| settings access control 保存 | 005-only；005 隐式拥有全部页面；OA role sync | `/api/session/me`、全部页面和对应 API |
+| 业务写入 / 关系确认撤回 | 当前页面有权；actor/tenant 取后端 session；audit + dirty/outbox 同事务 | 关联台、待找发票、批量账务、往来款、免 OA、银行明细 |
+| 导出 | 当前页面有权；错误/HTML 不当作文件 | 银行明细、成本、税金、进项/销项、往来款等导出 |
 | 数据重置 / OA 凭据 / AppHealth dashboard | admin-only；密码/token 不泄露 | 设置、App Health、进项 OA 反提、所有 read model |
 | worker/service 边界 | worker/service 不 import auth，不解析 cookie/header | runtime worker、read model refresh、platform boundary |
 
 关键回归保护：
 
-- `tests/test_auth_guard.py`、`tests/test_session_api.py` 保护 401/403、session payload、tier 判定、settings allowed/readonly/admin、local dev auth。
+- `tests/test_auth_guard.py`、`tests/test_session_api.py` 保护 401/403、session page payload、页面判定、005 管理员和 local dev auth。
 - `web/src/test/SessionGate.test.tsx`、`web/src/test/SessionApi.test.ts` 保护前端 session bootstrap、cookie Authorization header、超时和 retry。
 - `tests/test_audit_service.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_turnover_ledger_uow_contract.py` 保护 actor/tenant、audit metadata、银行分类真实 side-effect owner 和事务型 writer 原子性。
 - `tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_app_health_api.py` 保护 admin-only 高风险接口和敏感数据不泄露。
 - `tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` 保护模块写入权限。
 - `tests/test_platform_runtime_boundary_guards.py` 保护 service/worker 不依赖 HTTP auth 边界。
 - `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppHealthOperationsPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/src/test/TaxOffsetPage.test.tsx` 保护前端权限展示和禁用。
-- `web/e2e/permissions-role-matrix.spec.ts` 保护 read_export_only 全页面可读无 mutation API、settings/tax/import/no-OA 高风险写入口禁用、full_access 非 admin 运维拒绝、admin 设置高危区和 AppHealth 可见。
+- `web/e2e/permissions-role-matrix.spec.ts` 保护零页面拒绝、单页可见与 API 隔离、非 005 账户管理拒绝，以及 005 的 OA 账户检索与双栏页面分配。
 
 ## 模块细化：app-shell-navigation
 

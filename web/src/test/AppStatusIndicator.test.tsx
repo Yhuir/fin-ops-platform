@@ -179,7 +179,7 @@ describe("global app status indicator", () => {
   test("shows operations link only for admin sessions and closes from the HeroUI trigger", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
-      sessionAccessTier: "admin",
+      sessionRole: "admin",
       appHealth: {
         status: "ok",
         generated_at: "2026-06-04T10:00:00+08:00",

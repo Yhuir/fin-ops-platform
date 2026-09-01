@@ -50,7 +50,7 @@ async function openAutoTagRulesDrawer(page: Page, recordLatency?: OperationLaten
 
 test.describe("bank details auto tag rules browser flow", () => {
   test("saves edited automatic tag rules and reloads visible rows without an operation barrier", async ({ page }, testInfo) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page");
@@ -113,7 +113,7 @@ test.describe("bank details auto tag rules browser flow", () => {
   });
 
   test("reapplies existing automatic tag rules without saving a draft and rereads bank detail rows", async ({ page }, testInfo) => {
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page");
@@ -147,7 +147,7 @@ test.describe("bank details auto tag rules browser flow", () => {
   test("ordinary save ignores a blocked global barrier because it owns no barrier targets", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       operationBarrierMode: "blocked",
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 

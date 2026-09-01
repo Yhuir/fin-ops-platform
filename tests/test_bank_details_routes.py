@@ -77,10 +77,9 @@ class FakeBankDetailsApplicationService:
 
 class BankDetailsRoutesTests(unittest.TestCase):
     @staticmethod
-    def _session(*, username: str = "finance-user", can_mutate_data: bool = True):
+    def _session(*, username: str = "finance-user"):
         return SimpleNamespace(
             identity=SimpleNamespace(username=username, user_id="oa-001"),
-            can_mutate_data=can_mutate_data,
         )
 
     def test_routes_facade_delegates_direct_account_reads_as_200(self) -> None:
@@ -318,25 +317,25 @@ class BankDetailsRoutesTests(unittest.TestCase):
         self.assertEqual(response["payload"]["error"], "manual_bank_transaction_category_disabled")
         self.assertEqual(service.calls, [])
 
-    def test_routes_facade_denies_mutations_before_calling_application_service(self) -> None:
+    def test_routes_facade_delegates_writes_after_central_page_authorization(self) -> None:
         service = FakeBankDetailsApplicationService()
         routes = BankDetailsApiRoutes(application_service=service)
 
         update_status, update_payload = routes.update_auto_tag_rules(
             {"version": 1},
-            session=self._session(can_mutate_data=False),
+            session=self._session(),
         )
         confirm_status, confirm_payload = routes.confirm_category(
             "bank-row-001",
             {"category_code": "fee"},
-            session=self._session(can_mutate_data=False),
+            session=self._session(),
         )
 
-        self.assertEqual(update_status, HTTPStatus.FORBIDDEN)
-        self.assertEqual(update_payload["error"], "permission_denied")
-        self.assertEqual(confirm_status, HTTPStatus.FORBIDDEN)
-        self.assertEqual(confirm_payload["error"], "permission_denied")
-        self.assertEqual(service.calls, [])
+        self.assertEqual(update_status, HTTPStatus.OK)
+        self.assertEqual(update_payload["version"], 2)
+        self.assertEqual(confirm_status, HTTPStatus.OK)
+        self.assertEqual(confirm_payload["transaction_id"], "bank-row-001")
+        self.assertEqual([call[0] for call in service.calls], ["update_auto_tag_rules", "confirm_category"])
 
     def test_routes_facade_maps_category_validation_error_without_hiding_transaction_id(self) -> None:
         service = FakeBankDetailsApplicationService()

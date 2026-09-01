@@ -171,7 +171,7 @@ test.describe("bank transaction import browser flow", () => {
   test("clear discards the current preview and returns to a fresh page", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await previewBankStatementFiles(page);
@@ -188,7 +188,7 @@ test.describe("bank transaction import browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       bankImportAllExisting: true,
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
 
     await previewBankStatementFiles(page, {
@@ -210,7 +210,7 @@ test.describe("bank transaction import browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
@@ -274,7 +274,7 @@ test.describe("bank transaction import browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       bankImportDownstreamFanout: true,
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
@@ -332,7 +332,7 @@ test.describe("bank transaction import browser flow", () => {
 
   test("blocks confirmation when the selected bank account conflicts with the detected account", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
     await previewBankStatementFiles(page, { recordLatency });
@@ -353,7 +353,7 @@ test.describe("bank transaction import browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       bankImportIncludeCorruptFile: true,
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
@@ -407,7 +407,7 @@ test.describe("bank transaction import browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       bankImportPreviewDelayMs: 500,
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
@@ -444,7 +444,7 @@ test.describe("bank transaction import browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       bankImportConfirmPreviewStale: true,
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 
@@ -472,7 +472,7 @@ test.describe("bank transaction import browser flow", () => {
     const api = await installDeterministicApiMocks(page, {
       bankImportConfirmError: true,
       bankImportNoAccountConflict: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createBankImportLatencyRecorder(page, testInfo);
 

@@ -3372,20 +3372,20 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(payload["error"], "invalid_turnover_ledger_extra")
 
-    def test_relation_extra_put_rejects_readonly_user(self) -> None:
+    def test_relation_extra_put_rejects_account_without_turnover_page(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(
                 app,
-                full_access=["FULL001"],
-                read_export_only=["READONLY001"],
+                usernames=["FULL001"],
+                page_access={"LIMITED001": ["bank-details"]},
             )
             identities = {
                 "readonly-token": OAUserIdentity(
                     user_id="101",
-                    username="READONLY001",
-                    nickname="只读用户",
-                    display_name="只读用户",
+                    username="LIMITED001",
+                    nickname="受限用户",
+                    display_name="受限用户",
                     dept_id="01",
                     dept_name="财务部",
                     roles=["finance"],
@@ -3506,20 +3506,20 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["details"], expected_details)
         self.assertEqual(export_payload["details"], expected_details)
 
-    def test_confirm_and_withdraw_require_mutation_permission_and_write_audit(self) -> None:
+    def test_confirm_rejects_account_without_page_and_authorized_write_is_audited(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir), install_test_session=False)
             configure_access_control(
                 app,
-                full_access=["FULL001"],
-                read_export_only=["READONLY001"],
+                usernames=["FULL001"],
+                page_access={"LIMITED001": ["bank-details"]},
             )
             identities = {
                 "readonly-token": OAUserIdentity(
                     user_id="101",
-                    username="READONLY001",
-                    nickname="只读用户",
-                    display_name="只读用户",
+                    username="LIMITED001",
+                    nickname="受限用户",
+                    display_name="受限用户",
                     dept_id="01",
                     dept_name="财务部",
                     roles=["finance"],

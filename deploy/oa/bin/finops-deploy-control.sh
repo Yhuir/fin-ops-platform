@@ -625,6 +625,7 @@ ACL_PATHS = (
     "backend/src/fin_ops_platform/tools/settings_access_control_preflight.py",
     "backend/src/fin_ops_platform/postgres/migrations/0132_settings_access_control_guard.sql",
     "backend/src/fin_ops_platform/postgres/migrations/0133_settings_access_control_canonical_order.sql",
+    "backend/src/fin_ops_platform/postgres/migrations/0165_page_access_accounts.sql",
 )
 EXCLUDED_PARTS = {
     ".git",
@@ -1184,10 +1185,9 @@ assert_runtime_env_prerequisites() {
       || die "OA role sync connection configuration is incomplete"
     [[ "${FIN_OPS_OA_ROLE_SYNC_PORT:-3306}" =~ ^[0-9]+$ ]] \
       || die "FIN_OPS_OA_ROLE_SYNC_PORT must be numeric"
-    [[ "${FIN_OPS_OA_ROLE_SYNC_READONLY_ROLE_KEY:-finops_read_export}" == "finops_read_export" \
-      && "${FIN_OPS_OA_ROLE_SYNC_FULL_ACCESS_ROLE_KEY:-finops_full_access}" == "finops_full_access" \
+    [[ "${FIN_OPS_OA_ROLE_SYNC_USER_ROLE_KEY:-finops_app_user}" == "finops_app_user" \
       && "${FIN_OPS_OA_ROLE_SYNC_ADMIN_ROLE_KEY:-finops_admin}" == "finops_admin" ]] \
-      || die "OA role sync must use the three fixed fin-ops role keys"
+      || die "OA role sync must use the two fixed fin-ops role keys"
   )
 }
 
@@ -2460,7 +2460,6 @@ checks = {
         int(session.get("_preflight_http_status") or 0) == 200
         and user.get("username") == "YNSYLP005"
         and session.get("allowed") is True
-        and session.get("access_tier") == "admin"
         and session.get("can_admin_access") is True
     ),
     "public_index": public_request["http_status"] == 200,

@@ -88,12 +88,12 @@ class OAManualImportApiTests(unittest.TestCase):
         )
         return app
 
-    def _readonly_identity(self) -> OAUserIdentity:
+    def _limited_identity(self) -> OAUserIdentity:
         return OAUserIdentity(
-            user_id="readonly-user-id",
-            username="READONLY001",
-            nickname="只读用户",
-            display_name="只读用户",
+            user_id="limited-user-id",
+            username="LIMITED001",
+            nickname="受限用户",
+            display_name="受限用户",
             roles=["finance"],
             permissions=["finops:access"],
         )
@@ -264,17 +264,17 @@ class OAManualImportApiTests(unittest.TestCase):
         self._assert_oa_manual_targets(delete_payload, month="2025-12")
         self.assertEqual(store.load_manual_oa_imports()["row_ids"], [])
 
-    def test_manual_import_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:
-        with self.subTest("explicit readonly OA session"):
+    def test_manual_import_endpoints_reject_account_without_settings_page(self) -> None:
+        with self.subTest("account only has bank details page"):
             store = MemoryManualImportStore()
             store.add_manual_oa_imports(["oa-exp-1981"], "tester", {})
             app = self._build_app_with_service(
                 adapter=RecordingOAAdapter([oa_record("oa-exp-1981")]),
                 store=store,
             )
-            configure_access_control(app, read_export_only=["READONLY001"])
-            app._oa_identity_service.resolve_identity = lambda _token: self._readonly_identity()
-            headers = {"Authorization": "Bearer readonly-token"}
+            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
+            app._oa_identity_service.resolve_identity = lambda _token: self._limited_identity()
+            headers = {"Authorization": "Bearer limited-token"}
 
             with (
                 patch.object(app._oa_attachment_refresh_request_service, "request") as refresh_attachments,
@@ -307,13 +307,13 @@ class OAManualImportApiTests(unittest.TestCase):
                 )
 
         self.assertEqual(refresh_response.status_code, 403)
-        self.assertEqual(json.loads(refresh_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(refresh_response.body)["error"], "page_access_denied")
         self.assertEqual(refresh_status_response.status_code, 403)
-        self.assertEqual(json.loads(refresh_status_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(refresh_status_response.body)["error"], "page_access_denied")
         self.assertEqual(import_response.status_code, 403)
-        self.assertEqual(json.loads(import_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(import_response.body)["error"], "page_access_denied")
         self.assertEqual(delete_response.status_code, 403)
-        self.assertEqual(json.loads(delete_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(delete_response.body)["error"], "page_access_denied")
         refresh_attachments.assert_not_called()
         refresh_status.assert_not_called()
         import_row_ids.assert_not_called()

@@ -111,8 +111,8 @@ export default function CertifiedInvoiceImportModal({
 }: CertifiedInvoiceImportModalProps) {
   const session = useSession();
   const isMountedRef = useRef(false);
-  const canMutateData =
-    session.status === "authenticated" ? session.session.canMutateData : false;
+  const canOperateData =
+    session.status === "authenticated" ? session.session.canAccessApp : false;
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewResult, setPreviewResult] = useState<TaxCertifiedImportPreviewResult | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -120,8 +120,8 @@ export default function CertifiedInvoiceImportModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmMessage, setConfirmMessage] = useState("正在导入已认证结果并刷新税金抵扣页面...");
 
-  const canPreview = canMutateData && selectedFiles.length > 0 && !isPreviewing && !isConfirming;
-  const canConfirm = canMutateData && previewResult !== null && !isPreviewing && !isConfirming;
+  const canPreview = canOperateData && selectedFiles.length > 0 && !isPreviewing && !isConfirming;
+  const canConfirm = canOperateData && previewResult !== null && !isPreviewing && !isConfirming;
   const importedBy =
     session.status === "authenticated" || session.status === "forbidden"
       ? session.session.user.username || session.session.user.displayName || "system"
@@ -267,7 +267,7 @@ export default function CertifiedInvoiceImportModal({
       <div className="certified-import-body">
         <FileDropzone
           accept=".xlsx,.xls"
-          disabled={!canMutateData || isPreviewing || isConfirming}
+          disabled={!canOperateData || isPreviewing || isConfirming}
           errorText={errorMessage}
           helperText={fileHint}
           label="选择已认证发票文件"
@@ -275,8 +275,8 @@ export default function CertifiedInvoiceImportModal({
           onFiles={applyDroppedFiles}
         />
 
-        {!canMutateData ? (
-          <Notice status="accent">当前账号仅支持查看和导出，不能导入已认证发票。</Notice>
+        {!canOperateData ? (
+          <Notice status="accent">当前页面暂不可导入已认证发票。</Notice>
         ) : null}
 
         {selectedFiles.length > 0 ? (

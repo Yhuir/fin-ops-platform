@@ -13,12 +13,15 @@ from tests.app_test_support import (
     configure_access_control,
 )
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError
+from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OAUserSummary
 
 
 class ExplodingSyncService:
     def sync_access_control(self, snapshot: dict[str, object]) -> None:
         raise OARoleSyncError("OA role sync failed")
+
+    def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
+        return [OAUserSummary(username=username, display_name=username, active=True) for username in usernames]
 
 
 class CompensationFailingSyncService:
@@ -30,6 +33,9 @@ class CompensationFailingSyncService:
         self.calls += 1
         if self.calls == 2:
             raise OARoleSyncError("OA compensation failed")
+
+    def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
+        return [OAUserSummary(username=username, display_name=username, active=True) for username in usernames]
 
 
 class ExplodingProjectAdapter:
@@ -46,12 +52,12 @@ class ExplodingProjectAdapter:
 
 
 class WorkbenchSettingsSyncApiTests(unittest.TestCase):
-    def _readonly_identity(self) -> OAUserIdentity:
+    def _limited_identity(self) -> OAUserIdentity:
         return OAUserIdentity(
-            user_id="readonly-user-id",
-            username="READONLY001",
-            nickname="只读用户",
-            display_name="只读用户",
+            user_id="limited-user-id",
+            username="LIMITED001",
+            nickname="受限用户",
+            display_name="受限用户",
             roles=["finance"],
             permissions=["finops:access"],
         )
@@ -76,22 +82,23 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                     {
                         "expected_version": 1,
                         "accounts": [
-                            {"username": "YNSYLP006", "access_tier": "read_export_only"}
+                            {"username": "YNSYLP006", "page_keys": ["settings"]}
                         ],
                     }
                 ),
                 headers={"Authorization": "Bearer admin"},
             )
             payload = json.loads(response.body)
-            settings_payload = app._app_settings_service.get_access_control_payload()
+            settings_payload = app._app_settings_service.get_access_control_snapshot()
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(payload["error"], "oa_role_sync_failed")
-        self.assertEqual(settings_payload["accounts"], [])
+        self.assertEqual(settings_payload["page_access_accounts"], [])
 
     def test_settings_update_returns_bad_gateway_when_oa_role_sync_is_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service._oa_role_sync_service = None
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="admin-id",
                 username="YNSYLP005",
@@ -107,19 +114,19 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                 body=json.dumps(
                     {
                         "expected_version": 1,
-                        "accounts": [{"username": "YNSYLP006", "access_tier": "read_export_only"}],
+                        "accounts": [{"username": "YNSYLP006", "page_keys": ["settings"]}],
                     }
                 ),
                 headers={"Authorization": "Bearer admin"},
             )
             payload = json.loads(response.body)
-            settings_payload = app._app_settings_service.get_access_control_payload()
+            settings_payload = app._app_settings_service.get_access_control_snapshot()
             state_path = Path(temp_dir) / "app_settings.json"
             persisted = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(payload["error"], "oa_role_sync_failed")
-        self.assertEqual(settings_payload["accounts"], [])
+        self.assertEqual(settings_payload["page_access_accounts"], [])
         self.assertEqual(persisted.get("_settings_acl_audit_events", []), [])
 
     def test_settings_update_keeps_existing_inconsistent_contract_when_compensation_fails(self) -> None:
@@ -158,7 +165,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
                 body=json.dumps(
                     {
                         "expected_version": 1,
-                        "accounts": [{"username": "FULL001", "access_tier": "full_access"}],
+                        "accounts": [{"username": "FULL001", "page_keys": ["settings"]}],
                     }
                 ),
                 headers={"Authorization": "Bearer admin"},
@@ -174,7 +181,7 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
     def test_only_protected_admin_can_use_versioned_access_control_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["FULL001"])
+            configure_access_control(app, usernames=["FULL001"])
             identities = {
                 "admin": OAUserIdentity(
                     user_id="admin-id",
@@ -347,18 +354,18 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "oa_project_sync_failed")
         self.assertEqual(settings_payload["projects"]["active"][0]["project_name"], "本地测试项目")
 
-    def test_project_mutation_endpoints_reject_readonly_session_even_with_spoofed_actor(self) -> None:
+    def test_project_mutation_endpoints_reject_account_without_settings_page(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, read_export_only=["READONLY001"])
+            configure_access_control(app, page_access={"LIMITED001": ["bank-details"]})
             created_payload = app._app_settings_service.create_manual_project(
                 actor_id="settings_owner",
                 project_code="LOCAL-001",
                 project_name="本地测试项目",
             )
             project_id = created_payload["projects"]["active"][0]["id"]
-            app._oa_identity_service.resolve_identity = lambda _token: self._readonly_identity()
-            headers = {"Authorization": "Bearer readonly-token"}
+            app._oa_identity_service.resolve_identity = lambda _token: self._limited_identity()
+            headers = {"Authorization": "Bearer limited-token"}
 
             with patch.object(app._project_costing_service, "sync_projects_from_oa") as sync_projects:
                 sync_response = app.handle_request(
@@ -388,11 +395,11 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
             settings_payload = app._app_settings_service.get_settings_payload()
 
         self.assertEqual(sync_response.status_code, 403)
-        self.assertEqual(json.loads(sync_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(sync_response.body)["error"], "page_access_denied")
         self.assertEqual(create_response.status_code, 403)
-        self.assertEqual(json.loads(create_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(create_response.body)["error"], "page_access_denied")
         self.assertEqual(delete_response.status_code, 403)
-        self.assertEqual(json.loads(delete_response.body)["error"], "permission_denied")
+        self.assertEqual(json.loads(delete_response.body)["error"], "page_access_denied")
         sync_projects.assert_not_called()
         self.assertEqual([project["project_code"] for project in settings_payload["projects"]["active"]], ["LOCAL-001"])
 

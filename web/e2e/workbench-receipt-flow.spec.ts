@@ -6,7 +6,7 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 test.describe("workbench receipt browser flow", () => {
   test("edits and prints an eligible receipt from either relation zone", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      sessionMode: "full_access",
+      sessionMode: "user",
       workbenchReceiptScenario: true,
     });
     await page.goto("/");
@@ -55,20 +55,4 @@ test.describe("workbench receipt browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("keeps receipt draft and print unavailable to read-export-only users", async ({ page }) => {
-    const api = await installDeterministicApiMocks(page, {
-      sessionMode: "read_export_only",
-      workbenchReceiptScenario: true,
-    });
-    await page.goto("/");
-
-    await expect(page.getByTestId("zone-paired").getByRole("button", {
-      name: "编辑并打印收据 CASE-RECEIPT-PAIRED",
-    })).toBeDisabled();
-    await expect(page.getByTestId("zone-unpaired").getByRole("button", {
-      name: "编辑并打印收据 CASE-RECEIPT-UNPAIRED",
-    })).toBeDisabled();
-    expect(api.count("POST /api/workbench/actions/receipt-draft")).toBe(0);
-    expect(api.count("POST /api/workbench/actions/print-receipt")).toBe(0);
-  });
 });

@@ -27,10 +27,9 @@ const defaultSession: SessionPayload = {
   },
   roles: ["fin_ops_user"],
   permissions: ["finops:app:view"],
-  accessTier: "full_access",
   canAccessApp: true,
-  canMutateData: true,
   canAdminAccess: false,
+  allowedPageKeys: ["batch-accounting"],
 };
 
 const staticSession: SessionContextValue = {

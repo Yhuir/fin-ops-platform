@@ -321,7 +321,6 @@ class EtcBusinessBatchApiRoutes:
             ),
             dept_id=session.identity.dept_id,
             can_admin_access=session.can_admin_access,
-            can_mutate_data=session.can_mutate_data,
         )
 
     @staticmethod

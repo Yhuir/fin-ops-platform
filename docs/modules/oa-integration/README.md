@@ -41,7 +41,7 @@
 - 本系统不修改 OA 原始业务库；对 OA Mongo 只读读取、映射、缓存和投影。
 - OA 费用类型按表单精确读取权威字段：支付申请父记录读取 `EtcOAFormFieldMapping.category`（默认 `category`，可由既有环境配置覆盖），日常报销子项只读取 `schedule[].purposeType`。两种表单不得共享模糊候选键或递归扫描同名字段；未知值保持空，不伪造“其他”。
 - `Admin-Token` 只作为身份来源；OA roles/permissions 不授予 APP 访问。固定 `YNSYLP005` 与 Settings canonical ACL 是唯一 APP authority，后端 direct API guard 与前端 `SessionGate` 分别强制执行同一结果。
-- `finops:app:view` 只定位唯一 OA menu。Runtime 验证唯一 menu、三个专用 role 和 exact 三绑定后，只替换三 role members；历史 non-dedicated binding cleanup 已退休，deployment 稳态只读验证 exact topology。
+- `finops:app:view` 只定位唯一 OA menu。Runtime 验证唯一 menu、`finops_app_user` / `finops_admin` 两个专用 role 和 exact 两绑定后，只替换两组 role members；历史分层 role 和 non-dedicated binding cleanup 只在 migration/preflight 识别，deployment 稳态只读验证 exact topology。
 - OA 同步通过 worker / durable queue 原子写入本系统 PostgreSQL canonical OA、admission、payment-status 与 watermark facts。它不 fan-out 页面 refresh；关联台及其它 direct 页面下一次 GET 读取已提交 facts。共享 `workbench_relation` 由其 owner 按独立消费者合同维护，不得恢复 page `workbench` runtime。
 - OA 附件解析结果不直接等同于正式发票事实。附件发票识别只有三种结果：命中统一发票池则建立/补充关系，判定为正式发票且池内不存在时可受控创建并关联，非正式票据、残缺号码、多义匹配或未知证据直接忽略。受控创建由设置页 `OA附件发票晋级` 控制：默认 `link_existing_only` 只关联已有发票，`disabled` 完全跳过 promotion，只有 `create_missing` 才允许创建缺失的统一发票池记录。
 - completed 与唯一的 `in_progress + expense_claim` 复用上述同一识别/promotion 边界；进行中发票必须带明确子付款项来源。普通同步只处理 OA owner 内容真实变化的 scope，精确刷新可为选中记录补发 matching reconciliation；进行中支付申请不扩展附件解析。
@@ -54,14 +54,14 @@
 ## ACL role sync boundary
 
 - OA role sync 只消费 settings owner 传入的 normalized snapshot；admin assignment 永远注入固定 `YNSYLP005`，不能从请求、环境变量或 OA 当前角色反推。
-- fixed selector 必须精确为 `finops:app:view`，且 menu、`finops_read_export` / `finops_full_access` / `finops_admin` 三角色和三条 binding 都唯一。任何 disabled、missing、drift 或 timeout 都在 DML 前 fail closed。
-- runtime 只替换三个专用 role members；不创建/删除 menu、role、binding，不改业务 role/member 或其他 menu。non-dedicated fixed-menu binding 属于阻断性漂移，deployment 不再自动清理或回滚。
+- fixed selector 必须精确为 `finops:app:view`，且 menu、`finops_app_user` / `finops_admin` 两角色和两条 binding 都唯一。任何 disabled、missing、drift 或 timeout 都在 DML 前 fail closed。
+- runtime 只替换两个专用 role members；不创建/删除 menu、role、binding，不改业务 role/member 或其他 menu。non-dedicated fixed-menu binding 属于阻断性漂移，deployment 不再自动清理或回滚。
 - generic settings save 与 ACL no-op 都是零 OA I/O；只有 ACL 真实变化执行一次 target sync。若 DB/audit 失败，最多执行一次 previous snapshot compensation；补偿失败返回 inconsistent 并要求人工核对。
 - MySQL connect/read/write timeout 分别受限；OA 密码、token、成员明文不进入发布 evidence。
 
 | 入口 | 影响范围 | 关键风险 |
 | --- | --- | --- |
-| `/api/session/me` / session bootstrap | 所有页面、所有 API 权限、page session scope | OA 超时、无权限、token 过期、只读/全操作/admin 分层错误 |
+| `/api/session/me` / session bootstrap | 所有页面、所有 API 权限、page session scope | OA 超时、无权限、token 过期、页面集合或 005 管理边界错误 |
 | OA Mongo adapter | Workbench、OA 待付款、进项使用、ETC、税金、成本、搜索 | 外部字段变体、Mongo 断连、缓存 backoff、附件发票 identity、附件 promotion 模式误配置 |
 | OA sync worker / canonical snapshot | 关联台 projection、待找发票、OA 待付款、进/销项等 direct 页面 | worker 未入队、canonical snapshot 半写入、retention cutoff、旧 relation row id 迁移 |
 | OA 手动搜索/导入 | 设置页、Workbench、历史 OA 补录 | 未完成单据误导入、附件刷新失败、手动 marker 删除后 stale scope |

@@ -709,10 +709,9 @@ def _session() -> OARequestSession:
             permissions=["finops:app:view"],
         ),
         allowed=True,
-        access_tier="full_access",
         can_access_app=True,
-        can_mutate_data=True,
         can_admin_access=False,
+        allowed_page_keys=frozenset({"reconciliation-workbench"}),
     )
 
 
@@ -2288,25 +2287,24 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         app._workbench_write_facade = lambda: WithdrawFacade()
         app._workbench_write_response = lambda result: Response(status_code=200, body="{}")
 
-        with patch("fin_ops_platform.app.server.resolve_oa_request_session", return_value=session):
-            confirm_response = Application._handle_api_workbench_confirm_link(
-                app,
-                "{}",
-                request_id="req-confirm",
-                headers={"Authorization": "Bearer token"},
-            )
-            cancel_response = Application._handle_api_workbench_cancel_link(
-                app,
-                "{}",
-                request_id="req-cancel",
-                headers={"Authorization": "Bearer token"},
-            )
-            withdraw_response = Application._handle_api_workbench_withdraw_link(
-                app,
-                "{}",
-                request_id="req-withdraw",
-                headers={"Authorization": "Bearer token"},
-            )
+        confirm_response = Application._handle_api_workbench_confirm_link(
+            app,
+            "{}",
+            request_id="req-confirm",
+            access_session=session,
+        )
+        cancel_response = Application._handle_api_workbench_cancel_link(
+            app,
+            "{}",
+            request_id="req-cancel",
+            access_session=session,
+        )
+        withdraw_response = Application._handle_api_workbench_withdraw_link(
+            app,
+            "{}",
+            request_id="req-withdraw",
+            access_session=session,
+        )
 
         self.assertEqual(confirm_response.status_code, 200)
         self.assertEqual(cancel_response.status_code, 200)

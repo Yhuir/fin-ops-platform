@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
 import AppSidebar from "../components/shell/AppSidebar";
-import { sidebarGroups } from "../components/shell/sidebarItems";
+import { isSidebarDisclosureItem, sidebarGroups } from "../components/shell/sidebarItems";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 
 const sidebarSession: SessionContextValue = {
@@ -22,10 +22,11 @@ const sidebarSession: SessionContextValue = {
     },
     roles: ["finance"],
     permissions: ["finops:app:view"],
-    accessTier: "full_access",
     canAccessApp: true,
-    canMutateData: true,
     canAdminAccess: false,
+    allowedPageKeys: sidebarGroups.flatMap((group) => group.items.flatMap((item) => (
+      isSidebarDisclosureItem(item) ? item.children.map((child) => child.pageKey) : [item.pageKey]
+    ))),
   },
   refresh: () => undefined,
 };
@@ -101,6 +102,27 @@ describe("AppSidebar shell contract", () => {
   const appSource = readFileSync("src/app/App.tsx", "utf8");
   const workbenchFilterSource = readFileSync("src/components/workbench/WorkbenchColumnFilterMenu.tsx", "utf8");
   const appStyles = readFileSync("src/app/styles.css", "utf8");
+
+  test("does not lay out permission-filtered navigation before session resolution", () => {
+    render(
+      <SessionContext.Provider value={{ status: "loading", refresh: () => undefined }}>
+        <MemoryRouter>
+          <AppSidebar
+            embedded={false}
+            expanded
+            isCompact={false}
+            mobileOpen={false}
+            onCloseMobile={() => undefined}
+            onToggleExpanded={() => undefined}
+          />
+        </MemoryRouter>
+      </SessionContext.Provider>,
+    );
+
+    expect(screen.getByRole("navigation", { name: "主导航" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByRole("link", { name: "关联台" })).not.toBeInTheDocument();
+    expect(screen.queryByText("系统操作")).not.toBeInTheDocument();
+  });
 
   test("keeps the desktop rail fixed and uses the approved navigation rhythm", () => {
     const sidebarRule = appStyles.match(/\.app-sidebar\s*\{[^}]*\}/s)?.[0] ?? "";

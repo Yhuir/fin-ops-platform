@@ -149,7 +149,7 @@ function mutationErrorMessage(caught: unknown, fallback: string) {
 export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { active, activationGeneration } = useOptionalPageActivation("bank-flow-rule-batches");
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<BankFlowRuleBatchStatusBucket>("unsubmitted");
   const [payload, setPayload] = useState<BankFlowRuleBatchesResponse>(EMPTY_BATCHES);
@@ -510,7 +510,7 @@ export default function BankFlowRuleBatchPage() {
   };
 
   const handleSubmitSelected = async () => {
-    if (!canMutateData || selectedTransactionIds.size === 0 || mutating) {
+    if (!canOperateData || selectedTransactionIds.size === 0 || mutating) {
       return;
     }
     if (!selectedBatch?.scopeMonth) {
@@ -555,7 +555,7 @@ export default function BankFlowRuleBatchPage() {
   };
 
   const handleSubmitBatch = async (batch: BankFlowRuleBatch) => {
-    if (!canMutateData || !canSubmitInternalTransferBatch(batch, bucket) || mutating) {
+    if (!canOperateData || !canSubmitInternalTransferBatch(batch, bucket) || mutating) {
       return;
     }
     const scopeMonth = batch.scopeMonth;
@@ -589,7 +589,7 @@ export default function BankFlowRuleBatchPage() {
   };
 
   const handleConfirmWithdraw = async () => {
-    if (!canMutateData || !withdrawTarget || !withdrawReason.trim() || mutating) {
+    if (!canOperateData || !withdrawTarget || !withdrawReason.trim() || mutating) {
       return;
     }
     const target = withdrawTarget;
@@ -621,7 +621,7 @@ export default function BankFlowRuleBatchPage() {
   };
 
   const saveTagSelection = async () => {
-    if (!canMutateData || tagLoading || mutating) {
+    if (!canOperateData || tagLoading || mutating) {
       return;
     }
     const rules: BankFlowRuleBatchTagRule[] = tagSelection.activeTags.map((tag) => {
@@ -755,8 +755,8 @@ export default function BankFlowRuleBatchPage() {
         </div>
       )}
     >
-      {!canMutateData ? (
-        <StatePanel compact tone="warning">当前账号仅支持查看和导出，不能提交、撤回或保存流水规则批次。</StatePanel>
+      {!canOperateData ? (
+        <StatePanel compact tone="warning">当前页面暂不可提交、撤回或保存流水规则批次。</StatePanel>
       ) : null}
       <div aria-label="批次筛选" className="bank-flow-rule-batches-filter" role="region">
         <ToggleButtonGroup
@@ -795,7 +795,7 @@ export default function BankFlowRuleBatchPage() {
           pageSize={listPagination.pageSize}
           total={listPagination.total}
         />
-        {bucket === "unsubmitted" && canMutateData ? (
+        {bucket === "unsubmitted" && canOperateData ? (
           <div className="bank-flow-rule-batches-selection-actions">
             {selectedTransactionIds.size > 0 ? (
               <>
@@ -919,7 +919,7 @@ export default function BankFlowRuleBatchPage() {
                             查看流水
                           </button>
                         ) : null}
-                        {internalTransferSubmitEnabled && canMutateData ? (
+                        {internalTransferSubmitEnabled && canOperateData ? (
                           <button
                             className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
                             disabled={mutating}
@@ -929,7 +929,7 @@ export default function BankFlowRuleBatchPage() {
                             提交内部往来批次
                           </button>
                         ) : null}
-                        {bucket === "submitted" && canMutateData && canWithdrawBatch(batch) ? (
+                        {bucket === "submitted" && canOperateData && canWithdrawBatch(batch) ? (
                           <button
                             className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact"
                             disabled={mutating}
@@ -971,7 +971,7 @@ export default function BankFlowRuleBatchPage() {
                                   <Checkbox
                                     aria-label={`${accountLabel(batch)}全选`}
                                     className="bank-flow-rule-batches-checkbox bank-flow-rule-batches-checkbox--table"
-                                    isDisabled={!canMutateData}
+                                    isDisabled={!canOperateData}
                                     isIndeterminate={regionIndeterminate}
                                     isSelected={regionChecked}
                                     slot="selection"
@@ -1011,7 +1011,7 @@ export default function BankFlowRuleBatchPage() {
                                       <Checkbox
                                         aria-label={`选择流水 ${row.counterpartyName || "未知对方"} ${formatDateTimeText(row.tradeTime)} ${formatMoney(row.amount)} ${row.bankName || "未知银行"} ${row.accountLast4 || ""}`}
                                         className="bank-flow-rule-batches-checkbox bank-flow-rule-batches-checkbox--table"
-                                        isDisabled={!canMutateData}
+                                        isDisabled={!canOperateData}
                                         isSelected={rowSelected}
                                         onChange={(selected) => toggleTransaction(row, selected)}
                                       >
@@ -1074,7 +1074,7 @@ export default function BankFlowRuleBatchPage() {
           <div className="bank-flow-rule-batches-drawer__actions">
             <Button
               className="bank-flow-rule-batches-button bank-flow-rule-batches-button--compact bank-flow-rule-batches-button--primary"
-              isDisabled={!canMutateData || tagLoading || mutating}
+              isDisabled={!canOperateData || tagLoading || mutating}
               isPending={mutating}
               onPress={saveTagSelection}
               size="sm"
@@ -1131,7 +1131,7 @@ export default function BankFlowRuleBatchPage() {
                             <Checkbox
                               aria-label={`${rowLabel} 需要OA`}
                               className="bank-flow-rule-batches-checkbox"
-                              isDisabled={!canMutateData || tagLoading}
+                              isDisabled={!canOperateData || tagLoading}
                               isSelected={rule.requiresOa}
                               onChange={(selected) => updateDraftRequirement(tag.code, "requiresOa", selected)}
                             >
@@ -1142,7 +1142,7 @@ export default function BankFlowRuleBatchPage() {
                             <Checkbox
                               aria-label={`${rowLabel} 需要发票`}
                               className="bank-flow-rule-batches-checkbox"
-                              isDisabled={!canMutateData || tagLoading}
+                              isDisabled={!canOperateData || tagLoading}
                               isSelected={rule.requiresInvoice}
                               onChange={(selected) => updateDraftRequirement(tag.code, "requiresInvoice", selected)}
                             >

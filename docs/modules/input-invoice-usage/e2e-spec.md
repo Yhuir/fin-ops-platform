@@ -9,8 +9,8 @@
 ## 用户角色
 
 - `admin`：可读写，并可在设置页维护目标 OA 申请人凭据。
-- `full_access`：可读取页面、创建 OA 草稿、确认 OA 已提交、维护支付规则和导出。
-- `read_export_only`：可查看/导出，不能创建 OA 草稿或保存规则。
+- `page_authorized`：可读取页面、创建 OA 草稿、确认 OA 已提交、维护支付规则和导出。
+- 未获本页授权：不能进入页面或调用其读取、导出、OA 草稿和规则 API。
 - forbidden/expired session：不能进入页面或调用受保护 API。
 
 ## Spec 场景
@@ -23,7 +23,7 @@
 | `IN-USAGE-E2E-004` | OA reverse draft -> staged -> submitted history | P0 | 用户可从当前候选子集重新 preview、创建 OA 草稿；关闭确认弹窗后批次进入 `暂存` 且不展示 OA 草稿链接；用户确认 `我已在OA系统提交该草稿 / OA正在进行中` 后，历史只展示业务字段，不暴露 batch/draft/preview/internal status；这些本地状态动作不刷新 rows，真正 relation 写后也只重跑当前页 normal GET。 |
 | `IN-USAGE-E2E-005` | direct-read error/detail recovery | P0 | rows 或 relation detail 暂时失败时展示错误、不伪装空态、不自动 polling；用户刷新后恢复 canonical rows/detail。 |
 | `IN-USAGE-E2E-006` | 多关系 `+N` 详情 | P1 | 同一 active relation component 下多 OA、流水或发票聚合为一行，`+N` 详情从 canonical detail API 展开。 |
-| `IN-USAGE-E2E-007` | 权限矩阵 | P1 | `read_export_only` 看不到或不能触发写入口；API 403 不被 UI 当作成功；admin-only 凭据入口不泄漏给普通用户。 |
+| `IN-USAGE-E2E-007` | 页面权限矩阵 | P1 | 未获本页授权时不能渲染或调用页面 API；API 403 不被 UI 当作成功；005-only 凭据入口不泄漏给普通用户。 |
 | `IN-USAGE-E2E-008` | 导出/download | P1 | 浏览器 download event 成功，字段、筛选、权限和 row-limit 反馈与 canonical contract 一致。 |
 | `IN-USAGE-E2E-009` | 下游 tax/cost/OA pending/search 访问收敛 | P1 | relation、支付规则、OA reverse 或认证状态变化时本页写后重跑 canonical GET；其它 consumer 按自己的事实边界收敛。 |
 

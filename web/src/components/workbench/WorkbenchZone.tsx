@@ -44,7 +44,7 @@ type WorkbenchZoneProps = {
   ) => void;
   onEditReceipt?: (group: WorkbenchRelationGroup) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
-  canMutateData: boolean;
+  canOperateData: boolean;
   highlightedRowId?: string | null;
   selectionSummary?: {
     explicitTotal?: number;
@@ -125,7 +125,7 @@ function WorkbenchZone({
   onRowAction,
   onEditReceipt,
   onEnsureGroupDetail,
-  canMutateData,
+  canOperateData,
   highlightedRowId,
   selectionSummary,
   onClearSelection,
@@ -397,7 +397,7 @@ function WorkbenchZone({
         sourceGroups={sourceGroups}
         visibleIndices={visibleIndices}
         widths={widths}
-        canMutateData={canMutateData}
+        canOperateData={canOperateData}
         onStartDrag={startDrag}
         zoneId={zoneId}
       />

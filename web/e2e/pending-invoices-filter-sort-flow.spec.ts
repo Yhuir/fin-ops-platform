@@ -56,7 +56,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceRowsFailuresBeforeSuccess: 100,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
@@ -105,7 +105,7 @@ test.describe("pending invoices filter and sort browser flow", () => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceFilterSortRows: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 

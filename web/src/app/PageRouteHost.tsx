@@ -23,8 +23,9 @@ function PageRouteFallback({ pageKey }: { pageKey: string }) {
 
 export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
   const location = useLocation();
-  const { canAdminAccess } = useOptionalSessionPermissions();
+  const { canAccessPage } = useOptionalSessionPermissions();
   const matchedRoute = useMemo(() => findRoute(routes, location.pathname), [location.pathname, routes]);
+  const firstAllowedRoute = routes.find((route) => canAccessPage(route.pageKey)) ?? null;
 
   useEffect(() => {
     if (!matchedRoute) {
@@ -37,8 +38,8 @@ export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
   if (!matchedRoute) {
     return <Navigate replace to="/" />;
   }
-  if (matchedRoute.requiresAdmin && !canAdminAccess) {
-    return <Navigate replace to="/" />;
+  if (!canAccessPage(matchedRoute.pageKey)) {
+    return <Navigate replace to={firstAllowedRoute?.path ?? "/"} />;
   }
 
   const PageComponent = matchedRoute.component;

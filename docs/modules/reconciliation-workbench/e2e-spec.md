@@ -11,8 +11,8 @@
 | 角色 | 期望 |
 | --- | --- |
 | `admin` | 可进入关联台并执行业务写操作，同时可访问系统状态。 |
-| `full_access` | 可查看关联台、执行确认/撤回/异常等业务操作。 |
-| `read_export_only` | 可查看和导出，但不得触发确认、撤回、异常处理等 mutation API。 |
+| `page_authorized` | 可查看关联台、执行确认/撤回/异常等业务操作。 |
+| 未获本页授权 | 不渲染关联台，读取和 mutation API 均不得调用。 |
 | forbidden/expired session | 不渲染受保护业务页面，不调用受保护页面 API。 |
 
 ## 页面状态合同
@@ -36,7 +36,7 @@
 | `RECON-WB-E2E-005` | 无正式关系的对象保持可见 | P0 | 历史非正式 automatic metadata 不应合并对象；没有 active relation 时每个对象必须独立显示在 unpaired，撤回 preview 必须拒绝。 |
 | `RECON-WB-E2E-006` | direct query failed/timeout 状态 | P0 | direct query 503/超时时显示可重试错误，不显示 false-empty、不读旧 projection/cache、不请求 refresh-status；OA sync dirty/refreshing 仍按独立安全合同禁写。 |
 | `RECON-WB-E2E-007` | 写 API 失败或 fresh refetch 失败 | P0 | 写 API 失败不移动行、不发成功 toast；写成功但 refetch 失败时停留在弹窗错误状态，提示不要重复写入。 |
-| `RECON-WB-E2E-008` | 权限 gate | P0 | `read_export_only` 不显示或禁用确认、关系级撤回和异常抽屉内写操作，并且不会发出 mutation API；未配对工具栏对任何角色都不显示旧人工“异常处理”。 |
+| `RECON-WB-E2E-008` | 页面权限 gate | P0 | 未获关联台授权时不渲染页面且不会发出读取或 mutation API；获权页面仍受健康状态 write-safety 约束；未配对工具栏不恢复旧人工“异常处理”。 |
 | `RECON-WB-E2E-009` | 统一异常审阅、唯一分类队列与分区流转 | P1 | OA—流水—发票金额由服务端自动归入七类，附件只补充“附件缺失 / 附件未解析 / 待归属”；异常默认留在未配对。每个 bucket 内有“金额异常 / 仅资料异常”两个互斥视图：金额关系只属于一个七分类，金额+资料关系仍只出现一次且保留资料 Chip，纯资料关系无论有多少 item 都只计一个关系。七分类数量固定含零值，首开自动选首个非零分类；resolved code 封存在 cursor，续页不回填且不因期间 counts 变化串入另一分类。`290=145+145`、`405=350+55`、`350=150+100+100` 同行且无误报，普通付款关系 `1050-35=1015` 与 OA/发票 `1015` 不生成异常，`turnover_manual_closure` 的同额收支闭环只比较付款本金且不误报。主表与抽屉展开态复用同一三栏定位：可证明时感叹号落具体行，不可证明时落既有关联组边界；折叠态在展开箭头前显示。hover/focus/click Popover 展示 Chip，页面不平铺 Chip，不增加第四栏或汇总细栏。客户端只提交 `accept_paired|keep_unpaired`，服务端重取当前证据；接受后保留原异常与独立审计信息并进入已配对异常，撤回后抽屉与主区同步回未配对。未解析附件可从展开三栏进入既有“录入发票”，打开前必须关闭异常抽屉，任一时刻只有一个业务抽屉；其它行级 mutation 不开放。每次决定一次 canonical GET、一次目标 bucket GET，零 downstream job；旧人工分类/逐项审阅、ignore/restore routes 与 UI 不存在，分类名称不自动执行付款、退款或 OA 草稿。 |
 | `RECON-WB-E2E-010` | 大数据/长列表/三栏滚动和详情 | P1 | 两区首屏各保留 10 组且没有手动“加载更多”；滚动接近区底部才自动读取下一页，失败不循环重试；区域搜索可命中尚未加载的全部服务端数据并高亮；详情、焦点和三栏滚动不遮挡关键按钮，不破坏选择状态。 |
 | `RECON-WB-E2E-011` | 网络恢复和重复提交 | P1 | 网络失败后用户能重试；重复点击/重复 submit 不创建第二条 active relation。 |

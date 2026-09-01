@@ -43,7 +43,7 @@ test.describe("pending invoices export browser download", () => {
   test("downloads current filtered pending invoices with confirmed OA and invoice relation fields", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 
     await recordLatency({
@@ -192,7 +192,7 @@ test.describe("pending invoices export browser download", () => {
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
       pendingInvoiceExportRowLimitError: true,
-      sessionMode: "full_access",
+      sessionMode: "user",
     });
     const recordLatency = createPendingInvoicesLatencyRecorder(page, testInfo);
 

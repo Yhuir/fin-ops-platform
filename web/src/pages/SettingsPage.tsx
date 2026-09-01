@@ -21,6 +21,7 @@ import {
   resumeWorkbenchSettingsDataResetJob,
   saveWorkbenchSettings,
   saveWorkbenchAccessControl,
+  searchWorkbenchAccessUsers,
   saveOaApplicantCredential,
   syncWorkbenchSettingsProjects,
   type WorkbenchBootstrapProgress,
@@ -37,8 +38,6 @@ import type {
   WorkbenchSettingsDataResetPreview,
   WorkbenchSettingsDataResetResult,
 } from "../features/workbench/types";
-
-const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能保存设置。";
 
 function settingsActorId(session: ReturnType<typeof useSession>) {
   return session.status === "authenticated" || session.status === "forbidden"
@@ -67,7 +66,7 @@ export default function SettingsPage() {
   const session = useSession();
   const healthStatus = useAppHealthStatus();
   const canMutateWithHealth = useCanMutateWithHealth();
-  const { canMutateData, canAdminAccess } = useSessionPermissions();
+  const { canAdminAccess } = useSessionPermissions();
   const { setWorkbenchHeaderActions, setWorkbenchStatus } = useAppChrome();
   const [settings, setSettings] = useState<WorkbenchSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -259,10 +258,6 @@ export default function SettingsPage() {
     bankTransactionTags: WorkbenchSettings["bankTransactionTags"];
     pendingInvoiceTagGroups: WorkbenchSettings["pendingInvoiceTagGroups"];
   }) => {
-    if (!canMutateData) {
-      setPageFeedback({ tone: "error", message: READONLY_ACTION_MESSAGE });
-      return;
-    }
     if (healthStatus.blocksMutations) {
       setPageFeedback({ tone: "error", message: "登录已失效或系统不可用，不能保存设置。" });
       return;
@@ -343,9 +338,6 @@ export default function SettingsPage() {
   ): Promise<WorkbenchSettingsDataResetPreview> => fetchWorkbenchSettingsDataResetPreview(action);
 
   const handleSyncSettingsProjects = async (): Promise<WorkbenchSettings> => {
-    if (!canMutateData) {
-      throw new Error(READONLY_ACTION_MESSAGE);
-    }
     if (healthStatus.blocksMutations) {
       throw new Error("登录已失效或系统不可用，不能保存设置。");
     }
@@ -359,9 +351,6 @@ export default function SettingsPage() {
     projectCode: string;
     projectName: string;
   }): Promise<WorkbenchSettings> => {
-    if (!canMutateData) {
-      throw new Error(READONLY_ACTION_MESSAGE);
-    }
     if (healthStatus.blocksMutations) {
       throw new Error("登录已失效或系统不可用，不能保存设置。");
     }
@@ -376,9 +365,6 @@ export default function SettingsPage() {
   };
 
   const handleDeleteSettingsProject = async (projectId: string): Promise<WorkbenchSettings> => {
-    if (!canMutateData) {
-      throw new Error(READONLY_ACTION_MESSAGE);
-    }
     if (healthStatus.blocksMutations) {
       throw new Error("登录已失效或系统不可用，不能保存设置。");
     }
@@ -440,14 +426,14 @@ export default function SettingsPage() {
 
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
-      canMutateData: canMutateData && canMutateWithHealth,
+      canOperateData: canMutateWithHealth,
       onOpenImport: (mode) => navigate(importWorkflowPath(mode)),
       onOpenSettings: handleStayOnSettings,
     });
     return () => {
       setWorkbenchHeaderActions(null);
     };
-  }, [canMutateData, canMutateWithHealth, handleStayOnSettings, navigate, setWorkbenchHeaderActions]);
+  }, [canMutateWithHealth, handleStayOnSettings, navigate, setWorkbenchHeaderActions]);
 
   return (
     <div className="settings-route" data-testid="settings-page">
@@ -471,7 +457,7 @@ export default function SettingsPage() {
           canManageAccessControl={canAdminAccess}
           accessControl={accessControl}
           accessControlStatus={accessControlStatus}
-          canSave={canMutateData && canMutateWithHealth}
+          canSave={canMutateWithHealth}
           isSaving={isSaving}
           isAccessControlLoading={isAccessControlLoading}
           isAccessControlSaving={isAccessControlSaving}
@@ -487,6 +473,7 @@ export default function SettingsPage() {
           onDeleteOaApplicantCredential={handleDeleteOaApplicantCredential}
           onSave={handleSaveSettings}
           onSaveAccessControl={handleSaveAccessControl}
+          onSearchAccessUsers={searchWorkbenchAccessUsers}
           onSaveOaApplicantCredential={handleSaveOaApplicantCredential}
           onSyncProjects={handleSyncSettingsProjects}
         />

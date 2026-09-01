@@ -9,7 +9,7 @@
 ## 用户角色
 
 - `admin`：可进入 `/operations/app-health` 并读取只读 dashboard。
-- `full_access` / `read_export_only`：可使用业务页面和全局状态提示，但不能读取 admin-only operations dashboard。
+- 未被授予本页的普通账号：可使用自己获权的业务页面和全局状态提示，但不能读取 admin-only operations dashboard。
 - forbidden/expired session：不能进入受保护 shell 或调用 dashboard API。
 
 ## Spec 场景
@@ -17,7 +17,7 @@
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
 | `APP-HEALTH-E2E-001` | admin shell 和 dashboard ready | P0 | admin 进入 `/operations/app-health` 后显示主导航、系统状态 active link、`AppHealth 运维状态` 标题、数据/请求/后台指标区和刷新按钮，并调用 dashboard API。 |
-| `APP-HEALTH-E2E-002` | dashboard admin-only gate | P0 | `read_export_only` 用户进入 route 时显示无管理员权限提示，不渲染 dashboard 数据区，也不调用 `/api/operations/app-health-dashboard`。 |
+| `APP-HEALTH-E2E-002` | dashboard admin-only gate | P0 | 非 005 用户进入 route 时显示无管理员权限提示，不渲染 dashboard 数据区，也不调用 `/api/operations/app-health-dashboard`。 |
 | `APP-HEALTH-E2E-003` | forbidden/expired session gate | P0 | forbidden session 显示无权访问，expired session 显示 OA 会话失效；两者都不渲染 dashboard，也不调用 protected dashboard API。 |
 | `APP-HEALTH-E2E-004` | Browser runtime error safety | P0 | admin/read-only/forbidden/expired 四条浏览器路径均不得出现隐藏 `pageerror`、`console.error`、非 abort request failure 或未预期 dialog。 |
 | `APP-HEALTH-E2E-005` | App Status overview 优先级 | P0 | 后端必须按 session、background jobs、readiness、dirty scopes、outbox、worker heartbeat、dependencies 和 alerts 推导 green/yellow/red；malformed/runtime unavailable/missing readiness 不能默认 green。 |

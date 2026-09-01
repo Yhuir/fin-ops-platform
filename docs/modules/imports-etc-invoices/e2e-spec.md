@@ -12,7 +12,7 @@
 | `IMPORT-ETC-E2E-006` | stale reconciliation task preview | task reopen、task version/hash 或 confirmed item set 变化时，confirm 返回 `stale_reconciliation_task_preview`；页面必须清空旧 preview，要求重新预览，禁用确认导入。 |
 | `IMPORT-ETC-E2E-007` | confirm 失败 | confirm API/worker 入队失败时，页面必须显示错误，不展示“已开始后台导入”，不把下游 read model 伪装成 fresh。 |
 | `IMPORT-ETC-E2E-008` | confirm job feedback | 可确认 session 提交后必须展示 background job feedback；job source 应指向 `imports_etc_invoices` 和 `etc_tickets`，不能走通用 `/imports/files/confirm`。 |
-| `IMPORT-ETC-E2E-009` | 权限和系统保护 | `read_export_only` 不能上传、预览或确认；系统 write-safety blocked 时不能执行确认。 |
+| `IMPORT-ETC-E2E-009` | 页面权限和系统保护 | 未获本导入页授权时不能上传、预览或确认；获权页面在系统 write-safety blocked 时不能执行确认。 |
 | `IMPORT-ETC-E2E-010` | explicit import scopes + access convergence | canonical metadata 真变更时，`etc_import_confirmed` 必须只按精确月份触发显式 import 合同声明的 Workbench、invoice lifecycle、tax offset 和 search；不直投 Cost，Workbench publish 也不投 `workbench_shard_published`。Cost 页面在访问时先收敛 Workbench，再收敛当前 Cost scope；historical repair 不进入热路径。 |
 | `IMPORT-ETC-E2E-011` | 真实基础设施 worker drain | PostgreSQL/RabbitMQ/Redis/systemd import worker、derived lifecycle worker、对象存储、真实 OA 草稿和下游 read model freshness 必须在 staging 或生产只读 smoke 验证。 |
 

@@ -168,7 +168,7 @@ function readPersistedTagVersion() {
 export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const { runOperation } = useGlobalOperationOverlay();
-  const { canMutateData } = useSessionPermissions();
+  const { canOperateData } = useSessionPermissions();
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
   const [statusFilters, setStatusFilters] = useState<StatusFilterSelection[]>(DEFAULT_STATUS_FILTERS);
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
@@ -367,8 +367,8 @@ export default function PendingInvoicesPage() {
   }, [isTransactionSelectable]);
 
   const handleOpenSelectedInvoicePicker = useCallback(() => {
-    if (!canMutateData) {
-      setError("当前账号仅支持查看和导出，不能选择发票或建立关系。");
+    if (!canOperateData) {
+      setError("当前页面暂不可选择发票或建立关系。");
       return;
     }
     const transactionIds = selectedRows.map(transactionIdForRow);
@@ -377,7 +377,7 @@ export default function PendingInvoicesPage() {
     }
     setInvoicePickerTransactionIds(transactionIds);
     setActiveDrawer("invoicePicker");
-  }, [canMutateData, selectedRows]);
+  }, [canOperateData, selectedRows]);
 
   const handleOpenDetail = useCallback((target: PendingInvoiceObjectDetailTarget) => {
     setDetailTarget(target);
@@ -497,8 +497,8 @@ export default function PendingInvoicesPage() {
   }, []);
 
   const handleMarkSelectedIncomeStatus = useCallback((statusCode: PendingInvoiceIncomeStatusCode) => {
-    if (!canMutateData) {
-      setError("当前账号仅支持查看和导出，不能修改收入流水状态。");
+    if (!canOperateData) {
+      setError("当前页面暂不可修改收入流水状态。");
       return;
     }
     const transactionIds = selectedRows.map(transactionIdForRow);
@@ -547,7 +547,7 @@ export default function PendingInvoicesPage() {
           return next;
         });
       });
-  }, [applyRowsPayload, canMutateData, clearSelectedTransactions, loadStatistics, query, runOperation, selectedRows, statusFilters]);
+  }, [applyRowsPayload, canOperateData, clearSelectedTransactions, loadStatistics, query, runOperation, selectedRows, statusFilters]);
 
   const compactStatusText = error
     ? error
@@ -701,7 +701,7 @@ export default function PendingInvoicesPage() {
                   {direction === "income" ? (
                     <>
                       <Button
-                        isDisabled={!canMutateData || pendingIncomeStatusRows.size > 0}
+                        isDisabled={!canOperateData || pendingIncomeStatusRows.size > 0}
                         onPress={() => handleMarkSelectedIncomeStatus("income_no_invoice_required")}
                         size="sm"
                         variant="primary"
@@ -709,7 +709,7 @@ export default function PendingInvoicesPage() {
                         标记无需开票
                       </Button>
                       <Button
-                        isDisabled={!canMutateData || pendingIncomeStatusRows.size > 0}
+                        isDisabled={!canOperateData || pendingIncomeStatusRows.size > 0}
                         onPress={() => handleMarkSelectedIncomeStatus("cash_income")}
                         size="sm"
                         variant="primary"
@@ -718,7 +718,7 @@ export default function PendingInvoicesPage() {
                       </Button>
                     </>
                   ) : (
-                    <Button isDisabled={!canMutateData} onPress={handleOpenSelectedInvoicePicker} size="sm" variant="primary">
+                    <Button isDisabled={!canOperateData} onPress={handleOpenSelectedInvoicePicker} size="sm" variant="primary">
                       选择发票
                     </Button>
                   )}
@@ -751,9 +751,9 @@ export default function PendingInvoicesPage() {
         <div className="pending-invoices-loading-slot">
           {loading ? <div aria-label="待找发票加载中" className="pending-invoices-loading-bar" role="progressbar" /> : null}
         </div>
-        {!canMutateData ? (
+        {!canOperateData ? (
           <div className="pending-invoices-status-text pending-invoices-status-text--warning" role="status">
-            当前账号仅支持查看和导出，不能选择发票、修改收入状态或保存规则。
+            当前页面暂不可选择发票、修改收入状态或保存规则。
           </div>
         ) : null}
         <PendingInvoicesTable

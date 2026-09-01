@@ -7,17 +7,17 @@ const mocked = vi.hoisted(() => ({
   session: {
     status: "authenticated",
     session: {
-      canMutateData: true,
+      canOperateData: true,
       canAccessApp: true,
       canAdminAccess: false,
-      accessTier: "full_access",
+      sessionRole: "user",
     },
   } as any,
   permissions: {
-    canMutateData: true,
+    canOperateData: true,
     canAccessApp: true,
     canAdminAccess: false,
-    accessTier: "full_access",
+    sessionRole: "user",
   } as any,
   jobs: [] as Array<{ status: string }>,
   connectionFailed: false,

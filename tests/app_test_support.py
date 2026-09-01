@@ -10,7 +10,12 @@ from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJob
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
+from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
+from fin_ops_platform.services.oa_role_sync_service import (
+    OARoleAssignment,
+    OARoleSyncService,
+    OAUserSummary,
+)
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.state_store_protocol import (
     settings_access_control_from_payload,
@@ -25,6 +30,17 @@ DEFAULT_TEST_OA_TOKEN = "test-suite-oa-token"
 DEFAULT_TEST_USERNAME = "test_finops_user"
 
 
+class _TestOARoleSyncExecutor:
+    def apply(self, _assignments: list[OARoleAssignment]) -> None:
+        return None
+
+    def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
+        return [OAUserSummary(username=username, display_name=f"{username} 用户", active=True) for username in usernames]
+
+    def search_users(self, query: str, limit: int) -> list[OAUserSummary]:
+        return [OAUserSummary(username=query, display_name=f"{query} 用户", active=True)][:limit]
+
+
 def build_local_state_application(*args, **kwargs):
     install_test_session = kwargs.pop("install_test_session", True)
     test_username = kwargs.pop("test_username", DEFAULT_TEST_USERNAME)
@@ -33,6 +49,7 @@ def build_local_state_application(*args, **kwargs):
         data_dir = args[0]
     if data_dir is None:
         application = _build_application(*args, **kwargs)
+        _install_test_oa_directory(application)
         if install_test_session:
             install_default_test_session(application, username=test_username)
         else:
@@ -53,11 +70,18 @@ def build_local_state_application(*args, **kwargs):
         patch.object(Application, "_runtime_bootstrap_state", load_local_bootstrap_state),
     ):
         application = _build_application(*args, **kwargs)
+    _install_test_oa_directory(application)
     if install_test_session:
         install_default_test_session(application, username=test_username)
     else:
         _install_default_test_access_provider(application)
     return application
+
+
+def _install_test_oa_directory(application: Application) -> None:
+    application._app_settings_service._oa_role_sync_service = OARoleSyncService(  # noqa: SLF001
+        executor=_TestOARoleSyncExecutor()
+    )
 
 
 def _install_default_test_access_provider(application: Application) -> None:
@@ -71,17 +95,16 @@ def _install_default_test_access_provider(application: Application) -> None:
         default_username = DEFAULT_TEST_USERNAME
         default_key = settings_username_comparison_key(default_username)
         if any(
-            settings_username_comparison_key(username) == default_key
-            for username in snapshot["allowed_usernames"]
+            settings_username_comparison_key(account["username"]) == default_key
+            for account in snapshot["page_access_accounts"]
         ):
             return snapshot
         return settings_access_control_from_payload(
             {
                 **snapshot,
-                "allowed_usernames": [],
-                "full_access_usernames": [
-                    *snapshot["full_access_usernames"],
-                    default_username,
+                "page_access_accounts": [
+                    *snapshot["page_access_accounts"],
+                    {"username": default_username, "page_keys": sorted(ASSIGNABLE_PAGE_KEYS)},
                 ],
             }
         )
@@ -132,25 +155,24 @@ def install_default_test_session(
 def configure_access_control(
     application: Application,
     *,
-    full_access: list[str] | None = None,
-    read_export_only: list[str] | None = None,
+    usernames: list[str] | None = None,
+    page_access: dict[str, list[str]] | None = None,
 ) -> dict[str, object]:
     service = application._app_settings_service  # noqa: SLF001
     sync_service = service._oa_role_sync_service  # noqa: SLF001
     if sync_service is None or (isinstance(sync_service, OARoleSyncService) and not sync_service.enabled):
         service._oa_role_sync_service = OARoleSyncService(  # noqa: SLF001
-            executor=SimpleNamespace(apply=lambda _assignments: None)
+            executor=_TestOARoleSyncExecutor()
         )
     current = service.get_access_control_payload()
+    accounts_by_username = {
+        username: sorted(ASSIGNABLE_PAGE_KEYS)
+        for username in list(usernames or [])
+    }
+    accounts_by_username.update(page_access or {})
     accounts = [
-        *(
-            {"username": username, "access_tier": "full_access"}
-            for username in list(full_access or [])
-        ),
-        *(
-            {"username": username, "access_tier": "read_export_only"}
-            for username in list(read_export_only or [])
-        ),
+        {"username": username, "page_keys": page_keys}
+        for username, page_keys in accounts_by_username.items()
     ]
     return service.update_access_control(
         expected_version=int(current["version"]),
@@ -162,7 +184,7 @@ def configure_access_control(
 
 
 def configure_default_test_access(application: Application) -> dict[str, object]:
-    return configure_access_control(application, full_access=["test_finops_user"])
+    return configure_access_control(application, usernames=["test_finops_user"])
 
 
 def seed_confirmed_import(

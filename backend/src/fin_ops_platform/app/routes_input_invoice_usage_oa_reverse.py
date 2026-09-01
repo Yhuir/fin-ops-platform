@@ -18,7 +18,7 @@ class InputInvoiceUsageOaReverseApiRoutes:
         *,
         service: InputInvoiceUsageOaReverseService,
         resolve_read_session: Callable[..., tuple[Any | None, Any | None]],
-        mutation_actor: Callable[..., tuple[str, bool, Any | None]],
+        mutation_actor: Callable[..., tuple[str, Any | None]],
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
         json_response: Callable[[HTTPStatus, object], Any],
         input_usage_error_response: Callable[[InputInvoiceUsageError], Any],
@@ -84,14 +84,14 @@ class InputInvoiceUsageOaReverseApiRoutes:
         try:
             result = self._service.preview(
                 payload,
-                can_create_draft=bool(session.can_mutate_data) if session is not None else True,
+                can_create_draft=True,
             )
         except InputInvoiceUsageError as exc:
             return self._input_usage_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
     def create_batch(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        actor_id, can_mutate, auth_error = self._mutation_actor(
+        actor_id, auth_error = self._mutation_actor(
             headers,
             denied_message="当前账户没有创建进项发票反提 OA 批次权限。",
         )
@@ -104,7 +104,6 @@ class InputInvoiceUsageOaReverseApiRoutes:
             result = self._service.create_batch(
                 payload if isinstance(payload, dict) else {},
                 actor_id=actor_id,
-                can_mutate=can_mutate,
             )
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
@@ -164,7 +163,7 @@ class InputInvoiceUsageOaReverseApiRoutes:
         return self._json_response(HTTPStatus.OK, result)
 
     def create_oa_draft_from_selection(self, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        actor_id, can_mutate, auth_error = self._mutation_actor(
+        actor_id, auth_error = self._mutation_actor(
             headers,
             denied_message="当前账户没有创建进项发票反提 OA 草稿权限。",
         )
@@ -177,7 +176,6 @@ class InputInvoiceUsageOaReverseApiRoutes:
             result = self._service.create_oa_draft_from_selection(
                 payload if isinstance(payload, dict) else {},
                 actor_id=actor_id,
-                can_mutate=can_mutate,
                 oa_client_provider=self._target_oa_applicant_token_provider(),
             )
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
@@ -185,7 +183,7 @@ class InputInvoiceUsageOaReverseApiRoutes:
         return self._json_response(HTTPStatus.OK, result)
 
     def create_oa_draft(self, batch_id: str, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        actor_id, can_mutate, auth_error = self._mutation_actor(
+        actor_id, auth_error = self._mutation_actor(
             headers,
             denied_message="当前账户没有创建进项发票反提 OA 草稿权限。",
         )
@@ -201,7 +199,6 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 expected_version=self._int_or_none(request.get("expectedVersion", request.get("expected_version"))),
                 idempotency_key=str(request.get("idempotencyKey", request.get("idempotency_key")) or ""),
                 actor_id=actor_id,
-                can_mutate=can_mutate,
                 oa_client=self._oa_draft_client_for_batch(batch_id),
             )
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
@@ -209,7 +206,7 @@ class InputInvoiceUsageOaReverseApiRoutes:
         return self._json_response(HTTPStatus.OK, result)
 
     def revoke_oa_draft(self, batch_id: str, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        actor_id, can_mutate, auth_error = self._mutation_actor(
+        actor_id, auth_error = self._mutation_actor(
             headers,
             denied_message="当前账户没有撤销进项发票反提 OA 草稿权限。",
         )
@@ -226,14 +223,13 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 expected_version=self._int_or_none(request.get("expectedVersion", request.get("expected_version"))),
                 idempotency_key=str(request.get("idempotencyKey", request.get("idempotency_key")) or ""),
                 actor_id=actor_id,
-                can_mutate=can_mutate,
             )
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
     def refresh_oa_status(self, batch_id: str, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        actor_id, can_mutate, auth_error = self._mutation_actor(
+        actor_id, auth_error = self._mutation_actor(
             headers,
             denied_message="当前账户没有刷新进项发票反提 OA 状态权限。",
         )
@@ -248,14 +244,13 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 batch_id,
                 expected_version=self._int_or_none(request.get("expectedVersion", request.get("expected_version"))),
                 actor_id=actor_id,
-                can_mutate=can_mutate,
             )
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:
             return self._oa_reverse_error_response(exc)
         return self._json_response(HTTPStatus.OK, result)
 
     def manual_oa_status(self, batch_id: str, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
-        actor_id, can_mutate, auth_error = self._mutation_actor(
+        actor_id, auth_error = self._mutation_actor(
             headers,
             denied_message="当前账户没有人工标记进项发票反提 OA 状态权限。",
         )
@@ -273,7 +268,6 @@ class InputInvoiceUsageOaReverseApiRoutes:
                 expected_version=self._int_or_none(request.get("expectedVersion", request.get("expected_version"))),
                 idempotency_key=str(request.get("idempotencyKey", request.get("idempotency_key")) or ""),
                 actor_id=actor_id,
-                can_mutate=can_mutate,
                 candidate_oa_row_id=str(request.get("candidateOaRowId", request.get("candidate_oa_row_id")) or "") or None,
             )
         except (InputInvoiceUsageOaReverseServiceError, WorkbenchRelationCommandError) as exc:

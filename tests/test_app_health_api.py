@@ -372,7 +372,7 @@ class AppHealthApiTests(unittest.TestCase):
     def test_operation_history_rejects_non_admin_without_querying_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            configure_access_control(app, full_access=["YNSYLP006"])
+            configure_access_control(app, usernames=["YNSYLP006"])
             app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
                 user_id="006",
                 username="YNSYLP006",
@@ -389,7 +389,7 @@ class AppHealthApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(json.loads(response.body)["error"], "admin_only")
+        self.assertEqual(json.loads(response.body)["error"], "admin_access_required")
         self.assertEqual(repository.list_calls, [])
 
     def test_mutation_records_requested_and_completed_events_with_one_request_id(self) -> None:
@@ -442,8 +442,8 @@ class AppHealthApiTests(unittest.TestCase):
 
         response = app.handle_request("POST", "/api/unknown-write", body="{}")
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(json.loads(response.body)["error"], "operation_audit_unavailable")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(json.loads(response.body)["error"], "page_access_policy_missing")
 
     def test_operations_app_health_dashboard_returns_stale_cached_payload_after_refresh_error(self) -> None:
         current_time = {"value": 100.0}

@@ -8,7 +8,7 @@ import { sidebarGroups } from "../components/shell/sidebarItems";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
-import type { SessionAccessTier, SessionPayload } from "../features/session/api";
+import type { SessionPayload } from "../features/session/api";
 import BankFlowRuleBatchPage from "../pages/BankFlowRuleBatchPage";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
 
@@ -290,29 +290,26 @@ const fullAccessSessionPayload: SessionPayload = {
   },
   roles: ["fin_ops_user"],
   permissions: ["finops:app:view"],
-  accessTier: "full_access",
   canAccessApp: true,
-  canMutateData: true,
   canAdminAccess: false,
+  allowedPageKeys: ["bank-flow-rule-batches"],
 };
 
-function sessionValue(accessTier: SessionAccessTier = "full_access"): SessionContextValue {
+function sessionValue(canAdminAccess = false): SessionContextValue {
   return {
     status: "authenticated",
     session: {
       ...fullAccessSessionPayload,
-      accessTier,
-      canMutateData: accessTier === "full_access" || accessTier === "admin",
-      canAdminAccess: accessTier === "admin",
+      canAdminAccess,
     },
     refresh: () => undefined,
   };
 }
 
-function renderPage(accessTier: SessionAccessTier = "full_access") {
+function renderPage(canAdminAccess = false) {
   return render(
     <GlobalOperationOverlayProvider>
-      <SessionContext.Provider value={sessionValue(accessTier)}>
+      <SessionContext.Provider value={sessionValue(canAdminAccess)}>
         <PageRuntimeProvider value={{ pageKey: "bank-flow-rule-batches", active: true, activationGeneration: 0 }}>
           <BankFlowRuleBatchPage />
         </PageRuntimeProvider>
@@ -802,26 +799,24 @@ describe("BankFlowRuleBatchPage", () => {
     });
   });
 
-  test("read-export users can view batches but cannot submit, withdraw, or save tag scope", async () => {
+  test("a user assigned to the page can use its normal batch and tag actions", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
-    renderPage("read_export_only");
+    renderPage();
 
     expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
-    expect(screen.getByText("当前账号仅支持查看和导出，不能提交、撤回或保存流水规则批次。")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "提交批次" })).not.toBeInTheDocument();
+    expect(screen.queryByText("当前页面暂不可提交、撤回或保存流水规则批次。")).not.toBeInTheDocument();
 
     const transactionRegion = screen.getByRole("region", { name: "流水" });
     const rowCheckbox = await within(transactionRegion).findByRole("checkbox", { name: /^选择流水 建设银行 2026-05-03 10:20:00 8\.80 建设银行 8106/ });
-    expect(rowCheckbox).toBeDisabled();
+    expect(rowCheckbox).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "流水规则标签管理" }));
     const drawer = await screen.findByRole("dialog", { name: "流水规则标签管理" });
-    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" })).toBeDisabled();
-    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要发票" })).toBeDisabled();
-    expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
-
-    expect(fetchMock.mock.calls.some(([, init]) => ["POST", "PUT", "PATCH", "DELETE"].includes(String(init?.method ?? "GET")))).toBe(false);
+    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要OA" })).toBeEnabled();
+    expect(within(drawer).getByRole("checkbox", { name: "费用 / 手续费 需要发票" })).toBeEnabled();
+    expect(within(drawer).getByRole("button", { name: "保存" })).toBeEnabled();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   test("recovers after a transient bank flow rule batch list failure when refreshed", async () => {
