@@ -1,3 +1,5 @@
+import { Input } from "@heroui/react";
+
 import type { SettingsOaInvoiceOffsetSectionProps } from "./types";
 
 export default function SettingsOaInvoiceOffsetSection({
@@ -8,7 +10,7 @@ export default function SettingsOaInvoiceOffsetSection({
   return (
     <section
       aria-labelledby="settings-section-oa-invoice-offset-title"
-      className="settings-section-panel"
+      className="settings-section-panel settings-section-panel--compact"
       id="settings-section-oa-invoice-offset"
       role="region"
     >
@@ -18,20 +20,14 @@ export default function SettingsOaInvoiceOffsetSection({
       <div className="settings-section-body">
         <label className="settings-field settings-field--wide">
           <span>冲账申请人</span>
-          <input
+          <Input
+            aria-label="冲账申请人"
             disabled={controlsDisabled}
-            type="text"
+            placeholder="多个姓名用逗号分隔"
             value={applicantsText}
             onChange={(event) => onChangeApplicantsText(event.currentTarget.value)}
           />
-          <small>多个申请人以逗号或空格分隔</small>
         </label>
-        <div className="settings-inline-alert settings-inline-alert--info" role="status">
-          <strong>自动配对规则</strong>
-          <p>
-            OA 申请人在名单内时，自动配对该 OA 和 OA 附件解析出的发票，并打“冲”标签；该组不计入成本统计。
-          </p>
-        </div>
       </div>
     </section>
   );

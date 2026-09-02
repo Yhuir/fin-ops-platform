@@ -11,5 +11,6 @@
 | `SETTINGS-E2E-005` | OA 角色与补偿 | 真实变化先同步两角色，再原子提交 PostgreSQL ACL+audit；OA/PG/补偿失败分别返回明确 502/503，不能伪报成功。 |
 | `SETTINGS-E2E-006` | 凭据安全 | OA 申请人密码不进入普通 settings、响应、日志或 audit。 |
 | `SETTINGS-E2E-007` | 数据重置 | 005 双确认、OA 密码复核、后台 job 进度和结果保持既有合同。 |
+| `SETTINGS-E2E-008` | 紧凑设置 UI | 桌面端为窄导航 + 自然宽度内容，窄屏为选择器 + 单栏；所有子页面无大卡片、导航描述/计数和静态解释文案，主要交互使用 HeroUI。 |
 
 访问账户不触发 read model、cache、dirty scope、background worker 或页面数据重建。

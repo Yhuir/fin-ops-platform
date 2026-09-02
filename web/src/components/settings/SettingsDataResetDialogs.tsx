@@ -1,3 +1,5 @@
+import { Button, Input, TextArea } from "@heroui/react";
+
 import AppDialog from "../common/AppDialog";
 import type { WorkbenchSettingsDataResetPreview } from "../../features/workbench/types";
 import type { DataResetActionConfig } from "./types";
@@ -39,27 +41,21 @@ export default function SettingsDataResetDialogs({
         onClose={onCancel}
         actions={(
           <>
-            <button className="settings-secondary-button" type="button" onClick={onCancel}>
+            <Button variant="secondary" onPress={onCancel}>
               取消
-            </button>
-            <button
-              className="settings-danger-button"
-              disabled={!preview.recoveryReady}
-              type="button"
-              onClick={onContinue}
+            </Button>
+            <Button
+              isDisabled={!preview.recoveryReady}
+              variant="danger"
+              onPress={onContinue}
             >
               继续
-            </button>
+            </Button>
           </>
         )}
       >
         <div className="settings-dialog-content">
-          <p>{config.description}</p>
-          <ul>
-            {config.impact.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          <strong>{config.label}</strong>
           <p>预计影响 {affectedRows} 条记录。</p>
           <p>{preview.recoveryReady ? "恢复点已验证。" : "恢复点未就绪，请先由运维创建并验证恢复点。"}</p>
         </div>
@@ -79,25 +75,25 @@ export default function SettingsDataResetDialogs({
       onClose={onCancel}
       actions={(
         <>
-          <button className="settings-secondary-button" disabled={isBusy} type="button" onClick={onCancel}>
+          <Button isDisabled={isBusy} variant="secondary" onPress={onCancel}>
             取消
-          </button>
-          <button
-            className="settings-danger-button"
-            disabled={isBusy || !password || reason.trim().length < 5 || !preview.recoveryReceiptId}
-            type="button"
-            onClick={onSubmit}
+          </Button>
+          <Button
+            isDisabled={isBusy || !password || reason.trim().length < 5 || !preview.recoveryReceiptId}
+            isPending={isBusy}
+            variant="danger"
+            onPress={onSubmit}
           >
             {isBusy ? "清理中..." : "确认清理"}
-          </button>
+          </Button>
         </>
       )}
     >
       <div className="settings-dialog-content">
-        <p>请输入当前 OA 用户密码以确认本次高风险操作。</p>
         <label className="settings-field settings-field--wide">
           <span>当前 OA 用户密码</span>
-          <input
+          <Input
+            aria-label="当前 OA 用户密码"
             aria-required="true"
             autoComplete="current-password"
             autoFocus
@@ -110,9 +106,9 @@ export default function SettingsDataResetDialogs({
         </label>
         <label className="settings-field settings-field--wide">
           <span>操作原因（必填）</span>
-          <textarea
+          <TextArea
             aria-label="操作原因（必填）"
-            aria-describedby="settings-data-reset-reason-help"
+            aria-describedby={reasonInvalid ? "settings-data-reset-reason-help" : undefined}
             aria-invalid={reasonInvalid || undefined}
             aria-required="true"
             disabled={isBusy}
@@ -123,12 +119,11 @@ export default function SettingsDataResetDialogs({
             value={reason}
             onChange={(event) => onReasonChange(event.currentTarget.value)}
           />
-          <small
-            className={reasonInvalid ? "settings-field-help settings-field-help--error" : "settings-field-help"}
-            id="settings-data-reset-reason-help"
-          >
-            {reasonInvalid ? `还需输入 ${5 - trimmedReasonLength} 个字。` : "至少输入 5 个字。"}
-          </small>
+          {reasonInvalid ? (
+            <small className="settings-field-help settings-field-help--error" id="settings-data-reset-reason-help">
+              还需输入 {5 - trimmedReasonLength} 个字。
+            </small>
+          ) : null}
         </label>
       </div>
     </AppDialog>

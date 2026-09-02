@@ -62,12 +62,6 @@ export default function SettingsTreeNav({
           </ListBox>
         </Select.Popover>
       </Select>
-      <div className="settings-tree-nav__header">
-        <h2>
-          设置分类
-        </h2>
-        <span>{items.length}</span>
-      </div>
       <ul className="settings-tree" role="tree" aria-label="设置分类">
         {items.map((item) => {
           const selected = activeSectionId === item.id;
@@ -81,11 +75,7 @@ export default function SettingsTreeNav({
                 aria-selected={selected}
                 onClick={() => onSelect(item.id)}
               >
-                <span className="settings-tree-copy">
-                  <strong>{item.label}</strong>
-                  <small>{item.description}</small>
-                </span>
-                <span className="settings-tree-count">{item.count}</span>
+                <strong>{item.label}</strong>
               </button>
             </li>
           );

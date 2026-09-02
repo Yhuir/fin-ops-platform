@@ -32,8 +32,6 @@ export type SettingsSectionId =
 export type SettingsNavigationItem = {
   id: SettingsSectionId;
   label: string;
-  description: string;
-  count: number;
 };
 
 export type ProjectActionStatus = {
@@ -49,9 +47,6 @@ export type DataResetStatus = {
 export type DataResetActionConfig = {
   action: WorkbenchSettingsDataResetAction;
   label: string;
-  title: string;
-  description: string;
-  impact: string[];
 };
 
 export type SettingsProjectsSectionProps = {

@@ -82,6 +82,52 @@ function expectDirectCanonicalPayload(payload: Record<string, unknown>) {
 }
 
 test.describe("settings data reset browser flow", () => {
+  test("keeps every settings section compact on desktop and narrow screens", async ({ page }) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, { sessionMode: "admin" });
+    await page.setViewportSize({ width: 1600, height: 1000 });
+
+    const settingsResponse = waitForSettings(page);
+    await page.goto("/settings");
+    expect((await settingsResponse).status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "设置", exact: true })).toBeVisible();
+    await expect(page.getByText("管理关联台项目、账户、OA导入与高风险维护配置。")).toHaveCount(0);
+
+    const navBox = await page.locator(".settings-nav-shell").boundingBox();
+    expect(navBox).not.toBeNull();
+    expect(navBox?.width).toBeLessThanOrEqual(224);
+
+    const sections = [
+      { nav: "项目状态", region: "项目状态管理", maxWidth: null },
+      { nav: "银行账户", region: "银行账户映射", maxWidth: 1040 },
+      { nav: "待找发票筛选", region: "待找发票筛选", maxWidth: 1040 },
+      { nav: "OA导入设置", region: "OA导入设置", maxWidth: null },
+      { nav: "冲账规则", region: "冲账规则", maxWidth: 720 },
+      { nav: "OA申请人凭据", region: "OA申请人凭据", maxWidth: 1040 },
+      { nav: "访问账户", region: "访问账户", maxWidth: null },
+      { nav: "数据重置", region: "数据重置", maxWidth: 720 },
+    ] as const;
+
+    for (const section of sections) {
+      const navigationItem = page.getByRole("treeitem", { name: section.nav, exact: true });
+      await navigationItem.click();
+      await expect(navigationItem).toHaveAttribute("aria-selected", "true");
+      const region = page.getByRole("region", { name: section.region, exact: true });
+      await expect(region).toBeVisible();
+      const regionBox = await region.boundingBox();
+      expect(regionBox).not.toBeNull();
+      if (section.maxWidth !== null) {
+        expect(regionBox?.width).toBeLessThanOrEqual(section.maxWidth + 1);
+      }
+    }
+
+    await page.setViewportSize({ width: 720, height: 900 });
+    await expect(page.locator(".settings-mobile-section-select")).toBeVisible();
+    await expect(page.getByRole("tree", { name: "设置分类" })).toBeHidden();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("runs data reset through impact confirmation, OA password review, job polling, and settings reload", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
@@ -111,7 +157,7 @@ test.describe("settings data reset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(dataResetRegion).toBeVisible());
     });
     await expect(dataResetRegion).toBeVisible();
-    await expect(dataResetRegion.getByText("高风险操作")).toBeVisible();
+    await expect(dataResetRegion.getByText("高风险操作")).toHaveCount(0);
 
     const impactDialog = page.getByRole("dialog", { name: "确认数据重置" });
     await recordLatency({
@@ -123,7 +169,8 @@ test.describe("settings data reset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(impactDialog).toBeVisible());
     });
     await expect(impactDialog).toBeVisible();
-    await expect(impactDialog.getByText("已导入银行流水会被清空")).toBeVisible();
+    await expect(impactDialog.getByText("已导入银行流水会被清空")).toHaveCount(0);
+    await expect(impactDialog.getByText("预计影响 2 条记录。")).toBeVisible();
     await expect(impactDialog.getByText("恢复点已验证。")).toBeVisible();
 
     const passwordDialog = page.getByRole("dialog", { name: "OA 密码复核" });
@@ -266,6 +313,7 @@ test.describe("settings data reset browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       await activeProjects.getByLabel(`${projectName} 标记完成`).click();
+      await projectsRegion.getByRole("tab", { name: /已完成/ }).click();
       await mark("finalSettledLatencyMs", expect(completedProjects.getByText(projectName)).toBeVisible());
     });
     const saveRequest = page.waitForRequest((request) =>

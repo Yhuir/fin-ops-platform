@@ -61,7 +61,7 @@ test.describe("page access browser matrix", () => {
     const region = page.getByRole("region", { name: "访问账户" });
     await expect(region).toBeVisible();
     await expect(region.getByText("YNSYLP005")).toBeVisible();
-    await expect(region.getByText("005 为固定权限管理员")).toBeVisible();
+    await expect(region.getByText("005 为固定权限管理员")).toHaveCount(0);
     await expect(region.getByLabel("账户列表")).toBeVisible();
     await expect(region.getByLabel("页面访问权限")).toBeVisible();
 

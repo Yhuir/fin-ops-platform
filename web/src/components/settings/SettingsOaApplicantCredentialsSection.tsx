@@ -1,3 +1,4 @@
+import { Button, Chip, Input } from "@heroui/react";
 import { Save, Trash2 } from "lucide-react";
 
 import type { OaApplicantCredentialSummary } from "../../features/workbench/types";
@@ -13,10 +14,6 @@ import type { SettingsOaApplicantCredentialsSectionProps } from "./types";
 
 function credentialStatusLabel(credential: OaApplicantCredentialSummary) {
   return credential.hasCredential && credential.credentialStatus === "configured" ? "已配置" : "未配置";
-}
-
-function credentialStatusTone(credential: OaApplicantCredentialSummary) {
-  return credentialStatusLabel(credential) === "已配置" ? "success" : "neutral";
 }
 
 function sortedCredentials(credentials: OaApplicantCredentialSummary[]) {
@@ -53,7 +50,7 @@ export default function SettingsOaApplicantCredentialsSection({
   return (
     <section
       aria-labelledby="settings-section-oa-applicant-credentials-title"
-      className="settings-section-panel"
+      className="settings-section-panel settings-section-panel--standard"
       id="settings-section-oa-applicant-credentials"
       role="region"
     >
@@ -64,45 +61,46 @@ export default function SettingsOaApplicantCredentialsSection({
         <div className="settings-access-form">
           <label className="settings-field">
             <span>目标 OA 申请人</span>
-            <input
+            <Input
+              aria-label="目标 OA 申请人"
               disabled={sectionDisabled}
-              type="text"
               value={targetApplicantNameDraft}
               onChange={(event) => onChangeTargetApplicantNameDraft(event.currentTarget.value)}
             />
           </label>
           <label className="settings-field">
             <span>申请人账号标识</span>
-            <input
+            <Input
+              aria-label="申请人账号标识"
               disabled={sectionDisabled}
-              type="text"
               value={targetApplicantCodeDraft}
               onChange={(event) => onChangeTargetApplicantCodeDraft(event.currentTarget.value)}
             />
           </label>
           <label className="settings-field">
             <span>OA 登录账号</span>
-            <input
+            <Input
+              aria-label="OA 登录账号"
               disabled={sectionDisabled}
-              type="text"
               value={oaUsernameDraft}
               onChange={(event) => onChangeOaUsernameDraft(event.currentTarget.value)}
             />
           </label>
           <label className="settings-field">
             <span>OA 登录密码</span>
-            <input
+            <Input
+              aria-label="OA 登录密码"
               disabled={sectionDisabled}
               type="password"
               value={oaPasswordDraft}
               onChange={(event) => onChangeOaPasswordDraft(event.currentTarget.value)}
             />
           </label>
-          <button
-            className="settings-primary-button"
-            disabled={!canSaveCredential || sectionDisabled}
-            type="button"
-            onClick={() =>
+          <Button
+            isDisabled={!canSaveCredential || sectionDisabled}
+            isPending={isSaving}
+            variant="primary"
+            onPress={() =>
               onSaveCredential({
                 targetApplicantCode: targetApplicantCodeDraft.trim(),
                 targetApplicantName: targetApplicantNameDraft.trim(),
@@ -113,7 +111,7 @@ export default function SettingsOaApplicantCredentialsSection({
           >
             <Save aria-hidden="true" size={16} />
             保存凭据
-          </button>
+          </Button>
         </div>
 
         {status ? (
@@ -134,8 +132,8 @@ export default function SettingsOaApplicantCredentialsSection({
             当前没有配置 OA 申请人凭据。
           </div>
         ) : (
-          <div className="settings-native-table-shell settings-native-table-shell--scroll">
-            <FinanceTable ariaLabel="OA申请人凭据" className="settings-native-table" minWidth={640} scrollMode="contained">
+          <div className="settings-native-table-shell">
+            <FinanceTable ariaLabel="OA申请人凭据" className="settings-native-table" minWidth={640}>
               <FinanceTableHeader>
                 <FinanceTableColumn id="applicant" isRowHeader columnRole="identity">目标 OA 申请人</FinanceTableColumn>
                 <FinanceTableColumn id="account" columnRole="account">OA 登录账号</FinanceTableColumn>
@@ -146,32 +144,37 @@ export default function SettingsOaApplicantCredentialsSection({
                 {rows.map((credential) => (
                   <FinanceTableRow id={credential.targetApplicantCode || credential.targetApplicantName} key={credential.targetApplicantCode || credential.targetApplicantName}>
                     <FinanceTableCell columnRole="identity">
-                      <button
-                        className="settings-secondary-button"
-                        disabled={sectionDisabled}
-                        type="button"
-                        onClick={() => onSelectCredential(credential)}
+                      <Button
+                        isDisabled={sectionDisabled}
+                        size="sm"
+                        variant="secondary"
+                        onPress={() => onSelectCredential(credential)}
                       >
                         {credential.targetApplicantName || credential.targetApplicantCode}
-                      </button>
+                      </Button>
                     </FinanceTableCell>
                     <FinanceTableCell columnRole="account">{credential.oaUsername || "-"}</FinanceTableCell>
                     <FinanceTableCell columnRole="status">
-                      <span className={`settings-selected-tag settings-selected-tag--${credentialStatusTone(credential)}`}>
-                        {credentialStatusLabel(credential)}
-                      </span>
+                      <Chip
+                        color={credentialStatusLabel(credential) === "已配置" ? "success" : "default"}
+                        size="sm"
+                        variant="soft"
+                      >
+                        <Chip.Label>{credentialStatusLabel(credential)}</Chip.Label>
+                      </Chip>
                     </FinanceTableCell>
                     <FinanceTableCell columnRole="action">
                       <div className="settings-table-actions">
-                        <button
+                        <Button
                           aria-label={`${credential.targetApplicantName || credential.targetApplicantCode} 清空密码`}
-                          className="settings-icon-button settings-icon-button--danger"
-                          disabled={sectionDisabled || !credential.targetApplicantCode}
-                          type="button"
-                          onClick={() => onClearCredential(credential.targetApplicantCode)}
+                          isDisabled={sectionDisabled || !credential.targetApplicantCode}
+                          isIconOnly
+                          size="sm"
+                          variant="danger"
+                          onPress={() => onClearCredential(credential.targetApplicantCode)}
                         >
                           <Trash2 aria-hidden="true" size={16} />
-                        </button>
+                        </Button>
                       </div>
                     </FinanceTableCell>
                   </FinanceTableRow>

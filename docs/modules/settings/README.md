@@ -57,6 +57,13 @@ canonical query，也可能影响 `workbench` 或 `workbench_relation` owner 的
 
 当前 HTTP I/O 边界已关闭：`SettingsApiRoutes` 负责 settings path matching、body/query parsing、权限 gate、错误码和 response shape；`server.py` 不再定义 `_handle_api_workbench_settings*` 旧 handler。`AppSettingsService` 只从持久化 settings store 刷新事实，缺失字段由 normalizer/default contract 处理，不再用旧内存 `_snapshot` 补齐持久化结果。
 
+## 当前页面呈现
+
+- 桌面端使用 224px 设置导航 + 内容区，移动端切换为 HeroUI `Select`；导航仅显示子页面名称。
+- 子页面采用自然文档流和三档内容宽度：紧凑 720px、标准 1040px、表格/访问账户按内容自适应；不使用大卡片或海报式栅格。
+- 表单、按钮、标签页、选择器、复选框、状态标签、进度条和弹窗使用 HeroUI；原生 button 只保留在 `treeitem` 与 OA 搜索 `option` 两个需要专用 ARIA role 的语义节点。
+- 访问账户保留账户/页面双栏；项目状态和待找发票筛选使用标签页；数据重置使用紧凑操作列表。静态说明文案已移除，运行状态、校验错误和不可逆操作确认仍按安全合同显示。
+
 ## 关键影响
 
 | 设置动作 | 后端事实 | 可见性合同 |

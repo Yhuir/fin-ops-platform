@@ -1,4 +1,6 @@
+import { Button, Chip, Input, Tabs } from "@heroui/react";
 import { CheckCircle, RotateCcw, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import type { WorkbenchProjectSetting } from "../../features/workbench/types";
 import {
@@ -33,69 +35,63 @@ function ProjectTable({
   onToggleCompleted,
 }: ProjectTableProps) {
   return (
-    <div className="settings-project-column">
-      <div className="settings-project-column-head">
-        <strong>{label}</strong>
-        <span>{projects.length} 个</span>
-      </div>
-      <div className="settings-native-table-shell">
-        <FinanceTable ariaLabel={label} className="settings-native-table" minWidth={560}>
-          <FinanceTableHeader>
-            <FinanceTableColumn id="name" isRowHeader columnRole="identity">项目名称</FinanceTableColumn>
-            <FinanceTableColumn id="code" columnRole="identity">项目编码</FinanceTableColumn>
-            <FinanceTableColumn id="source" columnRole="status">来源</FinanceTableColumn>
-            <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
-          </FinanceTableHeader>
-          <FinanceTableBody>
-            {projects.length === 0 ? (
-              <FinanceTableRow id="empty">
-                <FinanceTableCell className="settings-table-empty" columnRole="identity">当前没有{label}。</FinanceTableCell>
-                <FinanceTableCell columnRole="identity">-</FinanceTableCell>
-                <FinanceTableCell columnRole="status">-</FinanceTableCell>
-                <FinanceTableCell columnRole="action">-</FinanceTableCell>
+    <div className="settings-native-table-shell">
+      <FinanceTable ariaLabel={label} className="settings-native-table" minWidth={680}>
+        <FinanceTableHeader>
+          <FinanceTableColumn id="name" isRowHeader columnRole="identity">项目名称</FinanceTableColumn>
+          <FinanceTableColumn id="code" columnRole="identity">项目编码</FinanceTableColumn>
+          <FinanceTableColumn id="source" columnRole="status">来源</FinanceTableColumn>
+          <FinanceTableColumn id="action" columnRole="action">操作</FinanceTableColumn>
+        </FinanceTableHeader>
+        <FinanceTableBody>
+          {projects.length === 0 ? (
+            <FinanceTableRow id="empty">
+              <FinanceTableCell className="settings-table-empty" columnRole="identity">暂无项目</FinanceTableCell>
+              <FinanceTableCell columnRole="identity">-</FinanceTableCell>
+              <FinanceTableCell columnRole="status">-</FinanceTableCell>
+              <FinanceTableCell columnRole="action">-</FinanceTableCell>
+            </FinanceTableRow>
+          ) : (
+            projects.map((project) => (
+              <FinanceTableRow id={project.id} key={project.id}>
+                <FinanceTableCell columnRole="identity">
+                  <span className="settings-table-primary">{project.projectName}</span>
+                </FinanceTableCell>
+                <FinanceTableCell className="settings-table-code" columnRole="identity">{project.projectCode}</FinanceTableCell>
+                <FinanceTableCell columnRole="status">
+                  <Chip color="default" size="sm" variant="soft">
+                    <Chip.Label>{projectSourceLabel(project.source)}</Chip.Label>
+                  </Chip>
+                </FinanceTableCell>
+                <FinanceTableCell columnRole="action">
+                  <div className="settings-table-actions">
+                    <Button
+                      aria-label={`${project.projectName} ${isCompleted ? "移回进行中" : "标记完成"}`}
+                      isDisabled={controlsDisabled}
+                      isIconOnly
+                      size="sm"
+                      variant="tertiary"
+                      onPress={() => onToggleCompleted(project.id)}
+                    >
+                      {isCompleted ? <RotateCcw aria-hidden="true" size={16} /> : <CheckCircle aria-hidden="true" size={16} />}
+                    </Button>
+                    <Button
+                      aria-label={`${project.projectName} 删除`}
+                      isDisabled={controlsDisabled}
+                      isIconOnly
+                      size="sm"
+                      variant="danger"
+                      onPress={() => void onDeleteProject(project)}
+                    >
+                      <Trash2 aria-hidden="true" size={16} />
+                    </Button>
+                  </div>
+                </FinanceTableCell>
               </FinanceTableRow>
-            ) : (
-              projects.map((project) => (
-                <FinanceTableRow id={project.id} key={project.id}>
-                  <FinanceTableCell columnRole="identity">
-                    <span className="settings-table-primary">{project.projectName}</span>
-                  </FinanceTableCell>
-                  <FinanceTableCell className="settings-table-code" columnRole="identity">{project.projectCode}</FinanceTableCell>
-                  <FinanceTableCell columnRole="status">
-                    <span className={`settings-source-tag settings-source-tag--${project.source}`}>
-                      {projectSourceLabel(project.source)}
-                    </span>
-                  </FinanceTableCell>
-                  <FinanceTableCell columnRole="action">
-                    <div className="settings-table-actions">
-                      <button
-                        aria-label={`${project.projectName} ${isCompleted ? "移回进行中" : "标记完成"}`}
-                        className="settings-icon-button"
-                        disabled={controlsDisabled}
-                        title={isCompleted ? "移回进行中" : "标记完成"}
-                        type="button"
-                        onClick={() => onToggleCompleted(project.id)}
-                      >
-                        {isCompleted ? <RotateCcw aria-hidden="true" size={16} /> : <CheckCircle aria-hidden="true" size={16} />}
-                      </button>
-                      <button
-                        aria-label={`${project.projectName} 删除`}
-                        className="settings-icon-button settings-icon-button--danger"
-                        disabled={controlsDisabled}
-                        title="删除"
-                        type="button"
-                        onClick={() => void onDeleteProject(project)}
-                      >
-                        <Trash2 aria-hidden="true" size={16} />
-                      </button>
-                    </div>
-                  </FinanceTableCell>
-                </FinanceTableRow>
-              ))
-            )}
-          </FinanceTableBody>
-        </FinanceTable>
-      </div>
+            ))
+          )}
+        </FinanceTableBody>
+      </FinanceTable>
     </div>
   );
 }
@@ -116,10 +112,13 @@ export default function SettingsProjectsSection({
   isProjectActionBusy,
   canAddProject,
 }: SettingsProjectsSectionProps) {
+  const [activeTab, setActiveTab] = useState<"active" | "completed">("active");
+  const projects = activeTab === "active" ? activeProjects : completedProjects;
+
   return (
     <section
       aria-labelledby="settings-section-projects-title"
-      className="settings-section-panel"
+      className="settings-section-panel settings-section-panel--fluid"
       id="settings-section-projects"
       role="region"
     >
@@ -128,40 +127,39 @@ export default function SettingsProjectsSection({
       </header>
       <div className="settings-section-body">
         <div className="settings-project-toolbar">
-          <button
-            className="settings-secondary-button"
-            disabled={controlsDisabled || isProjectActionBusy}
-            type="button"
-            onClick={() => void onSyncProjects()}
+          <Button
+            isDisabled={controlsDisabled || isProjectActionBusy}
+            isPending={isProjectActionBusy}
+            variant="secondary"
+            onPress={() => void onSyncProjects()}
           >
             {isProjectActionBusy ? "同步中..." : "从 OA 拉取项目"}
-          </button>
-          <label className="settings-field">
+          </Button>
+          <label className="settings-field settings-field--project-code">
             <span>项目编码</span>
-            <input
+            <Input
+              aria-label="项目编码"
               disabled={controlsDisabled}
-              type="text"
               value={projectCodeDraft}
               onChange={(event) => onChangeProjectCodeDraft(event.currentTarget.value)}
             />
           </label>
-          <label className="settings-field">
+          <label className="settings-field settings-field--project-name">
             <span>项目名称</span>
-            <input
+            <Input
+              aria-label="项目名称"
               disabled={controlsDisabled}
-              type="text"
               value={projectNameDraft}
               onChange={(event) => onChangeProjectNameDraft(event.currentTarget.value)}
             />
           </label>
-          <button
-            className="settings-primary-button"
-            disabled={!canAddProject || controlsDisabled}
-            type="button"
-            onClick={() => void onAddProject()}
+          <Button
+            isDisabled={!canAddProject || controlsDisabled}
+            variant="primary"
+            onPress={() => void onAddProject()}
           >
             新增本地项目
-          </button>
+          </Button>
         </div>
 
         {projectActionStatus ? (
@@ -173,24 +171,25 @@ export default function SettingsProjectsSection({
           </div>
         ) : null}
 
-        <div className="settings-project-columns">
-          <ProjectTable
-            label="进行中项目"
-            projects={activeProjects}
-            isCompleted={false}
-            controlsDisabled={controlsDisabled}
-            onDeleteProject={onDeleteProject}
-            onToggleCompleted={onToggleCompleted}
-          />
-          <ProjectTable
-            label="已完成项目"
-            projects={completedProjects}
-            isCompleted
-            controlsDisabled={controlsDisabled}
-            onDeleteProject={onDeleteProject}
-            onToggleCompleted={onToggleCompleted}
-          />
-        </div>
+        <Tabs
+          className="settings-project-tabs"
+          selectedKey={activeTab}
+          variant="secondary"
+          onSelectionChange={(key) => setActiveTab(String(key) as "active" | "completed")}
+        >
+          <Tabs.List aria-label="项目状态">
+            <Tabs.Tab id="active">进行中 {activeProjects.length}</Tabs.Tab>
+            <Tabs.Tab id="completed">已完成 {completedProjects.length}</Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
+        <ProjectTable
+          label={activeTab === "active" ? "进行中项目" : "已完成项目"}
+          projects={projects}
+          isCompleted={activeTab === "completed"}
+          controlsDisabled={controlsDisabled}
+          onDeleteProject={onDeleteProject}
+          onToggleCompleted={onToggleCompleted}
+        />
       </div>
     </section>
   );

@@ -1,3 +1,5 @@
+import { Checkbox, Input, ListBox, Select } from "@heroui/react";
+
 import OaManualSearchImportTable from "./OaManualSearchImportTable";
 import type { SettingsOaRetentionSectionProps } from "./types";
 import type { WorkbenchOaImportSettings } from "../../features/workbench/types";
@@ -30,7 +32,7 @@ export default function SettingsOaRetentionSection({
   return (
     <section
       aria-labelledby="settings-section-oa-retention-title"
-      className="settings-section-panel"
+      className="settings-section-panel settings-section-panel--fluid"
       id="settings-section-oa-retention"
       role="region"
     >
@@ -38,29 +40,33 @@ export default function SettingsOaRetentionSection({
         <h3 id="settings-section-oa-retention-title">OA导入设置</h3>
       </header>
       <div className="settings-section-body">
-        <label className="settings-field settings-field--date">
-          <span>OA导入起始日期</span>
-          <input
-            disabled={controlsDisabled}
-            type="date"
-            value={cutoffDate}
-            onChange={(event) => onChangeCutoffDate(event.currentTarget.value)}
-          />
-        </label>
+        <div className="settings-oa-config">
+          <label className="settings-field settings-field--date">
+            <span>OA导入起始日期</span>
+            <Input
+              aria-label="OA导入起始日期"
+              disabled={controlsDisabled}
+              type="date"
+              value={cutoffDate}
+              onChange={(event) => onChangeCutoffDate(event.currentTarget.value)}
+            />
+          </label>
 
-        <div className="settings-oa-import-layout">
           <fieldset className="settings-checkbox-group" disabled={controlsDisabled}>
             <legend>表单类型</legend>
             <div className="settings-checkbox-list">
               {formTypeOptions.map((option) => (
-                <label className="settings-checkbox-row" key={option.value}>
-                  <input
-                    checked={oaImport.formTypes.includes(option.value)}
-                    type="checkbox"
-                    onChange={() => onToggleFormType(option.value)}
-                  />
+                <Checkbox
+                  className="settings-checkbox-row"
+                  isDisabled={controlsDisabled}
+                  isSelected={oaImport.formTypes.includes(option.value)}
+                  key={option.value}
+                  slot={null}
+                  onChange={() => onToggleFormType(option.value)}
+                >
+                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                   <span>{option.label}</span>
-                </label>
+                </Checkbox>
               ))}
             </div>
           </fieldset>
@@ -68,44 +74,45 @@ export default function SettingsOaRetentionSection({
             <legend>流程状态</legend>
             <div className="settings-checkbox-list">
               {statusOptions.map((option) => (
-                <label className="settings-checkbox-row" key={option.value}>
-                  <input
-                    checked={oaImport.statuses.includes(option.value)}
-                    type="checkbox"
-                    onChange={() => onToggleStatus(option.value)}
-                  />
+                <Checkbox
+                  className="settings-checkbox-row"
+                  isDisabled={controlsDisabled}
+                  isSelected={oaImport.statuses.includes(option.value)}
+                  key={option.value}
+                  slot={null}
+                  onChange={() => onToggleStatus(option.value)}
+                >
+                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
                   <span>{option.label}</span>
-                </label>
+                </Checkbox>
               ))}
             </div>
           </fieldset>
-        </div>
 
-        <label className="settings-field">
-          <span>OA附件发票晋级</span>
-          <select
-            className="settings-select-control"
-            disabled={controlsDisabled}
-            value={oaImport.attachmentInvoicePromotionMode}
-            onChange={(event) =>
-              onChangeAttachmentInvoicePromotionMode(
-                event.currentTarget.value as WorkbenchOaImportSettings["attachmentInvoicePromotionMode"],
-              )
-            }
-          >
-            {attachmentInvoicePromotionOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="settings-inline-alert settings-inline-alert--info" role="status">
-          <strong>保留规则</strong>
-          <p>
-            保留该日期及之后的 OA；保留与这些 OA 同组的流水和发票；如果旧 OA 与该日期及之后的流水同组，也会重新保留。
-          </p>
+          <label className="settings-field settings-field--promotion">
+            <span>OA附件发票晋级</span>
+            <Select
+              aria-label="OA附件发票晋级"
+              isDisabled={controlsDisabled}
+              selectedKey={oaImport.attachmentInvoicePromotionMode}
+              onSelectionChange={(key) =>
+                onChangeAttachmentInvoicePromotionMode(
+                  String(key) as WorkbenchOaImportSettings["attachmentInvoicePromotionMode"],
+                )
+              }
+            >
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {attachmentInvoicePromotionOptions.map((option) => (
+                    <ListBox.Item id={option.value} key={option.value} textValue={option.label}>
+                      {option.label}
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          </label>
         </div>
 
         <OaManualSearchImportTable />

@@ -58,7 +58,6 @@ describe("finance table alignment styles", () => {
       ".import-workflow-panel--table",
       ".tax-panel",
       ".settings-native-table-shell",
-      ".settings-project-column",
       ".bank-transaction-panel",
       ".bank-transaction-grid",
       ".etc-invoice-table-container",
@@ -72,7 +71,7 @@ describe("finance table alignment styles", () => {
       expectSquareSurface(selector);
     });
 
-    expect(source).toMatch(/\.settings-content-panel,\s*\.settings-section-panel\s*\{[^}]*border-radius:\s*0/s);
+    expect(source).toMatch(/\.settings-native-table-shell\s*\{[^}]*border-radius:\s*0/s);
     expect(source).toMatch(/\.cost-table-shell,\s*\.cost-table-section\s*\{[^}]*border-radius:\s*0/s);
   });
 

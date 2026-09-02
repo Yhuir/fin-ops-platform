@@ -1,3 +1,4 @@
+import { Button, Input } from "@heroui/react";
 import { Trash2 } from "lucide-react";
 
 import {
@@ -31,7 +32,7 @@ export default function SettingsBankAccountsSection({
   return (
     <section
       aria-labelledby="settings-section-bank-accounts-title"
-      className="settings-section-panel"
+      className="settings-section-panel settings-section-panel--standard"
       id="settings-section-bank-accounts"
       role="region"
     >
@@ -42,41 +43,40 @@ export default function SettingsBankAccountsSection({
         <div className="settings-bank-mapping-form">
           <label className="settings-field">
             <span>银行名称</span>
-            <input
+            <Input
+              aria-label="银行名称"
               disabled={controlsDisabled}
-              type="text"
               value={bankNameDraft}
               onChange={(event) => onChangeBankNameDraft(event.currentTarget.value)}
             />
           </label>
           <label className="settings-field">
             <span>银行卡后四位</span>
-            <input
+            <Input
+              aria-label="银行卡后四位"
               disabled={controlsDisabled}
               inputMode="numeric"
               maxLength={4}
-              type="text"
               value={last4Draft}
               onChange={(event) => onChangeLast4Draft(normalizeLast4(event.currentTarget.value))}
             />
           </label>
           <label className="settings-field">
             <span>简称</span>
-            <input
+            <Input
+              aria-label="简称"
               disabled={controlsDisabled}
-              type="text"
               value={bankShortNameDraft}
               onChange={(event) => onChangeBankShortNameDraft(event.currentTarget.value)}
             />
           </label>
-          <button
-            className="settings-primary-button"
-            disabled={!canAddMapping || controlsDisabled}
-            type="button"
-            onClick={onAddMapping}
+          <Button
+            isDisabled={!canAddMapping || controlsDisabled}
+            variant="primary"
+            onPress={onAddMapping}
           >
             新增映射
-          </button>
+          </Button>
         </div>
 
         {mappings.length === 0 ? (
@@ -84,8 +84,8 @@ export default function SettingsBankAccountsSection({
             当前没有银行映射。
           </div>
         ) : (
-          <div className="settings-native-table-shell settings-native-table-shell--scroll">
-            <FinanceTable ariaLabel="银行账户映射" className="settings-native-table" minWidth={640} scrollMode="contained">
+          <div className="settings-native-table-shell">
+            <FinanceTable ariaLabel="银行账户映射" className="settings-native-table" minWidth={720}>
               <FinanceTableHeader>
                 <FinanceTableColumn id="bank" isRowHeader columnRole="identity">银行名称</FinanceTableColumn>
                 <FinanceTableColumn id="last4" columnRole="account">后四位</FinanceTableColumn>
@@ -96,11 +96,10 @@ export default function SettingsBankAccountsSection({
                 {mappings.map((mapping) => (
                   <FinanceTableRow id={mapping.id} key={mapping.id}>
                     <FinanceTableCell columnRole="identity">
-                      <input
+                      <Input
                         aria-label={`${mapping.bankName || mapping.last4} 银行名称`}
                         className="settings-table-input"
                         disabled={controlsDisabled}
-                        type="text"
                         value={mapping.bankName}
                         onChange={(event) => {
                           const bankName = event.currentTarget.value.trim();
@@ -112,13 +111,12 @@ export default function SettingsBankAccountsSection({
                       />
                     </FinanceTableCell>
                     <FinanceTableCell columnRole="account">
-                      <input
+                      <Input
                         aria-label={`${mapping.bankName || mapping.last4} 后四位`}
                         className="settings-table-input settings-table-input--code"
                         disabled={controlsDisabled}
                         inputMode="numeric"
                         maxLength={4}
-                        type="text"
                         value={mapping.last4}
                         onChange={(event) => {
                           const last4 = normalizeLast4(event.currentTarget.value);
@@ -130,11 +128,10 @@ export default function SettingsBankAccountsSection({
                       />
                     </FinanceTableCell>
                     <FinanceTableCell columnRole="identity">
-                      <input
+                      <Input
                         aria-label={`${mapping.bankName || mapping.last4} 简称`}
                         className="settings-table-input"
                         disabled={controlsDisabled}
-                        type="text"
                         value={mapping.shortName}
                         onChange={(event) => {
                           const shortName = event.currentTarget.value.trim();
@@ -146,15 +143,16 @@ export default function SettingsBankAccountsSection({
                       />
                     </FinanceTableCell>
                     <FinanceTableCell columnRole="action">
-                      <button
+                      <Button
                         aria-label={`${mapping.bankName} 删除`}
-                        className="settings-icon-button settings-icon-button--danger"
-                        disabled={controlsDisabled}
-                        type="button"
-                        onClick={() => onDeleteMapping(mapping.id)}
+                        isDisabled={controlsDisabled}
+                        isIconOnly
+                        size="sm"
+                        variant="danger"
+                        onPress={() => onDeleteMapping(mapping.id)}
                       >
                         <Trash2 aria-hidden="true" size={16} />
-                      </button>
+                      </Button>
                     </FinanceTableCell>
                   </FinanceTableRow>
                 ))}

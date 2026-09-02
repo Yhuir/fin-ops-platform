@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { useEffect, useMemo, useState } from "react";
 
 import { usePageSessionState } from "../../contexts/PageSessionStateContext";
@@ -127,23 +128,14 @@ const DATA_RESET_ACTIONS: DataResetActionConfig[] = [
   {
     action: "reset_bank_transactions",
     label: "清除所有银行流水数据",
-    title: "清除所有银行流水数据",
-    description: "清空已导入银行流水、相关匹配结果、配对状态和工作台缓存，不影响 OA 源库。",
-    impact: ["已导入银行流水会被清空", "相关已配对 / 异常 / 忽略状态会被清空", "不会触碰 form_data_db.form_data"],
   },
   {
     action: "reset_invoices",
     label: "清除所有发票（进销）数据",
-    title: "清除所有发票（进销）数据",
-    description: "清空已导入进项票 / 销项票、税金认证记录、相关匹配结果和工作台缓存。",
-    impact: ["已导入发票会被清空", "税金认证导入记录会被清空", "不会触碰 OA 源库"],
   },
   {
     action: "reset_oa_and_rebuild",
     label: "清除所有 OA 数据并重新写入",
-    title: "清除所有 OA 数据并重新写入",
-    description: "按模式 B 清空 OA 相关 app 侧缓存和人工状态，再按 OA导入设置重新构建。",
-    impact: ["OA 附件发票解析缓存会保留", "OA 相关配对 / 异常 / 忽略状态会被清空", "不会删除 OA 原始数据"],
   },
 ];
 
@@ -405,76 +397,47 @@ export default function SettingsPageContent({
       {
         id: "projects" as const,
         label: "项目状态",
-        description: "进行中 / 已完成",
-        count: activeProjects.length + completedProjects.length,
         visible: true,
       },
       {
         id: "bank_accounts" as const,
         label: "银行账户",
-        description: "银行名称与尾号",
-        count: mappings.length,
         visible: true,
       },
       {
         id: "pending_invoice_tags" as const,
         label: "待找发票筛选",
-        description: "支出筛选标签映射",
-        count:
-          pendingInvoiceTagGroups.requiresInvoice.length
-          + pendingInvoiceTagGroups.bankStatementAsInvoice.length
-          + pendingInvoiceTagGroups.noInvoiceRequired.length,
         visible: true,
       },
       {
         id: "oa_retention" as const,
         label: "OA导入设置",
-        description: "表单类型、流程状态与附件发票",
-        count: oaImportFormTypes.length + oaImportStatuses.length + 1,
         visible: true,
       },
       {
         id: "oa_invoice_offset" as const,
         label: "冲账规则",
-        description: "按 OA 申请人自动配发票",
-        count: parseApplicantNames(oaInvoiceOffsetApplicantsText).length,
         visible: canManageOaInvoiceOffset,
       },
       {
         id: "oa_applicant_credentials" as const,
         label: "OA申请人凭据",
-        description: "反提 OA 登录账号",
-        count: oaApplicantCredentials.filter((credential) => credential.hasCredential).length,
         visible: canManageAccessControl,
       },
       {
         id: "access_accounts" as const,
         label: "访问账户",
-        description: "可访问账号权限",
-        count: managedAccessAccounts.length + (accessControl ? 1 : 0),
         visible: canManageAccessControl,
       },
       {
         id: "data_reset" as const,
         label: "数据重置",
-        description: "高风险清理工具",
-        count: DATA_RESET_ACTIONS.length,
         visible: canManageAccessControl,
       },
     ];
     return items.filter((item) => item.visible).map(({ visible: _visible, ...item }) => item);
   }, [
-    activeProjects.length,
-    completedProjects.length,
-    mappings.length,
-    pendingInvoiceTagGroups,
-    oaImportFormTypes.length,
-    oaImportStatuses.length,
-    oaInvoiceOffsetApplicantsText,
     canManageOaInvoiceOffset,
-    oaApplicantCredentials,
-    managedAccessAccounts.length,
-    accessControl,
     canManageAccessControl,
   ]);
 
@@ -571,9 +534,7 @@ export default function SettingsPageContent({
     if (controlsDisabled) {
       return;
     }
-    const confirmed = window.confirm(
-      "删除只会移除 app 本地项目或本地状态覆盖，不会删除 OA 源项目和历史数据。是否继续？",
-    );
+    const confirmed = window.confirm(`确认删除“${project.projectName}”？`);
     if (!confirmed) {
       return;
     }
@@ -795,12 +756,7 @@ export default function SettingsPageContent({
         <section aria-label="设置内容" className="settings-content-panel">
           <header className="settings-content-header">
             <div className="settings-content-title">
-              <h1>
-                设置
-              </h1>
-              <p>
-                管理关联台项目、账户、OA导入与高风险维护配置。
-              </p>
+              <h1>设置</h1>
               {settingsActionStatus ? (
                 <div
                   className={`settings-inline-alert settings-inline-alert--${settingsActionStatus.tone}`}
@@ -810,20 +766,18 @@ export default function SettingsPageContent({
                 </div>
               ) : null}
             </div>
-            {activeSectionId !== "access_accounts" ? <div className="settings-save-actions">
-              <span>
-                {isSaving ? "正在保存变更" : "变更需手动保存"}
-              </span>
-              <button
-                className="settings-save-button"
-                type="button"
-                disabled={controlsDisabled}
-                onClick={handleSave}
-              >
-                {isSaving ? <span className="settings-save-spinner" aria-hidden="true" /> : null}
-                {isSaving ? "保存中..." : "保存设置"}
-              </button>
-            </div> : null}
+            {!["access_accounts", "oa_applicant_credentials", "data_reset"].includes(activeSectionId) ? (
+              <div className="settings-save-actions">
+                <Button
+                  isDisabled={controlsDisabled}
+                  isPending={isSaving}
+                  variant="primary"
+                  onPress={handleSave}
+                >
+                  {isSaving ? "保存中..." : "保存设置"}
+                </Button>
+              </div>
+            ) : null}
           </header>
 
             {activeSectionId === "projects" ? (

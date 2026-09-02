@@ -436,10 +436,7 @@ export default function OaManualSearchImportTable() {
   return (
     <section aria-labelledby="oa-manual-search-import-title" className="oa-manual-import">
       <div className="oa-manual-import__header">
-        <div>
-          <h4 id="oa-manual-search-import-title">OA全量搜索导入</h4>
-          <p>已完成 OA 可正式导入；进行中日常报销可先解析附件，流程完成后进入统一发票池。</p>
-        </div>
+        <h4 id="oa-manual-search-import-title">OA全量搜索导入</h4>
         <div className="oa-manual-import__metrics">
           <span>已选 {selectedList.length} 个OA</span>
           <span>金额合计 {formatCurrency(selectedAmount)}</span>
@@ -498,11 +495,10 @@ export default function OaManualSearchImportTable() {
       </div>
 
       <div className="oa-manual-import__actions">
-        <Button className="settings-primary-button" isDisabled={isLoading} onPress={() => void runSearch(0, pageSize)} size="sm" variant="primary">
+        <Button isDisabled={isLoading} onPress={() => void runSearch(0, pageSize)} size="sm" variant="primary">
           搜索
         </Button>
         <Button
-          className="settings-secondary-button"
           onPress={() => {
             setQuery("");
             setDateFrom("");
@@ -522,11 +518,10 @@ export default function OaManualSearchImportTable() {
         >
           清空
         </Button>
-        <Button className="settings-secondary-button" onPress={() => setSelectedRows({})} size="sm" variant="secondary">
+        <Button onPress={() => setSelectedRows({})} size="sm" variant="secondary">
           清空选择
         </Button>
         <Button
-          className="settings-primary-button"
           isDisabled={selectedImportableRows.length === 0 || isImporting || busyRowId !== null}
           onPress={() => void handleImportSelected()}
           size="sm"
@@ -539,8 +534,8 @@ export default function OaManualSearchImportTable() {
       {error ? <div className="settings-inline-alert settings-inline-alert--error" role="alert">{error}</div> : null}
       {refreshMessage ? <div className="settings-inline-alert" role="status">{refreshMessage}</div> : null}
 
-      <div className="settings-native-table-shell settings-native-table-shell--scroll">
-        <FinanceTable ariaLabel="OA全量搜索导入结果" className="settings-native-table oa-manual-import__table" minWidth={1680} scrollMode="contained">
+      <div className="settings-native-table-shell">
+        <FinanceTable ariaLabel="OA全量搜索导入结果" className="settings-native-table oa-manual-import__table" minWidth={1680}>
           <FinanceTableHeader>
               <FinanceTableColumn id="selection" columnRole="selection">
                 <Checkbox
@@ -593,7 +588,6 @@ export default function OaManualSearchImportTable() {
                     <FinanceTableCell columnRole="action">
                       <Button
                         aria-label={`${expanded ? "收起" : "展开"} OA ${oaDisplayLabel(row)} 明细`}
-                        className="settings-icon-button"
                         isIconOnly
                         onPress={() => setExpandedRows((current) => ({ ...current, [row.rowId]: !expanded }))}
                         size="sm"
@@ -629,7 +623,6 @@ export default function OaManualSearchImportTable() {
                     <FinanceTableCell columnRole="action">
                       <Button
                         aria-label={`刷新 OA ${oaDisplayLabel(row)} 附件解析`}
-                        className="settings-icon-button"
                         isDisabled={busyRowId !== null || isImporting || !canRefreshAttachments(row)}
                         isIconOnly
                         onPress={() => void handleRefresh(row)}
@@ -673,7 +666,6 @@ export default function OaManualSearchImportTable() {
         </div>
         <div className="settings-table-pagination__actions">
           <Button
-            className="settings-secondary-button"
             isDisabled={page <= 0}
             onPress={() => {
               const nextPage = Math.max(0, page - 1);
@@ -689,7 +681,6 @@ export default function OaManualSearchImportTable() {
             上一页
           </Button>
           <Button
-            className="settings-secondary-button"
             isDisabled={page + 1 >= totalPages}
             onPress={() => {
               const nextPage = Math.min(totalPages - 1, page + 1);

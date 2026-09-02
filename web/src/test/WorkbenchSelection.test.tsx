@@ -3284,7 +3284,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     const settingsPage = await openWorkbenchSettingsPage(user);
     const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    expect(within(settingsPage).getByRole("heading", { name: "设置分类" })).toBeInTheDocument();
+    expect(within(settingsPage).queryByRole("heading", { name: "设置分类" })).not.toBeInTheDocument();
     expect(screen.queryByText("设置项")).not.toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /项目状态/ })).toBeInTheDocument();
     expect(within(settingsTree).getByRole("treeitem", { name: /银行账户/ })).toBeInTheDocument();
@@ -3440,9 +3440,12 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(settingsTree).getByRole("treeitem", { name: /项目状态/ }));
 
     expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
-    expect(within(settingsPage).getByText("进行中项目")).toBeInTheDocument();
-    expect(within(settingsPage).getByText("已完成项目")).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("tab", { name: /进行中/ })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("tab", { name: /已完成/ })).toBeInTheDocument();
+    expect(within(settingsPage).getByRole("grid", { name: "进行中项目" })).toBeInTheDocument();
+    await user.click(within(settingsPage).getByRole("tab", { name: /已完成/ }));
     expect(within(settingsPage).getByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).toBeInTheDocument();
+    await user.click(within(settingsPage).getByRole("tab", { name: /进行中/ }));
 
     await user.click(within(settingsPage).getByRole("button", { name: "从 OA 拉取项目" }));
     expect(fetchMock).toHaveBeenCalledWith(
@@ -3471,12 +3474,12 @@ describe("Workbench row selection and detail drawer", () => {
     expect(await within(settingsPage).findByText("本地测试项目")).toBeInTheDocument();
 
     await user.click(within(settingsPage).getByRole("button", { name: /本地测试项目.*标记完成/ }));
-    const completedColumn = within(settingsPage).getByText("已完成项目").closest(".settings-project-column");
-    expect(completedColumn).not.toBeNull();
-    expect(within(completedColumn as HTMLElement).getByText("本地测试项目")).toBeInTheDocument();
+    await user.click(within(settingsPage).getByRole("tab", { name: /已完成/ }));
+    const completedTable = within(settingsPage).getByRole("grid", { name: "已完成项目" });
+    expect(within(completedTable).getByText("本地测试项目")).toBeInTheDocument();
 
-    await user.click(within(completedColumn as HTMLElement).getByRole("button", { name: /本地测试项目.*删除/ }));
-    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining("不会删除 OA 源项目和历史数据"));
+    await user.click(within(completedTable).getByRole("button", { name: /本地测试项目.*删除/ }));
+    expect(confirmSpy).toHaveBeenCalledWith("确认删除“本地测试项目”？");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/settings/projects/proj_manual_local_001",
       expect.objectContaining({ method: "DELETE" }),
@@ -3504,11 +3507,13 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
 
     const confirmDialog = await screen.findByRole("dialog", { name: "确认数据重置" });
-    expect(within(confirmDialog).getByText(/不影响 OA 源库/)).toBeInTheDocument();
+    expect(within(confirmDialog).getByText("预计影响 2 条记录。")).toBeInTheDocument();
+    expect(within(confirmDialog).queryByText(/不影响 OA 源库/)).not.toBeInTheDocument();
 
     await user.click(within(confirmDialog).getByRole("button", { name: "继续" }));
     const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
-    expect(within(passwordDialog).getByText(/请输入当前 OA 用户密码/)).toBeInTheDocument();
+    expect(within(passwordDialog).getByLabelText("当前 OA 用户密码")).toBeInTheDocument();
+    expect(within(passwordDialog).queryByText(/请输入当前 OA 用户密码/)).not.toBeInTheDocument();
     expect(within(passwordDialog).queryByLabelText(/用户名/)).not.toBeInTheDocument();
 
     await user.type(within(passwordDialog).getByLabelText("当前 OA 用户密码"), "correct-password");
@@ -3525,7 +3530,7 @@ describe("Workbench row selection and detail drawer", () => {
       impact_fingerprint: "a".repeat(64),
       recovery_receipt_id: "00000000-0000-0000-0000-000000000001",
     });
-    expect(await screen.findByText(/正在清理 app 内部状态。 25%/)).toBeInTheDocument();
+    expect(await screen.findByRole("progressbar", { name: /正在清理 app 内部状态。 25%/ })).toBeInTheDocument();
     expect(await screen.findAllByText("已完成数据重置。")).not.toHaveLength(0);
   });
 

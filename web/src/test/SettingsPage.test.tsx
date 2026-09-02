@@ -152,6 +152,12 @@ describe("Settings page", () => {
     expect(forbiddenMuiSelectors).toEqual([]);
     expect(forbiddenLegacySurfaces).toEqual([]);
 
+    const heroUiInteractiveFiles = settingsSourceFiles.filter((path) => (
+      path.includes("src/components/settings/") && path !== "src/components/settings/types.ts"
+    ));
+    expect(heroUiInteractiveFiles.filter((path) => !sourceByPath[path].includes('from "@heroui/react"'))).toEqual([]);
+    expect(heroUiInteractiveFiles.filter((path) => /<(?:input|select|textarea|progress)\b/.test(sourceByPath[path]))).toEqual([]);
+
     const pageSource = sourceByPath["src/pages/SettingsPage.tsx"];
     const contentSource = sourceByPath["src/components/settings/SettingsPageContent.tsx"];
     const dataResetDialogsSource = sourceByPath["src/components/settings/SettingsDataResetDialogs.tsx"];
@@ -163,67 +169,60 @@ describe("Settings page", () => {
       /ListBox, Select/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should use the HeroUI mobile section selector",
       /ariaLabel=["']OA全量搜索导入结果["']/.test(oaManualTableSource) ? null : "OA manual search should preserve table accessible name",
       /确认数据重置/.test(dataResetDialogsSource) && /OA 密码复核/.test(dataResetDialogsSource) ? null : "Data reset should keep two modal dialog labels",
-      /minLength=\{5\}/.test(dataResetDialogsSource) && /至少输入 5 个字/.test(dataResetDialogsSource) ? null : "Data reset should expose its reason requirement",
+      /minLength=\{5\}/.test(dataResetDialogsSource) && /操作原因（必填）/.test(dataResetDialogsSource) ? null : "Data reset should expose its reason requirement",
     ].filter(Boolean);
 
     expect(missingPrimitiveTargets).toEqual([]);
   });
 
-  test("keeps premium settings tree, form, table, dialog, and motion CSS contracts", () => {
+  test("keeps the compact settings workspace and removes obsolete card layouts", () => {
     const styles = readWebSource("src/app/styles.css");
-    const shellRule = cssRule(styles, ".settings-route,\n.settings-layout,\n.settings-content-panel");
-    const navRule = cssRule(styles, ".settings-nav-shell,\n.settings-tree-panel");
-    const panelRule = cssRule(styles, ".settings-content-panel,\n.settings-section-panel");
+    const layoutRule = cssRule(styles, ".settings-layout", "224px");
+    const navRule = cssRule(styles, ".settings-nav-shell", "border-right: 1px");
+    const contentRule = cssRule(styles, ".settings-content-panel", "18px 22px 28px");
+    const compactPanelRule = cssRule(styles, ".settings-section-panel--compact");
     const treeMotionRule = cssRule(styles, ".settings-tree-item", "--motion-fast");
-    const controlMotionRule = cssRule(
-      styles,
-      ".settings-save-button,\n.settings-primary-button,\n.settings-secondary-button,\n.settings-danger-button,\n.settings-icon-button,\n.settings-menu button,\n.settings-pending-group-button,\n.settings-project-row,\n.settings-checkbox-row,\n.settings-table-pagination select",
-      "--motion-fast",
-    );
-    const fieldRule = cssRule(styles, ".settings-field input,\n.settings-table-input,\n.settings-select-control");
+    const fieldRule = cssRule(styles, ".settings-field > [data-slot=\"input-wrapper\"],\n.settings-field > [data-slot=\"select\"],\n.settings-field [data-slot=\"select-trigger\"],\n.settings-table-input [data-slot=\"input-wrapper\"]");
     const tableRule = cssRule(styles, ".settings-native-table th,\n.settings-native-table td");
     const amountRule = cssRule(styles, ".settings-table-code,\n.settings-table-input--code,\n.settings-table-amount");
-    const tagRule = cssRule(styles, ".settings-source-tag,\n.settings-selected-tag,\n.oa-manual-import__metrics span");
-    const projectRule = cssRule(styles, ".settings-project-toolbar,\n.settings-bank-mapping-row,\n.settings-data-reset-card,\n.settings-pending-tag-panel,\n.settings-checkbox-list");
-    const projectColumnRule = cssRule(styles, ".settings-project-column");
+    const tagRule = cssRule(styles, ".settings-selected-tag,\n.oa-manual-import__metrics span");
+    const bankFormRule = cssRule(styles, ".settings-bank-mapping-form", "grid-template-columns");
+    const dataResetRule = cssRule(styles, ".settings-data-reset-list");
+    const accessRule = cssRule(styles, ".settings-access-workspace", "minmax(250px, 300px)");
     const oaTableRule = cssRule(styles, ".oa-manual-import__table");
-    const selectedRule = cssRule(styles, ".settings-native-table-row--selected > td,\n.settings-tree-item[aria-selected=\"true\"],\n.settings-tree-item--selected");
-    const dangerRule = cssRule(styles, ".settings-danger-button:hover:not(:disabled)");
+    const selectedRule = cssRule(styles, ".settings-native-table-row--selected > td");
 
-    expect(shellRule).toContain("var(--fp-surface)");
-    expect(navRule).toContain("var(--fp-border)");
-    expect(navRule).toContain("var(--fp-radius-sm)");
-    expect(panelRule).toContain("border-radius: 0");
+    expect(layoutRule).toContain("grid-template-columns: 224px minmax(0, 1fr)");
+    expect(navRule).toContain("border-right: 1px solid var(--fp-border)");
+    expect(contentRule).toContain("padding: 18px 22px 28px");
+    expect(compactPanelRule).toContain("max-width: 720px");
     expect(treeMotionRule).toContain("--motion-fast");
     expect(treeMotionRule).toContain("--ease-out-quart");
-    expect(controlMotionRule).toContain("--motion-fast");
-    expect(controlMotionRule).toContain("--ease-out-quart");
-    expect(fieldRule).toContain("var(--fp-border)");
-    expect(fieldRule).toContain("--motion-fast");
+    expect(fieldRule).toContain("min-height: 34px");
     expect(tableRule).toContain("height: 36px");
-    expect(tableRule).toContain("--motion-fast");
     expect(amountRule).toContain("font-variant-numeric: tabular-nums");
     expect(amountRule).toContain("text-align: right");
     expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
     expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
-    expect(projectRule).toContain("var(--fp-surface)");
-    expect(projectRule).toContain("var(--fp-border)");
-    expect(projectColumnRule).toContain("border-radius: 0");
+    expect(bankFormRule).toContain("minmax(220px, 280px) 120px minmax(140px, 180px) auto");
+    expect(dataResetRule).toContain("border-top: 1px solid var(--fp-border)");
+    expect(accessRule).toContain("minmax(250px, 300px) minmax(0, 1fr)");
     expect(oaTableRule).toContain("min-width: 1500px");
     expect(oaTableRule).toContain("table-layout: fixed");
     expect(selectedRule).toContain("var(--fp-primary-soft)");
-    expect(dangerRule).toContain("color-mix(in srgb, var(--fp-danger)");
     expect([
-      shellRule,
+      layoutRule,
       navRule,
+      contentRule,
       treeMotionRule,
-      controlMotionRule,
       fieldRule,
       tableRule,
-      projectRule,
+      bankFormRule,
+      dataResetRule,
+      accessRule,
       selectedRule,
-      dangerRule,
     ].join("\n")).not.toMatch(/#102a43|#486581|#e7edf5|#fbfdff|#ffffff|#f0fff4|#fff5f5|#9f1d1d|#0f4c81|180ms ease-out/i);
+    expect(styles).not.toMatch(/settings-data-reset-card|settings-project-column|settings-tree-copy|settings-save-button|data-reset-card/);
   });
 
   test("renders as a tree-and-panel page without an extra page header title", async () => {
@@ -233,6 +232,7 @@ describe("Settings page", () => {
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "关联台设置" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "关联台设置" })).not.toBeInTheDocument();
+    expect(screen.queryByText("管理关联台项目、账户、OA导入与高风险维护配置。")).not.toBeInTheDocument();
 
     const tree = await screen.findByRole("tree", { name: "设置分类" });
     expect(screen.getByLabelText("移动端设置分类")).toBeInTheDocument();
@@ -321,6 +321,8 @@ describe("Settings page", () => {
       password: "target-password",
     });
 
+    expect(within(settingsPage).queryByRole("button", { name: "保存设置" })).not.toBeInTheDocument();
+    await user.click(within(tree).getByRole("treeitem", { name: "项目状态" }));
     await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input, init]) => {
@@ -361,6 +363,7 @@ describe("Settings page", () => {
     const region = screen.getByRole("region", { name: "访问账户" });
     expect(within(region).getByText("YNSYLP005")).toBeInTheDocument();
     expect(within(region).queryByRole("textbox", { name: "YNSYLP005 账户" })).not.toBeInTheDocument();
+    expect(within(region).queryByText(/固定权限管理员|自动拥有全部页面|为每个OA账户选择/)).not.toBeInTheDocument();
 
     await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
     await user.click(await within(region).findByRole("option", { name: "新增账户 READONLY001" }));
@@ -425,11 +428,14 @@ describe("Settings page", () => {
     const settingsPage = await screen.findByTestId("settings-page");
     const tree = await screen.findByRole("tree", { name: "设置分类" });
     await user.click(within(tree).getByRole("treeitem", { name: /数据重置/ }));
+    expect(within(settingsPage).queryByText(/高风险操作|不会触碰|会被清空/)).not.toBeInTheDocument();
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
 
     const confirmDialog = await screen.findByRole("dialog", { name: "确认数据重置" });
     expect(confirmDialog).toBeInTheDocument();
-    expect(within(confirmDialog).getByText("已导入银行流水会被清空")).toBeInTheDocument();
+    expect(within(confirmDialog).getByText("清除所有银行流水数据")).toBeInTheDocument();
+    expect(within(confirmDialog).getByText("预计影响 2 条记录。")).toBeInTheDocument();
+    expect(within(confirmDialog).queryByText("已导入银行流水会被清空")).not.toBeInTheDocument();
     expect(within(confirmDialog).getByText("恢复点已验证。")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "继续" }));
@@ -465,15 +471,16 @@ describe("Settings page", () => {
     await user.click(within(tree).getByRole("treeitem", { name: /待找发票筛选/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "待找发票筛选" });
-    expect(within(region).getByText("需要开票")).toBeInTheDocument();
-    expect(within(region).getByText("流水代替发票")).toBeInTheDocument();
-    expect(within(region).getByText("无需开票")).toBeInTheDocument();
+    expect(within(region).getByRole("tab", { name: /需要开票/ })).toBeInTheDocument();
+    expect(within(region).getByRole("tab", { name: /流水代替发票/ })).toBeInTheDocument();
+    expect(within(region).getByRole("tab", { name: /无需开票/ })).toBeInTheDocument();
     expect(within(region).queryByRole("textbox", { name: "新标签" })).not.toBeInTheDocument();
     expect(within(region).queryByRole("button", { name: /新建并加入/ })).not.toBeInTheDocument();
-    await user.click(within(region).getByText("流水代替发票"));
-    expect(within(region).getByText("当前分组未选择自动标签。")).toBeInTheDocument();
-    await user.click(within(region).getByRole("button", { name: "选择现有标签" }));
-    await user.click(await screen.findByRole("menuitem", { name: "内部往来款" }));
+    await user.click(within(region).getByRole("tab", { name: /流水代替发票/ }));
+    expect(within(region).getByText("暂无标签")).toBeInTheDocument();
+    await user.click(within(region).getByRole("button", { name: /已有标签/ }));
+    await user.click(await screen.findByRole("option", { name: "内部往来款" }));
+    await user.click(within(region).getByRole("button", { name: "添加标签" }));
     await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
 
     await waitFor(() => {
@@ -497,7 +504,8 @@ describe("Settings page", () => {
     await user.click(within(tree).getByRole("treeitem", { name: /OA导入设置/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "OA导入设置" });
-    await user.selectOptions(within(region).getByLabelText("OA附件发票晋级"), "disabled");
+    await user.click(within(region).getByRole("button", { name: /OA附件发票晋级/ }));
+    await user.click(await screen.findByRole("option", { name: "禁用晋级" }));
     await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
 
     await waitFor(() => {

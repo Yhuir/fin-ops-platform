@@ -95,10 +95,7 @@ export default function SettingsAccessAccountsSection({
   return (
     <section aria-labelledby="settings-section-access-accounts-title" className="settings-section-panel settings-access-section" id="settings-section-access-accounts" role="region">
       <header className="settings-section-header settings-access-header">
-        <div>
-          <h3 id="settings-section-access-accounts-title">访问账户</h3>
-          <p>为每个 OA 账户选择可进入的页面。页面内操作按原业务规则执行。</p>
-        </div>
+        <h3 id="settings-section-access-accounts-title">访问账户</h3>
         <div className="settings-access-admin-inline" aria-label="权限管理员">
           <ShieldCheck aria-hidden="true" size={16} />
           <span><strong>{administrator?.username ?? "005"}</strong><small>{administrator?.displayName || "权限管理员"}</small></span>
@@ -131,13 +128,13 @@ export default function SettingsAccessAccountsSection({
           ) : null}
 
           <div className="settings-access-account-list">
-            {managedAccessAccounts.length === 0 ? <div className="settings-access-empty">搜索 OA 账户并添加，然后在右侧选择页面。</div> : managedAccessAccounts.map((account) => (
+            {managedAccessAccounts.length === 0 ? <div className="settings-access-empty">暂无账户</div> : managedAccessAccounts.map((account) => (
               <div key={account.id} className={`settings-access-account-row${selectedAccount?.id === account.id ? " is-selected" : ""}`}>
-                <button type="button" className="settings-access-account-select" onClick={() => setSelectedAccountId(account.id)}>
+                <Button className="settings-access-account-select" slot={null} variant="tertiary" onPress={() => setSelectedAccountId(account.id)}>
                   <strong>{account.username}</strong>
                   <small>{account.displayName || "OA 未返回姓名"}</small>
                   <span>{account.pageKeys.length} 个页面{account.oaStatus !== "active" ? " · OA 状态异常" : ""}</span>
-                </button>
+                </Button>
                 <Button aria-label={`删除账户 ${account.username}`} className="settings-access-delete" isDisabled={controlsDisabled} isIconOnly size="sm" variant="tertiary" onPress={() => onDeleteManagedAccessAccount(account.id)}>
                   <Trash2 aria-hidden="true" size={15} />
                 </Button>
@@ -174,12 +171,11 @@ export default function SettingsAccessAccountsSection({
                 ))}
               </div>
             </>
-          ) : <div className="settings-access-page-empty">从左侧新增或选择一个账户。</div>}
+          ) : <div className="settings-access-page-empty">请选择账户</div>}
         </div>
       </div>
 
       <footer className="settings-access-footer">
-        <span>005 为固定权限管理员，自动拥有全部页面且不可删除。</span>
         <Button isDisabled={controlsDisabled || isLoading || isSaving || validationMessage !== null} isPending={isSaving} variant="primary" onPress={() => void onSave()}>
           {isSaving ? "保存中..." : "保存访问权限"}
         </Button>
