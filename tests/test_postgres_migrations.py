@@ -1047,6 +1047,32 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertNotIn("create table", normalized_sql)
         self.assertNotIn("job.outbox_events", normalized_sql)
 
+    def test_page_access_migration_drops_legacy_guards_before_rewriting_settings(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0165_page_access_accounts.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(strip_sql_comments(sql).split())
+
+        update_position = normalized_sql.index("update app.app_settings as settings")
+        self.assertLess(
+            normalized_sql.index("drop constraint if exists app_settings_access_control_guard"),
+            update_position,
+        )
+        self.assertLess(
+            normalized_sql.index(
+                "drop constraint if exists app_settings_access_control_canonical_order_guard"
+            ),
+            update_position,
+        )
+        self.assertGreater(
+            normalized_sql.index("add constraint app_settings_page_access_accounts_guard"),
+            update_position,
+        )
+        self.assertIn(
+            "validate constraint app_settings_page_access_accounts_guard",
+            normalized_sql,
+        )
+
     def test_runtime_queue_history_retention_indexes_and_migrator_delete_grants_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
         normalized_sql = " ".join(sql.split())

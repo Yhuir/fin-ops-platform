@@ -1,4 +1,12 @@
 -- Replace global access tiers with one canonical page list per ordinary account.
+-- The 0132/0133 guards validate the retired tier keys on every update, so they
+-- must be removed before the row is rewritten to the page-access shape.
+alter table app.app_settings
+    drop constraint if exists app_settings_access_control_guard;
+
+alter table app.app_settings
+    drop constraint if exists app_settings_access_control_canonical_order_guard;
+
 with source as (
     select
         id,
@@ -84,12 +92,6 @@ set
     updated_at = now()
 from normalized
 where settings.id = normalized.id;
-
-alter table app.app_settings
-    drop constraint if exists app_settings_access_control_guard;
-
-alter table app.app_settings
-    drop constraint if exists app_settings_access_control_canonical_order_guard;
 
 alter table app.app_settings
     add constraint app_settings_page_access_accounts_guard check (
