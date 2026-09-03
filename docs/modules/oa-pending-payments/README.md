@@ -72,7 +72,7 @@ browser
 
 ## 支付状态自动同步
 
-页面与 page command 不直接写 OA 支付状态。正式 relation 的 repository 在关系创建、扩展、撤回或恢复事务中登记 `oa.payment_status.reconcile` durable event；现有 `oa-sync` worker 始终查询最新 active topology：存在 OA+canonical outflow 就写已支付，金额差额只保留为异常；不存在 active outflow 时写待支付，不保留历史写回归属门禁。完整 `all` OA 权威同步在生命周期去重后、local retention 过滤前提取 OA Mongo 文档 ID，并与完整 MySQL payment-status flow 集合比较；只有 flow 在 current canonical OA 源中确实消失时，才在同一 snapshot 事务删除 PostgreSQL 状态并登记外部删除事件。worker 执行 MySQL DELETE 前以 exact `_id` 定位候选原始文档，再按业务编号重读同组流程并执行 lifecycle arbitration，同时合并已完成投影与进行中准入；历史 raw document 仍在但已被新流程取代时继续删除，源读取失败则事件失败重试。月度同步、精确刷新和本地 retention 裁剪不能证明 OA 源删除，因此不得删除外部状态。收入、inactive/candidate、缺 flow id 和 `pay_status=2` 均不得伪造成功。
+页面与 page command 不直接写 OA 支付状态。正式 relation 的 repository 在关系创建、扩展、撤回或恢复事务中登记 `oa.payment_status.reconcile` durable event；现有 `oa-sync` worker 始终查询最新 active topology：存在 OA+canonical outflow 就写已支付，金额差额只保留为异常；不存在 active outflow 时写待支付，不保留历史写回归属门禁。完整 `all` OA 权威同步在生命周期去重后、local retention 过滤前提取 current canonical OA 的 Mongo 文档 ID 与 `flowRequestId/processId` 支付身份，并与完整 MySQL payment-status flow 集合比较；只有 flow 在 current canonical OA 源中确实消失时，才在同一 snapshot 事务删除 PostgreSQL 状态并登记外部删除事件。worker 执行 MySQL DELETE 前以候选确定性身份定位原始文档，再按业务编号重读同组流程并执行 lifecycle arbitration，同时合并已完成投影与进行中准入；历史 raw document 仍在但已被新流程取代时继续删除，源读取失败则事件失败重试。月度同步、精确刷新和本地 retention 裁剪不能证明 OA 源删除，因此不得删除外部状态。收入、inactive/candidate、缺 flow id 和 `pay_status=2` 均不得伪造成功。
 
 `link-bank-transactions` 只负责正式关系命令，成功响应 `paymentStatusSync.code=queued`。人工 `writeback-paid` / `confirm-paid` API、按钮和 direct command 写入均已删除。外部 MySQL 与 PostgreSQL snapshot 由同一幂等 worker handler 收敛，页面只通过普通 GET 观察结果，不回退读取外部系统。
 

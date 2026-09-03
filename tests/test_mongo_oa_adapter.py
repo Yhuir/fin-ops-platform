@@ -3195,6 +3195,26 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         self.assertEqual(found, set())
 
+    def test_payment_flow_identity_lookup_accepts_authoritative_business_id(self) -> None:
+        authoritative_document = {
+            "_id": "flow-authoritative",
+            "form_id": "2",
+            "data": {"flowRequestId": "business-1", "processStatus": "2"},
+        }
+        adapter = StubMongoOAAdapter(
+            form_documents={"2": [authoritative_document]},
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_find_documents",
+            side_effect=[[authoritative_document], []],
+        ):
+            found = adapter.list_existing_payment_flow_ids(["business-1"])
+
+        self.assertEqual(found, {"business-1"})
+
     def test_sync_batch_admits_legitimate_in_progress_drafts_with_unfilled_business_fields(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
@@ -3360,7 +3380,7 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([record.id for record in batch.admission_records], ["oa-pay-payment-source-flow"])
         self.assertEqual(
             batch.authoritative_payment_flow_ids,
-            ("disabled-expense-source-flow", "payment-source-flow"),
+            ("3002", "disabled-expense-source-flow", "payment-source-flow"),
         )
         self.assertEqual(adapter.form_load_calls, [("2", None), ("32", None)])
 
@@ -3426,7 +3446,10 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         self.assertEqual(batch.projection_records, ())
         self.assertEqual(batch.admission_records, ())
-        self.assertEqual(batch.authoritative_payment_flow_ids, ("expense-doc-completed",))
+        self.assertEqual(
+            batch.authoritative_payment_flow_ids,
+            ("3002", "expense-doc-completed"),
+        )
         parse_pool.assert_not_called()
 
     def test_sync_batch_fails_closed_after_one_form_succeeds_and_the_next_form_fails(self) -> None:

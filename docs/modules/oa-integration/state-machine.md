@@ -152,7 +152,7 @@ fresh OA menu 验收只接受角色投影后的新 `/system/menu/getRouters` 或
 | `succeeded` | completed/admission/payment-status/watermark 同批原子提交 | 页面下次 normal GET 直接读取 canonical PostgreSQL |
 | `failed` | 任一启用 form、repository 或 queue 失败 | 整轮不提交部分 snapshot；记录 error/run，允许明确 retry |
 
-完整 `all` 同步的删除分支必须在生命周期去重后、local retention 过滤前提取完整 source document flow ID 集合，并与完整 MySQL payment-status flow 集合比较。真实消失 flow 的 PG payment snapshot 和失效 relation member 在同一事务清理，并登记 `remove_missing_oa_statuses`；`oa-sync` worker 删除 MySQL 前按候选文档的业务编号重新执行同一 lifecycle arbitration，并合并 completed/admitted 并集，只有 current canonical flow 重现时才跳过。被后续流程取代的 raw document 不属于重现。month scope、精确附件刷新和 retention prune 不进入该分支，仍是 current canonical OA 但超出 retention 的 flow 保留支付状态。
+完整 `all` 同步的删除分支必须在生命周期去重后、local retention 过滤前提取 current canonical OA 的 Mongo document ID 与 `flowRequestId/processId` 支付身份集合，并与完整 MySQL payment-status flow 集合比较。真实消失 flow 的 PG payment snapshot 和失效 relation member 在同一事务清理，并登记 `remove_missing_oa_statuses`；`oa-sync` worker 删除 MySQL 前按候选身份定位文档，再按业务编号重新执行同一 lifecycle arbitration，并合并 completed/admitted 并集，只有候选仍属于 current canonical OA 时才跳过。被后续流程取代的 raw document 不属于重现。month scope、精确附件刷新和 retention prune 不进入该分支，仍是 current canonical OA 但超出 retention 的 flow 保留支付状态。
 | `unavailable` | OA/Mongo/PostgreSQL 依赖不可用 | structured error；不得伪造成功或回退历史页面 projection |
 
 OA 手工导入/删除、进项 OA reverse、ETC OA 草稿和 settings 变更只提交各自 canonical

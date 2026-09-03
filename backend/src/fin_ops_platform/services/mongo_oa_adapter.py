@@ -310,11 +310,10 @@ class MongoOAAdapter(OAAdapter):
             documents = self._load_form_documents(form_id, month)
             self._require_sync_source_read_ready(f"after {form_type} read")
             documents = self._select_authoritative_documents(form_type, documents)
-            authoritative_payment_flow_ids.update(
-                flow_id
-                for document in documents
-                if (flow_id := self._document_id(document))
-            )
+            for document in documents:
+                authoritative_payment_flow_ids.update(
+                    self._payment_flow_identities(form_id, document)
+                )
             if not form_enabled:
                 continue
             if normalized_scope_key == "all" and normalized_cutoff_month:
@@ -371,7 +370,8 @@ class MongoOAAdapter(OAAdapter):
         if not requested_flow_ids:
             return set()
         self._require_sync_source_read_ready("before OA payment flow identity read")
-        query_values = [
+        external_id_query_values = self._external_id_query_values(requested_flow_ids)
+        document_id_query_values = [
             *self._external_id_query_values(requested_flow_ids),
             *self._object_id_query_values(requested_flow_ids),
         ]
@@ -385,7 +385,11 @@ class MongoOAAdapter(OAAdapter):
             candidate_documents = self._find_documents(
                 {
                     "form_id": self._form_id_query_value(form_id),
-                    "_id": {"$in": query_values},
+                    "$or": [
+                        {"_id": {"$in": document_id_query_values}},
+                        {"data.flowRequestId": {"$in": external_id_query_values}},
+                        {"data.processId": {"$in": external_id_query_values}},
+                    ],
                 }
             )
             self._require_sync_source_read_ready("after OA payment flow identity read")
@@ -410,11 +414,11 @@ class MongoOAAdapter(OAAdapter):
                 form_type,
                 lifecycle_documents,
             )
-            existing_flow_ids.update(
-                flow_id
-                for document in authoritative_documents
-                if (flow_id := self._document_id(document)) in requested_flow_ids
-            )
+            for document in authoritative_documents:
+                existing_flow_ids.update(
+                    self._payment_flow_identities(form_id, document)
+                    & requested_flow_ids
+                )
         return existing_flow_ids
 
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
@@ -2788,6 +2792,20 @@ class MongoOAAdapter(OAAdapter):
         if normalized_form_id == clean_string(self._settings.expense_claim_form_id):
             return self._expense_external_id(data, document)
         return self._document_id(document)
+
+    def _payment_flow_identities(
+        self,
+        form_id: str,
+        document: dict[str, Any],
+    ) -> set[str]:
+        return {
+            flow_id
+            for value in (
+                self._document_id(document),
+                self._document_external_id(form_id, document),
+            )
+            if (flow_id := clean_string(value))
+        }
 
     @staticmethod
     def _form_id_query_value(form_id: object) -> object:

@@ -1117,7 +1117,7 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 - 首屏唯一聚合入口是 `GET /api/oa-pending-payments/rows`；旧 `GET /api/oa-pending-payments/filter-options` 不存在。`filterConfig` 和全局 `filterOptions` 随 rows 响应返回，前端不得根据当前页 rows 推导。
 - rows、summary、facets、pagination 和详情由 `OaPendingPaymentQueryService` / `PostgresOaPendingPaymentQueryRepository` 在同一 `REPEATABLE READ READ ONLY` snapshot 中读取 `app.oa_applications`、`app.oa_pending_payment_admissions`、canonical 银行/发票和 active relations。页面/API 不读取 `oa_pending_payment` read model，也不直接访问外部 Mongo/MySQL。
 - 成功固定返回 `200`；响应不含 `read_model_status`、source version、ETag、refresh enqueue、scope 或 operation-barrier target。页面只处理 loading、empty、error、手工刷新和写后一次普通 GET。
-- `t_payment_simple.id` 不是 OA ID，不能作为 OA 匹配 key；OA 匹配和写回 key 必须使用 `flow_id` 对应的 OA Mongo 文档 ID。
+- `t_payment_simple.id` 不是 OA ID，不能作为 OA 匹配 key；OA 匹配和写回 key 必须使用 `flow_id` 对应的确定性 OA 支付身份。当前身份可能是 Mongo 文档 ID，也可能是历史已存在的 `flowRequestId/processId` 业务流程号；两者必须由同一 current canonical OA 文档导出，禁止按金额或文本猜测。
 - rows `summary` 必须包含 `viewCounts.completed/in_progress`，用于页面展示切换按钮数量；该统计使用同一搜索、月份、交易日期和 column filters，但不受当前 `view_mode` 限制。
 - rows 中 `oa` 必须携带 `workflowStatus`；`oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
 - `paymentStatus` 只返回 `paid` 或 `unpaid`。active linked付款关系驱动 `paid`；金额差异、缺失银行事实或非支出边保留在reason/amount/writeback校验中，不产生 `pending_review`、`partially_paid`、`overpaid` 或 `merged_paid`。
@@ -1146,7 +1146,7 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 - `pay_status=2`（支付失败）必须 fail closed，禁止自动覆盖；缺 OA、缺 canonical 流水或无法解析 `flow_id` 必须形成明确失败事件，禁止猜测字段或静默跳过。
 - 同一 OA ID 同时存在 completed 与 in-progress 快照时 completed 优先；多个 canonical OA row 解析到同一 `flow_id` 时每个事件只写一次外部状态。
 - handler 由现有 `oa-sync` worker 承担，采用 at-least-once 幂等处理；外部状态成功后必须同步记录 PostgreSQL payment-status snapshot。Migration `0160` 删除旧 ownership 状态，并为全部已完成 OA 与已准入进行中 OA 的并集只登记 reconcile event，不直接批量修改外部支付状态。
-- 支付状态从属于 OA 源生命周期。只有完整 `all` OA 权威扫描以 lifecycle arbitration 后、local retention 过滤前的 Mongo document ID 集合确认 MySQL status flow 已消失时，snapshot 事务才删除 PostgreSQL payment-status row 并登记 `oa.payment_status.reconcile(operation=remove_missing_oa_statuses, removed_flow_ids=[...])`。worker 删除 MySQL `t_payment_simple` 前必须按候选 exact `_id` 定位两个配置 OA 表单内的原始文档，再按其业务编号重读同组流程并执行相同的 lifecycle arbitration；只有候选仍是当前 canonical OA 时才保留，同时合并 completed projection 与 pending admission。历史原始文档仍存在但已被同业务编号的新流程取代，不得阻止删除。源读取失败或 canonical flow 重现时不删除。month sync、精确附件刷新和 retention 裁剪不能声明外部 OA 删除。
+- 支付状态从属于 OA 源生命周期。只有完整 `all` OA 权威扫描以 lifecycle arbitration 后、local retention 过滤前的 current canonical OA 支付身份集合（Mongo document ID + `flowRequestId/processId`）确认 MySQL status flow 已消失时，snapshot 事务才删除 PostgreSQL payment-status row 并登记 `oa.payment_status.reconcile(operation=remove_missing_oa_statuses, removed_flow_ids=[...])`。worker 删除 MySQL `t_payment_simple` 前必须按候选确定性身份定位两个配置 OA 表单内的原始文档，再按其业务编号重读同组流程并执行相同的 lifecycle arbitration；只有候选仍属于当前 canonical OA 时才保留，同时合并 completed projection 与 pending admission。历史原始文档仍存在但已被同业务编号的新流程取代，不得阻止删除。源读取失败或 canonical flow 重现时不删除。month sync、精确附件刷新和 retention 裁剪不能声明外部 OA 删除。
 
 `GET /api/oa-pending-payments/bank-transaction-candidates`
 

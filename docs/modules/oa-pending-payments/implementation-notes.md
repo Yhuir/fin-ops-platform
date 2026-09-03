@@ -757,7 +757,7 @@
 ## 2026-09-04 - OA 删除后支付状态从属清理
 
 - 根因：OA full snapshot 删除 canonical OA/准入和 active relation 时，MySQL `t_payment_simple` 与 PostgreSQL payment snapshot 是独立状态；relation cleanup 还会登记基于已删除 OA row ID 的普通 reconcile，worker 因无法再读取 OA 而 dead-letter，外部 `已支付` 因而残留。
-- 收口：只有完整 `all` OA 权威扫描能将 lifecycle arbitration 后、local retention 前的 source document flow ID 集合与完整 MySQL status flow 集合比较。确认真实消失后，同一 PostgreSQL snapshot 事务移除 PG status、清理 relation 并登记 `oa.payment_status.reconcile(operation=remove_missing_oa_statuses)`；relation cleanup 抑制无效 row-id 普通 reconcile，不保留并行旧路径。
+- 收口：只有完整 `all` OA 权威扫描能将 lifecycle arbitration 后、local retention 前的 current canonical OA 支付身份集合（Mongo document ID + `flowRequestId/processId`）与完整 MySQL status flow 集合比较。确认真实消失后，同一 PostgreSQL snapshot 事务移除 PG status、清理 relation 并登记 `oa.payment_status.reconcile(operation=remove_missing_oa_statuses)`；relation cleanup 抑制无效 row-id 普通 reconcile，不保留并行旧路径。
 - 外部删除：既有 `oa-sync` worker 批量复查 completed projection 与 pending admission，跳过队列等待期间重现的 flow，再用一个参数化 MySQL DELETE 删除仍缺失 flow 的所有行。重复事件删除零行即成功，失败 rollback 并走既有 bounded retry/dead-letter。
 - 边界：month sync、精确附件刷新和本地 retention prune 都不能证明 OA 源删除，禁止触发外部删除；完整 `all` source identity 可以删除未曾进入 canonical retention scope 的真实 external orphan，但 OA 源仍存在的超期 flow 必须保留。页面 GET 不访问 MySQL/Mongo，热路径查询数量不变。
 - 数据与架构：无 migration、无新表/worker/read model/cache/hash/baseline/gate、无数据库备份；只扩展现有 snapshot、relation UoW、durable event 与 MySQL repository 边界。
