@@ -39,7 +39,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_sync_closure_ga
 - Workbench matching scope 是领域状态，只由 matching repository/orchestrator 管理，不得塞进通用 queue adapter。
 - `workbench-matching` 复用正式关系命令，因此生产 `fin_ops_worker` 必须能 `SELECT/INSERT/UPDATE`
   `app.workbench_idempotency_records`；Migration `0151` 是该权限的事实源，不授予 `DELETE`。
-- `oa-sync` 同时消费 `oa.sync` 与 `oa.payment_status.reconcile`。后者由 relation 事务登记、按最新 active OA+outflow topology 收敛外部状态：有 active outflow 写 `已支付`，无 active outflow 写 `待支付`。Migration `0160` 删除旧 ownership state，并为全部已完成 OA 与已准入进行中 OA 的并集登记一次 durable 规则重算事件；不直接批量修改外部支付表。
+- `oa-sync` 同时消费 `oa.sync` 与 `oa.payment_status.reconcile`。关系事件按最新 active OA+outflow topology 收敛外部状态：有 active outflow 写 `已支付`，无 active outflow 写 `待支付`。完整 `all` OA snapshot 确认已管理 flow 从 canonical completed/admitted 并集消失时，使用同一 event type 的 `remove_missing_oa_statuses` operation；worker 执行外部批量删除前必须复查 completed + admitted flow 并跳过重现项。month sync、retention prune 和页面请求不得触发该删除。Migration `0160` 删除旧 ownership state，并为全部已完成 OA 与已准入进行中 OA 的并集登记一次 durable 规则重算事件；不直接批量修改外部支付表。
 - Runtime queue retention 只清理已完成历史；不得删除 pending、processing、failed 或 dead-lettered 行来伪造健康。
 - 发布 preflight 仅可接受 exact candidate 新增 event type 的纯 pending 升级积压，并必须用未截断的
   `event_type + status` 数据库聚合与 queue 总数完全对账；任何混合事件、processing、failed、dead-lettered

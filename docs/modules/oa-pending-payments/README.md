@@ -72,7 +72,7 @@ browser
 
 ## 支付状态自动同步
 
-页面与 page command 不直接写 OA 支付状态。正式 relation 的 repository 在关系创建、扩展、撤回或恢复事务中登记 `oa.payment_status.reconcile` durable event；现有 `oa-sync` worker 始终查询最新 active topology：存在 OA+canonical outflow 就写已支付，金额差额只保留为异常；不存在 active outflow 时，只撤销本 App 曾写入的已支付状态。收入、inactive/candidate、缺 flow id 和 `pay_status=2` 均不得伪造成功。
+页面与 page command 不直接写 OA 支付状态。正式 relation 的 repository 在关系创建、扩展、撤回或恢复事务中登记 `oa.payment_status.reconcile` durable event；现有 `oa-sync` worker 始终查询最新 active topology：存在 OA+canonical outflow 就写已支付，金额差额只保留为异常；不存在 active outflow 时写待支付，不保留历史写回归属门禁。完整 `all` OA 权威同步确认一个曾纳入 canonical snapshot 的 flow 已从 completed 与 admitted 集合同时消失时，同一 snapshot 事务删除 PostgreSQL 状态并登记外部删除事件；worker 执行前再次检查已完成投影与进行中准入，防止 OA 重现时误删。月度同步和本地 retention 裁剪不能证明 OA 源删除，因此不得删除外部状态。收入、inactive/candidate、缺 flow id 和 `pay_status=2` 均不得伪造成功。
 
 `link-bank-transactions` 只负责正式关系命令，成功响应 `paymentStatusSync.code=queued`。人工 `writeback-paid` / `confirm-paid` API、按钮和 direct command 写入均已删除。外部 MySQL 与 PostgreSQL snapshot 由同一幂等 worker handler 收敛，页面只通过普通 GET 观察结果，不回退读取外部系统。
 

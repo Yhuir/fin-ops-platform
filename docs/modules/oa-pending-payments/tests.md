@@ -2,6 +2,13 @@
 
 日期：2026-08-19
 
+## 2026-09-04 OA 删除后支付状态级联
+
+- `tests/test_oa_pending_payment_source_snapshot_repository.py` 覆盖完整 `all` snapshot 识别已完成/进行中 OA 消失、原子删除 PG status、抑制失效 row-id 普通 reconcile、登记 exact-flow external delete，以及 month scope 和未证明 ownership 的 external row 不误删。
+- `tests/test_oa_payment_status_reconcile_service.py` 覆盖删除事件参数、重复幂等、OA 以 completed 或 admitted 形态重现时跳过，以及确实缺失时批量删除。
+- `tests/test_oa_payment_status_reconcile_repository.py` 覆盖一次集合式读取 pending admission flow；`tests/test_oa_payment_status_service.py` 覆盖 MySQL exact-flow 批量 DELETE、重复 flow、空输入零 I/O、失败 rollback。
+- `tests/test_workbench_relation_repository.py` 覆盖 OA source cleanup 抑制旧 row-id reconcile，普通 relation create/withdraw 的支付状态事件合同保持不变。
+
 ## 2026-08-19 OA 事实源 XLSX 导出回归
 
 - `tests/test_oa_pending_payment_query_service.py` 覆盖来源解析、固定 OA-only 列、双 sheet/单 sheet、空值与公式注入防护、20,000 行上限、单 snapshot 和 repository SQL 不读取流水/发票/关系/read model/raw payload。

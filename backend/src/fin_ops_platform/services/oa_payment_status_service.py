@@ -67,6 +67,8 @@ class OAPaymentStatusRepository(Protocol):
 
     def mark_pending(self, flow_id: str) -> OAPaymentStatusRecord: ...
 
+    def remove_payment_statuses(self, flow_ids: list[str]) -> int: ...
+
 
 def oa_flow_id_candidates(record: OAApplicationRecord) -> OAFlowIdCandidates:
     detail_fields = record.detail_fields if isinstance(record.detail_fields, dict) else {}
@@ -248,6 +250,37 @@ class MySQLOAPaymentStatusRepository:
             if isinstance(exc, OAPaymentStatusError):
                 raise
             raise OAPaymentStatusExecutionError(f"Failed to mark OA payment status as pending: {exc}") from exc
+        finally:
+            connection.close()
+
+    def remove_payment_statuses(self, flow_ids: list[str]) -> int:
+        normalized_flow_ids = list(
+            dict.fromkeys(
+                flow_id
+                for value in list(flow_ids or [])
+                if (flow_id := _optional_text(value))
+            )
+        )
+        if not normalized_flow_ids:
+            return 0
+        connection = self._connect()
+        try:
+            placeholders = ", ".join(["%s"] * len(normalized_flow_ids))
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"DELETE FROM t_payment_simple WHERE flow_id IN ({placeholders})",
+                    tuple(normalized_flow_ids),
+                )
+                removed_count = int(cursor.rowcount)
+            connection.commit()
+            return removed_count
+        except Exception as exc:  # pragma: no cover - deployed dependency path
+            connection.rollback()
+            if isinstance(exc, OAPaymentStatusError):
+                raise
+            raise OAPaymentStatusExecutionError(
+                f"Failed to remove OA payment statuses: {exc}"
+            ) from exc
         finally:
             connection.close()
 

@@ -1340,6 +1340,7 @@ class WorkbenchRelationCommandService:
         reason: str,
         replace_history_operation_type: str = "remove_unavailable_oa_fact",
         cancel_history_operation_type: str = "cancel_relation_for_unavailable_oa_fact",
+        emit_payment_status_reconcile: bool = True,
     ) -> dict[str, Any]:
         """Remove unavailable canonical facts without leaving a half-valid active relation."""
 
@@ -1414,6 +1415,7 @@ class WorkbenchRelationCommandService:
                 pair_service,
                 changed_case_ids,
                 history_events=histories,
+                emit_payment_status_reconcile=emit_payment_status_reconcile,
             )
         return {
             "changed_case_ids": changed_case_ids,
@@ -2527,6 +2529,7 @@ class WorkbenchRelationCommandService:
         changed_case_ids: list[str],
         *,
         history_events: list[dict[str, Any]],
+        emit_payment_status_reconcile: bool = True,
     ) -> None:
         saver = getattr(self._relation_repository, "save_workbench_pair_relation_delta", None)
         if not callable(saver):
@@ -2548,7 +2551,14 @@ class WorkbenchRelationCommandService:
             for history in list(history_events or [])
             if isinstance(history, dict)
         ]
-        saver(snapshot, changed_case_ids=changed_ids)
+        if emit_payment_status_reconcile:
+            saver(snapshot, changed_case_ids=changed_ids)
+        else:
+            saver(
+                snapshot,
+                changed_case_ids=changed_ids,
+                emit_payment_status_reconcile=False,
+            )
 
     @staticmethod
     def _changed_case_ids(relations: list[dict[str, Any]]) -> list[str]:

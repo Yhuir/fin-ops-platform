@@ -244,6 +244,22 @@ def test_oa_bank_relation_change_enqueues_payment_status_reconcile_event() -> No
     assert queue_calls[0][1][7]["oa_row_ids"] == ["oa-1"]
 
 
+def test_oa_source_cleanup_can_suppress_obsolete_row_id_reconcile_event() -> None:
+    connection = QueueRecordingConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    repository.save_workbench_pair_relation_delta(
+        _oa_bank_snapshot(),
+        changed_case_ids={"CASE-OA-BANK"},
+        emit_payment_status_reconcile=False,
+    )
+
+    assert not any(
+        "insert into job.outbox_events" in " ".join(sql.lower().split())
+        for sql, _params in connection.fetch_one_calls
+    )
+
+
 def test_cancelled_oa_bank_relation_enqueues_pending_reconcile_event() -> None:
     connection = QueueRecordingConnection(
         existing_relation={

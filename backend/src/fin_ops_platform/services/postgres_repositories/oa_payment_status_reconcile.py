@@ -58,3 +58,20 @@ class PostgresOAPaymentStatusReconcileRepository:
             for row in rows
             if text(row.get("oa_row_id"))
         }
+
+    def current_pending_oa_flow_ids(self, *, tenant_id: str) -> set[str]:
+        rows = self._connection.fetch_all(
+            """
+            select distinct source_payload ->> 'flow_id' as flow_id
+            from app.oa_pending_payment_admissions
+            where tenant_id = %s
+              and source_payload ->> 'flow_id' is not null
+              and source_payload ->> 'flow_id' <> ''
+            """,
+            (tenant_id,),
+        )
+        return {
+            flow_id
+            for row in list(rows or [])
+            if (flow_id := str(row.get("flow_id") or "").strip())
+        }

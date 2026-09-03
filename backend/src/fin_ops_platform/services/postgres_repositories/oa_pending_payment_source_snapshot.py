@@ -15,6 +15,10 @@ from fin_ops_platform.services.oa_payment_status_service import (
     PAY_STATUS_PENDING,
     oa_flow_id_candidates,
 )
+from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_RECONCILE_EVENT,
+    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
+)
 from fin_ops_platform.services.postgres_repositories.common import jsonb, run_in_transaction, serialize_value, text
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
@@ -23,6 +27,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
     PostgresWorkbenchMatchingQueueRepository,
 )
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
 
 
@@ -68,6 +73,7 @@ class OaPendingPaymentSourceSnapshotResult:
     removed_non_completed_count: int = 0
     pruned_scope_keys: tuple[str, ...] = ()
     upserted_pending_count: int = 0
+    removed_payment_status_flow_ids: tuple[str, ...] = ()
 
 
 class PostgresOaPendingPaymentSourceSnapshotRepository:
@@ -389,9 +395,23 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 )
             }
 
+            replaced_scopes = _replaced_scopes(
+                normalized_scope_key,
+                normalized_admission_records,
+                old_admissions,
+                old_watermarks,
+            )
             record_scope_by_flow = _record_scope_by_flow(normalized_admission_records)
+            removed_payment_status_flow_ids = _removed_payment_status_flow_ids(
+                scope_key=normalized_scope_key,
+                current_flow_ids=set(record_scope_by_flow),
+                old_statuses=old_statuses,
+                old_admissions=old_admissions,
+            )
             new_statuses: dict[str, dict[str, Any]] = {}
             for flow_id, status in normalized_statuses.items():
+                if flow_id in removed_payment_status_flow_ids:
+                    continue
                 scope_month = record_scope_by_flow.get(flow_id) or _month(
                     (old_statuses.get(flow_id) or {}).get("scope_month")
                 )
@@ -402,12 +422,6 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 }
                 new_statuses[flow_id] = {**payload, "source_signature": _signature(payload)}
 
-            replaced_scopes = _replaced_scopes(
-                normalized_scope_key,
-                normalized_admission_records,
-                old_admissions,
-                old_watermarks,
-            )
             completed_owner_cleanup_scopes = {
                 admission_scope
                 for (admission_scope, oa_id) in old_admissions
@@ -513,6 +527,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     row_ids=unavailable_oa_row_ids,
                     actor_id="system:oa_pending_payment_source_sync",
                     reason="OA 已不在已完成或进行中事实集中，移除失效关系成员。",
+                    emit_payment_status_reconcile=False,
                 )
                 normalized_cleanup_result = dict(cleanup_result)
                 cleanup_results.append(normalized_cleanup_result)
@@ -525,6 +540,26 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     cleanup_affected_scopes.update(replaced_scopes)
                 oa_pending_payment_changed_scopes.update(cleanup_affected_scopes)
                 relation_cleanup_scopes.update(cleanup_affected_scopes)
+
+            external_removed_flow_ids = sorted(
+                removed_payment_status_flow_ids.intersection(normalized_statuses)
+            )
+            if external_removed_flow_ids:
+                RuntimeQueueRepository(transaction).enqueue_in_transaction(
+                    transaction=transaction,
+                    event_type=OA_PAYMENT_STATUS_RECONCILE_EVENT,
+                    aggregate_type="oa_source_snapshot",
+                    aggregate_id=normalized_scope_key,
+                    scope_type="oa_payment_status",
+                    scope_key=normalized_scope_key,
+                    payload={
+                        "operation": OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
+                        "removed_flow_ids": external_removed_flow_ids,
+                        "reason": "authoritative_oa_removed",
+                    },
+                    tenant_id=normalized_tenant_id,
+                    priority="high",
+                )
 
             source_signatures: dict[str, str] = {}
             for scope in sorted(
@@ -608,6 +643,9 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     sorted(changed_admission_scopes, key=lambda value: (value == "all", value))
                 ),
                 relation_cleanup=tuple(cleanup_results),
+                removed_payment_status_flow_ids=tuple(
+                    sorted(removed_payment_status_flow_ids)
+                ),
             )
 
         if transaction is not None:
@@ -689,6 +727,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 removed_stale_completed_count=len(removed_stale_row_ids),
                 removed_non_completed_count=len(removed_non_completed_row_ids),
                 pruned_scope_keys=tuple(sorted(set(pruned_scope_keys or []))),
+                removed_payment_status_flow_ids=snapshot.removed_payment_status_flow_ids,
             )
 
         return run_in_transaction(self._connection, write)
@@ -1227,6 +1266,32 @@ def _replaced_scopes(
     scopes.update(key[0] for key in old_admissions)
     scopes.update(_month(scope) for scope in old_watermarks)
     return {scope for scope in scopes if scope}
+
+
+def _removed_payment_status_flow_ids(
+    *,
+    scope_key: str,
+    current_flow_ids: set[str],
+    old_statuses: dict[str, dict[str, Any]],
+    old_admissions: dict[tuple[str, str], dict[str, Any]],
+) -> set[str]:
+    if scope_key != "all":
+        return set()
+    previously_managed_flow_ids = {
+        flow_id
+        for flow_id, status in old_statuses.items()
+        if _month(status.get("scope_month"))
+    }
+    previously_managed_flow_ids.update(
+        flow_id
+        for admission in old_admissions.values()
+        if (
+            flow_id := text(
+                _dict(admission.get("source_payload")).get("flow_id")
+            )
+        )
+    )
+    return previously_managed_flow_ids - current_flow_ids
 
 
 def _changed_status_scopes(

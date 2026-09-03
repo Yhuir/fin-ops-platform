@@ -622,10 +622,12 @@ class PostgresWorkbenchRelationRepository:
         snapshot: dict[str, Any],
         *,
         changed_case_ids: set[str] | list[str] | None = None,
+        emit_payment_status_reconcile: bool = True,
     ) -> None:
         self._save_workbench_pair_relations(
             snapshot,
             changed_case_ids=set(text_list(changed_case_ids)),
+            emit_payment_status_reconcile=emit_payment_status_reconcile,
         )
 
     def _save_workbench_pair_relations(
@@ -633,6 +635,7 @@ class PostgresWorkbenchRelationRepository:
         snapshot: dict[str, Any],
         *,
         changed_case_ids: set[str] | None,
+        emit_payment_status_reconcile: bool = True,
     ) -> None:
         def write(connection: Any) -> None:
             relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
@@ -642,9 +645,13 @@ class PostgresWorkbenchRelationRepository:
                 for case_id, payload in iter_mapping(relations)
                 if changed_ids is None or case_id in changed_ids
             ]
-            existing_reconcile_relations = _existing_reconcile_relations(
-                connection,
-                [case_id for case_id, _payload in selected_relations],
+            existing_reconcile_relations = (
+                _existing_reconcile_relations(
+                    connection,
+                    [case_id for case_id, _payload in selected_relations],
+                )
+                if emit_payment_status_reconcile
+                else {}
             )
             reconcile_events: list[tuple[str, dict[str, Any]]] = []
             for case_id, payload in selected_relations:
@@ -696,20 +703,21 @@ class PostgresWorkbenchRelationRepository:
                         jsonb({"normalized_payload": payload}),
                     ),
                 )
-                previous_payload = existing_reconcile_relations.get(case_id)
-                event_payload = _oa_payment_reconcile_payload(
-                    case_id,
-                    payload,
-                    previous_payload=previous_payload,
-                )
-                if (
-                    event_payload is not None
-                    and (
-                        previous_payload is None
-                        or _reconcile_signature(previous_payload) != _reconcile_signature(payload)
+                if emit_payment_status_reconcile:
+                    previous_payload = existing_reconcile_relations.get(case_id)
+                    event_payload = _oa_payment_reconcile_payload(
+                        case_id,
+                        payload,
+                        previous_payload=previous_payload,
                     )
-                ):
-                    reconcile_events.append((case_id, event_payload))
+                    if (
+                        event_payload is not None
+                        and (
+                            previous_payload is None
+                            or _reconcile_signature(previous_payload) != _reconcile_signature(payload)
+                        )
+                    ):
+                        reconcile_events.append((case_id, event_payload))
             history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
             self._append_workbench_pair_relation_history(
                 connection,

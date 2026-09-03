@@ -4,6 +4,9 @@ import unittest
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
+from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
+)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
     _signature,
@@ -308,6 +311,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.removed_stale_completed_count, 1)
         self.assertEqual(relation_commands.calls[0]["row_ids"], ["oa-completed-gone"])
+        self.assertFalse(relation_commands.calls[0]["emit_payment_status_reconcile"])
 
     def test_commit_preserves_deleted_row_ids_when_other_completed_oa_remains(self) -> None:
         connection = FakeConnection(
@@ -330,7 +334,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.removed_stale_completed_count, 1)
         self.assertEqual(relation_commands.calls[0]["row_ids"], ["oa-completed-gone"])
 
-    def test_payment_status_only_change_does_not_report_completed_projection_change(self) -> None:
+    def test_payment_status_without_current_oa_is_removed_and_enqueued_for_external_delete(self) -> None:
         connection = FakeConnection(
             status_rows=[
                 {
@@ -348,7 +352,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
 
         result = repository.replace_authoritative_snapshot(
-            scope_key="2026-06",
+            scope_key="all",
             completed_projection_records=[],
             admission_records=[],
             payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=1)},
@@ -356,8 +360,133 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.completed_projection_changed_scopes, ())
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
+        self.assertEqual(result.payment_status_count, 0)
+        self.assertEqual(result.removed_payment_status_flow_ids, ("flow-1",))
         executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
         self.assertNotIn("job.workbench_matching_dirty_scopes", executed_sql)
+        outbox_calls = [
+            params
+            for sql, params in connection.transaction_handle.executions
+            if "insert into job.outbox_events" in sql
+        ]
+        self.assertEqual(len(outbox_calls), 1)
+        self.assertEqual(outbox_calls[0][7]["operation"], OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION)
+        self.assertEqual(outbox_calls[0][7]["removed_flow_ids"], ["flow-1"])
+
+    def test_month_snapshot_preserves_payment_status_owned_by_another_scope(self) -> None:
+        connection = FakeConnection(
+            status_rows=[
+                {
+                    "flow_id": "flow-other-month",
+                    "pay_status": 1,
+                    "scope_month": "2026-05",
+                    "source_signature": "old-status",
+                }
+            ]
+        )
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        result = repository.replace_authoritative_snapshot(
+            scope_key="2026-06",
+            completed_projection_records=[],
+            admission_records=[],
+            payment_statuses={
+                "flow-other-month": OAPaymentStatusRecord(
+                    flow_id="flow-other-month",
+                    pay_status=1,
+                )
+            },
+        )
+
+        self.assertEqual(result.payment_status_count, 1)
+        self.assertEqual(result.removed_payment_status_flow_ids, ())
+        self.assertFalse(
+            any(
+                "insert into job.outbox_events" in sql
+                for sql, _params in connection.transaction_handle.executions
+            )
+        )
+
+    def test_full_snapshot_removes_status_for_disappeared_pending_admission(self) -> None:
+        connection = FakeConnection(
+            admission_rows=[
+                {
+                    "scope_key": "2026-06",
+                    "oa_id": "oa-pending-gone",
+                    "source_signature": "old-admission",
+                    "source_payload": {"flow_id": "flow-pending-gone"},
+                }
+            ],
+            watermark_rows=[_watermark("2026-06")],
+        )
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        result = repository.replace_authoritative_snapshot(
+            scope_key="all",
+            completed_projection_records=[],
+            admission_records=[],
+            payment_statuses={
+                "flow-pending-gone": OAPaymentStatusRecord(
+                    flow_id="flow-pending-gone",
+                    pay_status=1,
+                )
+            },
+        )
+
+        self.assertEqual(result.payment_status_count, 0)
+        self.assertEqual(
+            result.removed_payment_status_flow_ids,
+            ("flow-pending-gone",),
+        )
+        outbox_payloads = [
+            params[7]
+            for sql, params in connection.transaction_handle.executions
+            if "insert into job.outbox_events" in sql
+        ]
+        self.assertEqual(outbox_payloads[0]["removed_flow_ids"], ["flow-pending-gone"])
+
+    def test_full_snapshot_does_not_claim_unscoped_external_status_ownership(self) -> None:
+        connection = FakeConnection(
+            status_rows=[
+                {
+                    "flow_id": "flow-never-canonical",
+                    "pay_status": 1,
+                    "scope_month": None,
+                    "source_signature": "external-status",
+                }
+            ]
+        )
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        result = repository.replace_authoritative_snapshot(
+            scope_key="all",
+            completed_projection_records=[],
+            admission_records=[],
+            payment_statuses={
+                "flow-never-canonical": OAPaymentStatusRecord(
+                    flow_id="flow-never-canonical",
+                    pay_status=1,
+                )
+            },
+        )
+
+        self.assertEqual(result.payment_status_count, 1)
+        self.assertEqual(result.removed_payment_status_flow_ids, ())
+        self.assertFalse(
+            any(
+                "insert into job.outbox_events" in sql
+                for sql, _params in connection.transaction_handle.executions
+            )
+        )
 
     def test_matching_dirty_write_failure_rolls_back_the_oa_snapshot(self) -> None:
         connection = FakeConnection(fail_execute_contains="job.workbench_matching_dirty_scopes")
@@ -543,6 +672,25 @@ class FakeTransaction:
         if "insert into app.oa_applications" in sql:
             self.executions.append((sql, _params))
             return {"application_id": "00000000-0000-0000-0000-000000000001"}
+        if "insert into job.outbox_events" in sql:
+            self.executions.append((sql, _params))
+            return {
+                "event_id": "event-payment-status-remove",
+                "tenant_id": _params[0],
+                "event_type": _params[1],
+                "aggregate_type": _params[2],
+                "aggregate_id": _params[3],
+                "scope_type": _params[4],
+                "scope_key": _params[5],
+                "dedupe_key": _params[6],
+                "payload": _params[7],
+                "attempts": 0,
+                "status": "pending",
+                "schema_version": 1,
+                "source_version": _params[9],
+                "priority": _params[10],
+                "trace_id": _params[11],
+            }
         raise AssertionError(f"Unexpected query: {sql}")
 
     def fetch_all(self, sql: str, _params: tuple[object, ...]) -> list[dict[str, object]]:

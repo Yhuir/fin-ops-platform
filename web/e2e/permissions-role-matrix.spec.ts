@@ -1,6 +1,4 @@
-import type { Locator } from "@playwright/test";
-
-import { expect, setCheckbox, test } from "./fixtures/strictTest";
+import { expect, type Locator, setCheckbox, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 

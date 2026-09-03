@@ -120,11 +120,22 @@ formal relation transaction commits
   -> persist PostgreSQL payment-status snapshot
 ```
 
+```text
+complete OA all-scope scan commits
+  -> compare current completed + admitted flow IDs with previously managed flow IDs
+  -> remove disappeared flow from PostgreSQL payment snapshot and active relations
+  -> enqueue remove_missing_oa_statuses in the same transaction
+  -> oa-sync worker rechecks completed + admitted canonical flows
+  -> still absent ? delete every MySQL row for the exact flow IDs : skip reappeared flow
+```
+
 - 金额不等只保留关系异常，不参与 paid gate；inflow 不算支付证据。
 - relation writer 必须从同一事务中的变更前后 typed members 并集提取受影响 OA；撤回后 OA 即使已不在新 relation payload 中，也必须进入 reconcile，禁止只看 after snapshot 而漏写 `待支付`。
 - 最新 topology 没有 active outflow 时统一写 `待支付`，不判断该状态此前由 App 还是外部系统写入。
 - `pay_status=2`、OA/flow id/canonical bank 缺失明确失败，禁止覆盖或静默跳过。
 - 同一 flow 的重复 OA row 只执行一次外部写；同 ID completed/in-progress 冲突时 completed 优先。
+- 只有完整 `all` 权威扫描可进入 missing-OA 删除分支；month scope、精确附件刷新和 retention 裁剪不能把范围外 OA 误判为删除。
+- 外部删除按 exact flow IDs 集合式执行并天然幂等；执行前复查 canonical completed + admitted 并集，避免队列等待期间 OA 重现导致误删。
 
 ### `link-bank-transactions`
 

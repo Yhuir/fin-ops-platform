@@ -23,6 +23,7 @@ class ScriptedCursor:
     def __init__(self, connection: "ScriptedConnection") -> None:
         self._connection = connection
         self._last_result: object = None
+        self.rowcount = 0
 
     def __enter__(self) -> "ScriptedCursor":
         return self
@@ -35,6 +36,7 @@ class ScriptedCursor:
         if self._connection.raise_on_execute is not None:
             raise self._connection.raise_on_execute
         self._last_result = self._connection.results.pop(0) if self._connection.results else None
+        self.rowcount = self._connection.rowcounts.pop(0) if self._connection.rowcounts else 0
 
     def fetchone(self) -> object:
         if isinstance(self._last_result, list):
@@ -55,8 +57,10 @@ class ScriptedConnection:
         results: list[object] | None = None,
         *,
         raise_on_execute: Exception | None = None,
+        rowcounts: list[int] | None = None,
     ) -> None:
         self.results = list(results or [])
+        self.rowcounts = list(rowcounts or [])
         self.raise_on_execute = raise_on_execute
         self.executed: list[tuple[str, tuple[object, ...]]] = []
         self.committed = False
@@ -296,6 +300,44 @@ class OAPaymentStatusServiceTests(unittest.TestCase):
         self.assertEqual(record, OAPaymentStatusRecord(flow_id="flow-pending-new", pay_status=PAY_STATUS_PENDING))
         self.assertIn("INSERT INTO t_payment_simple", connection.executed[1][0])
         self.assertTrue(connection.committed)
+
+    def test_remove_payment_statuses_deletes_all_rows_for_unique_flow_ids(self) -> None:
+        connection = ScriptedConnection(rowcounts=[3])
+        repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
+
+        removed_count = repository.remove_payment_statuses(
+            ["flow-removed-1", "flow-removed-2", "flow-removed-1"]
+        )
+
+        self.assertEqual(removed_count, 3)
+        self.assertEqual(len(connection.executed), 1)
+        self.assertIn("DELETE FROM t_payment_simple", connection.executed[0][0])
+        self.assertIn("flow_id IN (%s, %s)", connection.executed[0][0])
+        self.assertEqual(connection.executed[0][1], ("flow-removed-1", "flow-removed-2"))
+        self.assertTrue(connection.committed)
+        self.assertFalse(connection.rolled_back)
+        self.assertTrue(connection.closed)
+
+    def test_remove_payment_statuses_empty_input_performs_no_io(self) -> None:
+        repository = MySQLOAPaymentStatusRepository(
+            _settings(),
+            connection_factory=lambda: (_ for _ in ()).throw(
+                AssertionError("connection should not be opened")
+            ),
+        )
+
+        self.assertEqual(repository.remove_payment_statuses([]), 0)
+
+    def test_remove_payment_statuses_rolls_back_on_delete_error(self) -> None:
+        connection = ScriptedConnection(raise_on_execute=RuntimeError("delete denied"))
+        repository = MySQLOAPaymentStatusRepository(_settings(), connection_factory=lambda: connection)
+
+        with self.assertRaises(OAPaymentStatusExecutionError):
+            repository.remove_payment_statuses(["flow-removed"])
+
+        self.assertTrue(connection.rolled_back)
+        self.assertFalse(connection.committed)
+        self.assertTrue(connection.closed)
 
     def test_failed_status_is_never_overwritten(self) -> None:
         connection = ScriptedConnection([

@@ -149,6 +149,7 @@ class WorkbenchRelationCommandRepositoryAdapter:
         snapshot: dict[str, Any],
         *,
         changed_case_ids: set[str] | list[str] | None = None,
+        emit_payment_status_reconcile: bool = True,
     ) -> None:
         normalized_case_ids = [
             str(case_id).strip()
@@ -159,7 +160,14 @@ class WorkbenchRelationCommandRepositoryAdapter:
         if self._save_repository and self._repository is not None:
             if not callable(saver):
                 raise RuntimeError("relation repository does not expose changed-case delta persistence")
-            saver(snapshot, changed_case_ids=normalized_case_ids)
+            if emit_payment_status_reconcile:
+                saver(snapshot, changed_case_ids=normalized_case_ids)
+            else:
+                saver(
+                    snapshot,
+                    changed_case_ids=normalized_case_ids,
+                    emit_payment_status_reconcile=False,
+                )
         runtime_snapshot = deepcopy(snapshot)
 
         def publish_runtime_delta() -> None:

@@ -293,3 +293,9 @@
 - 同批生产字段覆盖审计确认：`schedule[].purposeType` 覆盖 2,642 条 OA；`schedule[].category` 与 `schedule[].feeType` 覆盖数均为 0。因此直接读取面只保留 `purposeType`，避免猜测字段在未来静默覆盖真实费用类型。
 - 存量：`OA_PROJECTION_SYNC_VERSION` 升级为 `2026-08-17-expense-purpose-type-v7`，由既有 durable `oa.sync` worker 幂等重投；不新增表、read model、worker、缓存或同步链路。
 - 下游：统一 canonical `expense_type` 继续供关联台项目列第二行 chip、OA 详情和成本统计消费；下游页面不得重新猜测或回退费用类型。
+## 2026-09-04 - OA 权威删除联动支付状态
+
+- 完整 `all` dual-view batch 是唯一能声明 canonical OA 消失的输入；month、targeted refresh 与 retention 只代表范围或本地保存策略，不能据此删除外部状态。
+- snapshot writer 从此前已纳入 scope 的 payment/admission facts 提取已管理 flow，与本轮 admission flow 做集合差；PG status、失效 relation member 和 durable exact-flow delete event 在同一事务提交。
+- `oa-sync` 的既有 payment handler 执行 MySQL DELETE 前，集合式复查 completed projection 与 admitted in-progress flow，避免 OA 在排队期间重现而误删。source cleanup 不再生成必然找不到已删除 OA row 的旧 reconcile 事件。
+- 无 schema migration、无新 worker/queue 类型、无 fallback 或数据库备份；页面/API 热路径零新增 I/O。

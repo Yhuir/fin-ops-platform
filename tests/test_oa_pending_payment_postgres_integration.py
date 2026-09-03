@@ -827,6 +827,51 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             "cancelled",
         )
 
+    def test_full_authoritative_snapshot_removes_disappeared_oa_payment_status_and_queues_external_delete(
+        self,
+    ) -> None:
+        source_snapshot = self._source_snapshot()
+        record = _record()
+        status = OAPaymentStatusRecord(flow_id="flow-integration-1", pay_status=1)
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="all",
+            tenant_id="default",
+            projection_records=[record],
+            admission_records=[record],
+            payment_statuses={"flow-integration-1": status},
+        )
+
+        result = source_snapshot.commit_authoritative_snapshot(
+            scope_key="all",
+            tenant_id="default",
+            projection_records=[],
+            admission_records=[],
+            payment_statuses={"flow-integration-1": status},
+        )
+
+        self.assertEqual(result.removed_payment_status_flow_ids, ("flow-integration-1",))
+        self.assertIsNone(
+            self.connection.fetch_one(
+                """
+                select flow_id
+                from app.oa_pending_payment_status_snapshots
+                where tenant_id = 'default' and flow_id = 'flow-integration-1'
+                """
+            )
+        )
+        event = self.connection.fetch_one(
+            """
+            select payload
+            from job.outbox_events
+            where event_type = 'oa.payment_status.reconcile'
+              and aggregate_type = 'oa_source_snapshot'
+            order by created_at desc
+            limit 1
+            """
+        )
+        self.assertEqual(event["payload"]["operation"], "remove_missing_oa_statuses")
+        self.assertEqual(event["payload"]["removed_flow_ids"], ["flow-integration-1"])
+
     def test_stale_matching_plan_cannot_recreate_relation_after_oa_disappears(self) -> None:
         source_snapshot = self._source_snapshot()
         retained = _record()

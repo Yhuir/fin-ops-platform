@@ -11,6 +11,7 @@ from fin_ops_platform.services.oa_payment_status_service import (
     PAY_STATUS_PENDING,
 )
 from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
     OA_PAYMENT_STATUS_RECONCILE_EVENT,
 )
 from fin_ops_platform.services.postgres_repositories.oa_payment_status_reconcile import (
@@ -38,6 +39,8 @@ class OAPaymentStatusReconcileService:
         self._payment_status_snapshot_writer = payment_status_snapshot_writer
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
+        if event.payload.get("operation") == OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION:
+            return self._remove_missing_oa_statuses(event)
         oa_row_ids = _text_list(event.payload.get("oa_row_ids"))
         if not oa_row_ids:
             raise OAPaymentStatusReconcileError("oa_row_ids are required for payment-status reconciliation.")
@@ -86,6 +89,41 @@ class OAPaymentStatusReconcileService:
             "oa_row_ids": oa_row_ids,
             "flow_count": len(records_by_flow_id),
             "changed_scopes": list(result.oa_pending_payment_changed_scopes),
+        }
+
+    def _remove_missing_oa_statuses(self, event: RuntimeQueueEvent) -> dict[str, Any]:
+        requested_flow_ids = _text_list(event.payload.get("removed_flow_ids"))
+        if not requested_flow_ids:
+            raise OAPaymentStatusReconcileError(
+                "removed_flow_ids are required for missing-OA payment-status removal."
+            )
+        current_flow_ids = {
+            flow_id
+            for record in list(self._oa_projection.list_all_application_records() or [])
+            if isinstance(record, OAApplicationRecord)
+            if (flow_id := clean_string(self._payment_status_repository.resolve_flow_id(record) or ""))
+        }
+        current_flow_ids.update(
+            self._reconcile_repository.current_pending_oa_flow_ids(
+                tenant_id=event.tenant_id,
+            )
+        )
+        removable_flow_ids = [
+            flow_id for flow_id in requested_flow_ids if flow_id not in current_flow_ids
+        ]
+        removed_row_count = (
+            self._payment_status_repository.remove_payment_statuses(removable_flow_ids)
+            if removable_flow_ids
+            else 0
+        )
+        return {
+            "status": "removed_missing_oa_statuses",
+            "requested_flow_count": len(requested_flow_ids),
+            "removed_flow_count": len(removable_flow_ids),
+            "removed_row_count": removed_row_count,
+            "skipped_reappeared_flow_ids": [
+                flow_id for flow_id in requested_flow_ids if flow_id in current_flow_ids
+            ],
         }
 
     def _reconcile_flow(

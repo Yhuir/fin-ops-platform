@@ -9,6 +9,7 @@ from fin_ops_platform.services.oa_payment_status_reconcile import (
     OAPaymentStatusReconcileService,
 )
 from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
     OA_PAYMENT_STATUS_RECONCILE_EVENT,
 )
 from fin_ops_platform.services.oa_payment_status_service import (
@@ -27,12 +28,16 @@ class StaticProjection:
     def list_application_records_by_row_ids(self, row_ids: list[str]) -> list[OAApplicationRecord]:
         return [self._records[row_id] for row_id in row_ids if row_id in self._records]
 
+    def list_all_application_records(self) -> list[OAApplicationRecord]:
+        return list(self._records.values())
+
 
 class MemoryPaymentStatusRepository:
     def __init__(self, statuses: dict[str, int]) -> None:
         self.statuses = dict(statuses)
         self.marked_paid: list[str] = []
         self.marked_pending: list[str] = []
+        self.removal_calls: list[list[str]] = []
 
     def resolve_flow_id(self, record: OAApplicationRecord) -> str | None:
         return str(record.detail_fields.get("支付状态FlowID") or "") or None
@@ -51,17 +56,33 @@ class MemoryPaymentStatusRepository:
         self.statuses[flow_id] = PAY_STATUS_PENDING
         return OAPaymentStatusRecord(flow_id=flow_id, pay_status=PAY_STATUS_PENDING)
 
+    def remove_payment_statuses(self, flow_ids: list[str]) -> int:
+        normalized = list(dict.fromkeys(flow_ids))
+        self.removal_calls.append(normalized)
+        removed = 0
+        for flow_id in normalized:
+            if flow_id in self.statuses:
+                removed += 1
+                self.statuses.pop(flow_id)
+        return removed
+
 
 class MemoryReconcileRepository:
     def __init__(
         self,
         *,
         active_outflow: dict[str, bool] | None = None,
+        pending_flow_ids: set[str] | None = None,
     ) -> None:
         self.active_outflow = dict(active_outflow or {})
+        self.pending_flow_ids = set(pending_flow_ids or set())
 
     def active_outflow_by_oa_row_id(self, row_ids: list[str]) -> dict[str, bool]:
         return {row_id: self.active_outflow.get(row_id, False) for row_id in row_ids}
+
+    def current_pending_oa_flow_ids(self, *, tenant_id: str) -> set[str]:
+        self.pending_tenant_id = tenant_id
+        return set(self.pending_flow_ids)
 
 
 class RecordingSnapshotWriter:
@@ -189,12 +210,67 @@ class OAPaymentStatusReconcileServiceTests(unittest.TestCase):
         self.assertEqual(payment.marked_paid, ["flow-shared"])
         self.assertEqual(snapshot.calls[0]["pay_statuses_by_flow_id"], {"flow-shared": PAY_STATUS_PAID})
 
+    def test_missing_oa_operation_removes_only_flows_still_absent_from_canonical_oa(self) -> None:
+        service, payment, _, snapshot = _service(
+            records=[_record("oa-reappeared", "flow-reappeared")],
+            statuses={
+                "flow-removed": PAY_STATUS_PAID,
+                "flow-reappeared": PAY_STATUS_PENDING,
+            },
+        )
+
+        result = service.handle_runtime_event(
+            _remove_event(["flow-removed", "flow-reappeared", "flow-removed"])
+        )
+
+        self.assertEqual(payment.removal_calls, [["flow-removed"]])
+        self.assertNotIn("flow-removed", payment.statuses)
+        self.assertIn("flow-reappeared", payment.statuses)
+        self.assertEqual(snapshot.calls, [])
+        self.assertEqual(result["status"], "removed_missing_oa_statuses")
+        self.assertEqual(result["requested_flow_count"], 2)
+        self.assertEqual(result["removed_flow_count"], 1)
+        self.assertEqual(result["skipped_reappeared_flow_ids"], ["flow-reappeared"])
+
+    def test_missing_oa_operation_is_idempotent_when_external_rows_are_already_absent(self) -> None:
+        service, payment, _, snapshot = _service(records=[], statuses={})
+
+        result = service.handle_runtime_event(_remove_event(["flow-removed"]))
+
+        self.assertEqual(payment.removal_calls, [["flow-removed"]])
+        self.assertEqual(result["removed_row_count"], 0)
+        self.assertEqual(snapshot.calls, [])
+
+    def test_missing_oa_operation_preserves_flow_that_reappeared_as_pending(self) -> None:
+        service, payment, _, snapshot = _service(
+            records=[],
+            statuses={"flow-reappeared": PAY_STATUS_PAID},
+            pending_flow_ids={"flow-reappeared"},
+        )
+
+        result = service.handle_runtime_event(_remove_event(["flow-reappeared"]))
+
+        self.assertEqual(payment.removal_calls, [])
+        self.assertIn("flow-reappeared", payment.statuses)
+        self.assertEqual(result["skipped_reappeared_flow_ids"], ["flow-reappeared"])
+        self.assertEqual(snapshot.calls, [])
+
+    def test_missing_oa_operation_requires_explicit_flow_ids(self) -> None:
+        service, payment, _, snapshot = _service(records=[], statuses={})
+
+        with self.assertRaisesRegex(OAPaymentStatusReconcileError, "removed_flow_ids"):
+            service.handle_runtime_event(_remove_event([]))
+
+        self.assertEqual(payment.removal_calls, [])
+        self.assertEqual(snapshot.calls, [])
+
 
 def _service(
     *,
     records: list[OAApplicationRecord],
     statuses: dict[str, int],
     active_outflow: dict[str, bool] | None = None,
+    pending_flow_ids: set[str] | None = None,
 ) -> tuple[
     OAPaymentStatusReconcileService,
     MemoryPaymentStatusRepository,
@@ -202,7 +278,10 @@ def _service(
     RecordingSnapshotWriter,
 ]:
     payment = MemoryPaymentStatusRepository(statuses)
-    reconcile = MemoryReconcileRepository(active_outflow=active_outflow)
+    reconcile = MemoryReconcileRepository(
+        active_outflow=active_outflow,
+        pending_flow_ids=pending_flow_ids,
+    )
     snapshot = RecordingSnapshotWriter()
     return (
         OAPaymentStatusReconcileService(
@@ -228,6 +307,25 @@ def _event(row_ids: list[str]) -> RuntimeQueueEvent:
         scope_key=None,
         dedupe_key="event-1",
         payload={"oa_row_ids": row_ids},
+        attempts=0,
+        status="processing",
+    )
+
+
+def _remove_event(flow_ids: list[str]) -> RuntimeQueueEvent:
+    return RuntimeQueueEvent(
+        event_id="event-remove-1",
+        tenant_id="default",
+        event_type=OA_PAYMENT_STATUS_RECONCILE_EVENT,
+        aggregate_type="oa_payment_status",
+        aggregate_id="2026-08",
+        scope_type="oa_payment_status",
+        scope_key="2026-08",
+        dedupe_key=None,
+        payload={
+            "operation": OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION,
+            "removed_flow_ids": flow_ids,
+        },
         attempts=0,
         status="processing",
     )

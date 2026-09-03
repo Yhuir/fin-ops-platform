@@ -1146,6 +1146,7 @@ Workbench row payload 还可包含可选来源字段：单值兼容字段 `sourc
 - `pay_status=2`（支付失败）必须 fail closed，禁止自动覆盖；缺 OA、缺 canonical 流水或无法解析 `flow_id` 必须形成明确失败事件，禁止猜测字段或静默跳过。
 - 同一 OA ID 同时存在 completed 与 in-progress 快照时 completed 优先；多个 canonical OA row 解析到同一 `flow_id` 时每个事件只写一次外部状态。
 - handler 由现有 `oa-sync` worker 承担，采用 at-least-once 幂等处理；外部状态成功后必须同步记录 PostgreSQL payment-status snapshot。Migration `0160` 删除旧 ownership 状态，并为全部已完成 OA 与已准入进行中 OA 的并集只登记 reconcile event，不直接批量修改外部支付状态。
+- 支付状态从属于 canonical OA。只有完整 `all` OA 权威扫描确认曾管理 flow 已从 completed 与 admitted 并集消失时，snapshot 事务才删除 PostgreSQL payment-status row 并登记 `oa.payment_status.reconcile(operation=remove_missing_oa_statuses, removed_flow_ids=[...])`。worker 删除 MySQL `t_payment_simple` 前必须复查 completed projection 与 pending admission，跳过重现 flow；month sync、精确附件刷新和 retention 裁剪不能声明外部 OA 删除。
 
 `GET /api/oa-pending-payments/bank-transaction-candidates`
 

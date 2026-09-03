@@ -9,5 +9,6 @@
 | `SETTINGS-E2E-005` | covered-local | OA role sync/preflight/deploy tests；真实 OA topology 由发布前后 preflight 证明 |
 | `SETTINGS-E2E-006` | covered | OA applicant credential service/API/repository/frontend tests |
 | `SETTINGS-E2E-007` | covered-local | data reset service/API/frontend/E2E；本次权限改造不执行生产数据重置 |
+| `SETTINGS-E2E-008` | covered | `SettingsPage.test.tsx`、`SettingsNativeControls.test.tsx`、`HeroUIPlatformSmoke.test.tsx` 与 `permissions-role-matrix.spec.ts` 覆盖紧凑布局、窄屏切换、无说明性冗余、HeroUI primitives 和访问账户列表不重叠。 |
 
 新增 settings section 时先判断它属于普通 settings 页面能力还是 005 control plane；禁止重新引入账号操作层级。
