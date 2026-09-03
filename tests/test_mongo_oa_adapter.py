@@ -3136,12 +3136,20 @@ class MongoOAAdapterTests(unittest.TestCase):
             adapter.load_sync_application_batch("2026-03")
 
     def test_payment_flow_identity_lookup_reads_only_configured_form_ids(self) -> None:
-        adapter = StubMongoOAAdapter(form_documents={}, project_documents=[])
+        existing_document = {
+            "_id": "flow-existing",
+            "form_id": "2",
+            "data": {"flowRequestId": "business-1", "processStatus": "2"},
+        }
+        adapter = StubMongoOAAdapter(
+            form_documents={"2": [existing_document]},
+            project_documents=[],
+        )
 
         with patch.object(
             adapter,
             "_find_documents",
-            side_effect=[[{"_id": "flow-existing"}], []],
+            side_effect=[[existing_document], []],
         ) as find_documents:
             found = adapter.list_existing_payment_flow_ids(
                 ["flow-existing", "flow-missing", "flow-existing"]
@@ -3150,16 +3158,42 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(found, {"flow-existing"})
         self.assertEqual(find_documents.call_count, 2)
         self.assertEqual(
-            [call.args[0]["form_id"] for call in find_documents.call_args_list],
+            [call.args[0]["form_id"] for call in find_documents.call_args_list[:2]],
             [
                 adapter._form_id_query_value(adapter._settings.payment_request_form_id),
                 adapter._form_id_query_value(adapter._settings.expense_claim_form_id),
             ],
         )
-        self.assertEqual(
-            [call.kwargs["projection"] for call in find_documents.call_args_list],
-            [{"_id": 1}, {"_id": 1}],
+        self.assertTrue(
+            all("projection" not in call.kwargs for call in find_documents.call_args_list)
         )
+
+    def test_payment_flow_identity_lookup_excludes_superseded_raw_document(self) -> None:
+        superseded_document = {
+            "_id": "flow-superseded",
+            "form_id": "2",
+            "data": {"flowRequestId": "business-1", "processStatus": "1"},
+        }
+        authoritative_document = {
+            "_id": "flow-authoritative",
+            "form_id": "2",
+            "data": {"flowRequestId": "business-1", "processStatus": "2"},
+        }
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [superseded_document, authoritative_document],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_find_documents",
+            side_effect=[[superseded_document], []],
+        ):
+            found = adapter.list_existing_payment_flow_ids(["flow-superseded"])
+
+        self.assertEqual(found, set())
 
     def test_sync_batch_admits_legitimate_in_progress_drafts_with_unfilled_business_fields(self) -> None:
         adapter = StubMongoOAAdapter(

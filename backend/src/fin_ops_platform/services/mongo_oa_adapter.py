@@ -376,21 +376,43 @@ class MongoOAAdapter(OAAdapter):
             *self._object_id_query_values(requested_flow_ids),
         ]
         existing_flow_ids: set[str] = set()
-        for form_id in (
-            self._settings.payment_request_form_id,
-            self._settings.expense_claim_form_id,
-        ):
-            documents = self._find_documents(
+        form_specs = (
+            (self._settings.payment_request_form_id, OA_IMPORT_FORM_TYPE_PAYMENT),
+            (self._settings.expense_claim_form_id, OA_IMPORT_FORM_TYPE_EXPENSE),
+        )
+        candidate_documents_by_form: list[tuple[str, str, list[dict[str, Any]]]] = []
+        for form_id, form_type in form_specs:
+            candidate_documents = self._find_documents(
                 {
                     "form_id": self._form_id_query_value(form_id),
                     "_id": {"$in": query_values},
-                },
-                projection={"_id": 1},
+                }
             )
             self._require_sync_source_read_ready("after OA payment flow identity read")
+            candidate_documents_by_form.append(
+                (form_id, form_type, candidate_documents)
+            )
+
+        for form_id, form_type, candidate_documents in candidate_documents_by_form:
+            business_ids = {
+                business_id
+                for document in candidate_documents
+                if (business_id := self._document_external_id(form_id, document))
+            }
+            if not business_ids:
+                continue
+            lifecycle_documents = self._load_form_documents_by_external_ids(
+                form_id,
+                business_ids,
+            )
+            self._require_sync_source_read_ready("after OA payment flow lifecycle read")
+            authoritative_documents = self._select_authoritative_documents(
+                form_type,
+                lifecycle_documents,
+            )
             existing_flow_ids.update(
                 flow_id
-                for document in documents
+                for document in authoritative_documents
                 if (flow_id := self._document_id(document)) in requested_flow_ids
             )
         return existing_flow_ids
