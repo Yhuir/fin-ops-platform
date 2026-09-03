@@ -309,6 +309,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         completed_projection_records: list[OAApplicationRecord],
         admission_records: list[OAApplicationRecord],
         payment_statuses: dict[str, OAPaymentStatusRecord],
+        authoritative_payment_flow_ids: list[str] | tuple[str, ...] | None = None,
         removed_projection_oa_row_ids: list[str] | None = None,
         tenant_id: str = "default",
         transaction: Any | None = None,
@@ -329,6 +330,17 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             if is_completed_workflow_status(record.workflow_status)
         }
         normalized_statuses = _normalized_statuses(payment_statuses)
+        normalized_authoritative_payment_flow_ids = (
+            None
+            if authoritative_payment_flow_ids is None
+            else {
+                flow_id
+                for value in authoritative_payment_flow_ids
+                if (flow_id := text(value))
+            }
+        )
+        if normalized_scope_key == "all" and normalized_authoritative_payment_flow_ids is None:
+            raise ValueError("Full OA snapshot requires authoritative payment flow identities.")
         normalized_removed_projection_oa_row_ids = {
             row_id
             for value in list(removed_projection_oa_row_ids or [])
@@ -404,9 +416,12 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             record_scope_by_flow = _record_scope_by_flow(normalized_admission_records)
             removed_payment_status_flow_ids = _removed_payment_status_flow_ids(
                 scope_key=normalized_scope_key,
-                current_flow_ids=set(record_scope_by_flow),
-                old_statuses=old_statuses,
-                old_admissions=old_admissions,
+                current_flow_ids=(
+                    normalized_authoritative_payment_flow_ids
+                    if normalized_scope_key == "all"
+                    else set(record_scope_by_flow)
+                ),
+                known_status_flow_ids=set(old_statuses).union(normalized_statuses),
             )
             new_statuses: dict[str, dict[str, Any]] = {}
             for flow_id, status in normalized_statuses.items():
@@ -659,6 +674,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         projection_records: list[OAApplicationRecord],
         admission_records: list[OAApplicationRecord],
         payment_statuses: dict[str, OAPaymentStatusRecord],
+        authoritative_payment_flow_ids: list[str] | tuple[str, ...] | None = None,
         retention_cutoff_month: str | None = None,
         tenant_id: str = "default",
     ) -> OaPendingPaymentSourceSnapshotResult:
@@ -708,6 +724,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 completed_projection_records=completed_records,
                 admission_records=normalized_admission_records,
                 payment_statuses=payment_statuses,
+                authoritative_payment_flow_ids=authoritative_payment_flow_ids,
                 removed_projection_oa_row_ids=[
                     *removed_stale_row_ids,
                     *removed_non_completed_row_ids,
@@ -1272,26 +1289,11 @@ def _removed_payment_status_flow_ids(
     *,
     scope_key: str,
     current_flow_ids: set[str],
-    old_statuses: dict[str, dict[str, Any]],
-    old_admissions: dict[tuple[str, str], dict[str, Any]],
+    known_status_flow_ids: set[str],
 ) -> set[str]:
     if scope_key != "all":
         return set()
-    previously_managed_flow_ids = {
-        flow_id
-        for flow_id, status in old_statuses.items()
-        if _month(status.get("scope_month"))
-    }
-    previously_managed_flow_ids.update(
-        flow_id
-        for admission in old_admissions.values()
-        if (
-            flow_id := text(
-                _dict(admission.get("source_payload")).get("flow_id")
-            )
-        )
-    )
-    return previously_managed_flow_ids - current_flow_ids
+    return known_status_flow_ids - current_flow_ids
 
 
 def _changed_status_scopes(

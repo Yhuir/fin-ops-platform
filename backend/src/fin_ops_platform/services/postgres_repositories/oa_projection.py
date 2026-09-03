@@ -246,55 +246,29 @@ class PostgresOAProjectionRepository:
         records: list[OAApplicationRecord],
         scanned_records: list[OAApplicationRecord],
     ) -> list[str]:
+        normalized_scope_key = text(scope_key) or "all"
         months = self._months_for_scope(scope_key=scope_key, records=scanned_records)
-        if not months:
+        if normalized_scope_key != "all" and not months:
             return []
         incoming_row_ids = sorted({str(record.id or "").strip() for record in records if str(record.id or "").strip()})
+        scope_predicate = (
+            "true"
+            if normalized_scope_key == "all"
+            else "oa.scope_month = any(%s::date[])"
+        )
 
         def write(connection: Any) -> list[str]:
-            if incoming_row_ids:
-                rows = connection.fetch_all(
-                    """
-                    with stale as (
-                        select oa.id, oa.row_id, oa.scope_month
-                        from app.oa_applications oa
-                        where oa.scope_month = any(%s::date[])
-                          and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
-                          and not (oa.row_id = any(%s::text[]))
-                          and not exists (
-                              select 1
-                              from app.manual_oa_imports manual
-                              where manual.row_id = oa.row_id
-                                and manual.status = 'active'
-                          )
-                    ),
-                    deleted_items as (
-                        delete from app.oa_application_items item
-                        using stale
-                        where item.oa_application_id = stale.id
-                        returning item.id
-                    ),
-                    deleted_attachments as (
-                        delete from app.oa_attachments attachment
-                        using stale
-                        where attachment.oa_application_id = stale.id
-                        returning attachment.id
-                    )
-                    delete from app.oa_applications oa
-                    using stale
-                    where oa.id = stale.id
-                    returning stale.row_id
-                    """,
-                    (months, incoming_row_ids),
-                )
-                return [row_id for row in rows if (row_id := text(row.get("row_id")))]
+            params: tuple[object, ...] = (incoming_row_ids,)
+            if normalized_scope_key != "all":
+                params = (months, *params)
             rows = connection.fetch_all(
-                """
+                f"""
                 with stale as (
                     select oa.id, oa.row_id, oa.scope_month
                     from app.oa_applications oa
-                    where oa.scope_month = any(%s::date[])
+                    where {scope_predicate}
                       and """ + COMPLETED_WORKFLOW_STATUS_SQL + """
+                      and not (oa.row_id = any(%s::text[]))
                       and not exists (
                           select 1
                           from app.manual_oa_imports manual
@@ -319,7 +293,7 @@ class PostgresOAProjectionRepository:
                 where oa.id = stale.id
                 returning stale.row_id
                 """,
-                (months,),
+                params,
             )
             return [row_id for row in rows if (row_id := text(row.get("row_id")))]
 
@@ -331,17 +305,23 @@ class PostgresOAProjectionRepository:
         scope_key: str,
         records: list[OAApplicationRecord],
     ) -> list[str]:
+        normalized_scope_key = text(scope_key) or "all"
         months = self._months_for_scope(scope_key=scope_key, records=records)
-        if not months:
+        if normalized_scope_key != "all" and not months:
             return []
+        scope_predicate = (
+            "true"
+            if normalized_scope_key == "all"
+            else "oa.scope_month = any(%s::date[])"
+        )
 
         def write(connection: Any) -> list[str]:
             rows = connection.fetch_all(
-                """
+                f"""
                 with stale as (
                     select oa.id, oa.row_id, oa.scope_month
                     from app.oa_applications oa
-                    where oa.scope_month = any(%s::date[])
+                    where {scope_predicate}
                       and coalesce(nullif(oa.workflow_status, ''), 'completed') <> 'completed'
                       and not exists (
                           select 1
@@ -367,7 +347,7 @@ class PostgresOAProjectionRepository:
                 where oa.id = stale.id
                 returning stale.row_id
                 """,
-                (months,),
+                (months,) if normalized_scope_key != "all" else (),
             )
             return [row_id for row in rows if (row_id := text(row.get("row_id")))]
 

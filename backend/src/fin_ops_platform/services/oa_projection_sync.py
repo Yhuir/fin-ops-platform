@@ -176,6 +176,7 @@ class OAProjectionSyncService:
         source_batch = self._load_source_batch(scope_key, cutoff_month=cutoff_month)
         projection_records = self._sanitized_records(list(source_batch["projection_records"]))
         admission_records = self._sanitized_records(list(source_batch["admission_records"]))
+        authoritative_payment_flow_ids = list(source_batch["authoritative_payment_flow_ids"])
         payment_statuses = self._load_payment_statuses()
         completed_records = [record for record in projection_records if _is_completed_workflow(record)]
         if self._payment_status_repository is not None:
@@ -187,6 +188,7 @@ class OAProjectionSyncService:
                 scope_key=scope_key,
                 projection_records=projection_records,
                 admission_records=admission_records,
+                authoritative_payment_flow_ids=authoritative_payment_flow_ids,
                 payment_statuses=payment_statuses,
                 cutoff_month=cutoff_month,
             )
@@ -356,6 +358,7 @@ class OAProjectionSyncService:
         scope_key: str,
         projection_records: list[OAApplicationRecord],
         admission_records: list[OAApplicationRecord],
+        authoritative_payment_flow_ids: list[str],
         payment_statuses: dict[str, OAPaymentStatusRecord] | None,
         cutoff_month: str | None,
     ) -> Any:
@@ -371,6 +374,7 @@ class OAProjectionSyncService:
             scope_key=scope_key,
             projection_records=projection_records,
             admission_records=admission_records,
+            authoritative_payment_flow_ids=authoritative_payment_flow_ids,
             payment_statuses=payment_statuses,
             retention_cutoff_month=cutoff_month,
         )
@@ -392,8 +396,20 @@ class OAProjectionSyncService:
             batch = load_batch(scope_key, retention_cutoff_month=cutoff_month)
         projection_records = getattr(batch, "projection_records", None)
         admission_records = getattr(batch, "admission_records", None)
-        if not isinstance(projection_records, (list, tuple)) or not isinstance(admission_records, (list, tuple)):
+        authoritative_payment_flow_ids = getattr(batch, "authoritative_payment_flow_ids", None)
+        if (
+            not isinstance(projection_records, (list, tuple))
+            or not isinstance(admission_records, (list, tuple))
+            or not isinstance(authoritative_payment_flow_ids, (list, tuple))
+        ):
             raise RuntimeError("OA sync source adapter returned an incomplete source batch.")
+        normalized_authoritative_payment_flow_ids = tuple(
+            str(flow_id).strip()
+            for flow_id in authoritative_payment_flow_ids
+            if str(flow_id).strip()
+        )
+        if len(normalized_authoritative_payment_flow_ids) != len(authoritative_payment_flow_ids):
+            raise RuntimeError("OA sync source adapter returned an invalid payment flow identity.")
 
         def retained(records: list[OAApplicationRecord] | tuple[OAApplicationRecord, ...]) -> tuple[OAApplicationRecord, ...]:
             return tuple(
@@ -407,6 +423,7 @@ class OAProjectionSyncService:
         return {
             "projection_records": retained(projection_records),
             "admission_records": retained(admission_records),
+            "authoritative_payment_flow_ids": normalized_authoritative_payment_flow_ids,
         }
 
     def _retention_cutoff_month(self) -> str | None:
@@ -497,7 +514,7 @@ class OAProjectionSyncService:
         scanned_records: list[OAApplicationRecord],
     ) -> int:
         delete_stale_completed = getattr(self._projection_repository, "delete_stale_completed_application_records", None)
-        if not callable(delete_stale_completed) or (scope_key == "all" and not scanned_records):
+        if not callable(delete_stale_completed):
             return 0
         return len(
             list(
@@ -512,7 +529,7 @@ class OAProjectionSyncService:
 
     def _delete_non_completed_projection_records(self, *, scope_key: str, records: list[OAApplicationRecord]) -> int:
         delete_non_completed = getattr(self._projection_repository, "delete_non_completed_application_records", None)
-        if not callable(delete_non_completed) or (scope_key == "all" and not records):
+        if not callable(delete_non_completed):
             return 0
         return len(list(delete_non_completed(scope_key=scope_key, records=records) or []))
 

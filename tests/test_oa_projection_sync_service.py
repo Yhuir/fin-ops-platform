@@ -5,7 +5,10 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
+from fin_ops_platform.services.oa_payment_status_service import (
+    OAPaymentStatusRecord,
+    oa_flow_id_candidates,
+)
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     OaPendingPaymentSourceSnapshotResult,
@@ -354,6 +357,20 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["scanned_count"], 0)
         self.assertEqual(projection_repository.stale_completed_scopes, ["2026-06"])
         self.assertEqual(projection_repository.non_completed_scopes, ["2026-06"])
+
+    def test_full_sync_with_no_source_records_clears_the_full_projection(self) -> None:
+        source_adapter = FakeSourceAdapter(months=[], records_by_month={})
+        projection_repository = FakeProjectionRepository()
+        service = OAProjectionSyncService(
+            source_adapter=source_adapter,
+            projection_repository=projection_repository,
+        )
+
+        result = service.handle_runtime_event(_event("all"))
+
+        self.assertEqual(result["scanned_count"], 0)
+        self.assertEqual(projection_repository.stale_completed_scopes, ["all"])
+        self.assertEqual(projection_repository.non_completed_scopes, ["all"])
 
     def test_oa_sync_commits_projection_facts_without_downstream_page_fan_out(self) -> None:
         records = [
@@ -809,6 +826,15 @@ class FakeSourceAdapter:
         return SimpleNamespace(
             projection_records=tuple(projection_records),
             admission_records=tuple(records),
+            authoritative_payment_flow_ids=tuple(
+                sorted(
+                    {
+                        candidates.payment_flow_ids[0]
+                        for record in records
+                        if (candidates := oa_flow_id_candidates(record)).payment_flow_ids
+                    }
+                )
+            ),
         )
 
 

@@ -296,6 +296,7 @@
 ## 2026-09-04 - OA 权威删除联动支付状态
 
 - 完整 `all` dual-view batch 是唯一能声明 canonical OA 消失的输入；month、targeted refresh 与 retention 只代表范围或本地保存策略，不能据此删除外部状态。
-- snapshot writer 从此前已纳入 scope 的 payment/admission facts 提取已管理 flow，与本轮 admission flow 做集合差；PG status、失效 relation member 和 durable exact-flow delete event 在同一事务提交。
-- `oa-sync` 的既有 payment handler 执行 MySQL DELETE 前，集合式复查 completed projection 与 admitted in-progress flow，避免 OA 在排队期间重现而误删。source cleanup 不再生成必然找不到已删除 OA row 的旧 reconcile 事件。
+- source adapter 在 lifecycle arbitration 后、local retention 过滤前输出完整 OA Mongo document flow ID 集合；snapshot writer 将其与完整 MySQL payment-status flow 集合比较。未曾进入 App retention scope 的真实外部孤儿也会删除，而仅超出 retention、仍存在于 OA 源的 flow 必须保留。
+- `all` stale projection 清理不再由本轮返回记录的月份反推范围；整月从 retention 投影消失时也会清理旧 canonical 行，避免 worker 的重现检查读取陈旧 OA。month scope 仍只清理指定月份，manual import owner 不变。
+- `oa-sync` 的既有 payment handler 执行 MySQL DELETE 前，对删除候选做两个配置财务表单的 Mongo `_id` 精确索引复查，再合并 completed projection 与 admitted in-progress flow；OA 在排队期间重现、仅超出 retention 或 source read 失败时均不误删。该 cross-system destructive boundary 是唯一新增门禁，不进入普通页面或同步热路径。source cleanup 不再生成必然找不到已删除 OA row 的旧 reconcile 事件。
 - 无 schema migration、无新 worker/queue 类型、无 fallback 或数据库备份；页面/API 热路径零新增 I/O。

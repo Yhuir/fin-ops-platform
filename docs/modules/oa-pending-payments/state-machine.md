@@ -122,10 +122,11 @@ formal relation transaction commits
 
 ```text
 complete OA all-scope scan commits
-  -> compare current completed + admitted flow IDs with previously managed flow IDs
+  -> collect authoritative OA source flow IDs before local retention filtering
+  -> compare authoritative source IDs with the complete external payment-status flow set
   -> remove disappeared flow from PostgreSQL payment snapshot and active relations
   -> enqueue remove_missing_oa_statuses in the same transaction
-  -> oa-sync worker rechecks completed + admitted canonical flows
+  -> oa-sync worker rechecks exact OA source identities plus completed + admitted canonical flows
   -> still absent ? delete every MySQL row for the exact flow IDs : skip reappeared flow
 ```
 
@@ -134,8 +135,8 @@ complete OA all-scope scan commits
 - 最新 topology 没有 active outflow 时统一写 `待支付`，不判断该状态此前由 App 还是外部系统写入。
 - `pay_status=2`、OA/flow id/canonical bank 缺失明确失败，禁止覆盖或静默跳过。
 - 同一 flow 的重复 OA row 只执行一次外部写；同 ID completed/in-progress 冲突时 completed 优先。
-- 只有完整 `all` 权威扫描可进入 missing-OA 删除分支；month scope、精确附件刷新和 retention 裁剪不能把范围外 OA 误判为删除。
-- 外部删除按 exact flow IDs 集合式执行并天然幂等；执行前复查 canonical completed + admitted 并集，避免队列等待期间 OA 重现导致误删。
+- 只有完整 `all` 权威扫描可进入 missing-OA 删除分支；source flow ID 在生命周期去重后、local retention 过滤前提取，因此超出 App 投影保留窗口但仍存在于 OA 源的申请不会被误删支付状态。month scope、精确附件刷新和 retention 裁剪不能声明 OA 源删除。
+- 外部删除按 exact flow IDs 集合式执行并天然幂等；执行前以两个配置财务表单的 `_id` 索引精确读取复查 OA source，再合并 canonical completed + admitted，避免队列等待期间 OA 重现或 retention 外 OA 被误删。精确源读取失败则事件失败重试，不执行 MySQL DELETE。
 
 ### `link-bank-transactions`
 

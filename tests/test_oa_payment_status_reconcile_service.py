@@ -32,6 +32,16 @@ class StaticProjection:
         return list(self._records.values())
 
 
+class StaticSourceIdentityReader:
+    def __init__(self, flow_ids: set[str] | None = None) -> None:
+        self.flow_ids = set(flow_ids or set())
+        self.calls: list[list[str]] = []
+
+    def list_existing_payment_flow_ids(self, flow_ids: list[str]) -> set[str]:
+        self.calls.append(list(flow_ids))
+        return self.flow_ids.intersection(flow_ids)
+
+
 class MemoryPaymentStatusRepository:
     def __init__(self, statuses: dict[str, int]) -> None:
         self.statuses = dict(statuses)
@@ -255,6 +265,20 @@ class OAPaymentStatusReconcileServiceTests(unittest.TestCase):
         self.assertEqual(result["skipped_reappeared_flow_ids"], ["flow-reappeared"])
         self.assertEqual(snapshot.calls, [])
 
+    def test_missing_oa_operation_preserves_flow_that_exists_outside_projection_retention(self) -> None:
+        service, payment, _, snapshot = _service(
+            records=[],
+            statuses={"flow-outside-retention": PAY_STATUS_PAID},
+            source_flow_ids={"flow-outside-retention"},
+        )
+
+        result = service.handle_runtime_event(_remove_event(["flow-outside-retention"]))
+
+        self.assertEqual(payment.removal_calls, [])
+        self.assertIn("flow-outside-retention", payment.statuses)
+        self.assertEqual(result["skipped_reappeared_flow_ids"], ["flow-outside-retention"])
+        self.assertEqual(snapshot.calls, [])
+
     def test_missing_oa_operation_requires_explicit_flow_ids(self) -> None:
         service, payment, _, snapshot = _service(records=[], statuses={})
 
@@ -271,6 +295,7 @@ def _service(
     statuses: dict[str, int],
     active_outflow: dict[str, bool] | None = None,
     pending_flow_ids: set[str] | None = None,
+    source_flow_ids: set[str] | None = None,
 ) -> tuple[
     OAPaymentStatusReconcileService,
     MemoryPaymentStatusRepository,
@@ -289,6 +314,7 @@ def _service(
             reconcile_repository=reconcile,  # type: ignore[arg-type]
             payment_status_repository=payment,
             payment_status_snapshot_writer=snapshot,
+            oa_source_identity_reader=StaticSourceIdentityReader(source_flow_ids),
         ),
         payment,
         reconcile,

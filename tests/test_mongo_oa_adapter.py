@@ -3135,6 +3135,32 @@ class MongoOAAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "OA Mongo source read failed"):
             adapter.load_sync_application_batch("2026-03")
 
+    def test_payment_flow_identity_lookup_reads_only_configured_form_ids(self) -> None:
+        adapter = StubMongoOAAdapter(form_documents={}, project_documents=[])
+
+        with patch.object(
+            adapter,
+            "_find_documents",
+            side_effect=[[{"_id": "flow-existing"}], []],
+        ) as find_documents:
+            found = adapter.list_existing_payment_flow_ids(
+                ["flow-existing", "flow-missing", "flow-existing"]
+            )
+
+        self.assertEqual(found, {"flow-existing"})
+        self.assertEqual(find_documents.call_count, 2)
+        self.assertEqual(
+            [call.args[0]["form_id"] for call in find_documents.call_args_list],
+            [
+                adapter._form_id_query_value(adapter._settings.payment_request_form_id),
+                adapter._form_id_query_value(adapter._settings.expense_claim_form_id),
+            ],
+        )
+        self.assertEqual(
+            [call.kwargs["projection"] for call in find_documents.call_args_list],
+            [{"_id": 1}, {"_id": 1}],
+        )
+
     def test_sync_batch_admits_legitimate_in_progress_drafts_with_unfilled_business_fields(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
@@ -3252,6 +3278,56 @@ class MongoOAAdapterTests(unittest.TestCase):
             [record.id for record in batch.admission_records],
             ["oa-pay-retained-valid-completed"],
         )
+        self.assertEqual(
+            batch.authoritative_payment_flow_ids,
+            ("historical-invalid-completed", "retained-valid-completed"),
+        )
+        self.assertEqual(adapter.form_load_calls, [("2", None), ("32", None)])
+
+    def test_full_sync_identity_set_includes_oa_from_projection_disabled_form(self) -> None:
+        adapter = CountingStubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-source-flow",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-20",
+                            "userName": "张三",
+                            "amount": "200",
+                            "cause": "当期单据",
+                            "processStatus": "2",
+                        },
+                    }
+                ],
+                "32": [
+                    {
+                        "_id": "disabled-expense-source-flow",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "李四",
+                            "flowRequestId": "3002",
+                            "processStatus": "2",
+                            "schedule": [],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+        adapter.set_import_settings_provider(
+            lambda: {"form_types": ["payment_request"], "statuses": ["completed"]}
+        )
+
+        batch = adapter.load_sync_application_batch("all")
+
+        self.assertEqual([record.id for record in batch.projection_records], ["oa-pay-payment-source-flow"])
+        self.assertEqual([record.id for record in batch.admission_records], ["oa-pay-payment-source-flow"])
+        self.assertEqual(
+            batch.authoritative_payment_flow_ids,
+            ("disabled-expense-source-flow", "payment-source-flow"),
+        )
         self.assertEqual(adapter.form_load_calls, [("2", None), ("32", None)])
 
     def test_sync_batch_arbitrates_completed_duplicate_before_all_scope_cutoff(self) -> None:
@@ -3316,6 +3392,7 @@ class MongoOAAdapterTests(unittest.TestCase):
 
         self.assertEqual(batch.projection_records, ())
         self.assertEqual(batch.admission_records, ())
+        self.assertEqual(batch.authoritative_payment_flow_ids, ("expense-doc-completed",))
         parse_pool.assert_not_called()
 
     def test_sync_batch_fails_closed_after_one_form_succeeds_and_the_next_form_fails(self) -> None:

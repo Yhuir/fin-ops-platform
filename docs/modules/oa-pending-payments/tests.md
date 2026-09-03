@@ -4,8 +4,9 @@
 
 ## 2026-09-04 OA 删除后支付状态级联
 
-- `tests/test_oa_pending_payment_source_snapshot_repository.py` 覆盖完整 `all` snapshot 识别已完成/进行中 OA 消失、原子删除 PG status、抑制失效 row-id 普通 reconcile、登记 exact-flow external delete，以及 month scope 和未证明 ownership 的 external row 不误删。
-- `tests/test_oa_payment_status_reconcile_service.py` 覆盖删除事件参数、重复幂等、OA 以 completed 或 admitted 形态重现时跳过，以及确实缺失时批量删除。
+- `tests/test_mongo_oa_adapter.py` 覆盖完整 `all` batch 在 lifecycle arbitration 后、retention 过滤前保留 source flow ID，并且 projection filter 隐藏表单不被误判为 OA 源删除；`tests/test_oa_projection_sql_runtime.py` 与 sync service tests 覆盖 `all` stale cleanup 跨整月收敛且 month scope 继续隔离。
+- `tests/test_oa_pending_payment_source_snapshot_repository.py` 覆盖完整 `all` source identity 合同、已完成/进行中 OA 消失、原子删除 PG status、抑制失效 row-id 普通 reconcile、登记 exact-flow external delete、未进入 PG scope 的外部孤儿删除，以及 OA 仍存在但超出 retention 时状态保留。
+- `tests/test_oa_payment_status_reconcile_service.py` 覆盖删除事件参数、重复幂等、OA 以 source identity、completed 或 admitted 形态重现时跳过，以及确实缺失时批量删除；`tests/test_mongo_oa_adapter.py` 还覆盖候选 flow 只对两个配置表单执行 `_id` 精确投影查询。
 - `tests/test_oa_payment_status_reconcile_repository.py` 覆盖一次集合式读取 pending admission flow；`tests/test_oa_payment_status_service.py` 覆盖 MySQL exact-flow 批量 DELETE、重复 flow、空输入零 I/O、失败 rollback。
 - `tests/test_workbench_relation_repository.py` 覆盖 OA source cleanup 抑制旧 row-id reconcile，普通 relation create/withdraw 的支付状态事件合同保持不变。
 

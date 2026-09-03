@@ -14,6 +14,23 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 
 
 class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
+    def test_full_snapshot_requires_authoritative_payment_flow_id_set(self) -> None:
+        connection = FakeConnection()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "authoritative payment flow identities"):
+            repository.replace_authoritative_snapshot(
+                scope_key="all",
+                completed_projection_records=[],
+                admission_records=[],
+                payment_statuses={},
+            )
+
+        self.assertEqual(connection.transaction_count, 0)
+
     def test_owner_snapshot_refuses_duplicate_winning_status_before_transaction(self) -> None:
         record = _oa(
             "oa-exp-duplicate",
@@ -265,6 +282,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             scope_key="all",
             completed_projection_records=[],
             admission_records=[],
+            authoritative_payment_flow_ids=[],
             payment_statuses={},
         )
 
@@ -355,6 +373,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             scope_key="all",
             completed_projection_records=[],
             admission_records=[],
+            authoritative_payment_flow_ids=[],
             payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=1)},
         )
 
@@ -431,6 +450,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             scope_key="all",
             completed_projection_records=[],
             admission_records=[],
+            authoritative_payment_flow_ids=[],
             payment_statuses={
                 "flow-pending-gone": OAPaymentStatusRecord(
                     flow_id="flow-pending-gone",
@@ -451,14 +471,14 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         ]
         self.assertEqual(outbox_payloads[0]["removed_flow_ids"], ["flow-pending-gone"])
 
-    def test_full_snapshot_does_not_claim_unscoped_external_status_ownership(self) -> None:
+    def test_full_snapshot_preserves_status_when_oa_exists_outside_projection_retention(self) -> None:
         connection = FakeConnection(
             status_rows=[
                 {
-                    "flow_id": "flow-never-canonical",
+                    "flow_id": "flow-outside-retention",
                     "pay_status": 1,
-                    "scope_month": None,
-                    "source_signature": "external-status",
+                    "scope_month": "2025-12",
+                    "source_signature": "old-status",
                 }
             ]
         )
@@ -471,9 +491,10 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             scope_key="all",
             completed_projection_records=[],
             admission_records=[],
+            authoritative_payment_flow_ids=["flow-outside-retention"],
             payment_statuses={
-                "flow-never-canonical": OAPaymentStatusRecord(
-                    flow_id="flow-never-canonical",
+                "flow-outside-retention": OAPaymentStatusRecord(
+                    flow_id="flow-outside-retention",
                     pay_status=1,
                 )
             },
@@ -487,6 +508,35 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
                 for sql, _params in connection.transaction_handle.executions
             )
         )
+
+    def test_full_snapshot_removes_unscoped_status_without_current_oa(self) -> None:
+        connection = FakeConnection()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            relation_command_service_for_transaction=lambda _transaction: FakeRelationCommandService(),
+        )
+
+        result = repository.replace_authoritative_snapshot(
+            scope_key="all",
+            completed_projection_records=[],
+            admission_records=[],
+            authoritative_payment_flow_ids=[],
+            payment_statuses={
+                "flow-never-canonical": OAPaymentStatusRecord(
+                    flow_id="flow-never-canonical",
+                    pay_status=1,
+                )
+            },
+        )
+
+        self.assertEqual(result.payment_status_count, 0)
+        self.assertEqual(result.removed_payment_status_flow_ids, ("flow-never-canonical",))
+        outbox_payloads = [
+            params[7]
+            for sql, params in connection.transaction_handle.executions
+            if "insert into job.outbox_events" in sql
+        ]
+        self.assertEqual(outbox_payloads[0]["removed_flow_ids"], ["flow-never-canonical"])
 
     def test_matching_dirty_write_failure_rolls_back_the_oa_snapshot(self) -> None:
         connection = FakeConnection(fail_execute_contains="job.workbench_matching_dirty_scopes")
@@ -519,6 +569,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             scope_key="all",
             completed_projection_records=[],
             admission_records=[],
+            authoritative_payment_flow_ids=[],
             payment_statuses={},
         )
 

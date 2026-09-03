@@ -213,6 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 reconcile_repository=PostgresOAPaymentStatusReconcileRepository(connection),
                 payment_status_repository=payment_status_repository,
                 payment_status_snapshot_writer=pending_payment_source_snapshot_repository,
+                oa_source_identity_reader=source_adapter,
             )
             handlers[OA_PAYMENT_STATUS_RECONCILE_EVENT] = (
                 payment_status_reconcile_service.handle_runtime_event

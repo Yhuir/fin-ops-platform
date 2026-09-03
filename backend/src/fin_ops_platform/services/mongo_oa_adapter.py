@@ -127,6 +127,7 @@ class MongoOASettings:
 class OASyncSourceBatch:
     projection_records: tuple[OAApplicationRecord, ...]
     admission_records: tuple[OAApplicationRecord, ...]
+    authoritative_payment_flow_ids: tuple[str, ...]
 
 
 class OAAttachmentInvoiceCache(Protocol):
@@ -296,17 +297,26 @@ class MongoOAAdapter(OAAdapter):
         projection_statuses = set(import_settings["statuses"])
         projection_records: list[OAApplicationRecord] = []
         admission_records: list[OAApplicationRecord] = []
+        authoritative_payment_flow_ids: set[str] = set()
         month = None if normalized_scope_key == "all" else normalized_scope_key
         forms = (
             (self._settings.payment_request_form_id, OA_IMPORT_FORM_TYPE_PAYMENT),
             (self._settings.expense_claim_form_id, OA_IMPORT_FORM_TYPE_EXPENSE),
         )
         for form_id, form_type in forms:
-            if form_type not in enabled_form_types:
+            form_enabled = form_type in enabled_form_types
+            if not form_enabled and normalized_scope_key != "all":
                 continue
             documents = self._load_form_documents(form_id, month)
             self._require_sync_source_read_ready(f"after {form_type} read")
             documents = self._select_authoritative_documents(form_type, documents)
+            authoritative_payment_flow_ids.update(
+                flow_id
+                for document in documents
+                if (flow_id := self._document_id(document))
+            )
+            if not form_enabled:
+                continue
             if normalized_scope_key == "all" and normalized_cutoff_month:
                 documents = [
                     document
@@ -349,7 +359,41 @@ class MongoOAAdapter(OAAdapter):
         return OASyncSourceBatch(
             projection_records=tuple(sorted(projection_records, key=lambda item: (item.month, item.id))),
             admission_records=tuple(sorted(admission_records, key=lambda item: (item.month, item.id))),
+            authoritative_payment_flow_ids=tuple(sorted(authoritative_payment_flow_ids)),
         )
+
+    def list_existing_payment_flow_ids(self, flow_ids: list[str]) -> set[str]:
+        requested_flow_ids = {
+            normalized
+            for value in flow_ids
+            if (normalized := clean_string(value))
+        }
+        if not requested_flow_ids:
+            return set()
+        self._require_sync_source_read_ready("before OA payment flow identity read")
+        query_values = [
+            *self._external_id_query_values(requested_flow_ids),
+            *self._object_id_query_values(requested_flow_ids),
+        ]
+        existing_flow_ids: set[str] = set()
+        for form_id in (
+            self._settings.payment_request_form_id,
+            self._settings.expense_claim_form_id,
+        ):
+            documents = self._find_documents(
+                {
+                    "form_id": self._form_id_query_value(form_id),
+                    "_id": {"$in": query_values},
+                },
+                projection={"_id": 1},
+            )
+            self._require_sync_source_read_ready("after OA payment flow identity read")
+            existing_flow_ids.update(
+                flow_id
+                for document in documents
+                if (flow_id := self._document_id(document)) in requested_flow_ids
+            )
+        return existing_flow_ids
 
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         if not MONTH_RE.match(month):

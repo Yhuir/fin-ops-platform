@@ -32,11 +32,13 @@ class OAPaymentStatusReconcileService:
         reconcile_repository: PostgresOAPaymentStatusReconcileRepository,
         payment_status_repository: OAPaymentStatusRepository,
         payment_status_snapshot_writer: Any,
+        oa_source_identity_reader: Any | None = None,
     ) -> None:
         self._oa_projection = oa_projection
         self._reconcile_repository = reconcile_repository
         self._payment_status_repository = payment_status_repository
         self._payment_status_snapshot_writer = payment_status_snapshot_writer
+        self._oa_source_identity_reader = oa_source_identity_reader
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         if event.payload.get("operation") == OA_PAYMENT_STATUS_REMOVE_MISSING_OPERATION:
@@ -97,6 +99,15 @@ class OAPaymentStatusReconcileService:
             raise OAPaymentStatusReconcileError(
                 "removed_flow_ids are required for missing-OA payment-status removal."
             )
+        list_existing_source_flow_ids = getattr(
+            self._oa_source_identity_reader,
+            "list_existing_payment_flow_ids",
+            None,
+        )
+        if not callable(list_existing_source_flow_ids):
+            raise OAPaymentStatusReconcileError(
+                "Missing-OA payment-status removal requires the OA source identity reader."
+            )
         current_flow_ids = {
             flow_id
             for record in list(self._oa_projection.list_all_application_records() or [])
@@ -108,6 +119,7 @@ class OAPaymentStatusReconcileService:
                 tenant_id=event.tenant_id,
             )
         )
+        current_flow_ids.update(list_existing_source_flow_ids(requested_flow_ids))
         removable_flow_ids = [
             flow_id for flow_id in requested_flow_ids if flow_id not in current_flow_ids
         ]

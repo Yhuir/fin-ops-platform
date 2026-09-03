@@ -838,6 +838,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             tenant_id="default",
             projection_records=[record],
             admission_records=[record],
+            authoritative_payment_flow_ids=["flow-integration-1"],
             payment_statuses={"flow-integration-1": status},
         )
 
@@ -846,10 +847,16 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             tenant_id="default",
             projection_records=[],
             admission_records=[],
+            authoritative_payment_flow_ids=[],
             payment_statuses={"flow-integration-1": status},
         )
 
         self.assertEqual(result.removed_payment_status_flow_ids, ("flow-integration-1",))
+        self.assertIsNone(
+            self.connection.fetch_one(
+                "select row_id from app.oa_applications where row_id = 'oa-integration-1'"
+            )
+        )
         self.assertIsNone(
             self.connection.fetch_one(
                 """

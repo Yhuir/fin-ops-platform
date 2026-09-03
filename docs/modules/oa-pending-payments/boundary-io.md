@@ -56,7 +56,7 @@
 | detail response | frontend drawer | canonical row hydrate 后复用既有 detail builder；missing=`404`、invalid=`400` |
 | bank candidates | frontend drawer | canonical bank facts + active formal relations；返回 relation status 与服务端 pagination |
 | write result | frontend | 业务结果、affected objects/scopes、冲突/重试信息；不含 read-model refresh/barrier/version metadata |
-| payment reconcile event | `job.outbox_events` / `oa-sync` worker | relation writer 同事务登记 `oa.payment_status.reconcile`；worker 按最新 active OA+outflow topology 幂等写外部状态与 PostgreSQL snapshot。完整 OA 权威快照确认已管理 flow 消失时，同事务删除 PG snapshot 并登记 `remove_missing_oa_statuses`；worker 在外部删除前复查 completed + admitted canonical flow 并批量删除 MySQL 状态。 |
+| payment reconcile event | `job.outbox_events` / `oa-sync` worker | relation writer 同事务登记 `oa.payment_status.reconcile`；worker 按最新 active OA+outflow topology 幂等写外部状态与 PostgreSQL snapshot。完整 OA 权威快照以 retention 前的 OA source flow ID 集合比较完整 MySQL status 集合；确认 source flow 消失时，同事务删除 PG snapshot 并登记 `remove_missing_oa_statuses`。worker 在外部删除前以 exact `_id` 复查 OA source，再合并 completed + admitted canonical flow 并批量删除 MySQL 状态；source read 失败不删除。 |
 | formal relation mutation | PostgreSQL | 只调用 `WorkbenchRelationCommandService`；扩展唯一 active case 时保留原 case 和发票成员，冲突或多个 owner fail closed |
 | matching dirty scopes | `job.workbench_matching_dirty_scopes` | admission 或 completed OA canonical snapshot 发生匹配相关变化时，在同一业务事务中标记实际月份及前后各两个月；仅 payment-status 变化不触发匹配。 |
 | Audit UI | admin frontend | 单次读取 operations Audit；不等待 operation barrier，不参与页面正确性 |
@@ -78,7 +78,7 @@
 
 - completed OA：`app.oa_applications`，OA sync owner。
 - in-progress admission：`app.oa_pending_payment_admissions`，OA sync owner。
-- payment status：`app.oa_pending_payment_status_snapshots`，OA sync/payment reconcile owner；支付状态只由最新 active OA+outflow topology 收敛，不持久化写回归属门禁。支付状态从属于 canonical OA：只有完整 `all` 同步能声明曾管理 flow 已删除；month sync、精确附件刷新和 retention 裁剪都无权删除外部状态。
+- payment status：`app.oa_pending_payment_status_snapshots`，OA sync/payment reconcile owner；支付状态只由最新 active OA+outflow topology 收敛，不持久化写回归属门禁。支付状态从属于 OA 源生命周期：只有完整 `all` 同步能以 retention 前的 source flow ID 集合声明 flow 已删除；month sync、精确附件刷新和 retention 裁剪都无权删除外部状态。
 - formal relation：`app.workbench_pair_relations`，Workbench relation owner；completed 与 in-progress 共用同一事实源。
 - 历史 pending relation / claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表只读审计；migration `0136` 已迁移 active 关系并撤销运行时写权限。
 - bank/input invoice：`app.bank_transactions`、`app.invoices`，对应 canonical owner。
@@ -92,7 +92,7 @@
 | Workbench confirm/withdraw | Workbench UoW | active canonical relation commit 后下一次页面 GET 可见 |
 | in-progress OA relation create/extend | OA pending command -> Workbench relation UoW | formal owner transaction commit 后下一次页面 GET 可见；无 promotion 阶段 |
 | admission terminal cleanup | OA source snapshot -> Workbench relation command | OA 不再属于 completed 或 admitted 时，从 active case 移除该 OA；剩余成员仍构成有效组则保留原 case，否则取消 relation |
-| authoritative OA deletion | OA source snapshot -> `oa.payment_status.reconcile` -> MySQL adapter | 完整 `all` 扫描确认曾管理 flow 不再属于 completed/admitted 后，PG 状态和关系在 snapshot 事务内清理，外部 MySQL 状态由 durable event 幂等批量删除；执行前复查 canonical OA，重现 flow 不删除。 |
+| authoritative OA deletion | OA source snapshot -> `oa.payment_status.reconcile` -> MySQL adapter | 完整 `all` 扫描把生命周期去重后的 source document ID 集合与完整 MySQL status flow 集合比较；真实消失 flow 的 PG 状态和关系在 snapshot 事务内清理，外部 MySQL 状态由 durable event 幂等批量删除。执行前对候选 flow 做两个配置表单的 Mongo `_id` 精确索引复查，并合并 canonical OA；重现 flow 不删除，源读取失败不执行删除，仅超出 App retention 的 flow 保留外部状态。 |
 | bank/invoice import or correction | canonical import owners | commit 后下一次页面 GET 可见 |
 | active relation topology change | Workbench relation repository -> `oa.payment_status.reconcile` -> oa-sync worker | writer 对本次变更 case 批量读取变更前 relation；事件中的 typed OA ID 取变更前后成员并集，确保撤回后已脱离 case 的 OA 仍进入 reconcile。有 active outflow 自动写 `已支付`；无 active outflow 自动写 `待支付`；金额不等不阻断，失败状态不覆盖 |
 

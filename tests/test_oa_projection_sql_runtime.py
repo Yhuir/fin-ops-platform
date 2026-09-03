@@ -479,6 +479,47 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         ]
         self.assertEqual(stale_delete, [])
 
+    def test_full_scope_stale_cleanup_is_not_limited_to_returned_months(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        connection = OAProjectionWriteConnection()
+
+        PostgresOAProjectionRepository(connection).delete_stale_completed_application_records(
+            scope_key="all",
+            records=[],
+            scanned_records=[],
+        )
+
+        stale_delete = [
+            (sql, params)
+            for sql, params in connection.executed
+            if "delete from app.oa_applications oa" in sql and "stale" in sql
+        ]
+        self.assertEqual(len(stale_delete), 1)
+        self.assertIn("where true", stale_delete[0][0])
+        self.assertEqual(stale_delete[0][1], ([],))
+
+    def test_month_scope_stale_cleanup_remains_limited_to_selected_month(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        connection = OAProjectionWriteConnection()
+        record = oa_record(row_id="oa-pay-current", month="2026-05")
+
+        PostgresOAProjectionRepository(connection).delete_stale_completed_application_records(
+            scope_key="2026-05",
+            records=[record],
+            scanned_records=[record],
+        )
+
+        stale_delete = [
+            (sql, params)
+            for sql, params in connection.executed
+            if "delete from app.oa_applications oa" in sql and "stale" in sql
+        ]
+        self.assertEqual(len(stale_delete), 1)
+        self.assertIn("oa.scope_month = any(%s::date[])", stale_delete[0][0])
+        self.assertEqual(stale_delete[0][1], (["2026-05-01"], ["oa-pay-current"]))
+
     def test_workbench_query_service_reads_oa_rows_from_sql_projection_adapter(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionAdapter
 
@@ -531,7 +572,11 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
             ) -> object:
                 del retention_cutoff_month
                 records = [oa_record(month=scope_key)]
-                return SimpleNamespace(projection_records=records, admission_records=records)
+                return SimpleNamespace(
+                    projection_records=records,
+                    admission_records=records,
+                    authoritative_payment_flow_ids=[],
+                )
 
         class ProjectionRepository:
             def __init__(self) -> None:
@@ -591,7 +636,11 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
                     oa_record(row_id="oa-2026-01", month="2026-01"),
                     oa_record(row_id="oa-2026-02", month="2026-02"),
                 ]
-                return SimpleNamespace(projection_records=records, admission_records=records)
+                return SimpleNamespace(
+                    projection_records=records,
+                    admission_records=records,
+                    authoritative_payment_flow_ids=[],
+                )
 
         class ProjectionRepository:
             def __init__(self) -> None:
@@ -640,7 +689,11 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
             ) -> object:
                 del retention_cutoff_month
                 records = [oa_record(row_id="oa-2026-01", month="2026-01")]
-                return SimpleNamespace(projection_records=records, admission_records=records)
+                return SimpleNamespace(
+                    projection_records=records,
+                    admission_records=records,
+                    authoritative_payment_flow_ids=[],
+                )
 
         class ProjectionRepository:
             def __init__(self) -> None:
@@ -725,6 +778,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
                 return SimpleNamespace(
                     projection_records=[source_record],
                     admission_records=[source_record],
+                    authoritative_payment_flow_ids=[],
                 )
 
         class ProjectionRepository:
