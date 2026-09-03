@@ -1,6 +1,41 @@
+import type { Locator } from "@playwright/test";
+
 import { expect, setCheckbox, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
+
+async function expectAccountRowsToRemainSeparated(accountList: Locator) {
+  const geometry = await accountList.locator(".settings-access-account-row").evaluateAll((rows) => rows.map((row) => {
+    const select = row.querySelector<HTMLElement>(".settings-access-account-select");
+    if (!select) throw new Error("Account row is missing its selection control.");
+    const rowRect = row.getBoundingClientRect();
+    const selectRect = select.getBoundingClientRect();
+    const contentRects = Array.from(select.children, (child) => child.getBoundingClientRect());
+    return {
+      rowTop: rowRect.top,
+      rowBottom: rowRect.bottom,
+      selectTop: selectRect.top,
+      selectBottom: selectRect.bottom,
+      contentTop: Math.min(...contentRects.map((rect) => rect.top)),
+      contentBottom: Math.max(...contentRects.map((rect) => rect.bottom)),
+      clientHeight: select.clientHeight,
+      scrollHeight: select.scrollHeight,
+    };
+  }));
+
+  expect(geometry.length).toBeGreaterThan(1);
+  geometry.forEach((row, index) => {
+    expect(row.selectTop).toBeGreaterThanOrEqual(row.rowTop - 0.5);
+    expect(row.selectBottom).toBeLessThanOrEqual(row.rowBottom + 0.5);
+    expect(row.contentTop).toBeGreaterThanOrEqual(row.selectTop - 0.5);
+    expect(row.contentBottom).toBeLessThanOrEqual(row.selectBottom + 0.5);
+    expect(row.scrollHeight).toBeLessThanOrEqual(row.clientHeight + 1);
+    if (index > 0) {
+      expect(geometry[index - 1].rowBottom).toBeLessThanOrEqual(row.rowTop + 0.5);
+      expect(geometry[index - 1].contentBottom).toBeLessThanOrEqual(row.rowTop + 0.5);
+    }
+  });
+}
 
 test.describe("page access browser matrix", () => {
   test("an account with no assigned page stops at the shell boundary", async ({ page }) => {
@@ -92,5 +127,33 @@ test.describe("page access browser matrix", () => {
     await expect(page.getByRole("link", { name: "关联台" })).toBeVisible();
     await expect(page.getByRole("link", { name: "银行明细" })).toBeVisible();
     await expect(page.getByRole("link", { name: "设置" })).toHaveCount(0);
+  });
+
+  test("multi-account rows stay separated at desktop and narrow widths", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: "admin" });
+    await page.setViewportSize({ width: 1600, height: 1000 });
+
+    await page.goto("/settings");
+    const tree = page.getByRole("tree", { name: "设置分类" });
+    await tree.getByRole("treeitem", { name: /访问账户/ }).click();
+
+    const region = page.getByRole("region", { name: "访问账户" });
+    const search = region.getByRole("searchbox", { name: "搜索 OA 账户" });
+    for (const username of ["YNSYLP002", "YNSYLP006", "YNSYLP007", "YNSYLP010", "YNSYLP044"]) {
+      await search.fill(username);
+      const addButton = region.getByRole("option", { name: `新增账户 ${username}` });
+      await expect(addButton).toBeVisible();
+      await addButton.click();
+    }
+
+    const accountList = region.getByLabel("账户列表");
+    await expect(accountList.locator(".settings-access-account-row")).toHaveCount(5);
+    await expectAccountRowsToRemainSeparated(accountList);
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expectAccountRowsToRemainSeparated(accountList);
+
+    await page.setViewportSize({ width: 720, height: 900 });
+    await expectAccountRowsToRemainSeparated(accountList);
   });
 });

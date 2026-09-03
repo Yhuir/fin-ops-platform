@@ -18152,19 +18152,32 @@ body.column-layout-dragging {
 }
 
 .settings-access-account-select {
+  align-content: center;
   gap: 2px;
-  justify-content: start;
+  justify-content: stretch;
+  justify-items: start;
   width: 100%;
-  padding: 10px 8px 10px 12px;
+  height: auto;
+  min-height: 64px;
+  padding: 8px 8px 8px 12px;
   color: var(--fp-text-primary);
   text-align: left;
 }
 
+.settings-access-account-select strong,
+.settings-access-account-select small,
 .settings-access-account-select span {
-  margin-top: 3px;
+  max-width: 100%;
+  line-height: 1.3;
+}
+
+.settings-access-account-select span {
+  overflow: hidden;
   color: var(--fp-text-secondary);
   font-size: var(--fp-text-caption);
   font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-access-delete {
