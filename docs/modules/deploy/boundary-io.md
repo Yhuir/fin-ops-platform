@@ -39,5 +39,7 @@ immutable fingerprint 回滚。
 
 ## 验证
 
+现金后端先行发布已获用户授权，分支 `codex/cash-ledger`，不合并 main。必须先配置同库受限 cash 登录角色及服务器专用密钥，再走现有发布流程；没有 role/env 管理权限时不可借其他 helper 或普通 DSN 绕过。步骤见[现金部署](../../operations/cash-module-deployment.md)。无现金 UI 导航，生产不插入试验现金；既有正式发布验证保留。
+
 `tests/test_deploy_oa_script.py`、`tests/test_deploy_runtime_examples.py`、
 `tests/test_read_model_runtime_removal.py` 与生产 T+0/T+30 evidence。

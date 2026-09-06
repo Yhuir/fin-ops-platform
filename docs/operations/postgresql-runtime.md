@@ -7,6 +7,7 @@
 - `app`：canonical business facts、settings、active relations、domain scopes。
 - `job`：background jobs、outbox、attempt、heartbeat。
 - `audit`：durable operation/external evidence。
+- `cash`：现金模块独立事实/配置（migration0166）；普通业务、audit/job、reset与页面查询不读写。现金只读OA项目资料，不读取普通财务事实。生产是否开通以[现金实施记录](../dev/cash-module-implementation-plan.md)为准。
 - `public`/migration metadata：schema version 与扩展。
 
 旧 projection schema 已由 migration 0149 删除，不属于当前 runtime。
@@ -19,9 +20,12 @@
 | Worker runtime | 明确 job/domain handler 所需最小读写 |
 | Migrator | migration DDL；不作为 API/worker 凭据 |
 | Audit/smoke | 只读，或仅允许固定可逆探针 |
+| Cash API runtime | 同数据库cash专属十表DML；无DDL、角色继承、普通财务读取或全局审计写入 |
 
 API/worker 通过同一受控 common/secrets env 取得 DSN，但角色可分离。不得把 migrator DSN 打印、提交或交给
 浏览器。连接池必须有 acquire timeout、max waiting、idle/lifetime 与指标。
+
+现金凭据为例外：只由API加载root0600的`/etc/fin-ops/fin-ops.cash.env`，不进入共用worker secrets；独立pool最大2/等待8、statement timeout5秒。缺配置明确503，禁止用普通DSN替代。角色创建/双向权限实际验证见[现金首次授权](cash-module-deployment.md)。这仍是同一个主数据库，不是第二数据库。
 
 ## Query contract
 

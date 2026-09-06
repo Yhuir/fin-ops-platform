@@ -12,6 +12,7 @@ Environment=PYTHONPATH=/opt/fin-ops/releases/REPLACE_WITH_RELEASE/src/backend/sr
 Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
 EnvironmentFile=/etc/fin-ops/fin-ops.common.env
 EnvironmentFile=/etc/fin-ops/fin-ops.secrets.env
+EnvironmentFile=-/etc/fin-ops/fin-ops.cash.env
 RuntimeDirectory=fin-ops
 RuntimeDirectoryMode=0750
 ExecStart=/opt/fin-ops/venv/bin/python -m gunicorn --config python:fin_ops_platform.app.gunicorn_conf fin_ops_platform.app.wsgi:application

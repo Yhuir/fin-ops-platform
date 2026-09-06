@@ -1,5 +1,11 @@
 # 权限与审计测试入口
 
+## 现金后端先行回归（2026-09-07）
+
+- `tests/test_cash_permissions.py`：cash 二态授权/即时撤销、只有005管理权限、cash key 在既有 Settings 规范化往返中保留、未知层级拒绝、精确路由段、写请求不冒充只读、普通后台任务和全局 System Audit owner 排除现金。
+- `tests/test_permissions_write_entry_inventory.py`：精确允许 cash 后端先行，所有旧前端/后端页面仍匹配；没有删除已有授权/退役字段/无缓存队列断言。
+- 对应七类测试：业务权限规则、service、API/路由边界、全局读侧排除和旧功能回归适用；本轮不实现现金前端组件或新增 worker/cache，完整 HTTP 审计及现金业务链由现金入口测试负责。
+
 ## 七类测试适用性
 
 | 类别 | 适用性 | 主要覆盖 |

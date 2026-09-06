@@ -4,6 +4,8 @@
 
 ## 影响面清单
 
+现金项目口（2026-09-07）：`tests/test_cash_oa_projects.py` 覆盖真实字段形状、全字典不受项目分页裁剪、完整计数、空允许集合、阶段 0/end/未知/缺失、源失败脱敏、消失身份、期初历史识别、错误输入与纯 GET 字典边界。测试不调用真实 OA 写接口，假资料仅存在测试夹具。实际 Mongo 只读字段与 OA 字典管理已核实；生产 HTTP 字典连通及现金全链由本次发布验证补证，不能以单元测试代替。
+
 | 影响面 | 必须保护的行为 | 代表测试入口 |
 | --- | --- | --- |
 | OA identity / APP authorization | `Admin-Token` -> canonical username；OA role/permission（含 `finops:app:view`）只作信息；canonical page ACL、direct API 403、即时撤权 | `tests/test_auth_guard.py`、`tests/test_session_api.py`、`tests/test_oa_identity_service.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx` |

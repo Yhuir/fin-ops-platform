@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | 设置表单 | `SettingsPage.tsx`、`components/settings/*` | API 负责校验和权限 |
 | 普通 settings GET/POST | Settings page、Workbench 列布局等既有 caller | 不读取、返回或写 ACL；任一历史 ACL key 明确 `400 access_control_write_forbidden` |
-| ACL GET/PUT | 仅 `YNSYLP005` 的后端 admin session | GET 返回完整 snapshot 和 OA 名称/状态；PUT 只接受正整数 `expected_version` 与完整 `accounts[{username,page_keys}]`，page key 必须来自 17 个可分配页面，账号缺席表示 denied |
+| ACL GET/PUT | 仅 `YNSYLP005` 的后端 admin session | GET 返回完整 snapshot 和 OA 名称/状态；PUT 只接受正整数 `expected_version` 与完整 `accounts[{username,page_keys}]`，page key 必须来自可分配集合（本轮新增 cash，后端 18 项），账号缺席表示 denied；旧 UI 暂无现金 checkbox，非 005 不自动授予现金 |
 | OA 账户搜索 | 仅 `YNSYLP005` 的 `GET /api/workbench/settings/access-control/users` | 从 OA `sys_user` 按账号或姓名有界查询；只返回 username、display_name、active，不返回凭据 |
 | OA 草稿预填 GET/PUT | ETC 票据、进项发票使用页面 | 两个独立 family 均允许已授权账号读取，只有 admin 可保存；PUT 只接受 `expected_version + configuration`，校验 OA 真实枚举 code、项目和申请事由模板 token |
 | OA canonical username | normalized ACL snapshot / OA `sys_user.user_name` | 共享 casefold key 负责比较与去重并保留 canonical spelling；collision、重复、控制字符和 protected admin 输入在 OA I/O 前失败 |

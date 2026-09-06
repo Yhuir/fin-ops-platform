@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from psycopg_pool import PoolTimeout, TooManyRequests
 
+from fin_ops_platform.app.route_access_policy import is_cash_request
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 
@@ -19,6 +20,14 @@ from fin_ops_platform.services.http_runtime_metrics import HTTP_RUNTIME_METRICS
 LOGGER = logging.getLogger("fin_ops_platform.http")
 BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 WORKBENCH_GZIP_MIN_BYTES = 1024
+
+
+def _cash_path(path: str) -> bool:
+    return is_cash_request(Application._normalize_route_path(path.split("?", 1)[0]))
+
+
+def _log_path(path: str) -> str:
+    return "/api/cash" if _cash_path(path) else path
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,8 @@ class WsgiHttpAdapter:
             response = body_error or self._dispatch(method, path, body, self._headers(environ), request_id)
             status_code = int(response.status_code)
             response.headers["X-Request-ID"] = request_id
+            if _cash_path(path):
+                response.headers["Cache-Control"] = "no-store"
             encoded = response.body.encode("utf-8") if isinstance(response.body, str) else bytes(response.body)
             if self._should_compress_workbench_json(
                 method=method,
@@ -139,13 +150,14 @@ class WsgiHttpAdapter:
                 retry_after="1",
             )
         except Exception:
-            LOGGER.exception(
+            log = LOGGER.error if _cash_path(path) else LOGGER.exception
+            log(
                 json.dumps(
                     {
                         "event": "http_unhandled_error",
                         "request_id": request_id,
                         "method": method,
-                        "path": path,
+                        "path": _log_path(path),
                     },
                     ensure_ascii=False,
                 )
@@ -306,7 +318,7 @@ class WsgiHttpAdapter:
                     "event": "http_access",
                     "request_id": request_id,
                     "method": method,
-                    "path": path,
+                    "path": _log_path(path),
                     "status": status_code,
                     "duration_ms": round((monotonic() - started_at) * 1000, 3),
                     "active_requests_at_start": active_requests,

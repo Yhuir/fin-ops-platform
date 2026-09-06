@@ -16,6 +16,15 @@ QUEUE_PRUNE = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 
 
 class DeployRuntimeExampleTests(unittest.TestCase):
+    def test_cash_secret_env_is_api_only_and_uses_existing_private_file_check(self) -> None:
+        script = DEPLOY_CONTROL.read_text(encoding="utf-8")
+        api = script[script.index("write_api_dropin() {"):script.index("write_worker_dropin() {")]
+        worker = script[script.index("write_worker_dropin() {"):script.index("write_worker_dropin() {")+1000]
+        self.assertIn('assert_root_owned_private_file "$ENV_DIR/fin-ops.cash.env"', api)
+        self.assertIn("EnvironmentFile=-$ENV_DIR/fin-ops.cash.env", api)
+        self.assertNotIn("fin-ops.cash.env", worker)
+        self.assertNotIn("fin-ops.cash.env", WORKER_UNIT.read_text(encoding="utf-8"))
+
     def test_runtime_worker_inventory_is_exactly_the_four_current_workers(self) -> None:
         required = [
             registration.instance_name

@@ -4,6 +4,8 @@
 
 ## 职责
 
+- 现金不在 page audit registry 或按接口页面耗时记录中；不得查询 `cash.*`、返回现金项目/金额/ID/查询条件。全局 HTTP 并发/错误计数可保留，技术日志现金路径统一脱敏为 `/api/cash`。现金性能通过已授权的专用只读测量验证，不塞回系统状态页。
+
 - 聚合 session、OA sync、background jobs、四个 required worker、PostgreSQL 通用 outbox、Workbench matching dirty scopes 和依赖状态。
 - 展示 HTTP/DB request timing、import inventory、operation audit。
 - 编排只读 canonical page proof / System Audit；前端只允许 App Health 发起固定 System Audit，业务页面不暴露 Audit 控件。

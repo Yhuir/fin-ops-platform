@@ -26,6 +26,7 @@
 - OA identity/session：`backend/src/fin_ops_platform/app/auth.py`、`backend/src/fin_ops_platform/services/oa_identity_service.py`、`web/src/features/session/api.ts`
 - OA 菜单 ACL 投影：`backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`deploy/oa/bin/finops-deploy-control.sh`
 - OA Mongo 只读 adapter：`backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
+- 现金项目资料窄只读口：`backend/src/fin_ops_platform/services/cash_oa_projects.py`；实际字段/10 阶段字典及例外边界见 `boundary-io.md` 的“现金项目只读例外”。
 - OA 投影与同步：`backend/src/fin_ops_platform/services/oa_projection_sync.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py`、`backend/src/fin_ops_platform/app/worker.py`
 - OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_query_service.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_canonical_rows.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_query.py`
 - OA 手动搜索/导入：`backend/src/fin_ops_platform/services/oa_manual_import_service.py`、`backend/src/fin_ops_platform/app/server.py`

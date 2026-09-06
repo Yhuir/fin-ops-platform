@@ -1,6 +1,7 @@
 # 运维文档索引
 
 - `deployment.md`：发布路径、环境和部署检查。
+- [cash-module-deployment.md](cash-module-deployment.md)：同库现金受限角色、API 专用密钥、后端先行发布与只读生产验证。
 - `data-safety.md`：数据重置、备份恢复、对象存储和高风险数据操作。
 - `etc-business-batches.md`：ETC 业务批次、OA 自动检测、迁移 dry-run、回滚和 Nginx/API smoke。
 - `external-control-evidence.md`：银行/OA/发票/ETC 外部完整快照 manifest 的独立采集边界、校验、登记、撤销、System Audit 判定和生产授权门禁。

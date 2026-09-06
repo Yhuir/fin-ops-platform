@@ -38,6 +38,7 @@
 - 后端 guard：所有 protected API 必须先解析 OA session，并由 `route_access_policy.py` 将 API 路由映射到页面 key；未登记的受保护路由 fail closed。访问账户、OA 凭据、数据重置和操作历史等 control plane 额外要求 `can_admin_access`。
 - 前端权限：侧栏只展示 `allowed_page_keys` 中的页面，直达未授权页面会跳转到首个可访问页面；前端仅改善体验，不能替代后端校验。
 - 页面内能力：被授权页面沿用现有完整业务规则，不再区分“只读/导出”和“所有操作”。系统健康写门禁独立于账户页面权限。
+- 现金页面：独立 `cash` key，005 才能给其他账号配置；现金写操作不进入全局操作历史，现金权限不授予普通后台任务或 System Audit 数据访问。具体双审计排除与后端先行范围见 `boundary-io.md`。
 - 审计：高风险动作、设置变化、标签规则、关系确认/撤回、批量提交/撤回、数据重置、导出等必须记录 actor、动作、对象、金额或参数摘要。
 - 敏感数据：不得在 API、日志、audit metadata、前端 state 中泄露 OA token、密码、数据库 DSN、凭据密文、导入文件敏感正文或完整附件正文。
 

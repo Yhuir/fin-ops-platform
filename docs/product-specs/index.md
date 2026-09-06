@@ -20,4 +20,4 @@
 
 ## 待批准功能设计
 
-- [现金模块开发设计](cash-module-design.md)：现金池隔离、Excel 覆盖、UI、OA 项目只读、后端/数据库/API；待用户确认，不代表已实现。[实施计划](../dev/cash-module-implementation-plan.md)单独维护开发顺序与验证。
+- [现金模块业务总设计](cash-module-design.md)：现金池隔离、Excel 全表覆盖、业务口径与待定项；待用户确认，不代表已实现。配套 [UI 与 Figma Make 交接](cash-module-ui-spec.md)、[后端/API/数据库设计](../dev/cash-module-technical-design.md)、[实施与验证计划](../dev/cash-module-implementation-plan.md)，四份分工维护。

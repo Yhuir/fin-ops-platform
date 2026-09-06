@@ -56,6 +56,8 @@
 
 ## 当前全量定位结论
 
+- `cash`：现金独立事实模块，入口 [README](../../modules/cash/README.md) / [boundary-io](../../modules/cash/boundary-io.md)。当前仅后端 `/api/cash/*`；同库 cash 表和专用受限连接，不属于普通财务事实、全局历史、reset、Health/worker 的读取范围。
+
 - 页面模块已经统一登记在 `docs/modules/README.md`，每个模块都有维护入口。
 - PostgreSQL 业务唯一真相已经登记为 `canonical-facts` 资源治理模块；它维护 owner matrix 和全局写入/读取规则，但不替代各业务 owner 模块。
 - Read model runtime 集合为空，以 `read-model-contracts.md` 与 `tests/test_read_model_runtime_removal.py` 为删除合同。

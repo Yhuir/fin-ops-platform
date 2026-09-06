@@ -1,12 +1,12 @@
 # 权限与审计模块边界与 I/O
 
-日期：2026-08-09
+日期：2026-09-07
 
 ## 模块化状态
 
 - 状态：partial
 - 当前边界可信度：high
-- 目标边界：权限与审计模块负责 session/access-control/audit，不承载业务判断；所有写 API 必须通过权限和审计边界。
+- 目标边界：权限与审计模块负责 session/access-control/audit，不承载业务判断；所有写 API 必须通过权限边界。现金写操作由明确私密路由策略排除全局操作历史，不能伪装只读请求绕过权限。
 - 当前缺口：部分 route 仍在 `server.py`，权限矩阵和 route owner 拆分需持续同步；生产 OA/proxy 行为仍需发布后 smoke。
 - 旧代码删除状态：共享 `route_access_policy.py` 已在 body 解析前覆盖受保护 API；旧 fail-open background owner fallback、运行时 synthetic dev/test session、默认重置密码与 legacy OA/project/ledger/reminder/matching HTTP families 已删除并由回归测试保护。
 
@@ -56,6 +56,14 @@
 
 ## 持久化与投影
 
+### 现金私密页面
+
+- 新页面 key 为 `cash`，仅“可用/不可用”。既有 fixed 005 管理员规则不变；普通账号只有明确保存该 key 才能访问现金 API，不新增 reader/editor/admin/delete 档位。
+- `is_cash_request` 只匹配 `/api/cash` 或 `/api/cash/` 路径段，不匹配 cash-back 等近似前缀。现金 POST/PUT/DELETE 仍是状态变更，不能加入 read-only POST allowlist。
+- 全局 requested/completed 操作历史两处均按同一现金路由策略排除，不保存业务参数、流水、任务或配置；平台专用 ACL 管理仍走原安全审计，不因 cash key 取消。
+- `/api/background-jobs` 的 ordinary 页面 owner 集合明确排除 cash，防止扩充 ASSIGNABLE_PAGE_KEYS 后现金专用账号获得普通任务读取权限。现金不登记全局 PAGE_AUDIT_REGISTRY，不通过 System Audit 暴露现金事实或统计。
+- 后端先行期间不新增前端导航/现金勾选，不自动授予非005账号现金权限。既有 Settings API GET/PUT 和 state normalization 原样保留 cash key；旧 UI 单项勾选也保留未知项，但“全选”按旧页面清单重建集合，因此在 F 阶段 UI 接入前不进行非005现金授权。该发布范围不新增 feature flag 或兼容授权逻辑。
+
 - Own read model：无。
 - Persistence：permissions 不持久化 ACL 或 access decision；ACL success audit 由 Settings repository 与 `app.app_settings` 同事务写 `audit.events`，其他业务 audit 由其 owner UoW 写入。
 - Related docs：`SECURITY.md`。
@@ -89,7 +97,7 @@
 
 ## 当前缺口和删除条件
 
-- 新增写 API 必须更新 permissions inventory tests 和模块 boundary docs。
+- 新增写 API 必须更新 permissions inventory tests 和模块 boundary docs；后端先行阶段 inventory 精确声明仅 cash 暂无前端页面，其余页面集合保持完全匹配。
 - 动态管理员 provider、`get_admin_usernames`、运行时 `FIN_OPS_ADMIN_USERNAMES` 和本地 auth clone 已删除；不得以兼容路径恢复。
 - dev/test auth 环境变量及其 runtime 分支已删除；遗留值必须保持无效，测试身份只能由 `tests/app_test_support.py` 显式注入，不能进入 runtime package。
 - permission/role/三项退役 env admission branch 已删除；`finops:app:view` 只允许出现在 OA selector、部署/测试/文档的明确路径中，唯一 whole-repo inventory owner 负责机械阻止恢复。

@@ -31,6 +31,7 @@ _ROUTE_PAGE_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("/reconciliation", ("reconciliation-workbench",)),
     ("/api/cost-statistics", ("cost-statistics",)),
     ("/api/bank-details", ("bank-details",)),
+    ("/api/cash", ("cash",)),
     ("/api/no-oa-bank-batches", ("bank-details",)),
     ("/api/oa-pending-payments", ("oa-pending-payments",)),
     ("/api/oa-sync", ("oa-pending-payments",)),
@@ -59,8 +60,13 @@ _ROUTE_PAGE_PREFIXES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "/api/import-facts",
         ("reconciliation-workbench", "imports.bank-transactions", "imports.invoices", "imports.etc-invoices"),
     ),
-    ("/api/background-jobs", tuple(sorted(ASSIGNABLE_PAGE_KEYS))),
+    ("/api/background-jobs", tuple(sorted(ASSIGNABLE_PAGE_KEYS - {"cash"}))),
 )
+
+
+def is_cash_request(route_path: str) -> bool:
+    """Identify the private cash boundary, not a read-only mutation exemption."""
+    return _matches_prefix(route_path, "/api/cash")
 
 
 def is_state_changing_request(method: str, route_path: str) -> bool:

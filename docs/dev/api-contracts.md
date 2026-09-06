@@ -1,5 +1,9 @@
 # API 契约
 
+## 现金独立 API（后端先行）
+
+`/api/cash/*` 的字段、命令和响应唯一说明见[现金技术设计](cash-module-technical-design.md)，实际边界见[现金模块](../modules/cash/boundary-io.md)。需要现金页面二态授权；仅 005 管理页面 ACL。Cash 响应 no-store、金额字符串、无普通财务读取/全局操作历史/worker；前端尚未接入。独立后端部署范围与实测见[实施记录](cash-module-implementation-plan.md)。
+
 ## 契约原则
 
 - API 返回字段应稳定，前端不能猜测不存在的字段。

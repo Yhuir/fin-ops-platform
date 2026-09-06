@@ -1352,6 +1352,9 @@ archive_legacy_current() {
 write_api_dropin() {
   local src="$1"
   local api_exec_start
+  if [[ -e "$ENV_DIR/fin-ops.cash.env" ]]; then
+    assert_root_owned_private_file "$ENV_DIR/fin-ops.cash.env"
+  fi
   if [[ -f "$src/backend/src/fin_ops_platform/app/wsgi.py" \
     && -f "$src/backend/src/fin_ops_platform/app/gunicorn_conf.py" ]]; then
     api_exec_start="$API_PYTHON -m gunicorn --config python:fin_ops_platform.app.gunicorn_conf fin_ops_platform.app.wsgi:application"
@@ -1364,6 +1367,7 @@ write_api_dropin() {
 EnvironmentFile=
 EnvironmentFile=$COMMON_ENV
 EnvironmentFile=$SECRETS_ENV
+EnvironmentFile=-$ENV_DIR/fin-ops.cash.env
 Environment=PYTHONPATH=$src/backend/src
 Environment=FIN_OPS_DATA_DIR=/opt/fin-ops/data
 WorkingDirectory=$src
