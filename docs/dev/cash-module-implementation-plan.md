@@ -521,9 +521,13 @@ python3 -m tests.test_cash_query_performance --rows 10000 100000 --samples 100
 
 #### 提交、部署与尚未满足的生产条件
 
-当前准备将全部现金范围代码、测试、既有设计修改及新文档提交/推送本分支；实际commit/release结果在收尾更新。没有合并main。后端本地功能已实现，不表示B10生产验证完成。
+全部现金范围代码、测试、既有设计修改及新文档已提交为`7a0d272e9a30c196331893281ddfaf0b536854d5`并推送`origin/codex/cash-ledger`，远端ref已核对一致。没有合并main。后端本地功能已实现，不表示B10生产验证完成。
 
-- 生产deploy SSH可连接，现有API和4worker仍在原release；本轮尚未激活现金版本。
+实际执行`./scripts/deploy-oa.sh --no-activate`退出0：重新生产构建、上传、服务器check-release及依赖漏洞检查通过（No known vulnerabilities found）。候选为`codex-cash-ledger-7a0d272e-20260907050131`，目录`/opt/fin-ops/releases/codex-cash-ledger-7a0d272e-20260907050131/src`。这是**已上传验证、未激活**，没有改root helper、生产env、数据库角色或schema。
+
+只读schema-compatibility-plan确认：生产PostgreSQL **16**、head0165；本候选head0166，只有cash_ledger一条待迁移，未改旧迁移；现有流程要求exact旧release代码在候选schema上的兼容写入证据，仍待执行/安装，不绕过该已有发布边界。本机功能/性能实测为PG17.10，不冒称PG16生产验证。恢复管理员配置/有效会话后，继续按现有发布流程对该exact候选完成兼容验证与激活，而不是使用allow-dirty/跳过检查或扩大清理。
+
+- 生产deploy SSH可连接；候选上传后再次`systemctl show`确认API仍为`active/running`、工作目录`/opt/fin-ops/releases/main-ae2f1504-20260904025336/src`；本轮尚未激活现金版本。
 - 本机保存005会话经证书验证的HTTPS请求返回401。需要用户通过`./scripts/with-production-admin-token.sh --store`更新有效会话，不在聊天传token；不伪造会话或把失败转成功。
 - deploy账号只有固定sudo helper；新cash角色、root0600 API env和受控helper更新需要服务器管理员/DBA权限。没有把candidate代码塞入helper任意root执行，没有复用普通或migrator身份运行现金。
 - Nginx实际配置deploy账号不可读，代理日志隐私仍未验证。应用/Gunicorn脱敏测试不能替代此项。一次性流程见[现金部署](../operations/cash-module-deployment.md)。
