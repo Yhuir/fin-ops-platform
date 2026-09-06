@@ -17,3 +17,7 @@
 
 - `platform-settings-health.md`：设置、权限、数据重置、App Health 和后台任务可见性。
 - `page-data-integrity-statistics.md`：业务页面标题统计、页面自有数据边界与 App Health System Audit 对账口径。
+
+## 待批准功能设计
+
+- [现金模块开发设计](cash-module-design.md)：现金池隔离、Excel 覆盖、UI、OA 项目只读、后端/数据库/API；待用户确认，不代表已实现。[实施计划](../dev/cash-module-implementation-plan.md)单独维护开发顺序与验证。
