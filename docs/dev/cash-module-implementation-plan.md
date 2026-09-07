@@ -1184,7 +1184,7 @@ PYTHONPATH=backend/src:. python3 -m tests.test_cash_query_performance --rows 100
 
 ### 14.1 实施范围和发现的问题
 
-U01–U06已实现并完成本地验证，当前等待提交/发布后的生产复核。本轮不用GSD，没有新增依赖、迁移、数据库账号、worker、缓存、hash或门禁。沿用现有发布安全措施。
+U01–U07已完成：修正版ba6f6f0b2已提交/推送/正式发布，生产只读、浏览器和性能验证已执行，结果及未达标项记录于本节。现金核心指标符合本轮目标，但普通银行/工作台四并发p95未满足既有1秒目标，不能宣布全App性能通过。本轮不用GSD，没有新增依赖、迁移、数据库账号、worker、缓存、hash或门禁。沿用现有发布安全措施。
 
 - 全部四子页面和相关流水明细使用同一组CashFilters原生Popover/Checkbox、CashUi原生Tabs、CashSelect与cash.css。CashFilters只接值/选项/状态和回调；业务视图负责完整查询校验与提交，client负责JSON编码及HTTP边界，service/repository负责集合规则/SQL。公共FinanceTable只新增两个可选原生排序props，不改变未传props的普通页面。
 - 历史项目/费用/账单内联面板、更多筛选details、重复排序Select+升降序按钮、内联余额表、支付说明行展开、手写Tabs键盘和失效CSS已替换。真实事项关系、CAS确认、录入条件及普通cash-special不是废代码，不删除。
@@ -1199,7 +1199,7 @@ U01–U06已实现并完成本地验证，当前等待提交/发布后的生产�
 
 - 实际使用三个经核验不存在后创建的本地disposable数据库：fin_ops_cash_test_uniform_backend_20260907（现金专项）、fin_ops_cash_test_uniform_e2e_20260907（既有完整schema/HTTP/浏览器）、fin_ops_cash_test_uniform_perf_20260907（规模测量）。不是第二个生产现金库；没有数据库备份。
 - 132项现金core/runtime/API/queries/tasks/OA/permissions/HTTP测试在完整schema的e2e库全部通过，8.676s。初次误在仅cash schema的backend库跑HTTP，因app.bank_transactions缺表失败；改用已迁移完整schema的自有测试库后实际重跑，不跳过该用例。
-- tests.test_cash_http_integration --browser-e2e真实链：浏览器→Vite代理→Application/CashRuntime→PostgreSQL，最终版本1项通过（9.6s，本体7.8s）。两账户两分类、UI逐笔收入100+40、多选合计140、每次应用仅一个主GET、两次UI删除后真实404/列表0/余额恢复1000与0。没有cash mock，结束清理fixture/进程/连接；缺DSN明确退出1。
+- tests.test_cash_http_integration --browser-e2e真实链：浏览器→Vite代理→Application/CashRuntime→PostgreSQL，UI收尾版本（3500字节窄修前）1项通过（9.6s，本体7.8s）。两账户两分类、UI逐笔收入100+40、多选合计140、每次应用仅一个主GET、两次UI删除后真实404/列表0/余额恢复1000与0。没有cash mock，结束清理fixture/进程/连接；缺DSN明确退出1。后续窄修没有改变写链，3500边界由独立API/交互和生产只读验证覆盖，不虚称重跑了已清理测试库的整条写链。
 - 规模数据包含多账户/项目/分类、null、跨年、互转、20账单标签及合法日期/同项目结算；每组100样本，64组6400有效样本，0失败。环境为本机service+PostgreSQL+连接池等待，**不是生产HTTP或浏览器耗时**。
 
 | 流水量 | 并发 | 全场景最高p95 ms | 全场景最高p99 ms |
@@ -1225,12 +1225,53 @@ U01–U06已实现并完成本地验证，当前等待提交/发布后的生产�
 
 第一候选4fbeed57c已commit/push至codex/cash-ledger，release cash-4fbeed57c-20260908-ui-unified于00:44:52 CST激活；既有runtime profile pre/t0/t30均PASS，t30于00:46:36完成，API/四worker active，未回滚，167项迁移全跳过，无表变更。激活首次携带不适用的keep-releases参数被本地parser拒绝，去掉该参数后正常执行；activate-existing分支不调用旧release清理。
 
-生产三API别名均认证200/匿名401、JSON/no-store。随后6000字节极限查询返回400 text/html（Request Line is too large），发生在应用之前，不能把此响应算作现金API正确拒绝。按原计划允许的更严代理边界将现金查询上限统一收紧到3500，保留50/100项数量规则；修补后再次commit/push/发布和验证，最终活动版本将在完成后记录。未改全App Gunicorn限制、未加地址/POST fallback。
+生产三API别名均认证200/匿名401、JSON/no-store。随后6000字节极限查询返回400 text/html（Request Line is too large），发生在应用之前，不能把此响应算作现金API正确拒绝。按原计划允许的更严代理边界将现金查询上限统一收紧到3500，保留50/100项数量规则；修补后再次commit/push/发布和验证，最终活动版本见下文。未改全App Gunicorn限制、未加地址/POST fallback。
 
 边界窄修验证：服务器Gunicorn LimitRequestLine.default实读4094；实现只改routes的一处及client的两处阈值。test_cash_api 19/19通过（明确unset所有测试/生产DB URL，不连接数据库），前端CashApi/Books/Flows/Filters/Hooks 71/71通过10.76s，tsc/lint/diff-check通过。新增精确3500接受/3501 JSON400 no-store、拒绝前不调repository、前端不发HTTP且保留条件/草稿/结果；没有靠真实业务写入来测上限。
 
 生产只读验证继续禁止创建受限角色、现金试验流水或OA写操作；敏感截图/录像/trace关闭。正式发布使用已提交推送的现金分支与deploy-oa.sh，不用allow-dirty/skip-build。
 
+最终应用提交ba6f6f0b263eb4fa1b7f034b66d6bc19b366467d已推送至codex/cash-ledger，正式release为cash-ba6f6f0b2-20260908-ui-unified。发布构建3.52s，依赖审计无已知漏洞。现有runtime profile的pre/t0/t30于00:55:35/00:56:39/00:57:43 CST均PASS，未回滚，API与4worker active、未知worker0、队列稳定。服务器证据`/opt/fin-ops/runtime-smoke/release-gates/cash-ba6f6f0b2-20260908-ui-unified/evidence.json`。旧release保留；没有数据库迁移变更或备份。
+
+最终边界生产实测：3别名认证200/匿名401，均JSON/no-store；编码3500 query返回200及真实空匹配结果，3501返回现金JSON400/no-store。生产Nginx map和条件access_log定向只读复查仍排除三个精确cash前缀。无全局请求行放宽、无真实现金或OA写操作。
+
+部署后首轮普通对照（00:57:55–00:58:57 CST）：与部署前同参数100样本/接口、warmup2、4并发、TLS验证。session p50/p95/p99=167.523/175.665/177.528ms（100个200）；银行992.513/1465.469/1544.146ms（99个200、1次SSL UNEXPECTED_EOF_WHILE_READING，未获得HTTP响应）；工作台1040.237/1230.840/1312.494ms（100个200）。保留失败组，不把网络错误当作成功API耗时，不依据这一组归因现金代码或宣称全App达标。
+
+银行独立复测（01:06:06–01:06:37 CST）：相同100样本、warmup2、4并发、TLS验证，100个200、0错误；p50/p95/p99=1146.680/1260.951/1286.087ms。未再出现TLS EOF，但不能用复测抹掉首轮异常；p95仍超过既有1000ms目标，与部署前1217.394ms也不等同于零变化。未授权扩大为普通银行/工作台性能改造，保留该限制并报告。
+
+最终现金生产HTTP测量（00:59:16–00:59:59 CST）：每组100样本、warmup2、4并发，8组800次全部200、0失败，TLS验证开启。八组均符合现金p95≤500ms、p99≤1000ms目标。生产现金业务数据当前为空，因此这里只证明真实网络/鉴权/查询链和空数据性能；有量性能另看上文10k/100k本地真实PostgreSQL测量，不能混为生产大数据压测。
+
+| 现金API场景 | p50 ms | p95 ms | p99 ms |
+| --- | ---: | ---: | ---: |
+| 现金流水 | 175.595 | 187.589 | 195.811 |
+| 现金流水多选 | 174.803 | 190.857 | 214.423 |
+| 往来账总表 | 176.361 | 188.057 | 192.452 |
+| 有票支付 | 174.870 | 190.184 | 247.443 |
+| 个人年度矩阵 | 174.376 | 186.069 | 188.111 |
+| 本月任务 | 175.502 | 185.304 | 188.811 |
+| 现金账户 | 174.129 | 213.450 | 246.678 |
+| 历史项目候选 | 173.657 | 183.124 | 186.671 |
+
+混合共存测量（01:07:02–01:08:16 CST）：现金流水/往来总表/银行/工作台四条独立请求流同时启动，每流并发1、100样本、warmup2，最多总并发4；各流自然结束，现金流约13秒结束后，普通流继续到60–74秒。400次全200、0错误；现金流水p95/p99=164.687/196.393ms，往来167.856/208.653ms，银行821.279/938.485ms，工作台728.667/852.131ms。此组说明有重叠期间的正常共存，**不代表全时段恒定四并发，也不是每接口四并发**，不能用来替换普通接口四并发未达标结果。
+
+最终release生产浏览器第一轮：production-cash-readonly与production-route-shell共2/2通过（34.5s+27.5s）。四个现金子页、三账及个人四视图、任务两视图、设置四视图全部可达；10个代表性菜单开/关背景几何差≤1px、Escape关闭及焦点返回通过。读取真实OA阶段checkbox，仅显示不修改；支付说明切换不发cash请求。离开现金到银行后cash容器卸载且不继续发cash查询；现金期间未请求银行/工作台/普通往来/全局历史/发票。16个普通路由无登录阻断、浏览器错误或写请求。现金219个GET、现金非200响应0、发起的写请求0；测试还主动拦截非读方法，不只观察日志。
+
+该轮浏览器冷进入现金流水878.75ms（单次，不称p95冷启动分布）；现金流水/往来各100次热切换，click-to-paint p50/p95/p99分别133.28/134.78/149.95ms与133.35/134.48/149.97ms；响应完成→绘制p95分别39.33ms、36.03ms，符合100ms目标。10个菜单的自动化调用click→可见含两帧等待p50/p95/p99=81.86/115.04/115.04ms，含Playwright自动等待，不能称纯浏览器交互100ms达标。补充实际pointerdown时间戳复用本地几何测试的计时方式，同时保留原调用计时，复测单列如下。
+
+补记pointerdown后的生产两用例再次2/2通过（现金33.9s、普通路由27.9s），同10菜单pointerdown→可见并经过两帧的p50/p95/p99=48.40/81.70/81.70ms；对应自动化click调用计时77.34/105.91/105.91ms，原值未删。该10菜单样本符合100ms目标，但不是每个菜单100次的统计分布或跨设备承诺。现金流水/往来各100次热切换click-to-paint p95=134.11/133.60ms，响应→绘制p95=43.99/40.10ms。第二轮冷进入494.37ms（新浏览器上下文，但服务器/系统缓存状态不保证全冷）；OA项目单次响应→绘制103.61ms，只是单次样本，不能声明所有视图的p95都已证明≤100ms。新增计时仅在E2E，不改变生产代码或重复部署。
+
 ### 14.4 清理和未测边界
 
-上述三个自有测试库已核验owner=yu且无连接后精确删除，并再次查询确认不存在。最终结束前清理任务临时性能/probe工件；不删除主数据库、生产cash表、组织备份、其他任务资产和可回滚release。真实生产现金写链/受限角色不在此次生产验证范围；本地写链和生产只读不能冒称同一生产写入验证。
+上述三个自有测试库已核验owner=yu且无连接后精确删除，并再次查询确认不存在。已核验归属并精确删除本任务三个临时目录：`/tmp/cash-ui-query-measurements.8vbv0i`、`/tmp/cash-ui-browser-unified.f5s7W0`、`/tmp/cash-ui-production-BbEPHQ`，再次确认路径不存在；必要脱敏测量结论保留本节，合成样本可重新运行测试生成。没有主数据库、生产cash表、组织备份、用户原始截图/Excel、其他任务资产或可回滚release被删除。
+
+真实生产现金写链/受限角色不在此次生产验证范围；本地写链和生产只读不能冒称同一生产写入验证。全量后端discovery没有运行，已跑的是上述132项真实PG相关后端及最终边界19项；最终3500窄修后的前端跑71项定向而非再次跑1220项。生产现金当前为空，不冒称生产十万行或所有浏览器/设备的完整性能证明。既有普通接口超标、首轮TLS EOF、现有构建警告均保留，不加新门禁或未经授权的普通页性能改造。
+
+### 14.5 收尾验证与要求复审
+
+实际收尾命令：`npx tsc --noEmit`（web）、`bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`；生产浏览器通过本机token wrapper运行`npx playwright test e2e/production-cash-readonly.spec.ts e2e/production-route-shell.spec.ts --project=chromium`，显式设置生产只读模式、跳过本地webserver并指向正式HTTPS站点。凭据不进入命令正文、报告或Git。HTTP测量使用已有`fin_ops_platform.tools.http_slo_probe`，临时混合脚本只组合其公开测量入口，不留新性能框架。
+
+七类测试本轮均有适用覆盖：输入/金额与筛选规则；service/repository；API；直接读查询；前端交互；真实HTTP/PG及浏览器写删链；普通页与权限回归。第4类没有新增cache/read model/worker，所以没有新增后台状态测试；生产受限角色验证按用户要求不执行。具体覆盖与适用边界见§13.5及本节实际结果，不把测试文件数量当业务覆盖率。
+
+复审结论：采用现金局部规则和一个纯交互组件组合现有HeroUI，而非重建App UI框架；SQL集合筛选在既有读侧边界完成，写事务/权限/现金池隔离不变；替代内联展开、重复排序和手写Tabs后删除旧路径，无并行旧UI、假成功或地址兜底。公共表格新增可选原生排序透传，未传者行为保持；不全局改样式/服务器限制。既有Git、类型、参数边界、事务、普通测试及正式部署措施满足本次风险控制，不新增hash/冻结contract/baseline/gate。高性能与旧页不受影响只能基于上述样本与回归报告，不能保证任何负载下零延迟或零bug。
+
+应用活动版本固定为ba6f6f0b2对应release；后续收尾提交只有验证测试与记录，不改变部署产物，无须因文档与测试提交重复切换生产。

@@ -30,6 +30,7 @@ test.describe("production cash read-only verification", () => {
     });
     const samples: Record<string, { clickToPaint: number; responseToPaint: number }[]> = {};
     const menuPaint: number[] = [];
+    const menuPointerPaint: number[] = [];
     async function checkMenu(label: string) {
       const trigger = page.getByRole("button", { name: label, exact: true });
       await trigger.scrollIntoViewIfNeeded();
@@ -40,11 +41,16 @@ test.describe("production cash read-only verification", () => {
         const rect = element.getBoundingClientRect();
         return [rect.x, rect.y, rect.width, rect.height];
       }));
-      const before = await geometry(), started = performance.now();
+      const before = await geometry();
+      await trigger.evaluate(button => button.addEventListener("pointerdown", () => {
+        (window as Window & { cashOpenStarted?: number }).cashOpenStarted = performance.now();
+      }, { once: true }));
+      const started = performance.now();
       await trigger.click();
       const dialog = page.getByRole("dialog", { name: label, exact: true });
       await expect(dialog).toBeVisible(); await twoFrames(page);
       menuPaint.push(performance.now() - started);
+      menuPointerPaint.push(await dialog.evaluate(() => performance.now() - (window as Window & { cashOpenStarted?: number }).cashOpenStarted!));
       const after = await geometry();
       expect(after.length).toBe(before.length);
       after.forEach((rect, index) => rect.forEach((value, axis) => expect(Math.abs(value - before[index][axis])).toBeLessThanOrEqual(1)));
@@ -116,7 +122,7 @@ test.describe("production cash read-only verification", () => {
     const metrics = Object.fromEntries(Object.entries(samples).map(([name, rows]) => [name, {
       count: rows.length, clickToPaintMs: percentiles(rows.map(row => row.clickToPaint)), responseToPaintMs: percentiles(rows.map(row => row.responseToPaint)),
     }]));
-    console.log("CASH_READONLY_METRICS", JSON.stringify({ metrics, menuSamples: menuPaint.length, menuClickToVisibleMs: percentiles(menuPaint), cashGetCount: cashCalls.length, blockedWrites: writes.length, failures: failed.length }));
+    console.log("CASH_READONLY_METRICS", JSON.stringify({ metrics, menuSamples: menuPaint.length, menuClickToVisibleMs: percentiles(menuPaint), menuPointerToVisibleMs: percentiles(menuPointerPaint), cashGetCount: cashCalls.length, blockedWrites: writes.length, failures: failed.length }));
   });
 });
 
