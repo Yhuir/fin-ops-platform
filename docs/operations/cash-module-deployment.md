@@ -12,12 +12,14 @@
 
 ## 发布顺序
 
-**当前已获执行及发布授权。** 顺序是App前端与本地真实API联调→既有发布条件→提交并推送cash分支→正式发布及生产验证。不恢复旧的后端独立部署安排；此前`7a0d272e`候选依赖已取消的专用账号设计，不能直接激活。实际结果记录在实施计划§10.13。
+**已于2026-09-07 17:48 CST完成正式发布，release=`cash-8bdfc07ae-20260907-ui`，代码=`8bdfc07ae`。** 按App前端与本地真实API联调→既有发布条件→提交推送cash分支→正式发布及生产只读验证执行，既有发布证据PASS。此前`7a0d272e`候选依赖已取消的专用账号设计，不可激活。实际本地结果见实施计划§10.13，发布、隐私、性能和未测风险见§10.14；下面为保持的发布规则。
+
+该服务器当前API单元是`fin-ops.service`，其WorkingDirectory直接指向本release的src，四worker为`fin-ops-worker@<name>.service`；没有`/opt/fin-ops/current`软链接。运维以实际systemd属性和正式发布证据确认活动版本，勿用不存在的单元或泛用示例路径替代核查。
 
 1. 发布届时已提交并推送的`codex/cash-ledger`，不合并main；现金前端入口只能在新版UI确认后实现。用现有`./scripts/deploy-oa.sh`完成新候选检查。
 2. 保持历史0166不变；追加`0167_cash_shared_runtime_grants.sql`为**已存在的**`fin_ops_app_runtime`授予cash schema USAGE以及明确10表SELECT/INSERT/UPDATE/DELETE。迁移不创建角色、不授予DDL、TRUNCATE、所有权或普通业务新增权限。角色不存在时明确报错，不另造账号。
 3. 依照既有发布规则，在实际PostgreSQL 16隔离测试数据库上验证上一release代码与0166、0167每个候选schema head的固定写操作矩阵；兼容证据必须是真实执行结果，不可填造或跳过。
-4. 若服务器曾安装带cash env加载项的helper，使用现有hash-pinned bootstrap把它更新为最新已验证候选；只替换helper不顺带迁移或重启。2026-09-07此前已安装的版本仍带旧加载项，需要本次移除；现金env当时确认不存在，不需要创建或删除密钥文件。
+4. 若服务器曾安装带cash env加载项的helper，使用现有hash-pinned bootstrap更新为最新已验证候选；只替换helper不顺带迁移或重启。本次已安装`8bdfc07ae`版本，旧cash env加载项已移除；语法/既有contract检查通过，root:root/0755。现金env不存在，未创建或删除密钥文件。
 5. 完成下述代理日志隐私配置，运行`nginx -t`；在正式发布窗口应用。普通请求诊断保持不变。
 6. 用`./scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh ...`正常激活；按现有流程迁移、切换和验证，不新增门禁，不删除既有安全措施。API仍只加载现有common/secrets。
 7. 验证现金只读API、真实OA项目/状态读取、旧页面API及worker、全局历史排除和混合负载。无真实现金数据时，空表耗时不能代表满量性能；生产不插入试验现金，写入/任务/删除/回滚在明确隔离测试库验证。
@@ -34,9 +36,9 @@
 | `/fin-ops/api/` | `/fin-ops/api/cash`及子路径 |
 | `/fin-ops-api/` | `/fin-ops-api/api/cash`及子路径 |
 
-检查时三个入口尚无cash日志例外，继承站点access log。应用/Gunicorn已将现金技术路径脱敏为通用`/api/cash`，但不能控制代理日志；上线前必须对上述精确cash路径段关闭access记录或等价脱敏，不影响cash-back等近似前缀及普通页面日志。不采集真实现金正文作为验证样本，不打印token或金融内容。
+发布前检查发现三个入口没有cash日志例外，本轮已在真实配置中安装精确排除。应用/Gunicorn将现金技术路径脱敏为通用`/api/cash`，代理对上述精确cash路径段关闭access记录，不影响cash-back等近似前缀及普通页面日志。不采集真实现金正文作为验证样本，不打印token或金融内容。
 
-仓库Nginx示例已用http级`map $uri $fin_ops_access_loggable`和站点条件access_log实现三个精确前缀排除；`$uri`归一化后再匹配，兼容现有rewrite。正式安装使用原配置的局部补丁、`nginx -t`后reload；不替换其他OA代理、TLS或普通请求日志。安装与真实日志探针结果仍以实施记录为准。
+仓库示例及活动配置使用http级`map $uri $fin_ops_access_loggable`和站点条件access_log实现三个精确前缀排除；`$uri`归一化后再匹配，兼容现有rewrite。正式安装只局部补丁，候选/活动配置`nginx -t`均通过后reload，保留OA代理和TLS。三个现金别名实测认证200/匿名401且no-store；带非敏感标记的3次现金请求access记录0条，cash-back邻近请求403且记录1条，验证未误关普通日志。
 
 ## 验证、清理与回退
 
@@ -46,6 +48,7 @@
 - 普通App共享基础设施，不能承诺零资源影响；必须分别报告旧版/新版、并发数、样本数、p50/p95/p99和错误。此前旧工作台4并发p95超标不能归因于现金，也不能通过降低阈值隐藏。
 - 不创建本任务数据库备份；既有发布若要求任务专属恢复工件，按[数据安全流程](data-safety.md)验证后精确清理。保留组织PITR/永久备份、生产cash表及业务数据，禁止删除主库。
 - 代码回退保留cash事实，不能回退到把现金写入普通池/全局历史的代码。0167不收回旧权限、不改普通表数据；遵守实际发布兼容证据和历史forward-only约束。
-- 当前Make方向与移植方案已认可，不再要求重新生成/确认整体UI；先实施App前端和本地联调，最后恢复获授权发布与生产验证。不能把原型当已上线页面，也不省略未完成的后端兼容验证。
+- 本轮App已上线并完成有界生产只读检查，现金事实和配置仍为空；首次真实账户/期初/任务/OA允许阶段由用户使用时设置。生产浏览器已覆盖现金全部视图和旧16页面，未做生产现金写入或受限角色验证；真实写入浏览器耗时未测。工作台4并发p95发布后1124.80ms，仍未达到1000ms目标，不以混测较快结果覆盖该例外。
+- 任务专属Nginx配置副本和候选暂存目录已验证后精确清理；保留活动配置、旧release、正式兼容及发布证据。本次没有数据库备份，也没有删除主库或既有备份。纯文档收尾提交不重复部署应用。
 
 接口及隔离事实见[现金边界](../modules/cash/boundary-io.md)和[技术设计](../dev/cash-module-technical-design.md)。当前实际进度只以[实施记录](../dev/cash-module-implementation-plan.md)为准。
