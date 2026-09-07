@@ -281,3 +281,142 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(result["summary"]["cash_paid_amount"], "100.00")
         empty = self.query.query_turnover({**self.period, "category_id": self.uid()})
         self.assertEqual(empty["pagination"]["total"], 0)
+
+    def test_turnover_projects_category_and_each_event_remark_without_inheriting(self):
+        child = {"id": self.uid(), "type": "loan", "origin_date": "2026-09-03", "original_amount": "100.00",
+                 "obligation_direction": "receivable", "ledger_group": "company", "counterparty": "Synthetic",
+                 "content": "Principal content", "remark": "Principal remark"}
+        payment = self.flow(related_items=[child], remark="Not the item remark")
+        loan = self.query.get_item(child["id"])["item"]
+        receipt_category = self.cash.create_category({"id": self.uid(), "name": "Receipt type", "group": "receipt"})["category"]
+        receipt = self.flow("20.00", "receipt", category_id=receipt_category["id"], remark="Not the settlement remark")
+        repaid = self.settlement("cash_repayment", "20.00", item=loan, flow=receipt)
+        loan = self.query.get_item(loan["id"])["item"]
+        offset = self.settlement("non_ticket_offset", "10.00", item=loan, occurred_on="2026-09-04", remark="This adjustment")
+        report = self.query.query_turnover({**self.period, "order": "asc"})
+        rows = {row["row_id"]: row for row in report["rows"]}
+        principal = rows["item:" + loan["id"]]
+        self.assertEqual(principal["category"], {key: self.category[key] for key in ("id", "name", "group")})
+        self.assertEqual(principal["remark"], "Principal remark")
+        self.assertEqual(principal["flow_id"], payment["id"])
+        self.assertEqual(principal["remaining_after_event"], "100.00")
+        repayment = rows["settlement:" + repaid["id"]]
+        self.assertEqual(repayment["category"], {key: receipt_category[key] for key in ("id", "name", "group")})
+        self.assertIsNone(repayment["remark"])
+        self.assertEqual(repayment["remaining_after_event"], "80.00")
+        adjustment = rows["settlement:" + offset["id"]]
+        self.assertIsNone(adjustment["category"])
+        self.assertEqual(adjustment["remark"], "This adjustment")
+        self.assertEqual(adjustment["remaining_after_event"], "70.00")
+        self.assertTrue(all(row["ticket_collection_state"] is None for row in rows.values()))
+        page = self.query.query_turnover({**self.period, "page_size": 1, "page": 2, "order": "asc"})
+        self.assertEqual(page["rows"], [repayment])
+        self.assertEqual(page["summary"], report["summary"])
+        self.cash.delete_flow(receipt["id"], {"expected_version": 2})
+        after = self.query.query_turnover(self.period)
+        self.assertNotIn(repayment["row_id"], {row["row_id"] for row in after["rows"]})
+        self.assertEqual(after["summary"]["remaining_obligation_amount"]["receivable"], "90.00")
+
+    def test_turnover_opening_expense_and_expense_settlement_remark_sources(self):
+        loan = self.item(is_opening=True, remark="Opening remark")
+        expense = self.item("expense", related_obligation_id=loan["id"], remark="Expense remark",
+                            expected_related_versions={"items": [{"id": loan["id"], "version": loan["version"]}]})
+        payment = self.flow()
+        paid = self.settlement("expense_payment", "100.00", item=expense, flow=payment, remark="Payment remark")
+        rows = {row["row_id"]: row for row in self.query.query_turnover(self.period)["rows"]}
+        opening = rows["item:" + loan["id"]]
+        self.assertEqual(opening["row_kind"], "opening")
+        self.assertEqual(opening["remark"], "Opening remark")
+        self.assertIsNone(opening["category"])
+        self.assertEqual(rows["expense:" + expense["id"]]["remark"], "Expense remark")
+        self.assertIsNone(rows["expense:" + expense["id"]]["category"])
+        event = rows["expense_settlement:" + paid["id"]]
+        self.assertEqual(event["remark"], "Payment remark")
+        self.assertEqual(event["category"]["id"], self.category["id"])
+        self.assertIsNone(event["remaining_after_event"])
+
+    def test_turnover_ticket_collection_state_uses_cutoff_and_actual_cash_only(self):
+        ticket = self.item("ticket_source")
+        receivable = self.item("company_receivable", ticket_source_id=ticket["id"],
+                               expected_related_versions={"items": [{"id": ticket["id"], "version": ticket["version"]}]})
+        self.item("company_receivable", content="No explicit ticket")
+        collection = self.flow("30.00", "receipt", occurred_on="2026-09-05")
+        self.settlement("company_collection", "30.00", item=receivable, flow=collection)
+        receivable = self.query.get_item(receivable["id"])["item"]
+        remaining = self.flow("70.00", "receipt", occurred_on="2026-09-10")
+        self.settlement("company_collection", "70.00", item=receivable, flow=remaining)
+        for cutoff, expected in (("2026-09-04", "open"), ("2026-09-05", "partial"), ("2026-09-10", "settled")):
+            with self.subTest(cutoff=cutoff):
+                rows = self.query.query_turnover({**self.period, "date_to": cutoff})["rows"]
+                self.assertTrue(all(row["ticket_collection_state"] == expected for row in rows if row["item_id"] == receivable["id"]))
+                self.assertIsNone(next(row for row in rows if row["content"] == "No explicit ticket")["ticket_collection_state"])
+        self.cash.delete_flow(remaining["id"], {"expected_version": 2})
+        receivable = self.query.get_item(receivable["id"])["item"]
+        self.settlement("non_ticket_offset", "70.00", item=receivable, occurred_on="2026-09-10", remark="Not cash collection")
+        rows = [row for row in self.query.query_turnover(self.period)["rows"] if row["item_id"] == receivable["id"]]
+        self.assertTrue(all(row["state"] == "settled" and row["ticket_collection_state"] == "partial" for row in rows))
+        self.cash.delete_flow(collection["id"], {"expected_version": 2})
+        rows = [row for row in self.query.query_turnover(self.period)["rows"] if row["item_id"] == receivable["id"]]
+        self.assertTrue(all(row["state"] == "partial" and row["ticket_collection_state"] == "open" for row in rows))
+
+    def test_turnover_personal_variant_filters_before_pagination_and_summary(self):
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-09-01"})
+        loan = self.item(ledger_group="personal")
+        self.item(amount="200.00", ledger_group="personal")
+        self.item(amount="50.00", ledger_group="personal", is_opening=True)
+        self.item(amount="999.00")
+        receipt = self.flow("40.00", "receipt")
+        self.settlement("cash_repayment", "40.00", item=loan, flow=receipt)
+        loan = self.query.get_item(loan["id"])["item"]
+        self.settlement("non_ticket_offset", "10.00", item=loan, remark="Synthetic offset")
+        loan = self.query.get_item(loan["id"])["item"]
+        self.item("expense", "20.00", related_obligation_id=loan["id"],
+                  expected_related_versions={"items": [{"id": loan["id"], "version": loan["version"]}]})
+        query = {**self.period, "ledger_group": "personal", "page_size": 1, "page": 2}
+        principal = self.query.query_turnover({**query, "personal_variant": "principal"})
+        self.assertEqual(principal["pagination"], {"page": 2, "page_size": 1, "total": 3})
+        self.assertEqual(len(principal["rows"]), 1)
+        self.assertEqual(principal["rows"][0]["personal_variant"], "principal")
+        self.assertEqual(principal["summary"]["principal_amount"], "300.00")
+        self.assertEqual(principal["summary"]["opening_adjustment_amount"], "50.00")
+        self.assertEqual(principal["summary"]["remaining_obligation_amount"]["receivable"], "300.00")
+        processed = self.query.query_turnover({**query, "personal_variant": "settlement"})
+        self.assertEqual(processed["pagination"]["total"], 3)
+        self.assertEqual(processed["rows"][0]["personal_variant"], "settlement")
+        self.assertEqual(processed["summary"]["principal_amount"], "0.00")
+        self.assertEqual(processed["summary"]["repayment_amount"], "40.00")
+        self.assertEqual(processed["summary"]["non_ticket_offset_amount"], "10.00")
+        self.assertEqual(processed["summary"]["real_expense_amount"], "20.00")
+        self.assertEqual(processed["summary"]["remaining_obligation_amount"]["receivable"], "50.00")
+        beyond = self.query.query_turnover({**query, "personal_variant": "settlement", "page": 4})
+        self.assertEqual(beyond["rows"], [])
+        self.assertEqual(beyond["summary"], processed["summary"])
+
+    def test_item_relationship_lists_are_bounded_complete_and_list_only(self):
+        children = [{"id": self.uid(), "type": "loan", "origin_date": "2026-09-03", "original_amount": "1.00",
+                     "obligation_direction": "receivable", "ledger_group": "company", "counterparty": "Synthetic",
+                     "content": f"Owned {index}"} for index in range(25)]
+        flow = self.flow("25.00", related_items=children)
+        self.item(content="Unrelated")
+        first = self.query.list_items({"origin_flow_id": flow["id"], "page_size": 20})
+        second = self.query.list_items({"origin_flow_id": flow["id"], "page_size": 20, "page": 2})
+        self.assertEqual(first["pagination"]["total"], 25)
+        self.assertEqual(len(first["rows"]), 20)
+        self.assertEqual(len(second["rows"]), 5)
+        self.assertEqual({row["id"] for row in first["rows"] + second["rows"]}, {row["id"] for row in children})
+        parent = self.query.get_item(children[0]["id"])["item"]
+        expense = self.item("expense", "1.00", related_obligation_id=parent["id"],
+                            expected_related_versions={"items": [{"id": parent["id"], "version": parent["version"]}]})
+        self.assertEqual([row["id"] for row in self.query.list_items({"related_obligation_id": parent["id"]})["rows"]], [expense["id"]])
+        ticket = self.item("ticket_source")
+        receivable = self.item("company_receivable", ticket_source_id=ticket["id"],
+                               expected_related_versions={"items": [{"id": ticket["id"], "version": ticket["version"]}]})
+        self.assertEqual([row["id"] for row in self.query.list_items({"ticket_source_id": ticket["id"]})["rows"]], [receivable["id"]])
+        for field, identity in (("origin_flow_id", flow["id"]), ("related_obligation_id", parent["id"]), ("ticket_source_id", ticket["id"])):
+            with self.subTest(field=field):
+                with self.assertRaises(CashError) as invalid_selector:
+                    self.query.list_items({field: identity, "purpose": "settlement_target", "settlement_kind": "cash_repayment"})
+                self.assertEqual(invalid_selector.exception.status, 400)
+                with self.assertRaises(CashError) as missing:
+                    self.query.list_items({field: self.uid()})
+                self.assertEqual(missing.exception.status, 404)

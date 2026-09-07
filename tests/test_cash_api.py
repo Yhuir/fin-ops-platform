@@ -10,15 +10,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from psycopg_pool import PoolTimeout
-
 from fin_ops_platform.app.http_adapter import WsgiHttpAdapter
 from fin_ops_platform.app.routes_cash import CashApiRoutes
 from fin_ops_platform.app.server import Application, Response
 from fin_ops_platform.services.cash_domain import CashError
-from test_http_adapter import FakeApplication, invoke
-from tests.app_test_support import build_local_state_application, configure_access_control
+from fin_ops_platform.services.cash_queries import CashQueryService
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from psycopg_pool import PoolTimeout
+from test_http_adapter import FakeApplication, invoke
+
+from tests.app_test_support import build_local_state_application, configure_access_control
 
 
 def session(*, allowed=True, admin=False):
@@ -63,6 +64,40 @@ class CashApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(json.loads(response.body)["error"], "cash_access_denied")
         self.queries.list_flows.assert_not_called()
+
+    def test_turnover_preserves_ui_projections_and_nullable_money(self):
+        row = {"row_id": "settlement:synthetic", "row_kind": "settlement", "category": {"id": "synthetic", "name": "Income", "group": "receipt"},
+               "remark": None, "ticket_collection_state": "partial", "original_amount": None,
+               "reimbursement_received_amount": Decimal("30.00"), "remaining_after_event": Decimal("70.00")}
+        result = {"rows": [row], "summary": {"event_count": 1}, "pagination": {"page": 1, "page_size": 50, "total": 1}}
+        self.queries.query_turnover.return_value = result
+        query = {"date_from": ["2026-09-01"], "date_to": ["2026-09-30"]}
+        response = self.call(path="/api/cash/reports/turnover", query=query)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.body)
+        self.assertEqual(body["rows"], [{**row, "reimbursement_received_amount": "30.00", "remaining_after_event": "70.00"}])
+        self.assertEqual(body["pagination"], result["pagination"])
+        self.assertEqual(body["summary"], result["summary"])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.queries.query_turnover.assert_called_once_with({"date_from": "2026-09-01", "date_to": "2026-09-30"})
+
+    def test_turnover_personal_variant_rejects_incompatible_context_before_io(self):
+        repository = Mock()
+        self.routes.queries = CashQueryService(repository)
+        period = {"date_from": ["2026-09-01"], "date_to": ["2026-09-30"]}
+        for extra in ({"personal_variant": ["principal"]},
+                      {"personal_variant": ["principal"], "ledger_group": ["company"]},
+                      {"personal_variant": ["orange"], "ledger_group": ["personal"]},
+                      {"personal_variant": ["principal", "settlement"], "ledger_group": ["personal"]}):
+            with self.subTest(extra=extra):
+                response = self.call(path="/api/cash/reports/turnover", query={**period, **extra})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(json.loads(response.body)["error"], "cash_invalid_input")
+        repository.query_turnover.assert_not_called()
+        repository.query_turnover.return_value = {"rows": [], "summary": {}, "pagination": {"page": 1, "page_size": 50, "total": 0}}
+        response = self.call(path="/api/cash/reports/turnover", query={**period, "ledger_group": ["personal"], "personal_variant": ["settlement"]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(repository.query_turnover.call_args.args[0]["personal_variant"], "settlement")
 
     def test_strict_json_and_duplicate_query(self):
         for body in ('{"amount": NaN}', '{"id":"a","id":"b"}', '[]', ''):
@@ -129,8 +164,8 @@ class CashGlobalIsolationTests(unittest.TestCase):
             self.assertIsNone(app._cash_runtime)
             app.close()
 
-    def test_missing_cash_configuration_does_not_break_ordinary_session(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"FIN_OPS_CASH_POSTGRES_DATABASE_URL": ""}):
+    def test_missing_postgres_configuration_does_not_break_existing_local_session(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"FIN_OPS_POSTGRES_DATABASE_URL": "", "DATABASE_URL": ""}):
             app = build_local_state_application(data_dir=Path(temporary), install_test_session=False)
             app._oa_identity_service.resolve_identity = lambda token: OAUserIdentity("005", "YNSYLP005", "", "Test")
             headers = {"Authorization": "Bearer admin"}

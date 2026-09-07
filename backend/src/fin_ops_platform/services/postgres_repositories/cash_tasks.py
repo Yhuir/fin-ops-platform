@@ -100,6 +100,9 @@ class CashTaskRepository:
             from actuals a
         ) select template_id::text||':'||to_char(month,'YYYY-MM') as row_key,occurrence_id,version,template_id,template_version,
             to_char(month,'YYYY-MM') as month,title,kind,due_on,remind_on,planned_amount,actual_amount,state,
+            template_values_snapshot->>'instructions' as instructions,
+            template_values_snapshot->>'default_account_id' as default_account_id,
+            template_values_snapshot->>'default_category_id' as default_category_id,
             processing_state='unpaid' as marked_unpaid,kind<>'check' and planned_amount is null as need_planned_amount,
             kind<>'check' and planned_amount is not null and actual_amount>planned_amount as is_over_plan,
             case when kind='check' then null else greatest(actual_amount-coalesce(planned_amount,actual_amount),0) end as over_plan_amount,

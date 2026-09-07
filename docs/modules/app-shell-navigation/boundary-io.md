@@ -86,6 +86,8 @@
 
 ## 当前缺口和删除条件
 
+现金移植边界（2026-09-07 已实现）：pageRegistry只增一个cash页面/授权选项，财务侧栏展示一个父分组及三个共享cash权限的子链接，section只含accounts/tasks/settings。AppSidebar按disclosure.id独立保存展开，取代importsExpanded的单分组假设；导入子路由仍由registry派生。父项不拉cash接口，现金数据/草稿/任务数不进入shell、PageSessionState或全局overlay。PageRouteHost权限拒绝与挂载模式不改，cash局部处理section切换。验证归现金实施计划§10。
+
 - 新增页面必须同步 page registry、docs/modules、权限和 e2e routing smoke。
 - 导入分组只能从三个正式 import route 派生；不得恢复第二份子路由清单或独立导入汇总页。
 - ACL/menu 发布验收必须同时有 fresh APP session/direct API 与 fresh OA router/shell 两类证据；任一缺失都不能由另一类推断。

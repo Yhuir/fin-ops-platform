@@ -64,6 +64,8 @@ def occurrence_row(occurrence: dict[str, Any], actual: dict[str, Any], today: da
             "occurrence_id": occurrence["id"], "version": occurrence["version"],
             "template_id": occurrence["template_id"], "template_version": snapshot["template_version"],
             "month": target_month, "title": snapshot["title"], "kind": kind, "due_on": occurrence["due_on"],
+            "instructions": snapshot["instructions"], "default_account_id": snapshot["default_account_id"],
+            "default_category_id": snapshot["default_category_id"],
             "remind_on": occurrence["due_on"] - timedelta(days=snapshot["remind_days"]),
             "planned_amount": planned, "actual_amount": amount, "state": state,
             "marked_unpaid": occurrence["processing_state"] == "unpaid", "need_planned_amount": kind != "check" and planned is None,

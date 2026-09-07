@@ -123,6 +123,41 @@ class CashTaskPostgresTests(CashPostgresCase):
         with self.assertRaises(CashError):
             self.tasks.mark_unpaid(self.identity(template, month="2026-09"))
 
+    def test_occurrence_defaults_and_instructions_keep_month_snapshot_after_template_edit(self):
+        template = self.template(instructions="Original monthly instructions")
+        keys = ("instructions", "default_account_id", "default_category_id")
+        original = {"instructions": "Original monthly instructions", "default_account_id": self.account["id"], "default_category_id": self.category["id"]}
+        virtual = self.tasks.list_occurrences({"month": "2026-09"})["rows"][0]
+        self.assertIsNone(virtual["occurrence_id"])
+        self.assertEqual({key: virtual[key] for key in keys}, original)
+        current = self.tasks.mark_unpaid(self.identity(template))["occurrence"]
+        explicit_future = self.tasks.adjust({**self.identity(template, month="2026-12"), "note": "Explicit December"})["occurrence"]
+        self.assertEqual({key: current[key] for key in keys}, original)
+        self.assertEqual({key: explicit_future[key] for key in keys}, original)
+        account = self.cash.create_account({"id": self.uid(), "name": "New task account", "kind": "cash", "opening_date": "2026-01-01", "opening_amount": "0.00"})["account"]
+        category = self.cash.create_category({"id": self.uid(), "name": "New payment category", "group": "payment"})["category"]
+        changed = {"instructions": "Future instructions", "default_account_id": account["id"], "default_category_id": category["id"]}
+        self.tasks.update_template(template["id"], {"expected_version": template["version"], **changed})
+        for target_month in ("2026-09", "2026-12"):
+            row = self.tasks.list_occurrences({"month": target_month})["rows"][0]
+            self.assertEqual({key: row[key] for key in keys}, original)
+            self.assertEqual(row["template_version"], template["version"])
+        updated_current = self.tasks.adjust({**self.identity(template, version=current["version"]), "note": "Current month note"})["occurrence"]
+        self.assertEqual({key: updated_current[key] for key in keys}, original)
+        future = self.tasks.list_occurrences({"month": "2026-10"})["rows"][0]
+        self.assertIsNone(future["occurrence_id"])
+        self.assertEqual({key: future[key] for key in keys}, changed)
+        self.assertEqual(future["template_version"], template["version"] + 1)
+
+    def test_check_occurrence_keeps_nullable_defaults_in_list_and_command_response(self):
+        template = self.template("check")
+        listed = self.tasks.list_occurrences({"month": "2026-09"})["rows"][0]
+        completed = self.tasks.complete_check(self.identity(template))["occurrence"]
+        for row in (listed, completed):
+            for key in ("instructions", "default_account_id", "default_category_id"):
+                self.assertIn(key, row)
+                self.assertIsNone(row[key])
+
     def test_pause_does_not_erase_explicit_future_or_backfill_paused_months(self):
         template = self.template()
         self.tasks.adjust({**self.identity(template, month="2026-12"), "note": "Explicit future"})

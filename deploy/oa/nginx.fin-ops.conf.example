@@ -1,3 +1,10 @@
+# Place this map in the http context. $uri is normalized and remains safe after
+# the /fin-ops/api rewrite. Do not record cash paths, IDs, or query strings.
+map $uri $fin_ops_access_loggable {
+    default 1;
+    ~^/(api/cash|fin-ops/api/cash|fin-ops-api/api/cash)(/|$) 0;
+}
+
 upstream fin_ops_api {
     server 127.0.0.1:18001;
     keepalive 16;
@@ -6,6 +13,7 @@ upstream fin_ops_api {
 server {
     listen 443 ssl http2;
     server_name oa.company.com;
+    access_log /www/wwwlogs/access.log combined if=$fin_ops_access_loggable;
     client_max_body_size 128m;
     client_body_timeout 30s;
 

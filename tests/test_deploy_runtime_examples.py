@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
+import re
 import subprocess
 import unittest
+from pathlib import Path
 
 from fin_ops_platform.services.runtime_worker_registry import (
     RUNTIME_WORKER_REGISTRY,
 )
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_CONTROL = REPO_ROOT / "deploy/oa/bin/finops-deploy-control.sh"
@@ -16,14 +16,26 @@ QUEUE_PRUNE = REPO_ROOT / "deploy/oa/bin/finops-prune-runtime-queue-history.sh"
 
 
 class DeployRuntimeExampleTests(unittest.TestCase):
-    def test_cash_secret_env_is_api_only_and_uses_existing_private_file_check(self) -> None:
+    def test_cash_proxy_log_exclusion_covers_all_three_paths_without_hiding_neighbors(self) -> None:
+        config = (REPO_ROOT / "deploy/oa/nginx.fin-ops.conf.example").read_text(encoding="utf-8")
+        pattern = r"^/(api/cash|fin-ops/api/cash|fin-ops-api/api/cash)(/|$)"
+        self.assertIn(f"~{pattern} 0;", config)
+        self.assertIn("access_log /www/wwwlogs/access.log combined if=$fin_ops_access_loggable;", config)
+        for prefix in ("/api", "/fin-ops/api", "/fin-ops-api/api"):
+            for suffix in ("/cash", "/cash/flows", "/cash/settings/project-selection"):
+                self.assertIsNotNone(re.match(pattern, prefix + suffix))
+            for suffix in ("/cash-back", "/cashflow", "/bank-transactions"):
+                self.assertIsNone(re.match(pattern, prefix + suffix))
+
+    def test_cash_reuses_runtime_environment_without_a_separate_secret_file(self) -> None:
         script = DEPLOY_CONTROL.read_text(encoding="utf-8")
         api = script[script.index("write_api_dropin() {"):script.index("write_worker_dropin() {")]
         worker = script[script.index("write_worker_dropin() {"):script.index("write_worker_dropin() {")+1000]
-        self.assertIn('assert_root_owned_private_file "$ENV_DIR/fin-ops.cash.env"', api)
-        self.assertIn("EnvironmentFile=-$ENV_DIR/fin-ops.cash.env", api)
+        self.assertIn("EnvironmentFile=$SECRETS_ENV", api)
+        self.assertNotIn("fin-ops.cash.env", api)
         self.assertNotIn("fin-ops.cash.env", worker)
         self.assertNotIn("fin-ops.cash.env", WORKER_UNIT.read_text(encoding="utf-8"))
+        self.assertNotIn("fin-ops.cash.env", (REPO_ROOT / "deploy/oa/systemd/fin-ops.service.example").read_text(encoding="utf-8"))
 
     def test_runtime_worker_inventory_is_exactly_the_four_current_workers(self) -> None:
         required = [

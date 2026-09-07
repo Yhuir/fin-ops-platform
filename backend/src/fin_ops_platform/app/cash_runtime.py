@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
+from dataclasses import replace
 from pathlib import Path
 
-from psycopg import ProgrammingError
-from psycopg.conninfo import conninfo_to_dict
 from pymongo import MongoClient
 
 from fin_ops_platform.app.routes_cash import CashApiRoutes
@@ -17,35 +15,29 @@ from fin_ops_platform.services.cash_service import CashService
 from fin_ops_platform.services.cash_tasks import CashTaskService
 from fin_ops_platform.services.mongo_oa_adapter import load_mongo_oa_settings
 from fin_ops_platform.services.oa_identity_service import OAIdentitySettings
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_connection import (
+    PostgresConfigurationError,
+    PostgresConnection,
+    PostgresSettings,
+)
 from fin_ops_platform.services.postgres_repositories.cash import CashRepository
 from fin_ops_platform.services.postgres_repositories.cash_queries import CashQueryRepository
-from fin_ops_platform.services.postgres_repositories.cash_runtime_identity import assert_cash_runtime_identity
 from fin_ops_platform.services.postgres_repositories.cash_tasks import CashTaskRepository
 
 
 def cash_postgres_settings() -> PostgresSettings:
-    cash_url = os.environ.get("FIN_OPS_CASH_POSTGRES_DATABASE_URL", "").strip()
-    ordinary_url = (os.environ.get("FIN_OPS_POSTGRES_DATABASE_URL") or os.environ.get("DATABASE_URL") or "").strip()
-    if not cash_url or not ordinary_url:
-        raise CashError("cash_dependency_unavailable", "现金专用数据库身份未配置。", 503)
     try:
-        cash, ordinary = conninfo_to_dict(cash_url), conninfo_to_dict(ordinary_url)
-    except ProgrammingError:
-        # libpq's parser may include credentials in its exception text.
-        raise CashError("cash_dependency_unavailable", "现金数据库配置格式不正确。", 503) from None
-    for info in (cash, ordinary):
-        if (any(not info.get(key) for key in ("host", "dbname", "user"))
-                or any(key in info for key in ("options", "service")) or "," in info["host"]):
-            raise CashError("cash_dependency_unavailable", "现金连接必须明确单一数据库端点和身份，不能覆盖角色或服务配置。", 503)
-    if (any(cash.get(key) != ordinary.get(key) for key in ("host", "hostaddr", "dbname"))
-            or cash.get("port", "5432") != ordinary.get("port", "5432")):
-        raise CashError("cash_dependency_unavailable", "现金必须连接当前 PostgreSQL 的同一数据库。", 503)
-    if not cash.get("user") or not ordinary.get("user") or cash.get("user") == ordinary.get("user"):
-        raise CashError("cash_dependency_unavailable", "现金必须使用独立的数据库运行身份。", 503)
-    return PostgresSettings(
-        database_url=cash_url, pool_min_size=1, pool_max_size=2,
-        pool_max_waiting=8, pool_name="fin-ops-cash", statement_timeout_ms=5000,
+        settings = PostgresSettings.from_env()
+    except PostgresConfigurationError:
+        raise CashError("cash_dependency_unavailable", "当前 PostgreSQL 连接配置不完整或不正确。", 503) from None
+    # Same database and login as the App; a small independent pool bounds cash
+    # resource use, not SQL permissions. Repositories enforce cash-only I/O.
+    return replace(
+        settings, pool_min_size=1, pool_max_size=min(settings.pool_max_size, 2),
+        pool_max_waiting=min(settings.pool_max_waiting, 8), pool_name="fin-ops-cash", pool_enabled=True,
+        statement_timeout_ms=min(settings.statement_timeout_ms, 5000),
+        connect_timeout_seconds=min(settings.connect_timeout_seconds, 5),
+        pool_acquire_timeout_seconds=min(settings.pool_acquire_timeout_seconds, 2),
     )
 
 
@@ -53,9 +45,7 @@ class CashRuntime:
     def __init__(self, data_dir: Path | None) -> None:
         self.connection = PostgresConnection(cash_postgres_settings())
         self.mongo_client = None
-        ordinary_url = os.environ.get("FIN_OPS_POSTGRES_DATABASE_URL") or os.environ["DATABASE_URL"]
         try:
-            assert_cash_runtime_identity(self.connection, conninfo_to_dict(ordinary_url)["user"])
             self.repository = CashRepository(self.connection)
             self.queries = CashQueryService(CashQueryRepository(self.connection))
             self.task_repository = CashTaskRepository(self.connection)

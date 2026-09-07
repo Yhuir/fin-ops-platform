@@ -229,7 +229,10 @@ class CashQueryRepository:
 
     def list_items(self, query: dict[str, Any]) -> dict[str, Any]:
         with self.snapshot() as tx:
-            condition, params = _where(query, {"type": "i.type", "ledger_group": "i.ledger_group", "counterparty": "i.counterparty", "project_id": "i.oa_project_id", "bill_label_id": "i.bill_label_id", "bill_month": "i.bill_month", "is_opening": "i.is_opening"})
+            for field, table in (("origin_flow_id", "flows"), ("related_obligation_id", "items"), ("ticket_source_id", "items")):
+                if field in query:
+                    self._require(tx, table, query[field])
+            condition, params = _where(query, {"type": "i.type", "ledger_group": "i.ledger_group", "counterparty": "i.counterparty", "project_id": "i.oa_project_id", "bill_label_id": "i.bill_label_id", "bill_month": "i.bill_month", "is_opening": "i.is_opening", "origin_flow_id": "i.origin_flow_id", "related_obligation_id": "i.related_obligation_id", "ticket_source_id": "i.ticket_source_id"})
             if "origin_date_from" in query:
                 condition += " and i.origin_date between %s and %s"
                 params.extend([query["origin_date_from"], query["origin_date_to"]])
@@ -324,8 +327,13 @@ class CashQueryRepository:
             cte = f"""with obligations as (
                 select i.id,i.original_amount,i.is_opening,i.origin_date,i.created_at,i.content,i.origin_flow_id,
                   i.ledger_group,i.counterparty,i.oa_project_id,i.project_name_snapshot,i.obligation_direction,
-                  i.original_amount-coalesce(s.settled,0) as remaining_amount
-                from cash.items i left join (select item_id,sum(amount) as settled from cash.settlements
+                  i.original_amount-coalesce(s.settled,0) as remaining_amount,
+                  case when i.type='company_receivable' and i.ticket_source_id is not null then
+                    case when coalesce(s.collected,0)=0 then 'open'
+                      when s.collected=i.original_amount then 'settled' else 'partial' end
+                  end as ticket_collection_state
+                from cash.items i left join (select item_id,sum(amount) as settled,
+                  sum(amount) filter(where kind='company_collection') as collected from cash.settlements
                   where kind in ('cash_repayment','company_collection','ticket_offset','non_ticket_offset')
                   and occurred_on<=%s group by item_id) s on s.item_id=i.id
                 where i.type in ('loan','company_receivable') and i.origin_date<=%s
@@ -363,11 +371,14 @@ class CashQueryRepository:
                 where s.kind in ('expense_payment','expense_refund') and s.occurred_on<=%s
             ), complete_events as (
                 select e.*,i.ledger_group,i.counterparty,i.oa_project_id,i.project_name_snapshot,i.obligation_direction,i.remaining_amount,
-                  i.original_amount as obligation_original_amount,
+                  i.original_amount as obligation_original_amount,i.ticket_collection_state,
                   case when i.remaining_amount=0 then 'settled' when i.remaining_amount=i.original_amount then 'open' else 'partial' end as state
                 from events e join obligations i on i.id=e.item_id
             ) """
             condition, params = _where(query, {"ledger_group": "e.ledger_group", "counterparty": "e.counterparty", "project_id": "e.oa_project_id", "category_id": "e.category_id", "state": "e.state"})
+            if "personal_variant" in query:
+                operator = "in" if query["personal_variant"] == "principal" else "not in"
+                condition += f" and e.row_kind {operator} ('opening','principal')"
             condition += " and e.occurred_on between %s and %s"
             params.extend([query["date_from"], query["date_to"]])
             if "keyword" in query:
@@ -377,7 +388,7 @@ class CashQueryRepository:
                 case when e.ledger_group='personal' then case when e.row_kind in ('opening','principal') then 'principal' else 'settlement' end end as personal_variant,
                 e.occurred_on,e.item_id,e.counterparty,{_PROJECT.format(a='e')} as project,e.content,e.state,e.original_amount,
                 e.repayment_amount,e.reimbursement_received_amount,e.ticket_offset_amount,e.non_ticket_offset_amount,e.real_expense_amount,
-                e.cash_received_amount,e.cash_paid_amount,e.flow_id,e.settlement_id,e.expense_item_id,
+                e.cash_received_amount,e.cash_paid_amount,e.flow_id,e.settlement_id,e.expense_item_id,e.ticket_collection_state,
                 e.obligation_direction,e.remaining_amount,e.obligation_original_amount,e.created_at from complete_events e where {condition}"""
             params = [query["date_to"]] * 5 + params
             columns = ("repayment_amount", "reimbursement_received_amount", "ticket_offset_amount", "non_ticket_offset_amount", "real_expense_amount", "cash_received_amount", "cash_paid_amount")
@@ -385,19 +396,28 @@ class CashQueryRepository:
             row_casts = ",".join(f"'{key}',p.{key}::text" for key in row_money)
             summary_casts = ",".join(f"'{key}',t.{key}::text" for key in ("principal_amount", "opening_adjustment_amount", *columns))
             combined = tx.fetch_one(f"""with matched as materialized ({sql}),
-                selected_page as (select * from matched order by {query['sort']} {query['order']} nulls last,row_id {query['order']} limit %s offset %s),
-                page_rows as (select m.*,case when m.row_kind='expense' then null
+                selected_page as materialized (select * from matched order by {query['sort']} {query['order']} nulls last,row_id {query['order']} limit %s offset %s),
+                page_rows as (select m.*,
+                  case when c.id is not null then jsonb_build_object('id',c.id,'name',c.name,'group',c."group") end as category,
+                  case when m.settlement_id is not null then s.remark else i.remark end as remark,
+                  case when m.row_kind='expense' then null
                   when m.row_kind in ('opening','principal') then m.original_amount
                   else m.obligation_original_amount-coalesce((select sum(s.amount) from cash.settlements s
                     where s.item_id=m.item_id and s.kind in ('cash_repayment','company_collection','ticket_offset','non_ticket_offset')
-                    and (s.occurred_on,s.created_at,s.id)<=(m.occurred_on,m.created_at,m.settlement_id)),0) end as remaining_after_event from selected_page m),
+                    and (s.occurred_on,s.created_at,s.id)<=(m.occurred_on,m.created_at,m.settlement_id)),0) end as remaining_after_event
+                  from selected_page m
+                  left join cash.flows f on f.id=m.flow_id
+                  left join cash.categories c on c.id=f.category_id
+                  left join cash.items i on i.id=coalesce(m.expense_item_id,m.item_id)
+                  left join cash.settlements s on s.id=m.settlement_id),
                 totals as (select count(*) as event_count,
                   coalesce(sum(original_amount) filter(where row_kind='principal'),0.00) as principal_amount,
                   coalesce(sum(original_amount) filter(where row_kind='opening'),0.00) as opening_adjustment_amount,
                   {','.join('coalesce(sum('+column+'),0.00) as '+column for column in columns)} from matched),
                 unique_items as (select distinct item_id,obligation_direction,remaining_amount from matched)
                 select t.event_count as total,
-                  coalesce((select jsonb_agg((to_jsonb(p)-'obligation_direction'-'remaining_amount'-'obligation_original_amount'-'created_at')||jsonb_build_object({row_casts})) from page_rows p),'[]'::jsonb) as rows,
+                  coalesce((select jsonb_agg((to_jsonb(p)-'obligation_direction'-'remaining_amount'-'obligation_original_amount'-'created_at')||jsonb_build_object({row_casts})
+                    order by p.{query['sort']} {query['order']} nulls last,p.row_id {query['order']}) from page_rows p),'[]'::jsonb) as rows,
                   jsonb_build_object('event_count',t.event_count,{summary_casts},'remaining_obligation_amount',
                     (select jsonb_build_object('receivable',coalesce(sum(remaining_amount) filter(where obligation_direction='receivable'),0.00)::text,
                       'payable',coalesce(sum(remaining_amount) filter(where obligation_direction='payable'),0.00)::text) from unique_items)) as summary

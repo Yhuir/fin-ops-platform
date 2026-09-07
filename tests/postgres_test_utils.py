@@ -178,6 +178,7 @@ EXPECTED_MIGRATION_FILES = [
     "0164_manual_bank_entry_audit_contract.sql",
     "0165_page_access_accounts.sql",
     "0166_cash_ledger.sql",
+    "0167_cash_shared_runtime_grants.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

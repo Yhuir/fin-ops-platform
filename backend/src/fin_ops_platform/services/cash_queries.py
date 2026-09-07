@@ -94,13 +94,15 @@ class CashQueryService:
         return serialize(self.repository.get_flow(normalize_uuid(flow_id)))
 
     def list_items(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"type", "ledger_group", "counterparty", "project_id", "bill_label_id", "bill_month", "origin_date_from", "origin_date_to", "is_opening", "has_bill_label", "keyword", "purpose", "settlement_kind", "flow_id", "source_item_id", "item_id"}, {"origin_date", "original_amount"}, "origin_date")
+        query = query_input(raw, {"type", "ledger_group", "counterparty", "project_id", "bill_label_id", "bill_month", "origin_date_from", "origin_date_to", "is_opening", "has_bill_label", "keyword", "purpose", "settlement_kind", "flow_id", "source_item_id", "item_id", "origin_flow_id", "related_obligation_id", "ticket_source_id"}, {"origin_date", "original_amount"}, "origin_date")
         enum_fields(query, type={"loan", "company_receivable", "expense", "ticket_source"}, ledger_group={"company", "external_person", "personal"}, purpose={"list", "settlement_target", "settlement_source"}, settlement_kind={"cash_repayment", "company_collection", "expense_payment", "expense_refund", "ticket_use", "ticket_offset", "non_ticket_offset"})
         purpose = query.setdefault("purpose", "list")
         if purpose != "list" and "settlement_kind" not in query:
             invalid("A settlement selector requires settlement_kind.")
         if purpose == "list" and {"settlement_kind", "flow_id", "source_item_id", "item_id"} & query.keys():
             invalid("Settlement context requires a selector purpose.")
+        if purpose != "list" and {"origin_flow_id", "related_obligation_id", "ticket_source_id"} & query.keys():
+            invalid("Item relationship filters require purpose=list.")
         if "bill_label_id" in query and query.get("has_bill_label") is False:
             invalid("bill_label_id conflicts with has_bill_label=false.")
         result = self.repository.list_items(query)
@@ -127,8 +129,10 @@ class CashQueryService:
         return serialize(self.repository.list_settlements(query))
 
     def query_turnover(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"date_from", "date_to", "ledger_group", "counterparty", "project_id", "category_id", "state", "keyword"}, {"occurred_on", "original_amount", "repayment_amount"}, "occurred_on")
-        enum_fields(query, ledger_group={"company", "external_person", "personal"}, state={"open", "partial", "settled"})
+        query = query_input(raw, {"date_from", "date_to", "ledger_group", "personal_variant", "counterparty", "project_id", "category_id", "state", "keyword"}, {"occurred_on", "original_amount", "repayment_amount"}, "occurred_on")
+        enum_fields(query, ledger_group={"company", "external_person", "personal"}, personal_variant={"principal", "settlement"}, state={"open", "partial", "settled"})
+        if "personal_variant" in query and query.get("ledger_group") != "personal":
+            invalid("personal_variant requires ledger_group=personal.")
         self._period(query)
         return serialize(self.repository.query_turnover(query))
 

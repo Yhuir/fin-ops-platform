@@ -20,12 +20,12 @@
 | Worker runtime | 明确 job/domain handler 所需最小读写 |
 | Migrator | migration DDL；不作为 API/worker 凭据 |
 | Audit/smoke | 只读，或仅允许固定可逆探针 |
-| Cash API runtime | 同数据库cash专属十表DML；无DDL、角色继承、普通财务读取或全局审计写入 |
+| Cash API模块（复用API runtime账号） | 0167给既有fin_ops_app_runtime增加cash十表DML；不新设角色/密钥，不授予DDL；现金与普通事实由应用I/O分离 |
 
 API/worker 通过同一受控 common/secrets env 取得 DSN，但角色可分离。不得把 migrator DSN 打印、提交或交给
 浏览器。连接池必须有 acquire timeout、max waiting、idle/lifetime 与指标。
 
-现金凭据为例外：只由API加载root0600的`/etc/fin-ops/fin-ops.cash.env`，不进入共用worker secrets；独立pool最大2/等待8、statement timeout5秒。缺配置明确503，禁止用普通DSN替代。角色创建/双向权限实际验证见[现金首次授权](cash-module-deployment.md)。这仍是同一个主数据库，不是第二数据库。
+现金按用户要求直接复用既有App数据库及登录配置，不安装cash专用env；独立小pool最大2/等待8、statement timeout5秒，既有更严限制不放宽。缺配置明确503，不提供替代数据库。它是应用模块隔离，不是数据库账号级隔离；上线步骤及验证见[现金部署](cash-module-deployment.md)。
 
 ## Query contract
 

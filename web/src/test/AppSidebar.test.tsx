@@ -380,6 +380,22 @@ describe("AppSidebar shell contract", () => {
     }
   });
 
+  test("cash subpages share one permission and expand independently of imports", () => {
+    renderSidebarAt("/cash?section=tasks");
+    const cash = screen.getByRole("button", { name: "现金账" });
+    const imports = screen.getByRole("button", { name: "导入" });
+    expect(cash).toHaveAttribute("aria-expanded", "true");
+    expect(imports).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("link", { name: "每月任务" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "现金账目" })).not.toHaveAttribute("aria-current");
+    fireEvent.click(imports);
+    expect(cash).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(cash);
+    expect(imports).toHaveAttribute("aria-expanded", "true");
+    const group = sidebarGroups.flatMap(row => row.items).find(item => item.label === "现金账");
+    expect(group && isSidebarDisclosureItem(group) && group.children.map(item => item.pageKey)).toEqual(["cash", "cash", "cash"]);
+  });
+
   test("closes the compact drawer after selecting a navigation item", () => {
     const onCloseMobile = vi.fn();
 

@@ -4,7 +4,7 @@
 
 `Application` 认证/页面授权 → `CashApiRoutes` 解析和 HTTP → cash service 命令/查询 → cash repository SQL → 同库 `cash.*`。
 
-`CashRuntime` 惰性组装专用有界 PostgreSQL 连接，缺少 `FIN_OPS_CASH_POSTGRES_DATABASE_URL` 只使现金 API 返回 503，不使普通 App 启动失败。现金连接必须指向普通 App 同一数据库、使用不同受限登录角色；不继承普通角色、不拥有 cash DDL、不读普通表。池最大 2、等待队列 8、获取超时 2 秒、SQL 超时 5 秒。实际部署须核对全机连接预算。
+`CashRuntime`在现金页面授权后惰性组装有界PostgreSQL连接；复用`PostgresSettings.from_env()`，与普通App使用同一数据库、同一登录账号，不另配cash DSN或密钥文件。池最大2、等待8、获取超时2秒、SQL超时5秒，既有更严限制不放宽；小池仅约束资源，不提供权限隔离。配置错误或数据库不可用明确503，不创建替代数据。0167仅给既有`fin_ops_app_runtime`授予现金10表DML；cash repository只读写cash.*，普通repository不得读取cash。此为应用模块隔离，不是数据库账号隔离；实际部署须核对全机连接预算。
 
 请求级 `CashOaProjectService` 接收可信 session token 对应的字典读取函数、现金阶段设置读取函数及共享有界 Mongo client。只 GET `XMJD` 字典，Mongo 只投影 form 17 的项目 ID/名称/编号/阶段；不写 OA，不查财务表单，不把 token 留在共享服务中。OA 未配置仅影响依赖它的项目操作；本地历史事项结算不调用 OA。
 
@@ -13,6 +13,12 @@
 - `/api/cash/*`：必须先认证并拥有页面 `cash`；005 管理员可用，普通账号只有可用/不可用。只有 005 能在既有平台设置修改页面 ACL。
 - 金额用两位十进制字符串，日期 ISO、月份 YYYY-MM、ID UUID；未知/重复字段、重复 query key、非法类型和状态明确失败。完整字段与版本见[技术设计](../../dev/cash-module-technical-design.md)。
 - 手工创建与任务确认共用同一现金命令事务；核对/未办不造现金。新建真实项目、自由改项目取 OA 当前资格；既有事项结算沿用本地项目。
+
+前端已实现（2026-09-07）：左侧三子页面统一cash权限，单`/cash`入口以section=accounts/tasks/settings承接导航；非法或重复section明确报错，裸路径规范到accounts。shell只持非敏感标识，不读现金数据、不显示金额或任务数；正文局部视图拥有业务请求和4/2/4菜单。OA checkbox只保存现金project-selection配置，全部项目与新增候选分开，取消状态不隐藏历史。无新权限层级。
+
+前端请求owner为features/cash/api.ts：复用底层apiFetch，现金路径单地址严格JSON/HTTP，15秒超时，不调用自动换地址重发的apiRequestJson；不从普通业务client查分类/项目/金额。hooks.tsx只在CashProvider内维护请求取消和局部revision，写成功重新GET，401/403卸载敏感子树；无storage、全局事件或全局overlay写入。复用FinanceTable/AppDrawer纯UI，不复用useFinanceTableSession；关闭的现金抽屉条件卸载，Portal样式仅.cash-drawer范围。
+
+已补充TurnoverRow.category、remark、ticket_collection_state，来源/空值/截至日期口径见技术设计§8.7；分类/备注只JOIN当前页，回款复用集合聚合，无N+1。个人橘/绿筛选personal_variant在SQL分页前执行。/items新增list-only origin_flow_id/related_obligation_id/ticket_source_id关系筛选，父对象不存在404；CashFlowCorrections有界读取关系，只收集明确动作和CAS版本，随一次最终保存/删除提交。OccurrenceRow的instructions/default_account_id/default_category_id严格来自当月快照，未来模板变更不覆盖历史。不改变普通银行DTO。
 
 ## 输出和禁止出口
 
@@ -27,6 +33,8 @@
 ## 文件与旧链路
 
 现金代码入口见[README](README.md)，共享改动限 `server.py/http_adapter.py/route_access_policy.py/access_control_service.py` 的组装、精确策略与日志；不更改普通现金收入/cash-special 的业务。它们不是本模块旧版，禁止误删。现金源不用旧 OA active/completed adapter，不恢复已退役 read model 或兼容池。
+
+2026-09-07按用户同账号要求移除尚未上线的`cash_runtime_identity.py`、独立账号provision工具、对应角色专项测试及cash env示例/加载项；保留并迁移真实CashRuntime录入/读取/删除测试为同账号链路，旧方案只保留在Git和明确标注的历史执行记录，不进入运行时。
 
 ## 验证与发布
 

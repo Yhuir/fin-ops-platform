@@ -1,0 +1,206 @@
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState, type ComponentProps } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { CashFlowDrawer } from "../components/cash/CashFlowDrawer";
+import CashFlowTable from "../components/cash/CashFlowTable";
+import type { CashFlow, CashFlowDetail, CashFlowSummary } from "../components/cash/CashFlows.types";
+import type { CashItem } from "../components/cash/CashItems.types";
+import { apiFetch } from "../features/apiClient";
+import { CashProvider } from "../features/cash/hooks";
+
+vi.mock("../features/apiClient", async (original) => ({ ...await original<typeof import("../features/apiClient")>(), apiFetch: vi.fn() }));
+
+const http = vi.mocked(apiFetch);
+const accountA = "b0965e94-cd68-49a2-bac3-0038422e8204";
+const accountB = "5e626f51-ec2e-4128-a35d-d54f1b5f7e0a";
+const categoryId = "9d830b6c-2747-437b-a4b8-f8b2641a840e";
+const flowId = "80f737c2-16c4-4c2c-9caa-3dd3b7f6ce48";
+const itemId = "113c719a-14b5-46fc-a14c-ff63bb7e0cb2";
+const templateId = "238e47dd-9e68-4084-b2e3-b6cb23f9cd90";
+
+const rowsPage = <T,>(rows: T[], pageSize = 50) => ({ rows, pagination: { page: 1, page_size: pageSize, total: rows.length } });
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const flow = (changes: Partial<CashFlow> = {}): CashFlow => ({
+  id: flowId, version: 7, occurred_on: "2026-01-05", kind: "receipt", amount: "125.50",
+  from_account: null, to_account: { id: accountA, name: "合成现金账户" }, category: { id: categoryId, name: "合成往来类型", group: "turnover" },
+  project: null, person_name: null, content: "合成手工收款", source_kind: "manual", task: null,
+  income_amount: "125.50", expense_amount: null, account_running_balance: null,
+  remark: null, created_by_account: "TEST_OPERATOR", created_by_name: "合成经办人", created_at: "2026-01-05T01:00:00Z", updated_at: "2026-01-05T01:00:00Z", ...changes,
+});
+const detail = (value = flow()): CashFlowDetail => ({
+  flow: value, task: value.task, allocations: [], allocation_count: 0, allocations_has_more: false,
+  delete_impact: { flow_version: value.version, task_count: 0, item_count: 0, settlement_count: 0, source_owned_item_count: 0, source_correction_required: false, tasks: [], items: [], preview_truncated: false },
+});
+const summary = (): CashFlowSummary => ({
+  period: { date_from: "2026-01-01", date_to: "2026-09-07" },
+  filtered_totals: { flow_count: 1, income_amount: "125.50", expense_amount: "0.00", transfer_amount: "42.35" },
+  account_balances: [
+    { account_id: accountA, account_name: "合成现金账户", opening_date: "2026-01-01", coverage_state: "complete", coverage_start: "2026-01-01", opening_balance: "50.00", balance_at_coverage_start: "50.00", period_inflow: "125.50", period_outflow: "42.35", ending_balance: "133.15" },
+    { account_id: accountB, account_name: "尚未起算合成账户", opening_date: "2027-01-01", coverage_state: "not_started", coverage_start: null, opening_balance: null, balance_at_coverage_start: null, period_inflow: null, period_outflow: null, ending_balance: null },
+  ],
+});
+
+type Write = { path: string; method: string; body: Record<string, unknown>; init: RequestInit };
+function installHttp(options: { write?: (write: Write) => Response | Promise<Response>; getDetail?: () => CashFlowDetail; list?: () => { rows: CashFlow[]; pagination: { total: number; page: number; page_size: number }; summary: CashFlowSummary } } = {}) {
+  const writes: Write[] = [];
+  http.mockImplementation(async (url, init = {}) => {
+    const parsed = new URL(url, "http://cash-test.invalid");
+    const path = parsed.pathname;
+    expect(path.startsWith("/api/cash/")).toBe(true);
+    if (init.method && init.method !== "GET") {
+      expect(typeof init.body).toBe("string");
+      const write = { path, method: init.method, body: JSON.parse(String(init.body)) as Record<string, unknown>, init };
+      writes.push(write);
+      if (!options.write) throw new Error(`Unexpected cash write ${path}`);
+      return options.write(write);
+    }
+    if (path === "/api/cash/settings/accounts") return json(rowsPage([
+      { id: accountA, version: 1, name: "合成现金账户", kind: "cash", opening_date: "2026-01-01", opening_amount: "50.00", enabled: true, remark: null },
+      { id: accountB, version: 1, name: "合成储蓄账户", kind: "savings", opening_date: "2026-01-01", opening_amount: "0.00", enabled: true, remark: null },
+    ], Number(parsed.searchParams.get("page_size"))));
+    if (path === "/api/cash/settings/categories") return json(rowsPage([{ id: categoryId, version: 1, name: "合成往来类型", group: "turnover", enabled: true, remark: null }], Number(parsed.searchParams.get("page_size"))));
+    if (path === "/api/cash/items" || path === "/api/cash/settlements") return json(rowsPage([], 20));
+    if (path === `/api/cash/flows/${flowId}`) return json(options.getDetail ? options.getDetail() : detail());
+    if (path === "/api/cash/flows") return json(options.list ? options.list() : { ...rowsPage([flow()]), summary: summary() });
+    throw new Error(`Unexpected cash GET ${url}`);
+  });
+  return writes;
+}
+
+function created(body: Record<string, unknown>) {
+  return json({ flow: { ...body, source_kind: "manual", task_occurrence_id: null, project_name_snapshot: null, version: 1, created_by_account: "TEST_OPERATOR", created_by_name: null, created_at: "2026-09-07T01:00:00Z", updated_at: "2026-09-07T01:00:00Z" }, related_items: [], origin_items: [], allocations: [], version: 1 }, 201);
+}
+
+function DrawerHarness(props: Omit<ComponentProps<typeof CashFlowDrawer>, "open" | "onClose">) {
+  const [open, setOpen] = useState(true);
+  return <CashProvider>{open ? <CashFlowDrawer {...props} open onClose={() => setOpen(false)} /> : <p>现金抽屉已关闭</p>}</CashProvider>;
+}
+async function select(user: ReturnType<typeof userEvent.setup>, label: string, option: string) {
+  const trigger = await screen.findByLabelText(label, { selector: "button" });
+  await waitFor(() => expect(trigger).toBeEnabled());
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: option, exact: true }));
+}
+async function inputCash(user: ReturnType<typeof userEvent.setup>, amount = "125.5") {
+  await user.type(screen.getByRole("textbox", { name: "金额（元）" }), amount);
+  await user.type(screen.getByRole("textbox", { name: "用途" }), "真实控件合成收付");
+}
+
+beforeEach(() => http.mockReset());
+afterEach(cleanup);
+
+describe("现金实际录入 HTTP 字段", () => {
+  it("手工保存十进制字符串，503 后保留草稿并以相同 UUID 重试一次", async () => {
+    const user = userEvent.setup(); let attempts = 0;
+    const writes = installHttp({ write: ({ body }) => ++attempts === 1 ? json({ error: "cash_storage_unavailable", message: "现金服务暂不可用，请核对提交结果。" }, 503) : created(body) });
+    render(<DrawerHarness kind="receipt" />);
+    await select(user, "收款账户", "合成现金账户"); await select(user, "费用分类", "合成往来类型"); await inputCash(user);
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("现金服务暂不可用");
+    expect(screen.getByRole("textbox", { name: "金额（元）" })).toHaveValue("125.5");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ path: "/api/cash/flows", method: "POST", body: { amount: "125.50", kind: "receipt", from_account_id: null, to_account_id: accountA, category_id: categoryId, project_mode: "selection", oa_project_id: null, related_items: [], origin_items: [], allocations: [] } });
+    expect(writes[0].body.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(writes[0].body).not.toHaveProperty("source_kind");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await screen.findByText("现金抽屉已关闭");
+    expect(writes).toHaveLength(2); expect(writes[1].body).toEqual(writes[0].body);
+    expect(writes[1].init.cache).toBe("no-store");
+  });
+
+  it.each(["300.00", null])("任务目标 %s 使用原子 confirm/new_flow，不把目标当本次金额", async (planned) => {
+    const user = userEvent.setup();
+    const writes = installHttp({ write: ({ body }) => json({ occurrence: { template_id: templateId, month: "2026-09", version: 2 }, flow: body.new_flow, version: 2 }) });
+    render(<DrawerHarness task={{ template_id: templateId, month: "2026-09", expected_version: null, expected_template_version: 4, planned_amount: planned, kind: "payment", title: "合成任务", instructions: "本月已保存说明", default_account_id: accountA, default_category_id: categoryId }} />);
+    expect(screen.getByRole("textbox", { name: "金额（元）" })).toHaveValue("");
+    await waitFor(() => expect(screen.getByLabelText("付款账户", { selector: "button" })).toBeEnabled());
+    await inputCash(user, "20.01");
+    if (planned === null) await user.type(screen.getByRole("textbox", { name: "本月计划金额" }), "300");
+    await user.click(screen.getByRole("button", { name: "保存并确认任务" }));
+    await screen.findByText("现金抽屉已关闭");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ path: "/api/cash/task-occurrences/confirm", body: { template_id: templateId, month: "2026-09", expected_version: null, expected_template_version: 4, mode: "new_flow", new_flow: { amount: "20.01", kind: "payment", from_account_id: accountA, to_account_id: null, category_id: categoryId } } });
+    if (planned === null) expect(writes[0].body.planned_amount).toBe("300.00");
+    else expect(writes[0].body).not.toHaveProperty("planned_amount");
+    expect(writes.some((write) => write.path === "/api/cash/flows")).toBe(false);
+    expect(http.mock.calls.some(([url]) => url.includes("/tasks"))).toBe(false);
+  });
+
+  it("历史事项只读沿用项目并提交事项版本，全程不请求 OA 选择器", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
+    const item: CashItem = { id: itemId, version: 9, type: "loan", origin_date: "2026-01-01", original_amount: "100.00", is_opening: true, obligation_direction: "receivable", ledger_group: "company", counterparty: "合成往来对象", oa_project_id: "507f1f77bcf86cd799439011", project_name_snapshot: "合成已结束项目", origin_flow_id: null, origin_mode: null, bill_label_id: null, bill_month: null, ticket_provider: null, ticket_provided_on: null, ticket_description: null, related_obligation_id: null, ticket_source_id: null, content: "合成历史未结", remark: null };
+    render(<DrawerHarness kind="receipt" existingItem={item} settlementKind="cash_repayment" />);
+    expect(screen.getByText("合成已结束项目")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择项目" })).not.toBeInTheDocument();
+    await select(user, "收款账户", "合成现金账户"); await select(user, "费用分类", "合成往来类型"); await inputCash(user, "17.30");
+    await user.type(screen.getByRole("textbox", { name: "本次处理金额" }), "17.30");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await screen.findByText("现金抽屉已关闭");
+    expect(writes[0].body).toMatchObject({ project_mode: "existing_item", project_item_id: itemId, expected_project_item_version: 9, amount: "17.30", allocations: [{ item_id: itemId, target_is_new: false, expected_item_version: 9, kind: "cash_repayment", amount: "17.30" }] });
+    expect(writes[0].body).not.toHaveProperty("oa_project_id");
+    expect(writes[0].body).not.toHaveProperty("related_items");
+    expect(http.mock.calls.some(([url]) => url.includes("/projects"))).toBe(false);
+  });
+
+  it("内部转账只提交一笔、分类为空、不产生事项；同账户不能提交", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
+    render(<DrawerHarness kind="transfer" />);
+    expect(screen.queryByLabelText("费用分类")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新增借款 / 代付" })).not.toBeInTheDocument();
+    await select(user, "付款账户", "合成现金账户"); await select(user, "收款账户", "合成现金账户"); await inputCash(user, "42.35");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("两个账户必须不同"); expect(writes).toHaveLength(0);
+    await select(user, "收款账户", "合成储蓄账户");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await screen.findByText("现金抽屉已关闭");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].body).toMatchObject({ kind: "transfer", category_id: null, amount: "42.35", from_account_id: accountA, to_account_id: accountB, related_items: [], origin_items: [], allocations: [] });
+    expect(http.mock.calls.some(([url]) => url.includes("/settings/categories"))).toBe(false);
+  });
+});
+
+describe("现金读取、更正、删除", () => {
+  it("编辑携带详情读取的初始版本，409 后不自动抬版本覆盖", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: () => json({ error: "cash_version_conflict", message: "现金版本已改变。" }, 409) });
+    render(<DrawerHarness flowId={flowId} />);
+    await user.click(await screen.findByRole("button", { name: "编辑", exact: true }));
+    const amount = screen.getByRole("textbox", { name: "金额（元）" }); await user.clear(amount); await user.type(amount, "130.2");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("现金版本已改变");
+    expect(writes).toHaveLength(1); expect(writes[0]).toMatchObject({ path: `/api/cash/flows/${flowId}`, method: "PUT", body: { expected_version: 7, amount: "130.20" } });
+    expect(writes[0].body).not.toHaveProperty("id"); expect(writes[0].body).not.toHaveProperty("source_kind");
+    expect(amount).toHaveValue("130.2");
+  });
+
+  it("删除需明确确认，完成后重读当前列表而非逐账簿删除", async () => {
+    const user = userEvent.setup(); let deleted = false;
+    const writes = installHttp({ write: ({ path, body }) => { expect(path).toBe(`/api/cash/flows/${flowId}/delete`); expect(body.expected_version).toBe(7); deleted = true; return json({ id: flowId, deleted: true, already_deleted: false, affected_counts: { flows: 1, items: 0, settlements: 0, occurrences: 0 } }); }, list: () => ({ ...rowsPage(deleted ? [] : [flow()]), summary: { ...summary(), filtered_totals: { flow_count: deleted ? 0 : 1, income_amount: deleted ? "0.00" : "125.50", expense_amount: "0.00", transfer_amount: "0.00" } } }) });
+    render(<CashProvider><CashFlowTable /></CashProvider>);
+    await user.click(await screen.findByRole("button", { name: "详情", exact: true }));
+    await user.click(await screen.findByRole("button", { name: "删除", exact: true }));
+    expect(screen.getByText(/影响：0 个任务，0 个事项，0 笔处理/)).toBeInTheDocument(); expect(writes).toHaveLength(0);
+    await screen.findByText("本笔现金没有来源事项。");
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
+    await screen.findByText(/该范围内没有现金流水/);
+    expect(screen.queryByText("合成手工收款")).not.toBeInTheDocument();
+    expect(writes).toHaveLength(1);
+    expect(http.mock.calls.filter(([url, init]) => url.startsWith("/api/cash/flows?") && init?.method === "GET").length).toBeGreaterThan(1);
+    expect(screen.getByText(/操作已保存/)).toBeInTheDocument();
+  });
+
+  it("账户汇总采用嵌套 DTO，未覆盖期间的 null 不显示成 0", async () => {
+    const user = userEvent.setup(); installHttp();
+    render(<CashProvider><CashFlowTable /></CashProvider>);
+    expect(await screen.findByText("筛选合计：收入 125.50")).toBeInTheDocument();
+    expect(screen.getByText("内部转账 42.35")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "账户期间余额" }));
+    const table = screen.getByRole("grid", { name: "账户期间余额" });
+    expect(within(table).getByText("133.15")).toBeInTheDocument();
+    const unknown = within(table).getByRole("row", { name: /尚未起算合成账户/ });
+    expect(within(unknown).getByText("尚未起算，余额未知")).toBeInTheDocument();
+    expect(within(unknown).getAllByText("—")).toHaveLength(5);
+    expect(within(unknown).queryByText("0.00")).not.toBeInTheDocument();
+  });
+});

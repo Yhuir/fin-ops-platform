@@ -2,7 +2,7 @@
 
 更新日期：2026-09-07。工作分支：`codex/cash-ledger`。
 
-状态：**R1–R7已接受；本轮用户明确授权后端实施、测试、提交/推送及部署。后端实施中，真实测试与发布结果只以实施计划执行记录为准。** 本文继续拥有字段/API/事务规格，不把规格等同于已通过验收。
+状态：**R1–R7已接受，本轮已获实施及部署授权；App现金前端和后端查询补齐已实现。** 前端边界见§1.2，17列查询投影见§8.7，不为展示新增表或重做账务。真实测试、兼容验证和发布状态以实施计划§10.13为准，规格不等于验收通过。
 
 本次共四份配套文档：业务需求和 Excel 解释以[现金模块开发设计](../product-specs/cash-module-design.md)为准；页面、表单和 Make 改稿见[UI 设计](../product-specs/cash-module-ui-spec.md)；执行顺序、旧链清理和总体测试安排见[实施计划](cash-module-implementation-plan.md)。本文拥有技术字段、数据关系、服务 I/O、请求语义和事务细节。将来修改需求时，四份文档的受影响部分须同步修改，不保留相互冲突的旧规则。
 
@@ -30,14 +30,14 @@
 
 只有一套现金事实。往来账总表、现金流水、有票支付、刘树刚账及子表都是这套事实的查询结果，不各自写入一份流水。
 
-### 1.2 拟议文件落点
+### 1.2 实际文件落点
 
-以下现金文件名均为候选，不表示当前存在；现有文件仅在集成确实需要时改动。
+以下为当前实现责任。现金内部按实际体量分成配置、流水、事项/结算、任务和查询文件；完整文件清单见cash/boundary-io.md，不新增通用框架。
 
 | 责任 | 文件/目录 | 输入与输出 | 不承担 |
 | --- | --- | --- | --- |
-| 页面组合 | `web/src/pages/CashPage.tsx` | 当前 Tab、可信页面可用性 → 当前现金视图 | 全局 store、第二套 Router、跨页现金 badge |
-| 前端请求与 DTO | `web/src/features/cash/api.ts` 及同目录类型 | 表单/查询参数 → 本文现金 API；响应 → 局部组件 | 普通银行/发票/往来 API、模拟成功、浏览器全量计算 |
+| 页面组合 | `web/src/pages/CashPage.tsx` | 侧栏选择的现金子页面、当前下级Tab、可信cash可用性 → 当前现金视图 | 全局 store、第二套 Router、跨页现金 badge |
+| 前端请求与 DTO | `web/src/features/cash/api.ts`、`hooks.tsx`；DTO在`components/cash/*.types.ts` | 表单/查询参数 → 本文现金 API；响应 → 局部组件 | 普通银行/发票/往来 API、模拟成功、浏览器全量计算 |
 | HTTP 边界 | `backend/src/fin_ops_platform/app/routes_cash.py` | 已认证身份、请求 → 严格参数/命令；结果 → HTTP | SQL、账务规则、读取 cookie 的业务 service |
 | 业务方法 | `backend/src/fin_ops_platform/services/cash_service.py` | 明确命令/查询参数与 actor → 业务结果 | 整个 Application、HTTP response、普通账 repository |
 | 现金持久化 | `backend/src/fin_ops_platform/services/postgres_repositories/cash.py` | 现金查询条件、调用方事务 → cash.* 事实 | OA 网络 I/O、用户权限判断、全局 audit/job 写入 |
@@ -45,6 +45,19 @@
 | 最小组装 | 现有 `application_factory.py` / `server.py` | 明确 cash repository、项目只读依赖、时间来源 → cash service | 启动时拉项目、初始化业务数据、跑任务 |
 
 初始保持一个现金 service 和一个现金 repository。只有实际体量妨碍维护时，才在同一 owner 内拆出任务/结算文件；不提前引入 facade、manager、factory、策略注册平台或一张表一个 service。复用当前工程的事务/连接池和纯组件，不复制旧模块的内存 fallback 或完整状态快照。
+
+前端导航已实施：现有pageRegistry/AppSidebar拥有“现金账”可展开父菜单及现金账目/每月任务/基础设置三个子入口；现金页面只消费非敏感子页面标识，正文显示对应4/2/4下级菜单。沿用一个cash权限key，不新增三个后端权限、三套数据模块或第二Router。父菜单展开与chunk预加载不读现金API；业务请求只由当前现金视图发起，离开现金模块清理数据与在途请求，禁止把现金行、任务数、阶段集合存进shell/session store。
+
+#### 前端移植接线（2026-09-07，已实现）
+
+- **导航**：pageRegistry只登记一个`/cash`页面和一个cash授权选项，三个SidebarItem共用同一现金lazy入口，分别链接`/cash?section=accounts`、`/cash?section=tasks`、`/cash?section=settings`。`/cash`无section时在读取业务前replace到accounts，这是明确默认导航，不是错误数据兜底；非法section显示明确导航错误，不请求另一业务页。下级Tab、日期、项目、搜索与行ID均不写URL。现有Sidebar已支持按完整search高亮，因而URL只保留这个非敏感section；浏览器前进/后退切换这三个子页面，现金局部负责标题/焦点和草稿离开保护。
+- **共享改动的具体必要性**：AppSidebar目前所有Disclosure共用importsExpanded；新增现金前必须按现有disclosure.id保存各自展开状态，移除这一单一状态假设，导入与现金互不联动。pageRegistry的assignablePageOptions由页面定义生成，不得登记三条cash页面造成三个重复权限checkbox；财务侧栏从唯一cash定义组成子链接组即可，不新增导航引擎。
+- **请求**：`features/cash/api.ts`复用现有`apiFetch`的apiUrl解析、凭据与登录头，只调用`/api/cash/*`；集中做严格JSON/HTTP结果、CashError、安全文案、明确超时和AbortSignal处理，不为每个表复制fetch。现有`apiRequestJson`遇HTML会自动换`/fin-ops-api`重发同一请求，因此现金不调用该封装、不复制该fallback，也不为现金删除普通页仍使用的实现。现金收到HTML或非预期结构直接报错，写失败不自动换地址/新ID重试。部署前核实实际API base，不能用前端重发掩盖代理错误。
+- **状态**：CashPage内保存活动视图、各视图筛选/页码、当前数据与表单；必要时一个模块内hook管理请求生命周期，不引入新的全局store/query client。写成功只重读当前相关视图/已打开详情，其他视图再次进入时重读；保留条件不等于保留已失效rows。切换请求、写成功、删除、退出/撤权后取消旧读取并按局部请求序号或effect清理拒绝旧结果，不新增hash/事件总线。
+- **隐私**：不直接使用会持久化状态的useFinanceTableSession/PageSessionStateContext，不将现金筛选中的姓名、项目、关键词或选中ID写浏览器磁盘。复用纯FinanceTable而非普通页查询hook。AppDrawer关闭动画会短暂保留内容；现金路由卸载/撤权须卸载其局部drawer owner并清空数据，不让内容留在全局overlay。Portal样式用现金className局部传入；不修改普通页默认主题。
+- **金额**：写入仍是两位十进制字符串，按既有Money范围校验；不把用户非法三位小数先交formatMoney四舍五入再提交。展示已知金额复用formatMoney的字符串/BigInt格式化；null显式显示“—”，缺字段/非法金额是接口错误，不调用其默认空值“0.00”。不把银行DTO继承为现金DTO，也不在浏览器复算余额。
+- **文件**：CashPage只组合页面；`features/cash/api.ts`拥有HTTP边界，`hooks.tsx`拥有请求生命周期与局部重读；`components/cash/`按账表/录入与事项/任务/设置拆实际有状态责任及DTO，现金局部CSS由lazy入口加载。多个动作共用流水表单/事项选择器，不引入一字段一文件、一Tab一全局Provider或通用表单引擎。
+- **写后反馈**：成功命令与随后GET分开反馈，局部提示“操作已保存”；GET失败提示重新读取，不诱导重复新增。编辑草稿保留初始版本，409不能静默重基。复合删除只收集更正方案并提交一个命令；OA读取和逐项UI选择不提前写库。
 
 ### 1.3 最少 service 方法
 
@@ -645,6 +658,8 @@ OA rows精确形状id/code/name/stage_code/stage_name/selectable/unavailable_rea
 
 all包含结束/未知，selection只可选；selection和selectable=false冲突400。全源范围过滤后计数分页，read_at只是读取时刻。固定结束编码必须实际核实，禁止硬编码用户估计或UI名称。无OA项目/阶段修改端点。
 
+阶段checkbox复用上述接口，不新增数据库字段或“历史结算开放”开关：以stages.code作为选项值、name作为文字，草稿与已保存allowed_stage_codes分离。勾选不调用PUT；“保存选择”提交expected_version及完整集合，成功后按返回configured/version更新本地状态并重读当前项目资格，下一次打开自由新增表单重新读取selection。失败保留草稿，冲突不自动盖最新版本；“撤销更改”恢复最近读取/保存的集合且不写入。结束选项disabled且不进提交集合；全空保存合法，历史查询与无项目录入不受影响。刷新OA只更新源资料、不覆盖本地保存集合；旧请求不得把保存前资格填回。正式App不采用Make的示例字典/勾选初值，也不由前端当前页项目自行推导完整候选。
+
 selection中的新选/改选项目由OA owner批量只读验证，在现金事务外完成；父flow、owned items及分配目标必须同项目，null不是跨项目通配。服务内收集有界去重ID集，用本地集合操作，不加hash指纹；事务内校验同一允许集合版本。关联历史未改项目不重新校验新增资格。R7的existing_item结算只沿用本地既有事项项目，OA不可用/项目已结束不阻断真实结算；不能自由新选该项目、混项目或带入新事项。期初非现金义务按§3.8从all只读识别历史项目，只核实真实身份，不按新增阶段允许集判断；它不是FlowCreate。不以普通completed override或财务项目缓存替代OA。
 
 ### 8.6 最少示例与错误
@@ -748,7 +763,7 @@ GET settlements的item_id/source_item_id/flow_id至少给一个；同时给多�
 
 **任务配置与月度行**
 
-模板行逐一返回§3.6的明确列，包含默认值null和version，不返回全部月份实例。月度行形状为 `row_key,occurrence_id,version,template_id,template_version,month,title,kind,due_on,remind_on,planned_amount,actual_amount,state,marked_unpaid,need_planned_amount,is_over_plan,over_plan_amount,is_overdue,is_due,note,flow_count`。row_key是template_id与YYYY-MM的普通拼接，仅用于UI稳定key，不生成hash或新数据库身份。未落库待办occurrence_id/version为null；template_version仍必须存在。
+模板行逐一返回§3.6的明确列，包含默认值null和version，不返回全部月份实例。月度行形状为 `row_key,occurrence_id,version,template_id,template_version,month,title,kind,due_on,remind_on,planned_amount,actual_amount,state,marked_unpaid,need_planned_amount,is_over_plan,over_plan_amount,is_overdue,is_due,note,flow_count,instructions,default_account_id,default_category_id`。最后三个字段来自当月快照，可空；办理弹窗不得用今日模板重写旧月预填。row_key是template_id与YYYY-MM的普通拼接，仅用于UI稳定key，不生成hash或新数据库身份。未落库待办occurrence_id/version为null；template_version仍必须存在。
 
 remind_on以当月due_on减有效快照remind_days得到；核对任务actual_amount=null，不是0元付款；现金任务在明确范围内无有效现金时actual_amount="0.00"。planned_amount是明确月目标；null显示待填，default_amount仅初建时明确预填建议。flow_count是有效现金条数，点击后GET flows?task_occurrence_id分页显示全部，标题“处理明细”不等于新增历史审计系统。首次无记录冲突后，用GET occurrences?month&template_id重读；不能继续向null ID重试写入。
 
@@ -765,6 +780,16 @@ remind_on以当月due_on减有效快照remind_days得到；核对任务actual_am
 
 Turnover state是该目标义务截至date_to的open/partial/settled，不是任务state。remaining_after_event按item完整事件账序计算再做显示过滤，不能用当前页累计；费用不改变该义务余额，可为null。summary为event_count、principal_amount、opening_adjustment_amount、五列合计、cash_received_amount/cash_paid_amount、remaining_obligation_amount；后者按唯一义务截至date_to计算，并分receivable/payable两项，不能把应收/应付或每行余额直接相加。principal_amount不含opening。
 
+**TurnoverRow投影补充（已实现）**：`CashQueryRepository.query_turnover`保留remaining_after_event并返回以下3个字段。17列表由同一现金查询owner提供，原有字段、公式和普通银行API不变，不加表/迁移/worker。
+
+| 追加字段 | 类型/来源与明确空值 |
+| --- | --- |
+| category | `{id,name,group}`或null；该事件有flow_id时取其cash.flows.category_id对应的现金分类，未关联现金/分类为空时null。不用ledger_group、结算kind或备注猜费用类型，也不以原本金分类替代后续非现金事件分类 |
+| remark | string或null；本金/期初为本事项remark，费用初建为费用事项remark，各种处理为本次settlement.remark。没有备注就是null，不复制content或父事项长说明填满该列 |
+| ticket_collection_state | `open/partial/settled`或null；仅目标为明确关联ticket_source_id的company_receivable时适用。以截至date_to的company_collection累计与该应收original_amount比较：0为open，小于原额为partial，等于原额为settled。非现金冲抵不冒充已回款；它与总义务state可以不同。其他目标null，不把未建立公司应收的票额当欠款 |
+
+分类和备注只对selected_page实际行批量投影；回款状态沿用现金集合聚合，不逐行HTTP/SQL查详情，不重引入无筛选时多次扫全flows的旧性能问题。页数/合计/行数据仍在同一短快照，删除后重读投影同步变化。补充API字段的定向断言、真PG查询测量属于F02；不能通过全部填null把未实现字段伪装为“不适用”。
+
 Ticket summary对全部匹配来源汇总provided/used/offset/available/receivable/cash_received，各数独立。提供日筛选决定来源集合，累计使用/回款截至date_to；完整历史下钻可查全期间并注明，不把未来回款混入历史截点。
 
 Personal summary含coverage说明、opening_obligation_amount、opening_adjustment_amount、new_principal_amount、cash_repayment_amount、ticket_offset_amount、non_ticket_offset_amount、remaining_obligation_amount。期初为已知年初未结；年中起算只报告已知覆盖，不能冒充完整年初。个人coverage从settings.personal_opening_date确定；未配置明确unconfigured、派生完整期初null；起算前月份null，覆盖后的无记录月份0，年中起算月标部分覆盖。矩阵下钻使用origin_date_from/to、is_opening=false、type=loan、ledger_group=personal，无卡组has_bill_label=false且不传bill_label_id。矩阵每页最多200个稳定行×12月，不嵌全部item IDs；下钻分页拿ID/version。无账单本金用non_bill组，不挂假银行卡。
@@ -772,6 +797,8 @@ Personal summary含coverage说明、opening_obligation_amount、opening_adjustme
 ItemDetail.amounts使用四种精确判别类型：loan/company_receivable为original_amount,cash_settled_amount,ticket_offset_amount,non_ticket_offset_amount,remaining_obligation_amount；expense为original_amount,paid_amount,refund_amount,net_expense_amount,available_offset_amount；ticket_source为provided_amount,used_amount,offset_amount,available_source_amount。paid_amount包括origin_flow份额与expense_payment、不重复；refund计一次。不存在万能余额或任意字典。
 
 报表sort白名单：turnover occurred_on/original_amount/repayment_amount；tickets ticket_provided_on/provided_amount/available_source_amount；personal matrix bank_name/label/year_principal_amount，子表occurred_on/amount。末级追加稳定row_id/ID；非法sort400。summary与rows/total同快照，不取当前页合计冒充全结果。
+
+总表`personal_variant=principal/settlement`只可与`ledger_group=personal`一起使用，服务端在分页前筛选；非法组合400且不查询数据库。详情复用`GET items?purpose=list`增加`origin_flow_id`、`related_obligation_id`、`ticket_source_id`三种明确父关系过滤；父ID不存在404，不做每行子详情请求，也不使用当前页代替完整关联。它们不是新增报表事实或通用关系API。
 
 ### 8.8 有界读取、排序和已知错误
 
@@ -789,14 +816,14 @@ ItemDetail.amounts使用四种精确判别类型：loan/company_receivable为ori
 
 ## 9. 权限、全局历史排除与 OA 边界
 
-### 9.1 同 PostgreSQL 的最少权限
+### 9.1 同 PostgreSQL、同账号与模块隔离
 
-- `cash` schema 归迁移 owner；现金 API 运行角色仅有 cash.* 必要读写，不授予 DDL、超级用户或普通财务/audit/job 权限。
-- 普通 API/worker 不获得 cash.* 权限；不把 cash 角色 grant 给普通角色，不使用同一连接动态 `SET ROLE`。
-- cash repository 只拿现金连接入口，普通 repository 只拿普通入口；两者复用已维护的池实现。连接总量一起预算，不再额外开一大池。
-- 检查 owner/PUBLIC/default privileges、角色继承、视图和 SECURITY DEFINER 旁路；不只检查表名/search_path。
-- 现金身份/ACL 在共享安全控制面先判断，cash service 不自行读取普通设置表。现金池不可用只让现金请求明确失败，不回退普通 DSN。
-- 同进程和同库仍共享 CPU、磁盘、连接总预算和备份管理权；不能保证被攻陷的整个服务器看不到现金，也不能承诺理论零性能影响。
+- 用户2026-09-07明确不使用单独现金数据库登录账号。唯一连接配置来自`PostgresSettings.from_env()`，现金与普通App的DSN完全一致；不新增cash密钥文件、专用账号或动态`SET ROLE`。
+- `cash` schema仍归迁移owner。0167给已存在、生产已核实的`fin_ops_app_runtime`授予cash schema USAGE及10表SELECT/INSERT/UPDATE/DELETE；不授予DDL、TRUNCATE、所有权或角色管理权限，不改既有普通业务权限，不修改0166。
+- cash repository只拿现金连接入口并且只操作cash.*；普通repository不调用cash查询。二者复用现有池实现和登录配置，现金单独小池限制资源占用，不是权限隔离。上限2连接/8等待/2秒获取/5秒SQL，既有更严上限不放宽。
+- 移除`cash_runtime_identity.py`、专用账号provision工具、cash env示例及systemd/helper加载行；不留双配置或账号兼容分支。连接配置无效/数据库不可用仍明确503，不创建替代库、内存数据或假成功。
+- 现金页面ACL在初始化前判断，cash service不自行读取普通设置表；全局requested/completed审计、页面指标、job和普通reset排除保持不变。
+- 同账号的有效数据库权限能够访问两类表，因此不再要求/宣称数据库拒绝跨池SQL。应用业务层仍严禁双向混读混写，通过真实事务、API权限、跨池数据不变和旧页回归测试保护。同进程/同库共享CPU、磁盘、连接和备份管理权，不能承诺理论零性能影响或数据库级不可见。
 
 ### 9.2 页面权限只有两个状态
 
@@ -935,9 +962,9 @@ TC28还覆盖首次cash为空→识别OA中已结束但真实存在的项目→�
 
 | 项目 | 实施动作 | 当前结论 |
 | --- | --- | --- |
-| OA原始字段/编码/字典/分页/源权限 | 实施B01只读查真实结构与脱敏样例，B03实现窄方法 | UI标签证据不等于源合同已核验；不能猜字段后宣称OA模块完成 |
-| PG部署版本/迁移序号/角色权限/连接预算 | B01核实，B02在明确测试库验证migration与双向拒绝 | 当前未执行DDL或GRANT；同库不是物理隔离 |
-| 所有现金函数/接口/金额规则 | B05–B09实际编码、真实PG失败/并发/HTTP链测试 | 本文是实施规格，不是现成实现或测试结果 |
+| OA原始字段/编码/字典/分页/源权限 | B01/B03已只读核查真实项目字段及10阶段字典；发布后现金入口仍需联调 | 已核查来源不等于生产现金API已激活；实际范围见实施计划§10 |
+| PG部署版本/迁移序号/角色权限/连接预算 | 同库同账号测试迁移/运行授权与模块不混读写；保留迁移owner职责 | 仍需补五项schema兼容测试正文、PG16旧版兼容与发布预算；不要求已取消的cash专用角色SQL拒绝 |
+| 现金函数/接口/金额规则 | 主体已有实现和本地测试，F阶段补UI所需投影、真实浏览器链和受影响回归 | 规格不等于全部测试通过，新增三项TurnoverRow投影仍未实现 |
 | 原App共享ACL/审计/日志/健康出口 | B01定位、B02/B09回归 | 保留普通保护，现金新page key不能扩大普通job授权 |
 | 性能 | B10测服务器/旧页请求；F05测浏览器和DOM | 目标不是实测成绩，不保证理论零影响 |
 | 账户/期初/允许阶段/12项任务数值 | 使用设置填写 | 不以真实公司数据作为写代码的前置要求 |
@@ -946,7 +973,7 @@ TC28还覆盖首次cash为空→识别OA中已结束但真实存在的项目→�
 
 ### 12.3 后端先行的完成边界
 
-唯一执行顺序在[实施计划](cash-module-implementation-plan.md)：B01–B10覆盖非前端，F01–F05覆盖前端。非前端可在一个任务中分步交付；不需为验证后端写临时页面，不要求Figma先导出代码。不保证一天完成，也不把当前询问当实施/新建任务/发布授权。
+唯一执行顺序在[实施计划](cash-module-implementation-plan.md)：B01–B10标识非前端责任，F01–F05标识前端责任。Make基本方向已认可，本次只分析；获移植实施授权后进入F阶段和本地联调，B10未完成的生产部分后移到正式发布后。编号不要求先完成生产验证才做UI，不需要临时后端页面或强制先导出Figma代码，也不保证一天完成。
 
 后端交付应有：cash持久化与受限连接、权限/审计隔离、OA窄只读、全部配置/流水/事项/结算/任务/报表API、真实PG事务并发、HTTP完整业务链与旧功能回归、服务器性能结果、实际接口例子与字段说明。只用mock或单元测试不算后端完成。前端导航、005权限checkbox、表单/抽屉/空错态、前端取消旧请求、页面E2E和DOM性能留F阶段，不提前报完成。
 

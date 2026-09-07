@@ -86,6 +86,7 @@ const reconciliationWorkbenchPage = lazyPage(() => import("../pages/Reconciliati
 const taxOffsetPage = lazyPage(() => import("../pages/TaxOffsetPage"));
 const costStatisticsPage = lazyPage(() => import("../pages/CostStatisticsPage"));
 const bankDetailsPage = lazyPage(() => import("../pages/BankDetailsPage"));
+const cashPage = lazyPage(() => import("../pages/CashPage"));
 const pendingInvoicesPage = lazyPage(() => import("../pages/PendingInvoicesPage"));
 const inputInvoiceUsagePage = lazyPage(() => import("../pages/InputInvoiceUsagePage"));
 const oaPendingPaymentsPage = lazyPage(() => import("../pages/OaPendingPaymentsPage"));
@@ -123,6 +124,14 @@ export const appPageDefinitions: AppPageDefinition[] = [
     component: bankDetailsPage.component,
     preload: bankDetailsPage.preload,
     sidebar: { group: "finance", label: "银行明细", icon: Landmark },
+  },
+  {
+    path: "/cash",
+    pageKey: "cash",
+    component: cashPage.component,
+    preload: cashPage.preload,
+    end: true,
+    sidebar: { group: "finance", label: "现金账", icon: WalletCards },
   },
   {
     path: "/oa-pending-payments",
@@ -287,7 +296,15 @@ export const sidebarGroups: SidebarGroup[] = [
     items: appPageDefinitions
       .filter((definition) => definition.sidebar?.group === "finance")
       .map(sidebarItemFromDefinition)
-      .filter((item): item is SidebarItem => item !== null),
+      .filter((item): item is SidebarItem => item !== null)
+      .map((item) => item.pageKey === "cash" ? {
+        id: "cash", label: "现金账", icon: WalletCards,
+        children: [
+          { ...item, id: "cash-accounts", label: "现金账目", to: "/cash?section=accounts" },
+          { ...item, id: "cash-tasks", label: "每月任务", to: "/cash?section=tasks" },
+          { ...item, id: "cash-settings", label: "基础设置", to: "/cash?section=settings" },
+        ],
+      } : item),
   },
   {
     title: "系统操作",
