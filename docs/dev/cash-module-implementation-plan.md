@@ -42,7 +42,7 @@
 
 | 原输入 | 当前状态与执行依据 | 责任/落点 |
 | --- | --- | --- |
-| D1 OA 实际字段与分页 | 已只读核实 Mongo `form_data` 的字符串 form_id=17、ObjectId、data.name/code/projectPhase；真实118项目。OA 字典 XMJD 的10个 code/label 已在已登录OA界面核实，end=已结束、0=未中标。运行时直接 GET 字典并投影项目，缺失/未知明确不可选；有效令牌下的生产 HTTP 验证仍待完成 | B01/B03；不以静态名称或 active/completed 代替实时字典 |
+| D1 OA 实际字段与分页 | 已只读核实 Mongo `form_data` 的字符串 form_id=17、ObjectId、data.name/code/projectPhase；真实118项目。OA 字典 XMJD 的10个 code/label 已在已登录OA界面核实，end=已结束、0=未中标；§10.9进一步通过现金实现的loader读取真实OA HTTP，10个唯一阶段且含end。现金生产API尚未激活，项目/设置端到端仍未测 | B01/B03；不以静态名称或 active/completed 代替实时字典 |
 | D2 账户/期初/币种/历史 | R3 已确认：管理现金/储蓄账户，信用卡为账单；人民币两位、期初现金与未结事项分开；未知历史不伪造；负余额提示而非造钱；更正起算/期初须明确影响；真实退款另记 | B04/B05/B08；具体账户名、金额和启用日留待实际配置，不阻塞写通用功能 |
 | D3 五列/现金与非现金/票据/费用 | R1/R2 已确认：往来按处理列行、金额各有固定事实来源；ticket_use 与 ticket_offset 不重复占额；公司回款不再次冲个人；费用只记一次；个人矩阵按实际代付月 | B05/B06/B08；准确字段与公式只在技术/总设计维护 |
 | D4 删除/源纠错/任务分次/关联/模板 | R3/R4/R5 已确认：正文物理删除与最少身份；源义务明确纠正；同月目标可分次，一 flow 最多一任务；已有流水仅关联；逾期保留、模板写时保存必要旧月快照；首版单项目、同项目多事项 | B05–B08；不保留单次模式、逻辑删除、历史只显示处理过月份等旧分支 |
@@ -73,10 +73,10 @@
 
 ### 2.2 仍需做的不是重新征求 R1–R7
 
-- D1 原始 OA 技术核查和受控测试数据库、角色/连接预算的事实核实，归属 B01；不得伪称本轮已完成。
+- D1源结构、字典HTTP及本地PG测试已有§10.8/10.9证据；生产现金API、实际连接预算及发布后的链路仍须在真实运行环境验证。数据库角色专项验收按用户最新分工由用户/DBA执行，Agent不重复执行该项，也不替用户声称已通过。
 - 原型还需按现有 UI 文档修订，前端阶段可以在现有组件中逐项完成；不能把“文档已更新”说成“Make 已更新”。
 - R1–R7不默认扩充跨项目金额分摊、附件/导出、外部通知、在线说明编辑。这些以后如明确需要，另补局部设计，不留隐藏兼容模式。
-- 在当前文档结果之后，仍需用户明确发出实施指令才运行 B 阶段；不会因本轮接受业务推荐自动编写代码或发布。
+- 用户已明确授权B阶段实施和发布，不能继续把“需要实施指令”作为当前阻塞；只保留尚未具备的真实服务器配置/激活条件，不把部署未完成写成已完成。
 
 ### 2.3 R7已确认：历史项目结算闭环
 
@@ -452,7 +452,7 @@ B/F 是开发顺序。本轮已取得后端实施和部署许可；这不授权�
 - 新增 `0166_cash_ledger.sql`，同库 `cash` schema 十表；金额使用精确 numeric/Decimal，UUID、版本、唯一约束与事务控制并发，不接入普通事实池。
 - `routes_cash → cash_runtime → cash_service/cash_tasks/cash_queries → cash repositories`：账户/分类/账单标识、项目允许阶段、个人期初、流水/事项/结算、源纠错/物理删除、月任务/分次/核对、四账及个人全部子表。具体文件和 I/O 见[现金边界](../modules/cash/boundary-io.md)。
 - 普通登录先鉴权，再惰性开启独立现金连接（pool 2、等待队列8）；缺现金配置只令现金返回503，不令原页面启动失败。不复用普通 DSN；拒绝不同库、相同角色及角色覆盖参数。
-- OA 专用只读服务使用真实项目 `form_id="17"`、ObjectId、`data.name/code/projectPhase`；阶段展示来自 `XMJD` 字典，禁止旧 active 适配器和状态写回。Mongo 118项目、结束36已只读核实；真实字典 HTTP 仍因过期会话未通过。
+- OA 专用只读服务使用真实项目 `form_id="17"`、ObjectId、`data.name/code/projectPhase`；阶段展示来自 `XMJD` 字典，禁止旧 active 适配器和状态写回。Mongo 118项目、结束36已只读核实；首轮真实字典HTTP因过期会话未通过，用户更新token后已由§10.9真实验证，不再是当前阻塞。
 - `cash` 页面可用/不可用；005保持唯一授权管理。两处全局操作历史钩子、全局页面性能详情均精确排除现金；现金响应 `no-store`；应用/Gunicorn 日志不包含现金 ID/query/异常正文。Nginx实际配置仍需管理员核查。
 - API-only现金环境文件与一次性受限角色配置工具已编写、真实PG验证。普通worker不加载现金凭据，普通reset/审计不读写cash。
 - 未增加现金导航、权限checkbox、任何现金组件或Figma变更。既有Settings普通保存保留cash key；旧“全选”没有现金选项，待F01一起修订，当前不为普通账号自动授予现金。
@@ -528,9 +528,42 @@ python3 -m tests.test_cash_query_performance --rows 10000 100000 --samples 100
 只读schema-compatibility-plan确认：生产PostgreSQL **16**、head0165；本候选head0166，只有cash_ledger一条待迁移，未改旧迁移；现有流程要求exact旧release代码在候选schema上的兼容写入证据，仍待执行/安装，不绕过该已有发布边界。本机功能/性能实测为PG17.10，不冒称PG16生产验证。恢复管理员配置/有效会话后，继续按现有发布流程对该exact候选完成兼容验证与激活，而不是使用allow-dirty/跳过检查或扩大清理。
 
 - 生产deploy SSH可连接；候选上传后再次`systemctl show`确认API仍为`active/running`、工作目录`/opt/fin-ops/releases/main-ae2f1504-20260904025336/src`；本轮尚未激活现金版本。
-- 本机保存005会话经证书验证的HTTPS请求返回401。需要用户通过`./scripts/with-production-admin-token.sh --store`更新有效会话，不在聊天传token；不伪造会话或把失败转成功。
+- 首轮本机005会话HTTPS返回401；用户随后通过本机wrapper更新，§10.9已验证200且`can_admin_access=true`，该阻塞已解除。不在聊天传token，不伪造会话。
 - deploy账号只有固定sudo helper；新cash角色、root0600 API env和受控helper更新需要服务器管理员/DBA权限。没有把candidate代码塞入helper任意root执行，没有复用普通或migrator身份运行现金。
 - Nginx实际配置deploy账号不可读，代理日志隐私仍未验证。应用/Gunicorn脱敏测试不能替代此项。一次性流程见[现金部署](../operations/cash-module-deployment.md)。
 - 未执行生产迁移、真实cash录入/删除、OA状态写回，也未停服务。部署受阻时只能准备候选，不得称已部署或生产达标。
 - 未产生数据库备份。测试结束确认没有活动连接后，已精确删除本任务创建、仅含合成数据的`fin_ops_cash_test_20260907_core`、`fin_ops_cash_test_20260907_tasks`、`fin_ops_cash_test_20260907_root`，元数据复查残留0；未删除主库、常规备份、Excel或用户原文件。合成测试数据不保留恢复副本，可用测试重新生成。
 - 收尾文档检查：31份本次变更MD的92个本地链接及代码围栏检查通过；lint/docs/diff空白检查再次通过。再次HTTPS只读会话核查仍401；浏览器现有OA标签页自动化返回`Debugger unattached`，没有取得替代有效会话。
+
+### 10.9 用户更新token后的生产只读验证
+
+范围变更：用户已保存新admin token，并明确现金受限角色的配置/专项权限验收由用户处理。Agent本轮**不执行生产role创建、grant/revoke或角色权限探测**，不运行`provision_cash_postgres.py`。现有CashRuntime身份检查和禁止普通DSN替代的安全边界不删除；用户接手专项验收不等于允许绕过程序隔离。没有应用代码变更。
+
+#### 登录、OA和部署状态
+
+- 使用`./scripts/with-production-admin-token.sh`从本机安全文件加载凭据；HTTPS使用可信CA验证，没有打印token、身份详情、项目全集或业务payload。
+- 真实`GET /fin-ops-api/api/session/me`返回200、`can_admin_access=true`，复核耗时98.37ms；token失效问题已解除。
+- 运行本分支实际`cash_oa_projects.load_project_stages`调用`https://www.yn-sourcing.com/oa-api/system/dict/data/type/XMJD`：成功96.69ms、10个状态、code唯一、含end，完整通过实现的格式校验。此为**现金adapter→真实OA字典**验证，不是尚未部署的`/api/cash/projects`端到端验证。不向OA写入任何内容。
+- `systemctl show`确认API仍运行`main-ae2f1504-20260904025336`；API及4个既有worker均active。`GET /fin-ops-api/health/ready`返回200、`status=ready`，只证明当前旧release就绪。
+- 005访问`GET /fin-ops-api/api/cash/settings/project-selection`返回403，错误码`page_access_policy_missing`、消息“当前接口尚未登记页面权限”。旧版未注册现金路由，尚未进入现金service/数据库；**这不是现金数据库角色验证失败结论**。
+- API运行配置仍只列common/secrets两个EnvironmentFiles；只读检查已安装deploy helper也没有`fin-ops.cash.env`加载项。未打印任何环境秘密值。现金API专用env加载与受控helper安装尚未完成，不能只更新admin token就称现金版本可用。
+- 本轮没有再次上传或激活候选，没有迁移生产schema、修改systemd、重启服务或执行真实现金写入。仍使用§10.8已验证候选，正式激活待管理员完成服务器配置后按现有流程执行。数据库角色专项验收由用户/DBA交付，Agent不重复检查；其结果目前不作已通过声明。
+
+#### 当前旧release只读HTTP测量
+
+复用现有`fin_ops_platform.tools.http_slo_probe.collect_http_slo`和`DEFAULT_API_PROBES`中4个命名探针；参数`base_url=https://www.yn-sourcing.com`、`api_prefix=/fin-ops-api`、`iterations=20`、`warmup=2`、`concurrency=4`、`timeout_seconds=10`、`include_samples=False`，认证header来自wrapper。无新增测量框架、门禁或生产写入；响应正文只在内存处理，不存盘。
+
+4并发窗口为工具报告的2026-09-07 04:52:46–04:53:04 UTC；共80个实测请求（另8次预热），全部200、错误0。阈值沿用现有每接口p95≤1000ms、p99≤2000ms，不调整：
+
+| 旧release接口 | p50 ms | p95 ms | p99 ms | 本次采样结论 |
+| --- | ---: | ---: | ---: | --- |
+| 工作台initial，month=all | 1128.089 | 1273.753 | 1291.104 | p95超标 |
+| 银行流水列表，2026年，第一页50条 | 589.287 | 721.110 | 723.200 | 通过 |
+| 成本explorer，2026-03，非阻塞统计不包含 | 305.368 | 427.294 | 428.232 | 通过 |
+| 普通往来款，分组第一页50条 | 857.879 | 913.887 | 919.602 | 通过 |
+
+为区分并发影响，工作台同参数另做1并发20次+2预热，窗口04:53:52–04:54:05 UTC：20次均200；p50=564.589ms、p95=639.463ms、p99=706.438ms。单并发结果不覆盖4并发失败，不通过只保留较快样本伪造整体通过。本次HTTP现象表明并发增加时端到端耗时上升，但尚未拆分PG/CPU/TLS/网络等待，不能猜测根因。
+
+这些是当前旧release小样本只读测量：未加载现金代码，不能归因于现金变更；也不能当作现金生产性能、百万级容量、14天容量合同、全量业务金额正确性或浏览器测试。现金流水/任务/各账生产链路、现金与普通API混合负载、生产PG16满量性能和Nginx隐私仍未验证。本轮不扩展为旧工作台性能修复，不修改旧模块或降低SLO。
+
+文档影响仅为本实施记录、产品状态和部署验收分工；不改变业务字段、模块I/O或既有安全逻辑。本轮只读验证覆盖已有API连通、OA外部读取及旧功能采样，不新增应用测试；七类中的新业务单测/事务/前端/新worker测试不适用无代码变更。没有创建备份或临时数据库、未删除任何数据。

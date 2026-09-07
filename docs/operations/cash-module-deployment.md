@@ -4,6 +4,8 @@
 
 本次用户明确授权从 `codex/cash-ledger` 分支部署后端，不合并 `main`，不新增前端导航或现金权限复选框。正式发布仍使用 [`scripts/deploy-oa.sh`](../../scripts/deploy-oa.sh) 及[现有部署流程](../../deploy/oa/README.md)。本文只补充现金所需的一次性管理员配置，不替换现有发布验证。
 
+2026-09-07后续分工：用户已更新admin token，并接手现金数据库角色配置及专项权限验收；Agent不执行该生产专项、不运行下面的provision工具，也不替用户宣称通过。此分工不删除应用现有身份校验，不允许普通DSN替代；API专用env与受控helper仍须管理员安装。当前token、OA字典、线上版本及性能结果见[实施计划§10.9](../dev/cash-module-implementation-plan.md#109-用户更新token后的生产只读验证)。
+
 ## 职责和顺序
 
 1. 发布负责人确定已提交、已推送的 exact 分支 commit 和候选 release；先执行正常候选验证。
