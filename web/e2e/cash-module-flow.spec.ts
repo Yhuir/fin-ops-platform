@@ -17,10 +17,10 @@ function flow(id: string, kind: "receipt" | "payment", amount: string, content: 
     account_running_balance: null, remark: null, created_by_account: "E2E-CASH", created_by_name: "合成测试", created_at: fixedNow, updated_at: fixedNow };
 }
 function totals(repaid: boolean) { return { principal_amount: "15000.00", opening_adjustment_amount: "0.00", repayment_amount: repaid ? "3000.00" : "0.00", reimbursement_received_amount: "0.00", ticket_offset_amount: "0.00", non_ticket_offset_amount: "0.00", real_expense_amount: "0.00", cash_received_amount: repaid ? "3000.00" : "0.00", cash_paid_amount: "12000.00", remaining_obligation_amount: { receivable: repaid ? "12000.00" : "15000.00", payable: "0.00" } }; }
-async function installCashFixtures(page: Page, options: { firstCreateFailure?: boolean } = {}) {
+async function installCashFixtures(page: Page, options: { firstCreateFailure?: boolean; denseFlows?: boolean } = {}) {
   const ordinary = await installDeterministicApiMocks(page, { sessionMode: "admin" });
   const calls: { method: string; path: string; query: string }[] = []; const submitted: Record<string, unknown>[] = [];
-  const flows = [flow(principalId, "payment", "12000.00", "合成个人借出"), flow(repaymentId, "receipt", "3000.00", "合成现金归还", "2026-09-02")];
+  const flows = options.denseFlows ? Array.from({ length: 51 }, (_, index) => flow(`20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, "receipt", "999999999999.99", `第${index + 1}笔合成流水：超长中文用途说明用于验证换行、滚动和最后一行完整显示`)) : [flow(principalId, "payment", "12000.00", "合成个人借出"), flow(repaymentId, "receipt", "3000.00", "合成现金归还", "2026-09-02")];
   let forbidden = false; let failCreate = options.firstCreateFailure ?? false;
   const paginate = (rows: unknown[], url: URL) => {
     const pageNumber = Number(url.searchParams.get("page") ?? "1"); const pageSize = Number(url.searchParams.get("page_size") ?? "50");
@@ -87,16 +87,18 @@ test.describe("cash module deterministic browser flow", () => {
   test("renders all cash subpages, every tab, real table colors and confined wide-table overflow", async ({ page }, testInfo) => {
     await installCashFixtures(page); await page.goto("/cash?section=accounts");
     const navigation = page.getByRole("navigation", { name: "主导航" });
-    for (const name of ["现金账目", "每月任务", "基础设置"]) await expect(navigation.getByRole("link", { name, exact: true })).toBeVisible();
+    for (const name of ["现金流水", "现金账目", "每月任务", "基础设置"]) await expect(navigation.getByRole("link", { name, exact: true })).toBeVisible();
     const table = page.getByRole("grid", { name: "往来账总表" }); await expect(table).toBeVisible(); await expect(table.getByRole("columnheader")).toHaveCount(17);
     const colors = await table.locator("tbody tr").evaluateAll(rows => rows.map(row => [...row.querySelectorAll("td,th")].map(cell => getComputedStyle(cell).backgroundColor)));
     expect(colors).toHaveLength(4);
+    const rowHeight = (await table.locator("tbody tr").first().boundingBox())!.height;
+    expect(rowHeight).toBeGreaterThanOrEqual(44); expect(rowHeight).toBeLessThanOrEqual(45);
     for (const [index, color] of ["rgb(255, 253, 240)", "rgb(239, 246, 255)", "rgb(255, 247, 237)", "rgb(240, 253, 244)"].entries()) expect(colors[index].every(value => value === color)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("cash-desktop-total.png"), fullPage: true });
     await page.getByRole("tab", { name: "有票支付", exact: true }).click(); await expect(page.getByRole("grid", { name: "有票支付", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "个人专账", exact: true }).click(); await expect(page.getByRole("grid", { name: "个人年度还款矩阵" })).toBeVisible();
-    for (const [tab, grid] of [["现金归还", "个人现金归还"], ["有票直接冲", "有票直接冲"], ["无票报销冲抵", "无票报销冲抵"]]) { await page.getByRole("tab", { name: tab, exact: true }).click(); await expect(page.getByRole("grid", { name: grid, exact: true })).toBeVisible(); }
-    await page.getByRole("tab", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
+    for (const [tab, grid] of [["现金归还", "个人现金归还"], ["有票直接冲", "有票直接冲"], ["无票报销冲抵", "无票报销冲抵"]]) { await page.getByRole("button", { name: /个人专账视图$/ }).click(); await page.getByRole("option", { name: tab, exact: true }).click(); await expect(page.getByRole("grid", { name: grid, exact: true })).toBeVisible(); }
+    await page.getByRole("link", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
     await navigation.getByRole("link", { name: "每月任务", exact: true }).click(); await expect(page.getByRole("tab", { name: "本月处理" })).toBeVisible();
     await page.getByRole("tab", { name: "任务配置" }).click(); await expect(page.getByRole("grid", { name: "任务模板" })).toBeVisible();
     await navigation.getByRole("link", { name: "基础设置", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金账户", exact: true })).toBeVisible();
@@ -105,7 +107,7 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(page.getByRole("checkbox", { name: "实施", exact: true })).toBeChecked(); await expect(page.getByRole("checkbox", { name: "已结束（不允许新增）" })).toBeDisabled();
     await page.screenshot({ path: testInfo.outputPath("cash-project-settings.png"), fullPage: true });
     await page.getByRole("tab", { name: "支付办理说明" }).click(); await expect(page.getByRole("grid", { name: "支付办理参考" })).toBeVisible();
-    await navigation.getByRole("link", { name: "现金账目", exact: true }).click(); await expect(table).toBeVisible();
+    await navigation.getByRole("link", { name: "现金账目", exact: true }).click(); await page.getByRole("tab", { name: "往来账总表", exact: true }).click(); await expect(table).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     const scroll = page.locator(".finance-table__scroll").filter({ has: table }); await expect(scroll).toBeVisible();
     expect(await scroll.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
@@ -115,7 +117,7 @@ test.describe("cash module deterministic browser flow", () => {
 
   test("uses a stable submission ID on explicit retry and deletion rereads the cash pool and report", async ({ page }, testInfo) => {
     const api = await installCashFixtures(page, { firstCreateFailure: true }); await page.goto("/cash?section=accounts"); await expect(page.getByRole("grid", { name: "往来账总表" })).toBeVisible();
-    await page.getByRole("tab", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
+    await page.getByRole("link", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
     await page.getByRole("button", { name: "新增流水", exact: true }).click(); await page.getByRole("menuitem", { name: "收入", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "新增现金流水" }); await expect(dialog).toBeVisible();
     await dialog.getByRole("textbox", { name: "金额（元）" }).fill("88.60"); await dialog.getByRole("textbox", { name: "用途", exact: true }).fill("合成新增现金流水");
@@ -133,7 +135,7 @@ test.describe("cash module deterministic browser flow", () => {
     const deletion = page.getByRole("dialog", { name: "删除现金流水" }); await expect(deletion.getByText("本笔现金没有来源事项。")).toBeVisible();
     await deletion.getByRole("button", { name: "确认删除", exact: true }).click(); await expect(deletion).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "现金流水明细" })).not.toContainText("合成现金归还"); expect(api.count("GET", "/flows")).toBeGreaterThan(beforeFlows);
-    const beforeReport = api.count("GET", "/reports/turnover"); await page.getByRole("tab", { name: "往来账总表", exact: true }).click();
+    const beforeReport = api.count("GET", "/reports/turnover"); await page.getByRole("link", { name: "现金账目", exact: true }).click();
     await expect(page.getByRole("grid", { name: "往来账总表" })).not.toContainText("合成现金归还"); expect(api.count("GET", "/reports/turnover")).toBeGreaterThan(beforeReport);
     expect(api.count("POST", `/flows/${repaymentId}/delete`)).toBe(1);
   });
@@ -147,5 +149,126 @@ test.describe("cash module deterministic browser flow", () => {
     await page.getByRole("link", { name: "现金账目", exact: true }).click(); await expect(page.getByRole("grid", { name: "往来账总表" })).toBeVisible();
     api.forbid(); await page.getByRole("button", { name: "刷新", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("现金账权限已失效"); await expect(page.getByRole("grid", { name: "往来账总表" })).toHaveCount(0); await expect(page.locator("body")).not.toContainText("合成个人借出");
+  });
+
+  test("keeps applied filters across cash views, refetches on return, and resets all filters once", async ({ page }) => {
+    const api = await installCashFixtures(page);
+    let flowResponses = 0;
+    page.on("response", response => { if (new URL(response.url()).pathname === "/api/cash/flows" && response.status() === 200) flowResponses += 1; });
+    await page.goto("/cash?section=flows");
+    const grid = page.getByRole("grid", { name: "现金流水明细" }); await expect(grid).toContainText("合成现金归还");
+    await expect(page.getByRole("tab")).toHaveCount(0);
+    await page.getByRole("textbox", { name: "搜索流水" }).fill("归还");
+    await page.getByRole("button", { name: "查询", exact: true }).click(); await expect(grid).not.toContainText("合成个人借出");
+    await page.getByRole("button", { name: /来源$/ }).click(); await page.getByRole("option", { name: "手动录入", exact: true }).click();
+    await expect(grid).toContainText("合成现金归还");
+    const before = flowResponses;
+    await page.getByRole("link", { name: "现金账目", exact: true }).click();
+    await page.getByRole("button", { name: "公司", exact: true }).click();
+    await page.getByRole("tab", { name: "有票支付", exact: true }).click();
+    await page.getByRole("tab", { name: "往来账总表", exact: true }).click();
+    await expect(page.getByRole("button", { name: "公司", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("link", { name: "现金流水", exact: true }).click();
+    await expect(grid).toContainText("合成现金归还"); await expect(grid).not.toContainText("合成个人借出");
+    await expect(page.getByRole("textbox", { name: "搜索流水" })).toHaveValue("归还");
+    // Development StrictMode may start an aborted mount GET; only the active request completes.
+    expect(flowResponses).toBe(before + 1);
+    const resetBefore = api.count("GET", "/flows");
+    await page.getByRole("button", { name: "重置", exact: true }).click(); await expect(grid).toContainText("合成个人借出");
+    expect(api.count("GET", "/flows")).toBe(resetBefore + 1);
+    const url = new URL(`http://test/${api.calls.filter(row => row.path === "/flows").at(-1)!.query}`);
+    expect(url.searchParams.has("keyword")).toBe(false); expect(url.searchParams.has("source")).toBe(false);
+    expect(page.url()).toMatch(/\/cash\?section=flows$/);
+    await page.getByRole("link", { name: "银行明细", exact: true }).click();
+    await expect(page.getByRole("grid", { name: "交易流水" })).toBeVisible();
+    await expect(page.locator(".cash-workspace")).toHaveCount(0);
+    await page.getByRole("link", { name: "现金账目", exact: true }).click();
+    await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("compact controls align without accounts, empty state stays below headers, and footer fits the viewport", async ({ page }, testInfo) => {
+    await installCashFixtures(page);
+    await page.route("**/api/cash/settings/accounts?**", route => route.fulfill({ json: { rows: [], pagination: { page: 1, page_size: 100, total: 0 } } }));
+    await page.route("**/api/cash/flows?**", route => route.fulfill({ json: { rows: [], pagination: { page: 1, page_size: 50, total: 0 }, summary: { period: { date_from: "2026-01-01", date_to: "2026-09-07" }, filtered_totals: { income_amount: "0.00", expense_amount: "0.00", transfer_amount: "0.00", flow_count: 0 }, account_balances: [] } } }));
+    await page.setViewportSize({ width: 1800, height: 847 }); await page.goto("/cash?section=flows");
+    const grid = page.getByRole("grid", { name: "现金流水明细" }); await expect(grid).toContainText("该范围内没有现金流水");
+    const geometry = await page.locator(".cash-page").evaluate(root => {
+      const controls = [...root.querySelectorAll(".cash-toolbar--compact .select__trigger")].map(node => node.getBoundingClientRect());
+      const table = root.querySelector(".cash-main-table")!, header = table.querySelector("thead")!, empty = table.querySelector(".cash-empty")!;
+      return { heights: controls.map(rect => rect.height), tops: controls.map(rect => rect.top), headerHeight: header.getBoundingClientRect().height,
+        emptyInside: Boolean(empty.closest("tbody")), headerBottom: header.getBoundingClientRect().bottom, emptyTop: empty.getBoundingClientRect().top,
+        footerBottom: table.querySelector(".finance-table__footer")!.getBoundingClientRect().bottom, tableHeight: table.getBoundingClientRect().height };
+    });
+    expect(geometry.heights.every(height => Math.abs(height - 32) < 1)).toBe(true);
+    expect(Math.max(...geometry.tops) - Math.min(...geometry.tops)).toBeLessThan(1);
+    expect(geometry.headerHeight).toBeGreaterThanOrEqual(35); expect(geometry.headerHeight).toBeLessThanOrEqual(37);
+    expect(geometry.emptyInside).toBe(true); expect(geometry.emptyTop).toBeGreaterThanOrEqual(geometry.headerBottom);
+    expect(geometry.tableHeight).toBeGreaterThan(500); expect(geometry.footerBottom).toBeLessThanOrEqual(847);
+    await page.screenshot({ path: testInfo.outputPath("cash-compact-empty.png") });
+    for (const zoom of [1.25, 1.5]) {
+      await page.locator("body").evaluate((body, value) => { body.style.zoom = String(value); }, zoom);
+      await page.getByRole("button", { name: "新增流水", exact: true }).scrollIntoViewIfNeeded();
+      await expect(page.getByRole("button", { name: "新增流水", exact: true })).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+    }
+  });
+
+  test("full pages keep large amounts inside their columns and the last row above the footer", async ({ page }) => {
+    await installCashFixtures(page, { denseFlows: true });
+    await page.setViewportSize({ width: 1440, height: 900 }); await page.goto("/cash?section=flows");
+    const grid = page.getByRole("grid", { name: "现金流水明细" });
+    await expect(grid.locator("tbody tr")).toHaveCount(50);
+    const amounts = await grid.locator('tbody [data-column-role="amount"]').evaluateAll(cells => cells.map(cell => {
+      const range = document.createRange(); range.selectNodeContents(cell);
+      const content = range.getBoundingClientRect(), box = cell.getBoundingClientRect();
+      return { left: content.left - box.left, right: box.right - content.right };
+    }));
+    expect(amounts.every(amount => amount.left >= 7 && amount.right >= 7), JSON.stringify(amounts.slice(0, 4))).toBe(true);
+    const scroll = page.locator(".finance-table__scroll").filter({ has: grid });
+    await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+    await expect(grid.getByText(/第50笔合成流水/)).toBeInViewport();
+    const last = await grid.locator("tbody tr").last().boundingBox();
+    const footer = await page.locator(".cash-main-table .finance-table__footer").boundingBox();
+    expect(last!.y + last!.height).toBeLessThanOrEqual(footer!.y + 1);
+    expect(footer!.y + footer!.height).toBeLessThanOrEqual(900);
+    await page.getByRole("button", { name: "下一页", exact: true }).click();
+    await expect(grid.locator("tbody tr")).toHaveCount(1); await expect(grid).toContainText("第51笔合成流水");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+  });
+
+  test("rejects malformed cash sections without querying cash and normalizes only the bare route", async ({ page }) => {
+    const api = await installCashFixtures(page);
+    for (const path of ["/cash?section=wrong", "/cash?section=flows&section=accounts", "/cash?section=flows&keyword=private"]) {
+      await page.goto(path); await expect(page.getByRole("alert")).toContainText("现金页面地址不正确");
+      expect(api.calls).toHaveLength(0);
+    }
+    await page.goto("/cash"); await expect(page).toHaveURL(/\/cash\?section=accounts$/);
+    await expect(page.getByRole("grid", { name: "往来账总表" })).toContainText("合成个人借出");
+  });
+
+  test("account filters page and search inside the popover without moving or closing the toolbar", async ({ page }) => {
+    await installCashFixtures(page);
+    await page.route("**/api/cash/settings/accounts?**", route => {
+      const params = new URL(route.request().url()).searchParams;
+      expect(params.has("enabled")).toBe(false);
+      const pageNumber = Number(params.get("page")); const keyword = params.get("keyword");
+      const rows = keyword || pageNumber === 2 ? [{ ...account, name: "历史停用账户", enabled: false }] : Array.from({ length: 100 }, (_, index) => ({ ...account, id: `10000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`, name: `合成账户${index}` }));
+      return route.fulfill({ json: { rows, pagination: { page: pageNumber, page_size: 100, total: keyword ? 1 : 101 } } });
+    });
+    await page.goto("/cash?section=flows"); await expect(page.getByRole("grid", { name: "现金流水明细" })).toContainText("合成现金归还");
+    const trigger = page.getByRole("button", { name: /账户$/ });
+    const before = await trigger.boundingBox(); await trigger.click();
+    const popup = page.locator(".cash-select-popover");
+    await popup.getByRole("button", { name: "下一页", exact: true }).click();
+    await expect(popup.getByRole("option", { name: "历史停用账户", exact: true })).toBeVisible();
+    await popup.getByRole("textbox", { name: "搜索账户" }).fill("历史");
+    await expect(popup.getByRole("textbox", { name: "搜索账户" })).toHaveValue("历史");
+    await expect(popup.getByRole("textbox", { name: "搜索账户" })).toBeFocused();
+    await popup.getByRole("option", { name: "历史停用账户", exact: true }).click();
+    await expect(trigger).toContainText("历史停用账户");
+    const after = await trigger.boundingBox(); expect(after!.y).toBe(before!.y); expect(after!.height).toBe(32);
+    await page.getByRole("link", { name: "现金账目", exact: true }).click();
+    await page.getByRole("link", { name: "现金流水", exact: true }).click();
+    await expect(trigger).toContainText("历史停用账户");
   });
 });

@@ -6,6 +6,8 @@
 
 修改前依次读[边界 I/O](boundary-io.md)、[业务总设计](../../product-specs/cash-module-design.md)、[技术字段与 API](../../dev/cash-module-technical-design.md)、[测试](tests.md)。UI 只在[UI 设计](../../product-specs/cash-module-ui-spec.md)定义。
 
+同日UI修复已实现：现金流水成为第四个左侧子页面；现金账目保留三Tab，个人四视图用选择器。CashContent在可撤权卸载子树保存已应用条件，切回重读；表头/空态/滚动/金额列及32px控件已修复。源码原因和原计划保留于[实施计划§11](../../dev/cash-module-implementation-plan.md#11-源码对照后的现金-ui-修复计划2026-09-07待实施)，执行、测试与本次发布状态统一见§12。没有新增API/数据库/权限，生产写入验收仍不以只读验证代替。
+
 代码：`app/routes_cash.py`、`app/cash_runtime.py`；`services/cash_domain.py/cash_service.py/cash_tasks.py/cash_queries.py/cash_oa_projects.py`；`services/postgres_repositories/cash*.py`；migration `0166_cash_ledger.sql`与`0167_cash_shared_runtime_grants.sql`。同App数据库账号，不另设cash角色、DSN或env。
 
 不新增 worker、缓存、read model、Excel 导入器、审计正文池或通用规则引擎。

@@ -4,7 +4,7 @@ import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CashFlowDrawer } from "../components/cash/CashFlowDrawer";
-import CashFlowTable from "../components/cash/CashFlowTable";
+import CashFlowTable, { initialCashFlowCriteria } from "../components/cash/CashFlowTable";
 import type { CashFlow, CashFlowDetail, CashFlowSummary } from "../components/cash/CashFlows.types";
 import type { CashItem } from "../components/cash/CashItems.types";
 import { apiFetch } from "../features/apiClient";
@@ -43,7 +43,7 @@ const summary = (): CashFlowSummary => ({
 });
 
 type Write = { path: string; method: string; body: Record<string, unknown>; init: RequestInit };
-function installHttp(options: { write?: (write: Write) => Response | Promise<Response>; getDetail?: () => CashFlowDetail; list?: () => { rows: CashFlow[]; pagination: { total: number; page: number; page_size: number }; summary: CashFlowSummary } } = {}) {
+function installHttp(options: { write?: (write: Write) => Response | Promise<Response>; getDetail?: () => CashFlowDetail; list?: (url: URL) => { rows: CashFlow[]; pagination: { total: number; page: number; page_size: number }; summary: CashFlowSummary } } = {}) {
   const writes: Write[] = [];
   http.mockImplementation(async (url, init = {}) => {
     const parsed = new URL(url, "http://cash-test.invalid");
@@ -63,7 +63,7 @@ function installHttp(options: { write?: (write: Write) => Response | Promise<Res
     if (path === "/api/cash/settings/categories") return json(rowsPage([{ id: categoryId, version: 1, name: "合成往来类型", group: "turnover", enabled: true, remark: null }], Number(parsed.searchParams.get("page_size"))));
     if (path === "/api/cash/items" || path === "/api/cash/settlements") return json(rowsPage([], 20));
     if (path === `/api/cash/flows/${flowId}`) return json(options.getDetail ? options.getDetail() : detail());
-    if (path === "/api/cash/flows") return json(options.list ? options.list() : { ...rowsPage([flow()]), summary: summary() });
+    if (path === "/api/cash/flows") return json(options.list ? options.list(parsed) : { ...rowsPage([flow()]), summary: summary() });
     throw new Error(`Unexpected cash GET ${url}`);
   });
   return writes;
@@ -202,5 +202,61 @@ describe("现金读取、更正、删除", () => {
     expect(within(unknown).getByText("尚未起算，余额未知")).toBeInTheDocument();
     expect(within(unknown).getAllByText("—")).toHaveLength(5);
     expect(within(unknown).queryByText("0.00")).not.toBeInTheDocument();
+  });
+
+  it("独立流水限定期间、筛选包含停用账户；录入只请求启用账户", async () => {
+    installHttp();
+    const mounted = render(<CashProvider><CashFlowTable /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    const urls = http.mock.calls.map(([url]) => new URL(url, "http://cash-test.invalid"));
+    const list = urls.find(url => url.pathname === "/api/cash/flows")!;
+    expect(list.searchParams.get("date_from")).toMatch(/^\d{4}-01-01$/);
+    expect(list.searchParams.get("date_to")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(urls.find(url => url.pathname.endsWith("/settings/accounts"))!.searchParams.has("enabled")).toBe(false);
+    expect(screen.getByLabelText("账户", { selector: "button" })).toHaveTextContent("全部账户");
+    mounted.unmount(); http.mockClear();
+    render(<DrawerHarness kind="receipt" />);
+    await waitFor(() => expect(http.mock.calls.some(([url]) => url.includes("/settings/accounts") && new URL(url, "http://cash-test.invalid").searchParams.get("enabled") === "true")).toBe(true));
+  });
+
+  it.each([{ itemId }, { taskOccurrenceId: templateId }])("父对象 %s 默认全历史分页，仍只有一个现金查询入口", async props => {
+    installHttp();
+    render(<CashProvider><CashFlowTable {...props} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    const url = new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/flows?"))![0], "http://cash-test.invalid");
+    expect(url.searchParams.has("date_from")).toBe(false); expect(url.searchParams.has("date_to")).toBe(false);
+    expect(url.searchParams.get("page_size")).toBe("50");
+    expect(url.searchParams.get("item_id") || url.searchParams.get("task_occurrence_id")).toBe("itemId" in props ? itemId : templateId);
+    expect(screen.queryByRole("button", { name: "新增流水" })).not.toBeInTheDocument();
+  });
+
+  it("删除末页最后一行后退至有效页，不重复删除命令", async () => {
+    const user = userEvent.setup(); let deleted = false;
+    const writes = installHttp({
+      write: () => { deleted = true; return json({ id: flowId, deleted: true, already_deleted: false, affected_counts: { tasks: 0, items: 0, settlements: 0 } }); },
+      list: url => {
+        const page = Number(url.searchParams.get("page"));
+        return { rows: deleted && page === 2 ? [] : [flow({ content: deleted ? "前一页现金" : "末页现金" })],
+          pagination: { page, page_size: 50, total: deleted ? 50 : 51 }, summary: summary() };
+      },
+    });
+    render(<CashProvider><CashFlowTable initialCriteria={{ ...initialCashFlowCriteria(), page: 2 }} /></CashProvider>);
+    await user.click(await screen.findByRole("button", { name: "详情", exact: true }));
+    await user.click(await screen.findByRole("button", { name: "删除", exact: true }));
+    await screen.findByText("本笔现金没有来源事项。");
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
+    await screen.findByText("前一页现金");
+    expect(writes).toHaveLength(1);
+    expect(http.mock.calls.filter(([url]) => url.startsWith("/api/cash/flows?")).map(([url]) => new URL(url, "http://cash-test.invalid").searchParams.get("page"))).toEqual(["2", "2", "1"]);
+  });
+
+  it("恢复跨页历史账户名称仅用于显示，不污染现金查询字段", async () => {
+    installHttp();
+    render(<CashProvider><CashFlowTable initialCriteria={{ ...initialCashFlowCriteria(), account_id: "historical-account", selectedAccount: { id: "historical-account", name: "历史账户" } }} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    expect(screen.getByLabelText("账户", { selector: "button" })).toHaveTextContent("历史账户");
+    const url = new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/flows?"))![0], "http://cash-test.invalid");
+    expect(url.searchParams.get("account_id")).toBe("historical-account");
+    expect(url.searchParams.has("selectedAccount")).toBe(false); expect(url.search).not.toContain("历史账户");
   });
 });

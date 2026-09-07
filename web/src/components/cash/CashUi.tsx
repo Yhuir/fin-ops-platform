@@ -10,9 +10,9 @@ export function CashInput({ label, value, onChange, type = "text", required, dis
   </label>;
 }
 
-export function CashSelect({ label, value, onChange, options, required, disabled }: {
+export function CashSelect({ label, value, onChange, options, required, disabled, children }: {
   label: string; value: string; onChange: (value: string) => void;
-  options: { value: string; label: string; disabled?: boolean }[]; required?: boolean; disabled?: boolean;
+  options: { value: string; label: string; disabled?: boolean }[]; required?: boolean; disabled?: boolean; children?: ReactNode;
 }) {
   return <div className="cash-field"><span>{label}{required ? " *" : ""}</span>
     <Select aria-label={label} selectedKey={value === "" && !options.some(option => option.value === "") ? null : value} isRequired={required} isDisabled={disabled}
@@ -20,7 +20,7 @@ export function CashSelect({ label, value, onChange, options, required, disabled
       <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
       <Select.Popover className="cash-select-popover"><ListBox>
         {options.map(option => <ListBox.Item key={option.value} id={option.value} textValue={option.label} isDisabled={option.disabled}>{option.label}</ListBox.Item>)}
-      </ListBox></Select.Popover>
+      </ListBox>{children}</Select.Popover>
     </Select>
   </div>;
 }

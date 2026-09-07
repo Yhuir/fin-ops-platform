@@ -242,7 +242,7 @@ describe("PageRouteHost", () => {
     expect(new Set(appPageRoutes.map((route) => route.pageKey))).toHaveLength(appPageRoutes.length);
     expect(sidebarItems.every((item) => routeByPath.has(item.to.split("?")[0]))).toBe(true);
     expect(sidebarItems.filter(item => item.to.startsWith("/cash?")).map(item => item.to)).toEqual([
-      "/cash?section=accounts", "/cash?section=tasks", "/cash?section=settings",
+      "/cash?section=flows", "/cash?section=accounts", "/cash?section=tasks", "/cash?section=settings",
     ]);
     expect(sidebarItems.every((item) => typeof item.preload === "function")).toBe(true);
     expect(appPageRoutes.every((route) => typeof route.preload === "function")).toBe(true);

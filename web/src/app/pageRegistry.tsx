@@ -300,6 +300,7 @@ export const sidebarGroups: SidebarGroup[] = [
       .map((item) => item.pageKey === "cash" ? {
         id: "cash", label: "现金账", icon: WalletCards,
         children: [
+          { ...item, id: "cash-flows", label: "现金流水", to: "/cash?section=flows" },
           { ...item, id: "cash-accounts", label: "现金账目", to: "/cash?section=accounts" },
           { ...item, id: "cash-tasks", label: "每月任务", to: "/cash?section=tasks" },
           { ...item, id: "cash-settings", label: "基础设置", to: "/cash?section=settings" },

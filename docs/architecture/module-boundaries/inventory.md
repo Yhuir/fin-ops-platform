@@ -56,7 +56,7 @@
 
 ## 当前全量定位结论
 
-- `cash`：现金独立事实模块，入口[README](../../modules/cash/README.md) / [boundary-io](../../modules/cash/boundary-io.md)。当前仅后端`/api/cash/*`；同库、同App账号、独立cash表及有界小池，不另设数据库账号。应用I/O禁止普通财务、全局历史、reset、Health/worker读取现金，不宣称数据库账号级隔离。
+- `cash`：现金独立事实模块，入口[README](../../modules/cash/README.md) / [boundary-io](../../modules/cash/boundary-io.md)。`/cash`前端与`/api/cash/*`已上线；四子页/视觉修复为待实施目标。同库、同App账号、独立cash表及有界小池，不另设数据库账号。应用I/O禁止普通财务、全局历史、reset、Health/worker读取现金，不宣称数据库账号级隔离。
 
 - 页面模块已经统一登记在 `docs/modules/README.md`，每个模块都有维护入口。
 - PostgreSQL 业务唯一真相已经登记为 `canonical-facts` 资源治理模块；它维护 owner matrix 和全局写入/读取规则，但不替代各业务 owner 模块。

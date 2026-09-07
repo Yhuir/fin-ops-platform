@@ -15,9 +15,18 @@ import { useCashTaskSettingsCloseGuard } from "./CashTaskSettingsCloseGuard";
 const kindOptions = Object.entries(cashTaskKindLabels).map(([value, label]) => ({ value, label }));
 const stateOptions = Object.entries(cashTaskStateLabels).map(([value, label]) => ({ value, label }));
 
-export default function CashTasks() {
-  const [tab, setTab] = useState("month");
-  return <><CashTabs value={tab} onChange={setTab} tabs={[{ id: "month", label: "本月处理" }, { id: "templates", label: "任务配置" }]} />{tab === "month" ? <CashTaskMonth /> : <CashTaskTemplates />}</>;
+type MonthCriteria = { month: string; view: string; kind: string; state: string; keyword: string; page: number };
+type TemplateCriteria = { page: number; kind: string; enabled: string; keyword: string; sort: string };
+export type CashTasksCriteria = { tab: string; month: MonthCriteria; templates: TemplateCriteria };
+export function initialCashTasksCriteria(): CashTasksCriteria {
+  return { tab: "month", month: { month: cashToday().slice(0, 7), view: "month", kind: "", state: "", keyword: "", page: 1 },
+    templates: { page: 1, kind: "", enabled: "", keyword: "", sort: "title" } };
+}
+export default function CashTasks({ initialCriteria, onCriteriaChange }: { initialCriteria?: CashTasksCriteria; onCriteriaChange?: (value: CashTasksCriteria) => void }) {
+  const [initial] = useState(() => initialCriteria ?? initialCashTasksCriteria());
+  const [tab, setTab] = useState(initial.tab); const [month, setMonth] = useState(initial.month); const [templates, setTemplates] = useState(initial.templates);
+  useEffect(() => { onCriteriaChange?.({ tab, month, templates }); }, [tab, month, templates, onCriteriaChange]);
+  return <><CashTabs value={tab} onChange={setTab} tabs={[{ id: "month", label: "本月处理" }, { id: "templates", label: "任务配置" }]} /><div className="cash-scroll-content">{tab === "month" ? <CashTaskMonth initial={month} onChange={setMonth} /> : <CashTaskTemplates initial={templates} onChange={setTemplates} />}</div></>;
 }
 
 export function cashTaskRemaining(row: Pick<CashTaskOccurrence, "planned_amount" | "actual_amount" | "kind">): string | null {
@@ -31,18 +40,19 @@ export function cashTaskRemaining(row: Pick<CashTaskOccurrence, "planned_amount"
   return `${positive / 100n}.${String(positive % 100n).padStart(2, "0")}`;
 }
 
-function CashTaskMonth() {
+function CashTaskMonth({ initial, onChange }: { initial: MonthCriteria; onChange: (value: MonthCriteria) => void }) {
   const { revision, refresh } = useCashScope();
   const [today, setToday] = useState(cashToday);
-  const [month, setMonth] = useState(() => cashToday().slice(0, 7));
-  const [view, setView] = useState("month");
-  const [kind, setKind] = useState("");
-  const [state, setState] = useState("");
-  const [keyword, setKeyword] = useState("");
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
+  const [month, setMonth] = useState(initial.month);
+  const [view, setView] = useState(initial.view);
+  const [kind, setKind] = useState(initial.kind);
+  const [state, setState] = useState(initial.state);
+  const [keyword, setKeyword] = useState(initial.keyword);
+  const [search, setSearch] = useState(initial.keyword);
+  const [page, setPage] = useState(initial.page);
   const [action, setAction] = useState<{ row: CashTaskOccurrence; mode: "adjust" | "unpaid" | "check" | "link" | "detail" | "new" } | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
+  useEffect(() => { onChange({ month, view, kind, state, keyword, page }); }, [month, view, kind, state, keyword, page, onChange]);
   const query = useCashQuery<CashOccurrencesPage>("/task-occurrences", {
     ...(view === "overdue" ? { overdue_as_of: today } : view === "reminders" ? { reminder_from: today, reminder_to: today } : { month }),
     page, page_size: 50, sort: "due_on", order: "asc", kind: kind || undefined, state: state || undefined, keyword: keyword || undefined,
@@ -182,15 +192,16 @@ function CashTaskDetails({ row, onClose, onFlow }: { row: CashTaskOccurrence; on
   </AppDrawer>;
 }
 
-function CashTaskTemplates() {
+function CashTaskTemplates({ initial, onChange }: { initial: TemplateCriteria; onChange: (value: TemplateCriteria) => void }) {
   const { revision } = useCashScope();
-  const [page, setPage] = useState(1);
-  const [kind, setKind] = useState("");
-  const [enabled, setEnabled] = useState("");
-  const [keyword, setKeyword] = useState("");
-  const [search, setSearch] = useState("");
-  const [sort, setSort] = useState("title");
+  const [page, setPage] = useState(initial.page);
+  const [kind, setKind] = useState(initial.kind);
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [keyword, setKeyword] = useState(initial.keyword);
+  const [search, setSearch] = useState(initial.keyword);
+  const [sort, setSort] = useState(initial.sort);
   const [editing, setEditing] = useState<CashTaskTemplate | "new" | null>(null);
+  useEffect(() => { onChange({ page, kind, enabled, keyword, sort }); }, [page, kind, enabled, keyword, sort, onChange]);
   const query = useCashQuery<CashTasksPage<CashTaskTemplate>>("/tasks", { page, page_size: 50, sort, order: "asc", kind: kind || undefined, enabled: enabled || undefined, keyword: keyword || undefined }, revision);
   const change = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(1); };
   return <section className="cash-section" aria-label="任务配置">

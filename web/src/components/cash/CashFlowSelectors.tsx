@@ -6,27 +6,30 @@ import { CashInput, CashNotice, CashSelect } from "./CashUi";
 import type { CashPageRows } from "./CashItems.types";
 import type { CashProjectsPage } from "./CashSettingsTypes";
 
-export function CashConfigurationSelect({ name, label, value, onChange, selected, group, required, disabled }: {
-  name: "accounts" | "categories" | "bill-labels"; label: string; value: string; onChange: (value: string) => void;
-  selected?: { id: string; name: string } | null; group?: string; required?: boolean; disabled?: boolean;
+export function CashConfigurationSelect({ name, label, value, onChange, selected, group, required, disabled, mode }: {
+  name: "accounts" | "categories" | "bill-labels"; label: string; value: string; onChange: (value: string, selected: { id: string; name: string } | null) => void;
+  selected?: { id: string; name: string } | null; group?: string; required?: boolean; disabled?: boolean; mode: "entry" | "filter";
 }) {
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState("");
   const query = useCashQuery<CashPageRows<{ id: string; name?: string; label?: string; bank_name?: string; group?: string }>>(`/settings/${name}`, {
-    enabled: true, page, page_size: 100, keyword,
+    enabled: mode === "entry" ? true : undefined, page, page_size: 100, keyword,
   });
   const options = query.data ? query.data.rows.filter(row => !group || row.group === group || row.group === "turnover")
     .map(row => ({ value: row.id, label: name === "bill-labels" ? `${row.bank_name} · ${row.label}` : row.name! })) : [];
-  if (selected && !options.some(option => option.value === selected.id)) options.unshift({ value: selected.id, label: `${selected.name}（原值）` });
+  if (selected && !options.some(option => option.value === selected.id)) options.unshift({ value: selected.id, label: mode === "filter" ? selected.name : `${selected.name}（原值）` });
+  if (mode === "filter") options.unshift({ value: "", label: `全部${label}` });
   return <div className="cash-config-select">
-    <CashSelect label={label} value={value} onChange={onChange} options={options} required={required} disabled={disabled || query.loading} />
+    <CashSelect label={label} value={value} onChange={value => onChange(value, value ? { id: value, name: options.find(option => option.value === value)!.label } : null)} options={options} required={required} disabled={disabled}>
+      <CashInput label={`搜索${label}`} value={keyword} onChange={value => { setKeyword(value); setPage(1); }} />
+      {query.loading && <p role="status">正在读取{label}…</p>}
+      {query.data && query.data.pagination.total > 100 &&
+      <FinanceTablePagination page={page} pageSize={100} total={query.data.pagination.total} onPageChange={setPage} compact />
+      }
+    </CashSelect>
     <CashNotice error={query.error?.message} />
     {query.error && <Button size="sm" variant="tertiary" onPress={query.reload}>重新读取{label}</Button>}
-    {query.data && query.data.pagination.total === 0 && <small>暂无启用的{label}，请在基础设置中添加。</small>}
-    {query.data && (query.data.pagination.total > 100 || keyword) && <>
-      <CashInput label={`搜索${label}`} value={keyword} onChange={value => { setKeyword(value); setPage(1); }} />
-      <FinanceTablePagination page={page} pageSize={100} total={query.data.pagination.total} onPageChange={setPage} compact />
-    </>}
+    {mode === "entry" && query.data && query.data.pagination.total === 0 && <small>暂无启用的{label}，请在基础设置中添加。</small>}
   </div>;
 }
 

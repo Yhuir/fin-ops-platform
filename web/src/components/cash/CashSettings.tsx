@@ -1,5 +1,5 @@
 import { Button, Checkbox } from "@heroui/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useCashMutation, useCashQuery, useCashScope } from "../../features/cash/hooks";
 import { cashAmount } from "./CashItems.types";
@@ -19,24 +19,37 @@ const settingTabs = [
   { id: "guide", label: "支付办理说明" },
 ];
 
-export default function CashSettings() {
-  const [tab, setTab] = useState("accounts");
+type AccountCriteria = { page: number; keyword: string; enabled: string };
+type CategoryCriteria = AccountCriteria & { group: string };
+type ProjectCriteria = { page: number; keyword: string; stage: string; selectable: string };
+export type CashSettingsCriteria = { tab: string; accounts: AccountCriteria; categories: CategoryCriteria; projects: ProjectCriteria; guide: string };
+export function initialCashSettingsCriteria(): CashSettingsCriteria {
+  return { tab: "accounts", accounts: { page: 1, keyword: "", enabled: "" },
+    categories: { page: 1, keyword: "", enabled: "", group: "" },
+    projects: { page: 1, keyword: "", stage: "", selectable: "" }, guide: "" };
+}
+export default function CashSettings({ initialCriteria, onCriteriaChange }: { initialCriteria?: CashSettingsCriteria; onCriteriaChange?: (value: CashSettingsCriteria) => void }) {
+  const [initial] = useState(() => initialCriteria ?? initialCashSettingsCriteria());
+  const [tab, setTab] = useState(initial.tab); const [accounts, setAccounts] = useState(initial.accounts);
+  const [categories, setCategories] = useState(initial.categories); const [projects, setProjects] = useState(initial.projects); const [guide, setGuide] = useState(initial.guide);
+  useEffect(() => { onCriteriaChange?.({ tab, accounts, categories, projects, guide }); }, [tab, accounts, categories, projects, guide, onCriteriaChange]);
   return <>
     <CashTabs value={tab} onChange={setTab} tabs={settingTabs} />
-    {tab === "accounts" && <><CashAccounts /><CashPersonalOpening /></>}
-    {tab === "categories" && <CashCategories />}
-    {tab === "projects" && <CashProjectSettings />}
-    {tab === "guide" && <CashPaymentGuide />}
+    <div className="cash-scroll-content">{tab === "accounts" && <><CashAccounts initial={accounts} onChange={setAccounts} /><CashPersonalOpening /></>}
+    {tab === "categories" && <CashCategories initial={categories} onChange={setCategories} />}
+    {tab === "projects" && <CashProjectSettings initial={projects} onChange={setProjects} />}
+    {tab === "guide" && <CashPaymentGuide keyword={guide} onChange={setGuide} />}</div>
   </>;
 }
 
-function CashAccounts() {
+function CashAccounts({ initial, onChange }: { initial: AccountCriteria; onChange: (value: AccountCriteria) => void }) {
   const { revision } = useCashScope();
-  const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState("");
-  const [search, setSearch] = useState("");
-  const [enabled, setEnabled] = useState("");
+  const [page, setPage] = useState(initial.page);
+  const [keyword, setKeyword] = useState(initial.keyword);
+  const [search, setSearch] = useState(initial.keyword);
+  const [enabled, setEnabled] = useState(initial.enabled);
   const [editing, setEditing] = useState<CashAccountSetting | "new" | null>(null);
+  useEffect(() => { onChange({ page, keyword, enabled }); }, [page, keyword, enabled, onChange]);
   const query = useCashQuery<CashTasksPage<CashAccountSetting>>("/settings/accounts", { page, page_size: 50, order: "asc", keyword: keyword || undefined, enabled: enabled || undefined }, revision);
   return <section className="cash-section" aria-label="现金账户">
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}>
@@ -97,14 +110,15 @@ function CashAccountEditor({ account, onClose }: { account: CashAccountSetting |
   </AppDrawer>;
 }
 
-function CashCategories() {
+function CashCategories({ initial, onChange }: { initial: CategoryCriteria; onChange: (value: CategoryCriteria) => void }) {
   const { revision } = useCashScope();
-  const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState("");
-  const [search, setSearch] = useState("");
-  const [group, setGroup] = useState("");
-  const [enabled, setEnabled] = useState("");
+  const [page, setPage] = useState(initial.page);
+  const [keyword, setKeyword] = useState(initial.keyword);
+  const [search, setSearch] = useState(initial.keyword);
+  const [group, setGroup] = useState(initial.group);
+  const [enabled, setEnabled] = useState(initial.enabled);
   const [editing, setEditing] = useState<CashCategorySetting | "new" | null>(null);
+  useEffect(() => { onChange({ page, keyword, enabled, group }); }, [page, keyword, enabled, group, onChange]);
   const query = useCashQuery<CashTasksPage<CashCategorySetting>>("/settings/categories", { page, page_size: 50, order: "asc", keyword: keyword || undefined, group: group || undefined, enabled: enabled || undefined }, revision);
   return <section className="cash-section" aria-label="费用类型">
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}>
@@ -185,14 +199,15 @@ function CashOpeningDateEditor({ setting, onClose }: { setting: { opening_date: 
   </AppDrawer>;
 }
 
-export function CashProjectSettings() {
+export function CashProjectSettings({ initial = initialCashSettingsCriteria().projects, onChange }: { initial?: ProjectCriteria; onChange?: (value: ProjectCriteria) => void } = {}) {
   const { revision } = useCashScope();
-  const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState("");
-  const [search, setSearch] = useState("");
-  const [stage, setStage] = useState("");
-  const [selectable, setSelectable] = useState("");
+  const [page, setPage] = useState(initial.page);
+  const [keyword, setKeyword] = useState(initial.keyword);
+  const [search, setSearch] = useState(initial.keyword);
+  const [stage, setStage] = useState(initial.stage);
+  const [selectable, setSelectable] = useState(initial.selectable);
   const [draft, setDraft] = useState<{ codes: string[]; version: number } | null>(null);
+  useEffect(() => { onChange?.({ page, keyword, stage, selectable }); }, [page, keyword, stage, selectable, onChange]);
   const selection = useCashQuery<CashProjectSelection>("/settings/project-selection", undefined, revision);
   const projects = useCashQuery<CashProjectsPage>("/projects", { purpose: "all", page, page_size: 50, keyword: keyword || undefined, stage_code: stage || undefined, selectable: selectable || undefined }, revision);
   const mutation = useCashMutation();
@@ -286,14 +301,13 @@ const paymentGuideRows = [
   { category: "员工施工预领", summary: "施工前预领费用", applicant: "员工", document: "负责人同意后填写领款单", recipient: "员工", current: "申请经负责人同意后，交财务办理", proposed: "未明确调整" },
 ];
 
-function CashPaymentGuide() {
-  const [keyword, setKeyword] = useState("");
+function CashPaymentGuide({ keyword, onChange }: { keyword: string; onChange: (value: string) => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const needle = keyword.trim();
   const rows = paymentGuideRows.filter((row) => !needle || Object.values(row).some((value) => value.includes(needle)));
   return <section className="cash-section" aria-label="支付办理说明">
     <p className="cash-hint">参考说明，不会提交 OA 或执行付款。现行与拟调整方式不自动成为任务规则。</p>
-    <div className="cash-toolbar"><CashInput label="办理说明关键词" value={keyword} onChange={setKeyword} placeholder="类别、申请人或所需单据" /></div>
+    <div className="cash-toolbar"><CashInput label="办理说明关键词" value={keyword} onChange={onChange} placeholder="类别、申请人或所需单据" /></div>
     <FinanceTable ariaLabel="支付办理参考" minWidth={1050}>
       <FinanceTableHeader>{["类别", "概要", "申请人", "所需单据", "收款方", "办理说明"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
       <FinanceTableBody>{rows.map((row) => <FinanceTableRow key={row.category} id={row.category}><FinanceTableCell columnRole="identity">{row.category}</FinanceTableCell><FinanceTableCell columnRole="description">{row.summary}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.applicant}</FinanceTableCell><FinanceTableCell columnRole="description">{row.document}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.recipient}</FinanceTableCell><FinanceTableCell columnRole="description"><Button variant="tertiary" size="sm" aria-expanded={expanded === row.category} onPress={() => setExpanded(expanded === row.category ? null : row.category)}>{expanded === row.category ? "收起" : "查看说明"}</Button>{expanded === row.category && <div className="cash-guide-detail"><p>现行参考：{row.current}</p><p>调整参考：{row.proposed}</p></div>}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>

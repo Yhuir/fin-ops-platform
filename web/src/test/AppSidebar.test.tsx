@@ -388,12 +388,13 @@ describe("AppSidebar shell contract", () => {
     expect(imports).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("link", { name: "每月任务" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "现金账目" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "现金流水" })).toHaveAttribute("href", "/cash?section=flows");
     fireEvent.click(imports);
     expect(cash).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(cash);
     expect(imports).toHaveAttribute("aria-expanded", "true");
     const group = sidebarGroups.flatMap(row => row.items).find(item => item.label === "现金账");
-    expect(group && isSidebarDisclosureItem(group) && group.children.map(item => item.pageKey)).toEqual(["cash", "cash", "cash"]);
+    expect(group && isSidebarDisclosureItem(group) && group.children.map(item => item.pageKey)).toEqual(["cash", "cash", "cash", "cash"]);
   });
 
   test("closes the compact drawer after selecting a navigation item", () => {

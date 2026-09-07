@@ -1,5 +1,11 @@
 # 现金测试入口
 
+2026-09-07本次UI修复已增加/更新CashBooks、CashFlows、AppSidebar、PageRouteHost及cash-module-flow测试：四子页、0/3/2/4视图、个人选择器、空态/错误稳定表头、32px对齐、筛选恢复/重置、末页删除归一、父对象跨年、停用账户筛选、长金额/满页滚动与非法地址。全量前端1176项和真实HTTP/PG现金54项已通过；最终定向/浏览器、发布和性能结果统一记录[实施计划§12](../../dev/cash-module-implementation-plan.md)。下文F阶段三子页/4-2-4属于首次上线历史，不覆盖本次行为。后台/SQL未变，不新建service/worker测试，既有业务集成仍回归。
+
+生产只读入口：`web/e2e/production-cash-readonly.spec.ts`沿用显式生产smoke环境和本机token wrapper；关闭截图/录像/trace，拦截非GET/HEAD/OPTIONS，逐页读取真实接口并记录数值化耗时，不创建角色/账户/现金/OA记录。只有显式生产验证运行此文件；普通本地E2E使用合成HTTP，与真实PostgreSQL证据分开。
+
+执行细节补充测试：跨年事项/任务关联流水默认不发本年期间且不漏记录；独立流水仍发有界期间；切视图恢复条件但重新取数，撤权卸载条件状态；删末页最后一行调整至最近有效页，重读失败不重发delete；entry/filter全部调用显式传mode、停用账户仅历史筛选可选；任务/设置多区块能滚动到最后一表，无每表满屏叠加。
+
 现金业务算例由[技术设计 TC01–TC28](../../dev/cash-module-technical-design.md)定义。测试必须验证金额/来源/版本/状态，不只断言 HTTP 200。
 
 | 七类 | 本轮范围 |

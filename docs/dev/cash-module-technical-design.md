@@ -46,18 +46,35 @@
 
 初始保持一个现金 service 和一个现金 repository。只有实际体量妨碍维护时，才在同一 owner 内拆出任务/结算文件；不提前引入 facade、manager、factory、策略注册平台或一张表一个 service。复用当前工程的事务/连接池和纯组件，不复制旧模块的内存 fallback 或完整状态快照。
 
-前端导航已实施：现有pageRegistry/AppSidebar拥有“现金账”可展开父菜单及现金账目/每月任务/基础设置三个子入口；现金页面只消费非敏感子页面标识，正文显示对应4/2/4下级菜单。沿用一个cash权限key，不新增三个后端权限、三套数据模块或第二Router。父菜单展开与chunk预加载不读现金API；业务请求只由当前现金视图发起，离开现金模块清理数据与在途请求，禁止把现金行、任务数、阶段集合存进shell/session store。
+2026-09-07已实施现金流水/现金账目/每月任务/基础设置四子页，对应0/3/2/4菜单，个人四视图用选择器。沿用一个cash权限key、一个lazy CashPage、同一套cash API/表；不增加权限、Router或服务。父项和chunk预加载不读现金API；只有当前视图发起业务请求，离开现金模块清理数据与在途请求，现金行、任务数、阶段集合不进入shell/session store。首次上线三子页为历史状态；本次部署状态与证据见实施计划§12。
 
-#### 前端移植接线（2026-09-07，已实现）
+#### 前端移植接线（2026-09-07，当前与修订目标分列）
 
-- **导航**：pageRegistry只登记一个`/cash`页面和一个cash授权选项，三个SidebarItem共用同一现金lazy入口，分别链接`/cash?section=accounts`、`/cash?section=tasks`、`/cash?section=settings`。`/cash`无section时在读取业务前replace到accounts，这是明确默认导航，不是错误数据兜底；非法section显示明确导航错误，不请求另一业务页。下级Tab、日期、项目、搜索与行ID均不写URL。现有Sidebar已支持按完整search高亮，因而URL只保留这个非敏感section；浏览器前进/后退切换这三个子页面，现金局部负责标题/焦点和草稿离开保护。
-- **共享改动的具体必要性**：AppSidebar目前所有Disclosure共用importsExpanded；新增现金前必须按现有disclosure.id保存各自展开状态，移除这一单一状态假设，导入与现金互不联动。pageRegistry的assignablePageOptions由页面定义生成，不得登记三条cash页面造成三个重复权限checkbox；财务侧栏从唯一cash定义组成子链接组即可，不新增导航引擎。
+- **导航目标**：pageRegistry仍只登记一个`/cash`页面/授权选项，现金链接新增`section=flows`并保留accounts/tasks/settings。裸路径继续replace到accounts；非法/重复section或多余参数明确报错，不请求其他业务。下级Tab、日期、项目、搜索与行ID不写URL。浏览器前进/后退切换四子页，局部活动视图条件挂载，不保留隐藏账簿树。UI划分不改变API字段、事务或现金事实源。
+- **共享改动的必要性**：AppSidebar已按disclosure.id独立保存展开，本次不重复改造该能力；pageRegistry仅扩一个现金子链接，不能注册四条cash页面造成四个权限checkbox。只保留非敏感标题/导航数据；现金表单/响应/请求不进入Shell。
 - **请求**：`features/cash/api.ts`复用现有`apiFetch`的apiUrl解析、凭据与登录头，只调用`/api/cash/*`；集中做严格JSON/HTTP结果、CashError、安全文案、明确超时和AbortSignal处理，不为每个表复制fetch。现有`apiRequestJson`遇HTML会自动换`/fin-ops-api`重发同一请求，因此现金不调用该封装、不复制该fallback，也不为现金删除普通页仍使用的实现。现金收到HTML或非预期结构直接报错，写失败不自动换地址/新ID重试。部署前核实实际API base，不能用前端重发掩盖代理错误。
-- **状态**：CashPage内保存活动视图、各视图筛选/页码、当前数据与表单；必要时一个模块内hook管理请求生命周期，不引入新的全局store/query client。写成功只重读当前相关视图/已打开详情，其他视图再次进入时重读；保留条件不等于保留已失效rows。切换请求、写成功、删除、退出/撤权后取消旧读取并按局部请求序号或effect清理拒绝旧结果，不新增hash/事件总线。
+- **状态目标**：活动视图及各视图已应用筛选/排序/页码放在CashProvider可以撤权卸载的现金局部子树，用普通React state/props；不得放到Provider外、Shell或持久化store。当前rows与表单仍由活动视图拥有；关闭视图卸载查询和详情，不保留隐藏数据树。切回只恢复条件并重新GET，写后只重读当前相关视图/已打开详情；退现金页/401/403清空条件、数据和草稿。切换请求、写成功、删除、退出/撤权后取消旧读取，沿用effect清理拒绝旧结果，不新增hash/事件总线/query cache。
 - **隐私**：不直接使用会持久化状态的useFinanceTableSession/PageSessionStateContext，不将现金筛选中的姓名、项目、关键词或选中ID写浏览器磁盘。复用纯FinanceTable而非普通页查询hook。AppDrawer关闭动画会短暂保留内容；现金路由卸载/撤权须卸载其局部drawer owner并清空数据，不让内容留在全局overlay。Portal样式用现金className局部传入；不修改普通页默认主题。
 - **金额**：写入仍是两位十进制字符串，按既有Money范围校验；不把用户非法三位小数先交formatMoney四舍五入再提交。展示已知金额复用formatMoney的字符串/BigInt格式化；null显式显示“—”，缺字段/非法金额是接口错误，不调用其默认空值“0.00”。不把银行DTO继承为现金DTO，也不在浏览器复算余额。
 - **文件**：CashPage只组合页面；`features/cash/api.ts`拥有HTTP边界，`hooks.tsx`拥有请求生命周期与局部重读；`components/cash/`按账表/录入与事项/任务/设置拆实际有状态责任及DTO，现金局部CSS由lazy入口加载。多个动作共用流水表单/事项选择器，不引入一字段一文件、一Tab一全局Provider或通用表单引擎。
 - **写后反馈**：成功命令与随后GET分开反馈，局部提示“操作已保存”；GET失败提示重新读取，不诱导重复新增。编辑草稿保留初始版本，409不能静默重基。复合删除只收集更正方案并提交一个命令；OA读取和逐项UI选择不提前写库。
+
+#### 本次还原修复的前端文件与I/O（已实施）
+
+| owner | 输入 | 输出/限制 |
+| --- | --- | --- |
+| pageRegistry / CashPage | 非敏感section、既有cash权限 | 四个导航入口→当前视图；单cash页面/权限；非法参数不读API |
+| 新增局部CashFlows组合组件 | 当前流水页、用户选择收/支/互转 | 组合既有CashFlowTable和CashFlowDrawer；不建立第二API client/DTO/Provider |
+| CashBooks | 当前账簿、筛选、事项ID/办理动作 | 三账目查询和事项/票据处理；移除通用流水Tab与顶部通用新增，但保留上下文实际收付回调 |
+| CashFlowTable / CashFlowSelectors | 必传mode: entry/filter、期间、父对象ID | 沿用/flows及/settings；filter包含停用历史账户、默认全部；entry只含启用项。事项/任务嵌入明细继续复用，不套整个独立页面 |
+| CashUi / cash.css | UI状态、局部className、控件值 | 紧凑控件、表内空态、对齐；无fetch/算账、无公共CSS默认变更 |
+| features/cash现有client/hooks | 现有查询/写命令 | 单地址HTTP、abort、拒绝旧响应、局部重读、401/403清除不变；不引入全局缓存 |
+
+已应用条件由CashProvider子树内CashContent的四个普通state拥有，透过initialCriteria/onCriteriaChange传递；活动视图有自己的草稿/rows和唯一query owner。未保存表单不进入条件快照。共享PageScaffold/FinanceTable/AppDrawer和普通主题均未修改。现金表格采用参考列宽+原生auto布局，金额不换行不截断；长数字只扩展所在表格，不增加测宽循环、hash或浏览器算账。
+
+单表视图继续page_size=50、SQL聚合/稳定分页。独立流水默认本年1月1日至今天；明确itemId/taskOccurrenceId的关联明细默认全历史分页，不强加本年date_from/date_to，仅主动期间筛选才附加日期。未带父对象的独立流水仍须有界期间。删除末页最后一行后用成功查询的pagination.total定位最近有效页并重读，不重复提交删除。Make的“全部日期”、前端数组分页、浮点reduce、Date.now主键、300ms假保存和本地强制覆盖版本都不迁入。输入输出字段按既有DTO，不做Make兼容层。CashConfigurationSelect明确复用原组件增加mode，各调用点显式传入，不另建取数抽象；filter省略enabled而不是读取普通银行账户。
+
+仅调整前端导航和布局，不新增数据库表、migration、索引、连接或备份。CashProvider保存提示与PageScaffold共同进入现金局部剩余高度分配；不改共享PageScaffold/FinanceTable/AppDrawer默认值，不给全App增加定高/滚动/导航拦截机制。切页卸载会取消浏览器等待，不代表服务端已接收的写命令回滚；提交中、结果未知和已有关闭确认不得被本次布局清理删除。
 
 ### 1.3 最少 service 方法
 

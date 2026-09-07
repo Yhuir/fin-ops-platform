@@ -14,7 +14,11 @@
 - 金额用两位十进制字符串，日期 ISO、月份 YYYY-MM、ID UUID；未知/重复字段、重复 query key、非法类型和状态明确失败。完整字段与版本见[技术设计](../../dev/cash-module-technical-design.md)。
 - 手工创建与任务确认共用同一现金命令事务；核对/未办不造现金。新建真实项目、自由改项目取 OA 当前资格；既有事项结算沿用本地项目。
 
-前端已实现（2026-09-07）：左侧三子页面统一cash权限，单`/cash`入口以section=accounts/tasks/settings承接导航；非法或重复section明确报错，裸路径规范到accounts。shell只持非敏感标识，不读现金数据、不显示金额或任务数；正文局部视图拥有业务请求和4/2/4菜单。OA checkbox只保存现金project-selection配置，全部项目与新增候选分开，取消状态不隐藏历史。无新权限层级。
+前端已实现（2026-09-07本次修复）：左侧四子页面统一cash权限，单`/cash`入口以section=flows/accounts/tasks/settings承接导航；非法、重复section或多余参数明确报错，裸路径规范到accounts。shell只持非敏感标识，不读现金数据、不显示金额或任务数；正文局部视图拥有业务请求和0/3/2/4菜单。OA checkbox只保存现金project-selection配置，全部项目与新增候选分开，取消状态不隐藏历史。无新权限层级。
+
+CashFlows只组合既有表格/录入，不复制业务；CashBooks已移除通用flows Tab/新增但保留上下文实际收付。CashFlowTable的itemId/taskOccurrenceId嵌入明细保留；CashConfigurationSelect区分筛选全账户与录入启用账户。API/同库同账号/唯一cash权限/无全局历史边界不变，CSS仅现金及现金Portal；技术边界见技术设计§1.2，执行证据见实施计划§12。
+
+实施细节复审：CashConfigurationSelect采用必传entry/filter模式，不新增查询抽象；父对象嵌入流水默认全历史分页，独立流水必须带期间。已应用筛选/排序/页码仅存于CashProvider可卸载子树，切回重新GET；撤权/退页条件和rows均清空，不把条件留在Provider之外。删除末页用查询返回的total调整页码，不重复删除命令；多表页只设一个内容滚动区。上述仍是cash内的UI/查询责任，不改变Shell或API合同。
 
 前端请求owner为features/cash/api.ts：复用底层apiFetch，现金路径单地址严格JSON/HTTP，15秒超时，不调用自动换地址重发的apiRequestJson；不从普通业务client查分类/项目/金额。hooks.tsx只在CashProvider内维护请求取消和局部revision，写成功重新GET，401/403卸载敏感子树；无storage、全局事件或全局overlay写入。复用FinanceTable/AppDrawer纯UI，不复用useFinanceTableSession；关闭的现金抽屉条件卸载，Portal样式仅.cash-drawer范围。
 
