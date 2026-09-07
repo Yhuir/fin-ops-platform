@@ -117,11 +117,15 @@ describe("现金实际录入 HTTP 字段", () => {
     expect(http.mock.calls).toHaveLength(requests);
   });
 
-  it("顶部关键词超过完整请求长度时保留查询草稿和上次成功的流水", async () => {
+  it("顶部查询达到 3501 字节时保留查询草稿和上次成功的流水，不发送 HTTP", async () => {
     const user = userEvent.setup(); installHttp(); const onCriteriaChange = vi.fn();
     render(<CashProvider><CashFlowTable onCriteriaChange={onCriteriaChange} /></CashProvider>);
     await screen.findByText("合成手工收款"); const criteria = onCriteriaChange.mock.calls.at(-1)![0];
-    const requests = http.mock.calls.length; const keyword = "项".repeat(700);
+    const requests = http.mock.calls.length;
+    const query = new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/flows?"))![0], "http://test").searchParams;
+    query.set("keyword", "");
+    const keyword = "x".repeat(3501 - query.toString().length); query.set("keyword", keyword);
+    expect(query.toString()).toHaveLength(3501);
     fireEvent.change(screen.getByRole("textbox", { name: "搜索流水" }), { target: { value: keyword } });
     await user.click(screen.getByRole("button", { name: "查询", exact: true }));
     expect(screen.getByRole("alert")).toHaveTextContent("筛选条件过长");

@@ -1193,7 +1193,7 @@ U01–U06已实现并完成本地验证，当前等待提交/发布后的生产�
 - 真实浏览器发现Checkbox继承Table行选择上下文，已用HeroUI支持的slot=null明确退出该上下文；原生控件仍保留键盘、语义与焦点能力，不自写checkbox。
 - 右侧列浮层曾因非模态焦点引发祖先表格横滚而被原生close-on-scroll关闭，已移除isNonModal，使用原生模态Popover且验证背景不位移。空表原生集合没有可恢复单元格，现金共享组件通过公开Button/Dialog ref、Escape/显式关闭标志，在Dialog实际退出后标准focus(preventScroll)恢复有效触发器；外部点击不请求恢复。没有使用React Aria私有事件、禁用焦点或位置补偿。
 - 复查发现候选满页50加null成51、开菜单250ms旧计时器把翻页回退，均已补边界测试并修正：49真实候选+null、账户仍50、只为真实搜索差异防抖。全部主表每页50不变。
-- 完整参数超100/编码6000不在主表显示假空结果；应用前复用cashQueryString检查，失败留在浮层/表单及原有效查询，不截断条件。HTTP前检查仍保留。
+- 完整参数超100/编码3500不在主表显示假空结果；应用前复用cashQueryString检查，失败留在浮层/表单及原有效查询，不截断条件。HTTP前检查仍保留。原设计6000在生产请求行边界实测失败，按技术§13原计划收紧，不放宽全局服务器配置。
 
 ### 14.2 本地真实链与规模测量
 
@@ -1223,8 +1223,14 @@ U01–U06已实现并完成本地验证，当前等待提交/发布后的生产�
 
 部署前只读对照：2026-09-08 00:16:46–00:17:44 CST，TLS校验，100样本/接口，warmup2，4并发。session p50/p95/p99=164.599/182.819/188.365ms；银行910.388/1217.394/1255.052ms；工作台1047.275/1244.014/1331.281ms；300次全200。银行和工作台在此次部署前已超过既有p95≤1000ms目标，必须单独报告，不能宣称全App达标。初次Python默认CA缺发行链，300次均未完成TLS，不能算API性能；显式使用本机certifi信任包后重测，未关闭证书验证。
 
-生产只读验证继续禁止创建受限角色、现金试验流水或OA写操作；敏感截图/录像/trace关闭。正式发布使用已提交推送的现金分支与deploy-oa.sh，不用allow-dirty/skip-build。当前旧版仍为cash-68eee75c0-20260907-ui-layout。
+第一候选4fbeed57c已commit/push至codex/cash-ledger，release cash-4fbeed57c-20260908-ui-unified于00:44:52 CST激活；既有runtime profile pre/t0/t30均PASS，t30于00:46:36完成，API/四worker active，未回滚，167项迁移全跳过，无表变更。激活首次携带不适用的keep-releases参数被本地parser拒绝，去掉该参数后正常执行；activate-existing分支不调用旧release清理。
+
+生产三API别名均认证200/匿名401、JSON/no-store。随后6000字节极限查询返回400 text/html（Request Line is too large），发生在应用之前，不能把此响应算作现金API正确拒绝。按原计划允许的更严代理边界将现金查询上限统一收紧到3500，保留50/100项数量规则；修补后再次commit/push/发布和验证，最终活动版本将在完成后记录。未改全App Gunicorn限制、未加地址/POST fallback。
+
+边界窄修验证：服务器Gunicorn LimitRequestLine.default实读4094；实现只改routes的一处及client的两处阈值。test_cash_api 19/19通过（明确unset所有测试/生产DB URL，不连接数据库），前端CashApi/Books/Flows/Filters/Hooks 71/71通过10.76s，tsc/lint/diff-check通过。新增精确3500接受/3501 JSON400 no-store、拒绝前不调repository、前端不发HTTP且保留条件/草稿/结果；没有靠真实业务写入来测上限。
+
+生产只读验证继续禁止创建受限角色、现金试验流水或OA写操作；敏感截图/录像/trace关闭。正式发布使用已提交推送的现金分支与deploy-oa.sh，不用allow-dirty/skip-build。
 
 ### 14.4 清理和未测边界
 
-最终结束前核对无连接，精确删除上述三个自有测试库、任务临时性能/probe工件；不删除主数据库、生产cash表、组织备份、其他任务资产和可回滚release。真实生产现金写链/受限角色不在此次生产验证范围；本地写链和生产只读不能冒称同一生产写入验证。
+上述三个自有测试库已核验owner=yu且无连接后精确删除，并再次查询确认不存在。最终结束前清理任务临时性能/probe工件；不删除主数据库、生产cash表、组织备份、其他任务资产和可回滚release。真实生产现金写链/受限角色不在此次生产验证范围；本地写链和生产只读不能冒称同一生产写入验证。

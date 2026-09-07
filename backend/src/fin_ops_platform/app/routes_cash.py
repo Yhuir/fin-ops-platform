@@ -31,7 +31,7 @@ class CashApiRoutes:
                 raise CashError("cash_access_denied", "当前账号不可使用现金账。", 403)
             if any(len(values) != 1 for values in query.values()):
                 raise CashError("cash_invalid_input", "查询参数不能重复。")
-            if len(urlencode(query, doseq=True).encode("utf-8")) > 6000:
+            if len(urlencode(query, doseq=True).encode("utf-8")) > 3500:
                 raise CashError("cash_invalid_input", "查询条件过长，请减少选择项。")
             params = {key: values[0] for key, values in query.items()}
             actor = {"account": session.identity.username, "name": session.identity.display_name}

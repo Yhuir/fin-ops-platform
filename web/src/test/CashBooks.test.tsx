@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import CashBooks, { initialCashBooksCriteria } from "../components/cash/CashBooks";
+import { cashQueryString } from "../features/cash/api";
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), reload: vi.fn() }));
 vi.mock("../features/cash/hooks", () => ({ useCashQuery: (path: string | null, params: unknown) => mocks.query(path, params), useCashMutation: () => ({ run: vi.fn(), busy: false, error: null, clearError: vi.fn() }) }));
@@ -40,16 +41,20 @@ describe("cash books", () => {
     expect(screen.getByText("实际借款")).toBeInTheDocument();
   });
 
-  test.each(["tickets", "personal"] as const)("%s keeps applied query and project draft when encoded criteria exceed 6000 bytes", async tab => {
+  test.each(["tickets", "personal"] as const)("%s keeps applied query and project draft when encoded criteria reach 3501 bytes", async tab => {
     const user = userEvent.setup(); const initial = initialCashBooksCriteria(); initial.tab = tab;
-    const ids = Array.from({ length: 29 }, (_, i) => "p".repeat(190) + i);
+    const ids = Array.from({ length: 17 }, (_, i) => "p".repeat(183) + i);
+    const extraId = "z".repeat(tab === "tickets" ? 94 : 122);
     if (tab === "tickets") initial.tickets.filters.project_ids = ids;
     else initial.personal.projects = ids;
     const originalQuery = mocks.query.getMockImplementation()!;
-    mocks.query.mockImplementation((path, params) => path === "/reports/project-options" ? result({ rows: [{ id: "z".repeat(200), name: "另一个历史项目" }], pagination: { page: 1, page_size: 49, total: 1 } }) : originalQuery(path, params));
+    mocks.query.mockImplementation((path, params) => path === "/reports/project-options" ? result({ rows: [{ id: extraId, name: "另一个历史项目" }], pagination: { page: 1, page_size: 49, total: 1 } }) : originalQuery(path, params));
     render(<CashBooks initialCriteria={initial} />);
     const path = tab === "tickets" ? "/reports/ticket-payments" : "/reports/personal";
     const applied = lastParams(path);
+    const encoded = cashQueryString(applied as Parameters<typeof cashQueryString>[0]);
+    const next = new URLSearchParams(encoded); next.set("project_ids", JSON.stringify([...ids, extraId]));
+    expect(next.toString()).toHaveLength(3501);
     await user.click(screen.getByRole("button", { name: "筛选项目" }));
     const popup = await screen.findByRole("dialog", { name: "筛选项目" });
     await user.click(within(popup).getByRole("checkbox", { name: "另一个历史项目" }));

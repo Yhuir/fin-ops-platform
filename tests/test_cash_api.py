@@ -9,6 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from fin_ops_platform.app.http_adapter import WsgiHttpAdapter
@@ -168,6 +169,34 @@ class CashApiTests(unittest.TestCase):
         response = self.call(query={"project_ids": [json.dumps(["项" * 150] * 5, ensure_ascii=False)]})
         self.assertEqual(response.status_code, 400)
         self.assertIn("过长", json.loads(response.body)["message"])
+        repository.list_flows.assert_not_called()
+
+    def test_query_3500_bytes_is_valid_and_3501_is_json_no_store_before_io(self):
+        repository = Mock()
+        repository.list_flows.return_value = {"rows": [], "pagination": {"page": 1, "page_size": 50, "total": 0}}
+        self.routes.queries = CashQueryService(repository)
+        query = {"date_from": ["2026-09-01"], "date_to": ["2026-09-30"],
+            "project_ids": [json.dumps(["p" * 190 + str(index) for index in range(17)], separators=(",", ":"))],
+            "keyword": [""]}
+        query["keyword"] = ["x" * (3500 - len(urlencode(query, doseq=True)))]
+        self.assertLessEqual(len(query["keyword"][0]), 200)
+        self.assertEqual(len(urlencode(query, doseq=True)), 3500)
+        response = self.call(query=query)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body)["rows"], [])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        repository.list_flows.assert_called_once()
+        repository.reset_mock()
+
+        query["keyword"][0] += "x"
+        self.assertEqual(len(urlencode(query, doseq=True)), 3501)
+        response = self.call(query=query)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertIn("application/json", response.headers["Content-Type"])
+        self.assertEqual(json.loads(response.body), {
+            "error": "cash_invalid_input", "message": "查询条件过长，请减少选择项。",
+        })
         repository.list_flows.assert_not_called()
 
     def test_multi_endpoint_whitelists_and_enum_sets(self):

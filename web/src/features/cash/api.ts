@@ -21,7 +21,7 @@ export function cashQueryString(params: CashQueryParams = {}): string {
     } else if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
   }
   const encoded = query.toString();
-  if (encoded.length > 6000) throw new CashRequestError(400, "cash_filter_limit", "筛选条件过长，请减少选择项或清空限制后查看全部。");
+  if (encoded.length > 3500) throw new CashRequestError(400, "cash_filter_limit", "筛选条件过长，请减少选择项或清空限制后查看全部。");
   return encoded;
 }
 
@@ -41,7 +41,7 @@ export async function cashRequest<T>(path: string, options: {
   if (!/^\/[a-z][a-z0-9/-]*(?:\?[^#]*)?$/.test(path)) {
     throw new CashRequestError(0, "cash_invalid_path", "现金请求地址不正确。");
   }
-  if (new TextEncoder().encode(path.split("?")[1] ?? "").length > 6000) {
+  if (new TextEncoder().encode(path.split("?")[1] ?? "").length > 3500) {
     throw new CashRequestError(400, "cash_filter_limit", "筛选条件过长，请减少选择项。");
   }
   const controller = new AbortController();
