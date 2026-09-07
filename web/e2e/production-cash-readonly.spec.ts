@@ -29,6 +29,31 @@ test.describe("production cash read-only verification", () => {
       if (path.includes("/api/cash/") && response.status() !== 200) failed.push(`${response.status()} ${path}`);
     });
     const samples: Record<string, { clickToPaint: number; responseToPaint: number }[]> = {};
+    const menuPaint: number[] = [];
+    async function checkMenu(label: string) {
+      const trigger = page.getByRole("button", { name: label, exact: true });
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.focus(); await twoFrames(page);
+      const geometry = () => page.evaluate(() => Array.from(document.querySelectorAll(
+        ".cash-page .page-header, .cash-page .cash-toolbar, .cash-page .finance-table, .cash-page .finance-table__footer",
+      )).map(element => {
+        const rect = element.getBoundingClientRect();
+        return [rect.x, rect.y, rect.width, rect.height];
+      }));
+      const before = await geometry(), started = performance.now();
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name: label, exact: true });
+      await expect(dialog).toBeVisible(); await twoFrames(page);
+      menuPaint.push(performance.now() - started);
+      const after = await geometry();
+      expect(after.length).toBe(before.length);
+      after.forEach((rect, index) => rect.forEach((value, axis) => expect(Math.abs(value - before[index][axis])).toBeLessThanOrEqual(1)));
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0); await expect(trigger).toBeFocused();
+      const closed = await geometry();
+      expect(closed.length).toBe(before.length);
+      closed.forEach((rect, index) => rect.forEach((value, axis) => expect(Math.abs(value - before[index][axis])).toBeLessThanOrEqual(1)));
+    }
     async function show(name: string, path: string, action: () => Promise<unknown>, grid?: Locator) {
       const start = performance.now();
       const incoming = page.waitForResponse(response => new URL(response.url()).pathname === `/fin-ops-api/api/cash/${path}` && response.request().method() === "GET");
@@ -46,20 +71,29 @@ test.describe("production cash read-only verification", () => {
     await show("cold_flows", "flows", () => page.goto("/fin-ops/cash?section=flows", { waitUntil: "domcontentloaded" }), flowsGrid);
     for (const name of ["现金流水", "现金账目", "每月任务", "基础设置"]) await expect(nav().getByRole("link", { name, exact: true })).toBeVisible();
     await expect(page.getByRole("tab")).toHaveCount(0);
+    await checkMenu("筛选账户"); await checkMenu("筛选来源");
     await show("turnover", "reports/turnover", () => nav().getByRole("link", { name: "现金账目", exact: true }).click(), page.getByRole("grid", { name: "往来账总表" }));
     await expect(page.getByRole("tab")).toHaveCount(3);
+    await checkMenu("筛选项目");
     await show("tickets", "reports/ticket-payments", () => page.getByRole("tab", { name: "有票支付", exact: true }).click(), page.getByRole("grid", { name: "有票支付", exact: true }));
+    await checkMenu("筛选使用状态");
     await show("personal_matrix", "reports/personal", () => page.getByRole("tab", { name: "个人专账", exact: true }).click(), page.getByRole("grid", { name: "个人年度还款矩阵" }));
+    await checkMenu("筛选银行 / 账单");
     for (const [label, grid] of [["现金归还", "个人现金归还"], ["有票直接冲", "有票直接冲"], ["无票报销冲抵", "无票报销冲抵"]]) {
       await page.getByRole("button", { name: /个人专账视图$/ }).click();
       await show(grid, "reports/personal", () => page.getByRole("option", { name: label, exact: true }).click(), page.getByRole("grid", { name: grid, exact: true }));
     }
     await show("task_month", "task-occurrences", () => nav().getByRole("link", { name: "每月任务", exact: true }).click());
+    await checkMenu("筛选任务状态");
     await show("task_templates", "tasks", () => page.getByRole("tab", { name: "任务配置", exact: true }).click(), page.getByRole("grid", { name: "任务模板" }));
+    await checkMenu("筛选模板类别");
     await show("accounts", "settings/accounts", () => nav().getByRole("link", { name: "基础设置", exact: true }).click(), page.getByRole("grid", { name: "现金账户", exact: true }));
+    await checkMenu("筛选账户状态");
     await show("categories", "settings/categories", () => page.getByRole("tab", { name: "费用类型", exact: true }).click());
+    await checkMenu("筛选适用范围");
     await show("projects", "projects", () => page.getByRole("tab", { name: "OA 项目与可选阶段", exact: true }).click(), page.getByRole("grid", { name: "OA 项目列表" }));
     expect(await page.locator(".cash-checkbox-grid").getByRole("checkbox").count()).toBeGreaterThan(0);
+    await checkMenu("筛选项目阶段");
     const guideCalls = cashCalls.length;
     await page.getByRole("tab", { name: "支付办理说明", exact: true }).click();
     await expect(page.getByRole("grid", { name: "支付办理参考" })).toBeVisible(); await twoFrames(page);
@@ -82,7 +116,7 @@ test.describe("production cash read-only verification", () => {
     const metrics = Object.fromEntries(Object.entries(samples).map(([name, rows]) => [name, {
       count: rows.length, clickToPaintMs: percentiles(rows.map(row => row.clickToPaint)), responseToPaintMs: percentiles(rows.map(row => row.responseToPaint)),
     }]));
-    console.log("CASH_READONLY_METRICS", JSON.stringify({ metrics, cashGetCount: cashCalls.length, blockedWrites: writes.length, failures: failed.length }));
+    console.log("CASH_READONLY_METRICS", JSON.stringify({ metrics, menuSamples: menuPaint.length, menuClickToVisibleMs: percentiles(menuPaint), cashGetCount: cashCalls.length, blockedWrites: writes.length, failures: failed.length }));
   });
 });
 

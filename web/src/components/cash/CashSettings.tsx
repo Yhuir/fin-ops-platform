@@ -6,6 +6,7 @@ import { cashAmount } from "./CashItems.types";
 import AppDrawer from "../common/AppDrawer";
 import { FinanceTable, FinanceTableBody, FinanceTableCell, FinanceTableColumn, FinanceTableHeader, FinanceTablePagination, FinanceTableRow } from "../common/FinanceTable";
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
+import { CashColumnHeader, CashFilterPopover } from "./CashFilters";
 import type { CashTasksPage } from "./CashTasksTypes";
 import type { CashAccountSetting, CashBillLabelSetting, CashCategorySetting, CashProjectSelection, CashProjectsPage } from "./CashSettingsTypes";
 import { cashCategoryGroupLabels, cashProjectUnavailableLabels } from "./CashSettingsTypes";
@@ -19,14 +20,14 @@ const settingTabs = [
   { id: "guide", label: "支付办理说明" },
 ];
 
-type AccountCriteria = { page: number; keyword: string; enabled: string };
-type CategoryCriteria = AccountCriteria & { group: string };
-type ProjectCriteria = { page: number; keyword: string; stage: string; selectable: string };
+type AccountCriteria = { page: number; keyword: string; enabled: string; order: "asc" | "desc" };
+type CategoryCriteria = AccountCriteria & { groups: string[] };
+type ProjectCriteria = { page: number; keyword: string; stages: (string | null)[]; selectable: string };
 export type CashSettingsCriteria = { tab: string; accounts: AccountCriteria; categories: CategoryCriteria; projects: ProjectCriteria; guide: string };
 export function initialCashSettingsCriteria(): CashSettingsCriteria {
-  return { tab: "accounts", accounts: { page: 1, keyword: "", enabled: "" },
-    categories: { page: 1, keyword: "", enabled: "", group: "" },
-    projects: { page: 1, keyword: "", stage: "", selectable: "" }, guide: "" };
+  return { tab: "accounts", accounts: { page: 1, keyword: "", enabled: "", order: "asc" },
+    categories: { page: 1, keyword: "", enabled: "", groups: [], order: "asc" },
+    projects: { page: 1, keyword: "", stages: [], selectable: "" }, guide: "" };
 }
 export default function CashSettings({ initialCriteria, onCriteriaChange }: { initialCriteria?: CashSettingsCriteria; onCriteriaChange?: (value: CashSettingsCriteria) => void }) {
   const [initial] = useState(() => initialCriteria ?? initialCashSettingsCriteria());
@@ -48,21 +49,26 @@ function CashAccounts({ initial, onChange }: { initial: AccountCriteria; onChang
   const [keyword, setKeyword] = useState(initial.keyword);
   const [search, setSearch] = useState(initial.keyword);
   const [enabled, setEnabled] = useState(initial.enabled);
+  const [order, setOrder] = useState(initial.order);
   const [editing, setEditing] = useState<CashAccountSetting | "new" | null>(null);
-  useEffect(() => { onChange({ page, keyword, enabled }); }, [page, keyword, enabled, onChange]);
-  const query = useCashQuery<CashTasksPage<CashAccountSetting>>("/settings/accounts", { page, page_size: 50, order: "asc", keyword: keyword || undefined, enabled: enabled || undefined }, revision);
+  useEffect(() => { onChange({ page, keyword, enabled, order }); }, [page, keyword, enabled, order, onChange]);
+  const query = useCashQuery<CashTasksPage<CashAccountSetting>>("/settings/accounts", { page, page_size: 50, sort: "name", order, keyword: keyword || undefined, enabled: enabled || undefined }, revision);
   return <section className="cash-section" aria-label="现金账户">
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}>
       <CashInput label="账户名称" value={search} onChange={setSearch} placeholder="搜索账户" />
       <Button type="submit" variant="secondary">查询</Button>
-      <CashSelect label="账户状态" value={enabled} onChange={(value) => { setEnabled(value); setPage(1); }} options={[{ value: "", label: "全部状态" }, { value: "true", label: "启用" }, { value: "false", label: "停用" }]} />
+      <Button variant="tertiary" onPress={() => { setKeyword(""); setSearch(""); setEnabled(""); setOrder("asc"); setPage(1); }}>重置</Button>
       <Button variant="tertiary" onPress={query.reload} isDisabled={query.loading}>刷新</Button>
       <Button onPress={() => setEditing("new")}>新增账户</Button>
     </form>
-    <CashNotice error={query.error?.message}>{query.loading ? "正在读取账户…" : query.data?.rows.length === 0 ? "尚无匹配账户。新增现金账户并确认期初后，即可逐笔录入。" : null}</CashNotice>
-    {query.data && <FinanceTable ariaLabel="现金账户" minWidth={900} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data.pagination.total} onPageChange={setPage} isDisabled={query.loading} />}>
-      <FinanceTableHeader>{["账户名称", "类型", "起算日期", "确认期初", "状态", "说明", "操作"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{query.data.rows.map((row) => <FinanceTableRow key={row.id} id={row.id}>
+    <CashNotice error={query.error?.message} />
+    <FinanceTable ariaLabel="现金账户" minWidth={900} sortDescriptor={{ column: "name", direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => { setOrder(value.direction === "ascending" ? "asc" : "desc"); setPage(1); }} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
+      <FinanceTableHeader>
+        <FinanceTableColumn id="name" isRowHeader allowsSorting>账户名称</FinanceTableColumn><FinanceTableColumn id="kind">类型</FinanceTableColumn><FinanceTableColumn id="opening_date">起算日期</FinanceTableColumn><FinanceTableColumn id="opening_amount">确认期初</FinanceTableColumn>
+        <FinanceTableColumn id="enabled"><CashColumnHeader label="状态"><CashFilterPopover label="账户状态" column value={enabled ? [enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => { setEnabled(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取账户…" : query.error ? "账户读取失败，请刷新。" : "尚无匹配账户。新增现金账户并确认期初后，即可逐笔录入。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell>
         <FinanceTableCell columnRole="status">{row.kind === "cash" ? "现金" : "储蓄"}</FinanceTableCell>
         <FinanceTableCell columnRole="date">{row.opening_date}</FinanceTableCell>
@@ -71,7 +77,7 @@ function CashAccounts({ initial, onChange }: { initial: AccountCriteria; onChang
         <FinanceTableCell columnRole="description">{row.remark ?? "—"}</FinanceTableCell>
         <FinanceTableCell columnRole="action"><Button variant="tertiary" size="sm" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell>
       </FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>}
+    </FinanceTable>
     {editing && <CashAccountEditor account={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
   </section>;
 }
@@ -115,28 +121,33 @@ function CashCategories({ initial, onChange }: { initial: CategoryCriteria; onCh
   const [page, setPage] = useState(initial.page);
   const [keyword, setKeyword] = useState(initial.keyword);
   const [search, setSearch] = useState(initial.keyword);
-  const [group, setGroup] = useState(initial.group);
+  const [groups, setGroups] = useState(initial.groups);
   const [enabled, setEnabled] = useState(initial.enabled);
+  const [order, setOrder] = useState(initial.order);
   const [editing, setEditing] = useState<CashCategorySetting | "new" | null>(null);
-  useEffect(() => { onChange({ page, keyword, enabled, group }); }, [page, keyword, enabled, group, onChange]);
-  const query = useCashQuery<CashTasksPage<CashCategorySetting>>("/settings/categories", { page, page_size: 50, order: "asc", keyword: keyword || undefined, group: group || undefined, enabled: enabled || undefined }, revision);
+  useEffect(() => { onChange({ page, keyword, enabled, groups, order }); }, [page, keyword, enabled, groups, order, onChange]);
+  const query = useCashQuery<CashTasksPage<CashCategorySetting>>("/settings/categories", { page, page_size: 50, sort: "name", order, keyword: keyword || undefined, groups: groups.length ? groups : undefined, enabled: enabled || undefined }, revision);
   return <section className="cash-section" aria-label="费用类型">
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}>
       <CashInput label="费用类型名称" value={search} onChange={setSearch} placeholder="搜索费用类型" />
       <Button type="submit" variant="secondary">查询</Button>
-      <CashSelect label="适用范围" value={group} onChange={(value) => { setGroup(value); setPage(1); }} options={[{ value: "", label: "全部范围" }, ...Object.entries(cashCategoryGroupLabels).map(([value, label]) => ({ value, label }))]} />
-      <CashSelect label="费用类型状态" value={enabled} onChange={(value) => { setEnabled(value); setPage(1); }} options={[{ value: "", label: "全部状态" }, { value: "true", label: "启用" }, { value: "false", label: "停用" }]} />
+      <Button variant="tertiary" onPress={() => { setKeyword(""); setSearch(""); setGroups([]); setEnabled(""); setOrder("asc"); setPage(1); }}>重置</Button>
       <Button variant="tertiary" onPress={query.reload} isDisabled={query.loading}>刷新</Button><Button onPress={() => setEditing("new")}>新增费用类型</Button>
     </form>
-    <CashNotice error={query.error?.message}>{query.loading ? "正在读取费用类型…" : query.data?.rows.length === 0 ? "暂无匹配费用类型。请按实际收付或往来用途新增。" : null}</CashNotice>
-    {query.data && <FinanceTable ariaLabel="费用类型" minWidth={760} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data.pagination.total} onPageChange={setPage} isDisabled={query.loading} />}>
-      <FinanceTableHeader>{["名称", "适用范围", "状态", "说明", "操作"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{query.data.rows.map((row) => <FinanceTableRow key={row.id} id={row.id}>
+    <CashNotice error={query.error?.message} />
+    <FinanceTable ariaLabel="费用类型" minWidth={760} sortDescriptor={{ column: "name", direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => { setOrder(value.direction === "ascending" ? "asc" : "desc"); setPage(1); }} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
+      <FinanceTableHeader>
+        <FinanceTableColumn id="name" isRowHeader allowsSorting>名称</FinanceTableColumn>
+        <FinanceTableColumn id="group"><CashColumnHeader label="适用范围"><CashFilterPopover label="适用范围" column value={groups} options={Object.entries(cashCategoryGroupLabels).map(([value, label]) => ({ value, label }))} onApply={value => { setGroups(value); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="enabled"><CashColumnHeader label="状态"><CashFilterPopover label="费用类型状态" column value={enabled ? [enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => { setEnabled(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="remark">说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取费用类型…" : query.error ? "费用类型读取失败，请刷新。" : "暂无匹配费用类型。请按实际收付或往来用途新增。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell><FinanceTableCell columnRole="direction">{cashCategoryGroupLabels[row.group]}</FinanceTableCell>
         <FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="description">{row.remark ?? "—"}</FinanceTableCell>
         <FinanceTableCell columnRole="action"><Button variant="tertiary" size="sm" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell>
       </FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>}
+    </FinanceTable>
     {editing && <CashCategoryEditor category={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
   </section>;
 }
@@ -204,14 +215,20 @@ export function CashProjectSettings({ initial = initialCashSettingsCriteria().pr
   const [page, setPage] = useState(initial.page);
   const [keyword, setKeyword] = useState(initial.keyword);
   const [search, setSearch] = useState(initial.keyword);
-  const [stage, setStage] = useState(initial.stage);
+  const [stages, setStages] = useState(initial.stages);
   const [selectable, setSelectable] = useState(initial.selectable);
   const [draft, setDraft] = useState<{ codes: string[]; version: number } | null>(null);
-  useEffect(() => { onChange?.({ page, keyword, stage, selectable }); }, [page, keyword, stage, selectable, onChange]);
+  const [stageOptions, setStageOptions] = useState<CashProjectsPage["stages"] | null>(null);
+  const [savedSelection, setSavedSelection] = useState<CashProjectSelection | null>(null);
+  useEffect(() => { onChange?.({ page, keyword, stages, selectable }); }, [page, keyword, stages, selectable, onChange]);
   const selection = useCashQuery<CashProjectSelection>("/settings/project-selection", undefined, revision);
-  const projects = useCashQuery<CashProjectsPage>("/projects", { purpose: "all", page, page_size: 50, keyword: keyword || undefined, stage_code: stage || undefined, selectable: selectable || undefined }, revision);
+  const projects = useCashQuery<CashProjectsPage>("/projects", { purpose: "all", page, page_size: 50, keyword: keyword || undefined, stage_codes: stages.length ? stages : undefined, selectable: selectable || undefined }, revision);
+  useEffect(() => { if (projects.data) setStageOptions(projects.data.stages); }, [projects.data]);
+  useEffect(() => { if (selection.data) setSavedSelection(selection.data); }, [selection.data]);
   const mutation = useCashMutation();
-  const selected = draft?.codes ?? selection.data?.allowed_stage_codes ?? [];
+  const displayedSelection = selection.data ?? savedSelection;
+  const selected = draft?.codes ?? displayedSelection?.allowed_stage_codes ?? [];
+  const configurationUnavailable = mutation.busy || selection.loading || projects.loading || !selection.data || Boolean(projects.error);
   const save = async () => {
     if (!selection.data) return;
     const result = await mutation.run<CashProjectSelection>("/settings/project-selection", { expected_version: draft?.version ?? selection.data.version, allowed_stage_codes: selected }, "PUT");
@@ -221,36 +238,39 @@ export function CashProjectSettings({ initial = initialCashSettingsCriteria().pr
     <div className="cash-toolbar"><h3>新增流水可选项目状态</h3><Button variant="tertiary" isDisabled={projects.loading || selection.loading || mutation.busy} onPress={() => { projects.reload(); selection.reload(); }}>刷新 OA 资料</Button></div>
     <p className="cash-hint">仅影响新增流水的项目选择，不修改 OA 状态。</p>
     <CashNotice error={selection.error?.message ?? projects.error?.message ?? mutation.error?.message} />
-    {selection.data && projects.data && <>
-      <fieldset className="cash-checkbox-grid" disabled={mutation.busy}>
+    {displayedSelection && stageOptions && <>
+      <fieldset className="cash-checkbox-grid" disabled={configurationUnavailable}>
         <legend className="sr-only">允许进入新增流水的 OA 阶段</legend>
-        {projects.data.stages.map((item) => <Checkbox key={item.code} isSelected={item.code !== "end" && selected.includes(item.code)} isDisabled={mutation.busy || item.code === "end"} onChange={(checked) => {
+        {stageOptions.map((item) => <Checkbox key={item.code} isSelected={item.code !== "end" && selected.includes(item.code)} isDisabled={configurationUnavailable || item.code === "end"} onChange={(checked) => {
           const next = checked ? [...selected, item.code] : selected.filter((code) => code !== item.code);
           setDraft({ codes: next, version: draft?.version ?? selection.data!.version });
         }}><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>{item.name}{item.code === "end" ? "（不允许新增）" : ""}</span></Checkbox>)}
       </fieldset>
       <div className="cash-toolbar">
-        <span role="status">{draft ? "未保存" : !selection.data.configured ? "尚未设置，请明确保存允许范围" : selection.data.allowed_stage_codes.length === 0 ? "当前不允许任何项目" : "已保存"}</span>
-        <Button isDisabled={mutation.busy || (!draft && selection.data.configured)} onPress={() => { void save(); }}>保存选择</Button>
+        <span role="status">{draft ? "未保存" : !displayedSelection.configured ? "尚未设置，请明确保存允许范围" : displayedSelection.allowed_stage_codes.length === 0 ? "当前不允许任何项目" : "已保存"}</span>
+        <Button isDisabled={configurationUnavailable || (!draft && displayedSelection.configured)} onPress={() => { void save(); }}>保存选择</Button>
         <Button variant="tertiary" isDisabled={!draft || mutation.busy} onPress={() => setDraft(null)}>撤销更改</Button>
       </div>
     </>}
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}>
       <CashInput label="项目关键词" value={search} onChange={setSearch} placeholder="项目名称或编号" />
       <Button type="submit" variant="secondary">查询项目</Button>
-      <CashSelect label="项目阶段" value={stage} onChange={(value) => { setStage(value); setPage(1); }} options={[{ value: "", label: "全部阶段" }, ...(projects.data?.stages.map((item) => ({ value: item.code, label: item.name })) ?? [])]} />
-      <CashSelect label="新增资格" value={selectable} onChange={(value) => { setSelectable(value); setPage(1); }} options={[{ value: "", label: "全部项目" }, { value: "true", label: "可选" }, { value: "false", label: "不可选" }]} />
+      <Button variant="tertiary" onPress={() => { setKeyword(""); setSearch(""); setStages([]); setSelectable(""); setPage(1); }}>重置</Button>
       {projects.data && <span className="cash-hint">本次读取：{new Date(projects.data.read_at).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}</span>}
     </form>
-    <CashNotice>{projects.loading ? "正在读取 OA 项目…" : projects.data?.rows.length === 0 ? "没有匹配项目。历史现金记录不受本页选择范围影响。" : null}</CashNotice>
-    {projects.data && <FinanceTable ariaLabel="OA 项目列表" minWidth={900} footer={<FinanceTablePagination page={page} pageSize={50} total={projects.data.total} onPageChange={setPage} isDisabled={projects.loading || mutation.busy} />}>
-      <FinanceTableHeader>{["项目编号", "项目名称", "真实阶段", "新增可选", "不可选原因"].map((name, index) => <FinanceTableColumn id={name} key={name} isRowHeader={index === 1}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{projects.data.rows.map((row) => <FinanceTableRow key={row.id} id={row.id}>
+    <FinanceTable ariaLabel="OA 项目列表" minWidth={900} footer={<FinanceTablePagination page={page} pageSize={50} total={projects.data?.total ?? 0} onPageChange={setPage} isDisabled={projects.loading || Boolean(projects.error) || mutation.busy} />}>
+      <FinanceTableHeader>
+        <FinanceTableColumn id="code">项目编号</FinanceTableColumn><FinanceTableColumn id="name" isRowHeader>项目名称</FinanceTableColumn>
+        <FinanceTableColumn id="stage"><CashColumnHeader label="真实阶段"><CashFilterPopover<string | null> label="项目阶段" column value={stages} options={[...(stageOptions?.map(item => ({ value: item.code, label: item.name })) ?? []), { value: null, label: "阶段缺失" }]} loading={projects.loading} error={projects.error?.message} onReload={projects.reload} onApply={value => { setStages(value); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="selectable"><CashColumnHeader label="新增可选"><CashFilterPopover label="新增资格" column value={selectable ? [selectable] : []} options={[{ value: "true", label: "可选" }, { value: "false", label: "不可选" }]} onApply={value => { setSelectable(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="reason">不可选原因</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody renderEmptyState={() => projects.loading ? "正在读取 OA 项目…" : projects.error ? "OA 项目读取失败，请刷新。" : "没有匹配项目。历史现金记录不受本页选择范围影响。"}>{(projects.data?.rows ?? []).map((row) => <FinanceTableRow key={row.id} id={row.id}>
         <FinanceTableCell columnRole="identity">{row.code ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.name}</FinanceTableCell>
         <FinanceTableCell columnRole="status">{row.stage_name ?? (row.stage_code ? "未知阶段" : "阶段缺失")}</FinanceTableCell><FinanceTableCell columnRole="status">{row.selectable ? "可选" : "不可选"}</FinanceTableCell>
         <FinanceTableCell columnRole="description">{row.unavailable_reason ? cashProjectUnavailableLabels[row.unavailable_reason] : "—"}</FinanceTableCell>
       </FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>}
+    </FinanceTable>
   </section>;
 }
 
@@ -263,11 +283,11 @@ export function CashBillLabels() {
   const query = useCashQuery<CashTasksPage<CashBillLabelSetting>>("/settings/bill-labels", { page, page_size: 50, keyword: keyword || undefined, order: "asc" }, revision);
   return <section className="cash-section" aria-label="账单分组">
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}><CashInput label="账单分组关键词" value={search} onChange={setSearch} /><Button type="submit" variant="secondary">查询分组</Button><Button onPress={() => setEditing("new")}>新增账单分组</Button></form>
-    <CashNotice error={query.error?.message}>{query.loading ? "正在读取账单分组…" : query.data?.rows.length === 0 ? "尚无账单分组。分组只标明用途，不是现金账户。" : null}</CashNotice>
-    {query.data && <FinanceTable ariaLabel="账单分组" minWidth={480} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data.pagination.total} onPageChange={setPage} />}>
+    <CashNotice error={query.error?.message} />
+    <FinanceTable ariaLabel="账单分组" minWidth={480} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
       <FinanceTableHeader>{["银行", "账单别名", "状态", "操作"].map((name, i) => <FinanceTableColumn key={name} id={name} isRowHeader={i === 1}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{query.data.rows.map((row) => <FinanceTableRow id={row.id} key={row.id}><FinanceTableCell columnRole="identity">{row.bank_name}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.label}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>}
+      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取账单分组…" : query.error ? "账单分组读取失败，请刷新。" : "尚无账单分组。分组只标明用途，不是现金账户。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow id={row.id} key={row.id}><FinanceTableCell columnRole="identity">{row.bank_name}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.label}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => setEditing(row)}>编辑</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+    </FinanceTable>
     {editing && <CashBillEditor row={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
   </section>;
 }
@@ -302,7 +322,7 @@ const paymentGuideRows = [
 ];
 
 function CashPaymentGuide({ keyword, onChange }: { keyword: string; onChange: (value: string) => void }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [detail, setDetail] = useState<(typeof paymentGuideRows)[number] | null>(null);
   const needle = keyword.trim();
   const rows = paymentGuideRows.filter((row) => !needle || Object.values(row).some((value) => value.includes(needle)));
   return <section className="cash-section" aria-label="支付办理说明">
@@ -310,8 +330,8 @@ function CashPaymentGuide({ keyword, onChange }: { keyword: string; onChange: (v
     <div className="cash-toolbar"><CashInput label="办理说明关键词" value={keyword} onChange={onChange} placeholder="类别、申请人或所需单据" /></div>
     <FinanceTable ariaLabel="支付办理参考" minWidth={1050}>
       <FinanceTableHeader>{["类别", "概要", "申请人", "所需单据", "收款方", "办理说明"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{rows.map((row) => <FinanceTableRow key={row.category} id={row.category}><FinanceTableCell columnRole="identity">{row.category}</FinanceTableCell><FinanceTableCell columnRole="description">{row.summary}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.applicant}</FinanceTableCell><FinanceTableCell columnRole="description">{row.document}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.recipient}</FinanceTableCell><FinanceTableCell columnRole="description"><Button variant="tertiary" size="sm" aria-expanded={expanded === row.category} onPress={() => setExpanded(expanded === row.category ? null : row.category)}>{expanded === row.category ? "收起" : "查看说明"}</Button>{expanded === row.category && <div className="cash-guide-detail"><p>现行参考：{row.current}</p><p>调整参考：{row.proposed}</p></div>}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+      <FinanceTableBody renderEmptyState={() => "没有匹配的办理说明。"}>{rows.map((row) => <FinanceTableRow key={row.category} id={row.category}><FinanceTableCell columnRole="identity">{row.category}</FinanceTableCell><FinanceTableCell columnRole="description">{row.summary}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.applicant}</FinanceTableCell><FinanceTableCell columnRole="description">{row.document}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.recipient}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" size="sm" onPress={() => setDetail(row)}>查看说明</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
     </FinanceTable>
-    {rows.length === 0 && <p>没有匹配的办理说明。</p>}
+    {detail && <AppDrawer open title={detail.category} width={520} className="cash-drawer" onClose={() => setDetail(null)}><div className="cash-form"><p>{detail.summary}</p><p>申请人：{detail.applicant}</p><p>所需单据：{detail.document}</p><p>收款方：{detail.recipient}</p><p>现行参考：{detail.current}</p><p>调整参考：{detail.proposed}</p></div></AppDrawer>}
   </section>;
 }

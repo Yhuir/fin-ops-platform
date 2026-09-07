@@ -78,6 +78,31 @@ class CashOaProjectTests(unittest.TestCase):
         self.assertEqual(result["rows"][0]["code"], "P3")
         self.assertEqual(self.source.list_projects({"selectable": "false"})["total"], 3)
 
+    def test_stage_multi_null_and_unknown_filter_before_pagination_without_writes(self) -> None:
+        result = self.source.list_projects({"stage_codes": '["5",null,"new"]', "page_size": 1, "page": 2})
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["rows"][0]["stage_code"], None)
+        self.assertEqual(result["rows"][0]["unavailable_reason"], "stage_missing")
+        self.collection.find.assert_called_once_with({"form_id": "17"}, PROJECT_PROJECTION)
+        unknown = self.source.list_projects({"stage_codes": '["new"]'})["rows"][0]
+        self.assertEqual(unknown["unavailable_reason"], "stage_unknown")
+        self.assertIsNone(unknown["stage_name"])
+        ended = self.source.list_projects({"stage_codes": '["end"]', "purpose": "selection"})
+        self.assertEqual(ended["total"], 0)
+        self.collection.update_one.assert_not_called()
+        self.collection.insert_one.assert_not_called()
+
+    def test_stage_multi_invalid_values_fail_before_source_io(self) -> None:
+        for query in ({"stage_codes": "[]"}, {"stage_codes": '["5","5"]'},
+                      {"stage_codes": '[true]'}, {"stage_codes": '[NaN]'},
+                      {"stage_codes": '["5"]', "stage_code": "0"},
+                      {"stage_codes": ["5"]}):
+            with self.subTest(query=query), self.assertRaises(CashError) as error:
+                self.source.list_projects(query)
+            self.assertEqual(error.exception.status, 400)
+        self.collection.find.assert_not_called()
+        self.stage_loader.assert_not_called()
+
     def test_unconfigured_cannot_enable_projects_even_with_stale_allowed_values(self) -> None:
         self.settings["configured"] = False
         self.assertEqual(self.source.list_projects({"purpose": "selection"})["total"], 0)

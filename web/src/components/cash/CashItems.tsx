@@ -1,6 +1,7 @@
 import { Button, Checkbox } from "@heroui/react";
 import { useState, type FormEvent } from "react";
 
+import type { CashQueryParams } from "../../features/cash/api";
 import { useCashMutation, useCashQuery } from "../../features/cash/hooks";
 import AppDrawer from "../common/AppDrawer";
 import {
@@ -14,7 +15,7 @@ import {
   type CashSettlement, type CashSettlementKind,
 } from "./CashItems.types";
 
-type QueryParams = Record<string, string | number | boolean | null | undefined>;
+type QueryParams = CashQueryParams;
 type RefItem = { id: string; version: number; content: string };
 
 function useItemWrite() {

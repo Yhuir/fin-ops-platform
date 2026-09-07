@@ -14,6 +14,7 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 from fin_ops_platform.services.cash_domain import CashError, invalid
+from fin_ops_platform.services.cash_queries import query_sets
 from fin_ops_platform.services.mongo_oa_adapter import MongoOASettings
 
 
@@ -142,16 +143,20 @@ class CashOaProjectService:
         }
 
     def list_projects(self, query: dict) -> dict:
-        if not isinstance(query, dict) or set(query) - {"purpose", "keyword", "stage_code", "selectable", "page", "page_size"}:
+        if not isinstance(query, dict) or set(query) - {"purpose", "keyword", "stage_code", "stage_codes", "selectable", "page", "page_size"}:
             invalid("项目查询参数不正确。")
+        multi_stage = "stage_codes" in query
+        query = query_sets(query)
         purpose = query.get("purpose", "all")
         if not isinstance(purpose, str) or purpose not in {"all", "selection"}:
             invalid("项目查询 purpose 必须为 all 或 selection。")
         page = _positive_page(query.get("page", 1), 1000000)
         page_size = _positive_page(query.get("page_size", 50), 200)
         keyword, stage_filter = query.get("keyword", ""), query.get("stage_code")
-        if not isinstance(keyword, str) or len(keyword) > 200 or (stage_filter is not None and not isinstance(stage_filter, str)):
+        if not isinstance(keyword, str) or len(keyword) > 200 or (not multi_stage and stage_filter is not None and not isinstance(stage_filter, str)):
             invalid("项目查询文字参数不正确。")
+        if stage_filter is not None and not multi_stage:
+            stage_filter = [stage_filter]
         selectable = query.get("selectable")
         if isinstance(selectable, str) and selectable in {"true", "false"}:
             selectable = selectable == "true"
@@ -173,7 +178,7 @@ class CashOaProjectService:
         needle = keyword.strip().casefold()
         rows = [row for row in rows if
                 (not needle or needle in row["name"].casefold() or needle in (row["code"] or "").casefold())
-                and (stage_filter is None or row["stage_code"] == stage_filter)
+                and (stage_filter is None or row["stage_code"] in stage_filter)
                 and (purpose != "selection" or row["selectable"])
                 and (selectable is None or row["selectable"] is selectable)]
         rows.sort(key=lambda row: (row["name"], row["id"]))

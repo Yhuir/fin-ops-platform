@@ -7,12 +7,42 @@ export class CashRequestError extends Error {
   }
 }
 
+export type CashQueryParams = Record<string, string | number | boolean | null | undefined | readonly (string | null)[]>;
+
+export function cashQueryString(params: CashQueryParams = {}): string {
+  const query = new URLSearchParams();
+  let selected = 0;
+  for (const [key, value] of Object.entries(params)) {
+    if (Array.isArray(value)) {
+      if (!value.length) continue;
+      selected += value.length;
+      if (value.length > 50 || selected > 100) throw new CashRequestError(400, "cash_filter_limit", "每列最多选择 50 项，全部条件最多选择 100 项。查看全部请清空限制。");
+      query.set(key, JSON.stringify(value));
+    } else if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+  }
+  const encoded = query.toString();
+  if (encoded.length > 6000) throw new CashRequestError(400, "cash_filter_limit", "筛选条件过长，请减少选择项或清空限制后查看全部。");
+  return encoded;
+}
+
+/** Check the complete next query before replacing an already applied filter. */
+export function cashQueryError(params: CashQueryParams): string | null {
+  try { cashQueryString(params); return null; }
+  catch (error) {
+    if (error instanceof CashRequestError && error.code === "cash_filter_limit") return error.message;
+    throw error;
+  }
+}
+
 /** Cash has one HTTP boundary. Never retry through the ordinary financial API. */
 export async function cashRequest<T>(path: string, options: {
   method?: string; body?: unknown; signal?: AbortSignal;
 } = {}): Promise<T> {
   if (!/^\/[a-z][a-z0-9/-]*(?:\?[^#]*)?$/.test(path)) {
     throw new CashRequestError(0, "cash_invalid_path", "现金请求地址不正确。");
+  }
+  if (new TextEncoder().encode(path.split("?")[1] ?? "").length > 6000) {
+    throw new CashRequestError(400, "cash_filter_limit", "筛选条件过长，请减少选择项。");
   }
   const controller = new AbortController();
   const abort = () => controller.abort();

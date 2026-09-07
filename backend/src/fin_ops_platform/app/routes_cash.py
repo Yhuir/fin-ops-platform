@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Callable
+from urllib.parse import urlencode
 
 from psycopg import OperationalError
 from psycopg.errors import InsufficientPrivilege, InvalidSchemaName, LockNotAvailable, QueryCanceled, UndefinedTable, UniqueViolation
@@ -30,6 +31,8 @@ class CashApiRoutes:
                 raise CashError("cash_access_denied", "当前账号不可使用现金账。", 403)
             if any(len(values) != 1 for values in query.values()):
                 raise CashError("cash_invalid_input", "查询参数不能重复。")
+            if len(urlencode(query, doseq=True).encode("utf-8")) > 6000:
+                raise CashError("cash_invalid_input", "查询条件过长，请减少选择项。")
             params = {key: values[0] for key, values in query.items()}
             actor = {"account": session.identity.username, "name": session.identity.display_name}
             payload = self._parse_body(body) if method in {"POST", "PUT"} else None

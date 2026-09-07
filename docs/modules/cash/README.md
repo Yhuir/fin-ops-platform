@@ -1,5 +1,7 @@
 # 现金账模块
 
+当前工作：用户已授权执行[实施计划§13](../../dev/cash-module-implementation-plan.md#13-全现金模块ui统筹实施计划设计完成代码待授权执行)、提交推送和部署。统一布局、HeroUI原生浮层/排序及多选GET已实现；实际验证与最新发布状态统一看[实施§14](../../dev/cash-module-implementation-plan.md#14-统一现金ui实际执行与验证2026-09-08)。下文68eee75c0是上一版记录，不代表本次验收。
+
 本模块管理保密的公司现金/受管储蓄账户、往来事项、票据与个人账、每月任务。现金业务只进入同库 `cash.*`，不进入 App 普通统一事实池。
 
 当前线上代码`68eee75c0`，release为`cash-68eee75c0-20260907-ui-layout`，已提交推送`codex/cash-ledger`。复用现有HeroUI/FinanceTable/AppDrawer；四子页面/0-3-2-4视图接真实API。首次上线`8bdfc07ae`的三子页属于历史；本次测试、上线和生产只读性能见[实施计划§12](../../dev/cash-module-implementation-plan.md)。现金只读通过，旧银行/工作台四并发耗时仍超标，不把空库和只读验证扩大为完整生产写入验收。

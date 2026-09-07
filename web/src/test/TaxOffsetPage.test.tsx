@@ -1162,7 +1162,7 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
     expect(within(getStatCard("已认证结果进项税额")).getByText("0.00")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: /11203490/ })).not.toBeDisabled();
+    expect(await screen.findByRole("checkbox", { name: /11203490/ })).not.toBeDisabled();
     expect(screen.getAllByText("当前分组暂无记录")).toHaveLength(2);
     const countTaxOffsetLoads = () => fetchMock.mock.calls.filter(([input]) => (
       String(input) === "/api/tax-offset?month=2026-03"

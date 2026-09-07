@@ -79,9 +79,9 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
         <CashSelect label="方向" value={kind} disabled={mutation.busy || Boolean(task || existingItem)} onChange={value => { setKind(value as CashFlowKind); setCategory(""); setParts([]); setDirty(true); }} required options={Object.entries(cashFlowLabels).map(([value, label]) => ({ value, label }))} />
         <CashInput label="实际发生日" type="date" value={date} onChange={setDate} required disabled={mutation.busy} />
         <CashInput label="金额（元）" value={amount} onChange={setAmount} required disabled={mutation.busy} />
-        {kind !== "receipt" && <CashConfigurationSelect mode="entry" name="accounts" label="付款账户" value={from} selected={flow?.from_account} onChange={value => { setFrom(value); setDirty(true); }} required disabled={mutation.busy} />}
-        {kind !== "payment" && <CashConfigurationSelect mode="entry" name="accounts" label="收款账户" value={to} selected={flow?.to_account} onChange={value => { setTo(value); setDirty(true); }} required disabled={mutation.busy} />}
-        {kind !== "transfer" && <CashConfigurationSelect mode="entry" name="categories" label="费用分类" value={category} selected={flow?.category} group={kind} onChange={value => { setCategory(value); setDirty(true); }} required disabled={mutation.busy} />}
+        {kind !== "receipt" && <CashConfigurationSelect name="accounts" label="付款账户" value={from} selected={flow?.from_account} onChange={value => { setFrom(value); setDirty(true); }} required disabled={mutation.busy} />}
+        {kind !== "payment" && <CashConfigurationSelect name="accounts" label="收款账户" value={to} selected={flow?.to_account} onChange={value => { setTo(value); setDirty(true); }} required disabled={mutation.busy} />}
+        {kind !== "transfer" && <CashConfigurationSelect name="categories" label="费用分类" value={category} selected={flow?.category} group={kind} onChange={value => { setCategory(value); setDirty(true); }} required disabled={mutation.busy} />}
         <CashInput label="人员 / 经办对象（可选）" value={person} onChange={setPerson} disabled={mutation.busy} />
         <CashInput label="用途" value={content} onChange={setContent} required disabled={mutation.busy} />
         <CashInput label="备注（可选）" value={remark} onChange={setRemark} disabled={mutation.busy} />

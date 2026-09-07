@@ -56,7 +56,7 @@ async function installCashFixtures(page: Page, options: { firstCreateFailure?: b
     }
     if (path === "/flows") {
       let rows = flows;
-      for (const key of ["kind", "source"] as const) { const value = url.searchParams.get(key); if (value) rows = rows.filter(row => (key === "source" ? row.source_kind : row.kind) === value); }
+      for (const key of ["kinds", "sources"] as const) { const value = url.searchParams.get(key); if (value) rows = rows.filter(row => (JSON.parse(value) as string[]).includes(key === "sources" ? row.source_kind : row.kind)); }
       const keyword = url.searchParams.get("keyword"); if (keyword) rows = rows.filter(row => row.content.includes(keyword));
       return json({ ...paginate(rows, url), summary: { period: { date_from: url.searchParams.get("date_from") ?? "2026-01-01", date_to: url.searchParams.get("date_to") ?? "2026-12-31" }, filtered_totals: { flow_count: rows.length, income_amount: "3000.00", expense_amount: "12000.00", transfer_amount: "0.00" }, account_balances: [{ account_id: account.id, account_name: account.name, opening_date: "2026-01-01", coverage_state: "complete", coverage_start: "2026-01-01", opening_balance: "50000.00", balance_at_coverage_start: "50000.00", period_inflow: "3000.00", period_outflow: "12000.00", ending_balance: "41000.00" }] } });
     }
@@ -160,7 +160,10 @@ test.describe("cash module deterministic browser flow", () => {
     await expect(page.getByRole("tab")).toHaveCount(0);
     await page.getByRole("textbox", { name: "搜索流水" }).fill("归还");
     await page.getByRole("button", { name: "查询", exact: true }).click(); await expect(grid).not.toContainText("合成个人借出");
-    await page.getByRole("button", { name: /来源$/ }).click(); await page.getByRole("option", { name: "手动录入", exact: true }).click();
+    await page.getByRole("button", { name: "筛选来源" }).click();
+    await page.getByRole("dialog", { name: "筛选来源" }).locator("label").filter({ hasText: "手动录入" }).click();
+    await expect(page.getByRole("checkbox", { name: "手动录入", exact: true })).toBeChecked();
+    await page.getByRole("dialog", { name: "筛选来源" }).getByRole("button", { name: "应用", exact: true }).click();
     await expect(grid).toContainText("合成现金归还");
     const before = flowResponses;
     await page.getByRole("link", { name: "现金账目", exact: true }).click();
@@ -177,7 +180,7 @@ test.describe("cash module deterministic browser flow", () => {
     await page.getByRole("button", { name: "重置", exact: true }).click(); await expect(grid).toContainText("合成个人借出");
     expect(api.count("GET", "/flows")).toBe(resetBefore + 1);
     const url = new URL(`http://test/${api.calls.filter(row => row.path === "/flows").at(-1)!.query}`);
-    expect(url.searchParams.has("keyword")).toBe(false); expect(url.searchParams.has("source")).toBe(false);
+    expect(url.searchParams.has("keyword")).toBe(false); expect(url.searchParams.has("sources")).toBe(false);
     expect(page.url()).toMatch(/\/cash\?section=flows$/);
     await page.getByRole("link", { name: "银行明细", exact: true }).click();
     await expect(page.getByRole("grid", { name: "交易流水" })).toBeVisible();
@@ -193,7 +196,7 @@ test.describe("cash module deterministic browser flow", () => {
     await page.setViewportSize({ width: 1800, height: 847 }); await page.goto("/cash?section=flows");
     const grid = page.getByRole("grid", { name: "现金流水明细" }); await expect(grid).toContainText("该范围内没有现金流水");
     const geometry = await page.locator(".cash-page").evaluate(root => {
-      const controls = [...root.querySelectorAll(".cash-toolbar--compact .select__trigger")].map(node => node.getBoundingClientRect());
+      const controls = [...root.querySelectorAll('.cash-toolbar input[type="date"]')].map(node => node.getBoundingClientRect());
       const table = root.querySelector(".cash-main-table")!, header = table.querySelector("thead")!, empty = table.querySelector(".cash-empty")!;
       return { heights: controls.map(rect => rect.height), tops: controls.map(rect => rect.top), headerHeight: header.getBoundingClientRect().height,
         emptyInside: Boolean(empty.closest("tbody")), headerBottom: header.getBoundingClientRect().bottom, emptyTop: empty.getBoundingClientRect().top,
@@ -252,23 +255,108 @@ test.describe("cash module deterministic browser flow", () => {
       const params = new URL(route.request().url()).searchParams;
       expect(params.has("enabled")).toBe(false);
       const pageNumber = Number(params.get("page")); const keyword = params.get("keyword");
-      const rows = keyword || pageNumber === 2 ? [{ ...account, name: "历史停用账户", enabled: false }] : Array.from({ length: 100 }, (_, index) => ({ ...account, id: `10000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`, name: `合成账户${index}` }));
-      return route.fulfill({ json: { rows, pagination: { page: pageNumber, page_size: 100, total: keyword ? 1 : 101 } } });
+      const rows = keyword || pageNumber === 2 ? [{ ...account, name: "历史停用账户", enabled: false }] : Array.from({ length: 50 }, (_, index) => ({ ...account, id: `10000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`, name: `合成账户${index}` }));
+      return route.fulfill({ json: { rows, pagination: { page: pageNumber, page_size: 50, total: keyword ? 1 : 51 } } });
     });
     await page.goto("/cash?section=flows"); await expect(page.getByRole("grid", { name: "现金流水明细" })).toContainText("合成现金归还");
-    const trigger = page.getByRole("button", { name: /账户$/ });
+    const trigger = page.getByRole("button", { name: "筛选账户", exact: true });
     const before = await trigger.boundingBox(); await trigger.click();
-    const popup = page.locator(".cash-select-popover");
+    const popup = page.getByRole("dialog", { name: "筛选账户", exact: true });
     await popup.getByRole("button", { name: "下一页", exact: true }).click();
-    await expect(popup.getByRole("option", { name: "历史停用账户", exact: true })).toBeVisible();
-    await popup.getByRole("textbox", { name: "搜索账户" }).fill("历史");
-    await expect(popup.getByRole("textbox", { name: "搜索账户" })).toHaveValue("历史");
-    await expect(popup.getByRole("textbox", { name: "搜索账户" })).toBeFocused();
-    await popup.getByRole("option", { name: "历史停用账户", exact: true }).click();
-    await expect(trigger).toContainText("历史停用账户");
-    const after = await trigger.boundingBox(); expect(after!.y).toBe(before!.y); expect(after!.height).toBe(32);
+    await expect(popup.getByRole("checkbox", { name: "历史停用账户", exact: true })).toBeVisible();
+    await popup.getByRole("textbox", { name: "搜索账户选项" }).fill("历史");
+    await expect(popup.getByRole("textbox", { name: "搜索账户选项" })).toHaveValue("历史");
+    await expect(popup.getByRole("textbox", { name: "搜索账户选项" })).toBeFocused();
+    await popup.locator("label").filter({ hasText: "历史停用账户" }).click();
+    await expect(popup.getByRole("checkbox", { name: "历史停用账户", exact: true })).toBeChecked();
+    await popup.getByRole("button", { name: "应用", exact: true }).click();
+    await expect(trigger).toHaveAttribute("data-active", "true");
+    const after = await trigger.boundingBox(); expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(1);
+    expect(await trigger.evaluate(button => button.offsetHeight)).toBe(28);
     await page.getByRole("link", { name: "现金账目", exact: true }).click();
     await page.getByRole("link", { name: "现金流水", exact: true }).click();
-    await expect(trigger).toContainText("历史停用账户");
+    await trigger.click(); await expect(popup.getByText("已选 1", { exact: true })).toBeVisible();
+    await popup.getByRole("textbox", { name: "搜索账户选项" }).fill("历史");
+    await expect(popup.getByRole("checkbox", { name: "历史停用账户", exact: true })).toBeChecked();
+  });
+
+  test("every cash view uses anchored overlays without background layout or scroll displacement", async ({ page }, testInfo) => {
+    const api = await installCashFixtures(page); await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/cash?section=accounts");
+    const measures: { name: string; displacement: number; openMs: number }[] = [];
+    const check = async (label: string) => {
+      await expect(page.locator(".cash-page").getByText(/^正在读取/)).toHaveCount(0);
+      const trigger = page.getByRole("button", { name: label, exact: true });
+      await trigger.scrollIntoViewIfNeeded();
+      const positions = () => page.locator(".cash-page").evaluate(root => ({
+        boxes: [...root.querySelectorAll('.page-header, .cash-toolbar, .finance-table, .finance-table__footer')].map(node => { const b = node.getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; }),
+        scroll: [...root.querySelectorAll('.cash-view, .cash-scroll-content, .finance-table__scroll')].map(node => [node.scrollLeft, node.scrollTop]),
+      }));
+      const before = await positions(); const cashCount = api.calls.length;
+      await trigger.evaluate(button => button.addEventListener("pointerdown", () => { (window as Window & { cashOpenStarted?: number }).cashOpenStarted = performance.now(); }, { once: true }));
+      await trigger.click();
+      const dialog = page.getByRole("dialog", { name: label, exact: true }); await expect(dialog).toBeVisible();
+      const openMs = await dialog.evaluate(() => performance.now() - (window as Window & { cashOpenStarted?: number }).cashOpenStarted!);
+      const after = await positions();
+      expect(after.scroll).toEqual(before.scroll);
+      expect(after.boxes.length).toBe(before.boxes.length);
+      const displacement = Math.max(0, ...before.boxes.flatMap((box, i) => box.map((v, j) => Math.abs(v - after.boxes[i][j]))));
+      expect(displacement, label).toBeLessThanOrEqual(1);
+      const box = await dialog.boundingBox(); expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.x + box!.width).toBeLessThanOrEqual(1440);
+      if (measures.length === 0) {
+        await expect(page.locator(".cash-filter-popover[data-entering]")).toHaveCount(0);
+        await page.screenshot({ path: testInfo.outputPath("cash-anchored-project-filter.png") });
+        const styles = await page.evaluate(() => {
+          const read = (selector: string) => {
+            const node = document.querySelector<HTMLElement>(selector)!; const style = getComputedStyle(node);
+            return { selector, label: node.textContent?.trim(), hovered: node.hasAttribute("data-hovered"), height: style.height, background: style.backgroundColor, color: style.color,
+              border: style.border, radius: style.borderRadius, padding: style.padding, shadow: style.boxShadow };
+          };
+          return [".cash-filter-popover .button--primary", ".cash-page .cash-toolbar .button--secondary", ".cash-page .cash-toolbar .button--tertiary", ".cash-page .cash-column-filter", ".cash-filter-popover"].map(read);
+        });
+        console.log("cash computed styles", JSON.stringify(styles));
+        await testInfo.attach("cash-computed-styles", { body: JSON.stringify(styles, null, 2), contentType: "application/json" });
+      }
+      await page.keyboard.press("Escape"); await expect(dialog).toHaveCount(0); await expect(trigger).toBeFocused();
+      const closed = await positions(); expect(closed.scroll).toEqual(before.scroll);
+      expect(closed.boxes.length).toBe(before.boxes.length);
+      expect(Math.max(0, ...before.boxes.flatMap((box, i) => box.map((v, j) => Math.abs(v - closed.boxes[i][j])))), label).toBeLessThanOrEqual(1);
+      // Opening candidates may read their own endpoint, but must not requery the main report.
+      expect(api.calls.slice(cashCount).every(call => ["/reports/project-options", "/settings/accounts", "/settings/categories", "/settings/bill-labels"].includes(call.path))).toBe(true);
+      measures.push({ name: label, displacement, openMs: Number(openMs.toFixed(2)) });
+    };
+    for (const label of ["筛选项目", "筛选往来对象", "筛选费用类型", "筛选处理状态", "其他排序"]) await check(label);
+    await page.getByRole("tab", { name: "有票支付", exact: true }).click();
+    for (const label of ["筛选项目", "筛选提供人", "筛选使用状态"]) await check(label);
+    await page.getByRole("tab", { name: "个人专账", exact: true }).click();
+    for (const label of ["筛选项目", "筛选银行 / 账单", "其他排序"]) await check(label);
+    for (const view of ["现金归还", "有票直接冲", "无票报销冲抵"]) {
+      await page.getByRole("button", { name: /个人专账视图$/ }).click(); await page.getByRole("option", { name: view, exact: true }).click();
+      await check("筛选项目"); await check("筛选银行 / 账单");
+    }
+    await page.getByRole("link", { name: "现金流水", exact: true }).click();
+    for (const label of ["筛选账户", "筛选项目", "筛选人员", "筛选分类", "筛选来源", "筛选方向", "其他排序"]) await check(label);
+    await page.getByRole("link", { name: "每月任务", exact: true }).click();
+    await check("筛选任务类别"); await check("筛选任务状态");
+    await page.getByRole("tab", { name: "任务配置" }).click(); await check("筛选模板类别"); await check("筛选模板状态");
+    await page.getByRole("link", { name: "基础设置", exact: true }).click(); await check("筛选账户状态");
+    await page.getByRole("tab", { name: "费用类型", exact: true }).click(); await check("筛选适用范围"); await check("筛选费用类型状态");
+    await page.getByRole("tab", { name: "OA 项目与可选阶段" }).click(); await check("筛选项目阶段"); await check("筛选新增资格");
+    console.log("cash overlay geometry", JSON.stringify(measures));
+    await testInfo.attach("cash-overlay-geometry", { body: JSON.stringify(measures, null, 2), contentType: "application/json" });
+    await page.getByRole("link", { name: "现金账目", exact: true }).click();
+    await page.getByRole("tab", { name: "往来账总表", exact: true }).click();
+    await page.getByRole("button", { name: "筛选项目" }).click();
+    const backgroundSearch = page.getByRole("textbox", { name: "关键词", exact: true });
+    const outside = await backgroundSearch.boundingBox();
+    await page.mouse.click(outside!.x + outside!.width / 2, outside!.y + outside!.height / 2);
+    await expect(page.getByRole("dialog", { name: "筛选项目" })).toHaveCount(0);
+    await backgroundSearch.click(); await expect(backgroundSearch).toBeFocused();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "筛选项目" }).click();
+    const narrow = await page.getByRole("dialog", { name: "筛选项目" }).boundingBox();
+    expect(narrow!.x).toBeGreaterThanOrEqual(0); expect(narrow!.x + narrow!.width).toBeLessThanOrEqual(390);
+    await expect(page.locator(".cash-filter-popover[data-entering]")).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("cash-narrow-filter.png") });
   });
 });

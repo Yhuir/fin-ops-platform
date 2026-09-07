@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -61,6 +61,7 @@ function installHttp(options: { write?: (write: Write) => Response | Promise<Res
       { id: accountB, version: 1, name: "合成储蓄账户", kind: "savings", opening_date: "2026-01-01", opening_amount: "0.00", enabled: true, remark: null },
     ], Number(parsed.searchParams.get("page_size"))));
     if (path === "/api/cash/settings/categories") return json(rowsPage([{ id: categoryId, version: 1, name: "合成往来类型", group: "turnover", enabled: true, remark: null }], Number(parsed.searchParams.get("page_size"))));
+    if (path === "/api/cash/reports/project-options") return json(rowsPage([{ id: "project-a", name: "合成历史项目甲" }, { id: "project-b", name: "合成历史项目乙" }]));
     if (path === "/api/cash/items" || path === "/api/cash/settlements") return json(rowsPage([], 20));
     if (path === `/api/cash/flows/${flowId}`) return json(options.getDetail ? options.getDetail() : detail());
     if (path === "/api/cash/flows") return json(options.list ? options.list(parsed) : { ...rowsPage([flow()]), summary: summary() });
@@ -92,6 +93,44 @@ beforeEach(() => http.mockReset());
 afterEach(cleanup);
 
 describe("现金实际录入 HTTP 字段", () => {
+  it("跨列总选择超限保留菜单草稿、已应用条件和当前结果，不发送新 HTTP", async () => {
+    const user = userEvent.setup(); installHttp(); const onCriteriaChange = vi.fn();
+    const initial = initialCashFlowCriteria();
+    initial.account_ids = Array.from({ length: 50 }, (_, i) => `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`);
+    initial.project_ids = Array.from({ length: 50 }, (_, i) => `p${i}`);
+    render(<CashProvider><CashFlowTable initialCriteria={initial} onCriteriaChange={onCriteriaChange} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    await user.click(screen.getByRole("button", { name: "筛选来源" }));
+    const popup = await screen.findByRole("dialog", { name: "筛选来源" });
+    await user.click(within(popup).getByRole("checkbox", { name: "手动录入" }));
+    const requests = http.mock.calls.length;
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    expect(within(popup).getByRole("alert")).toHaveTextContent("全部条件最多选择 100 项");
+    expect(within(popup).getByRole("checkbox", { name: "手动录入" })).toBeChecked();
+    expect(http.mock.calls).toHaveLength(requests);
+    expect(onCriteriaChange.mock.calls.at(-1)![0]).toEqual(initial);
+    expect(screen.getByText("合成手工收款")).toBeInTheDocument();
+    await user.click(within(popup).getByRole("button", { name: "清空" }));
+    expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "筛选来源" })).not.toBeInTheDocument());
+    expect(http.mock.calls).toHaveLength(requests);
+  });
+
+  it("顶部关键词超过完整请求长度时保留查询草稿和上次成功的流水", async () => {
+    const user = userEvent.setup(); installHttp(); const onCriteriaChange = vi.fn();
+    render(<CashProvider><CashFlowTable onCriteriaChange={onCriteriaChange} /></CashProvider>);
+    await screen.findByText("合成手工收款"); const criteria = onCriteriaChange.mock.calls.at(-1)![0];
+    const requests = http.mock.calls.length; const keyword = "项".repeat(700);
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索流水" }), { target: { value: keyword } });
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    expect(screen.getByRole("alert")).toHaveTextContent("筛选条件过长");
+    expect(screen.getByRole("textbox", { name: "搜索流水" })).toHaveValue(keyword);
+    expect(screen.getByText("合成手工收款")).toBeInTheDocument();
+    expect(onCriteriaChange.mock.calls.at(-1)![0]).toEqual(criteria);
+    expect(http.mock.calls).toHaveLength(requests);
+  });
+
   it("手工保存十进制字符串，503 后保留草稿并以相同 UUID 重试一次", async () => {
     const user = userEvent.setup(); let attempts = 0;
     const writes = installHttp({ write: ({ body }) => ++attempts === 1 ? json({ error: "cash_storage_unavailable", message: "现金服务暂不可用，请核对提交结果。" }, 503) : created(body) });
@@ -162,6 +201,70 @@ describe("现金实际录入 HTTP 字段", () => {
 });
 
 describe("现金读取、更正、删除", () => {
+  it("账户多选只在应用后读取一次，不提交日期与搜索草稿，排序保留集合", async () => {
+    const user = userEvent.setup(); installHttp();
+    render(<CashProvider><CashFlowTable /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    const listCalls = () => http.mock.calls.filter(([url]) => url.startsWith("/api/cash/flows?"));
+    const original = new URL(listCalls()[0][0], "http://test").searchParams;
+    fireEvent.change(screen.getByLabelText("起始日期"), { target: { value: "2026-06-01" } });
+    await user.type(screen.getByRole("textbox", { name: "搜索流水" }), "未提交草稿");
+    const before = listCalls().length;
+    await user.click(screen.getByRole("button", { name: "筛选账户" }));
+    const popup = await screen.findByRole("dialog", { name: "筛选账户" });
+    await user.click(await within(popup).findByRole("checkbox", { name: "合成现金账户" }));
+    await user.click(within(popup).getByRole("checkbox", { name: "合成储蓄账户" }));
+    expect(listCalls()).toHaveLength(before);
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await waitFor(() => expect(listCalls()).toHaveLength(before + 1));
+    let params = new URL(listCalls().at(-1)![0], "http://test").searchParams;
+    expect(JSON.parse(params.get("account_ids")!)).toEqual([accountA, accountB]);
+    expect(params.has("keyword")).toBe(false); expect(params.get("date_from")).toBe(original.get("date_from"));
+    expect(params.get("page")).toBe("1");
+    await user.click(screen.getByRole("columnheader", { name: /日期/ }));
+    await waitFor(() => expect(new URL(listCalls().at(-1)![0], "http://test").searchParams.get("order")).toBe("asc"));
+    params = new URL(listCalls().at(-1)![0], "http://test").searchParams;
+    expect(params.get("account_ids")).toBe(JSON.stringify([accountA, accountB]));
+    expect(screen.queryByLabelText("排序", { selector: "button" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重置", exact: true }));
+    params = new URL(listCalls().at(-1)![0], "http://test").searchParams;
+    expect(params.has("account_ids")).toBe(false); expect(params.get("order")).toBe("desc");
+    expect(screen.getByRole("textbox", { name: "搜索流水" })).toHaveValue("");
+  });
+
+  it("历史项目与未分类按 nullable 集合提交；关闭草稿与来源全选不写业务", async () => {
+    const user = userEvent.setup(); const writes = installHttp();
+    render(<CashProvider><CashFlowTable itemId={itemId} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    await user.click(screen.getByRole("button", { name: "筛选项目" }));
+    let popup = await screen.findByRole("dialog", { name: "筛选项目" });
+    await user.click(await within(popup).findByRole("checkbox", { name: "合成历史项目甲" }));
+    await user.click(within(popup).getByRole("checkbox", { name: "无项目" }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    const candidate = new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/reports/project-options?"))![0], "http://test").searchParams;
+    expect(candidate.get("item_id")).toBe(itemId); expect(candidate.has("date_from")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "筛选分类" }));
+    popup = await screen.findByRole("dialog", { name: "筛选分类" });
+    await user.click(await within(popup).findByRole("checkbox", { name: "未分类" }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    let params = new URL(http.mock.calls.filter(([url]) => url.startsWith("/api/cash/flows?")).at(-1)![0], "http://test").searchParams;
+    expect(JSON.parse(params.get("project_ids")!)).toEqual(["project-a", null]);
+    expect(JSON.parse(params.get("category_ids")!)).toEqual([null]);
+    await user.click(screen.getByRole("button", { name: "筛选来源" }));
+    popup = await screen.findByRole("dialog", { name: "筛选来源" });
+    const before = http.mock.calls.length;
+    await user.click(within(popup).getByRole("button", { name: "全选", exact: true }));
+    await user.click(within(popup).getByRole("button", { name: "取消" }));
+    expect(http.mock.calls).toHaveLength(before);
+    await user.click(screen.getByRole("button", { name: "筛选分类" }));
+    popup = await screen.findByRole("dialog", { name: "筛选分类" });
+    await user.click(within(popup).getByRole("button", { name: "清空" }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    params = new URL(http.mock.calls.filter(([url]) => url.startsWith("/api/cash/flows?")).at(-1)![0], "http://test").searchParams;
+    expect(params.has("category_ids")).toBe(false); expect(params.has("project_ids")).toBe(true);
+    expect(writes).toHaveLength(0);
+  });
+
   it("编辑携带详情读取的初始版本，409 后不自动抬版本覆盖", async () => {
     const user = userEvent.setup(); const writes = installHttp({ write: () => json({ error: "cash_version_conflict", message: "现金版本已改变。" }, 409) });
     render(<DrawerHarness flowId={flowId} />);
@@ -195,25 +298,31 @@ describe("现金读取、更正、删除", () => {
     render(<CashProvider><CashFlowTable /></CashProvider>);
     expect(await screen.findByText("筛选合计：收入 125.50")).toBeInTheDocument();
     expect(screen.getByText("内部转账 42.35")).toBeInTheDocument();
+    const before = http.mock.calls.length;
     await user.click(screen.getByRole("button", { name: "账户期间余额" }));
+    expect(screen.getByRole("dialog", { name: "账户期间余额" })).toBeInTheDocument();
     const table = screen.getByRole("grid", { name: "账户期间余额" });
     expect(within(table).getByText("133.15")).toBeInTheDocument();
     const unknown = within(table).getByRole("row", { name: /尚未起算合成账户/ });
     expect(within(unknown).getByText("尚未起算，余额未知")).toBeInTheDocument();
     expect(within(unknown).getAllByText("—")).toHaveLength(5);
     expect(within(unknown).queryByText("0.00")).not.toBeInTheDocument();
+    expect(http.mock.calls.length).toBe(before);
   });
 
   it("独立流水限定期间、筛选包含停用账户；录入只请求启用账户", async () => {
-    installHttp();
+    const user = userEvent.setup(); installHttp();
     const mounted = render(<CashProvider><CashFlowTable /></CashProvider>);
     await screen.findByText("合成手工收款");
-    const urls = http.mock.calls.map(([url]) => new URL(url, "http://cash-test.invalid"));
+    let urls = http.mock.calls.map(([url]) => new URL(url, "http://cash-test.invalid"));
     const list = urls.find(url => url.pathname === "/api/cash/flows")!;
     expect(list.searchParams.get("date_from")).toMatch(/^\d{4}-01-01$/);
     expect(list.searchParams.get("date_to")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(urls.some(url => url.pathname.endsWith("/settings/accounts"))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "筛选账户" }));
+    await screen.findByRole("checkbox", { name: "合成储蓄账户" });
+    urls = http.mock.calls.map(([url]) => new URL(url, "http://cash-test.invalid"));
     expect(urls.find(url => url.pathname.endsWith("/settings/accounts"))!.searchParams.has("enabled")).toBe(false);
-    expect(screen.getByLabelText("账户", { selector: "button" })).toHaveTextContent("全部账户");
     mounted.unmount(); http.mockClear();
     render(<DrawerHarness kind="receipt" />);
     await waitFor(() => expect(http.mock.calls.some(([url]) => url.includes("/settings/accounts") && new URL(url, "http://cash-test.invalid").searchParams.get("enabled") === "true")).toBe(true));
@@ -251,12 +360,16 @@ describe("现金读取、更正、删除", () => {
   });
 
   it("恢复跨页历史账户名称仅用于显示，不污染现金查询字段", async () => {
-    installHttp();
-    render(<CashProvider><CashFlowTable initialCriteria={{ ...initialCashFlowCriteria(), account_id: "historical-account", selectedAccount: { id: "historical-account", name: "历史账户" } }} /></CashProvider>);
+    const user = userEvent.setup(); installHttp();
+    render(<CashProvider><CashFlowTable initialCriteria={{ ...initialCashFlowCriteria(), account_ids: ["historical-account"], selected: { account_ids: [{ value: "historical-account", label: "历史账户" }] } }} /></CashProvider>);
     await screen.findByText("合成手工收款");
-    expect(screen.getByLabelText("账户", { selector: "button" })).toHaveTextContent("历史账户");
+    expect(screen.getByRole("button", { name: "筛选账户" })).toHaveAttribute("data-active", "true");
+    await user.click(screen.getByRole("button", { name: "筛选账户" }));
+    const popup = await screen.findByRole("dialog", { name: "筛选账户" });
+    await user.click(within(popup).getByText("查看已选项"));
+    expect(within(popup).getByText("历史账户")).toBeVisible();
     const url = new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/flows?"))![0], "http://cash-test.invalid");
-    expect(url.searchParams.get("account_id")).toBe("historical-account");
-    expect(url.searchParams.has("selectedAccount")).toBe(false); expect(url.search).not.toContain("历史账户");
+    expect(url.searchParams.get("account_ids")).toBe('["historical-account"]');
+    expect(url.searchParams.has("selected")).toBe(false); expect(url.search).not.toContain("历史账户");
   });
 });

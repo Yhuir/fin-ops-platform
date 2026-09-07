@@ -69,7 +69,7 @@ export function CashFlowComposition({ parts, onChange, kind, existingItem, disab
         </>}
         {part.mode === "expense" && <CashSelect label="费用归属本次借款（可选）" value={part.relatedLoanId} onChange={relatedLoanId => update(part.id, { relatedLoanId })} disabled={disabled}
           options={[{ value: "", label: "不关联借款" }, ...parts.filter(row => row.mode === "loan").map((row, loanIndex) => ({ value: row.id, label: `${loanIndex + 1}. ${row.content || "未填写内容的借款"}` }))]} />}
-        <CashConfigurationSelect mode="entry" name="bill-labels" label="账单标识（可选）" value={part.billLabel} onChange={billLabel => update(part.id, { billLabel })} disabled={disabled} />
+        <CashConfigurationSelect name="bill-labels" label="账单标识（可选）" value={part.billLabel} onChange={billLabel => update(part.id, { billLabel })} disabled={disabled} />
         <CashInput label="账单月份（可选）" type="month" value={part.billMonth} onChange={billMonth => update(part.id, { billMonth })} disabled={disabled} />
       </div> : <>
         {part.mode === "settlement" && <CashSelect label="处理类型" value={part.kind} onChange={value => update(part.id, { kind: value as CashSettlementKind, item: null })}

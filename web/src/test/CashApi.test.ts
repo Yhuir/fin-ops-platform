@@ -1,11 +1,35 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { cashRequest } from "../features/cash/api";
+import { cashRequest, cashQueryError, cashQueryString } from "../features/cash/api";
 import { apiFetch } from "../features/apiClient";
 
 vi.mock("../features/apiClient", () => ({ apiFetch: vi.fn() }));
 const fetcher = vi.mocked(apiFetch);
 afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); });
 describe("cash-only HTTP boundary", () => {
+  test("encodes multi-value filters once, preserves null and omits unrestricted arrays", () => {
+    const query = new URLSearchParams(cashQueryString({ project_ids: ["a&b", null, "项目"], kinds: [], page: 2, enabled: false }));
+    expect(query.getAll("project_ids")).toEqual([JSON.stringify(["a&b", null, "项目"])]);
+    expect(query.has("kinds")).toBe(false);
+    expect(query.get("enabled")).toBe("false");
+    expect(query.get("page")).toBe("2");
+  });
+  test("rejects oversized selections and encoded URI before network IO", async () => {
+    expect(() => cashQueryString({ account_ids: Array.from({ length: 51 }, (_, i) => String(i)) })).toThrow(/50/);
+    expect(() => cashQueryString({ keyword: "项".repeat(1000) })).toThrow(/过长/);
+    await expect(cashRequest(`/flows?keyword=${"a".repeat(6001)}`)).rejects.toMatchObject({ code: "cash_filter_limit" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  test("validates complete next criteria without mutating it or swallowing unrelated errors", () => {
+    const params = { account_ids: Array.from({ length: 50 }, (_, i) => String(i)), project_ids: Array.from({ length: 50 }, (_, i) => `p${i}`) };
+    expect(cashQueryError(params)).toBeNull();
+    expect(cashQueryError({ ...params, sources: ["manual"] })).toMatch(/全部条件最多选择 100/);
+    expect(cashQueryError({ keyword: "x".repeat(5992) })).toBeNull();
+    expect(cashQueryError({ keyword: "x".repeat(5993) })).toMatch(/过长/);
+    expect(params.account_ids).toHaveLength(50);
+    const broken = { get keyword(): string { throw new Error("unexpected getter failure"); } };
+    expect(() => cashQueryError(broken)).toThrow("unexpected getter failure");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   test("uses one authenticated boundary with no-store and exact amount strings", async () => {
     fetcher.mockResolvedValue(new Response(JSON.stringify({ flow: { id: "a", amount: "9999999999999999.99" } }), { status: 201, headers: { "content-type": "application/json" } }));
     const body = { id: "same-submission", amount: "9999999999999999.99" };

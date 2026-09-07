@@ -2,6 +2,8 @@
 
 更新日期：2026-09-07。工作分支：`codex/cash-ledger`。
 
+**统一UI与多选已实现：** §13定义本轮局部组件I/O、查询状态和多选读取扩展；实际验证和生产版本见[实施§14](cash-module-implementation-plan.md#14-统一现金ui实际执行与验证2026-09-08)。§1.2“仅前端、API不变”描述上一轮部署，本轮包含§13的窄GET扩展；数据库表、写命令、账务算法、权限和普通财务API不变。原执行顺序保留于实施计划§13。
+
 状态：**R1–R7已接受，当前App现金UI修复已于2026-09-07正式上线，代码提交68eee75c0。** 前端边界见§1.2，17列查询投影见§8.7，不为展示新增表或重做账务。首次上线证据见实施计划§10.13–10.14；本次真实本地测试、发布及生产只读证据、旧页性能例外和未测项见§12，规格不等于所有场景验收通过。
 
 本次共四份配套文档：业务需求和 Excel 解释以[现金模块开发设计](../product-specs/cash-module-design.md)为准；页面、表单和 Make 改稿见[UI 设计](../product-specs/cash-module-ui-spec.md)；执行顺序、旧链清理和总体测试安排见[实施计划](cash-module-implementation-plan.md)。本文拥有技术字段、数据关系、服务 I/O、请求语义和事务细节。将来修改需求时，四份文档的受影响部分须同步修改，不保留相互冲突的旧规则。
@@ -66,7 +68,7 @@
 | pageRegistry / CashPage | 非敏感section、既有cash权限 | 四个导航入口→当前视图；单cash页面/权限；非法参数不读API |
 | 新增局部CashFlows组合组件 | 当前流水页、用户选择收/支/互转 | 组合既有CashFlowTable和CashFlowDrawer；不建立第二API client/DTO/Provider |
 | CashBooks | 当前账簿、筛选、事项ID/办理动作 | 三账目查询和事项/票据处理；移除通用流水Tab与顶部通用新增，但保留上下文实际收付回调 |
-| CashFlowTable / CashFlowSelectors | 必传mode: entry/filter、期间、父对象ID | 沿用/flows及/settings；filter包含停用历史账户、默认全部；entry只含启用项。事项/任务嵌入明细继续复用，不套整个独立页面 |
+| CashFlowTable / CashFlowSelectors | 期间、父对象ID；录入Select与历史Filter职责分开 | CashConfigurationSelect仅录入启用项，CashConfigurationFilter包含停用历史项；删除无消费者的mode/filter分支。事项/任务嵌入明细继续复用，不套整个独立页面 |
 | CashUi / cash.css | UI状态、局部className、控件值 | 紧凑控件、表内空态、对齐；无fetch/算账、无公共CSS默认变更 |
 | features/cash现有client/hooks | 现有查询/写命令 | 单地址HTTP、abort、拒绝旧响应、局部重读、401/403清除不变；不引入全局缓存 |
 
@@ -975,7 +977,9 @@ TC28还覆盖首次cash为空→识别OA中已结束但真实存在的项目→�
 
 8核心表之外只增加业务已要求的稳定账单别名身份与防已删创建复活的最少ID；它们复用一个repository，不产生新服务/平台。金额RMB两位、正常字段尺寸与资源上限由开发者负责，不把SQL字段名转交用户决定。字段可由普通版本、类型、约束、事务与测试演进，不冻结contract。
 
-### 12.2 已验证事实与剩余使用配置
+### 12.2 首轮上线验证与使用配置记录（历史）
+
+本节记录实施计划§10对应发布时点的事实，不代表本轮重新检查了生产配置。后续布局发布证据见实施计划§12；统一UI与多选的实际执行证据见实施计划§14，不能沿用下表结果作为新版本验收。
 
 | 项目 | 实施动作 | 当前结论 |
 | --- | --- | --- |
@@ -988,18 +992,98 @@ TC28还覆盖首次cash为空→识别OA中已结束但真实存在的项目→�
 
 真实源若与计划不同，先修对应窄接口/文档，再实现该模块；其他不依赖的模块可继续。若发现会改变已接受业务范围的冲突，说明具体例子并请求决定，不做fallback。没有新通知/附件/Excel导入/导出/CMS需求。
 
-### 12.3 后端先行的完成边界
+### 12.3 首轮后端先行的完成边界（历史责任划分）
 
-唯一执行顺序在[实施计划](cash-module-implementation-plan.md)：B01–B10标识非前端责任，F01–F05标识前端责任。本轮已按已获授权完成前后端接线、本地联调、正式发布，再进行生产只读验证。下述是责任划分，不是仍等待UI批准；未测项以实施计划§10.14为准。
+首轮执行顺序在[实施计划](cash-module-implementation-plan.md)：B01–B10标识非前端责任，F01–F05标识前端责任。该轮已按当时授权完成前后端接线、本地联调、正式发布，再进行生产只读验证。下述是历史责任划分，不是仍等待UI批准，也不是本轮统一UI应重复执行的流程；该轮未测项以实施计划§10.14为准。
 
 后端交付应有：cash持久化与受限连接、权限/审计隔离、OA窄只读、全部配置/流水/事项/结算/任务/报表API、真实PG事务并发、HTTP完整业务链与旧功能回归、服务器性能结果、实际接口例子与字段说明。只用mock或单元测试不算后端完成。前端导航、005权限checkbox、表单/抽屉/空错态、前端取消旧请求、页面E2E和DOM性能留F阶段，不提前报完成。
 
 B阶段不得独立生产上线新增cash可分配权限或开放入口：旧客户端保存授权是否丢弃未知新key、session权限列表/空可见页如何表现必须实测；采用本分支本地/测试环境开发，F完成后沿既有发布流程授权上线，不新增兼容别名或功能开关平台。
 
-本轮已修改并部署应用、测试及0167增量授权迁移，未写回OA或创建数据库备份。当前验证记录见实施计划§10.13–10.14；历史共享MoneyFormat测试仅是复用依据，不替代现金业务验证。
+首轮已修改并部署应用、测试及0167增量授权迁移，未写回OA或创建数据库备份。该轮验证记录见实施计划§10.13–10.14；历史共享MoneyFormat测试仅是复用依据，不替代现金业务验证。
 
 ### 12.4 R7已确认并合入正文
 
 用户已接受[历史项目结算规则](../product-specs/cash-module-design.md#102-r7-已确认历史项目结算不是自由新增项目)。§2.2定义重试、§5.2定义事务、§8.2定义两种严格DTO上下文、§8.5定义OA边界、TC28定义正反并发用例；不再保留条件稿或待审批分支。
 
 R7复用原flow/items/settlements、manual/monthly_task来源和同一事务，不加表、项目镜像、缓存、worker、状态覆盖或门禁。设计已收口，真实OA字段与PG运行事实仍按B01验证；设计接受不是本轮代码、数据库或发布操作。
+
+## 13. 统一UI与多选读取实施细节
+
+本节已实现；最新验证与生产版本见实施计划§14。
+
+### 13.1 最小组件边界与文件责任
+
+| owner/文件 | 输入 → 输出 | 实施边界 |
+| --- | --- | --- |
+| `pages/CashPage.tsx` | section、已应用条件快照 → 活动视图 | 保留四state及可撤权子树，不存rows/编辑草稿，不新增路由/权限/全局store |
+| `components/cash/CashUi.tsx`、`cash.css` | 显示状态、值、slots → HeroUI控件/布局 | 现有控件收敛；同文件可加一个布局组合，用少量CSS类区分单表/分组/配置，无fetch/账务或模板引擎 |
+| `components/cash/CashFilters.tsx` | label、已应用值、候选/加载/错误、排序状态及callbacks → apply/clear/sort/search/page/open事件 | 集中CashFilterPopover与CashColumnHeader；不拆工厂/注册器/DSL；不接API path、不import业务client |
+| `CashFlowSelectors.tsx`及各视图 | 候选用途/父对象/期间、搜索/页码 → 类型化候选 | 沿用现金hooks；录入单选与历史多选目的明确，原值快照独立；纯UI不判断OA资格 |
+| `CashBooks.tsx`、`CashFlowTable.tsx`、`CashTasks.tsx`、`CashSettings.tsx` | 草稿/已应用条件、响应 → 表格/摘要/动作 | 各自定义固定列能力和参数映射；一个活动查询owner，不用万能动态列配置，不机械一列一文件 |
+| `features/cash/hooks.tsx`、`api.ts` | 现金参数/AbortSignal → 严格响应 | 增加数组明确序列化；单地址、取消、错误、撤权保留；无fallback/cache/总线 |
+| `app/routes_cash.py` | 认证后单次query key → service | 保留重复key拒绝/no-store/脱敏；不加入SQL或业务筛选 |
+| `services/cash_queries.py`、`cash_tasks.py`的GET方法、`cash_oa_projects.py`只读列表 | 白名单条件 → repository/只读OA | 多选解析/类型/值验证，不改任务创建/修改/确认等写方法 |
+| `services/postgres_repositories/cash_queries.py`、`cash_tasks.py`读方法 | 条件 → SQL rows/summary/total | 集合谓词在分页前，同一只读快照；金额算法和写事务不变 |
+
+FinanceTable继续是纯UI，表头可直接放上述现金筛选组件。已核对当前Column有allowsSorting，但FinanceTable未向HeroUI Table.Content转发sortDescriptor/onSortChange；本轮明确补这两个可选props，类型直接取已安装Table.Content的props，并传给Table.Content而非外层Table容器。列事件由现金视图映射业务sort，主表不自行排序rows或请求API。无对应显示列的排序不伪造原生列descriptor。未传props的其他页面保持原行为，回归FinanceTable与旧页；AppDrawer与Shell默认合同不变。
+
+### 13.2 UI状态与请求生命周期
+
+1. 每视图保留明确类型的draft（顶部草稿）、applied（含sort/order/page）和rows；浮层短期selectionDraft独立。视图间保留的是已应用快照，不是第二份正在发请求的状态。
+2. 打开浮层从applied初始化；勾选无主查询，候选搜索250ms防抖并取消旧读取；切候选页保持草稿选中集合。只请求当前打开的候选，单选录入必要的初始值读取除外。
+3. 应用列条件只修改该条件、page=1、一次主查询，不提交顶部未应用关键词/日期。排序立即生效并回第1页。查询一次提交顶部草稿；重置统一恢复本视图默认并清理草稿。
+4. 切页取消旧读取，切回恢复条件后GET。切换个人视图时保留适用公共条件，sort恢复目标视图定义：矩阵bank_name asc，三明细occurred_on desc；流水/总表日期desc、票据提供日desc、月任务due_on asc、模板title asc、配置name asc不机械一致。
+5. 保存沿用现金局部revision重读，不逐表手改金额/删除数组；失败/409/未知写结果不自动重试写命令。关闭或权限失效卸载Portal；无现金内容/条件写全局store、URL导航、localStorage、sessionStorage或日志。
+6. 请求竞争仍用现有Abort和结果key检查，不新增hash。显示名称/候选分页/菜单open不能进入主查询参数。
+
+### 13.3 GET多选参数（2026-09-08已实现，验证见实施§14）
+
+继续GET、继续拒绝重复query key。不使用`project_id=a&project_id=b`。每个新增复数字段的HTTP值为一个JSON数组字符串，前端JSON.stringify后交URLSearchParams编码；Python只解析白名单字段。逻辑值示例：`project_ids=["项目ID-A","项目ID-B"]`、`category_ids=[null,"费用UUID"]`；这些只是编码形状，不是真实可提交ID。
+
+| GET端点（`/api/cash`下） | 新增多值字段 | 保持不变 |
+| --- | --- | --- |
+| `/flows` | `account_ids`、`project_ids`、`category_ids`、`kinds`、`sources` | person精确文本，父对象/purpose/期间规则 |
+| `/reports/turnover` | `project_ids`、`category_ids`、`states` | ledger_group/personal_variant来自单个分类切换，counterparty精确匹配 |
+| `/reports/ticket-payments` | `project_ids`、`states` | ticket_provider精确匹配 |
+| `/reports/personal` | `project_ids`、`bill_label_ids` | 四种view字段、年度摘要与明细sort集合 |
+| `/items` | `project_ids` | 个人矩阵月格下钻继承多项目范围；原单账单/月份/事项类型条件不变，不另建明细API |
+| `/tasks` | `kinds` | enabled boolean及模板生效逻辑 |
+| `/task-occurrences` | `kinds`、`states` | 时间范围互斥，summary覆盖整个匹配结果 |
+| `/settings/categories` | `groups` | enabled boolean；组别在SQL分页前筛选，录入receipt/payment加turnover显式传两个group，不再只过滤当前候选页 |
+| `/projects` | `stage_codes` | 仅列表过滤；配置PUT/resolve_project/资格核验不变，selectable boolean，OA只读 |
+
+参数约束：
+
+- 每数组1–50项、总选中项≤100；空数组400，清空/不限时前端省略字段。超选择上限明确提示并禁止应用，不截断、不丢条件。
+- 元素为字符串；仅project_ids/category_ids/bill_label_ids/stage_codes允许JSON null，分别表示无项目/未分类/无账单/阶段缺失，不用字符串`"null"`。字符串非空且≤200字符；本地ID按UUID，项目/阶段按既有快照字符串规则，不凭名称猜ID或固定五阶段。
+- 重复元素、嵌套结构、对象、数值、布尔、NaN、非法JSON均400；只有表内端点允许的字段有效。enum集合沿用各端点现有值，不能让任务check混入flows；阶段code可以对应源未知code，显示未知而非造名称。
+- 已有单值字段仍是明确公开GET语义（其他选择/详情调用及原API使用者继续可用），不是失败时回退路径。同一请求同时传单值及对应复数值400；标准化后进入同一查询实现，不保留两套报表SQL。新版列表UI只走复数表示，不留旧控件/二次重试；退役公开单值API不属于本次范围。
+- 新增查询的编码query部分上限6000 UTF-8字节，前端应用前和现金HTTP边界检查；超出明确400/输入提示，不自动换POST或另一地址。代理更严限制仍有效；发布前验证最长合法请求，若不满足，缩小允许选择量并同步文档，不放宽全局安全配置。
+- 二值列两项/零项均省略字段，单项传原enabled/selectable；不新增boolean数组、排除模式或规则语言。
+
+完整有限枚举“全选”选整个枚举；分页候选仅提供明确“全选本页”，保留其他页已选。清空再应用=移除该列限制，可以直接查看所有项目而不用下载全集ID。不实现跨任意搜索全集的全选/反选表达式。ID条件在服务端完整结果上生效，不在浏览器过滤50条。
+
+### 13.4 候选来源、空值与历史边界
+
+- 账户/分类/账单复用`/settings/*`分页接口；筛选含停用项，录入只含可用项。保留已选ID/label局部快照，未在候选当前页不代表已删除。
+- 主列表每页50不变。含固定null选项的分类/账单/项目候选每页49条真实资源，加1个无归属选项，保证“全选本页”可提交；账户候选仍50条。候选total只计服务端真实资源，分页按49/50真实page_size计算，不将null伪造成数据库行。
+- 候选搜索仅在输入与已查询关键词不同时启动250ms计时，避免刚打开菜单的旧计时器把快速翻页重置回第1页。实际关键词变化才回第1页；关闭取消计时。
+- 历史项目复用`/reports/project-options`，不增加OA镜像或通用facet接口。候选改为“现金已使用项目，截至查询期末”，不能只取期间内首次项目而漏期初/跨年处理；集合读本地flows/items/settlements及名称快照。date_from/date_to仍为有界期间输入，候选身份按date_to截至历史，不声称与其他列筛选完全联动。
+- 该候选GET增加可选item_id/task_occurrence_id，与流水表同样要求期间或明确父对象；有父无日期取父对象全历史，有父有期间取交集。父对象检查和候选在同一快照，不存在404，不退回全现金项目。个人视图用所选年；候选可以含其他现金账出现的项目，选中后本表0条是合法结果。
+- null选项明确提供并查询IS NULL，不能用删除候选/默认0隐藏未分类记录。单账户不存在保持既有404，多账户存在性一次集合验证，不做每ID一个SQL。
+- OA阶段候选用真实stages和明确“阶段缺失”；未知源code显示未知。完整一次投影读取后应用多选，再count/sort/page，不过滤已分页的50条。实测若超预算再提出窄查询优化，不引入同步平台。
+
+### 13.5 SQL与余额正确性
+
+1. 复数条件用参数化集合谓词，非null的`= ANY(...)`与必要IS NULL括号OR组合；字段/排序用固定映射，不拼客户端SQL。空数组已校验阻止。
+2. 同列OR、列间AND；筛选在count/summary/page前。聚合后的状态在聚合后、分页前应用；保留repeatable-read只读快照、稳定主键次序、查询投影和删除可见性。
+3. account_ids匹配from或to任一账户；互转两端都选仍只出现一个flow，不用展开JOIN重复计收支。
+4. 精确一个已选账户（单值或单元素数组）才能显示account_running_balance；多账户/不限为null，UI“—”。余额在完整账户账序计算，项目/人员/关键词不重算余额。summary.account_balances按账户集合和期间返回各账户余额，与filtered_totals分开。
+5. 总表事件后未结、事项期末未结、票据截止使用/回款、个人未知起初与年度累计继续原算法。不能把所有summary统一套全部筛选；按已有合同区分账序条件和可见集合条件。
+6. 多选不循环发N个单选查询合并，不逐行查候选详情；无新增表、迁移、索引、缓存、worker或报表副本。只有实测明确SQL瓶颈时才说明证据并处理对应SQL/索引，不提前加缓存。
+7. 历史候选实测大集合排序落盘，现先按(id,name)聚合max(updated_at)，再按id/最新时间/name选唯一名称；关键词在唯一名称确定后匹配，父对象范围和同时间并列规则不变。没有新增索引或缓存。
+
+### 13.6 验证边界
+
+覆盖多项/单项/不限/null/重复/非法/超限、原单值API、分页与摘要、互转两端、余额、跨年候选、停用/缺失候选、任务状态与真实code模拟。步骤/命令/性能目标见实施计划§13，不复制执行结果；§12历史生产空库耗时不能证明多选SQL或新浮层已通过。

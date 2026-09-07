@@ -8,6 +8,7 @@ import { CashFlowDrawer } from "./CashFlowDrawer";
 import { cashAmount, cashToday } from "./CashItems.types";
 import type { CashAccountSetting, CashCategorySetting } from "./CashSettingsTypes";
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
+import { CashColumnHeader, CashFilterPopover } from "./CashFilters";
 import { cashTaskIdentity, cashTaskKindLabels, cashTaskStateLabels } from "./CashTasksTypes";
 import type { CashOccurrencesPage, CashTaskOccurrence, CashTasksPage, CashTaskTemplate } from "./CashTasksTypes";
 import { useCashTaskSettingsCloseGuard } from "./CashTaskSettingsCloseGuard";
@@ -15,12 +16,12 @@ import { useCashTaskSettingsCloseGuard } from "./CashTaskSettingsCloseGuard";
 const kindOptions = Object.entries(cashTaskKindLabels).map(([value, label]) => ({ value, label }));
 const stateOptions = Object.entries(cashTaskStateLabels).map(([value, label]) => ({ value, label }));
 
-type MonthCriteria = { month: string; view: string; kind: string; state: string; keyword: string; page: number };
-type TemplateCriteria = { page: number; kind: string; enabled: string; keyword: string; sort: string };
+type MonthCriteria = { month: string; view: string; kinds: string[]; states: string[]; keyword: string; page: number; sort: string; order: "asc" | "desc" };
+type TemplateCriteria = { page: number; kinds: string[]; enabled: string; keyword: string; sort: string; order: "asc" | "desc" };
 export type CashTasksCriteria = { tab: string; month: MonthCriteria; templates: TemplateCriteria };
 export function initialCashTasksCriteria(): CashTasksCriteria {
-  return { tab: "month", month: { month: cashToday().slice(0, 7), view: "month", kind: "", state: "", keyword: "", page: 1 },
-    templates: { page: 1, kind: "", enabled: "", keyword: "", sort: "title" } };
+  return { tab: "month", month: { month: cashToday().slice(0, 7), view: "month", kinds: [], states: [], keyword: "", page: 1, sort: "due_on", order: "asc" },
+    templates: { page: 1, kinds: [], enabled: "", keyword: "", sort: "title", order: "asc" } };
 }
 export default function CashTasks({ initialCriteria, onCriteriaChange }: { initialCriteria?: CashTasksCriteria; onCriteriaChange?: (value: CashTasksCriteria) => void }) {
   const [initial] = useState(() => initialCriteria ?? initialCashTasksCriteria());
@@ -44,18 +45,21 @@ function CashTaskMonth({ initial, onChange }: { initial: MonthCriteria; onChange
   const { revision, refresh } = useCashScope();
   const [today, setToday] = useState(cashToday);
   const [month, setMonth] = useState(initial.month);
+  const [monthDraft, setMonthDraft] = useState(initial.month);
   const [view, setView] = useState(initial.view);
-  const [kind, setKind] = useState(initial.kind);
-  const [state, setState] = useState(initial.state);
+  const [kinds, setKinds] = useState(initial.kinds);
+  const [states, setStates] = useState(initial.states);
+  const [sort, setSort] = useState(initial.sort);
+  const [order, setOrder] = useState(initial.order);
   const [keyword, setKeyword] = useState(initial.keyword);
   const [search, setSearch] = useState(initial.keyword);
   const [page, setPage] = useState(initial.page);
   const [action, setAction] = useState<{ row: CashTaskOccurrence; mode: "adjust" | "unpaid" | "check" | "link" | "detail" | "new" } | null>(null);
   const [flowId, setFlowId] = useState<string | null>(null);
-  useEffect(() => { onChange({ month, view, kind, state, keyword, page }); }, [month, view, kind, state, keyword, page, onChange]);
+  useEffect(() => { onChange({ month, view, kinds, states, keyword, page, sort, order }); }, [month, view, kinds, states, keyword, page, sort, order, onChange]);
   const query = useCashQuery<CashOccurrencesPage>("/task-occurrences", {
     ...(view === "overdue" ? { overdue_as_of: today } : view === "reminders" ? { reminder_from: today, reminder_to: today } : { month }),
-    page, page_size: 50, sort: "due_on", order: "asc", kind: kind || undefined, state: state || undefined, keyword: keyword || undefined,
+    page, page_size: 50, sort, order, kinds: kinds.length ? kinds : undefined, states: states.length ? states : undefined, keyword: keyword || undefined,
   }, revision);
   useEffect(() => {
     const foreground = () => { if (document.visibilityState === "visible") { setToday(cashToday()); refresh(); } };
@@ -66,23 +70,23 @@ function CashTaskMonth({ initial, onChange }: { initial: MonthCriteria; onChange
   }, [refresh, today]);
   const change = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(1); };
   return <section className="cash-section" aria-label="本月任务处理">
-    <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}>
-      <CashInput label="归属月份" type="month" value={month} onChange={change(setMonth)} disabled={view !== "month"} />
+    <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setMonth(monthDraft); setKeyword(search.trim()); setPage(1); }}>
+      <CashInput label="归属月份" type="month" value={monthDraft} onChange={setMonthDraft} disabled={view !== "month"} />
       <CashSelect label="任务范围" value={view} onChange={change(setView)} options={[{ value: "month", label: "所选月份" }, { value: "overdue", label: "逾期待办" }, { value: "reminders", label: "今日提醒" }]} />
-      <CashSelect label="任务状态" value={state} onChange={change(setState)} options={[{ value: "", label: "全部状态" }, ...stateOptions]} />
-      <CashSelect label="任务类别" value={kind} onChange={change(setKind)} options={[{ value: "", label: "全部类别" }, ...kindOptions]} />
       <CashInput label="任务关键词" value={search} onChange={setSearch} placeholder="任务内容" />
       <Button type="submit" variant="secondary">查询任务</Button>
+      <Button variant="tertiary" onPress={() => { const defaults = initialCashTasksCriteria().month; setMonth(defaults.month); setMonthDraft(defaults.month); setView(defaults.view); setKinds([]); setStates([]); setKeyword(""); setSearch(""); setSort(defaults.sort); setOrder(defaults.order); setPage(1); }}>重置</Button>
+      <CashFilterPopover label="任务类别" value={kinds} options={kindOptions} onApply={value => { setKinds(value); setPage(1); }} />
+      <CashFilterPopover label="任务状态" value={states} options={stateOptions} onApply={value => { setStates(value); setPage(1); }} />
       <Button variant="tertiary" onPress={query.reload} isDisabled={query.loading}>刷新</Button>
     </form>
-    {query.data && <div className="cash-summary" aria-label="任务汇总"><span>未处理 {query.data.summary.counts_by_state.pending}</span><span>部分办理 {query.data.summary.counts_by_state.partial}</span><span>已完成 {query.data.summary.counts_by_state.completed}</span><span>收入累计 {cashAmount(query.data.summary.receipt_actual_amount)}</span><span>支出累计 {cashAmount(query.data.summary.payment_actual_amount)}</span></div>}
+    <div className="cash-summary" aria-label="任务汇总" aria-busy={query.loading}><span>未处理 {query.data?.summary.counts_by_state.pending ?? "—"}</span><span>部分办理 {query.data?.summary.counts_by_state.partial ?? "—"}</span><span>已完成 {query.data?.summary.counts_by_state.completed ?? "—"}</span><span>收入累计 {cashAmount(query.data?.summary.receipt_actual_amount ?? null)}</span><span>支出累计 {cashAmount(query.data?.summary.payment_actual_amount ?? null)}</span></div>
     <CashNotice error={query.error?.message}>{query.loading ? "正在读取任务…" : query.data?.rows.length === 0 ? "没有匹配任务。可在任务配置中新增每月收付或核对任务。" : null}</CashNotice>
-    {query.data && (["receipt", "payment", "check"] as const).map((group) => {
-      const rows = query.data!.rows.filter((row) => row.kind === group);
-      if (!rows.length) return null;
-      return <div className="cash-task-group" key={group}><h3>{cashTaskKindLabels[group]}</h3><FinanceTable ariaLabel={`${cashTaskKindLabels[group]}任务`} minWidth={1450}>
-        <FinanceTableHeader>{["任务内容", "归属月份", "执行日期", "提醒日期", "当月目标", "实际累计", "剩余 / 超出", "处理状态", "关联流水", "操作"].map((name, index) => <FinanceTableColumn key={name} id={name} isRowHeader={index === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-        <FinanceTableBody>{rows.map((row) => <FinanceTableRow key={row.row_key} id={row.row_key}>
+    {(["receipt", "payment", "check"] as const).map((group) => {
+      const rows = query.data?.rows.filter((row) => row.kind === group) ?? [];
+      return <div className="cash-task-group" key={group}><h3>{cashTaskKindLabels[group]} <span className="cash-hint">当前页分组</span></h3><FinanceTable ariaLabel={`${cashTaskKindLabels[group]}任务`} minWidth={1450} sortDescriptor={{ column: sort, direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => { setSort(String(value.column)); setOrder(value.direction === "ascending" ? "asc" : "desc"); setPage(1); }}>
+        <FinanceTableHeader>{[{ id: "title", label: "任务内容" }, { id: "month", label: "归属月份" }, { id: "due_on", label: "执行日期" }, { id: "remind_on", label: "提醒日期" }, { id: "planned", label: "当月目标" }, { id: "actual_amount", label: "实际累计" }, { id: "remaining", label: "剩余 / 超出" }, { id: "state", label: "处理状态" }, { id: "flows", label: "关联流水" }, { id: "actions", label: "操作" }].map((column, index) => <FinanceTableColumn key={column.id} id={column.id} isRowHeader={index === 0} allowsSorting={["due_on", "remind_on", "actual_amount"].includes(column.id)}>{column.label}</FinanceTableColumn>)}</FinanceTableHeader>
+        <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取任务…" : query.error ? "任务读取失败，请刷新。" : "当前页没有此类任务。"}>{rows.map((row) => <FinanceTableRow key={row.row_key} id={row.row_key}>
           <FinanceTableCell columnRole="identity">{row.title}</FinanceTableCell><FinanceTableCell columnRole="date">{row.month}</FinanceTableCell>
           <FinanceTableCell columnRole="date">{row.due_on}{row.is_overdue ? <span className="cash-danger"> · 逾期</span> : row.is_due ? " · 今日到期" : ""}</FinanceTableCell><FinanceTableCell columnRole="date">{row.remind_on}</FinanceTableCell>
           <FinanceTableCell columnRole="amount">{row.need_planned_amount ? <Button variant="tertiary" size="sm" onPress={() => setAction({ row, mode: "adjust" })}>待填写本月金额</Button> : cashAmount(row.planned_amount)}</FinanceTableCell>
@@ -99,7 +103,7 @@ function CashTaskMonth({ initial, onChange }: { initial: MonthCriteria; onChange
         </FinanceTableRow>)}</FinanceTableBody>
       </FinanceTable></div>;
     })}
-    {query.data && <FinanceTablePagination page={page} pageSize={50} total={query.data.pagination.total} onPageChange={setPage} isDisabled={query.loading} />}
+    <FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />
     {action && ["adjust", "unpaid", "check"].includes(action.mode) && <CashOccurrenceAction row={action.row} mode={action.mode as "adjust" | "unpaid" | "check"} onClose={() => setAction(null)} />}
     {action?.mode === "link" && <CashTaskLink row={action.row} onClose={() => setAction(null)} />}
     {action?.mode === "detail" && <CashTaskDetails row={action.row} onClose={() => setAction(null)} onFlow={(id) => { setAction(null); setFlowId(id); }} />}
@@ -163,11 +167,10 @@ function CashTaskLink({ row, onClose }: { row: CashTaskOccurrence; onClose: () =
     <CashNotice error={mutation.error?.message ?? query.error?.message} />
     {row.need_planned_amount && <CashInput label="本月目标金额" value={planned} onChange={setPlanned} required disabled={mutation.busy} />}
     <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); setSelected(null); }}><CashInput label="流水起始日" type="date" value={from} onChange={(value) => { setFrom(value); setPage(1); setSelected(null); }} disabled={mutation.busy} /><CashInput label="流水截止日" type="date" value={to} onChange={(value) => { setTo(value); setPage(1); setSelected(null); }} disabled={mutation.busy} /><CashInput label="流水关键词" value={search} onChange={setSearch} disabled={mutation.busy} /><Button type="submit" variant="secondary">查询流水</Button></form>
-    <CashNotice>{query.loading ? "正在读取现金流水…" : query.data?.rows.length === 0 ? "所选期间没有匹配现金流水。可调整日期或返回新记一笔。" : null}</CashNotice>
-    {query.data && <FinanceTable ariaLabel="可关联现金流水" minWidth={750} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data.pagination.total} onPageChange={(value) => { setPage(value); setSelected(null); }} isDisabled={query.loading || mutation.busy} />}>
+    <FinanceTable ariaLabel="可关联现金流水" minWidth={750} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={(value) => { setPage(value); setSelected(null); }} isDisabled={query.loading || Boolean(query.error) || mutation.busy} />}>
       <FinanceTableHeader>{["日期", "内容", "金额", "来源", "关联资格"].map((name, i) => <FinanceTableColumn key={name} id={name} isRowHeader={i === 1}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{query.data.rows.map((flow) => <FinanceTableRow id={flow.id} key={flow.id}><FinanceTableCell columnRole="date">{flow.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{flow.content}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(flow.amount)}</FinanceTableCell><FinanceTableCell columnRole="status">{flow.source_kind === "manual" ? "手工录入" : "每月任务"}</FinanceTableCell><FinanceTableCell columnRole="selection"><Button variant={selected?.id === flow.id ? "primary" : "tertiary"} isDisabled={!flow.selectable || mutation.busy || query.loading} onPress={() => setSelected(flow)}>{flow.selectable ? selected?.id === flow.id ? "已选择" : "选择" : flow.unavailable_reason ? reason[flow.unavailable_reason] : "不可选"}</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>}
+      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取现金流水…" : query.error ? "现金流水读取失败，请重新查询。" : "所选期间没有匹配现金流水。可调整日期或返回新记一笔。"}>{(query.data?.rows ?? []).map((flow) => <FinanceTableRow id={flow.id} key={flow.id}><FinanceTableCell columnRole="date">{flow.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{flow.content}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(flow.amount)}</FinanceTableCell><FinanceTableCell columnRole="status">{flow.source_kind === "manual" ? "手工录入" : "每月任务"}</FinanceTableCell><FinanceTableCell columnRole="selection"><Button variant={selected?.id === flow.id ? "primary" : "tertiary"} isDisabled={!flow.selectable || mutation.busy || query.loading} onPress={() => setSelected(flow)}>{flow.selectable ? selected?.id === flow.id ? "已选择" : "选择" : flow.unavailable_reason ? reason[flow.unavailable_reason] : "不可选"}</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+    </FinanceTable>
     {selected && <p role="status">已选：{selected.occurred_on} · {selected.content} · {cashAmount(selected.amount)}</p>}
     {selected && query.data && !selectionCurrent && <CashNotice error="所选流水已变化或不再可关联，请重新选择。其他输入已保留。" />}
     {close.confirmation}
@@ -184,10 +187,10 @@ function CashTaskDetails({ row, onClose, onFlow }: { row: CashTaskOccurrence; on
     <p>{row.title} · {row.month}</p><div className="cash-summary"><span>{cashTaskStateLabels[row.state]}</span><span>当月目标 {cashAmount(row.planned_amount)}</span><span>实际累计 {cashAmount(row.actual_amount)}</span></div>{row.instructions && <p className="cash-hint">办理说明：{row.instructions}</p>}<p className="cash-hint">{row.note ?? "未填写本月说明"}</p>
     <CashNotice error={query.error?.message ?? mutation.error?.message}>{!row.occurrence_id ? "本月尚未办理，没有关联现金。" : query.loading ? "正在读取处理明细…" : query.data?.rows.length === 0 ? "本月没有有效关联现金。" : null}</CashNotice>
     {row.kind === "check" && row.state === "completed" && row.occurrence_id && <Button variant="tertiary" isDisabled={mutation.busy} onPress={() => { void (async () => { const result = await mutation.run(`/task-occurrences/${row.occurrence_id}/reopen-check`, { expected_version: row.version }); if (result !== null) onClose(); })(); }}>重新核对</Button>}
-    {query.data && <FinanceTable ariaLabel="任务关联现金" minWidth={740} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data.pagination.total} onPageChange={setPage} isDisabled={query.loading || mutation.busy} />}>
+    <FinanceTable ariaLabel="任务关联现金" minWidth={740} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error) || mutation.busy} />}>
       <FinanceTableHeader>{["日期", "内容", "金额", "来源", "操作"].map((name, i) => <FinanceTableColumn id={name} key={name} isRowHeader={i === 1}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{query.data.rows.map((flow) => <FinanceTableRow id={flow.id} key={flow.id}><FinanceTableCell columnRole="date">{flow.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{flow.content}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(flow.amount)}</FinanceTableCell><FinanceTableCell columnRole="status">{flow.source_kind === "manual" ? "手工录入" : "每月任务"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => onFlow(flow.id)}>流水详情</Button>{flow.source_kind === "manual" && <Button variant="tertiary" isDisabled={mutation.busy} onPress={() => setUnlink(flow)}>解除误关联</Button>}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>}
+      <FinanceTableBody>{(query.data?.rows ?? []).map((flow) => <FinanceTableRow id={flow.id} key={flow.id}><FinanceTableCell columnRole="date">{flow.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{flow.content}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(flow.amount)}</FinanceTableCell><FinanceTableCell columnRole="status">{flow.source_kind === "manual" ? "手工录入" : "每月任务"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => onFlow(flow.id)}>流水详情</Button>{flow.source_kind === "manual" && <Button variant="tertiary" isDisabled={mutation.busy} onPress={() => setUnlink(flow)}>解除误关联</Button>}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+    </FinanceTable>
     {unlink && <div className="cash-confirm" role="group" aria-label="确认解除任务关联"><p>只解除“{unlink.content}”的任务关系，保留现金和已有事项分配。</p><Button variant="tertiary" onPress={() => setUnlink(null)} isDisabled={mutation.busy}>取消</Button><Button isDisabled={mutation.busy} onPress={() => { void (async () => { const result = await mutation.run(`/flows/${unlink.id}/unlink-task`, { expected_version: unlink.version, expected_occurrence_version: unlink.task!.occurrence_version }); if (result !== null) onClose(); })(); }}>确认解除关联</Button></div>}
   </AppDrawer>;
 }
@@ -195,22 +198,28 @@ function CashTaskDetails({ row, onClose, onFlow }: { row: CashTaskOccurrence; on
 function CashTaskTemplates({ initial, onChange }: { initial: TemplateCriteria; onChange: (value: TemplateCriteria) => void }) {
   const { revision } = useCashScope();
   const [page, setPage] = useState(initial.page);
-  const [kind, setKind] = useState(initial.kind);
+  const [kinds, setKinds] = useState(initial.kinds);
   const [enabled, setEnabled] = useState(initial.enabled);
   const [keyword, setKeyword] = useState(initial.keyword);
   const [search, setSearch] = useState(initial.keyword);
   const [sort, setSort] = useState(initial.sort);
+  const [order, setOrder] = useState(initial.order);
   const [editing, setEditing] = useState<CashTaskTemplate | "new" | null>(null);
-  useEffect(() => { onChange({ page, kind, enabled, keyword, sort }); }, [page, kind, enabled, keyword, sort, onChange]);
-  const query = useCashQuery<CashTasksPage<CashTaskTemplate>>("/tasks", { page, page_size: 50, sort, order: "asc", kind: kind || undefined, enabled: enabled || undefined, keyword: keyword || undefined }, revision);
-  const change = (setter: (value: string) => void) => (value: string) => { setter(value); setPage(1); };
+  useEffect(() => { onChange({ page, kinds, enabled, keyword, sort, order }); }, [page, kinds, enabled, keyword, sort, order, onChange]);
+  const query = useCashQuery<CashTasksPage<CashTaskTemplate>>("/tasks", { page, page_size: 50, sort, order, kinds: kinds.length ? kinds : undefined, enabled: enabled || undefined, keyword: keyword || undefined }, revision);
   return <section className="cash-section" aria-label="任务配置">
-    <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}><CashInput label="模板关键词" value={search} onChange={setSearch} placeholder="任务名称或说明" /><Button type="submit" variant="secondary">查询模板</Button><CashSelect label="模板类别" value={kind} onChange={change(setKind)} options={[{ value: "", label: "全部类别" }, ...kindOptions]} /><CashSelect label="模板状态" value={enabled} onChange={change(setEnabled)} options={[{ value: "", label: "全部状态" }, { value: "true", label: "启用" }, { value: "false", label: "停用" }]} /><CashSelect label="模板排序" value={sort} onChange={change(setSort)} options={[{ value: "title", label: "任务名称" }, { value: "execution_day", label: "执行日" }]} /><Button variant="tertiary" onPress={query.reload} isDisabled={query.loading}>刷新</Button><Button onPress={() => setEditing("new")}>新增任务</Button></form>
-    <CashNotice error={query.error?.message}>{query.loading ? "正在读取任务配置…" : query.data?.rows.length === 0 ? "暂无匹配模板。可新增收入、支出或核对任务，日期和目标由你明确填写。" : null}</CashNotice>
-    {query.data && <FinanceTable ariaLabel="任务模板" minWidth={1050} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data.pagination.total} onPageChange={setPage} isDisabled={query.loading} />}>
-      <FinanceTableHeader>{["任务名称", "类别", "执行日", "提前提醒", "生效范围", "默认月目标", "状态", "办理说明", "操作"].map((name, i) => <FinanceTableColumn id={name} key={name} isRowHeader={i === 0}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody>{query.data.rows.map((row) => <FinanceTableRow id={row.id} key={row.id}><FinanceTableCell columnRole="identity">{row.title}</FinanceTableCell><FinanceTableCell columnRole="status">{cashTaskKindLabels[row.kind]}</FinanceTableCell><FinanceTableCell columnRole="date">每月 {row.execution_day} 日</FinanceTableCell><FinanceTableCell columnRole="quantity">{row.remind_days} 天</FinanceTableCell><FinanceTableCell columnRole="date">{row.effective_from_month} 至 {row.effective_to_month ?? "长期"}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.default_amount)}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="description">{row.instructions ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => setEditing(row)}>编辑 / 启停</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
-    </FinanceTable>}
+    <form className="cash-toolbar" onSubmit={(event) => { event.preventDefault(); setKeyword(search.trim()); setPage(1); }}><CashInput label="模板关键词" value={search} onChange={setSearch} placeholder="任务名称或说明" /><Button type="submit" variant="secondary">查询模板</Button><Button variant="tertiary" onPress={() => { setSearch(""); setKeyword(""); setKinds([]); setEnabled(""); setSort("title"); setOrder("asc"); setPage(1); }}>重置</Button><Button variant="tertiary" onPress={query.reload} isDisabled={query.loading}>刷新</Button><Button onPress={() => setEditing("new")}>新增任务</Button></form>
+    <CashNotice error={query.error?.message} />
+    <FinanceTable ariaLabel="任务模板" minWidth={1050} sortDescriptor={{ column: sort, direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => { setSort(String(value.column)); setOrder(value.direction === "ascending" ? "asc" : "desc"); setPage(1); }} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error)} />}>
+      <FinanceTableHeader>
+        <FinanceTableColumn id="title" isRowHeader allowsSorting>任务名称</FinanceTableColumn>
+        <FinanceTableColumn id="kind"><CashColumnHeader label="类别"><CashFilterPopover label="模板类别" column value={kinds} options={kindOptions} onApply={value => { setKinds(value); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="execution_day" allowsSorting>执行日</FinanceTableColumn><FinanceTableColumn id="remind_days">提前提醒</FinanceTableColumn><FinanceTableColumn id="effective">生效范围</FinanceTableColumn><FinanceTableColumn id="amount">默认月目标</FinanceTableColumn>
+        <FinanceTableColumn id="enabled"><CashColumnHeader label="状态"><CashFilterPopover label="模板状态" column value={enabled ? [enabled] : []} options={[{ value: "true", label: "启用" }, { value: "false", label: "停用" }]} onApply={value => { setEnabled(value.length === 1 ? value[0] : ""); setPage(1); }} /></CashColumnHeader></FinanceTableColumn>
+        <FinanceTableColumn id="instructions">办理说明</FinanceTableColumn><FinanceTableColumn id="actions">操作</FinanceTableColumn>
+      </FinanceTableHeader>
+      <FinanceTableBody renderEmptyState={() => query.loading ? "正在读取任务配置…" : query.error ? "任务配置读取失败，请刷新。" : "暂无匹配模板。可新增收入、支出或核对任务，日期和目标由你明确填写。"}>{(query.data?.rows ?? []).map((row) => <FinanceTableRow id={row.id} key={row.id}><FinanceTableCell columnRole="identity">{row.title}</FinanceTableCell><FinanceTableCell columnRole="status">{cashTaskKindLabels[row.kind]}</FinanceTableCell><FinanceTableCell columnRole="date">每月 {row.execution_day} 日</FinanceTableCell><FinanceTableCell columnRole="quantity">{row.remind_days} 天</FinanceTableCell><FinanceTableCell columnRole="date">{row.effective_from_month} 至 {row.effective_to_month ?? "长期"}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.default_amount)}</FinanceTableCell><FinanceTableCell columnRole="status">{row.enabled ? "启用" : "停用"}</FinanceTableCell><FinanceTableCell columnRole="description">{row.instructions ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => setEditing(row)}>编辑 / 启停</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+    </FinanceTable>
     {editing && <CashTaskTemplateEditor template={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
   </section>;
 }
@@ -235,7 +244,7 @@ function CashTaskTemplateEditor({ template, onClose }: { template: CashTaskTempl
   const [accountPage, setAccountPage] = useState(1);
   const [categoryPage, setCategoryPage] = useState(1);
   const accounts = useCashQuery<CashTasksPage<CashAccountSetting>>(kind && kind !== "check" ? "/settings/accounts" : null, { enabled: true, page: accountPage, page_size: 50, keyword: accountKeyword || undefined, order: "asc" });
-  const categories = useCashQuery<CashTasksPage<CashCategorySetting>>(kind && kind !== "check" ? "/settings/categories" : null, { enabled: true, page: categoryPage, page_size: 50, keyword: categoryKeyword || undefined, order: "asc" });
+  const categories = useCashQuery<CashTasksPage<CashCategorySetting>>(kind && kind !== "check" ? "/settings/categories" : null, { enabled: true, groups: kind && kind !== "check" ? [kind, "turnover"] : undefined, page: categoryPage, page_size: 50, keyword: categoryKeyword || undefined, order: "asc" });
   const mutation = useCashMutation();
   const close = useCashTaskSettingsCloseGuard([title, kind, day, remind, from, to, enabled, amount, account, category, instructions], onClose, mutation.busy);
   const [validation, setValidation] = useState<string | null>(null);
@@ -264,15 +273,15 @@ function CashTaskTemplateEditor({ template, onClose }: { template: CashTaskTempl
       <p className="cash-hint">普通修改与停用作用于未来月份，本月请使用“调整本月”。重新启用须明确当月或未来起点；历史月份和现金不会删除。</p>
       {kind && kind !== "check" && <>
         <CashInput label="默认月目标（选填）" value={amount} onChange={setAmount} disabled={mutation.busy} placeholder="不是每次实际收付金额" />
-        <details className="cash-inline-details"><summary>默认账户和费用类型（选填）</summary>
+        <fieldset className="cash-form-grid"><legend>默认账户和费用类型（选填）</legend>
           <CashNotice error={accounts.error?.message ?? categories.error?.message} />
           <CashInput label="搜索默认账户" value={accountSearch} onChange={setAccountSearch} disabled={mutation.busy} /><Button type="button" variant="tertiary" onPress={() => { setAccountKeyword(accountSearch.trim()); setAccountPage(1); }} isDisabled={mutation.busy}>查询默认账户</Button>
           <CashSelect label="默认现金账户" value={account} onChange={setAccount} disabled={mutation.busy || accounts.loading} options={[{ value: "", label: "每次办理时选择" }, ...(account && !accounts.data?.rows.some((item) => item.id === account) ? [{ value: account, label: "当前已设账户（搜索可核对）", disabled: true }] : []), ...(accounts.data?.rows.map((item) => ({ value: item.id, label: item.name })) ?? [])]} />
           {accounts.data && accounts.data.pagination.total > 50 && <FinanceTablePagination page={accountPage} pageSize={50} total={accounts.data.pagination.total} onPageChange={setAccountPage} compact />}
           <CashInput label="搜索默认费用类型" value={categorySearch} onChange={setCategorySearch} disabled={mutation.busy} /><Button type="button" variant="tertiary" onPress={() => { setCategoryKeyword(categorySearch.trim()); setCategoryPage(1); }} isDisabled={mutation.busy}>查询默认费用类型</Button>
-          <CashSelect label="默认费用类型" value={category} onChange={setCategory} disabled={mutation.busy || categories.loading} options={[{ value: "", label: "每次办理时选择" }, ...(category && !categories.data?.rows.some((item) => item.id === category) ? [{ value: category, label: "当前已设类型（搜索可核对）", disabled: true }] : []), ...(categories.data?.rows.map((item) => ({ value: item.id, label: item.name, disabled: item.group !== kind && item.group !== "turnover" })) ?? [])]} />
+          <CashSelect label="默认费用类型" value={category} onChange={setCategory} disabled={mutation.busy || categories.loading} options={[{ value: "", label: "每次办理时选择" }, ...(category && !categories.data?.rows.some((item) => item.id === category) ? [{ value: category, label: "当前已设类型（搜索可核对）", disabled: true }] : []), ...(categories.data?.rows.map((item) => ({ value: item.id, label: item.name })) ?? [])]} />
           {categories.data && categories.data.pagination.total > 50 && <FinanceTablePagination page={categoryPage} pageSize={50} total={categories.data.pagination.total} onPageChange={setCategoryPage} compact />}
-        </details>
+        </fieldset>
       </>}
       <CashInput label="办理说明" value={instructions} onChange={setInstructions} disabled={mutation.busy} />
       <p className="cash-hint">29/30/31 日遇短月取该月最后一天；不自动顺延节假日，不执行付款或页外通知。</p>

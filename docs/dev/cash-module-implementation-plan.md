@@ -4,9 +4,9 @@
 
 配套事实源：[业务总设计](../product-specs/cash-module-design.md)、[UI 与 Make 交接](../product-specs/cash-module-ui-spec.md)、[后端/API/数据库技术设计](cash-module-technical-design.md)。本文只拥有执行顺序、文件责任、验证与交付，不重复定义业务公式或 DTO。
 
-状态：**App现金前后端已提交推送，并于2026-09-07 17:48 CST完成正式发布及生产只读验证。** 上线代码为`8bdfc07ae`，release为`cash-8bdfc07ae-20260907-ui`。采用已认可Make Version 10的紧凑布局和现有HeroUI/App Shell。真实本地测试见§10.13，发布、生产测量和未测风险见§10.14；现金空库性能不代表满量生产性能，旧工作台仍有并发SLO超标。§10.8–10.12是历史记录，其中暂停和专用账号安排不覆盖当前事实。不使用GSD，不新增hash、冻结contract、baseline或gate平台，不删除既有正式发布安全措施。
+状态：**当前已上线代码为68eee75c0，release为cash-68eee75c0-20260907-ui-layout，证据与剩余风险见§12。** 用户已同意按顶层视角统一现金UI，本轮仅形成详细计划，尚未实现、提交或部署新修订；唯一新执行入口为§13。§10/§11保留首次上线和上一轮修复历史，不覆盖本轮目标。旧银行/工作台并发耗时问题仍未关闭，生产现金空库只读结果不代表全量或写入验收。
 
-维护约定：需求变化时就地同步四份文档的受影响章节，不另存v2/v3。F01–F05与§10为已执行历史；2026-09-07用户反馈视觉偏差并采纳现金流水独立左侧页，当前工作是**源码对照与S01–S05修复计划，见§11**。本轮仅分析/文档，不修改应用代码、不commit/push、不部署。后续获准执行再按§11连续完成；不重复旧P/E/F清单，不新增逐步审批。
+维护约定：需求变化时就地同步受影响的设计/技术/边界/测试文档，不另存v2/v3。§1–12是此前建设及执行记录；本轮以§13的U01–U07连续实施，无GSD、重复访谈、逐步审批或新增hash/冻结contract/baseline/gate。已有安全和正式发布措施保留；本次计划授权不自动授权生产写入或发布。
 
 ## 1. 当前结论：前后端联调后，发布现金分支
 
@@ -1037,3 +1037,194 @@ API探测不运行前端UI；本次后台及普通页查询代码没有变化，
 本次UI修复已经实施、提交、推送并部署；现金只读接口/浏览器达到本次目标，原有业务链的本地回归通过。不能宣称整个App性能全部达标：银行明细、工作台四并发尾延迟仍需独立定位。未执行生产现金录入/修改/删除，不创建角色，受限角色生产确认由用户执行；生产现金大数据量和真实写入到绘制耗时未在本轮验证。上述限制保留，不能用空库或mock结果掩盖。
 
 完成后清理：本次disposable测试库、核对RELEASE.json归属后的本机临时发布包、临时probe配置/输出与浏览器数值日志均已按精确路径删除，可按本节命令和提交重跑/重建。性能数值、错误测量说明、样本数/环境及服务器正式release证据已保留于文档/既有运维位置。没有删除主数据库、其他任务临时包或服务器可回滚release；没有新增数据库备份。
+
+## 13. 全现金模块UI统筹实施计划（设计完成，代码待授权执行）
+
+### 13.1 结论、范围与当前证据
+
+采用“保留业务边界，统一布局/控件/状态，再迁移全部视图”，不重写现金系统。当前已核对CashPage/Provider、CashUi/Selectors、四业务组件、FinanceTable边界、现金GET解析/SQL和现有测试。复用上一轮实际读取Make活跃入口与四账表的源码记录（UI§3.5），本轮未重新完整读Make、未运行App或测生产性能。
+
+必须改的是：历史项目/费用/账单内联选择、更多筛选details撑满一行、余额表/说明展开挤动主内容、Select浮层与正文样式分裂、单值查询无法正确多选、任务/设置加载时表框消失、重复排序控件、手写Tabs交互与原生要求不一致。上一轮测试没有完整覆盖这些展开态，本轮不借用§12的“通过”结论。
+
+明确不改：四个左侧子页、cash单一权限、Shell业务职责、数据库账号/表、写事务/账务算法、OA写入、普通页面业务。共享改动仅FinanceTable新增可选sortDescriptor/onSortChange转发到HeroUI Table.Content；现有allowsSorting已有，无需另造排序行为。AppDrawer、全局主题和未传排序props的旧页默认行为不变。无新worker/cache/规则引擎/全局store/新依赖。
+
+文档分工：DESIGN.md§7拥有通用视觉/交互；UI规格§3.6拥有全视图安排；技术§13拥有组件I/O/GET/SQL语义；本文拥有工作顺序、文件责任、验证与交付。旧历史条目不作为相冲突的新规范。
+
+### 13.2 执行前已经定下的规则
+
+- 页面骨架分单表/分组/配置三种实际组合，不创建万能表格。单表表体滚动，分组/设置一个主要纵向滚动，抽屉浮层不推挤背景。
+- 顶部保留期间/搜索/常用业务视角，真实列条件进入表头；跨分组条件留单一工具浮层。无对应列的合法金额排序留小排序浮层，不假冒其他金额列。
+- 采用HeroUI原生控件和现有纯UI封装，不升级依赖。CashFilters只组合通用行为，不知道API/OA资格或金额规则。
+- 应用条件/输入草稿/候选草稿各司其职，一次应用一次主查询；候选搜索250ms防抖。现金条件不写导航URL或磁盘，切视图恢复条件后重读，退页/撤权全部卸载。
+- 枚举全选完整集合；分页候选明确“全选本页”，清空=清除此列限制，null是明确的无归属选项。最大选择和GET编码约束见技术§13.3，不提供反选DSL。
+- 多选扩展服务端完整结果谓词；保留既有合法单值API，互斥传参且共用查询实现。零当前页结果不等于全部无数据；总数、筛选合计、余额各自按已有口径。
+- 初始所有筛选/排序默认见技术§13.2；名称/ID/请求状态不混用；配置checkbox与临时查询过滤器分开。
+- 不为形式统一删除字段/提示/确认。业务类型变化引起抽屉内相关字段变化可保留；菜单/说明/余额查看开关不得造成底层页面位移。
+
+### 13.3 文件、步骤与可见完成条件
+
+| 步骤 | 责任文件/输入 | 执行内容与输出 | 随步验证/删除 |
+| --- | --- | --- | --- |
+| U01 统一结构 | CashPage.tsx、CashUi.tsx、cash.css；UI§3.6矩阵 | 保留现有入口，统一标题/导航/工具/内容/页脚组合，确立单表/分组/配置滚动责任；加载/错误/保存通知各有位置 | 所有四页及关联抽屉可达，不产生空Tab行；任务/设置空错态保留表框；移除由旧选择面板要求的外层嵌套布局 |
+| U02 原生控件与表头 | CashUi.tsx、拟新增CashFilters.tsx、CashFlowSelectors.tsx、common/FinanceTable.tsx；DESIGN§7 | Popover+Checkbox+搜索+应用；FinanceTable补可选sortDescriptor/onSortChange到Table.Content，原生列排序与筛选事件隔离；Tabs改HeroUI；Select/按钮/焦点/Portal一次统一，单选录入资格保留 | 新增CashFilters/CashUi、扩FinanceTable排序及不传props回归；真实浏览器先验一个表头与抽屉，代表性验证不替代全模块迁移 |
+| U03 多选查询 | hooks.tsx/api.ts、routes_cash.py、cash_queries.py、cash_tasks.py读方法、cash_oa_projects.py、对应cash repository | 实现技术§13明确数组序列化、白名单/互斥/空值校验、SQL分页前集合筛选、单/多账户余额；扩历史项目候选截至期末/父对象范围；把配置group过滤前移服务端 | 先写参数及SQL边界测试，再执行真实PG/HTTP；原单值API回归；不改写方法、数据库表或普通API |
+| U04 流水与账目接入 | CashFlowTable.tsx、CashBooks.tsx、CashFlows.tsx、相关Items/Corrections/Drawer调用者 | 按UI矩阵把项目/账户/费用/来源/状态等接入统一交互；三账及个人四视图全部覆盖；账户期间余额使用AppDrawer显示现有summary | 复用原创建/更正/删除动作；删除HistoricalProjectFilter内联面板、showCategory/showBills旧UI、details更多筛选、重复sort+order控件和失效CSS；事项/任务内嵌流水同步迁移 |
+| U05 任务与设置接入 | CashTasks.tsx、CashSettings.tsx、CashFlowSelectors.tsx及关联表单 | 分组状态/类别仅一份条件；模板/配置列筛选排序统一；OA可选阶段持久配置仍独立保存；默认账户/费用常驻紧凑选填区；支付说明改抽屉 | 核对/未办无流水、模板旧月快照、OA草稿取消/版本失败、查看说明无写I/O；删除表格行内说明展开与已替代默认字段details，不删除真实条件字段 |
+| U06 全覆盖与清理 | 全部现金调用者、tests、docs、受影响公共UI | 完成§13.4清单扫描，七类适用测试及§13.6测量；每个实际菜单类型、每种页面布局、所有视图都有交互证据 | 所有旧入口替换后再删除其状态/样式/import；无未使用新文件、双轨入口、mock成功；更新文档为实际结果而非计划 |
+| U07 交付/可选发布 | 干净可审阅diff、既有部署入口 | 先报告实现/测试/风险；只有用户明确授权后commit/push和发布；本轮不执行 | 发布走既有deploy-oa.sh，不加skip/allow-dirty；核实代码版本及资产、认证/权限/no-store、现金及旧页只读链；可按旧release回退代码、不回滚删除业务数据 |
+
+顺序：U01→U02→U03→U04→U05→U06；U07须有执行时的发布授权。U01/U02的演示和测试使用本地合成数据，不在生产造记录；U03完成后U04立即连真实接口，不把所有静态页面做完作为联调前提。不重复旧B/F/S全过程，不增加每步人工批准。
+
+### 13.4 必须替换与不能误删的旧代码
+
+| 当前路径 | 替换动作 | 删除条件/保留项 |
+| --- | --- | --- |
+| CashBooks.HistoricalProjectFilter、showCategory、showBills | 同一筛选浮层与已应用条件 | 三账/个人调用全部改完后删除旧面板与专用state；project-options本地历史来源保留并按技术§13完善 |
+| PeriodFilters的details与cash-more-filters[open] | 顶部查询+明确列/工具浮层 | 无调用后删除撑满整行样式，不能保留隐藏旧筛选 |
+| 各页sort Select + order Button | 对应列排序/仅无列字段的小排序浮层 | 能力保留，旧按钮/重复状态迁移后删除；不新增未支持的列sort |
+| CashFlowTable.showBalances内联第二表 | 原summary在AppDrawer展示 | 同一数据不复制计算；删除内联布局，不删除账户余额能力 |
+| CashPaymentGuide.expanded行内说明 | AppDrawer | 原说明文字保留，删除行增高逻辑，不新增API |
+| CashTasks默认配置details | 紧凑表单组 | 选填含义、校验与任务快照不变；CashItems按类型显隐的真实字段不可连带删 |
+| CashUi手写Tabs键盘实现 | HeroUI Tabs | 活动视图卸载/键盘/焦点/状态恢复测试通过后移除旧按键代码 |
+| CashConfigurationSelect当前页group过滤 | 服务端groups谓词 | 所有录入/筛选调用检查entry/filter和组别后删除页内过滤；不得把停用历史项排除 |
+| 其他cash-picker选择区 | 逐个归类为业务选择而非一刀切 | CashItems与CashFlowCorrections的父关系/预算/版本选择保留；只替换会挤动背景的展示，不能删除SQL或真实业务入口 |
+
+实际实施前对待删符号做whole-repo引用扫描，包括tests/docs；不把普通cash-special、旧公开单值API、历史迁移、共享安全检查当作旧现金UI。CSS仅删除已无消费者的规则，Portal另有消费者时不能只扫描页面DOM。
+
+### 13.5 测试责任与命令
+
+| 七类测试 | 本轮必须覆盖 | 入口 |
+| --- | --- | --- |
+| 1 核心 | 参数数组/元素类型/重复/未知/超限/null、精确文本不改语义、默认sort、非法组合、单多账户与互转 | test_cash_api.py、test_cash_queries.py、CashApi.test.ts、拟新增CashFilters.test.tsx |
+| 2 Service/repository | 同快照rows/summary/count、删除后多选不残留、候选父对象不存在、GET零写入、任务/配置读改不影响写事务 | test_cash_queries.py、test_cash_tasks.py、test_cash_http_integration.py |
+| 3 API | 新数组JSON、重复key仍400、标量/数组互斥、旧单值仍正确、401/403/503、no-store、OA失败、响应字段/金额语义 | test_cash_api.py、test_cash_http_integration.py、test_cash_oa_projects.py、CashApi/CashHooks |
+| 4 读侧 | 分页前筛选、跨页与null候选、单账户完整账序、多个账户不造合成余额、竞态取消、主表一次应用一次读、删除/重读 | test_cash_queries.py、test_cash_query_performance.py、CashHooks/CashBooks/CashFlows |
+| 5 前端 | 全部子页/视图、菜单开关/草稿取消/全选本页/清空/搜索/翻页/失败重试/原生键盘、滚动/布局、抽屉、权限卸载 | 新CashFilters/CashUi及现有Cash*.test.*、cash-module-flow.spec.ts；拟新增cash-ui-interactions.spec.ts集中几何/候选测试 |
+| 6 全链 | 真HTTP→PG：建合成配置/手工+任务流水→多选→跨页+总表/个人/票据→删除→查询一致；浏览器真实接口至少一条录入→筛选→删除链 | 扩test_cash_http_integration.py，增加独立本地真后端浏览器用例与运行入口，不拿mock冒充；OA写不执行 |
+| 7 回归 | 普通银行/往来/工作台、Shell/授权/全局历史、公共表格/抽屉、现金旧操作；现金请求不流入其他页 | 现有全量前端+定向浏览器、test_cash_permissions.py及HTTP集成；共享改动才扩对应普通后端专项 |
+
+七类均有适用部分；第4类无新cache/read model/worker，因此不为不存在的后台状态造测试。布局代码不涉及金额算法改写，但既有金额/任务/删除链继续回归。生产不创建受限角色，权限失败在本地自动化覆盖。
+
+执行命令（本节是后续步骤，当前文档修订不执行这些业务测试）：
+
+仓库根，两个测试DSN必须显式指向已核验的本地disposable数据库，不能复制生产DSN；使用既有测试安全检查与迁移入口，不新增账号/门禁：
+
+```bash
+PYTHONPATH=backend/src:tests:. python3 -m unittest tests.test_cash_api tests.test_cash_queries tests.test_cash_tasks tests.test_cash_oa_projects tests.test_cash_permissions tests.test_cash_http_integration
+bash scripts/verify.sh lint
+bash scripts/verify.sh docs
+git diff --check
+```
+
+web目录，新增测试文件在U02/U06实际创建后运行：
+
+```bash
+npm test -- --run src/test/FinanceTable.test.tsx src/test/CashFilters.test.tsx src/test/CashUi.test.tsx src/test/CashApi.test.ts src/test/CashHooks.test.tsx src/test/CashBooks.test.tsx src/test/CashFlows.test.tsx src/test/CashTasks.test.tsx src/test/CashSettings.test.tsx
+npm run e2e -- e2e/cash-module-flow.spec.ts e2e/cash-ui-interactions.spec.ts e2e/finance-table-system-flow.spec.ts e2e/finance-table-text-selection.spec.ts e2e/drawer-motion.spec.ts e2e/app-shell-responsive.spec.ts --project=chromium
+npm test -- --run
+npm run build
+```
+
+本地真浏览器链复用`tests/test_cash_http_integration.py`已有loopback WSGI/Application/CashRuntime/真实PG fixture，不改生产认证。在同文件新增显式`--browser-e2e`测试运行入口：核验disposable DSN→启动本地随机端口HTTP→以子进程运行拟新增`web/e2e/cash-real-api-flow.spec.ts`→finally关闭浏览器/HTTP线程/连接并清理本次fixture。该入口缺DSN必须失败，不以skip成功；普通unittest入口保持。Vite已有VITE_API_PROXY_TARGET，指向该loopback地址；选择空闲FIN_OPS_E2E_PORT防止重用旧服务。只用现有DEFAULT_TEST_OA_TOKEN测试身份，绝不读取生产token；cash请求不能route.fulfill为假响应，身份/普通Shell/OA未配置使用现有本地fixture并如实注明。该用例独立于合成视觉测试，不用一个模式开关让同一断言在真假API之间切换。
+
+U06实现上述入口后，仓库根执行：
+
+```bash
+PYTHONPATH=backend/src:tests:. python3 -m tests.test_cash_http_integration --browser-e2e
+```
+
+真浏览器至少完成两账户/两费用合成配置→手工录入→多选筛选/合计→删除→真实GET及DOM恢复；其中测试服务器的时钟沿用现有固定日期，浏览器显式选择同一期间。不新建通用测试服务器框架。未接通就标记“浏览器→真实PG链未验证”，不能用HTTP集成+mock浏览器两份结果冒称一条E2E。
+
+### 13.6 浏览器视觉与性能测量
+
+**视觉/交互：** 1440×900、1280×800、390×844及桌面125%/150%缩放；金额长值、中文长名、空/错误/加载、50行、下一页与跨年数据。每个菜单按打开→搜索→选择→取消/应用→关闭检查：背景标题/工具区/表头/页脚坐标变化≤1 CSS px、底层scrollTop/Left不变；候选内部可以滚动。检查表内横滚、表头/固定列不裁切Portal、Tab/Shift-Tab/Escape/焦点返回、背景滚动条补偿。不得用截图大小不同推断精确像素偏移，不能只测默认空态。
+
+**交互目标（计划目标，不是新baseline或发布gate）：** 已加载UI菜单点击→首次绘制p95≤100ms；候选读取时间单列，不能与菜单出现混在一起。主查询一次应用仅一次有效请求、响应完成→表格绘制p95≤100ms。允许每个打开的资源选择器有自身候选请求，不预取所有子页/表头。无每选项/每行HTTP或SQL循环。
+
+**查询目标：** 沿用本任务现金本地API p95≤500ms、p99≤1000ms目标；计网络的端到端与纯SQL分开。已有测量器扩入多项目/多费用/单与多账户/状态、空值、截至历史候选、常用与较深分页，分别测1万/10万合成流水、并发1与4，每场景至少100有效样本；保留慢样本/失败比例及p50/p95/p99，不只报均值或空库耗时。先10k证明正确，再100k验证大集合；不为性能新建框架或永久快照。
+
+仓库根（仅测试库，脚本会清理该库合成现金表，不得接主库）：
+
+```bash
+PYTHONPATH=backend/src:. python3 -m tests.test_cash_query_performance --rows 10000 100000 --samples 100 --concurrency 1 4
+```
+
+测试数据扩充多项目、多账户、跨年、互转和不同分类，不能沿用全部集中一个账户/项目的样本冒充多选容量。慢查询先EXPLAIN ANALYZE/实际query count，优化被改动的集合谓词，不提前加缓存/索引/worker。构建报告现金懒块大小和冷/热进入，未改普通页也运行同条件旧页对照；无法证明共享服务器零影响，原银行/工作台超标保留，不越界自动重构。
+
+生产验证只在后续明确发布授权后执行既有token wrapper和production-cash-readonly.spec.ts，关闭敏感截图/录像/trace，不创建角色/现金/OA数据。性能日志不含条件、ID、金额或token。若用户要求生产真实写链，先明确可用测试记录/清理边界，不能擅自删除真实流水。
+
+### 13.7 回滚、清理与不可扩大范围
+
+- 本次不设计数据库备份、表变更或迁移，不触碰主数据库；若实施中发现必须迁移/备份，先说明具体原因和边界，另获授权。本任务新建且已核验的临时备份完成后清理，不删除既有灾备、主库或他人资产。
+- 测试库单独创建，记录精确库名、用途和归属；测试结束关闭连接后精确删除本次disposable库，不写通配DROP/主库清空命令。临时浏览器图片/性能文件放本次临时目录，保留必要脱敏结论后清理；旧可回滚release保留。
+- 前后端多选要同一发布版本配套：新版UI不能先上线配旧API；旧页面开着时合法单值API仍受支持。若需回滚，前后端一起回退到已验证release，刷新客户端；不增加自动地址探测/协议fallback/双运行系统，不回滚业务数据。
+- 正常发布沿用既有构建、身份、版本、部署检查；不加冻结contract、截图hash、baseline存档或新门禁平台。普通Git提交/版本、类型/参数验证、事务和普通测试足够本次目标。
+
+### 13.8 完成定义与九条复审
+
+完成必须同时满足：UI矩阵所有视图/相关抽屉接入同一规则；多选/余额/分页语义正确；被替代旧链路无调用；本地真链与浏览器展开态有证据；性能按数据量/环境报告；文档状态与实际代码一致。不能以“设计已通过/一个页面好看/旧测试通过”代替完成。
+
+| 用户要求 | 复审结果 |
+| --- | --- |
+| 模块化/明确I/O | 通过：布局/纯控件/业务视图/现金client/service/repository分工明确，无业务下沉公共UI |
+| 简单闭环/不过度设计 | 通过：保留已有模块，只新增一个现金交互组件文件与必要测试；无新框架/规则语言/缓存平台 |
+| 高性能 | 设计可验证：按需候选、一次应用一次读、集合SQL/分页；真实耗时待实施测量，不作无条件保证 |
+| 旧代码清理 | 通过：§13.4逐项列替代路径和删除条件，公开API/仍被使用的安全能力不误删 |
+| 旧页正常/I/O不污染 | 风险已约束：现金CSS/Portal/状态隔离，普通页回归与混合负载对照；无法逻辑保证零bug |
+| 不盲从 | 已修正：统一不等于万能模板；响应式允许重排；所有余额不能套相同筛选；全选须说明范围 |
+| 备份/主库 | 通过：本次无备份/迁移，禁止主库删除，临时资源按明确归属清理 |
+| 不写兜底 | 通过：非法/超限/未知明确失败；无假数据/空成功/重试旧API/自动覆盖版本 |
+| 不新增hash/冻结/baseline/gate | 通过：只用既有发布保护、普通类型/事务/测试和实测，无新平台/逐步审批 |
+
+复审后补齐的遗漏：分页候选全选范围、null和不限、URI/数组边界、草稿与应用分离、多账户互转不重复、余额完整账序、跨年/期初历史项目、分组分页解释、录入group分页前过滤、已选跨页显示、Portal撤权清理、原生Tabs、加载表框、前后端配套回退。没有新增必须由用户决定的业务口径；若真实API/原型发现与上述边界冲突，在对应步骤提出具体差异，不重启一轮全量访谈。
+
+**§13为实施前计划。用户后续已明确授权修复、commit/push与部署，实际完成度只看§14；不再要求重复授权。**
+
+## 14. 统一现金UI实际执行与验证（2026-09-08）
+
+### 14.1 实施范围和发现的问题
+
+U01–U06已实现并完成本地验证，当前等待提交/发布后的生产复核。本轮不用GSD，没有新增依赖、迁移、数据库账号、worker、缓存、hash或门禁。沿用现有发布安全措施。
+
+- 全部四子页面和相关流水明细使用同一组CashFilters原生Popover/Checkbox、CashUi原生Tabs、CashSelect与cash.css。CashFilters只接值/选项/状态和回调；业务视图负责完整查询校验与提交，client负责JSON编码及HTTP边界，service/repository负责集合规则/SQL。公共FinanceTable只新增两个可选原生排序props，不改变未传props的普通页面。
+- 历史项目/费用/账单内联面板、更多筛选details、重复排序Select+升降序按钮、内联余额表、支付说明行展开、手写Tabs键盘和失效CSS已替换。真实事项关系、CAS确认、录入条件及普通cash-special不是废代码，不删除。
+- 流水/总表/票据/个人四视图、任务模板与本月分组、账户/费用/OA配置均迁入统一列/工具浮层；余额和办理说明用已有AppDrawer。多选不把当前页筛选当成全量，rows/count/summary在同只读快照中查询；现金不会读普通流水/OA写回/全局历史。
+- 个人矩阵下钻补充items.project_ids，避免多项目汇总在月格下钻丢失范围。账单名称排序使用后端已有label键，不能把显示字段bill_label直接当sort。
+- 真实浏览器发现Checkbox继承Table行选择上下文，已用HeroUI支持的slot=null明确退出该上下文；原生控件仍保留键盘、语义与焦点能力，不自写checkbox。
+- 右侧列浮层曾因非模态焦点引发祖先表格横滚而被原生close-on-scroll关闭，已移除isNonModal，使用原生模态Popover且验证背景不位移。空表原生集合没有可恢复单元格，现金共享组件通过公开Button/Dialog ref、Escape/显式关闭标志，在Dialog实际退出后标准focus(preventScroll)恢复有效触发器；外部点击不请求恢复。没有使用React Aria私有事件、禁用焦点或位置补偿。
+- 复查发现候选满页50加null成51、开菜单250ms旧计时器把翻页回退，均已补边界测试并修正：49真实候选+null、账户仍50、只为真实搜索差异防抖。全部主表每页50不变。
+- 完整参数超100/编码6000不在主表显示假空结果；应用前复用cashQueryString检查，失败留在浮层/表单及原有效查询，不截断条件。HTTP前检查仍保留。
+
+### 14.2 本地真实链与规模测量
+
+- 实际使用三个经核验不存在后创建的本地disposable数据库：fin_ops_cash_test_uniform_backend_20260907（现金专项）、fin_ops_cash_test_uniform_e2e_20260907（既有完整schema/HTTP/浏览器）、fin_ops_cash_test_uniform_perf_20260907（规模测量）。不是第二个生产现金库；没有数据库备份。
+- 132项现金core/runtime/API/queries/tasks/OA/permissions/HTTP测试在完整schema的e2e库全部通过，8.676s。初次误在仅cash schema的backend库跑HTTP，因app.bank_transactions缺表失败；改用已迁移完整schema的自有测试库后实际重跑，不跳过该用例。
+- tests.test_cash_http_integration --browser-e2e真实链：浏览器→Vite代理→Application/CashRuntime→PostgreSQL，最终版本1项通过（9.6s，本体7.8s）。两账户两分类、UI逐笔收入100+40、多选合计140、每次应用仅一个主GET、两次UI删除后真实404/列表0/余额恢复1000与0。没有cash mock，结束清理fixture/进程/连接；缺DSN明确退出1。
+- 规模数据包含多账户/项目/分类、null、跨年、互转、20账单标签及合法日期/同项目结算；每组100样本，64组6400有效样本，0失败。环境为本机service+PostgreSQL+连接池等待，**不是生产HTTP或浏览器耗时**。
+
+| 流水量 | 并发 | 全场景最高p95 ms | 全场景最高p99 ms |
+| --- | ---: | ---: | ---: |
+| 10,000 | 1 | 19.22 | 19.89 |
+| 10,000 | 4 | 39.24 | 103.72 |
+| 100,000 | 1 | 117.19 | 157.68 |
+| 100,000 | 4 | 296.85 | 331.20 |
+
+历史候选初测100k/4并发p95=516.54ms，EXPLAIN发现126944行排序落盘6224kB。按(id,name)先聚合最新时间再取唯一名称，保持关键词/父范围/时间并列语义，新增真实PG回归。最终候选相同规模p95=136.06ms、p99=137.05ms；没有增加索引、缓存或表。旧慢结果用于诊断，未删除慢样本来制造通过。
+
+### 14.3 浏览器、全量回归与发布记录
+
+全量前端`npm test -- --run`：96文件、1220测试通过，270.81s。此前1203测试中TaxOffset旧测试先等统计再立即get checkbox存在异步竞态，改为await findByRole实际控件后重跑全量通过，未改税抵业务代码。最终焦点修改后CashFilters 16项和TypeScript再次通过。现有cash-module-flow.spec.ts直接扩展全菜单检查，复用现有fixture，未另造cash-ui-interactions.spec.ts重复框架；原生Tabs在CashBooks/Tasks/Settings及浏览器覆盖，不为文件名另造空CashUi测试。
+
+- cash-module-flow.spec.ts最终9/9通过（42.7s）；仅补截图等待原生进场结束后，几何/视觉矩阵另1/1通过（17.9s）。33种浮层实例全覆盖现金四子页/账簿/个人四视图/任务/配置：打开0px背景几何位移，底层滚动不变，关闭与焦点返回通过≤1px规则；未使用force或失败重试。历史失败包含真实上下文/焦点问题和候选重开返回第一页、0.237px原生按压缩放的错误测试假设，均明确修复后重跑，未降低已批准1px阈值。
+- 浮层打开到可见：final-verified 33样本p50/p95/p99=36/48/100ms；visual-final为35/52/105ms，nearest-rank。每种菜单各一次，是本地合成交互矩阵而非生产重复压测；p95符合100ms目标，不把105ms最大值隐藏。
+- 普通页面浏览器15/15通过（36.6s）：finance-table-system-flow、finance-table-text-selection、drawer-motion、app-shell-responsive。前一轮持久抽屉采样window值丢失出现在并发HMR期间，源码稳定后相同用例和全套15项直接通过，未修改抽屉业务或放松断言。
+- 主线程实际查看最终1440×900及390×844合成数据截图，确认紧凑工具行、浮层不推挤表格、类别行色、表内横滚、窄屏浮层不越界。不是拿真实生产数据拍照，也未宣称重新完整读取Make或像素级相同。
+- npm run build通过，Vite4.56s；cash懒块145.91kB/gzip42.39kB，cash CSS15.66kB/gzip3.26kB。上一版134.68/38.86与12.76/2.78kB，增加来自共享筛选/原生Tabs和完整多选交互，无新依赖。既有HeroUI CSS `:is()`压缩警告和全局519.25kB块警告仍在，未隐藏阈值或越界升级依赖。lint/docs/diff-check通过。
+
+部署前只读对照：2026-09-08 00:16:46–00:17:44 CST，TLS校验，100样本/接口，warmup2，4并发。session p50/p95/p99=164.599/182.819/188.365ms；银行910.388/1217.394/1255.052ms；工作台1047.275/1244.014/1331.281ms；300次全200。银行和工作台在此次部署前已超过既有p95≤1000ms目标，必须单独报告，不能宣称全App达标。初次Python默认CA缺发行链，300次均未完成TLS，不能算API性能；显式使用本机certifi信任包后重测，未关闭证书验证。
+
+生产只读验证继续禁止创建受限角色、现金试验流水或OA写操作；敏感截图/录像/trace关闭。正式发布使用已提交推送的现金分支与deploy-oa.sh，不用allow-dirty/skip-build。当前旧版仍为cash-68eee75c0-20260907-ui-layout。
+
+### 14.4 清理和未测边界
+
+最终结束前核对无连接，精确删除上述三个自有测试库、任务临时性能/probe工件；不删除主数据库、生产cash表、组织备份、其他任务资产和可回滚release。真实生产现金写链/受限角色不在此次生产验证范围；本地写链和生产只读不能冒称同一生产写入验证。

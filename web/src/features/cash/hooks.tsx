@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { cashRequest, CashRequestError } from "./api";
+import { cashRequest, cashQueryString, CashRequestError, type CashQueryParams } from "./api";
 
 type CashScope = { revision: number; refresh: () => void; deny: () => void; saved: () => void };
 const CashContext = createContext<CashScope | null>(null);
@@ -25,17 +25,23 @@ export function useCashScope(): CashScope {
 }
 
 export function useCashQuery<T>(path: string | null,
-  params?: Record<string, string | number | boolean | null | undefined>, revision?: number) {
+  params?: CashQueryParams, revision?: number) {
   const scope = useCashScope();
   const [localRevision, setLocalRevision] = useState(0);
   const [state, setState] = useState<{ key: string; data: T | null; loading: boolean; error: CashRequestError | null }>({ key: "", data: null, loading: true, error: null });
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params ?? {})) {
-    if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+  let url: string | null = null;
+  let inputError: CashRequestError | null = null;
+  try {
+    const query = cashQueryString(params);
+    url = path === null ? null : `${path}${query ? `?${query}` : ""}`;
+  } catch (error) {
+    if (!(error instanceof CashRequestError)) throw error;
+    inputError = error;
   }
-  const url = path === null ? null : `${path}${query.size ? `?${query}` : ""}`;
-  const key = `${url}:${revision ?? scope.revision}:${localRevision}`;
+  const errorMessage = inputError?.message;
+  const key = `${url}:${errorMessage ?? ""}:${revision ?? scope.revision}:${localRevision}`;
   useEffect(() => {
+    if (errorMessage) { setState({ key, data: null, loading: false, error: new CashRequestError(400, "cash_filter_limit", errorMessage) }); return; }
     if (url === null) { setState({ key, data: null, loading: false, error: null }); return; }
     const controller = new AbortController();
     setState({ key, data: null, loading: true, error: null });
@@ -48,7 +54,7 @@ export function useCashQuery<T>(path: string | null,
       setState({ key, data: null, loading: false, error });
     });
     return () => controller.abort();
-  }, [url, key, scope.deny]);
+  }, [url, key, scope.deny, errorMessage]);
   const reload = useCallback(() => setLocalRevision(value => value + 1), []);
   return { ...(state.key === key ? state : { data: null, loading: url !== null, error: null }), reload };
 }

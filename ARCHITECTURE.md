@@ -7,7 +7,7 @@
 - 前端：React + TypeScript + Vite，正式页面在 `web/`。
 - 后端：Python WSGI 服务，由 Gunicorn `gthread` 运行；`http_adapter.py` 负责请求边界，业务服务集中在 `backend/src/fin_ops_platform/services/`。
 - App 状态：PostgreSQL 是生产 app 状态和业务事实的唯一读写库；当前 runtime 不读取 app Mongo，也没有 app Mongo fallback、shadow-read 或导出/审计旁路。
-- 现金模块：同一PostgreSQL、同一App数据库登录账号，`cash.*`为独立保密事实域，不进入普通`app.*`统一财务事实源；现金API/service/repository及有界小池，无新worker/read model/cache。应用模块隔离而非数据库账号隔离；共享身份与二态页面ACL，只读OA项目元数据，不写全局操作历史。当前后端先行，边界与状态见[cash](docs/modules/cash/boundary-io.md)。
+- 现金模块：同一PostgreSQL、同一App数据库登录账号，`cash.*`为独立保密事实域，不进入普通`app.*`统一财务事实源；现金API/service/repository及有界小池，无新worker/read model/cache。应用模块隔离而非数据库账号隔离；共享身份与二态页面ACL，只读OA项目元数据，不写全局操作历史。四子页与统一UI/窄多选查询已实现，实际验证与发布记录见现金实施§14，边界与状态见[cash](docs/modules/cash/boundary-io.md)。
 - OA 数据源：通过 `MongoOAAdapter` 只读读取 OA MongoDB。
 - 部署：当前已有 OA 同域部署资产，前端路径 `/fin-ops/`，后端路径 `/fin-ops-api/`。
 

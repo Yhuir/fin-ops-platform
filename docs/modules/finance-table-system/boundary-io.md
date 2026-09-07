@@ -1,5 +1,9 @@
 # Finance Table System 模块边界与 I/O
 
+## 现金UI使用方提出的窄扩展（计划，未实现）
+
+现金实施计划§13需要原生表头排序。当前FinanceTableColumn已支持allowsSorting，但FinanceTable没有把受控排序值/事件传给HeroUI Table.Content。拟新增可选sortDescriptor/onSortChange（类型取Table.Content原生props），输入仅列key/方向，输出仅排序事件；现金页面负责映射业务条件和请求。没有props的旧消费者行为保持，公共表格不读cash、不排序业务rows、不持久化条件、不改默认CSS。扩FinanceTable.test.tsx及既有表格/旧页浏览器回归；不新增框架/排序状态store。
+
 日期：2026-08-10
 
 ## 模块化状态

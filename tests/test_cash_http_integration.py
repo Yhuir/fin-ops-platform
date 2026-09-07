@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -18,6 +22,7 @@ from pathlib import Path
 from socketserver import ThreadingMixIn
 from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
@@ -29,7 +34,7 @@ from fin_ops_platform.services.cash_tasks import CashTaskService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 
 from tests.app_test_support import DEFAULT_TEST_OA_TOKEN, build_local_state_application
-from tests.postgres_test_utils import assert_safe_test_database_url
+from tests.postgres_test_utils import apply_test_migrations, assert_safe_test_database_url
 
 
 class _ThreadingServer(ThreadingMixIn, WSGIServer):
@@ -41,6 +46,11 @@ class _QuietHandler(WSGIRequestHandler):
     def log_message(self, _format, *args):
         # Synthetic fixture values do not need an additional raw HTTP access log.
         pass
+
+
+def _reset_cash_fixture(connection):
+    connection.execute("TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
+    connection.execute("UPDATE cash.settings SET personal_opening_date=NULL,allowed_project_stage_codes='{}',project_selection_configured=false,version=1 WHERE id=1")
 
 
 @unittest.skipUnless(os.environ.get("FIN_OPS_CASH_TEST_DATABASE_URL"), "Explicit disposable cash PostgreSQL DSN required")
@@ -55,8 +65,8 @@ class CashHttpPostgresTests(unittest.TestCase):
         actual = connection.fetch_one("SELECT current_database() AS name")["name"]
         if not actual.startswith("fin_ops_cash_test_"):
             raise RuntimeError("HTTP writes require an explicit fin_ops_cash_test_* database")
-        connection.execute("TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
-        connection.execute("UPDATE cash.settings SET personal_opening_date=NULL,allowed_project_stage_codes='{}',project_selection_configured=false,version=1 WHERE id=1")
+        _reset_cash_fixture(connection)
+        self.addCleanup(_reset_cash_fixture, connection)
         self.connection = connection
         temporary = tempfile.TemporaryDirectory(prefix="finops-cash-http-")
         self.addCleanup(temporary.cleanup)
@@ -265,6 +275,77 @@ class CashHttpPostgresTests(unittest.TestCase):
         self.assert_empty_reports()
         self.assertEqual(self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count"), ordinary_before)
 
+    def test_plural_filters_cross_the_real_http_boundary(self):
+        other = self.call("POST", "/settings/accounts", {
+            "id": self.uid(), "name": "Synthetic second HTTP account", "kind": "savings",
+            "opening_date": "2026-01-01", "opening_amount": "0.00",
+        }, status=201)["account"]
+        self.call("POST", "/flows", self.flow_payload(), status=201)
+        self.call("POST", "/flows", self.flow_payload(kind="receipt", amount="40.00", to_account_id=other["id"]), status=201)
+        self.call("POST", "/flows", self.flow_payload(kind="transfer", amount="25.00", from_account_id=self.account["id"], to_account_id=other["id"], category_id=None), status=201)
+        plural = urlencode({"account_ids": json.dumps([self.account["id"], other["id"]])})
+        all_rows = self.call("GET", "/flows?" + self.period + "&" + plural)
+        self.assertEqual(all_rows["pagination"]["total"], 3)
+        self.assertEqual(all_rows["summary"]["filtered_totals"], {
+            "flow_count": 3, "income_amount": "40.00", "expense_amount": "100.00", "transfer_amount": "25.00",
+        })
+        self.assertTrue(all(row["account_running_balance"] is None for row in all_rows["rows"]))
+        nullable = urlencode({"category_ids": json.dumps([None, self.category["id"]]), "project_ids": "[null]"})
+        first_page = self.call("GET", "/flows?" + self.period + "&" + plural + "&" + nullable + "&page_size=1")
+        self.assertEqual(len(first_page["rows"]), 1)
+        self.assertEqual(first_page["pagination"]["total"], 3)
+        self.assertEqual(first_page["summary"]["filtered_totals"], all_rows["summary"]["filtered_totals"])
+        for invalid in ("account_ids=[]", "account_ids=invalid", plural + "&account_id=" + self.account["id"], plural + "&" + plural):
+            self.assertEqual(self.call("GET", "/flows?" + self.period + "&" + invalid, status=400)["error"], "cash_invalid_input")
+
+
+def browser_e2e() -> int:
+    """Run the real browser against this existing disposable HTTP/PG fixture."""
+    dsn = os.environ.get("FIN_OPS_CASH_TEST_DATABASE_URL", "")
+    if not dsn:
+        raise RuntimeError("--browser-e2e requires FIN_OPS_CASH_TEST_DATABASE_URL; no skipped success")
+    database = assert_safe_test_database_url(dsn)
+    if not database.startswith("fin_ops_cash_test_"):
+        raise RuntimeError("Browser writes require an explicit fin_ops_cash_test_* database")
+    apply_test_migrations(dsn)
+    fixture = CashHttpPostgresTests()
+    try:
+        fixture.setUp()
+        with socket.socket() as port:
+            port.bind(("127.0.0.1", 0))
+            frontend_port = port.getsockname()[1]
+        with tempfile.TemporaryDirectory(prefix="finops-cash-browser-") as output:
+            environment = {**os.environ,
+                           "FIN_OPS_CASH_REAL_E2E": "1", "FIN_OPS_E2E_PORT": str(frontend_port),
+                           "PLAYWRIGHT_BASE_URL": f"http://127.0.0.1:{frontend_port}",
+                           "VITE_API_PROXY_TARGET": fixture.base_url, "FIN_OPS_E2E_SKIP_WEBSERVER": "0",
+                           "FIN_OPS_CASH_REAL_TOKEN": DEFAULT_TEST_OA_TOKEN,
+                           "FIN_OPS_CASH_REAL_ACCOUNT": json.dumps(fixture.account),
+                           "FIN_OPS_CASH_REAL_CATEGORY": json.dumps(fixture.category)}
+            process = subprocess.Popen(
+                ["npm", "run", "e2e", "--", "e2e/cash-real-api-flow.spec.ts", "--project=chromium", "--output=" + output],
+                cwd=Path(__file__).resolve().parents[1] / "web", env=environment, start_new_session=True,
+            )
+            try:
+                return process.wait(timeout=300)
+            finally:
+                # Stop this runner's process group, including Vite/Chromium on timeout.
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+    finally:
+        # Same TestCase cleanup stack: HTTP threads first, then runtime and PG.
+        if not fixture.doCleanups():
+            raise RuntimeError("Real browser fixture cleanup failed")
+
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--browser-e2e"]:
+        raise SystemExit(browser_e2e())
     unittest.main()

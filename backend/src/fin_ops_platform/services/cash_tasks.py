@@ -103,7 +103,7 @@ class CashTaskService:
         return result
 
     def list_templates(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"enabled", "kind", "keyword"}, {"title", "execution_day", "created_at"}, "title")
+        query = query_input(raw, {"enabled", "kind", "kinds", "keyword"}, {"title", "execution_day", "created_at"}, "title")
         enum_fields(query, kind={"receipt", "payment", "check"})
         return serialize(self.repository.list_templates(query))
 
@@ -159,7 +159,7 @@ class CashTaskService:
             return {"template": self._template_output(row), "version": row["version"], "changed": True}
 
     def list_occurrences(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"month", "reminder_from", "reminder_to", "overdue_as_of", "template_id", "kind", "state", "keyword"}, {"due_on", "remind_on", "title", "month", "actual_amount"}, "due_on")
+        query = query_input(raw, {"month", "reminder_from", "reminder_to", "overdue_as_of", "template_id", "kind", "state", "keyword", "kinds", "states"}, {"due_on", "remind_on", "title", "month", "actual_amount"}, "due_on")
         enum_fields(query, kind={"receipt", "payment", "check"}, state={"pending", "partial", "completed"})
         modes = int("month" in query) + int("overdue_as_of" in query) + int("reminder_from" in query or "reminder_to" in query)
         if modes != 1:

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,6 +40,78 @@ describe("任务金额与首次身份", () => {
 });
 
 describe("每月任务实际操作", () => {
+  it("分组共用多选和原生排序，应用不提交顶部草稿且只读取一次", async () => {
+    const user = userEvent.setup();
+    request.mockResolvedValue(result([task()]));
+    render(<CashProvider><CashTasks /></CashProvider>);
+    await screen.findByText("合成付款任务");
+    const initialRequest = request.mock.calls.at(-1)![0];
+    const originalMonth = new URL(initialRequest, "http://test").searchParams.get("month");
+    fireEvent.change(screen.getByLabelText("归属月份"), { target: { value: "2026-06" } });
+    await user.type(screen.getByRole("textbox", { name: "任务关键词" }), "尚未提交");
+    const before = request.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "筛选任务类别" }));
+    const popup = await screen.findByRole("dialog", { name: "筛选任务类别" });
+    await user.click(within(popup).getByRole("checkbox", { name: "收入", exact: true }));
+    await user.click(within(popup).getByRole("checkbox", { name: "支出", exact: true }));
+    expect(request.mock.calls.length).toBe(before);
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await waitFor(() => expect(request.mock.calls.length).toBe(before + 1));
+    let params = new URL(request.mock.calls.at(-1)![0], "http://test").searchParams;
+    expect(JSON.parse(params.get("kinds")!)).toEqual(["receipt", "payment"]);
+    expect(params.get("month")).toBe(originalMonth);
+    expect(params.has("keyword")).toBe(false);
+    expect(screen.getAllByText("当前页分组")).toHaveLength(3);
+    await user.click(screen.getAllByRole("columnheader", { name: /执行日期/ })[0]);
+    await waitFor(() => expect(new URL(request.mock.calls.at(-1)![0], "http://test").searchParams.get("order")).toBe("desc"));
+    await user.click(screen.getByRole("button", { name: "重置", exact: true }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "任务关键词" })).toHaveValue(""));
+    params = new URL(request.mock.calls.at(-1)![0], "http://test").searchParams;
+    expect(params.has("kinds")).toBe(false);
+    expect(params.get("sort")).toBe("due_on");
+    expect(params.get("order")).toBe("asc");
+  });
+
+  it("任务状态草稿取消不请求，读取失败仍保留全部分组表头", async () => {
+    const user = userEvent.setup();
+    request.mockResolvedValue(result([]));
+    render(<CashProvider><CashTasks /></CashProvider>);
+    await screen.findByText(/没有匹配任务/);
+    const before = request.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "筛选任务状态" }));
+    const popup = await screen.findByRole("dialog", { name: "筛选任务状态" });
+    await user.click(within(popup).getByRole("button", { name: "全选", exact: true }));
+    await user.click(within(popup).getByRole("button", { name: "取消" }));
+    expect(request.mock.calls.length).toBe(before);
+    request.mockRejectedValue(new CashRequestError(503, "cash_dependency_unavailable", "任务服务暂不可用"));
+    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("任务服务暂不可用");
+    expect(screen.getAllByRole("columnheader", { name: /执行日期/ })).toHaveLength(3);
+    expect(screen.queryByText(/没有匹配任务/)).not.toBeInTheDocument();
+  });
+
+  it("模板列筛选支持多类别和二值状态，表头排序不丢已应用条件", async () => {
+    const user = userEvent.setup();
+    request.mockImplementation(async path => path.startsWith("/tasks?") ? { rows: [], pagination: { total: 0, page: 1, page_size: 50 } } : result([]));
+    render(<CashProvider><CashTasks /></CashProvider>);
+    await user.click(screen.getByRole("tab", { name: "任务配置" }));
+    await screen.findByText(/暂无匹配模板/);
+    await user.click(screen.getByRole("button", { name: "筛选模板类别" }));
+    let popup = await screen.findByRole("dialog", { name: "筛选模板类别" });
+    await user.click(within(popup).getByRole("checkbox", { name: "核对与跟进" }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await user.click(screen.getByRole("button", { name: "筛选模板状态" }));
+    popup = await screen.findByRole("dialog", { name: "筛选模板状态" });
+    await user.click(within(popup).getByRole("checkbox", { name: "停用" }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await user.click(screen.getByRole("columnheader", { name: /执行日/ }));
+    const params = new URL(request.mock.calls.at(-1)![0], "http://test").searchParams;
+    expect(params.get("kinds")).toBe('["check"]');
+    expect(params.get("enabled")).toBe("false");
+    expect(params.get("sort")).toBe("execution_day");
+    expect(screen.queryByLabelText("模板排序")).not.toBeInTheDocument();
+  });
+
   it("部分办理不提供未还覆盖；新记一笔将归属月交给同一录入器", async () => {
     const user = userEvent.setup();
     request.mockResolvedValue(result([task({ occurrence_id: "month-id", version: 2, state: "partial", actual_amount: "40.00", flow_count: 1 })]));
@@ -158,6 +230,25 @@ describe("每月任务实际操作", () => {
       id: expect.any(String), title: "合成核对模板", kind: "check", execution_day: 31, remind_days: 2, default_amount: null, default_account_id: null, default_category_id: null,
     }) })));
     expect(request.mock.calls.filter(([path, options]) => path === "/tasks" && options?.method === "POST")).toHaveLength(1);
+  });
+
+  it("收付模板默认配置常驻，费用候选在服务端限定收付与往来范围", async () => {
+    const user = userEvent.setup();
+    request.mockImplementation(async path => path.startsWith("/task-occurrences?") ? result([]) : { rows: [], pagination: { page: 1, page_size: 50, total: 0 } });
+    render(<CashProvider><CashTasks /></CashProvider>);
+    await user.click(screen.getByRole("tab", { name: "任务配置" }));
+    await screen.findByText(/暂无匹配模板/);
+    await user.click(screen.getByRole("button", { name: "新增任务" }));
+    await user.click(screen.getByLabelText("处理类别", { selector: "button" }));
+    await user.click(await screen.findByRole("option", { name: "支出", exact: true }));
+    expect(screen.getByRole("group", { name: "默认账户和费用类型（选填）" })).toBeInTheDocument();
+    expect(screen.getByLabelText("默认现金账户", { selector: "button" })).toBeInTheDocument();
+    expect(screen.getByLabelText("默认费用类型", { selector: "button" })).toBeInTheDocument();
+    expect(document.querySelector(".cash-inline-details")).toBeNull();
+    await waitFor(() => expect(request.mock.calls.some(([path]) => path.startsWith("/settings/categories?"))).toBe(true));
+    const path = request.mock.calls.find(([value]) => value.startsWith("/settings/categories?"))![0];
+    expect(JSON.parse(new URL(path, "http://test").searchParams.get("groups")!)).toEqual(["payment", "turnover"]);
+    expect(request.mock.calls.some(([, options]) => options?.method)).toBe(false);
   });
 
   it("编辑历史已启用模板不将旧生效月作为新的重启参数提交", async () => {

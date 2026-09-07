@@ -9,6 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from uuid import uuid4
 
 from fin_ops_platform.app.http_adapter import WsgiHttpAdapter
 from fin_ops_platform.app.routes_cash import CashApiRoutes
@@ -105,6 +106,89 @@ class CashApiTests(unittest.TestCase):
                 self.assertEqual(self.call("POST", body=body).status_code, 400)
         self.assertEqual(self.call(query={"page": ["1", "2"]}).status_code, 400)
         self.service.create_flow.assert_not_called()
+
+    def test_multi_query_arrays_normalize_without_changing_scalar_contract(self):
+        repository = Mock()
+        repository.list_flows.return_value = {"rows": []}
+        self.routes.queries = CashQueryService(repository)
+        identity = str(uuid4())
+        period = {"date_from": ["2026-09-01"], "date_to": ["2026-09-30"]}
+        response = self.call(query={**period, "account_ids": [json.dumps([identity])],
+            "project_ids": ['[null,"historical"]'], "category_ids": ['[null]'],
+            "kinds": ['["receipt","payment"]'], "sources": ['["manual"]']})
+        self.assertEqual(response.status_code, 200)
+        normalized = repository.list_flows.call_args.args[0]
+        self.assertEqual(normalized["account_id"], [identity])
+        self.assertEqual(normalized["project_id"], [None, "historical"])
+        self.assertEqual(normalized["category_id"], [None])
+        self.assertEqual(normalized["kind"], ["receipt", "payment"])
+        self.assertEqual(normalized["source"], ["manual"])
+        self.assertNotIn("project_ids", normalized)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(self.call(query={**period, "account_id": [identity]}).status_code, 200)
+        self.assertEqual(repository.list_flows.call_args.args[0]["account_id"], identity)
+
+    def test_invalid_multi_values_and_mixed_parameters_fail_before_repository(self):
+        repository = Mock()
+        self.routes.queries = CashQueryService(repository)
+        period = {"date_from": ["2026-09-01"], "date_to": ["2026-09-30"]}
+        invalid_values = ["[]", "{}", "null", '"text"', "[true]", "[12]", "[NaN]",
+                          "[Infinity]", "[[]]", "[{}]", '[""]', '[" "]', '["a","a"]',
+                          '[null,null]', '["a",]', json.dumps(["x" * 201]),
+                          json.dumps(["\x00"]), json.dumps(["\ud800"]),
+                          json.dumps([str(n) for n in range(51)])]
+        for value in invalid_values:
+            with self.subTest(value=value):
+                response = self.call(query={**period, "project_ids": [value]})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(json.loads(response.body)["error"], "cash_invalid_input")
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+        for query in ({"project_id": ["a"], "project_ids": ['["b"]']},
+                      {"project_ids": ['["a"]', '["b"]']}, {"account_ids": ['[null]']},
+                      {"account_ids": ['["bad-uuid"]']}, {"kinds": ['["check"]']},
+                      {"sources": ['["oa"]']}, {"groups": ['["payment"]']}):
+            with self.subTest(query=query):
+                self.assertEqual(self.call(query={**period, **query}).status_code, 400)
+        repository.list_flows.assert_not_called()
+
+    def test_multi_total_limit_and_encoded_query_length_are_explicit(self):
+        repository = Mock()
+        repository.list_flows.return_value = {"rows": []}
+        self.routes.queries = CashQueryService(repository)
+        maximum = {"date_from": "2026-09-01", "date_to": "2026-09-30",
+            "account_ids": json.dumps([str(uuid4()) for _ in range(50)]),
+            "category_ids": json.dumps([str(uuid4()) for _ in range(50)])}
+        self.routes.queries.list_flows(maximum)
+        normalized = repository.list_flows.call_args.args[0]
+        self.assertEqual(len(normalized["account_id"]) + len(normalized["category_id"]), 100)
+        repository.reset_mock()
+        with self.assertRaises(CashError):
+            self.routes.queries.list_flows({**maximum, "kinds": '["payment"]'})
+        # URL length is checked before service/dependency I/O, including encoded Unicode.
+        response = self.call(query={"project_ids": [json.dumps(["项" * 150] * 5, ensure_ascii=False)]})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("过长", json.loads(response.body)["message"])
+        repository.list_flows.assert_not_called()
+
+    def test_multi_endpoint_whitelists_and_enum_sets(self):
+        repository = Mock()
+        queries = CashQueryService(repository)
+        period = {"date_from": "2026-09-01", "date_to": "2026-09-30"}
+        for method, raw, target in (
+            (queries.query_turnover, {**period, "states": '["open","settled"]', "category_ids": '[null]'}, repository.query_turnover),
+            (queries.query_tickets, {**period, "states": '["unused","partial"]', "project_ids": '[null]'}, repository.query_tickets),
+            (queries.query_personal, {"year": "2026", "bill_label_ids": '[null]'}, repository.query_personal),
+            (lambda raw: queries.list_configuration("categories", raw), {"groups": '["payment","turnover"]'}, repository.list_configuration),
+        ):
+            target.return_value = {"rows": []}
+            method(raw)
+            self.assertTrue(any(isinstance(value, list) for value in target.call_args.args[-1].values()))
+        for method, raw in ((queries.query_turnover, {**period, "states": '["used"]'}),
+                            (queries.query_tickets, {**period, "states": '["settled"]'}),
+                            (queries.query_personal, {"year": "2026", "category_ids": '[null]'}),
+                            (queries.list_items, {"account_ids": '[null]'})):
+            with self.subTest(raw=raw), self.assertRaises(CashError):
+                method(raw)
 
     def test_create_retry_status_and_trusted_actor(self):
         for created, status in ((True, 201), (False, 200)):

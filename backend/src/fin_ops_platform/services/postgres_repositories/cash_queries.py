@@ -21,8 +21,20 @@ def _where(query: dict[str, Any], fields: dict[str, str]) -> tuple[str, list[Any
     clauses, params = [], []
     for key, column in fields.items():
         if key in query:
-            clauses.append(f"{column} = %s")
-            params.append(query[key])
+            value = query[key]
+            if isinstance(value, list):
+                nonnull = [item for item in value if item is not None]
+                alternatives = []
+                if nonnull:
+                    sql_type = "uuid" if key.endswith("_id") and key != "project_id" else "text"
+                    alternatives.append(f"{column} = any(%s::{sql_type}[])")
+                    params.append(nonnull)
+                if None in value:
+                    alternatives.append(f"{column} is null")
+                clauses.append("(" + " or ".join(alternatives) + ")")
+            else:
+                clauses.append(f"{column} = %s")
+                params.append(value)
     return " and ".join(clauses) or "true", params
 
 
@@ -134,15 +146,21 @@ class CashQueryRepository:
                     condition += " and (exists(select 1 from cash.settlements s where s.flow_id=f.id and s.item_id=%s) or exists(select 1 from cash.items i where i.origin_flow_id=f.id and i.id=%s))"
                     params.extend([query["item_id"], query["item_id"]])
             balance_cte, running, balance_join = "", "null::numeric", ""
-            if "account_id" in query:
-                self._require(tx, "accounts", query["account_id"])
+            account_ids = query.get("account_id")
+            if isinstance(account_ids, str):
+                account_ids = [account_ids]
+            if account_ids is not None:
+                accounts = tx.fetch_all("select id from cash.accounts where id=any(%s::uuid[])", (account_ids,))
+                if len(accounts) != len(account_ids):
+                    _missing()
+                condition += " and (f.from_account_id=any(%s::uuid[]) or f.to_account_id=any(%s::uuid[]))"
+                params.extend([account_ids, account_ids])
+            if account_ids is not None and len(account_ids) == 1:
                 balance_cte = """, account_ledger as materialized (select f.id,a.opening_amount+
                     sum(case when f.to_account_id=a.id then f.amount else -f.amount end)
                     over(order by f.occurred_on,f.created_at,f.id rows unbounded preceding) as balance
                     from cash.accounts a join cash.flows f on f.from_account_id=a.id or f.to_account_id=a.id
                     where a.id=%s) """
-                condition += " and (f.from_account_id=%s or f.to_account_id=%s)"
-                params.extend([query["account_id"], query["account_id"]])
                 running = "ledger.balance"
                 balance_join = " join account_ledger ledger on ledger.id=f.id"
             base_sql = f"select f.* from cash.flows f where {condition}"
@@ -150,7 +168,7 @@ class CashQueryRepository:
             page_cte = f"with selected_page as materialized ({base_sql} order by {page_sort} limit %s offset %s)"
             prefix = [*params, query["page_size"], (query["page"] - 1) * query["page_size"]]
             if balance_cte:
-                prefix.append(query["account_id"])
+                prefix.append(account_ids[0])
             joins = _FLOW_JOINS.replace("from cash.flows f", "from selected_page f")
             sql = f"{page_cte}{balance_cte} select {_FLOW_COLUMNS}, f.created_at as recorded_at,{running} as account_running_balance, b.obligation_allocated_amount,b.expense_allocated_amount {joins} join ({_FLOW_BUDGET}) b on b.id=f.id {balance_join}"
             context = None
@@ -182,14 +200,14 @@ class CashQueryRepository:
             start, end = query.get("date_from", totals.pop("first_day")), query.get("date_to", totals.pop("last_day"))
             totals.pop("first_day", None)
             totals.pop("last_day", None)
-            balances = self._balances(tx, start, end, query.get("account_id")) if start is not None else []
+            balances = self._balances(tx, start, end, account_ids) if start is not None else []
             result["summary"] = {"period": {"date_from": start, "date_to": end}, "filtered_totals": totals, "account_balances": balances}
             if context is not None:
                 result["selection_context"] = context
             return result
 
     @staticmethod
-    def _balances(tx: Any, start: date, end: date, account_id: str | None) -> list[dict[str, Any]]:
+    def _balances(tx: Any, start: date, end: date, account_ids: list[str] | None) -> list[dict[str, Any]]:
         return tx.fetch_all("""select a.id as account_id,a.name as account_name,a.opening_date,
             case when a.opening_date>%s then 'not_started' when a.opening_date>%s then 'starts_during_period' else 'complete' end as coverage_state,
             case when a.opening_date>%s then null else greatest(a.opening_date,%s) end as coverage_start,
@@ -204,7 +222,7 @@ class CashQueryRepository:
               sum(f.amount) filter(where f.occurred_on>=%s and f.from_account_id=a.id) as outflow
               from cash.flows f where (f.from_account_id=a.id or f.to_account_id=a.id)
               and f.occurred_on>=a.opening_date and f.occurred_on<=%s) d on true
-            where (%s::uuid is null or a.id=%s::uuid) order by a.name,a.id""", (end, start, end, start, start, end, end, end, end, start, start, start, end, account_id, account_id))
+            where (%s::uuid[] is null or a.id=any(%s::uuid[])) order by a.name,a.id""", (end, start, end, start, start, end, end, end, end, start, start, start, end, account_ids, account_ids))
 
     def get_flow(self, flow_id: str) -> dict[str, Any]:
         with self.snapshot() as tx:
@@ -305,13 +323,43 @@ class CashQueryRepository:
 
     def project_options(self, query: dict[str, Any]) -> dict[str, Any]:
         with self.snapshot() as tx:
-            sql = """select distinct on(id) id,name from (
-                select oa_project_id as id,project_name_snapshot as name,updated_at from cash.flows where occurred_on between %s and %s and oa_project_id is not null
-                union all select i.oa_project_id,i.project_name_snapshot,i.updated_at from cash.items i
-                  where i.oa_project_id is not null and (i.origin_date between %s and %s or exists(
-                    select 1 from cash.settlements s where (s.item_id=i.id or s.source_item_id=i.id) and s.occurred_on between %s and %s))
-                ) p order by id,updated_at desc,name"""
-            params = [query["date_from"], query["date_to"]] * 3
+            flow_scope, item_scope = "f.oa_project_id is not null", "i.oa_project_id is not null"
+            flow_params, item_params = [], []
+            has_parent = "item_id" in query or "task_occurrence_id" in query
+            if "item_id" in query:
+                self._require(tx, "items", query["item_id"])
+                flow_scope += " and (exists(select 1 from cash.settlements s where s.flow_id=f.id and s.item_id=%s) or exists(select 1 from cash.items i where i.origin_flow_id=f.id and i.id=%s))"
+                flow_params.extend([query["item_id"], query["item_id"]])
+                item_scope += " and i.id=%s"
+                item_params.append(query["item_id"])
+            if "task_occurrence_id" in query:
+                self._require(tx, "task_occurrences", query["task_occurrence_id"])
+                flow_scope += " and f.task_occurrence_id=%s"
+                flow_params.append(query["task_occurrence_id"])
+                item_scope += " and exists(select 1 from cash.flows f where f.task_occurrence_id=%s and (f.id=i.origin_flow_id or exists(select 1 from cash.settlements s where s.flow_id=f.id and (s.item_id=i.id or s.source_item_id=i.id))))"
+                item_params.append(query["task_occurrence_id"])
+            if "date_to" in query:
+                if has_parent:
+                    flow_scope += " and f.occurred_on between %s and %s"
+                    flow_params.extend([query["date_from"], query["date_to"]])
+                    item_scope += " and (i.origin_date between %s and %s or exists(select 1 from cash.settlements s where (s.item_id=i.id or s.source_item_id=i.id) and s.occurred_on between %s and %s))"
+                    item_params.extend([query["date_from"], query["date_to"]] * 2)
+                else:
+                    # Candidate identity is historical through period end, not
+                    # restricted to projects first used within the visible year.
+                    flow_scope += " and f.occurred_on<=%s"
+                    flow_params.append(query["date_to"])
+                    item_scope += " and i.origin_date<=%s"
+                    item_params.append(query["date_to"])
+            # Sort project/name groups, not every historical transaction. Keep
+            # the same latest timestamp and deterministic name tie-break.
+            sql = f"""select distinct on(id) id,name from (
+                select id,name,max(updated_at) as updated_at from (
+                select f.oa_project_id as id,f.project_name_snapshot as name,f.updated_at from cash.flows f where {flow_scope}
+                union all select i.oa_project_id,i.project_name_snapshot,i.updated_at from cash.items i where {item_scope}
+                ) history group by id,name
+                ) reduced order by id,updated_at desc,name"""
+            params = [*flow_params, *item_params]
             if "keyword" in query:
                 sql = f"select * from ({sql}) r where name ilike %s"
                 params.append(_like(query["keyword"]))
@@ -446,8 +494,9 @@ class CashQueryRepository:
                 where {condition}"""
             params = [query["date_to"]] * 3 + params
             if "state" in query:
-                sql = f"select * from ({sql}) r where state=%s"
-                params.append(query["state"])
+                state_filter, state_params = _where(query, {"state": "r.state"})
+                sql = f"select * from ({sql}) r where {state_filter}"
+                params.extend(state_params)
             result = _page(tx, sql, params, query, order=query["sort"])
             names = ("provided_amount", "used_amount", "offset_amount", "available_source_amount", "receivable_amount", "cash_received_amount")
             result["summary"] = tx.fetch_one(f"select {','.join('coalesce(sum('+name+'),0) as '+name for name in names)} from ({sql}) r", tuple(params))

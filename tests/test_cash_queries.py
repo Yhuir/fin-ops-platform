@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import unittest
 from datetime import date
@@ -79,6 +80,170 @@ class CashPostgresCase(unittest.TestCase):
 
 class CashQueryPostgresTests(CashPostgresCase):
     period = {"date_from": "2026-09-01", "date_to": "2026-09-30"}
+
+    def test_multi_flow_columns_filter_whole_result_preserve_balances_and_delete(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
+        other = self.cash.create_account({"id": self.uid(), "name": "Other", "kind": "cash", "opening_date": "2026-01-01", "opening_amount": "200.00"})["account"]
+        category = self.cash.create_category({"id": self.uid(), "name": "Payment", "group": "payment"})["category"]
+        self.flow("100.00", oa_project_id="A", occurred_on="2026-09-01", content="Earlier")
+        matched = self.flow("20.00", oa_project_id="B", category_id=category["id"], occurred_on="2026-09-02", content="Matched")
+        self.flow("50.00", "receipt", occurred_on="2026-09-03")
+        self.cash.create_flow({"id": self.uid(), "occurred_on": "2026-09-04", "kind": "transfer", "amount": "75.00",
+            "from_account_id": self.account["id"], "to_account_id": other["id"], "project_mode": "selection", "content": "Transfer"}, self.actor)
+        selected = {**self.period, "account_ids": json.dumps([self.account["id"], other["id"]]),
+            "project_ids": '[null,"B"]', "category_ids": json.dumps([None, category["id"], self.category["id"]]),
+            "kinds": '["receipt","payment","transfer"]', "sources": '["manual"]', "page_size": 1, "page": 2,
+            "sort": "occurred_on", "order": "asc"}
+        result = self.query.list_flows(selected)
+        self.assertEqual(result["pagination"], {"page": 2, "page_size": 1, "total": 3})
+        self.assertEqual(result["summary"]["filtered_totals"], {"flow_count": 3, "income_amount": "50.00", "expense_amount": "20.00", "transfer_amount": "75.00"})
+        self.assertTrue(all(row["account_running_balance"] is None for row in result["rows"]))
+        balances = {row["account_id"]: row["ending_balance"] for row in result["summary"]["account_balances"]}
+        self.assertEqual(balances, {self.account["id"]: "855.00", other["id"]: "275.00"})
+        single = self.query.list_flows({**self.period, "account_ids": json.dumps([self.account["id"]]), "keyword": "Matched"})
+        self.assertEqual(single["rows"][0]["id"], matched["id"])
+        self.assertEqual(single["rows"][0]["account_running_balance"], "880.00")
+        self.assertEqual(single["summary"]["account_balances"][0]["ending_balance"], "855.00")
+        scalar = self.query.list_flows({**self.period, "account_id": self.account["id"], "keyword": "Matched"})
+        self.assertEqual(single, scalar)
+        self.cash.delete_flow(matched["id"], {"expected_version": 1})
+        after = self.query.list_flows(selected)
+        self.assertEqual(after["pagination"]["total"], 2)
+        self.assertEqual(after["summary"]["filtered_totals"]["expense_amount"], "0.00")
+        with self.assertRaises(CashError) as missing:
+            self.query.list_flows({**self.period, "account_ids": json.dumps([self.account["id"], self.uid()])})
+        self.assertEqual(missing.exception.status, 404)
+
+    def test_category_groups_filter_before_paging_including_disabled_history(self):
+        self.cash.create_category({"id": self.uid(), "name": "A receipt", "group": "receipt"})
+        first = self.cash.create_category({"id": self.uid(), "name": "B payment", "group": "payment"})["category"]
+        second = self.cash.create_category({"id": self.uid(), "name": "C payment", "group": "payment"})["category"]
+        with self.repo.transaction() as tx:
+            tx.update("categories", second["id"], {"enabled": False})
+        query = {"groups": '["payment","turnover"]', "page_size": 1, "page": 2, "order": "asc"}
+        result = self.query.list_configuration("categories", query)
+        self.assertEqual(result["pagination"]["total"], 3)
+        self.assertEqual(result["rows"][0]["id"], second["id"])
+        entry = self.query.list_configuration("categories", {**query, "enabled": "true", "page": 1})
+        self.assertEqual(entry["pagination"]["total"], 2)
+        self.assertEqual(entry["rows"][0]["id"], first["id"])
+
+    def test_multi_report_states_null_categories_and_project_sets_before_paging(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
+        self.item(oa_project_id="A")
+        partial = self.item(oa_project_id="B")
+        settled = self.item()
+        self.settlement("non_ticket_offset", "10.00", item=partial, remark="Partial")
+        self.settlement("non_ticket_offset", "100.00", item=settled, remark="Settled")
+        result = self.query.query_turnover({**self.period, "project_ids": '["A","B",null]',
+            "category_ids": '[null]', "states": '["open","partial"]', "page_size": 1, "page": 2})
+        self.assertEqual(result["pagination"]["total"], 3)
+        self.assertEqual(len(result["rows"]), 1)
+        self.assertEqual(result["summary"]["remaining_obligation_amount"]["receivable"], "190.00")
+        self.assertEqual(result["summary"]["principal_amount"], "200.00")
+        self.assertEqual(result["summary"]["non_ticket_offset_amount"], "10.00")
+        self.assertNotEqual(result["rows"][0]["state"], "settled")
+
+    def test_multi_tickets_state_filter_and_summary_do_not_use_only_page(self):
+        self.item("ticket_source", "200.00")
+        partial = self.item("ticket_source", "100.00")
+        used = self.item("ticket_source", "50.00")
+        loan = self.item(amount="500.00")
+        self.settlement("ticket_offset", "10.00", item=loan, source=partial)
+        loan = self.query.get_item(loan["id"])["item"]
+        self.settlement("ticket_offset", "50.00", item=loan, source=used)
+        result = self.query.query_tickets({**self.period, "project_ids": '[null]', "states": '["unused","partial"]', "page_size": 1, "page": 2})
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertEqual(result["summary"]["provided_amount"], "300.00")
+        self.assertEqual(result["summary"]["used_amount"], "10.00")
+        self.assertEqual(result["summary"]["available_source_amount"], "290.00")
+
+    def test_multi_personal_labels_with_null_cover_matrix_and_settlement_views(self):
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        label = self.cash.create_bill_label({"id": self.uid(), "bank_name": "A bank", "label": "A"})["bill_label"]
+        excluded = self.cash.create_bill_label({"id": self.uid(), "bank_name": "B bank", "label": "B"})["bill_label"]
+        self.item(ledger_group="personal", bill_label_id=label["id"], bill_month="2026-09")
+        unlabeled = self.item(ledger_group="personal")
+        self.item(amount="900.00", ledger_group="personal", bill_label_id=excluded["id"], bill_month="2026-09")
+        receipt = self.flow("20.00", "receipt")
+        self.settlement("cash_repayment", "20.00", item=unlabeled, flow=receipt)
+        selected = {"year": "2026", "project_ids": '[null]', "bill_label_ids": json.dumps([None, label["id"]])}
+        result = self.query.query_personal({**selected, "page_size": 1, "page": 2})
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertEqual(result["summary"]["new_principal_amount"], "200.00")
+        self.assertEqual(result["summary"]["remaining_obligation_amount"], "180.00")
+        detail = self.query.query_personal({**selected, "view": "cash_repayments"})
+        self.assertEqual(detail["pagination"]["total"], 1)
+        self.assertEqual(detail["rows"][0]["amount"], "20.00")
+        self.assertIsNone(detail["rows"][0]["bill_label"])
+        self.assertEqual(detail["summary"], result["summary"])
+
+    def test_personal_month_drilldown_preserves_project_multi_scope(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 2}
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        label = self.cash.create_bill_label({"id": self.uid(), "bank_name": "Bank", "label": "Month"})["bill_label"]
+        common = {"ledger_group": "personal", "bill_label_id": label["id"], "bill_month": "2026-09"}
+        expected = [self.item(amount="100.00", oa_project_id="A", **common), self.item(amount="200.00", **common)]
+        self.item(amount="900.00", oa_project_id="excluded", **common)
+        projects = '["A",null]'
+        matrix = self.query.query_personal({"year": "2026", "project_ids": projects, "bill_label_ids": json.dumps([label["id"]])})
+        cell = matrix["rows"][0]["months"][8]
+        detail = self.query.list_items({"type": "loan", "ledger_group": "personal", "bill_label_id": label["id"],
+            "project_ids": projects, "is_opening": "false", "origin_date_from": "2026-09-01", "origin_date_to": "2026-09-30"})
+        self.assertEqual(cell["item_count"], detail["pagination"]["total"])
+        self.assertEqual({item["id"] for item in detail["rows"]}, {item["id"] for item in expected})
+        self.assertEqual(Decimal(cell["principal_amount"]), sum(Decimal(item["original_amount"]) for item in detail["rows"]))
+
+    def test_historical_candidates_include_prior_year_and_parent_intersection(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
+        old = self.item(origin_date="2025-11-01", oa_project_id="prior-year")
+        current = self.item(oa_project_id="current")
+        self.item(origin_date="2026-10-01", oa_project_id="future")
+        result = self.query.project_options(self.period)
+        self.assertEqual({row["id"] for row in result["rows"]}, {"prior-year", "current"})
+        parent = self.query.project_options({"item_id": old["id"]})
+        self.assertEqual(parent["rows"], [{"id": "prior-year", "name": "prior-year"}])
+        self.assertEqual(self.query.project_options({**self.period, "item_id": old["id"]})["rows"], [])
+        self.settlement("non_ticket_offset", "10.00", item=old, remark="Prior year handling")
+        self.assertEqual(self.query.project_options({**self.period, "item_id": old["id"]})["rows"], parent["rows"])
+        current_result = self.query.project_options({"item_id": current["id"]})
+        self.assertEqual(current_result["pagination"]["total"], 1)
+        for raw in ({"item_id": self.uid()}, {"task_occurrence_id": self.uid()}):
+            with self.subTest(raw=raw), self.assertRaises(CashError) as missing:
+                self.query.project_options(raw)
+            self.assertEqual(missing.exception.status, 404)
+        with self.assertRaises(CashError):
+            self.query.project_options({})
+
+    def test_historical_project_candidates_keep_latest_name_ties_and_keyword_scope(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
+        older = self.flow(oa_project_id="renamed")
+        current = self.flow(oa_project_id="renamed")
+        duplicate = self.item(oa_project_id="renamed")
+        tied = self.item(oa_project_id="renamed")
+        another = self.flow(oa_project_id="another")
+        self.connection.execute("update cash.flows set project_name_snapshot=%s,updated_at=%s::timestamptz where id=%s",
+                                ("Retired name", "2026-09-01T00:00:00Z", older["id"]))
+        self.connection.execute("update cash.flows set project_name_snapshot=%s,updated_at=%s::timestamptz where id=%s",
+                                ("A current", "2026-09-05T00:00:00Z", current["id"]))
+        self.connection.execute("update cash.items set project_name_snapshot=%s,updated_at=%s::timestamptz where id=%s",
+                                ("A current", "2026-09-02T00:00:00Z", duplicate["id"]))
+        self.connection.execute("update cash.items set project_name_snapshot=%s,updated_at=%s::timestamptz where id=%s",
+                                ("Z tied", "2026-09-05T00:00:00Z", tied["id"]))
+        self.connection.execute("update cash.flows set project_name_snapshot=%s,updated_at=%s::timestamptz where id=%s",
+                                ("B other", "2026-09-04T00:00:00Z", another["id"]))
+        result = self.query.project_options({**self.period, "order": "asc", "page_size": 1})
+        self.assertEqual(result["rows"], [{"id": "renamed", "name": "A current"}])
+        self.assertEqual(result["pagination"]["total"], 2)
+        page = self.query.project_options({**self.period, "order": "asc", "page_size": 1, "page": 2})
+        self.assertEqual(page["rows"], [{"id": "another", "name": "B other"}])
+        for keyword in ("Retired", "Z tied"):
+            self.assertEqual(self.query.project_options({**self.period, "keyword": keyword})["pagination"]["total"], 0)
+        current_name = self.query.project_options({**self.period, "keyword": "A current"})
+        self.assertEqual(current_name["rows"], [{"id": "renamed", "name": "A current"}])
+        # Parent-scoped candidates choose the latest name only within that parent.
+        scoped = self.query.project_options({"item_id": tied["id"]})
+        self.assertEqual(scoped["rows"], [{"id": "renamed", "name": "Z tied"}])
 
     def test_empty_reports_keep_unknown_personal_coverage(self):
         for method in (self.query.list_flows, self.query.query_turnover, self.query.query_tickets, self.query.project_options):

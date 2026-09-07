@@ -1,5 +1,17 @@
 # 现金账边界与 I/O
 
+## 本轮边界（统一UI）
+
+以下统一边界已实现，最新验证及发布状态见[实施§14](../../dev/cash-module-implementation-plan.md#14-统一现金ui实际执行与验证2026-09-08)。后文“API不变”描述上一轮修复，本轮新增读取参数见[技术§13](../../dev/cash-module-technical-design.md#13-统一ui与多选读取实施细节)。
+
+- 布局/控件：CashPage/CashUi/cash.css组合单表/分组/配置；CashFilters.tsx只接类型化值/选项/状态/callbacks，输出apply/clear/sort/search/page/open，不取数、不算账、不识别OA资格。Checkbox用slot=null脱离表格行选择上下文；应用回调可返回校验信息，不把无效草稿提交为已应用条件。
+- 业务视图：四子页及关联抽屉拥有列能力、草稿/已应用条件/rows，cash内恢复条件但不持久化；候选owner负责历史/录入范围，不能把页面业务下沉到共享FinanceTable/AppDrawer。
+- 共享表格：仅给FinanceTable补可选sortDescriptor/onSortChange并转发到HeroUI Table.Content，输出列/方向，不请求API、不排序业务数据；未传这两个props的既有页面行为不变，纳入公共表格回归。
+- 读I/O：新增明确JSON数组查询，保留合法单值、禁止同一字段单复数同传及重复key；SQL集合过滤在分页前，保持摘要/完整账户账序差异。items的project_ids只为保留个人矩阵月格下钻范围；OA只增加阶段列表过滤，不改写入或资格保存合同；GET无写副作用。
+- CSS/Portal：现金局部样式类显式传入浮层，撤权/退页卸载；不修改普通页面默认主题、全局store、日志或请求链。
+- 旧代码：内联历史项目/费用/账单面板、更多筛选details、重复排序、内联余额/说明和手写Tabs随调用方迁移删除；实际录入条件、公开单值API、cash-special及安全确认不误删。清单见实施§13.4。
+- 数据库10表、账号、service/repository责任、写事务、资金公式、普通财务隔离不变，无新worker/cache/迁移/备份。测试七类及浏览器全展开态、规模/混合负载按实施§13，不复用历史空库结果冒称通过。
+
 ## 责任与依赖方向
 
 `Application` 认证/页面授权 → `CashApiRoutes` 解析和 HTTP → cash service 命令/查询 → cash repository SQL → 同库 `cash.*`。
@@ -16,9 +28,9 @@
 
 前端已实现（2026-09-07本次修复）：左侧四子页面统一cash权限，单`/cash`入口以section=flows/accounts/tasks/settings承接导航；非法、重复section或多余参数明确报错，裸路径规范到accounts。shell只持非敏感标识，不读现金数据、不显示金额或任务数；正文局部视图拥有业务请求和0/3/2/4菜单。OA checkbox只保存现金project-selection配置，全部项目与新增候选分开，取消状态不隐藏历史。无新权限层级。
 
-CashFlows只组合既有表格/录入，不复制业务；CashBooks已移除通用flows Tab/新增但保留上下文实际收付。CashFlowTable的itemId/taskOccurrenceId嵌入明细保留；CashConfigurationSelect区分筛选全账户与录入启用账户。API/同库同账号/唯一cash权限/无全局历史边界不变，CSS仅现金及现金Portal；技术边界见技术设计§1.2，执行证据见实施计划§12。
+CashFlows只组合既有表格/录入，不复制业务；CashBooks已移除通用flows Tab/新增但保留上下文实际收付。CashFlowTable的itemId/taskOccurrenceId嵌入明细保留；CashConfigurationSelect仅负责启用项录入，CashConfigurationFilter负责全部历史候选。单值API/同库同账号/唯一cash权限/无全局历史边界不变，CSS仅现金及现金Portal；新增GET集合参数见技术§13，执行证据见实施§14。
 
-实施细节复审：CashConfigurationSelect采用必传entry/filter模式，不新增查询抽象；父对象嵌入流水默认全历史分页，独立流水必须带期间。已应用筛选/排序/页码仅存于CashProvider可卸载子树，切回重新GET；撤权/退页条件和rows均清空，不把条件留在Provider之外。删除末页用查询返回的total调整页码，不重复删除命令；多表页只设一个内容滚动区。上述仍是cash内的UI/查询责任，不改变Shell或API合同。
+实施细节复审：CashConfigurationSelect已删除无消费者的mode/filter分支，不保留并行旧筛选路径；父对象嵌入流水默认全历史分页，独立流水必须带期间。已应用筛选/排序/页码仅存于CashProvider可卸载子树，切回重新GET；撤权/退页条件和rows均清空，不把条件留在Provider之外。删除末页用查询返回的total调整页码，不重复删除命令；多表页只设一个内容滚动区。上述仍是cash内的UI/查询责任，不改变Shell合同。
 
 前端请求owner为features/cash/api.ts：复用底层apiFetch，现金路径单地址严格JSON/HTTP，15秒超时，不调用自动换地址重发的apiRequestJson；不从普通业务client查分类/项目/金额。hooks.tsx只在CashProvider内维护请求取消和局部revision，写成功重新GET，401/403卸载敏感子树；无storage、全局事件或全局overlay写入。复用FinanceTable/AppDrawer纯UI，不复用useFinanceTableSession；关闭的现金抽屉条件卸载，Portal样式仅.cash-drawer范围。
 

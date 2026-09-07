@@ -50,6 +50,45 @@ class CashTaskPostgresTests(CashPostgresCase):
         self.assertEqual(self.connection.fetch_one("select count(*) as n from cash.task_occurrences")["n"], 0)
         self.assertEqual(self.tasks.list_occurrences({"reminder_from": "2026-01-28", "reminder_to": "2026-01-28"})["rows"][0]["template_id"], template["id"])
 
+    def test_task_multi_kind_state_paging_summary_and_source_queries(self):
+        pending = self.template("receipt", title="A pending")
+        partial = self.template("payment", title="B partial")
+        completed = self.template("payment", title="C completed")
+        self.template("check", title="D check")
+        partial_flow = self.confirm_new(partial, "30.00")
+        self.confirm_new(completed, "100.00")
+        query = {"month": "2026-09", "kinds": '["receipt","payment"]', "states": '["pending","partial"]',
+                 "sort": "title", "order": "asc", "page": 2, "page_size": 1}
+        result = self.tasks.list_occurrences(query)
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertEqual(result["rows"][0]["template_id"], partial["id"])
+        self.assertEqual(result["summary"]["counts_by_state"], {"pending": 1, "partial": 1, "completed": 0})
+        self.assertEqual(result["summary"]["payment_actual_amount"], "30.00")
+        templates = self.tasks.list_templates({"kinds": '["receipt","check"]', "sort": "title", "order": "asc", "page_size": 1})
+        self.assertEqual(templates["pagination"]["total"], 2)
+        self.assertEqual(templates["rows"][0]["id"], pending["id"])
+        flow = self.query.list_flows({"task_occurrence_id": partial_flow["occurrence"]["occurrence_id"],
+            "sources": '["monthly_task"]', "kinds": '["payment"]'})
+        self.assertEqual(flow["rows"][0]["source_kind"], "monthly_task")
+        self.assertEqual(flow["rows"][0]["task"]["template_id"], partial["id"])
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from cash.task_occurrences")["n"], 2)
+        for raw in ({"kind": "payment", "kinds": '["receipt"]'}, {"kinds": '["transfer"]'},
+                    {"states": '[null]'}, {"state": "pending", "states": '["partial"]'}):
+            with self.subTest(raw=raw), self.assertRaises(CashError):
+                self.tasks.list_occurrences({"month": "2026-09", **raw})
+
+    def test_task_parent_historical_projects_do_not_leak_other_projects(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
+        template = self.template()
+        result = self.tasks.confirm({**self.identity(template), "mode": "new_flow",
+            "new_flow": self.flow_payload("30.00", oa_project_id="parent-project")}, self.actor)
+        self.flow(oa_project_id="unrelated-project")
+        identity = result["occurrence"]["occurrence_id"]
+        projects = self.query.project_options({"task_occurrence_id": identity})
+        self.assertEqual(projects["rows"], [{"id": "parent-project", "name": "parent-project"}])
+        before = self.query.project_options({"task_occurrence_id": identity, "date_from": "2026-08-01", "date_to": "2026-08-31"})
+        self.assertEqual(before["pagination"]["total"], 0)
+
     def test_partial_confirm_replay_overplan_and_unpaid_rejection(self):
         template = self.template()
         payload = {**self.identity(template), "mode": "new_flow", "new_flow": self.flow_payload("30.00")}

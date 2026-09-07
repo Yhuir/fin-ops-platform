@@ -98,6 +98,8 @@ components:
 
 # Design System: fin-ops-platform
 
+> 2026-09-08 现金 UI 统筹修订：§7组件/交互规范已落到现金模块，实际验证与发布状态见现金实施计划§14。其他页面不因文档更新自动改样式。原迁移约束用于保护业务能力，不禁止用户明确批准的入口合并、表头筛选及必要的窄查询扩展；不把规范当作测试证据。
+
 ## 1. Overview
 
 **Creative North Star: "Ledger Calm"**
@@ -118,7 +120,7 @@ Design serves repeated work: importing files, reviewing financial records, compa
 - Stable App Shell with predictable navigation.
 - Button and tag language shared across pages.
 - Amounts, dates, account labels, and status tags aligned as product primitives.
-- No backend, API, read model, worker, permission, or business-state changes as part of UI migration.
+- Pure visual migration does not change backend behavior. An explicitly approved interaction change, such as server-side multi-select filtering, must document its narrow API impact separately; it does not authorize changing accounting rules, permissions, read models, or workers.
 
 ## 2. Colors
 
@@ -344,9 +346,9 @@ Use one state component for loading, empty, error, stale, refreshing, permission
 ### Don't:
 
 - **Don't** add new `@mui/*` or `@emotion/*` imports anywhere in frontend runtime or tests, except negative no-MUI contract strings.
-- **Don't** change backend behavior, API contracts, read models, workers, permissions, or business state machines as part of UI migration.
+- **Don't** change backend behavior for cosmetic reasons. Explicitly approved query changes follow the scoped technical design; unrelated contracts, read models, workers, permissions, and business state machines remain unchanged.
 - **Don't** reintroduce MUI inside `ReconciliationWorkbenchPage` internals or `web/src/components/workbench/*`.
-- **Don't** remove or hide existing buttons, filters, import/export actions, confirmation flows, drawers, dialogs, or permission controls.
+- **Don't** silently remove business capabilities. Approved consolidation may replace duplicate buttons with equivalent header/overlay interactions; confirmations, permissions, and data semantics remain protected.
 - **Don't** change an old right-side drawer into a modal, inline panel, card, or route.
 - **Don't** change an old modal dialog into a drawer.
 - **Don't** introduce TanStack Table or TanStack Virtual for this migration.
@@ -358,3 +360,52 @@ Use one state component for loading, empty, error, stale, refreshing, permission
 - **Don't** encode status using color alone.
 - **Don't** scatter arbitrary Tailwind classes when a product primitive should exist.
 - **Don't** use inline styles for new UI except for unavoidable runtime CSS variables such as measured widths.
+
+## 7. 现金模块统筹应用规范
+
+### 7.1 布局责任与适用范围
+
+统一的是规则和交互，而非一张万能页面。继续使用现有App Shell、PageScaffold、FinanceTable、AppDrawer和HeroUI 3.1.0，不新增依赖或全局状态系统。现金局部组件组合三种已有内容形式：
+
+- 单表：标题/可选视图导航/紧凑工具区/剩余高度表格/表内汇总与分页；表头及页脚稳定，表体滚动。
+- 分组：任务/多表专账使用一个主要纵向滚动区，各组表自然高度；不能每表设置满屏最小高度。
+- 配置：业务字段、配置列表及其保存/撤销在同一内容区；不强迫配置变成可筛选账表。
+
+没有Tab、摘要或操作的区域不留占位空行。桌面页面内边距16px、同组间距8px、组间16px；标题条52px、Tab条40px。1280px以上优先一条工具行；不足时根据实际可用宽度自然换行，不按页面逐个写死坐标。窄屏保留真实列、表内横滚；必要时工具区可滚动到达，不用隐藏溢出遮住操作。窗口尺寸改变可以重排，同一尺寸开关菜单不应重排。
+
+### 7.2 组件外观与行为
+
+| 组件 | 默认规范 | 状态与例外 |
+| --- | --- | --- |
+| Button | 密集工具栏32px高，6px圆角，4px 10px内距，13px字；主按钮#1d4ed8/白字，无阴影 | secondary/tertiary采用HeroUI原生浅灰底、无边框；ghost透明底；loading不改变宽度、不重复提交。具体语义色见下文 |
+| 图标按钮 | 一般32px点击框、16px图标、6px圆角；密集表头筛选28px高、4px圆角、2px 4px内距 | 有可访问名和必要Tooltip；不是仅hover才可用；计数区域预留宽度，不因筛选生效挤动列标题 |
+| Input/Select | 32px高、6px圆角、1px #d7dee8边框、白底、13px字；同组顶边一致 | 表单保留可见Label；工具栏使用明确占位/短标签和可访问名，不能把所有嵌套label一律隐藏 |
+| Popover/Select浮层 | 白底、8px圆角、1px #d7dee8边框、阴影0 4px 12px rgba(15,23,42,.10)、距触发器4px | 经HeroUI Portal显示；正文与Portal都显式带现金样式类，不修改全局popover/Select默认值 |
+| 选项 | 行高最小32px、4px圆角、8px横向内距、13px字 | hover #eef3f8；选中#e8f0ff并有勾选；禁用仍能理解原因，不使用胶囊选中背景 |
+| 筛选浮层 | 常规宽280px，长项目名可320px，上限为视口减24px；搜索在顶、候选滚动、操作在底 | 高度上限min(360px,可用视口高度)；候选加载/错误只占浮层区域；读失败不伪装无选项 |
+| 表头 | 高36px、12px/600字、浅底色；排序/筛选入口预留固定宽度 | 只给真实支持的列加入口；排序与筛选不互相触发；aria-sort描述当前排序 |
+| 表体 | 默认44px行高、13px字、金额右对齐和tabular-nums | 36px仅用于明确的简单紧凑表；长金额不截断，不为塞进一屏缩字；null、0和接口错误分开 |
+| Tabs | 40px高、13px字、当前项#1d4ed8/600与2px底线 | 使用HeroUI Tabs，切换仅挂载活动业务视图，不同时预取所有Tab；键盘焦点保留 |
+| Checkbox | HeroUI Checkbox/CheckboxGroup，文字13px、整行可点 | 选中、混合、禁用、焦点均可辨；业务配置checkbox不当作临时过滤器 |
+| Drawer/Dialog | 沿用AppDrawer的420/560/720px及视口约束；小表单/确认沿用已有Dialog | 抽屉内部浮层遵循相同样式；不使用大卡片、海报说明、重复副标题 |
+
+沿用既有正文#1f2937、次级#475569、弱化#64748b、白色surface、App背景#f6f8fb（现金内容白底）。按钮使用HeroUI已安装浅色主题的语义变量：灰底`--default: oklch(94% 0.001 286.375)`；secondary字色`color-mix(in oklab, var(--accent) 70%, var(--foreground) 30%)`，tertiary字色#1f2937；主按钮hover为`color-mix(in oklab, var(--accent) 90%, var(--accent-foreground) 10%)`，灰按钮hover混入4% default-foreground。不复制主题、不把tertiary误写成透明按钮；透明操作明确用ghost。2026-09-08浏览器computed style已核实上述样式。
+
+焦点使用清晰的2px蓝色轮廓，不以删除焦点换取视觉一致。浮层仅短暂opacity/transform过渡（120ms左右，reduced-motion关闭），不对主布局height/margin做展开动画。字号/颜色/radius在现有现金CSS一个位置定义，不在每页复制数值。
+
+现金行色是业务分类例外：公司#fffdf0、外部#eff6ff、个人本金#fff7ed、个人归还/冲抵#f0fdf4；不是全App新增成功/失败含义。行色必须覆盖固定单元格，hover/选中不抹去其含义，同时保留类别文字。蓝色主操作、蓝色筛选活动态与蓝色外部往来行色不能靠颜色独自区分。
+
+### 7.3 统一交互规则
+
+1. 顶部仅放期间/年份/月、全局搜索、常用业务视角与必要操作；有对应列的枚举筛选进入表头。跨表条件留一处工具浮层，不复制多份查询状态。
+2. 日期与明确金额列点击表头切换升降序；未显示的合法排序字段放一个紧凑排序浮层，不错误映射成其他金额列。一次一个排序字段，业务默认顺序不机械统一。
+3. 多选使用搜索+Checkbox+应用；勾选不请求主表。全选有限枚举选中完整枚举；分页候选明确写“全选本页”，跨页已选保留。“清空”清除此列限制；无选择表示不限。具体参数见现金技术设计§13，禁止当前页数组筛选冒充完整结果。
+4. 筛选/选择/短说明通过浮层；较多详情通过抽屉。开关时标题、工具区、表头、页脚和底层滚动位置保持稳定，Portal不得被表格裁切。焦点关闭后回到有效触发点。
+5. 真实业务字段随类型/勾选而改变属于有意的表单变化，可以在抽屉正文发生；不得借此推挤背后的主列表。错误、未保存确认和权限信息不能删除或藏到不可达区域。
+6. 主查询加载、错误、空态保留表框；候选错误在候选浮层内；保存成功与读取失败分别提示。不用巨大常驻空白预留每一种提示，不把旧结果冒充新查询成功。
+
+### 7.4 实施与验证边界
+
+Figma Make提供排版、层级、密度、行色和浮层视觉参考；不迁移其模拟业务、Router、全局CSS或store。依据已读活跃源码记录核对相关变化，不重复全工程审计。现金先落实§7；其他页仍按现有规范运行，未经授权不改全局主题和公共默认行为。
+
+使用普通组件测试和浏览器几何/视觉检查：默认、打开、搜索中、错误、应用、关闭均检查；相同视口菜单开关前后固定区域差值≤1 CSS px、底层滚动位置不变。与Make使用同视口/缩放/等价合成数据比较，不承诺操作系统字体逐像素一致；不新增截图hash、冻结截图或视觉发布平台。

@@ -34,10 +34,14 @@ test.describe("production route shell smoke", () => {
 
   test("opens core routes without session gate, hidden browser errors, or mutating requests", async ({ page, baseURL }) => {
     const mutatingRequests: string[] = [];
-    page.on("request", (request) => {
-      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method())) {
+    await page.route("**/*", async route => {
+      const request = route.request();
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
         mutatingRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+        await route.abort("blockedbyclient");
+        return;
       }
+      await route.continue();
     });
 
     await page.context().addCookies([
