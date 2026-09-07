@@ -2,7 +2,7 @@
 
 本模块管理保密的公司现金/受管储蓄账户、往来事项、票据与个人账、每月任务。现金业务只进入同库 `cash.*`，不进入 App 普通统一事实池。
 
-2026-09-07 App现金前后端已提交推送`codex/cash-ledger`并正式上线，代码`8bdfc07ae`。复用现有HeroUI/FinanceTable/AppDrawer；侧栏三子页面、正文4/2/4视图、流水与事项/任务/设置接入真实API。本地测试及生产只读验证、旧工作台并发性能例外、未测风险见[实施计划§10.13–10.14](../../dev/cash-module-implementation-plan.md)，不把空库和只读验证扩大为完整生产写入验收。
+当前线上代码`68eee75c0`，release为`cash-68eee75c0-20260907-ui-layout`，已提交推送`codex/cash-ledger`。复用现有HeroUI/FinanceTable/AppDrawer；四子页面/0-3-2-4视图接真实API。首次上线`8bdfc07ae`的三子页属于历史；本次测试、上线和生产只读性能见[实施计划§12](../../dev/cash-module-implementation-plan.md)。现金只读通过，旧银行/工作台四并发耗时仍超标，不把空库和只读验证扩大为完整生产写入验收。
 
 修改前依次读[边界 I/O](boundary-io.md)、[业务总设计](../../product-specs/cash-module-design.md)、[技术字段与 API](../../dev/cash-module-technical-design.md)、[测试](tests.md)。UI 只在[UI 设计](../../product-specs/cash-module-ui-spec.md)定义。
 
