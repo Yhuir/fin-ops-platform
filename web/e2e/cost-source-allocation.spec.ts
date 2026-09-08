@@ -10,7 +10,7 @@ async function sourceScenario(page: Page, options: { missingTag?: boolean; confl
     oa_total: '600.00', gross_outflow_total: '600.00', wrong_payment_refund_total: '0.00', net_outflow_total: '600.00',
     units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', oa_original_amount: '600.00' }],
     bank_events: [
-      { transaction_id: 'bank-a', event_kind: 'outflow', amount: '350.00', trade_time: '2026-08-15', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
+      { transaction_id: 'bank-a', event_kind: 'outflow', amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
       { transaction_id: 'bank-b', event_kind: 'outflow', amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
     ],
     allocations: [{ unit_id: 'oa-1', amount: '600.00' }], source_allocations: null as unknown,
@@ -60,7 +60,7 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
   const scene = await sourceScenario(page);
   await fillSources(page, scene.unit);
   await expect(scene.drawer.locator('.cost-source-evidence-card').getByText('剩余 0.00', { exact: false })).toHaveCount(2);
-  await expect(scene.unit.getByText('2026-08-15', { exact: true }).last()).toBeVisible();
+  await expect(scene.unit.getByText('2026-08-15 08:00:00', { exact: true }).last()).toBeVisible();
   await expect(scene.unit.getByText('2026-09-03', { exact: true }).last()).toBeVisible();
   await page.screenshot({ path: '/tmp/cost-source-app-1440.png', fullPage: false, animations: "disabled" });
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();

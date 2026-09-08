@@ -850,19 +850,9 @@ def _manual_allocation_task(
             str(event["transaction_id"]),
         ),
     )
-    source_fingerprint = _manual_allocation_source_fingerprint(
-        group=group,
-        relation_case_id=relation_case_id,
-        relation_version=relation_version,
-        units=units,
-        outflows=outflows,
-        refunds=refunds,
-        reconciliation=reconciliation,
-    )
     task: dict[str, Any] = {
         "relation_case_id": relation_case_id,
         "relation_version": relation_version,
-        "source_fingerprint": source_fingerprint,
         "status": "pending",
         "oa_total": reconciliation["oa_total"],
         "gross_outflow_total": reconciliation["gross_outflow_total"],
@@ -886,7 +876,22 @@ def _manual_allocation_task(
             for unit in units
         ]
     if manual_record is None:
-        return _complete_source_task(task)
+        _complete_source_task(task)
+        if task["status"] == "allocated":
+            # No persisted/manual decision consumes a fingerprint on this automatic read path.
+            return task
+    source_fingerprint = _manual_allocation_source_fingerprint(
+        group=group,
+        relation_case_id=relation_case_id,
+        relation_version=relation_version,
+        units=units,
+        outflows=outflows,
+        refunds=refunds,
+        reconciliation=reconciliation,
+    )
+    task["source_fingerprint"] = source_fingerprint
+    if manual_record is None:
+        return task
     task.update(
         {
             "version": int(manual_record.get("version") or 0),

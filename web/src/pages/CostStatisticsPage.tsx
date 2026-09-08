@@ -232,7 +232,7 @@ function EntryIdentity({
         variant="soft"
       >
         <Chip.Label>
-          <time dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款日期待完善"}</time>
+          <time dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款来源或日期待确定"}</time>
         </Chip.Label>
       </Chip>
     </span>
@@ -1734,7 +1734,7 @@ export default function CostStatisticsPage() {
                   <div className="cost-section-heading-copy"><h2>{viewMode === "project" ? "按项目统计" : viewMode === "bankAccount" ? "按银行账户统计" : "按流水标签统计"}</h2><DirectionAmount amount={explorerData.summary.totalAmount} label="成本金额" tone="expense" /></div>
                   <div className="cost-section-heading-actions cost-project-scope-actions"><BusinessPeriodPicker ariaLabel="成本统计时间范围" onChange={selection => updateScopeSelection(viewMode, selection)} selection={{ mode: activeScopeMode, year: activeScopeYear, month: activeScopeMonth }} years={availableScopeYears} />{costViewSearch}</div>
                 </div>
-                {explorerData.allocationQuality && explorerData.allocationQuality.undatedRowCount > 0 ? <p className="cost-source-muted">含付款日期待完善成本 {explorerData.allocationQuality.undatedAmount} 元；这些明细仅在全部期间展示。</p> : null}
+                {explorerData.allocationQuality && explorerData.allocationQuality.undatedRowCount > 0 ? <p className="cost-source-muted">仍有成本 {explorerData.allocationQuality.undatedAmount} 元尚未确定付款来源或月份，仅在全部期间展示。</p> : null}
                 {explorerTransitionScope === "surface" ? <CostSurfaceSkeleton loading={isExplorerLoading} /> : (
                   <CostStatisticsHierarchy key={viewMode} lanes={costLanes}>
                     <section aria-busy={isExplorerLoading && isRowsTransition} className="cost-explorer-lane cost-explorer-lane-table"><header className="cost-explorer-lane-header"><h2>成本明细</h2><CostLaneCount value={isRowsTransition ? 0 : explorerData.rowCount} /></header>

@@ -104,12 +104,7 @@ class PostgresCostStatisticsCanonicalRepository:
                     available_years=available_years,
                 )
             if not relation_only_all_scope:
-                if scoped:
-                    relations = _postgres_relations(
-                        transaction,
-                        bank_row_ids=bank_ids,
-                    )
-                elif bank_ids:
+                if bank_ids:
                     active_bank_ids = set(bank_ids)
                     relations = [
                         relation
@@ -123,37 +118,18 @@ class PostgresCostStatisticsCanonicalRepository:
                     ]
                 else:
                     relations = []
-            relation_bank_ids = _relation_member_ids(
-                relations,
-                {"bank", "bank_transaction"},
-            )
-            relation_bank_rows = (
-                _postgres_bank_rows(
-                    transaction,
-                    settings=settings,
-                    transaction_ids=relation_bank_ids,
-                )
-                if scoped
-                else bank_rows
-            )
-            category_rows = [*bank_rows, *relation_bank_rows]
-            category_ids = _bank_row_ids(category_rows)
+            relation_bank_rows = bank_rows
             categories_by_transaction_id = (
                 PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
                     transaction,
                     settings=settings,
-                    transaction_ids=category_ids,
+                    transaction_ids=bank_ids,
                 )
             )
             _apply_bank_category_projection(
                 bank_rows,
                 categories_by_transaction_id=categories_by_transaction_id,
             )
-            if relation_bank_rows is not bank_rows:
-                _apply_bank_category_projection(
-                    relation_bank_rows,
-                    categories_by_transaction_id=categories_by_transaction_id,
-                )
             relation_oa_ids = _relation_member_ids(relations, {"oa"})
             oa_rows = _postgres_oa_rows(transaction, oa_ids=relation_oa_ids)
             manual_allocations = PostgresCostStatisticsManualAllocationRepository(
