@@ -18,6 +18,7 @@ from fin_ops_platform.services.turnover_ledger_query_service import (
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankRowSelectionPort,
 )
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -36,21 +37,13 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         self.connection = PostgresConnection(
             PostgresSettings(database_url=self.database_url, pool_enabled=False)
         )
+        self.addCleanup(self.connection.close)
 
     def tearDown(self) -> None:
         truncate_test_database(self.database_url)
 
-    def test_direct_query_ignores_retired_projection_rows(self) -> None:
-        self.connection.execute(
-            """
-            insert into read_model.turnover_ledger_rows(
-                relation_id, scope_month, family, status, source_versions, payload
-            ) values (
-                'retired-projection-row', '2026-04-01', 'personal', 'suggested', '{}'::jsonb,
-                '{"relation_id":"retired-projection-row","cash_closure_linked":true}'::jsonb
-            )
-            """
-        )
+    def test_direct_query_empty_canonical_facts_needs_no_retired_projection(self) -> None:
+        self.assertIsNone(self.connection.fetch_one("SELECT to_regclass('read_model.turnover_ledger_rows') AS retired")["retired"])
 
         payload = TurnoverLedgerQueryService(connection=self.connection).list_ledger(
             view="grouped"

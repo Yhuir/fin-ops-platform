@@ -95,10 +95,38 @@ def _row(
         "purpose_text": purpose_text,
         "summary_text": summary_text,
         "note_text": note_text,
+        "same_time_order_status": "time",
     }
 
 
 class BankDetailsExportServiceTests(unittest.TestCase):
+    def test_export_preserves_unresolved_order_and_original_balances(self) -> None:
+        rows = [
+            {
+                **_row(row_id, bank_name="建设银行", account_last4="8106", account_key="建设银行:8106"),
+                "balance": balance,
+                "same_time_order_status": status,
+            }
+            for row_id, balance, status in (
+                ("unresolved-a", "0.00", "unresolved"),
+                ("unresolved-b", None, "unresolved"),
+                ("confirmed", "40512.82", "balance_chain"),
+            )
+        ]
+        service = BankDetailsExportService(
+            transaction_page_loader=_PagedRowsLoader(rows),
+            account_loader=lambda **_kwargs: _accounts(),
+        )
+        result = service.export(mode="all", date_from="2026-04-01", date_to="2026-05-18", keyword=None)
+        sheet = load_workbook(BytesIO(result.content))["全部流水"]
+        self.assertEqual([sheet[f"R{index}"].value for index in range(2, 5)], [row["id"] for row in rows])
+        self.assertEqual(sheet["H2"].value, 0)
+        self.assertIsNone(sheet["H3"].value)
+        self.assertEqual(sheet["H4"].value, 40512.82)
+        self.assertEqual(sheet["S2"].value, "顺序待核实（同时间或时间精度不足）")
+        self.assertEqual(sheet["S3"].value, sheet["S2"].value)
+        self.assertIsNone(sheet["S4"].value)
+
     def test_all_bank_export_builds_summary_and_bank_sheets_with_professional_columns(self) -> None:
         rows = [
             _row("icbc", bank_name="工商银行", account_last4="6386", account_key="工商银行:6386", purpose_text="工行用途", summary_text="工行摘要", note_text="工行附言", category="手续费", category_primary_label="费用", category_sub_label="手续费"),
@@ -119,7 +147,9 @@ class BankDetailsExportServiceTests(unittest.TestCase):
         sheet = workbook["全部流水"]
         self.assertEqual([cell.value for cell in sheet[1]], BANK_DETAIL_EXPORT_COLUMNS)
         self.assertEqual(sheet.freeze_panes, "A2")
-        self.assertEqual(sheet.auto_filter.ref, f"A1:R{sheet.max_row}")
+        self.assertEqual(sheet.auto_filter.ref, f"A1:S{sheet.max_row}")
+        self.assertEqual(sheet["S1"].value, "同时间顺序说明")
+        self.assertIsNone(sheet["S2"].value)
         self.assertEqual(sheet["A2"].value, "2026-04-16 11:09:14")
         self.assertIsInstance(sheet["G2"].value, (int, float))
         self.assertIsNone(sheet["F2"].value)

@@ -10,6 +10,7 @@ import {
   PopoverDialog,
   PopoverRoot,
   PopoverTrigger,
+  Tooltip,
 } from "@heroui/react";
 import { Filter, RefreshCw, Tags } from "lucide-react";
 
@@ -400,6 +401,25 @@ function createDateFilter(preset: BankDateFilter["preset"], value = DEFAULT_BANK
 
 function displayBalance(value: string | null) {
   return value && value.trim() ? formatMoney(value) : "余额为空";
+}
+
+function BankSameTimeOrderHint() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Tooltip isOpen={open} onOpenChange={setOpen}>
+      <Tooltip.Trigger
+        aria-label="同时间顺序待核实"
+        onBlur={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        tabIndex={0}
+      >
+        <Chip color="warning" size="sm" variant="soft"><Chip.Label>顺序待核实</Chip.Label></Chip>
+      </Tooltip.Trigger>
+      <Tooltip.Content>同时间顺序待核实，请通过导入来源核对原银行明细。</Tooltip.Content>
+    </Tooltip>
+  );
 }
 
 function relationTagTone(tag: string) {
@@ -1434,8 +1454,7 @@ export default function BankDetailsPage() {
   const [accountsData, setAccountsData] = useState<{
     accounts: BankDetailAccount[];
     totalBalance: string | null;
-    missingBalanceAccountCount: number;
-  }>({ accounts: [], totalBalance: null, missingBalanceAccountCount: 0 });
+  }>({ accounts: [], totalBalance: null });
   const selectedAccountKey = selectedAccountSession.value;
   const setSelectedAccountKey = selectedAccountSession.setValue;
   const dateFilter = dateFilterSession.value;
@@ -1452,6 +1471,10 @@ export default function BankDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [rowLoading, setRowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [transactionsError, setTransactionsError] = useState<string | null>(null);
+  const [categoryCountsError, setCategoryCountsError] = useState<string | null>(null);
+  const [rulesError, setRulesError] = useState<string | null>(null);
   const [categoryFilterSnapshot, setCategoryFilterSnapshot] = useState<CategoryFilterSnapshot>({
     queryKey: "",
     totalCount: 0,
@@ -1473,6 +1496,7 @@ export default function BankDetailsPage() {
   const [categoryMutationId, setCategoryMutationId] = useState<string | null>(null);
   const hasAccountPayloadRef = useRef(false);
   const hasTransactionPayloadRef = useRef(false);
+  const transactionRequestRef = useRef<AbortController | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const selectedTransactionAccountKey = selectedAccountKey === ALL_ACCOUNTS_KEY ? null : selectedAccountKey || null;
   const categoryFilterQueryKey = useMemo(() => categoryFilterSnapshotKey({
@@ -1532,18 +1556,18 @@ export default function BankDetailsPage() {
     }
     const controller = new AbortController();
     setLoading(!hasAccountPayloadRef.current);
-    setError(null);
+    setAccountsError(null);
     fetchBankDetailAccounts({
       dateFrom: dateFilter.dateFrom,
       dateTo: dateFilter.dateTo,
       signal: controller.signal,
     })
       .then((payload) => {
+        if (controller.signal.aborted) return;
         hasAccountPayloadRef.current = true;
         setAccountsData({
           accounts: payload.accounts,
           totalBalance: payload.totalBalance,
-          missingBalanceAccountCount: payload.missingBalanceAccountCount,
         });
         setSelectedAccountKey((current) => (
           current && (current === ALL_ACCOUNTS_KEY || payload.accounts.some((account) => account.accountKey === current))
@@ -1552,8 +1576,8 @@ export default function BankDetailsPage() {
         ));
       })
       .catch((caught) => {
-        if (!isAbortLikeError(caught)) {
-          setError(caught instanceof Error ? caught.message : "银行明细加载失败。");
+        if (!controller.signal.aborted && !isAbortLikeError(caught)) {
+          setAccountsError(`账户未更新：${caught instanceof Error ? caught.message : "银行明细加载失败。"}`);
         }
       })
       .finally(() => {
@@ -1569,13 +1593,15 @@ export default function BankDetailsPage() {
       return undefined;
     }
     const controller = new AbortController();
+    setRulesError(null);
     fetchBankAutoTagRules({ signal: controller.signal })
       .then((payload) => {
+        if (controller.signal.aborted) return;
         setActiveAutoTagRules(payload.activeRules);
       })
       .catch((caught) => {
-        if (!isAbortLikeError(caught)) {
-          setError(caught instanceof Error ? caught.message : "自动标签规则加载失败。");
+        if (!controller.signal.aborted && !isAbortLikeError(caught)) {
+          setRulesError(`规则未更新：${caught instanceof Error ? caught.message : "自动标签规则加载失败。"}`);
         }
       });
     return () => controller.abort();
@@ -1598,8 +1624,11 @@ export default function BankDetailsPage() {
       return;
     }
     const controller = new AbortController();
+    transactionRequestRef.current?.abort();
+    transactionRequestRef.current = controller;
     setRowLoading(!hasTransactionPayloadRef.current);
-    setError(null);
+    setTransactionsError(null);
+    setCategoryCountsError(null);
     const accountKey = selectedTransactionAccountKey;
     const snapshotQueryKey = categoryFilterQueryKey;
     const requestHasCategoryFilter = hasCategoryRequestFilter(selectedCategoryRequestParams);
@@ -1615,11 +1644,12 @@ export default function BankDetailsPage() {
         signal: controller.signal,
       })
         .then((payload) => {
+          if (controller.signal.aborted) return;
           applyCategorySnapshotPayload(payload, snapshotQueryKey);
         })
         .catch((caught) => {
-          if (!isAbortLikeError(caught)) {
-            setError(caught instanceof Error ? caught.message : "银行流水标签统计加载失败。");
+          if (!controller.signal.aborted && !isAbortLikeError(caught)) {
+            setCategoryCountsError(`标签统计未更新：${caught instanceof Error ? caught.message : "银行流水标签统计加载失败。"}`);
           }
         });
     }
@@ -1638,12 +1668,13 @@ export default function BankDetailsPage() {
       signal: controller.signal,
     })
       .then((payload) => {
+        if (controller.signal.aborted) return;
         applyTransactionsPayload(payload, { snapshotQueryKey, requestHasCategoryFilter });
       })
       .catch((caught) => {
-        if (!isAbortLikeError(caught)) {
+        if (!controller.signal.aborted && !isAbortLikeError(caught)) {
           setStatistics(null);
-          setError(caught instanceof Error ? caught.message : "银行流水加载失败。");
+          setTransactionsError(`流水未更新：${caught instanceof Error ? caught.message : "银行流水加载失败。"}`);
         }
       })
       .finally(() => {
@@ -1651,7 +1682,10 @@ export default function BankDetailsPage() {
           setRowLoading(false);
         }
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      transactionRequestRef.current?.abort();
+    };
   }, [
     applyCategorySnapshotPayload,
     applyTransactionsPayload,
@@ -1939,11 +1973,16 @@ export default function BankDetailsPage() {
   };
 
   const reloadTransactionsAfterRulesMutation = useCallback(async () => {
+    const controller = new AbortController();
+    transactionRequestRef.current?.abort();
+    transactionRequestRef.current = controller;
     const accountKey = selectedTransactionAccountKey;
     const snapshotQueryKey = categoryFilterQueryKey;
     const requestHasCategoryFilter = hasCategoryRequestFilter(selectedCategoryRequestParams);
     setRowLoading(true);
     setError(null);
+    setTransactionsError(null);
+    setCategoryCountsError(null);
     try {
       if (requestHasCategoryFilter) {
         const snapshotPayload = await fetchBankDetailTransactions({
@@ -1953,7 +1992,9 @@ export default function BankDetailsPage() {
           keyword: searchKeyword,
           page: 1,
           pageSize: 1,
+          signal: controller.signal,
         });
+        if (controller.signal.aborted) return;
         applyCategorySnapshotPayload(snapshotPayload, snapshotQueryKey);
       }
 
@@ -1968,11 +2009,17 @@ export default function BankDetailsPage() {
         categoryThirdLabel: selectedCategoryRequestParams.categoryThirdLabel,
         page: paginationModel.page + 1,
         pageSize: paginationModel.pageSize,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       applyTransactionsPayload(latestPayload, { snapshotQueryKey, requestHasCategoryFilter });
       return latestPayload;
+    } catch (caught) {
+      if (controller.signal.aborted || isAbortLikeError(caught)) return;
+      setTransactionsError(`流水未更新：${caught instanceof Error ? caught.message : "银行流水加载失败。"}`);
+      throw caught;
     } finally {
-      setRowLoading(false);
+      if (!controller.signal.aborted) setRowLoading(false);
     }
   }, [
     applyCategorySnapshotPayload,
@@ -2036,6 +2083,7 @@ export default function BankDetailsPage() {
     persistTagVersion(payload.version);
     tagVersionRef.current = payload.version;
     setActiveAutoTagRules(payload.activeRules);
+    setRulesError(null);
     return payload.refreshReason === "reapplied" ? "重新应用已完成。" : "规则已保存。";
   }, []);
 
@@ -2111,7 +2159,10 @@ export default function BankDetailsPage() {
           <Button
             aria-label="刷新银行明细"
             isDisabled={loading || rowLoading}
-            onPress={() => setRefreshToken((current) => current + 1)}
+            onPress={() => {
+              setError(null);
+              setRefreshToken((current) => current + 1);
+            }}
             size="sm"
             variant="secondary"
           >
@@ -2121,18 +2172,18 @@ export default function BankDetailsPage() {
         </div>
       </header>
       <div className="bank-details-workbench">
-        {error ? (
-          <div className="bank-details-error-live" role="alert" aria-live="polite">
-            {error}
+        {[error, accountsError, transactionsError, categoryCountsError, rulesError].filter(Boolean).map((message) => (
+          <div className="bank-details-error-live" role="alert" aria-live="polite" key={message}>
+            {message}
           </div>
-        ) : null}
+        ))}
         {loading ? <StatePanel tone="loading" compact>正在加载银行明细。</StatePanel> : null}
         {rulesFeedback ? (
           <StatePanel tone="success" compact>
             {rulesFeedback}
           </StatePanel>
         ) : null}
-        {!loading && accountsData.accounts.length === 0 ? (
+        {!loading && !accountsError && accountsData.accounts.length === 0 ? (
           <StatePanel tone="empty">暂无银行流水，请先在银行流水导入页面导入。</StatePanel>
         ) : null}
 
@@ -2141,12 +2192,17 @@ export default function BankDetailsPage() {
             <div className="bank-account-summary">
               <span className="bank-account-summary-label">总余额</span>
               <strong className="bank-balance-value bank-total-balance">
-                {displayBalance(accountsData.totalBalance)}
+                {accountsData.totalBalance === null ? "—" : displayBalance(accountsData.totalBalance)}
               </strong>
+              {!loading && accountsData.accounts.length > 0 && accountsData.totalBalance === null ? (
+                <span className="bank-account-summary-label">暂无法确定完整总余额</span>
+              ) : null}
               <div className="bank-account-summary-tags">
                 <span className="bank-account-total-chip bank-chip-auto-size">{accountsData.accounts.length} 个账户</span>
-                {accountsData.missingBalanceAccountCount > 0 ? (
-                  <span className="bank-account-empty-chip bank-chip-auto-size">{accountsData.missingBalanceAccountCount} 个无余额</span>
+                {accountsData.accounts.some((account) => account.balanceStatus !== "confirmed") ? (
+                  <span className="bank-account-empty-chip bank-chip-auto-size">
+                    {accountsData.accounts.filter((account) => account.balanceStatus !== "confirmed").length} 个账户余额未确认
+                  </span>
                 ) : null}
               </div>
             </div>
@@ -2166,7 +2222,7 @@ export default function BankDetailsPage() {
                     <span className="bank-account-count-chip bank-account-title-count bank-chip-auto-size">{totalTransactionCount} 条</span>
                   </span>
                   <span className="bank-account-inline-balance bank-account-secondary-balance bank-balance-value">
-                    {displayBalance(accountsData.totalBalance)}
+                    {accountsData.totalBalance === null ? "—" : displayBalance(accountsData.totalBalance)}
                   </span>
                 </button>
               </li>
@@ -2181,7 +2237,7 @@ export default function BankDetailsPage() {
                     <li>
                       <button
                         aria-current={selected ? "true" : undefined}
-                        aria-label={`${account.displayName} 余额 ${displayBalance(account.latestBalance)} ${account.transactionCount} 条`}
+                        aria-label={`${account.displayName} 余额 ${account.balanceStatus === "unresolved" ? "待核实" : displayBalance(account.latestBalance)} ${account.transactionCount} 条${account.balanceStatus === "last_known" ? ` 最后已知余额 ${formatDateTimeText(account.latestBalanceAt).slice(0, 10)}` : ""}`}
                         className={`bank-account-node${selected ? " active" : ""}`}
                         onClick={() => handleAccountSelect(account.accountKey)}
                         type="button"
@@ -2200,9 +2256,16 @@ export default function BankDetailsPage() {
                             </span>
                           ) : null}
                           {!account.hasBalance ? (
-                            <span className="bank-account-empty-chip bank-chip-auto-size">余额为空</span>
+                            <span className="bank-account-empty-chip bank-chip-auto-size">
+                              {account.balanceStatus === "unresolved" ? "余额待核实" : "余额为空"}
+                            </span>
                           ) : null}
                         </span>
+                        {account.balanceStatus === "last_known" ? (
+                          <span className="bank-account-summary-label">
+                            最后已知余额 · {formatDateTimeText(account.latestBalanceAt).slice(0, 10)}
+                          </span>
+                        ) : null}
                       </button>
                     </li>
                     {showDivider ? <li className="bank-account-divider" aria-hidden="true" role="separator" /> : null}
@@ -2295,7 +2358,7 @@ export default function BankDetailsPage() {
                         <FinanceTableCell columnRole="description" textValue="loading">-</FinanceTableCell>
                       </FinanceTableRow>
                     ) : null}
-                    {!rowLoading && rows.length === 0 ? (
+                    {!rowLoading && !transactionsError && rows.length === 0 ? (
                       <FinanceTableRow id="empty" className="bank-transaction-state-row" textValue="当前时间范围内没有流水。">
                         <FinanceTableCell columnRole="identity" textValue="当前时间范围内没有流水。">
                           <EmptyTransactionOverlay />
@@ -2322,6 +2385,7 @@ export default function BankDetailsPage() {
                             </span>
                             <div className="bank-counterparty-meta-row">
                               <span className="bank-trade-time-text">{formatDateTimeText(row.tradeTime)}</span>
+                              {row.sameTimeOrderStatus === "unresolved" ? <BankSameTimeOrderHint /> : null}
                               <div className="bank-relation-chip-row">
                                 {row.relationTags.map((tag) => (
                                   <Chip
@@ -2370,9 +2434,9 @@ export default function BankDetailsPage() {
                             </span>
                           </div>
                         </FinanceTableCell>
-                        <FinanceTableCell className="bank-col-balance" columnRole="amount" textValue={formatMoney(row.balance)}>
+                        <FinanceTableCell className="bank-col-balance" columnRole="amount" textValue={row.balance === null ? "—" : formatMoney(row.balance)}>
                           <span className="bank-balance-value">
-                            {formatMoney(row.balance)}
+                            {row.balance === null ? "—" : formatMoney(row.balance)}
                           </span>
                         </FinanceTableCell>
                         <FinanceTableCell className="bank-col-purpose" columnRole="description" textValue={row.purposeText}><BankTextCell value={row.purposeText} /></FinanceTableCell>

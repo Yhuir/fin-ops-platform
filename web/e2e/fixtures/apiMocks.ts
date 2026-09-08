@@ -7126,11 +7126,14 @@ function bankAccountsPayload() {
         display_name: "建设银行 1138",
         latest_balance: "130500.50",
         latest_balance_at: "2026-03-28 10:18:00",
+        balance_status: "confirmed",
+        currency: "CNY",
         has_balance: true,
         transaction_count: 1,
       },
     ],
     total_balance: "130500.50",
+    total_balances_by_currency: { CNY: "130500.50" },
     balance_account_count: 1,
     missing_balance_account_count: 0,
   };
@@ -7157,6 +7160,7 @@ function bankTransactionsPayload(
       {
         id: "bk-o-202603-001",
         trade_time: "2026-03-28 10:18:00",
+        same_time_order_status: "time",
         counterparty_name: "智能工厂设备商",
         direction: "expense",
         direction_label: "支",
@@ -7203,6 +7207,7 @@ function bankTransactionsPayload(
         {
           id: "bk-import-202605-001",
           trade_time: "2026-05-18 09:30:00",
+          same_time_order_status: "time",
           counterparty_name: "导入浏览器测试客户",
           direction: "income",
           direction_label: "收",
@@ -7251,6 +7256,7 @@ function bankTransactionsPayload(
         const padded = String(sequence).padStart(3, "0");
         return {
           id: `bk-large-202603-${padded}`,
+          same_time_order_status: "unresolved",
           trade_time: `2026-03-${String((sequence % 28) + 1).padStart(2, "0")} 15:42:00`,
           counterparty_name: `长字段浏览器供应商${padded}有限公司-跨区域设备服务与维护合同`,
           direction: "expense",

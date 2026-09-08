@@ -1,73 +1,79 @@
 from __future__ import annotations
 
+import json
+import pickle
+import time
+import unittest
 from copy import deepcopy
 from dataclasses import dataclass, make_dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
-import json
-import pickle
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event, Lock, Thread
-import time
 from types import SimpleNamespace
-import unittest
+from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import fitz
-
-from tests.app_test_support import (
-    build_local_state_application as _build_application,
-    configure_access_control,
-    install_durable_import_queue,
-)
+from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services import etc_service as etc_service_module
-from fin_ops_platform.services.etc_service import (
-    EtcBusinessBatchActiveExistsError,
-    EtcBusinessBatchInvalidTransitionError,
-    EtcBusinessBatchNotFoundError,
-    EtcBusinessBatchStatus,
-    EtcBusinessBatchVersionConflictError,
-    EtcBusinessBatch,
-    EtcDraftRequestError,
-    EtcOAHttpClientSettings,
-    EtcInvoiceStatus,
-    EtcInvoiceNotFoundError,
-    HttpEtcOAClient,
-    EtcOAClient,
-    EtcOAClientError,
-    EtcOADraftOutcomeUnknownError,
-    EtcService,
-    UploadedEtcZipFile,
-    parse_etc_xml,
-)
-from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
 from fin_ops_platform.services.etc_business_batch_application_service import (
     EtcBusinessBatchActor,
     EtcBusinessBatchApplicationService,
     evaluate_etc_oa_draft_action,
 )
-from fin_ops_platform.services.etc_document_parsers import CcbCreditCardStatementParser, SupplementEvidenceParser, TicketRootPdfTextParser
+from fin_ops_platform.services.etc_document_parsers import (
+    CcbCreditCardStatementParser,
+    SupplementEvidenceParser,
+    TicketRootPdfTextParser,
+)
 from fin_ops_platform.services.etc_reconciliation_models import (
     EtcReconciliationTaskStatus,
     FileParseResult,
     SourceFileKind,
 )
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
+from fin_ops_platform.services.etc_service import (
+    EtcBusinessBatch,
+    EtcBusinessBatchActiveExistsError,
+    EtcBusinessBatchInvalidTransitionError,
+    EtcBusinessBatchNotFoundError,
+    EtcBusinessBatchStatus,
+    EtcBusinessBatchVersionConflictError,
+    EtcDraftRequestError,
+    EtcInvoiceNotFoundError,
+    EtcInvoiceStatus,
+    EtcOAClient,
+    EtcOAClientError,
+    EtcOADraftOutcomeUnknownError,
+    EtcOAHttpClientSettings,
+    EtcService,
+    HttpEtcOAClient,
+    UploadedEtcZipFile,
+    parse_etc_xml,
+)
 from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
     HistoricalEtcRepairService,
 )
-from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.workbench_etc_batch_link import workbench_etc_summary_row_id
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
-from unittest.mock import patch
 
+from tests.app_test_support import (
+    build_local_state_application as _build_application,
+)
+from tests.app_test_support import (
+    configure_access_control,
+    install_durable_import_queue,
+)
+from tests.mock_import_files import ticket_root_txt_sample
 
 TICKET_ROOT_TEXT = """
 票根网通行明细
@@ -110,7 +116,7 @@ TICKET_ROOT_CLIPBOARD_TEXT = """
 发票数量：2
 """
 
-REAL_TICKET_ROOT_TXT_A516HJ_PATH = Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云A516HJ/云A516HJ")
+SYNTHETIC_TICKET_ROOT_TXT = ticket_root_txt_sample("云A516HJ", 11).encode("utf-8")
 
 
 def build_application(*args, **kwargs):
@@ -3013,8 +3019,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("已有票根网 PDF/JPG 源文件", payload["message"])
 
     def test_ticket_root_text_route_rejects_existing_txt_ticket_root_source(self) -> None:
-        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
-            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
@@ -3023,7 +3027,7 @@ class EtcApiTests(unittest.TestCase):
                 source_kind=SourceFileKind.TICKET_ROOT,
                 original_name="云A516HJ",
                 content_type="text/plain; charset=utf-8",
-                content=REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes(),
+                content=SYNTHETIC_TICKET_ROOT_TXT,
                 created_by="alice",
             )
             task = app._etc_reconciliation_task_service.get_task(task.task_id)
@@ -3041,8 +3045,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("删除已有票根来源后才能切换导入方式", payload["message"])
 
     def test_ticket_root_upload_route_imports_txt_without_extension_with_clipboard_parser(self) -> None:
-        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
-            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             created = json.loads(app.handle_request(
@@ -3051,7 +3053,7 @@ class EtcApiTests(unittest.TestCase):
                 json.dumps({"title": "ETC", "createdBy": "alice"}),
             ).body)
             body, headers = multipart(
-                {"云A516HJ": REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes()},
+                {"云A516HJ": SYNTHETIC_TICKET_ROOT_TXT},
                 fields={"expectedVersion": str(created["version"])},
             )
 
@@ -3256,8 +3258,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("已有手工粘贴票根网源", payload["message"])
 
     def test_ticket_root_upload_route_rejects_existing_txt_ticket_root_source_before_pdf_upload(self) -> None:
-        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
-            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
@@ -3266,7 +3266,7 @@ class EtcApiTests(unittest.TestCase):
                 source_kind=SourceFileKind.TICKET_ROOT,
                 original_name="云A516HJ",
                 content_type="text/plain; charset=utf-8",
-                content=REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes(),
+                content=SYNTHETIC_TICKET_ROOT_TXT,
                 created_by="alice",
             )
             task = app._etc_reconciliation_task_service.get_task(task.task_id)
@@ -3289,8 +3289,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("删除已有票根来源后才能切换导入方式", payload["message"])
 
     def test_ticket_root_upload_route_rejects_existing_pdf_ticket_root_source_before_txt_upload(self) -> None:
-        if not REAL_TICKET_ROOT_TXT_A516HJ_PATH.exists():
-            self.skipTest(f"missing local ticket root sample: {REAL_TICKET_ROOT_TXT_A516HJ_PATH}")
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
@@ -3304,7 +3302,7 @@ class EtcApiTests(unittest.TestCase):
             )
             task = app._etc_reconciliation_task_service.get_task(task.task_id)
             body, headers = multipart(
-                {"云A516HJ": REAL_TICKET_ROOT_TXT_A516HJ_PATH.read_bytes()},
+                {"云A516HJ": SYNTHETIC_TICKET_ROOT_TXT},
                 fields={"expectedVersion": str(task.version)},
             )
 

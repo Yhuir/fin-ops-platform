@@ -40,69 +40,6 @@ class BankDetailsService:
         self._relation_tag_batch_provider = relation_tag_batch_provider
         self._fact_repository = fact_repository
 
-    def list_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
-        sql_account_loader = getattr(self._fact_repository, "list_bank_transaction_accounts", None)
-        if callable(sql_account_loader):
-            account_rows = list(sql_account_loader(date_from=date_from, date_to=date_to) or [])
-            accounts = []
-            for row in account_rows:
-                account = self._account_payload(row)
-                latest_balance = row.get("latest_balance")
-                account["latest_balance"] = self._format_decimal(latest_balance) if latest_balance is not None else None
-                account["latest_balance_at"] = self._date_text(row.get("latest_balance_at"))
-                account["has_balance"] = latest_balance is not None
-                account["transaction_count"] = int(row.get("transaction_count") or 0)
-                accounts.append(account)
-            sorted_accounts = sorted(accounts, key=lambda item: (item["bank_name"], item["account_last4"]))
-            total_balance = sum(
-                (Decimal(str(account["latest_balance"])) for account in sorted_accounts if account.get("has_balance")),
-                Decimal("0.00"),
-            )
-            return {
-                "accounts": sorted_accounts,
-                "total_balance": self._format_decimal(total_balance) if any(account.get("has_balance") for account in sorted_accounts) else None,
-                "balance_account_count": sum(1 for account in sorted_accounts if account.get("has_balance")),
-                "missing_balance_account_count": sum(1 for account in sorted_accounts if not account.get("has_balance")),
-            }
-        transactions = self._transactions()
-        filtered_counts: dict[str, int] = {}
-        accounts: dict[str, dict[str, Any]] = {}
-        for transaction in transactions:
-            row = self._transaction_payload(transaction)
-            account = self._account_payload(row)
-            accounts.setdefault(account["account_key"], account)
-            if self._date_in_range(row.get("trade_time") or row.get("txn_date"), date_from=date_from, date_to=date_to):
-                filtered_counts[account["account_key"]] = filtered_counts.get(account["account_key"], 0) + 1
-
-        for account_key, account in accounts.items():
-            account_transactions = [
-                self._transaction_payload(transaction)
-                for transaction in transactions
-                if self._account_key(self._transaction_payload(transaction)) == account_key
-            ]
-            latest = self._latest_balance_transaction(account_transactions)
-            if latest is None:
-                account["latest_balance"] = None
-                account["latest_balance_at"] = None
-                account["has_balance"] = False
-            else:
-                account["latest_balance"] = self._format_decimal(latest.get("balance"))
-                account["latest_balance_at"] = self._date_text(latest.get("trade_time") or latest.get("txn_date"))
-                account["has_balance"] = True
-            account["transaction_count"] = filtered_counts.get(account_key, 0)
-
-        sorted_accounts = sorted(accounts.values(), key=lambda item: (item["bank_name"], item["account_last4"]))
-        total_balance = sum(
-            (Decimal(str(account["latest_balance"])) for account in sorted_accounts if account.get("has_balance")),
-            Decimal("0.00"),
-        )
-        return {
-            "accounts": sorted_accounts,
-            "total_balance": self._format_decimal(total_balance) if any(account.get("has_balance") for account in sorted_accounts) else None,
-            "balance_account_count": sum(1 for account in sorted_accounts if account.get("has_balance")),
-            "missing_balance_account_count": sum(1 for account in sorted_accounts if not account.get("has_balance")),
-        }
-
     def list_transactions(
         self,
         *,
@@ -252,12 +189,6 @@ class BankDetailsService:
         account_last4 = str(row.get("imported_bank_last4") or row.get("account_last4") or "")[-4:] or str(row.get("account_no") or "")[-4:] or "unknown"
         normalized_bank = bank_name.lower().replace(" ", "-")
         return f"{normalized_bank}:{account_last4}"
-
-    def _latest_balance_transaction(self, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
-        with_balance = [row for row in rows if row.get("balance") not in (None, "", "—")]
-        if not with_balance:
-            return None
-        return max(with_balance, key=lambda row: str(row.get("trade_time") or row.get("txn_date") or ""))
 
     def row_payload(
         self,

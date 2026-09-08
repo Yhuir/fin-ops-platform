@@ -6,7 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 from threading import Event
 from uuid import uuid4
 
@@ -15,6 +14,13 @@ from fin_ops_platform.services.cash_domain import CashError, normalize_money
 from fin_ops_platform.services.cash_service import CashService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.cash import CashRepository
+
+from tests.postgres_test_utils import (
+    apply_test_migrations,
+    apply_test_migrations_through,
+    reset_test_database,
+    restore_current_test_database,
+)
 
 
 def uid():
@@ -34,13 +40,22 @@ class CashMoneyTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("FIN_OPS_CASH_TEST_DATABASE_URL"), "requires explicitly isolated cash PostgreSQL test database")
 class CashClosureMigrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.dsn = os.environ["FIN_OPS_CASH_TEST_DATABASE_URL"]
+        connection = PostgresConnection(PostgresSettings(cls.dsn, pool_enabled=False))
+        cls.addClassCleanup(connection.close)
+        if not connection.fetch_one("SELECT current_database() AS name")["name"].startswith("fin_ops_cash_test_"):
+            raise RuntimeError("Migration fixtures require a dedicated fin_ops_cash_test_* database")
+        cls.addClassCleanup(restore_current_test_database, cls.dsn)
+        reset_test_database(cls.dsn)
+        apply_test_migrations_through(cls.dsn, "0167")
+
     def test_incremental_migration_preserves_legacy_facts_without_invented_categories_or_owner(self):
         connection = PostgresConnection(PostgresSettings(os.environ["FIN_OPS_CASH_TEST_DATABASE_URL"], pool_enabled=False))
         self.addCleanup(connection.close)
         if not connection.fetch_one("SELECT current_database() AS name")["name"].startswith("fin_ops_cash_test_"):
             raise RuntimeError("Migration fixtures require a dedicated fin_ops_cash_test_* database")
-        connection.execute("DROP SCHEMA IF EXISTS cash CASCADE")
-        connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0166_cash_ledger.sql").read_text())
         loan_id, expense_id, settlement_id = uid(), uid(), uid()
         connection.execute("""INSERT INTO cash.items(id,type,origin_date,original_amount,ledger_group,obligation_direction,counterparty,content)
             VALUES(%s,'loan','2026-01-01',100,'personal','receivable','Legacy owner','Legacy loan')""", (loan_id,))
@@ -49,7 +64,7 @@ class CashClosureMigrationTests(unittest.TestCase):
             VALUES(%s,'non_ticket_offset',10,'2026-01-01',%s,'Legacy adjustment')""", (settlement_id, loan_id))
         connection.execute("UPDATE cash.settings SET personal_opening_date='2026-01-01',version=7 WHERE id=1")
         before = {table: connection.fetch_all(f"SELECT * FROM cash.{table} ORDER BY id") for table in ("items", "settlements", "settings")}
-        connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0168_cash_business_closure.sql").read_text())
+        apply_test_migrations(self.dsn)
         for table, extra in (("items", "category_id"), ("settlements", "category_id"), ("settings", "personal_counterparty")):
             after = connection.fetch_all(f"SELECT * FROM cash.{table} ORDER BY id")
             self.assertTrue(all(row[extra] is None for row in after))
@@ -63,21 +78,15 @@ class CashCorePostgresTests(unittest.TestCase):
     def setUpClass(cls):
         cls.dsn = os.environ["FIN_OPS_CASH_TEST_DATABASE_URL"]
         cls.connection = PostgresConnection(PostgresSettings(cls.dsn, pool_enabled=False))
+        cls.addClassCleanup(cls.connection.close)
         db = cls.connection.fetch_one("SELECT current_database() AS name")["name"]
         if not db.startswith("fin_ops_cash_test_"):
             raise RuntimeError("Cash destructive fixtures require a dedicated fin_ops_cash_test_* database")
-        # This schema belongs solely to this explicit disposable test database.
-        cls.connection.execute("DROP SCHEMA IF EXISTS cash CASCADE")
-        cls.connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0166_cash_ledger.sql").read_text())
-        cls.connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0168_cash_business_closure.sql").read_text())
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.connection.close()
+        apply_test_migrations(cls.dsn)
 
     def setUp(self):
-        self.connection.execute("TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
-        self.connection.execute("UPDATE cash.settings SET allowed_project_stage_codes='{}',project_selection_configured=false,personal_opening_date=NULL,personal_counterparty=NULL,version=1")
+        self._reset_fixture()
+        self.addCleanup(self._reset_fixture)
         self.repo = CashRepository(self.connection)
         self.oa_calls = []
 
@@ -92,6 +101,10 @@ class CashCorePostgresTests(unittest.TestCase):
         self.account = self.service.create_account({"id": uid(), "name": "Synthetic account", "kind": "cash", "opening_date": "2026-01-01", "opening_amount": "1000"})["account"]
         self.category = self.service.create_category({"id": uid(), "name": "Synthetic turnover", "group": "turnover"})["category"]
         self.payment_category = self.service.create_category({"id": uid(), "name": "Synthetic expense", "group": "payment"})["category"]
+
+    def _reset_fixture(self):
+        self.connection.execute("TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
+        self.connection.execute("UPDATE cash.settings SET allowed_project_stage_codes='{}',project_selection_configured=false,personal_opening_date=NULL,personal_counterparty=NULL,version=1")
 
     def flow(self, kind="payment", amount="100", **extra):
         payload = {"id": uid(), "kind": kind, "amount": amount, "occurred_on": "2026-09-01", "content": "Synthetic flow", "category_id": self.category["id"], "project_mode": "selection"}

@@ -3,15 +3,22 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.postgres import migrate
+
 from tests.postgres_test_utils import (
     apply_test_migrations_through,
     fetch_scalar,
     require_postgres_test_database_url,
     reset_test_database,
+    restore_current_test_database,
 )
 
 
 class CanonicalFinanceDomainContractsPostgresIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.database_url = require_postgres_test_database_url()
+        cls.addClassCleanup(restore_current_test_database, cls.database_url)
+
     def setUp(self) -> None:
         self.database_url = require_postgres_test_database_url()
         reset_test_database(self.database_url)
@@ -212,7 +219,7 @@ class CanonicalFinanceDomainContractsPostgresIntegrationTests(unittest.TestCase)
             select
                 array_to_string(affected_months, ',')
                 || E'\t'
-                || raw_payload #>> '{normalized_payload,affected_months,0}'
+                || (raw_payload #>> '{normalized_payload,affected_months,0}')
             from job.background_jobs
             where job_id = 'historical-global-scope';
             """,

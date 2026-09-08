@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import unittest
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 from tempfile import TemporaryDirectory
-import unittest
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fin_ops_platform.services.etc_document_parsers import (
@@ -35,8 +35,7 @@ from fin_ops_platform.services.etc_reconciliation_zip_filter import (
     preview_etc_zip_for_task,
     validate_etc_zip_confirm_for_task,
 )
-from fin_ops_platform.services.etc_service import UploadedEtcZipFile
-from fin_ops_platform.services.etc_service import _archive_entry_display_name, parse_etc_xml
+from fin_ops_platform.services.etc_service import UploadedEtcZipFile, _archive_entry_display_name, parse_etc_xml
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.untrusted_document_policy import (
     ETC_DOCUMENT_LIMITS,
@@ -44,23 +43,12 @@ from fin_ops_platform.services.untrusted_document_policy import (
     inspect_untrusted_document,
 )
 
+from tests.mock_import_files import ticket_root_txt_sample
 
-REAL_TICKET_ROOT_TXT_SAMPLES = {
-    "a516hj": (
-        Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云A516HJ/云A516HJ"),
-        "云A516HJ",
-        11,
-    ),
-    "ada0381": (
-        Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云ADA0381/云a0381"),
-        "云ADA0381",
-        48,
-    ),
-    "a361hx": (
-        Path("/Users/yu/Desktop/sy/财务运营平台/票根网/4月/云A361HX/云A361HX"),
-        "云A361HX",
-        2,
-    ),
+SYNTHETIC_TICKET_ROOT_TXT_SAMPLES = {
+    "a516hj": ("云A516HJ", 11),
+    "ada0381": ("云ADA0381", 48),
+    "a361hx": ("云A361HX", 2),
 }
 
 
@@ -507,13 +495,11 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         )
         self.assertTrue(all(item.extraction_method == "clipboard_text" for item in result.ticket_root_items))
 
-    def test_ticket_root_clipboard_text_parser_reads_real_txt_file_samples(self) -> None:
+    def test_ticket_root_clipboard_text_parser_reads_self_contained_txt_samples(self) -> None:
         parser = TicketRootClipboardTextParser()
-        for sample_key, (sample_path, expected_plate, expected_count) in REAL_TICKET_ROOT_TXT_SAMPLES.items():
-            if not sample_path.exists():
-                self.skipTest(f"missing local ticket root sample: {sample_path}")
+        for sample_key, (expected_plate, expected_count) in SYNTHETIC_TICKET_ROOT_TXT_SAMPLES.items():
             with self.subTest(sample=sample_key):
-                result = parser.parse_text(file_id=f"TXT-{sample_key}", text=sample_path.read_text(encoding="utf-8"))
+                result = parser.parse_text(file_id=f"TXT-{sample_key}", text=ticket_root_txt_sample(expected_plate, expected_count))
 
                 self.assertEqual(result.issues, [])
                 self.assertEqual(len(result.ticket_root_items), expected_count)
@@ -521,7 +507,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
 
         a516_result = parser.parse_text(
             file_id="TXT-a516hj-key-records",
-            text=REAL_TICKET_ROOT_TXT_SAMPLES["a516hj"][0].read_text(encoding="utf-8"),
+            text=ticket_root_txt_sample("云A516HJ", 11),
         )
         self.assertIn(
             ("2026-04-02 13:30:29", Decimal("57.95"), "云A516HJ"),
@@ -3417,8 +3403,8 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(result.ticket_root_items[1].exit_station, "云南昆明北站")
 
     def test_ticket_root_document_parser_default_ocr_extractor_reads_image_text(self) -> None:
-        from PIL import Image
         import fin_ops_platform.services.etc_document_parsers as parsers
+        from PIL import Image
 
         class FakeRapidOCR:
             def __call__(self, _content: bytes) -> tuple[list[list[object]], object]:
@@ -3520,8 +3506,8 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(result.credit_card_items[0].description, "财付通-贵州黔通智联高速通行费")
 
     def test_credit_card_statement_image_pdf_falls_back_to_layout_ocr(self) -> None:
-        from PIL import Image
         import fin_ops_platform.services.etc_document_parsers as parsers
+        from PIL import Image
 
         class FakeRapidOCR:
             def __call__(self, _content: bytes) -> tuple[list[list[object]], object]:

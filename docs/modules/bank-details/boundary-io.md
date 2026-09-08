@@ -1,6 +1,6 @@
 # 银行明细模块边界与 I/O
 
-日期：2026-08-14
+日期：2026-09-08（同时间顺序修复本地实施中，未发布）
 
 ## 模块化状态
 
@@ -20,6 +20,7 @@
 - 候选确认/撤销、人工分类覆盖/清除的 canonical category fact、event 和 audit；人工覆盖原子替换旧 active category/confirmation，并在所有消费端优先于当前自动规则；有效标签变化时，同一事务通过正式 relation command/repository 重冻结受影响 active 普通关系的配对要求。
 - 当前页面写成功后的一次 direct GET 重新读取。
 - 页面头部手动刷新重新读取账户、自动标签规则和当前筛选流水；不执行浏览器 reload，不触发其它页面或 read model I/O。
+- 在同一只读快照中对完整候选日/同时间组判定余额衔接，统一列表、分页、账户末余额与导出顺序；判定结果仅属于本次请求，不写回 canonical facts。
 
 ### 不负责
 
@@ -37,7 +38,7 @@
 | 页面默认年份 | `BankDetailsPage` | 首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务年；用户已有选择继续按既有 session 合同恢复。 |
 | 流水查询 | `GET /api/bank-details/transactions` | `account_key`、日期、keyword、分类层级、page、page_size；page 从 1 开始，page_size 为 1..500。所有过滤、排序和分页在 SQL 完成。 |
 | 导出查询 | `GET /api/bank-details/transactions/export` | `mode=all|account` 与同一筛选合同；复用 canonical query，读取上限为 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1`，超限返回业务错误。 |
-| canonical 银行事实 | `app.bank_transactions` | 只读取 active/有效流水；保留 legacy/canonical identity、账户 identity、方向、金额、余额、银行文本和时间语义。 |
+| canonical 银行事实 | `app.bank_transactions` | 只读取 active/有效流水；保留 legacy/canonical identity、账户 identity、方向、numeric 金额/余额、银行文本和实际 `trade_time`/`txn_date`。排序证据由完整同账户、同币种候选日提供，不能先被 keyword、分类或分页截断。 |
 | 分类与确认事实 | `app.bank_transaction_categories`、`app.bank_transaction_category_confirmations`、settings 标签规则 | active confirmation 只用于候选确认；`source=manual, manual_assignment=true` 是持久人工覆盖并优先于当前自动规则，清除后才重新暴露当前自动结果；不读取 `read_model.bank_detail_rows`。 |
 | 分类写闭环 | 当前 effective category + 同一 settings snapshot + active relation | 分类事实、relation requirement metadata 与 relation history 在同一 PostgreSQL 事务提交；无标签变化或无 active relation 时短路。单独保存 OA/发票 requirement 时由 bank-flow settings-maintenance job 按变化 tag proof 增量更新关系，不进入本页面分类写事务。 |
 | 正式关系事实 | `app.workbench_pair_relations` | 只读取 `status=active`；按当前可见/导出目标 legacy + canonical row IDs 做 bounded overlap；排除 `turnover_manual_closure`，不读取 `read_model.workbench_relation*`。 |
@@ -48,18 +49,30 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| accounts payload | Bank Details 页面 | `accounts`、余额汇总、币种汇总与缺失余额计数来自有界 SQL 聚合；不含 read-model/status/source/job 字段。 |
-| transactions payload | Bank Details 页面 | `rows`、`statistics`、`category_counts`、pagination 和展示标签字典；rows/summary/facets/relations 在同一个 `REPEATABLE READ READ ONLY` snapshot 中一致。列表只输出 effective/auto/candidate/relationship 展示字段；旧 `category_*` / `manual_category_*` 重复别名、自动规则 evidence 和标签匹配 rules/account scope 不进入页面 DTO。 |
-
-`statistics` 只包含流水总数、支出、收入、已分类和未分类数量；旧“已关联/未关联”统计字段不再属于页面输出合同。
+| accounts payload | Bank Details 页面 | `accounts`、余额汇总、币种汇总与缺失余额计数来自有界 SQL 聚合。每账户必含 `balance_status`：confirmed、last_known、unresolved 或 missing；只有完整确认的币种返回总余额；不含 read-model status/source/job 字段。详见账户余额模块合同。 |
+| transactions payload | Bank Details 页面 | `rows`、`statistics`、`category_counts`、pagination 和展示标签字典；rows/summary/facets/relations 在同一个 `REPEATABLE READ READ ONLY` snapshot 中一致。每行必含 `same_time_order_status`：time、balance_chain 或 unresolved；保留 effective/auto/candidate/relationship 字段。旧 `category_*` / `manual_category_*` 重复别名、自动规则 evidence 和标签匹配 rules/account scope 不进入页面 DTO。 |
 | relation tags | 页面/导出 | 只反映 active canonical relation membership；候选、withdrawn relation、Workbench raw payload 和 relation projection 不进入页面事实。 |
-| 导出文件 | 有导出权限的用户 | 复用同一筛选与 relation 语义；服务端生成 XLSX，不先向浏览器加载全量 rows。 |
+| 导出文件 | 有导出权限的用户 | 复用同一筛选、顺序与 relation 语义；保留原列名称、相对顺序、原始金额和 sheet 分组，仅在末尾追加“同时间顺序说明”。服务端生成 XLSX；保留下载权限和下载审计。 |
 | 分类/规则写响应 | 当前页面 | 保留 `changed`、`affected_months`、version、error/message 等业务字段；不返回 freshness target、refresh job、operation barrier 或 202 refreshing envelope。 |
 | relation requirement delta | workbench-relations owner | 仅 changed case 的 canonical metadata/history；数据库提交后才发布同 case 进程镜像增量。失败整体回滚，不发页面通知、不写 dirty/outbox。 |
 | 写后重读 | 当前页面 | 成功后只触发一次当前 query GET；不轮询、不等待 worker、不触发页面 RM fan-out。 |
 | 页面手动刷新 | 当前页面 | 并发重新读取账户、自动标签规则和当前筛选流水；保留页面筛选条件，不写 canonical facts。 |
 
 金额和余额的页面文本统一为无千分位两位小数；keyword 搜索直接包含 canonical 金额/余额文本，不生成分组格式的重复搜索值。
+
+`statistics` 只包含流水总数、支出、收入、已分类和未分类数量；旧“已关联/未关联”统计字段不再属于页面输出合同。组内顺序状态不影响行数、金额统计、分类或关系。
+
+## 同时间顺序合同
+
+- `bank_account_balance_canonical_rows.py` 提供账户聚合及闭合锚点所需的既有账户事实输入，列表排序复用 classifier base；`bank_transaction_ordering_sql.py` 提供共享币种归一和固定内部别名的顺序 SQL CTE，不执行连接 I/O，不接受用户 SQL 标识符。
+- 完整同时间组用 `balance - signed_amount → balance` 建边，验证正金额、方向与 signed amount 一致以及组连通性。逐笔顺序仅对每个余额节点出边不超过一条的无分支组遍历，覆盖全部且不重复时返回 `balance_chain`；分支组不搜索排列，可独立确认终点余额，逐笔顺序仍为 `unresolved`。
+- 开放组的终点由完整组的进入/离开次数与连通性证明，不要求更早历史连续。闭合组只接受紧邻前一时点单笔、非空、同币种且具备具体时间的余额作为起点，不递归回溯补证据。
+- 同账户、同币种、同日多笔且至少一笔缺具体时间时，该日各行均为 `unresolved`；只有日期的单笔保留真实日期，不制造午夜时间。更早日期歧义不否定更晚完整日期。
+- 排序键依次为实际时间的展示排序键倒序、稳定账户/币种组键、已确认组内序号倒序及稳定 ID。page keys 与最终 rows 使用完全相同的键，导出不二次排序；UUID、serial、导入批次和源行号均不证明记账先后。
+- 内容筛选可以定位候选组，但不能截断判定证据。列表先按时间倒序、账户键使用 `FETCH FIRST (offset + page_size) ROWS WITH TIES` 选覆盖本页前缀的完整时间/账户组，再从 classifier 的 `base` 补齐候选日期，完成日期精度检查后只对目标时间组判定；最终 page keys 才应用组内顺序与分页。summary/facets 仍统计全部命中行。
+- 排序输入复用 classifier `base` 已有 `account_key`，币种归一共用 `BANK_NORMALIZED_CURRENCY_SQL`；不额外计算账户 hash。仅闭合组需要紧邻历史锚点时访问完整账户历史。按 canonical identity 一笔事实最多连接一条顺序结果，不丢弃未确认记录，不新增账户 key、持久化顺序、schema、cache 或 worker。
+- 必填顺序字段仅在银行公共列表/导出的 `_ordered_transactions_payload` 添加；原业务 `_transactions_payload` 分类映射保持原状，Workbench 等分类消费者不需要该字段，也不产生顺序证据查询。
+- 页面独立记录账户、流水、标签统计与规则请求错误，取消/过期请求不得提交结果。已覆盖切账户晚返回、账户失败被流水成功清除和旧 header 刷新覆盖新规则读取三种竞态。两个 HTTP 请求仍各自拥有数据库快照，不承诺并发写入期间跨请求的绝对同一时点。
 
 ## Snapshot 与查询次数
 
@@ -76,6 +89,7 @@
 - 内部转账匹配使用 SQL `±2 days` bounded context；自动规则只为实际使用的匹配字段构建文本 normalization。
 - 账户和精确日期先限定页面目标行；合法金额 keyword 在确认不可能命中配置标签文案后，可把 canonical 金额/余额及既有可搜索原始字段下推到规则分类候选。内部转账仍保留完整 bounded context，最终完整筛选不得删除。
 - 查询次数 guard 位于 `tests/test_bank_details_canonical_query.py`。
+- 候选组缩减是请求内 SQL 优化，不改变筛选/统计或证据完整性；实际扫描量、EXPLAIN 与尾延迟继续按修复计划验收，不能由固定查询数或局部测试推导性能通过。
 
 ## 文件范围
 
@@ -84,9 +98,11 @@
 | Frontend | `web/src/pages/BankDetailsPage.tsx`、`web/src/features/bankDetails/*` |
 | Route | `backend/src/fin_ops_platform/app/routes_bank_details.py` |
 | Query service/repository | `backend/src/fin_ops_platform/services/bank_details_canonical_query.py` |
+| 共享排序/账户 SQL | `backend/src/fin_ops_platform/services/bank_transaction_ordering_sql.py`、`bank_account_balance_canonical_rows.py` |
+| Export | `backend/src/fin_ops_platform/services/bank_details_export_service.py` |
 | Application/write service | `bank_details_application_service.py`、`bank_category_relation_closure_service.py`、`bank_details_service.py`、`bank_transaction_category_mutation_writer.py`、`bank_transaction_auto_category_service.py` |
 | Runtime wiring | `backend/src/fin_ops_platform/app/server.py`，只允许最小依赖组装 |
-| Tests | `tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_routes.py`、`tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetails*.test.*`、`web/e2e/bank-details-*.spec.ts` |
+| Tests | `tests/test_bank_same_time_ordering_postgres.py`、`tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_routes.py`、`tests/test_bank_details_export_service.py`、`tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetails*.test.*`、`web/e2e/bank-details-*.spec.ts` |
 
 ## 依赖方向
 
@@ -96,6 +112,7 @@
 
 ## 跨页面清理结果
 
+- 全仓调用扫描后删除 `BankDetailsService.list_accounts`、`_latest_balance_transaction`、`PostgresCoreRepository.list_bank_transaction_accounts`、`PostgresStateStore` 对应 wrapper 及独占测试 fake；有效账户业务断言迁入 `tests/test_bank_same_time_ordering_postgres.py`，不保留并行本地余额算法。`label_consistent` metadata 选择继续保留。
 - `bank_detail_*`、`bank_account_balance_*` projection/repository/refresh/backfill/derived lifecycle 已删除。
 - manifest、scope policy、worker handlers/registry、App Status、RabbitMQ dispatcher 和 deploy env 中的两个页面 key 已删除。
 - 原 tagged-row 消费者已迁移到各自 canonical query boundary；`BankTransactionTagReadFacade` 和旧 repository port 已删除。
@@ -104,6 +121,6 @@
 
 ## 文档影响
 
-- 产品口径未变，不更新 `docs/product-specs/`。
+- 同时间顺序、余额状态与完整合计口径更新 `docs/product-specs/bank-turnover-and-no-oa.md`；输入事实、分类/关系写 owner、导入身份和权限不变。
 - 页面/API/运行时边界已变，更新本模块文档、`docs/app-architecture/` 与 `docs/dev/api-contracts.md`。
 - 全局 `read-model-contracts.md` 与 worker/deploy 文档已同步为清理后的合同。

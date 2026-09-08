@@ -1,5 +1,12 @@
 # 流水规则批量处理测试矩阵
 
+## 2026-09-08 真实 PostgreSQL 写边界回归
+
+- `test_reversible_relation_closure_postgres.py` 分开验证四组登记和原三组 relation UoW；不把银行规则批次套入 Workbench 伪 checkpoint。
+- `test_app_postgres_mode_integration.py` 经真实 import fact/category owner 准备合成数据，走 HTTP 规则保存→提交→详情→撤回→重复撤回。对提交及撤回均在实际 event 写入后注入异常，验证 relation/history/batch/events/幂等记录整体回滚。
+- 重复撤回核对业务字段、事件身份/数量/发生时间不变；DB upsert 的维护时间不是额外业务事件。规则审计查 durable `audit.events`，不查已停用的内存 audit 列表。
+- 验证结果及七类适用性统一记录于 [回归修复记录](../../dev/postgres-regression-repair-plan.md)。没有新增 UoW、正式接口或刷新事件。
+
 状态：covered-close。页面列表、summary、分页、详情和写后回读已切到 PostgreSQL canonical query boundary；页面 API 不再返回 read-model status/version、refresh enqueue 或 operation-barrier targets，前端不再轮询 freshness。
 
 ## 2026-09-01 三栏流水表与选择控件回归

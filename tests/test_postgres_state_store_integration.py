@@ -1,23 +1,21 @@
 from __future__ import annotations
 
+import json
+import unittest
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
-from psycopg.errors import ObjectNotInPrerequisiteState
-
-from fin_ops_platform.postgres import migrate
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
+from fin_ops_platform.postgres import migrate
+from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.etc_reconciliation_models import (
     EtcReconciliationTaskStatus,
     SourceFileKind,
 )
-from fin_ops_platform.services.background_job_service import BackgroundJobService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import (
     EtcBatch,
@@ -27,6 +25,8 @@ from fin_ops_platform.services.etc_service import (
     EtcInvoiceStatus,
     EtcService,
 )
+from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportService, FileImportSession
+from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
@@ -38,8 +38,6 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_protocol import SettingsAccessControlCommitOutcomeUnknown
-from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportService, FileImportSession
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.tax_certified_import_service import (
     TaxCertifiedImportBatch,
     TaxCertifiedImportPreviewFile,
@@ -47,8 +45,13 @@ from fin_ops_platform.services.tax_certified_import_service import (
     TaxCertifiedImportSession,
     TaxCertifiedInvoiceRecord,
 )
-
-from postgres_test_utils import apply_test_migrations, fetch_scalar, require_postgres_test_database_url, truncate_test_database
+from postgres_test_utils import (
+    apply_test_migrations,
+    fetch_scalar,
+    require_postgres_test_database_url,
+    truncate_test_database,
+)
+from psycopg.errors import ObjectNotInPrerequisiteState
 
 
 class PostgresStateStoreIntegrationTests(unittest.TestCase):
@@ -61,6 +64,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         truncate_test_database(self.database_url)
         self._temp_dir = TemporaryDirectory()
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
+        self.addCleanup(self.connection.close)
         self.store = PostgresStateStore(data_dir=Path(self._temp_dir.name), connection=self.connection)
 
     def tearDown(self) -> None:
@@ -98,11 +102,11 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             """
             insert into app.bank_transactions(
                 id, legacy_mongo_id, account_no, txn_direction, amount, signed_amount,
-                txn_date, txn_month, source_unique_key, data_fingerprint, status
+                txn_date, txn_month, source_unique_key, data_fingerprint, status, counterparty_name_raw
             ) values (
                 '00000000-0000-0000-0000-000000000901', 'guarded-bank-1', '62220001',
                 'outflow', 100.00, -100.00, '2026-08-09', '2026-08-01',
-                'guarded-bank-key-1', 'guarded-bank-fingerprint-1', 'active'
+                'guarded-bank-key-1', 'guarded-bank-fingerprint-1', 'active', 'Synthetic vendor'
             )
             """
         )
@@ -137,8 +141,8 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         assert correction is not None
         self.assertEqual(correction["actor_id"], "YNSYLP005")
         self.assertEqual(correction["reason"], "银行回单修正")
-        self.assertEqual(str(correction["before_value"]["amount"]), "100.00")
-        self.assertEqual(str(correction["after_value"]["amount"]), "200.00")
+        self.assertEqual(Decimal(str(correction["before_value"]["amount"])), Decimal("100.00"))
+        self.assertEqual(Decimal(str(correction["after_value"]["amount"])), Decimal("200.00"))
 
         with self.assertRaisesRegex(ObjectNotInPrerequisiteState, "append-only"):
             self.connection.execute(
@@ -186,10 +190,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             with lost_ack_store.begin_settings_acl_critical_section(1) as critical_section:
                 critical_section.commit(
                     {
-                        "allowed_usernames": ["YNSYLP005", "FULL001"],
-                        "readonly_export_usernames": [],
-                        "admin_usernames": ["YNSYLP005"],
-                        "full_access_usernames": ["FULL001"],
+                        "page_access_accounts": [{"username": "FULL001", "page_keys": ["bank-details"]}],
                     },
                     {"mutation_id": mutation_id, "actor_id": "YNSYLP005", "request_id": "integration"},
                 )
@@ -197,7 +198,8 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         recovery = lost_ack_store.recover_settings_acl_commit(mutation_id)
         self.assertTrue(recovery["audit_present"])
         self.assertEqual(recovery["access_control"]["access_control_version"], 2)
-        self.assertEqual(recovery["access_control"]["full_access_usernames"], ["FULL001"])
+        self.assertEqual(recovery["access_control"]["page_access_accounts"], [{"username": "FULL001", "page_keys": ["bank-details"]}])
+        self.assertNotIn("full_access_usernames", recovery["access_control"])
 
     def test_manual_category_clear_executes_json_update_and_returns_to_unmatched_fact(self) -> None:
         repository = PostgresBankTransactionCategoryRepository(self.connection)
@@ -668,7 +670,17 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             ),
         )
 
-        reset_result = self.store.reset_bank_transaction_data()
+        impact = self.store.preview_settings_data_reset("reset_bank_transactions")["impact_fingerprint"]
+        receipt_id, job_id = "00000000-0000-0000-0000-000000000902", "synthetic-bank-reset"
+        self.connection.execute("""INSERT INTO job.settings_data_reset_recovery_receipts
+            (receipt_id,action,impact_fingerprint,restore_point_run_id,dump_sha256,dump_size_bytes,
+             created_by,valid_until,consumed_by_job_id,consumed_at)
+            VALUES (%s,'reset_bank_transactions',%s,%s,%s,1,'synthetic-test',now()+interval '1 hour',%s,now())""",
+            (receipt_id, impact, job_id, "a" * 64, job_id))
+        reset_result = self.store.reset_bank_transaction_data(
+            reset_context={"impact_fingerprint": impact, "recovery_receipt_id": receipt_id,
+                           "job_id": job_id, "actor_id": "synthetic-test", "reason": "Synthetic cleanup intent test"},
+        )
 
         self.assertEqual(reset_result["file_import_files"], 1)
         self.assertEqual(reset_result["stored_import_file_paths"], [missing_path])
@@ -990,11 +1002,11 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "1",
         )
         self.assertEqual(
-            fetch_scalar(
+            Decimal(fetch_scalar(
                 self.database_url,
                 "select total_amount from app.etc_business_batches where business_batch_id = 'etc_business_batch_0001';",
-            ),
-            "100.00",
+            )),
+            Decimal("100.00"),
         )
 
         reloaded_service = EtcService(state_store=self.store)

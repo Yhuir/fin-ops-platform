@@ -11,6 +11,7 @@
 - `spec-first-e2e-inventory.md`：页面、功能和跨页面链路的 Spec-first E2E 审计队列。
 - `testing-closure-dependency-map.md`：页面/API/read model/worker/domain event 的测试闭环依赖地图。
 - `testing-closure-state.md`：测试闭环 master goal 的模块状态和下一步队列。
+- [PostgreSQL 回归失败修复计划](postgres-regression-repair-plan.md)：现金合并后全量测试的 6 failure / 44 error / 5 skip 根因、测试库生命周期、旧测试清理、owner 边界和验证顺序；2026-09-08 仅分析与计划，未执行修复。
 
 ## 接口和契约
 
@@ -23,4 +24,5 @@
 
 ## 待批准功能实施
 
+- [银行同时间流水与余额修复计划](bank-same-time-ordering-repair-plan.md)：统一列表/导出/账户余额的顺序依据、明确未确认和最后已知余额、控制查询性能与旧代码清理；2026-09-08 设计阶段，未实现或发布。
 - [现金模块实施计划](cash-module-implementation-plan.md)：现金分支的开发顺序、执行单元、旧链路处理、测试/性能与复审；[技术详细设计](cash-module-technical-design.md)集中维护后端/API/数据库/事务，配套[业务总设计](../product-specs/cash-module-design.md)与[UI/Make 交接](../product-specs/cash-module-ui-spec.md)。不使用 GSD，未批准前不实施。

@@ -10,6 +10,7 @@ from tests.postgres_test_utils import (
     fetch_scalar,
     require_postgres_test_database_url,
     reset_test_database,
+    restore_current_test_database,
 )
 
 MIGRATION_SQL = (
@@ -19,6 +20,11 @@ MIGRATION_SQL = (
 
 
 class WorkbenchAnomalyReviewerIdentityMigrationPostgresIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.database_url = require_postgres_test_database_url()
+        cls.addClassCleanup(restore_current_test_database, cls.database_url)
+
     def setUp(self) -> None:
         self.database_url = require_postgres_test_database_url()
         reset_test_database(self.database_url)

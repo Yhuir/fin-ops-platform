@@ -5,6 +5,13 @@
 - Route：`/bank-details`
 - Page key：`bank-details`
 
+## 同时间顺序与余额
+
+- [同时间流水顺序与账户余额修复](../../dev/bank-same-time-ordering-repair-plan.md)：2026-09-08 本地实现与验证进行中，未发布；本目录记录配套代码合同，实际验收及剩余风险以计划执行记录为准。
+- 同账户、同币种、同实际时间的完整流水组，复用共享 SQL 判断账后余额衔接；分页、搜索和导出使用同一顺序。`same_time_order_status` 区分普通时间顺序、余额衔接确认和待核实。
+- 列表只对覆盖当前页前缀的完整时间组判定顺序，完整候选日期仍参与缺时间检测；复用 classifier 已有 `account_key`，不增加身份 hash 计算。旧本地账户读取方法及其 wrapper 已删除，有效断言迁入真实 PostgreSQL 测试。
+- 账户余额独立输出 `confirmed`、`last_known`、`unresolved`、`missing`；存在未确认账户的币种不输出部分合计充当总余额。
+
 ## 修改前必读
 
 - `docs/product-specs/bank-turnover-and-no-oa.md`
@@ -21,6 +28,8 @@
 - `backend/src/fin_ops_platform/app/routes_bank_details.py`
 - `backend/src/fin_ops_platform/services/bank_details_application_service.py`
 - `backend/src/fin_ops_platform/services/bank_details_canonical_query.py`
+- `backend/src/fin_ops_platform/services/bank_transaction_ordering_sql.py`
+- `backend/src/fin_ops_platform/services/bank_account_balance_canonical_rows.py`
 - `backend/src/fin_ops_platform/services/bank_details_service.py`
 - `backend/src/fin_ops_platform/services/bank_transaction_category_mutation_writer.py`
 
@@ -32,8 +41,9 @@
 - route 只负责鉴权、参数解析与 HTTP 映射；查询组合由 `BankDetailsCanonicalQueryService` 负责，SQL 由 `PostgresBankDetailsCanonicalQueryRepository` 负责。
 - rows、statistics、category counts 与当前页关系标签在同一个 `REPEATABLE READ READ ONLY` snapshot 中读取。
 - 正式关系只读取 `app.workbench_pair_relations` 中 `status=active` 的事实；关系 overlap 查询只接收当前可见或导出目标流水 IDs，不读取 Workbench 页面 payload、`workbench_relation` projection 或其它页面 read model。
-- 账户列表和余额直接以有界 SQL 聚合 canonical `app.bank_transactions`，保留账户 identity、最新余额、最新流水、币种和空余额账户语义，不在 Python 或浏览器全量聚合。
+- 账户列表和余额直接以有界 SQL 聚合 canonical `app.bank_transactions`；账户事实输入保留既有 identity、metadata 一致性，币种归一与列表排序共用空币种按 CNY 的原规则。余额取共享判定的可靠末余额，无法确认时保留账户并明确状态，不在 Python 或浏览器全量聚合。
 - 页面响应不再携带 `read_model_status`、`source_versions`、refresh scope/job/barrier；前端不轮询。loading、empty、error 与用户重试仍是可观察状态。
+- 账户、流水、标签统计和规则分别保存请求错误；切换账户或刷新后的过期结果不得覆盖当前内容，任一成功请求不得清除其他请求的失败。
 - 分类、候选确认和人工补分类继续走 canonical fact、审计和定向写入；effective 标签实际变化时，同一事务重冻结既有 active 普通关系的 requirement metadata/history。页面仍只重新 GET 一次，不通知关联台、不产生跨页 refresh。
 
 旧 `bank_detail` / `bank_account_balance` read model、worker、下游 tagged-row ports、backfill 和部署单元已在跨页面清理中删除。历史 migration/表暂留作回滚证据，不存在页面或 worker 运行时调用方。

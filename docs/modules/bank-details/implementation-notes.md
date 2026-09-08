@@ -1,5 +1,16 @@
 # 银行明细 实施记录
 
+## 2026-09-08 - 同时间排序与账户末余额共享判定
+
+- 目标：修复同时间多笔流水由随机 ID 决定列表顺序、账户由另一套 serial/ID 规则选余额的问题；保留原始时间、金额、余额、导入身份、分类和正式关系。
+- 决策：账户聚合保留 `bank_account_balance_canonical_rows.py` 的事实输入，新增窄 `bank_transaction_ordering_sql.py` 只生成请求内 SQL CTE。列表按时间/账户 WITH TIES 选本页前缀完整组，从 classifier base 补齐候选日期做精度检测，再仅判定目标组；复用已有 account_key，不额外算 hash。账户仅判定最新/最后非空组，闭合历史锚点才访问完整历史。page keys、最终 rows 与导出统一排序，不新增 schema、顺序持久化、账户 key、cache、worker 或依赖。
+- 算法边界：以精确 numeric 前/后余额关系、进入/离开次数与连通性证明组终点；完整逐笔顺序只确认无分支且覆盖全部成员的组。分支不搜索排列，闭合组只接受紧邻前一时点单笔、非空、同币种且有具体时间的起点证据。缺时间日期整体歧义，不造午夜。
+- 输出变化：银行页面/导出增加 `same_time_order_status`，账户增加 `balance_status` 和完整合计规则；公共列表/导出通过 `_ordered_transactions_payload` 附加顺序状态，原业务 mapper 保持不变，共享分类映射及 Workbench 等调用方不引入排序 I/O。XLSX 仅追加末尾说明列，下载审计继续执行。
+- 前端决策：复用现有刷新入口，分别保存账户、流水、标签统计和规则失败；取消或过期请求不能提交状态。已复现并修复切账户晚返回、账户错误被流水成功清除、旧 header 刷新覆盖规则新读取三种竞态。缺失 API 状态提示刷新，不默认为 confirmed；last_known、unresolved、missing 与 null/真实零分别展示。
+- 文档影响：同步两个银行模块的 README/boundary/state/tests，以及 API 契约和银行业务口径；上游导入/分类/关系写边界不变。
+- 验证：前端全量已有 96 文件/1249 项通过；最后一项规则竞态回归加入后银行专项 75 项、build 与 6 项相关浏览器测试通过。真实 PostgreSQL 29 项已有一轮通过，后续重跑与 SQL 测量继续以[修复计划](../../dev/bank-same-time-ordering-repair-plan.md)实际记录为准。本地验证中，未发布，不以固定查询数或此前通过宣称最终性能通过。
+- 旧链清理：全仓调用扫描后删除 `BankDetailsService.list_accounts/_latest_balance_transaction`、`PostgresCoreRepository.list_bank_transaction_accounts`、`PostgresStateStore` 对应 wrapper 及独占测试 fake；有效旧账户断言迁入 `tests/test_bank_same_time_ordering_postgres.py`。正式 accounts 统一使用共享组末余额结果，账户 metadata 一致性选择继续保留。
+
 ## 2026-08-18 - 分类投影跨页一致性闭环
 
 - 成本统计与 Workbench matching 复用 Bank Details owner 的有界 canonical SQL 分类投影，不再分别维护 Python 有效分类算法。

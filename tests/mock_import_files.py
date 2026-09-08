@@ -7,6 +7,19 @@ from typing import Any
 from openpyxl import Workbook
 
 
+def ticket_root_txt_sample(vehicle_plate: str, row_count: int) -> str:
+    """Synthetic clipboard-format TXT; no personal desktop or business file dependency."""
+    rows = [
+        ("2026-04-02 13:30:29", "57.95"),
+        ("2026-04-02 11:25:48", "88.86"),
+        *[(f"2026-04-03 10:{index:02d}:00", "12.30") for index in range(row_count - 2)],
+    ]
+    return f"收费公路通行费电子发票服务平台\n按行程查看\n车牌号：{vehicle_plate}\n202604\n入口收费站/出口收费站\n" + "\n".join(
+        f"交易时间：{occurred_at}交易金额：￥{amount}查看发票 发票下载 发票转发\n云南\n测试入口站\n云南\n测试出口站\n发票数量：1"
+        for occurred_at, amount in rows
+    )
+
+
 @dataclass(frozen=True)
 class MockImportFile:
     name: str

@@ -52,16 +52,6 @@ class _ContextBankTransactionRepository(_PagedBankTransactionRepository):
         return list(self.context_rows)
 
 
-class _BankAccountRepository:
-    def __init__(self, rows: list[dict[str, object]]) -> None:
-        self.rows = rows
-        self.calls: list[dict[str, object]] = []
-
-    def list_bank_transaction_accounts(self, **kwargs: object) -> list[dict[str, object]]:
-        self.calls.append(dict(kwargs))
-        return list(self.rows)
-
-
 class _CanonicalRelationReader:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self._rows = rows
@@ -173,66 +163,6 @@ class BankDetailsServiceTests(unittest.TestCase):
             ),
         ]
 
-    def test_accounts_group_by_bank_and_last4_with_latest_balances(self) -> None:
-        service = BankDetailsService(
-            _ImportServiceStub(
-                [
-                    BankTransaction(
-                        id="txn-1",
-                        account_no="6222000011116386",
-                        txn_direction=TransactionDirection.OUTFLOW,
-                        counterparty_name_raw="供应商A",
-                        amount=Decimal("100.00"),
-                        signed_amount=Decimal("-100.00"),
-                        txn_date="2026-04-01",
-                        trade_time="2026-04-01 09:00:00",
-                        balance=Decimal("900.00"),
-                        imported_bank_name="工商银行",
-                        imported_bank_last4="6386",
-                    ),
-                    BankTransaction(
-                        id="txn-2",
-                        account_no="6222000011116386",
-                        txn_direction=TransactionDirection.INFLOW,
-                        counterparty_name_raw="客户A",
-                        amount=Decimal("50.00"),
-                        signed_amount=Decimal("50.00"),
-                        txn_date="2026-04-03",
-                        trade_time="2026-04-03 09:00:00",
-                        balance=Decimal("950.00"),
-                        imported_bank_name="工商银行",
-                        imported_bank_last4="6386",
-                    ),
-                    BankTransaction(
-                        id="txn-3",
-                        account_no="6222000011111410",
-                        txn_direction=TransactionDirection.OUTFLOW,
-                        counterparty_name_raw="供应商B",
-                        amount=Decimal("20.00"),
-                        signed_amount=Decimal("-20.00"),
-                        txn_date="2026-04-02",
-                        trade_time="2026-04-02 09:00:00",
-                        balance=None,
-                        imported_bank_name="工商银行",
-                        imported_bank_last4="1410",
-                    ),
-                ]
-            )
-        )
-
-        payload = service.list_accounts(date_from="2026-04-03", date_to="2026-04-03")
-
-        self.assertEqual(len(payload["accounts"]), 2)
-        account_6386 = next(account for account in payload["accounts"] if account["account_last4"] == "6386")
-        account_1410 = next(account for account in payload["accounts"] if account["account_last4"] == "1410")
-        self.assertEqual(account_6386["latest_balance"], "950.00")
-        self.assertEqual(account_6386["transaction_count"], 1)
-        self.assertFalse(account_1410["has_balance"])
-        self.assertEqual(account_1410["transaction_count"], 0)
-        self.assertEqual(payload["total_balance"], "950.00")
-        self.assertEqual(payload["balance_account_count"], 1)
-        self.assertEqual(payload["missing_balance_account_count"], 1)
-
     def test_transactions_use_sql_paged_repository_when_available(self) -> None:
         transaction = self._transaction(
             transaction_id="txn-sql-1",
@@ -249,77 +179,6 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(repository.calls[0]["page"], 4)
         self.assertEqual(repository.calls[0]["page_size"], 25)
         self.assertEqual(repository.calls[0]["keyword"], "供应商")
-
-    def test_accounts_use_sql_account_repository_when_available(self) -> None:
-        repository = _BankAccountRepository(
-            [
-                {
-                    "bank_name": "交通银行",
-                    "account_last4": "3847",
-                    "transaction_count": 51,
-                    "latest_balance": Decimal("16091.81"),
-                    "latest_balance_at": "2026-04-23 17:33:58",
-                },
-                {
-                    "bank_name": "建设银行",
-                    "account_last4": "8106",
-                    "transaction_count": 12,
-                    "latest_balance": Decimal("139098.31"),
-                    "latest_balance_at": "2026-04-23 17:10:27",
-                },
-            ]
-        )
-        service = BankDetailsService(_ExplodingImportService(), fact_repository=repository)
-
-        payload = service.list_accounts(date_from="2026-01-01", date_to="2026-12-31")
-
-        self.assertEqual(repository.calls, [{"date_from": "2026-01-01", "date_to": "2026-12-31"}])
-        self.assertEqual([account["display_name"] for account in payload["accounts"]], ["交通银行 3847", "建设银行 8106"])
-        self.assertEqual(payload["accounts"][0]["transaction_count"], 51)
-        self.assertEqual(payload["accounts"][0]["latest_balance"], "16091.81")
-        self.assertEqual(payload["total_balance"], "155190.12")
-        self.assertEqual(payload["balance_account_count"], 2)
-        self.assertEqual(payload["missing_balance_account_count"], 0)
-
-    def test_accounts_transaction_count_respects_date_range(self) -> None:
-        service = BankDetailsService(
-            _ImportServiceStub(
-                [
-                    self._transaction(
-                        transaction_id="txn-before",
-                        trade_time="2026-03-31 09:00:00",
-                        account_last4="6386",
-                    ),
-                    self._transaction(
-                        transaction_id="txn-in-range-1",
-                        trade_time="2026-04-01 09:00:00",
-                        account_last4="6386",
-                    ),
-                    self._transaction(
-                        transaction_id="txn-in-range-2",
-                        trade_time="2026-04-30 09:00:00",
-                        account_last4="6386",
-                    ),
-                    self._transaction(
-                        transaction_id="txn-after",
-                        trade_time="2026-05-01 09:00:00",
-                        account_last4="6386",
-                    ),
-                    self._transaction(
-                        transaction_id="txn-other-account",
-                        trade_time="2026-03-30 09:00:00",
-                        account_last4="1410",
-                    ),
-                ]
-            )
-        )
-
-        payload = service.list_accounts(date_from="2026-04-01", date_to="2026-04-30")
-
-        account_6386 = next(account for account in payload["accounts"] if account["account_last4"] == "6386")
-        account_1410 = next(account for account in payload["accounts"] if account["account_last4"] == "1410")
-        self.assertEqual(account_6386["transaction_count"], 2)
-        self.assertEqual(account_1410["transaction_count"], 0)
 
     def test_transactions_filter_by_account_and_date_with_direction_label(self) -> None:
         service = BankDetailsService(

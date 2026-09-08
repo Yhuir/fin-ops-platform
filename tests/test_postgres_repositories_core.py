@@ -527,16 +527,6 @@ class PagedFactConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
-        if "with normalized as" in normalized and "from app.bank_transactions" in normalized and "latest_balances" in normalized:
-            return [
-                {
-                    "bank_name": "交通银行",
-                    "account_last4": "3847",
-                    "transaction_count": 51,
-                    "balance": "16091.81",
-                    "latest_balance_at": "2026-04-23 17:33:58+08",
-                }
-            ]
         if "from app.invoices" in normalized:
             assert "limit %s offset %s" in normalized
             return [
@@ -749,26 +739,6 @@ def test_core_repository_restores_imported_bank_identity_from_normalized_payload
 
     assert transaction.imported_bank_name == "交通银行"
     assert transaction.imported_bank_last4 == "3847"
-
-
-def test_core_repository_lists_bank_transaction_accounts_with_sql_aggregation() -> None:
-    connection = PagedFactConnection()
-    repository = PostgresCoreRepository(connection)
-
-    accounts = repository.list_bank_transaction_accounts(date_from="2026-01-01", date_to="2026-12-31")
-
-    assert accounts == [
-        {
-            "bank_name": "交通银行",
-            "account_last4": "3847",
-            "transaction_count": 51,
-            "latest_balance": Decimal("16091.81"),
-            "latest_balance_at": "2026-04-23",
-        }
-    ]
-    sql, params = connection.fetch_all_calls[0]
-    assert "filtered_counts" in sql
-    assert params == ("2026-01-01", "2026-12-31")
 
 
 class IdentityConnection:

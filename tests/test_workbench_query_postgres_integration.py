@@ -6,6 +6,7 @@ import time
 import unittest
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
@@ -140,6 +141,11 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.database_url = require_postgres_test_database_url()
+        # The fixture and visible-time search assertions explicitly use China time.
+        # libpq applies this to every connection, independent of the host DB default.
+        timezone = patch.dict(os.environ, {"PGTZ": "Asia/Shanghai"})
+        timezone.start()
+        cls.addClassCleanup(timezone.stop)
         apply_test_migrations(cls.database_url)
 
     def setUp(self) -> None:
@@ -162,10 +168,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
 
     def _insert_canonical_fixtures(self) -> None:
         settings_payload = {
-            "allowed_usernames": ["YNSYLP005"],
-            "readonly_export_usernames": [],
-            "admin_usernames": ["YNSYLP005"],
-            "full_access_usernames": [],
+            "page_access_accounts": [],
             "access_control_version": 1,
             "bank_transaction_tags": {
                 "version": 2,

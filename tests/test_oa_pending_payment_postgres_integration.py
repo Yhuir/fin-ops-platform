@@ -1167,6 +1167,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             """
         )
 
+        watermarks_before = self.connection.fetch_all("SELECT sync_key, version, payload FROM app.oa_sync_watermarks ORDER BY sync_key")
         result = source_snapshot.commit_targeted_attachment_refresh(records=[record])
         counts = self.connection.fetch_one(
             """
@@ -1183,7 +1184,8 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(result.pending_admission_changed_scopes, ("2026-05",))
         self.assertEqual(int(counts["completed_count"]), 0)
         self.assertEqual(int(counts["pending_count"]), 1)
-        self.assertEqual(int(counts["watermark_count"]), 1)
+        self.assertEqual(int(counts["watermark_count"]), len(watermarks_before))
+        self.assertEqual(self.connection.fetch_all("SELECT sync_key, version, payload FROM app.oa_sync_watermarks ORDER BY sync_key"), watermarks_before)
         self.assertEqual(
             self.connection.fetch_one(
                 """

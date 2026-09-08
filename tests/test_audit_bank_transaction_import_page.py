@@ -1290,7 +1290,10 @@ class BankTransactionImportPageAuditPostgresTests(unittest.TestCase):
             ("a" * 64,),
         )
 
-        self.connection.execute("delete from app.bank_transactions where legacy_mongo_id = 'txn-1'")
+        with self.connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.actor_id', 'synthetic-audit-test', true)")
+            transaction.execute("select set_config('fin_ops.correction_reason', 'Synthetic orphan audit fixture', true)")
+            transaction.execute("delete from app.bank_transactions where legacy_mongo_id = 'txn-1'")
         missing_transaction = self._audit()
         self.assertIn(
             "bank_import_row_transaction_orphan",

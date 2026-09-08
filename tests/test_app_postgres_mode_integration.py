@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import os
+import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
@@ -16,8 +16,14 @@ from fin_ops_platform.services.postgres_repositories.import_audit_repair import 
     apply_import_audit_repair,
     load_import_audit_repair_snapshot,
 )
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from postgres_test_utils import (
+    apply_test_migrations,
+    fetch_scalar,
+    require_postgres_test_database_url,
+    truncate_test_database,
+)
 
-from postgres_test_utils import apply_test_migrations, fetch_scalar, require_postgres_test_database_url, truncate_test_database
 from tests.app_test_support import install_default_test_session, seed_confirmed_import
 from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN
 
@@ -33,6 +39,7 @@ def postgres_app_env(database_url: str):
         "FIN_OPS_POSTGRES_READ_POOL_ENABLED": "0",
     }
     removed = {
+        "FIN_OPS_POSTGRES_READ_DATABASE_URL",
         "FIN_OPS_OA_MONGO_URI",
         "FIN_OPS_OA_MONGO_DATABASE",
         "FIN_OPS_OA_MONGO_COLLECTION",
@@ -62,14 +69,13 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         truncate_test_database(self.database_url)
         self._temp_dir = TemporaryDirectory()
-
-    def tearDown(self) -> None:
-        self._temp_dir.cleanup()
+        self.addCleanup(self._temp_dir.cleanup)
 
     def _build_app(self):
         with postgres_app_env(self.database_url):
             app = build_application(data_dir=Path(self._temp_dir.name))
         install_default_test_session(app)
+        self.addCleanup(app.close)
         return app
 
     def test_readiness_session_and_app_health_are_secret_safe(self) -> None:
@@ -366,6 +372,17 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             ),
             "relation_created",
         )
+        app._pending_invoice_application_service._fault_injector = None
+        replay_body = json.dumps({**payload, "preview_id": preview["preview_id"], "request_id": "pg-recoverable"})
+        for _ in range(2):
+            replay = app.handle_request("POST", f"/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice", body=replay_body)
+            self.assertEqual(replay.status_code, 200, replay.body)
+        self.assertEqual(fetch_scalar(self.database_url,
+            "select status from app.pending_invoice_manual_invoice_commands where command_id = 'pg-recoverable'"), "completed")
+        relations = app._state_store.load_workbench_pair_relations()["pair_relations"]
+        active = [relation for relation in relations.values() if relation["status"] == "active"]
+        self.assertEqual(len(active), 1)
+        self.assertEqual(set(active[0]["row_ids"]), {transaction_id, invoice_id})
 
     def test_bank_auto_tag_rules_and_pending_invoice_rules_round_trip_through_their_owners(self) -> None:
         app = self._build_app()
@@ -423,12 +440,12 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
 
         self.assertEqual(noop_response.status_code, 200, noop_response.body)
         self.assertEqual(noop_payload["version"], current["version"])
-        self.assertEqual(app._audit_service.as_dicts(), [])
+        self.assertEqual(fetch_scalar(self.database_url,
+            "select count(*) from audit.events where action='bank_flow_rule_batch_tag_rules_updated'"), "0")
         self.assertEqual(
             fetch_scalar(
                 self.database_url,
-                "select count(*) from job.read_model_dirty_scopes "
-                "where scope_type = 'bank_flow_rule_batch' and scope_key = 'all';",
+                "select count(*) from job.outbox_events where event_type like '%.read_model.refresh';",
             ),
             "0",
         )
@@ -452,15 +469,87 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         self.assertEqual(
             fetch_scalar(
                 self.database_url,
-                "select count(*) from job.read_model_dirty_scopes "
-                "where scope_type = 'bank_flow_rule_batch' and scope_key = 'all';",
+                "select count(*) from job.outbox_events where event_type like '%.read_model.refresh';",
             ),
             "0",
         )
         self.assertEqual(
-            [event["action"] for event in app._audit_service.as_dicts()],
-            ["bank_flow_rule_batch_tag_rules_updated"],
+            fetch_scalar(self.database_url,
+                "select count(*) from audit.events where action='bank_flow_rule_batch_tag_rules_updated' and outcome='success'"),
+            "1",
         )
+        self.assertEqual(changed_payload["recalculation_job"]["status"], "queued")
+
+    def test_bank_flow_owner_real_postgres_submit_withdraw_replay_and_event_failure(self) -> None:
+        app = self._build_app()
+        row_id = self._create_bank_transaction(app, counterparty_name="Synthetic fee vendor")
+        connection = app._state_store._connection
+        with connection.transaction() as transaction:
+            app._state_store.bank_transaction_category_repository.apply_mutation(
+                transaction=transaction, transaction_id=row_id, mutation_type="manual_assign",
+                record={"category_code": "fee", "manual_assignment": True},
+                actor_id="synthetic-test", action="bank_detail_category_manually_assigned", metadata={},
+            )
+        current = json.loads(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules").body)
+        rules = [{**rule, "requires_oa": False, "requires_invoice": False} if rule["tag_code"] == "fee" else rule for rule in current["rules"]]
+        saved = app.handle_request("PUT", "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current["version"], "rules": rules}))
+        self.assertEqual(saved.status_code, 200, saved.body)
+        request = json.dumps({"transaction_ids": [row_id], "scope_month": "2026-05", "note": "Synthetic owner closure"})
+        tables = ("app.workbench_pair_relations", "app.workbench_pair_relation_history",
+                  "app.bank_flow_rule_batches", "app.bank_flow_rule_batch_events", "app.workbench_idempotency_records")
+
+        def persisted():
+            return {table: connection.fetch_all(f"select * from {table} order by id") for table in tables if table != "app.workbench_idempotency_records"} | {
+                "app.workbench_idempotency_records": connection.fetch_all("select * from app.workbench_idempotency_records order by idempotency_key")}
+
+        original_events = PostgresWorkbenchRepository._replace_bank_flow_rule_batch_events
+
+        def fail_after_event_write(repository, transaction, events):
+            original_events(repository, transaction, events)
+            raise RuntimeError("synthetic batch event failure")
+
+        before = persisted()
+        with patch.object(PostgresWorkbenchRepository, "_replace_bank_flow_rule_batch_events", fail_after_event_write):
+            failed = app.handle_request("POST", "/api/bank-flow-rule-batches/submit-selection", body=request)
+        self.assertEqual(failed.status_code, 500, failed.body)
+        self.assertEqual(json.loads(failed.body)["error"], "bank_flow_rule_batch_persistence_failed")
+        self.assertEqual(persisted(), before)
+
+        submitted = app.handle_request("POST", "/api/bank-flow-rule-batches/submit-selection", body=request)
+        self.assertEqual(submitted.status_code, 200, submitted.body)
+        batch = json.loads(submitted.body)["batch"]
+        self.assertEqual(batch["status"], "submitted")
+        self.assertEqual(len(connection.fetch_all("select * from app.workbench_pair_relations where status='active'")), 1)
+        detail = app.handle_request("GET", f"/api/bank-flow-rule-batches/{batch['batch_id']}")
+        self.assertEqual(detail.status_code, 200, detail.body)
+
+        withdraw_path = f"/api/bank-flow-rule-batches/{batch['batch_id']}/withdraw"
+        withdraw_body = json.dumps({"reason": "Synthetic closure cleanup"})
+        committed = persisted()
+        with patch.object(PostgresWorkbenchRepository, "_replace_bank_flow_rule_batch_events", fail_after_event_write):
+            failed = app.handle_request("POST", withdraw_path, body=withdraw_body)
+        self.assertEqual(failed.status_code, 500, failed.body)
+        self.assertEqual(json.loads(failed.body)["error"], "bank_flow_rule_batch_persistence_failed")
+        self.assertEqual(persisted(), committed)
+
+        withdrawn = app.handle_request("POST", withdraw_path, body=withdraw_body)
+        self.assertEqual(withdrawn.status_code, 200, withdrawn.body)
+        self.assertEqual(json.loads(withdrawn.body)["batch"]["status"], "withdrawn")
+        finished = persisted()
+        replay = app.handle_request("POST", withdraw_path, body=withdraw_body)
+        self.assertEqual(replay.status_code, 200, replay.body)
+        # Delta upserts may advance DB bookkeeping timestamps; business facts,
+        # event IDs/counts and the recorded occurrence times must not change.
+        for table, rows in persisted().items():
+            with self.subTest(table=table):
+                self.assertEqual(
+                    [{key: value for key, value in row.items() if key not in {"created_at", "updated_at"}} for row in rows],
+                    [{key: value for key, value in row.items() if key not in {"created_at", "updated_at"}} for row in finished[table]],
+                )
+        self.assertEqual(connection.fetch_all("select * from app.workbench_pair_relations where status='active'"), [])
+        self.assertEqual(connection.fetch_one("select count(*) as n from job.outbox_events where event_type like %s", ("%.read_model.refresh",))["n"], 0)
+        self.assertEqual(connection.fetch_one("select count(*) as n from app.bank_transactions")["n"], 1)
 
     @staticmethod
     def _create_bank_transaction(app: object, *, counterparty_name: str, credit: bool = False) -> str:
@@ -483,7 +572,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             ],
         )
         app._import_service.confirm_import(preview.id)
-        app._persist_state()
+        app._state_store.import_fact_repository.save_imports(app._import_service.persistence_snapshot_for_batches([preview.id]))
         return str(preview.row_results[0].linked_object_id)
 
     @staticmethod
@@ -505,7 +594,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             ],
         )
         app._import_service.confirm_import(preview.id)
-        app._persist_state()
+        app._state_store.import_fact_repository.save_imports(app._import_service.persistence_snapshot_for_batches([preview.id]))
         return str(preview.row_results[0].linked_object_id)
 
 

@@ -1,5 +1,9 @@
 # 待找发票测试矩阵
 
+## 2026-09-08 持久化失败恢复回归
+
+`test_app_postgres_mode_integration.py` 的 attach-existing 样例通过现有 import fact repository 落库，不再期待 `_persist_state()` 保存导入事实。测试到达 `after_relation_created` 故障点，验证 command 的 `failed_recoverable` / `last_successful_status=relation_created`，随后两次重放同一 request，确认命令完成、只保留一个 active relation 且成员精确一致。应用、事务及响应规则未修改；实际结果见 [回归修复记录](../../dev/postgres-regression-repair-plan.md)。
+
 > 页面已切换为 canonical query。旧 `pending_invoice`、search-pending、invoice-lifecycle
 > 页面 projection/worker 测试只作 Git 历史，不是当前合同。
 

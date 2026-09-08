@@ -27,6 +27,7 @@ class CashSchemaCompatibilityTests(unittest.TestCase):
             raise RuntimeError("Compatibility writes require a synthetic fin_ops_cash_test_* database")
         self.core = PostgresCoreRepository(self.connection)
         self.cash_id, account_id, category_id = (str(uuid4()) for _ in range(3))
+        self.addCleanup(self._remove_cash_fixture, account_id, category_id)
         with self.connection.transaction() as tx:
             tx.execute("INSERT INTO cash.accounts(id,name,kind,opening_date,opening_amount) VALUES(%s,'Synthetic','cash','2026-01-01',0)", (account_id,))
             tx.execute('INSERT INTO cash.categories(id,name,"group") VALUES(%s,\'Synthetic\',\'receipt\')', (category_id,))
@@ -39,8 +40,22 @@ class CashSchemaCompatibilityTests(unittest.TestCase):
     def assert_cash_unchanged(self):
         self.assertEqual(self.connection.fetch_one("SELECT * FROM cash.flows WHERE id=%s", (self.cash_id,)), self.before)
 
+    def _remove_cash_fixture(self, account_id, category_id):
+        with self.connection.transaction() as tx:
+            tx.execute("DELETE FROM cash.flows WHERE id=%s", (self.cash_id,))
+            tx.execute("DELETE FROM cash.accounts WHERE id=%s", (account_id,))
+            tx.execute("DELETE FROM cash.categories WHERE id=%s", (category_id,))
+
+    def _remove_ordinary_fixture(self, table, identity):
+        # Only constants supplied by these two fixture builders, never user input.
+        with self.connection.transaction() as tx:
+            tx.execute("SELECT set_config('fin_ops.actor_id','synthetic-test',true)")
+            tx.execute("SELECT set_config('fin_ops.correction_reason','Synthetic compatibility cleanup',true)")
+            tx.execute(f"DELETE FROM {table} WHERE legacy_mongo_id=%s", (identity,))
+
     def bank(self):
         identity = "bank-cash-compat-" + uuid4().hex
+        self.addCleanup(self._remove_ordinary_fixture, "app.bank_transactions", identity)
         return {"id": identity, "account_no": "synthetic-account", "txn_direction": "outflow",
                 "counterparty_name_raw": "Synthetic vendor", "amount": "100.00", "signed_amount": "-100.00",
                 "txn_date": "2026-01-15", "source_unique_key": identity, "data_fingerprint": identity,
@@ -87,6 +102,7 @@ class CashSchemaCompatibilityTests(unittest.TestCase):
 
     def test_invoice_existing_upsert(self):
         invoice_id, invoice_no = "invoice-cash-compat-" + uuid4().hex, str(uuid4().int)[:20]
+        self.addCleanup(self._remove_ordinary_fixture, "app.invoices", invoice_id)
         invoice = {"id": invoice_id, "invoice_type": "input", "invoice_no": invoice_no,
                    "digital_invoice_no": invoice_no, "source_unique_key": invoice_no,
                    "invoice_date": "2026-01-15", "counterparty": {"id": "synthetic-vendor", "name": "Synthetic vendor"},
@@ -106,6 +122,7 @@ class CashSchemaCompatibilityTests(unittest.TestCase):
             repository = PostgresSettingsDataResetRepository(tx)
             impact = repository.preview("reset_bank_transactions")["impact_fingerprint"]
             receipt, job = str(uuid4()), "synthetic-reset-" + uuid4().hex
+            self.addCleanup(self.connection.execute, "DELETE FROM job.settings_data_reset_recovery_receipts WHERE receipt_id=%s", (receipt,))
             tx.execute("""INSERT INTO job.settings_data_reset_recovery_receipts
                 (receipt_id,action,impact_fingerprint,restore_point_run_id,dump_sha256,dump_size_bytes,
                  created_by,valid_until,consumed_by_job_id,consumed_at)

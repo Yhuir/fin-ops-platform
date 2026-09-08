@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
+import unittest
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-import json
-import unittest
 
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
 from fin_ops_platform.services.app_settings_service import AppSettingsService
@@ -20,15 +20,16 @@ from fin_ops_platform.services.postgres_repositories.app_health_system_audit imp
 from fin_ops_platform.services.postgres_repositories.external_control_evidence import (
     PostgresExternalControlEvidenceRepository,
 )
-from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
+from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
-from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
+
 from tests.external_evidence_test_support import manifest_payload
+from tests.postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 
 
 def _inventory_payload() -> dict[str, object]:
@@ -384,9 +385,13 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
     def setUp(self) -> None:
         truncate_test_database(self.database_url)
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
+        self.addCleanup(self.connection.close)
         self._seed_clean_system()
 
     def _seed_clean_system(self) -> None:
+        self.connection.execute("""INSERT INTO audit.events(event_type,actor_id,action,page_key,operation_location,reason,outcome,payload)
+            VALUES ('audit.coverage_started','synthetic-test','enable_operation_history','operation-history',
+            'test_fixture','Synthetic audit coverage','success','{"contract_revision":"operation-audit-v1"}'::jsonb)""")
         settings = AppSettingsService._normalize_settings({}, validate_pending_invoice_tag_groups=False)
         settings = AppSettingsService._normalize_settings(settings, validate_pending_invoice_tag_groups=False)
         self.connection.execute(
@@ -433,6 +438,17 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
             connection,
             api_performance_recorder=ApiPerformanceRecorder(),
         ).build_payload()
+
+    def test_missing_coverage_marker_still_fails_closed(self) -> None:
+        # Deliberately erase only the isolated test audit fixture; do not weaken
+        # the append-only triggers or make the shared truncate helper seed it.
+        self.connection.execute("TRUNCATE audit.events")
+        report = PostgresOperationsAuditRepository(self.connection).audit_system(
+            tenant_id="default", sample_limit=20, dashboard_payload_builder=self._dashboard,
+        )
+        self.assertNotEqual(report["overall_status"], "pass")
+        self.assertEqual(report["summary"]["issue_sample_counts_by_code"], {"system_page_integrity_failed": 1})
+        self.assertEqual(report["summary"]["passed_business_page_count"], 16)
 
     def test_full_migration_clean_and_destructive_fail_closed_proof(self) -> None:
         repository = PostgresOperationsAuditRepository(self.connection)

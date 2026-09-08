@@ -9,6 +9,7 @@ import { SessionContext, type SessionContextValue } from "../contexts/SessionCon
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import type { SessionPayload } from "../features/session/api";
 import BankDetailsPage from "../pages/BankDetailsPage";
+import * as bankDetailsApi from "../features/bankDetails/api";
 import { installMockApiFetch } from "./apiMock";
 import { renderAuthenticatedAppAt } from "./renderHelpers";
 
@@ -110,6 +111,7 @@ async function editRuleLabelInDrawer(user: ReturnType<typeof userEvent.setup>, d
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -184,6 +186,172 @@ describe("Bank details page", () => {
     });
   });
 
+  test.each(["success", "failure"])("ignores late transaction %s after switching accounts", async (outcome) => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const original = await bankDetailsApi.fetchBankDetailTransactions({});
+    let finishOldRequest!: (payload: typeof original) => void;
+    let failOldRequest!: (error: Error) => void;
+    const delayed = new Promise<typeof original>((resolve, reject) => { finishOldRequest = resolve; failOldRequest = reject; });
+    vi.spyOn(bankDetailsApi, "fetchBankDetailTransactions")
+      .mockResolvedValueOnce(original)
+      .mockReturnValueOnce(delayed)
+      .mockResolvedValue({ ...original, rows: [], pagination: { ...original.pagination, total: 0 } });
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    await user.click(within(page).getByRole("button", { name: /工商银行 6386 余额/ }));
+    await user.click(within(page).getByRole("button", { name: /交通银行 3847 余额/ }));
+    await within(page).findByText("当前时间范围内没有流水。");
+    await act(async () => {
+      if (outcome === "success") finishOldRequest(original);
+      else failOldRequest(new Error("旧账户请求失败"));
+    });
+    expect(within(page).queryByText("云南溯源科技有限公司")).not.toBeInTheDocument();
+    expect(within(page).getByText("当前时间范围内没有流水。")).toBeInTheDocument();
+    expect(within(page).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  test("keeps an account refresh failure visible when transactions reload successfully", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts").mockRejectedValue(new Error("账户查询失败"));
+    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await within(page).findByText(/账户查询失败/);
+    await user.click(within(page).getByRole("button", { name: /交通银行 3847 余额/ }));
+    await within(page).findByText("当前时间范围内没有流水。");
+    expect(within(page).getByRole("alert")).toHaveTextContent("账户未更新：账户查询失败");
+  });
+
+  test("shows unresolved, missing and last-known balances without inventing a total", async () => {
+    installMockApiFetch();
+    const accounts = await bankDetailsApi.fetchBankDetailAccounts();
+    const account = accounts.accounts[0];
+    vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts").mockResolvedValue({
+      ...accounts,
+      accounts: [
+        { ...account, balanceStatus: "last_known", latestBalanceAt: "2026-09-03 17:16:44" },
+        { ...account, accountKey: "mixed", bankName: "多币种银行", displayName: "多币种银行 1001", currency: null,
+          balanceStatus: "unresolved", latestBalance: null, hasBalance: false },
+        accounts.accounts[1],
+      ],
+      totalBalance: null,
+    });
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    const historical = await within(page).findByRole("button", { name: /工商银行 6386 余额/ });
+    expect(historical).toHaveTextContent("最后已知余额 · 2026-09-03");
+    expect(historical).toHaveTextContent("130500.50");
+    const unresolved = within(page).getByRole("button", { name: /多币种银行 1001 余额/ });
+    expect(unresolved).toHaveTextContent("余额待核实");
+    expect(unresolved).not.toHaveTextContent("0.00");
+    expect(unresolved).not.toHaveTextContent("CNY");
+    expect(within(page).getByText("暂无法确定完整总余额")).toBeInTheDocument();
+    expect(within(page).getByText("3 个账户余额未确认")).toBeInTheDocument();
+    expect(page.querySelector(".bank-total-balance")).toHaveTextContent("—");
+  });
+
+  test("shows a confirmed zero total as zero", async () => {
+    installMockApiFetch();
+    const accounts = await bankDetailsApi.fetchBankDetailAccounts();
+    vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts").mockResolvedValue({
+      ...accounts, accounts: [{ ...accounts.accounts[0], latestBalance: "0.00" }], totalBalance: "0.00",
+    });
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByRole("button", { name: /工商银行 6386 余额 0.00/ });
+    expect(page.querySelector(".bank-total-balance")).toHaveTextContent("0.00");
+    expect(within(page).queryByText("暂无法确定完整总余额")).not.toBeInTheDocument();
+  });
+
+  test("shows the order warning only for unresolved rows and preserves date-only text", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const original = await bankDetailsApi.fetchBankDetailTransactions({});
+    const row = original.rows[0];
+    vi.spyOn(bankDetailsApi, "fetchBankDetailTransactions").mockResolvedValue({
+      ...original,
+      rows: [
+        { ...row, id: "unresolved", counterpartyName: "顺序待核对方", tradeTime: "2026-09-08", sameTimeOrderStatus: "unresolved", balance: null },
+        { ...row, id: "confirmed", counterpartyName: "顺序已确认方", sameTimeOrderStatus: "balance_chain" },
+      ],
+    });
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    const unresolvedRow = await within(page).findByRole("row", { name: /顺序待核对方/ });
+    expect(within(unresolvedRow).getByText("2026-09-08")).toBeInTheDocument();
+    expect(within(unresolvedRow).queryByText("2026-09-08 00:00:00")).not.toBeInTheDocument();
+    expect(unresolvedRow.querySelector(".bank-col-balance")).toHaveTextContent("—");
+    const warning = within(unresolvedRow).getByLabelText("同时间顺序待核实");
+    await user.hover(warning);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("请通过导入来源核对原银行明细");
+    expect(within(page).getAllByText("顺序待核实")).toHaveLength(1);
+    expect(within(within(page).getByRole("row", { name: /顺序已确认方/ })).queryByText("顺序待核实")).not.toBeInTheDocument();
+  });
+
+  test("rejects stale account results after a newer page refresh", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const original = await bankDetailsApi.fetchBankDetailAccounts();
+    let finishOldRequest!: (payload: typeof original) => void;
+    const delayed = new Promise<typeof original>((resolve) => { finishOldRequest = resolve; });
+    vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts")
+      .mockResolvedValueOnce(original).mockReturnValueOnce(delayed)
+      .mockResolvedValue({ ...original, accounts: [{ ...original.accounts[0], latestBalance: "40512.82" }], totalBalance: "40512.82" });
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await within(page).findByRole("button", { name: /工商银行 6386 余额 40512.82/ });
+    await act(async () => { finishOldRequest(original); });
+    expect(within(page).getByRole("button", { name: /工商银行 6386 余额/ })).toHaveTextContent("40512.82");
+    expect(within(page).queryByRole("button", { name: /交通银行 3847/ })).not.toBeInTheDocument();
+  });
+
+  test("keeps a transaction refresh failure visible when slower accounts succeed", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const accounts = await bankDetailsApi.fetchBankDetailAccounts();
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    let finishAccounts!: (payload: typeof accounts) => void;
+    vi.spyOn(bankDetailsApi, "fetchBankDetailAccounts").mockReturnValue(new Promise((resolve) => { finishAccounts = resolve; }));
+    vi.spyOn(bankDetailsApi, "fetchBankDetailTransactions").mockRejectedValue(new Error("流水查询失败"));
+    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await within(page).findByText("流水未更新：流水查询失败");
+    await act(async () => { finishAccounts(accounts); });
+    expect(within(page).getByRole("alert")).toHaveTextContent("流水未更新：流水查询失败");
+    expect(within(page).getByText("云南溯源科技有限公司")).toBeInTheDocument();
+    expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
+  });
+
+  test("keeps a rules reread newer than an already pending page refresh", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const original = await bankDetailsApi.fetchBankDetailTransactions({});
+    let finishOldRequest!: (payload: typeof original) => void;
+    const delayed = new Promise<typeof original>((resolve) => { finishOldRequest = resolve; });
+    vi.spyOn(bankDetailsApi, "fetchBankDetailTransactions")
+      .mockResolvedValueOnce(original).mockReturnValueOnce(delayed)
+      .mockResolvedValue({ ...original, rows: [{ ...original.rows[0], counterpartyName: "规则应用后对方" }] });
+    renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await user.click(within(page).getByRole("button", { name: "自动标签规则" }));
+    const drawer = await screen.findByRole("dialog", { name: "自动标签规则" });
+    await user.click(within(drawer).getByRole("button", { name: "重新应用规则" }));
+    await within(page).findByText("规则应用后对方");
+    await act(async () => { finishOldRequest(original); });
+    expect(within(page).getByText("规则应用后对方")).toBeInTheDocument();
+    expect(within(page).queryByText("云南溯源科技有限公司")).not.toBeInTheDocument();
+  });
+
   test("requests the current year range for both accounts and transactions by default", async () => {
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
@@ -213,7 +381,7 @@ describe("Bank details page", () => {
     expect(allAccountsButton).toBeInTheDocument();
     expect(within(allAccountsButton).getByText("299 条").closest(".bank-account-count-chip")).toHaveClass("bank-account-title-count");
     expect(within(allAccountsButton).getByText("全部").closest(".bank-account-identity")).toBeInTheDocument();
-    expect(within(allAccountsButton).getByText("130500.50")).toHaveClass("bank-account-secondary-balance");
+    expect(within(allAccountsButton).getByText("—")).toHaveClass("bank-account-secondary-balance");
     const icbcAccountButton = within(accountList).getByRole("button", { name: /工商银行 6386/ });
     expect(within(icbcAccountButton).getByText("299 条").closest(".bank-account-count-chip")).toHaveClass("bank-account-title-count");
     expect(within(icbcAccountButton).getByText("299 条").closest(".bank-account-title-row")).toHaveClass("bank-account-title-row");
@@ -267,7 +435,7 @@ describe("Bank details page", () => {
 
     const accountSummary = within(page).getByText("总余额").closest(".bank-account-summary");
     expect(accountSummary).not.toBeNull();
-    expect(within(accountSummary as HTMLElement).getByText("130500.50")).toHaveClass("bank-balance-value");
+    expect(within(accountSummary as HTMLElement).getByText("—")).toHaveClass("bank-balance-value");
     const icbcAccount = within(page).getByRole("button", { name: /工商银行 6386/ });
     expect(within(icbcAccount).getByText("130500.50")).toHaveClass("bank-balance-value");
   });
@@ -1336,6 +1504,7 @@ describe("Bank details page", () => {
               display_name: "工商银行 6386",
               latest_balance: "130500.50",
               latest_balance_at: "2026-05-01 16:30:00",
+              balance_status: "confirmed",
               has_balance: true,
               transaction_count: 1,
             },

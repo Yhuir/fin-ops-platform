@@ -5,6 +5,7 @@ import {
   clearBankDetailCategoryAssignment,
   confirmBankDetailCategory,
   downloadBankDetailTransactionsExport,
+  fetchBankDetailAccounts,
   fetchBankDetailTransactions,
   reapplyBankAutoTagRules,
   revokeBankDetailCategoryConfirmation,
@@ -16,6 +17,51 @@ afterEach(() => {
 });
 
 describe("bank details API", () => {
+  test.each(["confirmed", "last_known", "unresolved", "missing"])("preserves %s account balance state and incomplete currency totals", async (status) => {
+    const hasBalance = status === "confirmed" || status === "last_known";
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      accounts: [{
+        account_key: "test-account", bank_name: "测试银行", account_last4: "1001", display_name: "测试银行 1001",
+        currency: status === "unresolved" ? null : "CNY", balance_status: status,
+        latest_balance: hasBalance ? "0.00" : null,
+        latest_balance_at: hasBalance ? "2026-09-03 17:16:44" : null,
+        latest_balance_transaction_id: null, has_balance: hasBalance, transaction_count: 3,
+      }],
+      total_balance: null, total_balances_by_currency: { USD: "12.00" },
+      balance_account_count: hasBalance ? 1 : 0, missing_balance_account_count: hasBalance ? 0 : 1,
+    })));
+    const payload = await fetchBankDetailAccounts();
+    expect(payload.accounts[0]).toMatchObject({
+      balanceStatus: status, latestBalance: hasBalance ? "0.00" : null,
+      latestBalanceTransactionId: null, hasBalance, currency: status === "unresolved" ? null : "CNY",
+    });
+    expect(payload.totalBalance).toBeNull();
+    expect(payload.totalBalancesByCurrency).toEqual({ USD: "12.00" });
+  });
+
+  test.each([undefined, "future_status"])("rejects missing or unsupported account balance state %s", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ accounts: [{ balance_status: status }] })));
+    await expect(fetchBankDetailAccounts()).rejects.toThrow("请刷新页面后重试");
+  });
+
+  test.each([undefined, "future_status"])("rejects missing or unsupported transaction order state %s", async (status) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ rows: [{ same_time_order_status: status }] })));
+    await expect(fetchBankDetailTransactions({})).rejects.toThrow("请刷新页面后重试");
+  });
+
+  test.each(["time", "balance_chain", "unresolved"])("preserves %s order, date-only evidence and original balances", async (status) => {
+    const row = {
+      id: "first", same_time_order_status: status, trade_time: "2026-09-08", counterparty_name: "测试方",
+      direction: "expense", direction_label: "支", amount: "1.00", balance: "0.00",
+      summary: "", purpose: "", bank_name: "测试银行", account_last4: "1001",
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ rows: [row, { ...row, id: "second", balance: null }] })));
+    const payload = await fetchBankDetailTransactions({});
+    expect(payload.rows.map((item) => item.id)).toEqual(["first", "second"]);
+    expect(payload.rows[0]).toMatchObject({ sameTimeOrderStatus: status, tradeTime: "2026-09-08", balance: "0.00" });
+    expect(payload.rows[1].balance).toBeNull();
+  });
+
   test("maps relation tags from transaction rows and defaults missing tags to unlinked labels", async () => {
     vi.stubGlobal(
       "fetch",
@@ -23,6 +69,7 @@ describe("bank details API", () => {
         rows: [
           {
             id: "bank-detail-linked",
+            same_time_order_status: "time",
             trade_time: "2026-05-01 10:30:00+08:00",
             counterparty_name: "云南溯源科技有限公司",
             direction: "income",
@@ -44,6 +91,7 @@ describe("bank details API", () => {
           },
           {
             id: "bank-detail-unlinked",
+            same_time_order_status: "time",
             trade_time: "2026-05-02 10:30:00",
             counterparty_name: "杭州张三广告有限公司",
             direction: "expense",
@@ -105,6 +153,7 @@ describe("bank details API", () => {
         rows: [
           {
             id: "bank-detail-001",
+            same_time_order_status: "time",
             trade_time: "2026-05-01 10:30:00",
             counterparty_name: "云南溯源科技有限公司",
             direction: "expense",
@@ -196,6 +245,7 @@ describe("bank details API", () => {
         rows: [
           {
             id: "bank-detail-needs-confirmation",
+            same_time_order_status: "time",
             trade_time: "2026-05-01 10:30:00+08:00",
             counterparty_name: "候选供应商",
             direction: "expense",
@@ -343,6 +393,7 @@ describe("bank details API", () => {
         rows: [
           {
             id: "bank-detail-legacy",
+            same_time_order_status: "time",
             trade_time: "2026-04-16 11:09:14",
             counterparty_name: "未知对手方",
             direction: "expense",

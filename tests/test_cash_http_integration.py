@@ -57,6 +57,15 @@ def _reset_cash_fixture(connection):
 class CashHttpPostgresTests(unittest.TestCase):
     period = "date_from=2026-09-01&date_to=2026-09-30"
 
+    @classmethod
+    def setUpClass(cls):
+        dsn = os.environ["FIN_OPS_CASH_TEST_DATABASE_URL"]
+        connection = PostgresConnection(PostgresSettings(dsn, pool_enabled=False))
+        cls.addClassCleanup(connection.close)
+        if not connection.fetch_one("SELECT current_database() AS name")["name"].startswith("fin_ops_cash_test_"):
+            raise RuntimeError("HTTP writes require an explicit fin_ops_cash_test_* database")
+        apply_test_migrations(dsn)
+
     def setUp(self):
         dsn = os.environ["FIN_OPS_CASH_TEST_DATABASE_URL"]
         assert_safe_test_database_url(dsn)

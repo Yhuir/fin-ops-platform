@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import unittest
 
 from fin_ops_platform.postgres import migrate
@@ -10,24 +9,30 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.postgres_repositories.settings_data_reset_request import (
     PostgresSettingsDataResetRequestRepository,
 )
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     apply_test_migrations_through,
     fetch_scalar,
     require_postgres_test_database_url,
     reset_test_database,
+    restore_current_test_database,
     truncate_test_database,
 )
 
 
 class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.database_url = require_postgres_test_database_url()
+        apply_test_migrations(cls.database_url)
+
     def setUp(self) -> None:
-        self.database_url = require_postgres_test_database_url()
-        apply_test_migrations(self.database_url)
         truncate_test_database(self.database_url)
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url))
+        self.addCleanup(self.connection.close)
         self.runtime_queue = RuntimeQueueRepository(self.connection)
 
     def test_runtime_infrastructure_tables_exist(self) -> None:
@@ -76,32 +81,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(count, str(len(columns)))
 
-    def test_read_model_refresh_proofs_round_trip_and_coalesce_active_targets(
-        self,
-    ) -> None:
-        workbench_metadata = {
-            "freshness_token": "workbench-target",
-            "expected_source_versions": {"builder": "workbench-v6"},
-        }
-        workbench_event = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench",
-            scope_key="2026-05",
-            reason="api_groups_stale",
-            metadata=workbench_metadata,
-        )
-        self.assertIsNotNone(workbench_event)
-        self.assertEqual(
-            workbench_event.payload["metadata"],
-            workbench_metadata,
-        )
-        self.assertIsNone(
-            self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-                scope_type="workbench",
-                scope_key="2026-05",
-                reason="api_groups_stale",
-                metadata=workbench_metadata,
-            )
-        )
 
     def test_outbox_attempt_count_is_an_exact_one_way_mirror_of_attempts(self) -> None:
         trigger_name = fetch_scalar(
@@ -341,116 +320,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["schema_version"], 1)
         self.assertEqual(row["payload"]["reason"], "integration-test")
 
-    def test_active_refresh_remains_true_after_outbox_completion_until_dirty_scope_completes(self) -> None:
-        event = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="workbench",
-            scope_key="2026-02",
-            reason="api_groups_source_versions_stale",
-        )
-        self.connection.fetch_one(
-            """
-            update job.outbox_events
-            set status = 'done', processed_at = clock_timestamp()
-            where id = %s
-            returning id
-            """,
-            (event.event_id,),
-        )
-
-        self.assertTrue(
-            self.runtime_queue.read_model_refresh_is_active(
-                tenant_id="default",
-                scope_type="workbench",
-                scope_key="2026-02",
-            )
-        )
-        self.assertTrue(
-            self.runtime_queue.complete_read_model_refresh(
-                tenant_id="default",
-                scope_type="workbench",
-                scope_key="2026-02",
-                source_version=event.source_version,
-            )
-        )
-        self.assertFalse(
-            self.runtime_queue.read_model_refresh_is_active(
-                tenant_id="default",
-                scope_type="workbench",
-                scope_key="2026-02",
-            )
-        )
-
-    def test_relation_delta_metadata_dedupe_merges_cases_and_overwrites_same_case(self) -> None:
-        first = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="turnover_ledger",
-            scope_key="2026-05",
-            reason="turnover_relation_changed",
-            metadata={
-                "relation_deltas": {
-                    "CASE-A": {"status": "active", "row_ids": ["oa-a", "bank-a"]},
-                }
-            },
-        )
-        second = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="turnover_ledger",
-            scope_key="2026-05",
-            reason="turnover_relation_changed",
-            metadata={
-                "relation_deltas": {
-                    "CASE-B": {"status": "active", "row_ids": ["oa-b", "bank-b"]},
-                }
-            },
-        )
-        third = self.runtime_queue.enqueue_read_model_refresh(
-            scope_type="turnover_ledger",
-            scope_key="2026-05",
-            reason="turnover_relation_changed",
-            metadata={
-                "relation_deltas": {
-                    "CASE-A": {"status": "cancelled", "row_ids": ["oa-a", "bank-a"]},
-                }
-            },
-        )
-
-        self.assertEqual(second.event_id, first.event_id)
-        self.assertEqual(third.event_id, first.event_id)
-        row = self.connection.fetch_one(
-            "select source_version, payload from job.outbox_events where id = %s",
-            (first.event_id,),
-        )
-        self.assertEqual(row["source_version"], 2)
-        self.assertEqual(
-            row["payload"]["metadata"]["relation_deltas"],
-            {
-                "CASE-A": {"status": "cancelled", "row_ids": ["oa-a", "bank-a"]},
-                "CASE-B": {"status": "active", "row_ids": ["oa-b", "bank-b"]},
-            },
-        )
-
-    def test_0009_backfills_attempts_from_preexisting_attempt_count(self) -> None:
-        reset_test_database(self.database_url)
-        apply_test_migrations_through(self.database_url, "0008")
-        event_id = fetch_scalar(
-            self.database_url,
-            """
-            insert into job.outbox_events(event_type, status, attempt_count)
-            values ('runtime_infrastructure_backfill_test', 'pending', 3)
-            returning id;
-            """,
-        )
-
-        apply_test_migrations_through(self.database_url, "0009")
-
-        attempts = fetch_scalar(
-            self.database_url,
-            f"""
-            select attempt_count::text || E'\t' || attempts::text
-            from job.outbox_events
-            where id = '{event_id}'::uuid;
-            """,
-        )
-        self.assertEqual(tuple(attempts.split("\t")), ("3", "3"))
-
     def test_outbox_dedupe_partial_unique_index_enforces_active_events_only(self) -> None:
         insert_sql = """
             insert into job.outbox_events(event_type, status, tenant_id, dedupe_key)
@@ -560,165 +429,6 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
             payload={"after_done": True},
         )
         self.assertNotEqual(after_done.event_id, first.event_id)
-
-    def test_atomic_batch_read_model_enqueue_only_creates_uncovered_exact_scopes(self) -> None:
-        initial = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-            scope_type="workbench_relation",
-            scope_keys=["2026-02", "2026-03"],
-            reason="api_source_versions_stale",
-        )
-
-        self.assertEqual(
-            [event.scope_key for event in initial],
-            ["2026-02", "2026-03"],
-        )
-        self.assertEqual(
-            self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-                scope_type="workbench_relation",
-                scope_keys=["2026-02", "2026-03"],
-                reason="api_source_versions_stale",
-            ),
-            [],
-        )
-
-        mixed = self.runtime_queue.enqueue_read_model_refreshes_if_inactive(
-            scope_type="workbench_relation",
-            scope_keys=["2026-02", "2026-04"],
-            reason="api_source_versions_stale",
-        )
-
-        self.assertEqual([event.scope_key for event in mixed], ["2026-04"])
-        counts = self.connection.fetch_one(
-            """
-            select
-                count(*) filter (where status in ('pending', 'processing'))::integer
-                    as active_event_count,
-                (
-                    select count(*)::integer
-                    from job.read_model_dirty_scopes
-                    where scope_type = 'workbench_relation'
-                      and status in ('pending', 'processing')
-                ) as active_dirty_count
-            from job.outbox_events
-            where event_type = 'workbench_relation.read_model.refresh'
-            """
-        )
-        self.assertEqual(counts["active_event_count"], 3)
-        self.assertEqual(counts["active_dirty_count"], 3)
-
-    def test_completed_freshness_target_coalesces_concurrent_stale_callers(self) -> None:
-        first = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench_relation",
-            scope_key="2026-04",
-            reason="api_groups_stale",
-            metadata={"freshness_token": "target-a"},
-        )
-        assert first is not None
-        self.assertTrue(
-            self.runtime_queue.complete_read_model_refresh(
-                tenant_id="default",
-                scope_type="workbench_relation",
-                scope_key="2026-04",
-                source_version=first.source_version,
-            )
-        )
-        self.connection.fetch_one(
-            """
-            update job.outbox_events
-            set status = 'done', processed_at = clock_timestamp()
-            where id = %s
-            returning id
-            """,
-            (first.event_id,),
-        )
-
-        def enqueue_same_target(_index: int) -> str | None:
-            connection = PostgresConnection(
-                PostgresSettings(
-                    database_url=self.database_url,
-                    pool_enabled=False,
-                )
-            )
-            event = RuntimeQueueRepository(connection).enqueue_read_model_refresh_if_inactive(
-                scope_type="workbench_relation",
-                scope_key="2026-04",
-                reason="api_groups_stale",
-                metadata={"freshness_token": "target-a"},
-            )
-            return event.event_id if event is not None else None
-
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(enqueue_same_target, range(4)))
-
-        self.assertEqual(results, [None, None, None, None])
-        event_count = self.connection.fetch_one(
-            """
-            select count(*)::integer as count
-            from job.outbox_events
-            where event_type = 'workbench_relation.read_model.refresh'
-              and scope_key = '2026-04'
-            """
-        )
-        self.assertEqual(event_count["count"], 1)
-
-        second = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench_relation",
-            scope_key="2026-04",
-            reason="api_groups_stale",
-            metadata={"freshness_token": "target-b"},
-        )
-        assert second is not None
-        self.assertTrue(
-            self.runtime_queue.complete_read_model_refresh(
-                tenant_id="default",
-                scope_type="workbench_relation",
-                scope_key="2026-04",
-                source_version=second.source_version,
-            )
-        )
-        self.connection.fetch_one(
-            """
-            update job.outbox_events
-            set status = 'done', processed_at = clock_timestamp()
-            where id = %s
-            returning id
-            """,
-            (second.event_id,),
-        )
-
-        third = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench_relation",
-            scope_key="2026-04",
-            reason="api_groups_stale",
-            metadata={"freshness_token": "target-a"},
-        )
-        assert third is not None
-        self.connection.fetch_one(
-            """
-            update job.outbox_events
-            set status = 'done', processed_at = clock_timestamp()
-            where id = %s
-            returning id
-            """,
-            (third.event_id,),
-        )
-        self.connection.fetch_one(
-            """
-            update job.read_model_dirty_scopes
-            set status = 'failed', last_error = 'fixture failed dirty scope'
-            where scope_type = 'workbench_relation'
-              and scope_key = '2026-04'
-            returning id
-            """,
-        )
-
-        recovered = self.runtime_queue.enqueue_read_model_refresh_if_inactive(
-            scope_type="workbench_relation",
-            scope_key="2026-04",
-            reason="api_groups_stale",
-            metadata={"freshness_token": "target-a"},
-        )
-        self.assertIsNotNone(recovered)
 
     def test_runtime_queue_claim_next_sets_processing_lock_and_attempts(self) -> None:
         event = self.runtime_queue.enqueue(event_type="runtime.integration.claim", payload={"claim": True})
@@ -1215,6 +925,37 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertTrue(row["has_processed_at"])
         self.assertIsNone(row["locked_by"])
         self.assertIsNone(row["locked_at"])
+
+
+class RuntimeInfrastructureMigrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.database_url = require_postgres_test_database_url()
+        cls.addClassCleanup(restore_current_test_database, cls.database_url)
+
+    def test_0009_backfills_attempts_from_preexisting_attempt_count(self) -> None:
+        reset_test_database(self.database_url)
+        apply_test_migrations_through(self.database_url, "0008")
+        event_id = fetch_scalar(
+            self.database_url,
+            """
+            insert into job.outbox_events(event_type, status, attempt_count)
+            values ('runtime_infrastructure_backfill_test', 'pending', 3)
+            returning id;
+            """,
+        )
+
+        apply_test_migrations_through(self.database_url, "0009")
+
+        attempts = fetch_scalar(
+            self.database_url,
+            f"""
+            select attempt_count::text || E'\t' || attempts::text
+            from job.outbox_events
+            where id = '{event_id}'::uuid;
+            """,
+        )
+        self.assertEqual(tuple(attempts.split("\t")), ("3", "3"))
 
 
 if __name__ == "__main__":

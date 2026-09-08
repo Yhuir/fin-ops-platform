@@ -1,5 +1,15 @@
 # Bank Account Balance 实施记录
 
+## 2026-09-08 - 余额证据状态与完整合计
+
+- 目标：账户余额与银行列表/导出共用完整组判定，去掉银行流水号或随机 ID 对真实末余额的决定作用；既有账户 identity、metadata 一致性、币种归一和日期范围笔数保持原合同。
+- 决策：保留 `BANK_ACCOUNT_CANONICAL_SOURCE_CTES` 的账户事实，以共享 `BANK_TRANSACTION_ORDERING_CTES` 仅判定最新/最后非空目标组的终点；完整候选日期先检查缺时间歧义，闭合组需要锚点时才访问历史。最新组可靠返回 confirmed；全部缺余额才检查最近有余额历史组，可靠时 last_known；冲突不继续向前回溯。列表复用 classifier 已有 account_key，币种归一共享，不额外计算 hash。
+- 金额/来源：confirmed/last_known 返回原始终点余额；无法证明末笔身份时 ID 为 null。unresolved/missing 金额和来源为空，不造零。多币种账户先判 unresolved，展示 currency=null；单币种全历史无余额再判 missing，最新日期缺时间歧义不会把它改成余额冲突。
+- 汇总：按底层币种集合判定完整性；每币种全部应计账户 confirmed 才输出完整总额，CNY 不完整为 `total_balance=null`。last_known 计入可显示余额数量但不计入完整合计，真实零保持零值字符串。
+- 边界：没有新 schema、写入、hash/账户 key、cache、worker 或 migration。共享分类消费者不引入排序字段/查询；本轮不做多币种子账户 UI 或历史连续性重建。
+- 验证：真实 PostgreSQL 29 项已有一轮通过；前端最后竞态修复后的银行专项、build 和相关浏览器测试通过，轮次/数量见银行明细测试矩阵。后续 SQL 重跑、执行计划与剩余风险统一记录在[修复计划](../../dev/bank-same-time-ordering-repair-plan.md)。本地验证中，未发布，固定查询数不是性能验收结论。
+- 清理：全仓调用扫描后删除旧 `BankDetailsService.list_accounts/_latest_balance_transaction`、core `list_bank_transaction_accounts`、state-store wrapper 和独占测试 fake；有效余额/笔数/无余额/metadata 断言已迁入 29 项真实 PostgreSQL 测试。账户 metadata 的 label_consistent 选择继续保留。
+
 ## 2026-07-27 - Bank Details accounts direct canonical read
 
 - 决策：`/api/bank-details/accounts` 改由 page-specific canonical query repository 直接读取 `app.bank_transactions` 与 canonical account mappings，不再读取 `read_model.bank_account_balances`。

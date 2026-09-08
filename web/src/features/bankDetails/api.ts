@@ -1,5 +1,7 @@
 import type {
   BankDetailAccount,
+  BankBalanceStatus,
+  BankSameTimeOrderStatus,
   BankDetailAccountsRequest,
   BankDetailAccountsResponse,
   BankDetailAutoCandidateCategory,
@@ -39,6 +41,7 @@ type ApiBankDetailAccount = {
   latest_balance_at: string | null;
   latest_balance_transaction_id?: string | null;
   has_balance: boolean;
+  balance_status: BankBalanceStatus;
   transaction_count: number;
   transaction_total_count?: number | null;
 };
@@ -60,6 +63,7 @@ type ApiBankDetailCategoryMutationResponse = {
 type ApiBankDetailTransaction = {
   id: string;
   trade_time: string;
+  same_time_order_status: BankSameTimeOrderStatus;
   counterparty_name: string;
   direction: "income" | "expense";
   direction_label: "收" | "支";
@@ -358,6 +362,9 @@ function filenameFromContentDisposition(value: string | null) {
 }
 
 function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {
+  if (!["confirmed", "last_known", "unresolved", "missing"].includes(account.balance_status)) {
+    throw new Error("银行账户余额状态缺失或不受支持，请刷新页面后重试。");
+  }
   return {
     accountIdentity: account.account_identity ?? null,
     accountKey: account.account_key,
@@ -371,6 +378,7 @@ function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {
     latestBalanceAt: account.latest_balance_at,
     latestBalanceTransactionId: account.latest_balance_transaction_id ?? null,
     hasBalance: account.has_balance,
+    balanceStatus: account.balance_status,
     transactionCount: account.transaction_count,
     transactionTotalCount: Number(account.transaction_total_count) || account.transaction_count,
   };
@@ -468,6 +476,9 @@ function mapAutoCandidateCategory(value: ApiBankDetailAutoCandidateCategory): Ba
 }
 
 function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
+  if (!["time", "balance_chain", "unresolved"].includes(row.same_time_order_status)) {
+    throw new Error("银行流水顺序状态缺失或不受支持，请刷新页面后重试。");
+  }
   const rawRelationTags = Array.isArray(row.relation_tags)
     ? row.relation_tags.map(String).map((tag) => tag.trim()).filter(Boolean)
     : [];
@@ -478,6 +489,7 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
   return {
     id: row.id,
     tradeTime: formatBankDetailTradeTime(row.trade_time),
+    sameTimeOrderStatus: row.same_time_order_status,
     counterpartyName: row.counterparty_name,
     direction: row.direction,
     directionLabel: row.direction_label,

@@ -1,5 +1,8 @@
 import type { BankTransactionTagDictionary } from "../pendingInvoices/types";
 
+export type BankBalanceStatus = "confirmed" | "last_known" | "unresolved" | "missing";
+export type BankSameTimeOrderStatus = "time" | "balance_chain" | "unresolved";
+
 export type BankDetailAccount = {
   accountIdentity?: string | null;
   accountKey: string;
@@ -13,6 +16,7 @@ export type BankDetailAccount = {
   latestBalanceAt: string | null;
   latestBalanceTransactionId?: string | null;
   hasBalance: boolean;
+  balanceStatus: BankBalanceStatus;
   transactionCount: number;
   transactionTotalCount?: number;
 };
@@ -78,6 +82,7 @@ export type BankDetailAutoCandidateCategory = {
 export type BankDetailTransaction = {
   id: string;
   tradeTime: string;
+  sameTimeOrderStatus: BankSameTimeOrderStatus;
   counterpartyName: string;
   direction: BankTransactionDirection;
   directionLabel: "收" | "支";

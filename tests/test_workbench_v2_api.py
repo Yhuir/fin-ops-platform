@@ -236,7 +236,9 @@ class BankDetailCanonicalQueryFixture:
         return self._app._bank_details_service.list_transactions(**kwargs)
 
     def list_bank_detail_accounts(self, *, date_from: str | None = None, date_to: str | None = None) -> dict[str, object]:
-        return self._app._bank_details_service.list_accounts(date_from=date_from, date_to=date_to)
+        # These route tests cover categories/all-bank export, not balance queries.
+        # Account aggregation is exercised against PostgreSQL in its owner tests.
+        return {"accounts": [], "total_balance": None}
 
     def accounts_payload(
         self,

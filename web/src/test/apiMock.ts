@@ -6172,7 +6172,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         : "130500.50";
       return {
         body: {
-          total_balance: totalBalance,
+          total_balance: null,
+          total_balances_by_currency: {},
           balance_account_count: 1,
           missing_balance_account_count: 1,
           accounts: [
@@ -6183,6 +6184,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               display_name: "工商银行 6386",
               latest_balance: totalBalance,
               latest_balance_at: "2026-05-01 16:30:00",
+              balance_status: "confirmed",
+              currency: "CNY",
               has_balance: true,
               transaction_count: isCurrentYear ? 299 : 1,
             },
@@ -6193,6 +6196,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               display_name: "交通银行 3847",
               latest_balance: null,
               latest_balance_at: null,
+              balance_status: "missing",
+              currency: "CNY",
               has_balance: false,
               transaction_count: 0,
             },
@@ -6807,7 +6812,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           account_key: accountKey,
           date_from: dateFrom,
           date_to: dateTo,
-          rows: responseRows,
+          rows: responseRows.map((row) => ({ ...row, same_time_order_status: "time" })),
           category_counts: keyword || hasCategoryFilter ? visibleCategoryCounts : baseCategoryCounts,
           pagination: {
             page,

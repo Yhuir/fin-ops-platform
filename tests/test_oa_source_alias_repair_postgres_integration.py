@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from fin_ops_platform.postgres import migrate
+
 from tests.postgres_test_utils import (
     apply_test_migrations_through,
     fetch_scalar,
     require_postgres_test_database_url,
     reset_test_database,
+    restore_current_test_database,
 )
-
 
 MIGRATION_SQL = (
     Path(__file__).resolve().parents[1]
@@ -19,6 +20,11 @@ MIGRATION_SQL = (
 
 
 class OASourceAliasRepairPostgresIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.database_url = require_postgres_test_database_url()
+        cls.addClassCleanup(restore_current_test_database, cls.database_url)
+
     def setUp(self) -> None:
         self.database_url = require_postgres_test_database_url()
         reset_test_database(self.database_url)

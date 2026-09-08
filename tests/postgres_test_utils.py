@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from io import StringIO
 import os
-from pathlib import Path
-from urllib.parse import urlsplit, unquote
 import unittest
+from io import StringIO
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from fin_ops_platform.postgres import migrate
 from fin_ops_platform.services.postgres_connection import redact_database_url
-
 
 MIGRATIONS_DIR = Path("backend/src/fin_ops_platform/postgres/migrations")
 EXPECTED_MIGRATION_FILES = [
@@ -343,6 +342,12 @@ drop schema if exists cash cascade;
 drop table if exists public.schema_migrations;
 """,
     )
+
+
+def restore_current_test_database(database_url: str) -> None:
+    """Discard a historical fixture and leave a clean current schema for the next class."""
+    reset_test_database(database_url)
+    apply_test_migrations(database_url)
 
 
 def truncate_test_database(database_url: str) -> None:

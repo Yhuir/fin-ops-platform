@@ -688,9 +688,9 @@ OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前
 | 字段 | 说明 |
 | --- | --- |
 | `accounts` | 账户列表。 |
-| `total_balance` | CNY 账户最新余额合计；没有任何非空余额时为 `null`。 |
-| `total_balances_by_currency` | 按币种汇总的账户最新余额。 |
-| `balance_account_count` | 有最新余额的账户数。 |
+| `total_balance` | 只有 CNY 所有应计账户均 `balance_status=confirmed` 时返回完整合计字符串；缺少可合计 CNY 账户，或存在 last_known/unresolved/missing 时为 `null`。真实合计为零时返回零值字符串，不是 null。 |
+| `total_balances_by_currency` | 只包含全部应计账户均 confirmed 的币种及完整合计。缺失币种表示没有可输出的完整合计，不能解释为 0。 |
+| `balance_account_count` | 有可显示来源余额的账户数，包含 confirmed 和 last_known；不表示当前余额已完整确认的账户数。 |
 | `missing_balance_account_count` | 没有可用余额的账户数。 |
 
 `accounts[*]` 至少包含：
@@ -701,15 +701,20 @@ OA row 的 additive `expense_items[]` 同步返回 `attachment_file_count`。前
 | `account_key` | 前端筛选流水使用的稳定 key；与 transactions direct query 中的 `account_key` 对齐。 |
 | `bank_name` / `account_last4` / `display_name` | 账户展示字段。 |
 | `account_no` / `account_name` | 可选账户原始字段；完整账号只用于身份区分和必要展示，不参与前端自造 key。 |
-| `latest_balance` | 该账户按交易时间排序的最新一笔非空 `balance`。 |
-| `latest_balance_at` | 贡献最新余额的流水时间。 |
-| `latest_balance_transaction_id` | 贡献最新余额的流水 ID，用于审计和排查余额变化。 |
-| `currency` | 币种，缺省为 `CNY`。 |
-| `has_balance` | 是否有可用最新余额。 |
+| `balance_status` | 必填：`confirmed` 为最新已导入组末余额可靠；`last_known` 为最近有余额历史组末余额可靠；`unresolved` 为末余额待核实或账户多币种；`missing` 为单币种账户全历史无可用余额。 |
+| `latest_balance` | nullable 金额字符串。confirmed/last_known 返回可靠组末余额对应的银行原始值；unresolved/missing 返回 null，不重新累计或补 0。 |
+| `latest_balance_at` | 该余额真实来源的流水或组时间；日期来源保留日期。unresolved/missing 为 null。 |
+| `latest_balance_transaction_id` | 贡献余额的可确认末笔 ID。终点余额可靠但末笔身份无法证明时为 null，不以稳定展示 ID 补齐；unresolved/missing 也为 null。 |
+| `currency` | 沿用既有归一规则，空币种、RMB、人民币等按 CNY；同一账户多币种时为 null，且 balance_status=unresolved。 |
+| `has_balance` | confirmed/last_known 且有可显示来源值时为 true；其余为 false，不单独表示当前余额完整。 |
 | `transaction_count` | 当前日期范围内该账户流水数量；只影响列表徽标，不参与余额计算。 |
 | `transaction_total_count` | 该账户全部流水数量。 |
 
 日期筛选只影响 `transaction_count`，不改变 `latest_balance`、`total_balance` 或 `total_balances_by_currency`。关键字、分类筛选和自动标签规则变化不调用该接口；银行流水导入、删除、重导或原始余额字段变化在事务提交后由下一次 accounts GET 直接可见。响应不携带 read-model status/source/job/barrier。
+
+账户余额与 transactions 复用完整同账户、同币种、同实际时间组判定。最新组部分缺余额且末余额不可靠时为 unresolved；仅最新组全部缺余额才检查最近有余额历史组，可靠时返回 last_known，不继续跨过冲突历史组。最新日多笔且包含缺具体时间记录时不能用午夜补值挑末笔。状态优先处理多币种，再处理全历史无余额；多币种账户通过底层全部币种集合标记各币种合计不完整，不能因为展示 currency=null 漏掉它。账户 metadata 一致性和原 account key 保持原合同。
+
+前端必须验证余额状态，缺字段或未知值提示刷新页面，不静默默认为 confirmed。last_known 显示“最后已知余额”和来源日期，unresolved/missing 显示对应说明；null 总额显示“暂无法确定完整总余额”，不能转成 0。accounts 与 transactions 分别拥有自己的只读快照，页面并发刷新不承诺两次 HTTP 请求共享数据库同一时点。
 
 `GET /api/bank-details/transactions`
 
@@ -719,11 +724,14 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 | 字段 | 说明 |
 | --- | --- |
+| `same_time_order_status` | 每行必填：`time` 为无须组内推导的时间顺序；`balance_chain` 为完整无分支组已确认；`unresolved` 为当前证据不能确认整组顺序，包括同日缺具体时间歧义。与分类状态、账户余额状态分别表达，缺字段/未知值不能默认已确认。 |
 | `category_resolution_status` | 分类解析状态：`auto_matched`、`needs_confirmation`、`internal_transfer`、`manual_confirmed` 或 `unmatched`。 |
 | `category_rule_version` | 生成该自动标签或候选集时使用的自动标签规则版本。 |
 | `manual_confirmed_category_code` | 用户从自动候选集中确认后的标签 code；未确认时为 `null`。 |
 | `auto_candidate_category_codes` | 当前自动规则命中的候选标签 code 列表；只有 `needs_confirmation` 时用于页面选择。 |
 | `auto_candidate_categories` | 候选标签展示对象列表，包含 `category_code`、`category_label`、`category_primary_label`、`category_sub_label`、`category_third_label`、`category_label_path`、`category_path`、`turnover_role`、`turnover_action_type`、`turnover_family`、`rule_code` 和 `reason`。 |
+
+同时间顺序基于完整组的原始 numeric 余额与 signed amount 衔接。keyword/分类可定位候选组，但不能截断组内证据；实现按时间/账户 WITH TIES 先选覆盖本页前缀的完整组，再补齐候选整日检查精度并判定目标组，最终才按组内顺序分页。summary/facets 仍统计全部命中行，排序复用 classifier 已有账户 key，不新增 hash。实际 trade_time 精度保持不变；单笔日期来源不制造午夜时间。同日多笔且存在缺时间记录时，即使搜索隐藏该记录，其他行仍为 unresolved。列表使用时间倒序、稳定账户/币种组键、已确认组内序号倒序、稳定 ID，page keys 与最终 rows 同序。ID 仅保证展示稳定，不决定真实末笔；分支组可有可靠末余额但顺序仍 unresolved。只有银行公共列表/导出通过 `_ordered_transactions_payload` 添加此字段，原共享分类 mapper 和 Workbench 等消费者不读取排序证据。
 
 当 `category_resolution_status=needs_confirmation` 时，前端展示 `auto_candidate_categories` 作为候选确认项，并额外提供系统 `内部往来款` 人工覆盖项；不得回退到其它未命中的标签。选择候选调用 confirmation API，选择 `内部往来款` 调用 assignment API。确认后接口返回的行应表现为 `manual_confirmed`，`effective_*` 字段按确认标签填充；撤销后回到当前自动规则重新计算结果。外部往来规则命中但缺少第三层标签时，候选项为同一规则展开出的 `个人往来`、`公司往来`、`银行往来`、`业务往来` 四类第三层标签，`turnover_action_type` 来自规则。
 
@@ -735,7 +743,9 @@ rows、`statistics`、`category_counts`、pagination 和当前目标行关系标
 
 `GET /api/bank-details/transactions/export`
 
-复用 transactions 的 canonical filter/category/relation 合同，`mode` 仅接受 `all` 或 `account`。导出不受页面 pagination 限制，但服务端最多读取 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1` 行用于超限判断；超限返回结构化业务错误，不把全量 rows 先发送到浏览器。XLSX 中的 relation 字段只来自目标导出 row IDs 的 active canonical relation overlap。
+复用 transactions 的 canonical filter/category/relation/顺序合同，`mode` 仅接受 `all` 或 `account`。导出不受页面 pagination 限制，但服务端最多读取 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1`（20001）行用于 20000 行超限判断；超限返回结构化业务错误，不把全量 rows 先发送到浏览器。XLSX 中的 relation 字段只来自目标导出 row IDs 的 active canonical relation overlap。
+
+导出保留全部原列名称、相对顺序、原始金额/余额和 sheet 分组，仅末尾追加“同时间顺序说明”：time、balance_chain 留空，unresolved 为“顺序待核实（同时间或时间精度不足）”。导出不二次排序，不丢弃未确认行，不生成持久组内序号。该 GET 继续执行既有权限校验和下载审计，不能描述为零写入的纯只读操作。
 
 `POST /api/bank-details/transactions/{transaction_id}/category-confirmation`
 

@@ -55,7 +55,7 @@ class _Transaction:
                     "row_types": ["bank", "invoice"],
                 }
             ]
-        if "latest_balances as" in normalized:
+        if "balance_choices as" in normalized:
             return [
                 {
                     "account_identity": "acct:one",
@@ -63,6 +63,8 @@ class _Transaction:
                     "bank_name": "工商银行",
                     "account_last4": "1234",
                     "currency": "CNY",
+                    "currencies": ["CNY"],
+                    "balance_status": "confirmed",
                     "transaction_total_count": 2,
                     "latest_balance": Decimal("88.00"),
                 }
@@ -114,6 +116,7 @@ class _SnapshotRepository:
                     "bank_name": "工商银行",
                     "account_last4": "1234",
                     "trade_time": "2026-05-10T10:00:00+08:00",
+                    "same_time_order_status": "time",
                     "direction": "expense",
                     "amount": Decimal("12.34"),
                     "balance": Decimal("88.00"),
@@ -335,7 +338,8 @@ class BankDetailsCanonicalQueryTests(unittest.TestCase):
         self.assertEqual(len(transaction.reads), 3)
         sql_text = "\n".join(sql for sql, _params in transaction.reads)
         self.assertIn("from app.bank_transactions", sql_text)
-        self.assertIn("latest_balances", sql_text)
+        self.assertIn("balance_choices", sql_text)
+        self.assertIn("order_group_results", sql_text)
         self.assertIn("group by account_identity", sql_text)
         self.assertNotIn("read_model.", sql_text)
         self.assertEqual(snapshot["transaction_counts"], {"acct:one": 1})

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -11,6 +10,8 @@ from uuid import uuid4
 from fin_ops_platform.app.cash_runtime import CashRuntime, cash_postgres_settings
 from fin_ops_platform.services.cash_domain import CashError
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+
+from tests.postgres_test_utils import apply_test_migrations, truncate_test_database
 
 
 class CashRuntimeTests(unittest.TestCase):
@@ -78,10 +79,7 @@ class CashRuntimePostgresTests(unittest.TestCase):
         identity = ordinary.fetch_one("SELECT current_database() AS database, current_user AS role")
         if not identity["database"].startswith("fin_ops_cash_test_"):
             raise RuntimeError("Cash fixtures require an explicit fin_ops_cash_test_* database")
-        ordinary.execute("DROP SCHEMA IF EXISTS cash CASCADE")
-        ordinary.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0166_cash_ledger.sql").read_text())
-        ordinary.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0167_cash_shared_runtime_grants.sql").read_text())
-        ordinary.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0168_cash_business_closure.sql").read_text())
+        apply_test_migrations(dsn)
         grants = ordinary.fetch_one("""SELECT count(*) AS tables,
             bool_and(has_table_privilege('fin_ops_app_runtime',c.oid,'SELECT')
                 AND has_table_privilege('fin_ops_app_runtime',c.oid,'INSERT')
@@ -90,11 +88,14 @@ class CashRuntimePostgresTests(unittest.TestCase):
             FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname='cash' AND c.relkind='r'""")
         self.assertEqual(grants, {"tables": 10, "dml": True})
-        ordinary.execute("CREATE TABLE public.cash_runtime_test_ordinary_flows (id uuid PRIMARY KEY, amount numeric(18,2))")
-        self.addCleanup(ordinary.execute, "DROP TABLE public.cash_runtime_test_ordinary_flows")
+        truncate_test_database(dsn)
+        self.addCleanup(truncate_test_database, dsn)
+        ordinary.execute("TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
+        self.addCleanup(ordinary.execute, "TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
         account_id, category_id, flow_id = (str(uuid4()) for _ in range(3))
-        ordinary.execute("INSERT INTO public.cash_runtime_test_ordinary_flows VALUES (%s, 987654.32)", (flow_id,))
-        before = ordinary.fetch_all("SELECT * FROM public.cash_runtime_test_ordinary_flows")
+        ordinary.execute("""INSERT INTO app.bank_transactions(id,account_no,txn_direction,counterparty_name_raw,amount,signed_amount,txn_date,txn_month,status)
+            VALUES (%s,'synthetic-account','outflow','Synthetic vendor',987654.32,-987654.32,'2026-01-15','2026-01-01','active')""", (flow_id,))
+        before = ordinary.fetch_all("SELECT * FROM app.bank_transactions ORDER BY id")
         session = SimpleNamespace(can_admin_access=False, allowed_page_keys=frozenset({"cash"}), token="test-only",
                                   identity=SimpleNamespace(username="CASH_TEST", display_name="Synthetic operator"))
         with patch.dict(os.environ, {"FIN_OPS_POSTGRES_DATABASE_URL": dsn}), \
@@ -136,7 +137,7 @@ class CashRuntimePostgresTests(unittest.TestCase):
             self.assertEqual(empty["rows"], [])
             self.assertEqual(empty["summary"]["filtered_totals"]["income_amount"], "0.00")
             self.assertEqual(empty["summary"]["account_balances"][0]["ending_balance"], "100.00")
-            self.assertEqual(ordinary.fetch_all("SELECT * FROM public.cash_runtime_test_ordinary_flows"), before)
+            self.assertEqual(ordinary.fetch_all("SELECT * FROM app.bank_transactions ORDER BY id"), before)
 
 
 if __name__ == "__main__":

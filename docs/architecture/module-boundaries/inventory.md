@@ -56,6 +56,8 @@
 
 ## 当前全量定位结论
 
+- `bank-details` / `bank-account-balance`：2026-09-08 共用 `services/bank_transaction_ordering_sql.py` 的请求内顺序/末余额判定；列表复用现有分类 base 的身份，分类公共 I/O 不增加顺序字段。旧 service/core/state-store 账户读取已删除，文件范围及状态字段见对应 boundary-io。
+
 - `cash`：现金独立事实模块，入口[README](../../modules/cash/README.md) / [boundary-io](../../modules/cash/boundary-io.md)。`/cash`前端、四子页/统一UI与`/api/cash/*`已上线（实施§14）；Excel迁移闭环修订仅为实施§15计划。同库、同App账号、独立cash表及有界小池，不另设数据库账号。应用I/O禁止普通财务、全局历史、reset、Health/worker读取现金，不宣称数据库账号级隔离。
 
 - 页面模块已经统一登记在 `docs/modules/README.md`，每个模块都有维护入口。

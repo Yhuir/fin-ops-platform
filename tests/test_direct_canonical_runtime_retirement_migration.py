@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from fin_ops_platform.services.postgres_connection import (
     PostgresConnection,
     PostgresSettings,
 )
-
 from postgres_test_utils import (
-    apply_test_migrations,
+    apply_test_migrations_through,
     require_postgres_test_database_url,
-    truncate_test_database,
+    reset_test_database,
+    restore_current_test_database,
 )
-
 
 MIGRATION_PATH = Path(
     "backend/src/fin_ops_platform/postgres/migrations/"
@@ -42,16 +41,18 @@ class DirectCanonicalRuntimeRetirementMigrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.database_url = require_postgres_test_database_url()
-        apply_test_migrations(cls.database_url)
+        cls.addClassCleanup(restore_current_test_database, cls.database_url)
 
     def setUp(self) -> None:
-        truncate_test_database(self.database_url)
+        reset_test_database(self.database_url)
+        apply_test_migrations_through(self.database_url, "0126")
         self.connection = PostgresConnection(
             PostgresSettings(
                 database_url=self.database_url,
                 pool_enabled=False,
             )
         )
+        self.addCleanup(self.connection.close)
 
     def test_retirement_is_idempotent_noop_preserving_rollback_evidence(self) -> None:
         with self.connection.transaction() as transaction:

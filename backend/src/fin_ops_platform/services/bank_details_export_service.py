@@ -33,6 +33,7 @@ BANK_DETAIL_EXPORT_COLUMNS = [
     "摘要",
     "备注/附言/客户附言",
     "流水 ID",
+    "同时间顺序说明",
 ]
 MONEY_COLUMNS = {"收入金额", "支出金额", "余额"}
 PURPOSE_TEXT_LABELS = ("用途", "交易用途")
@@ -201,6 +202,11 @@ class BankDetailsExportService:
             "摘要": text_fields["summary_text"],
             "备注/附言/客户附言": text_fields["note_text"],
             "流水 ID": cls._text(row.get("id")),
+            "同时间顺序说明": (
+                "顺序待核实（同时间或时间精度不足）"
+                if row.get("same_time_order_status") == "unresolved"
+                else ""
+            ),
         }
 
     @classmethod

@@ -1,5 +1,12 @@
 # 权限与审计测试入口
 
+## 2026-09-08 真实 PG 测试准备修正
+
+- 工作台 fixture 与 lost-ack 用例改用 `page_access_accounts`；保持 005、版本冲突、提交未知与审计恢复断言，不恢复旧权限档位。
+- 系统健康正例在本测试类局部补齐审计启用标记；另测缺标记时系统拒绝。共享 truncate helper 不自动伪造健康。
+- 金融事实纠错反例使用 transaction-local actor/reason，保留 append-only 保护；reset 正例提供既有 impact、合成恢复 receipt 和 job，未取消任何生产保护。
+- 详情及实测结果见 [回归修复记录](../../dev/postgres-regression-repair-plan.md)。不创建生产现金受限角色，不把现金操作接入全局历史。
+
 ## 现金后端先行回归（2026-09-07）
 
 - `tests/test_cash_permissions.py`：cash 二态授权/即时撤销、只有005管理权限、cash key 在既有 Settings 规范化往返中保留、未知层级拒绝、精确路由段、写请求不冒充只读、普通后台任务和全局 System Audit owner 排除现金。

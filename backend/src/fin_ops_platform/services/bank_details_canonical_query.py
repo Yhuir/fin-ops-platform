@@ -8,6 +8,7 @@ from typing import Any, Iterator
 
 from fin_ops_platform.services.bank_account_balance_canonical_rows import (
     BANK_ACCOUNT_BALANCE_CANONICAL_ROWS_SQL,
+    BANK_ACCOUNT_CANONICAL_SOURCE_CTES,
 )
 from fin_ops_platform.services.bank_details_export_service import (
     BANK_DETAIL_EXPORT_ROW_LIMIT,
@@ -21,6 +22,10 @@ from fin_ops_platform.services.bank_transaction_category_service import (
     BankTransactionCategoryService,
     bank_transaction_tag_dictionary_display_payload,
     default_bank_transaction_tag_dictionary_payload,
+)
+from fin_ops_platform.services.bank_transaction_ordering_sql import (
+    BANK_NORMALIZED_CURRENCY_SQL,
+    BANK_TRANSACTION_ORDERING_CTES,
 )
 from fin_ops_platform.services.import_file_service import COMPANY_NAME_KEYWORDS
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -533,16 +538,40 @@ class PostgresBankDetailsCanonicalQueryRepository:
         )
         rows = transaction.fetch_all(
             f"""
-            with {cte_sql},
+            with recursive {cte_sql},
             filtered as materialized (
               select
                 row_id,
                 trade_time_sort,
                 direction,
-                effective_category_code
+                effective_category_code,
+                account_key,
+                txn_date
               from classified_filter_rows
               where {where_sql}
             ),
+            {BANK_ACCOUNT_CANONICAL_SOURCE_CTES},
+            ordering_candidates as materialized (
+              select account_key, txn_date, trade_time_sort from filtered
+              order by trade_time_sort desc nulls last, account_key
+              fetch first %s rows with ties
+            ),
+            ordering_target_groups as (
+              select distinct account_key as account_identity, trade_time_sort
+              from ordering_candidates
+            ),
+            ordering_input as (
+              select facts.row_id, facts.account_key as account_identity,
+                facts.txn_date, facts.trade_time, facts.trade_time_sort,
+                facts.normalized_account_no, facts.amount, facts.signed_amount,
+                facts.txn_direction, facts.balance,
+                {BANK_NORMALIZED_CURRENCY_SQL} as normalized_currency
+              from base facts
+              join (select distinct account_key, txn_date from ordering_candidates) days
+                on days.account_key = facts.account_key
+                and days.txn_date = facts.txn_date
+            ),
+            {BANK_TRANSACTION_ORDERING_CTES},
             category_counts as (
               select coalesce(
                 jsonb_object_agg(category_code, category_count),
@@ -566,13 +595,18 @@ class PostgresBankDetailsCanonicalQueryRepository:
               from filtered
             ),
             page_keys as materialized (
-              select row_id, trade_time_sort
-              from filtered
-              order by trade_time_sort desc nulls last, row_id desc
+              select filtered.row_id, filtered.trade_time_sort,
+                ordered.account_identity, ordered.normalized_currency,
+                ordered.order_in_group, ordered.same_time_order_status
+              from filtered join order_results ordered using (row_id)
+              order by trade_time_sort desc nulls last, ordered.account_identity,
+                ordered.normalized_currency, ordered.order_in_group desc nulls last,
+                filtered.row_id desc
               limit %s offset %s
             )
             select
               page_rows.*,
+              page_keys.same_time_order_status,
               coalesce(
                 nullif(
                   case
@@ -624,12 +658,15 @@ class PostgresBankDetailsCanonicalQueryRepository:
               on page_rows.row_id = page_keys.row_id
             left join app.bank_transactions page_bank
               on page_bank.id::text = page_rows.canonical_transaction_id
-            order by page_keys.trade_time_sort desc nulls last, page_keys.row_id desc
+            order by page_keys.trade_time_sort desc nulls last,
+              page_keys.account_identity, page_keys.normalized_currency,
+              page_keys.order_in_group desc nulls last, page_keys.row_id desc
             """,
             tuple(
                 [
                     *cte_params,
                     *where_params,
+                    page * page_size,
                     page_size,
                     (page - 1) * page_size,
                 ]
@@ -744,7 +781,7 @@ class BankDetailsCanonicalQueryService:
             page=page,
             page_size=page_size,
         )
-        return self._transactions_payload(
+        return self._ordered_transactions_payload(
             snapshot,
             account_key=account_key,
             date_from=date_from,
@@ -777,7 +814,7 @@ class BankDetailsCanonicalQueryService:
             category_third_label=category_third_label,
         )
         return {
-            "transactions": self._transactions_payload(
+            "transactions": self._ordered_transactions_payload(
                 snapshot,
                 account_key=account_key,
                 date_from=date_from,
@@ -789,6 +826,14 @@ class BankDetailsCanonicalQueryService:
                 else None
             ),
         }
+
+    @classmethod
+    def _ordered_transactions_payload(cls, snapshot: dict[str, Any], **scope: Any) -> dict[str, Any]:
+        # Workbench also uses the category mapper, but does not own bank order I/O.
+        payload = cls._transactions_payload(snapshot, **scope)
+        for mapped, source in zip(payload["rows"], snapshot["rows"], strict=True):
+            mapped["same_time_order_status"] = source["same_time_order_status"]
+        return payload
 
     @staticmethod
     def _accounts_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -808,6 +853,7 @@ class BankDetailsCanonicalQueryService:
         )
         accounts: list[dict[str, Any]] = []
         totals_by_currency: dict[str, Decimal] = {}
+        incomplete_currencies: set[str] = set()
         for row in list(snapshot.get("rows") or []):
             if not isinstance(row, dict):
                 continue
@@ -819,10 +865,15 @@ class BankDetailsCanonicalQueryService:
                 or text(row.get("bank_name"))
                 or "未知银行"
             )
-            currency = text(row.get("currency")) or "CNY"
+            currency = text(row.get("currency"))
+            balance_status = row["balance_status"]
+            if balance_status not in {"confirmed", "last_known", "unresolved", "missing"}:
+                raise ValueError("Invalid bank account balance status.")
             latest_balance = row.get("latest_balance")
             has_balance = latest_balance is not None
-            if has_balance:
+            if balance_status != "confirmed":
+                incomplete_currencies.update(row["currencies"])
+            if balance_status == "confirmed" and currency is not None:
                 totals_by_currency[currency] = totals_by_currency.get(
                     currency,
                     Decimal("0.00"),
@@ -838,6 +889,7 @@ class BankDetailsCanonicalQueryService:
                     "account_name": text(row.get("account_name")),
                     "identity_confidence": text(row.get("identity_confidence")) or "fallback",
                     "currency": currency,
+                    "balance_status": balance_status,
                     "latest_balance": (
                         decimal_text(latest_balance)
                         if latest_balance is not None
@@ -858,6 +910,10 @@ class BankDetailsCanonicalQueryService:
                     ),
                 }
             )
+        totals_by_currency = {
+            currency: total for currency, total in totals_by_currency.items()
+            if currency not in incomplete_currencies
+        }
         total_balance = totals_by_currency.get("CNY")
         return {
             "accounts": accounts,

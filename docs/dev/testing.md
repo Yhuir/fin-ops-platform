@@ -1,5 +1,19 @@
 # 测试与验证
 
+## PostgreSQL 集成测试准备（2026-09-08）
+
+测试修复范围、逐项根因及实际结果见 [PostgreSQL 回归修复记录](postgres-regression-repair-plan.md)。
+当前权限为逐页面二态授权，当前页面查询为 canonical direct read；下文早期阶段中出现的多档权限、projection、freshness/barrier 记录是历史验证背景，不应照搬为当前 fixture 或恢复已退役代码。
+
+- 本轮使用独占本地 PostgreSQL 16 测试实例，测试库名明确为 `fin_ops_cash_test_*`；现金仍与普通业务共用生产 PostgreSQL 和既有登录账号。两个 test DSN 可以指向这个独占测试库，不得并行运行会 reset 同一库的套件。
+- 空测试集群需预先有迁移引用的既有角色名：`fin_ops_app_runtime`、`fin_ops_api`、`fin_ops_worker`、`fin_ops_migrator`、`fin_ops_readonly`、`fin_ops_app`。本地 fixture 角色均为 NOLOGIN，不是生产账号配置，也不创建现金受限角色。
+- 常规测试准备当前完整迁移；历史迁移测试在破坏结构前注册 `addClassCleanup(restore_current_test_database, dsn)`，退出时先清反例再恢复当前完整结构。禁止常规现金测试只 DROP/rebuild cash、留下与实际结构不一致的迁移记录。
+- 旧代码/候选 schema 兼容探针不自行应用最新迁移；调用者准备精确候选结构，探针只清理自己创建的 ID，不删除追加写审计历史。
+- 工作台日期文本样例显式用 `PGTZ=Asia/Shanghai` 的类级测试环境，退出即恢复；不修改全局或生产数据库时区。
+- `bash scripts/verify.sh backend` 会先执行读取运行时 DSN 的 clean check。在独立测试进程中清除 `FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_READ_DATABASE_URL`、`DATABASE_URL`、`FIN_OPS_APP_STORAGE_BACKEND`，仅设置显式 test DSN；不加载生产 token/env。无生产配置时 clean check 应验证拒绝启动，随后真实 PG 用例用自己的测试连接执行。
+- 单项命令：`PYTHONPATH=backend/src:tests python3 -m unittest tests.<module> -v`；全量使用现有 `bash scripts/verify.sh backend`。测试环境缺失产生的 skip 不算真实 PG 验证成功。
+
+
 本文件是开发验证入口。测试闭环的全局状态见 `testing-closure-state.md`，跨页面/API/read model/worker 依赖地图见 `testing-closure-dependency-map.md`，Spec-first Browser e2e 审计规则见 `spec-first-e2e-audit.md`，审计队列见 `spec-first-e2e-inventory.md`，nightly CI 规则见 `nightly-ci.md`。
 
 > 2026-09-02 当前权限合同：访问账户已改为逐页面二元授权，删除 `read_export_only/full_access` 运行时层级；页面有权即保留该页面原有读、写、导出能力，未分配页面及其 API 返回 403。只有 OA 账户 `005` 管理访问账户并隐式拥有全部页面。下文包含旧层级名称的早期增量记录仅作历史测试演进证据，不得作为当前权限合同。

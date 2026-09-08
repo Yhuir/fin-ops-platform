@@ -47,6 +47,10 @@ EXPECTED_PROFILE_PAIRS = {
         "workbench_relation_confirm_cross_page",
         "workbench_relation_withdraw_cross_page",
     ),
+    "bank_flow_rule_batch": (
+        "bank_flow_rule_batch_submit",
+        "bank_flow_rule_batch_withdraw",
+    ),
 }
 
 
@@ -79,6 +83,7 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
     def setUp(self) -> None:
         truncate_test_database(self.database_url)
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
+        self.addCleanup(self.connection.close)
         self.run_id = uuid4().hex
         self.actor_id = f"phase20-postgres-test-{self.run_id}"
 
@@ -89,9 +94,13 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
         )
         truncate_test_database(self.database_url)
 
-    def test_three_registered_profile_pairs_commit_idempotently_without_write_fanout(self) -> None:
-        pairs = self._profile_pairs()
-        self.assertEqual(pairs, EXPECTED_PROFILE_PAIRS)
+    def test_all_four_owner_profile_pairs_are_registered(self) -> None:
+        self.assertEqual(self._profile_pairs(), EXPECTED_PROFILE_PAIRS)
+
+    def test_three_relation_owner_profile_pairs_commit_without_write_fanout(self) -> None:
+        # Bank-flow owns a different transaction; its real HTTP/PG submit +
+        # withdraw + rollback proof lives in test_app_postgres_mode_integration.
+        pairs = {key: EXPECTED_PROFILE_PAIRS[key] for key in ("bank_invoice", "bank_turnover", "bank_oa_invoice")}
         checkpoint_keys: list[str] = []
 
         for shape_index, (shape, profiles) in enumerate(pairs.items(), start=1):
