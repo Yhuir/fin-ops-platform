@@ -17,3 +17,7 @@
 
 - `platform-settings-health.md`：设置、权限、数据重置、App Health 和后台任务可见性。
 - `page-data-integrity-statistics.md`：业务页面标题统计、页面自有数据边界与 App Health System Audit 对账口径。
+
+## 待批准功能设计
+
+- [现金模块业务总设计](cash-module-design.md)：现金池隔离、Excel 全表覆盖、业务口径与待定项；待用户确认，不代表已实现。配套 [UI 与 Figma Make 交接](cash-module-ui-spec.md)、[后端/API/数据库设计](../dev/cash-module-technical-design.md)、[实施与验证计划](../dev/cash-module-implementation-plan.md)，四份分工维护。

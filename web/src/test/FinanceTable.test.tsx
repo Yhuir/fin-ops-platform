@@ -18,6 +18,18 @@ import {
 } from "../components/common/FinanceTable";
 
 describe("FinanceTable shared primitives", () => {
+  test("forwards optional native sorting without sorting the supplied rows itself", async () => {
+    const onSortChange = vi.fn();
+    render(<FinanceTable ariaLabel="原生排序" sortDescriptor={{ column: "name", direction: "ascending" }} onSortChange={onSortChange}>
+      <FinanceTableHeader><FinanceTableColumn id="name" isRowHeader allowsSorting>名称</FinanceTableColumn></FinanceTableHeader>
+      <FinanceTableBody>{["乙", "甲"].map(name => <FinanceTableRow key={name} id={name} textValue={name}><FinanceTableCell>{name}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+    </FinanceTable>);
+    const column = screen.getByRole("columnheader", { name: "名称" });
+    expect(column).toHaveAttribute("aria-sort", "ascending");
+    await userEvent.click(column);
+    expect(onSortChange).toHaveBeenCalledTimes(1); expect(onSortChange).toHaveBeenCalledWith({ column: "name", direction: "descending" });
+    expect(screen.getAllByRole("rowheader").map(cell => cell.textContent)).toEqual(["乙", "甲"]);
+  });
   test("exposes one contained scroll surface while keeping HeroUI table semantics", () => {
     render(
       <FinanceTable ariaLabel="测试表格" scrollMode="contained">

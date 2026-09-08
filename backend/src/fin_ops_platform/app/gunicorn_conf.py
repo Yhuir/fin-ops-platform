@@ -18,6 +18,7 @@ max_requests_jitter = int(os.environ.get("FIN_OPS_HTTP_MAX_REQUESTS_JITTER", "50
 accesslog = "-"
 errorlog = "-"
 capture_output = True
+logger_class = "fin_ops_platform.app.cash_access_logger.CashAccessLogger"
 access_log_format = (
     '{"event":"gunicorn_access","remote":"%(h)s","request":"%(r)s",'
     '"status":%(s)s,"bytes":%(b)s,"duration_us":%(D)s,"request_id":"%({x-request-id}o)s"}'

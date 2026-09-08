@@ -2,6 +2,8 @@
 
 本文记录业务唯一真相的模块化边界。这里的 canonical facts 指 PostgreSQL 中代表业务事实本体的 `app.*` 表，不包括派生 read model、Redis cache、frontend domain event、local pickle、full snapshot、`state:*` JSON 或 Mongo app snapshot。
 
+现金是明确例外的独立事实域：同库 `cash.*` 只归 [cash owner](../../modules/cash/boundary-io.md)，不进入本普通统一财务池，不对其他页面/审计/reset/worker 提供财务 read port。普通 owner 不得因共用 PostgreSQL 而查询或复制现金；现金也不得调用普通财务 read port。
+
 ## 目标
 
 - 每类业务事实只有一个业务 owner。

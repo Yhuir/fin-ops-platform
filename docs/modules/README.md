@@ -59,6 +59,7 @@
 | `oa-integration` | OA 集成 | 资源模块 | `N/A` | `oa-integration/README.md` |
 | `data-safety-reset` | 数据安全与重置 | 资源模块 | `N/A` | `data-safety-reset/README.md` |
 | `permissions-and-audit` | 权限与审计 | 资源模块 | `N/A` | `permissions-and-audit/README.md` |
+| `cash` | 现金账 | 独立业务模块 | `/cash` + `/api/cash/*`；四子页、统一UI/表头多选已实现，实际验证与发布记录见实施§14 | `cash/README.md` |
 
 
 ## 文件约定

@@ -39,5 +39,9 @@ immutable fingerprint 回滚。
 
 ## 验证
 
+现金前后端发布已获用户2026-09-07最新明确授权，分支`codex/cash-ledger`，不合并main。前端实现并本地验证后发布。使用同库、同一App登录账号，不安装cash专用env或创建账号；追加0167为已存在的`fin_ops_app_runtime`授予cash十表必要DML，保留0166及旧迁移不变。步骤见[现金部署](../../operations/cash-module-deployment.md)。生产不插入试验现金、不创建受限角色、不改OA状态；既有正式发布验证保留。
+
+Nginx示例采用归一化`$uri`条件access_log，精确排除三种cash API前缀；普通/近似cash-back路径日志不变。正式配置只改这项map和站点日志条件，经原配置对比和nginx语法验证后reload；不改变OA代理/TLS/应用路由。
+
 `tests/test_deploy_oa_script.py`、`tests/test_deploy_runtime_examples.py`、
 `tests/test_read_model_runtime_removal.py` 与生产 T+0/T+30 evidence。

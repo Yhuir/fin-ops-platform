@@ -79,6 +79,8 @@ type FinanceTableProps = {
   selectableText?: boolean;
   scrollMode?: "natural" | "contained";
   scrollRef?: Ref<HTMLDivElement>;
+  sortDescriptor?: ComponentProps<typeof Table.Content>["sortDescriptor"];
+  onSortChange?: ComponentProps<typeof Table.Content>["onSortChange"];
 };
 
 export function FinanceTable({
@@ -90,6 +92,8 @@ export function FinanceTable({
   selectableText = false,
   scrollMode = "natural",
   scrollRef,
+  sortDescriptor,
+  onSortChange,
 }: FinanceTableProps) {
   const style: FinanceTableStyle = {
     "--finance-table-min-width": typeof minWidth === "number" ? `${minWidth}px` : minWidth,
@@ -104,7 +108,7 @@ export function FinanceTable({
         className,
       )}>
         <Table.ScrollContainer ref={scrollRef} className="finance-table__scroll">
-          <Table.Content aria-label={ariaLabel} className="finance-table__content" style={style}>
+          <Table.Content aria-label={ariaLabel} className="finance-table__content" style={style} sortDescriptor={sortDescriptor} onSortChange={onSortChange}>
             {children}
           </Table.Content>
         </Table.ScrollContainer>

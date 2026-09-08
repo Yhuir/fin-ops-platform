@@ -177,8 +177,11 @@ EXPECTED_MIGRATION_FILES = [
     "0163_workbench_relation_receipts.sql",
     "0164_manual_bank_entry_audit_contract.sql",
     "0165_page_access_accounts.sql",
+    "0166_cash_ledger.sql",
+    "0167_cash_shared_runtime_grants.sql",
+    "0168_cash_business_closure.sql",
 ]
-TEST_SCHEMAS = ("audit", "job", "app", "staging")
+TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (
     "audit.events",
     "app.financial_fact_corrections",
@@ -336,6 +339,7 @@ drop schema if exists job cascade;
 drop schema if exists read_model cascade;
 drop schema if exists app cascade;
 drop schema if exists staging cascade;
+drop schema if exists cash cascade;
 drop table if exists public.schema_migrations;
 """,
     )

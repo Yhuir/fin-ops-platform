@@ -40,6 +40,7 @@ from fin_ops_platform.app.http_upload import MultipartBodyError, parse_multipart
 from fin_ops_platform.app.route_access_policy import (
     audit_page_key_for_route,
     is_admin_only_route,
+    is_cash_request,
     is_state_changing_request,
     page_keys_for_route,
 )
@@ -570,6 +571,9 @@ class Application:
         self._api_performance_recorder = ApiPerformanceRecorder()
         self._state_store = build_state_store(data_dir)
         self._runtime_repositories = RuntimeRepositoryContext.from_state_store(self._state_store)
+        self._cash_data_dir = data_dir
+        self._cash_runtime_lock = Lock()
+        self._cash_runtime = None
         self._app_health_dashboard_cache_lock = Lock()
         self._app_health_dashboard_cache: tuple[float, dict[str, object]] | None = None
         self._app_status_runtime_snapshot_cache_lock = Lock()
@@ -584,6 +588,8 @@ class Application:
         return self._runtime_repositories
 
     def close(self) -> None:
+        if self._cash_runtime is not None:
+            self._cash_runtime.close()
         close = getattr(self._state_store, "close", None)
         if callable(close):
             close()
@@ -1498,7 +1504,8 @@ class Application:
         request_started_at = monotonic()
         route_path = self._normalize_route_path(urlparse(path).path)
         mutation_request = is_state_changing_request(method, route_path)
-        request_audit_enabled = mutation_request and self._audit_service.is_durable
+        cash_request = is_cash_request(route_path)
+        request_audit_enabled = mutation_request and not cash_request and self._audit_service.is_durable
         effective_request_id = request_id or (uuid4().hex if request_audit_enabled else None)
         status_code = int(HTTPStatus.INTERNAL_SERVER_ERROR)
         response: Response | None = None
@@ -1517,6 +1524,8 @@ class Application:
                     authoritative_request_id=effective_request_id,
                 )
                 status_code = int(response.status_code)
+                if cash_request:
+                    response.headers["Cache-Control"] = "no-store"
                 return response
             except Exception as exc:
                 request_error = exc
@@ -1562,16 +1571,41 @@ class Application:
                 _REQUEST_AUDIT_REQUEST_ID.reset(request_id_token)
                 _REQUEST_AUDIT_EVIDENCE.reset(evidence_token)
                 _REQUEST_OA_SESSION.reset(session_token)
-                self._api_performance_recorder.record_request(
-                    method=method,
-                    route_path=route_path,
-                    status_code=status_code,
-                    duration_ms=self._duration_ms(request_started_at),
-                    connection_acquire_duration_ms=database_timing.connection_acquire_duration_ms,
-                    sql_execute_fetch_duration_ms=database_timing.sql_execute_fetch_duration_ms,
-                    database_duration_ms=database_timing.total_duration_ms,
-                    database_query_count=database_timing.query_count,
-                )
+                if not cash_request:
+                    self._api_performance_recorder.record_request(
+                        method=method,
+                        route_path=route_path,
+                        status_code=status_code,
+                        duration_ms=self._duration_ms(request_started_at),
+                        connection_acquire_duration_ms=database_timing.connection_acquire_duration_ms,
+                        sql_execute_fetch_duration_ms=database_timing.sql_execute_fetch_duration_ms,
+                        database_duration_ms=database_timing.total_duration_ms,
+                        database_query_count=database_timing.query_count,
+                    )
+
+    def _handle_cash_request(self, method, route_path, query, body, session) -> Response:
+        from psycopg import OperationalError
+        from psycopg.errors import InsufficientPrivilege, InvalidSchemaName, UndefinedTable
+        from psycopg_pool import PoolTimeout, TooManyRequests
+
+        from fin_ops_platform.app.cash_runtime import CashRuntime
+        from fin_ops_platform.services.cash_domain import CashError
+
+        try:
+            if self._cash_runtime is None:
+                with self._cash_runtime_lock:
+                    if self._cash_runtime is None:
+                        self._cash_runtime = CashRuntime(self._cash_data_dir)
+            routes = self._cash_runtime.routes(session, self._json_response)
+            return routes.route(method, route_path, query, body, session=session)
+        except CashError as exc:
+            return self._json_response(exc.status, {"error": exc.code, "message": exc.message},
+                                       {"Cache-Control": "no-store"})
+        except (OperationalError, PoolTimeout, TooManyRequests, InsufficientPrivilege,
+                InvalidSchemaName, UndefinedTable):
+            return self._json_response(503, {"error": "cash_dependency_unavailable",
+                                            "message": "现金数据库暂不可用或配置尚未完成。"},
+                                       {"Cache-Control": "no-store"})
 
     def _handle_request_untracked(
         self,
@@ -1584,7 +1618,7 @@ class Application:
         request_started_at = monotonic()
         parsed = urlparse(path)
         route_path = self._normalize_route_path(parsed.path)
-        query = parse_qs(parsed.query)
+        query = parse_qs(parsed.query, keep_blank_values=is_cash_request(route_path))
         timed_action = self._workbench_timed_action_for_route(method=method, route_path=route_path)
         request_id = authoritative_request_id or (uuid4().hex[:12] if timed_action is not None else None)
 
@@ -1624,6 +1658,8 @@ class Application:
                     status="auth_error",
                 )
             return auth_error
+        if is_cash_request(route_path):
+            return self._handle_cash_request(method, route_path, query, body, access_session)
         if is_state_changing_request(method, route_path):
             actor_id = actor_id_for_session(access_session) if access_session is not None else ""
             identity = access_session.identity if access_session is not None else None

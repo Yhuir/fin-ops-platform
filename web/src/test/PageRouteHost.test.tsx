@@ -215,11 +215,12 @@ describe("PageRouteHost", () => {
     const financeItems = sidebarGroups.find((group) => group.title === "财务业务")?.items ?? [];
     const systemItems = sidebarGroups.find((group) => group.title === "系统操作")?.items ?? [];
 
-    expect(appPageRoutes).toHaveLength(18);
+    expect(appPageRoutes).toHaveLength(19);
     expect(appPageRoutes.map((route) => route.path)).toEqual([
       "/",
       "/cost-statistics",
       "/bank-details",
+      "/cash",
       "/oa-pending-payments",
       "/bank-flow-rule-batches",
       "/batch-accounting",
@@ -236,10 +237,13 @@ describe("PageRouteHost", () => {
       "/imports/invoices",
       "/imports/etc-invoices",
     ]);
-    expect(financeItems).toHaveLength(12);
+    expect(financeItems).toHaveLength(13);
     expect(systemItems).toHaveLength(4);
     expect(new Set(appPageRoutes.map((route) => route.pageKey))).toHaveLength(appPageRoutes.length);
-    expect(sidebarItems.every((item) => routeByPath.has(item.to))).toBe(true);
+    expect(sidebarItems.every((item) => routeByPath.has(item.to.split("?")[0]))).toBe(true);
+    expect(sidebarItems.filter(item => item.to.startsWith("/cash?")).map(item => item.to)).toEqual([
+      "/cash?section=flows", "/cash?section=accounts", "/cash?section=tasks", "/cash?section=settings",
+    ]);
     expect(sidebarItems.every((item) => typeof item.preload === "function")).toBe(true);
     expect(appPageRoutes.every((route) => typeof route.preload === "function")).toBe(true);
     expect(appPageRoutes.every((route) => (
@@ -270,7 +274,9 @@ describe("PageRouteHost", () => {
       "src/components/imports/ImportWorkflowPage.tsx",
     ];
 
-    expect(appPageRoutes).toHaveLength(18);
+    expect(appPageRoutes).toHaveLength(19);
+    // Cash deliberately owns abort/cleanup locally and does not persist page session data.
+    expect(appPageRoutes.find(route => route.path === "/cash")?.pageKey).toBe("cash");
     for (const path of pageOwners) {
       expect(readFileSync(path, "utf8"), path).toContain("useOptionalPageActivation");
     }

@@ -20,3 +20,7 @@
 
 - `../app-architecture/pages.md`：页面、API client、刷新来源和页面间影响关系。
 - `../app-architecture/runtime-and-ownership.md`：read model、worker、dirty cascade 调用链和 owner。
+
+## 待批准功能实施
+
+- [现金模块实施计划](cash-module-implementation-plan.md)：现金分支的开发顺序、执行单元、旧链路处理、测试/性能与复审；[技术详细设计](cash-module-technical-design.md)集中维护后端/API/数据库/事务，配套[业务总设计](../product-specs/cash-module-design.md)与[UI/Make 交接](../product-specs/cash-module-ui-spec.md)。不使用 GSD，未批准前不实施。

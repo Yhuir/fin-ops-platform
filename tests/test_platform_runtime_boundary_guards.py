@@ -1327,6 +1327,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         route_owners = {
+            "routes_cash.py": {
+                "module": "fin_ops_platform.app.routes_cash",
+                "class": "CashApiRoutes",
+                "composition_root": "cash_runtime.py",
+                "composition_markers": ("def routes(", "return CashApiRoutes("),
+                "server_markers": ("def _handle_cash_request", "self._cash_runtime.routes(session, self._json_response)", "return routes.route(method, route_path, query, body, session=session)"),
+            },
             "routes_bank_details.py": {
                 "module": "fin_ops_platform.app.routes_bank_details",
                 "class": "BankDetailsApiRoutes",
@@ -1446,8 +1453,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             module = str(owner["module"])
             if not _class_source(route_tree, route_source, route_class):
                 violations.append(f"{filename} does not define {route_class}")
-            if not _imports_name_from_module(server_tree, module=module, name=route_class):
-                violations.append(f"server.py does not import {route_class} from {module}")
+            composition_tree = server_tree
+            composition_filename = str(owner.get("composition_root", "server.py"))
+            if composition_filename != "server.py":
+                composition_path = APP_ROOT / composition_filename
+                composition_source = composition_path.read_text(encoding="utf-8")
+                composition_tree = _parse(composition_path)
+                for marker in owner["composition_markers"]:
+                    if marker not in composition_source:
+                        violations.append(f"{composition_filename} route owner {route_class} is missing marker {marker}")
+            if not _imports_name_from_module(composition_tree, module=module, name=route_class):
+                violations.append(f"{composition_filename} does not import {route_class} from {module}")
             for marker in owner["server_markers"]:
                 if marker not in server_source:
                     violations.append(f"server.py route owner {route_class} is missing marker {marker}")
@@ -5939,7 +5955,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 continue
             calls = _attribute_calls(_parse(path), {"fetch_one", "fetch_all"})
             source = path.read_text(encoding="utf-8")
-            if re.search(r"\bPostgresConnection\s*\(", source):
+            # The private cash composition root owns its bounded pool, not SQL.
+            # Do not exempt the file from query/write checks along with construction.
+            if rel_path == "backend/src/fin_ops_platform/app/cash_runtime.py":
+                calls.extend(_attribute_calls(_parse(path), {"execute", "executemany"}))
+            elif re.search(r"\bPostgresConnection\s*\(", source):
                 calls.append("PostgresConnection")
             if calls:
                 violations.append(f"{rel_path}: {sorted(set(calls))}")

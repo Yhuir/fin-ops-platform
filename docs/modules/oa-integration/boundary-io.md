@@ -1,6 +1,6 @@
 # OA 集成模块边界与 I/O
 
-日期：2026-08-26
+日期：2026-09-07
 
 ## 模块化状态
 
@@ -18,6 +18,7 @@
 - 把 Settings canonical ACL 投影到唯一 `finops:app:view` menu 的两个专用 OA role members：有至少一个页面的普通账号进入 `finops_app_user`，固定 005 进入 `finops_admin`。
 - OA Mongo 读取、OA projection sync、OA 附件发票识别和 OA applicant credentials。
 - 对 OA 待付款、ETC、进项反提等模块提供外部系统 adapter。
+- 为现金模块提供独立的项目资料窄只读口：只读 form 17 的 ID、名称、编码、projectPhase 与 XMJD 字典，不读取付款/报销，不经过普通项目 override 或财务投影。
 
 ### 不负责
 
@@ -61,6 +62,16 @@
 
 ## 持久化与投影
 
+### 现金项目只读例外
+
+- Owner：`services/cash_oa_projects.py`。输入为项目查询/真实项目 ID、现金允许阶段设置 provider、显式受信 OA token 的字典 loader、既有 Mongo 设置和调用方拥有的有界 MongoClient。service 不读取 HTTP cookie/header，也不创建 OA 凭据或新连接配置。
+- 输出：`list_projects` 返回项目 rows、完整 stages、过滤后的 total/分页、read_at、selection_settings_version、configured；`resolve_project` 返回真实 ID/名称和允许阶段设置版本。source 故障明确 503，ID 消失/当前不可选 409，非法输入 400；不返回假空、旧字典或固定 active。
+- 仅这一项目元数据口允许请求时通过 OA owner 直接只读：每次读取真实字典，Mongo 只投影 `_id/data.name/data.code/data.projectPhase`；全源过滤后统一计数分页。不存在 OA 项目镜像、财务数据复制、轮询、worker 或写回。
+- 2026-09-07 只读核实：OA `form_data.form_id` 为字符串 `17`，ID 为 BSON ObjectId，阶段字段 `data.projectPhase`；118 个项目，其中 `end` 36 个。字典管理实际类型为 `XMJD`（ID 24），10 个键值：`1` 投标前、`2` 招投标阶段、`3` 合同签订阶段、`4` 采购阶段、`5` 实施阶段、`6` 结算阶段、`7` 试运行、`8` 质保期、`0` 未中标、`end` 已结束。该清单是核实记录，运行时名称仍读取权威字典，不能硬编码该快照。
+- 初始允许集合为空且 configured=false，不猜哪些阶段可用；现金页面可用账号按现金设置规则配置。`end` 始终不可用于自由新增；未知/缺失阶段在 all 中明确显示不可选，不隐藏项目。
+- 期初非现金义务识别只验证 OA 中真实项目身份，不限制结束阶段；已有现金事项的后续真实结算直接沿用 cash 内历史归属，完全不调用本 OA 口。普通现金改选仍执行当前阶段资格，事务由现金 owner 核对同一设置版本。
+- 原 `MongoOAAdapter.fetch_projects()` 仍服务普通链路，不改其语义、不让现金调用它；禁止为现金读取普通 `app.projects`、completed override 或 OA 付款/报销。
+
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
 - OA manual import/create/remove 逻辑上影响 `workbench`、`workbench_relation`、invoice lifecycle、tax offset 和 cost statistics，但普通写路径不 enqueue、不等待 operation barrier；消费页面访问时按 owner contract 读取。唯一例外是管理员显式 `refresh-attachments`：Settings request service 只校验 canonical OA row、登记现有 `oa.sync` 精确 operation 并提供状态读取。OA worker 对 selected completed OA 与 selected `in_progress + expense_claim` 强制重解析、owner 提交、统一 promotion 和 matching reconciliation。该操作不广播其它页面，其状态由 event status 和通用队列指标单独观测，不参与全量 `oa_projection` freshness、App Health OA 状态或发布 readiness。
 - OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection；batch 额外输出 lifecycle arbitration 后、local retention 前的完整 payment flow identity 集合，只供 `all` lifecycle deletion 比较，不扩大页面 canonical retention。真实变化记录写完 item/attachment 后，在同一事务按 OA row ids 执行一次 indexed identity bridge，再由 Worker 主链路对 `completed_projection_changed_scopes` 内的 completed records 和 `pending_admission_changed_scopes` 内的 `in_progress + expense_claim` records 提升已解析正式附件发票到 canonical invoice pool，随后记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`。cache 保存入口按 cache key 复用同一 bridge，因此 OA facts/cache 任一到达顺序都闭环。设置页精确刷新也由同一 worker-owned source adapter/persistence 边界完成，但只 upsert 指定记录且不执行 stale snapshot deletion；两条入口复用同一强身份、冲突、模式和批量持久化合同，不允许 route/Application 私有 Mongo、OCR 或 promotion。自动同步只在 OA owner 或 canonical 发票真实变化时写发票来源并触发 matching；支付状态单独变化和周期性相同输入必须零重复 projection/invoice/source write。管理员精确刷新 eligible record 即使 canonical 发票不变也显式补发 matching reconciliation；`all` 替换必须全范围清理 stale canonical projection，并把旧 watermark scopes 纳入变化比较，不能漏掉整月或最后一条 completed 被删除的月份。
@@ -76,6 +87,7 @@
 | Menu projection | `backend/src/fin_ops_platform/services/oa_role_sync_service.py`、`backend/src/fin_ops_platform/tools/settings_access_control_preflight.py` |
 | Deployment verification / repair | `backend/src/fin_ops_platform/tools/settings_access_control_preflight.py`、`backend/src/fin_ops_platform/postgres/migrations/0153_oa_source_alias_attachment_identity_repair.sql`、`deploy/oa/bin/finops-deploy-control.sh` |
 | Adapter/projection | `mongo_oa_adapter.py`、`oa_projection_sync.py`、`oa_attachment_invoice_promotion_service.py`、`postgres_repositories/oa_projection.py`、`postgres_repositories/oa_attachment_identity_bridge.py`、`postgres_repositories/oa_attachment_invoice.py`、`runtime_worker_registry.py` |
+| Cash project metadata | `cash_oa_projects.py`；现金唯一外部项目只读口，不挂入普通 OA sync/projection |
 | OA services | `oa_identity_service.py`、`oa_manual_import_service.py`、`oa_attachment_refresh_request_service.py`、`oa_attachment_invoice_service.py`、`oa_attachment_invoice_promotion_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
 | Related routes | `routes_oa_pending_payments.py`、`routes_etc.py`、`routes_input_invoice_usage_oa_reverse.py`、`server.py` |
 | Related modules | OA pending payments、ETC、input invoice usage、settings、permissions |
@@ -117,5 +129,5 @@
 - Allowed writes: OA sync worker、manual OA import service、OA credential service、受控 attachment repair/alias tools。
 - Allowed reads: OA projection adapters/read ports、OA integration APIs。
 - Downstream outputs: canonical/source versions 与信息性 changed scopes；各消费页自己的 access-time freshness gateway 决定是否创建精确 dirty scope。
-- Forbidden paths: production API 不得直接读 OA Mongo；HTTP 进程不得启动 OA polling、热重建 Workbench read model 或 fallback inline sync；OA cache 不得当作正式发票池；OA source alias 不得由弱业务指纹自动激活；OA credential 不得通过 settings snapshot fallback 写入。
+- Forbidden paths: production API 不得直接读 OA 财务 Mongo；现金项目元数据仅允许上述窄 OA owner 例外。HTTP 进程不得启动 OA polling、热重建 Workbench read model 或 fallback inline sync；OA cache 不得当作正式发票池；OA source alias 不得由弱业务指纹自动激活；OA credential 不得通过 settings snapshot fallback 写入。
 - Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback、进程内 `OASyncService` polling/hot rebuild、HTTP `Application` 附件发票 promotion、无调用方 fingerprint polling、sync service 多 list 扫描、snapshot repository queue dependency 和 sync downstream fan-out 必须保持删除；migration/audit/rollback 工具保留不算 closure。

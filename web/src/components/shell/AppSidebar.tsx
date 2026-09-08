@@ -82,7 +82,9 @@ export default function AppSidebar({
   const session = useSession();
   const { canAccessPage } = useOptionalSessionPermissions();
   const showExpandedContent = expanded || isCompact;
-  const [importsExpanded, setImportsExpanded] = useState(() => location.pathname.startsWith("/imports"));
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
+    imports: location.pathname.startsWith("/imports"), cash: location.pathname === "/cash",
+  }));
   const [openPopover, setOpenPopover] = useState<"status" | "account" | null>(null);
 
   const drawerContent = (
@@ -146,9 +148,9 @@ export default function AppSidebar({
                     <li key={item.id} className="app-sidebar-item app-sidebar-disclosure-item">
                       <Disclosure
                         className="app-sidebar-disclosure"
-                        isExpanded={showExpandedContent && importsExpanded}
+                        isExpanded={showExpandedContent && (expandedGroups[item.id] ?? routeActive)}
                         onExpandedChange={(isExpanded) => {
-                          setImportsExpanded(isExpanded);
+                          setExpandedGroups(current => ({ ...current, [item.id]: isExpanded }));
                           if (isExpanded && !showExpandedContent) {
                             onToggleExpanded();
                           }

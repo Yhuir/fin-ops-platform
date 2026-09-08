@@ -18,6 +18,7 @@ ASSIGNABLE_PAGE_KEYS = frozenset(
         "reconciliation-workbench",
         "cost-statistics",
         "bank-details",
+        "cash",
         "oa-pending-payments",
         "bank-flow-rule-batches",
         "batch-accounting",

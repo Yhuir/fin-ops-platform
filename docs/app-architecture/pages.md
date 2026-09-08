@@ -1,6 +1,6 @@
 # 页面架构与页面间影响关系
 
-日期：2026-08-29
+日期：2026-09-07
 
 ## 代码事实源
 
@@ -17,6 +17,7 @@
 | --- | --- | --- |
 | 关联台/批量账务 | OA、银行、发票、ETC、active pair relations；合格的无 OA 收入+销项关系可同步派生 relation-scoped 收据 PDF | Workbench matching 只负责领域匹配；收据无 read model/worker |
 | 银行明细/余额/流水规则 | 银行流水、分类/标签、账户映射、active relations | settings-maintenance 只负责要求重算 |
+| 现金账（三子页面） | 同库cash.*独立流水/事项/结算/任务/配置；项目选择只读OA项目元数据 | 无worker，无报表副本；不接普通财务池 |
 | 待找发票/进项使用/销项收款 | 银行流水、发票 lifecycle、规则、active relations | import 只负责导入 |
 | OA 待付款 | OA canonical snapshot、银行/发票、active relations | OA sync |
 | 税金抵扣/成本统计/外部往来 | 发票、流水、项目、认证/闭环事实、active relations | 明确 import/maintenance job |
@@ -32,6 +33,7 @@
 - 初次 mount、query 改变、用户明确刷新和当前页写后一次 GET 是业务读取入口。
 - 离开页面会卸载 React tree；不保留隐藏业务 DOM、rows cache 或跨页刷新订阅。
 - 普通写不发送 window event/BroadcastChannel，也不触发其它页面请求。
+- 现金写只刷新当前现金视图；当前三子页面共用`cash`权限，URL只存非敏感section。2026-09-07后续设计新增独立现金流水section=flows，目标四子页仍单cash权限，尚未实施；详见现金实施计划§11。现金事实、筛选、任务数不进入shell/global store、浏览器存储或全局操作历史；离开或401/403清除现金子树。普通页面不读取cash.*。
 - OA sync/import/maintenance progress 和 App Health 使用自己的 bounded polling，不作为页面事实来源。
 - 前端请求必须能 abort/淘汰旧 generation，迟到响应不能覆盖更新的 query/result。
 - 后台状态变化只更新状态或安排当前页数据重读；存在抽屉、对话框、详情、选择或未提交输入时不得导航、刷新文档或重置交互状态。需要重读的页面应延后到交互结束，或只替换数据事实并保留当前交互上下文。
