@@ -5405,7 +5405,8 @@ function costStatisticsExplorerPagePayload(
   const pageSize = Math.max(1, Math.min(100, Number(url.searchParams.get("page_size") ?? 50) || 50));
   const cursorOffset = Number((url.searchParams.get("cursor") ?? "").replace(/^mock:/, "")) || 0;
   const projectName = url.searchParams.get("project_name") ?? "";
-  const expenseType = url.searchParams.get("expense_type") ?? "";
+  const primaryKey = url.searchParams.get("bank_tag_primary_key") ?? "";
+  const subKey = url.searchParams.get("bank_tag_sub_key") ?? "";
   const bankAccountLabel = url.searchParams.get("bank_account_label") ?? "";
   const bankTagPrimaryLabel = url.searchParams.get("bank_tag_primary_label") ?? "";
   const bankTagSubLabel = url.searchParams.get("bank_tag_sub_label") ?? "";
@@ -5413,7 +5414,7 @@ function costStatisticsExplorerPagePayload(
     scope === "all"
     || (scope.startsWith("year:") ? row.trade_time.startsWith(`${scope.slice(5)}-`) : row.trade_time.startsWith(scope))
   ));
-  const costRows = inScope(payload.cost_rows);
+  const costRows = inScope(payload.cost_rows).map(row => ({ ...row, ...costBankTagForRow(row) }));
   const bankFlowRows = costRows.map((row) => ({
     ...row,
     direction: row.transaction_id === "cost-txn-e2e-002" ? "收入" : "支出",
@@ -5427,19 +5428,15 @@ function costStatisticsExplorerPagePayload(
   });
 
   const projectGroups = new Map<string, { rows: typeof costRows; total: number; expenseTypes: Set<string> }>();
-  const expenseGroups = new Map<string, { rows: typeof costRows; total: number; projects: Set<string> }>();
+
   const bankGroups = new Map<string, { rows: typeof costRows; total: number; projects: Set<string> }>();
   for (const row of costRows) {
     const project = projectGroups.get(row.project_name) ?? { rows: [], total: 0, expenseTypes: new Set<string>() };
     project.rows.push(row);
     project.total += amount(row.amount);
-    project.expenseTypes.add(row.expense_type);
+    project.expenseTypes.add(row.bank_tag_primary_label);
     projectGroups.set(row.project_name, project);
-    const expense = expenseGroups.get(row.expense_type) ?? { rows: [], total: 0, projects: new Set<string>() };
-    expense.rows.push(row);
-    expense.total += amount(row.amount);
-    expense.projects.add(row.project_name);
-    expenseGroups.set(row.expense_type, expense);
+
   }
   for (const row of costRows) {
     const accountLabel = row.bank_account_label;
@@ -5453,13 +5450,7 @@ function costStatisticsExplorerPagePayload(
   const projects = Array.from(projectGroups.entries()).map(([name, group]) => ({
     project_name: name,
     total_amount: formatAmount(group.total),
-    expense_type_count: group.expenseTypes.size,
-  })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
-  const expenseTypes = Array.from(expenseGroups.entries()).map(([name, group]) => ({
-    expense_type: name,
-    total_amount: formatAmount(group.total),
-    transaction_count: group.rows.length,
-    project_count: group.projects.size,
+    primary_tag_count: group.expenseTypes.size,
   })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
   const bankAccounts = Array.from(bankGroups.entries()).map(([label, group]) => ({
     bank_account_label: label,
@@ -5506,17 +5497,6 @@ function costStatisticsExplorerPagePayload(
     };
   });
 
-  const selectedProjectRows = projectGroups.get(projectName)?.rows ?? [];
-  const projectExpenseTypes = Array.from(new Set(selectedProjectRows.map((row) => row.expense_type))).map((name) => {
-    const rows = selectedProjectRows.filter((row) => row.expense_type === name);
-    const rowTotal = rows.reduce((sum, row) => sum + amount(row.amount), 0);
-    return {
-      expense_type: name,
-      total_amount: formatAmount(rowTotal),
-      transaction_count: rows.length,
-      project_count: 1,
-    };
-  }).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
   const selectedBankRows = bankGroups.get(bankAccountLabel)?.rows ?? [];
   const bankProjects = Array.from(new Set(selectedBankRows.map((row) => row.project_name))).map((name) => {
     const accountProjectRows = selectedBankRows.filter((row) => row.project_name === name);
@@ -5524,17 +5504,20 @@ function costStatisticsExplorerPagePayload(
     return {
       project_name: name,
       total_amount: formatAmount(rowTotal),
-      expense_type_count: new Set(accountProjectRows.map((row) => row.expense_type)).size,
+      primary_tag_count: new Set(accountProjectRows.map((row) => row.bank_tag_primary_label)).size,
     };
   });
 
+  const ancestors = ((view === "project" && !projectName) || (view === "bank_account" && (!bankAccountLabel || !projectName))) ? [] : costRows.filter(row => (!projectName || row.project_name === projectName) && (!bankAccountLabel || row.bank_account_label === bankAccountLabel));
+  const primaryRows = ancestors.filter(row => `primary:${row.bank_tag_primary_label}` === primaryKey);
+  const tagFacets = (rows: typeof costRows, sub: boolean) => {
+    const groups = new Map<string, typeof costRows>();
+    for (const row of rows) { const key = sub ? `sub:${row.bank_tag_primary_label}:${row.bank_tag_sub_label}` : `primary:${row.bank_tag_primary_label}`; groups.set(key, [...(groups.get(key) ?? []), row]); }
+    return [...groups].map(([key, rows]) => ({ key, label: sub ? rows[0].bank_tag_sub_label : rows[0].bank_tag_primary_label, total_amount: sumCostAmounts(rows), row_count: rows.length, project_count: new Set(rows.map(row => row.project_name)).size }));
+  };
   let matchedRows: typeof costRows = [];
-  if (view === "project" && projectName && expenseType) {
-    matchedRows = costRows.filter((row) => row.project_name === projectName && row.expense_type === expenseType);
-  } else if (view === "expense_type" && expenseType) {
-    matchedRows = costRows.filter((row) => row.expense_type === expenseType);
-  } else if (view === "bank_account" && bankAccountLabel && projectName) {
-    matchedRows = selectedBankRows.filter((row) => row.project_name === projectName);
+  if (['project', 'cost_tag', 'bank_account'].includes(view) && primaryKey && subKey) {
+    matchedRows = primaryRows.filter(row => `sub:${row.bank_tag_primary_label}:${row.bank_tag_sub_label}` === subKey);
   } else if (view === "time") {
     matchedRows = bankFlowRows;
   } else if (view === "bank_tag" && bankTagPrimaryLabel && bankTagSubLabel) {
@@ -5548,7 +5531,7 @@ function costStatisticsExplorerPagePayload(
       entry_id: bankFlowView ? row.transaction_id : allocationId,
       row_kind: bankFlowView ? "bank_transaction" : "oa_allocation",
       allocation_id: bankFlowView ? "" : allocationId,
-      occurred_at: row.trade_time,
+      occurred_at: row.trade_time, allocation_state: "source_resolved",
     };
   });
   const nextOffset = cursorOffset + rows.length;
@@ -5580,14 +5563,15 @@ function costStatisticsExplorerPagePayload(
       expense_transaction_count: bankFlowRows.filter((row) => row.direction === "支出").length,
       income_transaction_count: bankFlowRows.filter((row) => row.direction === "收入").length,
       project_count: projectGroups.size,
-      expense_type_count: expenseGroups.size,
+      primary_tag_count: new Set(costRows.map(row => row.bank_tag_primary_label)).size,
       bank_account_count: Array.from(bankGroups.keys()).filter((label) => label !== "银行账户未确定").length,
       cost_transaction_count: costRows.length,
     },
     available_years: Array.from(new Set(payload.cost_rows.map((row) => row.trade_time.slice(0, 4)))).sort().reverse(),
     facets: {
       projects: view === "project" ? projects : view === "bank_account" && bankAccountLabel ? bankProjects : [],
-      expense_types: view === "expense_type" ? expenseTypes : view === "project" && projectName ? projectExpenseTypes : [],
+      cost_tag_primary: tagFacets(ancestors, false),
+      cost_tag_sub: primaryKey ? tagFacets(primaryRows, true) : [],
       bank_accounts: view === "bank_account" ? bankAccounts : [],
       bank_tag_primary: view === "bank_tag" ? bankTagPrimary : [],
       bank_tag_sub: view === "bank_tag" ? bankTagSub : [],
@@ -5635,6 +5619,8 @@ function costAllocationPayload(
     kind: "oa_allocation",
     allocation: {
       allocation_id: allocationId,
+      transaction_id: transactionId, occurred_at: row?.trade_time ?? "2026-03-10 21:27:55", allocation_state: "source_resolved",
+      bank_tag_primary_label: "项目开销", bank_tag_sub_label: "设备材料", bank_tag_label_path: ["项目开销", "设备材料"],
       oa_id: `oa-${transactionId}`,
       oa_apply_type: "支付申请",
       expense_item_id: "",
@@ -9451,10 +9437,12 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
-    if (path === "/api/cost-statistics/manual-allocations") {
+    if (path === "/api/cost-statistics/manual-allocations" || path === "/api/cost-statistics/manual-allocations/CASE-COST-MANUAL-READONLY") {
       const status = url.searchParams.get("status") ?? "pending";
       const task = {
         relation_case_id: "CASE-COST-MANUAL-READONLY",
+        pending_reasons: ["amount_required"], amounts_fixed: false, source_allocations: null,
+        project_names: ["权限测试项目"], unit_count: 1, bank_event_count: 1,
         relation_version: 1,
         source_fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         status: "pending",
@@ -9476,6 +9464,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         }],
         bank_events: [{
           transaction_id: "bank-cost-1",
+          bank_account_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "材料费",
           event_kind: "outflow",
           amount: "100.00",
           trade_time: "2026-08-28T10:00:00+08:00",
@@ -9490,6 +9479,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         updated_at: "",
         can_save: configuredSessionKind() !== "denied",
       };
+      if (path.endsWith("/CASE-COST-MANUAL-READONLY")) return json(route, task);
       return json(route, {
         items: status === "pending" ? [task] : [],
         row_count: status === "pending" ? 1 : 0,

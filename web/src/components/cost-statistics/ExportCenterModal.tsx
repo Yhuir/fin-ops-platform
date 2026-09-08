@@ -13,13 +13,14 @@ import {
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
 import { formatCostAmount } from "../../features/cost-statistics/format";
 
-export type ExportCenterMode = "time" | "bank_tag" | "bank_account" | "project" | "expense_type";
+export type ExportCenterMode = "time" | "bank_tag" | "bank_account" | "project" | "cost_tag";
 export type ExportRangeMode = "month" | "custom";
 
 type ExportCenterModalProps = {
   mode: ExportCenterMode;
   projectOptions: string[];
-  expenseTypeOptions: string[];
+  costTagOptions: string[];
+  costTagLabels: Record<string, string>;
   bankAccountOptions: string[];
   bankAccountRangeMode: ExportRangeMode;
   bankAccountMonth: string;
@@ -29,12 +30,12 @@ type ExportCenterModalProps = {
   bankAccountProjectNames: string[];
   projectNames: string[];
   projectAggregateBy: "month" | "year";
-  projectExpenseTypes: string[];
-  expenseTypeRangeMode: ExportRangeMode;
-  expenseTypeMonth: string;
-  expenseTypeStartDate: string;
-  expenseTypeEndDate: string;
-  expenseTypeSelections: string[];
+  projectCostTags: string[];
+  costTagRangeMode: ExportRangeMode;
+  costTagMonth: string;
+  costTagStartDate: string;
+  costTagEndDate: string;
+  costTagSelections: string[];
   bankFlowRangeMode: ExportRangeMode;
   bankFlowMonth: string;
   bankFlowStartDate: string;
@@ -54,12 +55,12 @@ type ExportCenterModalProps = {
   onBankAccountProjectNamesChange: (projectNames: string[]) => void;
   onProjectNamesChange: (projectNames: string[]) => void;
   onProjectAggregateByChange: (aggregateBy: "month" | "year") => void;
-  onProjectExpenseTypesChange: (expenseTypes: string[]) => void;
-  onExpenseTypeRangeModeChange: (mode: ExportRangeMode) => void;
-  onExpenseTypeMonthChange: (month: string) => void;
-  onExpenseTypeStartDateChange: (date: string) => void;
-  onExpenseTypeEndDateChange: (date: string) => void;
-  onExpenseTypeSelectionsChange: (expenseTypes: string[]) => void;
+  onProjectCostTagsChange: (costTags: string[]) => void;
+  onCostTagRangeModeChange: (mode: ExportRangeMode) => void;
+  onCostTagMonthChange: (month: string) => void;
+  onCostTagStartDateChange: (date: string) => void;
+  onCostTagEndDateChange: (date: string) => void;
+  onCostTagSelectionsChange: (costTags: string[]) => void;
   onBankFlowRangeModeChange: (mode: ExportRangeMode) => void;
   onBankFlowMonthChange: (month: string) => void;
   onBankFlowStartDateChange: (date: string) => void;
@@ -72,14 +73,15 @@ function toggleSelection(items: string[], value: string) {
   return items.includes(value) ? items.filter((item) => item !== value) : [...items, value];
 }
 
-type ExpenseTypeSelectorProps = {
+type CostTagSelectorProps = {
   title: string;
   options: string[];
+  labels?: Record<string, string>;
   selected: string[];
   onChange: (next: string[]) => void;
 };
 
-function ExpenseTypeSelector({ title, options, selected, onChange }: ExpenseTypeSelectorProps) {
+function CostTagSelector({ title, options, labels, selected, onChange }: CostTagSelectorProps) {
   const hasOptions = options.length > 0;
   const allSelected = hasOptions && selected.length === options.length;
   return (
@@ -115,12 +117,12 @@ function ExpenseTypeSelector({ title, options, selected, onChange }: ExpenseType
               onChange={() => onChange(toggleSelection(selected, option))}
             >
               <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-              <span>{option}</span>
+              <span>{labels ? labels[option] : option}</span>
             </Checkbox>
           ))}
         </div>
       ) : (
-        <div className="cost-explorer-empty">当前没有可选费用类型。</div>
+        <div className="cost-explorer-empty">当前没有可选银行主标签。</div>
       )}
     </section>
   );
@@ -151,7 +153,8 @@ function DateRangeFields({ startDate, endDate, onStartDateChange, onEndDateChang
 export default function ExportCenterModal({
   mode,
   projectOptions,
-  expenseTypeOptions,
+  costTagOptions,
+  costTagLabels,
   bankAccountOptions,
   bankAccountRangeMode,
   bankAccountMonth,
@@ -161,12 +164,12 @@ export default function ExportCenterModal({
   bankAccountProjectNames,
   projectNames,
   projectAggregateBy,
-  projectExpenseTypes,
-  expenseTypeRangeMode,
-  expenseTypeMonth,
-  expenseTypeStartDate,
-  expenseTypeEndDate,
-  expenseTypeSelections,
+  projectCostTags,
+  costTagRangeMode,
+  costTagMonth,
+  costTagStartDate,
+  costTagEndDate,
+  costTagSelections,
   bankFlowRangeMode,
   bankFlowMonth,
   bankFlowStartDate,
@@ -186,12 +189,12 @@ export default function ExportCenterModal({
   onBankAccountProjectNamesChange,
   onProjectNamesChange,
   onProjectAggregateByChange,
-  onProjectExpenseTypesChange,
-  onExpenseTypeRangeModeChange,
-  onExpenseTypeMonthChange,
-  onExpenseTypeStartDateChange,
-  onExpenseTypeEndDateChange,
-  onExpenseTypeSelectionsChange,
+  onProjectCostTagsChange,
+  onCostTagRangeModeChange,
+  onCostTagMonthChange,
+  onCostTagStartDateChange,
+  onCostTagEndDateChange,
+  onCostTagSelectionsChange,
   onBankFlowRangeModeChange,
   onBankFlowMonthChange,
   onBankFlowStartDateChange,
@@ -260,13 +263,13 @@ export default function ExportCenterModal({
               按项目
             </Button>
             <Button
-              aria-pressed={mode === "expense_type"}
+              aria-pressed={mode === "cost_tag"}
               className="cost-view-tab"
-              onPress={() => onModeChange("expense_type")}
+              onPress={() => onModeChange("cost_tag")}
               size="sm"
-              variant={mode === "expense_type" ? "primary" : "secondary"}
+              variant={mode === "cost_tag" ? "primary" : "secondary"}
             >
-              按费用类型
+              按银行主标签
             </Button>
           </div>
 
@@ -346,13 +349,13 @@ export default function ExportCenterModal({
                   />
                 )}
               </section>
-              <ExpenseTypeSelector
+              <CostTagSelector
                 title="银行账户"
                 options={bankAccountOptions}
                 selected={bankAccountSelections}
                 onChange={onBankAccountSelectionsChange}
               />
-              <ExpenseTypeSelector
+              <CostTagSelector
                 title="项目（可选）"
                 options={projectOptions}
                 selected={bankAccountProjectNames}
@@ -377,29 +380,30 @@ export default function ExportCenterModal({
                     <span>按年算</span>
                   </Radio>
                 </RadioGroup>
-                <ExpenseTypeSelector
+                <CostTagSelector
                   title="项目选择"
                   options={projectOptions}
                   selected={projectNames}
                   onChange={onProjectNamesChange}
                 />
               </section>
-              <ExpenseTypeSelector
-                title="费用类型"
-                options={expenseTypeOptions}
-                selected={projectExpenseTypes}
-                onChange={onProjectExpenseTypesChange}
+              <CostTagSelector
+                title="银行主标签"
+                options={costTagOptions}
+                labels={costTagLabels}
+                selected={projectCostTags}
+                onChange={onProjectCostTagsChange}
               />
             </div>
           ) : null}
 
-          {mode === "expense_type" ? (
+          {mode === "cost_tag" ? (
             <div className="export-center-config-grid">
               <section className="export-center-section">
                 <div className="export-center-section-header">
                   <h3>时间范围</h3>
                 </div>
-                <RadioGroup aria-label="费用类型时间范围" className="project-export-radio-group" onChange={(value) => onExpenseTypeRangeModeChange(value as ExportRangeMode)} value={expenseTypeRangeMode}>
+                <RadioGroup aria-label="银行主标签时间范围" className="project-export-radio-group" onChange={(value) => onCostTagRangeModeChange(value as ExportRangeMode)} value={costTagRangeMode}>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
@@ -409,29 +413,30 @@ export default function ExportCenterModal({
                     <span>自定义时间区间（精确到日）</span>
                   </Radio>
                 </RadioGroup>
-                {expenseTypeRangeMode === "month" ? (
+                {costTagRangeMode === "month" ? (
                   <BusinessPeriodPicker
                     allowAll={false}
                     allowedModes={["month"]}
                     ariaLabel="统计月份"
-                    onChange={(selection) => onExpenseTypeMonthChange(selection.month)}
-                    selection={{ mode: "month", year: expenseTypeMonth.slice(0, 4), month: expenseTypeMonth }}
-                    years={nearbyBusinessYears(expenseTypeMonth)}
+                    onChange={(selection) => onCostTagMonthChange(selection.month)}
+                    selection={{ mode: "month", year: costTagMonth.slice(0, 4), month: costTagMonth }}
+                    years={nearbyBusinessYears(costTagMonth)}
                   />
                 ) : (
                   <DateRangeFields
-                    startDate={expenseTypeStartDate}
-                    endDate={expenseTypeEndDate}
-                    onStartDateChange={onExpenseTypeStartDateChange}
-                    onEndDateChange={onExpenseTypeEndDateChange}
+                    startDate={costTagStartDate}
+                    endDate={costTagEndDate}
+                    onStartDateChange={onCostTagStartDateChange}
+                    onEndDateChange={onCostTagEndDateChange}
                   />
                 )}
               </section>
-              <ExpenseTypeSelector
-                title="费用类型"
-                options={expenseTypeOptions}
-                selected={expenseTypeSelections}
-                onChange={onExpenseTypeSelectionsChange}
+              <CostTagSelector
+                title="银行主标签"
+                options={costTagOptions}
+                labels={costTagLabels}
+                selected={costTagSelections}
+                onChange={onCostTagSelectionsChange}
               />
             </div>
           ) : null}

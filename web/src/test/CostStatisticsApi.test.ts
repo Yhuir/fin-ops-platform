@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   exportCostStatisticsView,
   fetchCostStatisticsManualAllocations,
+  fetchCostStatisticsManualAllocation,
   fetchCostStatisticsExplorerPage,
   fetchCostStatisticsExportPreview,
   fetchCostStatisticsNoOaRules,
@@ -18,12 +19,14 @@ afterEach(() => {
 });
 
 describe("Cost statistics export API", () => {
-  test("maps the unit-allocation and bank-event contract without source-matrix fields", async () => {
+  test("maps the unit-allocation and bank-event contract with explicit source-matrix fields and lazy detail", async () => {
     const task = {
       relation_case_id: "relation-1",
       relation_version: 3,
       source_fingerprint: "b".repeat(64),
       status: "pending",
+      pending_reasons: ["source_required"], amounts_fixed: true, source_allocations: null,
+      project_names: ["云南溯源科技"], unit_count: 1, bank_event_count: 1,
       oa_total: "120.00",
       gross_outflow_total: "125.00",
       wrong_payment_refund_total: "5.00",
@@ -46,7 +49,7 @@ describe("Cost statistics export API", () => {
         amount: "5.00",
         counterparty_name: "供应商",
         trade_time: "2026-08-27T10:00:00+08:00",
-        tags: ["退款"],
+        tags: ["退款"], bank_account_label: "建行", bank_tag_code: "refund", bank_tag_primary_label: "退款", bank_tag_sub_label: "",
       }],
       allocations: [],
       non_cost_amount: "0.00",
@@ -61,8 +64,8 @@ describe("Cost statistics export API", () => {
         ...task,
         status: "allocated",
         allocations: [{ unit_id: "oa-1:parent", amount: "120.00" }],
-        version: 1,
-      } : {
+        version: 1, source_allocations: { cost_lines: [{unit_id: "oa-1:parent", bank_transaction_id: "bank-out", amount: "120.00"}], refund_links: [], non_cost_lines: [] },
+      } : String(_input).endsWith("/relation-1") ? task : {
         items: [task],
         row_count: 1,
         counts: { pending: 1, allocated: 0 },
@@ -71,7 +74,9 @@ describe("Cost statistics export API", () => {
     }), { status: 200 })) as typeof fetch;
 
     const page = await fetchCostStatisticsManualAllocations({ status: "pending", pageSize: 50 });
-    expect(page.items[0]).toMatchObject({
+    expect(page.items[0]).not.toHaveProperty("bankEvents");
+    const detail = await fetchCostStatisticsManualAllocation("relation-1");
+    expect(detail).toMatchObject({
       oaTotal: "120.00",
       grossOutflowTotal: "125.00",
       wrongPaymentRefundTotal: "5.00",
@@ -83,13 +88,14 @@ describe("Cost statistics export API", () => {
         tags: ["退款"],
       }],
     });
-    expect(page.items[0].bankEvents[0]).not.toHaveProperty("summary");
+    expect(detail.bankEvents[0]).not.toHaveProperty("summary");
 
     await saveCostStatisticsManualAllocation({
       relationCaseId: "relation-1",
       expectedVersion: 0,
       sourceFingerprint: "b".repeat(64),
       allocations: [{ unitId: "oa-1:parent", amount: "120.00" }],
+      sourceAllocations: { costLines: [{unitId: "oa-1:parent", bankTransactionId: "bank-out", amount: "120.00"}], refundLinks: [], nonCostLines: [] },
       nonCostAmount: "0.00",
       nonCostReason: "",
     });
@@ -99,6 +105,7 @@ describe("Cost statistics export API", () => {
       expected_version: 0,
       source_fingerprint: "b".repeat(64),
       allocations: [{ unit_id: "oa-1:parent", amount: "120.00" }],
+      source_allocations: { cost_lines: [{unit_id: "oa-1:parent", bank_transaction_id: "bank-out", amount: "120.00"}], refund_links: [], non_cost_lines: [] },
       non_cost_amount: "0.00",
       non_cost_reason: "",
     });
@@ -160,7 +167,7 @@ describe("Cost statistics export API", () => {
             projects: [{
               project_name: "云南溯源科技",
               total_amount: "100.00",
-              expense_type_count: 1,
+              primary_tag_count: 1,
             }],
           },
           rows: [],
@@ -222,7 +229,7 @@ describe("Cost statistics export API", () => {
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      `/api/cost-statistics/export?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month&include_oa_details=true&include_invoice_details=true&include_exception_rows=true&include_ignored_rows=true&include_expense_content_summary=true&sort_by=time`,
+      `/api/cost-statistics/export?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month`,
       expect.any(Object),
     );
     expect(page.availableYears).toEqual(["2026", "2025"]);
@@ -248,7 +255,7 @@ describe("Cost statistics export API", () => {
           expense_transaction_count: 11000,
           income_transaction_count: 1500,
           project_count: 4,
-          expense_type_count: 8,
+          primary_tag_count: 8,
           bank_account_count: 3,
           cost_transaction_count: 12000,
         },
@@ -277,12 +284,13 @@ describe("Cost statistics export API", () => {
       scope: "2026-03",
       view: "project",
       projectName: "云南溯源科技",
-      expenseType: "交通费",
+      bankTagPrimaryKey: "primary:差旅交通",
+      bankTagSubKey: "sub:差旅交通:交通费",
     });
 
     expect(payload.statistics).toEqual(expect.objectContaining({
       projectCount: 4,
-      expenseTypeCount: 8,
+      primaryTagCount: 8,
       bankAccountCount: 3,
       costTransactionCount: 12000,
       transactionCount: 12500,
@@ -404,7 +412,7 @@ describe("Cost statistics export API", () => {
           projects: [{
             project_name: "云南溯源科技",
             total_amount: "90.00",
-            expense_type_count: 1,
+            primary_tag_count: 1,
           }],
           bank_accounts: [{
             bank_account_label: "建设银行 8106",

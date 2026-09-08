@@ -97,7 +97,7 @@ describe("Cost statistics page", () => {
     const views = within(switcher).getByRole("radiogroup", { name: "项目成本统计视图" });
     expect(within(views).getAllByRole("radio").map((item) => item.textContent)).toEqual([
       "按项目",
-      "按费用类型",
+      "按流水标签",
       "按银行账户",
     ]);
     expect(within(switcher).getByText("银行流水")).toBeInTheDocument();
@@ -116,7 +116,7 @@ describe("Cost statistics page", () => {
     expect(screen.queryByText("展开")).not.toBeInTheDocument();
   });
 
-  test("keeps bank labels and OA expense types distinct in manual allocation", async () => {
+  test("keeps bank labels and original OA expense types distinct in manual allocation", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderPage();
@@ -124,26 +124,25 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
     const drawer = await screen.findByRole("dialog", { name: "成本人工分配" });
-    await user.click(within(drawer).getByRole("button", { name: "展开项目 A 等 2 个项目人工分配" }));
-
-    expect(within(drawer).getByText("流水1", { exact: true })).toBeInTheDocument();
-    expect(within(drawer).getByText("流水2", { exact: true })).toBeInTheDocument();
-    expect(within(drawer).getByText("2026-08-27 09:30:00", { exact: true }).closest(".cost-manual-allocation-meta-chip")).not.toBeNull();
+    expect(await within(drawer).findByText("bank-manual-001", { exact: true })).toBeInTheDocument();
+    expect(within(drawer).getByText("bank-manual-002", { exact: true })).toBeInTheDocument();
     expect(within(drawer).getAllByText("项目开销 / 设备材料 / 设备采购", { exact: true })).toHaveLength(2);
-    expect(within(drawer).getByText("支付申请", { exact: true })).toBeInTheDocument();
-    expect(within(drawer).getByText("日常报销", { exact: true })).toBeInTheDocument();
-    expect(within(drawer).getByText("材料费", { exact: true })).toBeInTheDocument();
-    expect(within(drawer).getByText("交通费", { exact: true })).toBeInTheDocument();
-    expect(within(drawer).queryByText("设备采购", { exact: true })).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("每项分配金额均需填写为非负数，并保留两位小数。")).not.toBeInTheDocument();
-    expect(within(drawer).getByRole("checkbox", { name: "不计入成本" })).toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "保存分配" })).toBeDisabled();
-
-    await user.type(within(drawer).getByLabelText("项目 A分配金额"), "600.00");
-    expect(await within(drawer).findByText("待分配 400.00")).toBeInTheDocument();
-    await user.type(within(drawer).getByLabelText("项目 B分配金额"), "400.00");
-    expect(within(drawer).queryByText("待分配 400.00", { exact: true })).not.toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "保存分配" })).toBeEnabled();
+    expect(within(drawer).getByText("支付申请 · 材料费")).toBeInTheDocument();
+    expect(within(drawer).getByText("日常报销 · 交通费")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("combobox")).not.toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "保存分配" }));
+    expect(within(drawer).getAllByText("请填写本项成本，零成本请明确填写 0")).toHaveLength(2);
+    await user.type(within(drawer).getByLabelText("项目 A本项成本"), "600.00");
+    await user.type(within(drawer).getByLabelText("项目 B本项成本"), "400.00");
+    expect(within(drawer).getAllByText("来源分配合计必须等于本项成本")).toHaveLength(2);
+    const firstUnit = within(drawer).getByText("支付申请 · 材料费").closest("article")!;
+    await user.click(within(firstUnit).getByRole("button", { name: "新增来源" }));
+    expect(within(firstUnit).getByRole("button", { name: /来源流水 1/ })).toHaveFocus();
+    await user.click(within(firstUnit).getByRole("button", { name: /来源流水 1/ }));
+    await user.click(await screen.findByRole("option", { name: /600.00/ }));
+    await user.type(within(firstUnit).getByLabelText("分配金额 1"), "600");
+    expect(within(firstUnit).getAllByText("建设银行 8106", { exact: true }).length).toBeGreaterThan(0);
+    expect(within(firstUnit).queryByLabelText("银行账户")).not.toBeInTheDocument();
   });
 
   test("shows signed bank flows by time and drills from tag to raw rows", async () => {
@@ -198,21 +197,22 @@ describe("Cost statistics page", () => {
     });
   });
 
-  test("drills from project to expense type to cost detail", async () => {
+  test("drills from project to bank tags to cost detail", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderPage();
     await waitUntilReady();
 
     await user.click(screen.getByRole("option", { name: "选择项目名 云南溯源科技" }));
-    await user.click(await screen.findByRole("option", { name: "选择费用类型 设备货款及材料费" }));
-    expect(await screen.findByRole("grid", { name: "项目成本明细表" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("option", { name: "选择银行主标签 项目开销" }));
+    await user.click(await screen.findByRole("option", { name: "选择银行子标签 设备材料" }));
+    expect(await screen.findByRole("grid", { name: "成本明细表" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("view=project&project_name="),
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("expense_type="),
+      expect.stringContaining("bank_tag_primary_key="),
       expect.any(Object),
     );
   });
@@ -226,24 +226,27 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按银行账户" }));
     const account = await screen.findByRole("option", { name: "选择银行账户 工商银行 账户 0001" });
     await user.click(account);
-    await user.click(await screen.findByRole("option", { name: /选择项目 云南溯源科技/ }));
+    await user.click(await screen.findByRole("option", { name: /选择项目名 云南溯源科技/ }));
+    await user.click(await screen.findByRole("option", { name: "选择银行主标签 项目开销" }));
+    await user.click(await screen.findByRole("option", { name: "选择银行子标签 设备材料" }));
 
-    expect(await screen.findByRole("grid", { name: "银行账户项目成本明细表" })).toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "成本明细表" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringMatching(/view=bank_account.*project_name=.*bank_account_label=/),
       expect.any(Object),
     );
   });
 
-  test("keeps expense-type drill-down independent", async () => {
+  test("keeps bank-tag drill-down independent", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderPage();
     await waitUntilReady();
 
-    await user.click(screen.getByRole("radio", { name: "按费用类型" }));
-    await user.click(await screen.findByRole("option", { name: "选择费用类型 设备货款及材料费" }));
-    expect(await screen.findByRole("grid", { name: "按费用类型成本明细表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "按流水标签" }));
+    await user.click(await screen.findByRole("option", { name: "选择银行主标签 项目开销" }));
+    await user.click(await screen.findByRole("option", { name: "选择银行子标签 设备材料" }));
+    expect(await screen.findByRole("grid", { name: "成本明细表" })).toBeInTheDocument();
   });
 
   test("shows a scoped error and recovers through refresh", async () => {
@@ -270,7 +273,7 @@ describe("Cost statistics page", () => {
       "按标签",
       "按银行账户",
       "按项目",
-      "按费用类型",
+      "按银行主标签",
     ]);
     await user.click(within(tabs).getByRole("button", { name: "按时间" }));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));

@@ -300,7 +300,7 @@ def _raw_bank_oa_invoice_scenario(name: str, key_prefix: str) -> dict[str, objec
         )
     _set_bank_oa_cost_probe(
         scenario,
-        view="bank",
+        view="bank_account",
         include_semantic_assertion=True,
     )
     return scenario
@@ -1613,7 +1613,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         scenario = _raw_bank_oa_invoice_scenario("cost-identity-only", "cost-identity-only")
         _set_bank_oa_cost_probe(
             scenario,
-            view="bank",
+            view="bank_account",
             include_semantic_assertion=False,
         )
         with TemporaryDirectory() as temp_dir:
@@ -1626,7 +1626,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         scenario = _raw_bank_oa_invoice_scenario("cost-relation-impact", "cost-relation-impact")
         _set_bank_oa_cost_probe(
             scenario,
-            view="bank",
+            view="bank_account",
             include_semantic_assertion=True,
         )
         with TemporaryDirectory() as temp_dir:

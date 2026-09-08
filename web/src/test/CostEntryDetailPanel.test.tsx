@@ -10,6 +10,8 @@ test("shows net allocation and paid-wrong refund as negative drawer evidence", (
     allocation: {
       allocationId: "bank:bank-1050:oa:oa-exp-1:item:lodging",
       oaId: "oa-exp-1",
+      transactionId: "bank-1050", occurredAt: "2026-08-01 15:58:31", allocationState: "source_resolved", bankTagCode: "lodging", bankTagLabel: "住宿费", bankAccountLabel: "建设银行 8106",
+      bankTagPrimaryLabel: "差旅", bankTagSubLabel: "住宿费", bankTagLabelPath: ["差旅", "住宿费"],
       oaApplyType: "日常报销",
       expenseItemId: "lodging",
       oaCompletedAt: "2026-07-23 18:00:00",
@@ -68,6 +70,9 @@ test("shows net allocation and paid-wrong refund as negative drawer evidence", (
   expect(within(basic).getAllByText("710.00")).toHaveLength(2);
   expect(within(basic).getByText("本笔支出流水原额")).toBeInTheDocument();
   expect(within(basic).getByText("1050.00")).toBeInTheDocument();
+  const source = screen.getByRole("grid", { name: "银行来源详情" });
+  expect(within(source).getByText("bank-1050")).toBeInTheDocument();
+  expect(within(source).getByText("2026-08-01 15:58:31")).toBeInTheDocument();
 
   const reconciliation = screen.getByRole("grid", { name: "金额核对详情" });
   expect(within(reconciliation).getByText("关系净支出")).toBeInTheDocument();

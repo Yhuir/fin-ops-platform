@@ -12,6 +12,7 @@ from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
 )
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
+from fin_ops_platform.services.cost_statistics_source_allocation import SourceAllocationError, complete_source_task
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
 )
@@ -157,54 +158,40 @@ class CostStatisticsPolicy:
             ]
         base_rows.sort(key=_row_sort_key, reverse=True)
         project_name = _clean_text(filters.get("project_name"))
-        expense_type = _clean_text(filters.get("expense_type"))
         bank_account_label = _clean_text(filters.get("bank_account_label"))
         tag_primary = _clean_text(filters.get("bank_tag_primary_label"))
         tag_sub = _clean_text(filters.get("bank_tag_sub_label"))
 
         primary_facets: list[dict[str, Any]] = []
         secondary_facets: list[dict[str, Any]] = []
+        tertiary_facets: list[dict[str, Any]] = []
+        quaternary_facets: list[dict[str, Any]] = []
         row_matches: list[dict[str, Any]] = []
+        primary_key = _clean_text(filters.get("bank_tag_primary_key"))
+        sub_key = _clean_text(filters.get("bank_tag_sub_key"))
         if view == "time":
             row_matches = base_rows
-        elif view == "project":
-            primary_facets = _project_facets(base_rows)
-            if project_name:
-                secondary_facets = _expense_facets(
-                    [row for row in base_rows if row["project_name"] == project_name]
-                )
-            if project_name and expense_type:
-                row_matches = [
-                    row
-                    for row in base_rows
-                    if row["project_name"] == project_name
-                    and row["expense_type"] == expense_type
-                ]
-        elif view == "bank_account":
-            primary_facets = _bank_account_facets(base_rows)
-            account_rows = (
-                [
-                    row
-                    for row in base_rows
-                    if row["bank_account_label"] == bank_account_label
-                ]
-                if bank_account_label
-                else []
-            )
-            if bank_account_label:
+        elif view in {"project", "bank_account", "cost_tag"}:
+            tag_rows = base_rows
+            if view == "bank_account":
+                primary_facets = _bank_account_facets(base_rows)
+                account_rows = [row for row in base_rows if row["bank_account_label"] == bank_account_label] if bank_account_label else []
                 secondary_facets = _project_facets(account_rows)
-            if bank_account_label and project_name:
-                row_matches = [
-                    row
-                    for row in account_rows
-                    if row["project_name"] == project_name
-                ]
-        elif view == "expense_type":
-            primary_facets = _expense_facets(base_rows)
-            if expense_type:
-                row_matches = [
-                    row for row in base_rows if row["expense_type"] == expense_type
-                ]
+                tag_rows = [row for row in account_rows if row["project_name"] == project_name] if project_name else []
+            elif view == "project":
+                primary_facets = _project_facets(base_rows)
+                tag_rows = [row for row in base_rows if row["project_name"] == project_name] if project_name else []
+            main_tags = _cost_tag_facets(tag_rows, level="primary")
+            primary_rows = [row for row in tag_rows if _cost_tag_key(row, "primary") == primary_key] if primary_key else []
+            sub_tags = _cost_tag_facets(primary_rows, level="sub")
+            if view == "project":
+                secondary_facets, tertiary_facets = main_tags, sub_tags
+            elif view == "bank_account":
+                tertiary_facets, quaternary_facets = main_tags, sub_tags
+            else:
+                primary_facets, secondary_facets = main_tags, sub_tags
+            if primary_key and sub_key:
+                row_matches = [row for row in primary_rows if _cost_tag_key(row, "sub") == sub_key]
         elif view == "bank_tag":
             primary_facets = _bank_tag_primary_facets(base_rows)
             if tag_primary:
@@ -220,7 +207,7 @@ class CostStatisticsPolicy:
                 ]
         else:
             raise ValueError(
-                "view must be time, project, expense_type, bank_account, or bank_tag"
+                "view must be time, project, cost_tag, bank_account, or bank_tag"
             )
 
         matched_row_count = len(row_matches)
@@ -257,12 +244,18 @@ class CostStatisticsPolicy:
             ),
             "primary_facets": primary_facets,
             "secondary_facets": secondary_facets,
+            "tertiary_facets": tertiary_facets,
+            "quaternary_facets": quaternary_facets,
             "row_count": matched_row_count,
             "rows": page_rows,
             "next_cursor_values": _cursor_tuple(page_rows[-1])
             if has_more and page_rows
             else None,
-            "allocation_quality": None if bank_flow_view else self.allocation_quality,
+            "allocation_quality": None if bank_flow_view else {
+                **self.allocation_quality,
+                "undated_amount": _money(sum((_decimal(row["amount"]) or ZERO for row in source_rows if not row["occurred_at"] and (not query or _row_matches_query(row, query))), start=ZERO)),
+                "undated_row_count": sum(1 for row in source_rows if not row["occurred_at"] and (not query or _row_matches_query(row, query))),
+            },
         }
 
     def export_page(
@@ -274,7 +267,7 @@ class CostStatisticsPolicy:
         start_date: str | None,
         end_date: str | None,
         project_names: list[str],
-        expense_types: list[str],
+        bank_tag_primary_keys: list[str],
         row_shape: str,
         offset: int,
         page_size: int,
@@ -286,7 +279,6 @@ class CostStatisticsPolicy:
             "raw_cost",
             "project_month",
             "project_year",
-            "month_summary",
         }:
             raise ValueError("invalid cost statistics export row shape")
         bank_flow_export = row_shape == "raw_bank"
@@ -294,8 +286,8 @@ class CostStatisticsPolicy:
         normalized_project_names = {
             _clean_text(value) for value in project_names if _clean_text(value)
         }
-        normalized_expense_types = {
-            _clean_text(value) for value in expense_types if _clean_text(value)
+        normalized_bank_tag_primary_keys = {
+            _clean_text(value) for value in bank_tag_primary_keys if _clean_text(value)
         }
         normalized_bank_account_labels = {
             _clean_text(value)
@@ -318,8 +310,8 @@ class CostStatisticsPolicy:
                 or row["project_name"] in normalized_project_names
             )
             and (
-                not normalized_expense_types
-                or row["expense_type"] in normalized_expense_types
+                not normalized_bank_tag_primary_keys
+                or _cost_tag_key(row, "primary") in normalized_bank_tag_primary_keys
             )
             and (
                 not normalized_bank_account_labels
@@ -328,7 +320,7 @@ class CostStatisticsPolicy:
         ]
         rows.sort(key=_row_sort_key, reverse=True)
         result_rows: list[dict[str, Any]]
-        if row_shape in {"project_month", "project_year", "month_summary"}:
+        if row_shape in {"project_month", "project_year"}:
             result_rows = _aggregate_export_rows(rows, row_shape=row_shape)
         else:
             result_rows = rows
@@ -340,9 +332,7 @@ class CostStatisticsPolicy:
                 {
                     "source_row_count": len(rows),
                     "row_count": len(result_rows),
-                    "expense_type_count": len(
-                        {row["expense_type"] for row in rows}
-                    ),
+                    "primary_tag_count": len({_cost_tag_key(row, "primary") for row in rows}),
                 }
             )
             if not bank_flow_export:
@@ -426,9 +416,7 @@ class CostStatisticsPolicy:
             "project_count": len(
                 {row["project_name"] for row in cost_rows}
             ),
-            "expense_type_count": len(
-                {row["expense_type"] for row in cost_rows}
-            ),
+            "primary_tag_count": len({_cost_tag_key(row, "primary") for row in cost_rows}),
             "bank_account_count": len(
                 {
                     row["bank_account_label"]
@@ -589,7 +577,6 @@ def _cost_entries(
                     + len(contexts)
                 )
             continue
-        bank_account_label = _resolve_cost_bank_account_label(outflows)
         if len(contexts) == 0:
             continue
         for context in contexts:
@@ -631,8 +618,6 @@ def _cost_entries(
             raise CostStatisticsAllocationConflictError(
                 f"relation {relation_case_id} has paid-wrong refunds exceeding outflows"
             )
-        if net_outflow_total == ZERO:
-            continue
         difference = (net_outflow_total - oa_total).quantize(MONEY_QUANTUM)
         evidence = [_payment_evidence(row) for row in [*outflows, *refunds]]
         reconciliation = {
@@ -657,58 +642,23 @@ def _cost_entries(
                 )
             event_owners[transaction_id] = relation_case_id
 
-        is_automatic = oa_total == net_outflow_total
-        if not is_automatic:
-            task = _manual_allocation_task(
-                group=group,
-                contexts=contexts,
-                outflows=outflows,
-                refunds=refunds,
-                reconciliation=reconciliation,
-                manual_record=manual_allocations.get(relation_case_id),
-            )
-            manual_tasks.append(task)
-            if task["status"] != "allocated":
-                reason = (
-                    "stale_manual_allocation"
-                    if task["status"] == "stale"
-                    else "pending_manual_allocation"
-                )
-                excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
-                continue
-            manual_amounts = {
-                _clean_text(line.get("unit_id")): _required_nonnegative_money(
-                    line.get("amount")
-                )
-                for line in list(task.get("allocations") or [])
-                if isinstance(line, dict)
-            }
-            _append_unit_allocation_entries(
-                entries,
-                contexts=contexts,
-                unit_amounts=manual_amounts,
-                outflows=outflows,
-                oa_total=oa_total,
-                relation_case_id=relation_case_id,
-                bank_account_label=bank_account_label,
-                payment_evidence=evidence,
-                reconciliation=reconciliation,
-            )
+        if net_outflow_total == ZERO:
             continue
-
-        _append_unit_allocation_entries(
-            entries,
-            contexts=contexts,
-            unit_amounts={
-                _allocation_id(context): context["allocation_amount"]
-                for context in contexts
-            },
-            outflows=outflows,
-            oa_total=oa_total,
-            relation_case_id=relation_case_id,
-            bank_account_label=bank_account_label,
-            payment_evidence=evidence,
-            reconciliation=reconciliation,
+        manual_record = manual_allocations.get(relation_case_id)
+        task = _manual_allocation_task(
+            group=group, contexts=contexts, outflows=outflows, refunds=refunds,
+            reconciliation=reconciliation, manual_record=manual_record,
+        )
+        if task["status"] == "pending" or manual_record is not None or difference != ZERO:
+            manual_tasks.append(task)
+        if not task["allocations"]:
+            reason = "stale_manual_allocation" if "allocation_stale" in task["pending_reasons"] else "pending_manual_allocation"
+            excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
+            continue
+        _append_source_allocation_entries(
+            entries, contexts=contexts, task=task, outflows=outflows,
+            oa_total=oa_total, relation_case_id=relation_case_id,
+            payment_evidence=evidence, reconciliation=reconciliation,
         )
 
     no_oa_payload = AppSettingsService.cost_statistics_no_oa_projects_payload_from_settings(
@@ -753,8 +703,8 @@ def _cost_entries(
                     project_id=project["id"],
                 )
             )
-    pending_count = sum(1 for task in manual_tasks if task.get("status") == "pending")
-    stale_count = sum(1 for task in manual_tasks if task.get("status") == "stale")
+    stale_count = sum("allocation_stale" in task["pending_reasons"] for task in manual_tasks)
+    pending_count = sum(task["status"] == "pending" for task in manual_tasks) - stale_count
     return (
         sorted(entries, key=_row_sort_key, reverse=True),
         {
@@ -835,48 +785,29 @@ def _no_oa_entry(
     }
 
 
-def _append_unit_allocation_entries(
-    entries: list[dict[str, Any]],
-    *,
-    contexts: list[dict[str, Any]],
-    unit_amounts: dict[str, Decimal],
-    outflows: list[dict[str, Any]],
-    oa_total: Decimal,
-    relation_case_id: str,
-    bank_account_label: str,
-    payment_evidence: list[dict[str, Any]],
+def _append_source_allocation_entries(
+    entries: list[dict[str, Any]], *, contexts: list[dict[str, Any]],
+    task: dict[str, Any], outflows: list[dict[str, Any]], oa_total: Decimal,
+    relation_case_id: str, payment_evidence: list[dict[str, Any]],
     reconciliation: dict[str, Any],
 ) -> None:
-    context_by_unit_id = {
-        _allocation_id(context): context for context in contexts
-    }
-    if set(unit_amounts) != set(context_by_unit_id):
-        raise CostStatisticsAllocationConflictError(
-            f"manual allocation {relation_case_id} does not match current units"
-        )
-    anchor_outflow = max(
-        outflows,
-        key=lambda row: (
-            _serialize_bank_row(row)["trade_time"],
-            _bank_transaction_id(row),
-        ),
-    )
-    for unit_id, context in context_by_unit_id.items():
-        unit_amount = _required_nonnegative_money(unit_amounts[unit_id])
-        if unit_amount == ZERO:
+    contexts_by_id = {_allocation_id(context): context for context in contexts}
+    sources = {_bank_transaction_id(row): row for row in outflows}
+    decision = task["source_allocations"]
+    lines = decision["cost_lines"] if decision is not None else task["allocations"]
+    for line in lines:
+        amount = _required_nonnegative_money(line["amount"])
+        if amount == ZERO:
             continue
-        entries.append(
-            _allocation_entry(
-                context,
-                bank_row=anchor_outflow,
-                allocated_amount=unit_amount,
-                oa_total=oa_total,
-                relation_case_id=relation_case_id,
-                bank_account_label=bank_account_label,
-                payment_evidence=payment_evidence,
-                reconciliation=reconciliation,
-            )
-        )
+        bank_id = line["bank_transaction_id"] if decision is not None else None
+        bank_row = sources[bank_id] if bank_id is not None else None
+        entries.append(_allocation_entry(
+            contexts_by_id[line["unit_id"]], bank_row=bank_row,
+            allocated_amount=amount, oa_total=oa_total,
+            relation_case_id=relation_case_id,
+            bank_account_label=(_clean_text(bank_row.get("payment_account_label")) if bank_row else "") or UNRESOLVED_BANK_ACCOUNT_LABEL,
+            payment_evidence=payment_evidence, reconciliation=reconciliation,
+        ))
 
 
 def _manual_allocation_task(
@@ -949,8 +880,13 @@ def _manual_allocation_task(
         "updated_by": "",
         "updated_at": "",
     }
+    if reconciliation["difference"] == "0.00":
+        task["allocations"] = [
+            {"unit_id": unit["unit_id"], "amount": unit["oa_original_amount"]}
+            for unit in units
+        ]
     if manual_record is None:
-        return task
+        return _complete_source_task(task)
     task.update(
         {
             "version": int(manual_record.get("version") or 0),
@@ -966,7 +902,10 @@ def _manual_allocation_task(
     )
     if _clean_text(manual_record.get("source_fingerprint")) != source_fingerprint:
         task["status"] = "stale"
-        return task
+        task["non_cost_amount"] = "0.00"
+        task["non_cost_reason"] = ""
+        # A stale decision cannot choose a new source automatically.
+        return _complete_source_task(task)
     raw_allocations = [
         dict(line)
         for line in list(manual_record.get("allocations") or [])
@@ -1009,7 +948,14 @@ def _manual_allocation_task(
         )
     task["status"] = "allocated"
     task["allocations"] = ordered_allocations
-    return task
+    return _complete_source_task(task, manual_record.get("source_allocations"))
+
+
+def _complete_source_task(task: dict[str, Any], source_allocations: Any = None) -> dict[str, Any]:
+    try:
+        return complete_source_task(task, source_allocations)
+    except SourceAllocationError as exc:
+        raise CostStatisticsAllocationConflictError(str(exc)) from exc
 
 
 def _manual_allocation_bank_event(
@@ -1044,6 +990,10 @@ def _manual_allocation_bank_event(
         "trade_time": serialized["trade_time"],
         "counterparty_name": serialized["counterparty_name"],
         "tags": list(dict.fromkeys(tag_path)),
+        "bank_account_label": serialized["payment_account_label"],
+        "bank_tag_code": serialized["bank_tag_code"],
+        "bank_tag_primary_label": serialized["bank_tag_primary_label"],
+        "bank_tag_sub_label": serialized["bank_tag_sub_label"],
     }
 
 
@@ -1281,17 +1231,6 @@ def _bank_flow_direction(row: dict[str, Any]) -> str:
     )
 
 
-def _resolve_cost_bank_account_label(outflows: list[dict[str, Any]]) -> str:
-    labels = {
-        _clean_text(_serialize_bank_row(row).get("payment_account_label"))
-        for row in outflows
-    }
-    labels.discard("")
-    if len(labels) == 1:
-        return next(iter(labels))
-    return UNRESOLVED_BANK_ACCOUNT_LABEL
-
-
 def _oa_allocation_contexts(
     row: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -1457,7 +1396,7 @@ def _allocation_id(context: dict[str, Any]) -> str:
 def _allocation_entry(
     context: dict[str, Any],
     *,
-    bank_row: dict[str, Any],
+    bank_row: dict[str, Any] | None,
     allocated_amount: Decimal,
     oa_total: Decimal,
     relation_case_id: str,
@@ -1467,7 +1406,11 @@ def _allocation_entry(
 ) -> dict[str, Any]:
     unit_id = _allocation_id(context)
     allocation_id = f"relation:{relation_case_id}:unit:{unit_id}"
-    occurred_at = _serialize_bank_row(bank_row)["trade_time"]
+    source = _serialize_bank_row(bank_row) if bank_row is not None else None
+    bank_id = source["transaction_id"] if source else None
+    if bank_id is not None:
+        allocation_id += f":source:{bank_id}"
+    occurred_at = source["trade_time"] or None if source else None
     return {
         "row_key": allocation_id,
         "entry_id": allocation_id,
@@ -1479,10 +1422,16 @@ def _allocation_entry(
         "oa_apply_type": context["oa_apply_type"],
         "expense_item_id": context["expense_item_id"],
         "oa_completed_at": context["oa_completed_at"],
-        "transaction_id": "",
+        "transaction_id": bank_id,
+        "allocation_state": "source_resolved" if source else "source_pending",
+        "bank_tag_code": source["bank_tag_code"] if source else None,
+        "bank_tag_label": source["bank_tag_label"] if source else None,
+        "bank_tag_primary_label": source["bank_tag_primary_label"] if source else None,
+        "bank_tag_sub_label": source["bank_tag_sub_label"] if source else None,
+        "bank_tag_label_path": source["bank_tag_label_path"] if source else [],
         "occurred_at": occurred_at,
         "counterparty_name": context["counterparty_name"],
-        "payment_account_label": "",
+        "payment_account_label": source["payment_account_label"] if source else None,
         "bank_account_label": bank_account_label,
         "direction": "支出",
         "remark": "",
@@ -1494,7 +1443,7 @@ def _allocation_entry(
         "amount_decimal": allocated_amount,
         "oa_original_amount": context["allocation_amount"],
         "oa_allocation_weight": _ratio(context["allocation_amount"], oa_total),
-        "bank_event_amount": "",
+        "bank_event_amount": source["amount"] if source else "",
         "payment_evidence": payment_evidence,
         "reconciliation": reconciliation,
     }
@@ -1552,19 +1501,24 @@ def _inflow_amount(bank_row: dict[str, Any]) -> Decimal | None:
 
 
 def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    occurred_at = str(entry["occurred_at"])
+    occurred_at = entry["occurred_at"] or None
     return {
         "entry_id": entry["entry_id"],
         "row_kind": entry["row_kind"],
         "row_key": entry["row_key"],
         "allocation_id": entry.get("allocation_id") or "",
-        "transaction_id": entry.get("transaction_id") or "",
+        "transaction_id": entry.get("transaction_id"),
+        "allocation_state": entry.get("allocation_state", "source_resolved"),
+        "bank_tag_code": entry.get("bank_tag_code"),
+        "bank_tag_primary_label": entry.get("bank_tag_primary_label"),
+        "bank_tag_sub_label": entry.get("bank_tag_sub_label"),
+        "bank_tag_label_path": entry.get("bank_tag_label_path", []),
         "group_id": entry.get("group_id") or "",
         "relation_case_id": entry.get("relation_case_id") or "",
         "oa_id": entry.get("oa_id") or "",
         "oa_apply_type": entry.get("oa_apply_type") or "",
         "expense_item_id": entry.get("expense_item_id") or "",
-        "month": occurred_at[:7],
+        "month": occurred_at[:7] if occurred_at else None,
         "occurred_at": occurred_at,
         "oa_completed_at": entry.get("oa_completed_at") or "",
         "direction": entry["direction"],
@@ -1613,16 +1567,16 @@ def _project_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "project_name": name,
                 "total": ZERO,
-                "expense_types": set(),
+                "primary_tags": set(),
             },
         )
         bucket["total"] += _decimal(row["amount"]) or ZERO
-        bucket["expense_types"].add(row["expense_type"])
+        bucket["primary_tags"].add(_cost_tag_key(row, "primary"))
     return [
         {
             "project_name": bucket["project_name"],
             "total_amount": _money(bucket["total"]),
-            "expense_type_count": len(bucket["expense_types"]),
+            "primary_tag_count": len(bucket["primary_tags"]),
         }
         for bucket in sorted(
             buckets.values(),
@@ -1631,34 +1585,26 @@ def _project_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def _expense_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _cost_tag_key(row: dict[str, Any], level: str) -> str:
+    if row.get("allocation_state") == "source_pending":
+        return "pending:source"
+    if not row.get("bank_tag_code") or not row.get("bank_tag_primary_label"):
+        return "pending:tag"
+    label = row.get(f"bank_tag_{level}_label")
+    return "label:" + str(label) if label else "tag:no_sub"
+
+
+def _cost_tag_facets(rows: list[dict[str, Any]], *, level: str) -> list[dict[str, Any]]:
     buckets: dict[str, dict[str, Any]] = {}
     for row in rows:
-        name = row["expense_type"]
-        bucket = buckets.setdefault(
-            name,
-            {
-                "expense_type": name,
-                "total": ZERO,
-                "transactions": set(),
-                "projects": set(),
-            },
-        )
+        key = _cost_tag_key(row, level)
+        label = {"pending:source": "来源待分配", "pending:tag": "银行标签待完善", "tag:no_sub": "无子标签"}.get(key, row.get(f"bank_tag_{level}_label"))
+        bucket = buckets.setdefault(key, {"key": key, "label": label, "total": ZERO, "row_count": 0, "projects": set()})
         bucket["total"] += _decimal(row["amount"]) or ZERO
-        bucket["transactions"].add(_row_identity(row))
+        bucket["row_count"] += 1
         bucket["projects"].add(row["project_name"])
-    return [
-        {
-            "expense_type": bucket["expense_type"],
-            "total_amount": _money(bucket["total"]),
-            "transaction_count": len(bucket["transactions"]),
-            "project_count": len(bucket["projects"]),
-        }
-        for bucket in sorted(
-            buckets.values(),
-            key=lambda item: (-item["total"], item["expense_type"]),
-        )
-    ]
+    return [{"key": bucket["key"], "label": bucket["label"], "total_amount": _money(bucket["total"]), "row_count": bucket["row_count"], "project_count": len(bucket["projects"])}
+            for bucket in sorted(buckets.values(), key=lambda item: (-item["total"], item["key"]))]
 
 
 def _bank_account_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1857,27 +1803,22 @@ def _aggregate_export_rows(
 ) -> list[dict[str, Any]]:
     buckets: dict[tuple[str, ...], dict[str, Any]] = {}
     for row in rows:
-        period = (
-            str(row["month"])[:4]
-            if row_shape == "project_year"
-            else str(row["month"])
-        )
+        month = row["month"]
+        period = (str(month)[:4] if row_shape == "project_year" else str(month)) if month else "日期待确定"
         key = (
-            *((period,) if row_shape != "month_summary" else ()),
+            period,
             row["project_name"],
-            row["expense_type"],
+            _cost_tag_key(row, "primary"),
+            _cost_tag_key(row, "sub"),
             row["expense_content"],
         )
         bucket = buckets.setdefault(
             key,
             {
-                **(
-                    {"period_label": period}
-                    if row_shape != "month_summary"
-                    else {}
-                ),
+                "period_label": period,
                 "project_name": row["project_name"],
-                "expense_type": row["expense_type"],
+                "bank_tag_primary_label": row["bank_tag_primary_label"],
+                "bank_tag_sub_label": row["bank_tag_sub_label"],
                 "expense_content": row["expense_content"],
                 "amount_decimal": ZERO,
                 "transactions": set(),
@@ -1887,13 +1828,10 @@ def _aggregate_export_rows(
         bucket["transactions"].add(_row_identity(row))
     return [
         {
-            **(
-                {"period_label": bucket["period_label"]}
-                if "period_label" in bucket
-                else {}
-            ),
+            "period_label": bucket["period_label"],
             "project_name": bucket["project_name"],
-            "expense_type": bucket["expense_type"],
+            "bank_tag_primary_label": bucket["bank_tag_primary_label"],
+            "bank_tag_sub_label": bucket["bank_tag_sub_label"],
             "expense_content": bucket["expense_content"],
             "amount": _money(bucket["amount_decimal"]),
             "transaction_count": len(bucket["transactions"]),
@@ -1903,7 +1841,8 @@ def _aggregate_export_rows(
             key=lambda item: (
                 str(item.get("period_label") or ""),
                 item["project_name"],
-                item["expense_type"],
+                str(item["bank_tag_primary_label"] or ""),
+                str(item["bank_tag_sub_label"] or ""),
                 item["expense_content"],
             ),
         )
@@ -1940,6 +1879,8 @@ def _row_in_export_range(
     occurred_at = str(row.get("occurred_at") or row.get("trade_time") or "")
     row_month = str(row.get("month") or occurred_at)[:7]
     row_date = occurred_at[:10]
+    if not occurred_at and (month != "all" or start_month or end_month or start_date or end_date):
+        return False
     if month != "all" and row_month != month:
         return False
     if start_month and row_month < start_month:

@@ -10,7 +10,7 @@ export type CostSummary = {
 
 export type CostStatisticsPageStatistics = {
   projectCount?: number;
-  expenseTypeCount?: number;
+  primaryTagCount?: number;
   bankAccountCount?: number;
   costTransactionCount?: number;
   transactionCount?: number;
@@ -23,9 +23,10 @@ export type CostStatisticsPageStatistics = {
 export type CostExplorerEntryRow = {
   entryId: string;
   rowKind: "bank_transaction" | "oa_allocation";
-  transactionId?: string;
+  transactionId: string | null;
+  allocationState: "source_resolved" | "source_pending";
   allocationId?: string;
-  occurredAt: string;
+  occurredAt: string | null;
   direction: string;
   projectName: string;
   expenseType: string;
@@ -52,13 +53,14 @@ export type CostBankExplorerRow = {
 export type CostProjectExplorerRow = {
   projectName: string;
   totalAmount: string;
-  expenseTypeCount: number;
+  primaryTagCount: number;
 };
 
-export type CostExpenseTypeExplorerRow = {
-  expenseType: string;
+export type CostTagExplorerRow = {
+  key: string;
+  label: string;
   totalAmount: string;
-  transactionCount: number;
+  rowCount: number;
   projectCount: number;
 };
 
@@ -87,7 +89,7 @@ export type CostBankTagSubExplorerRow = {
 export type CostStatisticsView =
   | "time"
   | "project"
-  | "expense_type"
+  | "cost_tag"
   | "bank_account"
   | "bank_tag";
 
@@ -99,7 +101,8 @@ export type CostStatisticsExplorerPage = {
   availableYears: string[];
   facets: {
     projects: CostProjectExplorerRow[];
-    expenseTypes: CostExpenseTypeExplorerRow[];
+    costTagPrimary: CostTagExplorerRow[];
+    costTagSub: CostTagExplorerRow[];
     bankAccounts: CostBankExplorerRow[];
     bankTagPrimary: CostBankTagPrimaryExplorerRow[];
     bankTagSub: CostBankTagSubExplorerRow[];
@@ -110,6 +113,8 @@ export type CostStatisticsExplorerPage = {
     excludedByReason: Array<{ reason: string; count: number }>;
     pendingManualAllocationCount: number;
     staleManualAllocationCount: number;
+    undatedAmount: string;
+    undatedRowCount: number;
   };
   rowCount: number;
   nextCursor?: string;
@@ -135,6 +140,10 @@ export type CostStatisticsManualAllocationBankEvent = {
   tradeTime: string;
   counterpartyName: string;
   tags: string[];
+  bankAccountLabel: string;
+  bankTagCode: string;
+  bankTagPrimaryLabel: string;
+  bankTagSubLabel: string;
 };
 
 export type CostStatisticsManualAllocationLine = {
@@ -146,7 +155,10 @@ export type CostStatisticsManualAllocationTask = {
   relationCaseId: string;
   relationVersion: number;
   sourceFingerprint: string;
-  status: "pending" | "stale" | "allocated";
+  status: "pending" | "allocated";
+  pendingReasons: string[];
+  amountsFixed: boolean;
+  sourceAllocations: CostSourceAllocations | null;
   oaTotal: string;
   grossOutflowTotal: string;
   wrongPaymentRefundTotal: string;
@@ -162,8 +174,20 @@ export type CostStatisticsManualAllocationTask = {
   canSave: boolean;
 };
 
+export type CostSourceAllocations = {
+  costLines: Array<{ unitId: string; bankTransactionId: string; amount: string }>;
+  refundLinks: Array<{ refundTransactionId: string; bankTransactionId: string; amount: string }>;
+  nonCostLines: Array<{ bankTransactionId: string; amount: string }>;
+};
+
+export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations"> & {
+  projectNames: string[];
+  unitCount: number;
+  bankEventCount: number;
+};
+
 export type CostStatisticsManualAllocationPage = {
-  items: CostStatisticsManualAllocationTask[];
+  items: CostStatisticsManualAllocationSummary[];
   rowCount: number;
   counts: { pending: number; allocated: number };
   nextCursor?: string;
@@ -178,6 +202,7 @@ export type CostStatisticsManualAllocationPageRequest = {
 };
 
 export type SaveCostStatisticsManualAllocationRequest = {
+  sourceAllocations: CostSourceAllocations;
   relationCaseId: string;
   expectedVersion: number;
   sourceFingerprint: string;
@@ -190,7 +215,8 @@ export type CostStatisticsExplorerPageRequest = {
   scope: string;
   view: CostStatisticsView;
   projectName?: string;
-  expenseType?: string;
+  bankTagPrimaryKey?: string;
+  bankTagSubKey?: string;
   bankAccountLabel?: string;
   bankTagPrimaryLabel?: string;
   bankTagSubLabel?: string;
@@ -228,6 +254,13 @@ export type CostAllocationDetail = {
   kind: "oa_allocation";
   allocation: {
     allocationId: string;
+    transactionId: string | null;
+    occurredAt: string | null;
+    allocationState: "source_resolved" | "source_pending";
+    bankTagCode: string;
+    bankTagPrimaryLabel: string;
+    bankTagSubLabel: string;
+    bankTagLabelPath: string[];
     oaId: string;
     oaApplyType: string;
     expenseItemId: string;
@@ -271,7 +304,7 @@ export type CostAllocationDetail = {
 export type CostEntryDetail = CostBankTransactionDetail | CostAllocationDetail;
 
 export type CostStatisticsExportPreview = {
-  view: "time" | "bank_tag" | "bank_account" | "project" | "expense_type";
+  view: "time" | "bank_tag" | "bank_account" | "project" | "cost_tag";
   fileName: string;
   scopeLabel: string;
   summary: {

@@ -3953,7 +3953,8 @@ function buildCostStatisticsExplorerPagePayload(
   const pageSize = Math.max(1, Math.min(100, Number(url.searchParams.get("page_size") ?? 50) || 50));
   const cursorOffset = Number((url.searchParams.get("cursor") ?? "").replace(/^mock:/, "")) || 0;
   const projectName = url.searchParams.get("project_name") ?? "";
-  const expenseType = url.searchParams.get("expense_type") ?? "";
+  const primaryKey = url.searchParams.get("bank_tag_primary_key") ?? "";
+  const subKey = url.searchParams.get("bank_tag_sub_key") ?? "";
   const bankAccountLabel = url.searchParams.get("bank_account_label") ?? "";
   const bankTagPrimaryLabel = url.searchParams.get("bank_tag_primary_label") ?? "";
   const bankTagSubLabel = url.searchParams.get("bank_tag_sub_label") ?? "";
@@ -3987,41 +3988,31 @@ function buildCostStatisticsExplorerPagePayload(
   }));
   const costTotal = costRows.reduce((sum, row) => sum + amountNumber(row.amount), 0);
   const projectFacetsFor = (rows: typeof costRows) => {
-    const groups = new Map<string, { amount: number; rows: typeof costRows; expenseTypes: Set<string> }>();
+    const groups = new Map<string, { amount: number; rows: typeof costRows; primaryTags: Set<string> }>();
     for (const row of rows) {
-      const group = groups.get(row.project_name) ?? { amount: 0, rows: [], expenseTypes: new Set<string>() };
+      const group = groups.get(row.project_name) ?? { amount: 0, rows: [], primaryTags: new Set<string>() };
       group.amount += amountNumber(row.amount);
       group.rows.push(row);
-      group.expenseTypes.add(row.expense_type);
+      group.primaryTags.add(row.bank_tag_primary_label);
       groups.set(row.project_name, group);
     }
     return Array.from(groups.entries()).map(([name, group]) => ({
       project_name: name,
       total_amount: formatAmount(group.amount),
-      expense_type_count: group.expenseTypes.size,
+      primary_tag_count: group.primaryTags.size,
     })).sort((left, right) => amountNumber(right.total_amount) - amountNumber(left.total_amount));
   };
   const projectFacets = projectFacetsFor(costRows);
-  const expenseGroups = new Map<string, { amount: number; rows: typeof costRows; projects: Set<string> }>();
+  const tagFacetsFor = (rows: typeof costRows, level: 'primary' | 'sub') => {
+    const groups = new Map<string, typeof costRows>();
+    for (const row of rows) { const label = level === 'primary' ? row.bank_tag_primary_label : row.bank_tag_sub_label; groups.set(label, [...(groups.get(label) ?? []), row]); }
+    return [...groups].map(([label, rows]) => ({ key: `label:${label}`, label, total_amount: formatAmount(rows.reduce((sum,row) => sum + amountNumber(row.amount),0)), row_count: rows.length, project_count: new Set(rows.map(row => row.project_name)).size }));
+  };
   const accountGroups = new Map<string, { amount: number; rows: typeof costRows; projects: Set<string> }>();
   for (const row of costRows) {
-    const expense = expenseGroups.get(row.expense_type) ?? { amount: 0, rows: [], projects: new Set<string>() };
-    expense.amount += amountNumber(row.amount);
-    expense.rows.push(row);
-    expense.projects.add(row.project_name);
-    expenseGroups.set(row.expense_type, expense);
     const account = accountGroups.get(row.bank_account_label) ?? { amount: 0, rows: [], projects: new Set<string>() };
-    account.amount += amountNumber(row.amount);
-    account.rows.push(row);
-    account.projects.add(row.project_name);
-    accountGroups.set(row.bank_account_label, account);
+    account.amount += amountNumber(row.amount); account.rows.push(row); account.projects.add(row.project_name); accountGroups.set(row.bank_account_label, account);
   }
-  const expenseFacets = Array.from(expenseGroups.entries()).map(([name, group]) => ({
-    expense_type: name,
-    total_amount: formatAmount(group.amount),
-    transaction_count: group.rows.length,
-    project_count: group.projects.size,
-  })).sort((left, right) => amountNumber(right.total_amount) - amountNumber(left.total_amount));
   const bankAccountFacets = Array.from(accountGroups.entries()).map(([label, group]) => ({
     bank_account_label: label,
     total_amount: formatAmount(group.amount),
@@ -4077,20 +4068,12 @@ function buildCostStatisticsExplorerPagePayload(
   });
   const selectedProjectRows = costRows.filter((row) => row.project_name === projectName);
   const selectedAccountRows = costRows.filter((row) => row.bank_account_label === bankAccountLabel);
+  const beforeTags = view === 'project' ? (projectName ? selectedProjectRows : []) : view === 'bank_account' ? (bankAccountLabel && projectName ? selectedAccountRows.filter(row => row.project_name === projectName) : []) : view === 'cost_tag' ? costRows : [];
+  const primaryRows = beforeTags.filter(row => `label:${row.bank_tag_primary_label}` === primaryKey);
   let matchedRows: typeof costRows = [];
-  if (view === "project" && projectName && expenseType) {
-    matchedRows = selectedProjectRows.filter((row) => row.expense_type === expenseType);
-  } else if (view === "expense_type" && expenseType) {
-    matchedRows = costRows.filter((row) => row.expense_type === expenseType);
-  } else if (view === "bank_account" && bankAccountLabel && projectName) {
-    matchedRows = selectedAccountRows.filter((row) => row.project_name === projectName);
-  } else if (view === "time") {
-    matchedRows = bankFlowRows;
-  } else if (view === "bank_tag" && bankTagPrimaryLabel && bankTagSubLabel) {
-    matchedRows = selectedPrimaryRows.filter(
-      (row) => (row.bank_tag_sub_label || "未标记") === bankTagSubLabel,
-    );
-  }
+  if (['project','bank_account','cost_tag'].includes(view) && primaryKey && subKey) matchedRows = primaryRows.filter(row => `label:${row.bank_tag_sub_label}` === subKey);
+  else if (view === 'time') matchedRows = bankFlowRows;
+  else if (view === 'bank_tag' && bankTagPrimaryLabel && bankTagSubLabel) matchedRows = selectedPrimaryRows.filter(row => row.bank_tag_sub_label === bankTagSubLabel);
   const rows = matchedRows.slice(cursorOffset, cursorOffset + pageSize);
   const apiRows = rows.map((row) => {
     const bankFlowView = view === "time" || view === "bank_tag";
@@ -4101,6 +4084,7 @@ function buildCostStatisticsExplorerPagePayload(
       row_kind: bankFlowView ? "bank_transaction" : "oa_allocation",
       allocation_id: bankFlowView ? "" : allocationId,
       occurred_at: row.trade_time,
+      allocation_state: "source_resolved",
     };
   });
   const nextOffset = cursorOffset + rows.length;
@@ -4134,7 +4118,7 @@ function buildCostStatisticsExplorerPagePayload(
       expense_transaction_count: bankFlowRows.filter((row) => row.direction === "支出").length,
       income_transaction_count: bankFlowRows.filter((row) => row.direction === "收入").length,
       project_count: new Set(costRows.map((row) => row.project_name)).size,
-      expense_type_count: expenseGroups.size,
+      primary_tag_count: tagFacetsFor(costRows, "primary").length,
       bank_account_count: new Set(costRows.map((row) => row.bank_account_label).filter((label) => label !== "银行账户未确定")).size,
       cost_transaction_count: costRows.length,
     },
@@ -4145,15 +4129,13 @@ function buildCostStatisticsExplorerPagePayload(
         : view === "bank_account" && bankAccountLabel
           ? projectFacetsFor(selectedAccountRows)
           : [],
-      expense_types: view === "expense_type"
-        ? expenseFacets
-        : view === "project" && projectName
-          ? expenseFacets.filter((item) => selectedProjectRows.some((row) => row.expense_type === item.expense_type))
-          : [],
+      cost_tag_primary: tagFacetsFor(beforeTags, 'primary'),
+      cost_tag_sub: primaryKey ? tagFacetsFor(primaryRows, 'sub') : [],
       bank_accounts: view === "bank_account" ? bankAccountFacets : [],
       bank_tag_primary: view === "bank_tag" ? bankTagPrimaryFacets : [],
       bank_tag_sub: view === "bank_tag" ? bankTagSubFacets : [],
     },
+    allocation_quality: { excluded_allocation_count: 0, excluded_by_reason: [], pending_manual_allocation_count: 1, stale_manual_allocation_count: 0, undated_amount: "0.00", undated_row_count: 0 },
     rows: apiRows,
     row_count: matchedRows.length,
     next_cursor: nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
@@ -4662,6 +4644,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let manualAllocationNonCostAmount = "0.00";
   let manualAllocationNonCostReason = "";
   let manualAllocationVersion = 0;
+  let manualSourceAllocations: Record<string, unknown> | null = null;
   const buildManualAllocationTask = (
     relationCaseId: string,
     allocations: Array<Record<string, unknown>> = manualAllocationLines,
@@ -4670,6 +4653,10 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     relation_version: 1,
     source_fingerprint: "a".repeat(64),
     status: allocations.length > 0 ? "allocated" : "pending",
+    pending_reasons: allocations.length ? [] : ["amount_required"],
+    amounts_fixed: false,
+    source_allocations: manualSourceAllocations,
+    project_names: ["项目 A", "项目 B"], unit_count: 2, bank_event_count: 2,
     oa_total: "1010.00",
     gross_outflow_total: "1000.00",
     wrong_payment_refund_total: "0.00",
@@ -4708,6 +4695,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         trade_time: "2026-08-27T09:30:00+08:00",
         counterparty_name: "昆明设备供应商",
         tags: ["项目开销", "设备材料", "设备采购"],
+        bank_account_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "设备材料",
       },
       {
         transaction_id: "bank-manual-002",
@@ -4716,6 +4704,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         trade_time: "2026-08-27T10:30:00+08:00",
         counterparty_name: "昆明设备供应商",
         tags: ["项目开销", "设备材料", "设备采购"],
+        bank_account_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "设备材料",
       },
     ],
     allocations,
@@ -7754,6 +7743,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         },
       });
     }
+    if (method === "GET" && url.pathname.startsWith("/api/cost-statistics/manual-allocations/")) return jsonResponse({ body: buildManualAllocationTask(decodeURIComponent(url.pathname.split('/').pop()!)) });
     if (
       method === "PUT"
       && url.pathname.startsWith("/api/cost-statistics/manual-allocations/")
@@ -7763,6 +7753,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         ? jsonBody.allocations as Array<Record<string, unknown>>
         : [];
       manualAllocationLines = allocations;
+      manualSourceAllocations = jsonBody?.source_allocations as Record<string, unknown>;
       manualAllocationNonCostAmount = String(jsonBody?.non_cost_amount ?? "");
       manualAllocationNonCostReason = String(jsonBody?.non_cost_reason ?? "");
       manualAllocationVersion += 1;

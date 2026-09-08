@@ -2565,10 +2565,10 @@ def _validate_relation_impact_cost_consumers(
     for consumer in cost_consumers:
         query = parse_qs(urlsplit(consumer.probe.path).query, keep_blank_values=True)
         views = query.get("view", [])
-        if len(views) != 1 or views[0] not in {"project", "bank", "expense_type"}:
+        if len(views) != 1 or views[0] not in {"project", "bank_account", "cost_tag"}:
             raise ValueError(
                 f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} affected Cost "
-                "consumer must use a Workbench-dependent Cost view: project, bank, or expense_type."
+                "consumer must use a Workbench-dependent Cost view: project, bank_account, or cost_tag."
             )
         consumer_has_relation_semantic = any(
             _is_relation_derived_cost_assertion(assertion)

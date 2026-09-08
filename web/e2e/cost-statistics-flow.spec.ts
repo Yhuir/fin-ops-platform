@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const now = Date.now();
     sessionStorage.setItem("finops:pageSession:v1:e2e-user:cost-statistics:explorerState", JSON.stringify({
-      version: 5,
+      version: 6,
       updatedAt: now,
       expiresAt: now + 60 * 60 * 1000,
       value: {
@@ -27,9 +27,9 @@ test.beforeEach(async ({ page }) => {
         bankAccountScopeMode: "all",
         bankAccountScopeYear: "2026",
         bankAccountScopeMonth: "2026-03",
-        expenseTypeScopeMode: "month",
-        expenseTypeScopeYear: "2026",
-        expenseTypeScopeMonth: "2026-03",
+        costTagScopeMode: "month",
+        costTagScopeYear: "2026",
+        costTagScopeMonth: "2026-03",
         bankFlowScopeMode: "month",
         bankFlowScopeYear: "2026",
         bankFlowScopeMonth: "2026-03",
@@ -49,7 +49,7 @@ test.describe("cost statistics browser flow", () => {
     const views = switcher.getByRole("radiogroup", { name: "项目成本统计视图" });
     await expect(views.getByRole("radio")).toHaveCount(3);
     await expect(views.getByRole("radio", { name: "按项目" })).toBeVisible();
-    await expect(views.getByRole("radio", { name: "按费用类型" })).toBeVisible();
+    await expect(views.getByRole("radio", { name: "按流水标签" })).toBeVisible();
     await expect(views.getByRole("radio", { name: "按银行账户" })).toBeVisible();
     await expect(switcher.getByText("银行流水")).toBeVisible();
     const bankFlowViews = switcher.getByRole("radiogroup", { name: "银行流水统计视图" });
@@ -146,7 +146,7 @@ test.describe("cost statistics browser flow", () => {
     await expect.poll(() => scrollSurface.evaluate((element) => element.scrollTop)).toBe(0);
   });
 
-  test("drills from project through expense type to OA cost detail", async ({ page }) => {
+  test("drills from project through bank tags to OA cost detail", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
@@ -162,12 +162,13 @@ test.describe("cost statistics browser flow", () => {
     const rowsResponse = waitForExplorer(page, (url) => (
       url.searchParams.get("view") === "project"
       && url.searchParams.get("project_name") === "云南溯源科技"
-      && url.searchParams.get("expense_type") === "设备货款及材料费"
+      && url.searchParams.get("bank_tag_primary_key") === "primary:项目开销"
     ));
-    await page.getByRole("option", { name: "选择费用类型 设备货款及材料费" }).click();
+    await page.getByRole("option", { name: "选择银行主标签 项目开销" }).click();
     await rowsResponse;
 
-    const grid = page.getByRole("grid", { name: "项目成本明细表" });
+    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    const grid = page.getByRole("grid", { name: "成本明细表" });
     await expect(grid).toBeVisible();
     await expect(grid).toContainText("PLC 模块采购");
     await grid.getByRole("button", { name: /查看OA 成本归集 云南溯源科技 2026-03-10/ }).click();
@@ -176,7 +177,7 @@ test.describe("cost statistics browser flow", () => {
     await expect(drawer).toContainText("工商银行 账户 0001");
   });
 
-  test("drills from bank account through project to the same cost population", async ({ page }) => {
+  test("drills from bank account through project and tags to the same cost population", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
@@ -197,29 +198,32 @@ test.describe("cost statistics browser flow", () => {
       && url.searchParams.get("bank_account_label") === "工商银行 账户 0001"
       && url.searchParams.get("project_name") === "云南溯源科技"
     ));
-    await page.getByRole("option", { name: "选择项目 云南溯源科技" }).click();
+    await page.getByRole("option", { name: "选择项目名 云南溯源科技" }).click();
     await rowsResponse;
 
-    const grid = page.getByRole("grid", { name: "银行账户项目成本明细表" });
+    await page.getByRole("option", { name: "选择银行主标签 项目开销" }).click();
+    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    const grid = page.getByRole("grid", { name: "成本明细表" });
     await expect(grid).toBeVisible();
     await expect(grid).toContainText("PLC 模块采购");
   });
 
-  test("keeps expense-type analysis as an independent drill-down", async ({ page }) => {
+  test("keeps bank-tag analysis as an independent drill-down", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     await page.goto("/cost-statistics");
-    const expenseListResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "expense_type");
-    await page.getByRole("radio", { name: "按费用类型" }).click();
+    const expenseListResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "cost_tag");
+    await page.getByRole("radio", { name: "按流水标签" }).click();
     await expenseListResponse;
 
     const rowsResponse = waitForExplorer(page, (url) => (
-      url.searchParams.get("view") === "expense_type"
-      && url.searchParams.get("expense_type") === "设备货款及材料费"
+      url.searchParams.get("view") === "cost_tag"
+      && url.searchParams.get("bank_tag_primary_key") === "primary:项目开销"
     ));
-    await page.getByRole("option", { name: "选择费用类型 设备货款及材料费" }).click();
+    await page.getByRole("option", { name: "选择银行主标签 项目开销" }).click();
     await rowsResponse;
-    await expect(page.getByRole("grid", { name: "按费用类型成本明细表" })).toContainText("云南溯源科技");
+    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    await expect(page.getByRole("grid", { name: "成本明细表" })).toContainText("云南溯源科技");
   });
 
   test("previews bank-flow and bank-account exports", async ({ page }) => {

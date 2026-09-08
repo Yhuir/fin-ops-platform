@@ -45,8 +45,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         rows = policy.serialized_cost_rows
         self.assertEqual(len(rows), 3)
         self.assertEqual({row["amount"] for row in rows}, {"240.00", "710.00", "65.00"})
-        self.assertEqual({row["transaction_id"] for row in rows}, {""})
-        self.assertEqual({row["payment_account_label"] for row in rows}, {""})
+        self.assertEqual({row["transaction_id"] for row in rows}, {"bank-1050"})
+        self.assertEqual({row["payment_account_label"] for row in rows}, {"建设银行 8106"})
         self.assertEqual({row["bank_account_label"] for row in rows}, {"建设银行 8106"})
         dali = next(
             row
@@ -56,7 +56,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(dali["month"], "2026-08")
         self.assertEqual(dali["oa_completed_at"], "2026-07-23 18:00:00")
         detail = policy.allocation(
-            allocation_id="relation:case-1:unit:oa:oa-exp-1:item:item-2",
+            allocation_id="relation:case-1:unit:oa:oa-exp-1:item:item-2:source:bank-1050",
             scope_kind="month",
             scope_value="2026-08",
         )
@@ -65,7 +65,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(detail["amount"], "710.00")
         self.assertEqual(detail["oa_original_amount"], "710.00")
         self.assertEqual(detail["oa_allocation_weight"], "69.95%")
-        self.assertEqual(detail["bank_event_amount"], "")
+        self.assertEqual(detail["bank_event_amount"], "1050.00")
         self.assertEqual(detail["reconciliation"]["wrong_payment_refund_total"], "35.00")
         self.assertEqual(detail["reconciliation"]["net_outflow_total"], "1015.00")
         self.assertEqual(detail["reconciliation"]["difference"], "0.00")
@@ -88,8 +88,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(
             {(row["allocation_id"], row["amount"]) for row in policy.serialized_cost_rows},
             {
-                ("relation:case-1:unit:oa:oa-4360", "4360.00"),
-                ("relation:case-1:unit:oa:oa-5450", "5450.00"),
+                ("relation:case-1:unit:oa:oa-4360:source:bank-9810", "4360.00"),
+                ("relation:case-1:unit:oa:oa-5450:source:bank-9810", "5450.00"),
             },
         )
 
@@ -117,7 +117,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(len(policy.serialized_cost_rows), 3)
         self.assertEqual(
             {row["payment_account_label"] for row in policy.serialized_cost_rows},
-            {""},
+            {None},
         )
         self.assertEqual(
             {row["bank_account_label"] for row in policy.serialized_cost_rows},
@@ -136,7 +136,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             sum((Decimal(row["amount"]) for row in policy.serialized_cost_rows), start=Decimal("0")),
             Decimal("540.00"),
         )
-        for view in ("project", "expense_type", "bank_account"):
+        for view in ("project", "cost_tag", "bank_account"):
             page = policy.explorer_page(
                 scope_kind="all",
                 scope_value=None,
@@ -199,7 +199,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             scope_kind="all",
             scope_value=None,
             view="bank_account",
-            filters={"bank_account_label": "建设银行 8106", "project_name": "项目A"},
+            filters={"bank_account_label": "建设银行 8106", "project_name": "项目A", "bank_tag_primary_key": "label:材料款", "bank_tag_sub_key": "label:材料款"},
             cursor_values=None,
             page_size=50,
         )
@@ -362,17 +362,17 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             {("oa-a", "50.01"), ("oa-b", "49.99")},
         )
         self.assertEqual(
-            {row["transaction_id"] for row in policy.serialized_cost_rows}, {""}
+            {row["transaction_id"] for row in policy.serialized_cost_rows}, {None}
         )
         self.assertEqual(
             {row["payment_account_label"] for row in policy.serialized_cost_rows},
-            {""},
+            {None},
         )
         self.assertEqual(
             {row["bank_account_label"] for row in policy.serialized_cost_rows},
-            {"建设银行 8106"},
+            {UNRESOLVED_BANK_ACCOUNT_LABEL},
         )
-        for view in ("project", "expense_type", "bank_account"):
+        for view in ("project", "cost_tag", "bank_account"):
             page = policy.explorer_page(
                 scope_kind="all",
                 scope_value=None,
@@ -403,15 +403,18 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                         self._line("oa:oa-a", "50.00"),
                         self._line("oa:oa-b", "50.00"),
                     ],
-                    "non_cost_amount": "0.00",
-                    "non_cost_reason": "",
+                    "non_cost_amount": "100.00",
+                    "non_cost_reason": "旧非成本决定",
                 }
             },
         )
 
         self.assertEqual(policy.serialized_cost_rows, [])
-        self.assertEqual(policy.manual_allocation_tasks[0]["status"], "stale")
+        self.assertEqual(policy.manual_allocation_tasks[0]["pending_reasons"], ["allocation_stale"])
         self.assertEqual(policy.allocation_quality["stale_manual_allocation_count"], 1)
+
+        self.assertEqual(policy.manual_allocation_tasks[0]["non_cost_amount"], "0.00")
+        self.assertEqual(policy.manual_allocation_tasks[0]["non_cost_reason"], "")
 
     def test_manual_allocation_fingerprint_preserves_pre_0162_identity(self) -> None:
         group = self._group(
@@ -572,7 +575,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
 
         self.assertEqual(
             {(row["transaction_id"], row["amount"], row["direction"]) for row in policy.serialized_cost_rows},
-            {("", "1015.00", "支出")},
+            {("bank-out", "1015.00", "支出")},
         )
         self.assertEqual(policy.explorer_page(
             scope_kind="all", scope_value=None, view="project",
@@ -580,7 +583,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             cursor_values=None, page_size=50,
         )["summary"]["total_amount"], "1015.00")
         detail = policy.allocation(
-            allocation_id="relation:case-1:unit:oa:oa-1",
+            allocation_id="relation:case-1:unit:oa:oa-1:source:bank-out",
             scope_kind="all",
             scope_value=None,
         )
@@ -733,7 +736,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         view_filters = {
             "project": {"project_name": "项目A", "expense_type": "设备采购"},
             "bank_account": {"bank_account_label": "建设银行 8106", "project_name": "项目A"},
-            "expense_type": {"expense_type": "设备采购"},
+            "cost_tag": {"bank_tag_primary_key": "label:材料款", "bank_tag_sub_key": "label:材料款"},
         }
         totals: dict[str, str] = {}
         for view, filters in view_filters.items():
@@ -787,7 +790,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             [row["transaction_id"] for row in policy.serialized_cost_rows],
-            [""],
+            ["paired"],
         )
         self.assertEqual(
             sum(
@@ -1033,8 +1036,8 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         direction: str = "outflow",
         account_no: str = "8106",
         account_label: str = "建设银行 8106",
-        tag_code: str = "",
-        tag_label: str = "",
+        tag_code: str = "material",
+        tag_label: str = "材料款",
     ) -> dict[str, object]:
         return {
             "id": bank_id,

@@ -38,7 +38,6 @@ function costDetailSections(detail: CostEntryDetail) {
       { label: "本笔支出流水原额", value: formatCostAmount(allocation.bankEventAmount) },
       { label: "审批完成时间", value: allocation.oaCompletedAt },
       { label: "项目名称", value: allocation.projectName },
-      { label: "费用类型", value: allocation.expenseType },
       { label: "费用内容", value: allocation.expenseContent },
       { label: "OA类型", value: allocation.oaApplyType },
       { label: "申请人", value: allocation.oaApplicant },
@@ -76,7 +75,18 @@ function costDetailSections(detail: CostEntryDetail) {
       ],
     });
   });
-  return preparePublicDetailSections(sections);
+  // Source fields are explicitly owned by Cost; the shared public-label list is unchanged.
+  return [...preparePublicDetailSections(sections), {
+    title: "银行来源",
+    fields: [
+      { label: "来源流水", value: allocation.transactionId || "来源待分配" },
+      { label: "付款日期", value: allocation.occurredAt || "付款日期待完善" },
+      { label: "银行主标签", value: allocation.allocationState === "source_pending" ? "来源待分配" : allocation.bankTagPrimaryLabel || "银行标签待完善" },
+      { label: "银行子标签", value: allocation.allocationState === "source_pending" ? "来源待分配" : allocation.bankTagSubLabel || "未设置子标签" },
+      { label: "完整银行标签", value: allocation.bankTagLabelPath.join(" / ") },
+      { label: "原 OA 费用类型", value: allocation.expenseType },
+    ],
+  }];
 }
 
 function formatCostReduction(value: string): string {

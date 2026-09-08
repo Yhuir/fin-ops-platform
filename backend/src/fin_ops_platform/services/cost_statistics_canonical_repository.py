@@ -19,7 +19,7 @@ from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allo
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
 )
-
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 OA_COST_FORM_TYPES = ("支付申请", "日常报销")
 
@@ -44,17 +44,15 @@ class PostgresCostStatisticsCanonicalRepository:
         scope_value: str | None = None,
         view: str = "project",
         include_statistics: bool = True,
-        include_cost_row_tags: bool = True,
     ) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
             settings = _settings_payload(transaction)
             bank_flow_view = view in {"time", "bank_tag"}
             has_no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
-            scoped = (bank_flow_view or not include_statistics) and scope_kind != "all"
+            scoped = bank_flow_view and scope_kind != "all"
             relation_only_all_scope = (
                 not bank_flow_view
                 and not has_no_oa_assignments
-                and (include_statistics or scope_kind == "all")
             )
             relations = _postgres_relations(transaction) if relation_only_all_scope else []
             relation_only_bank_ids = (
@@ -138,22 +136,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 if scoped
                 else bank_rows
             )
-            if include_cost_row_tags:
-                category_rows = [*bank_rows, *relation_bank_rows]
-            else:
-                category_rows = [
-                    row
-                    for row in relation_bank_rows
-                    if _direction(row) == "inflow"
-                    and _text(row.get("id")) in relation_bank_ids
-                ]
-                if has_no_oa_assignments:
-                    category_rows.extend(
-                        row
-                        for row in bank_rows
-                        if _direction(row) == "outflow"
-                        and _text(row.get("id")) not in relation_bank_ids
-                    )
+            category_rows = [*bank_rows, *relation_bank_rows]
             category_ids = _bank_row_ids(category_rows)
             categories_by_transaction_id = (
                 PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
@@ -247,6 +230,12 @@ class PostgresCostStatisticsCanonicalRepository:
         if for_update and not self._transaction_bound:
             raise ValueError("for_update requires a transaction-bound cost repository")
         with self._snapshot_transaction() as transaction:
+            if for_update:
+                transaction.execute("set local lock_timeout = '1000ms'")
+                # Use relation writers' member lock order; bank SHARE locks below coordinate category writers.
+                PostgresWorkbenchRelationRepository(transaction).acquire_relation_member_locks(
+                    [], case_ids=[normalized_case_id]
+                )
             settings = _settings_payload(transaction)
             relations = _postgres_relations(
                 transaction,
@@ -256,7 +245,13 @@ class PostgresCostStatisticsCanonicalRepository:
             if not relations:
                 raise KeyError(normalized_case_id)
             relation = relations[0]
+            # Fetch peers with overlapping IDs; policy checks typed members for duplicate ownership.
+            relations = _postgres_relations(transaction, related_member_ids=list(relation["row_ids"]))
             bank_ids = _relation_member_ids(relations, {"bank", "bank_transaction"})
+            if for_update:
+                # SHARE blocks amount/date edits too; KEY SHARE would only protect identity.
+                transaction.fetch_all("select id from app.bank_transactions where legacy_mongo_id = any(%s::text[]) order by id for share", (bank_ids,))
+                transaction.fetch_all("select id from app.oa_applications where row_id = any(%s::text[]) order by id for share", (_relation_member_ids(relations, {"oa"}),))
             bank_rows = _postgres_bank_rows(
                 transaction,
                 settings=settings,
@@ -277,13 +272,13 @@ class PostgresCostStatisticsCanonicalRepository:
             )
             manual_allocations = PostgresCostStatisticsManualAllocationRepository(
                 transaction
-            ).list_by_case_ids([normalized_case_id])
+            ).list_by_case_ids([item["case_id"] for item in relations])
             return _build_snapshot(
                 settings=settings,
                 bank_rows=bank_rows,
                 relation_bank_rows=bank_rows,
                 oa_rows=oa_rows,
-                relations=[relation],
+                relations=relations,
                 manual_allocations=manual_allocations,
                 available_years=_bank_available_years(bank_rows),
             )
@@ -365,7 +360,6 @@ class LocalCostStatisticsCanonicalRepository:
         scope_value: str | None = None,
         view: str = "project",
         include_statistics: bool = True,
-        include_cost_row_tags: bool = True,
     ) -> dict[str, Any]:
         settings = dict(self._settings_provider() or {})
         bank_flow_view = view in {"time", "bank_tag"}
@@ -382,10 +376,10 @@ class LocalCostStatisticsCanonicalRepository:
             if _bank_row_in_scope(
                 row,
                 scope_kind=(
-                    scope_kind if bank_flow_view or not include_statistics else "all"
+                    scope_kind if bank_flow_view else "all"
                 ),
                 scope_value=(
-                    scope_value if bank_flow_view or not include_statistics else None
+                    scope_value if bank_flow_view else None
                 ),
             )
         ]
@@ -401,13 +395,8 @@ class LocalCostStatisticsCanonicalRepository:
                 relations=[],
                 available_years=bank_available_years,
             )
-        no_oa_assignments = _has_no_oa_project_tag_assignments(settings)
         _apply_bank_tags(
-            (
-                scoped_bank_rows
-                if include_cost_row_tags or no_oa_assignments
-                else [row for row in scoped_bank_rows if _direction(row) == "inflow"]
-            ),
+            scoped_bank_rows,
             category_provider=self._category_provider,
         )
         all_relations = [
@@ -436,11 +425,7 @@ class LocalCostStatisticsCanonicalRepository:
             in relation_bank_ids
         ]
         _apply_bank_tags(
-            (
-                relation_bank_rows
-                if include_cost_row_tags
-                else [row for row in relation_bank_rows if _direction(row) == "inflow"]
-            ),
+            relation_bank_rows,
             category_provider=self._category_provider,
         )
         all_oa_rows = [
@@ -482,8 +467,6 @@ class LocalCostStatisticsCanonicalRepository:
         ]
         if not groups:
             raise KeyError(normalized_case_id)
-        snapshot["cost_groups"] = groups
-        snapshot["manual_allocations"] = self._manual_allocations_provider([normalized_case_id])
         return snapshot
 
     def load_manual_allocation_task_snapshot(self) -> dict[str, Any]:
@@ -706,6 +689,7 @@ def _postgres_relations(
     *,
     bank_row_ids: list[str] | None = None,
     relation_case_id: str | None = None,
+    related_member_ids: list[str] | None = None,
     for_update: bool = False,
 ) -> list[dict[str, Any]]:
     if bank_row_ids is not None and not bank_row_ids:
@@ -726,6 +710,9 @@ def _postgres_relations(
     if relation_case_id is not None:
         filter_sql += " and case_id = %s"
         params = (*params, relation_case_id)
+    if related_member_ids is not None:
+        filter_sql += " and row_ids && %s::text[]"
+        params = (*params, related_member_ids)
     lock_sql = "for update" if for_update else ""
     rows = connection.fetch_all(
         f"""
@@ -1030,12 +1017,9 @@ def _apply_bank_tags(
     *,
     category_provider: Any,
 ) -> None:
-    categories = category_provider.bulk_get_for_rows(bank_rows)
-    for row in bank_rows:
-        transaction_id = _text(
-            row.get("id") or row.get("transaction_id") or row.get("row_id")
-        )
-        row.update(bank_tag_context_from_row(categories.get(transaction_id) or {}))
+    _apply_bank_category_projection(
+        bank_rows, categories_by_transaction_id=category_provider.bulk_get_for_rows(bank_rows)
+    )
 
 
 def _apply_bank_category_projection(
@@ -1047,11 +1031,16 @@ def _apply_bank_category_projection(
         transaction_id = _text(
             row.get("id") or row.get("transaction_id") or row.get("row_id")
         )
-        row.update(
-            bank_tag_context_from_row(
-                categories_by_transaction_id.get(transaction_id) or {}
-            )
-        )
+        if transaction_id not in categories_by_transaction_id:
+            raise CostStatisticsIntegrityError(f"Bank classification projection missing transaction {transaction_id}")
+        category = categories_by_transaction_id[transaction_id]
+        row.update(bank_tag_context_from_row({
+            "bank_tag_code": category["effective_category_code"],
+            "bank_tag_label": category["effective_category_label"],
+            "bank_tag_primary_label": category["effective_category_primary_label"],
+            "bank_tag_sub_label": category["effective_category_sub_label"],
+            "bank_tag_label_path": category["effective_category_label_path"],
+        }))
 
 
 def _bank_row_from_object(

@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 import BusinessPeriodPicker from "../components/common/BusinessPeriodPicker";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
+import CostStatisticsHierarchy, { type CostHierarchyLane } from "../components/cost-statistics/CostStatisticsHierarchy";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
 import CostStatisticsManualAllocationDrawer from "../components/cost-statistics/CostStatisticsManualAllocationDrawer";
 import CostStatisticsNoOaRulesDrawer from "../components/cost-statistics/CostStatisticsNoOaRulesDrawer";
@@ -43,7 +44,7 @@ import type {
   CostBankExplorerRow,
   CostBankTagPrimaryExplorerRow,
   CostBankTagSubExplorerRow,
-  CostExpenseTypeExplorerRow,
+  CostTagExplorerRow,
   CostProjectExplorerRow,
   CostStatisticsNoOaProject,
   CostStatisticsNoOaRules,
@@ -54,7 +55,7 @@ import type {
   CostEntryDetail,
 } from "../features/cost-statistics/types";
 
-type CostViewMode = "project" | "bankAccount" | "expenseType" | "time" | "bankTag";
+type CostViewMode = "project" | "bankAccount" | "costTag" | "time" | "bankTag";
 type CostEntryDetailSource = CostViewMode;
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode;
@@ -111,7 +112,7 @@ function getExplorerTransitionScope(
 
 type CostStatisticsExportReferenceData = {
   projects: CostProjectExplorerRow[];
-  expenseTypes: CostExpenseTypeExplorerRow[];
+  costTags: CostTagExplorerRow[];
   bankAccounts: CostBankExplorerRow[];
 };
 
@@ -123,27 +124,19 @@ type CostStatisticsPageSession = {
   bankAccountScopeMode: ExplorerScopeMode;
   bankAccountScopeYear: string;
   bankAccountScopeMonth: string;
-  expenseTypeScopeMode: ExplorerScopeMode;
-  expenseTypeScopeYear: string;
-  expenseTypeScopeMonth: string;
+  costTagScopeMode: ExplorerScopeMode;
+  costTagScopeYear: string;
+  costTagScopeMonth: string;
   bankFlowScopeMode: ExplorerScopeMode;
   bankFlowScopeYear: string;
   bankFlowScopeMonth: string;
 };
 
-function getCostEntryRowRenderKey(row: CostExplorerEntryRow, index: number) {
-  return [
-    row.entryId || "entry",
-    row.occurredAt,
-    row.projectName,
-    row.expenseType,
-    row.expenseContent,
-    row.amount,
-    String(index),
-  ].join("|");
+function getCostEntryRowRenderKey(row: CostExplorerEntryRow) {
+  return row.entryId;
 }
 
-function formatCostTradeTime(value: string) {
+function formatCostTradeTime(value: string | null) {
   const raw = String(value || "").trim();
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})(?::(\d{2}))?/);
   if (!match) {
@@ -216,7 +209,7 @@ function EntryIdentity({
   secondaryLabel,
 }: {
   label: string;
-  occurredAt: string;
+  occurredAt: string | null;
   secondaryLabel?: string;
 }) {
   const formattedTradeTime = formatCostTradeTime(occurredAt);
@@ -239,7 +232,7 @@ function EntryIdentity({
         variant="soft"
       >
         <Chip.Label>
-          <time dateTime={occurredAt}>{formattedTradeTime || "--"}</time>
+          <time dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款日期待完善"}</time>
         </Chip.Label>
       </Chip>
     </span>
@@ -326,9 +319,9 @@ function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPag
     "bankAccountScopeMode",
     "bankAccountScopeYear",
     "bankAccountScopeMonth",
-    "expenseTypeScopeMode",
-    "expenseTypeScopeYear",
-    "expenseTypeScopeMonth",
+    "costTagScopeMode",
+    "costTagScopeYear",
+    "costTagScopeMonth",
     "bankFlowScopeMode",
     "bankFlowScopeYear",
     "bankFlowScopeMonth",
@@ -344,7 +337,7 @@ export default function CostStatisticsPage() {
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
     pageKey: "cost-statistics",
     stateKey: "explorerState",
-    version: 5,
+    version: 6,
     initialValue: {
       viewMode: "project",
       projectScopeMode: "all",
@@ -353,9 +346,9 @@ export default function CostStatisticsPage() {
       bankAccountScopeMode: "all",
       bankAccountScopeYear: DEFAULT_MONTH.slice(0, 4),
       bankAccountScopeMonth: DEFAULT_MONTH,
-      expenseTypeScopeMode: "month",
-      expenseTypeScopeYear: DEFAULT_MONTH.slice(0, 4),
-      expenseTypeScopeMonth: DEFAULT_MONTH,
+      costTagScopeMode: "month",
+      costTagScopeYear: DEFAULT_MONTH.slice(0, 4),
+      costTagScopeMonth: DEFAULT_MONTH,
       bankFlowScopeMode: "month",
       bankFlowScopeYear: DEFAULT_MONTH.slice(0, 4),
       bankFlowScopeMonth: DEFAULT_MONTH,
@@ -419,7 +412,7 @@ export default function CostStatisticsPage() {
 
   const [projectExportNames, setProjectExportNames] = useState<string[]>([]);
   const [projectAggregateBy, setProjectAggregateBy] = useState<"month" | "year">("month");
-  const [projectExpenseTypes, setProjectExpenseTypes] = useState<string[]>([]);
+  const [projectCostTags, setProjectCostTags] = useState<string[]>([]);
   const projectScopeMode = costSession.projectScopeMode;
   const projectScopeYear = costSession.projectScopeYear;
   const projectScopeMonth = costSession.projectScopeMonth;
@@ -427,28 +420,28 @@ export default function CostStatisticsPage() {
   const bankAccountScopeYear = costSession.bankAccountScopeYear;
   const bankAccountScopeMonth = costSession.bankAccountScopeMonth;
 
-  const expenseTypeScopeMode = costSession.expenseTypeScopeMode;
-  const expenseTypeScopeYear = costSession.expenseTypeScopeYear;
-  const expenseTypeScopeMonth = costSession.expenseTypeScopeMonth;
+  const costTagScopeMode = costSession.costTagScopeMode;
+  const costTagScopeYear = costSession.costTagScopeYear;
+  const costTagScopeMonth = costSession.costTagScopeMonth;
   const bankFlowScopeMode = costSession.bankFlowScopeMode;
   const bankFlowScopeYear = costSession.bankFlowScopeYear;
   const bankFlowScopeMonth = costSession.bankFlowScopeMonth;
-  const [expenseTypeRangeMode, setExpenseTypeRangeMode] = useState<ExportRangeMode>("month");
-  const [expenseTypeMonth, setExpenseTypeMonth] = useState(DEFAULT_MONTH);
-  const [expenseTypeStartDate, setExpenseTypeStartDate] = useState(defaultMonthBounds.startDate);
-  const [expenseTypeEndDate, setExpenseTypeEndDate] = useState(defaultMonthBounds.endDate);
-  const [expenseTypeSelections, setExpenseTypeSelections] = useState<string[]>([]);
+  const [costTagRangeMode, setCostTagRangeMode] = useState<ExportRangeMode>("month");
+  const [costTagMonth, setCostTagMonth] = useState(DEFAULT_MONTH);
+  const [costTagStartDate, setCostTagStartDate] = useState(defaultMonthBounds.startDate);
+  const [costTagEndDate, setCostTagEndDate] = useState(defaultMonthBounds.endDate);
+  const [costTagSelections, setCostTagSelections] = useState<string[]>([]);
   const [bankFlowRangeMode, setBankFlowRangeMode] = useState<ExportRangeMode>("month");
   const [bankFlowMonth, setBankFlowMonth] = useState(DEFAULT_MONTH);
   const [bankFlowStartDate, setBankFlowStartDate] = useState(defaultMonthBounds.startDate);
   const [bankFlowEndDate, setBankFlowEndDate] = useState(defaultMonthBounds.endDate);
   const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
-  const [selectedProjectExpenseType, setSelectedProjectExpenseType] = useState<string | null>(null);
+  const [selectedCostPrimary, setSelectedCostPrimary] = useState<string | null>(null);
+  const [selectedCostSub, setSelectedCostSub] = useState<string | null>(null);
   const [selectedProjectEntryId, setSelectedProjectEntryId] = useState<string | null>(null);
   const [selectedBankAccountLabel, setSelectedBankAccountLabel] = useState<string | null>(null);
   const [selectedBankProjectName, setSelectedBankProjectName] = useState<string | null>(null);
   const [selectedBankEntryId, setSelectedBankEntryId] = useState<string | null>(null);
-  const [selectedExpenseType, setSelectedExpenseType] = useState<string | null>(null);
   const [selectedExpenseEntryId, setSelectedExpenseEntryId] = useState<string | null>(null);
   const [selectedTimeEntryId, setSelectedTimeEntryId] = useState<string | null>(null);
   const [selectedBankTagPrimaryLabel, setSelectedBankTagPrimaryLabel] = useState<string | null>(null);
@@ -485,30 +478,30 @@ export default function CostStatisticsPage() {
     ? projectScopeMode
     : viewMode === "bankAccount"
       ? bankAccountScopeMode
-      : viewMode === "expenseType"
-        ? expenseTypeScopeMode
+      : viewMode === "costTag"
+        ? costTagScopeMode
         : bankFlowScopeMode;
   const activeScopeYear = viewMode === "project"
     ? projectScopeYear
     : viewMode === "bankAccount"
       ? bankAccountScopeYear
-      : viewMode === "expenseType"
-        ? expenseTypeScopeYear
+      : viewMode === "costTag"
+        ? costTagScopeYear
         : bankFlowScopeYear;
   const activeScopeMonth = viewMode === "project"
     ? projectScopeMonth
     : viewMode === "bankAccount"
       ? bankAccountScopeMonth
-      : viewMode === "expenseType"
-        ? expenseTypeScopeMonth
+      : viewMode === "costTag"
+        ? costTagScopeMonth
         : bankFlowScopeMonth;
   const explorerScope = activeScopeMode === "all"
     ? "all"
     : activeScopeMode === "year"
       ? `year:${activeScopeYear}`
       : activeScopeMonth;
-  const explorerView = viewMode === "expenseType"
-    ? "expense_type"
+  const explorerView = viewMode === "costTag"
+    ? "cost_tag"
     : viewMode === "bankAccount"
       ? "bank_account"
       : viewMode === "bankTag"
@@ -519,10 +512,10 @@ export default function CostStatisticsPage() {
     view: explorerView,
     pageSize: EXPLORER_PAGE_SIZE,
     ...(viewMode === "project" && selectedProjectName ? { projectName: selectedProjectName } : {}),
-    ...(viewMode === "project" && selectedProjectExpenseType ? { expenseType: selectedProjectExpenseType } : {}),
+    ...(!["time", "bankTag"].includes(viewMode) && selectedCostPrimary ? { bankTagPrimaryKey: selectedCostPrimary } : {}),
+    ...(!["time", "bankTag"].includes(viewMode) && selectedCostSub ? { bankTagSubKey: selectedCostSub } : {}),
     ...(viewMode === "bankAccount" && selectedBankAccountLabel ? { bankAccountLabel: selectedBankAccountLabel } : {}),
     ...(viewMode === "bankAccount" && selectedBankProjectName ? { projectName: selectedBankProjectName } : {}),
-    ...(viewMode === "expenseType" && selectedExpenseType ? { expenseType: selectedExpenseType } : {}),
     ...(viewMode === "bankTag" && selectedBankTagPrimaryLabel ? { bankTagPrimaryLabel: selectedBankTagPrimaryLabel } : {}),
     ...(viewMode === "bankTag" && selectedBankTagSubLabel ? { bankTagSubLabel: selectedBankTagSubLabel } : {}),
     ...(searchQuery ? { query: searchQuery } : {}),
@@ -558,14 +551,15 @@ export default function CostStatisticsPage() {
 
   const resetExplorerSelection = useCallback((targetView: CostViewMode) => {
     resetDetailSelection();
+    setSelectedCostPrimary(null); setSelectedCostSub(null);
     if (targetView === "project") {
       setSelectedProjectName(null);
-      setSelectedProjectExpenseType(null);
+      setSelectedCostPrimary(null); setSelectedCostSub(null);
     } else if (targetView === "bankAccount") {
       setSelectedBankAccountLabel(null);
       setSelectedBankProjectName(null);
-    } else if (targetView === "expenseType") {
-      setSelectedExpenseType(null);
+    } else if (targetView === "costTag") {
+      setSelectedCostPrimary(null); setSelectedCostSub(null);
     } else if (targetView === "bankTag") {
       setSelectedBankTagPrimaryLabel(null);
       setSelectedBankTagSubLabel(null);
@@ -616,12 +610,12 @@ export default function CostStatisticsPage() {
           bankAccountScopeMonth: selection.month,
         };
       }
-      if (targetView === "expenseType") {
+      if (targetView === "costTag") {
         return {
           ...current,
-          expenseTypeScopeMode: selection.mode,
-          expenseTypeScopeYear: selection.year,
-          expenseTypeScopeMonth: selection.month,
+          costTagScopeMode: selection.mode,
+          costTagScopeYear: selection.year,
+          costTagScopeMonth: selection.month,
         };
       }
       if (targetView === "time" || targetView === "bankTag") {
@@ -682,7 +676,7 @@ export default function CostStatisticsPage() {
       });
       setNoOaRules(result);
       setNoOaDraftProjects(result.projects);
-      if (viewMode === "project" || viewMode === "bankAccount" || viewMode === "expenseType") {
+      if (viewMode === "project" || viewMode === "bankAccount" || viewMode === "costTag") {
         setDomainRefreshNonce((current) => current + 1);
       }
       setIsNoOaRulesOpen(false);
@@ -848,20 +842,23 @@ export default function CostStatisticsPage() {
   const pageRows = isRowsTransition ? [] : explorerData?.rows ?? [];
   const availableScopeYears = explorerData?.availableYears ?? [];
   const projectRows = explorerData?.facets.projects ?? [];
-  const projectExpenseTypeRows = isChildrenTransition ? [] : explorerData?.facets.expenseTypes ?? [];
   const bankRows = explorerData?.facets.bankAccounts ?? [];
   const bankProjectRows = isChildrenTransition ? [] : explorerData?.facets.projects ?? [];
-  const expenseTypeRows = explorerData?.facets.expenseTypes ?? [];
+  const clearCostTags = () => { setSelectedCostPrimary(null); setSelectedCostSub(null); resetDetailSelection(); };
+  const loadedRequest: CostStatisticsExplorerPageRequest | null = loadedExplorer ? JSON.parse(loadedExplorer.requestKey) : null;
+  const costAncestorsReady = loadedRequest?.projectName === explorerRequest.projectName && loadedRequest?.bankAccountLabel === explorerRequest.bankAccountLabel;
+  const costPrimaryRows = costAncestorsReady ? explorerData?.facets.costTagPrimary ?? [] : [];
+  const costSubRows = costAncestorsReady && loadedRequest?.bankTagPrimaryKey === explorerRequest.bankTagPrimaryKey ? explorerData?.facets.costTagSub ?? [] : [];
+  const costLanes: CostHierarchyLane[] = [];
+  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, amount: row.totalAmount, description: `${row.projectCount} 个项目` })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
+  if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, amount: row.totalAmount, description: `${row.primaryTagCount} 个主标签` })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
+  costLanes.push({ title: "银行主标签", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount, description: `${row.rowCount} 条成本明细` })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
+  costLanes.push({ title: "银行子标签", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount, description: `${row.rowCount} 条成本明细` })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
+  const costPathComplete = costLanes.every(lane => lane.selectedKey !== null);
   const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
   const bankTagSubRows = isChildrenTransition ? [] : explorerData?.facets.bankTagSub ?? [];
-  const selectedProjectTransactionRows = selectedProjectName && selectedProjectExpenseType ? pageRows : [];
-  const selectedBankRows = selectedBankAccountLabel && selectedBankProjectName ? pageRows : [];
-  const selectedExpenseTypeRows = selectedExpenseType ? pageRows : [];
   const selectedTimeRows = viewMode === "time" ? pageRows : [];
   const selectedBankTagRows = selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? pageRows : [];
-  const bankTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
-  const projectTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
-  const expenseTypeTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
   const bankFlowExpenseAmount = explorerData?.summary.expenseAmount ?? "0.00";
   const bankFlowIncomeAmount = explorerData?.summary.incomeAmount ?? "0.00";
 
@@ -895,18 +892,18 @@ export default function CostStatisticsPage() {
     if (availableScopeYears.length === 0) {
       return;
     }
-    if (!availableScopeYears.includes(expenseTypeScopeYear)) {
-      updateScopeSelection("expenseType", {
-        mode: expenseTypeScopeMode,
+    if (!availableScopeYears.includes(costTagScopeYear)) {
+      updateScopeSelection("costTag", {
+        mode: costTagScopeMode,
         year: availableScopeYears[0],
-        month: expenseTypeScopeMonth,
+        month: costTagScopeMonth,
       });
     }
   }, [
     availableScopeYears,
-    expenseTypeScopeMode,
-    expenseTypeScopeMonth,
-    expenseTypeScopeYear,
+    costTagScopeMode,
+    costTagScopeMonth,
+    costTagScopeYear,
     updateScopeSelection,
   ]);
 
@@ -932,8 +929,8 @@ export default function CostStatisticsPage() {
     () => (exportReferenceData?.projects ?? []).map((row) => row.projectName),
     [exportReferenceData],
   );
-  const allExpenseTypeOptions = useMemo(
-    () => (exportReferenceData?.expenseTypes ?? []).map((row) => row.expenseType),
+  const allCostTagOptions = useMemo(
+    () => (exportReferenceData?.costTags ?? []).map((row) => row.key),
     [exportReferenceData],
   );
   const exportBankAccountOptions = useMemo(
@@ -941,7 +938,6 @@ export default function CostStatisticsPage() {
     [exportReferenceData],
   );
 
-  const projectExpenseTypeOptions = projectExportNames.length > 0 ? allExpenseTypeOptions : [];
 
   const hasExplorerLoadError = Boolean(loadError) && !loadedExplorer;
   const effectiveCostPageState: EffectiveCostPageState = hasExplorerLoadError
@@ -1019,8 +1015,8 @@ export default function CostStatisticsPage() {
     setIsDetailLoading(true);
     try {
       const detailView =
-        source === "expenseType"
-          ? "expense_type"
+        source === "costTag"
+          ? "cost_tag"
           : source === "bankAccount"
             ? "bank_account"
             : source === "bankTag"
@@ -1054,7 +1050,7 @@ export default function CostStatisticsPage() {
     if (source === "bankAccount") {
       setSelectedBankEntryId(row.entryId);
     }
-    if (source === "expenseType") {
+    if (source === "costTag") {
       setSelectedExpenseEntryId(row.entryId);
     }
     if (source === "time") {
@@ -1094,10 +1090,10 @@ export default function CostStatisticsPage() {
     referenceData: CostStatisticsExportReferenceData | null = exportReferenceData,
   ) {
     setProjectExportNames(projectNames);
-    const nextExpenseTypes = projectNames.length > 0
-      ? (referenceData?.expenseTypes ?? []).map((row) => row.expenseType)
+    const nextCostTags = projectNames.length > 0
+      ? (referenceData?.costTags ?? []).map((row) => row.key)
       : [];
-    setProjectExpenseTypes(nextExpenseTypes);
+    setProjectCostTags(nextCostTags);
   }
 
   async function loadExportReferenceData(): Promise<CostStatisticsExportReferenceData | null> {
@@ -1110,7 +1106,7 @@ export default function CostStatisticsPage() {
     exportReferenceRequestRef.current = controller;
     setIsExportReferenceLoading(true);
     try {
-      const [projectPage, expenseTypePage, bankAccountPage] = await Promise.all([
+      const [projectPage, costTagPage, bankAccountPage] = await Promise.all([
         fetchCostStatisticsExplorerPage({
           scope: "all",
           view: "project",
@@ -1120,7 +1116,7 @@ export default function CostStatisticsPage() {
         }),
         fetchCostStatisticsExplorerPage({
           scope: "all",
-          view: "expense_type",
+          view: "cost_tag",
           pageSize: 1,
           includeStatistics: false,
           signal: controller.signal,
@@ -1138,7 +1134,7 @@ export default function CostStatisticsPage() {
       }
       const referenceData = {
         projects: projectPage.facets.projects,
-        expenseTypes: expenseTypePage.facets.expenseTypes,
+        costTags: costTagPage.facets.costTagPrimary,
         bankAccounts: bankAccountPage.facets.bankAccounts,
       };
       setExportReferenceData(referenceData);
@@ -1192,20 +1188,20 @@ export default function CostStatisticsPage() {
             ? [selectedProjectName]
             : projectOptions.slice(0, 1);
       updateProjectExportSelection(nextProjectNames, referenceData);
-    } else if (viewMode === "expenseType") {
-      setExportCenterMode("expense_type");
-      const rangeMode = expenseTypeScopeMode === "month" ? "month" : "custom";
+    } else if (viewMode === "costTag") {
+      setExportCenterMode("cost_tag");
+      const rangeMode = costTagScopeMode === "month" ? "month" : "custom";
       const bounds = getScopeDateRange(
-        expenseTypeScopeMode,
-        expenseTypeScopeYear,
-        expenseTypeScopeMonth,
+        costTagScopeMode,
+        costTagScopeYear,
+        costTagScopeMonth,
         availableScopeYears,
       );
-      setExpenseTypeRangeMode(rangeMode);
-      setExpenseTypeMonth(expenseTypeScopeMonth);
-      setExpenseTypeStartDate(bounds.startDate);
-      setExpenseTypeEndDate(bounds.endDate);
-      setExpenseTypeSelections(selectedExpenseType ? [selectedExpenseType] : []);
+      setCostTagRangeMode(rangeMode);
+      setCostTagMonth(costTagScopeMonth);
+      setCostTagStartDate(bounds.startDate);
+      setCostTagEndDate(bounds.endDate);
+      setCostTagSelections(selectedCostPrimary ? [selectedCostPrimary] : []);
     } else {
       setExportCenterMode("bank_account");
       const rangeMode = bankAccountScopeMode === "month" ? "month" : "custom";
@@ -1251,8 +1247,8 @@ export default function CostStatisticsPage() {
             : projectOptions.slice(0, 1);
       updateProjectExportSelection(nextProjectNames, referenceData);
     }
-    if (mode === "expense_type" && expenseTypeSelections.length === 0) {
-      setExpenseTypeSelections(selectedExpenseType ? [selectedExpenseType] : []);
+    if (mode === "cost_tag" && costTagSelections.length === 0) {
+      setCostTagSelections(selectedCostPrimary ? [selectedCostPrimary] : []);
     }
     if (mode === "bank_account" && bankAccountSelections.length === 0) {
       setBankAccountSelections(
@@ -1303,7 +1299,7 @@ export default function CostStatisticsPage() {
     }
 
     if (exportCenterMode === "project") {
-      if (projectExportNames.length === 0 || projectExpenseTypes.length === 0) {
+      if (projectExportNames.length === 0 || projectCostTags.length === 0) {
         return null;
       }
       return {
@@ -1311,41 +1307,32 @@ export default function CostStatisticsPage() {
         view: "project",
         projectNames: projectExportNames,
         aggregateBy: projectAggregateBy,
-        expenseTypes: projectExpenseTypes,
-        includeOaDetails: true,
-        includeInvoiceDetails: true,
-        includeExceptionRows: true,
-        includeIgnoredRows: true,
-        includeExpenseContentSummary: true,
-        sortBy: "time",
+        bankTagPrimaryKeys: projectCostTags,
       };
     }
 
-    if (expenseTypeSelections.length === 0) {
+    if (costTagSelections.length === 0) {
       return null;
     }
-    if (expenseTypeRangeMode === "month") {
+    if (costTagRangeMode === "month") {
       return {
-        month: expenseTypeMonth,
-        view: "expense_type",
-        expenseTypes: expenseTypeSelections,
+        month: costTagMonth,
+        view: "cost_tag",
+        bankTagPrimaryKeys: costTagSelections,
       };
     }
     return {
       month: "all",
-      view: "expense_type",
-      expenseTypes: expenseTypeSelections,
-      startDate: expenseTypeStartDate <= expenseTypeEndDate ? expenseTypeStartDate : expenseTypeEndDate,
-      endDate: expenseTypeStartDate <= expenseTypeEndDate ? expenseTypeEndDate : expenseTypeStartDate,
+      view: "cost_tag",
+      bankTagPrimaryKeys: costTagSelections,
+      startDate: costTagStartDate <= costTagEndDate ? costTagStartDate : costTagEndDate,
+      endDate: costTagStartDate <= costTagEndDate ? costTagEndDate : costTagStartDate,
     };
   }
 
   function buildPreviewParamsFromState(): PreviewCostExportParams | null {
     const params = buildExportParamsFromState();
     if (!params) {
-      return null;
-    }
-    if (params.view === "month") {
       return null;
     }
     return params;
@@ -1488,7 +1475,7 @@ export default function CostStatisticsPage() {
           { key: "expenseContent", header: "摘要 / 备注", flex: 1.1, render: (row) => row.expenseContent },
         ];
       }
-      const identityColumn: CostStatisticsTableColumn<CostExplorerEntryRow> = viewMode === "expenseType"
+      const identityColumn: CostStatisticsTableColumn<CostExplorerEntryRow> = viewMode === "costTag"
         ? {
             key: "projectName",
             header: "项目名 / 申请/报销人",
@@ -1612,7 +1599,7 @@ export default function CostStatisticsPage() {
                   className="cost-view-tabs"
                   onSelectionChange={(keys) => {
                     const [key] = Array.from(keys);
-                    if (key === "project" || key === "expenseType" || key === "bankAccount") {
+                    if (key === "project" || key === "costTag" || key === "bankAccount") {
                       handleViewModeChange(key);
                     }
                   }}
@@ -1621,7 +1608,7 @@ export default function CostStatisticsPage() {
                   size="sm"
                 >
                   <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
-                  <ToggleButton className="cost-view-tab" id="expenseType">按费用类型</ToggleButton>
+                  <ToggleButton className="cost-view-tab" id="costTag">按流水标签</ToggleButton>
                   <ToggleButton className="cost-view-tab" id="bankAccount">按银行账户</ToggleButton>
                 </ToggleButtonGroup>
               </div>
@@ -1668,6 +1655,7 @@ export default function CostStatisticsPage() {
           {!isBankFlowView ? (
             <>
               <CostStatisticsManualAllocationDrawer
+                pendingCount={explorerData?.allocationQuality ? explorerData.allocationQuality.pendingManualAllocationCount + explorerData.allocationQuality.staleManualAllocationCount : undefined}
                 canSave={canOperateData && !interactionLocked}
                 onSaved={handleManualRefresh}
               />
@@ -1740,253 +1728,19 @@ export default function CostStatisticsPage() {
             ) : null}
         {explorerData ? (
           <>
-            {viewMode === "project" ? (
+            {!isBankFlowView ? (
               <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
-                  <div className="cost-section-heading-copy">
-                    <h2>按项目统计</h2>
-                    <DirectionAmount amount={projectTotalAmount} label="支出金额" tone="expense" />
-                  </div>
-                  <div className="cost-section-heading-actions cost-project-scope-actions">
-                    <BusinessPeriodPicker
-                      ariaLabel="项目统计时间范围"
-                      onChange={(selection) => updateScopeSelection("project", selection)}
-                      selection={{ mode: projectScopeMode, year: projectScopeYear, month: projectScopeMonth }}
-                      years={availableScopeYears}
-                    />
-                    {costViewSearch}
-                  </div>
+                  <div className="cost-section-heading-copy"><h2>{viewMode === "project" ? "按项目统计" : viewMode === "bankAccount" ? "按银行账户统计" : "按流水标签统计"}</h2><DirectionAmount amount={explorerData.summary.totalAmount} label="成本金额" tone="expense" /></div>
+                  <div className="cost-section-heading-actions cost-project-scope-actions"><BusinessPeriodPicker ariaLabel="成本统计时间范围" onChange={selection => updateScopeSelection(viewMode, selection)} selection={{ mode: activeScopeMode, year: activeScopeYear, month: activeScopeMonth }} years={availableScopeYears} />{costViewSearch}</div>
                 </div>
-                {explorerTransitionScope === "surface" ? (
-                  <CostSurfaceSkeleton loading={isExplorerLoading} />
-                ) : (
-                <div className="cost-explorer-grid project grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.92fr)_minmax(220px,0.92fr)_minmax(0,2.16fr)]">
-                  <CostExplorerList<CostProjectExplorerRow>
-                    title="项目名"
-                    count={projectRows.length}
-                    items={projectRows}
-                    emptyLabel="当前时间范围没有项目成本。"
-                    getKey={(row) => row.projectName}
-                    isActive={(row) => row.projectName === selectedProjectName}
-                    onSelect={(row) => {
-                      setSelectedProjectName(row.projectName);
-                      setSelectedProjectExpenseType(null);
-                      setSelectedProjectEntryId(null);
-                      setEntryDetail(null);
-                    }}
-                    getPrimaryText={(row) => row.projectName}
-                    renderSecondary={(row) => `${row.expenseTypeCount} 类费用`}
-                    renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
-                      </div>
-                    )}
-                  />
-                  <CostExplorerList<CostExpenseTypeExplorerRow>
-                    title="费用类型"
-                    count={projectExpenseTypeRows.length}
-                    items={projectExpenseTypeRows}
-                    loading={isChildrenTransition}
-                    emptyLabel={selectedProjectName ? "该项目下暂无费用类型。" : "请先在左侧选择项目。"}
-                    getKey={(row) => row.expenseType}
-                    isActive={(row) => row.expenseType === selectedProjectExpenseType}
-                    onSelect={(row) => {
-                      setSelectedProjectExpenseType(row.expenseType);
-                      setSelectedProjectEntryId(null);
-                      setEntryDetail(null);
-                    }}
-                    getPrimaryText={(row) => row.expenseType}
-                    renderSecondary={(row) => `${row.transactionCount} 条明细`}
-                    renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
-                      </div>
-                    )}
-                  />
-                  <section
-                    aria-busy={isExplorerLoading && isRowsTransition}
-                    className="cost-explorer-lane cost-explorer-lane-table"
-                  >
-                    <header className="cost-explorer-lane-header">
-                      <h2>成本明细</h2>
-                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedProjectTransactionRows.length} />
-                    </header>
-                    {isRowsTransition ? (
-                      <div className="cost-explorer-empty" />
-                    ) : selectedProjectName && selectedProjectExpenseType ? (
-                      <CostStatisticsTable
-                        ariaLabel="项目成本明细表"
-                        columns={entryColumns}
-                        rows={selectedProjectTransactionRows}
-                        getRowKey={getCostEntryRowRenderKey}
-                        onRowClick={(row) => void openEntryDetail(row, "project")}
-                        getRowActionLabel={costEntryActionLabel}
-                        emptyLabel="该费用类型下暂无成本明细。"
-                        {...tablePaginationProps}
-                      />
-                    ) : <div className="cost-explorer-empty">依次选择项目和费用类型</div>}
-                  </section>
-                </div>
-                )}
-              </div>
-            ) : null}
-
-            {viewMode === "bankAccount" ? (
-              <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
-                <div className="cost-section-heading cost-view-scope-heading">
-                  <div className="cost-section-heading-copy">
-                    <h2>按银行账户统计</h2>
-                    <DirectionAmount amount={bankTotalAmount} label="支出金额" tone="expense" />
-                  </div>
-                  <div className="cost-section-heading-actions cost-project-scope-actions">
-                    <BusinessPeriodPicker
-                      ariaLabel="银行账户成本时间范围"
-                      onChange={(selection) => updateScopeSelection("bankAccount", selection)}
-                      selection={{ mode: bankAccountScopeMode, year: bankAccountScopeYear, month: bankAccountScopeMonth }}
-                      years={availableScopeYears}
-                    />
-                    {costViewSearch}
-                  </div>
-                </div>
-                {explorerTransitionScope === "surface" ? (
-                  <CostSurfaceSkeleton loading={isExplorerLoading} />
-                ) : (
-                <div className="cost-explorer-grid bank grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(230px,0.9fr)_minmax(220px,0.9fr)_minmax(0,2.2fr)]">
-                  <CostExplorerList<CostBankExplorerRow>
-                    title="银行账户"
-                    count={bankRows.length}
-                    items={bankRows}
-                    emptyLabel="当前时间范围没有银行账户成本。"
-                    getKey={(row) => row.bankAccountLabel}
-                    isActive={(row) => row.bankAccountLabel === selectedBankAccountLabel}
-                    onSelect={(row) => {
-                      setSelectedBankAccountLabel(row.bankAccountLabel);
-                      setSelectedBankProjectName(null);
-                      setSelectedBankEntryId(null);
-                      setEntryDetail(null);
-                    }}
-                    getPrimaryText={(row) => row.bankAccountLabel}
-                    renderSecondary={(row) => `${row.projectCount} 个项目`}
-                    renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
-                      </div>
-                    )}
-                  />
-                  <CostExplorerList<CostProjectExplorerRow>
-                    title="项目"
-                    count={bankProjectRows.length}
-                    items={bankProjectRows}
-                    loading={isChildrenTransition}
-                    emptyLabel={selectedBankAccountLabel ? "该银行账户下暂无项目成本。" : "请先在左侧选择银行账户。"}
-                    getKey={(row) => row.projectName}
-                    isActive={(row) => row.projectName === selectedBankProjectName}
-                    onSelect={(row) => {
-                      setSelectedBankProjectName(row.projectName);
-                      setSelectedBankEntryId(null);
-                      setEntryDetail(null);
-                    }}
-                    getPrimaryText={(row) => row.projectName}
-                    renderSecondary={(row) => `${row.expenseTypeCount} 类费用`}
-                    renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
-                      </div>
-                    )}
-                  />
-                  <section
-                    aria-busy={isExplorerLoading && isRowsTransition}
-                    className="cost-explorer-lane cost-explorer-lane-table"
-                  >
-                    <header className="cost-explorer-lane-header">
-                      <h2>成本明细</h2>
-                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedBankRows.length} />
-                    </header>
-                    {isRowsTransition ? (
-                      <div className="cost-explorer-empty" />
-                    ) : selectedBankAccountLabel && selectedBankProjectName ? (
-                      <CostStatisticsTable
-                        ariaLabel="银行账户项目成本明细表"
-                        columns={entryColumns}
-                        rows={selectedBankRows}
-                        getRowKey={getCostEntryRowRenderKey}
-                        onRowClick={(row) => void openEntryDetail(row, "bankAccount")}
-                        getRowActionLabel={costEntryActionLabel}
-                        emptyLabel="该银行账户和项目下暂无成本明细。"
-                        {...tablePaginationProps}
-                      />
-                    ) : <div className="cost-explorer-empty">依次选择银行账户和项目</div>}
-                  </section>
-                </div>
-                )}
-              </div>
-            ) : null}
-
-            {viewMode === "expenseType" ? (
-              <div className="cost-analysis-layout explorer-layout expense-layout grid min-h-0 grid-cols-1 gap-3">
-                <div className="cost-section-heading cost-view-scope-heading">
-                  <div className="cost-section-heading-copy">
-                    <h2>按费用类型统计</h2>
-                    <DirectionAmount amount={expenseTypeTotalAmount} label="支出金额" tone="expense" />
-                  </div>
-                  <div className="cost-section-heading-actions cost-project-scope-actions">
-                    <BusinessPeriodPicker
-                      ariaLabel="费用类型统计时间范围"
-                      onChange={(selection) => updateScopeSelection("expenseType", selection)}
-                      selection={{ mode: expenseTypeScopeMode, year: expenseTypeScopeYear, month: expenseTypeScopeMonth }}
-                      years={availableScopeYears}
-                    />
-                    {costViewSearch}
-                  </div>
-                </div>
-                {explorerTransitionScope === "surface" ? (
-                  <CostSurfaceSkeleton loading={isExplorerLoading} />
-                ) : (
-                <div className="cost-explorer-grid expense grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,2.15fr)]">
-                  <CostExplorerList<CostExpenseTypeExplorerRow>
-                    title="费用类型"
-                    count={expenseTypeRows.length}
-                    items={expenseTypeRows}
-                    emptyLabel="当前时间范围没有费用类型数据。"
-                    getKey={(row) => row.expenseType}
-                    isActive={(row) => row.expenseType === selectedExpenseType}
-                    onSelect={(row) => {
-                      setSelectedExpenseType(row.expenseType);
-                      setSelectedExpenseEntryId(null);
-                      setEntryDetail(null);
-                    }}
-                    getPrimaryText={(row) => row.expenseType}
-                    renderSecondary={(row) => `${row.projectCount} 个项目`}
-                    renderMeta={(row) => (
-                      <div className="cost-explorer-item-meta-stack">
-                        <DirectionAmount amount={row.totalAmount} label="支出金额" tone="expense" />
-                      </div>
-                    )}
-                  />
-                  <section
-                    aria-busy={isExplorerLoading && isRowsTransition}
-                    className="cost-explorer-lane cost-explorer-lane-table"
-                  >
-                    <header className="cost-explorer-lane-header">
-                      <h2>成本明细</h2>
-                      <CostLaneCount value={isRowsTransition ? 0 : explorerData?.rowCount ?? selectedExpenseTypeRows.length} />
-                    </header>
-                    {isRowsTransition ? (
-                      <div className="cost-explorer-empty" />
-                    ) : selectedExpenseType ? (
-                      <CostStatisticsTable
-                        ariaLabel="按费用类型成本明细表"
-                        columns={entryColumns}
-                        rows={selectedExpenseTypeRows}
-                        getRowKey={getCostEntryRowRenderKey}
-                        onRowClick={(row) => void openEntryDetail(row, "expenseType")}
-                        getRowActionLabel={costEntryActionLabel}
-                        emptyLabel="该费用类型下暂无成本明细。"
-                        {...tablePaginationProps}
-                      />
-                    ) : <div className="cost-explorer-empty">选择费用类型查看成本明细</div>}
-                  </section>
-                </div>
+                {explorerData.allocationQuality && explorerData.allocationQuality.undatedRowCount > 0 ? <p className="cost-source-muted">含付款日期待完善成本 {explorerData.allocationQuality.undatedAmount} 元；这些明细仅在全部期间展示。</p> : null}
+                {explorerTransitionScope === "surface" ? <CostSurfaceSkeleton loading={isExplorerLoading} /> : (
+                  <CostStatisticsHierarchy key={viewMode} lanes={costLanes}>
+                    <section aria-busy={isExplorerLoading && isRowsTransition} className="cost-explorer-lane cost-explorer-lane-table"><header className="cost-explorer-lane-header"><h2>成本明细</h2><CostLaneCount value={isRowsTransition ? 0 : explorerData.rowCount} /></header>
+                      {isRowsTransition ? <div className="cost-explorer-empty" /> : costPathComplete ? <CostStatisticsTable ariaLabel="成本明细表" columns={entryColumns} rows={pageRows} getRowKey={getCostEntryRowRenderKey} onRowClick={row => void openEntryDetail(row, viewMode)} getRowActionLabel={costEntryActionLabel} emptyLabel="当前选择下暂无成本明细" {...tablePaginationProps} /> : <div className="cost-explorer-empty">依次选择{costLanes.map(lane => lane.title).join("、")}查看成本明细</div>}
+                    </section>
+                  </CostStatisticsHierarchy>
                 )}
               </div>
             ) : null}
@@ -2170,7 +1924,8 @@ export default function CostStatisticsPage() {
         <ExportCenterModal
           mode={exportCenterMode}
           projectOptions={exportProjectOptions}
-          expenseTypeOptions={exportCenterMode === "project" ? projectExpenseTypeOptions : allExpenseTypeOptions}
+          costTagOptions={allCostTagOptions}
+          costTagLabels={Object.fromEntries((exportReferenceData?.costTags ?? []).map(row => [row.key, row.label]))}
           bankAccountOptions={exportBankAccountOptions}
           bankAccountRangeMode={bankAccountRangeMode}
           bankAccountMonth={bankAccountMonth}
@@ -2180,12 +1935,12 @@ export default function CostStatisticsPage() {
           bankAccountProjectNames={bankAccountProjectNames}
           projectNames={projectExportNames}
           projectAggregateBy={projectAggregateBy}
-          projectExpenseTypes={projectExpenseTypes}
-          expenseTypeRangeMode={expenseTypeRangeMode}
-          expenseTypeMonth={expenseTypeMonth}
-          expenseTypeStartDate={expenseTypeStartDate}
-          expenseTypeEndDate={expenseTypeEndDate}
-          expenseTypeSelections={expenseTypeSelections}
+          projectCostTags={projectCostTags}
+          costTagRangeMode={costTagRangeMode}
+          costTagMonth={costTagMonth}
+          costTagStartDate={costTagStartDate}
+          costTagEndDate={costTagEndDate}
+          costTagSelections={costTagSelections}
           bankFlowRangeMode={bankFlowRangeMode}
           bankFlowMonth={bankFlowMonth}
           bankFlowStartDate={bankFlowStartDate}
@@ -2229,28 +1984,28 @@ export default function CostStatisticsPage() {
             setProjectAggregateBy(aggregateBy);
             setExportPreview(null);
           }}
-          onProjectExpenseTypesChange={(expenseTypes) => {
-            setProjectExpenseTypes(expenseTypes);
+          onProjectCostTagsChange={(costTags) => {
+            setProjectCostTags(costTags);
             setExportPreview(null);
           }}
-          onExpenseTypeRangeModeChange={(mode) => {
-            setExpenseTypeRangeMode(mode);
+          onCostTagRangeModeChange={(mode) => {
+            setCostTagRangeMode(mode);
             setExportPreview(null);
           }}
-          onExpenseTypeMonthChange={(month) => {
-            setExpenseTypeMonth(month);
+          onCostTagMonthChange={(month) => {
+            setCostTagMonth(month);
             setExportPreview(null);
           }}
-          onExpenseTypeStartDateChange={(date) => {
-            setExpenseTypeStartDate(date);
+          onCostTagStartDateChange={(date) => {
+            setCostTagStartDate(date);
             setExportPreview(null);
           }}
-          onExpenseTypeEndDateChange={(date) => {
-            setExpenseTypeEndDate(date);
+          onCostTagEndDateChange={(date) => {
+            setCostTagEndDate(date);
             setExportPreview(null);
           }}
-          onExpenseTypeSelectionsChange={(expenseTypes) => {
-            setExpenseTypeSelections(expenseTypes);
+          onCostTagSelectionsChange={(costTags) => {
+            setCostTagSelections(costTags);
             setExportPreview(null);
           }}
           onBankFlowRangeModeChange={(mode) => {

@@ -1,0 +1,12 @@
+.cost-hierarchy { min-height:520px; min-width:0; flex:1; display:flex; flex-direction:column; }
+.cost-hierarchy-grid { display:grid; grid-template-columns:repeat(var(--cost-lane-count),minmax(155px,.7fr)) minmax(420px,2.2fr); gap:10px; flex:1; min-height:0; }
+.cost-hierarchy-column,.cost-hierarchy-detail { min-width:0; display:flex; }
+.cost-hierarchy-column > section,.cost-hierarchy-detail > section { flex:1; min-width:0; }
+.cost-hierarchy .cost-explorer-item { padding:10px; }
+.cost-hierarchy-breadcrumb { display:none; }
+@media(max-width:1200px) {
+ .cost-hierarchy-grid { display:flex; min-width:0; }
+ .cost-hierarchy-column,.cost-hierarchy-detail { display:none; flex:1; }
+ .cost-hierarchy-column.is-current,.cost-hierarchy-detail.is-current { display:flex; }
+ .cost-hierarchy-breadcrumb { display:flex; flex-wrap:wrap; gap:6px; padding-bottom:10px; }
+}

@@ -90,6 +90,8 @@ class CostStatisticsApiRoutes:
                 search_query=query.get("query", [None])[0],
                 headers=headers,
             )
+        if method == "GET" and route_path.startswith("/api/cost-statistics/manual-allocations/"):
+            return self.handle_manual_allocation_detail(route_path.rsplit("/", 1)[-1], headers=headers)
         if method == "PUT" and route_path.startswith("/api/cost-statistics/manual-allocations/"):
             relation_case_id = route_path.rsplit("/", 1)[-1]
             return self.handle_update_manual_allocation(
@@ -106,17 +108,23 @@ class CostStatisticsApiRoutes:
                 bank_account_label=query.get("bank_account_label", [None])[0],
                 bank_tag_primary_label=query.get("bank_tag_primary_label", [None])[0],
                 bank_tag_sub_label=query.get("bank_tag_sub_label", [None])[0],
+                bank_tag_primary_key=query.get("bank_tag_primary_key", [None])[0],
+                bank_tag_sub_key=query.get("bank_tag_sub_key", [None])[0],
                 search_query=query.get("query", [None])[0],
                 cursor=query.get("cursor", [None])[0],
                 page_size=query.get("page_size", [None])[0],
                 include_statistics=query.get("include_statistics", [None])[0],
             )
+        if method == "GET" and route_path in {"/api/cost-statistics/export", "/api/cost-statistics/export-preview"}:
+            retired = {"expense_type", "include_oa_details", "include_invoice_details", "include_exception_rows", "include_ignored_rows", "include_expense_content_summary", "sort_by"}.intersection(query)
+            if retired:
+                return self._json_response(HTTPStatus.BAD_REQUEST, {"error": "invalid_cost_statistics_export_request", "message": "不再支持旧导出参数：" + ", ".join(sorted(retired))})
         if method == "GET" and route_path == "/api/cost-statistics/export-preview":
             return self.handle_export_preview(
                 month=query.get("month", [None])[0],
                 view=query.get("view", [None])[0],
                 project_names=query.get("project_name", []),
-                expense_types=query.get("expense_type", []),
+                bank_tag_primary_keys=query.get("bank_tag_primary_key", []),
                 bank_account_labels=query.get("bank_account_label", []),
                 start_month=query.get("start_month", [None])[0],
                 end_month=query.get("end_month", [None])[0],
@@ -129,21 +137,13 @@ class CostStatisticsApiRoutes:
                 month=query.get("month", [None])[0],
                 view=query.get("view", [None])[0],
                 project_names=query.get("project_name", []),
-                expense_types=query.get("expense_type", []),
+                bank_tag_primary_keys=query.get("bank_tag_primary_key", []),
                 bank_account_labels=query.get("bank_account_label", []),
                 start_month=query.get("start_month", [None])[0],
                 end_month=query.get("end_month", [None])[0],
                 start_date=query.get("start_date", [None])[0],
                 end_date=query.get("end_date", [None])[0],
                 aggregate_by=query.get("aggregate_by", [None])[0],
-                include_oa_details=self._optional_bool_parser(query.get("include_oa_details", [None])[0]),
-                include_invoice_details=self._optional_bool_parser(query.get("include_invoice_details", [None])[0]),
-                include_exception_rows=self._optional_bool_parser(query.get("include_exception_rows", [None])[0]),
-                include_ignored_rows=self._optional_bool_parser(query.get("include_ignored_rows", [None])[0]),
-                include_expense_content_summary=self._optional_bool_parser(
-                    query.get("include_expense_content_summary", [None])[0]
-                ),
-                sort_by=query.get("sort_by", [None])[0],
             )
         if method == "GET" and route_path.startswith("/api/cost-statistics/bank-transactions/"):
             transaction_id = route_path.rsplit("/", 1)[-1]
@@ -194,6 +194,18 @@ class CostStatisticsApiRoutes:
             {"Cache-Control": "private, no-cache", "Vary": "Authorization, Cookie"},
         )
 
+    def handle_manual_allocation_detail(self, relation_case_id: str, *, headers: dict[str, str] | None) -> Any:
+        _session, error = self._read_session(headers)
+        if error is not None:
+            return error
+        try:
+            payload = self._manual_allocation_service_required().get_task(relation_case_id, can_save=True)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "cost_statistics_manual_allocation_not_found"})
+        except (CostStatisticsIntegrityError, CostStatisticsAllocationConflictError) as exc:
+            return self._integrity_error_response(exc)
+        return self._json_response(HTTPStatus.OK, payload, {"Cache-Control": "private, no-cache", "Vary": "Authorization, Cookie"})
+
     def handle_update_manual_allocation(
         self,
         relation_case_id: str,
@@ -207,9 +219,11 @@ class CostStatisticsApiRoutes:
         payload, body_error = self._load_body(body)
         if body_error is not None:
             return body_error
-        identity = session.identity if session is not None else None
+        if session is None:
+            return self._json_response(HTTPStatus.FORBIDDEN, {"error": "authentication_required"})
+        identity = session.identity
         actor = {
-            "id": actor_id_for_session(session) if session is not None else str(payload.get("actor_id") or "cost_statistics"),
+            "id": actor_id_for_session(session),
             "name": str(getattr(identity, "display_name", "") or getattr(identity, "nickname", "") or ""),
             "account": str(getattr(identity, "username", "") or ""),
         }
@@ -223,7 +237,7 @@ class CostStatisticsApiRoutes:
         except CostStatisticsManualAllocationValidationError as exc:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
-                {"error": exc.error_code, "message": str(exc)},
+                {"error": exc.error_code, "message": str(exc), **({"field_errors": [exc.field_error]} if hasattr(exc, "field_error") else {})},
             )
         except CostStatisticsManualAllocationConflictError as exc:
             return self._json_response(
@@ -309,6 +323,8 @@ class CostStatisticsApiRoutes:
         cursor: str | None,
         page_size: str | None,
         include_statistics: str | None,
+        bank_tag_primary_key: str | None = None,
+        bank_tag_sub_key: str | None = None,
     ) -> Any:
         current_scope = scope or self._now_provider().strftime("%Y-%m")
         started_at = monotonic()
@@ -328,6 +344,8 @@ class CostStatisticsApiRoutes:
                     "bank_account_label": bank_account_label,
                     "bank_tag_primary_label": bank_tag_primary_label,
                     "bank_tag_sub_label": bank_tag_sub_label,
+                    "bank_tag_primary_key": bank_tag_primary_key,
+                    "bank_tag_sub_key": bank_tag_sub_key,
                     "query": search_query,
                 },
                 cursor=cursor,
@@ -356,36 +374,29 @@ class CostStatisticsApiRoutes:
         month: str | None,
         view: str | None,
         project_names: list[str] | None,
-        expense_types: list[str] | None,
+        bank_tag_primary_keys: list[str] | None,
         bank_account_labels: list[str] | None,
         start_month: str | None = None,
         end_month: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         aggregate_by: str | None = None,
-        include_oa_details: bool = True,
-        include_invoice_details: bool = True,
-        include_exception_rows: bool = True,
-        include_ignored_rows: bool = True,
-        include_expense_content_summary: bool = True,
-        sort_by: str | None = None,
     ) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
         if view not in {
-            "month",
             "time",
             "bank_tag",
             "bank_account",
             "project",
-            "expense_type",
+            "cost_tag",
         }:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_export_request",
                     "message": (
-                        "view must be month, time, bank_tag, bank_account, "
-                        "project, or expense_type."
+                        "view must be time, bank_tag, bank_account, "
+                        "project, or cost_tag."
                     ),
                 },
             )
@@ -394,19 +405,13 @@ class CostStatisticsApiRoutes:
                 month=current_month,
                 view=view,
                 project_names=project_names,
-                expense_types=expense_types,
+                bank_tag_primary_keys=bank_tag_primary_keys,
                 bank_account_labels=bank_account_labels,
                 start_month=start_month,
                 end_month=end_month,
                 start_date=start_date,
                 end_date=end_date,
                 aggregate_by=aggregate_by,
-                include_oa_details=include_oa_details,
-                include_invoice_details=include_invoice_details,
-                include_exception_rows=include_exception_rows,
-                include_ignored_rows=include_ignored_rows,
-                include_expense_content_summary=include_expense_content_summary,
-                sort_by=sort_by or "time",
             )
         except CostStatisticsExportLimitError as error:
             return self._json_response(
@@ -428,7 +433,7 @@ class CostStatisticsApiRoutes:
         month: str | None,
         view: str | None,
         project_names: list[str] | None,
-        expense_types: list[str] | None,
+        bank_tag_primary_keys: list[str] | None,
         bank_account_labels: list[str] | None,
         start_month: str | None = None,
         end_month: str | None = None,
@@ -442,7 +447,7 @@ class CostStatisticsApiRoutes:
             "bank_tag",
             "bank_account",
             "project",
-            "expense_type",
+            "cost_tag",
         }:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -450,7 +455,7 @@ class CostStatisticsApiRoutes:
                     "error": "invalid_cost_statistics_export_preview_request",
                     "message": (
                         "view must be time, bank_tag, bank_account, project, "
-                        "or expense_type."
+                        "or cost_tag."
                     ),
                 },
             )
@@ -459,7 +464,7 @@ class CostStatisticsApiRoutes:
                 month=current_month,
                 view=view,
                 project_names=project_names,
-                expense_types=expense_types,
+                bank_tag_primary_keys=bank_tag_primary_keys,
                 bank_account_labels=bank_account_labels,
                 start_month=start_month,
                 end_month=end_month,
@@ -493,7 +498,7 @@ class CostStatisticsApiRoutes:
             "bank_tag",
             "project",
             "bank_account",
-            "expense_type",
+            "cost_tag",
         }:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
@@ -501,7 +506,7 @@ class CostStatisticsApiRoutes:
                     "error": "invalid_cost_statistics_bank_transaction_request",
                     "message": (
                         "view must be time, bank_tag, project, bank_account, "
-                        "or expense_type."
+                        "or cost_tag."
                     ),
                 },
             )
@@ -535,12 +540,12 @@ class CostStatisticsApiRoutes:
         scope: str | None,
     ) -> Any:
         normalized_view = str(view or "").strip().lower()
-        if normalized_view not in {"project", "bank_account", "expense_type"}:
+        if normalized_view not in {"project", "bank_account", "cost_tag"}:
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_cost_statistics_allocation_request",
-                    "message": "view must be project, bank_account, or expense_type.",
+                    "message": "view must be project, bank_account, or cost_tag.",
                 },
             )
         try:

@@ -36,12 +36,13 @@ test.describe("cost statistics relation browser fan-out", () => {
     await expect(linkedProject).toContainText("58000.00");
     await linkedProject.click();
 
-    const linkedExpenseType = page.getByRole("option", { name: /设备货款及材料费/ });
+    const linkedExpenseType = page.getByRole("option", { name: "选择银行主标签 项目开销" });
     await expect(linkedExpenseType).toBeVisible();
     await expect(linkedExpenseType).toContainText("58000.00");
     await linkedExpenseType.click();
 
-    const projectRows = page.getByRole("grid", { name: "项目成本明细表" });
+    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    const projectRows = page.getByRole("grid", { name: "成本明细表" });
     await expect(projectRows).toBeVisible();
     await expect(projectRows).toContainText("智能工厂设备尾款");
 

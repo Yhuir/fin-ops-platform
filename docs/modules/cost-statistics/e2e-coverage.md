@@ -4,9 +4,9 @@
 | --- | --- | --- |
 | `COST-E2E-001` | covered | `tests/test_cost_statistics_policy.py`、`tests/test_cost_statistics_api.py` 三视图根汇总对账 |
 | `COST-E2E-002` | covered | policy/API 定向测试；`CostStatisticsPage.test.tsx`；`cost-statistics-flow.spec.ts` |
-| `COST-E2E-003` | covered | API mapper、组件与浏览器费用类型下钻测试 |
-| `COST-E2E-004` | covered | bank_account API 合同、组件与浏览器账户→项目→明细测试 |
-| `COST-E2E-005` | covered | policy 单一/缺失/多账户/退款忽略/无 OA 账户测试 |
+| `COST-E2E-003` | covered | API mapper、组件与浏览器银行主/子标签下钻测试 |
+| `COST-E2E-004` | covered | bank_account API 合同、组件与浏览器账户→项目→主标签→子标签→明细测试 |
+| `COST-E2E-005` | covered | 来源 policy + PostgreSQL 跨账户/跨月/退款/非成本闭合测试 |
 | `COST-E2E-006` | covered | policy 与 manual-allocation API 的自动/人工/金额/完整性测试 |
 | `COST-E2E-007` | covered | no-OA policy/settings/API 测试及浏览器保存后刷新测试 |
 | `COST-E2E-008` | covered | policy 的 4200 支出/2100 收入/2100 净支出合同；API、前端 mapper、组件和真实 Chromium 标签下钻 |
@@ -17,3 +17,5 @@
 | `COST-E2E-013` | local-covered / production-measure | repository 查询预算、本地 API budget、`http_slo_probe`；发布后记录五视图生产分位数 |
 
 生产性能与真实数据抽样在每次改变成本人口或查询链后重新执行；本地 mock 结果不能替代生产证据。
+
+来源专项：`test_cost_statistics_source_allocation.py`、`test_cost_statistics_source_postgres.py`、`CostSourceAllocation.test.ts`、`cost-source-allocation.spec.ts`覆盖双边闭合、固定目标、并发冲突、事务回滚、跨月、缺资料保存与草稿恢复。

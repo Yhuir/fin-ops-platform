@@ -186,6 +186,7 @@ class _NoOaCandidateTransaction(_SnapshotTransaction):
                     "effective_category_label": "手续费",
                     "effective_category_primary_label": "费用",
                     "effective_category_sub_label": "手续费",
+                        "effective_category_label_path": ["费用", "手续费"],
                     "effective_category_source": "auto",
                 }
             ]
@@ -263,7 +264,9 @@ class _ConfiguredMixedCostSnapshotTransaction(_NoOaCandidateTransaction):
         self.fetched.append(normalized)
         self.reads.append((normalized, params))
         if "select row_id, effective_category_code" in normalized:
-            return []
+            return [{"row_id": row_id, "effective_category_code": None, "effective_category_label": None,
+                     "effective_category_primary_label": None, "effective_category_sub_label": None}
+                    for row_id in params[-1]]
         if "from app.workbench_pair_relations" in normalized:
             return [
                 {
@@ -295,8 +298,12 @@ class _ConfiguredMixedCostConnection(_Connection):
 
 
 class _CategoryProvider:
-    def bulk_get_for_rows(self, _rows):
-        return {}
+    def bulk_get_for_rows(self, rows):
+        return {row["id"]: {
+            "effective_category_code": None, "effective_category_label": None,
+            "effective_category_primary_label": None, "effective_category_sub_label": None,
+            "effective_category_label_path": [],
+        } for row in rows}
 
 
 class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
@@ -325,7 +332,6 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="project",
             include_statistics=False,
-            include_cost_row_tags=False,
         )
 
         relation_sql = next(
@@ -341,7 +347,6 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="project",
             include_statistics=False,
-            include_cost_row_tags=False,
         )
 
         bank_sql, bank_params = next(
@@ -352,7 +357,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         )
         self.assertIn("legacy_mongo_id = any(%s::text[])", bank_sql)
         self.assertIn(["bank-1"], bank_params)
-        self.assertFalse(
+        self.assertTrue(
             any(
                 "select row_id, effective_category_code" in query
                 for query in connection.snapshot_transaction.fetched
@@ -365,7 +370,6 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         snapshot = PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="project",
             include_statistics=True,
-            include_cost_row_tags=False,
         )
 
         bank_sql, bank_params = next(
@@ -399,7 +403,6 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="project",
             include_statistics=False,
-            include_cost_row_tags=False,
         )
 
         bank_sql = next(
@@ -409,7 +412,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             and "select row_id, effective_category_code" not in query
         )
         self.assertNotIn("legacy_mongo_id = any(%s::text[])", bank_sql)
-        self.assertFalse(
+        self.assertTrue(
             any(
                 "select row_id, effective_category_code" in query
                 for query in connection.snapshot_transaction.fetched
@@ -422,7 +425,6 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         PostgresCostStatisticsCanonicalRepository(connection).load_snapshot(
             view="bank_account",
             include_statistics=True,
-            include_cost_row_tags=False,
         )
 
         projection_params = next(
@@ -432,7 +434,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(
             projection_params[-1],
-            ["bank-linked-refund", "bank-unpaired-outflow"],
+            ["bank-unpaired-outflow", "bank-protected", "bank-linked-refund", "bank-unpaired-income"],
         )
 
     def test_scoped_relation_filter_uses_gin_prefilter_and_exact_member_types(self) -> None:
@@ -450,8 +452,8 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
             for query in connection.snapshot_transaction.fetched
             if "from app.workbench_pair_relations" in query
         )
-        self.assertIn("row_ids && %s::text[]", relation_sql)
-        self.assertIn("unnest(row_ids, row_types)", relation_sql)
+        self.assertNotIn("row_ids && %s::text[]", relation_sql)
+        self.assertNotIn("unnest(row_ids, row_types)", relation_sql)
 
     def test_manual_allocation_snapshot_loads_and_classifies_only_relation_bank_rows(self) -> None:
         connection = _PopulatedCostConnection()
@@ -518,6 +520,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
                         "effective_category_label": "手续费",
                         "effective_category_primary_label": "费用",
                         "effective_category_sub_label": "手续费",
+                        "effective_category_label_path": ["费用", "手续费"],
                     }
                 }
 
@@ -614,6 +617,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
                         "effective_category_label": "手续费",
                         "effective_category_primary_label": "运营费用",
                         "effective_category_sub_label": "手续费",
+                        "effective_category_label_path": ["费用", "手续费"],
                     }
                 }
 
@@ -670,7 +674,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
         self.assertEqual(connection.transaction_count, 1)
         self.assertLessEqual(len(connection.snapshot_transaction.fetched), 8)
         sql = "\n".join(connection.snapshot_transaction.fetched)
-        self.assertIn("txn_month >= %s and txn_month < %s", sql)
+        self.assertNotIn("txn_month >= %s and txn_month < %s", sql)
         self.assertNotIn("approved_at >= %s::date and approved_at < %s::date", sql)
         self.assertIn("from app.bank_transaction_categories", sql)
         self.assertIn("from app.bank_transaction_category_confirmations", sql)
@@ -730,7 +734,7 @@ class CostStatisticsCanonicalRepositoryTests(unittest.TestCase):
 
         self.assertEqual(
             {row["id"] for row in snapshot["bank_rows"]},
-            {"bank-march"},
+            {"bank-march", "bank-april"},
         )
         self.assertEqual(len(snapshot["cost_groups"]), 1)
         self.assertEqual(

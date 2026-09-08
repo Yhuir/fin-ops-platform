@@ -80,7 +80,6 @@ class CostStatisticsQueryService:
                 scope_value=scope_value,
                 view=normalized_view,
                 include_statistics=include_statistics,
-                include_cost_row_tags=normalized_view in {"time", "bank_tag"},
             ),
         )
         raw_page = policy.explorer_page(
@@ -94,21 +93,26 @@ class CostStatisticsQueryService:
         )
         facets = {
             "projects": [],
-            "expense_types": [],
             "bank_accounts": [],
             "bank_tag_primary": [],
             "bank_tag_sub": [],
+            "cost_tag_primary": [],
+            "cost_tag_sub": [],
         }
         primary = list(raw_page.get("primary_facets") or [])
         secondary = list(raw_page.get("secondary_facets") or [])
         if normalized_view == "project":
             facets["projects"] = primary
-            facets["expense_types"] = secondary
+            facets["cost_tag_primary"] = secondary
+            facets["cost_tag_sub"] = list(raw_page["tertiary_facets"])
         elif normalized_view == "bank_account":
             facets["bank_accounts"] = primary
             facets["projects"] = secondary
-        elif normalized_view == "expense_type":
-            facets["expense_types"] = primary
+            facets["cost_tag_primary"] = list(raw_page["tertiary_facets"])
+            facets["cost_tag_sub"] = list(raw_page["quaternary_facets"])
+        elif normalized_view == "cost_tag":
+            facets["cost_tag_primary"] = primary
+            facets["cost_tag_sub"] = secondary
         elif normalized_view == "bank_tag":
             facets["bank_tag_primary"] = primary
             facets["bank_tag_sub"] = secondary
@@ -221,20 +225,16 @@ class CostStatisticsQueryService:
     ) -> dict[str, Any]:
         scope_kind, scope_value, _normalized_scope = self._normalize_page_scope(scope)
         normalized_view, _filters = self._normalize_page_query(view, {})
-        if normalized_view not in {"project", "bank_account", "expense_type"}:
+        if normalized_view not in {"project", "bank_account", "cost_tag"}:
             raise ValueError(
-                "allocation detail requires project, bank_account, or expense_type view"
+                "allocation detail requires project, bank_account, or cost_tag view"
             )
         normalized_allocation_id = str(allocation_id or "").strip()
-        if not normalized_allocation_id:
+        relation_prefix, separator, _unit_source = normalized_allocation_id.partition(":unit:")
+        if not separator or not relation_prefix.startswith("relation:"):
             raise KeyError(allocation_id)
         row = CostStatisticsPolicy(
-            self._canonical_repository.load_snapshot(
-                scope_kind=scope_kind,
-                scope_value=scope_value,
-                view=normalized_view,
-                include_statistics=False,
-            ),
+            self._canonical_repository.load_relation_snapshot(relation_prefix.removeprefix("relation:")),
         ).allocation(
             allocation_id=normalized_allocation_id,
             scope_kind=scope_kind,
@@ -264,7 +264,8 @@ class CostStatisticsQueryService:
                     "oa_applicant",
                     "oa_original_amount",
                     "oa_allocation_weight",
-                    "bank_event_amount",
+                    "bank_event_amount", "transaction_id", "occurred_at", "allocation_state",
+                    "bank_tag_code", "bank_tag_primary_label", "bank_tag_sub_label", "bank_tag_label_path",
                 )
             },
             "payment_evidence": [
@@ -292,7 +293,7 @@ class CostStatisticsQueryService:
                 else []
             )
         )
-        expense_types = self._normalize_text_set(kwargs.get("expense_types"))
+        bank_tag_primary_keys = self._normalize_text_set(kwargs.get("bank_tag_primary_keys"))
         bank_account_labels = self._normalize_text_set(
             kwargs.get("bank_account_labels")
         )
@@ -302,27 +303,30 @@ class CostStatisticsQueryService:
             "bank_tag",
             "bank_account",
             "project",
-            "expense_type",
+            "cost_tag",
         }:
             raise ValueError(
-                "view must be time, bank_tag, bank_account, project, or expense_type."
+                "view must be time, bank_tag, bank_account, project, or cost_tag."
             )
         if view == "project" and not project_names:
             raise ValueError("project_name is required for project export preview")
-        if view == "expense_type" and not expense_types:
+        if view == "cost_tag" and not bank_tag_primary_keys:
             raise ValueError(
-                "expense_type is required for expense_type export preview"
+                "bank_tag_primary_key is required for cost_tag export preview"
             )
         if view == "bank_account" and not bank_account_labels:
             raise ValueError(
                 "bank_account_label is required for bank_account export preview"
             )
+        aggregate_by = self._normalize_project_aggregate_by(kwargs.get("aggregate_by"))
         row_shape = "raw_bank" if view in {"time", "bank_tag"} else "raw_cost"
+        if view == "project" and aggregate_by is not None:
+            row_shape = "project_month" if aggregate_by == "month" else "project_year"
         policy = self._policy(view=view)
         page = policy.export_page(
             month=month,
             project_names=sorted(project_names),
-            expense_types=sorted(expense_types),
+            bank_tag_primary_keys=sorted(bank_tag_primary_keys),
             row_shape=row_shape,
             offset=0,
             page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
@@ -368,98 +372,15 @@ class CostStatisticsQueryService:
             sheet_names = ["按标签统计"]
             file_name = self._build_filename(month=scope_label, view=view)
             extra = self._directional_summary_from_export_summary(summary)
-        elif view == "bank_account":
-            columns = [
-                "成本日期",
-                "银行账户",
-                "项目名称",
-                "费用类型",
-                "金额",
-                "费用内容",
-                "申请/报销人",
-            ]
-            rows = [
-                [
-                    entry["trade_time"],
-                    entry["bank_account_label"],
-                    entry["project_name"],
-                    entry["expense_type"],
-                    _plain_money(entry["amount_decimal"]),
-                    entry["expense_content"],
-                    entry["oa_applicant"],
-                ]
-                for entry in entries
-            ]
-            sheet_names = ["按银行账户统计"]
-            file_name = self._build_filename(
-                month=scope_label,
-                view=view,
-            )
-            extra = {}
-        elif view == "project":
-            project_name = sorted(project_names)[0]
-            columns = [
-                "OA完成时间",
-                "资金方向",
-                "费用类型",
-                "金额",
-                "费用内容",
-                "申请/报销人",
-                "支付账户",
-            ]
-            rows = [
-                [
-                    entry["trade_time"],
-                    entry["direction"],
-                    entry["expense_type"],
-                    _plain_money(entry["amount_decimal"]),
-                    entry["expense_content"],
-                    entry["oa_applicant"],
-                    entry["payment_account_label"],
-                ]
-                for entry in entries
-            ]
-            sheet_names = self._project_sheet_names(
-                include_oa_details=True,
-                include_invoice_details=True,
-                include_exception_rows=True,
-                include_ignored_rows=True,
-                include_expense_content_summary=True,
-            )
-            file_name = self._build_filename(
-                month=scope_label,
-                view=view,
-                project_name=project_name,
-            )
-            extra = {}
         else:
-            columns = [
-                "OA完成时间",
-                "项目名称",
-                "资金方向",
-                "金额",
-                "费用内容",
-                "申请/报销人",
-                "支付账户",
-            ]
-            rows = [
-                [
-                    entry["trade_time"],
-                    entry["project_name"],
-                    entry["direction"],
-                    _plain_money(entry["amount_decimal"]),
-                    entry["expense_content"],
-                    entry["oa_applicant"],
-                    entry["payment_account_label"],
-                ]
-                for entry in entries
-            ]
-            sheet_names = ["按费用类型统计"]
-            file_name = self._build_filename(
-                month=scope_label,
-                view=view,
-                expense_type=self._build_expense_type_label(expense_types),
-            )
+            if row_shape in {"project_month", "project_year"}:
+                columns = ["统计周期", "项目名称", "银行主标签", "银行子标签", "金额", "费用内容", "成本明细数"]
+                rows = [[entry["period_label"], entry["project_name"], entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], entry["amount"], entry["expense_content"], entry["transaction_count"]] for entry in entries]
+            else:
+                columns = self._cost_export_headers()
+                rows = [self._cost_export_row(entry) for entry in entries]
+            sheet_names = ["按项目汇总", "成本明细"] if row_shape in {"project_month", "project_year"} else ["成本明细"]
+            file_name = self._build_filename(month=scope_label, view=view, project_name="、".join(sorted(project_names)), project_names=sorted(project_names), aggregate_by=aggregate_by)
             extra = {}
         if view not in {"time", "bank_tag"}:
             allocation_quality = self._manual_allocation_quality_from_export_summary(
@@ -494,7 +415,7 @@ class CostStatisticsQueryService:
                 else []
             )
         )
-        expense_types = self._normalize_text_set(kwargs.get("expense_types"))
+        bank_tag_primary_keys = self._normalize_text_set(kwargs.get("bank_tag_primary_keys"))
         bank_account_labels = self._normalize_text_set(
             kwargs.get("bank_account_labels")
         )
@@ -503,19 +424,18 @@ class CostStatisticsQueryService:
         )
         range_kwargs = self._range_kwargs(kwargs)
         if view not in {
-            "month",
             "time",
             "bank_tag",
             "bank_account",
             "project",
-            "expense_type",
+            "cost_tag",
         }:
             raise ValueError(f"unsupported export view: {view}")
         if view == "project" and not project_names:
             raise ValueError("project_name is required for project export")
-        if view == "expense_type" and not expense_types:
+        if view == "cost_tag" and not bank_tag_primary_keys:
             raise ValueError(
-                "expense_type is required for expense_type export"
+                "bank_tag_primary_key is required for cost_tag export"
             )
         if view == "bank_account" and not bank_account_labels:
             raise ValueError("bank_account_label is required for bank_account export")
@@ -523,12 +443,7 @@ class CostStatisticsQueryService:
         export_month = month
         if view in {"time", "bank_tag"}:
             row_shape = "raw_bank"
-        elif view == "month":
-            row_shape = "month_summary"
-        elif view == "project" and (
-            aggregate_by is not None or len(project_names) > 1
-        ):
-            export_month = "all"
+        elif view == "project" and aggregate_by is not None:
             row_shape = (
                 "project_month"
                 if (aggregate_by or "month") == "month"
@@ -538,7 +453,7 @@ class CostStatisticsQueryService:
         page = policy.export_page(
             month=export_month,
             project_names=sorted(project_names),
-            expense_types=sorted(expense_types),
+            bank_tag_primary_keys=sorted(bank_tag_primary_keys),
             row_shape=row_shape,
             offset=0,
             page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
@@ -548,9 +463,7 @@ class CostStatisticsQueryService:
         )
         summary = self._export_page_summary(page)
         total = int(
-            summary.get("row_count")
-            if view == "month"
-            else summary.get("source_row_count")
+            summary.get("source_row_count")
             or 0
         )
         self._ensure_export_row_limit(view=view, total=total)
@@ -591,160 +504,38 @@ class CostStatisticsQueryService:
                 (self._bank_tag_row_from_entry(entry) for entry in entries),
             )
             filename = self._build_filename(month=scope_label, view=view)
-        elif view == "bank_account":
-            workbook = self._table_workbook(
-                "按银行账户统计",
-                [
-                    "成本日期",
-                    "银行账户",
-                    "项目名称",
-                    "费用类型",
-                    "金额",
-                    "费用内容",
-                    "申请/报销人",
-                ],
-                (
-                    [
-                        entry["trade_time"],
-                        entry["bank_account_label"],
-                        entry["project_name"],
-                        entry["expense_type"],
-                        entry["amount"],
-                        entry["expense_content"],
-                        entry["oa_applicant"],
-                    ]
-                    for entry in entries
-                ),
-            )
-            filename = self._build_filename(
-                month=scope_label,
-                view=view,
-            )
-        elif view == "month":
-            workbook = self._table_workbook(
-                "月份汇总",
-                [
-                    "项目名称",
-                    "费用类型",
-                    "金额",
-                    "费用内容",
-                    "支出笔数",
-                ],
-                (
-                    [
-                        entry["project_name"],
-                        entry["expense_type"],
-                        entry["amount"],
-                        entry["expense_content"],
-                        entry["transaction_count"],
-                    ]
-                    for entry in entries
-                ),
-            )
-            filename = self._build_filename(month=month, view=view)
-        elif view == "project":
-            if aggregate_by is not None or len(project_names) > 1:
-                workbook = self._table_workbook(
-                    "按项目统计",
-                    [
-                        "统计周期",
-                        "项目名称",
-                        "费用类型",
-                        "金额",
-                        "费用内容",
-                        "支出笔数",
-                    ],
-                    (
-                        [
-                            entry["period_label"],
-                            entry["project_name"],
-                            entry["expense_type"],
-                            entry["amount"],
-                            entry["expense_content"],
-                            entry["transaction_count"],
-                        ]
-                        for entry in entries
-                    ),
-                )
-                filename = self._build_filename(
-                    month=self._build_scope_label(
-                        month="all",
-                        **range_kwargs,
-                    ),
-                    view=view,
-                    project_names=sorted(project_names),
-                    aggregate_by=aggregate_by or "month",
-                )
-            else:
-                project_name = sorted(project_names)[0]
-                workbook = self._project_detail_workbook(
-                    month=month,
-                    project_name=project_name,
-                    entries=entries,
-                    include_oa_details=bool(
-                        kwargs.get("include_oa_details", True)
-                    ),
-                    include_invoice_details=bool(
-                        kwargs.get("include_invoice_details", True)
-                    ),
-                    include_exception_rows=bool(
-                        kwargs.get("include_exception_rows", True)
-                    ),
-                    include_ignored_rows=bool(
-                        kwargs.get("include_ignored_rows", True)
-                    ),
-                    include_expense_content_summary=bool(
-                        kwargs.get("include_expense_content_summary", True)
-                    ),
-                    scope_label=scope_label,
-                )
-                filename = self._build_filename(
-                    month=scope_label,
-                    view=view,
-                    project_name=project_name,
-                )
         else:
-            workbook = self._table_workbook(
-                "按费用类型统计",
-                [
-                    "时间",
-                    "项目名称",
-                    "金额",
-                    "费用内容",
-                    "资金方向",
-                    "申请/报销人",
-                    "支付账户",
-                ],
-                (
-                    [
-                        entry["trade_time"],
-                        entry["project_name"],
-                        _plain_money(entry["amount_decimal"]),
-                        entry["expense_content"],
-                        entry["direction"],
-                        entry["oa_applicant"],
-                        entry["payment_account_label"],
-                    ]
-                    for entry in entries
-                ),
-            )
-            filename = self._build_filename(
-                month=scope_label,
-                view=view,
-                expense_type=self._build_expense_type_label(expense_types),
-            )
+            if row_shape in {"project_month", "project_year"}:
+                headers = ["统计周期", "项目名称", "银行主标签", "银行子标签", "金额", "费用内容", "成本明细数"]
+                values = ([entry["period_label"], entry["project_name"], entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], entry["amount"], entry["expense_content"], entry["transaction_count"]] for entry in entries)
+            else:
+                headers = self._cost_export_headers()
+                values = (self._cost_export_row(entry) for entry in entries)
+            aggregated = row_shape in {"project_month", "project_year"}
+            workbook = self._table_workbook("按项目汇总" if aggregated else "成本明细", headers, values)
+            if aggregated:
+                detail_page = policy.export_page(
+                    month=export_month, project_names=sorted(project_names),
+                    bank_tag_primary_keys=sorted(bank_tag_primary_keys), row_shape="raw_cost",
+                    offset=0, page_size=COST_STATISTICS_EXPORT_ROW_LIMIT + 1,
+                    include_summary=False, bank_account_labels=sorted(bank_account_labels), **range_kwargs,
+                )
+                detail_sheet = workbook.create_sheet("成本明细")
+                detail_sheet.append(self._cost_export_headers())
+                for row in detail_page["rows"]:
+                    detail_sheet.append(self._cost_export_row(self._export_entry_from_row(row)))
+            filename = self._build_filename(month=scope_label, view=view, project_name="、".join(sorted(project_names)), project_names=sorted(project_names), aggregate_by=aggregate_by)
         if view not in {"time", "bank_tag"}:
             self._append_manual_allocation_notice(workbook, summary=summary)
         return filename, self._serialize_workbook(workbook)
 
     def _policy(self, *, view: str) -> CostStatisticsPolicy:
         snapshot_view = view
-        if snapshot_view in {"month", "expense_type"}:
+        if snapshot_view == "cost_tag":
             snapshot_view = "project"
         return CostStatisticsPolicy(
             self._canonical_repository.load_snapshot(
                 view=snapshot_view,
-                include_cost_row_tags=snapshot_view in {"time", "bank_tag"},
             )
         )
 
@@ -777,51 +568,31 @@ class CostStatisticsQueryService:
         if normalized_view not in {
             "time",
             "project",
-            "expense_type",
+            "cost_tag",
             "bank_account",
             "bank_tag",
         }:
             raise ValueError(
-                "view must be time, project, expense_type, bank_account, or bank_tag"
+                "view must be time, project, cost_tag, bank_account, or bank_tag"
             )
         query = normalize_money_search_query(
             " ".join(str(filters.get("query") or "").split())
         )
         if len(query) > 200:
             raise ValueError("query must be at most 200 characters")
-        normalized_filters = {
-            "project_name": "",
-            "expense_type": "",
-            "bank_account_label": "",
-            "bank_tag_primary_label": "",
-            "bank_tag_sub_label": "",
-            "query": query,
-        }
-        if normalized_view == "project":
-            normalized_filters["project_name"] = str(
-                filters.get("project_name") or ""
-            ).strip()
-            normalized_filters["expense_type"] = str(
-                filters.get("expense_type") or ""
-            ).strip()
-        elif normalized_view == "expense_type":
-            normalized_filters["expense_type"] = str(
-                filters.get("expense_type") or ""
-            ).strip()
-        elif normalized_view == "bank_account":
-            normalized_filters["bank_account_label"] = str(
-                filters.get("bank_account_label") or ""
-            ).strip()
-            normalized_filters["project_name"] = str(
-                filters.get("project_name") or ""
-            ).strip()
+        if filters.get("expense_type"):
+            raise ValueError("OA expense_type is no longer a cost statistics filter")
+        keys = {"query"}
+        if normalized_view in {"project", "bank_account"}:
+            keys.add("project_name")
+        if normalized_view == "bank_account":
+            keys.add("bank_account_label")
+        if normalized_view in {"project", "bank_account", "cost_tag"}:
+            keys.update({"bank_tag_primary_key", "bank_tag_sub_key"})
         elif normalized_view == "bank_tag":
-            normalized_filters["bank_tag_primary_label"] = str(
-                filters.get("bank_tag_primary_label") or ""
-            ).strip()
-            normalized_filters["bank_tag_sub_label"] = str(
-                filters.get("bank_tag_sub_label") or ""
-            ).strip()
+            keys.update({"bank_tag_primary_label", "bank_tag_sub_label"})
+        normalized_filters = {key: str(filters.get(key) or "").strip() for key in sorted(keys)}
+        normalized_filters["query"] = query
         return normalized_view, normalized_filters
 
     @staticmethod
@@ -838,6 +609,7 @@ class CostStatisticsQueryService:
                 "view": view,
                 "filters": filters,
                 "page_size": page_size,
+                **({"cost_cursor_version": 2} if view in {"project", "cost_tag", "bank_account"} else {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -903,10 +675,11 @@ class CostStatisticsQueryService:
             "available_years": [],
             "facets": {
                 "projects": [],
-                "expense_types": [],
-                "bank_accounts": [],
+                    "bank_accounts": [],
                 "bank_tag_primary": [],
                 "bank_tag_sub": [],
+            "cost_tag_primary": [],
+            "cost_tag_sub": [],
             },
             "rows": [],
             "row_count": 0,
@@ -947,23 +720,9 @@ class CostStatisticsQueryService:
         amount = _decimal_from_value(raw_row.get("amount")) or Decimal(
             "0.00"
         )
-        primary = str(
-            raw_row.get("bank_tag_primary_label")
-            or raw_row.get("bank_tag_label")
-            or "未标记"
-        ).strip()
-        sub = str(
-            raw_row.get("bank_tag_sub_label")
-            or raw_row.get("bank_tag_label")
-            or primary
-        ).strip()
-        label_path = [
-            str(item).strip()
-            for item in list(raw_row.get("bank_tag_label_path") or [])
-            if str(item).strip()
-        ]
-        if not label_path:
-            label_path = [primary] if primary == sub else [primary, sub]
+        primary = str(raw_row.get("bank_tag_primary_label") or "")
+        sub = str(raw_row.get("bank_tag_sub_label") or "")
+        label_path = list(raw_row.get("bank_tag_label_path") or [])
         return {
             "entry_id": str(
                 raw_row.get("entry_id")
@@ -972,6 +731,8 @@ class CostStatisticsQueryService:
                 or ""
             ).strip(),
             "allocation_id": str(raw_row.get("allocation_id") or "").strip(),
+            "transaction_id": raw_row.get("transaction_id"),
+            "allocation_state": raw_row.get("allocation_state", "source_resolved"),
             "oa_id": str(raw_row.get("oa_id") or "").strip(),
             "oa_apply_type": str(raw_row.get("oa_apply_type") or "").strip(),
             "relation_case_id": str(
@@ -1155,34 +916,16 @@ class CostStatisticsQueryService:
         }
 
     @staticmethod
-    def _build_expense_type_label(expense_types: set[str]) -> str:
-        ordered = sorted(expense_types)
-        if not ordered:
-            return "未命名费用类型"
-        if len(ordered) == 1:
-            return ordered[0]
-        return f"{ordered[0]}等{len(ordered)}类"
+    def _cost_export_headers() -> list[str]:
+        return ["付款日期", "项目名称", "银行账户", "银行主标签", "银行子标签", "银行完整标签", "成本金额", "费用内容", "申请/报销人", "来源流水ID", "成本明细ID", "OA单号", "原OA费用类型", "分配状态"]
 
     @staticmethod
-    def _project_sheet_names(
-        *,
-        include_oa_details: bool,
-        include_invoice_details: bool,
-        include_exception_rows: bool,
-        include_ignored_rows: bool,
-        include_expense_content_summary: bool,
-    ) -> list[str]:
-        sheet_names = ["导出说明", "项目汇总", "按费用类型汇总"]
-        if include_expense_content_summary:
-            sheet_names.append("按费用内容汇总")
-        sheet_names.append("成本明细")
-        if include_oa_details:
-            sheet_names.append("OA关联明细")
-        if include_invoice_details:
-            sheet_names.append("发票关联明细")
-        if include_exception_rows or include_ignored_rows:
-            sheet_names.append("异常与未闭环")
-        return sheet_names
+    def _cost_export_row(entry: dict[str, Any]) -> list[Any]:
+        return [entry["trade_time"] or "日期待完善", entry["project_name"], entry["bank_account_label"],
+                entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], " / ".join(entry["bank_tag_label_path"]),
+                entry["amount"], entry["expense_content"], entry["oa_applicant"], entry["transaction_id"],
+                entry["entry_id"], entry["oa_id"], entry["expense_type"],
+                "来源待分配" if entry["allocation_state"] == "source_pending" else "来源已确定"]
 
     @staticmethod
     def _table_workbook(
@@ -1213,236 +956,12 @@ class CostStatisticsQueryService:
         sheet.append(["说明", "数量"])
         sheet.append(
             [
-                "复杂配对关系尚未形成当前有效的逐子付款项、逐资金来源人工分配，未计入本次配对归集统计。",
+                "以下关联仍需分配或完善银行资料。已知金额但来源未定的成本仅计入全部期间；指定日期范围不含日期未确定的成本。",
                 quality["manual_allocation_pending_count"],
             ]
         )
         sheet.append(["待首次分配", quality["pending_manual_allocation_count"]])
         sheet.append(["来源变化待重新分配", quality["stale_manual_allocation_count"]])
-
-    def _project_detail_workbook(
-        self,
-        *,
-        month: str,
-        project_name: str,
-        entries: list[dict[str, Any]],
-        include_oa_details: bool,
-        include_invoice_details: bool,
-        include_exception_rows: bool,
-        include_ignored_rows: bool,
-        include_expense_content_summary: bool,
-        scope_label: str,
-    ) -> Workbook:
-        workbook = Workbook(write_only=True)
-        intro_sheet = workbook.create_sheet("导出说明")
-        self._fill_key_value_sheet(
-            intro_sheet,
-            [
-                ("项目名称", project_name),
-                ("统计范围", scope_label),
-                ("月份列表", month),
-                ("数据口径", "统一事实源只读一致性快照"),
-                ("导出结构", "项目汇总、费用类型汇总、成本明细"),
-            ],
-        )
-        summary_sheet = workbook.create_sheet("项目汇总")
-        expense_type_sheet = workbook.create_sheet("按费用类型汇总")
-        expense_content_sheet = (
-            workbook.create_sheet("按费用内容汇总")
-            if include_expense_content_summary
-            else None
-        )
-        detail_sheet = workbook.create_sheet("成本明细")
-        detail_headers = [
-            "OA完成时间",
-            "归集单元ID",
-            "资金方向",
-            "申请/报销人",
-            "支付账户",
-            "归集金额",
-            "备注",
-            "项目名称",
-            "费用类型",
-            "费用内容",
-            "OA单号",
-            "关联组ID",
-        ]
-        detail_sheet.append(detail_headers)
-        for index in range(1, len(detail_headers) + 1):
-            detail_sheet.column_dimensions[chr(64 + index)].width = 18
-        if include_oa_details:
-            self._append_table_sheet(
-                workbook.create_sheet("OA关联明细"),
-                [
-                    "OA单号",
-                    "申请人",
-                    "项目名称",
-                    "费用类型",
-                    "费用内容",
-                    "OA金额",
-                    "关联组ID",
-                ],
-                [],
-            )
-        if include_invoice_details:
-            self._append_table_sheet(
-                workbook.create_sheet("发票关联明细"),
-                [
-                    "发票号码",
-                    "销方名称",
-                    "购方名称",
-                    "发票金额",
-                    "税额",
-                    "项目名称",
-                    "关联状态",
-                    "关联组ID",
-                ],
-                [],
-            )
-        if include_exception_rows or include_ignored_rows:
-            self._append_table_sheet(
-                workbook.create_sheet("异常与未闭环"),
-                [
-                    "记录类型",
-                    "记录ID",
-                    "项目名称",
-                    "费用类型",
-                    "金额",
-                    "状态",
-                    "备注",
-                ],
-                [],
-            )
-        total_amount = Decimal("0.00")
-        type_buckets: dict[str, dict[str, Any]] = {}
-        content_buckets: dict[tuple[str, str], dict[str, Any]] = {}
-        for entry in entries:
-            total_amount += entry["amount_decimal"]
-            type_bucket = type_buckets.setdefault(
-                entry["expense_type"],
-                {
-                    "amount_decimal": Decimal("0.00"),
-                    "transaction_count": 0,
-                    "expense_contents": set(),
-                },
-            )
-            type_bucket["amount_decimal"] += entry["amount_decimal"]
-            type_bucket["transaction_count"] += 1
-            type_bucket["expense_contents"].add(
-                entry["expense_content"]
-            )
-            content_key = (
-                entry["expense_type"],
-                entry["expense_content"],
-            )
-            content_bucket = content_buckets.setdefault(
-                content_key,
-                {
-                    "amount_decimal": Decimal("0.00"),
-                    "transaction_count": 0,
-                },
-            )
-            content_bucket["amount_decimal"] += entry["amount_decimal"]
-            content_bucket["transaction_count"] += 1
-            detail_sheet.append(
-                [
-                    entry["trade_time"],
-                    entry["entry_id"],
-                    entry["direction"],
-                    entry["oa_applicant"],
-                    entry["payment_account_label"],
-                    _plain_money(entry["amount_decimal"]),
-                    entry["remark"],
-                    entry["project_name"],
-                    entry["expense_type"],
-                    entry["expense_content"],
-                    entry["oa_id"] or "—",
-                    entry["relation_case_id"] or "—",
-                ]
-            )
-        self._fill_key_value_sheet(
-            summary_sheet,
-            [
-                ("项目名称", project_name),
-                ("统计期间", scope_label),
-                ("总支出金额", _plain_money(total_amount)),
-                ("成本明细数", len(entries)),
-                ("费用类型数", len(type_buckets)),
-                ("已关联OA笔数", len({entry["oa_id"] for entry in entries if entry["oa_id"]})),
-                ("已关联发票笔数", 0),
-                ("已处理异常笔数", 0),
-                ("已忽略笔数", 0),
-            ],
-        )
-        self._append_table_sheet(
-            expense_type_sheet,
-            ["费用类型", "金额", "占比", "笔数", "费用内容数"],
-            (
-                [
-                    expense_type,
-                    _plain_money(bucket["amount_decimal"]),
-                    _percentage(bucket["amount_decimal"], total_amount),
-                    bucket["transaction_count"],
-                    len(bucket["expense_contents"]),
-                ]
-                for expense_type, bucket in sorted(
-                    type_buckets.items(),
-                    key=lambda item: (
-                        -item[1]["amount_decimal"],
-                        item[0],
-                    ),
-                )
-            ),
-        )
-        if include_expense_content_summary:
-            assert expense_content_sheet is not None
-            self._append_table_sheet(
-                expense_content_sheet,
-                ["费用类型", "费用内容", "金额", "笔数"],
-                [
-                    [
-                        expense_type,
-                        expense_content,
-                        _plain_money(bucket["amount_decimal"]),
-                        bucket["transaction_count"],
-                    ]
-                    for (
-                        expense_type,
-                        expense_content,
-                    ), bucket in sorted(
-                        content_buckets.items(),
-                        key=lambda item: (
-                            -item[1]["amount_decimal"],
-                            item[0][0],
-                            item[0][1],
-                        ),
-                    )
-                ],
-            )
-        return workbook
-
-    @staticmethod
-    def _fill_key_value_sheet(
-        sheet: Any,
-        rows: list[tuple[str, Any]],
-    ) -> None:
-        sheet.append(["字段", "值"])
-        for key, value in rows:
-            sheet.append([key, value])
-        sheet.column_dimensions["A"].width = 18
-        sheet.column_dimensions["B"].width = 52
-
-    @staticmethod
-    def _append_table_sheet(
-        sheet: Any,
-        headers: list[str],
-        rows: Any,
-    ) -> None:
-        sheet.append(headers)
-        for row in rows:
-            sheet.append(row)
-        for index in range(1, len(headers) + 1):
-            sheet.column_dimensions[chr(64 + index)].width = 18
 
     @staticmethod
     def _serialize_workbook(workbook: Workbook) -> bytes:
@@ -1458,7 +977,6 @@ class CostStatisticsQueryService:
         project_name: str | None = None,
         project_names: list[str] | None = None,
         aggregate_by: str | None = None,
-        expense_type: str | None = None,
     ) -> str:
         month_segment = (
             "全部期间"
@@ -1471,8 +989,6 @@ class CostStatisticsQueryService:
             return f"成本统计_{month_segment}_按标签统计.xlsx"
         if view == "bank_account":
             return f"成本统计_{month_segment}_按银行账户统计.xlsx"
-        if view == "month":
-            return f"成本统计_{month_segment}_月份汇总.xlsx"
         if view == "project":
             if aggregate_by is not None:
                 project_label = (
@@ -1491,11 +1007,8 @@ class CostStatisticsQueryService:
                 f"成本统计_{month_segment}_项目明细_"
                 f"{_sanitize_filename(project_name or '未命名项目')}.xlsx"
             )
-        if view == "expense_type":
-            return (
-                f"成本统计_{month_segment}_按费用类型统计_"
-                f"{_sanitize_filename(expense_type or '未命名费用类型')}.xlsx"
-            )
+        if view == "cost_tag":
+            return f"成本统计_{month_segment}_按流水标签统计.xlsx"
         raise ValueError(f"unsupported export view: {view}")
 
 
@@ -1510,14 +1023,6 @@ def _decimal_from_value(value: object) -> Decimal | None:
         return Decimal(str(value).replace(",", ""))
     except Exception:
         return None
-
-
-def _percentage(value: Decimal, total: Decimal) -> str:
-    if total == Decimal("0.00"):
-        return "0.00%"
-    return (
-        f"{(value / total * Decimal('100')).quantize(Decimal('0.01'))}%"
-    )
 
 
 def _sanitize_filename(value: str) -> str:

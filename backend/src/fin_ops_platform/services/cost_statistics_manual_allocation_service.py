@@ -8,13 +8,17 @@ from fin_ops_platform.services.cost_statistics_canonical_repository import (
     PostgresCostStatisticsCanonicalRepository,
 )
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
+from fin_ops_platform.services.cost_statistics_source_allocation import (
+    SourceAllocationError,
+    complete_source_task,
+    validate_source_allocations,
+)
 from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
     PostgresCostStatisticsManualAllocationRepository,
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
-
 
 MONEY_PATTERN = re.compile(r"^(?:0|[1-9]\d{0,14})\.\d{2}$")
 
@@ -110,7 +114,7 @@ class CostStatisticsManualAllocationService:
         has_more = len(page) > normalized_size
         page = page[:normalized_size]
         return {
-            "items": page,
+            "items": [_task_summary(task) for task in page],
             "row_count": row_count,
             "counts": counts,
             "next_cursor": (
@@ -119,6 +123,14 @@ class CostStatisticsManualAllocationService:
                 else None
             ),
         }
+
+    def get_task(self, relation_case_id: str, *, can_save: bool) -> dict[str, Any]:
+        snapshot = self._canonical_repository.load_relation_snapshot(relation_case_id)
+        task = next((task for task in CostStatisticsPolicy(snapshot).manual_allocation_tasks
+                     if task["relation_case_id"] == relation_case_id), None)
+        if task is None:
+            raise KeyError(relation_case_id)
+        return {**task, "can_save": can_save}
 
     def save(
         self,
@@ -144,22 +156,29 @@ class CostStatisticsManualAllocationService:
                 audit_repository=None,
                 for_update=False,
             )
-        with self._write_connection.transaction() as transaction:
-            return self._save_in_context(
-                normalized_case_id,
-                payload,
-                actor=actor,
-                request_id=request_id,
-                canonical_repository=PostgresCostStatisticsCanonicalRepository(
-                    transaction,
-                    transaction_bound=True,
-                ),
-                allocation_repository=PostgresCostStatisticsManualAllocationRepository(
-                    transaction
-                ),
-                audit_repository=PostgresOperationsAuditRepository(transaction),
-                for_update=True,
-            )
+        from psycopg.errors import DeadlockDetected, LockNotAvailable, SerializationFailure
+
+        try:
+            with self._write_connection.transaction() as transaction:
+                return self._save_in_context(
+                    normalized_case_id,
+                    payload,
+                    actor=actor,
+                    request_id=request_id,
+                    canonical_repository=PostgresCostStatisticsCanonicalRepository(
+                        transaction,
+                        transaction_bound=True,
+                    ),
+                    allocation_repository=PostgresCostStatisticsManualAllocationRepository(
+                        transaction
+                    ),
+                    audit_repository=PostgresOperationsAuditRepository(transaction),
+                    for_update=True,
+                )
+        except (DeadlockDetected, LockNotAvailable, SerializationFailure) as exc:
+            raise CostStatisticsManualAllocationConflictError(
+                "关联或来源正在更新，请保留草稿并刷新后重试。"
+            ) from exc
 
     @staticmethod
     def _save_in_context(
@@ -178,6 +197,7 @@ class CostStatisticsManualAllocationService:
             "expected_version",
             "source_fingerprint",
             "allocations",
+            "source_allocations",
             "non_cost_amount",
             "non_cost_reason",
         }
@@ -251,6 +271,14 @@ class CostStatisticsManualAllocationService:
             raise CostStatisticsManualAllocationValidationError(
                 "分配金额合计与不计入成本金额之和必须等于净支出。"
             )
+        try:
+            source_allocations = validate_source_allocations(
+                task, allocations, non_cost_amount, payload.get("source_allocations")
+            )
+        except SourceAllocationError as exc:
+            error = CostStatisticsManualAllocationValidationError(str(exc))
+            error.field_error = {"path": exc.path, "code": exc.code, "message": str(exc)}
+            raise error from exc
         actor_id = str(actor.get("id") or "").strip()
         if not actor_id:
             raise CostStatisticsManualAllocationValidationError(
@@ -265,6 +293,7 @@ class CostStatisticsManualAllocationService:
             wrong_payment_refund_total=str(task["wrong_payment_refund_total"]),
             net_outflow_total=str(task["net_outflow_total"]),
             allocations=allocations,
+            source_allocations=source_allocations,
             non_cost_amount=f"{non_cost_amount:.2f}",
             non_cost_reason=non_cost_reason,
             expected_version=expected_version,
@@ -295,12 +324,13 @@ class CostStatisticsManualAllocationService:
                         "version": int(saved["version"]),
                         "net_outflow_total": str(task["net_outflow_total"]),
                         "allocations": allocations,
+                        "source_allocations": source_allocations,
                         "non_cost_amount": f"{non_cost_amount:.2f}",
                         "non_cost_reason": non_cost_reason,
                     },
                 }
             )
-        return {
+        return complete_source_task({
             **task,
             "status": "allocated",
             "allocations": allocations,
@@ -310,7 +340,7 @@ class CostStatisticsManualAllocationService:
             "updated_by": actor_id,
             "updated_at": str(saved.get("updated_at") or ""),
             "can_save": True,
-        }
+        }, source_allocations)
 
 
 def _required_version(value: Any) -> int:
@@ -454,3 +484,14 @@ def _task_search_text(task: dict[str, Any]) -> str:
                 str(value) for value in list(event.get("tags") or [])
             )
     return " ".join(visible_values).casefold()
+
+
+def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value for key, value in task.items()
+        if key not in {"units", "bank_events", "allocations", "source_allocations"}
+    } | {
+        "project_names": list(dict.fromkeys(unit["project_name"] for unit in task["units"])),
+        "unit_count": len(task["units"]),
+        "bank_event_count": len(task["bank_events"]),
+    }
