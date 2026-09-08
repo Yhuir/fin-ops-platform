@@ -56,6 +56,38 @@ afterEach(() => {
 });
 
 describe("etc api", () => {
+  test("does not repost a file upload to alternate URLs after an HTML response", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response("<html>upstream timed out</html>", {
+      status: 504,
+      headers: { "Content-Type": "text/html" },
+    }));
+    global.fetch = fetchMock as typeof fetch;
+    const file = new File(["车牌号：云A516HJ"], "云A516HJ");
+
+    await expect(uploadEtcTicketRootFiles("etc-recon-task-001", [file], 3)).rejects.toThrow("ETC 接口返回了 HTML 页面");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files");
+  });
+
+  test("preserves the structured version conflict code alongside its user message", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "task_version_conflict", message: "批次版本已变化",
+    }), { status: 409, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+    await expect(uploadEtcTicketRootFiles("etc-recon-task-001", [new File(["body"], "行程")], 3))
+      .rejects.toMatchObject({ status: 409, code: "task_version_conflict", message: "批次版本已变化" });
+  });
+
+  test("uploads extensionless bytes unchanged and does not repost after a network failure", async () => {
+    const file = new File([new Uint8Array([0xef, 0xbb, 0xbf, 0x31, 0x0d, 0x0a])], "行程");
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    global.fetch = fetchMock as typeof fetch;
+    await expect(uploadEtcTicketRootFiles("etc-recon-task-001", [file], 3)).rejects.toThrow("Failed to fetch");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    expect(form.get("expectedVersion")).toBe("3");
+    expect(form.getAll("files")).toEqual([file]);
+  });
+
   test("downloads a merged ETC invoice PDF with the server filename", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       new Blob(["merged-pdf"], { type: "application/pdf" }),

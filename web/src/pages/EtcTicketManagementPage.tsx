@@ -423,7 +423,7 @@ function isEtcBusinessBatchNotFoundError(error: unknown, batchId?: string) {
 
 type UploadBlockProps = {
   label: string;
-  accept: string;
+  accept?: string;
   disabled: boolean;
   helperText: string;
   disabledReason?: string;
@@ -728,6 +728,7 @@ export default function EtcTicketManagementPage() {
     controller: AbortController;
   } | null>(null);
   const selectedBatchIdRef = useRef(selectedBatchId);
+  const taskDetailControllerRef = useRef<AbortController | null>(null);
   activeStatusRef.current = activeStatus;
   batchPageRef.current = batchPage;
   selectedBatchIdRef.current = selectedBatchId;
@@ -865,6 +866,7 @@ export default function EtcTicketManagementPage() {
       return undefined;
     }
     const controller = new AbortController();
+    taskDetailControllerRef.current = controller;
     setDetailLoading(true);
     setTaskLoading(Boolean(selectedBusinessBatchTaskId));
     setTaskListError(selectedBusinessBatchTaskId ? null : "当前批次缺少绑定的 ETC 流程，请刷新后重试。");
@@ -878,7 +880,7 @@ export default function EtcTicketManagementPage() {
           }
         })
         .catch((caught) => {
-          if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+          if (!controller.signal.aborted && !(caught instanceof DOMException && caught.name === "AbortError")) {
             setSelectedTask(null);
             setTaskListError(formatEtcUiErrorMessage(caught, "ETC批次流程加载失败。"));
           }
@@ -897,7 +899,7 @@ export default function EtcTicketManagementPage() {
         }
       })
       .catch((caught) => {
-        if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+        if (!controller.signal.aborted && !(caught instanceof DOMException && caught.name === "AbortError")) {
           if (isEtcBusinessBatchNotFoundError(caught, selectedBatchId)) {
             setBusinessBatchDetail(null);
             setBatchDetailError(null);
@@ -1264,10 +1266,55 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleUploadTicketRootFiles = async (files: File[]) => {
-    if (!taskMutationTarget || files.length === 0) {
+    if (!taskMutationTarget || !taskIsMutable || taskActionLoading || files.length === 0) {
       return;
     }
-    await runTaskAction(() => uploadEtcTicketRootFiles(taskMutationTarget.taskId, files, taskMutationTarget.version));
+    const unsupportedFiles = files.filter((file) => {
+      const dot = file.name.lastIndexOf(".");
+      const extension = dot > 0 && dot < file.name.length - 1 ? file.name.slice(dot).toLowerCase() : "";
+      return extension && extension !== ".txt" && extension !== ".text";
+    });
+    if (unsupportedFiles.length > 0) {
+      setActionError(`票根网入口仅支持 TXT 或无扩展名文本；本次未上传任何文件。不支持：${unsupportedFiles.map((file) => file.name).join("、")}`);
+      return;
+    }
+    const batchId = selectedBatchIdRef.current;
+    const viewController = taskDetailControllerRef.current;
+    const isCurrentUpload = () => selectedBatchIdRef.current === batchId && viewController !== null && !viewController.signal.aborted;
+    const showUploadTask = (task: EtcReconciliationTask) => {
+      if (!isCurrentUpload()) return;
+      mergeReconciliationTask(task);
+      setWorkflowExpandedKeys((current) => new Set([
+        ...current,
+        "sources",
+        ...(task.parseIssues.length > 0 ? ["issues"] : []),
+      ]));
+    };
+    setTaskActionLoading(true);
+    setActionError(null);
+    try {
+      showUploadTask(await uploadEtcTicketRootFiles(taskMutationTarget.taskId, files, taskMutationTarget.version));
+    } catch (caught) {
+      if (!isCurrentUpload()) return;
+      const message = formatEtcUiErrorMessage(caught, "票根网文件上传结果未确认。");
+      setActionError(message);
+      const outcomeMayBeUnknown = !(caught instanceof EtcApiError)
+        || caught.status === 0 || caught.status === 408 || caught.status >= 500;
+      const taskChanged = caught instanceof EtcApiError
+        && (caught.code === "task_version_conflict" || caught.code === "source_file_deleted_during_parse");
+      if (outcomeMayBeUnknown || taskChanged) {
+        try {
+          // A failed response may follow successful earlier files. Read once; never retry the POST.
+          showUploadTask(await fetchEtcReconciliationTask(taskMutationTarget.taskId, viewController?.signal));
+        } catch (readError) {
+          if (isCurrentUpload()) {
+            setActionError(`${message} 当前上传状态尚无法确认：${formatEtcUiErrorMessage(readError, "读取失败")}。请刷新并核对已上传文件后再处理。`);
+          }
+        }
+      }
+    } finally {
+      setTaskActionLoading(false);
+    }
   };
 
   const handleRefreshReconciliationMatches = async () => {
@@ -2261,14 +2308,16 @@ export default function EtcTicketManagementPage() {
                                 />
                                 <UploadBlock
                                   label="票根网"
-                                  accept=".txt,text/plain"
-                                  helperText="支持多个 TXT 文件。"
+                                  helperText="支持 TXT 或无扩展名的票根网行程文本，可多选或拖拽。"
                                   multiple
                                   disabled={!taskIsMutable || taskActionLoading || hasLegacyNonTxtTicketRootSource}
                                   disabledReason={hasLegacyNonTxtTicketRootSource ? "已有非 TXT 来源，删除后可导入。" : undefined}
                                   onFiles={handleUploadTicketRootFiles}
                                 />
                               </div>
+                              {selectedTask.sourceFiles.some((file) => file.sourceKind === "ticket_root" && file.hasBlockingIssue) ? (
+                                <StatePanel tone="warning" compact>文件已上传，但有内容需要处理。请查看解析异常，修正后删除重传。</StatePanel>
+                              ) : null}
                             </div>
                           </EtcDisclosureSection>
 

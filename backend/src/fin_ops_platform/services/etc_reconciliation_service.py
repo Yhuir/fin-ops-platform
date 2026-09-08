@@ -236,64 +236,67 @@ class EtcReconciliationTaskService:
         content: bytes,
         created_by: str,
     ) -> UploadedSourceFileMetadata:
-        task = self._get_active_task_mutable(task_id)
-        self._assert_mutable_task(task)
-        content_bytes = bytes(content or b"")
-        sha256 = hashlib.sha256(content_bytes).hexdigest()
-        normalized_kind = source_kind if isinstance(source_kind, SourceFileKind) else SourceFileKind(str(source_kind))
-        for existing_file in task.source_files:
-            if existing_file.source_kind == normalized_kind and existing_file.sha256 == sha256:
-                return replace(existing_file)
+        # Source registration must not hold a task reference across a concurrent hydrate.
+        # Parsing/OCR is performed by the caller after this existing commit lock is released.
+        with self._source_parse_commit_lock:
+            task = self._get_active_task_mutable(task_id)
+            self._assert_mutable_task(task)
+            content_bytes = bytes(content or b"")
+            sha256 = hashlib.sha256(content_bytes).hexdigest()
+            normalized_kind = source_kind if isinstance(source_kind, SourceFileKind) else SourceFileKind(str(source_kind))
+            for existing_file in task.source_files:
+                if existing_file.source_kind == normalized_kind and existing_file.sha256 == sha256:
+                    return replace(existing_file)
 
-        previous_file_counter = self._file_counter
-        previous_source_files = list(task.source_files)
-        previous_audit_events = list(task.audit_events)
-        previous_version = task.version
-        previous_updated_at = task.updated_at
-        self._file_counter += 1
-        file_id = f"ETC-RECON-FILE-{self._file_counter:06d}"
-        try:
-            stored_path = self._store_file(task_id=task_id, file_id=file_id, original_name=original_name, content=content_bytes)
-        except Exception:
-            self._file_counter = previous_file_counter
-            task.source_files = previous_source_files
-            task.audit_events = previous_audit_events
-            task.version = previous_version
-            task.updated_at = previous_updated_at
-            raise
-        metadata = UploadedSourceFileMetadata(
-            file_id=file_id,
-            task_id=task_id,
-            source_kind=normalized_kind,
-            original_name=original_name,
-            content_type=content_type,
-            size_bytes=len(content_bytes),
-            sha256=sha256,
-            stored_path=stored_path,
-            created_by=created_by,
-        )
-        task.source_files.append(metadata)
-        self._touch(task)
-        task.audit_events.append(
-            self._new_audit_event(
-                task_id=task_id,
-                event_type="source_file_uploaded",
-                actor=created_by,
+            previous_file_counter = self._file_counter
+            previous_source_files = list(task.source_files)
+            previous_audit_events = list(task.audit_events)
+            previous_version = task.version
+            previous_updated_at = task.updated_at
+            self._file_counter += 1
+            file_id = f"ETC-RECON-FILE-{self._file_counter:06d}"
+            try:
+                stored_path = self._store_file(task_id=task_id, file_id=file_id, original_name=original_name, content=content_bytes)
+            except Exception:
+                self._file_counter = previous_file_counter
+                task.source_files = previous_source_files
+                task.audit_events = previous_audit_events
+                task.version = previous_version
+                task.updated_at = previous_updated_at
+                raise
+            metadata = UploadedSourceFileMetadata(
                 file_id=file_id,
-                file_name=original_name,
-                file_sha256=sha256,
+                task_id=task_id,
+                source_kind=normalized_kind,
+                original_name=original_name,
+                content_type=content_type,
+                size_bytes=len(content_bytes),
+                sha256=sha256,
+                stored_path=stored_path,
+                created_by=created_by,
             )
-        )
-        try:
-            self._persist()
-        except Exception:
-            self._file_counter = previous_file_counter
-            task.source_files = previous_source_files
-            task.audit_events = previous_audit_events
-            task.version = previous_version
-            task.updated_at = previous_updated_at
-            raise
-        return replace(metadata)
+            task.source_files.append(metadata)
+            self._touch(task)
+            task.audit_events.append(
+                self._new_audit_event(
+                    task_id=task_id,
+                    event_type="source_file_uploaded",
+                    actor=created_by,
+                    file_id=file_id,
+                    file_name=original_name,
+                    file_sha256=sha256,
+                )
+            )
+            try:
+                self._persist()
+            except Exception:
+                self._file_counter = previous_file_counter
+                task.source_files = previous_source_files
+                task.audit_events = previous_audit_events
+                task.version = previous_version
+                task.updated_at = previous_updated_at
+                raise
+            return replace(metadata)
 
     def apply_parse_result(
         self,

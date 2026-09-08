@@ -2036,7 +2036,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByText("2026-03 ETC批次")).toBeInTheDocument();
   });
 
-  test("uploads ticket-root TXT files through the ticket-root files endpoint", async () => {
+  test.each(["云A516HJ", ".hidden", "尾点.", "行程.TXT"])("uploads ticket-root text through the ticket-root files endpoint: %s", async (fileName) => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderAppAt("/etc-tickets");
@@ -2050,9 +2050,11 @@ describe("ETC ticket management page", () => {
     if (!(txtInput instanceof HTMLInputElement)) {
       throw new Error("Expected ticket-root TXT upload input to render.");
     }
-    expect(txtInput).toHaveAttribute("accept", ".txt,text/plain");
+    expect(txtInput).not.toHaveAttribute("accept");
+    expect(within(page).getByLabelText("上传信用卡账单").querySelector('input[type="file"]'))
+      .toHaveAttribute("accept", ".pdf,application/pdf");
 
-    const txtFile = new File(["车牌号：云A516HJ\n交易时间：2026-04-02 13:30:29交易金额：￥57.95"], "云A516HJ", { type: "text/plain" });
+    const txtFile = new File(["车牌号：云A516HJ\n交易时间：2026-04-02 13:30:29交易金额：￥57.95"], fileName);
     await user.upload(txtInput, txtFile);
 
     await waitFor(() => {
@@ -2064,7 +2066,153 @@ describe("ETC ticket management page", () => {
     const request = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files")?.[1] as RequestInit;
     const formData = request.body as FormData;
     expect(formData.get("expectedVersion")).toBe("3");
-    expect((formData.getAll("files") as File[])[0]).toMatchObject({ name: "云A516HJ", type: "text/plain" });
+    expect((formData.getAll("files") as File[])[0]).toBe(txtFile);
+    expect(txtFile.type).toBe("");
+  });
+
+  test.each(["choose", "drop"])("rejects unsupported ticket-root mixed selections without silently uploading other files: %s", async (method) => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const uploadBox = await within(page).findByLabelText("上传票根网");
+    const input = uploadBox.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = [new File(["票根文本"], "行程"), new File(["pdf"], "错误.pdf"), new File(["zip"], "错误.zip")];
+    if (method === "choose") {
+      // Bypass the browser accept hint to exercise the handler's actual mixed-file contract.
+      fireEvent.change(input, { target: { files } });
+    } else {
+      fireEvent.drop(uploadBox, { dataTransfer: { files } });
+    }
+    expect(await within(page).findByText(/错误.pdf、错误.zip/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/ticket-root-files") && init?.method === "POST")).toHaveLength(0);
+    await user.upload(input, new File(["票根文本"], "重新选择.TEXT", { type: "text/plain" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/ticket-root-files") && init?.method === "POST")).toHaveLength(1));
+    expect(within(page).queryByText(/错误.pdf、错误.zip/)).not.toBeInTheDocument();
+  });
+
+  test.each([
+    new etcApi.EtcApiError("第二个文件保存失败", { status: 503 }),
+    new TypeError("Failed to fetch"),
+    new Error("ETC 文件上传超时"),
+    new etcApi.EtcApiError("批次版本已变化", { status: 409, code: "task_version_conflict" }),
+    new etcApi.EtcApiError("来源在解析期间被删除", { status: 409, code: "source_file_deleted_during_parse" }),
+  ])("rereads ticket-root upload outcome once and keeps the error without reposting: %s", async (failure) => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const initialTask = await etcApi.fetchEtcReconciliationTask("etc-recon-task-001");
+    const savedSource = { fileId: "partially-saved", sourceKind: "ticket_root", originalName: "已保存行程", contentType: "text/plain", hasBlockingIssue: false };
+    const persistedTask = { ...initialTask, version: initialTask.version + 1, sourceFiles: [...initialTask.sourceFiles, savedSource] };
+    const read = vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValueOnce(initialTask).mockResolvedValue(persistedTask);
+    const upload = vi.spyOn(etcApi, "uploadEtcTicketRootFiles").mockRejectedValueOnce(failure).mockResolvedValue(persistedTask);
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const box = await within(page).findByLabelText("上传票根网");
+    const input = box.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, [new File(["one"], "第一份.txt"), new File(["two"], "第二份.txt")]);
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    expect(await within(page).findByText(failure.message)).toBeInTheDocument();
+    await openEtcDisclosure(page, user, /已上传文件/);
+    expect(await within(page).findByText("已保存行程")).toBeInTheDocument();
+    expect(upload).toHaveBeenCalledTimes(1);
+    await user.upload(input, new File(["two"], "第二份.txt"));
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    expect(upload.mock.calls[1][2]).toBe(persistedTask.version);
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([400, 403, 409])("does not reread after known pre-write ticket-root rejection %s", async (status) => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const read = vi.spyOn(etcApi, "fetchEtcReconciliationTask");
+    vi.spyOn(etcApi, "uploadEtcTicketRootFiles").mockRejectedValue(new etcApi.EtcApiError("未写入的拒绝", { status, code: "ticket_root_source_mode_conflict" }));
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const box = await within(page).findByLabelText("上传票根网");
+    await user.upload(box.querySelector('input[type="file"]') as HTMLInputElement, new File(["body"], "行程.txt"));
+    expect(await within(page).findByText("未写入的拒绝")).toBeInTheDocument();
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps original sources and explicitly reports unknown upload state when the outcome reread fails", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const initialTask = await etcApi.fetchEtcReconciliationTask("etc-recon-task-001");
+    const read = vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValueOnce(initialTask).mockRejectedValue(new Error("读取失败"));
+    const upload = vi.spyOn(etcApi, "uploadEtcTicketRootFiles").mockRejectedValue(new TypeError("连接断开"));
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const box = await within(page).findByLabelText("上传票根网");
+    await user.upload(box.querySelector('input[type="file"]') as HTMLInputElement, new File(["body"], "行程.txt"));
+    expect(await within(page).findByText(/连接断开.*当前上传状态尚无法确认/)).toBeInTheDocument();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(within(page).getByText("2026-02 ETC批次")).toBeInTheDocument();
+  });
+
+  test("opens saved sources and parsing issues when an accepted upload contains invalid records", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const initialTask = await etcApi.fetchEtcReconciliationTask("etc-recon-task-001");
+    vi.spyOn(etcApi, "uploadEtcTicketRootFiles").mockResolvedValue({
+      ...initialTask,
+      sourceFiles: [...initialTask.sourceFiles, { fileId: "bad-source", sourceKind: "ticket_root", originalName: "损坏行程", contentType: "text/plain", hasBlockingIssue: true }],
+      parseIssues: [{ issueId: "bad-issue", fileId: "bad-source", sourceKind: "ticket_root", originalName: "损坏行程", severity: "blocking", message: "第 2 条记录金额不合法", sourcePage: null, sourceLine: 5, extractionMethod: "text", fieldName: "amount" }],
+    });
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const box = await within(page).findByLabelText("上传票根网");
+    await user.upload(box.querySelector('input[type="file"]') as HTMLInputElement, new File(["broken"], "损坏行程"));
+    expect(await within(page).findByText("第 2 条记录金额不合法")).toBeVisible();
+    expect(within(page).getByRole("button", { name: /解析异常/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(page).getByRole("button", { name: /已上传文件/ })).toHaveAttribute("aria-expanded", "true");
+    expect(within(page).getByText(/文件已上传，但有内容需要处理/)).toBeVisible();
+  });
+
+  test.each(["upload", "outcome read"])("does not apply a late ticket-root %s to another selected batch", async (lateResponse) => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const initialTask = await etcApi.fetchEtcReconciliationTask("etc-recon-task-001");
+    const secondTask = { ...initialTask, taskId: "task-second", title: "当前第二批次", version: 12 };
+    const firstBatch = businessBatchFixture({ businessBatchId: "batch-first", taskId: initialTask.taskId, status: "draft" });
+    const secondBatch = businessBatchFixture({ businessBatchId: "batch-second", taskId: secondTask.taskId, status: "draft" });
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { unsubmitted: 2, staged: 0, submitted: 0 }, items: [firstBatch, secondBatch], pagination: { page: 1, pageSize: 50, total: 2 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation(async (id) => ({
+      ...(id === firstBatch.businessBatchId ? firstBatch : secondBatch), invoiceItems: [],
+    }) as never);
+    let resolveLate!: (task: EtcReconciliationTask) => void;
+    const late = new Promise<EtcReconciliationTask>((resolve) => { resolveLate = resolve; });
+    let firstTaskReads = 0;
+    const read = vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockImplementation(async (id) => {
+      if (id === secondTask.taskId) return secondTask;
+      firstTaskReads += 1;
+      return lateResponse === "outcome read" && firstTaskReads > 1 ? late : initialTask;
+    });
+    const upload = vi.spyOn(etcApi, "uploadEtcTicketRootFiles");
+    if (lateResponse === "upload") upload.mockReturnValueOnce(late);
+    else upload.mockRejectedValueOnce(new TypeError("旧批次连接中断"));
+    upload.mockResolvedValue(secondTask);
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    const box = await within(page).findByLabelText("上传票根网");
+    await user.upload(box.querySelector('input[type="file"]') as HTMLInputElement, new File(["body"], "旧行程.txt"));
+    if (lateResponse === "outcome read") await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    await user.click(within(within(page).getByTestId("etc-batch-row-batch-second")).getByRole("button", { name: /^查看批次/ }));
+    expect(await within(page).findByText(secondTask.title)).toBeVisible();
+    const nextBox = within(page).getByLabelText("上传票根网");
+    expect(nextBox).toHaveAttribute("aria-disabled", "true");
+    fireEvent.drop(nextBox, { dataTransfer: { files: [new File(["new"], "新行程.txt")] } });
+    expect(upload).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveLate({ ...initialTask, title: "不应展示的旧结果", version: 9 }); });
+    expect(within(page).getByText(secondTask.title)).toBeVisible();
+    expect(within(page).queryByText("不应展示的旧结果")).not.toBeInTheDocument();
+    expect(within(page).queryByText("旧批次连接中断")).not.toBeInTheDocument();
+    await user.upload(within(page).getByLabelText("上传票根网").querySelector('input[type="file"]') as HTMLInputElement, new File(["new"], "新行程.txt"));
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    expect(upload.mock.calls[1][0]).toBe(secondTask.taskId);
+    expect(upload.mock.calls[1][2]).toBe(secondTask.version);
   });
 
   test("uploads ticket-root TXT files by dropping them on the upload box", async () => {
@@ -2073,7 +2221,7 @@ describe("ETC ticket management page", () => {
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     const txtUploadBox = await within(page).findByLabelText("上传票根网");
-    const txtFile = new File(["车牌号：云A516HJ\n交易时间：2026-04-02 13:30:29交易金额：￥57.95"], "云A516HJ.txt", { type: "text/plain" });
+    const txtFile = new File(["车牌号：云A516HJ\n交易时间：2026-04-02 13:30:29交易金额：￥57.95"], "云A516HJ");
 
     fireEvent.dragEnter(txtUploadBox, { dataTransfer: { files: [txtFile] } });
     fireEvent.dragOver(txtUploadBox, { dataTransfer: { files: [txtFile] } });
@@ -2087,7 +2235,7 @@ describe("ETC ticket management page", () => {
     });
     const request = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/ticket-root-files")?.[1] as RequestInit;
     const formData = request.body as FormData;
-    expect((formData.getAll("files") as File[])[0]).toMatchObject({ name: "云A516HJ.txt", type: "text/plain" });
+    expect((formData.getAll("files") as File[])[0]).toBe(txtFile);
   });
 
   test("surfaces ticket-root upload wrong-slot errors from the backend", async () => {

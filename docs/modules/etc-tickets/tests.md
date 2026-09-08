@@ -1,5 +1,15 @@
 # ETC票据管理 测试矩阵
 
+## 2026-09-08 无扩展名文本与损坏记录闭环
+
+- `test_untrusted_document_policy.py`：显式许可/默认拒绝、UTF/BOM/GB、空/NUL/非法字节、真实 PDF/图片/ZIP、未知和双后缀、全批预检零存储、GB 错入口识别；OA/图片/PDF 限制回归。
+- `test_etc_reconciliation_service.py`：好坏逆序、必要字段缺失/非法/重复、禁止串行、原始行号、导航、站点可选/默认票数、正常 4/11/48/2 条样例、保存 issue→hydrate→删除→重传。
+- 来源登记并发：Event 可控交错复现并修复重载替换 task；12 个独立任务、4 线程上传→解析→GET，验证来源/审计/版本持久化和文件编号唯一；解析期间真实删除仍拒绝旧结果，不用重试掩盖丢引用。
+- `test_etc_backend.py`：无扩展名/TXT 等价、409 来源互斥、400 全批零写、503 第二个不同文件存储失败保留第一文件和新版本、坏文件 GET/删除/重传。
+- `test_app_postgres_mode_integration.py`：真实 PostgreSQL task/source/items，multipart 上传→重建应用→GET→删除→TXT 同内容重传。对象存储测试边界按 fixture 明确，不以本地模式冒充生产 MinIO。
+- 页面/API/Chromium：无后缀选择和空 MIME 拖拽、混选拒绝、同文件重试、部分成功精准 GET、坏文件反馈、重读失败、400/403/409、切换批次晚返回；HTML 不换地址重 POST、错误码保留。
+- 七类测试中业务、服务、API、前端、集成、既有回归适用；无新增 read model/cache/job 合同，保留原 worker/ZIP 套件回归。
+
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
 ## 2026-08-20 submitted ETC relation membership 闭环

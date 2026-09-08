@@ -20,6 +20,7 @@ from fin_ops_platform.services.etc_reconciliation_models import (
 )
 from fin_ops_platform.services.untrusted_document_policy import (
     ETC_DOCUMENT_LIMITS,
+    UntrustedDocumentError,
     ValidatedDocument,
     inspect_untrusted_document,
 )
@@ -57,25 +58,31 @@ class EtcReconciliationSourceUploadService:
         if task.version != expected_version:
             raise ValueError("task_version_conflict")
         validated_documents = self._validated_documents(source_kind=source_kind, uploads=uploads)
+        decoded_texts = [
+            decode_text_file_content(document.content) if document.kind == "text" else None
+            for document in validated_documents
+        ]
         ticket_root_upload_modes = self._ticket_root_upload_modes(
             task=task,
             source_kind=source_kind,
             documents=validated_documents,
+            decoded_texts=decoded_texts,
         )
         for upload_index, upload in enumerate(uploads):
             validated_document = (
                 validated_documents[upload_index]
-                if upload_index < len(validated_documents)
+                if validated_documents
                 else None
             )
+            decoded_text = decoded_texts[upload_index] if decoded_texts else None
             ticket_root_upload_mode = (
                 ticket_root_upload_modes[upload_index]
-                if source_kind == SourceFileKind.TICKET_ROOT and upload_index < len(ticket_root_upload_modes)
+                if source_kind == SourceFileKind.TICKET_ROOT
                 else ""
             )
             content_type = (
-                f"text/plain; charset={ticket_root_text_encoding(upload.content) or 'utf-8'}"
-                if source_kind == SourceFileKind.TICKET_ROOT and ticket_root_upload_mode == "text_file"
+                f"text/plain; charset={decoded_text[1]}"
+                if decoded_text is not None
                 else validated_document.content_type
                 if validated_document is not None
                 else "text/plain; charset=utf-8"
@@ -94,6 +101,7 @@ class EtcReconciliationSourceUploadService:
                 upload=upload,
                 validated_document=validated_document,
                 ticket_root_upload_mode=ticket_root_upload_mode,
+                ticket_root_text=decoded_text[0] if decoded_text is not None else None,
                 evidence_kind_override=evidence_kind_override,
             )
             task = self._task_service.apply_parse_result(
@@ -126,6 +134,7 @@ class EtcReconciliationSourceUploadService:
                 content=upload.content,
                 allowed_kinds=allowed_kinds,
                 limits=ETC_DOCUMENT_LIMITS,
+                allow_extensionless_text=source_kind == SourceFileKind.TICKET_ROOT,
             )
             for upload in uploads
         ]
@@ -170,14 +179,17 @@ class EtcReconciliationSourceUploadService:
         task: Any,
         source_kind: SourceFileKind,
         documents: list[ValidatedDocument],
+        decoded_texts: list[tuple[str, str] | None],
     ) -> list[str]:
         if source_kind != SourceFileKind.TICKET_ROOT:
             return []
         upload_modes: list[str] = []
-        for document in documents:
+        for index, document in enumerate(documents):
+            decoded_text = decoded_texts[index]
             wrong_slot_message = reconciliation_wrong_slot_message(
                 expected_source_kind=source_kind,
                 document=document,
+                decoded_text=decoded_text[0] if decoded_text is not None else None,
             )
             if wrong_slot_message:
                 raise EtcReconciliationWrongSourceSlotError(wrong_slot_message)
@@ -193,6 +205,7 @@ class EtcReconciliationSourceUploadService:
         upload: EtcReconciliationSourceUpload,
         validated_document: ValidatedDocument | None,
         ticket_root_upload_mode: str,
+        ticket_root_text: str | None,
         evidence_kind_override: str | None,
     ) -> FileParseResult:
         if source_kind == SourceFileKind.CREDIT_CARD_STATEMENT:
@@ -206,10 +219,11 @@ class EtcReconciliationSourceUploadService:
             if validated_document is None:
                 raise ValueError("invalid_reconciliation_upload")
             if ticket_root_upload_mode == "text_file":
-                decoded_text = decode_ticket_root_text(upload.content) or ""
+                if ticket_root_text is None:
+                    raise UntrustedDocumentError("document_text_invalid")
                 return (
-                    TicketRootClipboardTextParser().parse_text(file_id=source_file.file_id, text=decoded_text)
-                    if looks_like_ticket_root_clipboard_text(decoded_text)
+                    TicketRootClipboardTextParser().parse_text(file_id=source_file.file_id, text=ticket_root_text)
+                    if looks_like_ticket_root_clipboard_text(ticket_root_text)
                     else ticket_root_text_file_not_trip_result(source_file.file_id)
                 )
             return TicketRootDocumentParser().parse_file(
@@ -245,8 +259,11 @@ def reconciliation_wrong_slot_message(
     *,
     expected_source_kind: SourceFileKind,
     document: ValidatedDocument,
+    decoded_text: str | None,
 ) -> str | None:
-    text = document.content.decode("utf-8", errors="ignore") if document.kind == "text" else ""
+    if document.kind == "text" and decoded_text is None:
+        raise UntrustedDocumentError("document_text_invalid")
+    text = decoded_text if document.kind == "text" else ""
     if document.kind == "pdf":
         extracted_text = etc_document_parsers._extract_pdf_text(document)
         if extracted_text.strip():
@@ -334,26 +351,16 @@ def ticket_root_upload_source_mode(document: ValidatedDocument) -> str:
 TEXT_FILE_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "gbk")
 
 
-def decode_ticket_root_text(content: bytes) -> str | None:
-    decoded = decode_text_file_content(content)
-    return decoded[0] if decoded is not None else None
-
-
-def ticket_root_text_encoding(content: bytes) -> str | None:
-    decoded = decode_text_file_content(content)
-    return decoded[1] if decoded is not None else None
-
-
-def decode_text_file_content(content: bytes) -> tuple[str, str] | None:
+def decode_text_file_content(content: bytes) -> tuple[str, str]:
     for encoding in TEXT_FILE_ENCODINGS:
         try:
             text = content.decode(encoding)
         except UnicodeDecodeError:
             continue
         if "\x00" in text or not text.strip():
-            return None
+            raise UntrustedDocumentError("document_text_invalid")
         return text, "utf-8" if encoding == "utf-8-sig" else encoding
-    return None
+    raise UntrustedDocumentError("document_text_invalid")
 
 
 def looks_like_ticket_root_clipboard_text(text: str) -> bool:

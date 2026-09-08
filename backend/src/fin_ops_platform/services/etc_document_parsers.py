@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from uuid import uuid5, NAMESPACE_URL
 
 try:
@@ -49,6 +50,11 @@ PLATE_RE = re.compile(r"[\u4e00-\u9fff][A-Z][A-Z0-9]{5,6}")
 DATETIME_RE = re.compile(r"(\d{4}[-/]\d{2}[-/]\d{2}\s*\d{2}:\d{2}(?::\d{2})?)")
 AMOUNT_RE = re.compile(r"(?:交易金额|金额|收费金额|合计|￥|¥)\s*[:：]?\s*[￥¥]?\s*([0-9]+(?:\.[0-9]{1,2})?)")
 INVOICE_COUNT_RE = re.compile(r"(?:发票张数|发票数量|张数)\s*[:：]?\s*(\d+)")
+CLIPBOARD_FIELD_RE = re.compile(
+    r"(?P<transaction_at>交易时间)[ \t]*[:：]?[ \t]*"
+    r"|(?P<amount>交易金额|收费金额|金额|合计|￥)[ \t]*[:：]?[ \t]*(?:￥[ \t]*)?"
+    r"|(?P<invoice_count>发票张数|发票数量|张数)[ \t]*[:：]?[ \t]*"
+)
 ENTRY_RE = re.compile(r"(?:入口站|入口)\s*[:：]?\s*([^\s]+)")
 EXIT_RE = re.compile(r"(?:出口站|出口)\s*[:：]?\s*([^\s]+)")
 TRIP_TRANSACTION_AMOUNT_RE = re.compile(
@@ -348,19 +354,76 @@ class TicketRootClipboardTextParser:
             )
 
         items: list[TicketRootItem] = []
-        for record_index, block in enumerate(_ticket_record_blocks(normalized_text), start=1):
-            item = _ticket_item_from_block(
-                file_id=file_id,
+        issues: list[ParseIssue] = []
+        for record_index, (line_no, block) in enumerate(_clipboard_record_blocks(text), start=1):
+            fields = _clipboard_record_fields(block)
+            record_issues: list[tuple[str, str]] = []
+            for field_name, label in (("transaction_at", "交易时间"), ("amount", "交易金额"), ("invoice_count", "发票数量")):
+                values = fields[field_name]
+                if len(values) > 1:
+                    record_issues.append((field_name, f"{label}重复"))
+                elif not values and field_name != "invoice_count":
+                    record_issues.append((field_name, f"缺少{label}"))
+            transaction_at = ""
+            if len(fields["transaction_at"]) == 1:
+                raw_time = fields["transaction_at"][0]
+                transaction_at = _normalize_ticket_datetime(raw_time)
+                try:
+                    if DATETIME_RE.fullmatch(raw_time) is None:
+                        raise ValueError("invalid_ticket_datetime")
+                    datetime.fromisoformat(transaction_at)
+                except ValueError:
+                    record_issues.append(("transaction_at", "交易时间格式或日期不合法"))
+            amount = None
+            if len(fields["amount"]) == 1:
+                raw_amount = fields["amount"][0]
+                if re.fullmatch(r"[0-9]+(?:\.[0-9]{1,2})?", raw_amount):
+                    amount = _parse_decimal(raw_amount)
+                if amount is None:
+                    record_issues.append(("amount", "交易金额格式不合法"))
+            invoice_count = 1
+            if len(fields["invoice_count"]) == 1:
+                raw_count = fields["invoice_count"][0]
+                count_match = re.fullmatch(r"([0-9]+)\s*张?", raw_count)
+                try:
+                    if count_match is None:
+                        raise ValueError("invalid_ticket_invoice_count")
+                    invoice_count = int(count_match.group(1))
+                except ValueError:
+                    record_issues.append(("invoice_count", "发票数量格式不合法"))
+            if record_issues:
+                issues.extend(
+                    ParseIssue(
+                        issue_id=_stable_id("issue", file_id, "clipboard_record", record_index, field_name),
+                        file_id=file_id,
+                        severity=ParseIssueSeverity.BLOCKING,
+                        message=f"票根文本第 {record_index} 条记录（第 {line_no} 行）：{message}，请修正后重新上传。",
+                        source_page=1,
+                        source_line=line_no,
+                        extraction_method=self.extraction_method,
+                        field_name=field_name,
+                    )
+                    for field_name, message in record_issues
+                )
+                continue
+            assert amount is not None
+            entry_station, exit_station = _extract_ticket_stations(block, strict_labels=True)
+            items.append(TicketRootItem(
+                item_id=_stable_id("ticket", file_id, record_index, plate, transaction_at, amount, entry_station, exit_station),
                 task_id=task_id,
-                page_number=1,
+                ticket_file_id=file_id,
+                vehicle_plate=plate,
+                transaction_at=transaction_at,
+                amount=amount,
+                entry_station=entry_station,
+                exit_station=exit_station,
+                invoice_count=invoice_count,
+                source_page=1,
                 extraction_method=self.extraction_method,
-                plate=plate,
-                block=_clean_clipboard_record_block(block),
-                require_station=False,
-                record_index=record_index,
-            )
-            if item is not None:
-                items.append(item)
+                parse_confidence=1.0 if entry_station and exit_station else 0.72,
+            ))
+        if issues:
+            return FileParseResult(file_id=file_id, parser_code=self.parser_code, issues=issues)
         if not items:
             return FileParseResult(
                 file_id=file_id,
@@ -645,8 +708,6 @@ def _ticket_item_from_block(
     extraction_method: str,
     plate: str,
     block: str,
-    require_station: bool = True,
-    record_index: int | None = None,
 ) -> TicketRootItem | None:
     transaction_match = DATETIME_RE.search(block)
     amount = _first_decimal(AMOUNT_RE.findall(block))
@@ -654,18 +715,13 @@ def _ticket_item_from_block(
         return None
     transaction_at = _normalize_ticket_datetime(transaction_match.group(1))
     entry_station, exit_station = _extract_ticket_stations(block)
-    if require_station and not entry_station and not exit_station:
+    if not entry_station and not exit_station:
         return None
     invoice_count_match = INVOICE_COUNT_RE.search(block)
     invoice_count = int(invoice_count_match.group(1)) if invoice_count_match else 1
     confidence = 1.0 if entry_station and exit_station else 0.72
-    item_id = (
-        _stable_id("ticket", file_id, record_index, plate, transaction_at, amount, entry_station, exit_station)
-        if record_index is not None
-        else _stable_id("ticket", file_id, plate, transaction_at, amount, entry_station, exit_station)
-    )
     return TicketRootItem(
-        item_id=item_id,
+        item_id=_stable_id("ticket", file_id, plate, transaction_at, amount, entry_station, exit_station),
         task_id=task_id,
         ticket_file_id=file_id,
         vehicle_plate=plate,
@@ -700,9 +756,11 @@ def _first_group(pattern: re.Pattern[str], text: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def _extract_ticket_stations(block: str) -> tuple[str, str]:
-    entry_station = _first_group(ENTRY_RE, block) or ""
-    exit_station = _first_group(EXIT_RE, block) or ""
+def _extract_ticket_stations(block: str, *, strict_labels: bool = False) -> tuple[str, str]:
+    entry_pattern = re.compile(r"^(?:入口站|入口)(?:[ \t]*[:：][ \t]*|[ \t]+)([^\s]+)", re.M) if strict_labels else ENTRY_RE
+    exit_pattern = re.compile(r"^(?:出口站|出口)(?:[ \t]*[:：][ \t]*|[ \t]+)([^\s]+)", re.M) if strict_labels else EXIT_RE
+    entry_station = _first_group(entry_pattern, block) or ""
+    exit_station = _first_group(exit_pattern, block) or ""
     if _is_station_header_value(entry_station):
         entry_station = ""
     if _is_station_header_value(exit_station):
@@ -836,18 +894,38 @@ def _normalize_clipboard_text(text: str) -> str:
     return str(text or "").replace("\u3000", " ").replace("¥", "￥").strip()
 
 
-def _clean_clipboard_record_block(block: str) -> str:
+def _clipboard_record_blocks(text: str) -> Iterator[tuple[int, str]]:
+    """Only a new transaction-time label starts a trip, even if the prior trip is broken."""
     lines: list[str] = []
-    for raw_line in block.splitlines():
-        line = raw_line.strip()
+    start_line = 0
+    for line_no, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.replace("\u3000", " ").replace("¥", "￥").strip()
         if not line:
             continue
+        if "交易时间" in line and lines:
+            yield start_line, "\n".join(lines)
+            lines = []
+        # Ignore page chrome before a record, but retain orphan record fields to report missing time.
+        if not lines and CLIPBOARD_FIELD_RE.search(line) is None:
+            continue
+        if not lines:
+            start_line = line_no
         if any(marker in line for marker in CLIPBOARD_SKIP_LINE_MARKERS):
             line = re.sub(r"查看发票\s*发票下载\s*发票转发", "", line).strip()
-        cleaned = _clean_clipboard_station_line(line)
-        if cleaned:
-            lines.append(cleaned)
-    return "\n".join(lines)
+        if _clean_clipboard_station_line(line) or line.isdigit():
+            lines.append(line)
+    if lines:
+        yield start_line, "\n".join(lines)
+
+
+def _clipboard_record_fields(block: str) -> dict[str, list[str]]:
+    fields: dict[str, list[str]] = {"transaction_at": [], "amount": [], "invoice_count": []}
+    matches = list(CLIPBOARD_FIELD_RE.finditer(block))
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(block)
+        value = block[match.end():end].strip().split("\n", 1)[0].strip()
+        fields[match.lastgroup].append(value)
+    return fields
 
 
 def _clean_clipboard_station_line(line: str) -> str:

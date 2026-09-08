@@ -82,6 +82,120 @@ async function openEtcDisclosure(page: Page, name: RegExp | string) {
 }
 
 test.describe("ETC ticket management browser flow", () => {
+  test("selects and drops extensionless ticket text without hiding files or silently filtering mixed selections", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, {
+      etcTicketReconciliationWorkflow: true, etcTicketWorkflowTaskMatchesBusinessBatch: true, sessionMode: "user",
+    });
+    const initialResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/etc/reconciliation-tasks/etc-recon-e2e-001");
+    await page.goto("/etc-tickets");
+    const task = await (await initialResponse).json();
+    task.parse_issues = [];
+    const posts: string[] = [];
+    await page.route("**/api/etc/reconciliation-tasks/etc-recon-e2e-001/ticket-root-files", async (route) => {
+      posts.push(route.request().postDataBuffer()!.toString("utf8"));
+      const name = posts.length === 1 ? "云A516HJ" : "行程二";
+      task.version += 1;
+      task.source_files.push({ file_id: `uploaded-${posts.length}`, source_kind: "ticket_root", original_name: name, content_type: "text/plain", has_blocking_issue: false });
+      await route.fulfill({ json: task });
+    });
+    const box = page.getByLabel("上传票根网");
+    const input = box.locator('input[type="file"]');
+    await expect(box).toBeVisible();
+    expect(await input.getAttribute("accept")).toBeNull();
+    await expect(page.getByLabel("上传信用卡账单").locator('input[type="file"]')).toHaveAttribute("accept", ".pdf,application/pdf");
+    const payload = "车牌号：云A516HJ\r\n交易时间：2026-03-27 10:20:00\r\n交易金额：95.00";
+    const chooser = page.waitForEvent("filechooser");
+    await box.click();
+    await (await chooser).setFiles({ name: "云A516HJ", mimeType: "", buffer: Buffer.from(payload) });
+    await expect(page.getByRole("list", { name: "已上传文件列表" }).getByText("云A516HJ", { exact: true })).toBeVisible();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain('filename="云A516HJ"');
+    expect(posts[0]).toContain(payload);
+
+    await input.setInputFiles([
+      { name: "合法.txt", mimeType: "text/plain", buffer: Buffer.from(payload) },
+      { name: "错误.pdf", mimeType: "application/pdf", buffer: Buffer.from("pdf") },
+      { name: "错误.zip", mimeType: "application/zip", buffer: Buffer.from("zip") },
+    ]);
+    await expect(page.getByText(/本次未上传任何文件。不支持：错误.pdf、错误.zip/)).toBeVisible();
+    expect(posts).toHaveLength(1);
+    const dropData = await page.evaluateHandle((text) => {
+      const data = new DataTransfer();
+      data.items.add(new File([text], "行程二"));
+      return data;
+    }, payload);
+    await box.dispatchEvent("drop", { dataTransfer: dropData });
+    await dropData.dispose();
+    await expect(page.getByRole("list", { name: "已上传文件列表" }).getByText("行程二", { exact: true })).toBeVisible();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toContain('filename="行程二"');
+    expect(posts[1]).toContain(payload);
+    await expect(page.getByText(/本次未上传任何文件/)).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("extensionless-upload.png"), fullPage: true });
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("shows partial saved files after one outcome read and never reposts an uncertain upload", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page, { allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/] });
+    await installDeterministicApiMocks(page, {
+      etcTicketReconciliationWorkflow: true, etcTicketWorkflowTaskMatchesBusinessBatch: true, sessionMode: "user",
+    });
+    const initialResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/etc/reconciliation-tasks/etc-recon-e2e-001");
+    await page.goto("/etc-tickets");
+    const task = await (await initialResponse).json();
+    task.parse_issues = [];
+    let posts = 0;
+    let reads = 0;
+    await page.route("**/api/etc/reconciliation-tasks/etc-recon-e2e-001", async (route) => {
+      reads += 1;
+      await route.fulfill({ json: task });
+    });
+    await page.route("**/api/etc/reconciliation-tasks/etc-recon-e2e-001/ticket-root-files", async (route) => {
+      posts += 1;
+      task.version += 1;
+      task.source_files.push({ file_id: "first-saved", source_kind: "ticket_root", original_name: "已保存行程", content_type: "text/plain", has_blocking_issue: false });
+      await route.fulfill({ status: 503, json: { error: "file_storage_unavailable", message: "第二个文件存储失败，部分文件可能已保存。" } });
+    });
+    const input = page.getByLabel("上传票根网").locator('input[type="file"]');
+    await input.setInputFiles([
+      { name: "已保存行程", mimeType: "", buffer: Buffer.from("first") },
+      { name: "未保存行程", mimeType: "", buffer: Buffer.from("second") },
+    ]);
+    await expect(page.getByText("第二个文件存储失败，部分文件可能已保存。")).toBeVisible();
+    const list = page.getByRole("list", { name: "已上传文件列表" });
+    await expect(list.getByText("已保存行程", { exact: true })).toBeVisible();
+    await expect(list.getByText("未保存行程", { exact: true })).toHaveCount(0);
+    expect(posts).toBe(1);
+    expect(reads).toBe(1);
+    await page.screenshot({ path: testInfo.outputPath("partial-upload.png"), fullPage: true });
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("keeps accepted damaged ticket text visible as a parsing issue rather than successful records", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, {
+      etcTicketReconciliationWorkflow: true, etcTicketWorkflowTaskMatchesBusinessBatch: true, sessionMode: "user",
+    });
+    const initialResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/etc/reconciliation-tasks/etc-recon-e2e-001");
+    await page.goto("/etc-tickets");
+    const task = await (await initialResponse).json();
+    await page.route("**/api/etc/reconciliation-tasks/etc-recon-e2e-001/ticket-root-files", async (route) => {
+      await route.fulfill({ json: {
+        ...task, version: task.version + 1, ticket_root_items: [],
+        source_files: [...task.source_files, { file_id: "bad-text", source_kind: "ticket_root", original_name: "损坏行程", content_type: "text/plain", has_blocking_issue: true }],
+        parse_issues: [{ issue_id: "bad-amount", file_id: "bad-text", source_kind: "ticket_root", original_name: "损坏行程", severity: "blocking", message: "第 2 条记录金额不合法", source_line: 5, extraction_method: "text", field_name: "amount" }],
+      } });
+    });
+    await page.getByLabel("上传票根网").locator('input[type="file"]').setInputFiles({ name: "损坏行程", mimeType: "", buffer: Buffer.from("bad record") });
+    await expect(page.getByText(/文件已上传，但有内容需要处理/)).toBeVisible();
+    await expect(page.getByText("第 2 条记录金额不合法")).toBeVisible();
+    await expect(page.getByRole("button", { name: /^解析异常/ })).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("button", { name: /^已上传文件/ })).toHaveAttribute("aria-expanded", "true");
+    await page.screenshot({ path: testInfo.outputPath("damaged-text-feedback.png"), fullPage: true });
+    expect(browserErrors).toEqual([]);
+  });
+
   test("administrator saves ETC OA draft prefill without exposing internal ids", async ({ page }) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });

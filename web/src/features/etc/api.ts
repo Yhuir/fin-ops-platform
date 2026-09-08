@@ -528,6 +528,7 @@ type ApiEtcReconciliationTasksPayload = {
 type EtcRequestInit = RequestInit & {
   timeoutMs?: number;
   timeoutMessage?: string;
+  singleEndpoint?: boolean;
 };
 
 export class EtcApiError extends Error {
@@ -604,12 +605,12 @@ function requestTimeoutSignal(parentSignal: AbortSignal | null | undefined, time
 
 async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T> {
   let lastHtmlError: Error | null = null;
-  const candidates = requestUrlCandidates(url);
+  const candidates = init.singleEndpoint ? [apiUrl(url)] : requestUrlCandidates(url);
   const timeoutMs = Number.isFinite(init.timeoutMs) && Number(init.timeoutMs) > 0
     ? Number(init.timeoutMs)
     : DEFAULT_ETC_REQUEST_TIMEOUT_MS;
   const requestSignal = requestTimeoutSignal(init.signal, timeoutMs);
-  const { timeoutMs: _timeoutMs, timeoutMessage, ...fetchInit } = init;
+  const { timeoutMs: _timeoutMs, timeoutMessage, singleEndpoint: _singleEndpoint, ...fetchInit } = init;
   try {
     for (const candidateUrl of candidates) {
       const response = await apiFetchResolved(candidateUrl, {
@@ -654,7 +655,7 @@ async function requestJson<T>(url: string, init: EtcRequestInit = {}): Promise<T
           }
         }
         if (message) {
-          throw responseError(response, "", message);
+          throw responseError(response, typeof errorPayload.error === "string" ? errorPayload.error : "", message);
         }
         if (typeof errorPayload.error === "string" && errorPayload.error.trim()) {
           throw responseError(response, errorPayload.error, errorPayload.error);
@@ -1168,8 +1169,9 @@ async function uploadEtcReconciliationFiles(
     {
       method: "POST",
       body: reconciliationUploadFormData(files, expectedVersion, extra),
+      singleEndpoint: true,
       timeoutMs: ETC_FILE_UPLOAD_TIMEOUT_MS,
-      timeoutMessage: "ETC 文件上传超时，请检查网络后重试，或分批上传较大的文件。",
+      timeoutMessage: "ETC 文件上传超时，保存结果尚未确认。请核对已上传文件后再处理。",
     },
   );
   return mapEtcReconciliationTask(task);

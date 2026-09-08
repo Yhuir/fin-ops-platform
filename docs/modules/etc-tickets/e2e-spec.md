@@ -22,7 +22,7 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 | `ETC-TICKET-E2E-003` | 创建 OA 草稿并进入暂存 | P0 | 用户点击提交 OA 后必须打开创建草稿确认 dialog；确认后只调用一次 `POST /api/etc/business-batches/{id}/oa-draft`，成功后批次进入暂存并显示 OA 提交确认 dialog 和打开草稿入口；即使未提交列表 selection 被清空，确认操作仍必须携带该 batch 的最新 version。 |
 | `ETC-TICKET-E2E-004` | 人工确认已提交并进入 submitted bucket | P0 | 用户人工点击已提交后只调用一次 `manual-oa-status`；页面切换到已提交 bucket，隐藏提交 OA 入口，显示人工确认已提交状态和原批次证据；不得出现隐藏浏览器错误。 |
 | `ETC-TICKET-E2E-005` | 删除/reset 和 relation command safety | P0 | 任意阶段 delete/reset 必须走 business batch 统一删除链路；已提交 summary relation 取消必须通过 Workbench relation command boundary，失败时不得本地半删或恢复旧 OA+银行二栏关系。 |
-| `ETC-TICKET-E2E-006` | source file/object storage 和大 ZIP 预览 | P0 | source file 上传必须先落对象存储再追加 metadata；对象存储失败返回结构化错误且不留下半写；大 ZIP preview 不应被普通 API timeout 截断。 |
+| `ETC-TICKET-E2E-006` | source file/object storage 和大 ZIP 预览 | P0 | 单文件先存对象再存元数据，失败文件不能半写；多文件前序成功来源保持真实可见。票根选择/拖拽支持无扩展名和空 MIME，混选不支持后缀零 POST。上传无自动重发，可能已写失败后精确 GET 一次；坏文件保留并显示 issue，零可核对明细，可删除重传。大 ZIP preview 保留原超时合同。 |
 | `ETC-TICKET-E2E-007` | task-only、新建批次和 durable import recovery | P0 | 新建批次可省略 `taskId`，后端创建 linked task + active business batch；创建失败 tombstone 新 task；durable import restart 后创建 OA 草稿前必须补齐 linked task 状态。 |
 | `ETC-TICKET-E2E-008` | Workbench summary fan-out | P0 | 人工已提交业务批次必须在 Workbench open 区形成折叠 `etc_invoice_summary`；已存在 active relation 时 open 区过滤陈旧 summary；delete/reset 后 summary 消失且散票恢复。 |
 | `ETC-TICKET-E2E-009` | 权限、旧入口和 regression | P0 | read-only 用户不得触发 OA 草稿、人工确认、删除/reset、source file/upload/import mutation；旧 `/api/etc/batches*` 后端兼容入口、测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 和 ETC `oa-status/refresh` 不得回归；已移除 ETC OA 自动检测入口和字段不得回归。 |

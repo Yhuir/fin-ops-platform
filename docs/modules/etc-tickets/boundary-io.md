@@ -2,6 +2,10 @@
 
 日期：2026-08-20
 
+> 2026-09-08：[票根文本上传修复与验证](../../dev/etc-ticket-root-text-upload-repair-plan.md)。仅票根入口显式接受无扩展名文本；TXT/手工粘贴按记录边界解析，坏文件保留原件和 issue、零可核对 items。公开 DTO、其他入口及持久化 owner 不变。
+
+来源登记（对象文件存储、元数据/审计/版本提交及已有失败回滚）与 PostgreSQL task 重载、解析提交、来源删除使用同一既有 `_source_parse_commit_lock`，避免重载替换 task 时丢失新来源引用；耗时解析/OCR 在锁外运行。此约束限于单 API 进程内既有 task owner，不新增跨进程锁或全局 HTTP 串行机制。
+
 ## 页面完整性统计合同
 
 - ETC 批次列表既有主响应的 `statistics` 只返回 canonical 进项发票总数和其中具有非空 `etc_invoice_id` 的 ETC 发票数；不以业务批次、对账任务、源文件、标题或文本标签推断 ETC 身份，也不受当前 bucket、车牌、关键词或分页条件影响。
@@ -42,7 +46,8 @@
 | OA 金额与发票金额展示 | linked reconciliation task `oaTotalAmount`、business batch `invoiceSummary`、`amountBreakdown` | `oaTotalAmount`/`amountBreakdown.oaAmount` 是 OA 提交金额事实源；`invoiceSummary` 的持久化标量只从 business batch `invoice_ids` 对应 ETC 发票求数量和含税总额，不得被 submission/OA `total_amount`、`oa_total_amount` 覆盖。列表与详情必须返回同一发票汇总；历史差额使用既有 `amountBreakdown.gapAmount/gapReason` 如实展示，不据差额自动补发票。所有金额以无千分位两位小数展示；差额只提示、不阻断、不写回；禁止为该展示新增共享 API、read model、queue 或跨页面写入 |
 | OA 草稿结果决定 | `POST /api/etc/business-batches/{id}/manual-oa-status` | creating 与 pending 都允许决定；`submitted` 表示用户已在 OA 完成草稿提交，批次进入已提交；`not_submitted` 表示用户已在 OA 删除草稿，批次回到未提交。结果弹窗和暂存区只暴露这两个 command；同页 OA create 请求未完成时暂时禁用按钮，之后由 version CAS 防并发覆盖。该 command 写 business batch / reconciliation task / audit，并在提交事实落地后把受影响月份交给既有 `workbench-matching` durable dirty-scope 边界；禁止检测 OA、relink canonical invoice 或投递已退役的 Workbench page refresh。对已经 submitted 的同一决定允许幂等重放：不得推进 version 或重复写业务审计，只补投同一精确 matching scope；若请求携带的 OA row 与既有非空 OA row 冲突则 fail fast。 |
 | 批次列表标题 | `EtcTicketManagementPage.tsx` | 左栏按当前页 business batch 成员发票的最早/最晚开票月份命名，例如 `2026年4月–5月 ETC发票`；单月只显示一个月份，跨年同时显示两端年份。成员没有开票日期时仅回退到既有 `scopeMonth`，仍缺失则明确显示“开票月份未记录”，禁止回退提交/创建日期。列表 DTO 只对已分页的业务批次做一次 lateral `min/max(invoice_date)`，count/statistics 查询不得扫描日期范围；同一行继续展示发票数量和金额，不展示 internal business batch ID、external batch ID 或历史内部 title。后端 title/PATCH 合同只保留给现有非页面调用方。 |
-| ETC 对账来源文件 | `untrusted_document_policy.py`、`etc_reconciliation_source_upload_service.py` | 在对象存储和解析之前统一校验后缀、文件签名、类型、字节数、图片像素/尺寸、PDF 页数/渲染像素和 DOCX 解压资源；票根只接受 TXT/PDF/JPG/PNG，信用卡账单只接受 PDF。签名与后缀不一致、未知二进制或超限文件返回 `invalid_document_upload`，不得再按 document fallback、写入 source file 或进入 OCR。 |
+| ETC 对账来源文件 | `untrusted_document_policy.py`、`etc_reconciliation_source_upload_service.py` | 全批先校验文件类型/签名及既有资源限制再写存储。票根 API 接受 TXT/TEXT、无扩展名纯文本及既有 PDF/JPG/PNG；页面 TXT 框只接收前三类，未知后缀或混选整体不发 POST。无扩展名 PDF/图片/ZIP 不伪装为文本。信用卡只接受 PDF，其他消费者不打开缺后缀许可。格式失败为 400 `invalid_document_upload`，来源模式冲突为既有 409，均在本批预检零写。UTF-8/BOM/GB18030/GBK 严格解码供 MIME、错位识别和 parser 复用，不忽略乱码。文本遇损坏记录返回 200 + blocking parseIssues/hasBlockingIssue，保留原件但该文件零 items，删除后可重传。 |
+| 票根上传结果恢复 | 页面 upload handler / 既有 task detail GET | 上传使用正式 URL 单次 POST，无自动重传。503/超时/连接中断、版本冲突或解析期间来源删除后，精确 GET 一次以显示可能已保存的前序文件及最新 version，原错误仍可见；重读失败明确状态待确认。写前 400/403/来源冲突不额外 GET；旧批次上传/重读响应不得覆盖新选择。不改变逐文件存储事务或新增全批事务。 |
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 通过统一文件边界后，先从 PDF 文字层解析交易行；无可用交易行时才逐页渲染并用布局 OCR 重建表格行，不积压全部页面位图。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。禁止恢复外部 `pdftotext` 进程或 raw bytes OCR fallback。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | 导入批次与业务批次成员 | `app.etc_import_batches.invoice_ids`、`app.etc_business_batches.invoice_ids` | 当前导入尝试必须记录本次确认的完整 ETC 发票成员，包括已存在且附件完整、结果为 `duplicate_skipped` 的发票；重复发票保留首次 `import_batch_id` 作为 provenance，不据此排除其加入后续导入批次。绑定业务批次前先验证全部成员未提交且未被其它业务批次占用，再一次性写入目标批次与发票 owner，冲突整批失败、不得半绑定。创建 OA 草稿只按目标业务批次精确 `invoice_ids` 校验，不得通过成员旧 `import_batch_id` 拉入历史批次的其它发票。 |

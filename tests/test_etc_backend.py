@@ -3091,6 +3091,89 @@ class EtcApiTests(unittest.TestCase):
         )
         self.assertEqual(payload["parseIssues"], [])
 
+    def test_ticket_root_extensionless_bad_file_delete_and_reupload_closes_source_lifecycle(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC text lifecycle", created_by="alice")
+            endpoint = f"/api/etc/reconciliation-tasks/{task.task_id}"
+            broken = SYNTHETIC_TICKET_ROOT_TXT.decode("utf-8").replace("￥57.95", "￥坏金额", 1)
+            self.assertNotEqual(broken.encode("utf-8"), SYNTHETIC_TICKET_ROOT_TXT)
+            body, headers = multipart({"broken": broken.encode("utf-8")}, fields={"expectedVersion": str(task.version)})
+            response = app.handle_request("POST", f"{endpoint}/ticket-root-files", body=body, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            uploaded = json.loads(response.body)
+            self.assertEqual(uploaded["ticketRootItems"], [])
+            self.assertTrue(uploaded["sourceFiles"][0]["hasBlockingIssue"])
+            self.assertTrue(uploaded["parseIssues"])
+            self.assertEqual(json.loads(app.handle_request("GET", endpoint).body)["parseIssues"], uploaded["parseIssues"])
+            source_id = uploaded["sourceFiles"][0]["fileId"]
+            deleted = app.handle_request("DELETE", f"{endpoint}/source-files/{source_id}",
+                                         json.dumps({"expectedVersion": uploaded["version"]}))
+            self.assertEqual(deleted.status_code, 200)
+            clean = json.loads(deleted.body)
+            self.assertEqual(clean["sourceFiles"], [])
+            self.assertEqual(clean["parseIssues"], [])
+            body, headers = multipart({"fixed": SYNTHETIC_TICKET_ROOT_TXT}, fields={"expectedVersion": str(clean["version"])})
+            response = app.handle_request("POST", f"{endpoint}/ticket-root-files", body=body, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            uploaded = json.loads(response.body)
+            self.assertEqual(len(uploaded["ticketRootItems"]), 11)
+            self.assertEqual(uploaded["parseIssues"], [])
+            self.assertEqual(uploaded["sourceFiles"][0]["originalName"], "fixed")
+            self.assertEqual(json.loads(app.handle_request("GET", endpoint).body)["ticketRootItems"], uploaded["ticketRootItems"])
+
+    def test_ticket_root_upload_prewrite_errors_leave_version_and_sources_unchanged(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC preflight", created_by="alice")
+            endpoint = f"/api/etc/reconciliation-tasks/{task.task_id}"
+            for name, content, expected_error in (
+                ("empty", b"", "invalid_document_upload"),
+                ("nul", b"a\x00b", "invalid_document_upload"),
+                ("binary", VALID_DOCUMENT_PDF, "invalid_document_upload"),
+                ("unsupported.bin", SYNTHETIC_TICKET_ROOT_TXT, "invalid_document_upload"),
+                ("wrong-slot", "信用卡账单".encode("gb18030"), "wrong_reconciliation_source_kind"),
+            ):
+                with self.subTest(name=name):
+                    body, headers = multipart({"valid.txt": SYNTHETIC_TICKET_ROOT_TXT, name: content},
+                                              fields={"expectedVersion": str(task.version)})
+                    response = app.handle_request("POST", f"{endpoint}/ticket-root-files", body=body, headers=headers)
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(json.loads(response.body)["error"], expected_error)
+                    current = json.loads(app.handle_request("GET", endpoint).body)
+                    self.assertEqual(current["sourceFiles"], [])
+                    self.assertEqual(current["ticketRootItems"], [])
+                    self.assertEqual(current["version"], task.version)
+
+    def test_ticket_root_second_storage_failure_keeps_first_source_and_new_version(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC partial storage", created_by="alice")
+            endpoint = f"/api/etc/reconciliation-tasks/{task.task_id}"
+            store = app._state_store.store_etc_reconciliation_file
+            calls = 0
+
+            def fail_second(**kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise ObjectStorageWriteError("synthetic second write failure")
+                return store(**kwargs)
+
+            second_content = SYNTHETIC_TICKET_ROOT_TXT.decode("utf-8").replace("云A516HJ", "云B516HJ").encode("utf-8")
+            body, headers = multipart({"first": SYNTHETIC_TICKET_ROOT_TXT, "second": second_content},
+                                      fields={"expectedVersion": str(task.version)})
+            with patch.object(app._state_store, "store_etc_reconciliation_file", side_effect=fail_second):
+                response = app.handle_request("POST", f"{endpoint}/ticket-root-files", body=body, headers=headers)
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(json.loads(response.body)["error"], "reconciliation_file_storage_unavailable")
+            self.assertIn("部分文件可能已保存", json.loads(response.body)["message"])
+            current = json.loads(app.handle_request("GET", endpoint).body)
+            self.assertEqual([source["originalName"] for source in current["sourceFiles"]], ["first"])
+            self.assertEqual(len(current["ticketRootItems"]), 11)
+            self.assertGreater(current["version"], task.version)
+            self.assertEqual(current["parseIssues"], [])
+
     def test_ticket_root_upload_route_imports_txt_file_with_clipboard_parser(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

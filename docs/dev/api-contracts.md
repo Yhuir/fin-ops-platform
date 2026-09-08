@@ -1223,6 +1223,12 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `DELETE /api/etc/business-batches/{id}` 对任意阶段业务批次执行本地删除/reset，不撤销 OA。请求可带 `expectedVersion` 做并发保护，不要求删除原因；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind`、`releasedInvoiceCount` 和关联删除结果。后端必须删除该批次本地创建/导入的 ETC 对账任务、导入来源、核对结果、提交批次元数据和 ETC 发票；若已提交批次存在 `etc_invoice_summary`，必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失。若该 summary 已参与 active relation，删除时通过 canonical relation command 取消包含该 summary 的 relation，OA 和银行流水不得恢复成二栏 active relation。`workbench_relation` distribution/read model 非 fresh 不得阻断该删除/reset；写安全以权限、expected version、canonical relation 状态、持久化和 outbox/refresh enqueue 为准，失败时返回对应稳定错误码。
 - ETC 对账任务和业务批次源文件上传必须先落对象存储，再追加 source file 元数据。对象存储不可写时返回稳定错误码 `reconciliation_file_storage_unavailable` 和 HTTP 503，上传不得留下半写入的 source file、版本号或审计事件。慢解析/OCR 的结果提交必须与 source file 删除互斥；提交前来源已删除时返回 HTTP 409、`{ "error": "source_file_deleted_during_parse", "message": "源文件在解析完成前已被删除，请重新上传。" }`，不得留下孤儿解析结果或明细。`/api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`/ticket-root-files`、`/ticket-root-texts`、`/supplement-evidences` 使用直接错误结构 `{ "error": "...", "message": "..." }`；`/api/etc/business-batches/{id}/source-files` 使用 business batch envelope `{ "ok": false, "error": { "code": "...", "message": "..." } }`。
 
+### ETC 票根文本上传补充（2026-09-08）
+
+`POST /api/etc/reconciliation-tasks/{task_id}/ticket-root-files` 保留 multipart `files/expectedVersion` 和 task DTO。TXT/TEXT 与无扩展名文本按 UTF-8/BOM/GB18030/GBK 严格识别；缺后缀许可仅该入口开启，原名/字节不改，真实 PDF/图片/ZIP 不能作为无后缀文本进入。400 `invalid_document_upload` 区分空文件、类型/编码和资源上限；错入口400与既有来源模式409保持零预检写。200 可能附带 `parseIssues` 与来源 `hasBlockingIssue`，损坏文本文件零 `ticketRootItems`，不代表全部解析成功。
+
+前述“503 不留下半写”按**单文件**解释：失败文件不产生成功元数据/版本/审计，但前序文件可能已经持久化。503 message 不再宣称全批未保存；前端上传只发一次正式 URL POST，可能已写失败后精确 GET 一次（版本冲突/解析期间来源删除亦补读），不自动重传。其他写前400/403/来源模式409不补读；错误结构与权限不变。
+
 ## AppHealth 运维 Dashboard API
 
 `GET /api/operations/app-health-dashboard`

@@ -40,6 +40,58 @@ def _pdf_bytes(page_count: int = 1) -> bytes:
 
 
 class UntrustedDocumentPolicyTests(unittest.TestCase):
+    def test_extensionless_text_requires_explicit_permission_and_text_kind(self) -> None:
+        content = "票根网\n车牌号：云A12345".encode("utf-8")
+        for allowed, enabled in ((frozenset({"text"}), False), (frozenset({"pdf"}), True)):
+            with self.subTest(allowed=allowed, enabled=enabled):
+                with self.assertRaisesRegex(UntrustedDocumentError, "document_format_not_allowed"):
+                    inspect_untrusted_document(
+                        file_name="云A12345", content=content, allowed_kinds=allowed,
+                        limits=DocumentLimits(max_bytes=1024), allow_extensionless_text=enabled,
+                    )
+        for encoding in ("utf-8-sig", "utf-8", "gb18030", "gbk"):
+            with self.subTest(encoding=encoding):
+                encoded = content.decode("utf-8").encode(encoding)
+                document = inspect_untrusted_document(
+                    file_name="云A12345", content=encoded, allowed_kinds=frozenset({"text"}),
+                    limits=DocumentLimits(max_bytes=1024), allow_extensionless_text=True,
+                )
+                self.assertEqual(document.file_name, "云A12345")
+                self.assertEqual(document.content, encoded)
+                self.assertEqual(document.kind, "text")
+
+    def test_extensionless_permission_does_not_allow_binary_or_unknown_suffixes(self) -> None:
+        archive = BytesIO()
+        with ZipFile(archive, "w") as output:
+            output.writestr("data.txt", "not a ticket")
+        for file_name, content in (
+            ("ticket", _pdf_bytes()), ("ticket", _image_bytes()), ("ticket", archive.getvalue()),
+            ("ticket", b""), ("ticket", b" \n\t"), ("ticket", b"abc\x00def"),
+            ("ticket", b"\xff"), ("ticket.exe", b"readable text"),
+            ("ticket.bin", b"readable text"), ("ticket.txt.exe", b"readable text"),
+        ):
+            with self.subTest(file_name=file_name, prefix=content[:8]):
+                with self.assertRaises(UntrustedDocumentError):
+                    inspect_untrusted_document(
+                        file_name=file_name, content=content, allowed_kinds=frozenset({"text", "pdf", "png"}),
+                        limits=DocumentLimits(max_bytes=1024 * 1024), allow_extensionless_text=True,
+                    )
+
+    def test_etc_preflights_all_files_and_strictly_reads_gb_wrong_slot_before_storage(self) -> None:
+        task_service = Mock()
+        task_service.get_task.return_value = SimpleNamespace(version=1, source_files=[])
+        service = EtcReconciliationSourceUploadService(task_service=task_service)
+        for uploads, expected in (
+            ([EtcReconciliationSourceUpload(file_name="ticket.txt", content=b"valid text"),
+              EtcReconciliationSourceUpload(file_name="invalid", content=b"\x00")], UntrustedDocumentError),
+            ([EtcReconciliationSourceUpload(file_name="statement", content="信用卡账单".encode("gb18030"))], ValueError),
+        ):
+            with self.subTest(uploads=uploads):
+                with self.assertRaises(expected):
+                    service.upload_sources(task_id="ETC-1", source_kind=SourceFileKind.TICKET_ROOT,
+                                           expected_version=1, actor="alice", uploads=uploads)
+                task_service.store_uploaded_source_file.assert_not_called()
+
     def test_valid_png_is_normalized_before_ocr(self) -> None:
         document = inspect_untrusted_document(
             file_name="invoice.png",

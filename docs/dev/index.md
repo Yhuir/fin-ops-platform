@@ -24,5 +24,6 @@
 
 ## 待批准功能实施
 
+- [ETC 票根文本上传修复与验证](etc-ticket-root-text-upload-repair-plan.md)：入口限定许可、文本记录边界与错误反馈、前端选择/拖拽、多文件失败可见性及回归/性能证据；2026-09-08 已实施，执行与发布状态见第 10 节。
 - [银行同时间流水与余额修复计划](bank-same-time-ordering-repair-plan.md)：统一列表/导出/账户余额的顺序依据、明确未确认和最后已知余额、控制查询性能与旧代码清理；2026-09-08 设计阶段，未实现或发布。
 - [现金模块实施计划](cash-module-implementation-plan.md)：现金分支的开发顺序、执行单元、旧链路处理、测试/性能与复审；[技术详细设计](cash-module-technical-design.md)集中维护后端/API/数据库/事务，配套[业务总设计](../product-specs/cash-module-design.md)与[UI/Make 交接](../product-specs/cash-module-ui-spec.md)。不使用 GSD，未批准前不实施。

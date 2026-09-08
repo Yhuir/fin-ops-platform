@@ -2,6 +2,8 @@
 
 本文件把 `e2e-spec.md` 的 ETC 票据管理 Browser 合同映射到自动化覆盖。
 
+2026-09-08 `ETC-TICKET-E2E-006` 增补：Chromium 覆盖无扩展名点击选择（原生 input 无 accept）、空 MIME 拖拽、混选零提交、第二文件失败但第一文件可见的单次 GET、损坏来源与异常展开；组件另覆盖 400/403/写前来源冲突不补读、版本/解析提交后409补读、未知结果/重读失败、跨批次晚返回，API 验证 HTML 单次 POST 与错误码保留。本地 mock 浏览器不证明真实系统文件选择器或生产对象字节；真实 PG/生产 smoke 结果见[修复记录](../../dev/etc-ticket-root-text-upload-repair-plan.md)。下表旧“上传失败不留下半写”仅指失败文件，不能解释成跨文件全批回滚。
+
 | Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
 | --- | --- | --- | --- |
 | `ETC-TICKET-E2E-001` | `covered` | `web/e2e/etc-tickets-flow.spec.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`tests/test_etc_backend.py` | Browser 覆盖 `/etc-tickets` ready、标题、无月份/车牌/关键词搜索框、未提交/暂存/已提交状态切换、三个 HeroUI 分段等宽全宽、三 bucket 计数、业务批次行和四阶段；组件锁定无内部版本号、完成阶段重复说明、金额来源说明、相等说明和禁用原因，并保护同一批次手动/后台刷新时已选明细与未提交处理说明不丢失。121 批 fixture 证明 `page_size=50`、第 2/3 页、第 121 条与 total 一致，旧页不会拼接；并覆盖首屏 GET 暂时 503 后刷新恢复。组件/API 继续保护 task-only orphan、新建批次与 counts/items 同口径。 |

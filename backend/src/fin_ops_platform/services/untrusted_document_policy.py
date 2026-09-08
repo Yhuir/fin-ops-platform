@@ -69,13 +69,15 @@ def inspect_untrusted_document(
     content: bytes,
     allowed_kinds: frozenset[str],
     limits: DocumentLimits,
+    allow_extensionless_text: bool = False,
 ) -> ValidatedDocument:
     if not isinstance(content, bytes) or not content:
         raise UntrustedDocumentError("document_empty")
     if len(content) > limits.max_bytes:
         raise UntrustedDocumentError("document_too_large")
 
-    declared_kind = _SUFFIX_KIND.get(Path(file_name).suffix.lower())
+    suffix = Path(file_name).suffix.lower()
+    declared_kind = "text" if not suffix and allow_extensionless_text else _SUFFIX_KIND.get(suffix)
     if declared_kind is None or declared_kind not in allowed_kinds:
         raise UntrustedDocumentError("document_format_not_allowed")
     detected_kind = _detect_kind(content, declared_kind)

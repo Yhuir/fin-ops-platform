@@ -4230,11 +4230,21 @@ class Application:
     def _reconciliation_error_response(self, error: ValueError) -> Response:
         code = str(error) or "invalid_reconciliation_request"
         if code.startswith("document_"):
+            document_messages = {
+                "document_empty": "文件为空，请选择包含有效内容的文件。",
+                "document_too_large": "文件大小超过上传上限（64 MiB），请拆分源文件后上传。",
+                "document_format_not_allowed": "该入口不支持此文件类型。票根行程文本支持 TXT、TEXT 或无扩展名文件。",
+                "document_text_invalid": "文件不是有效文本，请使用 UTF-8 或 GB18030/GBK 编码的票根行程文本。",
+                "document_signature_invalid": "无法识别文件内容或文本编码，请检查原文件，勿仅修改扩展名。",
+                "document_signature_mismatch": "文件内容与文件类型不一致，请上传原始文件，勿仅修改扩展名。",
+            }
             return self._json_response(
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_document_upload",
-                    "message": "文件格式、签名或资源大小不符合上传要求，请上传有效的 TXT、PDF、JPG 或 PNG 文件。",
+                    "message": document_messages.get(
+                        code, "文件内容或资源限制不符合上传要求，请检查文件大小、页数和图片尺寸。"
+                    ),
                 },
             )
         status = HTTPStatus.CONFLICT if code in {
@@ -4250,6 +4260,7 @@ class Application:
             "source_file_deleted_during_parse",
         } else HTTPStatus.BAD_REQUEST
         messages = {
+            "task_version_conflict": "当前批次已更新，请核对最新文件与数据后再操作。",
             "ticket_root_source_mode_conflict": "已有手工粘贴票根网源，请先删除已有票根来源后才能切换导入方式。",
             "ticket_root_source_mode_conflict_pdf": "已有票根网 PDF/JPG 源文件，请先删除已有票根来源后才能切换导入方式。",
             "ticket_root_source_mode_conflict_text_file": "已有票根网 TXT 源文件，请先删除已有票根来源后才能切换导入方式。",
@@ -4270,7 +4281,7 @@ class Application:
             HTTPStatus.SERVICE_UNAVAILABLE,
             {
                 "error": "reconciliation_file_storage_unavailable",
-                "message": "文件存储暂时不可用，上传未保存。请稍后重试或联系管理员检查对象存储配置。",
+                "message": "文件存储暂时不可用，部分文件可能已保存。请核对当前文件列表后再处理。",
             },
         )
 

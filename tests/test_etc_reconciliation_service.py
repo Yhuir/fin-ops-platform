@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
 from types import SimpleNamespace
+from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fin_ops_platform.services.etc_document_parsers import (
@@ -323,6 +327,90 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(updated.ticket_root_items[0].amount, Decimal("71.25"))
         self.assertEqual(updated.parse_results[0].parser_code, TicketRootClipboardTextParser.parser_code)
 
+    class _ReloadingPostgresStateStore(_PostgresLikeReconciliationStateStore):
+        storage_backend = "postgres"
+
+        def load_etc_reconciliation_state(self) -> dict:
+            return deepcopy(super().load_etc_reconciliation_state())
+
+        def save_etc_reconciliation_state(self, snapshot: dict) -> None:
+            super().save_etc_reconciliation_state(deepcopy(snapshot))
+
+    def test_source_registration_blocks_reload_until_file_and_metadata_commit(self) -> None:
+        store = self._ReloadingPostgresStateStore()
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name), state_store=store)
+        first = service.create_task(title="upload", created_by="alice")
+        second = service.create_task(title="read", created_by="alice")
+        storing = Event()
+        allow_store = Event()
+        reading = Event()
+        reloaded = Event()
+        original_store = service._store_file
+        original_load = store.load_etc_reconciliation_state
+
+        def blocked_store(**kwargs):
+            storing.set()
+            self.assertTrue(allow_store.wait(5), "test did not release file storage")
+            return original_store(**kwargs)
+
+        def watched_load():
+            reloaded.set()
+            return original_load()
+
+        def read_other_task():
+            reading.set()
+            return service.get_task(second.task_id)
+
+        with patch.object(service, "_store_file", side_effect=blocked_store), patch.object(store, "load_etc_reconciliation_state", side_effect=watched_load):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                upload = pool.submit(service.store_uploaded_source_file, task_id=first.task_id,
+                    source_kind=SourceFileKind.TICKET_ROOT, original_name="ticket.txt",
+                    content_type="text/plain", content=TICKET_ROOT_CLIPBOARD_TEXT.encode(), created_by="alice")
+                try:
+                    self.assertTrue(storing.wait(5))
+                    read = pool.submit(read_other_task)
+                    self.assertTrue(reading.wait(5))
+                    self.assertFalse(reloaded.wait(0.1), "reload replaced the task during source registration")
+                finally:
+                    allow_store.set()
+                source = upload.result(timeout=5)
+                self.assertEqual(read.result(timeout=5).task_id, second.task_id)
+        self.assertTrue(reloaded.is_set())
+        updated = service.apply_parse_result(task_id=first.task_id, actor="alice", require_source_file=True,
+            parse_result=TicketRootClipboardTextParser().parse_text(file_id=source.file_id, text=TICKET_ROOT_CLIPBOARD_TEXT))
+        self.assertEqual([item.file_id for item in updated.source_files], [source.file_id])
+        self.assertEqual(len(updated.ticket_root_items), 4)
+        restored = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name), state_store=store).get_task(first.task_id)
+        self.assertEqual(len(restored.ticket_root_items), 4)
+        self.assertEqual([event.event_type for event in restored.audit_events], ["task_created", "source_file_uploaded", "file_parsed"])
+
+    def test_concurrent_source_uploads_and_reloads_keep_unique_file_ids_and_all_metadata(self) -> None:
+        store = self._ReloadingPostgresStateStore()
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name), state_store=store)
+        tasks = [service.create_task(title=f"upload-{index}", created_by="alice") for index in range(12)]
+        start = Event()
+
+        def upload(task):
+            self.assertTrue(start.wait(5))
+            service.get_task(task.task_id)
+            source = service.store_uploaded_source_file(task_id=task.task_id, source_kind=SourceFileKind.TICKET_ROOT,
+                original_name="ticket.txt", content_type="text/plain", content=TICKET_ROOT_CLIPBOARD_TEXT.encode(), created_by="alice")
+            service.apply_parse_result(task_id=task.task_id, actor="alice", require_source_file=True,
+                parse_result=TicketRootClipboardTextParser().parse_text(file_id=source.file_id, text=TICKET_ROOT_CLIPBOARD_TEXT))
+            reread = service.get_task(task.task_id)
+            self.assertEqual(len(reread.ticket_root_items), 4)
+            self.assertEqual([item.file_id for item in reread.source_files], [source.file_id])
+            return source.file_id
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(upload, task) for task in tasks]
+            start.set()
+            ids = [future.result(timeout=10) for future in futures]
+        self.assertEqual(len(set(ids)), len(tasks))
+        self.assertEqual(set(ids), {f"ETC-RECON-FILE-{index:06d}" for index in range(1, len(tasks) + 1)})
+        restored = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name), state_store=store)
+        self.assertTrue(all(len(restored.get_task(task.task_id).ticket_root_items) == 4 for task in tasks))
+
     def test_source_upload_service_submits_ticket_root_manual_text(self) -> None:
         with TemporaryDirectory() as temp_dir:
             task_service = EtcReconciliationTaskService(data_dir=Path(temp_dir))
@@ -532,6 +620,124 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(result.ticket_root_items, [])
         self.assertEqual(result.issues[0].severity, ParseIssueSeverity.BLOCKING)
         self.assertEqual(result.issues[0].message, "票根网手工粘贴内容缺少车牌号，不能进入核对。")
+
+    def test_ticket_root_clipboard_text_parser_reports_broken_record_in_either_order(self) -> None:
+        header = "按行程查看\n车牌号：云ADA0381\n"
+        good = "交易时间：2026-04-08 11:13:41交易金额：￥71.25\n发票数量：2\n"
+        broken = "交易时间：2026-04-09 18:57:17交易金额：损坏\n发票数量：1\n"
+        for records, broken_index in ((good + broken, 2), (broken + good, 1)):
+            with self.subTest(broken_index=broken_index):
+                result = TicketRootClipboardTextParser().parse_text(file_id="BROKEN-TXT", text=header + records)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.ticket_root_items, [])
+                self.assertEqual(len(result.issues), 1)
+                issue = result.issues[0]
+                self.assertEqual(issue.file_id, "BROKEN-TXT")
+                self.assertEqual(issue.field_name, "amount")
+                self.assertEqual(issue.source_line, 3 if broken_index == 1 else 5)
+                self.assertIn(f"第 {broken_index} 条", issue.message)
+
+    def test_ticket_root_clipboard_text_parser_rejects_missing_invalid_and_duplicate_fields(self) -> None:
+        header = "按行程查看\n车牌号：云ADA0381\n"
+        valid = "交易时间：2026-04-08 11:13:41\n交易金额：￥71.25\n发票数量：2\n"
+        cases = (
+            (valid.replace("交易金额：￥71.25\n", ""), "amount"),
+            (valid.replace("交易时间：2026-04-08 11:13:41\n", ""), "transaction_at"),
+            (valid.replace("2026-04-08", "2026-02-30"), "transaction_at"),
+            (valid.replace("11:13:41", "25:13:41"), "transaction_at"),
+            (valid.replace("71.25", "71.259"), "amount"),
+            (valid.replace("71.25", "71.25坏"), "amount"),
+            (valid.replace("71.25", "NaN"), "amount"),
+            (valid.replace("71.25", "-1.00"), "amount"),
+            (valid + "交易金额：￥88.86\n", "amount"),
+            (valid.replace("发票数量：2", "发票数量：未知"), "invoice_count"),
+            (valid.replace("发票数量：2", "发票数量：2.5"), "invoice_count"),
+            (valid + "发票数量：3\n", "invoice_count"),
+            (valid.replace("\n交易金额", "交易时间：2026-04-08 11:13:41\n交易金额"), "transaction_at"),
+        )
+        for text, field in cases:
+            with self.subTest(text=text):
+                result = TicketRootClipboardTextParser().parse_text(file_id="INVALID-TXT", text=header + text)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.ticket_root_items, [])
+                self.assertIn(field, [issue.field_name for issue in result.issues])
+                self.assertTrue(all(issue.source_line is not None for issue in result.issues))
+
+    def test_ticket_root_clipboard_text_parser_detects_orphan_record_without_time(self) -> None:
+        header = "按行程查看\n车牌号：云ADA0381\n"
+        good = "交易时间：2026-04-08 11:13:41\n金额：71.25\n发票数量：2\n"
+        orphan = "金额：88.86\n发票数量：1\n"
+        for records in (orphan + good, good + orphan):
+            with self.subTest(records=records):
+                result = TicketRootClipboardTextParser().parse_text(file_id="ORPHAN-TXT", text=header + records)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.ticket_root_items, [])
+
+    def test_ticket_root_clipboard_text_parser_preserves_optional_station_and_invoice_count_rules(self) -> None:
+        for count_line, count in (("", 1), ("发票数量：0\n", 0), ("发票数量：2张\n", 2)):
+            with self.subTest(count=count):
+                result = TicketRootClipboardTextParser().parse_text(
+                    file_id="OPTIONAL-TXT", task_id="TASK-OPTIONAL",
+                    text="按行程查看\n车牌号：云ADA0381\n交易时间：2026/04/08 11:13\n收费金额：￥0.00\n" + count_line,
+                )
+                self.assertTrue(result.ok)
+                self.assertEqual(len(result.ticket_root_items), 1)
+                item = result.ticket_root_items[0]
+                self.assertEqual((item.task_id, item.transaction_at, item.amount), ("TASK-OPTIONAL", "2026-04-08 11:13", Decimal("0.00")))
+                self.assertEqual((item.entry_station, item.exit_station, item.invoice_count), ("", "", count))
+                self.assertEqual(item.parse_confidence, 0.72)
+
+    def test_ticket_root_clipboard_text_parser_ignores_navigation_and_blank_lines(self) -> None:
+        result = TicketRootClipboardTextParser().parse_text(
+            file_id="NAV-TXT",
+            text="\n首页\n按行程查看\n入口收费站/出口收费站\n车牌号：云ADA0381\n\n"
+            "交易时间：2026-04-08 11:13:41交易金额：￥71.25查看发票 发票下载 发票转发\n"
+            "云南\n测试入口站\n\n云南\n测试出口站\n发票数量：2\n1234\n版权所有：测试\n",
+        )
+        self.assertEqual(result.issues, [])
+        self.assertEqual(len(result.ticket_root_items), 1)
+        self.assertEqual((result.ticket_root_items[0].entry_station, result.ticket_root_items[0].exit_station), ("测试入口站", "测试出口站"))
+
+    def test_ticket_root_clipboard_text_parser_reports_original_line_and_split_field_values(self) -> None:
+        result = TicketRootClipboardTextParser().parse_text(
+            file_id="LINES-TXT",
+            text="\n\n按行程查看\n车牌号：云ADA0381\n交易时间：\n2026-04-08 11:13:41\n交易金额：\n71.25\n发票数量：\n2\n",
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.ticket_root_items[0].amount, Decimal("71.25"))
+        self.assertEqual(result.ticket_root_items[0].invoice_count, 2)
+        broken = TicketRootClipboardTextParser().parse_text(
+            file_id="LINES-TXT",
+            text="\n\n按行程查看\n车牌号：云ADA0381\n交易时间：损坏\n交易金额：71.25\n",
+        )
+        self.assertFalse(broken.ok)
+        self.assertEqual(broken.issues[0].source_line, 5)
+
+    def test_source_text_parse_problem_keeps_source_without_partial_items_then_delete_reupload(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="Broken text closure", created_by="alice")
+        uploader = EtcReconciliationSourceUploadService(task_service=service)
+        broken_text = TICKET_ROOT_CLIPBOARD_TEXT.replace("￥71.25", "￥损坏", 1)
+        task = uploader.submit_ticket_root_texts(
+            task_id=task.task_id, expected_version=task.version, actor="alice", texts=[broken_text],
+        )
+        self.assertEqual(len(task.source_files), 1)
+        broken_file = task.source_files[0]
+        self.assertEqual(task.ticket_root_items, [])
+        self.assertEqual(len(task.parse_results[0].issues), 1)
+        self.assertEqual(task.parse_results[0].issues[0].file_id, broken_file.file_id)
+        restored_service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        restored = restored_service.get_task(task.task_id)
+        self.assertEqual(restored.ticket_root_items, [])
+        self.assertEqual(restored.parse_results[0].issues[0].source_line, task.parse_results[0].issues[0].source_line)
+        task = service.delete_source_file(task_id=task.task_id, file_id=broken_file.file_id, expected_version=task.version, actor="alice")
+        self.assertEqual(task.source_files, [])
+        self.assertEqual(task.parse_results, [])
+        task = uploader.submit_ticket_root_texts(
+            task_id=task.task_id, expected_version=task.version, actor="alice", texts=[TICKET_ROOT_CLIPBOARD_TEXT],
+        )
+        self.assertEqual(len(task.ticket_root_items), 4)
+        self.assertEqual(task.parse_results[0].issues, [])
 
     def test_ticket_root_clipboard_text_parser_blocks_without_trip_rows(self) -> None:
         result = TicketRootClipboardTextParser().parse_text(

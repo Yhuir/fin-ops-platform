@@ -26,6 +26,7 @@ from postgres_test_utils import (
 
 from tests.app_test_support import install_default_test_session, seed_confirmed_import
 from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN
+from tests.test_etc_backend import SYNTHETIC_TICKET_ROOT_TXT, multipart
 
 
 @contextmanager
@@ -107,6 +108,37 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         self.assertEqual(app_health_payload["dependencies"]["oa_sync"]["status"], "unavailable")
         self.assertEqual(app_health_payload["dependencies"]["oa_mongo"]["status"], "unavailable")
         self.assertNotIn("postgresql://", json.dumps(app_health_payload).lower())
+
+    def test_extensionless_ticket_upload_survives_restart_and_delete_reupload(self) -> None:
+        app = self._build_app()
+        response = app.handle_request("POST", "/api/etc/reconciliation-tasks", json.dumps({"title": "ETC isolated text"}))
+        self.assertEqual(response.status_code, 201)
+        task = json.loads(response.body)
+        endpoint = f"/api/etc/reconciliation-tasks/{task['taskId']}"
+        body, headers = multipart({"无扩展名票根": SYNTHETIC_TICKET_ROOT_TXT}, fields={"expectedVersion": str(task["version"])})
+        uploaded_response = app.handle_request("POST", f"{endpoint}/ticket-root-files", body=body, headers=headers)
+        self.assertEqual(uploaded_response.status_code, 200)
+        uploaded = json.loads(uploaded_response.body)
+        self.assertEqual(len(uploaded["ticketRootItems"]), 11)
+        self.assertEqual(uploaded["parseIssues"], [])
+        self.assertEqual(uploaded["sourceFiles"][0]["originalName"], "无扩展名票根")
+        restarted = self._build_app()
+        restored = json.loads(restarted.handle_request("GET", endpoint).body)
+        self.assertEqual(restored["sourceFiles"], uploaded["sourceFiles"])
+        self.assertEqual(restored["ticketRootItems"], uploaded["ticketRootItems"])
+        file_id = restored["sourceFiles"][0]["fileId"]
+        deleted_response = restarted.handle_request("DELETE", f"{endpoint}/source-files/{file_id}",
+                                                    json.dumps({"expectedVersion": restored["version"]}))
+        self.assertEqual(deleted_response.status_code, 200)
+        deleted = json.loads(deleted_response.body)
+        self.assertEqual(deleted["sourceFiles"], [])
+        self.assertEqual(deleted["ticketRootItems"], [])
+        body, headers = multipart({"无扩展名票根.txt": SYNTHETIC_TICKET_ROOT_TXT}, fields={"expectedVersion": str(deleted["version"])})
+        response = restarted.handle_request("POST", f"{endpoint}/ticket-root-files", body=body, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        reuploaded = json.loads(response.body)
+        expected = [(row["vehicle_plate"], row["transaction_at"], row["amount"]) for row in uploaded["ticketRootItems"]]
+        self.assertEqual([(row["vehicle_plate"], row["transaction_at"], row["amount"]) for row in reuploaded["ticketRootItems"]], expected)
 
     def test_stale_preview_delta_does_not_downgrade_confirmed_import(self) -> None:
         stale_api = self._build_app()
