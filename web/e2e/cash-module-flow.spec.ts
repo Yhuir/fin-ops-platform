@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import type { CashFlow } from "../src/components/cash/CashFlows.types";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 // Synthetic HTTP fixtures only. This file exercises real App Shell/HeroUI code,
 // not PostgreSQL transactions or any production financial data.
@@ -47,6 +48,7 @@ async function installCashFixtures(page: Page, options: { firstCreateFailure?: b
     }
     if (method !== "GET") throw new Error(`Unexpected synthetic cash write: ${method} ${path}`);
     if (path === "/reports/turnover") {
+      if (url.searchParams.get("view") === "unsettled") return json({ view: "unsettled", ...paginate([{ item_id: itemId, version: 1, type: "loan", origin_date: "2025-01-01", ledger_group: "personal", counterparty: "合成测试人员", project: null, content: "上年无新处理的未结借款", obligation_direction: "receivable", original_amount: "2000.00", settled_amount: "500.00", remaining_amount: "1500.00" }], url), summary: { item_count: 1, remaining_obligation_amount: { receivable: "1500.00", payable: "0.00" } } });
       const base = { row_kind: "principal", occurred_on: "2026-09-01", item_id: itemId, counterparty: "合成测试人员", project: null, category, content: "合成个人借出", state: "partial", original_amount: "12000.00", repayment_amount: null, reimbursement_received_amount: null, ticket_offset_amount: null, non_ticket_offset_amount: null, real_expense_amount: null, cash_received_amount: null, cash_paid_amount: "12000.00", remaining_after_event: "12000.00", flow_id: principalId, settlement_id: null, expense_item_id: null, ticket_collection_state: null, remark: null };
       let rows = [{ ...base, row_id: "company", ledger_group: "company", personal_variant: null, content: "合成公司往来", original_amount: "1000.00", cash_paid_amount: null, flow_id: null, remaining_after_event: "1000.00" }, { ...base, row_id: "external", ledger_group: "external_person", personal_variant: null, content: "合成外部往来", original_amount: "2000.00", cash_paid_amount: null, flow_id: null, remaining_after_event: "2000.00" }, { ...base, row_id: "personal-principal", ledger_group: "personal", personal_variant: "principal" }];
       if (flows.some(row => row.id === repaymentId)) rows.push({ ...base, row_id: "personal-repayment", row_kind: "settlement", ledger_group: "personal", personal_variant: "settlement", occurred_on: "2026-09-02", content: "合成现金归还", original_amount: null, cash_paid_amount: null, cash_received_amount: "3000.00", repayment_amount: "3000.00", remaining_after_event: "9000.00", flow_id: repaymentId } as typeof rows[number]);
@@ -69,11 +71,11 @@ async function installCashFixtures(page: Page, options: { firstCreateFailure?: b
     if (path === "/settings/accounts") return json(paginate([account], url));
     if (path === "/settings/categories") return json(paginate([category], url));
     if (path === "/settings/bill-labels") return json(paginate([], url));
-    if (path === "/settings/personal-opening") return json({ opening_date: null, version: 1 });
+    if (path === "/settings/personal-opening") return json({ opening_date: null, counterparty: null, version: 1 });
     if (path === "/settings/project-selection") return json({ allowed_stage_codes: ["implementation"], configured: true, version: 1 });
     if (path === "/projects") return json({ rows: [{ id: "610000000000000000000001", code: "E2E-001", name: "合成实施项目", stage_code: "implementation", stage_name: "实施", selectable: true, unavailable_reason: null }, { id: "610000000000000000000002", code: "E2E-002", name: "合成结束项目", stage_code: "end", stage_name: "已结束", selectable: false, unavailable_reason: "ended" }], stages: [{ code: "implementation", name: "实施" }, { code: "end", name: "已结束" }], total: 2, page: 1, page_size: 50, read_at: fixedNow, configured: true, selection_settings_version: 1 });
-    if (path === "/reports/ticket-payments") return json({ ...paginate([], url), summary: { provided_amount: "0.00", used_amount: "0.00", offset_amount: "0.00", available_source_amount: "0.00", receivable_amount: "0.00", cash_received_amount: "0.00" } });
-    if (path === "/reports/personal") return json({ ...paginate([], url), summary: { coverage: { state: "unconfigured", opening_date: null, coverage_start: null }, opening_obligation_amount: null, opening_adjustment_amount: null, new_principal_amount: null, cash_repayment_amount: null, ticket_offset_amount: null, non_ticket_offset_amount: null, remaining_obligation_amount: null } });
+    if (path === "/reports/ticket-payments") return json({ view: url.searchParams.get("view"), ...paginate([], url), summary: { provided_amount: "0.00", used_amount: "0.00", offset_amount: "0.00", available_source_amount: "0.00", receivable_amount: "0.00", cash_received_amount: "0.00", noncash_settled_amount: "0.00", remaining_receivable_amount: "0.00" } });
+    if (path === "/reports/personal") return json({ ...paginate([], url), summary: { counterparty: null, month_principal_totals: Array.from({ length: 12 }, (_, index) => ({ month: `2026-${String(index + 1).padStart(2, "0")}`, principal_amount: null, coverage_state: "unconfigured" })), year_principal_amount: null, coverage: { state: "unconfigured", opening_date: null, coverage_start: null }, opening_obligation_amount: null, opening_adjustment_amount: null, new_principal_amount: null, cash_repayment_amount: null, ticket_offset_amount: null, non_ticket_offset_amount: null, remaining_obligation_amount: null } });
     if (path === "/task-occurrences") return json({ ...paginate([], url), summary: { task_count: 0, counts_by_state: { pending: 0, partial: 0, completed: 0 }, receipt_actual_amount: "0.00", payment_actual_amount: "0.00" } });
     if (path === "/tasks") return json(paginate([], url));
     throw new Error(`Unhandled synthetic cash query: ${path}`);
@@ -96,7 +98,7 @@ test.describe("cash module deterministic browser flow", () => {
     for (const [index, color] of ["rgb(255, 253, 240)", "rgb(239, 246, 255)", "rgb(255, 247, 237)", "rgb(240, 253, 244)"].entries()) expect(colors[index].every(value => value === color)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("cash-desktop-total.png"), fullPage: true });
     await page.getByRole("tab", { name: "有票支付", exact: true }).click(); await expect(page.getByRole("grid", { name: "有票支付", exact: true })).toBeVisible();
-    await page.getByRole("tab", { name: "个人专账", exact: true }).click(); await expect(page.getByRole("grid", { name: "个人年度还款矩阵" })).toBeVisible();
+    await page.getByRole("tab", { name: "个人专账", exact: true }).click(); await expect(page.getByRole("grid", { name: "个人年度代付借出汇总" })).toBeVisible();
     for (const [tab, grid] of [["现金归还", "个人现金归还"], ["有票直接冲", "有票直接冲"], ["无票报销冲抵", "无票报销冲抵"]]) { await page.getByRole("button", { name: /个人专账视图$/ }).click(); await page.getByRole("option", { name: tab, exact: true }).click(); await expect(page.getByRole("grid", { name: grid, exact: true })).toBeVisible(); }
     await page.getByRole("link", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
     await navigation.getByRole("link", { name: "每月任务", exact: true }).click(); await expect(page.getByRole("tab", { name: "本月处理" })).toBeVisible();
@@ -129,15 +131,59 @@ test.describe("cash module deterministic browser flow", () => {
     await dialog.getByRole("button", { name: "保存", exact: true }).click(); await expect(dialog).toHaveCount(0);
     expect(api.submitted).toHaveLength(2); expect(api.submitted[0].id).toMatch(/^[0-9a-f-]{36}$/); expect(api.submitted[1].id).toBe(api.submitted[0].id);
     await expect(page.getByRole("grid", { name: "现金流水明细" })).toContainText("合成新增现金流水");
+    await expectNoUnexpectedSuccessUiErrors(page);
     const beforeFlows = api.count("GET", "/flows");
     await page.getByRole("row").filter({ hasText: "合成现金归还" }).getByRole("button", { name: "详情", exact: true }).click();
     const detail = page.getByRole("dialog", { name: "现金流水详情" }); await expect(detail).toBeVisible(); await detail.getByRole("button", { name: "删除", exact: true }).click();
     const deletion = page.getByRole("dialog", { name: "删除现金流水" }); await expect(deletion.getByText("本笔现金没有来源事项。")).toBeVisible();
     await deletion.getByRole("button", { name: "确认删除", exact: true }).click(); await expect(deletion).toHaveCount(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
     await expect(page.getByRole("grid", { name: "现金流水明细" })).not.toContainText("合成现金归还"); expect(api.count("GET", "/flows")).toBeGreaterThan(beforeFlows);
     const beforeReport = api.count("GET", "/reports/turnover"); await page.getByRole("link", { name: "现金账目", exact: true }).click();
     await expect(page.getByRole("grid", { name: "往来账总表" })).not.toContainText("合成现金归还"); expect(api.count("GET", "/reports/turnover")).toBeGreaterThan(beforeReport);
     expect(api.count("POST", `/flows/${repaymentId}/delete`)).toBe(1);
+  });
+
+  test("captures synthetic closure views and explicit task purpose without creating transactions", async ({ page }, testInfo) => {
+    const api = await installCashFixtures(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const pagination = { page: 1, page_size: 50, total: 1 };
+    const months = Array.from({ length: 12 }, (_, index) => ({ month: `2026-${String(index + 1).padStart(2, "0")}`, principal_amount: index === 8 ? "12000.00" : "0.00", item_count: index === 8 ? 1 : 0, coverage_state: "complete" }));
+    await page.route("**/api/cash/settings/personal-opening", route => route.fulfill({ json: { opening_date: "2026-01-01", counterparty: "合成测试人员", version: 1 } }));
+    await page.route("**/api/cash/reports/personal?**", route => route.fulfill({ json: { rows: [{ row_key: "synthetic-card", bill_label: { id: "40000000-0000-4000-8000-000000000001", bank_name: "合成银行", label: "合成信用卡" }, months, year_principal_amount: "12000.00" }], pagination, summary: { counterparty: "合成测试人员", coverage: { state: "complete", opening_date: "2026-01-01", coverage_start: "2026-01-01" }, opening_obligation_amount: "2000.00", opening_adjustment_amount: "0.00", new_principal_amount: "12000.00", cash_repayment_amount: "3000.00", ticket_offset_amount: "500.00", non_ticket_offset_amount: "0.00", remaining_obligation_amount: "10500.00", month_principal_totals: months, year_principal_amount: "12000.00" } } }));
+    await page.route("**/api/cash/reports/ticket-payments?**", route => route.fulfill({ json: { view: new URL(route.request().url()).searchParams.get("view"), rows: [{ id: itemId, version: 1, ticket_provider: "合成票据提供人", ticket_provided_on: "2025-12-01", content: "往年票据，公司应收分次结清", project: null, provided_amount: "2000.00", used_amount: "2000.00", offset_amount: "0.00", available_source_amount: "0.00", receivable_amount: "2000.00", cash_received_amount: "1000.00", noncash_settled_amount: "500.00", remaining_receivable_amount: "500.00", collection_state: "partial", state: "used" }], pagination, summary: { provided_amount: "2000.00", used_amount: "2000.00", offset_amount: "0.00", available_source_amount: "0.00", receivable_amount: "2000.00", cash_received_amount: "1000.00", noncash_settled_amount: "500.00", remaining_receivable_amount: "500.00" } } }));
+    await page.route("**/api/cash/task-occurrences?**", route => route.fulfill({ json: { rows: [{ row_key: "synthetic-task-2026-09", occurrence_id: null, version: null, template_id: "50000000-0000-4000-8000-000000000001", template_version: 1, month: "2026-09", title: "合成个人代付任务", kind: "payment", due_on: "2026-09-05", remind_on: "2026-09-03", planned_amount: "500.00", actual_amount: "0.00", state: "pending", marked_unpaid: false, need_planned_amount: false, is_over_plan: false, over_plan_amount: "0.00", is_overdue: true, is_due: true, note: null, flow_count: 0, instructions: null, default_account_id: account.id, default_category_id: category.id }], pagination, summary: { task_count: 1, counts_by_state: { pending: 1, partial: 0, completed: 0 }, receipt_actual_amount: "0.00", payment_actual_amount: "0.00" } } }));
+    await page.goto("/cash?section=accounts");
+    await page.getByRole("button", { name: /往来账视图$/ }).click();
+    await page.getByRole("option", { name: "截至期末未结事项", exact: true }).click();
+    await expect(page.getByRole("grid", { name: "截至期末未结事项" })).toContainText("上年无新处理的未结借款");
+    await page.screenshot({ path: testInfo.outputPath("cash-closure-unsettled.png"), fullPage: true });
+    await page.getByRole("tab", { name: "有票支付", exact: true }).click();
+    await page.getByRole("button", { name: /有票支付视图$/ }).click(); await page.getByRole("option", { name: "待回款", exact: true }).click();
+    const pendingGrid = page.getByRole("grid", { name: "有票支付", exact: true });
+    await expect(pendingGrid).toContainText("往年票据，公司应收分次结清");
+    await expect(pendingGrid.getByRole("columnheader")).toHaveCount(15);
+    const ticketScroll = page.locator(".finance-table__scroll").filter({ has: pendingGrid });
+    expect(await ticketScroll.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("cash-closure-pending-tickets.png"), fullPage: true });
+    await ticketScroll.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+    const columnBoxes = await pendingGrid.getByRole("columnheader").evaluateAll(nodes => nodes.slice(11).map(node => { const box = node.getBoundingClientRect(); return { x: box.x, right: box.right, width: box.width }; }));
+    for (let index = 1; index < columnBoxes.length; index++) expect(columnBoxes[index].x).toBeGreaterThanOrEqual(columnBoxes[index - 1].right - 1);
+    expect(columnBoxes.every(box => box.width >= 96)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("cash-closure-pending-tickets-right.png"), fullPage: true });
+    await page.getByRole("tab", { name: "个人专账", exact: true }).click();
+    await expect(page.getByRole("grid", { name: "个人年度代付借出汇总" })).toContainText("全部匹配账单合计");
+    await page.screenshot({ path: testInfo.outputPath("cash-closure-personal.png"), fullPage: true });
+    await page.getByRole("link", { name: "每月任务", exact: true }).click();
+    await page.getByRole("row").filter({ hasText: "合成个人代付任务" }).getByRole("button", { name: "已付 / 已还", exact: true }).click();
+    const drawer = page.getByRole("dialog", { name: "办理任务 · 合成个人代付任务" });
+    await drawer.getByRole("textbox", { name: "金额（元）" }).fill("500.00");
+    await drawer.getByRole("textbox", { name: "用途", exact: true }).fill("合成任务实际代付");
+    await drawer.getByRole("button", { name: /办理用途$/ }).click(); await page.getByRole("option", { name: "个人实际代付 / 借出（含替个人还卡）", exact: true }).click();
+    await expect(drawer.getByRole("textbox", { name: "往来对象", exact: true })).toHaveValue("合成测试人员");
+    await page.screenshot({ path: testInfo.outputPath("cash-closure-task-purpose.png"), fullPage: true });
+    expect(api.calls.filter(call => call.method !== "GET")).toEqual([]);
   });
 
   test("ordinary bank navigation does not request or display cash, and a 403 clears the mounted module", async ({ page }) => {
@@ -326,13 +372,19 @@ test.describe("cash module deterministic browser flow", () => {
       measures.push({ name: label, displacement, openMs: Number(openMs.toFixed(2)) });
     };
     for (const label of ["筛选项目", "筛选往来对象", "筛选费用类型", "筛选处理状态", "其他排序"]) await check(label);
+    await page.getByRole("button", { name: /往来账视图$/ }).click(); await page.getByRole("option", { name: "截至期末未结事项", exact: true }).click();
+    for (const label of ["筛选项目", "筛选往来对象", "筛选往来类别"]) await check(label);
+    await page.getByRole("button", { name: /往来账视图$/ }).click(); await page.getByRole("option", { name: "本期处理记录", exact: true }).click();
     await page.getByRole("tab", { name: "有票支付", exact: true }).click();
     for (const label of ["筛选项目", "筛选提供人", "筛选使用状态"]) await check(label);
+    await page.getByRole("button", { name: /有票支付视图$/ }).click(); await page.getByRole("option", { name: "待回款", exact: true }).click();
+    for (const label of ["筛选项目", "筛选提供人"]) await check(label);
     await page.getByRole("tab", { name: "个人专账", exact: true }).click();
     for (const label of ["筛选项目", "筛选银行 / 账单", "其他排序"]) await check(label);
     for (const view of ["现金归还", "有票直接冲", "无票报销冲抵"]) {
       await page.getByRole("button", { name: /个人专账视图$/ }).click(); await page.getByRole("option", { name: view, exact: true }).click();
       await check("筛选项目"); await check("筛选银行 / 账单");
+      if (view !== "现金归还") { await check("筛选来源项目"); await check("筛选费用类型"); }
     }
     await page.getByRole("link", { name: "现金流水", exact: true }).click();
     for (const label of ["筛选账户", "筛选项目", "筛选人员", "筛选分类", "筛选来源", "筛选方向", "其他排序"]) await check(label);

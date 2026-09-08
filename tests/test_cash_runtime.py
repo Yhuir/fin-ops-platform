@@ -81,6 +81,7 @@ class CashRuntimePostgresTests(unittest.TestCase):
         ordinary.execute("DROP SCHEMA IF EXISTS cash CASCADE")
         ordinary.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0166_cash_ledger.sql").read_text())
         ordinary.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0167_cash_shared_runtime_grants.sql").read_text())
+        ordinary.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0168_cash_business_closure.sql").read_text())
         grants = ordinary.fetch_one("""SELECT count(*) AS tables,
             bool_and(has_table_privilege('fin_ops_app_runtime',c.oid,'SELECT')
                 AND has_table_privilege('fin_ops_app_runtime',c.oid,'INSERT')

@@ -50,7 +50,7 @@ class _QuietHandler(WSGIRequestHandler):
 
 def _reset_cash_fixture(connection):
     connection.execute("TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
-    connection.execute("UPDATE cash.settings SET personal_opening_date=NULL,allowed_project_stage_codes='{}',project_selection_configured=false,version=1 WHERE id=1")
+    connection.execute("UPDATE cash.settings SET personal_opening_date=NULL,personal_counterparty=NULL,allowed_project_stage_codes='{}',project_selection_configured=false,version=1 WHERE id=1")
 
 
 @unittest.skipUnless(os.environ.get("FIN_OPS_CASH_TEST_DATABASE_URL"), "Explicit disposable cash PostgreSQL DSN required")
@@ -103,6 +103,9 @@ class CashHttpPostgresTests(unittest.TestCase):
         }, status=201)["account"]
         self.category = self.call("POST", "/settings/categories", {
             "id": self.uid(), "name": "Synthetic HTTP turnover", "group": "turnover",
+        }, status=201)["category"]
+        self.payment_category = self.call("POST", "/settings/categories", {
+            "id": self.uid(), "name": "Synthetic HTTP expense", "group": "payment",
         }, status=201)["category"]
 
     @staticmethod
@@ -179,7 +182,7 @@ class CashHttpPostgresTests(unittest.TestCase):
         ordinary_before = self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count")
         loan = self.loan_payload()
         expense = {"id": self.uid(), "type": "expense", "origin_date": "2026-09-03", "original_amount": "100.00",
-                   "content": "Synthetic HTTP expense", "oa_project_id": None}
+                   "content": "Synthetic HTTP expense", "oa_project_id": None, "category_id": self.payment_category["id"]}
         payload = self.flow_payload(related_items=[loan, expense])
         source = self.call("POST", "/flows", payload, status=201)["flow"]
         self.assertEqual(source["source_kind"], "manual")
@@ -297,6 +300,56 @@ class CashHttpPostgresTests(unittest.TestCase):
         self.assertEqual(first_page["summary"]["filtered_totals"], all_rows["summary"]["filtered_totals"])
         for invalid in ("account_ids=[]", "account_ids=invalid", plural + "&account_id=" + self.account["id"], plural + "&" + plural):
             self.assertEqual(self.call("GET", "/flows?" + self.period + "&" + invalid, status=400)["error"], "cash_invalid_input")
+
+
+    def test_personal_task_cash_noncash_and_undo_are_one_real_http_chain(self):
+        ordinary_before = self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count")
+        configured = self.call("PUT", "/settings/personal-opening", {"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic owner"})
+        self.assertEqual(configured["counterparty"], "Synthetic owner")
+        self.assertEqual(self.call("GET", "/settings/personal-opening")["counterparty"], "Synthetic owner")
+        opening = {**self.loan_payload(), "origin_date": "2026-01-01", "original_amount": "1000.00", "is_opening": True,
+                   "ledger_group": "personal", "counterparty": "Synthetic owner"}
+        self.call("POST", "/items", opening, status=201)
+        task = self.call("POST", "/tasks", {"id": self.uid(), "title": "Synthetic card repayment", "kind": "payment",
+            "execution_day": 5, "remind_days": 2, "effective_from_month": "2026-09", "default_amount": "2000.00",
+            "default_account_id": self.account["id"], "default_category_id": self.category["id"]}, status=201)["template"]
+        advance = {**self.loan_payload(), "original_amount": "2000.00", "ledger_group": "personal", "counterparty": "Synthetic owner"}
+        confirm = {"template_id": task["id"], "month": "2026-09", "expected_version": None,
+                   "expected_template_version": task["version"], "mode": "new_flow",
+                   "new_flow": self.flow_payload(amount="2000.00", related_items=[advance])}
+        paid = self.call("POST", "/task-occurrences/confirm", confirm)
+        self.assertEqual(paid["flow"]["source_kind"], "monthly_task")
+        self.assertEqual(paid["occurrence"]["actual_amount"], "2000.00")
+        self.assertEqual(self.call("POST", "/task-occurrences/confirm", confirm)["flow"]["id"], paid["flow"]["id"])
+        repaid = self.call("POST", "/flows", self.repayment_payload(opening["id"], "300.00"), status=201)
+        ticket = self.call("POST", "/items", {"id": self.uid(), "type": "ticket_source", "origin_date": "2026-09-03",
+            "original_amount": "500.00", "ticket_provider": "Synthetic owner", "ticket_provided_on": "2026-09-03",
+            "ticket_description": "Synthetic categorized tickets", "category_id": self.payment_category["id"],
+            "content": "Synthetic categorized tickets"}, status=201)["item"]
+        target = self.item(opening["id"])["item"]
+        offset = self.call("POST", "/settlements", {"id": self.uid(), "kind": "ticket_offset", "amount": "400.00", "occurred_on": "2026-09-03",
+            "item_id": target["id"], "expected_item_version": target["version"], "source_item_id": ticket["id"],
+            "expected_source_item_version": ticket["version"]}, status=201)["settlement"]
+        self.assertIsNone(offset["category_id"])
+        target = self.item(opening["id"])["item"]
+        adjustment = self.call("POST", "/settlements", {"id": self.uid(), "kind": "non_ticket_offset", "amount": "100.00",
+            "occurred_on": "2026-09-03", "item_id": target["id"], "expected_item_version": target["version"],
+            "remark": "Explicit independent adjustment", "category_id": self.category["id"]}, status=201)["settlement"]
+        self.assertEqual(self.item(opening["id"])["amounts"]["remaining_obligation_amount"], "200.00")
+        personal = self.call("GET", "/reports/personal?year=2026")
+        self.assertEqual(personal["summary"]["remaining_obligation_amount"], "2200.00")
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.flows")["n"], 2)
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.items WHERE type='loan'")["n"], 2)
+        # Remove the explicit adjustment, then a real receipt: all reports re-read the same facts.
+        target = self.item(opening["id"])["item"]
+        self.call("POST", f"/settlements/{adjustment['id']}/remove", {"expected_version": adjustment["version"],
+            "expected_related_versions": {"items": [{"id": target["id"], "version": target["version"]}]}})
+        self.delete_flow(repaid["flow"]["id"])
+        self.assertEqual(self.call("GET", "/reports/personal?year=2026")["summary"]["remaining_obligation_amount"], "2600.00")
+        self.delete_flow(paid["flow"]["id"])
+        self.assertEqual(self.call("GET", "/task-occurrences?month=2026-09")["rows"][0]["actual_amount"], "0.00")
+        self.assertEqual(self.call("GET", "/reports/personal?year=2026")["summary"]["remaining_obligation_amount"], "600.00")
+        self.assertEqual(self.connection.fetch_one("SELECT (SELECT count(*) FROM app.bank_transactions) AS bank_count,(SELECT count(*) FROM audit.events) AS audit_count"), ordinary_before)
 
 
 def browser_e2e() -> int:

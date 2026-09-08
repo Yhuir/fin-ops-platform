@@ -61,6 +61,8 @@ function installHttp(options: { write?: (write: Write) => Response | Promise<Res
       { id: accountB, version: 1, name: "合成储蓄账户", kind: "savings", opening_date: "2026-01-01", opening_amount: "0.00", enabled: true, remark: null },
     ], Number(parsed.searchParams.get("page_size"))));
     if (path === "/api/cash/settings/categories") return json(rowsPage([{ id: categoryId, version: 1, name: "合成往来类型", group: "turnover", enabled: true, remark: null }], Number(parsed.searchParams.get("page_size"))));
+    if (path === "/api/cash/settings/personal-opening") return json({ opening_date: "2026-01-01", counterparty: "明确归属人", version: 1 });
+    if (path === "/api/cash/settings/bill-labels") return json(rowsPage([]));
     if (path === "/api/cash/reports/project-options") return json(rowsPage([{ id: "project-a", name: "合成历史项目甲" }, { id: "project-b", name: "合成历史项目乙" }]));
     if (path === "/api/cash/items" || path === "/api/cash/settlements") return json(rowsPage([], 20));
     if (path === `/api/cash/flows/${flowId}`) return json(options.getDetail ? options.getDetail() : detail());
@@ -93,6 +95,38 @@ beforeEach(() => http.mockReset());
 afterEach(cleanup);
 
 describe("现金实际录入 HTTP 字段", () => {
+  it("任务显式选择个人代付，携带一次借款和真实归属，不按标题猜测", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: () => json({ version: 1 }) });
+    render(<DrawerHarness task={{ template_id: templateId, month: "2026-09", expected_version: 1, planned_amount: "125.50", title: "合成任意标题", kind: "payment", default_account_id: accountA, default_category_id: categoryId }} />);
+    await inputCash(user);
+    expect(screen.queryByRole("textbox", { name: "往来对象" })).not.toBeInTheDocument();
+    await select(user, "本次办理用途", "个人实际代付 / 借出（含替个人还卡）");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "往来对象" })).toHaveValue("明确归属人"));
+    expect(screen.getByRole("textbox", { name: "往来对象" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "保存并确认任务" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].path).toBe("/api/cash/task-occurrences/confirm");
+    expect(writes[0].body).toMatchObject({ mode: "new_flow", new_flow: { amount: "125.50", related_items: [{ type: "loan", counterparty: "明确归属人", ledger_group: "personal", obligation_direction: "receivable", category_id: null, original_amount: "125.50" }], allocations: [], origin_items: [] } });
+  });
+  it("个人配置读取失败阻止写入，显式重读后保留办理草稿", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: () => json({ version: 1 }) });
+    const existing = http.getMockImplementation()!; let first = true;
+    http.mockImplementation(async (url, init) => {
+      if (String(url).startsWith("/api/cash/settings/personal-opening") && first) { first = false; return json({ error: "cash_busy", message: "合成配置读取失败" }, 503); }
+      return existing(url, init);
+    });
+    render(<DrawerHarness task={{ template_id: templateId, month: "2026-09", expected_version: 1, planned_amount: "125.50", title: "配置故障测试", kind: "payment", default_account_id: accountA, default_category_id: categoryId }} />);
+    await inputCash(user);
+    await select(user, "本次办理用途", "个人实际代付 / 借出（含替个人还卡）");
+    await screen.findByText("合成配置读取失败");
+    await user.click(screen.getByRole("button", { name: "保存并确认任务" }));
+    expect(writes).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "重新读取个人专账配置" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "往来对象" })).toHaveValue("明确归属人"));
+    expect(screen.getByRole("textbox", { name: "事项金额" })).toHaveValue("125.5");
+    await user.click(screen.getByRole("button", { name: "保存并确认任务" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+  });
   it("跨列总选择超限保留菜单草稿、已应用条件和当前结果，不发送新 HTTP", async () => {
     const user = userEvent.setup(); installHttp(); const onCriteriaChange = vi.fn();
     const initial = initialCashFlowCriteria();
@@ -173,7 +207,7 @@ describe("现金实际录入 HTTP 字段", () => {
 
   it("历史事项只读沿用项目并提交事项版本，全程不请求 OA 选择器", async () => {
     const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
-    const item: CashItem = { id: itemId, version: 9, type: "loan", origin_date: "2026-01-01", original_amount: "100.00", is_opening: true, obligation_direction: "receivable", ledger_group: "company", counterparty: "合成往来对象", oa_project_id: "507f1f77bcf86cd799439011", project_name_snapshot: "合成已结束项目", origin_flow_id: null, origin_mode: null, bill_label_id: null, bill_month: null, ticket_provider: null, ticket_provided_on: null, ticket_description: null, related_obligation_id: null, ticket_source_id: null, content: "合成历史未结", remark: null };
+    const item: CashItem = { id: itemId, version: 9, type: "loan", origin_date: "2026-01-01", original_amount: "100.00", is_opening: true, obligation_direction: "receivable", ledger_group: "company", counterparty: "合成往来对象", oa_project_id: "507f1f77bcf86cd799439011", project_name_snapshot: "合成已结束项目", origin_flow_id: null, origin_mode: null, bill_label_id: null, bill_month: null, ticket_provider: null, ticket_provided_on: null, ticket_description: null, related_obligation_id: null, ticket_source_id: null, category_id: null, category: null, content: "合成历史未结", remark: null };
     render(<DrawerHarness kind="receipt" existingItem={item} settlementKind="cash_repayment" />);
     expect(screen.getByText("合成已结束项目")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "选择项目" })).not.toBeInTheDocument();

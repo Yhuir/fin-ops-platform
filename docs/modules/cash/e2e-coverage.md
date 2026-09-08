@@ -1,5 +1,12 @@
 # 覆盖状态
 
+| Spec ID | 执行入口 | 本轮证据 |
+| --- | --- | --- |
+| CASH-E2E-001 | web/e2e/cash-module-flow.spec.ts | 沿用并扩充本轮几何/业务视图断言；实际结果见实施计划§16 |
+| CASH-E2E-002 | web/e2e/cash-real-api-flow.spec.ts | 由真实HTTP fixture启动；本轮运行结果见§16 |
+| CASH-E2E-003 | web/e2e/cash-module-flow.spec.ts、web/e2e/cash-real-api-flow.spec.ts | 前端交互与真实API分层验证，结果见§16，不把mock等同生产写入 |
+| CASH-E2E-004 | web/e2e/production-cash-readonly.spec.ts | 发布后显式只读核验；结果及限制见§16 |
+
 统一UI与多选扩展已实现；实际验证和发布状态以实施计划§14为准。实施§12是上一轮历史，不能替代本轮展开态/多选验收。
 
 | 范围 | 本轮状态 | 证据归属 |

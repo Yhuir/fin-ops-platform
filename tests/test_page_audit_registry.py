@@ -27,13 +27,17 @@ SYSTEM_AUDIT_PATH = (
 
 
 class PageAuditRegistryTests(unittest.TestCase):
-    def test_registry_exactly_covers_frontend_page_registry(self) -> None:
+    def test_registry_exactly_covers_ordinary_frontend_pages_and_excludes_private_cash(self) -> None:
         source = PAGE_REGISTRY_PATH.read_text(encoding="utf-8")
         frontend_page_keys = re.findall(r'pageKey:\s*"([^"]+)"', source)
 
         self.assertEqual(len(frontend_page_keys), len(set(frontend_page_keys)))
-        self.assertEqual(set(PAGE_AUDIT_REGISTRY), set(frontend_page_keys))
+        self.assertIn("cash", frontend_page_keys)
+        self.assertNotIn("cash", PAGE_AUDIT_REGISTRY)
+        self.assertEqual(set(PAGE_AUDIT_REGISTRY), set(frontend_page_keys) - {"cash"})
         self.assertEqual(len(PAGE_AUDIT_REGISTRY), 18)
+        with self.assertRaisesRegex(ValueError, "Unsupported page audit page"):
+            page_audit_registration("cash")
 
     def test_ready_and_unavailable_pages_are_explicit_and_fail_closed(self) -> None:
         ready = [item for item in PAGE_AUDIT_REGISTRY.values() if item.availability == "ready"]

@@ -2,7 +2,7 @@ import { Button, Checkbox } from "@heroui/react";
 import { useEffect, useState } from "react";
 
 import { useCashMutation, useCashQuery, useCashScope } from "../../features/cash/hooks";
-import { cashAmount } from "./CashItems.types";
+import { cashAmount, type CashPersonalSetting } from "./CashItems.types";
 import AppDrawer from "../common/AppDrawer";
 import { FinanceTable, FinanceTableBody, FinanceTableCell, FinanceTableColumn, FinanceTableHeader, FinanceTablePagination, FinanceTableRow } from "../common/FinanceTable";
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
@@ -178,31 +178,33 @@ function CashCategoryEditor({ category, onClose }: { category: CashCategorySetti
 
 function CashPersonalOpening() {
   const { revision } = useCashScope();
-  const query = useCashQuery<{ opening_date: string | null; version: number }>("/settings/personal-opening", undefined, revision);
-  const [editing, setEditing] = useState<{ opening_date: string | null; version: number } | null>(null);
+  const query = useCashQuery<CashPersonalSetting>("/settings/personal-opening", undefined, revision);
+  const [editing, setEditing] = useState<CashPersonalSetting | null>(null);
   const [openingItem, setOpeningItem] = useState(false);
   const [billLabels, setBillLabels] = useState(false);
   return <section className="cash-section cash-settings-subsection" aria-label="个人账起算">
-    <div className="cash-toolbar"><h3>个人账起算</h3><span>{query.data ? query.data.opening_date ?? "尚未设置" : "正在读取…"}</span><Button variant="tertiary" onPress={() => setEditing(query.data)} isDisabled={!query.data || query.loading}>设置起算日期</Button><Button variant="tertiary" onPress={() => setOpeningItem(true)}>登记期初未结</Button><Button variant="tertiary" onPress={() => setBillLabels(true)}>管理账单分组</Button></div>
+    <div className="cash-toolbar"><h3>个人账起算</h3><span>{query.data ? `${query.data.counterparty ?? "归属人未设置"} · ${query.data.opening_date ?? "起算未设置"}` : "正在读取…"}</span><Button variant="tertiary" onPress={() => setEditing(query.data)} isDisabled={!query.data || query.loading}>设置起算日期</Button><Button variant="tertiary" isDisabled={!query.data?.opening_date || !query.data.counterparty || query.loading} onPress={() => setOpeningItem(true)}>登记期初未结</Button><Button variant="tertiary" onPress={() => setBillLabels(true)}>管理账单分组</Button></div>
     <CashNotice error={query.error?.message} />
     <p className="cash-hint">声明个人账的记账范围，不改变现金账户期初；旧欠款需逐项登记，不会自动生成现金流水。</p>
     {editing && <CashOpeningDateEditor setting={editing} onClose={() => setEditing(null)} />}
-    {openingItem && <CashItemEditor opening initialType="loan" onClose={() => setOpeningItem(false)} />}
+    {openingItem && query.data?.counterparty && query.data.opening_date && <CashItemEditor opening initialType="loan" personalContext={{ counterparty: query.data.counterparty, opening_date: query.data.opening_date }} onClose={() => setOpeningItem(false)} />}
     {billLabels && <AppDrawer open title="账单分组" width={760} className="cash-drawer" onClose={() => setBillLabels(false)}><CashBillLabels /></AppDrawer>}
   </section>;
 }
 
-function CashOpeningDateEditor({ setting, onClose }: { setting: { opening_date: string | null; version: number }; onClose: () => void }) {
+function CashOpeningDateEditor({ setting, onClose }: { setting: CashPersonalSetting; onClose: () => void }) {
   const [date, setDate] = useState(setting.opening_date ?? "");
+  const [counterparty, setCounterparty] = useState(setting.counterparty ?? "");
   const [confirmed, setConfirmed] = useState(false);
   const mutation = useCashMutation();
-  const close = useCashTaskSettingsCloseGuard([date], onClose, mutation.busy);
+  const close = useCashTaskSettingsCloseGuard([date, counterparty], onClose, mutation.busy);
   return <AppDrawer open title="设置个人账起算" width={480} className="cash-drawer" onClose={close.requestClose} closeDisabled={mutation.busy} footer={<><Button variant="tertiary" onPress={close.requestClose} isDisabled={mutation.busy}>取消</Button><Button type="submit" form="cash-personal-opening-form" isDisabled={mutation.busy || Boolean(setting.opening_date && !confirmed)}>保存起算</Button></>}>
     <form id="cash-personal-opening-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void (async () => {
-      const result = await mutation.run("/settings/personal-opening", { expected_version: setting.version, opening_date: date || null }, "PUT");
+      const result = await mutation.run("/settings/personal-opening", { expected_version: setting.version, opening_date: date || null, counterparty: counterparty.trim() || null }, "PUT");
       if (result !== null) onClose();
     })(); }}>
       <CashNotice error={mutation.error?.message} /><CashInput label="个人账起算日期" type="date" value={date} onChange={(value) => { setDate(value); setConfirmed(false); }} disabled={mutation.busy} />
+      <CashInput label="个人专账归属人" value={counterparty} onChange={value => { setCounterparty(value); setConfirmed(false); }} disabled={mutation.busy} required={Boolean(date)} />
       <p className="cash-hint">起算前不显示已知零余额；已登记的期初事项随日期更正，不自动改金额。</p>
       {setting.opening_date && <Checkbox isSelected={confirmed} onChange={setConfirmed} isDisabled={mutation.busy}><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>确认更正记账范围及已有期初事项日期</span></Checkbox>}
     </form>

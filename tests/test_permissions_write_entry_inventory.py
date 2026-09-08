@@ -32,9 +32,9 @@ def _frontend_page_keys() -> set[str]:
 
 class PermissionsWriteEntryInventoryTests(unittest.TestCase):
     def test_page_keys_have_one_frontend_and_backend_contract(self) -> None:
-        # Cash backend ships before its UI. No ordinary page may disappear or
-        # silently gain an unregistered backend permission during this rollout.
-        self.assertEqual(_frontend_page_keys(), set(ALL_PAGE_KEYS) - {"cash"})
+        # Cash UI now ships with the same binary page permission as its API.
+        # Every visible page still needs an explicit backend route owner.
+        self.assertEqual(_frontend_page_keys(), set(ALL_PAGE_KEYS))
         self.assertEqual(registered_page_keys(), ALL_PAGE_KEYS)
         self.assertEqual(missing_page_keys(), frozenset())
         self.assertNotIn("operation-history", ASSIGNABLE_PAGE_KEYS)

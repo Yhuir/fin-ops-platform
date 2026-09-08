@@ -113,14 +113,22 @@ class CashTransaction:
         items = sorted(set(item_ids))
         owned = [_row(row) for row in self.raw.fetch_all("SELECT * FROM cash.items WHERE origin_flow_id=ANY(%s::uuid[]) ORDER BY id", (flows,))] if flows else []
         item_ids = sorted(set(items) | {row["id"] for row in owned})
-        settlements = [_row(row) for row in self.raw.fetch_all("SELECT * FROM cash.settlements WHERE flow_id=ANY(%s::uuid[]) OR item_id=ANY(%s::uuid[]) OR source_item_id=ANY(%s::uuid[]) ORDER BY id", (flows, item_ids, item_ids))]
         refs = [_row(row) for row in self.raw.fetch_all("SELECT * FROM cash.items WHERE related_obligation_id=ANY(%s::uuid[]) OR ticket_source_id=ANY(%s::uuid[]) ORDER BY id", (item_ids, item_ids))] if item_ids else []
         all_items = set(item_ids) | {row["id"] for row in refs}
+        # A personal debt can own an expense used against another debt. Include its
+        # treatments and forward ownership anchors without scanning unrelated cash.
+        settlements = [_row(row) for row in self.raw.fetch_all("SELECT * FROM cash.settlements WHERE flow_id=ANY(%s::uuid[]) OR item_id=ANY(%s::uuid[]) OR source_item_id=ANY(%s::uuid[]) ORDER BY id", (flows, sorted(all_items), sorted(all_items)))]
         all_flows = set(flows)
         for settlement in settlements:
             all_items.update(value for value in (settlement["item_id"], settlement["source_item_id"]) if value)
             if settlement["flow_id"]:
                 all_flows.add(settlement["flow_id"])
+        if all_items:
+            anchors = self.raw.fetch_all("SELECT related_obligation_id,ticket_source_id,origin_flow_id FROM cash.items WHERE id=ANY(%s::uuid[])", (sorted(all_items),))
+            for anchor in anchors:
+                all_items.update(str(anchor[key]) for key in ("related_obligation_id", "ticket_source_id") if anchor[key])
+                if anchor["origin_flow_id"]:
+                    all_flows.add(str(anchor["origin_flow_id"]))
         return {"flow_ids": sorted(all_flows), "item_ids": sorted(all_items), "owned": owned, "settlements": settlements, "references": refs}
 
     def settlements_for_items(self, ids):
@@ -144,7 +152,11 @@ class CashTransaction:
         return self.raw.fetch_one("SELECT EXISTS(SELECT 1 FROM cash.flows WHERE from_account_id=%s OR to_account_id=%s) OR EXISTS(SELECT 1 FROM cash.task_templates WHERE default_account_id=%s) AS used", (account_id, account_id, account_id))["used"]
 
     def category_is_referenced(self, category_id):
-        return self.raw.fetch_one("SELECT EXISTS(SELECT 1 FROM cash.flows WHERE category_id=%s) OR EXISTS(SELECT 1 FROM cash.task_templates WHERE default_category_id=%s) AS used", (category_id, category_id))["used"]
+        return self.raw.fetch_one("""SELECT EXISTS(SELECT 1 FROM cash.flows WHERE category_id=%s)
+          OR EXISTS(SELECT 1 FROM cash.task_templates WHERE default_category_id=%s)
+          OR EXISTS(SELECT 1 FROM cash.task_occurrences WHERE template_values_snapshot->>'default_category_id'=%s)
+          OR EXISTS(SELECT 1 FROM cash.items WHERE category_id=%s)
+          OR EXISTS(SELECT 1 FROM cash.settlements WHERE category_id=%s) AS used""", (category_id,)*5)["used"]
 
     def personal_items(self):
         return [_row(row) for row in self.raw.fetch_all("SELECT * FROM cash.items WHERE ledger_group='personal' ORDER BY id")]

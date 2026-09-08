@@ -7,10 +7,10 @@ describe("cash composite entry", () => {
     expect(flowCompositionPayload([], "2026-09-07", null, "receipt")).toEqual({ related_items: [], origin_items: [], allocations: [] });
   });
   test("preserves stable identities and exact amounts across retries", () => {
-    const expense = { ...newFlowPart("expense", "payment"), amount: "1234567890123456.78", content: "实际材料费" };
+    const expense = { ...newFlowPart("expense", "payment"), amount: "1234567890123456.78", content: "实际材料费", category: "payment-category" };
     const first = flowCompositionPayload([expense], "2026-09-07", "project-a", "payment");
     expect(flowCompositionPayload([expense], "2026-09-07", "project-a", "payment")).toEqual(first);
-    expect(first.related_items[0]).toMatchObject({ id: expense.id, original_amount: "1234567890123456.78", oa_project_id: "project-a" });
+    expect(first.related_items[0]).toMatchObject({ id: expense.id, original_amount: "1234567890123456.78", oa_project_id: "project-a", category_id: "payment-category" });
     expect(first.allocations).toEqual([]);
   });
   test("existing-item cash allocation carries real target version and does not recreate obligation", () => {
@@ -37,10 +37,13 @@ describe("cash composite entry", () => {
   });
   test("links an expense to an explicitly selected same-flow loan without another payment", () => {
     const loan = { ...newFlowPart("loan", "payment"), amount: "10", content: "借款", counterparty: "公司", group: "company", direction: "receivable" };
-    const expense = { ...newFlowPart("expense", "payment"), amount: "10", content: "费用", relatedLoanId: loan.id };
+    const expense = { ...newFlowPart("expense", "payment"), amount: "10", content: "费用", category: "payment-category", relatedLoanId: loan.id };
     const result = flowCompositionPayload([expense, loan], "2026-09-07", null, "payment");
     expect(result.related_items[0]).toMatchObject({ related_obligation_id: loan.id });
     expect(result.allocations).toEqual([]);
     expect(() => flowCompositionPayload([expense], "2026-09-07", null, "payment")).toThrow("已被移除");
+  });
+  test("noncash expense classification is explicit, not inferred from content", () => {
+    expect(() => flowCompositionPayload([{ ...newFlowPart("expense", "payment"), amount: "3", content: "材料费用" }], "2026-09-07", null, "payment")).toThrow("费用类型");
   });
 });

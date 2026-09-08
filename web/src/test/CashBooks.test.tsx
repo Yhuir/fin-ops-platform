@@ -14,10 +14,10 @@ const turnover = {
   rows: [{ ...rowBase, row_id: "principal-a" }, { ...rowBase, row_id: "settlement-b", row_kind: "settlement", personal_variant: "settlement", occurred_on: "2026-01-02", content: "第一次归还", original_amount: null, repayment_amount: "3000.00", cash_received_amount: "3000.00", cash_paid_amount: null, remaining_after_event: "9000.00" }, { ...rowBase, row_id: "settlement-c", row_kind: "settlement", personal_variant: "settlement", occurred_on: "2026-01-03", content: "第二次归还", original_amount: null, repayment_amount: "2500.00", cash_received_amount: "2500.00", cash_paid_amount: null, remaining_after_event: "6500.00" }], pagination,
   summary: { cash_received_amount: "5500.00", cash_paid_amount: "12000.00", non_ticket_offset_amount: "0.00", repayment_amount: "5500.00", reimbursement_received_amount: "0.00", real_expense_amount: "0.00", ticket_offset_amount: "0.00", remaining_obligation_amount: { receivable: "6500.00", payable: "0.00" } },
 };
-const personalSummary = { coverage: { state: "unconfigured", opening_date: null, coverage_start: null }, opening_obligation_amount: null, opening_adjustment_amount: null, new_principal_amount: null, cash_repayment_amount: null, ticket_offset_amount: null, non_ticket_offset_amount: null, remaining_obligation_amount: null };
+const personalSummary = { counterparty: null, month_principal_totals: Array.from({ length: 12 }, (_, index) => ({ month: `2026-${String(index + 1).padStart(2, "0")}`, principal_amount: null, coverage_state: "unconfigured" })), year_principal_amount: null, coverage: { state: "unconfigured", opening_date: null, coverage_start: null }, opening_obligation_amount: null, opening_adjustment_amount: null, new_principal_amount: null, cash_repayment_amount: null, ticket_offset_amount: null, non_ticket_offset_amount: null, remaining_obligation_amount: null };
 function result(data: unknown, options = {}) { return { data, loading: false, error: null, reload: mocks.reload, ...options }; }
 const projects = { rows: [{ id: "project-a", name: "历史项目甲" }, { id: "project-b", name: "历史项目乙" }], pagination: { ...pagination, total: 2 } };
-const ticketReport = { rows: [], pagination: { ...pagination, total: 0 }, summary: { provided_amount: "0.00", used_amount: "0.00", offset_amount: "0.00", available_source_amount: "0.00", receivable_amount: "0.00", cash_received_amount: "0.00" } };
+const ticketReport = { rows: [], pagination: { ...pagination, total: 0 }, summary: { provided_amount: "0.00", used_amount: "0.00", offset_amount: "0.00", available_source_amount: "0.00", receivable_amount: "0.00", cash_received_amount: "0.00", noncash_settled_amount: "0.00", remaining_receivable_amount: "0.00" } };
 const lastParams = (path: string) => mocks.query.mock.calls.filter(([url]) => url === path).at(-1)![1] as Record<string, unknown>;
 beforeEach(() => {
   mocks.query.mockReset(); mocks.reload.mockReset();
@@ -25,6 +25,59 @@ beforeEach(() => {
 });
 
 describe("cash books", () => {
+  test("unsettled uses a cutoff-only item view, retains separate event criteria, and reads no other cash book", async () => {
+    const originalQuery = mocks.query.getMockImplementation()!;
+    mocks.query.mockImplementation((path, params) => path === "/reports/turnover" && params.view === "unsettled" ? result({ view: "unsettled", rows: [{ item_id: "old-loan", type: "loan", origin_date: "2025-02-01", ledger_group: "company", counterparty: "旧公司", project: null, content: "去年无新动作欠款", obligation_direction: "receivable", original_amount: "1000.00", settled_amount: "200.00", remaining_amount: "800.00", version: 3 }], summary: { item_count: 1, remaining_obligation_amount: { receivable: "800.00", payable: "0.00" } }, pagination: { ...pagination, total: 1 } }) : originalQuery(path, params));
+    render(<CashBooks />);
+    await userEvent.click(screen.getByRole("button", { name: /往来账视图$/ }));
+    await userEvent.click(screen.getByRole("option", { name: "截至期末未结事项" }));
+    expect(screen.getByRole("grid", { name: "截至期末未结事项" })).toHaveTextContent("去年无新动作欠款");
+    expect(lastParams("/reports/turnover")).toMatchObject({ view: "unsettled", sort: "origin_date" });
+    for (const key of ["date_from", "category_ids", "states", "personal_variant"]) expect(lastParams("/reports/turnover")).not.toHaveProperty(key);
+    expect(screen.queryByRole("button", { name: "筛选费用类型" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /往来账视图$/ })); await userEvent.click(screen.getByRole("option", { name: "本期处理记录" }));
+    expect(lastParams("/reports/turnover").date_from).toMatch(/-01-01$/);
+    expect(mocks.query.mock.calls.some(([path]) => path === "/reports/personal" || path === "/reports/ticket-payments")).toBe(false);
+  });
+  test("personal expense events stay neutral instead of claiming debt repayment", () => {
+    mocks.query.mockImplementation(path => result(path === "/reports/turnover" ? { ...turnover, rows: [{ ...rowBase, row_id: "neutral", row_kind: "expense", personal_variant: "neutral", content: "实际费用变化" }] } : null));
+    render(<CashBooks />);
+    const row = screen.getByText("实际费用变化").closest("tr")!;
+    expect(row).not.toHaveClass("cash-row--personal-settlement");
+    expect(row).toHaveTextContent("费用变化");
+    expect(screen.getByText("本期涉及事项期末未结 · 应收")).toBeInTheDocument();
+  });
+  test("pending ticket view discards period-only filters while preserving period state on return", async () => {
+    const initial = initialCashBooksCriteria(); initial.tab = "tickets"; initial.tickets.filters.states = ["unused"];
+    render(<CashBooks initialCriteria={initial} />);
+    await userEvent.click(screen.getByRole("button", { name: /有票支付视图$/ })); await userEvent.click(screen.getByRole("option", { name: "待回款", exact: true }));
+    expect(lastParams("/reports/ticket-payments")).toMatchObject({ view: "pending_collection", date_from: undefined, states: undefined });
+    expect(screen.queryByRole("button", { name: "筛选使用状态" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /有票支付视图$/ })); await userEvent.click(screen.getByRole("option", { name: "期间台账" }));
+    expect(lastParams("/reports/ticket-payments")).toMatchObject({ view: "period", states: ["unused"] });
+  });
+  test("matrix totals are API full-range amounts, not the displayed page", () => {
+    const initial = initialCashBooksCriteria(); initial.tab = "personal";
+    mocks.query.mockImplementation(path => result(path === "/reports/personal" ? { rows: [], pagination: { ...pagination, total: 100 }, summary: { ...personalSummary, counterparty: "合成人员", month_principal_totals: personalSummary.month_principal_totals.map(month => ({ ...month, principal_amount: "123.45", coverage_state: "complete" })), year_principal_amount: "1481.40" } } : null));
+    render(<CashBooks initialCriteria={initial} />);
+    const total = screen.getByRole("row", { name: "全部匹配账单合计" });
+    expect(within(total).getAllByText("123.45")).toHaveLength(12); expect(total).toHaveTextContent("1,481.40");
+  });
+  test("personal source filters include prior-year projects and never leak into cash repayments", async () => {
+    const initial = initialCashBooksCriteria(); initial.tab = "personal"; initial.personal.view = "ticket_offsets"; initial.personal.year = "2026"; initial.personal.sort = "occurred_on";
+    render(<CashBooks initialCriteria={initial} />);
+    await userEvent.click(screen.getByRole("button", { name: "筛选来源项目", exact: true }));
+    expect(lastParams("/reports/project-options")).toMatchObject({ date_to: "2026-12-31" });
+    expect(lastParams("/reports/project-options")).not.toHaveProperty("date_from");
+    const popup = screen.getByRole("dialog", { name: "筛选来源项目", exact: true });
+    await userEvent.click(within(popup).getByRole("checkbox", { name: "历史项目甲" }));
+    await userEvent.click(within(popup).getByRole("button", { name: "应用", exact: true }));
+    expect(lastParams("/reports/personal").source_project_ids).toEqual(["project-a"]);
+    await userEvent.click(screen.getByRole("button", { name: /个人专账视图$/ }));
+    await userEvent.click(screen.getByRole("option", { name: "现金归还", exact: true }));
+    expect(lastParams("/reports/personal")).toMatchObject({ view: "cash_repayments", source_project_ids: undefined, category_ids: undefined });
+    expect(screen.queryByRole("button", { name: "筛选来源项目", exact: true })).not.toBeInTheDocument();
+  });
   test("turnover rejects the 101st combined selection without replacing applied criteria", async () => {
     const user = userEvent.setup(); const initial = initialCashBooksCriteria();
     initial.turnover.filters.project_ids = Array.from({ length: 50 }, (_, i) => `p${i}`);
@@ -44,7 +97,7 @@ describe("cash books", () => {
   test.each(["tickets", "personal"] as const)("%s keeps applied query and project draft when encoded criteria reach 3501 bytes", async tab => {
     const user = userEvent.setup(); const initial = initialCashBooksCriteria(); initial.tab = tab;
     const ids = Array.from({ length: 17 }, (_, i) => "p".repeat(183) + i);
-    const extraId = "z".repeat(tab === "tickets" ? 94 : 122);
+    const extraId = "z".repeat(tab === "tickets" ? 82 : 122);
     if (tab === "tickets") initial.tickets.filters.project_ids = ids;
     else initial.personal.projects = ids;
     const originalQuery = mocks.query.getMockImplementation()!;
@@ -102,7 +155,7 @@ describe("cash books", () => {
   test("personal unconfigured coverage remains unknown and only fetches the active view", async () => {
     render(<CashBooks />);
     await userEvent.click(screen.getByRole("tab", { name: "个人专账" }));
-    expect(screen.getByText(/个人账起算未配置/)).toBeInTheDocument();
+    expect(screen.getByText(/个人账起算或归属人未配置/)).toBeInTheDocument();
     expect(screen.queryByText("0.00")).not.toBeInTheDocument();
     expect(mocks.query.mock.calls).toContainEqual(["/reports/personal", expect.objectContaining({ view: "matrix", page_size: 50 })]);
     await userEvent.click(screen.getByLabelText("个人专账视图", { selector: "button" }));
@@ -148,7 +201,7 @@ describe("cash books", () => {
   test("ticket state multi-select and amount sorting use true displayed columns", async () => {
     const user = userEvent.setup(); render(<CashBooks />);
     await user.click(screen.getByRole("tab", { name: "有票支付" }));
-    expect(within(screen.getByRole("grid", { name: "有票支付" })).getAllByRole("columnheader")).toHaveLength(12);
+    expect(within(screen.getByRole("grid", { name: "有票支付" })).getAllByRole("columnheader")).toHaveLength(15);
     await user.click(screen.getByRole("button", { name: "筛选使用状态" }));
     const popup = await screen.findByRole("dialog", { name: "筛选使用状态" });
     await user.click(within(popup).getByRole("checkbox", { name: "未使用", exact: true }));

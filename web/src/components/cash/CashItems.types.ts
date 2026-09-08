@@ -2,6 +2,9 @@ export type CashPageRows<T> = { rows: T[]; pagination: { page: number; page_size
 export type CashProject = { id: string; name_snapshot: string } | null;
 export type CashItemType = "loan" | "company_receivable" | "expense" | "ticket_source";
 export type CashSettlementKind = "cash_repayment" | "company_collection" | "expense_payment" | "expense_refund" | "ticket_use" | "ticket_offset" | "non_ticket_offset";
+export type CashCategory = { id: string; name: string; group: string };
+export type CashPersonalSetting = { opening_date: string | null; counterparty: string | null; version: number };
+export type CashPersonalContext = { opening_date: string; counterparty: string };
 export type CashItem = {
   id: string; version: number; type: CashItemType; origin_date: string; original_amount: string;
   is_opening: boolean; obligation_direction: "receivable" | "payable" | null;
@@ -11,10 +14,12 @@ export type CashItem = {
   bill_label_id: string | null; bill_month: string | null;
   ticket_provider: string | null; ticket_provided_on: string | null; ticket_description: string | null;
   related_obligation_id: string | null; ticket_source_id: string | null; content: string; remark: string | null;
+  category_id: string | null; category: CashCategory | null;
   selectable?: boolean; unavailable_reason?: string | null; remaining_obligation_amount?: string;
   available_source_amount?: string;
 };
 export type CashSettlement = {
+  category_id: string | null; category: CashCategory | null;
   id: string; version: number; kind: CashSettlementKind; occurred_on: string; amount: string; remark: string | null;
   item_id: string | null; item_version: number | null; item_content: string | null;
   source_item_id: string | null; source_item_version: number | null; source_item_content: string | null;

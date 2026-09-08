@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
-from fin_ops_platform.services.cash_domain import invalid, normalize_date, normalize_uuid, serialize
+from fin_ops_platform.services.cash_domain import invalid, normalize_date, normalize_uuid, serialize, shanghai_today
 
 
 def month(value: Any, name: str = "month") -> date:
@@ -29,8 +29,9 @@ _MULTI_FIELDS = {
     "account_ids": "account_id", "project_ids": "project_id", "category_ids": "category_id",
     "bill_label_ids": "bill_label_id", "kinds": "kind", "sources": "source",
     "states": "state", "groups": "group", "stage_codes": "stage_code",
+    "source_project_ids": "source_project_id",
 }
-_NULLABLE_MULTI_FIELDS = {"project_ids", "category_ids", "bill_label_ids", "stage_codes"}
+_NULLABLE_MULTI_FIELDS = {"project_ids", "source_project_ids", "category_ids", "bill_label_ids", "stage_codes"}
 
 
 def query_sets(raw: dict[str, Any]) -> dict[str, Any]:
@@ -82,7 +83,7 @@ def query_sets(raw: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def query_input(raw: dict[str, Any], allowed: set[str], sorts: set[str], default_sort: str) -> dict[str, Any]:
+def query_input(raw: dict[str, Any], allowed: set[str], sorts: set[str], default_sort: str, *, cutoff_only: bool = False) -> dict[str, Any]:
     if not isinstance(raw, dict) or set(raw) - allowed - {"page", "page_size", "sort", "order"}:
         invalid("Unknown cash query fields.")
     result = query_sets(raw)
@@ -95,7 +96,7 @@ def query_input(raw: dict[str, Any], allowed: set[str], sorts: set[str], default
     for name, value in raw.items():
         if name in _MULTI_FIELDS:
             continue
-        if name.endswith("_id") and name not in {"project_id"}:
+        if name.endswith("_id") and name not in {"project_id", "source_project_id"}:
             result[name] = normalize_uuid(value)
         elif name in {"date_from", "date_to", "origin_date_from", "origin_date_to", "reminder_from", "reminder_to", "overdue_as_of"}:
             result[name] = normalize_date(value)
@@ -110,6 +111,8 @@ def query_input(raw: dict[str, Any], allowed: set[str], sorts: set[str], default
                 invalid(f"{name} must be nonempty text of at most 200 characters.")
             result[name] = value.strip()
     for start, end in (("date_from", "date_to"), ("origin_date_from", "origin_date_to")):
+        if cutoff_only and start == "date_from":
+            continue
         if (start in result) != (end in result):
             invalid(f"{start} and {end} are required together.")
         if start in result and not 0 <= (result[end] - result[start]).days <= 365:
@@ -124,8 +127,9 @@ def enum_fields(query: dict[str, Any], **fields: set[str]) -> None:
 
 
 class CashQueryService:
-    def __init__(self, repository: Any) -> None:
+    def __init__(self, repository: Any, *, today: Callable[[], date] = shanghai_today) -> None:
         self.repository = repository
+        self.today = today
 
     def list_configuration(self, kind: str, raw: dict[str, Any]) -> dict[str, Any]:
         if kind not in {"accounts", "categories", "bill-labels"}:
@@ -189,23 +193,41 @@ class CashQueryService:
         return serialize(self.repository.list_settlements(query))
 
     def query_turnover(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"date_from", "date_to", "ledger_group", "personal_variant", "counterparty", "project_id", "category_id", "state", "keyword", "project_ids", "category_ids", "states"}, {"occurred_on", "original_amount", "repayment_amount"}, "occurred_on")
-        enum_fields(query, ledger_group={"company", "external_person", "personal"}, personal_variant={"principal", "settlement"}, state={"open", "partial", "settled"})
+        view = raw.get("view", "events")
+        common = {"view", "date_to", "ledger_group", "counterparty", "project_id", "project_ids", "keyword"}
+        if view == "unsettled":
+            query = query_input(raw, common, {"origin_date", "remaining_amount", "counterparty"}, "origin_date", cutoff_only=True)
+            self._cutoff(query)
+        else:
+            query = query_input(raw, common | {"date_from", "personal_variant", "category_id", "state", "category_ids", "states"}, {"occurred_on", "original_amount", "repayment_amount"}, "occurred_on")
+            self._period(query)
+        query["view"] = view
+        enum_fields(query, view={"events", "unsettled"}, ledger_group={"company", "external_person", "personal"}, personal_variant={"principal", "settlement", "neutral"}, state={"open", "partial", "settled"})
         if "personal_variant" in query and query.get("ledger_group") != "personal":
             invalid("personal_variant requires ledger_group=personal.")
-        self._period(query)
         return serialize(self.repository.query_turnover(query))
 
     def query_tickets(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"date_from", "date_to", "ticket_provider", "project_id", "state", "keyword", "project_ids", "states"}, {"ticket_provided_on", "provided_amount", "available_source_amount"}, "ticket_provided_on")
-        enum_fields(query, state={"unused", "partial", "used"})
-        self._period(query)
+        view = raw.get("view", "period")
+        allowed = {"view", "date_to", "ticket_provider", "project_id", "keyword", "project_ids"}
+        if view != "pending_collection":
+            allowed |= {"date_from", "state", "states"}
+        query = query_input(raw, allowed, {"ticket_provided_on", "provided_amount", "available_source_amount"}, "ticket_provided_on", cutoff_only=view == "pending_collection")
+        query["view"] = view
+        enum_fields(query, view={"period", "pending_collection"}, state={"unused", "partial", "used"})
+        if view == "pending_collection":
+            self._cutoff(query)
+        else:
+            self._period(query)
         return serialize(self.repository.query_tickets(query))
 
     def query_personal(self, raw: dict[str, Any]) -> dict[str, Any]:
         view = raw.get("view", "matrix")
         sorts = {"bank_name", "label", "year_principal_amount"} if view == "matrix" else {"occurred_on", "amount"}
-        query = query_input(raw, {"year", "view", "bill_label_id", "project_id", "bill_month", "keyword", "project_ids", "bill_label_ids"}, sorts, "bank_name" if view == "matrix" else "occurred_on")
+        allowed = {"year", "view", "bill_label_id", "project_id", "bill_month", "keyword", "project_ids", "bill_label_ids"}
+        if view in {"ticket_offsets", "non_ticket_offsets"}:
+            allowed |= {"source_project_id", "source_project_ids", "category_id", "category_ids"}
+        query = query_input(raw, allowed, sorts, "bank_name" if view == "matrix" else "occurred_on")
         if "year" not in query:
             invalid("year is required.")
         query["year"] = integer(query["year"], "year", 1, 9998)
@@ -214,12 +236,16 @@ class CashQueryService:
         return serialize(self.repository.query_personal(query))
 
     def project_options(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"date_from", "date_to", "keyword", "item_id", "task_occurrence_id"}, {"name"}, "name")
-        if "date_from" not in query and not ({"item_id", "task_occurrence_id"} & query.keys()):
-            invalid("A date range or explicit item/task parent is required.")
+        query = query_input(raw, {"date_from", "date_to", "keyword", "item_id", "task_occurrence_id"}, {"name"}, "name", cutoff_only="date_to" in raw and "date_from" not in raw)
+        if "date_to" not in query and not ({"item_id", "task_occurrence_id"} & query.keys()):
+            invalid("A cutoff date or explicit item/task parent is required.")
         return serialize(self.repository.project_options(query))
 
     @staticmethod
     def _period(query: dict[str, Any]) -> None:
         if "date_from" not in query:
             invalid("date_from and date_to are required.")
+
+    def _cutoff(self, query: dict[str, Any]) -> None:
+        if "date_to" not in query or query["date_to"] > self.today():
+            invalid("date_to is required and cannot be later than today.")

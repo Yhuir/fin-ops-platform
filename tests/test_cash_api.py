@@ -67,6 +67,59 @@ class CashApiTests(unittest.TestCase):
         self.assertEqual(json.loads(response.body)["error"], "cash_access_denied")
         self.queries.list_flows.assert_not_called()
 
+    def test_personal_opening_owner_is_explicit_in_read_and_write_dto(self):
+        expected = {"opening_date": "2026-01-01", "counterparty": "Synthetic owner", "version": 2}
+        self.service.get_personal_opening.return_value = expected
+        response = self.call(path="/api/cash/settings/personal-opening")
+        self.assertEqual(json.loads(response.body), expected)
+        payload = {"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic owner"}
+        self.service.update_personal_opening.return_value = {**expected, "changed": True}
+        response = self.call("PUT", "/api/cash/settings/personal-opening", body=json.dumps(payload))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.body)["counterparty"], "Synthetic owner")
+        self.service.update_personal_opening.assert_called_once_with(payload)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        denied = self.call("PUT", "/api/cash/settings/personal-opening", body=json.dumps(payload), identity=session(allowed=False))
+        self.assertEqual(denied.status_code, 403)
+        self.service.update_personal_opening.assert_called_once()
+
+    def test_unsettled_and_pending_collection_dtos_keep_exact_money_and_view(self):
+        row = {"item_id": str(uuid4()), "origin_date": "2025-01-01", "remaining_amount": Decimal("800.00")}
+        self.queries.query_turnover.return_value = {"view": "unsettled", "rows": [row],
+            "summary": {"item_count": 1, "remaining_obligation_amount": {"receivable": Decimal("800.00"), "payable": Decimal("0.00")}},
+            "pagination": {"page": 1, "page_size": 50, "total": 1}}
+        response = self.call(path="/api/cash/reports/turnover", query={"view": ["unsettled"], "date_to": ["2026-09-07"]})
+        self.assertEqual(response.status_code, 200)
+        result = json.loads(response.body)
+        self.assertEqual(result["view"], "unsettled")
+        self.assertEqual(result["rows"][0]["remaining_amount"], "800.00")
+        self.assertEqual(result["summary"]["remaining_obligation_amount"], {"receivable": "800.00", "payable": "0.00"})
+        self.queries.query_turnover.assert_called_once_with({"view": "unsettled", "date_to": "2026-09-07"})
+        self.queries.query_tickets.return_value = {"view": "pending_collection", "rows": [{"remaining_receivable_amount": Decimal("150.00"),
+            "noncash_settled_amount": Decimal("50.00"), "collection_state": "partial"}], "summary": {}, "pagination": {"total": 1}}
+        tickets = self.call(path="/api/cash/reports/ticket-payments", query={"view": ["pending_collection"], "date_to": ["2026-09-07"]})
+        self.assertEqual(tickets.status_code, 200)
+        self.assertEqual(json.loads(tickets.body)["rows"], [{"remaining_receivable_amount": "150.00", "noncash_settled_amount": "50.00", "collection_state": "partial"}])
+        self.assertEqual(tickets.headers["Cache-Control"], "no-store")
+
+    def test_new_view_incompatible_filters_fail_before_repository_io(self):
+        repository = Mock()
+        self.routes.queries = CashQueryService(repository)
+        for report, view, invalid in (("turnover", "unsettled", "date_from"),
+                                       ("turnover", "unsettled", "category_id"),
+                                       ("turnover", "unsettled", "personal_variant"),
+                                       ("ticket-payments", "pending_collection", "date_from"),
+                                       ("ticket-payments", "pending_collection", "state")):
+            value = {"date_from": "2026-01-01", "category_id": "null", "personal_variant": "principal", "state": "unused"}[invalid]
+            with self.subTest(report=report, invalid=invalid):
+                response = self.call(path="/api/cash/reports/" + report,
+                    query={"view": [view], "date_to": ["2026-09-07"], invalid: [value]})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(json.loads(response.body)["error"], "cash_invalid_input")
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+        repository.query_turnover.assert_not_called()
+        repository.query_tickets.assert_not_called()
+
     def test_turnover_preserves_ui_projections_and_nullable_money(self):
         row = {"row_id": "settlement:synthetic", "row_kind": "settlement", "category": {"id": "synthetic", "name": "Income", "group": "receipt"},
                "remark": None, "ticket_collection_state": "partial", "original_amount": None,

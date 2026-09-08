@@ -9,10 +9,11 @@ import {
   FinanceTablePagination, FinanceTableRow,
 } from "../common/FinanceTable";
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
+import { CashConfigurationSelect } from "./CashFlowSelectors";
 import {
   cashAmount, cashMoneyInput, cashToday, itemTypeLabels, settlementLabels, settlementVersions,
   type CashItem, type CashItemDetailData, type CashItemType, type CashPageRows,
-  type CashSettlement, type CashSettlementKind,
+  type CashSettlement, type CashSettlementKind, type CashPersonalContext,
 } from "./CashItems.types";
 
 type QueryParams = CashQueryParams;
@@ -77,17 +78,21 @@ function ItemProjectPicker({ historical, onSelect, onCancel }: {
   </section>;
 }
 
-export function CashItemEditor({ item, initialType = "loan", opening: initialOpening = false, ticketSource, onClose, onSaved }: {
-  item?: CashItem; initialType?: CashItemType; opening?: boolean; ticketSource?: RefItem; onClose: () => void; onSaved?: (id: string) => void;
+export function CashItemEditor({ item, initialType = "loan", opening: initialOpening = false, personalContext, ticketSource, onClose, onSaved }: {
+  item?: CashItem; initialType?: CashItemType; opening?: boolean; personalContext?: CashPersonalContext; ticketSource?: RefItem; onClose: () => void; onSaved?: (id: string) => void;
 }) {
   const [id] = useState(() => item?.id ?? crypto.randomUUID());
   const [expectedVersion] = useState(item?.version);
   const [type, setType] = useState<CashItemType>(item?.type ?? initialType);
-  const [date, setDate] = useState(item?.origin_date ?? cashToday());
+  const initialDate = item?.origin_date ?? (initialOpening && personalContext ? personalContext.opening_date : cashToday());
+  const initialCounterparty = item?.counterparty ?? personalContext?.counterparty ?? "";
+  const initialGroup = item?.ledger_group ?? (personalContext ? "personal" : "company");
+  const [date, setDate] = useState(initialDate);
   const [amount, setAmount] = useState(item?.original_amount ?? "");
   const [content, setContent] = useState(item?.content ?? ""); const [remark, setRemark] = useState(item?.remark ?? "");
-  const [counterparty, setCounterparty] = useState(item?.counterparty ?? "");
-  const [group, setGroup] = useState<string>(item?.ledger_group ?? "company");
+  const [counterparty, setCounterparty] = useState(initialCounterparty);
+  const [group, setGroup] = useState<string>(initialGroup);
+  const [category, setCategory] = useState(item?.category_id ?? "");
   const [direction, setDirection] = useState<string>(item?.obligation_direction ?? "receivable");
   const [opening, setOpening] = useState(item?.is_opening ?? initialOpening);
   const [project, setProject] = useState<{ id: string; name: string } | null>(item?.oa_project_id ? { id: item.oa_project_id, name: item.project_name_snapshot! } : null);
@@ -106,9 +111,9 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
   const action = useItemWrite();
   const obligation = type === "loan" || type === "company_receivable";
   const protectedSource = Boolean(item?.origin_flow_id);
-  const dirty = type !== (item?.type ?? initialType) || date !== (item?.origin_date ?? cashToday()) || amount !== (item?.original_amount ?? "")
-    || content !== (item?.content ?? "") || remark !== (item?.remark ?? "") || counterparty !== (item?.counterparty ?? "")
-    || group !== (item?.ledger_group ?? "company") || direction !== (item?.obligation_direction ?? "receivable")
+  const dirty = type !== (item?.type ?? initialType) || date !== initialDate || amount !== (item?.original_amount ?? "")
+    || content !== (item?.content ?? "") || remark !== (item?.remark ?? "") || counterparty !== initialCounterparty
+    || group !== initialGroup || category !== (item?.category_id ?? "") || direction !== (item?.obligation_direction ?? "receivable")
     || opening !== (item?.is_opening ?? initialOpening) || (project?.id ?? null) !== (item?.oa_project_id ?? null)
     || provider !== (item?.ticket_provider ?? "") || description !== (item?.ticket_description ?? "")
     || billLabel !== (item?.bill_label_id ?? "") || billMonth !== (item?.bill_month ?? "")
@@ -118,6 +123,7 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
+      if (type === "expense" && !category) throw new Error("请选择费用类型。");
       const body = {
         ...(item ? { expected_version: expectedVersion } : { id }), type,
         origin_date: date, original_amount: cashMoneyInput(amount), content: content.trim(), remark: remark.trim() || null,
@@ -125,6 +131,7 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
         obligation_direction: obligation ? (type === "company_receivable" || group === "personal" ? "receivable" : direction) : null,
         ledger_group: obligation ? (type === "company_receivable" ? "company" : group) : null,
         counterparty: obligation ? counterparty.trim() : null,
+        category_id: obligation ? null : category || null,
         oa_project_id: project?.id ?? null,
         bill_label_id: (type === "loan" || type === "expense") && showBill ? billLabel || null : null,
         bill_month: (type === "loan" || type === "expense") && showBill ? billMonth || null : null,
@@ -142,12 +149,13 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
     {closing && <div role="alert" className="cash-confirm"><p>未保存的事项内容将被丢弃。</p><Button size="sm" variant="secondary" onPress={() => setClosing(false)}>继续填写</Button><Button size="sm" variant="danger" onPress={onClose}>放弃并关闭</Button></div>}
     <form className="cash-form" onSubmit={submit}>
       <CashNotice error={action.error} />
-      <CashSelect label="事项类型" value={type} disabled={Boolean(item)} onChange={value => { setType(value as CashItemType); setRef(null); setRefCleared(true); setOpening(false); }} options={Object.entries(itemTypeLabels).map(([value, label]) => ({ value, label }))} />
+      <CashSelect label="事项类型" value={type} disabled={Boolean(item || personalContext)} onChange={value => { setType(value as CashItemType); setRef(null); setRefCleared(true); setOpening(false); setCategory(""); }} options={Object.entries(itemTypeLabels).map(([value, label]) => ({ value, label }))} />
       <div className="cash-form-grid"><CashInput label={opening ? "起算日期" : "实际日期"} type="date" value={date} onChange={setDate} required disabled={protectedSource} /><CashInput label={opening ? "期初未结金额" : "原始金额"} value={amount} onChange={setAmount} required disabled={protectedSource} /></div>
-      {obligation && <><CashInput label="往来对象" value={counterparty} onChange={setCounterparty} required /><div className="cash-form-grid"><CashSelect label="往来类别" value={type === "company_receivable" ? "company" : group} onChange={setGroup} disabled={type === "company_receivable"} options={[{ value: "company", label: "公司往来" }, { value: "external_person", label: "外部人员" }, { value: "personal", label: "个人专账" }]} /><CashSelect label="义务方向" value={type === "company_receivable" || group === "personal" ? "receivable" : direction} onChange={setDirection} disabled={protectedSource || type === "company_receivable" || group === "personal"} options={[{ value: "receivable", label: "应收 / 对方应还" }, { value: "payable", label: "应付 / 我方应还" }]} /></div><Checkbox isSelected={opening} isDisabled={protectedSource} onChange={setOpening}><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><Checkbox.Content>登记期初未结，不计本期新增</Checkbox.Content></Checkbox></>}
+      {obligation && <><CashInput label="往来对象" value={counterparty} onChange={setCounterparty} required disabled={Boolean(personalContext)} /><div className="cash-form-grid"><CashSelect label="往来类别" value={type === "company_receivable" ? "company" : group} onChange={setGroup} disabled={type === "company_receivable" || Boolean(personalContext)} options={[{ value: "company", label: "公司往来" }, { value: "external_person", label: "外部人员" }, { value: "personal", label: "个人专账" }]} /><CashSelect label="义务方向" value={type === "company_receivable" || group === "personal" ? "receivable" : direction} onChange={setDirection} disabled={protectedSource || type === "company_receivable" || group === "personal"} options={[{ value: "receivable", label: "应收 / 对方应还" }, { value: "payable", label: "应付 / 我方应还" }]} /></div><Checkbox isSelected={opening} isDisabled={protectedSource} onChange={value => { setOpening(value); if (personalContext) setDate(value ? personalContext.opening_date : cashToday()); }}><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><Checkbox.Content>登记期初未结，不计本期新增</Checkbox.Content></Checkbox></>}
       <div className="cash-toolbar"><span>项目：{project?.name ?? "无项目"}</span><Button size="sm" variant="tertiary" isDisabled={protectedSource} onPress={() => setProjectPicker(!projectPicker)}>选择项目</Button>{project && <Button size="sm" variant="tertiary" isDisabled={protectedSource} onPress={() => setProject(null)}>清除</Button>}</div>
       {projectPicker && <ItemProjectPicker historical={opening} onSelect={row => { setProject(row); setProjectPicker(false); }} onCancel={() => setProjectPicker(false)} />}
       <CashInput label="事项内容" value={content} onChange={setContent} required />
+      {!obligation && <CashConfigurationSelect name="categories" label="事项费用类型" value={category} selected={item?.category} groups={type === "expense" ? ["payment"] : ["payment", "turnover"]} onChange={setCategory} required={type === "expense"} disabled={action.busy} />}
       {type === "ticket_source" && <><CashInput label="提供人" value={provider} onChange={setProvider} required /><CashInput label="票据 / 用途说明" value={description} onChange={setDescription} required /></>}
       {(type === "loan" || type === "expense") && <><Checkbox isSelected={showBill} onChange={setShowBill}><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><Checkbox.Content>归属银行 / 卡片账单</Checkbox.Content></Checkbox>{showBill && <><CashNotice error={bills.error?.message} /><CashSelect label="账单别名" value={billLabel} onChange={setBillLabel} required options={[{ value: "", label: "请选择账单" }, ...(bills.data?.rows.map(row => ({ value: row.id, label: `${row.bank_name} · ${row.label}`, disabled: !row.enabled && row.id !== billLabel })) ?? [])]} />{bills.data && <FinanceTablePagination {...bills.data.pagination} pageSize={bills.data.pagination.page_size} onPageChange={setBillPage} />}<CashInput label="账单月份" type="month" value={billMonth} onChange={setBillMonth} required /></>}</>}
       {(type === "expense" || type === "company_receivable") && <><div className="cash-toolbar"><span>{type === "expense" ? "往来展示归属" : "对应票据来源"}：{linked?.content ?? "未关联"}</span><Button size="sm" variant="tertiary" onPress={() => setRefPicker(!refPicker)}>选择事项</Button>{(linked || originalRefId) && <Button size="sm" variant="tertiary" onPress={() => { setRef(null); setRefCleared(true); }}>解除引用</Button>}</div><CashNotice error={originalRef.error?.message} />{refPicker && <CashItemPicker label={type === "expense" ? "选择往来义务" : "选择票据来源"} params={{ type: type === "company_receivable" ? "ticket_source" : undefined, purpose: type === "expense" ? "settlement_target" : "list", settlement_kind: type === "expense" ? "non_ticket_offset" : undefined }} onSelect={row => { setRef(row); setRefCleared(false); setRefPicker(false); }} onCancel={() => setRefPicker(false)} />}</>}
@@ -166,6 +174,7 @@ export function CashSettlementEditor({ target, source, settlement, initialKind, 
 }) {
   const [id] = useState(() => crypto.randomUUID()); const [kind, setKind] = useState(initialKind);
   const [amount, setAmount] = useState(settlement?.amount ?? ""); const [date, setDate] = useState(settlement?.occurred_on ?? cashToday()); const [remark, setRemark] = useState(settlement?.remark ?? "");
+  const [category, setCategory] = useState(settlement?.category_id ?? "");
   const [chosenTarget, setTarget] = useState<RefItem | null>(target ?? (settlement?.item_id ? { id: settlement.item_id, version: settlement.item_version!, content: settlement.item_content! } : null));
   const [chosenSource, setSource] = useState<RefItem | null>(source ?? (settlement?.source_item_id ? { id: settlement.source_item_id, version: settlement.source_item_version!, content: settlement.source_item_content! } : null));
   const [picker, setPicker] = useState<"target" | "source" | null>(null); const [flow, setFlow] = useState<FlowCandidate | null>(null);
@@ -181,7 +190,8 @@ export function CashSettlementEditor({ target, source, settlement, initialKind, 
       if (kind !== "ticket_use" && !targetRef) throw new Error("请选择本次处理的目标事项。");
       if ((kind === "ticket_use" || kind === "ticket_offset") && !sourceRef) throw new Error("请选择票据来源。");
       if (isCash && !settlement && !flow) throw new Error("请选择实际现金流水。");
-      const fields = { kind, amount: cashMoneyInput(amount), occurred_on: isCash ? settlement?.occurred_on ?? flow!.occurred_on : date, remark: remark.trim() || null, item_id: targetRef?.id ?? null, source_item_id: sourceRef?.id ?? null, flow_id: isCash ? settlement?.flow_id ?? flow!.id : null };
+      if (kind === "non_ticket_offset" && !sourceRef && !category) throw new Error("请选择无来源调整分类。");
+      const fields = { kind, amount: cashMoneyInput(amount), occurred_on: isCash ? settlement?.occurred_on ?? flow!.occurred_on : date, remark: remark.trim() || null, item_id: targetRef?.id ?? null, source_item_id: sourceRef?.id ?? null, flow_id: isCash ? settlement?.flow_id ?? flow!.id : null, category_id: kind === "non_ticket_offset" && !sourceRef ? category : null };
       let body: Record<string, unknown>;
       if (settlement) {
         const versions = settlementVersions(settlement);
@@ -201,6 +211,8 @@ export function CashSettlementEditor({ target, source, settlement, initialKind, 
       {isCash && !settlement && <><div className="cash-toolbar"><CashInput label="搜索已录现金" value={flowSearch} onChange={setFlowSearch} /><Button size="sm" variant="secondary" onPress={() => { setFlowKeyword(flowSearch); setFlowPage(1); }}>查询流水</Button></div><CashNotice error={flows.error?.message} />{flows.loading && <p role="status">正在读取可关联流水…</p>}{flows.data && !flows.loading && <><ul className="cash-choice-list">{flows.data.rows.map(row => <li key={row.id}><Button size="sm" variant={flow?.id === row.id ? "secondary" : "tertiary"} isDisabled={!row.selectable} onPress={() => { setFlow(row); setDate(row.occurred_on); }}>{row.occurred_on} · {row.content} · {row.from_account?.name ?? row.to_account?.name} · {cashAmount(row.amount)} · 可归属 {cashAmount(row.available_amount)} · {row.source_kind === "manual" ? "手工" : "每月任务"}</Button>{!row.selectable && <small>不符合方向、项目或可用额度</small>}</li>)}</ul>{flows.data.rows.length === 0 && <p>没有可关联现金。请先登记真实收付，不会自动造一笔。</p>}<FinanceTablePagination {...flows.data.pagination} pageSize={20} onPageChange={setFlowPage} /></>}{flow && <p>已选择：{flow.content} · 义务或费用可归属额 {cashAmount(flow.available_amount)}</p>}</>}
       <div className="cash-form-grid"><CashInput label="实际处理日期" type="date" value={date} onChange={setDate} disabled={isCash} required /><CashInput label="本次处理金额" value={amount} onChange={setAmount} required /></div>
       <CashInput label="用途 / 说明" value={remark} onChange={setRemark} required={kind === "ticket_use" || (kind === "non_ticket_offset" && !chosenSource)} />
+      {kind === "non_ticket_offset" && !chosenSource && <CashConfigurationSelect name="categories" label="无来源调整分类" value={category} selected={settlement?.category} groups={["turnover"]} onChange={setCategory} required />}
+      {!isCash && chosenSource && <p className="cash-hint">分类沿用来源事项；来源项目与借款项目分别保留，提交时核对归属和当前可用额。</p>}
       <p className="cash-muted">{isCash ? "只关联选中的现金，不生成第二笔流水。" : "此操作不产生现金流水，不改变现金账户余额。"}</p>
       <div className="cash-form-actions"><Button variant="secondary" onPress={onClose} isDisabled={action.busy}>取消处理</Button><Button type="submit" isDisabled={action.busy || flows.loading}>保存处理</Button></div>
     </form>
@@ -241,8 +253,9 @@ export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow }: { item
     <CashNotice error={query.error?.message ?? action.error} />{query.loading && <p role="status">正在读取事项…</p>}
     {item && query.data && !query.loading && <>
       <div className="cash-detail-heading"><h3>{item.content}</h3><p>{itemTypeLabels[item.type]} · {item.counterparty ?? item.ticket_provider ?? "—"} · {item.project_name_snapshot ?? "无项目"}</p></div>
-      <dl className="cash-facts"><div><dt>{item.is_opening ? "起算日期" : "实际日期"}</dt><dd>{item.origin_date}</dd></div>{Object.entries(query.data.amounts).map(([key, value]) => <div key={key}><dt>{amountLabels[key]}</dt><dd>{cashAmount(value)}</dd></div>)}</dl>
-      {item.bill_month && <p>账单月份：{item.bill_month}{item.origin_date.slice(0, 7) < item.bill_month ? " · 提前还（计入实际发生月份）" : ""}</p>}
+      <p className="cash-hint">以下为当前事实与可办理额；历史报表截止日余额不能用于直接冲抵。</p>
+      <dl className="cash-facts"><div><dt>{item.is_opening ? "起算日期" : "实际日期"}</dt><dd>{item.origin_date}</dd></div>{(item.type === "expense" || item.type === "ticket_source") && <div><dt>费用类型</dt><dd>{item.category === null ? "未分类" : item.category.name}</dd></div>}{Object.entries(query.data.amounts).map(([key, value]) => <div key={key}><dt>{amountLabels[key]}</dt><dd>{cashAmount(value)}</dd></div>)}</dl>
+      {item.bill_month && <p>实际代付月份：{item.origin_date.slice(0, 7)} · 账单月份：{item.bill_month}{item.origin_date.slice(0, 7) < item.bill_month ? " · 提前代付（计入实际发生月份）" : ""}</p>}
       <p>{item.remark ?? "无备注"}</p>
       <div className="cash-toolbar"><Button size="sm" variant="secondary" onPress={() => setEditing(true)}>更正事项</Button>{item.origin_flow_id && onFlow ? <Button size="sm" variant="tertiary" onPress={() => onFlow(item.origin_flow_id!)}>来源流水 / 纠错</Button> : !item.origin_flow_id && <Button size="sm" variant="tertiary" onPress={() => setDeleteConfirm(true)}>删除错误事项</Button>}
         {cashKind && <><Button size="sm" variant="secondary" onPress={() => setActionKind(cashKind)}>关联已录现金</Button>{onActualFlow && <Button size="sm" onPress={() => onActualFlow(item, cashKind)}>登记实际收付</Button>}</>}

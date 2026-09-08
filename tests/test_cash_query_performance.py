@@ -15,6 +15,7 @@ import math
 import os
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import date
 from time import perf_counter
 
@@ -31,7 +32,7 @@ from tests.test_cash_queries import CashPostgresCase
 def seed(case: CashPostgresCase, rows: int) -> dict:
     case.setUp()
     tx = case.connection
-    tx.execute("update cash.settings set personal_opening_date='2025-01-01' where id=1")
+    tx.execute("update cash.settings set personal_opening_date='2025-01-01',personal_counterparty='Synthetic party' where id=1")
     tx.execute("update cash.accounts set opening_date='2025-01-01'")
     accounts = [case.account["id"]] + [case.cash.create_account({
         "id": case.uid(), "name": f"Synthetic account {n}", "kind": "savings",
@@ -58,12 +59,16 @@ def seed(case: CashPostgresCase, rows: int) -> dict:
           'Synthetic party','Synthetic obligation',id,'created',case when n%%10=0 then (%s::uuid[])[1+(n/10)%%20] end,
           case when n%%10=0 then date_trunc('month',occurred_on)::date end,oa_project_id,project_name_snapshot
         from (select f.*,row_number() over(order by id) as n from cash.flows f where kind='payment') f where n<=%s""", (bill_labels, rows // 4))
-    tx.execute("""insert into cash.items(id,type,origin_date,original_amount,content,origin_flow_id,origin_mode,related_obligation_id,oa_project_id,project_name_snapshot)
-        select gen_random_uuid(),'expense',origin_date,100,'Synthetic expense',origin_flow_id,'created',id,oa_project_id,project_name_snapshot from cash.items where type='loan'""")
-    tx.execute("""insert into cash.items(id,type,origin_date,original_amount,content,ticket_provider,ticket_provided_on,ticket_description,oa_project_id,project_name_snapshot)
-        select gen_random_uuid(),'ticket_source',date '2025-12-01'+(n%%304),100,'Synthetic ticket','Synthetic provider',date '2025-12-01'+(n%%304),'Synthetic provided ticket',
+    tx.execute("""insert into cash.items(id,type,origin_date,original_amount,content,origin_flow_id,origin_mode,related_obligation_id,oa_project_id,project_name_snapshot,category_id)
+        select gen_random_uuid(),'expense',origin_date,100,'Synthetic expense',
+          case when ledger_group<>'personal' then origin_flow_id end,case when ledger_group<>'personal' then 'created' end,id,
+          case when ledger_group='personal' then 'source-project' else oa_project_id end,
+          case when ledger_group='personal' then 'Synthetic source project' else project_name_snapshot end,%s
+          from cash.items where type='loan'""", (case.payment_category["id"],))
+    tx.execute("""insert into cash.items(id,type,origin_date,original_amount,content,ticket_provider,ticket_provided_on,ticket_description,oa_project_id,project_name_snapshot,category_id)
+        select gen_random_uuid(),'ticket_source',date '2025-12-01'+(n%%304),100,'Synthetic ticket','Synthetic party',date '2025-12-01'+(n%%304),'Synthetic provided ticket',
           case when n%%5<>0 then 'project-'||(n%%8) end,case when n%%5<>0 then 'Synthetic project '||(n%%8) end
-        from generate_series(1,%s)n""", (rows // 20,))
+          ,%s from generate_series(1,%s)n""", (case.payment_category["id"], rows // 20))
     tx.execute("""insert into cash.settlements(id,kind,amount,occurred_on,source_item_id,remark)
         select gen_random_uuid(),'ticket_use',20,greatest(origin_date,date '2026-09-10'),id,'Synthetic use' from cash.items where type='ticket_source'""")
     tx.execute("""insert into cash.settlements(id,kind,amount,occurred_on,item_id,flow_id)
@@ -71,6 +76,20 @@ def seed(case: CashPostgresCase, rows: int) -> dict:
         from (select *,row_number() over(partition by oa_project_id order by id) as n from cash.flows where kind='receipt' and occurred_on>='2026-09-17') r
         join (select *,row_number() over(partition by oa_project_id order by id) as n from cash.items where type='loan' and origin_date<='2026-09-16') i
           on i.n=r.n and i.oa_project_id is not distinct from r.oa_project_id""")
+    tx.execute("""insert into cash.settlements(id,kind,amount,occurred_on,item_id,source_item_id)
+        select gen_random_uuid(),'non_ticket_offset',10,greatest(e.origin_date,date '2026-09-03'),i.id,e.id
+        from cash.items e join cash.items i on i.id=e.related_obligation_id where e.type='expense' and i.ledger_group='personal'""")
+    tx.execute("""insert into cash.items(id,type,origin_date,original_amount,content,obligation_direction,ledger_group,counterparty,ticket_source_id,oa_project_id,project_name_snapshot)
+        select gen_random_uuid(),'company_receivable',i.origin_date,50,'Synthetic ticket receivable '||n,'receivable','company','Synthetic company',i.id,i.oa_project_id,i.project_name_snapshot
+        from cash.items i cross join generate_series(1,2)n where i.type='ticket_source'""")
+    tx.execute("""insert into cash.settlements(id,kind,amount,occurred_on,item_id,flow_id)
+        select gen_random_uuid(),'company_collection',20,r.occurred_on,i.id,r.id
+        from (select *,row_number() over(partition by oa_project_id order by id) as n from cash.flows where kind='receipt' and occurred_on>='2026-09-17') r
+        join (select *,row_number() over(partition by oa_project_id order by id) as n from cash.items where type='company_receivable' and origin_date<='2026-09-16') i
+          on i.n=r.n and i.oa_project_id is not distinct from r.oa_project_id""")
+    tx.execute("""insert into cash.settlements(id,kind,amount,occurred_on,item_id,category_id,remark)
+        select gen_random_uuid(),'non_ticket_offset',10,greatest(origin_date,date '2026-09-03'),id,%s,'Synthetic adjustment'
+        from cash.items where type='company_receivable'""", (case.category["id"],))
     tx.execute("""insert into cash.task_templates(id,title,kind,execution_day,remind_days,effective_from_month,default_amount)
         select gen_random_uuid(),'Synthetic task '||n,case when n%%2=0 then 'receipt' else 'payment' end,5,2,'2026-01-01',100
         from generate_series(1,12)n""")
@@ -89,13 +108,48 @@ def seed(case: CashPostgresCase, rows: int) -> dict:
         count(*) filter(where category_id is null) as null_categories,
         count(*) filter(where kind='transfer') as transfers,
         count(*) filter(where occurred_on<'2026-01-01') as prior_year_flows from cash.flows""")
+    dimensions.update(tx.fetch_one("""select count(*) as item_count,
+        count(*) filter(where type='loan' and origin_date<'2026-01-01') as prior_year_obligations,
+        count(*) filter(where type='company_receivable') as ticket_receivables,
+        count(*) filter(where type='ticket_source') as ticket_sources,
+        count(*) filter(where type='expense' and oa_project_id='source-project') as cross_project_expenses from cash.items"""))
     if dimensions["flow_count"] != rows or any(dimensions[key] < 1 for key in ("null_projects", "null_categories", "transfers", "prior_year_flows")) or dimensions["accounts"] != 4 or dimensions["categories"] != 3 or dimensions["projects"] != 8:
         raise AssertionError("Synthetic seed did not cover the required multi-value and cross-year dimensions")
     return {"accounts": accounts, "categories": categories, "dimensions": dimensions}
 
 
-def measure(name, call, samples, concurrency):
+class QueryCounter:
+    """Count statements for one untimed read; do not trace cash SQL or payloads."""
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.count = 0
+        self.enabled = False
+
+    @contextmanager
+    def transaction(self):
+        with self.connection.transaction() as tx:
+            if not self.enabled:
+                yield tx
+                return
+            counter = self
+            class Transaction:
+                def execute(self, *args):
+                    counter.count += 1
+                    return tx.execute(*args)
+                def fetch_one(self, *args):
+                    counter.count += 1
+                    return tx.fetch_one(*args)
+                def fetch_all(self, *args):
+                    counter.count += 1
+                    return tx.fetch_all(*args)
+            yield Transaction()
+
+
+def measure(name, call, samples, concurrency, counter):
+    counter.count, counter.enabled = 0, True
     response = call()
+    query_count, counter.enabled = counter.count, False
     def run(_):
         start = perf_counter()
         try:
@@ -114,6 +168,7 @@ def measure(name, call, samples, concurrency):
     def percentile(p):
         return round(times[math.ceil(len(times) * p) - 1], 2) if times else None
     return {"query": name, "scope": "service_and_postgres_including_pool_wait_not_http", "concurrency": concurrency,
+            "statement_count_including_snapshot": query_count,
             "attempts": samples, "samples": len(times), "failures": dict(failures), "failure_rate": round((samples - len(times)) / samples, 4),
             "p50_ms": percentile(.50), "p95_ms": percentile(.95), "p99_ms": percentile(.99),
             "max_ms": max(times) if times else None, "slowest_5_ms": [round(value, 2) for value in times[-5:]],
@@ -141,8 +196,9 @@ def main():
             print(json.dumps({"synthetic_seed": seeded["dimensions"]}), flush=True)
             connection = PostgresConnection(PostgresSettings(database_url=case.dsn, pool_min_size=1, pool_max_size=2, pool_max_waiting=8, statement_timeout_ms=5000, pool_name="cash-measurement"))
             try:
-                query = CashQueryService(CashQueryRepository(connection))
-                tasks = CashTaskService(CashTaskRepository(connection), case.cash, today=lambda: date(2026, 9, 30))
+                counter = QueryCounter(connection)
+                query = CashQueryService(CashQueryRepository(counter), today=lambda: date(2026, 9, 30))
+                tasks = CashTaskService(CashTaskRepository(counter), case.cash, today=lambda: date(2026, 9, 30))
                 period = {"date_from": "2026-09-01", "date_to": "2026-09-30"}
                 full_period = {"date_from": "2025-12-01", "date_to": "2026-09-30"}
                 multi_accounts = json.dumps(seeded["accounts"][:2])
@@ -157,15 +213,18 @@ def main():
                          "cross_year": lambda: query.list_flows({"date_from": "2025-12-01", "date_to": "2026-01-31"}),
                          "historical_project_options": lambda: query.project_options(period),
                          "turnover": lambda: query.query_turnover(period),
+                         "unsettled": lambda: query.query_turnover({"view": "unsettled", "date_to": "2026-09-30"}),
                          "turnover_multi_state": lambda: query.query_turnover({**full_period, "project_ids": '["project-1","project-2",null]', "states": '["open","partial"]'}),
                          "tickets": lambda: query.query_tickets(period),
+                         "pending_collection": lambda: query.query_tickets({"view": "pending_collection", "date_to": "2026-09-30"}),
                          "tickets_multi_project": lambda: query.query_tickets({**full_period, "project_ids": '["project-1","project-2",null]'}),
                          "personal_matrix": lambda: query.query_personal({"year": "2026"}),
+                         "personal_source_category": lambda: query.query_personal({"year": "2026", "view": "non_ticket_offsets", "source_project_id": "source-project", "category_id": case.payment_category["id"]}),
                          "items": lambda: query.list_items({}),
                          "task_overdue": lambda: tasks.list_occurrences({"overdue_as_of": "2026-09-30", "kinds": '["receipt","payment"]', "states": '["pending","partial"]'})}
                 for concurrency in args.concurrency:
                     for name, call in calls.items():
-                        result = measure(name, call, args.samples, concurrency)
+                        result = measure(name, call, args.samples, concurrency, counter)
                         failed = failed or bool(result["failures"])
                         print(json.dumps({"synthetic_flow_count": size, **result}), flush=True)
             finally:

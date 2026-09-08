@@ -11,20 +11,23 @@ import { cashAmount, cashToday, settlementLabels, type CashItem, type CashItemTy
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
 import { CashColumnHeader, CashFilterPopover, CashSortMenu, CashTextFilter, type CashFilterOption, type CashFilterValue } from "./CashFilters";
 import { CashConfigurationFilter, CashHistoricalProjectFilter } from "./CashFlowSelectors";
+import type { CashPersonalSetting } from "./CashItems.types";
+import { CashUnsettledBook, initialUnsettledCriteria, type CashUnsettledCriteria } from "./CashUnsettledBook";
 
 type Period = { date_from: string; date_to: string };
 type BookFilters = Period & { keyword?: string; counterparty?: string; ticket_provider?: string; project_ids?: CashFilterValue[]; category_ids?: CashFilterValue[]; states?: string[] };
 function yearPeriod(year: string): Period { return { date_from: `${year}-01-01`, date_to: `${year}-12-31` }; }
 const currentYear = () => cashToday().slice(0, 4);
 type BookCriteria = { filters: BookFilters; group: string; page: number; sort: string; order: string; selected: Record<string, CashFilterOption[]> };
-type PersonalCriteria = { view: string; year: string; keyword: string; bills: CashFilterValue[]; projects: CashFilterValue[]; selected: Record<string, CashFilterOption[]>; page: number; sort: string; order: string };
-export type CashBooksCriteria = { tab: string; turnover: BookCriteria; tickets: BookCriteria; personal: PersonalCriteria };
+type PersonalCriteria = { view: string; year: string; keyword: string; bills: CashFilterValue[]; projects: CashFilterValue[]; sourceProjects: CashFilterValue[]; categories: CashFilterValue[]; selected: Record<string, CashFilterOption[]>; page: number; sort: string; order: string };
+export type CashBooksCriteria = { tab: string; turnoverView: string; ticketsView: string; turnover: BookCriteria; unsettled: CashUnsettledCriteria; tickets: BookCriteria; pendingTickets: BookCriteria; personal: PersonalCriteria };
 export function initialCashBooksCriteria(): CashBooksCriteria {
   return {
-    tab: "turnover",
+    tab: "turnover", turnoverView: "events", ticketsView: "period", unsettled: initialUnsettledCriteria(),
     turnover: { filters: yearPeriod(currentYear()), group: "all", page: 1, sort: "occurred_on", order: "desc", selected: {} },
     tickets: { filters: yearPeriod(currentYear()), group: "all", page: 1, sort: "ticket_provided_on", order: "desc", selected: {} },
-    personal: { view: "matrix", year: currentYear(), keyword: "", bills: [], projects: [], selected: {}, page: 1, sort: "bank_name", order: "asc" },
+    pendingTickets: { filters: { date_from: "", date_to: cashToday() }, group: "all", page: 1, sort: "ticket_provided_on", order: "desc", selected: {} },
+    personal: { view: "matrix", year: currentYear(), keyword: "", bills: [], projects: [], sourceProjects: [], categories: [], selected: {}, page: 1, sort: "bank_name", order: "asc" },
   };
 }
 type TurnoverRow = {
@@ -38,10 +41,10 @@ type TurnoverRow = {
 };
 type Report<T, S> = CashPageRows<T> & { summary: S };
 type TurnoverSummary = Record<string, string | number | { receivable: string; payable: string }> & { remaining_obligation_amount: { receivable: string; payable: string } };
-type TicketRow = { id: string; version: number; ticket_provider: string; ticket_provided_on: string; content: string; project: CashProject; provided_amount: string; used_amount: string; offset_amount: string; available_source_amount: string; receivable_amount: string; cash_received_amount: string; state: string };
-type PersonalRow = CashSettlement & { bill_label: { id: string; bank_name: string; label: string } | null; bill_month: string | null; counterparty: string; project: CashProject };
+type TicketRow = { id: string; version: number; ticket_provider: string; ticket_provided_on: string; content: string; project: CashProject; provided_amount: string; used_amount: string; offset_amount: string; available_source_amount: string; receivable_amount: string; cash_received_amount: string; noncash_settled_amount: string; remaining_receivable_amount: string; collection_state: string; state: string };
+type PersonalRow = CashSettlement & { bill_label: { id: string; bank_name: string; label: string } | null; bill_month: string | null; counterparty: string; project: CashProject; source_project: CashProject };
 type MatrixRow = { row_key: string; bill_label: { id: string; bank_name: string; label: string } | null; months: { month: string; principal_amount: string | null; item_count: number | null; coverage_state: string }[]; year_principal_amount: string | null };
-type PersonalSummary = { coverage: { state: string; opening_date: string | null; coverage_start: string | null }; opening_obligation_amount: string | null; opening_adjustment_amount: string | null; new_principal_amount: string | null; cash_repayment_amount: string | null; ticket_offset_amount: string | null; non_ticket_offset_amount: string | null; remaining_obligation_amount: string | null };
+type PersonalSummary = { counterparty: string | null; coverage: { state: string; opening_date: string | null; coverage_start: string | null }; opening_obligation_amount: string | null; opening_adjustment_amount: string | null; new_principal_amount: string | null; cash_repayment_amount: string | null; ticket_offset_amount: string | null; non_ticket_offset_amount: string | null; remaining_obligation_amount: string | null; month_principal_totals: { month: string; principal_amount: string | null; coverage_state: string }[]; year_principal_amount: string | null };
 
 function ReportState({ error, reload }: { error: { message: string } | null; reload: () => void }) {
   return error && <div className="cash-query-error"><CashNotice error={error.message} /><Button size="sm" variant="secondary" onPress={reload}>重新读取</Button></div>;
@@ -49,24 +52,24 @@ function ReportState({ error, reload }: { error: { message: string } | null; rel
 function ReportEmpty({ loading, failed }: { loading: boolean; failed: boolean }) {
   return <p className="cash-empty" role="status">{loading ? "正在读取账目…" : failed ? "读取失败，请重试。" : "当前条件下暂无记录。"}</p>;
 }
-function PeriodFilters({ onApply, onReset, children, initial, initialKeyword }: {
+function PeriodFilters({ onApply, onReset, children, initial, initialKeyword, cutoffOnly = false }: {
   onApply: (params: Period & { keyword: string }) => string | null; onReset: () => void;
-  children?: ReactNode; initial: Period; initialKeyword: string;
+  children?: ReactNode; initial: Period; initialKeyword: string; cutoffOnly?: boolean;
 }) {
   const [dates, setDates] = useState(initial); const [keyword, setKeyword] = useState(initialKeyword);
   const [error, setError] = useState<string | null>(null);
   return <><form className="cash-toolbar cash-filterbar" onSubmit={event => {
     event.preventDefault();
-    if (dates.date_from > dates.date_to || (Date.parse(dates.date_to) - Date.parse(dates.date_from)) / 86400000 > 365) {
-      setError("查询起止日期须有序，范围不超过 366 天。"); return;
+    if (cutoffOnly ? !dates.date_to || dates.date_to > cashToday() : dates.date_from > dates.date_to || (Date.parse(dates.date_to) - Date.parse(dates.date_from)) / 86400000 > 365) {
+      setError(cutoffOnly ? "截至日期不能为空，且不能晚于今天。" : "查询起止日期须有序，范围不超过 366 天。"); return;
     }
     setError(onApply({ ...dates, keyword: keyword.trim() }));
   }}>
-    <CashInput label="开始日期" type="date" value={dates.date_from} onChange={date_from => setDates(value => ({ ...value, date_from }))} required />
-    <CashInput label="结束日期" type="date" value={dates.date_to} onChange={date_to => setDates(value => ({ ...value, date_to }))} required />
+    {!cutoffOnly && <CashInput label="开始日期" type="date" value={dates.date_from} onChange={date_from => setDates(value => ({ ...value, date_from }))} required />}
+    <CashInput label={cutoffOnly ? "截至日期" : "结束日期"} type="date" value={dates.date_to} onChange={date_to => setDates(value => ({ ...value, date_to }))} required />
     <CashInput label="关键词" value={keyword} onChange={setKeyword} placeholder="搜索内容 / 对象" />
     <Button type="submit" size="sm" variant="secondary">查询</Button><Button size="sm" variant="tertiary" onPress={() => {
-      setDates(yearPeriod(currentYear())); setKeyword(""); setError(null); onReset();
+      setDates(cutoffOnly ? { date_from: "", date_to: cashToday() } : yearPeriod(currentYear())); setKeyword(""); setError(null); onReset();
     }}>重置</Button>
     {children}
   </form><CashNotice error={error} /></>;
@@ -74,12 +77,12 @@ function PeriodFilters({ onApply, onReset, children, initial, initialKeyword }: 
 function SummaryLine({ values }: { values: [string, string | null][] }) { return <dl className="cash-summary-line">{values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{cashAmount(value)}</dd></div>)}</dl>; }
 
 const groupLabels: Record<string, string> = { company: "公司", external_person: "外部人员", personal: "个人" };
-const collectionLabels: Record<string, string> = { open: "未回款", partial: "部分回款", settled: "已回款" };
+const collectionLabels: Record<string, string> = { unregistered: "未登记应收", open: "未回款", partial: "部分回款", settled: "已回款" };
 const turnoverHeaders = ["日期", "项目", "人员 / 往来对象", "类别", "费用类型", "内容", "收入", "支出", "冲账", "还款", "报账提现", "真实花销", "票抵", "有票回款情况", "本次处理后未结", "备注", "操作"];
 function rowColor(row: TurnoverRow) {
   if (row.ledger_group === "company") return "cash-row--company";
   if (row.ledger_group === "external_person") return "cash-row--external-person";
-  if (row.ledger_group === "personal") return row.personal_variant === "principal" ? "cash-row--personal-principal" : "cash-row--personal-settlement";
+  if (row.ledger_group === "personal") return row.personal_variant === "principal" ? "cash-row--personal-principal" : row.personal_variant === "settlement" ? "cash-row--personal-settlement" : "";
   return "";
 }
 
@@ -131,7 +134,7 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
     <FinanceTable ariaLabel="往来账总表" className="cash-main-table cash-turnover-grid" scrollMode="contained" minWidth={1740} selectableText
       sortDescriptor={Object.values(sortColumns).includes(sort) ? { column: sort, direction: order === "asc" ? "ascending" : "descending" } : undefined}
       onSortChange={value => applySort(String(value.column), value.direction === "ascending" ? "asc" : "desc")} footer={data && <>
-      <SummaryLine values={[["收入", data.summary.cash_received_amount as string], ["支出", data.summary.cash_paid_amount as string], ["冲账", data.summary.non_ticket_offset_amount as string], ["还款", data.summary.repayment_amount as string], ["报账提现", data.summary.reimbursement_received_amount as string], ["真实花销", data.summary.real_expense_amount as string], ["票抵", data.summary.ticket_offset_amount as string], ["期末应收未结", data.summary.remaining_obligation_amount.receivable], ["期末应付未结", data.summary.remaining_obligation_amount.payable]]} />
+      <SummaryLine values={[["收入", data.summary.cash_received_amount as string], ["支出", data.summary.cash_paid_amount as string], ["冲账", data.summary.non_ticket_offset_amount as string], ["还款", data.summary.repayment_amount as string], ["报账提现", data.summary.reimbursement_received_amount as string], ["真实花销", data.summary.real_expense_amount as string], ["票抵", data.summary.ticket_offset_amount as string], ["本期涉及事项期末未结 · 应收", data.summary.remaining_obligation_amount.receivable], ["本期涉及事项期末未结 · 应付", data.summary.remaining_obligation_amount.payable]]} />
       <FinanceTablePagination {...data.pagination} pageSize={50} onPageChange={applyPage} />
     </>}>
       <FinanceTableHeader>{turnoverHeaders.map((label, index) => <FinanceTableColumn key={label} id={sortColumns[index] ?? "turnover-" + index} allowsSorting={index in sortColumns} isRowHeader={index === 0} columnRole={index >= 6 && index <= 12 || index === 14 ? "amount" : index === 16 ? "action" : index === 0 ? "date" : index === 2 ? "identity" : index === 3 || index === 13 ? "status" : "description"}>
@@ -142,7 +145,7 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
         </CashColumnHeader>
       </FinanceTableColumn>)}</FinanceTableHeader>
       <FinanceTableBody renderEmptyState={() => <ReportEmpty loading={query.loading} failed={Boolean(query.error)} />}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.row_id} id={row.row_id} className={rowColor(row)} textValue={`${row.occurred_on} ${row.content}`}>
-          <FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.counterparty ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="status">{row.ledger_group ? groupLabels[row.ledger_group] : "—"}{row.ledger_group === "personal" ? row.personal_variant === "principal" ? " · 借出 / 代付" : " · 归还 / 冲抵" : ""}</FinanceTableCell><FinanceTableCell columnRole="description">{row.category?.name ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell>
+          <FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.counterparty ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="status">{row.ledger_group ? groupLabels[row.ledger_group] : "—"}{row.ledger_group === "personal" ? row.personal_variant === "principal" ? " · 借出 / 代付" : row.personal_variant === "settlement" ? " · 归还 / 冲抵" : " · 费用变化" : ""}</FinanceTableCell><FinanceTableCell columnRole="description">{row.category?.name ?? "未分类"}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell>
           {[row.cash_received_amount, row.cash_paid_amount, row.non_ticket_offset_amount, row.repayment_amount, row.reimbursement_received_amount, row.real_expense_amount, row.ticket_offset_amount].map((value, index) => <FinanceTableCell key={index} columnRole="amount">{cashAmount(value)}</FinanceTableCell>)}
           <FinanceTableCell columnRole="status">{row.ticket_collection_state === null ? "—" : collectionLabels[row.ticket_collection_state]}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.remaining_after_event)}</FinanceTableCell><FinanceTableCell columnRole="description">{row.remark ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button size="sm" variant="tertiary" onPress={() => onItem(row.expense_item_id ?? row.item_id)}>详情</Button></FinanceTableCell>
         </FinanceTableRow>)}</FinanceTableBody>
@@ -150,17 +153,18 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
   </>;
 }
 
-function TicketBook({ onItem, initial, onChange }: { onItem: (id: string) => void; initial: BookCriteria; onChange: (value: BookCriteria) => void }) {
+function TicketBook({ onItem, initial, onChange, view }: { onItem: (id: string) => void; initial: BookCriteria; onChange: (value: BookCriteria) => void; view: string }) {
   const [filters, setFilters] = useState(initial.filters);
   const [page, setPage] = useState(initial.page); const [sort, setSort] = useState(initial.sort); const [order, setOrder] = useState(initial.order);
   const [selected, setSelected] = useState(initial.selected);
   const [validation, setValidation] = useState<string | null>(null);
   useEffect(() => { onChange({ filters, group: "all", page, sort, order, selected }); }, [filters, page, sort, order, selected, onChange]);
-  const params = { ...filters, sort, order, page, page_size: 50 };
+  const pending = view === "pending_collection";
+  const params = { ...filters, date_from: pending ? undefined : filters.date_from, states: pending ? undefined : filters.states, view, sort, order, page, page_size: 50 };
   const query = useCashQuery<Report<TicketRow, Record<string, string>>>("/reports/ticket-payments", params);
   const data = !query.loading && !query.error ? query.data : null;
   useEffect(() => { if (query.data && page > 1 && query.data.rows.length === 0) setPage(Math.max(1, Math.ceil(query.data.pagination.total / 50))); }, [query.data, page]);
-  const period = { date_from: filters.date_from, date_to: filters.date_to };
+  const period = { date_from: pending ? undefined : filters.date_from, date_to: filters.date_to };
   const applyFilters = (value: Partial<BookFilters>) => {
     const error = cashQueryError({ ...params, ...value, page: 1 });
     if (error) return error;
@@ -171,21 +175,22 @@ function TicketBook({ onItem, initial, onChange }: { onItem: (id: string) => voi
     if (!error) setPage(page);
   };
   const sortColumns: Record<number, string> = { 0: "ticket_provided_on", 4: "provided_amount", 6: "available_source_amount" };
-  return <><PeriodFilters initial={period} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
-      setFilters(yearPeriod(currentYear())); setSelected({}); setSort("ticket_provided_on"); setOrder("desc"); setPage(1); setValidation(null);
+  return <><PeriodFilters cutoffOnly={pending} initial={filters} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
+      setFilters(pending ? { date_from: "", date_to: cashToday() } : yearPeriod(currentYear())); setSelected({}); setSort("ticket_provided_on"); setOrder("desc"); setPage(1); setValidation(null);
     }} onApply={applyFilters}>
       <Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
     </PeriodFilters>
     <CashNotice error={validation} />
     <ReportState error={query.error} reload={query.reload} />
-    <FinanceTable ariaLabel="有票支付" className="cash-main-table cash-tickets-grid" scrollMode="contained" minWidth={1370}
+    <p className="cash-hint">截至 {filters.date_to}；{pending ? "包含往年已登记且仍未结的公司应收。" : "票据使用与公司回款分别计算。"} 详情显示当前可办理额。</p>
+    <FinanceTable ariaLabel="有票支付" className="cash-main-table cash-tickets-grid" scrollMode="contained" minWidth={1800}
       sortDescriptor={{ column: sort, direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => {
         const sort = String(value.column); const order = value.direction === "ascending" ? "asc" : "desc";
         const error = cashQueryError({ ...params, sort, order, page: 1 }); setValidation(error);
         if (!error) { setSort(sort); setOrder(order); setPage(1); }
       }}
-      footer={data && <><SummaryLine values={[["提供", data.summary.provided_amount], ["使用（含抵债）", data.summary.used_amount], ["票抵", data.summary.offset_amount], ["来源可用", data.summary.available_source_amount], ["明确公司应收", data.summary.receivable_amount], ["实际回款", data.summary.cash_received_amount]]} /><FinanceTablePagination {...data.pagination} pageSize={50} onPageChange={applyPage} /></>}>
-      <FinanceTableHeader>{["提供日期", "项目", "提供人", "票据 / 用途说明", "提供金额", "已使用", "来源可用", "已抵债", "明确公司应收", "实际回款", "使用状态", "操作"].map((label, index) => <FinanceTableColumn key={label} id={sortColumns[index] ?? "ticket-" + index} allowsSorting={index in sortColumns} isRowHeader={index === 0} columnRole={index >= 4 && index <= 9 ? "amount" : index === 11 ? "action" : index === 0 ? "date" : "description"}>
+      footer={data && <><SummaryLine values={[["提供", data.summary.provided_amount], ["使用（含抵债）", data.summary.used_amount], ["票抵", data.summary.offset_amount], ["来源可用", data.summary.available_source_amount], ["明确公司应收", data.summary.receivable_amount], ["实际现金回款", data.summary.cash_received_amount], ["非现金结清", data.summary.noncash_settled_amount], ["应收未结", data.summary.remaining_receivable_amount]]} /><FinanceTablePagination {...data.pagination} pageSize={50} onPageChange={applyPage} /></>}>
+      <FinanceTableHeader>{["提供日期", "项目", "提供人", "票据 / 用途说明", "提供金额", "已使用", "来源可用", "已抵债", "明确公司应收", "实际现金回款", "非现金结清", "应收未结", "使用状态", "回款状态", "操作"].map((label, index) => <FinanceTableColumn key={label} id={sortColumns[index] ?? "ticket-" + index} allowsSorting={index in sortColumns} isRowHeader={index === 0} columnRole={index >= 4 && index <= 11 ? "amount" : index === 14 ? "action" : index === 0 ? "date" : "description"}>
         <CashColumnHeader label={label}>
           {index === 1 && <CashHistoricalProjectFilter column label="项目" scope={period} value={filters.project_ids ?? []} selected={selected.project_ids} onApply={(project_ids, labels) => {
             const error = applyFilters({ project_ids });
@@ -193,10 +198,10 @@ function TicketBook({ onItem, initial, onChange }: { onItem: (id: string) => voi
             return error;
           }} />}
           {index === 2 && <CashTextFilter label="提供人" value={filters.ticket_provider ?? ""} onApply={ticket_provider => applyFilters({ ticket_provider })} />}
-          {index === 10 && <CashFilterPopover column label="使用状态" value={filters.states ?? []} onApply={states => applyFilters({ states })} options={[{ value: "unused", label: "未使用" }, { value: "partial", label: "部分使用" }, { value: "used", label: "已使用" }]} />}
+          {index === 12 && !pending && <CashFilterPopover column label="使用状态" value={filters.states ?? []} onApply={states => applyFilters({ states })} options={[{ value: "unused", label: "未使用" }, { value: "partial", label: "部分使用" }, { value: "used", label: "已使用" }]} />}
         </CashColumnHeader>
       </FinanceTableColumn>)}</FinanceTableHeader>
-      <FinanceTableBody renderEmptyState={() => <ReportEmpty loading={query.loading} failed={Boolean(query.error)} />}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id} textValue={row.content}><FinanceTableCell columnRole="date">{row.ticket_provided_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.ticket_provider}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell>{[row.provided_amount, row.used_amount, row.available_source_amount, row.offset_amount, row.receivable_amount, row.cash_received_amount].map((amount, index) => <FinanceTableCell key={index} columnRole="amount">{cashAmount(amount)}</FinanceTableCell>)}<FinanceTableCell columnRole="status">{{ unused: "未使用", partial: "部分使用", used: "已使用" }[row.state]}</FinanceTableCell><FinanceTableCell columnRole="action"><Button size="sm" variant="tertiary" onPress={() => onItem(row.id)}>详情 / 办理</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+      <FinanceTableBody renderEmptyState={() => <ReportEmpty loading={query.loading} failed={Boolean(query.error)} />}>{(data?.rows ?? []).map(row => <FinanceTableRow key={row.id} id={row.id} textValue={row.content}><FinanceTableCell columnRole="date">{row.ticket_provided_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.ticket_provider}</FinanceTableCell><FinanceTableCell columnRole="description">{row.content}</FinanceTableCell>{[row.provided_amount, row.used_amount, row.available_source_amount, row.offset_amount, row.receivable_amount, row.cash_received_amount, row.noncash_settled_amount, row.remaining_receivable_amount].map((amount, index) => <FinanceTableCell key={index} columnRole="amount">{cashAmount(amount)}</FinanceTableCell>)}<FinanceTableCell columnRole="status">{{ unused: "未使用", partial: "部分使用", used: "已使用" }[row.state]}</FinanceTableCell><FinanceTableCell columnRole="status">{collectionLabels[row.collection_state]}{row.remaining_receivable_amount === "0.00" && row.noncash_settled_amount !== "0.00" && <small>未结 0 · 含非现金结清</small>}</FinanceTableCell><FinanceTableCell columnRole="action"><Button size="sm" variant="tertiary" onPress={() => onItem(row.id)}>{row.collection_state === "unregistered" ? "登记应收 / 详情" : "详情 / 办理"}</Button></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
     </FinanceTable>
   </>;
 }
@@ -205,12 +210,14 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
   const [view, setView] = useState(initial.view); const [year, setYear] = useState(initial.year); const [appliedYear, setAppliedYear] = useState(initial.year);
   const [keyword, setKeyword] = useState(initial.keyword); const [appliedKeyword, setAppliedKeyword] = useState(initial.keyword);
   const [bills, setBills] = useState(initial.bills); const [projects, setProjects] = useState(initial.projects); const [selected, setSelected] = useState(initial.selected);
+  const [sourceProjects, setSourceProjects] = useState(initial.sourceProjects); const [categories, setCategories] = useState(initial.categories);
   const [page, setPage] = useState(initial.page); const [sort, setSort] = useState(initial.sort); const [order, setOrder] = useState(initial.order);
   const [drill, setDrill] = useState<{ row: MatrixRow; month: string } | null>(null); const [editing, setEditing] = useState<CashSettlement | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
-  useEffect(() => { onChange({ view, year: appliedYear, keyword: appliedKeyword, bills, projects, selected, page, sort, order }); }, [view, appliedYear, appliedKeyword, bills, projects, selected, page, sort, order, onChange]);
-  const params = { view, year: appliedYear, keyword: appliedKeyword, bill_label_ids: bills, project_ids: projects, page, page_size: 50, sort, order };
-  const query = useCashQuery<Report<MatrixRow | PersonalRow, PersonalSummary>>("/reports/personal", params);
+  useEffect(() => { onChange({ view, year: appliedYear, keyword: appliedKeyword, bills, projects, sourceProjects, categories, selected, page, sort, order }); }, [view, appliedYear, appliedKeyword, bills, projects, sourceProjects, categories, selected, page, sort, order, onChange]);
+  const noncash = view === "ticket_offsets" || view === "non_ticket_offsets";
+  const params = { view, year: appliedYear, keyword: appliedKeyword, bill_label_ids: bills, project_ids: projects, source_project_ids: noncash ? sourceProjects : undefined, category_ids: noncash ? categories : undefined, page, page_size: 50, sort, order };
+  const query = useCashQuery<Report<MatrixRow | PersonalRow, PersonalSummary> & { filtered_totals?: { settlement_count: number; amount: string } }>("/reports/personal", params);
   const data = !query.loading && !query.error ? query.data : null;
   useEffect(() => { if (query.data && page > 1 && query.data.rows.length === 0) setPage(Math.max(1, Math.ceil(query.data.pagination.total / 50))); }, [query.data, page]);
   const applySort = (sort: string, order: "asc" | "desc") => {
@@ -221,7 +228,7 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
     const error = cashQueryError({ ...params, page }); setValidation(error);
     if (!error) setPage(page);
   };
-  const projectFilter = (column: boolean) => <CashHistoricalProjectFilter column={column} label="项目" value={projects} selected={selected.projects} scope={yearPeriod(appliedYear)} onApply={(values, labels) => {
+  const projectFilter = (column: boolean) => <CashHistoricalProjectFilter column={column} label="项目" value={projects} selected={selected.projects} scope={{ date_to: `${appliedYear}-12-31` }} onApply={(values, labels) => {
     const error = cashQueryError({ ...params, project_ids: values, page: 1 });
     if (error) return error;
     setProjects(values); setSelected(old => ({ ...old, projects: labels })); setPage(1); return null;
@@ -240,21 +247,23 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
         const sort = value === "matrix" ? "bank_name" : "occurred_on"; const order = value === "matrix" ? "asc" : "desc";
         const error = cashQueryError({ ...params, view: value, sort, order, page: 1 }); setValidation(error);
         if (!error) { setView(value); setDrill(null); setEditing(null); setSort(sort); setOrder(order); setPage(1); }
-      }} options={[{ value: "matrix", label: "年度还款矩阵" }, { value: "cash_repayments", label: "现金归还" }, { value: "ticket_offsets", label: "有票直接冲" }, { value: "non_ticket_offsets", label: "无票报销冲抵" }]} />
+      }} options={[{ value: "matrix", label: "年度代付 / 借出汇总" }, { value: "cash_repayments", label: "现金归还" }, { value: "ticket_offsets", label: "有票直接冲" }, { value: "non_ticket_offsets", label: "无票报销冲抵" }]} />
       <CashInput label="年份" type="number" value={year} onChange={setYear} required /><CashInput label="关键词" value={keyword} onChange={setKeyword} />
       <Button size="sm" variant="secondary" type="submit">查询</Button>
-      <Button size="sm" variant="tertiary" onPress={() => { setYear(currentYear()); setAppliedYear(currentYear()); setKeyword(""); setAppliedKeyword(""); setBills([]); setProjects([]); setSelected({}); setSort(view === "matrix" ? "bank_name" : "occurred_on"); setOrder(view === "matrix" ? "asc" : "desc"); setPage(1); setValidation(null); }}>重置</Button>
+      <Button size="sm" variant="tertiary" onPress={() => { setYear(currentYear()); setAppliedYear(currentYear()); setKeyword(""); setAppliedKeyword(""); setBills([]); setProjects([]); setSourceProjects([]); setCategories([]); setSelected({}); setSort(view === "matrix" ? "bank_name" : "occurred_on"); setOrder(view === "matrix" ? "asc" : "desc"); setPage(1); setValidation(null); }}>重置</Button>
       <Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
       {view === "matrix" && <>{projectFilter(false)}<CashSortMenu sort={sort} order={order} onChange={applySort} options={[{ value: "label", label: "账单名称" }]} /></>}
     </form>
     <CashNotice error={validation} />
     <ReportState error={query.error} reload={query.reload} />
     {data && <>
-      {data.summary.coverage.state !== "complete" && <p role="status" className="cash-notice">{data.summary.coverage.state === "unconfigured" ? "个人账起算未配置，完整期初和未结不能确定。请在基础设置配置。" : data.summary.coverage.state === "not_started" ? "所选年份早于个人账起算，金额未知。" : `仅覆盖 ${data.summary.coverage.coverage_start} 起的已知期间，起算前金额未知。`}</p>}
+      {data.summary.counterparty && <p className="cash-hint">个人专账归属：{data.summary.counterparty}</p>}
+      {data.summary.coverage.state !== "complete" && <p role="status" className="cash-notice">{data.summary.coverage.state === "unconfigured" ? "个人账起算或归属人未配置，完整期初和未结不能确定。请在基础设置配置。" : data.summary.coverage.state === "not_started" ? "所选年份早于个人账起算，金额未知。" : `仅覆盖 ${data.summary.coverage.coverage_start} 起的已知期间，起算前金额未知。`}</p>}
       <SummaryLine values={[["已知年初未结", data.summary.opening_obligation_amount], ["期中起算未结", data.summary.opening_adjustment_amount], ["实际代付 / 新增借款", data.summary.new_principal_amount], ["现金归还", data.summary.cash_repayment_amount], ["有票冲抵", data.summary.ticket_offset_amount], ["无票冲抵", data.summary.non_ticket_offset_amount], ["当前未结", data.summary.remaining_obligation_amount]]} />
+      {noncash && data.filtered_totals && <p className="cash-hint">当前明细筛选：{data.filtered_totals.settlement_count} 笔 · {cashAmount(data.filtered_totals.amount)}；来源筛选不改变上方年度债务余额。</p>}
     </>}
     {view === "matrix" ? <><h3 className="cash-table-caption">实际代付 / 新增借款</h3>
-      <FinanceTable ariaLabel="个人年度还款矩阵" className="cash-main-table cash-personal-grid" scrollMode="contained" minWidth={1430}
+      <FinanceTable ariaLabel="个人年度代付借出汇总" className="cash-main-table cash-personal-grid" scrollMode="contained" minWidth={1430}
         sortDescriptor={sort !== "label" ? { column: sort, direction: order === "asc" ? "ascending" : "descending" } : undefined}
         onSortChange={value => applySort(String(value.column), value.direction === "ascending" ? "asc" : "desc")}
         footer={data && <FinanceTablePagination {...data.pagination} pageSize={50} onPageChange={applyPage} />}>
@@ -262,14 +271,14 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
           {Array.from({ length: 12 }, (_, index) => <FinanceTableColumn id={"month-" + index} key={index} columnRole="amount">{index + 1} 月</FinanceTableColumn>)}
           <FinanceTableColumn id="year_principal_amount" allowsSorting columnRole="amount">全年合计</FinanceTableColumn>
         </FinanceTableHeader>
-        <FinanceTableBody renderEmptyState={() => <ReportEmpty loading={query.loading} failed={Boolean(query.error)} />}>{((data?.rows ?? []) as MatrixRow[]).map(row => <FinanceTableRow key={row.row_key} id={row.row_key} textValue={row.bill_label?.label ?? "无账单本金"}><FinanceTableCell columnRole="identity">{row.bill_label ? `${row.bill_label.bank_name} · ${row.bill_label.label}` : "无账单本金"}</FinanceTableCell>{row.months.map(month => <FinanceTableCell key={month.month} columnRole="amount">{month.principal_amount === null ? "—" : <Button size="sm" variant="tertiary" aria-label={`${row.bill_label?.label ?? "无账单本金"} ${month.month} 明细`} onPress={() => setDrill({ row, month: month.month })}>{cashAmount(month.principal_amount)}{month.coverage_state === "starts_during_period" ? " *" : ""}</Button>}</FinanceTableCell>)}<FinanceTableCell columnRole="amount">{cashAmount(row.year_principal_amount)}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
-      </FinanceTable></> : <FinanceTable ariaLabel={view === "cash_repayments" ? "个人现金归还" : view === "ticket_offsets" ? "有票直接冲" : "无票报销冲抵"} className="cash-main-table" scrollMode="contained" minWidth={1100}
+        <FinanceTableBody renderEmptyState={() => <ReportEmpty loading={query.loading} failed={Boolean(query.error)} />}>{((data?.rows ?? []) as MatrixRow[]).map(row => <FinanceTableRow key={row.row_key} id={row.row_key} textValue={row.bill_label?.label ?? "无账单本金"}><FinanceTableCell columnRole="identity">{row.bill_label ? `${row.bill_label.bank_name} · ${row.bill_label.label}` : "无账单本金"}</FinanceTableCell>{row.months.map(month => <FinanceTableCell key={month.month} columnRole="amount">{month.principal_amount === null ? "—" : <Button size="sm" variant="tertiary" aria-label={`${row.bill_label?.label ?? "无账单本金"} ${month.month} 明细`} onPress={() => setDrill({ row, month: month.month })}>{cashAmount(month.principal_amount)}{month.coverage_state === "starts_during_period" ? " *" : ""}</Button>}</FinanceTableCell>)}<FinanceTableCell columnRole="amount">{cashAmount(row.year_principal_amount)}</FinanceTableCell></FinanceTableRow>)}{data && <FinanceTableRow id="all-months-total" textValue="全部匹配账单合计"><FinanceTableCell columnRole="identity">全部匹配账单合计</FinanceTableCell>{data.summary.month_principal_totals.map(month => <FinanceTableCell key={month.month} columnRole="amount">{cashAmount(month.principal_amount)}{month.coverage_state === "starts_during_period" ? " *" : ""}</FinanceTableCell>)}<FinanceTableCell columnRole="amount">{cashAmount(data.summary.year_principal_amount)}</FinanceTableCell></FinanceTableRow>}</FinanceTableBody>
+      </FinanceTable></> : <FinanceTable key={view} ariaLabel={view === "cash_repayments" ? "个人现金归还" : view === "ticket_offsets" ? "有票直接冲" : "无票报销冲抵"} className="cash-main-table" scrollMode="contained" minWidth={noncash ? 1420 : 1100}
         sortDescriptor={{ column: sort, direction: order === "asc" ? "ascending" : "descending" }} onSortChange={value => applySort(String(value.column), value.direction === "ascending" ? "asc" : "desc")}
         footer={data && <FinanceTablePagination {...data.pagination} pageSize={50} onPageChange={applyPage} />}>
-        <FinanceTableHeader>{["实际日期", "项目", "往来对象", "归属事项", "账单月份", "处理金额", "来源 / 说明", "操作"].map((label, index) => <FinanceTableColumn key={label} id={index === 0 ? "occurred_on" : index === 5 ? "amount" : "personal-" + index} allowsSorting={index === 0 || index === 5} isRowHeader={index === 0}>
-          <CashColumnHeader label={label}>{index === 1 && projectFilter(true)}{index === 3 && billFilter}</CashColumnHeader>
+        <FinanceTableHeader>{["实际日期", "借款项目", "往来对象", "归属事项", "账单月份", "处理金额", "来源 / 说明", ...(noncash ? ["来源项目", "费用类型"] : []), "操作"].map((label, index) => <FinanceTableColumn key={label} id={index === 0 ? "occurred_on" : index === 5 ? "amount" : "personal-" + index} allowsSorting={index === 0 || index === 5} isRowHeader={index === 0}>
+          <CashColumnHeader label={label}>{index === 1 && projectFilter(true)}{index === 3 && billFilter}{noncash && index === 7 && <CashHistoricalProjectFilter column label="来源项目" scope={{ date_to: `${appliedYear}-12-31` }} value={sourceProjects} selected={selected.sourceProjects} onApply={(values, labels) => { const error = cashQueryError({ ...params, source_project_ids: values, page: 1 }); if (!error) { setSourceProjects(values); setSelected(old => ({ ...old, sourceProjects: labels })); setPage(1); } return error; }} />}{noncash && index === 8 && <CashConfigurationFilter column name="categories" label="费用类型" value={categories} selected={selected.categories} onApply={(values, labels) => { const error = cashQueryError({ ...params, category_ids: values, page: 1 }); if (!error) { setCategories(values); setSelected(old => ({ ...old, categories: labels })); setPage(1); } return error; }} />}</CashColumnHeader>
         </FinanceTableColumn>)}</FinanceTableHeader>
-        <FinanceTableBody renderEmptyState={() => <ReportEmpty loading={query.loading} failed={Boolean(query.error)} />}>{((data?.rows ?? []) as PersonalRow[]).map(row => <FinanceTableRow key={row.id} id={row.id} textValue={`${row.occurred_on} ${row.item_content}`}><FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.counterparty}</FinanceTableCell><FinanceTableCell columnRole="description">{row.item_content}<small>{row.bill_label ? `${row.bill_label.bank_name} · ${row.bill_label.label}` : "无账单"}</small></FinanceTableCell><FinanceTableCell columnRole="date">{row.bill_month ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.amount)}</FinanceTableCell><FinanceTableCell columnRole="description">{row.source_item_content ?? (row.flow_source_kind === "manual" ? "手工现金" : row.flow_source_kind === "monthly_task" ? "任务现金" : "无现金收付")}<small>{row.remark ?? "—"}</small></FinanceTableCell><FinanceTableCell columnRole="action"><div className="cash-actions">{row.item_id && <Button size="sm" variant="tertiary" onPress={() => onItem(row.item_id!)}>事项</Button>}{row.flow_id && <Button size="sm" variant="tertiary" onPress={() => onFlow(row.flow_id!)}>现金</Button>}<Button size="sm" variant="tertiary" onPress={() => setEditing(row)}>更正</Button></div></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
+        <FinanceTableBody renderEmptyState={() => <ReportEmpty loading={query.loading} failed={Boolean(query.error)} />}>{((data?.rows ?? []) as PersonalRow[]).map(row => <FinanceTableRow key={row.id} id={row.id} textValue={`${row.occurred_on} ${row.item_content}`}><FinanceTableCell columnRole="date">{row.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{row.project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="identity">{row.counterparty}</FinanceTableCell><FinanceTableCell columnRole="description">{row.item_content}<small>{row.bill_label ? `${row.bill_label.bank_name} · ${row.bill_label.label}` : "无账单"}</small></FinanceTableCell><FinanceTableCell columnRole="date">{row.bill_month ?? "—"}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(row.amount)}</FinanceTableCell><FinanceTableCell columnRole="description">{row.source_item_content ?? (row.flow_source_kind === "manual" ? "手工现金" : row.flow_source_kind === "monthly_task" ? "任务现金" : "无现金收付")}<small>{row.remark ?? "—"}</small></FinanceTableCell>{noncash && <><FinanceTableCell columnRole="description">{row.source_item_id === null ? "无来源调整" : row.source_project?.name_snapshot ?? "无项目"}</FinanceTableCell><FinanceTableCell columnRole="description">{row.category === null ? "未分类" : row.category.name}</FinanceTableCell></>}<FinanceTableCell columnRole="action"><div className="cash-actions">{row.item_id && <Button size="sm" variant="tertiary" onPress={() => onItem(row.item_id!)}>事项</Button>}{row.flow_id && <Button size="sm" variant="tertiary" onPress={() => onFlow(row.flow_id!)}>现金</Button>}<Button size="sm" variant="tertiary" onPress={() => setEditing(row)}>更正</Button></div></FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
       </FinanceTable>}
     {drill && <AppDrawer open title={drill.month + " 实际发生本金"} width={760} className="cash-module cash-drawer" onClose={() => setDrill(null)}>
       <CashItemPicker label="本月本金来源" params={{ type: "loan", ledger_group: "personal", is_opening: false, origin_date_from: drill.month + "-01", origin_date_to: new Date(Number(drill.month.slice(0, 4)), Number(drill.month.slice(5)), 0).toLocaleDateString("sv-SE"), bill_label_id: drill.row.bill_label?.id, has_bill_label: drill.row.bill_label ? undefined : false, project_ids: projects }} onSelect={item => { setDrill(null); onItem(item.id); }} />
@@ -281,10 +290,13 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
 export default function CashBooks({ initialCriteria, onCriteriaChange }: { initialCriteria?: CashBooksCriteria; onCriteriaChange?: (value: CashBooksCriteria) => void }) {
   const [initial] = useState(() => initialCriteria ?? initialCashBooksCriteria());
   const [turnover, setTurnover] = useState(initial.turnover); const [tickets, setTickets] = useState(initial.tickets); const [personal, setPersonal] = useState(initial.personal);
+  const [turnoverView, setTurnoverView] = useState(initial.turnoverView); const [ticketsView, setTicketsView] = useState(initial.ticketsView);
+  const [unsettled, setUnsettled] = useState(initial.unsettled); const [pendingTickets, setPendingTickets] = useState(initial.pendingTickets);
   const [tab, setTab] = useState(initial.tab);
-  useEffect(() => { onCriteriaChange?.({ tab, turnover, tickets, personal }); }, [tab, turnover, tickets, personal, onCriteriaChange]); const [itemId, setItemId] = useState<string | null>(null);
+  useEffect(() => { onCriteriaChange?.({ tab, turnoverView, ticketsView, turnover, unsettled, tickets, pendingTickets, personal }); }, [tab, turnoverView, ticketsView, turnover, unsettled, tickets, pendingTickets, personal, onCriteriaChange]); const [itemId, setItemId] = useState<string | null>(null);
   const [manageItems, setManageItems] = useState(false);
   const [createItem, setCreateItem] = useState<CashItemType | null>(null);
+  const personalSetting = useCashQuery<CashPersonalSetting>(createItem && tab === "personal" ? "/settings/personal-opening" : null);
   const [flow, setFlow] = useState<{ id?: string; kind?: "receipt" | "payment" | "transfer"; item?: CashItem; settlementKind?: CashSettlementKind } | null>(null);
   const openFlow = (id: string) => { setItemId(null); setFlow({ id }); };
   const actualFlow = (item: CashItem, kind: CashSettlementKind) => {
@@ -293,9 +305,12 @@ export default function CashBooks({ initialCriteria, onCriteriaChange }: { initi
   };
   return <>
     <div className="cash-book-heading"><CashTabs value={tab} onChange={value => { setTab(value); setItemId(null); setCreateItem(null); setFlow(null); setManageItems(false); }} tabs={[{ id: "turnover", label: "往来账总表" }, { id: "tickets", label: "有票支付" }, { id: "personal", label: "个人专账" }]} /><div className="cash-actions"><Button size="sm" variant="tertiary" onPress={() => setManageItems(true)}>事项管理</Button><Button size="sm" variant="secondary" onPress={() => setCreateItem(tab === "tickets" ? "ticket_source" : "loan")}>{tab === "tickets" ? "登记票据提供" : "新建事项"}</Button></div></div>
-    {tab === "turnover" && <TurnoverBook onItem={setItemId} initial={turnover} onChange={setTurnover} />}{tab === "tickets" && <TicketBook onItem={setItemId} initial={tickets} onChange={setTickets} />}{tab === "personal" && <PersonalBook onItem={setItemId} onFlow={openFlow} initial={personal} onChange={setPersonal} />}
+    {tab === "turnover" && <><div className="cash-toolbar"><CashSelect label="往来账视图" value={turnoverView} onChange={setTurnoverView} options={[{ value: "events", label: "本期处理记录" }, { value: "unsettled", label: "截至期末未结事项" }]} /></div>{turnoverView === "events" ? <TurnoverBook onItem={setItemId} initial={turnover} onChange={setTurnover} /> : <CashUnsettledBook onItem={setItemId} initial={unsettled} onChange={setUnsettled} />}</>}
+    {tab === "tickets" && <><div className="cash-toolbar"><CashSelect label="有票支付视图" value={ticketsView} onChange={setTicketsView} options={[{ value: "period", label: "期间台账" }, { value: "pending_collection", label: "待回款" }]} /></div><TicketBook key={ticketsView} view={ticketsView} onItem={setItemId} initial={ticketsView === "period" ? tickets : pendingTickets} onChange={ticketsView === "period" ? setTickets : setPendingTickets} /></>}
+    {tab === "personal" && <PersonalBook onItem={setItemId} onFlow={openFlow} initial={personal} onChange={setPersonal} />}
     {itemId && <CashItemDetail key={itemId} itemId={itemId} onClose={() => setItemId(null)} onFlow={openFlow} onActualFlow={actualFlow} />}
-    {createItem && <CashItemEditor initialType={createItem} onClose={() => setCreateItem(null)} onSaved={setItemId} />}
+    {createItem && tab !== "personal" && <CashItemEditor initialType={createItem} onClose={() => setCreateItem(null)} onSaved={setItemId} />}
+    {createItem && tab === "personal" && (personalSetting.data?.counterparty && personalSetting.data.opening_date && !personalSetting.loading && !personalSetting.error ? <CashItemEditor initialType="loan" personalContext={{ counterparty: personalSetting.data.counterparty, opening_date: personalSetting.data.opening_date }} onClose={() => setCreateItem(null)} onSaved={setItemId} /> : <AppDrawer open title="个人专账录入" className="cash-drawer" onClose={() => setCreateItem(null)}><CashNotice error={personalSetting.error?.message} /><p role="status">{personalSetting.loading ? "正在读取个人账配置…" : "请先在基础设置 → 现金账户与期初，确认个人专账归属人和起算日期。"}</p>{personalSetting.error && <Button onPress={personalSetting.reload}>重新读取</Button>}</AppDrawer>)}
     {manageItems && <AppDrawer open title="事项管理" width={780} className="cash-module cash-drawer" onClose={() => setManageItems(false)}><CashItemPicker label="全部现金事项" onSelect={item => { setManageItems(false); setItemId(item.id); }} /></AppDrawer>}
     {flow && <CashFlowDrawer open flowId={flow.id} kind={flow.kind} existingItem={flow.item} settlementKind={flow.settlementKind} onClose={() => setFlow(null)} />}
   </>;

@@ -13,7 +13,7 @@ const loan = { id: "loan-1", version: 3, type: "loan", original_amount: "100.00"
 const child = { id: "expense-1", version: 5, type: "expense", original_amount: "50.00", content: "真实差旅费用", related_obligation_id: loan.id } as CashItem;
 const settlement: CashSettlement = { id: "settlement-1", version: 2, kind: "ticket_offset", occurred_on: "2026-09-05", amount: "20.00", remark: "原票抵说明",
   item_id: loan.id, item_version: 3, item_content: loan.content, source_item_id: "ticket-1", source_item_version: 6,
-  source_item_content: "真实票据", flow_id: null, flow_version: null, flow_source_kind: null, task: null };
+  source_item_content: "真实票据", flow_id: null, flow_version: null, flow_source_kind: null, task: null, category_id: null, category: null };
 function page<T>(rows: T[], number = 1, total = rows.length) { return { rows, pagination: { page: number, page_size: 20, total } }; }
 async function select(label: string, option: string) {
   const user = userEvent.setup();

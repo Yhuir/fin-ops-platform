@@ -81,8 +81,16 @@ test.describe("production cash read-only verification", () => {
     await show("turnover", "reports/turnover", () => nav().getByRole("link", { name: "现金账目", exact: true }).click(), page.getByRole("grid", { name: "往来账总表" }));
     await expect(page.getByRole("tab")).toHaveCount(3);
     await checkMenu("筛选项目");
+    await page.getByRole("button", { name: /往来账视图$/ }).click();
+    await show("unsettled", "reports/turnover", () => page.getByRole("option", { name: "截至期末未结事项", exact: true }).click(), page.getByRole("grid", { name: "截至期末未结事项" }));
+    await checkMenu("筛选项目");
+    await page.getByRole("button", { name: /往来账视图$/ }).click();
+    await show("events_return", "reports/turnover", () => page.getByRole("option", { name: "本期处理记录", exact: true }).click());
     await show("tickets", "reports/ticket-payments", () => page.getByRole("tab", { name: "有票支付", exact: true }).click(), page.getByRole("grid", { name: "有票支付", exact: true }));
     await checkMenu("筛选使用状态");
+    await page.getByRole("button", { name: /有票支付视图$/ }).click();
+    await show("pending_collection", "reports/ticket-payments", () => page.getByRole("option", { name: "待回款", exact: true }).click());
+    await checkMenu("筛选项目");
     await show("personal_matrix", "reports/personal", () => page.getByRole("tab", { name: "个人专账", exact: true }).click(), page.getByRole("grid", { name: "个人年度还款矩阵" }));
     await checkMenu("筛选银行 / 账单");
     for (const [label, grid] of [["现金归还", "个人现金归还"], ["有票直接冲", "有票直接冲"], ["无票报销冲抵", "无票报销冲抵"]]) {

@@ -8,15 +8,15 @@ import type { CashProjectsPage } from "./CashSettingsTypes";
 import { CashFilterPopover, type CashFilterOption, type CashFilterValue } from "./CashFilters";
 import type { CashQueryParams } from "../../features/cash/api";
 
-export function CashConfigurationSelect({ name, label, value, onChange, selected, group, required, disabled }: {
+export function CashConfigurationSelect({ name, label, value, onChange, selected, group, groups, required, disabled }: {
   name: "accounts" | "categories" | "bill-labels"; label: string; value: string; onChange: (value: string, selected: { id: string; name: string } | null) => void;
-  selected?: { id: string; name: string } | null; group?: string; required?: boolean; disabled?: boolean;
+  selected?: { id: string; name: string } | null; group?: string; groups?: string[]; required?: boolean; disabled?: boolean;
 }) {
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState("");
   const query = useCashQuery<CashPageRows<{ id: string; name?: string; label?: string; bank_name?: string; group?: string }>>(`/settings/${name}`, {
     enabled: true, page, page_size: 100, keyword,
-    groups: name === "categories" && group ? group === "turnover" ? [group] : [group, "turnover"] : undefined,
+    groups: groups ?? (name === "categories" && group ? group === "turnover" ? [group] : [group, "turnover"] : undefined),
   });
   const options = query.data ? query.data.rows.map(row => ({ value: row.id, label: name === "bill-labels" ? `${row.bank_name} · ${row.label}` : row.name! })) : [];
   if (selected && !options.some(option => option.value === selected.id)) options.unshift({ value: selected.id, label: `${selected.name}（原值）` });

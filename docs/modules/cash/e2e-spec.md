@@ -1,5 +1,12 @@
 # 现金端到端范围
 
+| Spec ID | 用户可见链路 |
+| --- | --- |
+| CASH-E2E-001 | 四个现金子页、表头筛选/排序、Portal展开与关闭不移动底层布局 |
+| CASH-E2E-002 | 真实本地浏览器录入→流水/账目读取→删除→贡献撤回，重复提交和失败不伪成功 |
+| CASH-E2E-003 | 个人起点与归属、来源分类、未结/待回款视图和任务办理用途 |
+| CASH-E2E-004 | 生产仅只读访问，现金与普通页面请求隔离；不创建角色或试验现金 |
+
 后端链路按[实施计划 B09/B10](../../dev/cash-module-implementation-plan.md)及[技术设计 TC01–TC28](../../dev/cash-module-technical-design.md)执行。
 
 浏览器当前已覆盖四子页面与既有业务，历史证据见实施计划§12。统一UI用例按[UI§3.6](../../product-specs/cash-module-ui-spec.md#36-全现金模块统一ui结构)和[实施§13.5–13.6](../../dev/cash-module-implementation-plan.md#135-测试责任与命令)落实，实际结果见实施§14；F01–F05只是首次建设历史。

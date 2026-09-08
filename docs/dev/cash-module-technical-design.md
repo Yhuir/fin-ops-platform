@@ -1,10 +1,12 @@
 # 现金模块技术设计：后端、数据库、API 与一致性
 
-更新日期：2026-09-07。工作分支：`codex/cash-ledger`。
+更新日期：2026-09-08。工作分支：`codex/cash-ledger`。
+
+**本轮执行：** §14字段、查询及事务增量已获代码实施、合并main及部署授权，实际结果见实施§16。保留既有route/service/repository和cash.*十表，仅追加0168三列迁移；不新增数据库账号、缓存、worker或通用架构层。§1–13保留历史合同，冲突处以§14为准，不并行保留旧规则。
 
 **统一UI与多选已实现：** §13定义本轮局部组件I/O、查询状态和多选读取扩展；实际验证和生产版本见[实施§14](cash-module-implementation-plan.md#14-统一现金ui实际执行与验证2026-09-08)。§1.2“仅前端、API不变”描述上一轮部署，本轮包含§13的窄GET扩展；数据库表、写命令、账务算法、权限和普通财务API不变。原执行顺序保留于实施计划§13。
 
-状态：**R1–R7已接受，当前App现金UI修复已于2026-09-07正式上线，代码提交68eee75c0。** 前端边界见§1.2，17列查询投影见§8.7，不为展示新增表或重做账务。首次上线证据见实施计划§10.13–10.14；本次真实本地测试、发布及生产只读证据、旧页性能例外和未测项见§12，规格不等于所有场景验收通过。
+状态：**统一UI已上线；闭环增量已进入实际实现/验证，最新版本和实测见实施§16。** 旧页性能例外和未测项分别报告，规格不等于所有场景验收通过；本次不把普通Page Audit纳入现金事实。
 
 本次共四份配套文档：业务需求和 Excel 解释以[现金模块开发设计](../product-specs/cash-module-design.md)为准；页面、表单和 Make 改稿见[UI 设计](../product-specs/cash-module-ui-spec.md)；执行顺序、旧链清理和总体测试安排见[实施计划](cash-module-implementation-plan.md)。本文拥有技术字段、数据关系、服务 I/O、请求语义和事务细节。将来修改需求时，四份文档的受影响部分须同步修改，不保留相互冲突的旧规则。
 
@@ -600,7 +602,7 @@ marked_unpaid只可在actual=0时设，不能盖掉partial/completed；办理后
 | GET /api/cash/reports/turnover | date_from/date_to,ledger_group,counterparty,project_id,category_id,state,keyword,sort/order/page/page_size | 固定TurnoverRow及summary/pagination |
 | GET /api/cash/reports/ticket-payments | date_from/date_to(按提供日),ticket_provider,project_id,state,keyword,sort/order/page/page_size | TicketRow及summary/pagination |
 | GET /api/cash/reports/personal | year,view,bill_label_id,project_id,bill_month?,keyword,sort/order/page/page_size | view=matrix/cash_repayments/ticket_offsets/non_ticket_offsets；只返回当前view |
-| GET /api/cash/reports/project-options | date_from/date_to,keyword,page/page_size | 本地历史rows/pagination，不查OA |
+| GET /api/cash/reports/project-options | date_from/date_to或单独date_to，显式item/task父对象，keyword,page/page_size | 本地截至日历史rows/pagination，不查OA；单独date_to供未结/待回款跨年选择 |
 
 FlowCreate明确字段：id、occurred_on、kind、amount、from_account_id?、to_account_id?、category_id?、project_mode、oa_project_id?、project_item_id?、expected_project_item_version?、person_name?、content、remark?、related_items[]?、origin_items[]?、allocations[]?。必填/可空/适用性见§3.5；不接受source_kind/actor/余额/名称快照。related_items是唯一数组形状，不同时保留旧单事项兼容分支。
 
@@ -1069,7 +1071,7 @@ FinanceTable继续是纯UI，表头可直接放上述现金筛选组件。已核
 - 账户/分类/账单复用`/settings/*`分页接口；筛选含停用项，录入只含可用项。保留已选ID/label局部快照，未在候选当前页不代表已删除。
 - 主列表每页50不变。含固定null选项的分类/账单/项目候选每页49条真实资源，加1个无归属选项，保证“全选本页”可提交；账户候选仍50条。候选total只计服务端真实资源，分页按49/50真实page_size计算，不将null伪造成数据库行。
 - 候选搜索仅在输入与已查询关键词不同时启动250ms计时，避免刚打开菜单的旧计时器把快速翻页重置回第1页。实际关键词变化才回第1页；关闭取消计时。
-- 历史项目复用`/reports/project-options`，不增加OA镜像或通用facet接口。候选改为“现金已使用项目，截至查询期末”，不能只取期间内首次项目而漏期初/跨年处理；集合读本地flows/items/settlements及名称快照。date_from/date_to仍为有界期间输入，候选身份按date_to截至历史，不声称与其他列筛选完全联动。
+- 历史项目复用`/reports/project-options`，不增加OA镜像或通用facet接口。候选为“现金已使用项目，截至查询期末”；集合读本地flows/items/settlements及名称快照。支持既有date_from/date_to与单独date_to，后者供未结/待回款，不伪造一年起点；显式父事项/任务也支持date_to截止。不声称与其他列筛选完全联动。
 - 该候选GET增加可选item_id/task_occurrence_id，与流水表同样要求期间或明确父对象；有父无日期取父对象全历史，有父有期间取交集。父对象检查和候选在同一快照，不存在404，不退回全现金项目。个人视图用所选年；候选可以含其他现金账出现的项目，选中后本表0条是合法结果。
 - null选项明确提供并查询IS NULL，不能用删除候选/默认0隐藏未分类记录。单账户不存在保持既有404，多账户存在性一次集合验证，不做每ID一个SQL。
 - OA阶段候选用真实stages和明确“阶段缺失”；未知源code显示未知。完整一次投影读取后应用多选，再count/sort/page，不过滤已分页的50条。实测若超预算再提出窄查询优化，不引入同步平台。
@@ -1087,3 +1089,70 @@ FinanceTable继续是纯UI，表头可直接放上述现金筛选组件。已核
 ### 13.6 验证边界
 
 覆盖多项/单项/不限/null/重复/非法/超限、原单值API、分页与摘要、互转两端、余额、跨年候选、停用/缺失候选、任务状态与真实code模拟。步骤/命令/性能目标见实施计划§13，不复制执行结果；§12历史生产空库耗时不能证明多选SQL或新浮层已通过。
+
+## 14. Excel迁移闭环技术增量（已接受，未实施）
+
+本节对应已接受的总设计§13，是本轮实施目标，不冒称当前数据库事实；实施时合入对应代码/测试并更新§3/5/6/8的运行状态，不保留新旧运行分支。cash仍为10表、同库同账号，无普通财务DTO、队列、缓存或OA写入变化。
+
+### 14.1 最少字段增量与旧数据
+
+| 所属 | 拟增字段 | 类型/空值与写入规则 |
+| --- | --- | --- |
+| cash.settings | personal_counterparty | Label，可空，无姓名默认值；现有personal-opening配置命令携带expected_version、opening_date、counterparty共同保存；GET显式返回counterparty。缺配置不猜名字、不合并多人，个人页显示待配置，其他现金业务正常可用 |
+| cash.items | category_id | UUID，可空，FK cash.categories；新expense必须选择payment分类；ticket_source可选payment/turnover分类；loan/company_receivable必须null，其本金/现金事件类别仍来自实际flow。无现金expense不再只能把费用类型写进备注 |
+| cash.settlements | category_id | UUID，可空，FK cash.categories；仅无source_item_id的non_ticket_offset可填写且新建时必填turnover分类；现金分配及有来源冲抵必须null，避免复制来源分类形成两份可改事实 |
+
+以上复用Label/Money/UUID/Version现有类型和字段长度，不新增人员主表。`counterparty`是现金账明确填写的业务归属标签，不冒称OA身份ID，不做同音/别名/手机号匹配。设置后所有新personal loan的counterparty必须与配置完全一致（只做既有字符串规范化）。票据提供人和无票来源的归属规则见§14.3。
+
+新迁移编号在实施时从现有迁移序列分配，不改0166/0167已应用迁移。只追加上述三列、FK与字段适用CHECK；不向旧记录填“其他费用”或示例姓名。非适用类型列为null；历史适用记录可保留null，UI明确“未分类（历史记录）”，不把缺失字段或读取失败映射为null。旧费用正常阅读；编辑该费用/无来源调整时必须显式补齐其分类。已经停用但正在被该记录引用的原分类可保持，换分类只能选当前适用且启用项。category查询null仍是明确未分类，不等于不限。
+
+首次保存个人归属前，在同一settings锁与现金事务内检查已有personal loan：无数据可以保存；全部属于用户填写的同一人可以确认；有其他姓名时返回冲突，不自动迁移债务。有历史后不能用改设置切换真实归属；若确为同一人的姓名纠错，需另行明确受影响来源与记录，不在普通配置保存中批量改名。此限制是一本专账的业务边界，不增加角色或多账套。
+
+任务模板/当月快照不加新字段。本轮以每次确认中的显式办理用途完成闭环；将来若用户要求保存更多预填，再讨论模板默认，不现在引入快照迁移。现金流水本体字段、双预算算法和删除身份表不变。
+
+### 14.2 查询I/O与金额范围
+
+**往来总表：** 扩展现有GET `/api/cash/reports/turnover` 的 `view=events|unsettled`（未传沿用既有events，这是已发布接口默认，不是失败兜底）。
+
+- events：保持逐次事件DTO、期间/筛选含义及`summary.remaining_obligation_amount`计算范围；前端将其标签准确改为“本期涉及事项期末未结”。增加明确`view`返回值。不把该数字静默改成另一集合的余额。
+- unsettled：必传date_to，拒绝date_from、category_id/category_ids、personal_variant、事件state和其他不适用筛选；只接受ledger_group、counterparty、project_id/project_ids、keyword及分页/排序。截止日合法且不晚于今天；不需要伪造366天起始日。
+- unsettled.rows固定字段：`item_id,type,origin_date,ledger_group,counterparty,project,content,obligation_direction,original_amount,settled_amount,remaining_amount,version`；项目与金额复用现有DTO定义。只纳入origin_date≤date_to且截至该日remaining_amount>0的loan/company_receivable。已在截止日以后结清的，查历史截止日仍显示原未结。
+- unsettled.summary：`item_count`和`remaining_obligation_amount:{receivable,payable}`，同一已应用事项范围、分页前聚合；同额不同ID分别计，一事项多结算只计一次。sort仅origin_date/remaining_amount/counterparty，金额服务端排序。日期并列沿用稳定ID顺序。
+- events与unsettled由前端明确类型分别渲染，不在通用FinanceTable中判断业务；切视图保留各自条件，不偷偷继承不适用条件。
+
+**事件类别唯一来源：** 本金/现金归还/公司回款用相应flow.category；费用建立、费用支付/退款事件用expense.category；ticket_offset用ticket_source.category；有费用来源的non_ticket_offset用expense.category；无来源non_ticket_offset用settlement.category。这是按事件类型确定owner，不是依次尝试多个字段的fallback。前端只显示DTO。类别筛选必须在分页前用同一表达式，历史null显式可筛；修改来源分类后所有相关事件同时改变，不能只修当前页显示。
+
+**个人账：** 保留现有路由、年度和四种视图，从settings读取明确归属，在SQL scope中限定personal+counterparty。归属未配置时返回明确coverage状态`unconfigured`与空/未知金额，不能把旧混合汇总当有效个人账。有不属于指定人的旧personal记录时返回具体配置冲突，而不是静默过滤后掩盖旧数据。
+
+矩阵增加`summary.month_principal_totals:[{month,principal_amount,coverage_state}]`固定12项，另加`year_principal_amount`；按整套已应用账单/项目/关键词范围聚合，不按当前页相加，起算前未知保持null。非现金明细增加`source_project`（无来源时null），保留`project`为目标债务项目。实际月份为origin_date，bill_month只做账单归属；提前标识从二者比较派生，不存提前月份状态、不增加第13个累计列。个人行的`personal_variant`明确principal/settlement/neutral三值：只有cash_repayment/ticket_offset/non_ticket_offset属于settlement；费用建立/支付/退款为neutral。
+
+个人非现金明细另返回`category`，来源按上述事件规则。既有project_id/project_ids仍筛目标债务项目，列名明确“借款项目”；新增source_project_id/source_project_ids只筛来源项目，category_id/category_ids筛来源/明确调整分类。这些增量只适用有票/无票冲抵明细，不用于矩阵/现金归还；同字段单复数互斥、null/50项/总100项/3500编码长度沿用原机制。无来源记录的source_project=null明确显示“无来源调整”，不能把目标项目复制过去；筛源项目B不会把借款A改成B。相应列表count/summary用同一范围，不将明细筛选悄悄改变年度全账余额。
+
+**有票支付：** 扩现有GET `/api/cash/reports/ticket-payments` 的 `view=period|pending_collection`。period保留原提供期间筛选；pending_collection必传date_to且拒绝date_from/使用状态筛选，候选为截至该日已提供且关联公司应收未结>0的来源，不漏旧年。两种视图新增余额及回款列均按date_to计算，避免历史期间混入截止日之后回款；原有历史期间“读取当前余额”的行为已经修订并测试，不新增tickets别名。
+
+票据行新增`remaining_receivable_amount`、`noncash_settled_amount`、`collection_state`；后者为unregistered/open/partial/settled：无明确公司应收为unregistered；有应收且现金回款=0为open；0<现金回款<明确应收为partial；现金回款=明确应收为settled。非现金结清不会把它变为settled，但已无未结时不再进催款列表；UI显示“未结0/非现金结清”及实际现金回款，不能继续催已清债务。票据使用状态仍独立存在。来源有多笔公司应收时按唯一应收ID及各自结算集合聚合，不能JOIN复制使用额或现金回款。
+
+### 14.3 命令、归属与事务
+
+CashService仍负责写规则、CashQueryService负责读参、cash repository负责SQL；不将SQL搬进route或UI。
+
+1. `CashItemEditor`接类型化上下文（新建类型、分组、归属、opening与起算日）；只用于新建预填。个人入口不再默认company；服务端仍验证，不能只靠隐藏字段。现有PUT/POST白名单、创建重放比较、repository映射和DTO同步纳入新增category字段。
+2. `_validate_settlement`按现有类型分支校验。个人ticket_offset要求source.ticket_provider等于target.counterparty及专账归属；个人non_ticket_offset有来源时，source必须expense且related_obligation_id指向同一归属人的personal loan。无来源调整保留明确原因及新增分类，不猜费用来源。
+3. 仅上述个人冲抵允许source/target项目不同；`_validate_item`中expense.related_obligation_id的同项目限制对应收窄。其他引用、cash.origin_flow、CASH_SETTLEMENTS、company_receivable.ticket_source_id继续同项目。关系选择器同步显示可用源并分别标来源/目标项目；不能只改保存规则而候选仍过滤掉合法来源。
+4. 新建/编辑/删除来源及目标均复核影响关系：改ticket_provider、个人归属、related_obligation_id、项目、日期、金额、分类时读取必要依赖；非法半状态整体409回滚，提示受影响关系，不自动解绑或改目标。冲抵/撤销涉及两端，按既有稳定锁序取得来源/目标/关联义务必要锁；并发占额与修改归属不能分别通过后形成违规关系。只锁本命令涉及行，只有个人操作读取settings共享锁。
+5. 手工和任务确认的“办理用途”仅是表单到现有FlowCreate复合DTO的确定性转换：普通收付不建事项；实际费用建expense；个人实际代付建personal loan并按实际情况绑定账单；收回/归还选既有目标建allocation。不是新的服务/通用规则引擎。一次写入共用CashService，任务继续在同事务计算当月实际累计；资金只计一次。
+6. 已录流水认领任务保持source_kind和原关系，不隐式增补事项；未办/核对不造现金，分次和超目标提示不改变。编辑删除继续复用现有source correction/CAS/tombstone，不新增批量删除或逐表删除接口。保存成功后读失败只重读，不重发写命令。
+
+### 14.4 有界读取、迁移与回退
+
+新视图复用既有短一致只读快照；rows/count/summary金额一致、集合SQL先过滤后分页、当前页解引用，不按每行访问OA或发HTTP。初始不加索引，先用未结/多来源/跨年10k与100k样本测现有查询计划，再优化实际瓶颈。不是因累计跨年就引入月结表或后台重建。
+
+三列增量迁移在测试库验证已有数据保留及旧null显示；正式执行前再读取当前真实记录数量，不能把上一轮空库当永远为空。已有不一致只报告并安排用户确认的纠正，不自动修账。实现、测试、迁移、前后端必须配套发布；不回滚或DROP业务数据。回退代码保留新增列；若旧代码会误读新归属/跨项目关系，应暂停现金入口并修复前进，不把错误旧报表开放给用户，也不关闭普通页面。当前回合不部署、不建库、不生成备份。
+
+### 14.5 接受后的字段级复审补充
+
+1. **分类引用完整覆盖。** 现有category的使用计数、改group/删除校验必须同时纳入flow、任务配置/快照及新增items/settlements引用；FK不级联删除现金事实。停用不删历史。对新关联分类取既有共享锁，分类启停/改类命令按原配置锁机制互斥；修改来源分类只更新唯一owner，相关报表实时读取该来源，不批量复制分类到事件。
+2. **新字段纳入所有命令路径。** 独立事项、flow.related_items、任务创建flow、原流水更正、独立settlement、来源纠正与删除预览DTO均检查适用的新字段。现金allocation的category_id明确为null（类型不适用），不能只在独立事项API加校验而复合命令漏填；有来源冲抵不接受第二份分类。旧请求缺新必填分类明确400，不能自动补“其他”。已应用迁移不改写，旧行null不会在GET中补写。
+3. **余额覆盖和期间表达。** 所有“全部未结”均指系统已登记且满足条件的事项；不代表未录入的Excel债务已知为0。历史截至日与当前详情分开标注：列表显示“截至某日”，进入详情显示当前事实及可办理额，不能拿历史余额直接提交当下冲抵。提交时按当下事实/版本复核。个人起算以前的完整余额仍未知，不能把无匹配行误称该人历史欠款为0。
+4. **个人跨项目不能改变来源选择资格。** 合法来源仍须先按原OA新增/历史规则登记；放宽source-target关系不等于自由新增已结束项目。CashService._item_values目前禁止expense/ticket_source为is_opening；create_item只用is_opening决定historical项目读取。已结束项目未处理票据/费用的开账能力尚不在现有三列方案内，按业务§13末段核对真实存量后再定窄方案，不增加隐藏historical开关或管理员绕过。
+5. **错误和资源边界。** 个人归属配置缺失/冲突只影响依赖它的个人写入或报表，不阻断普通现金收付和公司/外部账。失败不写全局业务历史。浏览器等待/读失败不重发任务确认或删除；离开现金/撤权继续取消请求并卸载Portal。SQL/连接超时和池上限保留，新增聚合不能扩大成全局写锁。

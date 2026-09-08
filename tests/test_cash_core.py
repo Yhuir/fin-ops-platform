@@ -33,6 +33,31 @@ class CashMoneyTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.environ.get("FIN_OPS_CASH_TEST_DATABASE_URL"), "requires explicitly isolated cash PostgreSQL test database")
+class CashClosureMigrationTests(unittest.TestCase):
+    def test_incremental_migration_preserves_legacy_facts_without_invented_categories_or_owner(self):
+        connection = PostgresConnection(PostgresSettings(os.environ["FIN_OPS_CASH_TEST_DATABASE_URL"], pool_enabled=False))
+        self.addCleanup(connection.close)
+        if not connection.fetch_one("SELECT current_database() AS name")["name"].startswith("fin_ops_cash_test_"):
+            raise RuntimeError("Migration fixtures require a dedicated fin_ops_cash_test_* database")
+        connection.execute("DROP SCHEMA IF EXISTS cash CASCADE")
+        connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0166_cash_ledger.sql").read_text())
+        loan_id, expense_id, settlement_id = uid(), uid(), uid()
+        connection.execute("""INSERT INTO cash.items(id,type,origin_date,original_amount,ledger_group,obligation_direction,counterparty,content)
+            VALUES(%s,'loan','2026-01-01',100,'personal','receivable','Legacy owner','Legacy loan')""", (loan_id,))
+        connection.execute("INSERT INTO cash.items(id,type,origin_date,original_amount,content) VALUES(%s,'expense','2026-01-01',25,'Legacy expense')", (expense_id,))
+        connection.execute("""INSERT INTO cash.settlements(id,kind,amount,occurred_on,item_id,remark)
+            VALUES(%s,'non_ticket_offset',10,'2026-01-01',%s,'Legacy adjustment')""", (settlement_id, loan_id))
+        connection.execute("UPDATE cash.settings SET personal_opening_date='2026-01-01',version=7 WHERE id=1")
+        before = {table: connection.fetch_all(f"SELECT * FROM cash.{table} ORDER BY id") for table in ("items", "settlements", "settings")}
+        connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0168_cash_business_closure.sql").read_text())
+        for table, extra in (("items", "category_id"), ("settlements", "category_id"), ("settings", "personal_counterparty")):
+            after = connection.fetch_all(f"SELECT * FROM cash.{table} ORDER BY id")
+            self.assertTrue(all(row[extra] is None for row in after))
+            self.assertEqual([{key: value for key, value in row.items() if key != extra} for row in after], before[table])
+        self.assertEqual(connection.fetch_one("SELECT count(*) AS n FROM information_schema.tables WHERE table_schema='cash' AND table_type='BASE TABLE'")["n"], 10)
+
+
+@unittest.skipUnless(os.environ.get("FIN_OPS_CASH_TEST_DATABASE_URL"), "requires explicitly isolated cash PostgreSQL test database")
 class CashCorePostgresTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -44,10 +69,15 @@ class CashCorePostgresTests(unittest.TestCase):
         # This schema belongs solely to this explicit disposable test database.
         cls.connection.execute("DROP SCHEMA IF EXISTS cash CASCADE")
         cls.connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0166_cash_ledger.sql").read_text())
+        cls.connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0168_cash_business_closure.sql").read_text())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.connection.close()
 
     def setUp(self):
         self.connection.execute("TRUNCATE cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
-        self.connection.execute("UPDATE cash.settings SET allowed_project_stage_codes='{}',project_selection_configured=false,personal_opening_date=NULL,version=1")
+        self.connection.execute("UPDATE cash.settings SET allowed_project_stage_codes='{}',project_selection_configured=false,personal_opening_date=NULL,personal_counterparty=NULL,version=1")
         self.repo = CashRepository(self.connection)
         self.oa_calls = []
 
@@ -61,6 +91,7 @@ class CashCorePostgresTests(unittest.TestCase):
         self.actor = {"account": "test-account", "name": "Synthetic operator"}
         self.account = self.service.create_account({"id": uid(), "name": "Synthetic account", "kind": "cash", "opening_date": "2026-01-01", "opening_amount": "1000"})["account"]
         self.category = self.service.create_category({"id": uid(), "name": "Synthetic turnover", "group": "turnover"})["category"]
+        self.payment_category = self.service.create_category({"id": uid(), "name": "Synthetic expense", "group": "payment"})["category"]
 
     def flow(self, kind="payment", amount="100", **extra):
         payload = {"id": uid(), "kind": kind, "amount": amount, "occurred_on": "2026-09-01", "content": "Synthetic flow", "category_id": self.category["id"], "project_mode": "selection"}
@@ -74,6 +105,8 @@ class CashCorePostgresTests(unittest.TestCase):
             payload.update(obligation_direction="receivable", ledger_group="company", counterparty="Synthetic company")
         if kind == "ticket_source":
             payload.update(ticket_provider="Synthetic provider", ticket_provided_on="2026-09-01", ticket_description="Synthetic tickets")
+        if kind == "expense":
+            payload["category_id"] = self.payment_category["id"]
         payload.update(extra)
         return payload
 
@@ -83,6 +116,257 @@ class CashCorePostgresTests(unittest.TestCase):
 
     def allocation(self, item, kind="cash_repayment", amount="100"):
         return {"id": uid(), "item_id": item["id"], "expected_item_version": item["version"], "target_is_new": False, "kind": kind, "amount": amount}
+
+    def personal(self, **changes):
+        settings = self.service.get_personal_opening()
+        if settings["counterparty"] is None:
+            self.service.update_personal_opening({"expected_version": settings["version"], "opening_date": "2026-01-01", "counterparty": "Synthetic owner"})
+        return self.service.create_item(self.item(ledger_group="personal", counterparty="Synthetic owner", **changes))["item"]
+
+    def offset(self, target, source=None, *, kind="ticket_offset", amount="40", **changes):
+        payload = {"id": uid(), "kind": kind, "occurred_on": "2026-09-01", "amount": amount,
+                   "item_id": target["id"], "expected_item_version": target["version"]}
+        if source is not None:
+            payload.update(source_item_id=source["id"], expected_source_item_version=source["version"])
+        payload.update(changes)
+        return payload
+
+    def test_personal_configuration_is_explicit_and_does_not_block_ordinary_cash(self):
+        self.assertIsNone(self.service.get_personal_opening()["counterparty"])
+        with self.assertRaises(CashError):
+            self.service.create_item(self.item(ledger_group="personal", counterparty="Synthetic owner"))
+        self.service.create_item(self.item())
+        self.service.create_flow(self.flow(), self.actor)
+        for counterparty in (None, "", "   "):
+            with self.subTest(counterparty=counterparty), self.assertRaises(CashError):
+                self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": counterparty})
+        saved = self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic owner"})
+        self.assertEqual(saved["counterparty"], "Synthetic owner")
+        self.assertEqual(saved["version"], 2)
+        self.assertFalse(self.service.update_personal_opening({"expected_version": 2, "opening_date": "2026-01-01", "counterparty": "Synthetic owner"})["changed"])
+        with self.assertRaises(CashError):
+            self.service.create_item(self.item(ledger_group="personal", counterparty="Different owner"))
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.flows")["n"], 1)
+
+    def test_personal_first_configuration_rejects_conflicting_legacy_owners(self):
+        legacy = self.item(ledger_group="personal", counterparty="Legacy owner")
+        self.connection.execute("""INSERT INTO cash.items(id,type,origin_date,original_amount,obligation_direction,ledger_group,counterparty,content)
+            VALUES(%s,'loan','2026-01-01',100,'receivable','personal','Legacy owner','Legacy principal')""", (legacy["id"],))
+        with self.assertRaises(CashError) as caught:
+            self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Other owner"})
+        self.assertEqual(caught.exception.status, 409)
+        self.assertIsNone(self.service.get_personal_opening()["counterparty"])
+        self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Legacy owner"})
+        with self.assertRaises(CashError):
+            self.service.update_personal_opening({"expected_version": 2, "opening_date": "2026-01-01", "counterparty": "New owner"})
+        self.assertEqual(self.row("items", legacy["id"])["counterparty"], "Legacy owner")
+
+    def test_item_categories_are_explicit_typed_and_part_of_replay(self):
+        for category in (None, self.category["id"]):
+            with self.subTest(category=category), self.assertRaises(CashError):
+                self.service.create_item(self.item("expense", category_id=category))
+        for kind in ("loan", "company_receivable"):
+            with self.subTest(kind=kind), self.assertRaises(CashError):
+                self.service.create_item(self.item(kind, category_id=self.payment_category["id"]))
+        expense = self.item("expense")
+        result = self.service.create_item(expense)
+        self.assertEqual(result["item"]["category_id"], self.payment_category["id"])
+        self.assertFalse(self.service.create_item(expense)["created"])
+        second = self.service.create_category({"id": uid(), "name": "Second expense", "group": "payment"})["category"]
+        with self.assertRaises(CashError) as caught:
+            self.service.create_item({**expense, "category_id": second["id"]})
+        self.assertEqual(caught.exception.code, "cash_submission_conflict")
+        for category in (None, self.category["id"], self.payment_category["id"]):
+            ticket = self.service.create_item(self.item("ticket_source", category_id=category))["item"]
+            self.assertEqual(ticket["category_id"], category)
+        receipt = self.service.create_category({"id": uid(), "name": "Receipt", "group": "receipt"})["category"]
+        with self.assertRaises(CashError):
+            self.service.create_item(self.item("ticket_source", category_id=receipt["id"]))
+
+    def test_legacy_expense_requires_classification_on_edit_without_get_side_effect(self):
+        expense = self.service.create_item(self.item("expense"))["item"]
+        self.connection.execute("UPDATE cash.items SET category_id=NULL WHERE id=%s", (expense["id"],))
+        before = self.row("items", expense["id"])
+        self.assertIsNone(before["category_id"])
+        with self.assertRaises(CashError):
+            self.service.update_item(expense["id"], {"expected_version": 1, "remark": "Needs category"})
+        self.assertEqual(self.row("items", expense["id"]), before)
+        fixed = self.service.update_item(expense["id"], {"expected_version": 1, "category_id": self.payment_category["id"], "remark": "Classified"})
+        self.assertEqual(fixed["item"]["category_id"], self.payment_category["id"])
+
+    def test_cash_allocation_rejects_second_category_in_composite_and_standalone_commands(self):
+        loan = self.service.create_item(self.item())["item"]
+        allocation = {**self.allocation(loan), "category_id": self.category["id"]}
+        with self.assertRaises(CashError):
+            self.service.create_flow(self.flow("receipt", allocations=[allocation]), self.actor)
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.flows")["n"], 0)
+        receipt = self.service.create_flow(self.flow("receipt"), self.actor)["flow"]
+        payload = {"id": uid(), "kind": "cash_repayment", "occurred_on": "2026-09-01", "amount": "100",
+                   "item_id": loan["id"], "expected_item_version": 1, "flow_id": receipt["id"],
+                   "expected_flow_version": receipt["version"], "category_id": self.category["id"]}
+        with self.assertRaises(CashError):
+            self.service.create_settlement(payload)
+        result = self.service.create_settlement({**payload, "category_id": None})
+        self.assertIsNone(result["settlement"]["category_id"])
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.settlements")["n"], 1)
+
+    def test_legacy_noncash_adjustment_requires_classification_on_edit(self):
+        loan = self.service.create_item(self.item())["item"]
+        entry = self.service.create_settlement(self.offset(loan, kind="non_ticket_offset", category_id=self.category["id"], remark="Explicit adjustment"))["settlement"]
+        self.connection.execute("UPDATE cash.settlements SET category_id=NULL WHERE id=%s", (entry["id"],))
+        before = self.row("settlements", entry["id"])
+        target = self.row("items", loan["id"])
+        versions = {"items": [{"id": target["id"], "version": target["version"]}]}
+        with self.assertRaises(CashError):
+            self.service.update_settlement(entry["id"], {"expected_version": 1, "expected_related_versions": versions, "remark": "Still unclassified"})
+        self.assertEqual(self.row("settlements", entry["id"]), before)
+        repaired = self.service.update_settlement(entry["id"], {"expected_version": 1, "expected_related_versions": versions, "category_id": self.category["id"]})
+        self.assertEqual(repaired["settlement"]["category_id"], self.category["id"])
+
+    def test_personal_cross_project_ticket_checks_owner_and_retains_projects(self):
+        loan = self.personal(oa_project_id="loan-project")
+        wrong = self.service.create_item(self.item("ticket_source", ticket_provider="Other person", oa_project_id="loan-project"))["item"]
+        with self.assertRaises(CashError) as caught:
+            self.service.create_settlement(self.offset(loan, wrong))
+        self.assertEqual(caught.exception.status, 409)
+        ticket = self.service.create_item(self.item("ticket_source", ticket_provider="Synthetic owner", oa_project_id="source-project", category_id=self.payment_category["id"]))["item"]
+        saved = self.service.create_settlement(self.offset(loan, ticket))
+        self.assertIsNone(saved["settlement"]["category_id"])
+        self.assertEqual(self.row("items", loan["id"])["oa_project_id"], "loan-project")
+        self.assertEqual(self.row("items", ticket["id"])["oa_project_id"], "source-project")
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.flows")["n"], 0)
+        loan = self.row("items", loan["id"])
+        with self.assertRaises(CashError):
+            self.service.create_flow(self.flow("receipt", amount="20", oa_project_id="source-project", allocations=[self.allocation(loan, amount="20")]), self.actor)
+
+    def test_noncash_category_has_one_owner_and_category_references_prevent_deletion(self):
+        loan = self.service.create_item(self.item())["item"]
+        for category in (None, self.payment_category["id"]):
+            with self.subTest(category=category), self.assertRaises(CashError):
+                self.service.create_settlement(self.offset(loan, kind="non_ticket_offset", category_id=category, remark="Explicit adjustment"))
+        saved = self.service.create_settlement(self.offset(loan, kind="non_ticket_offset", category_id=self.category["id"], remark="Explicit adjustment"))["settlement"]
+        self.assertEqual(saved["category_id"], self.category["id"])
+        with self.assertRaises(psycopg.errors.ForeignKeyViolation):
+            self.connection.execute("DELETE FROM cash.categories WHERE id=%s", (self.category["id"],))
+        with self.assertRaises(CashError):
+            self.service.update_category(self.category["id"], {"expected_version": 1, "group": "payment"})
+        self.service.update_category(self.category["id"], {"expected_version": 1, "enabled": False})
+        loan = self.row("items", loan["id"])
+        updated = self.service.update_settlement(saved["id"], {"expected_version": 1,
+            "expected_related_versions": {"items": [{"id": loan["id"], "version": loan["version"]}]},
+            "category_id": self.category["id"], "remark": "Keep disabled historical category"})
+        self.assertEqual(updated["settlement"]["category_id"], self.category["id"])
+        self.assertEqual(updated["settlement"]["amount"], "40.00")
+        expense = self.service.create_item(self.item("expense"))["item"]
+        with self.assertRaises(psycopg.errors.ForeignKeyViolation):
+            self.connection.execute("DELETE FROM cash.categories WHERE id=%s", (self.payment_category["id"],))
+        with self.assertRaises(CashError):
+            self.service.update_category(self.payment_category["id"], {"expected_version": 1, "group": "receipt"})
+        self.service.update_category(self.payment_category["id"], {"expected_version": 1, "enabled": False})
+        kept = self.service.update_item(expense["id"], {"expected_version": 1, "remark": "Historical disabled category"})
+        self.assertEqual(kept["item"]["category_id"], self.payment_category["id"])
+        with self.assertRaises(CashError):
+            self.service.create_item(self.item("expense"))
+        ticket = self.service.create_item(self.item("ticket_source"))["item"]
+        loan = self.row("items", loan["id"])
+        with self.assertRaises(CashError):
+            self.service.create_settlement(self.offset(loan, ticket, category_id=self.category["id"]))
+
+    def test_personal_expense_cross_project_requires_explicit_personal_obligation(self):
+        loan = self.personal(oa_project_id="loan-project")
+        source = self.service.create_item(self.item("expense", oa_project_id="source-project", related_obligation_id=loan["id"], expected_related_versions={"items": [{"id": loan["id"], "version": 1}]}))["item"]
+        entry = self.service.create_settlement(self.offset(loan, source, kind="non_ticket_offset"))["settlement"]
+        self.assertIsNone(entry["category_id"])
+        self.assertEqual(self.row("items", source["id"])["oa_project_id"], "source-project")
+        unowned = self.service.create_item(self.item("expense", oa_project_id="loan-project"))["item"]
+        with self.assertRaises(CashError):
+            self.service.create_settlement(self.offset(self.row("items", loan["id"]), unowned, kind="non_ticket_offset"))
+        ordinary = self.service.create_item(self.item(oa_project_id="loan-project"))["item"]
+        with self.assertRaises(CashError):
+            self.service.create_item(self.item("expense", oa_project_id="source-project", related_obligation_id=ordinary["id"], expected_related_versions={"items": [{"id": ordinary["id"], "version": 1}]}))
+
+    def test_personal_source_edits_and_deletion_reject_invalid_existing_relations(self):
+        loan = self.personal(oa_project_id="loan-project")
+        source = self.service.create_item(self.item("ticket_source", ticket_provider="Synthetic owner", oa_project_id="source-project"))["item"]
+        entry = self.service.create_settlement(self.offset(loan, source))["settlement"]
+        before = self.row("items", source["id"])
+        for changes in ({"ticket_provider": "Other person"}, {"original_amount": "10"},
+                        {"origin_date": "2026-09-02", "ticket_provided_on": "2026-09-02"}):
+            with self.subTest(changes=changes), self.assertRaises(CashError):
+                self.service.update_item(source["id"], {"expected_version": before["version"], **changes})
+            self.assertEqual(self.row("items", source["id"]), before)
+            self.assertEqual(self.row("settlements", entry["id"])["amount"], Decimal("40"))
+        with self.assertRaises(CashError):
+            self.service.delete_item(source["id"], {"expected_version": before["version"]})
+        target = self.row("items", loan["id"])
+        self.service.delete_settlement(entry["id"], {"expected_version": entry["version"], "expected_related_versions": {"items": [{"id": source["id"], "version": before["version"]}, {"id": target["id"], "version": target["version"]}]}})
+        changed = self.service.update_item(source["id"], {"expected_version": self.row("items", source["id"])["version"], "ticket_provider": "Other person"})
+        self.assertEqual(changed["item"]["ticket_provider"], "Other person")
+
+    def test_concurrent_personal_ticket_offsets_cannot_overspend_source(self):
+        first = self.personal(amount="100", oa_project_id="first-project")
+        second = self.personal(amount="100", oa_project_id="second-project")
+        source = self.service.create_item(self.item("ticket_source", ticket_provider="Synthetic owner", oa_project_id="source-project"))["item"]
+        payloads = [self.offset(target, source, amount="80") for target in (first, second)]
+
+        def execute(payload):
+            try:
+                self.service.create_settlement(payload)
+                return "created"
+            except CashError as error:
+                return error.code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(execute, payloads))
+        self.assertEqual(results.count("created"), 1)
+        self.assertEqual(self.connection.fetch_one("SELECT sum(amount) AS amount FROM cash.settlements")["amount"], Decimal("80"))
+        self.assertEqual(self.row("items", source["id"])["ticket_provider"], "Synthetic owner")
+
+    def test_concurrent_ticket_owner_edit_and_offset_cannot_commit_wrong_owner(self):
+        loan = self.personal(oa_project_id="loan-project")
+        source = self.service.create_item(self.item("ticket_source", ticket_provider="Synthetic owner", oa_project_id="source-project"))["item"]
+
+        def allocate():
+            try:
+                self.service.create_settlement(self.offset(loan, source, amount="80"))
+                return "allocated"
+            except CashError:
+                return "conflict"
+
+        def change_owner():
+            try:
+                self.service.update_item(source["id"], {"expected_version": 1, "ticket_provider": "Other person"})
+                return "changed"
+            except CashError:
+                return "conflict"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            allocate_job = pool.submit(allocate)
+            edit_job = pool.submit(change_owner)
+            results = [allocate_job.result(timeout=5), edit_job.result(timeout=5)]
+        self.assertEqual(results.count("conflict"), 1)
+        actual = self.row("items", source["id"])
+        count = self.connection.fetch_one("SELECT count(*) AS n FROM cash.settlements WHERE source_item_id=%s", (source["id"],))["n"]
+        self.assertEqual((actual["ticket_provider"], count), ("Synthetic owner", 1) if "allocated" in results else ("Other person", 0))
+
+    def test_expense_owner_reference_cannot_be_cleared_while_personal_offset_exists(self):
+        owner_loan = self.personal(oa_project_id="owner-loan")
+        target = self.personal(oa_project_id="target-loan")
+        source = self.service.create_item(self.item("expense", oa_project_id="source-project", related_obligation_id=owner_loan["id"],
+            expected_related_versions={"items": [{"id": owner_loan["id"], "version": owner_loan["version"]}]}))["item"]
+        offset = self.service.create_settlement(self.offset(target, source, kind="non_ticket_offset"))["settlement"]
+        before = self.row("items", source["id"])
+        with self.assertRaises(CashError):
+            self.service.update_item(source["id"], {"expected_version": before["version"], "related_obligation_id": None})
+        self.assertEqual(self.row("items", source["id"]), before)
+        self.assertEqual(self.row("settlements", offset["id"])["source_item_id"], source["id"])
+        owner_before = self.row("items", owner_loan["id"])
+        with self.assertRaises(CashError):
+            self.service.update_item(owner_loan["id"], {"expected_version": owner_before["version"],
+                "ledger_group": "company", "counterparty": "Synthetic company"})
+        self.assertEqual(self.row("items", owner_loan["id"]), owner_before)
+        self.assertEqual(self.row("items", source["id"]), before)
+        self.assertEqual(self.row("settlements", offset["id"])["source_item_id"], source["id"])
 
     def test_plain_create_retry_delete_no_resurrection(self):
         payload = self.flow()
@@ -198,7 +482,7 @@ class CashCorePostgresTests(unittest.TestCase):
             self.service.create_settlement(payload)
 
     def test_personal_start_does_not_configure_oa(self):
-        self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic company"})
         self.assertFalse(self.service.get_project_selection()["configured"])
         first = self.service.update_project_selection({"expected_version": 2, "allowed_stage_codes": []})
         self.assertTrue(first["configured"])
@@ -318,11 +602,28 @@ class CashCorePostgresTests(unittest.TestCase):
         result = self.service.create_flow(self.flow(related_items=[expense, loan]), self.actor)
         self.assertEqual(len(result["related_items"]), 2)
 
+    def test_deleting_composite_kept_expense_requires_explicit_reference_correction(self):
+        loan = self.item()
+        expense = self.item("expense", related_obligation_id=loan["id"])
+        source = self.service.create_flow(self.flow(related_items=[loan, expense]), self.actor)["flow"]
+        correction = {"expected_version": source["version"], "source_corrections": [
+            {"item_id": expense["id"], "expected_version": 1, "action": "keep_independent"}]}
+        with self.assertRaises(CashError):
+            self.service.delete_flow(source["id"], correction)
+        self.assertEqual(self.row("items", expense["id"])["origin_flow_id"], source["id"])
+        self.assertEqual(self.row("items", loan["id"])["origin_flow_id"], source["id"])
+        self.service.delete_flow(source["id"], {**correction, "item_reference_changes": [
+            {"item_id": expense["id"], "expected_version": 1, "related_obligation_id": None}]})
+        kept = self.row("items", expense["id"])
+        self.assertIsNone(kept["related_obligation_id"])
+        self.assertIsNone(kept["origin_flow_id"])
+        self.assertEqual(kept["original_amount"], Decimal("100"))
+
     def test_personal_start_rejects_hiding_real_principal(self):
-        self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        self.service.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic company"})
         loan = self.service.create_item(self.item(ledger_group="personal"))["item"]
         with self.assertRaises(CashError):
-            self.service.update_personal_opening({"expected_version": 2, "opening_date": "2026-09-02"})
+            self.service.update_personal_opening({"expected_version": 2, "opening_date": "2026-09-02", "counterparty": "Synthetic company"})
         self.assertEqual(self.row("items", loan["id"])["origin_date"], date(2026, 9, 1))
 
     def test_future_date_unknown_fields_and_wrong_types_fail(self):

@@ -149,7 +149,7 @@ describe("现金配置表单", () => {
     request.mockImplementation(async (path, options = {}) => {
       if (options.method === "PUT") return { account: { ...account, version: 3 }, version: 3, changed: true };
       if (path.startsWith("/settings/accounts")) return page([account]);
-      if (path === "/settings/personal-opening") return { opening_date: null, version: 4 };
+      if (path === "/settings/personal-opening") return { opening_date: null, counterparty: null, version: 4 };
       throw new Error(`Unexpected test request ${path}`);
     });
   }

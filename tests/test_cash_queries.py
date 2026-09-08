@@ -29,6 +29,8 @@ class CashPostgresCase(unittest.TestCase):
         if cls.connection.fetch_one("select to_regclass('cash.flows') as name")["name"] is None:
             migration = Path("backend/src/fin_ops_platform/postgres/migrations/0166_cash_ledger.sql")
             cls.connection.execute(migration.read_text())
+        if not cls.connection.fetch_one("select exists(select 1 from information_schema.columns where table_schema='cash' and table_name='settings' and column_name='personal_counterparty') as present")["present"]:
+            cls.connection.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0168_cash_business_closure.sql").read_text())
 
     @classmethod
     def tearDownClass(cls):
@@ -36,14 +38,15 @@ class CashPostgresCase(unittest.TestCase):
 
     def setUp(self):
         self.connection.execute("truncate cash.settlements,cash.items,cash.flows,cash.task_occurrences,cash.task_templates,cash.accounts,cash.categories,cash.bill_labels,cash.deleted_submission_ids")
-        self.connection.execute("update cash.settings set personal_opening_date=null,allowed_project_stage_codes='{}',project_selection_configured=false,version=1 where id=1")
+        self.connection.execute("update cash.settings set personal_opening_date=null,personal_counterparty=null,allowed_project_stage_codes='{}',project_selection_configured=false,version=1 where id=1")
         self.now = date(2026, 12, 31)
         self.repo = CashRepository(self.connection)
         self.cash = CashService(self.repo, today=lambda: self.now)
-        self.query = CashQueryService(CashQueryRepository(self.connection))
+        self.query = CashQueryService(CashQueryRepository(self.connection), today=lambda: self.now)
         self.actor = {"account": "cash-test", "name": "Synthetic actor"}
         self.account = self.cash.create_account({"id": self.uid(), "name": "Synthetic cash", "kind": "cash", "opening_date": "2026-01-01", "opening_amount": "1000.00"})["account"]
         self.category = self.cash.create_category({"id": self.uid(), "name": "Synthetic turnover", "group": "turnover"})["category"]
+        self.payment_category = self.cash.create_category({"id": self.uid(), "name": "Synthetic expense category", "group": "payment"})["category"]
 
     @staticmethod
     def uid():
@@ -64,7 +67,9 @@ class CashPostgresCase(unittest.TestCase):
         if kind in {"loan", "company_receivable"}:
             payload.update(obligation_direction="receivable", ledger_group="company", counterparty="Synthetic party")
         if kind == "ticket_source":
-            payload.update(ticket_provider="Synthetic provider", ticket_provided_on="2026-09-01", ticket_description="Synthetic ticket")
+            payload.update(ticket_provider="Synthetic party", ticket_provided_on="2026-09-01", ticket_description="Synthetic ticket")
+        if kind == "expense":
+            payload["category_id"] = self.payment_category["id"]
         payload.update(changes)
         return self.cash.create_item(payload, self.actor)["item"]
 
@@ -74,12 +79,172 @@ class CashPostgresCase(unittest.TestCase):
             if value is not None:
                 payload[prefix + "_id"] = value["id"]
                 payload["expected_" + prefix + "_version"] = value["version"]
+        if kind == "non_ticket_offset" and source is None:
+            payload["category_id"] = self.category["id"]
         payload.update(changes)
         return self.cash.create_settlement(payload, self.actor)["settlement"]
 
 
 class CashQueryPostgresTests(CashPostgresCase):
     period = {"date_from": "2026-09-01", "date_to": "2026-09-30"}
+
+    def test_unsettled_keeps_old_untouched_obligations_and_historical_cutoff(self):
+        old = self.item(amount="1000.00", origin_date="2025-12-01")
+        self.settlement("non_ticket_offset", "200.00", item=old, occurred_on="2025-12-31", remark="Old adjustment")
+        current = self.item(amount="500.00")
+        receipt = self.flow("100.00", "receipt")
+        self.settlement("cash_repayment", "100.00", item=current, flow=receipt)
+        period = self.query.query_turnover(self.period)
+        self.assertEqual(period["view"], "events")
+        self.assertEqual(period["summary"]["remaining_obligation_amount"]["receivable"], "400.00")
+        query = {"view": "unsettled", "date_to": "2026-09-30", "page_size": 1}
+        result = self.query.query_turnover(query)
+        self.assertEqual(result["view"], "unsettled")
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertEqual(result["summary"], {"item_count": 2, "remaining_obligation_amount": {"receivable": "1200.00", "payable": "0.00"}})
+        self.assertEqual(len(result["rows"]), 1)
+        old = self.query.get_item(old["id"])["item"]
+        self.settlement("non_ticket_offset", "800.00", item=old, occurred_on="2026-10-01", remark="Later settlement")
+        self.assertEqual(self.query.query_turnover(query), result)
+        self.assertEqual(self.query.query_turnover({**query, "date_to": "2026-10-01"})["pagination"]["total"], 1)
+
+    def test_personal_month_summary_is_full_scope_not_page_and_unconfigured_is_unknown(self):
+        unknown = self.query.query_personal({"year": "2026"})
+        self.assertEqual(unknown["summary"]["coverage"]["state"], "unconfigured")
+        self.assertEqual(len(unknown["summary"]["month_principal_totals"]), 12)
+        self.assertTrue(all(row["principal_amount"] is None for row in unknown["summary"]["month_principal_totals"]))
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-07-15", "counterparty": "Synthetic party"})
+        for n in range(2):
+            label = self.cash.create_bill_label({"id": self.uid(), "bank_name": "Bank", "label": str(n)})["bill_label"]
+            self.item(amount="100.00", ledger_group="personal", origin_date="2026-11-03", bill_label_id=label["id"], bill_month="2026-12")
+        first = self.query.query_personal({"year": "2026", "page_size": 1})
+        second = self.query.query_personal({"year": "2026", "page_size": 1, "page": 2})
+        self.assertEqual(first["summary"], second["summary"])
+        self.assertEqual(first["summary"]["year_principal_amount"], "200.00")
+        self.assertEqual(first["summary"]["month_principal_totals"][10]["principal_amount"], "200.00")
+        self.assertIsNone(first["summary"]["month_principal_totals"][0]["principal_amount"])
+        self.connection.execute("update cash.items set counterparty='Other person' where ledger_group='personal'")
+        with self.assertRaises(CashError) as error:
+            self.query.query_personal({"year": "2026"})
+        self.assertEqual(error.exception.status, 409)
+
+    def test_pending_ticket_collection_is_cross_year_cutoff_and_not_cash_for_noncash(self):
+        ticket = self.item("ticket_source", "500.00", origin_date="2025-12-01", ticket_provided_on="2025-12-01")
+        receivables = []
+        for amount in ("100.00", "200.00"):
+            ticket = self.query.get_item(ticket["id"])["item"]
+            receivables.append(self.item("company_receivable", amount, origin_date="2025-12-01", ticket_source_id=ticket["id"], expected_related_versions={"items": [{"id": ticket["id"], "version": ticket["version"]}]}))
+        cash = self.flow("100.00", "receipt")
+        self.settlement("company_collection", "100.00", item=receivables[0], flow=cash)
+        self.settlement("non_ticket_offset", "50.00", item=receivables[1], remark="Noncash adjustment")
+        query = {"view": "pending_collection", "date_to": "2026-09-30"}
+        result = self.query.query_tickets(query)
+        self.assertEqual(result["pagination"]["total"], 1)
+        row = result["rows"][0]
+        self.assertEqual(row["receivable_amount"], "300.00")
+        self.assertEqual(row["cash_received_amount"], "100.00")
+        self.assertEqual(row["noncash_settled_amount"], "50.00")
+        self.assertEqual(row["remaining_receivable_amount"], "150.00")
+        self.assertEqual(row["collection_state"], "partial")
+        self.assertEqual(self.query.query_tickets(self.period)["pagination"]["total"], 0)
+        last = self.query.get_item(receivables[1]["id"])["item"]
+        self.settlement("non_ticket_offset", "150.00", item=last, occurred_on="2026-10-01", remark="Later settled")
+        self.assertEqual(self.query.query_tickets(query), result)
+        self.assertEqual(self.query.query_tickets({**query, "date_to": "2026-10-01"})["pagination"]["total"], 0)
+
+    def test_new_report_queries_reject_inapplicable_filters_before_io(self):
+        for query in ({"view": "unsettled", "date_to": "2026-09-30", "date_from": "2026-09-01"},
+                      {"view": "unsettled", "date_to": "2026-09-30", "category_ids": "[null]"},
+                      {"view": "unsettled", "date_to": "2026-09-30", "state": "open"},
+                      {"view": "unsettled", "date_to": "2099-01-01"}):
+            with self.assertRaises(CashError) as error:
+                self.query.query_turnover(query)
+            self.assertEqual(error.exception.status, 400)
+        with self.assertRaises(CashError):
+            self.query.query_tickets({"view": "pending_collection", **self.period})
+        with self.assertRaises(CashError):
+            self.query.query_personal({"year": "2026", "view": "matrix", "source_project_ids": '["project-B"]'})
+
+    def test_project_options_accept_cutoff_without_hiding_old_sources(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
+        old = self.item("ticket_source", oa_project_id="old-source", origin_date="2025-01-01", ticket_provided_on="2025-01-01")
+        self.item("ticket_source", oa_project_id="later-source", origin_date="2026-10-01", ticket_provided_on="2026-10-01")
+        result = self.query.project_options({"date_to": "2026-09-30"})
+        self.assertEqual(result["rows"], [{"id": "old-source", "name": "old-source"}])
+        self.assertEqual(self.query.project_options({"date_to": "2026-09-30", "item_id": old["id"]})["rows"], result["rows"])
+        self.assertEqual(self.query.project_options({"date_to": "2024-12-31", "item_id": old["id"]})["rows"], [])
+        self.assertEqual(self.query.project_options({"date_from": "2026-01-01", "date_to": "2026-09-30"}), result)
+
+    def test_personal_noncash_source_owner_project_and_category_are_independent(self):
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic party"})
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 2}
+        loan = self.item(amount="1000.00", ledger_group="personal", oa_project_id="A")
+        ticket = self.item("ticket_source", "500.00", oa_project_id="B", category_id=self.payment_category["id"])
+        other = self.item("ticket_source", "500.00", oa_project_id="A", ticket_provider="Other person")
+        source_query = {"purpose": "settlement_source", "settlement_kind": "ticket_offset", "item_id": loan["id"]}
+        candidates = {row["id"]: row for row in self.query.list_items(source_query)["rows"]}
+        self.assertTrue(candidates[ticket["id"]]["selectable"])
+        self.assertFalse(candidates[other["id"]]["selectable"])
+        targets = self.query.list_items({"purpose": "settlement_target", "settlement_kind": "ticket_offset", "source_item_id": ticket["id"]})
+        self.assertTrue(next(row for row in targets["rows"] if row["id"] == loan["id"])["selectable"])
+        self.settlement("ticket_offset", "100.00", item=loan, source=ticket)
+        loan = self.query.get_item(loan["id"])["item"]
+        expense = self.item("expense", "500.00", oa_project_id="B", related_obligation_id=loan["id"], expected_related_versions={"items": [{"id": loan["id"], "version": loan["version"]}]})
+        loan = self.query.get_item(loan["id"])["item"]
+        choices = self.query.list_items({"purpose": "settlement_source", "settlement_kind": "non_ticket_offset", "item_id": loan["id"]})
+        self.assertTrue(next(row for row in choices["rows"] if row["id"] == expense["id"])["selectable"])
+        self.settlement("non_ticket_offset", "100.00", item=loan, source=expense)
+        for view in ("ticket_offsets", "non_ticket_offsets"):
+            result = self.query.query_personal({"year": "2026", "view": view, "project_ids": '["A"]', "source_project_ids": '["B"]', "category_ids": json.dumps([self.payment_category["id"]])})
+            self.assertEqual(result["pagination"]["total"], 1)
+            row = result["rows"][0]
+            self.assertEqual(row["project"]["id"], "A")
+            self.assertEqual(row["source_project"]["id"], "B")
+            self.assertEqual(row["category"]["id"], self.payment_category["id"])
+            self.assertEqual(result["summary"]["remaining_obligation_amount"], "800.00")
+            no_match = self.query.query_personal({"year": "2026", "view": view, "source_project_id": "A"})
+            self.assertEqual(no_match["rows"], [])
+            self.assertEqual(no_match["summary"], result["summary"])
+            self.assertEqual(no_match["filtered_totals"], {"settlement_count": 0, "amount": "0.00"})
+        turnover = self.query.query_turnover({**self.period, "category_id": self.payment_category["id"]})
+        self.assertEqual(turnover["pagination"]["total"], 3)
+        self.assertTrue(all(row["category"]["id"] == self.payment_category["id"] for row in turnover["rows"]))
+        self.assertEqual(self.query.get_item(expense["id"])["item"]["category"]["id"], self.payment_category["id"])
+
+    def test_expense_category_changes_reproject_all_events_without_cash_fallback(self):
+        loan = self.item()
+        expense = self.item("expense", related_obligation_id=loan["id"], expected_related_versions={"items": [{"id": loan["id"], "version": loan["version"]}]})
+        paid = self.flow()
+        self.settlement("expense_payment", "100.00", item=expense, flow=paid)
+        query = {**self.period, "category_id": self.payment_category["id"]}
+        result = self.query.query_turnover(query)
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertTrue(all(row["category"]["id"] == self.payment_category["id"] for row in result["rows"]))
+        replacement = self.cash.create_category({"id": self.uid(), "name": "New expense category", "group": "payment"})["category"]
+        self.connection.execute("update cash.items set category_id=%s where id=%s", (replacement["id"], expense["id"]))
+        self.assertEqual(self.query.query_turnover(query)["pagination"]["total"], 0)
+        result = self.query.query_turnover({**query, "category_id": replacement["id"]})
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertTrue(all(row["category"]["id"] == replacement["id"] for row in result["rows"]))
+        # Model a legacy NULL: the cash payment's category must not fill it in.
+        self.connection.execute("update cash.items set category_id=null where id=%s", (expense["id"],))
+        rows = self.query.query_turnover({**self.period, "category_ids": "[null]"})["rows"]
+        expense_rows = [row for row in rows if row["row_kind"] == "expense"]
+        self.assertEqual(len(expense_rows), 2)
+        self.assertTrue(all(row["category"] is None for row in expense_rows))
+
+    def test_turnover_pushed_scope_keeps_prior_reductions_and_event_keyword_semantics(self):
+        self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
+        loan = self.item(amount="500.00", origin_date="2025-12-01", oa_project_id="A", counterparty="Scoped party", content="Principal text")
+        self.settlement("non_ticket_offset", "200.00", item=loan, occurred_on="2025-12-31", remark="Prior reduction")
+        loan = self.query.get_item(loan["id"])["item"]
+        self.settlement("non_ticket_offset", "100.00", item=loan, remark="Match this event only")
+        self.item(amount="999.00", oa_project_id="B", content="Match this event only")
+        result = self.query.query_turnover({**self.period, "project_ids": '["A",null]', "ledger_group": "company", "counterparty": "Scoped party", "keyword": "Match this event"})
+        self.assertEqual(result["pagination"]["total"], 1)
+        self.assertEqual(result["rows"][0]["remaining_after_event"], "200.00")
+        self.assertEqual(result["summary"]["non_ticket_offset_amount"], "100.00")
+        self.assertEqual(result["summary"]["remaining_obligation_amount"]["receivable"], "200.00")
 
     def test_multi_flow_columns_filter_whole_result_preserve_balances_and_delete(self):
         self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 1}
@@ -122,10 +287,10 @@ class CashQueryPostgresTests(CashPostgresCase):
             tx.update("categories", second["id"], {"enabled": False})
         query = {"groups": '["payment","turnover"]', "page_size": 1, "page": 2, "order": "asc"}
         result = self.query.list_configuration("categories", query)
-        self.assertEqual(result["pagination"]["total"], 3)
+        self.assertEqual(result["pagination"]["total"], 4)
         self.assertEqual(result["rows"][0]["id"], second["id"])
         entry = self.query.list_configuration("categories", {**query, "enabled": "true", "page": 1})
-        self.assertEqual(entry["pagination"]["total"], 2)
+        self.assertEqual(entry["pagination"]["total"], 3)
         self.assertEqual(entry["rows"][0]["id"], first["id"])
 
     def test_multi_report_states_null_categories_and_project_sets_before_paging(self):
@@ -137,11 +302,11 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.settlement("non_ticket_offset", "100.00", item=settled, remark="Settled")
         result = self.query.query_turnover({**self.period, "project_ids": '["A","B",null]',
             "category_ids": '[null]', "states": '["open","partial"]', "page_size": 1, "page": 2})
-        self.assertEqual(result["pagination"]["total"], 3)
+        self.assertEqual(result["pagination"]["total"], 2)
         self.assertEqual(len(result["rows"]), 1)
         self.assertEqual(result["summary"]["remaining_obligation_amount"]["receivable"], "190.00")
         self.assertEqual(result["summary"]["principal_amount"], "200.00")
-        self.assertEqual(result["summary"]["non_ticket_offset_amount"], "10.00")
+        self.assertEqual(result["summary"]["non_ticket_offset_amount"], "0.00")
         self.assertNotEqual(result["rows"][0]["state"], "settled")
 
     def test_multi_tickets_state_filter_and_summary_do_not_use_only_page(self):
@@ -159,7 +324,7 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(result["summary"]["available_source_amount"], "290.00")
 
     def test_multi_personal_labels_with_null_cover_matrix_and_settlement_views(self):
-        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic party"})
         label = self.cash.create_bill_label({"id": self.uid(), "bank_name": "A bank", "label": "A"})["bill_label"]
         excluded = self.cash.create_bill_label({"id": self.uid(), "bank_name": "B bank", "label": "B"})["bill_label"]
         self.item(ledger_group="personal", bill_label_id=label["id"], bill_month="2026-09")
@@ -180,7 +345,7 @@ class CashQueryPostgresTests(CashPostgresCase):
 
     def test_personal_month_drilldown_preserves_project_multi_scope(self):
         self.cash.project_resolver = lambda project_id, **_: {"id": project_id, "name": project_id, "selection_settings_version": 2}
-        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic party"})
         label = self.cash.create_bill_label({"id": self.uid(), "bank_name": "Bank", "label": "Month"})["bill_label"]
         common = {"ledger_group": "personal", "bill_label_id": label["id"], "bill_month": "2026-09"}
         expected = [self.item(amount="100.00", oa_project_id="A", **common), self.item(amount="200.00", **common)]
@@ -315,7 +480,7 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(before["rows"][0]["used_amount"], "0.00")
 
     def test_personal_matrix_uses_actual_month_and_opening_not_principal(self):
-        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-07-15"})
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-07-15", "counterparty": "Synthetic party"})
         label = self.cash.create_bill_label({"id": self.uid(), "bank_name": "Synthetic bank", "label": "A"})["bill_label"]
         self.item(amount="200.00", ledger_group="personal", is_opening=True, origin_date="2026-07-15")
         loan = self.item(amount="100.00", ledger_group="personal", origin_date="2026-11-03", bill_label_id=label["id"], bill_month="2026-12")
@@ -365,7 +530,7 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(missing.exception.status, 404)
 
     def test_personal_january_first_opening_is_year_opening_not_new_principal(self):
-        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic party"})
         self.item(amount="250.00", ledger_group="personal", is_opening=True, origin_date="2026-01-01")
         report = self.query.query_personal({"year": "2026"})
         self.assertEqual(report["summary"]["opening_obligation_amount"], "250.00")
@@ -385,7 +550,7 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(row["available_source_amount"], "100.00")
 
     def test_personal_three_subtables_use_settlement_amounts(self):
-        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01"})
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic party"})
         item = self.item(ledger_group="personal")
         cash = self.flow("20.00", "receipt")
         self.settlement("cash_repayment", "20.00", item=item, flow=cash)
@@ -470,7 +635,7 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertIsNone(repayment["remark"])
         self.assertEqual(repayment["remaining_after_event"], "80.00")
         adjustment = rows["settlement:" + offset["id"]]
-        self.assertIsNone(adjustment["category"])
+        self.assertEqual(adjustment["category"]["id"], self.category["id"])
         self.assertEqual(adjustment["remark"], "This adjustment")
         self.assertEqual(adjustment["remaining_after_event"], "70.00")
         self.assertTrue(all(row["ticket_collection_state"] is None for row in rows.values()))
@@ -494,10 +659,10 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(opening["remark"], "Opening remark")
         self.assertIsNone(opening["category"])
         self.assertEqual(rows["expense:" + expense["id"]]["remark"], "Expense remark")
-        self.assertIsNone(rows["expense:" + expense["id"]]["category"])
+        self.assertEqual(rows["expense:" + expense["id"]]["category"]["id"], self.payment_category["id"])
         event = rows["expense_settlement:" + paid["id"]]
         self.assertEqual(event["remark"], "Payment remark")
-        self.assertEqual(event["category"]["id"], self.category["id"])
+        self.assertEqual(event["category"]["id"], self.payment_category["id"])
         self.assertIsNone(event["remaining_after_event"])
 
     def test_turnover_ticket_collection_state_uses_cutoff_and_actual_cash_only(self):
@@ -525,7 +690,7 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertTrue(all(row["state"] == "partial" and row["ticket_collection_state"] == "open" for row in rows))
 
     def test_turnover_personal_variant_filters_before_pagination_and_summary(self):
-        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-09-01"})
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-09-01", "counterparty": "Synthetic party"})
         loan = self.item(ledger_group="personal")
         self.item(amount="200.00", ledger_group="personal")
         self.item(amount="50.00", ledger_group="personal", is_opening=True)
@@ -546,16 +711,20 @@ class CashQueryPostgresTests(CashPostgresCase):
         self.assertEqual(principal["summary"]["opening_adjustment_amount"], "50.00")
         self.assertEqual(principal["summary"]["remaining_obligation_amount"]["receivable"], "300.00")
         processed = self.query.query_turnover({**query, "personal_variant": "settlement"})
-        self.assertEqual(processed["pagination"]["total"], 3)
+        self.assertEqual(processed["pagination"]["total"], 2)
         self.assertEqual(processed["rows"][0]["personal_variant"], "settlement")
         self.assertEqual(processed["summary"]["principal_amount"], "0.00")
         self.assertEqual(processed["summary"]["repayment_amount"], "40.00")
         self.assertEqual(processed["summary"]["non_ticket_offset_amount"], "10.00")
-        self.assertEqual(processed["summary"]["real_expense_amount"], "20.00")
+        self.assertEqual(processed["summary"]["real_expense_amount"], "0.00")
         self.assertEqual(processed["summary"]["remaining_obligation_amount"]["receivable"], "50.00")
         beyond = self.query.query_turnover({**query, "personal_variant": "settlement", "page": 4})
         self.assertEqual(beyond["rows"], [])
         self.assertEqual(beyond["summary"], processed["summary"])
+        neutral = self.query.query_turnover({**query, "page": 1, "personal_variant": "neutral"})
+        self.assertEqual(neutral["pagination"]["total"], 1)
+        self.assertEqual(neutral["rows"][0]["personal_variant"], "neutral")
+        self.assertEqual(neutral["summary"]["real_expense_amount"], "20.00")
 
     def test_item_relationship_lists_are_bounded_complete_and_list_only(self):
         children = [{"id": self.uid(), "type": "loan", "origin_date": "2026-09-03", "original_amount": "1.00",

@@ -23,8 +23,8 @@ from fin_ops_platform.services.cash_domain import (
 )
 
 FLOW_FIELDS = frozenset({"occurred_on", "kind", "amount", "from_account_id", "to_account_id", "category_id", "oa_project_id", "person_name", "content", "remark"})
-ITEM_FIELDS = frozenset({"type", "origin_date", "original_amount", "is_opening", "obligation_direction", "ledger_group", "counterparty", "oa_project_id", "bill_label_id", "bill_month", "ticket_provider", "ticket_provided_on", "ticket_description", "related_obligation_id", "ticket_source_id", "content", "remark"})
-SETTLEMENT_FIELDS = frozenset({"kind", "amount", "occurred_on", "item_id", "flow_id", "source_item_id", "remark"})
+ITEM_FIELDS = frozenset({"type", "origin_date", "original_amount", "is_opening", "obligation_direction", "ledger_group", "counterparty", "oa_project_id", "bill_label_id", "bill_month", "ticket_provider", "ticket_provided_on", "ticket_description", "related_obligation_id", "ticket_source_id", "category_id", "content", "remark"})
+SETTLEMENT_FIELDS = frozenset({"kind", "amount", "occurred_on", "item_id", "flow_id", "source_item_id", "category_id", "remark"})
 CORRECTION_FIELDS = frozenset({"source_corrections", "settlement_changes", "item_reference_changes", "expected_related_versions"})
 
 
@@ -106,8 +106,12 @@ class CashService:
                   "oa_project_id": _project_id(value.get("oa_project_id")), "content": normalize_text(value["content"], maximum=1000),
                   "remark": normalize_text(value.get("remark"), maximum=2000, nullable=True),
                   "origin_flow_id": None, "origin_mode": None}
-        for key in ("bill_label_id", "related_obligation_id", "ticket_source_id"):
+        for key in ("bill_label_id", "related_obligation_id", "ticket_source_id", "category_id"):
             result[key] = normalize_uuid(value.get(key), nullable=True)
+        if result["type"] == "expense" and result["category_id"] is None:
+            invalid("费用事项须选择支出分类。")
+        if result["type"] not in {"expense", "ticket_source"} and result["category_id"] is not None:
+            invalid("借款和公司应收不能指定费用分类。")
         result["bill_month"] = _month(value.get("bill_month"))
         for key in ("counterparty", "ticket_provider"):
             result[key] = normalize_text(value.get(key), nullable=True)
@@ -256,11 +260,12 @@ class CashService:
             return serialize(self.create_flow_in_transaction(tx, prepared))
 
     def lock_flow_config(self, tx, flows, related_items=(), selection_version=None):
-        if selection_version is not None or any(item.get("ledger_group") == "personal" for item in related_items):
-            settings = tx.get("settings", 1, "share")
-            if selection_version is not None and settings["version"] != selection_version:
-                conflict("项目允许状态配置已变化，请重新选择。", "cash_project_selection_changed")
+        # Shared configuration lock precedes item locks, including existing personal targets.
+        settings = tx.get("settings", 1, "share")
+        if selection_version is not None and settings["version"] != selection_version:
+            conflict("项目允许状态配置已变化，请重新选择。", "cash_project_selection_changed")
         category_ids = {flow["category_id"] for flow in flows if flow["category_id"]}
+        category_ids.update(item["category_id"] for item in related_items if item["category_id"])
         categories = tx.lock_rows("categories", category_ids, "share")
         bill_ids = {item["bill_label_id"] for item in related_items if item.get("bill_label_id")}
         labels = tx.lock_rows("bill_labels", bill_ids, "share")
@@ -280,20 +285,39 @@ class CashService:
                 if not category["enabled"] or category["group"] not in {flow["kind"], "turnover"}:
                     conflict("现金分类已停用或不适用于本次方向。")
         for item in related_items:
+            self._validate_category(tx, item["category_id"], {"payment"} if item["type"] == "expense" else {"payment", "turnover"})
             if item.get("bill_label_id") and (item["bill_label_id"] not in labels or not labels[item["bill_label_id"]]["enabled"]):
                 conflict("账单标识不存在或已停用。")
 
+    @staticmethod
+    def _validate_category(tx, category_id, groups, *, previous=None):
+        if category_id is None:
+            return
+        category = tx.get("categories", category_id)
+        if category["group"] not in groups or (category_id != previous and not category["enabled"]):
+            conflict("分类已停用或不适用于此业务。")
+
+    @staticmethod
+    def _validate_personal_owner(tx, item):
+        settings = tx.get("settings", 1)
+        if settings["personal_counterparty"] is None or settings["personal_opening_date"] is None:
+            conflict("请先配置个人专账人员和记账起点。", "cash_personal_unconfigured")
+        if item["counterparty"] != settings["personal_counterparty"]:
+            conflict("个人事项人员与专账配置不一致。", "cash_personal_owner_conflict")
+        return settings["personal_opening_date"]
+
     def _validate_item(self, tx, item):
         if item["ledger_group"] == "personal":
-            start = tx.get("settings", 1)["personal_opening_date"]
-            if start is None:
-                conflict("请先设置个人账记账起点。")
+            start = self._validate_personal_owner(tx, item)
             if item["origin_date"] < start or (item["is_opening"] and item["origin_date"] != start):
                 conflict("个人事项日期与记账起点不符。")
         for key, types in (("related_obligation_id", {"loan", "company_receivable"}), ("ticket_source_id", {"ticket_source"})):
             if item[key]:
                 target = tx.get("items", item[key])
-                if target["type"] not in types or target["oa_project_id"] != item["oa_project_id"]:
+                personal_expense = key == "related_obligation_id" and item["type"] == "expense" and target["ledger_group"] == "personal"
+                if personal_expense:
+                    self._validate_personal_owner(tx, target)
+                if target["type"] not in types or (not personal_expense and target["oa_project_id"] != item["oa_project_id"]):
                     conflict("事项引用的类型或项目不匹配。")
         if item["origin_flow_id"]:
             flow = tx.get("flows", item["origin_flow_id"])
@@ -306,6 +330,8 @@ class CashService:
         target = tx.get("items", settlement["item_id"]) if settlement["item_id"] else None
         source = tx.get("items", settlement["source_item_id"]) if settlement["source_item_id"] else None
         flow = tx.get("flows", settlement["flow_id"]) if settlement["flow_id"] else None
+        if target and target["ledger_group"] == "personal":
+            self._validate_personal_owner(tx, target)
         if kind in CASH_SETTLEMENTS:
             if target is None or flow is None or source is not None:
                 invalid("现金分配必须关联真实现金和事项，不得指定非现金来源。")
@@ -329,7 +355,15 @@ class CashService:
                 invalid("票抵须指定票据来源。")
             if kind == "non_ticket_offset" and ((source and source["type"] != "expense") or (source is None and not settlement["remark"])):
                 invalid("无票冲抵须指定费用来源，或填写明确调整原因。")
-            if source and target and source["oa_project_id"] != target["oa_project_id"]:
+            personal_offset = target and target["ledger_group"] == "personal" and kind in {"ticket_offset", "non_ticket_offset"}
+            if personal_offset and source:
+                if kind == "ticket_offset" and source["ticket_provider"] != target["counterparty"]:
+                    conflict("票据只能冲抵提供人本人的个人借款。", "cash_personal_owner_conflict")
+                if kind == "non_ticket_offset":
+                    obligation = tx.get("items", source["related_obligation_id"]) if source["related_obligation_id"] else None
+                    if obligation is None or obligation["ledger_group"] != "personal" or obligation["counterparty"] != target["counterparty"]:
+                        conflict("费用来源必须明确关联同一人的个人借款。", "cash_personal_owner_conflict")
+            if source and target and not personal_offset and source["oa_project_id"] != target["oa_project_id"]:
                 conflict("非现金来源与目标项目不同。")
         if target and settlement["occurred_on"] < target["origin_date"] or source and settlement["occurred_on"] < source["origin_date"]:
             conflict("处理日期不能早于来源或目标发生日。")
@@ -401,7 +435,7 @@ class CashService:
             tx.update("items", entry["item_id"], {"origin_flow_id": flow["id"], "origin_mode": "linked"})
         for allocation in allocations:
             row = {key: allocation[key] for key in ("id", "item_id", "kind", "amount", "remark")}
-            row.update(flow_id=flow["id"], occurred_on=flow["occurred_on"], source_item_id=None)
+            row.update(flow_id=flow["id"], occurred_on=flow["occurred_on"], source_item_id=None, category_id=None)
             self._validate_settlement(tx, row)
             if tx.insert("settlements", row) is None:
                 conflict("分配 ID 已被使用。", "cash_submission_conflict")
@@ -521,11 +555,14 @@ class CashService:
     def get_personal_opening(self):
         with self.repository.transaction(readonly=True) as tx:
             row = tx.get("settings", 1)
-            return serialize({"opening_date": row["personal_opening_date"], "version": row["version"]})
+            return serialize({"opening_date": row["personal_opening_date"], "counterparty": row["personal_counterparty"], "version": row["version"]})
 
     def update_personal_opening(self, payload):
-        value = fields(payload, {"expected_version", "opening_date"}, {"expected_version", "opening_date"})
+        value = fields(payload, {"expected_version", "opening_date", "counterparty"}, {"expected_version", "opening_date", "counterparty"})
         opening = self._actual_date(value["opening_date"]) if value["opening_date"] is not None else None
+        counterparty = normalize_text(value["counterparty"], nullable=True)
+        if (opening is None) != (counterparty is None):
+            invalid("个人专账人员和记账起点须同时设置或清空。")
         with self.repository.transaction() as tx:
             settings = tx.get("settings", 1, "update")
             check_version(settings, value["expected_version"])
@@ -534,16 +571,18 @@ class CashService:
             settlements = tx.settlements_for_items([item["id"] for item in items])
             if items and opening is None:
                 conflict("存在个人事项时不能清空记账起点。")
+            if any(item["counterparty"] != counterparty for item in items):
+                conflict("已有个人事项与指定人员不一致，不能自动合并或更名。", "cash_personal_owner_conflict")
             if opening is not None:
                 if any(not item["is_opening"] and item["origin_date"] < opening for item in items) or any(s["occurred_on"] < opening for s in settlements):
                     conflict("新起算日会排除已有个人本金或结算。")
-            changed = settings["personal_opening_date"] != opening
+            changed = settings["personal_opening_date"] != opening or settings["personal_counterparty"] != counterparty
             if changed:
-                settings = tx.update("settings", 1, {"personal_opening_date": opening})
+                settings = tx.update("settings", 1, {"personal_opening_date": opening, "personal_counterparty": counterparty})
                 for item in items:
-                    if item["is_opening"]:
+                    if item["is_opening"] and item["origin_date"] != opening:
                         tx.update("items", item["id"], {"origin_date": opening})
-            return serialize({"opening_date": opening, "version": settings["version"], "changed": changed})
+            return serialize({"opening_date": opening, "counterparty": counterparty, "version": settings["version"], "changed": changed})
 
     @staticmethod
     def _versions(value):
@@ -601,17 +640,16 @@ class CashService:
                 conflict("原事项提交已删除。", "cash_submission_deleted")
             return serialize({"item": inserted, "version": 1, "created": True})
 
-    def _lock_graph(self, tx, *, flow_ids=(), item_ids=(), extra_flows=(), extra_items=(), config_flows=(), config_items=(), selection_version=None, creating_settlement_id=None):
+    def _lock_graph(self, tx, *, flow_ids=(), item_ids=(), extra_flows=(), extra_items=(), config_flows=(), config_items=(), extra_categories=(), selection_version=None, creating_settlement_id=None):
         flow_ids = sorted(set(flow_ids) | set(extra_flows))
         item_ids = sorted(set(item_ids) | set(extra_items))
         graph = tx.relations(flow_ids=flow_ids, item_ids=item_ids)
         flows = [tx.get("flows", entity_id) for entity_id in graph["flow_ids"]]
         items = [tx.get("items", entity_id) for entity_id in graph["item_ids"]]
-        if selection_version is not None or any(item["ledger_group"] == "personal" for item in [*items, *config_items]):
-            settings = tx.get("settings", 1, "share")
-            if selection_version is not None and settings["version"] != selection_version:
-                conflict("项目允许状态配置已变化。", "cash_project_selection_changed")
-        tx.lock_rows("categories", [flow["category_id"] for flow in [*flows, *config_flows]], "share")
+        settings = tx.get("settings", 1, "share")
+        if selection_version is not None and settings["version"] != selection_version:
+            conflict("项目允许状态配置已变化。", "cash_project_selection_changed")
+        tx.lock_rows("categories", [row["category_id"] for row in [*flows, *config_flows, *items, *config_items, *graph["settlements"]]] + list(extra_categories), "share")
         tx.lock_rows("bill_labels", [item["bill_label_id"] for item in [*items, *config_items]], "share")
         tx.lock_rows("accounts", [flow[key] for flow in [*flows, *config_flows] for key in ("from_account_id", "to_account_id")], "share")
         occurrences = tx.lock_rows("task_occurrences", [flow["task_occurrence_id"] for flow in flows])
@@ -647,8 +685,13 @@ class CashService:
         value = fields(value, SETTLEMENT_FIELDS | {"id"}, {"id", "kind", "amount", "occurred_on"})
         result = {"id": normalize_uuid(value["id"]), "kind": enum(value["kind"], SETTLEMENT_KINDS), "amount": normalize_money(value["amount"]),
                   "occurred_on": self._actual_date(value["occurred_on"]), "remark": normalize_text(value.get("remark"), maximum=2000, nullable=True)}
-        for key in ("item_id", "flow_id", "source_item_id"):
+        for key in ("item_id", "flow_id", "source_item_id", "category_id"):
             result[key] = normalize_uuid(value.get(key), nullable=True)
+        manual_offset = result["kind"] == "non_ticket_offset" and result["source_item_id"] is None
+        if manual_offset and result["category_id"] is None:
+            invalid("无费用来源的冲抵须选择往来分类。")
+        if not manual_offset and result["category_id"] is not None:
+            invalid("此处理的分类由来源事实确定，不能单独指定。")
         if result["item_id"] is not None and result["item_id"] == result["source_item_id"]:
             invalid("来源事项和目标事项不能相同。")
         return result
@@ -668,7 +711,7 @@ class CashService:
                 if old["version"] != 1 or any(old[key] != val for key, val in settlement.items()):
                     conflict("分配 ID 已用于不同或已更正的内容。", "cash_submission_conflict")
                 return serialize({"settlement": old, "version": old["version"], "created": False})
-            graph = self._lock_graph(tx, flow_ids=[settlement["flow_id"]] if settlement["flow_id"] else [], item_ids=[key for key in (settlement["item_id"], settlement["source_item_id"]) if key], creating_settlement_id=settlement["id"])
+            graph = self._lock_graph(tx, flow_ids=[settlement["flow_id"]] if settlement["flow_id"] else [], item_ids=[key for key in (settlement["item_id"], settlement["source_item_id"]) if key], extra_categories=[settlement["category_id"]], creating_settlement_id=settlement["id"])
             concurrent = tx.get("settlements", settlement["id"], required=False)
             if concurrent:
                 if concurrent["version"] != 1 or any(concurrent[key] != val for key, val in settlement.items()):
@@ -677,6 +720,7 @@ class CashService:
             for entity, version, table in (("item_id", "expected_item_version", "items"), ("source_item_id", "expected_source_item_version", "items"), ("flow_id", "expected_flow_version", "flows")):
                 if settlement[entity]:
                     check_version(tx.get(table, settlement[entity]), value[version])
+            self._validate_category(tx, settlement["category_id"], {"turnover"})
             self._validate_settlement(tx, settlement)
             self._check_unique_cash_allocation(tx, settlement)
             if tx.insert("settlements", settlement) is None:
@@ -690,6 +734,7 @@ class CashService:
             for entity_id in {old[column], changes.get(column, old[column])} - {None}:
                 self._require_version(tx.get(table, entity_id), versions, kind, tx)
         new = {**old, **changes}
+        self._validate_category(tx, new["category_id"], {"turnover"}, previous=old["category_id"])
         if old["kind"] != new["kind"] and {old["kind"], new["kind"]} != {"ticket_use", "ticket_offset"}:
             invalid("处理类型只能在同次票据使用与票抵之间更正。")
         self._validate_settlement(tx, new)
@@ -717,7 +762,7 @@ class CashService:
         with self.repository.transaction() as tx:
             old = tx.get("settlements", entity_id)
             proposed = self._settlement_values({**serialize({key: old[key] for key in SETTLEMENT_FIELDS | {"id"}}), **changes})
-            graph = self._lock_graph(tx, flow_ids=[key for key in (old["flow_id"], proposed["flow_id"]) if key], item_ids=[key for key in (old["item_id"], old["source_item_id"], proposed["item_id"], proposed["source_item_id"]) if key])
+            graph = self._lock_graph(tx, flow_ids=[key for key in (old["flow_id"], proposed["flow_id"]) if key], item_ids=[key for key in (old["item_id"], old["source_item_id"], proposed["item_id"], proposed["source_item_id"]) if key], extra_categories=[proposed["category_id"]])
             old = tx.get("settlements", entity_id, "update")
             check_version(old, value["expected_version"])
             actual = {key: val for key, val in proposed.items() if key != "id" and old[key] != val}
@@ -783,6 +828,8 @@ class CashService:
             row = {"id": normalize_uuid(raw["id"]), "expected_version": normalize_version(raw["expected_version"]), "action": action}
             if action == "update":
                 row["fields"] = fields(raw["fields"], SETTLEMENT_FIELDS)
+                if "category_id" in row["fields"]:
+                    row["fields"]["category_id"] = normalize_uuid(row["fields"]["category_id"], nullable=True)
                 if not row["fields"]:
                     invalid("分配更正字段不能为空。")
             settlements.append(row)
@@ -820,6 +867,11 @@ class CashService:
                     flows.add(normalize_uuid(values["flow_id"]))
                 items.update(normalize_uuid(values[key]) for key in ("item_id", "source_item_id") if values.get(key))
         return flows, items
+
+    @staticmethod
+    def _correction_categories(corrections):
+        return [row["fields"]["category_id"] for row in corrections["settlements"]
+                if row["action"] == "update" and "category_id" in row["fields"]]
 
     def _apply_auxiliary_corrections(self, tx, corrections, graph):
         removed = 0
@@ -872,7 +924,9 @@ class CashService:
         return len(settlements)
 
     def _apply_sources(self, tx, flow, corrections, *, deleting):
-        owned = tx.rows("items", {"origin_flow_id": flow["id"]})
+        # Expenses can reference a loan created by the same flow; remove the child
+        # first. UUID ordering is a lock order, not the business dependency order.
+        owned = sorted(tx.rows("items", {"origin_flow_id": flow["id"]}), key=lambda item: (item["type"] != "expense", item["id"]))
         actions = {entry["item_id"]: entry for entry in corrections["sources"]}
         if set(actions) - {item["id"] for item in owned}:
             invalid("来源纠错事项不属于此现金流水。")
@@ -930,7 +984,7 @@ class CashService:
         extra_flows, extra_items = self._correction_roots(corrections)
         with self.repository.transaction() as tx:
             # New eligibility is checked before graph locks; unchanged metadata edits do not require OA.
-            graph = self._lock_graph(tx, flow_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items, config_flows=[proposed], selection_version=project.get("selection_settings_version"))
+            graph = self._lock_graph(tx, flow_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items, config_flows=[proposed], extra_categories=self._correction_categories(corrections), selection_version=project.get("selection_settings_version"))
             current = tx.get("flows", entity_id)
             check_version(current, value["expected_version"])
             actual = {key: val for key, val in proposed.items() if current[key] != val}
@@ -975,7 +1029,7 @@ class CashService:
                 return {"id": entity_id, "deleted": True, "already_deleted": True, "affected_counts": {"items": 0, "tasks": 0, "settlements": 0}, "affected_items": [], "affected_tasks": [], "affected_preview_truncated": False}
             tx.get("flows", entity_id)
             extra_flows, extra_items = self._correction_roots(corrections)
-            graph = self._lock_graph(tx, flow_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items)
+            graph = self._lock_graph(tx, flow_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items, extra_categories=self._correction_categories(corrections))
             flow = tx.get("flows", entity_id)
             check_version(flow, value["expected_version"])
             removed = self._apply_auxiliary_corrections(tx, corrections, graph)
@@ -1032,13 +1086,14 @@ class CashService:
         if old["origin_flow_id"]:
             extra_flows.add(old["origin_flow_id"])
         with self.repository.transaction() as tx:
-            graph = self._lock_graph(tx, item_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items, config_items=[proposed], selection_version=None if proposed["is_opening"] else project.get("selection_settings_version"))
+            graph = self._lock_graph(tx, item_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items, config_items=[proposed], extra_categories=self._correction_categories(corrections), selection_version=None if proposed["is_opening"] else project.get("selection_settings_version"))
             current = tx.get("items", entity_id)
             check_version(current, value["expected_version"])
             for key in ("related_obligation_id", "ticket_source_id"):
                 if proposed[key] and proposed[key] != current[key]:
                     self._require_version(tx.get("items", proposed[key]), corrections["versions"], "items", tx)
             actual = {key: val for key, val in proposed.items() if key != "id" and current[key] != val}
+            self._validate_category(tx, proposed["category_id"], {"payment"} if proposed["type"] == "expense" else {"payment", "turnover"}, previous=current["category_id"])
             if proposed["bill_label_id"] and proposed["bill_label_id"] != current["bill_label_id"] and not tx.get("bill_labels", proposed["bill_label_id"])["enabled"]:
                 conflict("账单标识已经停用。")
             if not actual and not any(corrections[key] for key in ("settlements", "refs")):
@@ -1059,7 +1114,7 @@ class CashService:
                 return {"id": entity_id, "deleted": True, "already_deleted": True, "affected_counts": {"items": 0, "tasks": 0, "settlements": 0}, "affected_items": [], "affected_tasks": [], "affected_preview_truncated": False}
             tx.get("items", entity_id)
             extra_flows, extra_items = self._correction_roots(corrections)
-            graph = self._lock_graph(tx, item_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items)
+            graph = self._lock_graph(tx, item_ids=[entity_id], extra_flows=extra_flows, extra_items=extra_items, extra_categories=self._correction_categories(corrections))
             item = tx.get("items", entity_id)
             check_version(item, value["expected_version"])
             if item["origin_flow_id"]:

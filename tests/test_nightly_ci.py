@@ -85,12 +85,16 @@ class NightlyCITests(unittest.TestCase):
         production_specs = {
             "production-admin-app-health.spec.ts",
             "production-route-shell.spec.ts",
+            "production-cash-readonly.spec.ts",
         }
+        # Real cash writes require their explicit disposable PostgreSQL HTTP fixture.
+        infrastructure_specs = {"cash-real-api-flow.spec.ts"}
+        self.assertIn("tests.test_cash_http_integration --browser-e2e", package_json["scripts"]["e2e:cash-real"])
 
         expected_specs = {
             f"e2e/{spec_path.name}"
             for spec_path in E2E_DIR.glob("*.spec.ts")
-            if spec_path.name not in production_specs
+            if spec_path.name not in production_specs | infrastructure_specs
         }
         listed_specs = {
             token

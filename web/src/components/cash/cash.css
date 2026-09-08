@@ -159,10 +159,10 @@
 .cash-flows-grid .finance-table__column:nth-child(11) { width: 116px; }
 .cash-flows-grid .finance-table__column:nth-child(12) { width: 64px; }
 .cash-tickets-grid .finance-table__content { table-layout: auto; }
-.cash-tickets-grid .finance-table__column:nth-child(1) { width: 92px; }
+.cash-tickets-grid .finance-table__column:nth-child(1) { width: 104px; }
 .cash-tickets-grid .finance-table__column:nth-child(2) { width: 120px; }
-.cash-tickets-grid .finance-table__column:nth-child(3) { width: 100px; }
-.cash-tickets-grid .finance-table__column:nth-child(4) { width: 160px; }
+.cash-tickets-grid .finance-table__column:nth-child(3) { width: 112px; }
+.cash-tickets-grid .finance-table__column:nth-child(4) { width: 190px; }
 .cash-tickets-grid .finance-table__column:nth-child(5) { width: 100px; }
 .cash-tickets-grid .finance-table__column:nth-child(6) { width: 100px; }
 .cash-tickets-grid .finance-table__column:nth-child(7) { width: 100px; }
@@ -171,6 +171,10 @@
 .cash-tickets-grid .finance-table__column:nth-child(10) { width: 100px; }
 .cash-tickets-grid .finance-table__column:nth-child(11) { width: 100px; }
 .cash-tickets-grid .finance-table__column:nth-child(12) { width: 100px; }
+.cash-tickets-grid .finance-table__column:nth-child(13) { width: 100px; }
+.cash-tickets-grid .finance-table__column:nth-child(14) { width: 120px; }
+.cash-tickets-grid .finance-table__column:nth-child(15) { width: 140px; }
+.cash-tickets-grid .finance-table__cell:first-child { white-space: nowrap; }
 .cash-personal-grid .finance-table__content { table-layout: auto; }
 .cash-personal-grid .finance-table__column:nth-child(1) { width: 160px; }
 .cash-personal-grid .finance-table__column:nth-child(2) { width: 94px; }

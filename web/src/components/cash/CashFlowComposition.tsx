@@ -9,10 +9,10 @@ import type { CashFlowKind } from "./CashFlows.types";
 export type FlowPart = {
   id: string; mode: "loan" | "expense" | "settlement" | "origin";
   amount: string; content: string; counterparty: string; group: string; direction: string;
-  billLabel: string; billMonth: string; relatedLoanId: string; item: CashItem | null; kind: CashSettlementKind;
+  billLabel: string; billMonth: string; category: string; relatedLoanId: string; item: CashItem | null; kind: CashSettlementKind;
 };
 export function newFlowPart(mode: FlowPart["mode"], kind: CashFlowKind, item: CashItem | null = null, settlementKind?: CashSettlementKind): FlowPart {
-  return { id: crypto.randomUUID(), mode, amount: "", content: "", counterparty: "", group: "", direction: "", billLabel: "", billMonth: "", relatedLoanId: "", item,
+  return { id: crypto.randomUUID(), mode, amount: "", content: "", counterparty: "", group: "", direction: "", billLabel: "", billMonth: "", category: "", relatedLoanId: "", item,
     kind: settlementKind ?? (item?.type === "company_receivable" ? "company_collection" : item?.type === "expense" ? kind === "receipt" ? "expense_refund" : "expense_payment" : "cash_repayment") };
 }
 
@@ -26,13 +26,15 @@ export function flowCompositionPayload(parts: FlowPart[], date: string, projectI
       if (part.mode === "loan" && part.group === "personal" && part.direction !== "receivable") throw new Error("个人借款 / 代付只能登记对方应归还。");
       if (Boolean(part.billLabel) !== Boolean(part.billMonth)) throw new Error("账单标识和账单月份须同时填写。");
       if (part.mode === "expense" && part.relatedLoanId && !parts.some(row => row.mode === "loan" && row.id === part.relatedLoanId)) throw new Error("费用归属的借款已被移除，请重新选择或明确取消关联。");
+      if (part.mode === "expense" && kind !== "payment") throw new Error("新增费用付款须使用支出；费用退款请选择已有费用。");
+      if (part.mode === "expense" && !part.category) throw new Error("请选择新增事项的费用类型。");
       related_items.push({ id: part.id, type: part.mode, origin_date: date, original_amount: amount, content: part.content.trim(), oa_project_id: projectId,
+        category_id: part.mode === "expense" ? part.category : null,
         ...(part.mode === "loan" ? { counterparty: part.counterparty.trim(), ledger_group: part.group, obligation_direction: part.direction } : {}),
         ...(part.billLabel ? { bill_label_id: part.billLabel, bill_month: part.billMonth } : {}),
         ...(part.mode === "expense" && part.relatedLoanId ? { related_obligation_id: part.relatedLoanId } : {}),
       });
       // The source flow itself pays a newly-created expense. A second allocation would double-count it.
-      if (part.mode === "expense" && kind !== "payment") throw new Error("新增费用付款须使用支出；费用退款请选择已有费用。");
     } else {
       if (!part.item) throw new Error("请选择要关联的已有事项。");
       if (part.mode === "origin") origin_items.push({ item_id: part.item.id, expected_item_version: part.item.version });
@@ -42,8 +44,8 @@ export function flowCompositionPayload(parts: FlowPart[], date: string, projectI
   return { related_items, origin_items, allocations };
 }
 
-export function CashFlowComposition({ parts, onChange, kind, existingItem, disabled }: {
-  parts: FlowPart[]; onChange: (parts: FlowPart[]) => void; kind: CashFlowKind; existingItem?: CashItem; disabled: boolean;
+export function CashFlowComposition({ parts, onChange, kind, existingItem, personalEntry = false, disabled }: {
+  parts: FlowPart[]; onChange: (parts: FlowPart[]) => void; kind: CashFlowKind; existingItem?: CashItem; personalEntry?: boolean; disabled: boolean;
 }) {
   const [picking, setPicking] = useState<string | null>(null);
   function update(id: string, patch: Partial<FlowPart>) { onChange(parts.map(part => part.id === id ? { ...part, ...patch } : part)); }
@@ -63,12 +65,12 @@ export function CashFlowComposition({ parts, onChange, kind, existingItem, disab
         <CashInput label="事项金额" value={part.amount} onChange={amount => update(part.id, { amount })} required disabled={disabled} />
         <CashInput label="事项内容" value={part.content} onChange={content => update(part.id, { content })} required disabled={disabled} />
         {part.mode === "loan" && <>
-          <CashInput label="往来对象" value={part.counterparty} onChange={counterparty => update(part.id, { counterparty })} required disabled={disabled} />
-          <CashSelect label="账簿分类" value={part.group} onChange={group => update(part.id, { group, direction: group === "personal" && part.direction === "payable" ? "" : part.direction })} required disabled={disabled} options={[{ value: "company", label: "公司" }, { value: "external_person", label: "外部人员" }, { value: "personal", label: "个人借款 / 代付" }]} />
+          <CashInput label="往来对象" value={part.counterparty} onChange={counterparty => update(part.id, { counterparty })} required disabled={disabled || personalEntry && index === 0} />
+          <CashSelect label="账簿分类" value={part.group} onChange={group => update(part.id, { group, direction: group === "personal" && part.direction === "payable" ? "" : part.direction })} required disabled={disabled || personalEntry && index === 0} options={[{ value: "company", label: "公司" }, { value: "external_person", label: "外部人员" }, { value: "personal", label: "个人借款 / 代付" }]} />
           <CashSelect label="借款方向" value={part.direction} onChange={direction => update(part.id, { direction })} required disabled={disabled} options={[{ value: "receivable", label: "对方应归还" }, { value: "payable", label: "我方应归还", disabled: part.group === "personal" }]} />
         </>}
-        {part.mode === "expense" && <CashSelect label="费用归属本次借款（可选）" value={part.relatedLoanId} onChange={relatedLoanId => update(part.id, { relatedLoanId })} disabled={disabled}
-          options={[{ value: "", label: "不关联借款" }, ...parts.filter(row => row.mode === "loan").map((row, loanIndex) => ({ value: row.id, label: `${loanIndex + 1}. ${row.content || "未填写内容的借款"}` }))]} />}
+        {part.mode === "expense" && <><CashConfigurationSelect name="categories" label="事项费用类型" value={part.category} groups={["payment"]} onChange={category => update(part.id, { category })} required disabled={disabled} /><CashSelect label="费用归属本次借款（可选）" value={part.relatedLoanId} onChange={relatedLoanId => update(part.id, { relatedLoanId })} disabled={disabled}
+          options={[{ value: "", label: "不关联借款" }, ...parts.filter(row => row.mode === "loan").map((row, loanIndex) => ({ value: row.id, label: `${loanIndex + 1}. ${row.content || "未填写内容的借款"}` }))]} /></>}
         <CashConfigurationSelect name="bill-labels" label="账单标识（可选）" value={part.billLabel} onChange={billLabel => update(part.id, { billLabel })} disabled={disabled} />
         <CashInput label="账单月份（可选）" type="month" value={part.billMonth} onChange={billMonth => update(part.id, { billMonth })} disabled={disabled} />
       </div> : <>

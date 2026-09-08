@@ -129,6 +129,47 @@ class CashTaskPostgresTests(CashPostgresCase):
         self.assertEqual(self.connection.fetch_one("select count(*) as n from cash.task_occurrences")["n"], 0)
         self.assertEqual(self.connection.fetch_one("select count(*) as n from cash.flows")["n"], 0)
 
+    def test_task_explicit_personal_advance_and_expense_create_once_delete_together(self):
+        self.cash.update_personal_opening({"expected_version": 1, "opening_date": "2026-01-01", "counterparty": "Synthetic owner"})
+        template = self.template()
+        # Deliberately order parent before child by ID: deletion cannot rely on UUID order.
+        loan_id, expense_id = "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"
+        loan = {"id": loan_id, "type": "loan", "origin_date": "2026-09-03", "original_amount": "100.00",
+                "obligation_direction": "receivable", "ledger_group": "personal", "counterparty": "Synthetic owner",
+                "content": "Explicit personal card advance", "category_id": None}
+        expense = {"id": expense_id, "type": "expense", "origin_date": "2026-09-03", "original_amount": "100.00",
+                   "content": "Explicit actual expense", "category_id": self.payment_category["id"], "related_obligation_id": loan_id}
+        payload = {**self.identity(template), "mode": "new_flow", "new_flow": self.flow_payload(related_items=[expense, loan])}
+        result = self.tasks.confirm(payload, self.actor)
+        self.assertEqual(result["occurrence"]["state"], "completed")
+        self.assertEqual(result["occurrence"]["actual_amount"], "100.00")
+        self.assertEqual(result["flow"]["source_kind"], "monthly_task")
+        self.assertEqual(self.query.get_item(loan_id)["amounts"]["remaining_obligation_amount"], "100.00")
+        self.assertEqual(self.query.get_item(expense_id)["item"]["category_id"], self.payment_category["id"])
+        self.assertEqual(self.query.get_item(expense_id)["amounts"]["paid_amount"], "100.00")
+        repeated = self.tasks.confirm(payload, self.actor)
+        self.assertEqual(repeated["flow"]["id"], result["flow"]["id"])
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.flows")["n"], 1)
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.items")["n"], 2)
+        self.cash.delete_flow(result["flow"]["id"], {"expected_version": result["flow"]["version"]})
+        restored = self.tasks.list_occurrences({"month": "2026-09"})["rows"][0]
+        self.assertEqual(restored["state"], "pending")
+        self.assertEqual(restored["actual_amount"], "0.00")
+        self.assertEqual(self.connection.fetch_one("SELECT count(*) AS n FROM cash.items")["n"], 0)
+        with self.assertRaises(CashError):
+            self.tasks.confirm(payload, self.actor)
+
+    def test_task_invalid_expense_category_rolls_back_occurrence_cash_and_items(self):
+        template = self.template()
+        expense = {"id": self.uid(), "type": "expense", "origin_date": "2026-09-03", "original_amount": "100.00",
+                   "content": "Unclassified expense"}
+        for changes in ({}, {"category_id": self.category["id"]}):
+            with self.subTest(changes=changes), self.assertRaises(CashError):
+                self.tasks.confirm({**self.identity(template), "mode": "new_flow",
+                    "new_flow": self.flow_payload(related_items=[{**expense, **changes}])}, self.actor)
+        for table in ("flows", "items", "settlements", "task_occurrences"):
+            self.assertEqual(self.connection.fetch_one(f"SELECT count(*) AS n FROM cash.{table}")["n"], 0)
+
     def test_existing_manual_flow_claim_preserves_cash_and_settlement(self):
         template = self.template("receipt")
         item = self.item()

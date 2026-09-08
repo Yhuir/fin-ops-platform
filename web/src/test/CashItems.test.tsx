@@ -16,11 +16,13 @@ const target: CashItem = {
   obligation_direction: "receivable", ledger_group: "personal", counterparty: "测试人员", oa_project_id: null, project_name_snapshot: null, project: null,
   origin_flow_id: null, origin_mode: null, bill_label_id: null, bill_month: null, ticket_provider: null, ticket_provided_on: null, ticket_description: null,
   related_obligation_id: null, ticket_source_id: null, content: "历史真实借款", remark: null, selectable: true, remaining_obligation_amount: "9000.00",
+  category_id: null, category: null,
 };
 const settlement: CashSettlement = {
   id: "00000000-0000-4000-8000-000000000020", version: 4, kind: "ticket_use", occurred_on: "2026-08-01", amount: "3000.00", remark: "实际用于支付",
   item_id: null, item_version: null, item_content: null, source_item_id: "00000000-0000-4000-8000-000000000003", source_item_version: 9,
   source_item_content: "测试票据", flow_id: null, flow_version: null, flow_source_kind: null, task: null,
+  category_id: null, category: null,
 };
 function result(data: unknown, options = {}) { return { data, loading: false, error: null, reload: mocks.reload, ...options }; }
 
@@ -46,6 +48,15 @@ describe("cash amount presentation", () => {
 });
 
 describe("cash item and settlement interaction", () => {
+  test("personal opening takes explicit owner and opening date instead of company and today", async () => {
+    render(<CashItemEditor initialType="loan" opening personalContext={{ counterparty: "测试个人", opening_date: "2026-01-01" }} onClose={vi.fn()} />);
+    expect(screen.getByRole("textbox", { name: "往来对象" })).toHaveValue("测试个人");
+    expect(screen.getByLabelText("起算日期 *")).toHaveValue("2026-01-01");
+    await userEvent.type(screen.getByRole("textbox", { name: "期初未结金额" }), "123");
+    await userEvent.type(screen.getByRole("textbox", { name: "事项内容" }), "期初欠款");
+    await userEvent.click(screen.getByRole("button", { name: "保存事项" }));
+    expect(mocks.run).toHaveBeenCalledWith("/items", expect.objectContaining({ ledger_group: "personal", counterparty: "测试个人", origin_date: "2026-01-01" }), "POST");
+  });
   test("shows error and retries without manufacturing an empty item", async () => {
     mocks.query.mockReturnValue(result(null, { error: { message: "事项已删除" } }));
     render(<CashItemDetail itemId={target.id} onClose={vi.fn()} />);
@@ -109,11 +120,16 @@ describe("cash item and settlement interaction", () => {
     expect(mocks.query.mock.calls.some(([path]) => path === "/flows")).toBe(false);
   });
   test("noncash adjustment requires an explicit target and explanation without cash", async () => {
+    mocks.query.mockImplementation((path: string | null) => result(path === "/settings/categories" ? { rows: [{ id: "adjustment-category", name: "明确调整", group: "turnover" }], pagination } : null));
     render(<CashSettlementEditor target={target} initialKind="non_ticket_offset" onClose={vi.fn()} />);
     await userEvent.type(screen.getByRole("textbox", { name: "本次处理金额" }), "2500");
     await userEvent.type(screen.getByRole("textbox", { name: "用途 / 说明" }), "已确认的非现金冲抵");
     await userEvent.click(screen.getByRole("button", { name: "保存处理" }));
-    expect(mocks.run).toHaveBeenCalledWith("/settlements", expect.objectContaining({ kind: "non_ticket_offset", amount: "2500.00", item_id: target.id, expected_item_version: 7, source_item_id: null, flow_id: null }), "POST");
+    expect(mocks.run).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /无来源调整分类$/ }));
+    await userEvent.click(screen.getByRole("option", { name: "明确调整" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存处理" }));
+    expect(mocks.run).toHaveBeenCalledWith("/settlements", expect.objectContaining({ kind: "non_ticket_offset", amount: "2500.00", item_id: target.id, expected_item_version: 7, source_item_id: null, flow_id: null, category_id: "adjustment-category" }), "POST");
   });
   test("removing an erroneous association uses its versions, not the cash delete route", async () => {
     const cashRow = { ...settlement, kind: "cash_repayment" as const, item_id: target.id, item_version: 7, item_content: target.content, source_item_id: null, source_item_version: null, source_item_content: null, flow_id: "00000000-0000-4000-8000-000000000099", flow_version: 8 };

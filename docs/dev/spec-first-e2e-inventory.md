@@ -6,6 +6,8 @@
 
 ## 页面模块 inventory
 
+现金模块 `cash`：四子页面共用既有现金边界；覆盖映射见[现金E2E](../modules/cash/e2e-coverage.md)。合成交互加入默认smoke，真实写链由`npm run e2e:cash-real`使用显式本地测试库，生产只读须单独启用，不混入默认CI、不新增审批流程。
+
 | Priority | Module | Route | Page key | 关键功能域 | 当前 Spec-first 状态 | 当前 Browser e2e |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `reconciliation-workbench` | `/` | `reconciliation-workbench` | direct canonical paired/unpaired 三栏、opaque cursor、任意至少 2 个不同 typed canonical 成员人工确认、两区 active relation exact-set 关系级撤回与事务内稳定拓扑恢复、OA/发票自动异常与增量抽屉、旧未配对人工异常入口缺席、现金特殊处理、写后一次 normal GET | `covered` | `web/e2e/workbench-relation-fanout.spec.ts`、`web/e2e/workbench-withdraw-flow.spec.ts`、`web/e2e/workbench-stale-error-flow.spec.ts`、`web/e2e/workbench-network-recovery-flow.spec.ts`、`web/e2e/workbench-exception-flow.spec.ts`、`web/e2e/workbench-cash-special-flow.spec.ts`、`web/e2e/workbench-large-scroll-flow.spec.ts`、`web/e2e/workbench-permissions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts`、`web/e2e/pending-invoices-fanout.spec.ts`、`web/e2e/batch-accounting-flow.spec.ts`、`web/e2e/turnover-ledger-flow.spec.ts`；exact typed selection、topology/history fingerprint、canonical/case/owner 事务重验和 version 单调推进另有 direct/UoW/repository 专项证据，详见模块 `e2e-coverage.md` |

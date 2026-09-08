@@ -7,6 +7,7 @@ import { CashItemPicker } from "./CashItems";
 import { cashAmount, cashMoneyInput, cashToday, itemTypeLabels, settlementLabels, settlementVersions,
   type CashItem, type CashPageRows, type CashSettlement, type CashSettlementKind } from "./CashItems.types";
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
+import { CashConfigurationSelect } from "./CashFlowSelectors";
 
 type Version = { id: string; version: number };
 type Versions = { items: Version[]; flows: Version[]; occurrences: Version[] };
@@ -109,6 +110,7 @@ function sourceLabel(action: string): string {
 function SettlementCorrection({ row, onSave, onClose }: { row: CashSettlement; onSave: (change: Change) => void; onClose: () => void }) {
   const [action, setAction] = useState(""); const [kind, setKind] = useState(row.kind);
   const [amount, setAmount] = useState(row.amount); const [date, setDate] = useState(row.occurred_on); const [remark, setRemark] = useState(row.remark ?? "");
+  const [category, setCategory] = useState(row.category_id ?? "");
   const [target, setTarget] = useState<(Version & { content: string }) | null>(row.item_id ? { id: row.item_id, version: row.item_version!, content: row.item_content! } : null);
   const [source, setSource] = useState<(Version & { content: string }) | null>(row.source_item_id ? { id: row.source_item_id, version: row.source_item_version!, content: row.source_item_content! } : null);
   const [flow, setFlow] = useState<FlowChoice | null>(null); const [picker, setPicker] = useState<"target" | "source" | "flow" | null>(null);
@@ -122,7 +124,9 @@ function SettlementCorrection({ row, onSave, onClose }: { row: CashSettlement; o
       if (action === "update") {
         if (kind !== "ticket_use" && !target) throw new Error("请选择真实目标事项。");
         if (["ticket_use", "ticket_offset"].includes(kind) && !source) throw new Error("请选择票据来源。");
+        if (kind === "non_ticket_offset" && !source && !category) throw new Error("请选择无来源调整分类。");
         const proposed = { kind, amount: cashMoneyInput(amount), occurred_on: isCash ? flow?.occurred_on ?? row.occurred_on : date,
+          category_id: kind === "non_ticket_offset" && !source ? category : null,
           remark: remark.trim() || null, item_id: kind === "ticket_use" ? null : target?.id ?? null,
           source_item_id: isCash ? null : source?.id ?? null, flow_id: isCash ? flow?.id ?? row.flow_id : null };
         const fields = Object.fromEntries(Object.entries(proposed).filter(([key, value]) => row[key as keyof CashSettlement] !== value));
@@ -146,7 +150,8 @@ function SettlementCorrection({ row, onSave, onClose }: { row: CashSettlement; o
       {(picker === "target" || picker === "source") && <CashItemPicker label={picker === "target" ? "选择正确目标" : "选择正确来源"} params={{ type: picker === "target" ? targetType : kind === "non_ticket_offset" ? "expense" : "ticket_source" }} onSelect={item => { if (picker === "target") setTarget(item); else setSource(item); setPicker(null); }} onCancel={() => setPicker(null)} />}
       {picker === "flow" && <CorrectionFlowPicker onSelect={item => { setFlow(item); setPicker(null); }} onClose={() => setPicker(null)} />}
       <div className="cash-form-grid"><CashInput label="更正处理金额" value={amount} onChange={setAmount} required /><CashInput label="更正处理日期" type="date" value={flow?.occurred_on ?? date} onChange={setDate} disabled={isCash} required /></div>
-      <CashInput label="更正处理说明" value={remark} onChange={setRemark} /></>}
+      <CashInput label="更正处理说明" value={remark} onChange={setRemark} />
+      {kind === "non_ticket_offset" && !source && <CashConfigurationSelect name="categories" label="无来源调整分类" value={category} selected={row.category} groups={["turnover"]} onChange={setCategory} required />}</>}
     <div className="cash-form-actions"><Button type="button" size="sm" variant="secondary" onPress={onClose}>取消本项</Button><Button type="button" size="sm" onPress={adopt}>采用处理纠错</Button></div>
   </section>;
 }

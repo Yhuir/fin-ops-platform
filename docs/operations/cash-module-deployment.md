@@ -2,6 +2,8 @@
 
 更新：2026-09-07。用户明确现金不使用单独数据库登录账号。本文件替代先前专用cash账号和API专用env的安装方案；历史执行证据保留在[实施计划§10](../dev/cash-module-implementation-plan.md)，不把旧计划或旧验证当作当前配置。
 
+2026-09-08最新授权覆盖此前“现金分支单独发布、不合main”的限制：闭环修复提交并推送现金分支后，合并main、推送并核实origin/main，再从该确切提交用既有deploy-oa.sh部署。0168只追加现金三列及约束，不更新业务数据、不创建备份或运行账号；本轮实际版本、测试与清理见实施§16。
+
 2026-09-08统一UI/多选读取发布：不增加数据库迁移或生产写操作，前后端使用同一已提交现金分支候选，由既有deploy-oa.sh正式检查/激活。部署前后同条件只读测量、活动release、全部验证与例外统一记录[实施§14](../dev/cash-module-implementation-plan.md#14-统一现金ui实际执行与验证2026-09-08)。下文具体旧版本性能是历史，不代表此次发布结果。生产浏览器显式阻断非GET/HEAD/OPTIONS，且关闭敏感截图、trace和录像；不创建受限角色或试验现金。保留可回滚release，本次不清理其他发布资产。
 
 ## 数据和连接边界
@@ -18,7 +20,7 @@
 
 该服务器当前API单元是`fin-ops.service`，其WorkingDirectory直接指向本release的src，四worker为`fin-ops-worker@<name>.service`；没有`/opt/fin-ops/current`软链接。运维以实际systemd属性和正式发布证据确认活动版本，勿用不存在的单元或泛用示例路径替代核查。
 
-1. 发布届时已提交并推送的`codex/cash-ledger`，不合并main；现金前端入口只能在新版UI确认后实现。用现有`./scripts/deploy-oa.sh`完成新候选检查。
+1. 按最新授权提交推送`codex/cash-ledger`，合并main并推送origin/main；核实本地HEAD与实际remote main相等后，用现有`./scripts/deploy-oa.sh`从该代码构建、上传并检查候选。不强推、不allow-dirty、不使用未经推送的工作树部署。
 2. 保持历史0166不变；追加`0167_cash_shared_runtime_grants.sql`为**已存在的**`fin_ops_app_runtime`授予cash schema USAGE以及明确10表SELECT/INSERT/UPDATE/DELETE。迁移不创建角色、不授予DDL、TRUNCATE、所有权或普通业务新增权限。角色不存在时明确报错，不另造账号。
 3. 依照既有发布规则，在实际PostgreSQL 16隔离测试数据库上验证上一release代码与0166、0167每个候选schema head的固定写操作矩阵；兼容证据必须是真实执行结果，不可填造或跳过。
 4. 若服务器曾安装带cash env加载项的helper，使用现有hash-pinned bootstrap更新为最新已验证候选；只替换helper不顺带迁移或重启。本次已安装`8bdfc07ae`版本，旧cash env加载项已移除；语法/既有contract检查通过，root:root/0755。现金env不存在，未创建或删除密钥文件。

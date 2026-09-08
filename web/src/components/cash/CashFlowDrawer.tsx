@@ -3,7 +3,7 @@ import { useId, useState, type FormEvent } from "react";
 import { useCashMutation, useCashQuery } from "../../features/cash/hooks";
 import AppDrawer from "../common/AppDrawer";
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
-import { cashAmount, cashMoneyInput, cashToday, settlementLabels, type CashItem, type CashPageRows, type CashSettlement, type CashSettlementKind } from "./CashItems.types";
+import { cashAmount, cashMoneyInput, cashToday, settlementLabels, type CashItem, type CashPageRows, type CashSettlement, type CashSettlementKind, type CashPersonalSetting } from "./CashItems.types";
 import { CashItemDetail } from "./CashItems";
 import { CashConfigurationSelect, CashProjectPicker } from "./CashFlowSelectors";
 import { CashFlowComposition, flowCompositionPayload, newFlowPart, type FlowPart } from "./CashFlowComposition";
@@ -34,6 +34,10 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
   const [project, setProject] = useState<CashFlow["project"]>(flow?.project ?? null); const [projectPicker, setProjectPicker] = useState(false);
   const [planned, setPlanned] = useState(""); const [error, setError] = useState<string | null>(null);
   const [parts, setParts] = useState<FlowPart[]>(() => existingItem ? [newFlowPart("settlement", kind, existingItem, settlementKind)] : []);
+  const [purpose, setPurpose] = useState("ordinary");
+  const [purposePartId, setPurposePartId] = useState<string | null>(null);
+  const personal = useCashQuery<CashPersonalSetting>(purpose === "personal" ? "/settings/personal-opening" : null);
+  const composedParts = parts.map(part => purpose === "personal" && part.id === purposePartId ? { ...part, group: "personal", direction: "receivable", counterparty: personal.data?.counterparty ?? "" } : part);
   const [corrections, setCorrections] = useState<Record<string, unknown>>({});
   const [correctionsValid, setCorrectionsValid] = useState(true);
   const [dirty, setDirty] = useState(false); const [closing, setClosing] = useState(false);
@@ -43,6 +47,9 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
     if (mutation.busy || !correctionsValid) return;
     let body: Record<string, unknown>;
     try {
+      if (purpose === "personal" && (personal.loading || personal.error)) throw new Error("个人专账配置尚未成功读取，请读取成功后再保存。");
+      if (purpose === "personal" && (!personal.data?.counterparty || !personal.data.opening_date)) throw new Error("请先在基础设置确认个人专账归属人和起算日期。");
+      if (purpose !== "ordinary" && !parts.length) throw new Error("请完成本次办理事项，或明确改为普通现金收付。");
       if (!date || date > cashToday()) throw new Error("请填写不晚于今天的实际收付日期。");
       if (!content.trim()) throw new Error("请填写现金用途。");
       if (kind !== "transfer" && !category) throw new Error("请选择适用分类。");
@@ -53,8 +60,8 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
         content: content.trim(), person_name: person.trim() || null, remark: remark.trim() || null };
       if (flow) body = { ...body, oa_project_id: project?.id ?? null, expected_version: expectedVersion, ...corrections };
       else if (existingItem) body = { ...body, id, project_mode: "existing_item", project_item_id: existingItem.id, expected_project_item_version: existingItem.version,
-        allocations: flowCompositionPayload(parts, date, existingItem.oa_project_id, kind).allocations };
-      else body = { ...body, id, project_mode: "selection", oa_project_id: project?.id ?? null, ...flowCompositionPayload(parts, date, project?.id ?? null, kind) };
+        allocations: flowCompositionPayload(composedParts, date, existingItem.oa_project_id, kind).allocations };
+      else body = { ...body, id, project_mode: "selection", oa_project_id: project?.id ?? null, ...flowCompositionPayload(composedParts, date, project?.id ?? null, kind) };
       if (task) body = { template_id: task.template_id, month: task.month, expected_version: task.expected_version,
         ...(task.expected_template_version === undefined ? {} : { expected_template_version: task.expected_template_version }),
         ...(task.planned_amount === null ? { planned_amount: cashMoneyInput(planned) } : {}), mode: "new_flow", new_flow: body };
@@ -76,7 +83,7 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
     {mutation.error?.status === 409 && <p className="cash-hint">记录已变化。请关闭后重新读取并确认，当前输入未被自动覆盖。</p>}
     <form id={formId} onSubmit={save} onChange={() => setDirty(true)} className="cash-form">
       <div className="cash-form-grid">
-        <CashSelect label="方向" value={kind} disabled={mutation.busy || Boolean(task || existingItem)} onChange={value => { setKind(value as CashFlowKind); setCategory(""); setParts([]); setDirty(true); }} required options={Object.entries(cashFlowLabels).map(([value, label]) => ({ value, label }))} />
+        <CashSelect label="方向" value={kind} disabled={mutation.busy || Boolean(task || existingItem)} onChange={value => { setKind(value as CashFlowKind); setCategory(""); setParts([]); setPurpose("ordinary"); setPurposePartId(null); setDirty(true); }} required options={Object.entries(cashFlowLabels).map(([value, label]) => ({ value, label }))} />
         <CashInput label="实际发生日" type="date" value={date} onChange={setDate} required disabled={mutation.busy} />
         <CashInput label="金额（元）" value={amount} onChange={setAmount} required disabled={mutation.busy} />
         {kind !== "receipt" && <CashConfigurationSelect name="accounts" label="付款账户" value={from} selected={flow?.from_account} onChange={value => { setFrom(value); setDirty(true); }} required disabled={mutation.busy} />}
@@ -88,6 +95,18 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
         {task?.planned_amount === null && <CashInput label="本月计划金额" value={planned} onChange={setPlanned} required disabled={mutation.busy} />}
       </div>
     </form>
+    {!flow && !existingItem && kind !== "transfer" && <section className="cash-settings-subsection">
+      <CashSelect label="本次办理用途" value={purpose} disabled={mutation.busy} onChange={value => {
+        if (parts.length) { setError("切换办理用途前，请先移除已填写的事项，避免丢失输入。"); return; }
+        setError(null); setPurpose(value); setDirty(true);
+        if (value !== "ordinary") {
+          const part = newFlowPart(value === "personal" ? "loan" : value === "expense" ? "expense" : "settlement", kind);
+          setPurposePartId(part.id);
+          setParts([{ ...part, amount, content, ...(value === "personal" ? { group: "personal", direction: "receivable" } : {}) }]);
+        }
+      }} options={[{ value: "ordinary", label: "普通现金收付" }, ...(kind === "payment" ? [{ value: "expense", label: "登记实际费用" }, { value: "personal", label: "个人实际代付 / 借出（含替个人还卡）" }] : []), { value: "settlement", label: "收回 / 归还已有事项" }]} />
+      {purpose === "personal" && <><CashNotice error={personal.error?.message} />{personal.error && <Button size="sm" variant="tertiary" onPress={personal.reload}>重新读取个人专账配置</Button>}{personal.loading ? <p role="status">正在读取个人专账设置…</p> : !personal.error && (personal.data?.counterparty && personal.data.opening_date ? <p className="cash-hint">归属：{personal.data.counterparty}。替个人还卡增加其应归还金额，不是个人归还。</p> : <p className="cash-notice">请在基础设置 → 现金账户与期初，确认个人归属人和起算日期。</p>)}</>}
+    </section>}
     <section className="cash-settings-subsection"><h3>项目</h3>
       <p>{existingItem ? existingItem.project_name_snapshot === null ? "无项目" : existingItem.project_name_snapshot : project === null ? "无项目" : project.name_snapshot}</p>
       {existingItem ? <p className="cash-hint">沿用已有事项的项目，不改写 OA 状态。已结束的项目仍可办理其真实结算。</p> : <div className="cash-row-actions">
@@ -98,7 +117,7 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
     </section>
     {kind === "transfer" && <CashNotice>内部转账仅记录现金模块内两个账户之间的资金移动；只生成一笔流水，不算收入或费用，不连接银行流水池。</CashNotice>}
     {flow ? <CashFlowCorrections flowId={flow.id} mode="edit" onValidityChange={setCorrectionsValid} onChange={value => { setCorrections(value); if (value.source_corrections.length || value.settlement_changes.length || value.item_reference_changes.length) setDirty(true); }} /> :
-      <CashFlowComposition parts={parts} kind={kind} existingItem={existingItem} disabled={mutation.busy} onChange={value => { setParts(value); setDirty(true); }} />}
+      <CashFlowComposition parts={composedParts} kind={kind} existingItem={existingItem} personalEntry={purpose === "personal"} disabled={mutation.busy} onChange={value => { setParts(value); setDirty(true); if (purposePartId && !value.some(part => part.id === purposePartId)) { setPurpose("ordinary"); setPurposePartId(null); } }} />}
   </AppDrawer>;
 }
 
