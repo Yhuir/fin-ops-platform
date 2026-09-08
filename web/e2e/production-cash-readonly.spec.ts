@@ -91,7 +91,7 @@ test.describe("production cash read-only verification", () => {
     await page.getByRole("button", { name: /有票支付视图$/ }).click();
     await show("pending_collection", "reports/ticket-payments", () => page.getByRole("option", { name: "待回款", exact: true }).click());
     await checkMenu("筛选项目");
-    await show("personal_matrix", "reports/personal", () => page.getByRole("tab", { name: "个人专账", exact: true }).click(), page.getByRole("grid", { name: "个人年度还款矩阵" }));
+    await show("personal_matrix", "reports/personal", () => page.getByRole("tab", { name: "个人专账", exact: true }).click(), page.getByRole("grid", { name: "个人年度代付借出汇总" }));
     await checkMenu("筛选银行 / 账单");
     for (const [label, grid] of [["现金归还", "个人现金归还"], ["有票直接冲", "有票直接冲"], ["无票报销冲抵", "无票报销冲抵"]]) {
       await page.getByRole("button", { name: /个人专账视图$/ }).click();

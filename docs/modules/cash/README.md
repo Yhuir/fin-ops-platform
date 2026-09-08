@@ -1,6 +1,6 @@
 # 现金账模块
 
-2026-09-08闭环修复已获实施与发布授权，运行事实以[实施§16](../../dev/cash-module-implementation-plan.md#16-闭环修复实际执行2026-09-08)为准：新增字段/归属、个人跨项目非现金、来源分类、未结及待回款、任务入口；保持四子页面/三账目Tab、同库同账号、私密cash事实池。§15是已接受计划，§14是上一发布证据，不替代当前验收。
+2026-09-08闭环修复已实施并从remote main正式发布，运行事实和未测边界以[实施§16](../../dev/cash-module-implementation-plan.md#16-闭环修复实际执行2026-09-08)为准：新增字段/归属、个人跨项目非现金、来源分类、未结及待回款、任务入口；保持四子页面/三账目Tab、同库同账号、私密cash事实池。§15是已接受计划，§14是上一发布证据，不替代当前验收。
 
 已完成工作：此前获授权的[实施计划§13](../../dev/cash-module-implementation-plan.md#13-全现金模块ui统筹实施计划设计完成代码待授权执行)统一布局、HeroUI原生浮层/排序及多选GET已实现、提交推送和部署；实际验证与最新发布状态统一看[实施§14](../../dev/cash-module-implementation-plan.md#14-统一现金ui实际执行与验证2026-09-08)。下文68eee75c0是上一版记录，不代表本次新计划验收。
 
@@ -12,7 +12,7 @@
 
 同日UI修复已实现：现金流水成为第四个左侧子页面；现金账目保留三Tab，个人四视图用选择器。CashContent在可撤权卸载子树保存已应用条件，切回重读；表头/空态/滚动/金额列及32px控件已修复。源码原因和原计划保留于[实施计划§11](../../dev/cash-module-implementation-plan.md#11-源码对照后的现金-ui-修复计划2026-09-07待实施)，执行、测试与本次发布状态统一见§12。没有新增API/数据库/权限，生产写入验收仍不以只读验证代替。
 
-代码：`app/routes_cash.py`、`app/cash_runtime.py`；`services/cash_domain.py/cash_service.py/cash_tasks.py/cash_queries.py/cash_oa_projects.py`；`services/postgres_repositories/cash*.py`；migration `0166_cash_ledger.sql`与`0167_cash_shared_runtime_grants.sql`。同App数据库账号，不另设cash角色、DSN或env。
+代码：`app/routes_cash.py`、`app/cash_runtime.py`；`services/cash_domain.py/cash_service.py/cash_tasks.py/cash_queries.py/cash_oa_projects.py`；`services/postgres_repositories/cash*.py`；migration `0166_cash_ledger.sql`、`0167_cash_shared_runtime_grants.sql`与`0168_cash_business_closure.sql`。同App数据库账号，不另设cash角色、DSN或env。
 
 不新增 worker、缓存、read model、Excel 导入器、审计正文池或通用规则引擎。
 
