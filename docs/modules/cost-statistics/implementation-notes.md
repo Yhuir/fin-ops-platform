@@ -12,8 +12,35 @@
 - 本地发布构建、Chromium1440×1000，各20样本：2行输入/增删/菜单打开/实际切换来源 p95 = 40.1/33.5/30.9/29.8ms；100个成本项、100条初始合法分配行、10个来源选项分别33.7/41.8/39.8/48.3ms。数据 responseEnd→首表 DOM 13.4/52.7ms为单次观测，不称 p95。实际切换先编辑另一行释放来源，再交替两笔流水；编辑无新增 GET/PUT。该结果是本地发布构建，不冒充生产网络耗时。
 - 本地 Chrome 用只读代理加载实际30个待分配任务，审阅两表、相邻组色、选项完整信息、全文和错误浮层。实际切换账户后350.00保持；本地代理拒绝写请求，验证草稿已通过重载丢弃。E2E额外验证390px精确视口；Chrome手动视口受原浏览器缩放影响，不将其观测宽度当作精确390px。
 - 验证：已有独立PG16成本专项90项通过、独占容器与匿名卷已删除；本轮6份前端单元/组件/API/公共表格文件通过，30条相关浏览器回归及2项独立性能通过。新增核心错误分离、来源/金额、删除顺序、全文键盘、退款/非成本与序号测试。六份前端测试合计51项（最后新增退款序号后定向复跑组件10项通过）；类型与发布构建、docs检查均通过。发布结果在下方补充。
-- 测试类别：业务核心/组件/跨模块E2E/回归适用；服务/API使用既有真实PG和合同测试，本轮无后端I/O变化；read model/cache/worker生命周期测试不适用。数据库迁移和备份不适用，主库未修改。生产正式发布及发布后验证尚待执行。
+- 测试类别：业务核心/组件/跨模块E2E/回归适用；服务/API使用既有真实PG和合同测试，本轮无后端I/O变化；read model/cache/worker生命周期测试不适用。数据库迁移和备份不适用，主库未修改。生产正式发布及发布后验证结果见下一节。
 
+
+### 第二轮正式发布与生产验证
+
+- 应用提交 `f5fa2d10aa054470d189475f0ef7a97ab8ac8eb8` 已推送 remote main。正式入口 `scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh` 成功，release `main-f5fa2d10-20260909234719`，frontend profile 的 preflight/T+0 为 PASS，无回滚；公开资源 `index-D4DB26AK.js`。四个 required worker ready，unknown worker 0。此 profile 未执行 runtime T+30，不把 null 项宣称为通过。
+- 生产 Chrome 实际看到 `OA · 3 条` / `银行流水 · 4 条`，前三组背景为234/242/255、242/237/255、234/242/255；旧独占新增行数量0。生产新增、选来源、350金额换账户保留、删末行回焦新增入口均通过，随后重载丢弃草稿，没有提交测试业务写入。
+- 三个成本视角总额均12,226,597.09，共563条成本明细；待分配30、已完成2。抽查15条实际来源金额、账户、主/子标签、日期一致，8/9月份视角对账通过；两个银行视角同口径。导出预览及下载14列、来源明细sheet通过，退役参数继续400拒绝。
+- 公网HTTPS（含网络/TLS、鉴权、SQL与JSON）各20样本：任务摘要列表p50/p95/max=490.30/577.97/616.60ms；定向详情111.08/135.92/224.31ms。
+- 生产loopback HTTP（含鉴权/SQL/JSON、不含公网）各30样本：项目/标签/账户根p95=460.72/460.62/460.69ms，下钻463.57ms，成本详情20.24ms，任务列表548.75ms、定向详情22.96ms。额外4并发20请求的项目汇总p95=1026.22ms、最大1083.53ms，略高于既有1000ms目标；上一版已记录类似并发限制。本轮UI交互达标，不把后端并发压力下的这一限制宣称为达标，也不扩展本次UI改造为后端查询重构。
+- 本地只读代理、Vite开发/预览服务已停止，端口确认无监听。未创建数据库备份，未删除或修改主数据库。
+
+实际验证入口：
+
+```bash
+# 前端定向核心、组件、API和公共表格测试（最后序号回归单独复跑组件文件）
+npm --prefix web test -- --run src/test/CostSourceAllocation.test.ts src/test/CostSourceAllocationForm.test.tsx src/test/CostStatisticsPage.test.tsx src/test/CostStatisticsApi.test.ts src/test/FinanceTableMigration.test.ts src/test/FinanceTable.test.tsx
+npm --prefix web run build
+# 在本地发布构建preview 5190上执行30条相关浏览器回归
+FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5190 npm --prefix web run e2e -- e2e/cost-source-allocation.spec.ts e2e/cost-statistics-flow.spec.ts e2e/cost-statistics-relation-fanout.spec.ts e2e/bank-details-initial-state.spec.ts e2e/app-shell.spec.ts e2e/workbench-withdraw-flow.spec.ts --project=chromium --grep-invert 'measures local'
+# CPU测量单独执行，不与回归并行
+FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5190 npm --prefix web run e2e -- e2e/cost-source-allocation.spec.ts --project=chromium --grep 'measures local'
+bash scripts/verify.sh docs
+git diff --check
+# 本轮已有90项真实PG16专项：FIN_OPS_TEST_DATABASE_URL指向任务独占临时数据库
+PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_cost_statistics*.py'
+```
+
+生产只读链路、公网20次和loopback30次测量由本机临时脚本通过认证包装器执行；输出保留本机 `/tmp/cost-grid-prod-chain.log`、`/tmp/cost-grid-public-perf.json`、`/tmp/cost-grid-origin-perf.log`，不提交含业务明细的原始数据或 token。
 
 ## 2026-09-09：紧凑两栏待分配抽屉重构
 

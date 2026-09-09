@@ -22,9 +22,9 @@
 - `../app-architecture/pages.md`：页面、API client、刷新来源和页面间影响关系。
 - `../app-architecture/runtime-and-ownership.md`：read model、worker、dirty cascade 调用链和 owner。
 
-## 待批准功能实施
+## 功能实施与计划
 
-- [成本待分配抽屉双表格与Chip改进计划](cost-allocation-drawer-grid-refinement-plan.md)：双只读表、Chip、字段错误浮层、同行新增、明显组底色、Make/App对照、旧代码删除、性能与九项复审；仅计划，未实施，不使用GSD。
+- [成本待分配抽屉双表格与Chip改进计划](cost-allocation-drawer-grid-refinement-plan.md)：已按 Impeccable 实施并部署，双只读表、Chip、字段错误浮层、同行新增与组色；真实浏览器/测试/性能和生产结果见[实施记录](../modules/cost-statistics/implementation-notes.md)，不使用GSD。
 - [成本待分配抽屉第一轮紧凑重构](cost-allocation-drawer-redesign-plan.md)：已实施上线，实际结果见[实施记录](../modules/cost-statistics/implementation-notes.md)；后续调整以上一项新计划为准。
 - [成本统计银行来源分配完整实施计划](cost-statistics-source-allocation-plan.md)：首轮前后端已实施并部署，生产链路与性能限制见[实施记录](../modules/cost-statistics/implementation-notes.md)；配套 [Figma Make设计交接](../modules/cost-statistics/figma-make-design-brief.md)。后续抽屉UI改进见上一项计划。
 - [ETC 票根文本上传修复与验证](etc-ticket-root-text-upload-repair-plan.md)：入口限定许可、文本记录边界与错误反馈、前端选择/拖拽、多文件失败可见性及回归/性能证据；2026-09-08 已实施，执行与发布状态见第 10 节。

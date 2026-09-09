@@ -1,12 +1,12 @@
 # 成本待分配抽屉：双表格、Chip 与稳定行布局实施计划
 
-日期：2026-09-09。状态：执行中；用户已取消 Figma Make，改用 Impeccable 与真实浏览器验证，沿用提交、推送 main、部署和生产验证授权。
+日期：2026-09-09。状态：已实施并部署，生产验证结果见[实施记录](../modules/cost-statistics/implementation-notes.md)；用户已取消 Figma Make，改用 Impeccable 与真实浏览器验证，沿用提交、推送 main、部署和生产验证授权。
 
 ## 1. 范围和代码事实
 
 直接模块为 cost-statistics，只调整抽屉展示、输入反馈和局部样式。复用 AppDrawer、FinanceTable 和已安装 HeroUI 原语；公共组件只消费，不改默认样式，不导入关联台/现金业务状态或请求。
 
-已核实：`CostSourceAllocationForm.tsx` 的来源和金额共用错误键，错误段落却放在来源单元格，来源失焦会显示尚未填写的金额错误；OA为堆叠article且申请类型重复；`.cost-source-add-row` 专门占一行；`.cost-source-task.is-expanded` 的白底覆盖组色。
+改造前核实并已替换：`CostSourceAllocationForm.tsx` 的来源和金额共用错误键，错误段落却放在来源单元格，来源失焦会显示尚未填写的金额错误；OA为堆叠article且申请类型重复；`.cost-source-add-row` 专门占一行；`.cost-source-task.is-expanded` 的白底覆盖组色。
 
 保留当前来源描述/日期预计算、精确金额、显式零、退款/非成本、草稿隔离、权限、事务、审计、版本/fingerprint和保存结果核实。后端API、数据库、统计口径、worker/cache均无运行时变更计划。
 
@@ -156,7 +156,7 @@ git diff --check
 ## 10. 本轮执行记录
 
 - 新Make文件已确认读取用户22:09:27截图和完整Markdown计划，原型生成输入已交付。浏览器最后核实运行24分40秒仍为初始空白App.tsx，每日额度耗尽。该生成尝试已随用户取消 Make 结束，不把Make规划文本当作已实现代码。
-- 用户随后取消 Make，改用 Impeccable。已实现双表、Chip、同行新增、字段独立错误键及浮层；正在执行验证。
+- 用户随后取消 Make，改用 Impeccable。已实现双表、Chip、同行新增、字段独立错误键及浮层；验证完成，结果见实施记录。
 - 独立PG16测试库成本专项90项全部通过，无跳过。首次初始化缺少既有migration依赖角色，在本次测试容器内补齐后完整复跑成功；不修改迁移或放宽测试。
 - 测试命令为配置独立FIN_OPS_TEST_DATABASE_URL后运行`PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_cost_statistics*.py'`。输出保留在本机`/tmp/cost-grid-backend-tests.log`。
 - 独占测试容器`fin-ops-grid-test-20260909`及匿名数据卷已通过`docker rm -fv`删除，随后确认不存在。未创建数据库备份，未操作主库。
