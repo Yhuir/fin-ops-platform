@@ -18,7 +18,7 @@
 | Policy | canonical snapshot、无 OA/人工分配事实 | 唯一成本事件集合或真实流水集合、聚合、详情 | 数据库、网络、全局状态、fallback |
 | Query service | repository、policy、view/filter/cursor | 稳定 API DTO | freshness gate、worker、旧 view 兼容 |
 | Manual allocation service | relation case、逐 OA 单元金额、来源/退款/非成本明细、version/fingerprint、actor | versioned allocation 与 audit | HTTP、页面状态、比例建议、半写入 |
-| Frontend | API DTO、用户选择 | 五视图、详情、导出、错误/重试 | 业务金额重算、跨页面 I/O、旧规则 UI |
+| Frontend | API DTO、用户选择 | 五视图、详情、导出、错误/重试；从合法草稿构造单元合计 | 重算服务端统计业务、跨页面 I/O、旧规则 UI |
 
 ## Canonical 输入
 
@@ -62,6 +62,13 @@ PUT manual allocation
 - 来源决定可保存但状态仍 pending（缺标签、账户、日期）。`allocation_stale` 不沿用旧决定；无已知来源的金额有显式 `source_pending` 状态。
 - 抽屉按关系缓存会话草稿，切换状态/搜索保留；关闭或显式重读脏草稿沿用确认。提交失败保留输入，成功只按响应状态移动任务。
 
+### 抽屉前端边界
+
+- 容器拥有列表/详情/独立草稿/保存；表单只收任务、草稿、权限和回调，输出编辑/保存事件。sourceAllocation纯工具按来源行构造既有单元金额，不重写服务端政策。
+- 固定金额取原始目标；可编辑金额不再保存targets副本，只存来源行和显式zeroUnitIds。来源/金额无效时拒绝构造PUT。
+- 证据按oaId分组，表格行以内部稳定ID保持身份；内部主键不进入可见文字。无字段补猜、演示数据回退或全局样式。
+- 详情GET/保存PUT使用现有客户端15秒超时；PUT选择allowHtmlFallback=false。结果不明确时GET核对版本及实际内容，不自动重发PUT。HTTP DTO/数据库/审计/权限均未改变。
+
 ### Explorer 与日期合同
 
 - `view=time|bank_tag|project|cost_tag|bank_account`；旧 `bank`、`expense_type` view 明确拒绝。
@@ -101,6 +108,9 @@ PUT manual allocation
 | Tests | `tests/test_cost_statistics_*.py`、`web/src/test/CostStatistics*.test.*`、`web/e2e/cost-statistics-*.spec.ts` |
 
 ## 已删除旧链路
+
+- 原880px卡片布局、可见内部ID、已分/剩余/计算公式、独立targets输入与旧source-popover/evidence-card/target样式。usedBySource仍用于合法来源容量校验。
+
 
 - OA 费用类型成本分面、导出分类与前端旧状态；整组唯一银行账户推断和整组最后付款月归属。
 - `include_cost_row_tags` 开关、标签多字段轮询/斜杠解析、旧单金额抽屉和专属样式、挂载时的额外任务计数读取。

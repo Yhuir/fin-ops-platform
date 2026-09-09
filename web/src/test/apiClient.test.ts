@@ -30,6 +30,15 @@ describe("apiClient", () => {
     expect((init.headers as Headers).get("Authorization")).toBe("Bearer oa-token-123");
   });
 
+  test("does not repeat an ambiguous write when the caller disables HTML fallback", async () => {
+    vi.stubEnv("VITE_API_BASE_PATH", "/");
+    vi.resetModules();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("<!doctype html><html>proxy response</html>", { status: 200, headers: { "Content-Type": "text/html" } }));
+    const { apiRequestJson } = await import("../features/apiClient");
+    await expect(apiRequestJson("/api/cost-statistics/manual-allocations/test", { method: "PUT", body: "{}" }, { allowHtmlFallback: false })).rejects.toThrow("接口返回了 HTML 页面");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("fails fast when a proxied API request returns HTML", async () => {
     vi.stubEnv("VITE_API_BASE_PATH", "/fin-ops-api/");
     vi.resetModules();

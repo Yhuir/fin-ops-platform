@@ -8,6 +8,7 @@ type ApiErrorPayload = {
 };
 
 export type ApiRequestJsonOptions = {
+  allowHtmlFallback?: boolean;
   defaultErrorMessage?: string;
   timeoutMs?: number;
   timeoutMessage?: string;
@@ -207,7 +208,7 @@ export async function apiRequestJson<T>(
   let result: Awaited<ReturnType<typeof fetchApiResponseText>>;
   try {
     result = await fetchApiResponseText(resolvedUrl, init, boundedSignal.signal);
-    if (result.trimmedText && looksLikeHtmlResponse(result.trimmedText, result.contentType)) {
+    if (options.allowHtmlFallback !== false && result.trimmedText && looksLikeHtmlResponse(result.trimmedText, result.contentType)) {
       const fallbackUrl = finOpsApiFallbackUrl(result.resolvedUrl);
       if (fallbackUrl !== null && fallbackUrl !== result.resolvedUrl) {
         result = await fetchApiResponseText(fallbackUrl, init, boundedSignal.signal);

@@ -9,6 +9,8 @@ const legacyWorkbenchTables = new Set([
 
 const approvedNativeTableSurfaces = new Set([
   "features/bankDetails/AutoTagRulesDrawer.tsx",
+  // Grouped source-entry form with per-OA add rows; not a selectable data-list surface.
+  "components/cost-statistics/CostSourceAllocationForm.tsx",
 ]);
 
 function tsxFiles(directory: string): string[] {

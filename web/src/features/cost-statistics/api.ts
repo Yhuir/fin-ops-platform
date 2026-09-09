@@ -612,14 +612,14 @@ export async function fetchCostStatisticsManualAllocations(
 }
 
 export async function fetchCostStatisticsManualAllocation(caseId: string, signal?: AbortSignal): Promise<CostStatisticsManualAllocationTask> {
-  const task = await requestJson<ApiCostStatisticsManualAllocationTask>(`/api/cost-statistics/manual-allocations/${encodeURIComponent(caseId)}`, { method: "GET", signal });
+  const task = await apiRequestJson<ApiCostStatisticsManualAllocationTask>(`/api/cost-statistics/manual-allocations/${encodeURIComponent(caseId)}`, { method: "GET", signal }, { timeoutMs: 15000, timeoutMessage: "任务读取超时，请重试" });
   return mapManualAllocationTask(task);
 }
 
 export async function saveCostStatisticsManualAllocation(
   request: SaveCostStatisticsManualAllocationRequest,
 ): Promise<CostStatisticsManualAllocationTask> {
-  const payload = await requestJson<ApiCostStatisticsManualAllocationTask>(
+  const payload = await apiRequestJson<ApiCostStatisticsManualAllocationTask>(
     `/api/cost-statistics/manual-allocations/${encodeURIComponent(request.relationCaseId)}`,
     {
       method: "PUT",
@@ -641,6 +641,7 @@ export async function saveCostStatisticsManualAllocation(
         non_cost_reason: request.nonCostReason,
       }),
     },
+    { timeoutMs: 15000, timeoutMessage: "保存结果待确认", allowHtmlFallback: false },
   );
   return mapManualAllocationTask(payload);
 }

@@ -54,3 +54,14 @@ cd web && npx playwright test e2e/cost-statistics-flow.spec.ts e2e/cost-statisti
 - Read model/cache/job仍不新增；既有银行/关联的写后读取与部署worker健康由原回归保护。
 
 验证结果和生产测量记录于[实施决策](implementation-notes.md)。不将本地mock耗时当生产性能。
+
+## 紧凑抽屉重构专项（2026-09-09）
+
+- `CostSourceAllocation.test.ts`：固定目标、来源派生合计、显式零、非法精度、旧来源缺失；不确定保存结果必须同时核对版本、既有 fingerprint 和完整分配内容，不能仅凭版本递增判成功。
+- `CostSourceAllocationForm.test.tsx`：一张 OA 多成本项分组计数、内部 ID/冗余数字不进入可见文本、表头、零成本/新增/删除/焦点、非固定金额保存。
+- `CostStatisticsPage.test.tsx`：既有页签、下钻、权限、抽屉读取和保存回填，更新旧可见 ID 与独立金额输入断言。
+- `apiClient.test.ts`：Cost PUT 显式关闭 HTML 路径重试后只发一次请求；其他调用方的既有默认行为仍由原测试保护。HTTP DTO 未改变，保留 Cost API 合同测试。
+- `cost-source-allocation.spec.ts`：350/250保存与已完成重读、缺标签pending、409保留、只读窄屏、详情失败重试、提交成功但响应丢失后GET核实、统计刷新失败不重复PUT、删除/新增焦点；2/100合法来源行的输入、选择、增删和数据到达后渲染测量，无新增性能gate。
+- `test_cost_statistics_source_postgres.py` 增加真实 PG16 可编辑目标600/400案例：原OA700/400不变；来源三行通过现有 HTTP 路由保存重读后，三个视角8月/9月各500。既有并发、审计、回滚测试继续运行。
+- `FinanceTableMigration.test.ts` 仅登记成本来源分组编辑表为原生表格的明确例外，避免把专用输入规则扩进公共 FinanceTable。既有检查仍覆盖其余页面。
+- 不新增 read model/cache/worker 生命周期测试：本次没有相应运行时变更。生产验证只读；合法写入及回滚使用任务独占数据库。

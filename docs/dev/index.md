@@ -24,7 +24,8 @@
 
 ## 待批准功能实施
 
-- [成本统计银行来源分配完整实施计划](cost-statistics-source-allocation-plan.md)：后端业务/存储/API、前端Make→浏览器迭代→App移植→还原复验、旧链删除、性能、统一执行顺序和验收样例；配套 [Figma Make设计交接](../modules/cost-statistics/figma-make-design-brief.md)。2026-09-09 完整计划已复审，不使用GSD，未实现。
+- [成本待分配抽屉紧凑重构计划](cost-allocation-drawer-redesign-plan.md)：上方OA/银行两栏、下方来源分配表、内部ID与冗余文案清理、Make迭代与App还原、零成本/退款/草稿闭环、性能与九项要求复审；2026-09-09 仅计划，未实施，不使用GSD。
+- [成本统计银行来源分配完整实施计划](cost-statistics-source-allocation-plan.md)：首轮前后端已实施并部署，生产链路与性能限制见[实施记录](../modules/cost-statistics/implementation-notes.md)；配套 [Figma Make设计交接](../modules/cost-statistics/figma-make-design-brief.md)。后续抽屉UI改进见上一项计划。
 - [ETC 票根文本上传修复与验证](etc-ticket-root-text-upload-repair-plan.md)：入口限定许可、文本记录边界与错误反馈、前端选择/拖拽、多文件失败可见性及回归/性能证据；2026-09-08 已实施，执行与发布状态见第 10 节。
 - [银行同时间流水与余额修复计划](bank-same-time-ordering-repair-plan.md)：统一列表/导出/账户余额的顺序依据、明确未确认和最后已知余额、控制查询性能与旧代码清理；2026-09-08 设计阶段，未实现或发布。
 - [现金模块实施计划](cash-module-implementation-plan.md)：现金分支的开发顺序、执行单元、旧链路处理、测试/性能与复审；[技术详细设计](cash-module-technical-design.md)集中维护后端/API/数据库/事务，配套[业务总设计](../product-specs/cash-module-design.md)与[UI/Make 交接](../product-specs/cash-module-ui-spec.md)。不使用 GSD，未批准前不实施。

@@ -93,3 +93,6 @@
 - 新增页面必须同步 page registry、docs/modules、权限和 e2e routing smoke。
 - 导入分组只能从三个正式 import route 派生；不得恢复第二份子路由清单或独立导入汇总页。
 - ACL/menu 发布验收必须同时有 fresh APP session/direct API 与 fresh OA router/shell 两类证据；任一缺失都不能由另一类推断。
+
+
+通用HTTP客户端参数补充（2026-09-09）：`ApiRequestJsonOptions.allowHtmlFallback`允许业务调用方显式禁止已有的HTML换API前缀重试。Cost保存设为false，避免不明确写结果重复请求；默认行为、身份头、URL解析和其他页面不变。客户端不解释成本分配内容，结果核实由Cost容器拥有。对应`ApiClient.test.ts`同时保护禁止重试与既有默认路径。

@@ -12,7 +12,7 @@
 - 当前边界可信度：high
 - 目标边界：Finance Table 只提供通用表格布局、列、滚动、选择和 session 行为，不承载业务数据解释。
 - 当前缺口：非关联台生产表格已收敛到共享 HeroUI `FinanceTable`；页面仍各自维护业务列配置属于页面模块责任，不阻断本模块 close。关联台两个冻结表格由 Workbench 独立边界维护。
-- 旧代码删除条件：旧 MUI/DataGrid runtime、provider/theme、`useMuiDataGridPageSession`、非关联台原生 `<table>` 路径及对应兼容测试均已移除；静态迁移门禁阻止这些路径回归。
+- 旧代码删除条件：旧 MUI/DataGrid runtime、provider/theme、`useMuiDataGridPageSession`、未获明确例外的非关联台原生 `<table>` 路径及对应兼容测试均已移除；静态迁移门禁阻止这些路径回归。
 
 ## 职责边界
 
@@ -69,7 +69,7 @@
 
 - 允许依赖：React/UI primitives, page-provided callbacks。
 - 必须通过：typed props and page session hook。
-- 禁止绕过：FinanceTable import business API；table component infer permission/read model state；恢复 MUI/DataGrid runtime、provider/theme、旧 `useMuiDataGridPageSession` 或非关联台原生表格。
+- 禁止绕过：FinanceTable import business API；table component infer permission/read model state；恢复 MUI/DataGrid runtime、provider/theme、旧 `useMuiDataGridPageSession` 或未登记例外的非关联台原生表格。
 
 ## 测试与验证
 
@@ -86,3 +86,7 @@
 - HeroUI Table header 内的全选 Checkbox 使用 selection slot；业务行 Checkbox 保持页面自控状态，不接管为 HeroUI 表格选择模型。
 - `contained` 表格表头内的筛选层使用 HeroUI Popover Portal；禁止恢复滚动容器内的绝对定位菜单。
 - 可复制文本由共享 `selectableText` 合同统一处理；禁止恢复待找发票页面私有 `user-select` 补丁，或把可复制业务内容重新包进整行/整项原生按钮。交互控件必须继续可点击和可聚焦。
+
+## 成本来源编辑表的局部例外（2026-09-09）
+
+`CostSourceAllocationForm.tsx` 使用原生语义表格承载 Make 的分组输入布局：每个 OA 成本项一个 tbody，包含来源、金额输入和新增行。它没有通用数据列表的排序、分页、选择或 session，不把成本编辑规则扩入 FinanceTable。仅此文件与已有银行规则抽屉登记在 `FinanceTableMigration.test.ts` 的明确允许集合；其余消费者的既有检查不变。Cost 局部 CSS 不修改公共表格或全站样式。

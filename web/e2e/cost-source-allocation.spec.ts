@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { missingTag?: boolean; conflict?: boolean; canSave?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64),
@@ -16,41 +16,56 @@ async function sourceScenario(page: Page, options: { missingTag?: boolean; confl
     allocations: [{ unit_id: 'oa-1', amount: '600.00' }], source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
+  if (options.large) {
+    task.oa_total = task.net_outflow_total = task.gross_outflow_total = '1000.00';
+    task.units = Array.from({ length: 10 }, (_, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_id: `doc-${Math.floor(i / 2)}`, expense_content: `成本项目 ${i + 1}`, oa_original_amount: '100.00' }));
+    task.bank_events = Array.from({ length: 10 }, (_, i) => ({ ...task.bank_events[0], transaction_id: `source-${i}`, bank_account_label: `测试银行 ${i + 1}`, amount: '100.00' }));
+    task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: '100.00' }));
+    task.source_allocations = { cost_lines: task.units.flatMap(unit => task.bank_events.map(bank => ({ unit_id: unit.unit_id, bank_transaction_id: bank.transaction_id, amount: '10.00' }))), refund_links: [], non_cost_lines: [] };
+  }
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
     if (route.request().method() === 'PUT') {
       writes++; savedBody = route.request().postDataJSON();
-      if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '关联事实已变化，请保留草稿并重新核对。' } });
+      if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '关联事实已变化，请重新读取并核对；草稿已保留' } });
       task.source_allocations = savedBody!.source_allocations;
+      task.allocations = savedBody!.allocations;
       task.version++; task.status = options.missingTag ? 'pending' : 'allocated';
       task.pending_reasons = options.missingTag ? ['bank_tag_missing'] : [];
+      if (options.interrupted) return route.fulfill({ status: 502, json: { message: 'upstream response lost after commit' } });
       return route.fulfill({ json: task });
     }
-    if (url.pathname.endsWith('/source-case')) { details++; return route.fulfill({ json: task }); }
+    if (url.pathname.endsWith('/source-case')) { details++; if (options.detailFailure && details === 1) return route.fulfill({ status: 503, json: { message: 'unavailable' } }); return route.fulfill({ json: task }); }
     const { units, bank_events, allocations, source_allocations, ...summary } = task;
     return route.fulfill({ json: {
-      items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: ['云南溯源科技'], unit_count: 1, bank_event_count: 2 }] : [],
+      items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: ['云南溯源科技'], unit_count: task.units.length, bank_event_count: task.bank_events.length }] : [],
       row_count: 1, counts: { pending: task.status === 'pending' ? 1 : 0, allocated: task.status === 'allocated' ? 1 : 0 }, next_cursor: null,
     } });
   });
+  if (options.refreshFailure) await page.route('**/api/cost-statistics/explorer**', route => writes > 0 ? route.fulfill({ status: 503, json: { error: 'temporarily_unavailable', message: '统计刷新暂不可用' } }) : route.fallback());
   await page.goto('/cost-statistics');
   await expect(page.getByRole('heading', { name: '成本统计' })).toBeVisible();
   expect(details).toBe(0);
+  await page.evaluate(() => {
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('.cost-source-table')) { performance.mark('cost-source-first-table'); observer.disconnect(); }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
   await page.getByRole('button', { name: '打开成本人工分配' }).click();
   const drawer = page.getByRole('dialog', { name: '成本人工分配' });
-  await expect(drawer.getByText('银行流水证据')).toBeVisible();
-  const unit = drawer.locator('.cost-source-unit').filter({ hasText: '原 OA 材料费用' });
-  return { drawer, unit, task, writes: () => writes, body: () => savedBody };
+  if (!options.detailFailure) await expect(drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
+  const unit = drawer.locator('.cost-source-table tbody').first();
+  return { drawer, unit, task, writes: () => writes, body: () => savedBody, details: () => details };
 }
 
 async function fillSources(page: Page, unit: ReturnType<Page['locator']>) {
   for (const [index, amount] of ['350', '250'].entries()) {
     await unit.getByRole('button', { name: '新增来源', exact: true }).click();
-    const source = unit.getByRole('button', { name: new RegExp(`来源流水 ${index + 1}`) });
+    const source = unit.getByRole('combobox', { name: `来源流水 ${index + 1}`, exact: true });
     await expect(source).toBeFocused();
-    await source.press('ArrowDown');
-    await page.getByRole('option', { name: new RegExp(`${amount}.00`) }).click();
+    await source.selectOption(index === 0 ? 'bank-a' : 'bank-b');
     await unit.getByRole('textbox', { name: `分配金额 ${index + 1}`, exact: true }).fill(amount);
   }
 }
@@ -59,10 +74,17 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
   await page.setViewportSize({ width: 1440, height: 1000 });
   const scene = await sourceScenario(page);
   await fillSources(page, scene.unit);
-  await expect(scene.drawer.locator('.cost-source-evidence-card').getByText('剩余 0.00', { exact: false })).toHaveCount(2);
-  await expect(scene.unit.getByText('2026-08-15 08:00:00', { exact: true }).last()).toBeVisible();
-  await expect(scene.unit.getByText('2026-09-03', { exact: true }).last()).toBeVisible();
-  await page.screenshot({ path: '/tmp/cost-source-app-1440.png', fullPage: false, animations: "disabled" });
+  await expect(scene.drawer.getByText(/剩余|已分 |bank-a|bank-b|source-case|OA-202608-001/)).toHaveCount(0);
+  expect(scene.details()).toBe(1);
+  expect(scene.writes()).toBe(0);
+  const evidence = scene.drawer.locator('.cost-source-evidence');
+  const left = await evidence.locator('section').first().boundingBox();
+  const right = await evidence.locator('section').last().boundingBox();
+  expect(right!.x).toBeGreaterThan(left!.x);
+  expect(right!.y).toBeCloseTo(left!.y, 0);
+  await expect(scene.drawer.locator('.cost-source-evidence').getByText('2026-08-15 08:00:00', { exact: true })).toBeVisible();
+  await expect(scene.drawer.locator('.cost-source-evidence').getByText('2026-09-03', { exact: true })).toBeVisible();
+  await page.screenshot({ path: '/tmp/cost-drawer-app-1440.png', fullPage: false, animations: "disabled" });
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
   await expect(scene.drawer.getByText('当前没有待分配任务')).toBeVisible();
   expect(scene.writes()).toBe(1);
@@ -80,7 +102,7 @@ test('keeps a saved task pending when a bank tag is missing and rehydrates after
   const scene = await sourceScenario(page, { missingTag: true });
   await fillSources(page, scene.unit);
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
-  await expect(scene.drawer.getByText('来源分配已保存，仍有银行信息待完善')).toBeVisible();
+  await expect(scene.drawer.getByText('已保存，银行信息待完善')).toBeVisible();
   await expect(scene.drawer.getByRole('radio', { name: '待分配 1' })).toBeVisible();
   await scene.drawer.getByRole('button', { name: /关闭/ }).click();
   await page.getByRole('button', { name: '打开成本人工分配' }).click();
@@ -94,8 +116,8 @@ test('retains input after a stale-version conflict and blocks incomplete amounts
   expect(scene.writes()).toBe(0);
   await fillSources(page, scene.unit);
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
-  await expect(scene.drawer.getByText('关联事实已变化，请保留草稿并重新核对。')).toBeVisible();
-  await expect(scene.unit.getByRole('textbox', { name: '分配金额 2', exact: true })).toHaveValue('250');
+  await expect(scene.drawer.getByText('关联事实已变化，请重新读取并核对；草稿已保留')).toBeVisible();
+  await expect(scene.unit.getByRole('textbox', { name: '分配金额 2', exact: true })).toHaveValue('250.00');
   await expect(scene.drawer.getByRole('button', { name: '重新读取当前事实' })).toBeVisible();
 });
 
@@ -105,8 +127,108 @@ test('preserves read-only controls and fits narrow screens without horizontal ov
   await expect(scene.drawer.getByRole('button', { name: '保存分配' })).toBeDisabled();
   await expect(scene.unit.getByRole('button', { name: '新增来源', exact: true })).toBeDisabled();
   expect(await scene.drawer.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-  await page.screenshot({ path: '/tmp/cost-source-app-390.png', fullPage: false, animations: "disabled" });
+  await page.screenshot({ path: '/tmp/cost-drawer-app-390.png', fullPage: false, animations: "disabled" });
   expect(scene.writes()).toBe(0);
   const box = await scene.drawer.boundingBox();
   expect(box!.x).toBeCloseTo(0, 0); expect(box!.width).toBeCloseTo(390, 0);
+});
+
+
+test('reads a failed detail again without showing an empty task as fact', async ({ page }) => {
+  const scene = await sourceScenario(page, { detailFailure: true });
+  await expect(scene.drawer.getByText('任务读取失败，请重试')).toBeVisible();
+  await expect(scene.drawer.locator('.cost-source-table')).toHaveCount(0);
+  await scene.drawer.getByRole('button', { name: '重新读取当前事实' }).click();
+  await expect(scene.drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
+  expect(scene.details()).toBe(2);
+  expect(scene.writes()).toBe(0);
+});
+
+test('reconciles a committed write with a lost response using GET and never submits twice', async ({ page }) => {
+  const scene = await sourceScenario(page, { interrupted: true });
+  await fillSources(page, scene.unit);
+  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await expect(scene.drawer.getByText('保存结果待确认，请核实保存结果；草稿已保留')).toBeVisible();
+  await expect(scene.drawer.getByRole('button', { name: '保存分配' })).toBeDisabled();
+  await scene.drawer.getByRole('button', { name: '核实保存结果' }).click();
+  await expect(scene.drawer.getByText('当前没有待分配任务')).toBeVisible();
+  expect(scene.writes()).toBe(1);
+  expect(scene.details()).toBe(2);
+});
+
+test('keeps the current full source selectable and restores focus after row deletion', async ({ page }) => {
+  const scene = await sourceScenario(page);
+  await fillSources(page, scene.unit);
+  const selected = scene.unit.getByRole('combobox', { name: '来源流水 1', exact: true });
+  await expect(selected.locator('option[value="bank-a"]')).toBeEnabled();
+  await expect(selected.locator('option[value="bank-b"]')).toBeDisabled();
+  await scene.unit.getByRole('button', { name: '删除来源行 1', exact: true }).click();
+  await expect(scene.unit.getByRole('combobox', { name: '来源流水 1', exact: true })).toBeFocused();
+  await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('250.00');
+  await scene.unit.getByRole('button', { name: '删除来源行 1', exact: true }).click();
+  await expect(scene.unit.getByRole('button', { name: '新增来源', exact: true })).toBeFocused();
+  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  expect(scene.writes()).toBe(0);
+});
+
+
+for (const large of [false, true]) {
+  test(`measures local editing with ${large ? '100' : '2'} valid source rows without extra requests`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const scene = await sourceScenario(page, { large });
+    if (!large) await fillSources(page, scene.unit);
+    const table = scene.drawer.getByRole('table', { name: '成本分配明细', exact: true });
+    await expect(table.getByRole('combobox')).toHaveCount(large ? 100 : 2);
+    const measurements = await table.evaluate(async element => {
+      const input = element.querySelector('input')!;
+      const select = element.querySelector('select')!;
+      const durations: number[] = [];
+      for (let i = 0; i < 20; i++) {
+        const start = performance.now();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, i % 2 ? '10.00' : '10.01');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        durations.push(performance.now() - start);
+      }
+      const selection: number[] = [];
+      const originalSource = select.value;
+      for (let i = 0; i < 20; i++) {
+        const start = performance.now();
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, i % 2 ? originalSource : '');
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        selection.push(performance.now() - start);
+      }
+      const addDelete: number[] = [];
+      const unit = element.querySelector('tbody')!;
+      for (let i = 0; i < 20; i++) {
+        const start = performance.now();
+        if (i % 2 === 0) unit.querySelector<HTMLButtonElement>('.cost-source-add-row button')!.click();
+        else [...unit.querySelectorAll<HTMLButtonElement>('.cost-source-icon')].at(-1)!.click();
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        addDelete.push(performance.now() - start);
+      }
+      const resource = performance.getEntriesByType('resource').find(entry => entry.name.endsWith('/manual-allocations/source-case')) as PerformanceResourceTiming | undefined;
+      const painted = performance.getEntriesByName('cost-source-first-table')[0];
+      const dataToTableMs = resource && painted ? Number((painted.startTime - resource.responseEnd).toFixed(2)) : null;
+      const p95 = (values: number[]) => Number([...values].sort((a, b) => a - b)[Math.ceil(values.length * .95) - 1].toFixed(2));
+      return { inputSamples: durations.length, inputP95Ms: p95(durations), selectionSamples: selection.length, selectionP95Ms: p95(selection), addDeleteSamples: addDelete.length, addDeleteP95Ms: p95(addDelete), dataToTableMs };
+    });
+    console.log(JSON.stringify({ costDrawerPerformance: { rows: large ? 100 : 2, ...measurements } }));
+    expect(scene.details()).toBe(1);
+    expect(scene.writes()).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+}
+
+test('keeps a successful allocation committed when the statistics refresh fails', async ({ page }) => {
+  const scene = await sourceScenario(page, { refreshFailure: true });
+  await fillSources(page, scene.unit);
+  const failedRead = page.waitForResponse(response => response.url().includes('/cost-statistics/explorer') && response.status() === 503);
+  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await failedRead;
+  await expect(scene.drawer.getByText('当前没有待分配任务')).toBeVisible();
+  await scene.drawer.getByRole('radio', { name: '已完成 1' }).click();
+  await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('350.00');
+  expect(scene.writes()).toBe(1);
 });

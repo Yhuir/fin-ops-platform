@@ -124,24 +124,21 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "打开成本人工分配" }));
     const drawer = await screen.findByRole("dialog", { name: "成本人工分配" });
-    expect(await within(drawer).findByText("bank-manual-001", { exact: true })).toBeInTheDocument();
-    expect(within(drawer).getByText("bank-manual-002", { exact: true })).toBeInTheDocument();
+    expect(await within(drawer).findByRole("heading", { name: /银行流水/ })).toBeInTheDocument();
+    expect(within(drawer).queryByText(/bank-manual-00/)).not.toBeInTheDocument();
     expect(within(drawer).getAllByText("项目开销 / 设备材料 / 设备采购", { exact: true })).toHaveLength(2);
     expect(within(drawer).getByText("支付申请 · 材料费")).toBeInTheDocument();
     expect(within(drawer).getByText("日常报销 · 交通费")).toBeInTheDocument();
     expect(within(drawer).queryByRole("combobox")).not.toBeInTheDocument();
     await user.click(within(drawer).getByRole("button", { name: "保存分配" }));
-    expect(within(drawer).getAllByText("请填写本项成本，零成本请明确填写 0")).toHaveLength(2);
-    await user.type(within(drawer).getByLabelText("项目 A本项成本"), "600.00");
-    await user.type(within(drawer).getByLabelText("项目 B本项成本"), "400.00");
-    expect(within(drawer).getAllByText("来源分配合计必须等于本项成本")).toHaveLength(2);
-    const firstUnit = within(drawer).getByText("支付申请 · 材料费").closest("article")!;
+    expect(within(drawer).getAllByText("请分配来源，或明确设为零成本")).toHaveLength(2);
+    expect(within(drawer).queryByLabelText("项目 A本项成本")).not.toBeInTheDocument();
+    const firstUnit = drawer.querySelector(".cost-source-table tbody")! as HTMLElement;
     await user.click(within(firstUnit).getByRole("button", { name: "新增来源" }));
-    expect(within(firstUnit).getByRole("button", { name: /来源流水 1/ })).toHaveFocus();
-    await user.click(within(firstUnit).getByRole("button", { name: /来源流水 1/ }));
-    await user.click(await screen.findByRole("option", { name: /600.00/ }));
+    const source = within(firstUnit).getByRole("combobox", { name: "来源流水 1" });
+    expect(source).toHaveFocus();
+    await user.selectOptions(source, "bank-manual-001");
     await user.type(within(firstUnit).getByLabelText("分配金额 1"), "600");
-    expect(within(firstUnit).getAllByText("建设银行 8106", { exact: true }).length).toBeGreaterThan(0);
     expect(within(firstUnit).queryByLabelText("银行账户")).not.toBeInTheDocument();
   });
 

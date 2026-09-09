@@ -80,6 +80,38 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertNotIn("bank_events", tasks["items"][0])
         self.assertNotIn("source_allocations", tasks["items"][0])
 
+    def test_editable_source_totals_save_without_changing_original_oa_amount(self):
+        # The table derives 600/400 from its source rows; the original OA remains 700/400.
+        self.connection.execute("""update app.oa_applications set amount=700,
+            normalized_payload=jsonb_set(normalized_payload,'{amount}','"700.00"'::jsonb)
+            where oa_source_id='oa-a'""")
+        task = self.service.get_task("cost-source-case", can_save=True)
+        self.assertFalse(task["amounts_fixed"])
+        payload = self.payload()
+        payload["allocations"] = [{"unit_id": "oa:oa-a", "amount": "600.00"},
+                                  {"unit_id": "oa:oa-b", "amount": "400.00"}]
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        # Keep the real HTTP mapping/session boundary; use this test's real PG services.
+        app._cost_statistics_api_routes._manual_allocation_service = self.service  # noqa: SLF001
+        app._cost_statistics_api_routes._query_service = self.query  # noqa: SLF001
+        path = "/api/cost-statistics/manual-allocations/cost-source-case"
+        response = app.handle_request("PUT", path, body=json.dumps(payload))
+        self.assertEqual(response.status_code, 200, response.body)
+        saved = json.loads(response.body)
+        self.assertEqual(saved["allocations"], payload["allocations"])
+        response = app.handle_request("GET", path)
+        self.assertEqual(response.status_code, 200)
+        reread = json.loads(response.body)
+        self.assertEqual(reread["source_allocations"], payload["source_allocations"])
+        self.assertEqual(next(unit for unit in reread["units"] if unit["unit_id"] == "oa:oa-a")["oa_original_amount"], "700.00")
+        for view in ("project", "cost_tag", "bank_account"):
+            for month in ("2026-08", "2026-09"):
+                response = app.handle_request("GET", f"/api/cost-statistics/explorer?view={view}&scope={month}&page_size=20")
+                self.assertEqual(response.status_code, 200, response.body)
+                page = json.loads(response.body)
+                self.assertEqual(page["summary"]["total_amount"], "500.00")
+
     def test_audit_failure_rolls_back_the_allocation(self):
         payload = self.payload()
         with patch.object(PostgresOperationsAuditRepository, "append_operation_event", side_effect=RuntimeError("audit unavailable")):
