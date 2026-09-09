@@ -1,6 +1,6 @@
 # 成本待分配抽屉：紧凑两栏与表格重构计划
 
-日期：2026-09-09。状态：已按用户授权完成 Make V8 设计迭代与 App 实施，发布验证结果以[实施记录](../modules/cost-statistics/implementation-notes.md)为准。下文保留实施依据，不使用 GSD，不新增门禁。
+日期：2026-09-09。状态：已按用户授权完成 Make V8 设计迭代、App 实施和上线验证，发布验证结果以[实施记录](../modules/cost-statistics/implementation-notes.md)为准。下文保留实施依据，不使用 GSD，不新增门禁。
 
 本计划承接已上线的[银行来源分配](cost-statistics-source-allocation-plan.md)，仅调整待分配抽屉的信息结构和输入方式。现有业务事实仍以[成本边界与 I/O](../modules/cost-statistics/boundary-io.md)为准；当前运行时事实与验证结果维护在模块文档中。
 
