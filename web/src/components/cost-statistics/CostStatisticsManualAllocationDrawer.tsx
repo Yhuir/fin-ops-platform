@@ -131,7 +131,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
           return <article className={`cost-source-task${active ? ' is-expanded' : ''}`} key={id}>
             <button type="button" className="cost-source-task-heading" aria-expanded={active} onClick={() => { setExpanded(active ? null : id); if (!active) void loadDetail(id); }}>
               <ChevronRight size={15} className={active ? 'is-expanded' : ''} /><strong>{item.projectNames.join('、') || '项目未填写'}</strong>
-              <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : '已完成'}</span><span>{item.unitCount} 个成本项 · {item.bankEventCount} 条流水{state?.dirty ? ' · 未保存' : ''}</span></span>
+              <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : '已完成'}</span>{state?.dirty ? <span>未保存</span> : null}</span>
             </button>
             {active ? <>
               {state?.loading ? <p role="status">正在读取该关联的来源…</p> : null}

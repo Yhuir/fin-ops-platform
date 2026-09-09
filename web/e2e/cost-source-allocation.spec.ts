@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64),
@@ -18,10 +18,15 @@ async function sourceScenario(page: Page, options: { missingTag?: boolean; confl
   };
   if (options.large) {
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '1000.00';
-    task.units = Array.from({ length: 10 }, (_, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_id: `doc-${Math.floor(i / 2)}`, expense_content: `成本项目 ${i + 1}`, oa_original_amount: '100.00' }));
+    task.units = Array.from({ length: 100 }, (_, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_id: `doc-${Math.floor(i / 2)}`, expense_content: `成本项目 ${i + 1}`, oa_original_amount: '10.00' }));
     task.bank_events = Array.from({ length: 10 }, (_, i) => ({ ...task.bank_events[0], transaction_id: `source-${i}`, bank_account_label: `测试银行 ${i + 1}`, amount: '100.00' }));
-    task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: '100.00' }));
-    task.source_allocations = { cost_lines: task.units.flatMap(unit => task.bank_events.map(bank => ({ unit_id: unit.unit_id, bank_transaction_id: bank.transaction_id, amount: '10.00' }))), refund_links: [], non_cost_lines: [] };
+    task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: '10.00' }));
+    task.source_allocations = { cost_lines: task.units.map((unit, i) => ({ unit_id: unit.unit_id, bank_transaction_id: task.bank_events[i % 10].transaction_id, amount: '10.00' })), refund_links: [], non_cost_lines: [] };
+  }
+  if (options.performance && !options.large) {
+    task.units = task.bank_events.map((bank, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_original_amount: bank.amount }));
+    task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: unit.oa_original_amount }));
+    task.source_allocations = { cost_lines: task.units.map((unit, i) => ({ unit_id: unit.unit_id, bank_transaction_id: task.bank_events[i].transaction_id, amount: unit.oa_original_amount })), refund_links: [], non_cost_lines: [] };
   }
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
@@ -65,7 +70,8 @@ async function fillSources(page: Page, unit: ReturnType<Page['locator']>) {
     await unit.getByRole('button', { name: '新增来源', exact: true }).click();
     const source = unit.getByRole('combobox', { name: `来源流水 ${index + 1}`, exact: true });
     await expect(source).toBeFocused();
-    await source.selectOption(index === 0 ? 'bank-a' : 'bank-b');
+    await source.click();
+    await page.getByRole('option', { name: index === 0 ? /建设银行 8106/ : /民生银行 9486/ }).click();
     await unit.getByRole('textbox', { name: `分配金额 ${index + 1}`, exact: true }).fill(amount);
   }
 }
@@ -114,6 +120,7 @@ test('retains input after a stale-version conflict and blocks incomplete amounts
   const scene = await sourceScenario(page, { conflict: true });
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
   expect(scene.writes()).toBe(0);
+  await page.keyboard.press('Escape');
   await fillSources(page, scene.unit);
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
   await expect(scene.drawer.getByText('关联事实已变化，请重新读取并核对；草稿已保留')).toBeVisible();
@@ -160,8 +167,10 @@ test('keeps the current full source selectable and restores focus after row dele
   const scene = await sourceScenario(page);
   await fillSources(page, scene.unit);
   const selected = scene.unit.getByRole('combobox', { name: '来源流水 1', exact: true });
-  await expect(selected.locator('option[value="bank-a"]')).toBeEnabled();
-  await expect(selected.locator('option[value="bank-b"]')).toBeDisabled();
+  await selected.click();
+  await expect(page.getByRole('option', { name: /建设银行 8106/ })).toBeEnabled();
+  await expect(page.getByRole('option', { name: /民生银行 9486/ })).toBeDisabled();
+  await page.keyboard.press('Escape');
   await scene.unit.getByRole('button', { name: '删除来源行 1', exact: true }).click();
   await expect(scene.unit.getByRole('combobox', { name: '来源流水 1', exact: true })).toBeFocused();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('250.00');
@@ -175,13 +184,12 @@ test('keeps the current full source selectable and restores focus after row dele
 for (const large of [false, true]) {
   test(`measures local editing with ${large ? '100' : '2'} valid source rows without extra requests`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
-    const scene = await sourceScenario(page, { large });
-    if (!large) await fillSources(page, scene.unit);
+    const scene = await sourceScenario(page, { large, performance: true });
     const table = scene.drawer.getByRole('table', { name: '成本分配明细', exact: true });
     await expect(table.getByRole('combobox')).toHaveCount(large ? 100 : 2);
     const measurements = await table.evaluate(async element => {
       const input = element.querySelector('input')!;
-      const select = element.querySelector('select')!;
+
       const durations: number[] = [];
       for (let i = 0; i < 20; i++) {
         const start = performance.now();
@@ -190,20 +198,11 @@ for (const large of [false, true]) {
         await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         durations.push(performance.now() - start);
       }
-      const selection: number[] = [];
-      const originalSource = select.value;
-      for (let i = 0; i < 20; i++) {
-        const start = performance.now();
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, i % 2 ? originalSource : '');
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-        selection.push(performance.now() - start);
-      }
       const addDelete: number[] = [];
       const unit = element.querySelector('tbody')!;
       for (let i = 0; i < 20; i++) {
         const start = performance.now();
-        if (i % 2 === 0) unit.querySelector<HTMLButtonElement>('.cost-source-add-row button')!.click();
+        if (i % 2 === 0) unit.querySelector<HTMLButtonElement>('.cost-source-add')!.click();
         else [...unit.querySelectorAll<HTMLButtonElement>('.cost-source-icon')].at(-1)!.click();
         await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         addDelete.push(performance.now() - start);
@@ -212,9 +211,26 @@ for (const large of [false, true]) {
       const painted = performance.getEntriesByName('cost-source-first-table')[0];
       const dataToTableMs = resource && painted ? Number((painted.startTime - resource.responseEnd).toFixed(2)) : null;
       const p95 = (values: number[]) => Number([...values].sort((a, b) => a - b)[Math.ceil(values.length * .95) - 1].toFixed(2));
-      return { inputSamples: durations.length, inputP95Ms: p95(durations), selectionSamples: selection.length, selectionP95Ms: p95(selection), addDeleteSamples: addDelete.length, addDeleteP95Ms: p95(addDelete), dataToTableMs };
+      return { inputSamples: durations.length, inputP50Ms: [...durations].sort((a,b) => a-b)[9], inputP95Ms: p95(durations), inputMaxMs: Math.max(...durations), addDeleteSamples: addDelete.length, addDeleteP50Ms: [...addDelete].sort((a,b) => a-b)[9], addDeleteP95Ms: p95(addDelete), addDeleteMaxMs: Math.max(...addDelete), dataToTableMs };
     });
-    console.log(JSON.stringify({ costDrawerPerformance: { rows: large ? 100 : 2, ...measurements } }));
+    // Editing the second row frees a real alternative source; measure actual changes, not same-value events.
+    await table.getByRole('textbox').nth(1).fill('0');
+    const opening: number[] = []; const selection: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      const trigger = table.getByRole('combobox').first();
+      const recordNextClick = () => page.evaluate(() => {
+        (window as any).__costInteraction = null;
+        document.addEventListener('pointerdown', () => {
+          const start = performance.now();
+          requestAnimationFrame(() => requestAnimationFrame(() => { (window as any).__costInteraction = performance.now() - start; }));
+        }, { once: true, capture: true });
+      });
+      const readDuration = async () => { await expect.poll(() => page.evaluate(() => (window as any).__costInteraction)).not.toBeNull(); return page.evaluate(() => (window as any).__costInteraction as number); };
+      await recordNextClick(); await trigger.click(); opening.push(await readDuration());
+      await recordNextClick(); await page.getByRole('listbox', { name: '来源流水 1', exact: true }).getByRole('option').nth(i % 2 === 0 ? 1 : 0).click(); selection.push(await readDuration());
+    }
+    const distribution = (values: number[]) => { const sorted = [...values].sort((a,b) => a-b); return { samples: values.length, p50: sorted[Math.ceil(values.length * .5)-1], p95: sorted[Math.ceil(values.length * .95)-1], max: sorted.at(-1) }; };
+    console.log(JSON.stringify({ costDrawerPerformance: { rows: large ? 100 : 2, ...measurements, dropdownOpen: distribution(opening), sourceChange: distribution(selection) } }));
     expect(scene.details()).toBe(1);
     expect(scene.writes()).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -231,4 +247,26 @@ test('keeps a successful allocation committed when the statistics refresh fails'
   await scene.drawer.getByRole('radio', { name: '已完成 1' }).click();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('350.00');
   expect(scene.writes()).toBe(1);
+});
+
+
+test('keeps invalid amount feedback within its cell and leaves source geometry stable', async ({ page }) => {
+  const scene = await sourceScenario(page);
+  await scene.unit.getByRole('button', { name: '新增来源', exact: true }).click();
+  const source = scene.unit.getByRole('combobox'); const amount = scene.unit.getByRole('textbox');
+  await source.press('ArrowDown');
+  await page.getByRole('option', { name: /建设银行 8106/ }).click();
+  const before = await source.boundingBox();
+  await amount.fill('1.234'); await amount.press('Tab');
+  await expect(amount).toHaveAttribute('aria-invalid', 'true');
+  await expect(source).toHaveAttribute('aria-invalid', 'false');
+  const after = await source.boundingBox();
+  expect(after!.y).toBe(before!.y); expect(after!.height).toBe(before!.height);
+  await expect(scene.unit.locator('td').nth(2).locator('p')).toHaveCount(0);
+  await scene.unit.getByRole('button', { name: '金额须大于 0，最多两位小数' }).click();
+  await expect(page.getByRole('dialog', { name: '分配校验' })).toBeVisible();
+  await page.screenshot({ path: '/tmp/cost-grid-amount-error.png', animations: 'disabled' });
+  await page.keyboard.press('Escape');
+  await expect(scene.drawer).toBeVisible();
+  expect(scene.writes()).toBe(0);
 });

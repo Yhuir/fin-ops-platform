@@ -65,14 +65,14 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
     const seen = new Set<string>();
     for (const line of draft[kind]) {
       const field = `${kind}.${line.id}`;
-      if (!sources.has(line.bankTransactionId)) errors[field] = '请选择本关联中的支出流水';
-      if (kind === 'costLines' && !units.has(line.ownerId)) errors[field] = '请选择有效的 OA 成本项';
-      if (kind === 'refundLinks' && !refunds.has(line.ownerId)) errors[field] = '请选择有效的退款流水';
+      if (!sources.has(line.bankTransactionId)) errors[`${field}.source`] = '请选择本关联中的支出流水';
+      if (kind === 'costLines' && !units.has(line.ownerId)) errors[`${field}.owner`] = '请选择有效的 OA 成本项';
+      if (kind === 'refundLinks' && !refunds.has(line.ownerId)) errors[`${field}.owner`] = '请选择有效的退款流水';
       const amount = cents(line.amount);
-      if (amount === null || amount <= 0n) errors[field] = '请输入大于零的金额，最多两位小数';
+      if (amount === null || amount <= 0n) errors[`${field}.amount`] = '金额须大于 0，最多两位小数';
       else if (kind === 'costLines') totals.set(line.ownerId, (totals.get(line.ownerId) ?? 0n) + amount);
       const identity = JSON.stringify([line.ownerId, line.bankTransactionId]);
-      if (line.bankTransactionId && seen.has(identity)) errors[field] = '此成本项已有该来源';
+      if (line.bankTransactionId && seen.has(identity)) errors[`${field}.source`] = '此成本项已有该来源';
       seen.add(identity);
     }
   }

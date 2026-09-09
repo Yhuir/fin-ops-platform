@@ -130,3 +130,12 @@ PUT manual allocation
 - 设置：只删除成本统计旧 time/tag family，不影响银行明细自己的自动标签设置。
 - 权限/审计：无 OA 与人工分配写入口保持现有权限和审计合同。
 - 数据库：0169 增加一个 nullable JSONB 列，不重写旧金额；不创建备份，不删除主库。写入只限成本分配与审计。
+
+## 双表格抽屉界面边界（2026-09-09）
+
+- 容器继续独占 GET/PUT、权限、草稿、未知保存结果核实及刷新；本轮没有新增 HTTP、DTO、数据库、worker 或 read model。
+- `CostSourceEvidence.tsx` 接收 task 和来源错误展示，只读 OA 成本单元与流水，两侧计数按展示行。复用 FinanceTable；不把两侧行号解释为逐行对应。
+- `CostSourcePicker.tsx` 接收 options/value/disabled/error、输出 transactionId；使用 HeroUI Popover/ListBox，不请求网络、不分配金额、不推断账户或标签。
+- 表单仍接收 task/draft、输出 onChange/onSave；`sourceAllocation.ts` 错误键分为 source/amount/owner，保留精确金额、零、双边闭合及未知写结果核实。
+- OA 原费用类型只读展示；成本行标签只读来源流水结构化主/子标签。替换来源不改变已输入金额。
+- 已移除 OA 文章卡片及展开全文行、独占一行的新增入口、来源格内联金额错误、旧原生 select 及灰白展开覆盖样式。旧实现没有并行保留。

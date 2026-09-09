@@ -43,7 +43,7 @@ describe('cost source amount closure', () => {
   test('rejects duplicate source tuples and editing fixed OA totals', () => {
     const task = sourceTask(); const draft = createSourceDraft(task);
     draft.costLines = [1, 2].map(id => ({ id, ownerId: 'oa-1:parent', bankTransactionId: 'bank-a', amount: '175' }));
-    expect(validateSourceDraft(task, draft)).toMatchObject({ 'costLines.2': '此成本项已有该来源', 'unit.oa-1:parent': '该成本项分配合计须为 600.00' });
+    expect(validateSourceDraft(task, draft)).toMatchObject({ 'costLines.2.source': '此成本项已有该来源', 'unit.oa-1:parent': '该成本项分配合计须为 600.00' });
   });
   test('rehydrates saved source decisions even while metadata remains pending', () => {
     const task = sourceTask(); task.pendingReasons = ['bank_tag_missing'];
@@ -104,7 +104,9 @@ describe('cost source amount closure', () => {
   test('rejects rows owned by an unavailable OA and malformed source amounts', () => {
     const task = sourceTask(); const draft = createSourceDraft(task);
     draft.costLines = [{ id: 1, ownerId: 'unknown-unit', bankTransactionId: 'bank-a', amount: '350' }];
-    expect(validateSourceDraft(task, draft)['costLines.1']).toBe('请选择有效的 OA 成本项');
+    expect(validateSourceDraft(task, draft)['costLines.1.owner']).toBe('请选择有效的 OA 成本项');
+    draft.costLines[0].bankTransactionId = ''; draft.costLines[0].amount = 'bad';
+    expect(validateSourceDraft(task, draft)).toMatchObject({ 'costLines.1.owner': '请选择有效的 OA 成本项', 'costLines.1.source': '请选择本关联中的支出流水', 'costLines.1.amount': '金额须大于 0，最多两位小数' });
     draft.costLines[0].ownerId = 'oa-1:parent'; draft.costLines[0].amount = '0.001';
     expect(() => sourceSaveRequest(task, draft)).toThrow();
   });
