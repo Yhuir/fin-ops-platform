@@ -185,3 +185,7 @@ PUT manual allocation
 - 任务详情保留完整事实；列表及计数排除全范围外关系，未知来源组内存在允许支出时保留。`bank_events[].in_project_cost_scope` 由 Policy 输出，前端仅显示“范围外”，不重新实现判断。
 - 专用 Drawer 只接收数据与事件。页面拥有 GET/PUT、草稿、超时结果核实和成功后的本页失效；旧分页请求中止、路径重置，保留期间/搜索。不开新队列、缓存或跨页面请求。
 - 移除旧 source_pending 正式行生成、分面、导出状态和详情显示分支；保留现有来源 fingerprint、金额校验、事务与正式发布措施。
+
+### 项目成本展示边界（2026-09-11）
+
+`CostStatisticsHierarchy` 只接收各栏的 key、label、amount、selectedKey 与 onSelect，输出选择事件和明细插槽；移除未使用的 description 输入。页面仍拥有查询和选择状态。项目成本根标记限定高度、内部滚动、紧凑样式的作用范围；祖先高度约束仅在该标记存在时生效，不修改 App Shell 或 FinanceTable 公共组件。银行流水两个视角保留公共列表辅助文字与时间 chip。无 API、服务、存储、权限或业务金额 I/O 变化。

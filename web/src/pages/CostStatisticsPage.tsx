@@ -210,10 +210,12 @@ function EntryIdentity({
   label,
   occurredAt,
   secondaryLabel,
+  compact = false,
 }: {
   label: string;
   occurredAt: string | null;
   secondaryLabel?: string;
+  compact?: boolean;
 }) {
   const formattedTradeTime = formatCostTradeTime(occurredAt);
   return (
@@ -228,7 +230,7 @@ function EntryIdentity({
           {secondaryLabel}
         </span>
       ) : null}
-      <Chip
+      {compact ? <time className="cost-entry-time" dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款来源或日期待确定"}</time> : <Chip
         className="cost-transaction-time-chip"
         color="default"
         size="sm"
@@ -237,7 +239,7 @@ function EntryIdentity({
         <Chip.Label>
           <time dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款来源或日期待确定"}</time>
         </Chip.Label>
-      </Chip>
+      </Chip>}
     </span>
   );
 }
@@ -909,10 +911,10 @@ export default function CostStatisticsPage() {
   const costPrimaryRows = costAncestorsReady ? explorerData?.facets.costTagPrimary ?? [] : [];
   const costSubRows = costAncestorsReady && loadedRequest?.bankTagPrimaryKey === explorerRequest.bankTagPrimaryKey ? explorerData?.facets.costTagSub ?? [] : [];
   const costLanes: CostHierarchyLane[] = [];
-  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, amount: row.totalAmount, description: `${row.projectCount} 个项目` })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
-  if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, amount: row.totalAmount, description: `${row.primaryTagCount} 个主标签` })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
-  costLanes.push({ title: "银行主标签", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount, description: `${row.rowCount} 条成本明细` })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
-  costLanes.push({ title: "银行子标签", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount, description: `${row.rowCount} 条成本明细` })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
+  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, amount: row.totalAmount })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
+  if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, amount: row.totalAmount })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
+  costLanes.push({ title: "银行主标签", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
+  costLanes.push({ title: "银行子标签", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
   const costPathComplete = costLanes.every(lane => lane.selectedKey !== null);
   const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
   const bankTagSubRows = isChildrenTransition ? [] : explorerData?.facets.bankTagSub ?? [];
@@ -1538,10 +1540,12 @@ export default function CostStatisticsPage() {
         ? {
             key: "projectName",
             header: "项目名 / 申请/报销人",
-            flex: 1.15,
+            headerClassName: "cost-entry-identity cost-entry-identity--project",
+            cellClassName: "cost-entry-identity",
             getTextValue: (row) => `${row.projectName} ${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
             render: (row) => (
               <EntryIdentity
+                compact
                 label={row.projectName}
                 secondaryLabel={row.oaApplicant}
                 occurredAt={row.occurredAt}
@@ -1551,9 +1555,10 @@ export default function CostStatisticsPage() {
         : {
               key: "oaApplicant",
               header: "申请/报销人",
-              flex: 1.15,
+              headerClassName: "cost-entry-identity",
+              cellClassName: "cost-entry-identity",
               getTextValue: (row) => `${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
-              render: (row) => <EntryIdentity label={row.oaApplicant} occurredAt={row.occurredAt} />,
+              render: (row) => <EntryIdentity compact label={row.oaApplicant} occurredAt={row.occurredAt} />,
             };
       return [
         identityColumn,
@@ -1561,6 +1566,7 @@ export default function CostStatisticsPage() {
           key: "amount",
           header: "支出金额",
           width: 180,
+          headerClassName: "cost-entry-amount",
           cellClassName: "cost-table-cell-money",
           render: (row) => ({
             amount: formatCostAmount(row.amount),
@@ -1634,7 +1640,7 @@ export default function CostStatisticsPage() {
   );
 
   return (
-    <div className="page-stack cost-page gap-3 bg-[var(--fp-page)]">
+    <div className={`page-stack cost-page gap-3 bg-[var(--fp-page)]${isBankFlowView ? "" : " cost-page--project"}`}>
       <header className="page-header cost-page-header">
         <div className="cost-page-header-main">
           <div className="page-title-row">

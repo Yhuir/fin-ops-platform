@@ -1,12 +1,71 @@
-.cost-hierarchy { min-height:520px; min-width:0; flex:1; display:flex; flex-direction:column; }
-.cost-hierarchy-grid { display:grid; grid-template-columns:repeat(var(--cost-lane-count),minmax(155px,.7fr)) minmax(420px,2.2fr); gap:10px; flex:1; min-height:0; }
-.cost-hierarchy-column,.cost-hierarchy-detail { min-width:0; display:flex; }
-.cost-hierarchy-column > section,.cost-hierarchy-detail > section { flex:1; min-width:0; }
-.cost-hierarchy .cost-explorer-item { padding:10px; }
-.cost-hierarchy-breadcrumb { display:none; }
-@media(max-width:1200px) {
- .cost-hierarchy-grid { display:flex; min-width:0; }
- .cost-hierarchy-column,.cost-hierarchy-detail { display:none; flex:1; }
- .cost-hierarchy-column.is-current,.cost-hierarchy-detail.is-current { display:flex; }
- .cost-hierarchy-breadcrumb { display:flex; flex-wrap:wrap; gap:6px; padding-bottom:10px; }
+/* Height ownership is limited to project-cost views. */
+.app-shell-content:has(.cost-page--project) { height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-body:has(.cost-page--project) { flex: 1; min-height: 0; display: flex; }
+.page-stack.cost-page--project { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; container-type: inline-size; }
+.cost-page--project > .cost-page-header { flex-shrink: 0; }
+.cost-page--project .cost-lock-surface,
+.cost-page--project .cost-lock-content,
+.cost-page--project .cost-content-shell,
+.cost-page--project .cost-analysis-layout { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cost-page--project .cost-section-heading { flex-shrink: 0; }
+.cost-hierarchy { min-height: 0; min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.cost-hierarchy-grid { display: grid; grid-template-columns: repeat(var(--cost-lane-count), minmax(145px, .7fr)) minmax(560px, 2.2fr); gap: 10px; flex: 1; min-height: 0; }
+.cost-hierarchy-column, .cost-hierarchy-detail { min-width: 0; min-height: 0; display: flex; }
+.cost-hierarchy-column > section, .cost-hierarchy-detail > section { flex: 1; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.cost-hierarchy .cost-explorer-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.cost-hierarchy .cost-explorer-item { min-height: 0; padding: 0; }
+.cost-hierarchy .cost-explorer-item-content { min-height: 42px; padding: 10px; gap: 8px; }
+.cost-hierarchy .cost-explorer-item-main { min-width: 0; }
+.cost-hierarchy .cost-finance-table .finance-table__scroll { max-height: none; }
+.cost-hierarchy .finance-table__content { table-layout: fixed; overflow: visible; }
+.cost-hierarchy .cost-explorer-lane-table .cost-finance-table .finance-table__row { min-height: 0; }
+.cost-hierarchy .cost-finance-table .finance-table__cell { padding: 8px 10px; }
+.cost-hierarchy .cost-entry-identity { width: 190px; }
+.cost-hierarchy .cost-entry-identity--project { width: 220px; }
+.cost-hierarchy .cost-entry-amount { width: 155px; }
+.cost-hierarchy .cost-transaction-identity { gap: 2px; }
+.cost-entry-time { white-space: nowrap; font-size: 12px; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--fp-text-muted); }
+.cost-hierarchy-breadcrumb { display: none; flex-wrap: wrap; gap: 6px; padding-bottom: 8px; }
+/* Adapt to content width, including the sidebar and browser zoom. */
+@container (max-width: 1190px) {
+  .cost-hierarchy[data-lanes="4"] .cost-hierarchy-grid { display: flex; }
+  .cost-hierarchy[data-lanes="4"] .cost-hierarchy-column, .cost-hierarchy[data-lanes="4"] .cost-hierarchy-detail { display: none; flex: 1; }
+  .cost-hierarchy[data-lanes="4"] .is-current { display: flex; }
+  .cost-hierarchy[data-lanes="4"] .cost-hierarchy-breadcrumb { display: flex; }
 }
+@container (max-width: 1030px) {
+  .cost-hierarchy[data-lanes="3"] .cost-hierarchy-grid { display: flex; }
+  .cost-hierarchy[data-lanes="3"] .cost-hierarchy-column, .cost-hierarchy[data-lanes="3"] .cost-hierarchy-detail { display: none; flex: 1; }
+  .cost-hierarchy[data-lanes="3"] .is-current { display: flex; }
+  .cost-hierarchy[data-lanes="3"] .cost-hierarchy-breadcrumb { display: flex; }
+}
+@container (max-width: 880px) {
+  .cost-hierarchy[data-lanes="2"] .cost-hierarchy-grid { display: flex; }
+  .cost-hierarchy[data-lanes="2"] .cost-hierarchy-column, .cost-hierarchy[data-lanes="2"] .cost-hierarchy-detail { display: none; flex: 1; }
+  .cost-hierarchy[data-lanes="2"] .is-current { display: flex; }
+  .cost-hierarchy[data-lanes="2"] .cost-hierarchy-breadcrumb { display: flex; }
+  .cost-hierarchy .cost-finance-table--fit .finance-table__scroll { overflow-x: auto; }
+  .cost-hierarchy .finance-table__content { min-width: 560px; }
+}
+.cost-hierarchy-breadcrumb button { max-width: 100%; height: auto; white-space: normal; }
+@container (max-width: 600px) {
+  .cost-page--project .cost-view-switcher { padding-bottom: 2px; }
+  .cost-page--project .cost-header-actions { flex-wrap: nowrap; overflow-x: auto; width: 100%; }
+  .cost-page--project .cost-header-actions > * { flex-shrink: 0; }
+  .cost-hierarchy .cost-table-pagination-footer { display: flex; flex-wrap: wrap; gap: 4px; }
+  .cost-hierarchy .finance-table-pagination { gap: 4px; flex-direction: row; flex-wrap: nowrap; }
+}
+@container (max-width: 1200px) {
+  .cost-page--project .cost-view-switcher { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; width: 100%; gap: 12px; }
+  .cost-page--project .cost-view-switcher-group { flex-shrink: 0; }
+  .cost-page--project .cost-page-header-main { gap: 8px; }
+  .cost-page--project .cost-view-scope-heading .cost-section-heading-actions { flex-direction: row; }
+  .cost-page--project .cost-view-scope-heading .cost-view-search-form { flex: 1; width: auto; min-width: 190px; }
+}
+.cost-hierarchy thead { position: sticky; top: 0; z-index: 2; }
+.cost-hierarchy .finance-table__column { position: relative; }
+.cost-hierarchy .money-cell-meta-row,
+.cost-hierarchy .cost-bank-account-chip,
+.cost-hierarchy .cost-bank-account-chip [data-slot="chip-label"],
+.cost-hierarchy .cost-bank-account-chip .bank-account-value { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.cost-hierarchy .cost-bank-account-chip .bank-account-value { flex-wrap: wrap; }

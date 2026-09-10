@@ -138,3 +138,10 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - `CostStatisticsProjectCostScopeDrawer.test.tsx`：标签清单、禁用收入、全取消、搜索、加载/错误、只读和结果待核实。
 - `e2e/cost-statistics-project-cost-scope.spec.ts`：按需 GET、草稿无写入、保存后正常读取、宽/窄浏览器截图；原有来源分配、配对对齐及颜色对比回归继续执行。
 - 七类适用：1/2/3/5/6/7；4 无新增 read model/cache/job，沿用直接读取不写队列的既有测试。
+
+## 2026-09-11 项目成本紧凑布局
+
+- `web/e2e/cost-statistics-layout.spec.ts`：三个视角，在 1920、1440、1024 和 390px 宽度下验证页面不溢出、完整时间单行、内部滚动与表头、分页可见；银行账户长列表独立滚动，切回银行流水保留原时间 chip。
+- 复跑 `CostStatisticsPage.test.tsx` 与 `cost-statistics-flow.spec.ts`，覆盖现有视角、下钻、详情、分页、导出及范围设置读取交互。
+- 测试类别 5、7 直接适用；6 通过已有页面→接口模拟→明细/导出交互回归。1、2、3、4 没有新增业务规则、服务、HTTP 合同、缓存或后台任务，因此不新增这些层的测试。
+- 发布后用真实浏览器检查三个视角，并核对同口径金额与生产只读 HTTP SLO；不通过保存分配制造生产测试数据。
