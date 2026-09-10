@@ -960,7 +960,7 @@ class CostStatisticsQueryService:
         sheet.append(["说明", "数量"])
         sheet.append(
             [
-                "以下关联仍需分配或完善银行资料。已知金额但来源未定的成本仅计入全部期间；指定日期范围不含日期未确定的成本。",
+                "待分配或完善银行资料的关联",
                 quality["manual_allocation_pending_count"],
             ]
         )
