@@ -710,6 +710,32 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(after["row_count"], 0)
         self.assertEqual(after["rows"], [])
 
+    def test_missing_approval_time_keeps_views_detail_and_export_consistent(self) -> None:
+        self.app._cost_statistics_canonical_repository._oa_rows_by_ids_provider = (  # noqa: SLF001
+            lambda _row_ids: [replace(self.oa, completed_at="")]
+        )
+        for view in ("project", "cost_tag", "bank_account"):
+            status, page = self._json(f"/api/cost-statistics/explorer?scope=2026-03&view={view}")
+            self.assertEqual(status, 200)
+            self.assertEqual(page["summary"]["total_amount"], "1250.00")
+        status, page = self._json("/api/cost-statistics/explorer?scope=2026-03&view=project"
+            "&project_name=云南溯源科技&bank_tag_primary_key=pending:tag&bank_tag_sub_key=pending:tag")
+        self.assertEqual(status, 200)
+        allocation_id = page["rows"][0]["allocation_id"]
+        status, detail = self._json(f"/api/cost-statistics/allocations/{allocation_id}?scope=2026-03&view=project")
+        self.assertEqual(status, 200)
+        self.assertEqual(detail["allocation"]["oa_completed_at"], "")
+        self.assertEqual(detail["allocation"]["amount"], "1250.00")
+        query = "?month=2026-03&view=project&project_name=云南溯源科技&aggregate_by=month"
+        status, preview = self._json("/api/cost-statistics/export-preview" + query)
+        self.assertEqual(status, 200)
+        response = self._get("/api/cost-statistics/export" + query)
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(filename=__import__("io").BytesIO(response.body))
+        self.assertEqual(workbook.sheetnames, preview["sheet_names"])
+        self.assertEqual(workbook["按项目汇总"]["E2"].value, "1250.00")
+        self.assertIn(self.bank_id, [cell.value for cell in workbook["成本明细"][2]])
+
     def test_export_preview_and_workbook_use_canonical_snapshot(self) -> None:
         status, preview = self._json(
             "/api/cost-statistics/export-preview"

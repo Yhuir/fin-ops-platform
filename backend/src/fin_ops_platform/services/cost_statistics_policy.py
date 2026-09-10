@@ -1309,8 +1309,6 @@ def _oa_cost_context(
     completed_at = _clean_text(row.get("completed_at"))
     if not oa_id:
         return None, "missing_oa_id"
-    if not completed_at:
-        return None, "missing_oa_completed_at"
     if not project_name:
         return None, "missing_project"
     if allocation_amount is None:
@@ -1361,7 +1359,7 @@ def _oa_expense_item_cost_context(
     item_id = _clean_text(
         item.get("expense_item_id") or item.get("row_id") or item.get("item_id")
     )
-    if not oa_id or not completed_at:
+    if not oa_id:
         return None, "missing_oa_identity"
     if not item_id:
         return None, "missing_expense_item_id"
@@ -1555,8 +1553,7 @@ def _first_present(*values: Any) -> Any:
 
 def _is_completed_oa_cost_row(row: dict[str, Any]) -> bool:
     return bool(
-        _clean_text(row.get("completed_at"))
-        and _clean_text(row.get("apply_type"))
+        _clean_text(row.get("apply_type"))
         in {PAYMENT_APPLICATION_TYPE, DAILY_REIMBURSEMENT_TYPE}
         and _clean_text(row.get("workflow_status"))
         in COMPLETED_WORKFLOW_STATUS_ALIASES

@@ -147,6 +147,27 @@ class CostSourcePostgresTests(unittest.TestCase):
     def save(self, payload):
         return self.service.save("cost-source-case", payload, actor={"id": "cost-test-actor"})
 
+    def test_missing_approval_time_keeps_manual_save_and_payment_year_reads(self):
+        self.connection.execute("""update app.oa_applications set approved_at=null,
+            application_date='2025-12-20', scope_month='2025-12-01'""")
+        payload = self.payload()
+        saved = self.save(payload)
+        self.assertEqual(saved["source_allocations"], payload["source_allocations"])
+        snapshot = self.repository.load_snapshot(scope_kind="year", scope_value="2026")
+        from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
+        rows = CostStatisticsPolicy(snapshot).serialized_cost_rows
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({row["oa_completed_at"] for row in rows}, {""})
+        for view in ("project", "bank_account", "cost_tag"):
+            for scope, amount in (("year:2025", "0.00"), ("year:2026", "1000.00"),
+                                  ("2026-08", "500.00"), ("2026-09", "500.00")):
+                page = self.query.get_explorer_page(scope=scope, view=view, filters={}, cursor=None, page_size=20)
+                self.assertEqual(page["summary"]["total_amount"], amount)
+        detail = self.query.get_allocation_detail(allocation_id=rows[0]["allocation_id"], view="project", scope="year:2026")
+        self.assertEqual(detail["allocation"]["oa_completed_at"], "")
+        self.assertEqual(detail["allocation"]["amount"], rows[0]["amount"])
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.oa_applications where approved_at is not null")["n"], 0)
+
     def test_save_audit_and_cross_month_read_closure(self):
         payload = self.payload()
         saved = self.save(payload)

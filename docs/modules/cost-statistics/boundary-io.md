@@ -33,6 +33,8 @@
 
 成本模块不读取银行明细页面的 payload/read model。银行有效分类通过银行分类 owner 的批量 projection port 取得；不得复制分类算法或增加 SQL/Python fallback。
 
+OA 成本资格由 Policy 按表单类型和 canonical 审批完成状态判断。`completed_at` / 输出 `oa_completed_at` 仅为可为空的凭据信息，缺失沿用既有空字符串输出，不阻断单据、报销明细或整组成本；不补造时间。Repository 保留原始时间投影，不维护第二套完成状态判断。来源付款日期仍是成本归属年月的唯一日期依据；进行中、关系成员不完整、金额或来源未定的处理不变。
+
 ## 请求闭环
 
 ```text

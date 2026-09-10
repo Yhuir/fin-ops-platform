@@ -2366,7 +2366,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             self.assertNotIn(retired_category_path, repository_source)
         self.assertIn("normalized_payload", repository_source)
-        self.assertIn("COMPLETED_WORKFLOW_STATUS_ALIASES", repository_source)
+        self.assertIn(
+            "COMPLETED_WORKFLOW_STATUS_ALIASES",
+            (SERVICES_ROOT / "cost_statistics_policy.py").read_text(encoding="utf-8"),
+        )
         self.assertIn("approved_at", repository_source)
         self.assertNotIn('/api/cost-statistics/transactions/', repository_source + query_source)
         self.assertIn("self._canonical_repository.load_snapshot(", query_source)

@@ -467,6 +467,45 @@ class CostStatisticsPolicyTests(unittest.TestCase):
 
         self.assertEqual(task["source_fingerprint"], expected)
 
+    def test_completed_oa_without_approval_time_uses_real_payment_date(self) -> None:
+        for apply_type in ("支付申请", "日常报销"):
+            for timestamp in (None, "", "   ", "missing"):
+                with self.subTest(apply_type=apply_type, timestamp=timestamp):
+                    oa = self._oa("oa-1", apply_type=apply_type,
+                        expense_items=[self._item("item-1", "项目A", "交通费", "100.00")])
+                    oa["application_date"] = "2025-12-20"
+                    if timestamp == "missing":
+                        oa.pop("completed_at")
+                    else:
+                        oa["completed_at"] = timestamp
+                    policy = self._policy([self._group(oa_rows=[oa],
+                        bank_rows=[self._bank("bank-1", "100.00", trade_time="2026-01-14 10:00:00")])])
+                    self.assertEqual(len(policy.serialized_cost_rows), 1)
+                    row = policy.serialized_cost_rows[0]
+                    self.assertEqual(row["amount"], "100.00")
+                    self.assertEqual(row["oa_completed_at"], "")
+                    self.assertEqual(row["month"], "2026-01")
+                    self.assertEqual(row["transaction_id"], "bank-1")
+                    self.assertEqual(policy.allocation_quality["excluded_by_reason"], [])
+
+    def test_missing_approval_time_in_old_member_does_not_block_completed_group(self) -> None:
+        old = self._oa("oa-old", apply_type="日常报销", completed_at="", amount="572.00",
+            expense_items=[self._item("old-item", "项目A", "交通费", "572.00")])
+        old["application_date"] = "2025-12-20"
+        current = self._oa("oa-current", apply_type="日常报销", amount="405.00",
+            expense_items=[self._item("current-item", "项目A", "交通费", "405.00")])
+        policy = self._policy([self._group(oa_rows=[old, current],
+            bank_rows=[self._bank("bank-1", "977.00", trade_time="2026-01-14 10:00:00")])])
+        self.assertEqual({(row["oa_id"], row["amount"], row["month"]) for row in policy.serialized_cost_rows},
+            {("oa-old", "572.00", "2026-01"), ("oa-current", "405.00", "2026-01")})
+
+    def test_noncompleted_status_is_excluded_even_with_approval_time(self) -> None:
+        for status in ("processing", "in_progress", "0", "", "unknown"):
+            with self.subTest(status=status):
+                policy = self._policy([self._group(oa_rows=[self._oa("oa-1", workflow_status=status)],
+                    bank_rows=[self._bank("bank-1", "100.00")])])
+                self.assertEqual(policy.serialized_cost_rows, [])
+
     def test_any_ongoing_oa_excludes_entire_relation(self) -> None:
         policy = self._policy(
             [

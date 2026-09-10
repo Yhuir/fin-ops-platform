@@ -16,9 +16,6 @@ from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
     PostgresCostStatisticsManualAllocationRepository,
 )
-from fin_ops_platform.services.postgres_repositories.oa_projection import (
-    COMPLETED_WORKFLOW_STATUS_ALIASES,
-)
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 OA_COST_FORM_TYPES = ("支付申请", "日常报销")
@@ -1190,14 +1187,6 @@ def _oa_row_ids(oa_rows: list[dict[str, Any]]) -> list[str]:
         for row in oa_rows
         if (row_id := _text(row.get("id") or row.get("row_id")))
     ]
-
-
-def _is_explicit_completed_oa(row: dict[str, Any]) -> bool:
-    return bool(
-        _date_text(row.get("completed_at"))
-        and _text(row.get("apply_type")) in OA_COST_FORM_TYPES
-        and _text(row.get("workflow_status")) in COMPLETED_WORKFLOW_STATUS_ALIASES
-    )
 
 
 def _object_payload(value: Any) -> dict[str, Any]:
