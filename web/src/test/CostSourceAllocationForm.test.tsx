@@ -23,6 +23,35 @@ function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocation
   return <CostSourceAllocationForm task={task} draft={draft} disabled={false} saving={false} onChange={setDraft} onSave={save} />;
 }
 
+it('hides exhausted hints while preserving capacity, duplicate, current selection and released capacity', async () => {
+  const task = fixture(); const user = userEvent.setup();
+  task.sourceAllocations = { costLines: [{ unitId: 'unit-a', bankTransactionId: 'internal-bank', amount: '600.00' }], refundLinks: [], nonCostLines: [] };
+  const { container } = render(<Editor task={task} />);
+  const groups = container.querySelectorAll('.cost-source-table tbody');
+  const first = within(groups[0] as HTMLElement); const second = within(groups[1] as HTMLElement);
+  await user.click(first.getByRole('combobox'));
+  expect(screen.getByRole('option')).not.toHaveAttribute('aria-disabled', 'true');
+  await user.keyboard('{Escape}');
+  await user.click(second.getByRole('button', { name: '新增来源' }));
+  await user.click(second.getByRole('combobox'));
+  expect(screen.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
+  expect(screen.queryByText('已用完')).not.toBeInTheDocument();
+  await user.keyboard('{ArrowDown}{Enter}');
+  await user.keyboard('{Escape}');
+  expect(second.getByRole('combobox')).toHaveTextContent('选择流水');
+  await user.clear(first.getByRole('textbox'));
+  await user.type(first.getByRole('textbox'), '300');
+  await user.click(second.getByRole('combobox'));
+  expect(screen.getByRole('option')).not.toHaveAttribute('aria-disabled', 'true');
+  await user.click(screen.getByRole('option'));
+  expect(second.getByRole('combobox')).toHaveTextContent('建行 8106');
+  expect(first.getByRole('textbox')).toHaveValue('300.00');
+  await user.click(first.getByRole('button', { name: '新增来源' }));
+  await user.click(first.getAllByRole('combobox')[1]);
+  expect(screen.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
+  expect(screen.getByText('本项已使用')).toBeInTheDocument();
+});
+
 describe('compact source allocation editor', () => {
   it('groups one OA document with two cost units and hides all internal identifiers', () => {
     const { container } = render(<Editor task={fixture()} />);

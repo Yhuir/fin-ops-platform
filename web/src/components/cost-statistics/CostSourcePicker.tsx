@@ -16,11 +16,14 @@ export default memo(function CostSourcePicker({ value, options, label, focusKey,
     <Popover.Content className="cost-source-picker-popover" placement="bottom start" offset={4}>
       <Popover.Dialog aria-label={label}>
         {open ? <ListBox aria-label={label} selectionMode="single" selectedKeys={value ? [value] : []} disabledKeys={options.filter(option => disabledReason(lineId, option.id)).map(option => option.id)} onSelectionChange={keys => { if (keys === 'all') return; const key = [...keys][0]; if (key !== undefined) onChange(lineId, String(key)); setOpen(false); }}>
-          {options.map(option => <ListBox.Item id={option.id} key={option.id} textValue={`${option.label} ${option.date} ${option.amount} ${option.counterparty} ${option.tags.join(' ')}`} className="cost-source-option">
-            <div><strong>{option.label}</strong><span className="cost-source-money">¥{option.amount}</span></div>
-            <span>{option.counterparty}</span><CostChips values={[option.date, ...option.tags]} />
-            {disabledReason(lineId, option.id) ? <span className="cost-source-option-state">{disabledReason(lineId, option.id)}</span> : null}
-          </ListBox.Item>)}
+          {options.map(option => {
+            const reason = disabledReason(lineId, option.id);
+            return <ListBox.Item id={option.id} key={option.id} textValue={`${option.label} ${option.date} ${option.amount} ${option.counterparty} ${option.tags.join(' ')}`} className="cost-source-option">
+              <div><strong>{option.label}</strong><span className="cost-source-money">¥{option.amount}</span></div>
+              <span>{option.counterparty}</span><CostChips values={[option.date, ...option.tags]} />
+              {reason && reason !== '已用完' ? <span className="cost-source-option-state">{reason}</span> : null}
+            </ListBox.Item>;
+          })}
         </ListBox> : null}
       </Popover.Dialog>
     </Popover.Content>

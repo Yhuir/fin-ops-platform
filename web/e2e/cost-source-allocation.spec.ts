@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64),
@@ -49,6 +49,11 @@ async function sourceScenario(page: Page, options: { screenshotCase?: boolean; p
       unit_id: task.units[Math.max(0, i - 1)].unit_id, bank_transaction_id: bank.transaction_id, amount: bank.amount,
     })), refund_links: [], non_cost_lines: [] };
   }
+  if (options.longMenu) task.bank_events.forEach(bank => {
+    bank.counterparty_name = '云南设备采购安装与节能改造工程服务有限公司'.repeat(3);
+    bank.bank_account_label = `云南省大理白族自治州项目结算专用${bank.bank_account_label}`;
+    bank.bank_tag_sub_label = '设备采购安装与运输综合费用';
+  });
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
@@ -342,3 +347,45 @@ test('COST-E2E-014 screenshot three OA four bank suggestions save as four source
   await expect(scene.drawer.locator('.cost-source-table').getByRole('combobox')).toHaveCount(4);
   await expectNoUnexpectedSuccessUiErrors(page);
 });
+
+for (const width of [1440, 390]) {
+  test(`source menu contains multiline options without shrinking at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const scene = await sourceScenario(page, { screenshotCase: true, longMenu: true });
+    await scene.unit.getByRole('combobox').first().click();
+    const menu = page.getByRole('listbox', { name: '来源流水 1', exact: true });
+    await expect(menu.getByRole('option')).toHaveCount(4);
+    await expect(menu.getByText('已用完')).toHaveCount(0);
+    await expect(menu.getByText('本项已使用')).toHaveCount(1);
+    const geometry = await menu.evaluate(element => {
+      const options = [...element.querySelectorAll<HTMLElement>('[role="option"]')];
+      return {
+        scrolls: element.scrollHeight > element.clientHeight,
+        fits: element.scrollWidth <= element.clientWidth + 1,
+        rows: options.map(option => {
+          const box = option.getBoundingClientRect();
+          const children = [...option.children].map(child => child.getBoundingClientRect());
+          const heading = option.firstElementChild!;
+          const name = heading.firstElementChild!.getBoundingClientRect();
+          const money = heading.lastElementChild!.getBoundingClientRect();
+          return { top: box.top, bottom: box.bottom,
+            contains: children.every(child => child.top >= box.top && child.bottom <= box.bottom + 1 && child.left >= box.left && child.right <= box.right + 1),
+            moneyFits: money.left >= name.right && money.right <= box.right,
+          };
+        }),
+      };
+    });
+    expect(geometry.scrolls).toBe(true);
+    expect(geometry.fits).toBe(true);
+    for (const [index, row] of geometry.rows.entries()) {
+      expect(row.contains).toBe(true);
+      expect(row.moneyFits).toBe(true);
+      if (index) expect(row.top).toBeGreaterThanOrEqual(geometry.rows[index - 1].bottom);
+    }
+    await menu.getByRole('option').last().scrollIntoViewIfNeeded();
+    await expect(menu.getByRole('option').last()).toBeInViewport();
+    expect(scene.writes()).toBe(0);
+    expect(scene.details()).toBe(1);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+}
