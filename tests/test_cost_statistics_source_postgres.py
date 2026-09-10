@@ -48,6 +48,41 @@ class CostSourcePostgresTests(unittest.TestCase):
             values ('cost-source-case',1,'manual_confirmed',%s::text[],%s::text[],'2026-08-01','active','{}'::jsonb)""",
             (["oa-a", "oa-b", "bank-1", "bank-2"], ["oa", "oa", "bank", "bank"]))
 
+    def test_prefill_reads_explicit_references_without_writing_then_saves(self):
+        with self.connection.transaction() as writer:
+            writer.execute("select set_config('fin_ops.correction_reason', 'isolated prefill evidence fixture', true)")
+            for bank, oa, amount in (("bank-1", "oa-a", "600.00"), ("bank-2", "oa-b", "400.00")):
+                writer.execute("""update app.bank_transactions set amount=%s,
+                    signed_amount=-%s::numeric, raw_payload=jsonb_build_object('source_oa_row_id',%s::text)
+                    where legacy_mongo_id=%s""", (amount, amount, oa, bank))
+        before = self.service.list_tasks(cursor=None, page_size=20, status="pending", query=None, can_save=True)
+        task = self.service.get_task("cost-source-case", can_save=True)
+        self.assertEqual(task["status"], "pending")
+        self.assertIsNone(task["source_allocations"])
+        self.assertEqual(len(task["suggested_source_allocations"]["cost_lines"]), 2)
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.cost_statistics_manual_allocations")["n"], 0)
+        after = self.service.list_tasks(cursor=None, page_size=20, status="pending", query=None, can_save=True)
+        self.assertEqual(before, after)
+        self.assertNotIn("suggested_source_allocations", after["items"][0])
+        payload = self.payload()
+        payload["source_allocations"] = task["suggested_source_allocations"]
+        saved = self.save(payload)
+        self.assertEqual(saved["version"], 1)
+        reloaded = self.service.get_task("cost-source-case", can_save=True)
+        self.assertEqual(reloaded["source_allocations"], payload["source_allocations"])
+        self.assertIsNone(reloaded["suggested_source_allocations"])
+
+    def test_equal_amount_alignment_without_explicit_reference_has_no_suggestion(self):
+        with self.connection.transaction() as writer:
+            writer.execute("select set_config('fin_ops.correction_reason', 'isolated amount-only fixture', true)")
+            writer.execute("""update app.bank_transactions set
+                amount=case legacy_mongo_id when 'bank-1' then 600 else 400 end,
+                signed_amount=case legacy_mongo_id when 'bank-1' then -600 else -400 end
+                where legacy_mongo_id in ('bank-1','bank-2')""")
+        task = self.service.get_task("cost-source-case", can_save=True)
+        self.assertIsNone(task["suggested_source_allocations"])
+        self.assertEqual(task["status"], "pending")
+
     def payload(self):
         task = self.service.get_task("cost-source-case", can_save=True)
         return {"relation_case_id": task["relation_case_id"], "expected_version": task["version"],

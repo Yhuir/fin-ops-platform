@@ -232,6 +232,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 transaction,
                 settings=settings,
                 transaction_ids=bank_ids,
+                include_source_references=True,
             )
             categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
                 transaction,
@@ -617,12 +618,23 @@ def _postgres_bank_rows(
     scope_kind: str = "all",
     scope_value: str | None = None,
     transaction_ids: list[str] | None = None,
+    include_source_references: bool = False,
 ) -> list[dict[str, Any]]:
     where_sql, params = _bank_row_filter(
         scope_kind=scope_kind,
         scope_value=scope_value,
         transaction_ids=transaction_ids,
     )
+    # Only explicit canonical OA references already consumed by the relation owner.
+    # The detail path projects four scalars, never the complete raw payload.
+    source_projection = """
+        , array_remove(array[
+            nullif(btrim(raw_payload->>'source_oa_row_id'), ''),
+            nullif(btrim(raw_payload->>'oa_row_id'), ''),
+            nullif(btrim(raw_payload->>'derived_from_oa_id'), ''),
+            nullif(btrim(raw_payload->>'source_workbench_row_id'), '')
+        ], null) as source_oa_ids
+    """ if include_source_references else ""
     account_resolver = _bank_account_resolver(settings)
     rows = connection.fetch_all(
         f"""
@@ -641,6 +653,7 @@ def _postgres_bank_rows(
             remark,
             project_id,
             bank_text_fields
+            {source_projection}
         from app.bank_transactions
         where status <> 'deleted'
           {where_sql}
@@ -1094,6 +1107,7 @@ def _bank_row_from_mapping(
             account_no,
             account_name,
         ),
+        "source_oa_ids": list(row.get("source_oa_ids") or []),
         "summary": _text(row.get("summary")),
         "remark": _text(row.get("remark")),
     }

@@ -4656,6 +4656,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     pending_reasons: allocations.length ? [] : ["amount_required"],
     amounts_fixed: false,
     source_allocations: manualSourceAllocations,
+    suggested_source_allocations: null,
     project_names: ["项目 A", "项目 B"], unit_count: 2, bank_event_count: 2,
     oa_total: "1010.00",
     gross_outflow_total: "1000.00",

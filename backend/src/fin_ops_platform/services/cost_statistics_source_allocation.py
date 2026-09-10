@@ -120,6 +120,58 @@ def automatic_source_allocations(task: dict[str, Any]) -> dict[str, Any] | None:
     return validate_source_allocations(task, allocations, non_cost, result)
 
 
+def suggest_source_allocations(
+    task: dict[str, Any], bank_rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Prefill only explicit OA ownership with a unique amount distribution.
+
+    This is a detail-only draft calculation. Never feed it into completion or
+    statistics. Display alignment and amount subset searches are not evidence.
+    """
+    if (task["status"] != "pending" or task["version"] != 0
+            or task["source_allocations"] is not None
+            or "allocation_stale" in task["pending_reasons"]
+            or not task["amounts_fixed"]
+            or Decimal(task["non_cost_amount"]) != ZERO
+            or any(event["event_kind"] != "outflow" for event in task["bank_events"])):
+        return None
+    units_by_oa: dict[str, list[dict[str, Any]]] = {}
+    for unit in task["units"]:
+        units_by_oa.setdefault(unit["oa_id"], []).append(unit)
+    events = {event["transaction_id"]: event for event in task["bank_events"]}
+    sources_by_oa: dict[str, list[dict[str, Any]]] = {}
+    blocked: set[str] = set()
+    for row in bank_rows:
+        source_id = row["id"]
+        if source_id not in events:
+            continue
+        owners = set(row.get("source_oa_ids", []))
+        if len(owners) != 1:
+            blocked.update(owners.intersection(units_by_oa))
+            continue
+        owner = next(iter(owners))
+        if owner in units_by_oa:
+            sources_by_oa.setdefault(owner, []).append(events[source_id])
+    result: dict[str, list[dict[str, str]]] = {"cost_lines": [], "refund_links": [], "non_cost_lines": []}
+    for owner, sources in sources_by_oa.items():
+        units = units_by_oa[owner]
+        positive = [unit for unit in units if Decimal(unit["oa_original_amount"]) > ZERO]
+        if (owner in blocked or not positive
+                or any(Decimal(source["amount"]) <= ZERO for source in sources)
+                or sum((Decimal(unit["oa_original_amount"]) for unit in units), ZERO)
+                != sum((Decimal(source["amount"]) for source in sources), ZERO)):
+            continue
+        if len(positive) == 1:
+            result["cost_lines"].extend({"unit_id": positive[0]["unit_id"],
+                "bank_transaction_id": source["transaction_id"], "amount": source["amount"]}
+                for source in sources)
+        elif len(sources) == 1:
+            result["cost_lines"].extend({"unit_id": unit["unit_id"],
+                "bank_transaction_id": sources[0]["transaction_id"], "amount": unit["oa_original_amount"]}
+                for unit in positive)
+    return result if result["cost_lines"] else None
+
+
 def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -> dict[str, Any]:
     """Resolve current facts; saving a source decision need not resolve missing metadata."""
     reasons = []
@@ -148,6 +200,7 @@ def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -
                     reasons.append("bank_account_missing")
                 if not event["trade_time"]:
                     reasons.append("source_date_missing")
+    task["suggested_source_allocations"] = None
     task["source_allocations"] = source_allocations
     task["pending_reasons"] = list(dict.fromkeys(reasons))
     task["status"] = "pending" if reasons else "allocated"

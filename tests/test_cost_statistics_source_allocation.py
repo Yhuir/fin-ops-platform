@@ -150,3 +150,70 @@ class SourceCostPolicyTests(unittest.TestCase):
         self.assertEqual({r["label"] for r in page["tertiary_facets"]}, {"材料", "设备"})
         self.assertEqual([r["amount"] for r in page["rows"]], ["50.00"])
         self.assertEqual(page["summary"]["total_amount"], "100.00")
+
+
+class SourceSuggestionTests(unittest.TestCase):
+    def fixture(self):
+        task = complete_source_task(task_fixture())
+        task['version'] = 0
+        for unit in task['units']:
+            unit['oa_id'] = unit['unit_id']
+        task['bank_events'][0]['amount'] = '600.00'
+        task['bank_events'][1]['amount'] = '400.00'
+        return task
+
+    def suggest(self, task, owners):
+        from fin_ops_platform.services.cost_statistics_source_allocation import suggest_source_allocations
+        return suggest_source_allocations(task, [
+            {'id': key, 'source_oa_ids': value} for key, value in owners.items()
+        ])
+
+    def test_exact_amounts_without_source_proof_stay_manual(self):
+        task = self.fixture()
+        self.assertIsNone(self.suggest(task, {'bank1': [], 'bank2': []}))
+
+    def test_explicit_owners_produce_draft_without_completing_task(self):
+        task = self.fixture()
+        before = deepcopy(task)
+        suggestion = self.suggest(task, {'bank1': ['a'], 'bank2': ['b']})
+        self.assertEqual(suggestion['cost_lines'], [
+            {'unit_id': 'a', 'bank_transaction_id': 'bank1', 'amount': '600.00'},
+            {'unit_id': 'b', 'bank_transaction_id': 'bank2', 'amount': '400.00'},
+        ])
+        self.assertEqual(task, before)
+        self.assertEqual(task['status'], 'pending')
+        self.assertIsNone(task['source_allocations'])
+
+    def test_one_oa_multiple_sources_and_partial_proof(self):
+        task = self.fixture()
+        task['bank_events'][0]['amount'] = '350.00'
+        task['bank_events'].append({**task['bank_events'][0], 'transaction_id': 'bank3', 'amount': '250.00'})
+        result = self.suggest(task, {'bank1': ['a'], 'bank3': ['a'], 'bank2': []})
+        self.assertEqual([line['amount'] for line in result['cost_lines']], ['350.00', '250.00'])
+        self.assertIsNone(self.suggest(task, {'bank1': ['a'], 'bank3': [], 'bank2': []}))
+
+    def test_one_source_multiple_cost_items_requires_known_parent_and_targets(self):
+        task = self.fixture()
+        task['units'][0]['oa_original_amount'] = '350.00'
+        task['units'].append({'unit_id': 'a-item-2', 'oa_id': 'a', 'oa_original_amount': '250.00'})
+        result = self.suggest(task, {'bank1': ['a'], 'bank2': ['b']})
+        self.assertEqual([line['amount'] for line in result['cost_lines']], ['350.00', '250.00', '400.00'])
+        task['bank_events'][0]['amount'] = '300.00'
+        task['bank_events'].append({**task['bank_events'][0], 'transaction_id': 'bank3'})
+        result = self.suggest(task, {'bank1': ['a'], 'bank3': ['a'], 'bank2': ['b']})
+        self.assertEqual([line['unit_id'] for line in result['cost_lines']], ['b'])
+
+    def test_conflicting_owners_never_use_first_reference(self):
+        task = self.fixture()
+        self.assertIsNone(self.suggest(task, {'bank1': ['a', 'b'], 'bank2': ['b']}))
+        self.assertIsNone(self.suggest(task, {'bank1': ['outside'], 'bank2': []}))
+
+    def test_saved_stale_variable_targets_and_refunds_do_not_prefill(self):
+        for patch in ({'version': 1}, {'pending_reasons': ['allocation_stale']},
+                      {'amounts_fixed': False}, {'non_cost_amount': '1.00'}, {'status': 'allocated'}):
+            with self.subTest(patch=patch):
+                task = self.fixture() | patch
+                self.assertIsNone(self.suggest(task, {'bank1': ['a'], 'bank2': ['b']}))
+        task = self.fixture()
+        task['bank_events'].append({**task['bank_events'][0], 'transaction_id': 'refund', 'event_kind': 'wrong_payment_refund'})
+        self.assertIsNone(self.suggest(task, {'bank1': ['a'], 'bank2': ['b']}))

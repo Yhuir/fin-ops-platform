@@ -21,7 +21,7 @@ export function money(value: bigint): string {
 }
 export function createSourceDraft(task: CostStatisticsManualAllocationTask): SourceDraft {
   let id = 0;
-  const saved = task.pendingReasons.includes('allocation_stale') ? null : task.sourceAllocations;
+  const saved = task.pendingReasons.includes('allocation_stale') ? null : (task.sourceAllocations ?? task.suggestedSourceAllocations);
   return {
     zeroUnitIds: task.pendingReasons.includes('allocation_stale') ? [] : task.allocations.filter(line => cents(line.amount) === 0n).map(line => line.unitId),
     costLines: (saved?.costLines ?? []).map(line => ({ ...line, ownerId: line.unitId, id: ++id })),

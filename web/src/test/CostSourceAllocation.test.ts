@@ -12,7 +12,7 @@ export function sourceTask(): CostStatisticsManualAllocationTask {
       { transactionId: 'bank-a', eventKind: 'outflow', amount: '350.00', counterpartyName: '供应商', tradeTime: '2026-08-15', tags: ['采购', '材料款'], bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
       { transactionId: 'bank-b', eventKind: 'outflow', amount: '250.00', counterpartyName: '供应商', tradeTime: '2026-09-03', tags: ['采购', '材料款'], bankAccountLabel: '民生 9486', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
     ],
-    allocations: [{ unitId: 'oa-1:parent', amount: '600.00' }], sourceAllocations: null,
+    allocations: [{ unitId: 'oa-1:parent', amount: '600.00' }], suggestedSourceAllocations: null, sourceAllocations: null,
     nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedAt: '', updatedBy: '', canSave: true,
   };
 }
@@ -129,3 +129,14 @@ describe('cost source amount closure', () => {
   });
 
 });
+
+ test('prefill initializes only a draft and never overrides saved or stale decisions', () => {
+   const task = sourceTask();
+   task.suggestedSourceAllocations = { costLines: [{unitId: 'oa-1:parent', bankTransactionId: 'bank-a', amount: '350.00'}], refundLinks: [], nonCostLines: [] };
+   expect(createSourceDraft(task).costLines[0].amount).toBe('350.00');
+   expect(task.sourceAllocations).toBeNull();
+   task.sourceAllocations = {...task.suggestedSourceAllocations, costLines: [{unitId: 'oa-1:parent', bankTransactionId: 'bank-b', amount: '250.00'}]};
+   expect(createSourceDraft(task).costLines[0].bankTransactionId).toBe('bank-b');
+   task.pendingReasons = ['allocation_stale'];
+   expect(createSourceDraft(task).costLines).toEqual([]);
+ });

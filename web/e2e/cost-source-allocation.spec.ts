@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64),
@@ -13,7 +13,7 @@ async function sourceScenario(page: Page, options: { missingTag?: boolean; confl
       { transaction_id: 'bank-a', event_kind: 'outflow', amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
       { transaction_id: 'bank-b', event_kind: 'outflow', amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
     ],
-    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], source_allocations: null as unknown,
+    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], suggested_source_allocations: null as unknown, source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
   if (options.large) {
@@ -28,6 +28,10 @@ async function sourceScenario(page: Page, options: { missingTag?: boolean; confl
     task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: unit.oa_original_amount }));
     task.source_allocations = { cost_lines: task.units.map((unit, i) => ({ unit_id: unit.unit_id, bank_transaction_id: task.bank_events[i].transaction_id, amount: unit.oa_original_amount })), refund_links: [], non_cost_lines: [] };
   }
+  if (options.prefill) task.suggested_source_allocations = {
+    cost_lines: task.bank_events.map(bank => ({unit_id: task.units[0].unit_id, bank_transaction_id: bank.transaction_id, amount: bank.amount})),
+    refund_links: [], non_cost_lines: [],
+  };
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
@@ -42,10 +46,10 @@ async function sourceScenario(page: Page, options: { missingTag?: boolean; confl
       return route.fulfill({ json: task });
     }
     if (url.pathname.endsWith('/source-case')) { details++; if (options.detailFailure && details === 1) return route.fulfill({ status: 503, json: { message: 'unavailable' } }); return route.fulfill({ json: task }); }
-    const { units, bank_events, allocations, source_allocations, ...summary } = task;
+    const { units, bank_events, allocations, source_allocations, suggested_source_allocations, ...summary } = task;
     return route.fulfill({ json: {
-      items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: ['云南溯源科技'], unit_count: task.units.length, bank_event_count: task.bank_events.length }] : [],
-      row_count: 1, counts: { pending: task.status === 'pending' ? 1 : 0, allocated: task.status === 'allocated' ? 1 : 0 }, next_cursor: null,
+      items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: ['云南溯源科技'], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
+      row_count: options.prefill ? 4 : 1, counts: { pending: task.status === 'pending' ? (options.prefill ? 4 : 1) : 0, allocated: task.status === 'allocated' ? (options.prefill ? 4 : 1) : 0 }, next_cursor: null,
     } });
   });
   if (options.refreshFailure) await page.route('**/api/cost-statistics/explorer**', route => writes > 0 ? route.fulfill({ status: 503, json: { error: 'temporarily_unavailable', message: '统计刷新暂不可用' } }) : route.fallback());
@@ -268,5 +272,33 @@ test('keeps invalid amount feedback within its cell and leaves source geometry s
   await page.screenshot({ path: '/tmp/cost-grid-amount-error.png', animations: 'disabled' });
   await page.keyboard.press('Escape');
   await expect(scene.drawer).toBeVisible();
+  expect(scene.writes()).toBe(0);
+});
+
+
+test('prefill is editable, merged, pending until save, with four distinct block colors', async ({page}) => {
+  await page.setViewportSize({width: 1600, height: 1100});
+  const scene = await sourceScenario(page, {prefill: true});
+  await expect(scene.unit.getByRole('combobox')).toHaveCount(2);
+  await expect(scene.unit.locator('td[rowspan="2"]')).toHaveCount(2);
+  expect(scene.writes()).toBe(0);
+  expect(scene.task.status).toBe('pending');
+  const colors = await scene.drawer.locator('.cost-source-task').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));
+  expect(colors).toEqual(['rgb(197, 212, 184)', 'rgb(232, 197, 165)', 'rgb(221, 185, 195)', 'rgb(185, 204, 223)']);
+  await scene.drawer.evaluate(async element => { await Promise.all(element.getAnimations({subtree: true}).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished)); });
+  await page.screenshot({path: '/tmp/cost-prefill-four-colors.png', fullPage: false, animations: 'disabled'});
+  await scene.drawer.getByRole('button', {name: '保存分配', exact: true}).click();
+  await expect.poll(scene.writes).toBe(1);
+  expect(scene.body()!.source_allocations.cost_lines).toHaveLength(2);
+});
+
+test('clearing prefill and collapsing the block does not recreate deleted input', async ({page}) => {
+  const scene = await sourceScenario(page, {prefill: true});
+  await scene.unit.getByRole('button', {name: '删除来源行 1', exact: true}).click();
+  await scene.unit.getByRole('button', {name: '删除来源行 1', exact: true}).click();
+  const heading = scene.drawer.locator('.cost-source-task-heading').first();
+  await heading.click(); await heading.click();
+  await expect(scene.unit.getByRole('combobox')).toHaveCount(0);
+  await expect(scene.unit.getByText('未分配')).toBeVisible();
   expect(scene.writes()).toBe(0);
 });

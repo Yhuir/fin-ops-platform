@@ -139,6 +139,7 @@ type ApiCostStatisticsManualAllocationTask = {
   pending_reasons: string[];
   amounts_fixed: boolean;
   source_allocations: ApiCostSourceAllocations | null;
+  suggested_source_allocations: ApiCostSourceAllocations | null;
   oa_total: string;
   gross_outflow_total: string;
   wrong_payment_refund_total: string;
@@ -185,7 +186,7 @@ type ApiCostSourceAllocations = {
   non_cost_lines: Array<{ bank_transaction_id: string; amount: string }>;
 };
 
-type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations"> & {
+type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations" | "suggested_source_allocations"> & {
   project_names: string[]; unit_count: number; bank_event_count: number;
 };
 
@@ -418,6 +419,7 @@ function mapManualAllocationTask(
     status: task.status,
     pendingReasons: task.pending_reasons,
     amountsFixed: task.amounts_fixed,
+    suggestedSourceAllocations: task.suggested_source_allocations === null ? null : mapSourceAllocations(task.suggested_source_allocations),
     sourceAllocations: task.source_allocations === null ? null : mapSourceAllocations(task.source_allocations),
     oaTotal: task.oa_total,
     grossOutflowTotal: task.gross_outflow_total,

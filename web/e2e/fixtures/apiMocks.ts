@@ -9441,7 +9441,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const status = url.searchParams.get("status") ?? "pending";
       const task = {
         relation_case_id: "CASE-COST-MANUAL-READONLY",
-        pending_reasons: ["amount_required"], amounts_fixed: false, source_allocations: null,
+        pending_reasons: ["amount_required"], amounts_fixed: false, suggested_source_allocations: null, source_allocations: null,
         project_names: ["权限测试项目"], unit_count: 1, bank_event_count: 1,
         relation_version: 1,
         source_fingerprint: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

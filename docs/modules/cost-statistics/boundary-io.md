@@ -1,6 +1,6 @@
 # 成本统计边界与 I/O
 
-日期：2026-09-09
+日期：2026-09-10
 
 ## 模块状态
 
@@ -67,7 +67,7 @@ PUT manual allocation
 - 容器拥有列表/详情/独立草稿/保存；表单只收任务、草稿、权限和回调，输出编辑/保存事件。sourceAllocation纯工具按来源行构造既有单元金额，不重写服务端政策。
 - 固定金额取原始目标；可编辑金额不再保存targets副本，只存来源行和显式zeroUnitIds。来源/金额无效时拒绝构造PUT。
 - 证据按oaId分组，表格行以内部稳定ID保持身份；内部主键不进入可见文字。无字段补猜、演示数据回退或全局样式。
-- 详情GET/保存PUT使用现有客户端15秒超时；PUT选择allowHtmlFallback=false。结果不明确时GET核对版本及实际内容，不自动重发PUT。HTTP DTO/数据库/审计/权限均未改变。
+- 详情GET/保存PUT使用现有客户端15秒超时；PUT选择allowHtmlFallback=false。结果不明确时GET核对版本及实际内容，不自动重发PUT。数据库/审计/权限保持既有合同；详情 DTO 的预填扩展见下节。
 
 ### Explorer 与日期合同
 
@@ -139,3 +139,14 @@ PUT manual allocation
 - 表单仍接收 task/draft、输出 onChange/onSave；`sourceAllocation.ts` 错误键分为 source/amount/owner，保留精确金额、零、双边闭合及未知写结果核实。
 - OA 原费用类型只读展示；成本行标签只读来源流水结构化主/子标签。替换来源不改变已输入金额。
 - 已移除 OA 文章卡片及展开全文行、独占一行的新增入口、来源格内联金额错误、旧原生 select 及灰白展开覆盖样式。旧实现没有并行保留。
+
+## 明确来源预填与合并单元格（2026-09-10）
+
+- `GET /manual-allocations/{case_id}` 新增必有的 `suggested_source_allocations: null | {cost_lines,refund_links,non_cost_lines}`；`PUT` 响应该字段为 null，列表摘要不携带它。PUT 入参、存储、权限、审计及原有自动完成规则不变。
+- repository 仅在定向关系 snapshot 投影银行 raw_payload 中现有的 `source_oa_row_id`、`oa_row_id`、`derived_from_oa_id`、`source_workbench_row_id` 四个标量引用为内部 `source_oa_ids`。普通 explorer 和任务列表不取原始 payload、不增加查询。只识别与当前 canonical OA ID 精确匹配的引用；别名或互相冲突的引用不猜测。
+- `suggest_source_allocations(task, bank_rows)` 是无 I/O 纯函数，按 OA 建映射，时间复杂度 O(OA 单元数 + 流水数 + 引用数)。只处理版本 0、未保存、未过期、固定目标、无退款/非成本的 pending 任务。明确归属的一组来源须与该 OA 单元总额相等；一成本项多来源按每笔原额、一来源多成本项按每项目标预填。多来源多成本项仍不分配，除非已拆成上述明确子组。
+- Workbench 的 `exact_amount` / `unique_bank_sum` 是展示对齐，不作为来源证据；不新增子集合搜索、比例算法、hash、表、cache、worker 或 fallback。截图 CASE-AUTO-0016 的金额组合可以作为人工判断线索，但没有原始明确引用时不会自动预填。
+- 服务只在 GET 详情计算建议，不把建议送入 policy、统计或持久化。前端草稿初始化优先已保存来源，再读取建议；stale 不复用。已有会话草稿（包括手动删空）不重新初始化。最终保存继续完整校验来源和金额并使用既有事务/版本约束。
+- 同一成本单元的项目格和 OA 格使用原生 rowSpan；新增、删除来源后同步更新跨度，删除最后一条仍保留身份与新增入口。不同 OA/成本单元不因项目同名而合并。
+- Block 使用四色循环 `#C5D4B8` / `#E8C5A5` / `#DDB9C3` / `#B9CCDF`；数据表格与输入保持白底，颜色不表示财务状态。已删除旧两色选择器、续行空身份格及依赖首个 td 的项目样式，不保留重复路径。
+- 上游 Workbench、银行分类与账户页面的写入、DTO 和职责不变；Cost 只消费既有原始引用。read model / worker 合同不变。本轮没有数据库迁移或备份。

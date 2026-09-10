@@ -15,7 +15,7 @@ function fixture(): CostStatisticsManualAllocationTask {
       { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', oaOriginalAmount: '200.00' },
     ],
     bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
-    allocations: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
+    allocations: [], suggestedSourceAllocations: null, sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
   };
 }
 function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocationTask; save?: () => void }) {
@@ -170,3 +170,22 @@ it('keeps source ordinals aligned with bank evidence when refunds appear first',
   expect(screen.getByRole('option', { name: /^2\. 建行 8106/ })).toBeInTheDocument();
   expect(screen.getAllByRole('option')).toHaveLength(1);
 });
+
+ it('merges both identity cells across suggested sources and updates spans on deletion', async () => {
+   const task = fixture(); const user = userEvent.setup();
+   task.suggestedSourceAllocations = {costLines: [
+     {unitId: 'unit-a', bankTransactionId: 'internal-bank', amount: '300.00'},
+     {unitId: 'unit-a', bankTransactionId: 'second-bank', amount: '200.00'},
+   ], refundLinks: [], nonCostLines: []};
+   task.bankEvents.push({...task.bankEvents[0], transactionId: 'second-bank', amount: '200.00'});
+   const {container} = render(<Editor task={task} />);
+   const group = container.querySelector('.cost-source-table tbody')!;
+   expect(group.querySelectorAll('td[rowspan="2"]')).toHaveLength(2);
+   expect(group.querySelectorAll('tr')[1].children).toHaveLength(4);
+   await user.click(within(group as HTMLElement).getByRole('button', {name: '删除来源行 1'}));
+   expect(group.querySelectorAll('td[rowspan="1"]')).toHaveLength(2);
+   expect(within(group as HTMLElement).getByRole('textbox', {name: '分配金额 1'})).toHaveValue('200.00');
+   await user.click(within(group as HTMLElement).getByRole('button', {name: '删除来源行 1'}));
+   expect(within(group as HTMLElement).getByText('未分配')).toBeVisible();
+   expect(within(group as HTMLElement).queryByRole('combobox')).not.toBeInTheDocument();
+ });

@@ -159,6 +159,7 @@ export type CostStatisticsManualAllocationTask = {
   pendingReasons: string[];
   amountsFixed: boolean;
   sourceAllocations: CostSourceAllocations | null;
+  suggestedSourceAllocations: CostSourceAllocations | null;
   oaTotal: string;
   grossOutflowTotal: string;
   wrongPaymentRefundTotal: string;
@@ -180,7 +181,7 @@ export type CostSourceAllocations = {
   nonCostLines: Array<{ bankTransactionId: string; amount: string }>;
 };
 
-export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations"> & {
+export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations" | "suggestedSourceAllocations"> & {
   projectNames: string[];
   unitCount: number;
   bankEventCount: number;

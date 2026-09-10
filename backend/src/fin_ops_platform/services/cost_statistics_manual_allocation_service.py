@@ -11,6 +11,7 @@ from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolic
 from fin_ops_platform.services.cost_statistics_source_allocation import (
     SourceAllocationError,
     complete_source_task,
+    suggest_source_allocations,
     validate_source_allocations,
 )
 from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
@@ -130,7 +131,10 @@ class CostStatisticsManualAllocationService:
                      if task["relation_case_id"] == relation_case_id), None)
         if task is None:
             raise KeyError(relation_case_id)
-        return {**task, "can_save": can_save}
+        group = next(group for group in snapshot["cost_groups"]
+                     if group["group_id"] == relation_case_id)
+        return {**task, "can_save": can_save,
+                "suggested_source_allocations": suggest_source_allocations(task, group["bank_rows"])}
 
     def save(
         self,
@@ -489,7 +493,7 @@ def _task_search_text(task: dict[str, Any]) -> str:
 def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value for key, value in task.items()
-        if key not in {"units", "bank_events", "allocations", "source_allocations"}
+        if key not in {"units", "bank_events", "allocations", "source_allocations", "suggested_source_allocations"}
     } | {
         "project_names": list(dict.fromkeys(unit["project_name"] for unit in task["units"])),
         "unit_count": len(task["units"]),

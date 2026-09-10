@@ -12,8 +12,10 @@
 .cost-source-tabs button[aria-checked="true"] span { background:#dbeafe; color:#1d4ed8; }
 .cost-source-search { display:flex; align-items:center; gap:6px; width:240px; }
 .cost-source-search input { flex:1; min-width:0; }
-.cost-source-task { border:1px solid #dce4ef; border-radius:8px; background:#eaf2ff; }
-.cost-source-task:nth-of-type(even) { background:#f2edff; }
+.cost-source-task { border:1px solid #dce4ef; border-radius:8px; background:#c5d4b8; }
+.cost-source-task:nth-of-type(4n + 2) { background:#e8c5a5; }
+.cost-source-task:nth-of-type(4n + 3) { background:#ddb9c3; }
+.cost-source-task:nth-of-type(4n + 4) { background:#b9ccdf; }
 
 .cost-source-task-heading { width:100%; display:flex; gap:8px; align-items:center; text-align:left; padding:12px 16px; background:transparent; border:0; cursor:pointer; font-size:13px; }
 .cost-source-task-heading > strong { flex:1; min-width:0; overflow-wrap:anywhere; font-weight:600; }
@@ -51,7 +53,7 @@
 .cost-source-table td { height:40px; padding:4px 10px; vertical-align:middle; border-bottom:1px solid #e2e8f0; border-right:1px solid #e2e8f0; }
 .cost-source-table tbody > tr:first-child { border-top:1px solid #bdcadd; }
 .cost-source-project-col { width:150px; }.cost-source-unit-col { width:170px; }.cost-source-tag-col { width:155px; }.cost-source-amount-col { width:125px; }.cost-source-action-col { width:76px; }
-.cost-source-table td:first-child { color:#56657d; font-size:12px; overflow-wrap:anywhere; }
+.cost-source-table .cost-source-project-cell { color:#56657d; font-size:12px; overflow-wrap:anywhere; }
 .cost-source-table td:nth-last-child(2) input { text-align:right; font-variant-numeric:tabular-nums; }
 .cost-source-table th:nth-last-child(2) { text-align:right; }
 .cost-source-table td:last-child { padding:4px; }
@@ -99,3 +101,5 @@
 @media(max-width:960px) { .cost-source-evidence { grid-template-columns:1fr; } }
 .cost-source-body input { box-sizing:border-box; border:1px solid #cbd5e1; border-radius:4px; padding:3px 8px; font-size:13px; height:32px; background:#fff; color:#1f2937; width:100%; font-family:inherit; min-width:0; }
 .cost-source-picker[aria-disabled="true"] { opacity:.6; cursor:not-allowed; }
+
+.cost-source-table .cost-source-identity-cell { vertical-align:top; padding-top:10px; }

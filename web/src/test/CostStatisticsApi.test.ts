@@ -25,7 +25,7 @@ describe("Cost statistics export API", () => {
       relation_version: 3,
       source_fingerprint: "b".repeat(64),
       status: "pending",
-      pending_reasons: ["source_required"], amounts_fixed: true, source_allocations: null,
+      pending_reasons: ["source_required"], amounts_fixed: true, suggested_source_allocations: null, source_allocations: null,
       project_names: ["云南溯源科技"], unit_count: 1, bank_event_count: 1,
       oa_total: "120.00",
       gross_outflow_total: "125.00",

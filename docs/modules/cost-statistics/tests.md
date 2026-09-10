@@ -73,3 +73,11 @@ cd web && npx playwright test e2e/cost-statistics-flow.spec.ts e2e/cost-statisti
 - 浏览器：真实鼠标与键盘选择；错误出现前后来源框 y/height 不变；错误浮层可见且 Escape 不关闭抽屉；原保存、冲突、失联后核实、只读、刷新失败链继续保护。
 - 性能：2/100条初始合法来源行，各20次输入、增删、打开菜单与实际切换来源；选择测量先编辑另一行释放真实来源，再交替两条来源，避免同值事件冒充选择性能。数据到表 DOM 为单次观测，不标作 p95。
 - 服务/API/数据库本轮无改动，复用已有90项真实PG成本专项及现有前端API合同；read model/cache/worker类别不适用。
+
+## 明确来源预填、四色与合并单元格专项（2026-09-10）
+
+- `test_cost_statistics_source_allocation.py`：金额相等无来源证据不填、明确一对一/一对多、同 OA 多单元一来源、部分组确定、冲突引用、多对多歧义、非固定金额/保存/过期/退款/非成本不猜测；计算不修改输入。
+- `test_cost_statistics_source_postgres.py`：真实 PG 原始引用投影→详情建议→无写入且列表不变→用户提交→保存重读；没有引用仅金额相等不填。沿用并发冲突、审计回滚和跨月三视角回归。
+- `CostSourceAllocation.test.ts` / `CostSourceAllocationForm.test.tsx`：建议初始化、保存优先、stale 不回填、rowSpan 增删、删除首条保留后续来源、删除全部保留身份。
+- `cost-source-allocation.spec.ts`：浏览器端建议映射、人工保存前零 PUT、四种实色、两格 rowSpan、清空后折叠重开不重填；现有只读、失败反馈、冲突、窄屏与100行性能样本继续验证。`cost-statistics-flow` / `relation-fanout` 保护五视图及关系链路。
+- 七类测试适用性不变：1/2/3/5/6/7 适用，第4类无新的 read model/cache/job 生命周期；保护 canonical 直读与无额外请求即可。
