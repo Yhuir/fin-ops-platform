@@ -88,3 +88,17 @@ cd web && npx playwright test e2e/cost-statistics-flow.spec.ts e2e/cost-statisti
 - PostgreSQL + HTTP：无原始引用的唯一金额组合GET预填，保持pending/零写入；确认PUT后审计、重读及三个视角跨月闭环，保留冲突/并发/回滚测试。
 - COST-E2E-014：实际金额结构四行呈现、两格rowSpan、无自动PUT、保存并在已完成重读；原草稿保护/错误/只读/窄屏测试保留。
 - 类别1/2/3/5/6/7适用；第4类无read model/cache/job变更，仍验证列表不带建议和GET无写入。
+
+本轮实际执行入口（PG环境变量指向本次独占测试库，现已清理）：
+
+```bash
+PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_source_allocation tests.test_cost_statistics_source_postgres tests.test_cost_statistics_policy tests.test_cost_statistics_canonical_repository tests.test_cost_statistics_api -q
+bash scripts/verify.sh lint
+bash scripts/verify.sh docs
+# web/ 下
+npm test -- --run
+npm run build
+FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playwright test e2e/cost-source-allocation.spec.ts e2e/cost-statistics-flow.spec.ts e2e/cost-statistics-relation-fanout.spec.ts --project=chromium
+```
+
+结果：104后端（含11真实PG）、1293前端、23发布构建浏览器测试通过；类别1/2/3/5/6/7覆盖，第4类无对应生命周期改动。生产性能、网络中断样本及未覆盖风险见实施记录修复版发布段。
