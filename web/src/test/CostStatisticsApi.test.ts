@@ -45,7 +45,7 @@ describe("Cost statistics export API", () => {
       }],
       bank_events: [{
         transaction_id: "bank-1",
-        event_kind: "wrong_payment_refund",
+        event_kind: "wrong_payment_refund", in_project_cost_scope: false,
         amount: "5.00",
         counterparty_name: "供应商",
         trade_time: "2026-08-27T10:00:00+08:00",
@@ -85,6 +85,7 @@ describe("Cost statistics export API", () => {
       bankEvents: [{
         transactionId: "bank-1",
         eventKind: "wrong_payment_refund",
+        inProjectCostScope: false,
         tags: ["退款"],
       }],
     });

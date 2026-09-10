@@ -180,6 +180,7 @@ EXPECTED_MIGRATION_FILES = [
     "0167_cash_shared_runtime_grants.sql",
     "0168_cash_business_closure.sql",
     "0169_cost_statistics_source_allocations.sql",
+    "0170_cost_statistics_project_cost_scope.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

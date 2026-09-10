@@ -7,9 +7,6 @@ from typing import Any, Callable
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
-from fin_ops_platform.services.cost_statistics_query_service import (
-    CostStatisticsExportLimitError,
-)
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     CostStatisticsIntegrityError,
 )
@@ -19,6 +16,9 @@ from fin_ops_platform.services.cost_statistics_manual_allocation_service import 
 )
 from fin_ops_platform.services.cost_statistics_policy import (
     CostStatisticsAllocationConflictError,
+)
+from fin_ops_platform.services.cost_statistics_query_service import (
+    CostStatisticsExportLimitError,
 )
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
@@ -78,6 +78,8 @@ class CostStatisticsApiRoutes:
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> Any | None:
+        if route_path == "/api/cost-statistics/project-cost-scope" and method in {"GET", "PUT"}:
+            return self.handle_project_cost_scope(method, body, headers)
         if method == "GET" and route_path == "/api/cost-statistics/no-oa-rules":
             return self.handle_no_oa_rules(headers)
         if method == "PUT" and route_path == "/api/cost-statistics/no-oa-rules":
@@ -160,6 +162,28 @@ class CostStatisticsApiRoutes:
                 query.get("scope", [None])[0],
             )
         return None
+
+    def handle_project_cost_scope(self, method: str, body: str | bytes | None, headers: dict[str, str] | None) -> Any:
+        session, error = self._write_session(headers) if method == "PUT" else self._read_session(headers)
+        if error is not None:
+            return error
+        try:
+            if method == "GET":
+                _, write_error = self._write_session(headers)
+                result = self._settings_service().get_project_cost_scope(can_save=write_error is None and session is not None)
+            else:
+                if session is None:
+                    return self._json_response(HTTPStatus.FORBIDDEN, {"error": "authentication_required"})
+                payload, body_error = self._load_body(body)
+                if body_error is not None:
+                    return body_error
+                result = self._settings_service().update_project_cost_scope(
+                    payload, actor_id=actor_id_for_session(session), request_id=_header_value(headers, "x-request-id"),
+                )
+        except AppSettingsValidationError as exc:
+            status = HTTPStatus.CONFLICT if exc.error_code.endswith("version_conflict") else HTTPStatus.BAD_REQUEST
+            return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
+        return self._json_response(HTTPStatus.OK, result, {"Cache-Control": "private, no-cache", "Vary": "Authorization, Cookie"})
 
     def handle_manual_allocations(
         self,

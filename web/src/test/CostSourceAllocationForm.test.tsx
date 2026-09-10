@@ -14,7 +14,7 @@ function fixture(): CostStatisticsManualAllocationTask {
       { unitId: 'unit-a', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '材料', expenseContent: '材料采购', oaApplicant: '张先生', oaOriginalAmount: '500.00' },
       { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', oaOriginalAmount: '200.00' },
     ],
-    bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
+    bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', inProjectCostScope: true, amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
     allocations: [], suggestedSourceAllocations: null, sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
   };
 }

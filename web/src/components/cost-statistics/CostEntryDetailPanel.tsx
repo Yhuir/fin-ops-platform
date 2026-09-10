@@ -81,8 +81,8 @@ function costDetailSections(detail: CostEntryDetail) {
     fields: [
       { label: "来源流水", value: allocation.transactionId || "来源待分配" },
       { label: "付款日期", value: allocation.occurredAt || "付款日期待完善" },
-      { label: "银行主标签", value: allocation.allocationState === "source_pending" ? "来源待分配" : allocation.bankTagPrimaryLabel || "银行标签待完善" },
-      { label: "银行子标签", value: allocation.allocationState === "source_pending" ? "来源待分配" : allocation.bankTagSubLabel || "未设置子标签" },
+      { label: "银行主标签", value: allocation.bankTagPrimaryLabel || "银行标签待完善" },
+      { label: "银行子标签", value: allocation.bankTagSubLabel || "未设置子标签" },
       { label: "完整银行标签", value: allocation.bankTagLabelPath.join(" / ") },
       { label: "原 OA 费用类型", value: allocation.expenseType },
     ],

@@ -80,6 +80,7 @@ class CostStatisticsManualAllocationService:
             (
                 {**task, "can_save": can_save}
                 for task in policy.manual_allocation_tasks
+                if task["in_project_cost_scope"]
             ),
             key=lambda task: str(task.get("relation_case_id") or ""),
         )

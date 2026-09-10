@@ -114,38 +114,15 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 )
         policy = self._policy([group])
 
-        self.assertEqual(len(policy.serialized_cost_rows), 3)
-        self.assertEqual(
-            {row["payment_account_label"] for row in policy.serialized_cost_rows},
-            {None},
-        )
-        self.assertEqual(
-            {row["bank_account_label"] for row in policy.serialized_cost_rows},
-            {UNRESOLVED_BANK_ACCOUNT_LABEL},
-        )
-        detail = policy.allocation(
-            allocation_id="relation:case-1:unit:oa:oa-2",
-            scope_kind="all",
-            scope_value=None,
-        )
-        assert detail is not None
-        self.assertEqual(detail["amount"], "180.00")
-        self.assertEqual(detail["bank_event_amount"], "")
-        self.assertEqual(len(detail["payment_evidence"]), 3)
-        self.assertEqual(
-            sum((Decimal(row["amount"]) for row in policy.serialized_cost_rows), start=Decimal("0")),
-            Decimal("540.00"),
-        )
+        self.assertEqual(policy.serialized_cost_rows, [])
+        task = policy.manual_allocation_tasks[0]
+        self.assertIsNone(task["source_allocations"])
+        self.assertEqual(len(task["bank_events"]), 3)
+        self.assertEqual(task["net_outflow_total"], "540.00")
         for view in ("project", "cost_tag", "bank_account"):
-            page = policy.explorer_page(
-                scope_kind="all",
-                scope_value=None,
-                view=view,
-                filters={},
-                cursor_values=None,
-                page_size=50,
-            )
-            self.assertEqual(page["summary"]["total_amount"], "540.00")
+            page = policy.explorer_page(scope_kind="all", scope_value=None, view=view,
+                filters={}, cursor_values=None, page_size=50)
+            self.assertEqual(page["summary"]["total_amount"], "0.00")
 
     def test_bank_account_view_groups_cost_then_drills_into_project(self) -> None:
         policy = self._policy(
@@ -356,32 +333,14 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(len(policy.serialized_cost_rows), 2)
-        self.assertEqual(
-            {(row["oa_id"], row["amount"]) for row in policy.serialized_cost_rows},
-            {("oa-a", "50.01"), ("oa-b", "49.99")},
-        )
-        self.assertEqual(
-            {row["transaction_id"] for row in policy.serialized_cost_rows}, {None}
-        )
-        self.assertEqual(
-            {row["payment_account_label"] for row in policy.serialized_cost_rows},
-            {None},
-        )
-        self.assertEqual(
-            {row["bank_account_label"] for row in policy.serialized_cost_rows},
-            {UNRESOLVED_BANK_ACCOUNT_LABEL},
-        )
+        self.assertEqual(policy.serialized_cost_rows, [])
+        task = policy.manual_allocation_tasks[0]
+        self.assertEqual(task["allocations"], [self._line("oa:oa-a", "50.01"), self._line("oa:oa-b", "49.99")])
+        self.assertIn("source_required", task["pending_reasons"])
         for view in ("project", "cost_tag", "bank_account"):
-            page = policy.explorer_page(
-                scope_kind="all",
-                scope_value=None,
-                view=view,
-                filters={},
-                cursor_values=None,
-                page_size=50,
-            )
-            self.assertEqual(page["summary"]["total_amount"], "100.00")
+            page = policy.explorer_page(scope_kind="all", scope_value=None, view=view,
+                filters={}, cursor_values=None, page_size=50)
+            self.assertEqual(page["summary"]["total_amount"], "0.00")
 
     def test_changed_relation_source_marks_manual_allocation_stale(self) -> None:
         group = self._group(
@@ -922,7 +881,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ]
         return CostStatisticsPolicy(
             {
-                "settings": settings or {},
+                "settings": {"cost_statistics_project_cost_scope": {"version": 1, "selected_tag_codes": sorted({str(row.get("bank_tag_code") or "uncategorized") for row in snapshot_bank_rows})}, **(settings or {})},
                 "bank_rows": snapshot_bank_rows,
                 "bank_statistics": {
                     "transaction_count": len(snapshot_bank_rows),

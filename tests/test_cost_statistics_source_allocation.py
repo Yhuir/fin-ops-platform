@@ -131,11 +131,11 @@ class SourceCostPolicyTests(unittest.TestCase):
         f = self.fixture
         policy = f._policy([f._group(oa_rows=[f._oa("a", amount="600.00"), f._oa("b", amount="400.00")],
                                     bank_rows=[f._bank("bank-1", "500.00"), f._bank("bank-2", "500.00")])])
-        self.assertEqual(len(policy.serialized_cost_rows), 2)
-        self.assertTrue(all(row["occurred_at"] is None and row["transaction_id"] is None for row in policy.serialized_cost_rows))
+        self.assertEqual(policy.serialized_cost_rows, [])
+        self.assertIn("source_required", policy.manual_allocation_tasks[0]["pending_reasons"])
         page = policy.explorer_page(scope_kind="month", scope_value="2026-05", view="project", filters={}, cursor_values=None, page_size=20)
         self.assertEqual(page["summary"]["total_amount"], "0.00")
-        self.assertEqual(page["allocation_quality"]["undated_amount"], "1000.00")
+        self.assertEqual(page["allocation_quality"]["undated_amount"], "0.00")
         exported = policy.export_page(month="all", start_month=None, end_month=None, start_date=None, end_date="2026-12-31", project_names=[], bank_tag_primary_keys=[], row_shape="raw_cost", offset=0, page_size=20, include_summary=True)
         self.assertEqual(exported["rows"], [])
 

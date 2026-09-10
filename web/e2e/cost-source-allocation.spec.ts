@@ -10,8 +10,8 @@ async function sourceScenario(page: Page, options: { alignmentCase?: boolean; ma
     oa_total: '600.00', gross_outflow_total: '600.00', wrong_payment_refund_total: '0.00', net_outflow_total: '600.00',
     units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', oa_original_amount: '600.00' }],
     bank_events: [
-      { transaction_id: 'bank-a', event_kind: 'outflow', amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
-      { transaction_id: 'bank-b', event_kind: 'outflow', amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
+      { transaction_id: 'bank-a', event_kind: 'outflow', in_project_cost_scope: true, amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
+      { transaction_id: 'bank-b', event_kind: 'outflow', in_project_cost_scope: true, amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
     ],
     allocations: [{ unit_id: 'oa-1', amount: '600.00' }], suggested_source_allocations: null as unknown, source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,

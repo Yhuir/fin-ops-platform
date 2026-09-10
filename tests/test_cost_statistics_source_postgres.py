@@ -29,6 +29,9 @@ class CostSourcePostgresTests(unittest.TestCase):
         truncate_test_database(self.database_url)
         self.addCleanup(truncate_test_database, self.database_url)
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
+        self.connection.execute("""insert into app.app_settings (settings_key,settings_payload) values
+            ('app_settings', %s::jsonb)""", (json.dumps({"access_control_version":1,"page_access_accounts":[],"bank_transaction_tags": {},
+                "cost_statistics_project_cost_scope": {"version": 1, "selected_tag_codes": ["uncategorized"]}}),))
         self.repository = PostgresCostStatisticsCanonicalRepository(self.connection)
         self.service = CostStatisticsManualAllocationService(canonical_repository=self.repository,
             allocation_repository=PostgresCostStatisticsManualAllocationRepository(self.connection), write_connection=self.connection)
@@ -133,6 +136,115 @@ class CostSourcePostgresTests(unittest.TestCase):
                 response = app.handle_request('GET', f'/api/cost-statistics/explorer?view={view}&scope={month}&page_size=20')
                 self.assertEqual(response.status_code, 200, response.body)
                 self.assertEqual(json.loads(response.body)['summary']['total_amount'], amount)
+
+    def scope_service(self):
+        from pathlib import Path
+
+        from fin_ops_platform.services.app_settings_service import AppSettingsService
+        from fin_ops_platform.services.postgres_state_store import PostgresStateStore
+
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        return AppSettingsService(PostgresStateStore(data_dir=Path("/tmp"), connection=self.connection),
+            app._project_costing_service)
+
+    def test_scope_save_empty_restore_audit_cas_and_original_flows(self):
+        from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+        service = self.scope_service()
+        self.save(self.payload())
+        original = self.service.get_task("cost-source-case", can_save=True)
+        raw_before = self.query.get_explorer_page(scope="all", view="time", filters={}, cursor=None, page_size=20)
+        result = service.update_project_cost_scope({"expected_version": 1, "selected_tag_codes": []}, actor_id="cost-test")
+        self.assertEqual((result["version"], result["changed"]), (2, True))
+        for view in ("project", "cost_tag", "bank_account"):
+            self.assertEqual(self.query.get_explorer_page(scope="all", view=view, filters={}, cursor=None, page_size=20)["summary"]["total_amount"], "0.00")
+        self.assertEqual(self.service.list_tasks(cursor=None,page_size=20,status="pending",query=None,can_save=True)["counts"], {"pending":0,"allocated":0})
+        self.assertEqual(self.service.get_task("cost-source-case", can_save=True)["source_allocations"], original["source_allocations"])
+        self.assertEqual(self.query.get_explorer_page(scope="all", view="time", filters={}, cursor=None, page_size=20), raw_before)
+        result = self.scope_service().update_project_cost_scope({"expected_version": 2, "selected_tag_codes": []}, actor_id="cost-test")
+        self.assertFalse(result["changed"])
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from audit.events where action='cost_statistics.project_cost_scope.save'")["n"], 1)
+        with self.assertRaises(AppSettingsValidationError):
+            service.update_project_cost_scope({"expected_version":1,"selected_tag_codes":["uncategorized"]},actor_id="cost-test")
+        result = service.update_project_cost_scope({"expected_version":2,"selected_tag_codes":["uncategorized"]},actor_id="cost-test")
+        self.assertEqual(result["version"],3)
+        self.assertEqual(self.query.get_explorer_page(scope="all",view="project",filters={},cursor=None,page_size=20)["summary"]["total_amount"],"1000.00")
+        with patch.object(PostgresOperationsAuditRepository, "append_operation_event", side_effect=RuntimeError("audit failure")):
+            with self.assertRaisesRegex(RuntimeError,"audit failure"):
+                service.update_project_cost_scope({"expected_version":3,"selected_tag_codes":[]},actor_id="cost-test")
+        self.assertEqual(service.get_project_cost_scope(can_save=True)["version"],3)
+
+    def test_scope_version_invalidates_cost_cursor_and_empty_export(self):
+        self.save(self.payload())
+        filters={"project_name":"测试项目","bank_tag_primary_key":"pending:tag","bank_tag_sub_key":"pending:tag"}
+        page=self.query.get_explorer_page(scope="all",view="project",filters=filters,cursor=None,page_size=1)
+        self.assertIsNotNone(page["next_cursor"])
+        self.scope_service().update_project_cost_scope({"expected_version":1,"selected_tag_codes":[]},actor_id="cost-test")
+        with self.assertRaises(ValueError):
+            self.query.get_explorer_page(scope="all",view="project",filters=filters,cursor=page["next_cursor"],page_size=1)
+        preview=self.query.get_export_preview(view="project",month="all",project_names=["测试项目"])
+        self.assertEqual(preview["summary"]["row_count"],0)
+
+    def test_scope_http_contract_and_concurrent_writes(self):
+        from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._app_settings_service = self.scope_service()
+        path = "/api/cost-statistics/project-cost-scope"
+        response = app.handle_request("GET",path)
+        self.assertEqual(response.status_code,200,response.body)
+        current = json.loads(response.body)
+        self.assertTrue(current["can_save"])
+        self.assertIn("internal_transfer",{tag["code"] for tag in current["available_tags"]})
+        for payload in ({"expected_version":True,"selected_tag_codes":[]},
+                        {"expected_version":1,"selected_tag_codes":["unknown-code"]},
+                        {"expected_version":1,"selected_tag_codes":["uncategorized","uncategorized"]}):
+            response=app.handle_request("PUT",path,body=json.dumps(payload))
+            self.assertEqual(response.status_code,400,response.body)
+            self.assertEqual(json.loads(response.body)["error"],"invalid_project_cost_scope")
+        def write(codes):
+            try:
+                return self.scope_service().update_project_cost_scope({"expected_version":1,"selected_tag_codes":codes},actor_id="test")["version"]
+            except AppSettingsValidationError as exc:
+                return exc.error_code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results=list(pool.map(write,[[],["internal_transfer"]]))
+        self.assertCountEqual(results,[2,"project_cost_scope_version_conflict"])
+        response=app.handle_request("PUT",path,body=json.dumps({"expected_version":1,"selected_tag_codes":[]}))
+        self.assertEqual(response.status_code,409,response.body)
+        self.assertEqual(json.loads(response.body)["error"],"project_cost_scope_version_conflict")
+        app._cost_statistics_api_routes._resolve_write_session=lambda headers:(None,app._json_response(403,{"error":"forbidden"}))
+        self.assertFalse(json.loads(app.handle_request("GET",path).body)["can_save"])
+        self.assertEqual(app.handle_request("PUT",path,body=json.dumps({"expected_version":2,"selected_tag_codes":[]})).status_code,403)
+
+    def test_scope_migration_and_generic_settings_writers_preserve_empty_choice(self):
+        from pathlib import Path
+
+        from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+        service = self.scope_service()
+        old = self.connection.fetch_one("select settings_payload from app.app_settings")["settings_payload"]
+        service.update_project_cost_scope({"expected_version":1,"selected_tag_codes":[]},actor_id="cost-test")
+        repo = PostgresOpsTaxEtcRepository(self.connection)
+        repo.save_settings("app_settings", {**old,"completed_project_ids":["p1"]})
+        with self.connection.transaction() as tx:
+            repo.replace_normalized_app_settings_in_transaction(old, transaction=tx)
+            tx.execute(Path("backend/src/fin_ops_platform/postgres/migrations/0170_cost_statistics_project_cost_scope.sql").read_text())
+        self.assertEqual(service.get_project_cost_scope(can_save=True)["selected_tag_codes"],[])
+        row = self.connection.fetch_one("select settings_payload,raw_payload from app.app_settings")
+        self.assertEqual(row["settings_payload"],row["raw_payload"]["normalized_payload"])
+
+    def test_internal_transfer_projection_has_primary_without_fake_sub_label(self):
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id, legacy_transaction_id, category, source, status, raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id='bank-1'""")
+        rows = self.repository.load_relation_snapshot("cost-source-case")["bank_rows"]
+        row = next(row for row in rows if row["id"] == "bank-1")
+        self.assertEqual(row["bank_tag_code"],"internal_transfer")
+        self.assertEqual(row["bank_tag_primary_label"],"内部往来款")
+        self.assertEqual(row["bank_tag_sub_label"],"")
+        self.assertEqual(row["bank_tag_label_path"],["内部往来款"])
 
     def payload(self):
         task = self.service.get_task("cost-source-case", can_save=True)

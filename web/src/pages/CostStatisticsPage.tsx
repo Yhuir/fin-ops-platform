@@ -1,3 +1,6 @@
+import CostStatisticsProjectCostScopeDrawer from "../components/cost-statistics/CostStatisticsProjectCostScopeDrawer";
+import { fetchProjectCostScope, saveProjectCostScope } from "../features/cost-statistics/api";
+import type { ProjectCostScope } from "../features/cost-statistics/types";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import {
   Button,
@@ -393,6 +396,15 @@ export default function CostStatisticsPage() {
   const [exportPreview, setExportPreview] = useState<CostStatisticsExportPreview | null>(null);
   const [exportCenterMode, setExportCenterMode] = useState<ExportCenterMode>("bank_account");
   const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [projectScope, setProjectScope] = useState<ProjectCostScope | null>(null);
+  const [scopeDraft, setScopeDraft] = useState<string[]>([]);
+  const [scopeLoading, setScopeLoading] = useState(false);
+  const [scopeSaving, setScopeSaving] = useState(false);
+  const [scopeError, setScopeError] = useState<string | null>(null);
+  const [scopeUnconfirmed, setScopeUnconfirmed] = useState<{ version: number; codes: string[] } | null>(null);
+  const [scopeReload, setScopeReload] = useState(0);
+  const [scopeRefresh, setScopeRefresh] = useState(0);
   const [isNoOaRulesOpen, setIsNoOaRulesOpen] = useState(false);
   const [noOaRules, setNoOaRules] = useState<CostStatisticsNoOaRules | null>(null);
   const [noOaDraftProjects, setNoOaDraftProjects] = useState<CostStatisticsNoOaProject[]>([]);
@@ -634,6 +646,53 @@ export default function CostStatisticsPage() {
     invalidateExportReferenceData();
     setDomainRefreshNonce((current) => current + 1);
   }, [invalidateExportReferenceData]);
+
+  const scopeSaved = useCallback(() => {
+    explorerRequestRef.current?.abort(); paginationRequestRef.current?.abort(); statisticsRequestRef.current?.abort();
+    resetExplorerSelection("project"); resetExplorerSelection("bankAccount");
+    setLoadedExplorer(null);
+    invalidateExportReferenceData();
+    setDomainRefreshNonce(current => current + 1);
+    setScopeRefresh(current => current + 1);
+    setScopeUnconfirmed(null);
+    setScopeOpen(false);
+  }, [invalidateExportReferenceData, resetExplorerSelection]);
+
+  useEffect(() => {
+    if (!active || !scopeOpen) return;
+    const controller = new AbortController();
+    setScopeLoading(true); setScopeError(null);
+    void fetchProjectCostScope(controller.signal).then(result => {
+      if (controller.signal.aborted) return;
+      setProjectScope(result);
+      if (scopeUnconfirmed) {
+        const matches = JSON.stringify([...result.selected_tag_codes].sort()) === JSON.stringify([...scopeUnconfirmed.codes].sort());
+        if (matches && result.version >= scopeUnconfirmed.version) { scopeSaved(); return; }
+        setScopeUnconfirmed(null);
+        setScopeError("当前范围与提交不同，修改已保留，请核对后保存");
+      } else { setScopeDraft(result.selected_tag_codes); }
+    }).catch(caught => { if (!controller.signal.aborted) setScopeError(getCostStatisticsLoadErrorMessage(caught)); })
+      .finally(() => { if (!controller.signal.aborted) setScopeLoading(false); });
+    return () => controller.abort();
+    // Opening/reloading owns the read. Changing the verification result must not launch another read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, scopeOpen, scopeReload]);
+
+  const saveScope = async () => {
+    if (!projectScope || scopeSaving || scopeUnconfirmed) return;
+    setScopeSaving(true); setScopeError(null);
+    try {
+      const result = await saveProjectCostScope(projectScope.version, scopeDraft);
+      setProjectScope(result); setScopeDraft(result.selected_tag_codes); scopeSaved();
+    } catch (caught) {
+      if (caught instanceof ApiClientError && caught.status >= 400 && caught.status < 500) {
+        setScopeError(getCostStatisticsActionErrorMessage(caught));
+      } else {
+        setScopeUnconfirmed({ version: projectScope.version, codes: [...scopeDraft] });
+        setScopeError("保存结果待核实，修改已保留");
+      }
+    } finally { setScopeSaving(false); }
+  };
 
   const closeNoOaRules = useCallback(() => {
     if (!isNoOaRulesSaving) {
@@ -1654,7 +1713,9 @@ export default function CostStatisticsPage() {
           </Button>
           {!isBankFlowView ? (
             <>
+              <Button className="cost-page-action" size="sm" variant="secondary" onPress={() => setScopeOpen(true)}>项目成本范围</Button>
               <CostStatisticsManualAllocationDrawer
+                scopeRefresh={scopeRefresh}
                 pendingCount={explorerData?.allocationQuality ? explorerData.allocationQuality.pendingManualAllocationCount + explorerData.allocationQuality.staleManualAllocationCount : undefined}
                 canSave={canOperateData && !interactionLocked}
                 onSaved={handleManualRefresh}
@@ -1906,6 +1967,11 @@ export default function CostStatisticsPage() {
         rowKind={activeRowKind}
       />
 
+      <CostStatisticsProjectCostScopeDrawer open={scopeOpen} scope={projectScope} selected={scopeDraft}
+        loading={scopeLoading} saving={scopeSaving} error={scopeError} unconfirmed={Boolean(scopeUnconfirmed)}
+        canSave={canOperateData && !interactionLocked && Boolean(projectScope?.can_save)}
+        onClose={() => { if (!scopeSaving && !scopeUnconfirmed) setScopeOpen(false); }}
+        onReload={() => setScopeReload(current => current + 1)} onChange={setScopeDraft} onSave={() => void saveScope()} />
       <CostStatisticsNoOaRulesDrawer
         canSave={canOperateData && !interactionLocked && (noOaRules?.canSave ?? true)}
         error={noOaRulesError}

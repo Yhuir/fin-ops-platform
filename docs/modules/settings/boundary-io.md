@@ -142,3 +142,7 @@
 - `app.app_settings.settings_payload.bank_flow_rule_batch_tag_rules` 是 canonical value；`raw_payload.normalized_payload` 只是同值审计镜像，不是第二事实源。
 - 历史迁移 `0111` 只规范了 formal payload，导致设置页只读 Audit 报 `settings_formal_raw_payload_mismatch`。`0118` 仅把该 setting family 的 canonical value 同步到 raw 镜像并记录 migration marker，禁止修改规则版本、OA/发票开关或其它 setting family。
 - 后续正常写入继续统一走 repository settings writer，由同一事务同时写 formal 与 raw；禁止再增加只改 `settings_payload` 的旁路 SQL。
+
+## 项目成本范围（2026-09-11）
+
+`cost_statistics_project_cost_scope={version,selected_tag_codes}` 由 AppSettingsService 的窄命令管理。GET 读取正式配置与银行标签清单；PUT 在现有 settings advisory/row lock 下校验最新字典及版本，通过 versioned family repository 只更新本项并同事务写 audit。相同选择无写入。普通设置保存及 normalized replacement 保留此 family 最新值，标签改名/新增不自动扩选。0170 显式初始化；缺键不运行时全选，空数组不重置。HTTP 权限仍由成本 route 负责。

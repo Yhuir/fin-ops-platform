@@ -181,6 +181,7 @@ EXPECTED_MIGRATIONS = [
     "0167_cash_shared_runtime_grants.sql",
     "0168_cash_business_closure.sql",
     "0169_cost_statistics_source_allocations.sql",
+    "0170_cost_statistics_project_cost_scope.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -344,7 +345,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 170)],
+            [f"{number:04d}" for number in range(1, 171)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -1944,6 +1945,12 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         for approved_drop in approved_legacy_drops:
             self.assertIn(approved_drop, checked_sql)
             checked_sql = checked_sql.replace(approved_drop, "")
+        # Only the explicit empty settings singleton bootstrap is permitted here.
+        scope_bootstrap = """insert into app.app_settings (settings_key, settings_payload)
+values ('app_settings', '{"access_control_version":1,"page_access_accounts":[]}'::jsonb)
+on conflict (settings_key) do nothing;"""
+        self.assertIn(scope_bootstrap, checked_sql)
+        checked_sql = checked_sql.replace(scope_bootstrap, "approved_empty_settings_singleton;")
         forbidden_patterns = [
             r"\bdrop\s+(database|schema|table)\b",
             r"\btruncate\b",

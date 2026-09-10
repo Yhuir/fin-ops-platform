@@ -9,9 +9,9 @@ import { createSourceDraft, sourceDecisionMatches, sourceSaveRequest, type Sourc
 import type { CostStatisticsManualAllocationSummary, CostStatisticsManualAllocationTask, SaveCostStatisticsManualAllocationRequest } from '../../features/cost-statistics/types';
 import './costSourceAllocation.css';
 
-type Props = { canSave: boolean; pendingCount?: number; onSaved: () => void };
+type Props = { scopeRefresh?: number; canSave: boolean; pendingCount?: number; onSaved: () => void };
 type TaskState = { task?: CostStatisticsManualAllocationTask; draft?: SourceDraft; dirty?: boolean; loading?: boolean; saving?: boolean; error?: string; notice?: string; unconfirmedRequest?: SaveCostStatisticsManualAllocationRequest };
-export default function CostStatisticsManualAllocationDrawer({ canSave, pendingCount, onSaved }: Props) {
+export default function CostStatisticsManualAllocationDrawer({ canSave, pendingCount, onSaved, scopeRefresh = 0 }: Props) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<'pending' | 'allocated'>('pending');
   const [queryDraft, setQueryDraft] = useState('');
@@ -57,6 +57,13 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
     } catch (caught) { if (!controller.signal.aborted) setError('人工分配任务加载失败，请重试'); }
     finally { if (listRequest.current === controller) setLoading(false); }
   };
+  useEffect(() => {
+    listRequest.current?.abort(); details.current.forEach(controller => controller.abort());
+    setCounts(null); setStates({}); setItems([]);
+    if (open) void load();
+    // Scope changes invalidate this drawer; ordinary draft edits do not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeRefresh]);
   useEffect(() => () => { listRequest.current?.abort(); details.current.forEach(controller => controller.abort()); }, []);
   const acceptSaved = (id: string, saved: CostStatisticsManualAllocationTask) => {
     const previous = currentStates.current[id].task;

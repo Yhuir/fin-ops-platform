@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from datetime import datetime
-import hashlib
 from time import sleep
 from typing import Any, Callable
 from uuid import uuid4
 
 from fin_ops_platform.domain.models import ProjectMaster
+from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.bank_transaction_category_service import (
     BankAutoTagRulesValidationError,
     BankTransactionCategoryService,
@@ -18,16 +19,18 @@ from fin_ops_platform.services.bank_turnover_tag_semantics import (
     is_external_turnover_definition,
     normalize_turnover_action_type,
 )
-from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
+from fin_ops_platform.services.cost_statistics_scope import (
+    PROJECT_COST_SCOPE_KEY,
+    project_cost_scope_tags,
+    read_project_cost_scope,
+)
+from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    SETTINGS_KEY as INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
+)
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
     InputInvoiceUsagePaymentRulesValidationError,
-    SETTINGS_KEY as INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
     normalize_payment_status_rules_settings,
-)
-from fin_ops_platform.services.oa_role_sync_service import (
-    OARoleSyncConfigurationError,
-    OARoleSyncService,
 )
 from fin_ops_platform.services.oa_draft_prefill import (
     DEFAULT_OA_PROJECT_ID,
@@ -38,6 +41,10 @@ from fin_ops_platform.services.oa_draft_prefill import (
     default_oa_draft_prefill,
     normalize_oa_draft_prefill,
     oa_draft_prefill_options,
+)
+from fin_ops_platform.services.oa_role_sync_service import (
+    OARoleSyncConfigurationError,
+    OARoleSyncService,
 )
 from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_GROUP_LABELS_BY_DIRECTION,
@@ -205,6 +212,7 @@ class AppSettingsService:
         )
         oa_import_options = self._oa_import_available_options()
         return {
+            **({PROJECT_COST_SCOPE_KEY: deepcopy(self._snapshot[PROJECT_COST_SCOPE_KEY])} if PROJECT_COST_SCOPE_KEY in self._snapshot else {}),
             "projects": {
                 "active": active_projects,
                 "completed": completed_projects,
@@ -545,6 +553,8 @@ class AppSettingsService:
                 "turnover_ledger_tag_selection": self._snapshot.get("turnover_ledger_tag_selection", {}),
                 "batch_accounting_tag_selection": self._snapshot.get("batch_accounting_tag_selection", {}),
                 "cost_statistics_no_oa_projects": self._snapshot.get("cost_statistics_no_oa_projects", {}),
+                **({PROJECT_COST_SCOPE_KEY: self._snapshot[PROJECT_COST_SCOPE_KEY]}
+                   if PROJECT_COST_SCOPE_KEY in self._snapshot else {}),
                 INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: self._snapshot.get(
                     INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY,
                     {},
@@ -1413,6 +1423,64 @@ class AppSettingsService:
             if str(code).strip()
         ]
 
+    def get_project_cost_scope(self, *, can_save: bool) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        try:
+            scope = read_project_cost_scope(self._snapshot)
+        except ValueError as exc:
+            raise AppSettingsValidationError("invalid_project_cost_scope", str(exc)) from exc
+        return {**scope, "available_tags": project_cost_scope_tags(self._snapshot["bank_transaction_tags"], scope["selected_tag_codes"]),
+                "can_save": can_save}
+
+    def update_project_cost_scope(
+        self, payload: dict[str, Any], *, actor_id: str, request_id: str = "",
+    ) -> dict[str, Any]:
+        from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+
+        if set(payload) != {"expected_version", "selected_tag_codes"}:
+            raise AppSettingsValidationError("invalid_project_cost_scope", "请提交版本和完整标签选择。")
+        try:
+            requested = read_project_cost_scope({PROJECT_COST_SCOPE_KEY: {
+                "version": payload["expected_version"], "selected_tag_codes": payload["selected_tag_codes"],
+            }})
+        except ValueError as exc:
+            raise AppSettingsValidationError("invalid_project_cost_scope", str(exc)) from exc
+        connection = getattr(self._state_store, "_connection", None)
+        save_family = getattr(self._state_store, "save_app_settings_for_versioned_family_in_transaction", None)
+        if connection is None or not callable(save_family):
+            raise AppSettingsPersistenceError("Project cost scope requires the PostgreSQL settings transaction.")
+        with connection.transaction() as transaction:
+            # Lock and read through the settings repository so validation and the write share facts.
+            from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+            current_settings = PostgresOpsTaxEtcRepository(transaction).load_app_settings_for_update()
+            try:
+                current = read_project_cost_scope(current_settings)
+            except ValueError as exc:
+                raise AppSettingsValidationError("invalid_project_cost_scope", str(exc)) from exc
+            if requested["version"] != current["version"]:
+                raise AppSettingsValidationError("project_cost_scope_version_conflict", "成本范围已更新，请重新加载。")
+            bank_tags = self.normalize_settings_payload(current_settings)["bank_transaction_tags"]
+            tags = project_cost_scope_tags(bank_tags, current["selected_tag_codes"])
+            allowed = {tag["code"] for tag in tags if tag["can_select"]}
+            if set(requested["selected_tag_codes"]) - allowed:
+                raise AppSettingsValidationError("invalid_project_cost_scope", "选择包含不可用的成本来源标签。")
+            changed = requested["selected_tag_codes"] != current["selected_tag_codes"]
+            if changed:
+                next_scope = {"version": current["version"] + 1, "selected_tag_codes": requested["selected_tag_codes"]}
+                saved = save_family({PROJECT_COST_SCOPE_KEY: next_scope}, family_key=PROJECT_COST_SCOPE_KEY,
+                                    expected_version=current["version"], transaction=transaction)
+                if saved is None:
+                    raise AppSettingsValidationError("project_cost_scope_version_conflict", "成本范围已更新，请重新加载。")
+                PostgresOperationsAuditRepository(transaction).append_operation_event({
+                    "event_type": "operation.completed", "object_type": "app_settings",
+                    "object_id": PROJECT_COST_SCOPE_KEY, "actor_id": actor_id,
+                    "action": "cost_statistics.project_cost_scope.save", "page_key": "cost-statistics",
+                    "operation_location": "成本统计/项目成本范围", "scope": "all", "request_id": request_id or None,
+                    "payload": {"before": current, "after": next_scope},
+                })
+                current = next_scope
+        return {**current, "available_tags": tags, "can_save": True, "changed": changed}
+
     def get_cost_statistics_no_oa_projects_payload(
         self,
         *,
@@ -2061,6 +2129,8 @@ class AppSettingsService:
             "turnover_ledger_tag_selection": turnover_ledger_tag_selection,
             "batch_accounting_tag_selection": batch_accounting_tag_selection,
             "cost_statistics_no_oa_projects": cost_statistics_no_oa_projects,
+            **({PROJECT_COST_SCOPE_KEY: deepcopy(raw_payload[PROJECT_COST_SCOPE_KEY])}
+               if PROJECT_COST_SCOPE_KEY in raw_payload else {}),
             INPUT_INVOICE_USAGE_PAYMENT_RULES_SETTINGS_KEY: input_invoice_usage_payment_rules,
             **oa_draft_prefill_profiles,
         }

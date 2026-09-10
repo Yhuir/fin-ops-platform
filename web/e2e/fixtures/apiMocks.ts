@@ -9465,7 +9465,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         bank_events: [{
           transaction_id: "bank-cost-1",
           bank_account_label: "建设银行 8106", bank_tag_code: "material", bank_tag_primary_label: "项目开销", bank_tag_sub_label: "材料费",
-          event_kind: "outflow",
+          event_kind: "outflow", in_project_cost_scope: true,
           amount: "100.00",
           trade_time: "2026-08-28T10:00:00+08:00",
           counterparty_name: "权限测试供应商",

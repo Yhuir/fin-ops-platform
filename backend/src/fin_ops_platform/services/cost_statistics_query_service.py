@@ -64,16 +64,6 @@ class CostStatisticsQueryService:
             filters,
         )
         normalized_page_size = self._normalize_page_size(page_size)
-        query_binding = self._page_query_binding(
-            scope=normalized_scope,
-            view=normalized_view,
-            filters=normalized_filters,
-            page_size=normalized_page_size,
-        )
-        cursor_values = self._decode_page_cursor(
-            cursor,
-            query_binding=query_binding,
-        )
         policy = CostStatisticsPolicy(
             self._canonical_repository.load_snapshot(
                 scope_kind=scope_kind,
@@ -81,6 +71,17 @@ class CostStatisticsQueryService:
                 view=normalized_view,
                 include_statistics=include_statistics,
             ),
+        )
+        query_binding = self._page_query_binding(
+            scope=normalized_scope,
+            view=normalized_view,
+            filters=normalized_filters,
+            page_size=normalized_page_size,
+            scope_version=(policy.project_cost_scope["version"] if normalized_view in {"project", "cost_tag", "bank_account"} else None),
+        )
+        cursor_values = self._decode_page_cursor(
+            cursor,
+            query_binding=query_binding,
         )
         raw_page = policy.explorer_page(
             scope_kind=scope_kind,
@@ -149,6 +150,8 @@ class CostStatisticsQueryService:
                 else None
             ),
         }
+        if normalized_view in {"project", "cost_tag", "bank_account"}:
+            payload["project_cost_scope_version"] = policy.project_cost_scope["version"]
         return payload
 
     def get_bank_transaction_detail(
@@ -602,6 +605,7 @@ class CostStatisticsQueryService:
         view: str,
         filters: dict[str, str],
         page_size: int,
+        scope_version: int | None = None,
     ) -> str:
         return json.dumps(
             {
@@ -609,7 +613,7 @@ class CostStatisticsQueryService:
                 "view": view,
                 "filters": filters,
                 "page_size": page_size,
-                **({"cost_cursor_version": 2} if view in {"project", "cost_tag", "bank_account"} else {}),
+                **({"cost_cursor_version": 2, "project_cost_scope_version": scope_version} if view in {"project", "cost_tag", "bank_account"} else {}),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -925,7 +929,7 @@ class CostStatisticsQueryService:
                 entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], " / ".join(entry["bank_tag_label_path"]),
                 entry["amount"], entry["expense_content"], entry["oa_applicant"], entry["transaction_id"],
                 entry["entry_id"], entry["oa_id"], entry["expense_type"],
-                "来源待分配" if entry["allocation_state"] == "source_pending" else "来源已确定"]
+                "来源已确定"]
 
     @staticmethod
     def _table_workbook(

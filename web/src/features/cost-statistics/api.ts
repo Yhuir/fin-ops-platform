@@ -38,7 +38,7 @@ type ApiCostExplorerEntryRow = {
   transaction_id?: string | null;
   allocation_id?: string | null;
   occurred_at: string | null;
-  allocation_state?: "source_resolved" | "source_pending";
+  allocation_state?: "source_resolved";
   direction: string;
   project_name: string;
   expense_type: string;
@@ -159,6 +159,7 @@ type ApiCostStatisticsManualAllocationTask = {
   bank_events: Array<{
     transaction_id: string;
     event_kind: "outflow" | "wrong_payment_refund";
+    in_project_cost_scope: boolean;
     amount: string;
     trade_time: string;
     counterparty_name: string;
@@ -227,7 +228,7 @@ type ApiCostAllocationDetail = {
     allocation_id: string;
     transaction_id: string | null;
     occurred_at: string | null;
-    allocation_state: "source_resolved" | "source_pending";
+    allocation_state: "source_resolved";
     bank_tag_code: string;
     bank_tag_primary_label: string;
     bank_tag_sub_label: string;
@@ -440,6 +441,7 @@ function mapManualAllocationTask(
     bankEvents: task.bank_events.map((event) => ({
       transactionId: event.transaction_id,
       eventKind: event.event_kind,
+      inProjectCostScope: event.in_project_cost_scope,
       amount: event.amount,
       tradeTime: event.trade_time,
       counterpartyName: event.counterparty_name,
@@ -1004,4 +1006,16 @@ export async function fetchCostStatisticsExportPreview(
     columns: payload.columns,
     rows: payload.rows,
   };
+}
+import type { ProjectCostScope } from "./types";
+
+export function fetchProjectCostScope(signal?: AbortSignal): Promise<ProjectCostScope> {
+  return requestJson<ProjectCostScope>("/api/cost-statistics/project-cost-scope", { method: "GET", signal });
+}
+
+export function saveProjectCostScope(version: number, codes: string[]): Promise<ProjectCostScope> {
+  return apiRequestJson<ProjectCostScope>("/api/cost-statistics/project-cost-scope", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_version: version, selected_tag_codes: codes }),
+  }, { timeoutMs: 15000, timeoutMessage: "保存结果待核实", allowHtmlFallback: false });
 }

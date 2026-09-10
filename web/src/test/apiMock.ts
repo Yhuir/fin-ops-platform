@@ -4691,7 +4691,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     bank_events: [
       {
         transaction_id: "bank-manual-001",
-        event_kind: "outflow",
+        event_kind: "outflow", in_project_cost_scope: true,
         amount: "600.00",
         trade_time: "2026-08-27T09:30:00+08:00",
         counterparty_name: "昆明设备供应商",
@@ -4700,7 +4700,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       },
       {
         transaction_id: "bank-manual-002",
-        event_kind: "outflow",
+        event_kind: "outflow", in_project_cost_scope: true,
         amount: "400.00",
         trade_time: "2026-08-27T10:30:00+08:00",
         counterparty_name: "昆明设备供应商",

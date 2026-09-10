@@ -1724,7 +1724,8 @@ def bank_category_classification_cte(
               base.confirmation_raw_payload->'normalized_payload'->>'category_primary_label',
               base.manual_category_raw_payload->'normalized_payload'->>'category_primary_label',
               definition.definition->>'output_primary_label',
-              definition.definition->>'category_primary_label'
+              definition.definition->>'category_primary_label',
+              case when effective.effective_category_code = 'internal_transfer' then '内部往来款' end
             ) as effective_category_primary_label,
             coalesce(
               base.confirmation_raw_payload->'normalized_payload'->>'category_sub_label',
@@ -1741,7 +1742,8 @@ def bank_category_classification_cte(
             coalesce(
               base.confirmation_raw_payload->'normalized_payload'->>'category_label',
               base.manual_category_raw_payload->'normalized_payload'->>'category_label',
-              definition.definition->>'label'
+              definition.definition->>'label',
+              case when effective.effective_category_code = 'internal_transfer' then '内部往来款' end
             ) as effective_category_label
           from effective
           join base on base.row_id = effective.row_id
@@ -1772,7 +1774,8 @@ def bank_category_classification_cte(
               base.confirmation_raw_payload->'normalized_payload'->>'category_primary_label',
               base.manual_category_raw_payload->'normalized_payload'->>'category_primary_label',
               definition.definition->>'output_primary_label',
-              definition.definition->>'category_primary_label'
+              definition.definition->>'category_primary_label',
+              case when effective.effective_category_code = 'internal_transfer' then '内部往来款' end
             ) as effective_category_primary_label,
             coalesce(
               base.confirmation_raw_payload->'normalized_payload'->>'category_sub_label',
@@ -1789,7 +1792,8 @@ def bank_category_classification_cte(
             coalesce(
               base.confirmation_raw_payload->'normalized_payload'->>'category_label',
               base.manual_category_raw_payload->'normalized_payload'->>'category_label',
-              definition.definition->>'label'
+              definition.definition->>'label',
+              case when effective.effective_category_code = 'internal_transfer' then '内部往来款' end
             ) as effective_category_label
           from effective
           join base on base.row_id = effective.row_id

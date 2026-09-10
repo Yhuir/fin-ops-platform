@@ -130,3 +130,11 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - `CostSourceAllocationForm.test.tsx`：常驻说明及禁用原因文字不存在；同项重复来源仍真实禁用，键盘不能选入。保留当前来源、释放金额、金额一致和保存反馈回归。
 - `cost-source-allocation.spec.ts`：更新加载/空态/冲突/核实/重读按钮文案与多对多短标题；保留保存→重读、409修改保留、响应丢失后GET核实、只读、菜单长文本、四色、窄屏及2/100行交互测量。
 - 七类：1复用来源/金额规则；5、7更新组件和浏览器回归；6复用保存和关联业务流。2、3、4无服务、HTTP合同或后台生命周期改动，不新增相关测试。生产仅验证只读事实及未提交的会话修改。
+
+## 2026-09-11 项目成本标签范围
+
+- `tests/test_cost_statistics_project_cost_scope.py`：混合来源、退款、显式未标记、空范围、来源未知、日期为空、身份不变、配置错误及原始流水隔离。
+- `tests/test_cost_statistics_source_postgres.py`：真实 PostgreSQL 保存/恢复、同事务审计和回滚、版本冲突/并发、API 400/403/409、窄设置写入、重复迁移、单层内部往来标签输出。
+- `CostStatisticsProjectCostScopeDrawer.test.tsx`：标签清单、禁用收入、全取消、搜索、加载/错误、只读和结果待核实。
+- `e2e/cost-statistics-project-cost-scope.spec.ts`：按需 GET、草稿无写入、保存后正常读取、宽/窄浏览器截图；原有来源分配、配对对齐及颜色对比回归继续执行。
+- 七类适用：1/2/3/5/6/7；4 无新增 read model/cache/job，沿用直接读取不写队列的既有测试。

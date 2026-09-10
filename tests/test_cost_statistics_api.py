@@ -19,6 +19,7 @@ from tests.app_test_support import build_local_state_application
 class CostStatisticsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = build_local_state_application()
+        self.app._app_settings_service._snapshot["cost_statistics_project_cost_scope"] = {"version": 1, "selected_tag_codes": ["uncategorized", "fee", "internal_transfer"]}
         oa = OAApplicationRecord(
             id="oa-cost-api-001",
             month="2026-03",

@@ -63,6 +63,32 @@ async function waitUntilReady() {
 }
 
 describe("Cost statistics page", () => {
+  test("scope lost response is verified by GET without a repeated PUT", async () => {
+    installMockApiFetch();
+    const otherFetch = globalThis.fetch;
+    let codes = ["material"], version = 1, writes = 0;
+    globalThis.fetch = vi.fn(async (input, init) => {
+      if (!String(input).includes("cost-statistics/project-cost-scope")) return otherFetch(input, init);
+      if (init?.method === "PUT") {
+        codes = JSON.parse(String(init.body)).selected_tag_codes; version++; writes++;
+        throw new TypeError("connection lost after commit");
+      }
+      return new Response(JSON.stringify({ version, selected_tag_codes: codes, can_save: true,
+        available_tags: [{ code: "material", label: "材料款", path: ["材料款"], status: "active", direction: "expense", can_select: true }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    renderPage(); await waitUntilReady();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "项目成本范围", exact: true }));
+    await user.click(await screen.findByRole("checkbox", { name: "材料款" }));
+    await user.click(screen.getByRole("button", { name: "保存范围" }));
+    expect(await screen.findByText("保存结果待核实，修改已保留")).toBeVisible();
+    expect(screen.getByRole("button", { name: "保存范围" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "核实保存结果" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "项目成本范围" })).not.toBeInTheDocument());
+    expect(writes).toBe(1); expect(codes).toEqual([]);
+  });
+
   test("keeps pagination explicit and does not load on scroll", async () => {
     const user = userEvent.setup();
     const onPageChange = vi.fn();

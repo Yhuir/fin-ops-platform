@@ -24,7 +24,7 @@ export type CostExplorerEntryRow = {
   entryId: string;
   rowKind: "bank_transaction" | "oa_allocation";
   transactionId: string | null;
-  allocationState: "source_resolved" | "source_pending";
+  allocationState: "source_resolved";
   allocationId?: string;
   occurredAt: string | null;
   direction: string;
@@ -136,6 +136,7 @@ export type CostStatisticsManualAllocationUnit = {
 export type CostStatisticsManualAllocationBankEvent = {
   transactionId: string;
   eventKind: "outflow" | "wrong_payment_refund";
+  inProjectCostScope: boolean;
   amount: string;
   tradeTime: string;
   counterpartyName: string;
@@ -257,7 +258,7 @@ export type CostAllocationDetail = {
     allocationId: string;
     transactionId: string | null;
     occurredAt: string | null;
-    allocationState: "source_resolved" | "source_pending";
+    allocationState: "source_resolved";
     bankTagCode: string;
     bankTagPrimaryLabel: string;
     bankTagSubLabel: string;
@@ -352,4 +353,11 @@ export type CostStatisticsNoOaRules = {
 export type SaveCostStatisticsNoOaRulesRequest = {
   expectedVersion: number;
   projects: CostStatisticsNoOaProject[];
+};
+export type ProjectCostScope = {
+  version: number;
+  selected_tag_codes: string[];
+  available_tags: Array<{ code: string; label: string; path: string[]; status: string; direction: string; can_select: boolean }>;
+  can_save: boolean;
+  changed?: boolean;
 };

@@ -296,6 +296,8 @@ def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -
             events = {event["transaction_id"]: event for event in task["bank_events"]}
             for line in source_allocations["cost_lines"]:
                 event = events[line["bank_transaction_id"]]
+                if event.get("in_project_cost_scope") is False:
+                    continue
                 if not event["bank_tag_code"] or not event["bank_tag_primary_label"]:
                     reasons.append("bank_tag_missing")
                 if not event["bank_account_label"]:

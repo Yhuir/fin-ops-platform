@@ -12,6 +12,7 @@ from fin_ops_platform.services.app_settings_service import (
     AppSettingsService,
 )
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
+from fin_ops_platform.services.cost_statistics_scope import read_project_cost_scope, source_in_project_cost_scope
 from fin_ops_platform.services.cost_statistics_source_allocation import SourceAllocationError, complete_source_task
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
@@ -112,6 +113,10 @@ class CostStatisticsPolicy:
     @cached_property
     def stale_manual_allocation_count(self) -> int:
         return int(self.allocation_quality.get("stale_manual_allocation_count") or 0)
+
+    @cached_property
+    def project_cost_scope(self) -> dict[str, Any]:
+        return read_project_cost_scope(self._settings)
 
     @cached_property
     def _allocation_result(
@@ -510,6 +515,7 @@ def _cost_entries(
     event_owners: dict[str, str] = {}
     protected_bank_ids = set(oa_related_bank_ids)
     excluded_by_reason: dict[str, int] = {}
+    selected_codes = set(read_project_cost_scope(settings)["selected_tag_codes"])
     refund_tag_codes = _paid_wrong_refund_tag_codes(settings)
     for group in groups:
         oa_rows = [
@@ -648,6 +654,7 @@ def _cost_entries(
         task = _manual_allocation_task(
             group=group, contexts=contexts, outflows=outflows, refunds=refunds,
             reconciliation=reconciliation, manual_record=manual_record,
+            selected_codes=selected_codes,
         )
         if task["status"] == "pending" or manual_record is not None or difference != ZERO:
             manual_tasks.append(task)
@@ -659,6 +666,7 @@ def _cost_entries(
             entries, contexts=contexts, task=task, outflows=outflows,
             oa_total=oa_total, relation_case_id=relation_case_id,
             payment_evidence=evidence, reconciliation=reconciliation,
+            selected_codes=selected_codes,
         )
 
     no_oa_payload = AppSettingsService.cost_statistics_no_oa_projects_payload_from_settings(
@@ -686,6 +694,7 @@ def _cost_entries(
                 or transaction_id in protected_bank_ids
                 or amount is None
                 or project is None
+                or not source_in_project_cost_scope(bank_row, selected_codes)
             ):
                 continue
             event = _cost_event(
@@ -703,8 +712,9 @@ def _cost_entries(
                     project_id=project["id"],
                 )
             )
-    stale_count = sum("allocation_stale" in task["pending_reasons"] for task in manual_tasks)
-    pending_count = sum(task["status"] == "pending" for task in manual_tasks) - stale_count
+    visible_tasks = [task for task in manual_tasks if task["in_project_cost_scope"]]
+    stale_count = sum("allocation_stale" in task["pending_reasons"] for task in visible_tasks)
+    pending_count = sum(task["status"] == "pending" for task in visible_tasks) - stale_count
     return (
         sorted(entries, key=_row_sort_key, reverse=True),
         {
@@ -789,23 +799,25 @@ def _append_source_allocation_entries(
     entries: list[dict[str, Any]], *, contexts: list[dict[str, Any]],
     task: dict[str, Any], outflows: list[dict[str, Any]], oa_total: Decimal,
     relation_case_id: str, payment_evidence: list[dict[str, Any]],
-    reconciliation: dict[str, Any],
+    reconciliation: dict[str, Any], selected_codes: set[str],
 ) -> None:
     contexts_by_id = {_allocation_id(context): context for context in contexts}
     sources = {_bank_transaction_id(row): row for row in outflows}
     decision = task["source_allocations"]
-    lines = decision["cost_lines"] if decision is not None else task["allocations"]
-    for line in lines:
+    if decision is None:
+        return
+    for line in decision["cost_lines"]:
         amount = _required_nonnegative_money(line["amount"])
         if amount == ZERO:
             continue
-        bank_id = line["bank_transaction_id"] if decision is not None else None
-        bank_row = sources[bank_id] if bank_id is not None else None
+        bank_row = sources[line["bank_transaction_id"]]
+        if not source_in_project_cost_scope(bank_row, selected_codes):
+            continue
         entries.append(_allocation_entry(
             contexts_by_id[line["unit_id"]], bank_row=bank_row,
             allocated_amount=amount, oa_total=oa_total,
             relation_case_id=relation_case_id,
-            bank_account_label=(_clean_text(bank_row.get("payment_account_label")) if bank_row else "") or UNRESOLVED_BANK_ACCOUNT_LABEL,
+            bank_account_label=_clean_text(bank_row.get("payment_account_label")) or UNRESOLVED_BANK_ACCOUNT_LABEL,
             payment_evidence=payment_evidence, reconciliation=reconciliation,
         ))
 
@@ -818,6 +830,7 @@ def _manual_allocation_task(
     refunds: list[dict[str, Any]],
     reconciliation: dict[str, Any],
     manual_record: dict[str, Any] | None,
+    selected_codes: set[str],
 ) -> dict[str, Any]:
     relation_case_id = _clean_text(group.get("group_id"))
     relation_version = int(group.get("relation_version") or 1)
@@ -837,10 +850,11 @@ def _manual_allocation_task(
         for context in contexts
     ]
     bank_events = [
-        _manual_allocation_bank_event(row, event_kind="outflow") for row in outflows
+        {**_manual_allocation_bank_event(row, event_kind="outflow"),
+         "in_project_cost_scope": source_in_project_cost_scope(row, selected_codes)} for row in outflows
     ]
     bank_events.extend(
-        _manual_allocation_bank_event(row, event_kind="wrong_payment_refund")
+        {**_manual_allocation_bank_event(row, event_kind="wrong_payment_refund"), "in_project_cost_scope": False}
         for row in refunds
     )
     bank_events = sorted(
@@ -851,6 +865,7 @@ def _manual_allocation_task(
         ),
     )
     task: dict[str, Any] = {
+        "in_project_cost_scope": any(source_in_project_cost_scope(row, selected_codes) for row in outflows),
         "relation_case_id": relation_case_id,
         "relation_version": relation_version,
         "status": "pending",
@@ -1399,7 +1414,7 @@ def _allocation_id(context: dict[str, Any]) -> str:
 def _allocation_entry(
     context: dict[str, Any],
     *,
-    bank_row: dict[str, Any] | None,
+    bank_row: dict[str, Any],
     allocated_amount: Decimal,
     oa_total: Decimal,
     relation_case_id: str,
@@ -1409,11 +1424,10 @@ def _allocation_entry(
 ) -> dict[str, Any]:
     unit_id = _allocation_id(context)
     allocation_id = f"relation:{relation_case_id}:unit:{unit_id}"
-    source = _serialize_bank_row(bank_row) if bank_row is not None else None
-    bank_id = source["transaction_id"] if source else None
-    if bank_id is not None:
-        allocation_id += f":source:{bank_id}"
-    occurred_at = source["trade_time"] or None if source else None
+    source = _serialize_bank_row(bank_row)
+    bank_id = source["transaction_id"]
+    allocation_id += f":source:{bank_id}"
+    occurred_at = source["trade_time"] or None
     return {
         "row_key": allocation_id,
         "entry_id": allocation_id,
@@ -1426,15 +1440,15 @@ def _allocation_entry(
         "expense_item_id": context["expense_item_id"],
         "oa_completed_at": context["oa_completed_at"],
         "transaction_id": bank_id,
-        "allocation_state": "source_resolved" if source else "source_pending",
-        "bank_tag_code": source["bank_tag_code"] if source else None,
-        "bank_tag_label": source["bank_tag_label"] if source else None,
-        "bank_tag_primary_label": source["bank_tag_primary_label"] if source else None,
-        "bank_tag_sub_label": source["bank_tag_sub_label"] if source else None,
-        "bank_tag_label_path": source["bank_tag_label_path"] if source else [],
+        "allocation_state": "source_resolved",
+        "bank_tag_code": source["bank_tag_code"],
+        "bank_tag_label": source["bank_tag_label"],
+        "bank_tag_primary_label": source["bank_tag_primary_label"],
+        "bank_tag_sub_label": source["bank_tag_sub_label"],
+        "bank_tag_label_path": source["bank_tag_label_path"],
         "occurred_at": occurred_at,
         "counterparty_name": context["counterparty_name"],
-        "payment_account_label": source["payment_account_label"] if source else None,
+        "payment_account_label": source["payment_account_label"],
         "bank_account_label": bank_account_label,
         "direction": "支出",
         "remark": "",
@@ -1446,7 +1460,7 @@ def _allocation_entry(
         "amount_decimal": allocated_amount,
         "oa_original_amount": context["allocation_amount"],
         "oa_allocation_weight": _ratio(context["allocation_amount"], oa_total),
-        "bank_event_amount": source["amount"] if source else "",
+        "bank_event_amount": source["amount"],
         "payment_evidence": payment_evidence,
         "reconciliation": reconciliation,
     }
@@ -1588,8 +1602,6 @@ def _project_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _cost_tag_key(row: dict[str, Any], level: str) -> str:
-    if row.get("allocation_state") == "source_pending":
-        return "pending:source"
     if not row.get("bank_tag_code") or not row.get("bank_tag_primary_label"):
         return "pending:tag"
     label = row.get(f"bank_tag_{level}_label")
@@ -1600,7 +1612,7 @@ def _cost_tag_facets(rows: list[dict[str, Any]], *, level: str) -> list[dict[str
     buckets: dict[str, dict[str, Any]] = {}
     for row in rows:
         key = _cost_tag_key(row, level)
-        label = {"pending:source": "来源待分配", "pending:tag": "银行标签待完善", "tag:no_sub": "无子标签"}.get(key, row.get(f"bank_tag_{level}_label"))
+        label = {"pending:tag": "银行标签待完善", "tag:no_sub": "无子标签"}.get(key, row.get(f"bank_tag_{level}_label"))
         bucket = buckets.setdefault(key, {"key": key, "label": label, "total": ZERO, "row_count": 0, "projects": set()})
         bucket["total"] += _decimal(row["amount"]) or ZERO
         bucket["row_count"] += 1

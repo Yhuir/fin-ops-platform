@@ -138,6 +138,18 @@ class PostgresOpsTaxEtcRepository:
         payload = row_payload(row, "settings_payload")
         return dict(payload) if isinstance(payload, dict) else {}
 
+    def load_app_settings_for_update(self) -> dict[str, Any]:
+        """Read under the existing settings lock, on a caller-owned transaction."""
+        self._connection.execute(
+            "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (SETTINGS_ACL_ADVISORY_LOCK_KEY,),
+        )
+        row = self._connection.fetch_one(
+            "select settings_payload from app.app_settings where settings_key = %s for update",
+            (APP_SETTINGS_KEY,),
+        )
+        return dict(row_payload(row, "settings_payload")) if row is not None else {}
+
     def save_settings(self, settings_key: str, payload: dict[str, Any]) -> None:
         if settings_key == APP_SETTINGS_KEY:
             self._save_app_settings(payload)
@@ -179,6 +191,8 @@ class PostgresOpsTaxEtcRepository:
             for key, value in serialize_value(payload).items()
             if key not in SETTINGS_ACCESS_CONTROL_KEYS
         }
+        if "cost_statistics_project_cost_scope" in current:
+            normalized_non_acl["cost_statistics_project_cost_scope"] = current["cost_statistics_project_cost_scope"]
         persisted = {
             **normalized_non_acl,
             **settings_access_control_from_payload(current),
@@ -345,6 +359,9 @@ class PostgresOpsTaxEtcRepository:
         incoming_non_acl = {
             key: value for key, value in serialize_value(payload).items() if key not in SETTINGS_ACCESS_CONTROL_KEYS
         }
+        # Project-cost scope is owned by its versioned command, never a generic snapshot save.
+        if "cost_statistics_project_cost_scope" in current:
+            incoming_non_acl.pop("cost_statistics_project_cost_scope", None)
         persisted = {
             **current,
             **incoming_non_acl,

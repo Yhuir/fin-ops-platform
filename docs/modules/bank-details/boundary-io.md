@@ -124,3 +124,7 @@
 - 同时间顺序、余额状态与完整合计口径更新 `docs/product-specs/bank-turnover-and-no-oa.md`；输入事实、分类/关系写 owner、导入身份和权限不变。
 - 页面/API/运行时边界已变，更新本模块文档、`docs/app-architecture/` 与 `docs/dev/api-contracts.md`。
 - 全局 `read-model-contracts.md` 与 worker/deploy 文档已同步为清理后的合同。
+
+## 系统单层标签投影（2026-09-11）
+
+批量 effective category projection 与银行分类 owner 使用同一系统语义：`internal_transfer` 输出“内部往来款”主标签与单层路径，子标签可空。保留有效人工分配/确认优先级。成本消费标准化 bank_tag 字段，不通过标签名称重跑分类，不复制一笔完整银行明细补值。

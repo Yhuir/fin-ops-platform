@@ -1,0 +1,12 @@
+.project-cost-scope { display:flex; flex-direction:column; height:100%; min-height:0; gap:16px; padding:20px; color:#25354a; background:#fff; }
+.project-cost-scope-list { flex:1; overflow:auto; min-height:0; }
+.project-cost-scope-group { font-size:13px; font-weight:600; color:#596579; padding:12px 0 6px; }
+.project-cost-scope-tag { display:flex; align-items:flex-start; width:100%; padding:10px 4px; gap:10px; }
+.project-cost-scope-tag > span { min-width:0; overflow-wrap:anywhere; line-height:1.5; }
+.project-cost-scope-tag small { margin-left:8px; font-size:12px; color:#596579; }
+.project-cost-scope-tag [data-slot="checkbox-control"] { border:1px solid #8b99aa; }
+.project-cost-scope-tag[data-disabled] { opacity:1; color:#697586; }
+.project-cost-scope-tag[data-disabled] [data-slot="checkbox-control"] { border-color:#bac4d1; }
+.project-cost-scope-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; padding-top:16px; border-top:1px solid #dce3ec; font-size:13px; }
+.project-cost-scope-error { display:flex; align-items:center; gap:12px; font-size:14px; color:#a12e24; }
+@media (max-width:600px) { .project-cost-scope { padding:14px; } }

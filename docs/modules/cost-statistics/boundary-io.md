@@ -1,6 +1,6 @@
 # 成本统计边界与 I/O
 
-日期：2026-09-10
+日期：2026-09-11
 
 ## 模块状态
 
@@ -15,7 +15,7 @@
 | --- | --- | --- | --- |
 | Route | HTTP query/body、权限 session | HTTP 状态、JSON 或导出文件 | SQL、业务聚合、队列写入 |
 | Canonical repository | scope、一个 PostgreSQL connection | 单个一致性 snapshot | read model、Redis、RabbitMQ、HTTP、逐行查询 |
-| Policy | canonical snapshot、无 OA/人工分配事实 | 唯一成本事件集合或真实流水集合、聚合、详情 | 数据库、网络、全局状态、fallback |
+| Policy | canonical snapshot、标签范围、无 OA/人工分配事实 | 唯一成本事件集合或真实流水集合、聚合、详情 | 数据库、网络、全局状态、fallback |
 | Query service | repository、policy、view/filter/cursor | 稳定 API DTO | freshness gate、worker、旧 view 兼容 |
 | Manual allocation service | relation case、逐 OA 单元金额、来源/退款/非成本明细、version/fingerprint、actor | versioned allocation 与 audit | HTTP、页面状态、比例建议、半写入 |
 | Frontend | API DTO、用户选择 | 五视图、详情、导出、错误/重试；从合法草稿构造单元合计 | 重算服务端统计业务、跨页面 I/O、旧规则 UI |
@@ -28,7 +28,7 @@
 - `app.oa_applications.normalized_payload` 的成本字段和 canonical `expense_items`
 - `app.workbench_pair_relations` 中 `status='active'` 的正式关系
 - `app.bank_transaction_categories` 与 confirmations 的批量有效分类投影
-- `app.app_settings` 中银行账户映射和 `cost_statistics_no_oa_projects`
+- `app.app_settings` 中银行账户映射、`cost_statistics_no_oa_projects` 和 `cost_statistics_project_cost_scope`
 - `app.cost_statistics_manual_allocations`
 
 成本模块不读取银行明细页面的 payload/read model。银行有效分类通过银行分类 owner 的批量 projection port 取得；不得复制分类算法或增加 SQL/Python fallback。
@@ -61,7 +61,7 @@ PUT manual allocation
 - 保存先取得既有 relation member locks，再锁关系及来源银行/OA 行，重新核对事实与版本。一次事务写 allocation 和 audit；锁冲突、事实变化、CAS 冲突返回 409，不自动重试提交。
 - 0169 只为既有 manual allocation 表增加 nullable JSONB `source_allocations`。旧 NULL 表示没有显式来源决定，只在当前事实确实存在唯一解时推导，不反推历史多对多。
 - 标签补齐可复用已保存来源；账户/日期变化仍受既有 fingerprint 保护，可能要求重新确认。单条详情按关联读取，同时检查共享成员关联，避免局部读取漏掉重复归属。
-- 来源决定可保存但状态仍 pending（缺标签、账户、日期）。`allocation_stale` 不沿用旧决定；无已知来源的金额有显式 `source_pending` 状态。
+- 来源决定可保存但状态仍 pending（缺标签、账户、日期）。`allocation_stale` 不沿用旧决定；未知来源仅保留待分配任务，不生成正式成本占位行。
 - 抽屉按关系缓存会话草稿，切换状态/搜索保留；关闭或显式重读脏草稿沿用确认。提交失败保留输入，成功只按响应状态移动任务。
 
 ### 抽屉前端边界
@@ -77,10 +77,10 @@ PUT manual allocation
 - 三个成本 view 的路径分别为：项目→主标签→子标签→明细；主标签→子标签→明细；账户→项目→主标签→子标签→明细。
 - 成本标签筛选使用后端返回的 `bank_tag_primary_key`、`bank_tag_sub_key`；主、子标签身份包含层级，客户端不自行生成。其他上级参数为 `project_name`、`bank_account_label`。
 - `time` 直接分页银行流水；`bank_tag` 沿用原 `bank_tag_primary_label/bank_tag_sub_label` 和原始收支口径。
-- 共用 scope/query/cursor/page_size/include_statistics。成本 cursor 版本为 2，原银行 cursor 不变；非法或旧 cursor 返回明确错误。
+- 共用 scope/query/cursor/page_size/include_statistics。成本 cursor 版本为 2，并绑定当前项目成本范围 version，原银行 cursor 不变；非法或旧 cursor 返回明确错误。
 - 每栏只按上级过滤，同级和祖先可继续切换。summary 保持当前期间/搜索根范围，不随末级选择缩水；row_count 是当前路径分页前行数。
 - 成本 facets 使用 projects、bank_accounts、cost_tag_primary、cost_tag_sub；项目/统计使用 primary_tag_count。标签分面返回 key/label/total_amount/row_count/project_count。
-- 已分配行 ID 为 `relation:{case}:unit:{unit}:source:{bank}`，金额/账户/主子标签/付款月份同源；来源未知则保留单元行且 source/date 为 NULL，指定年月排除并单列 undated_amount/undated_count。
+- 已分配行 ID 为 `relation:{case}:unit:{unit}:source:{bank}`，金额/账户/主子标签/付款月份同源；来源未知不进入任何正式成本视角/导出；真实已确认来源但缺日期仍在全部期间单列 undated_amount/undated_count。
 - 支出按来源实际付款日期归月，跨月付款拆行；退款先归原支出，冲减原付款月成本。银行收支视角的退款日期不变。
 - 三个成本根总额一致；两个银行流水根 `total_amount=expense_amount-income_amount`。银行基础统计仍在同快照批量计算；无关流水不加载完整标签。
 
@@ -93,7 +93,7 @@ PUT manual allocation
 
 ## 设置边界
 
-- 成本统计只保留 `cost_statistics_no_oa_projects` 设置 family。
+- 成本设置包括 `cost_statistics_no_oa_projects` 虚拟项目映射和 `cost_statistics_project_cost_scope` 全局准入。
 - `AppSettingsService.get_cost_statistics_source_settings_payload()` 只向 canonical repository 提供银行账户映射和银行标签字典等读取事实。
 - 已删除的 `cost_statistics_time_tag_selection` 不读取、不归一化、不持久化、不审计；历史持久化字段不得作为运行时 fallback。
 
@@ -103,7 +103,7 @@ PUT manual allocation
 | --- | --- |
 | Frontend | `web/src/pages/CostStatisticsPage.tsx`、`web/src/components/cost-statistics/*`、`web/src/features/cost-statistics/*` |
 | Route | `backend/src/fin_ops_platform/app/routes_cost_statistics.py` |
-| Query / policy | `cost_statistics_query_service.py`、`cost_statistics_policy.py`、`cost_statistics_bank_tags.py`、`cost_statistics_manual_allocation_service.py`、`cost_statistics_source_allocation.py` |
+| Query / policy | `cost_statistics_query_service.py`、`cost_statistics_policy.py`、`cost_statistics_bank_tags.py`、`cost_statistics_manual_allocation_service.py`、`cost_statistics_source_allocation.py`、`cost_statistics_scope.py` |
 | Canonical repository | `cost_statistics_canonical_repository.py` |
 | Manual allocation repository | `postgres_repositories/cost_statistics_manual_allocation.py` |
 | Settings owner | `app_settings_service.py` |
@@ -175,3 +175,13 @@ PUT manual allocation
 - 只读、加载、空态、冲突和保存待核实使用短文案；重读按钮改为“重新加载”。已保存、未保存与保存结果未确认保持区别，既有修改保护、权限、校验、超时与核实流程不变。
 - 保留状态徽标、“未保存”、金额一致提示及银行信息缺失等必要反馈。列表切换仍沿用现有异步流程，不因文案调整更改数据加载或其他页面。
 - 无新增 I/O、依赖、状态层、数据库备份或门禁；仅成本模块内部 Picker 禁用回调从字符串改为布尔值。
+
+## 全局标签范围 I/O
+
+- `GET /api/cost-statistics/project-cost-scope` 返回 `version,selected_tag_codes,available_tags,can_save`；清单包含系统内部往来、现行/归档规则及未标记，普通收入 `can_select=false`。
+- `PUT` 只接受 `expected_version,selected_tag_codes`；沿用成本页写权限，actor 来自 session。未知/重复/收入代码 400、权限不足 403、版本冲突 409。相同选择 `changed=false`，无重复审计。
+- Settings service 使用既有 settings 锁及 versioned family repository，读取字典、验证、只合并本 family、审计在同一 PostgreSQL 事务。其他设置 writer 保留最新范围。0170 仅在键缺失时初始化；空数组持久有效，GET 不补默认。
+- Policy 在完整金额/退款/来源闭合之后按来源有效代码过滤，一次构造集合，不增加逐行 SQL。无 OA 成本取虚拟映射与此范围交集。退款不受范围设置切断。
+- 任务详情保留完整事实；列表及计数排除全范围外关系，未知来源组内存在允许支出时保留。`bank_events[].in_project_cost_scope` 由 Policy 输出，前端仅显示“范围外”，不重新实现判断。
+- 专用 Drawer 只接收数据与事件。页面拥有 GET/PUT、草稿、超时结果核实和成功后的本页失效；旧分页请求中止、路径重置，保留期间/搜索。不开新队列、缓存或跨页面请求。
+- 移除旧 source_pending 正式行生成、分面、导出状态和详情显示分支；保留现有来源 fingerprint、金额校验、事务与正式发布措施。
