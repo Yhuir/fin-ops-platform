@@ -59,3 +59,11 @@ Make移植测试责任矩阵（2026-09-07 已进入实现和验证，结果统�
 CashFlows.test.tsx 新增直接打开/关闭清空、收入切支出保留输入与角色账户、有关联事项取消/确认切换且无旧事项提交；现有转账测试改用转出/转入账户标签。cash-module-flow.spec.ts 新增三种类型键盘切换及 1440/780/390 宽度验证；cash-real-api-flow.spec.ts 使用直接新增入口，继续验证真实 HTTP/PostgreSQL 保存刷新。业务核心、前端 API 请求、组件、端到端、旧入口回归适用；service 与直接查询复用已有回归，无新增后台/cache/read model。
 
 本次本地结果：`cd web && npx vitest run` 98 文件、1296 测试通过；现金专项 149 测试通过；`npx playwright test e2e/cash-module-flow.spec.ts --project=chromium` 11 项通过，桌面/窄屏截图已人工审阅；独立 Docker PostgreSQL `fin_ops_cash_test_entry` 下 `PYTHONPATH=backend/src:tests python3 -m tests.test_cash_http_integration --browser-e2e` 2 项通过，覆盖真实录入/筛选/删除重读和个人事项/任务链路。初始独立环境缺少既有迁移要求的角色，补齐测试容器角色后全流程通过，未改迁移或生产角色。`npm run build`、`bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check` 通过。构建保留既有大 chunk 提示，无新增依赖。
+
+补充：`FIN_OPS_CASH_TEST_DATABASE_URL=<独立测试库> PYTHONPATH=backend/src:tests python3 -m unittest tests.test_cash_http_integration -v` 3 项通过；测试容器及其匿名卷已清理。
+
+生产发布：代码提交 `3ec0e3b78` 已推送 origin/main，经 `scripts/with-production-admin-token.sh ./scripts/deploy-oa.sh` 发布为 `main-3ec0e3b7-20260910120133`。frontend profile 的 pre/t0 检查 PASS，公开资源与部署版本一致、4 worker 正常、无回滚；不宣称执行了 runtime profile 的 T+30。
+
+生产 Chromium 1440×1000 实测：新增点击至抽屉显示 136ms（单次），账户配置返回 141ms（单次）；20 次类型切换 p50 30.5ms / p95 31.1ms / max 31.4ms。默认收入、三种类型字段、关闭及账目页返回检查通过，页面错误和写入尝试均为 0；截图已审阅。当前生产无启用的转入账户，明确显示配置缺失，未创建真实现金业务数据；配置返回时间不代表可完成转账。
+
+生产四子页面只读回归使用本机 token wrapper 注入 `FIN_OPS_E2E_OA_TOKEN`，运行 `FIN_OPS_E2E_PRODUCTION_SMOKE=1 FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=https://www.yn-sourcing.com npx playwright test e2e/production-cash-readonly.spec.ts --project=chromium`：1 项通过，224 个现金 GET、0 失败、0 写入；现金页面不请求普通财务数据，切回银行明细卸载现金子树。流水冷开 782.64ms（单次）；现金流水与往来总表各 100 样本 click-to-paint p95 为 135.4ms / 149.6ms，p99 为 297.96ms / 168.5ms。本次无生产写入/大数据量或高并发承诺，真实写入由上述独立 HTTP/PG 浏览器链路覆盖。
