@@ -89,4 +89,4 @@
 
 ## 成本来源编辑表的局部例外（2026-09-09）
 
-`CostSourceAllocationForm.tsx` 使用原生语义表格承载成本分组输入布局：每个 OA 成本项一个 tbody，包含来源、金额输入和首行操作格中的新增按钮。它没有通用数据列表的排序、分页、选择或 session，不把成本编辑规则扩入 FinanceTable。仅此文件与已有银行规则抽屉登记在 `FinanceTableMigration.test.ts` 的明确允许集合；其余消费者的既有检查不变。Cost 局部 CSS 不修改公共表格或全站样式。
+`CostSourceAllocationForm.tsx` 使用原生语义表格承载成本分组输入布局：每个 OA 成本项一个 tbody，包含来源、金额输入和首行操作格中的新增按钮。它没有通用数据列表的排序、分页、选择或 session，不把成本编辑规则扩入 FinanceTable。2026-09-10 的 `CostSourceEvidence.tsx` 同样使用原生语义表格，以 rowspan/colspan 对齐现有来源决定；不向公共表格增加业务分组能力。这两个明确文件与已有银行规则抽屉登记在 `FinanceTableMigration.test.ts` 的允许集合；其余消费者的既有检查不变。Cost 局部 CSS 不修改公共表格或全站样式。

@@ -136,7 +136,7 @@ PUT manual allocation
 ## 双表格抽屉界面边界（2026-09-09）
 
 - 容器继续独占 GET/PUT、权限、草稿、未知保存结果核实及刷新；本轮没有新增 HTTP、DTO、数据库、worker 或 read model。
-- `CostSourceEvidence.tsx` 接收 task 和来源错误展示，只读 OA 成本单元与流水，两侧计数按展示行。复用 FinanceTable；不把两侧行号解释为逐行对应。
+- `CostSourceEvidence.tsx` 接收 task、当前草稿 costLines/nonCostLines 和来源错误展示，只读 OA 成本单元与流水，两侧计数按事实条目。当前统一对照表的边界见文末；旧双 FinanceTable 已被替换。
 - `CostSourcePicker.tsx` 接收 options/value/disabled/error、输出 transactionId；使用 HeroUI Popover/ListBox，不请求网络、不分配金额、不推断账户或标签。
 - 表单仍接收 task/draft、输出 onChange/onSave；`sourceAllocation.ts` 错误键分为 source/amount/owner，保留精确金额、零、双边闭合及未知写结果核实。
 - OA 原费用类型只读展示；成本行标签只读来源流水结构化主/子标签。替换来源不改变已输入金额。
@@ -160,3 +160,11 @@ PUT manual allocation
 - 来源选项高度随内容增长且不参与纵向压缩，菜单限高滚动；银行名称/交易对方/标签可换行，金额保持完整。样式只作用于 CostSourcePicker，不修改公共 ListBox。
 - 已用完来源保留灰色及真实禁用状态，删除可见“已用完”提示；同项重复仍显示“本项已使用”。部分可用、当前行已选中与金额释放后的判断继续由表单拥有，Picker 输入输出、HTTP 和金额规则不变。
 - 删除旧的无差别禁用原因展示分支；保留仍服务于“本项已使用”的状态样式，不保留并行旧路径。
+
+## 当前分配对照与金额提示（2026-09-10）
+
+- `sourceEvidence.ts` 是无 I/O 的展示分组函数：输入单元 ID、流水 ID/类型与草稿 owner/source ID，输出原始索引分组；以已有来源边构建连通组，复杂度 O(单元数+流水数+来源行数)，不读取金额、不推导新的配对。
+- `CostSourceEvidence.tsx` 用局部原生语义表格展示该分组：一对一同行，一对多/多对一 rowspan，多对多明确组标题并独立列出两侧事实。每项事实仅出现一次，序号保持来源列表顺序；未选择、无效来源对应的事实、退款与非成本来源均保留。无效输入的错误责任仍在既有校验。
+- OA 白底、流水浅灰底与中央分隔线共同区分两侧；表格在窄屏内部横向滚动，外部抽屉及保存区不溢出。样式作用域只在成本模块。`React.memo` 比较来源身份，金额输入不重画未变化的证据表；不新增缓存层、依赖或网络请求。
+- 表单复用 `validateSourceDraft` 的完整错误集合，全部通过且不在保存/错误/提示状态时，保存按钮左侧显示深绿色“分配金额一致”。逐来源、逐单元、退款、非成本和精度规则保持原样；不另造金额判断、自动保存或成本准入规则。
+- 已删除旧的独立双表渲染及对应两栏/公共表格覆盖样式，不保留并行展示路径。FinanceTable 公共实现、API、存储、权限、审计、worker/read model 均无变化；本轮不创建数据库备份。

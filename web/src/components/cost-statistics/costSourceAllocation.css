@@ -25,15 +25,26 @@
 .cost-source-badge { display:inline-flex; padding:1px 7px; border-radius:10px; background:#fef3c7; color:#92400e; font-size:12px; white-space:nowrap; }
 .cost-source-badge.is-complete { background:#dcfce7; color:#166534; }
 .cost-source-form { border-top:1px solid #dce4ef; }
- .cost-source-evidence { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:12px 16px 0; align-items:start; }
-.cost-source-evidence > section { min-width:0; }
+.cost-source-evidence { margin:12px 16px 0; min-width:0; }
 .cost-source-form h3 { margin:0 0 8px; color:#475569; font-size:13px; font-weight:600; }
-.cost-source-evidence-table { background:#fff; border:1px solid #cbd5e1; border-radius:4px; overflow:hidden; }
-.cost-source-evidence-table .finance-table__content { table-layout:fixed; width:100%; }
-.cost-source-evidence-table .finance-table__column { padding:7px 8px; font-size:12px; color:#475569; background:#f1f5f9; border-bottom:1px solid #cbd5e1; }
-.cost-source-evidence-table .finance-table__cell { padding:8px; white-space:normal; vertical-align:top; border-bottom:1px solid #e2e8f0; border-right:1px solid #e2e8f0; font-size:13px; }
-.cost-source-evidence-table .finance-table__column:last-child { width:112px; text-align:right; }
-.cost-source-evidence-table .finance-table__cell:last-child { text-align:right; border-right:0; }
+.cost-evidence-headings { display:grid; grid-template-columns:1fr 1fr; }
+.cost-evidence-caption { margin:0 0 8px; color:#475569; font-size:12px; }
+.cost-source-evidence-table { background:#fff; border:1px solid #cbd5e1; border-radius:4px; overflow-x:auto; }
+.cost-source-evidence-table table { width:100%; min-width:960px; table-layout:fixed; border-collapse:collapse; }
+.cost-evidence-amount-col { width:112px; }
+.cost-source-evidence-table th { padding:7px 8px; font-size:12px; color:#475569; background:#f1f5f9; text-align:left; border-bottom:1px solid #cbd5e1; }
+.cost-source-evidence-table td { padding:8px; vertical-align:top; border-bottom:1px solid #e2e8f0; border-right:1px solid #e2e8f0; font-size:13px; overflow-wrap:anywhere; }
+.cost-source-evidence-table .cost-evidence-bank { background:#f6f8fb; }
+.cost-source-evidence-table .cost-evidence-bank.cost-evidence-col-0,.cost-source-evidence-table th:nth-child(4),.cost-source-evidence-table .cost-evidence-group-cell.cost-evidence-bank { border-left:2px solid #cbd5e1; }
+.cost-source-evidence-table .cost-evidence-col-2,.cost-source-evidence-table th:nth-child(3),.cost-source-evidence-table th:nth-child(6) { text-align:right; }
+.cost-source-evidence-table tbody + tbody { border-top:2px solid #cbd5e1; }
+.cost-source-evidence-table .cost-evidence-group-label { background:#eef2f7; font-weight:500; }
+.cost-source-evidence-table .cost-evidence-group-cell { padding:0; }
+.cost-evidence-group-item { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 112px; }
+.cost-evidence-group-item > div { min-width:0; padding:8px; }
+.cost-evidence-group-item > div:last-child { text-align:right; }
+.cost-evidence-group-item + .cost-evidence-group-item { border-top:1px solid #e2e8f0; }
+.cost-evidence-unassigned { color:#64748b; }
 .cost-source-evidence-identity { display:block; font-weight:500; overflow-wrap:anywhere; margin-bottom:4px; }
 .cost-source-applicant { display:inline-block; font-size:12px; color:#475569; margin:2px 6px 4px 0; }
 .cost-source-counterparty { display:block; overflow-wrap:anywhere; margin-bottom:6px; }
@@ -100,8 +111,11 @@
 .cost-source-add:hover { color:#1e40af; }
 .cost-source-extra-heading { display:flex; align-items:center; gap:8px; padding:6px 0; }
 .cost-source-save { flex-shrink:0; }
-@media(max-width:960px) { .cost-source-evidence { grid-template-columns:1fr; } }
 .cost-source-body input { box-sizing:border-box; border:1px solid #cbd5e1; border-radius:4px; padding:3px 8px; font-size:13px; height:32px; background:#fff; color:#1f2937; width:100%; font-family:inherit; min-width:0; }
 .cost-source-picker[aria-disabled="true"] { opacity:.6; cursor:not-allowed; }
 
 .cost-source-table .cost-source-identity-cell { vertical-align:top; padding-top:10px; }
+
+.cost-source-save-actions { display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-shrink:0; margin-left:auto; }
+.cost-source-balanced { color:#14532d; font-size:13px; font-weight:600; line-height:20px; min-height:20px; min-width:7em; white-space:nowrap; }
+@media(max-width:640px) { .cost-source-form footer { flex-wrap:wrap; }.cost-source-save-actions { width:100%; } }

@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64),
@@ -48,6 +48,20 @@ async function sourceScenario(page: Page, options: { longMenu?: boolean; screens
     task.suggested_source_allocations = { cost_lines: task.bank_events.map((bank, i) => ({
       unit_id: task.units[Math.max(0, i - 1)].unit_id, bank_transaction_id: bank.transaction_id, amount: bank.amount,
     })), refund_links: [], non_cost_lines: [] };
+  }
+  if (options.alignmentCase) {
+    const amounts = ['210042.00','95000.00','14848.00','50376.00','117546.00','13735.00','5536.00'];
+    task.oa_total = task.net_outflow_total = task.gross_outflow_total = '507083.00';
+    task.units = amounts.map((amount, i) => ({...task.units[0], unit_id:`unit-${i}`, oa_id:`oa-${i}`, oa_original_amount:amount, expense_content:`采购成本 ${i + 1}`}));
+    const order = [4,5,6,1,0,2,3];
+    task.bank_events = order.map((unit, i) => ({...task.bank_events[0], transaction_id:`bank-${i}`, amount:amounts[unit], bank_account_label:`${i >= 3 && i <= 5 ? '建设银行 8106' : '交通银行 3847'}`}));
+    task.allocations = task.units.map(unit => ({unit_id:unit.unit_id,amount:unit.oa_original_amount}));
+    task.suggested_source_allocations = {cost_lines:order.map((unit,i)=>({unit_id:task.units[unit].unit_id,bank_transaction_id:`bank-${i}`,amount:amounts[unit]})),refund_links:[],non_cost_lines:[]};
+  }
+  if (options.many) {
+    task.units = [0,1].map(i=>({...task.units[0],unit_id:`unit-${i}`,oa_original_amount:'300.00'}));
+    task.allocations = task.units.map(unit=>({unit_id:unit.unit_id,amount:'300.00'}));
+    task.suggested_source_allocations = {cost_lines:task.units.flatMap(unit=>task.bank_events.map(bank=>({unit_id:unit.unit_id,bank_transaction_id:bank.transaction_id,amount:bank.transaction_id==='bank-a'?'175.00':'125.00'}))),refund_links:[],non_cost_lines:[]};
   }
   if (options.longMenu) task.bank_events.forEach(bank => {
     bank.counterparty_name = '云南设备采购安装与节能改造工程服务有限公司'.repeat(3);
@@ -111,8 +125,8 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
   expect(scene.details()).toBe(1);
   expect(scene.writes()).toBe(0);
   const evidence = scene.drawer.locator('.cost-source-evidence');
-  const left = await evidence.locator('section').first().boundingBox();
-  const right = await evidence.locator('section').last().boundingBox();
+  const left = await evidence.locator('tbody').first().locator('td').first().boundingBox();
+  const right = await evidence.locator('tbody').first().locator('td.cost-evidence-bank').first().boundingBox();
   expect(right!.x).toBeGreaterThan(left!.x);
   expect(right!.y).toBeCloseTo(left!.y, 0);
   await expect(scene.drawer.locator('.cost-source-evidence').getByText('2026-08-15 08:00:00', { exact: true })).toBeVisible();
@@ -389,3 +403,64 @@ for (const width of [1440, 390]) {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 }
+
+test('aligns seven chosen sources and keeps the balance hint legible on every task color', async ({page}, testInfo) => {
+  await page.setViewportSize({width:1440,height:1000});
+  const scene = await sourceScenario(page, {alignmentCase:true});
+  const evidence = scene.drawer.getByRole('table',{name:'OA 与流水对照'});
+  const rows = evidence.locator('tbody tr');
+  await expect(rows).toHaveCount(7);
+  for (let i=0;i<7;i++) {
+    const cells = rows.nth(i).locator('td');
+    await expect(cells.nth(2)).toHaveText(await cells.nth(5).innerText());
+    expect((await cells.nth(0).boundingBox())!.y).toBeCloseTo((await cells.nth(3).boundingBox())!.y,1);
+  }
+  await expect(rows.first().locator('td').nth(3)).toContainText('5. 建设银行 8106');
+  const hint = scene.drawer.getByText('分配金额一致',{exact:true});
+  const save = scene.drawer.getByRole('button',{name:'保存分配',exact:true});
+  await expect(hint).toBeVisible();
+  const ratios=[];
+  for (const [index,color] of ['#c5d4b8','#e8c5a5','#ddb9c3','#b9ccdf'].entries()) {
+    await scene.drawer.locator('.cost-source-task').first().evaluate((element,color)=>{(element as HTMLElement).style.backgroundColor=color;},color);
+    const ratio=await hint.evaluate(element=>{
+      const colors=[getComputedStyle(element).color,getComputedStyle(element.closest('.cost-source-task')!).backgroundColor];
+      const lum=(value:string)=>{const [r,g,b]=value.match(/[\d.]+/g)!.slice(0,3).map(Number).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;});return .2126*r+.7152*g+.0722*b;};
+      const values=colors.map(lum).sort((a,b)=>b-a);return (values[0]+.05)/(values[1]+.05);
+    });
+    expect(ratio).toBeGreaterThanOrEqual(4.5);ratios.push(ratio);
+    await scene.drawer.locator('footer').screenshot({path:testInfo.outputPath(`balance-color-${index}.png`),animations:'disabled'});
+  }
+  console.log(JSON.stringify({balanceContrastRatios:ratios}));
+  const before=await save.boundingBox();
+  const amount=scene.unit.getByRole('textbox').first();
+  await amount.fill('210041'); await save.scrollIntoViewIfNeeded();
+  await expect(hint).toHaveCount(0);
+  const after=await save.boundingBox();expect(after!.height).toBe(before!.height);expect(after!.x).toBeCloseTo(before!.x,1);expect(after!.y).toBeCloseTo(before!.y,1);
+  await amount.fill('210042');await expect(hint).toBeVisible();
+  const task=scene.drawer.locator('.cost-source-task').first();
+  await task.evaluate(element=>{(element as HTMLElement).style.zoom='1.5';});
+  await save.evaluate(element=>element.scrollIntoView({block:'center'}));
+  await expect(save).toBeInViewport();await expect(hint).toBeInViewport();
+  expect(await hint.evaluate(element=>{const box=element.getBoundingClientRect();return element.contains(document.elementFromPoint(box.x+box.width/2,box.y+box.height/2));})).toBe(true);
+  await page.screenshot({path:testInfo.outputPath('balance-150percent.png'),animations:'disabled'});
+  await task.evaluate(element=>{(element as HTMLElement).style.zoom='1';});
+  await scene.drawer.locator('.cost-source-evidence').screenshot({path:testInfo.outputPath('aligned-seven.png'),animations:'disabled'});
+  await page.setViewportSize({width:390,height:844});
+  expect(await scene.drawer.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+  await save.scrollIntoViewIfNeeded();await expect(save).toBeInViewport();await expect(hint).toBeInViewport();
+  expect(scene.writes()).toBe(0);expect(scene.details()).toBe(1);
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
+
+test('shows many-to-many evidence as one group without duplicating bank facts',async({page},testInfo)=>{
+  const scene=await sourceScenario(page,{many:true});
+  const evidence=scene.drawer.getByRole('table',{name:'OA 与流水对照'});
+  await expect(evidence.locator('tbody')).toHaveCount(1);
+  await expect(evidence.getByText('同组分配 · 2 个成本项 / 2 笔流水（组内不逐行对应）')).toBeVisible();
+  await expect(evidence.getByText('¥350.00',{exact:true})).toHaveCount(1);
+  await expect(evidence.getByText('¥250.00',{exact:true})).toHaveCount(1);
+  await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
+  await evidence.screenshot({path:testInfo.outputPath('many-to-many.png'),animations:'disabled'});
+  await scene.drawer.getByRole('button',{name:'保存分配'}).click();
+  expect(scene.writes()).toBe(1);
+});

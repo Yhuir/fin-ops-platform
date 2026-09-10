@@ -11,6 +11,8 @@ const approvedNativeTableSurfaces = new Set([
   "features/bankDetails/AutoTagRulesDrawer.tsx",
   // Grouped source-entry form with per-OA add rows; not a selectable data-list surface.
   "components/cost-statistics/CostSourceAllocationForm.tsx",
+  // Current source correspondence needs native rowSpan/colSpan, outside shared data-list behavior.
+  "components/cost-statistics/CostSourceEvidence.tsx",
 ]);
 
 function tsxFiles(directory: string): string[] {

@@ -163,7 +163,7 @@ it('opens full evidence with the keyboard without exposing internal IDs or movin
   act(() => trigger.focus()); await user.keyboard('{Enter}');
   expect(screen.getByRole('dialog', { name: 'OA 1 费用全文' })).toHaveTextContent(task.units[0].expenseContent);
   await user.keyboard('{Escape}'); await waitFor(() => expect(trigger).toHaveFocus());
-  expect(screen.getByRole('grid', { name: 'OA', exact: true })).not.toHaveTextContent('internal-oa');
+  expect(screen.getByRole('table', { name: 'OA 与流水对照', exact: true })).not.toHaveTextContent('internal-oa');
 });
 
 it('keeps refunds and non-cost sources editable through inline actions with full closure', async () => {
@@ -218,3 +218,35 @@ it('keeps source ordinals aligned with bank evidence when refunds appear first',
    expect(within(group as HTMLElement).getByText('未分配')).toBeVisible();
    expect(within(group as HTMLElement).queryByRole('combobox')).not.toBeInTheDocument();
  });
+
+it('shows balance only for complete allocations and updates the current source correspondence', async () => {
+  const task = fixture(); const user = userEvent.setup();
+  task.amountsFixed = true; task.oaTotal = '600.00'; task.units[0].oaOriginalAmount = '400.00';
+  task.bankEvents[0].amount = '400.00';
+  task.bankEvents.push({...task.bankEvents[0],transactionId:'bank-b',amount:'200.00',bankAccountLabel:'民生银行 9486'});
+  task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'400.00'},{unitId:'unit-b',bankTransactionId:'bank-b',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
+  const {container} = render(<Editor task={task} />);
+  const evidence = screen.getByRole('table', {name:'OA 与流水对照'});
+  expect(screen.getByText('分配金额一致')).toBeVisible();
+  expect(within(evidence).getAllByRole('rowgroup')).toHaveLength(3);
+  const groups = container.querySelectorAll('.cost-source-table tbody');
+  const first = within(groups[0] as HTMLElement); const second = within(groups[1] as HTMLElement);
+  await user.clear(second.getByRole('textbox')); await user.type(second.getByRole('textbox'),'100');
+  expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+  await user.clear(first.getByRole('textbox')); await user.type(first.getByRole('textbox'),'500');
+  // Grand total still equals 600, but per-unit/source amounts are wrong.
+  expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+  await user.clear(first.getByRole('textbox')); await user.type(first.getByRole('textbox'),'400');
+  await user.click(first.getByRole('combobox'));
+  await user.click(screen.getByRole('option',{name:/民生银行 9486/}));
+  expect(evidence.querySelectorAll('td[rowspan="2"]')).toHaveLength(3);
+  expect(evidence.querySelector('[data-evidence-kind="unassigned"]')).toHaveTextContent('建行 8106');
+  expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+});
+
+it.each([{saving:true}, {error:'保存结果待确认'}, {error:'关联事实已变化'}, {notice:'已保存，银行信息待完善'}])('prioritizes save feedback over balance: %j', state => {
+  const task = fixture();
+  task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'400.00'},{unitId:'unit-b',bankTransactionId:'internal-bank',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
+  render(<CostSourceAllocationForm task={task} draft={createSourceDraft(task)} disabled={false} saving={false} {...state} onChange={vi.fn()} onSave={vi.fn()} />);
+  expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+});
