@@ -80,7 +80,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
     try {
       const task = await fetchCostStatisticsManualAllocation(id);
       if (sourceDecisionMatches(request, task)) acceptSaved(id, task);
-      else setCase(id, { saving: false, error: '未确认本次保存。请重新读取当前事实并核对，草稿已保留。' });
+      else setCase(id, { saving: false, error: '保存结果待核实，修改已保留' });
     } catch { setCase(id, { saving: false, error: '保存结果暂时无法核实，请重试读取' }); }
   };
   const save = async (id: string) => {
@@ -92,9 +92,9 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
     try { saved = await saveCostStatisticsManualAllocation(request); }
     catch (caught) {
       if (caught instanceof ApiClientError && caught.status >= 400 && caught.status < 500) {
-        setCase(id, { saving: false, error: caught.status === 409 ? '关联事实已变化，请重新读取并核对；草稿已保留' : caught.status === 403 ? '当前无保存权限' : '分配未保存，请核对金额和来源；草稿已保留' });
+        setCase(id, { saving: false, error: caught.status === 409 ? '数据已变化，请重新核对；修改已保留' : caught.status === 403 ? '当前无保存权限' : '分配未保存，请核对金额和来源；草稿已保留' });
       } else {
-        setCase(id, { saving: false, unconfirmedRequest: request, error: '保存结果待确认，请核实保存结果；草稿已保留' });
+        setCase(id, { saving: false, unconfirmedRequest: request, error: '保存结果待核实，修改已保留' });
       }
       return;
     }
@@ -122,10 +122,10 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
             <input aria-label="搜索人工分配任务" placeholder="搜索项目、费用或申请人" value={queryDraft} onChange={event => setQueryDraft(event.target.value)} /><button className="cost-source-icon" aria-label="查询人工分配任务" type="submit" disabled={saving}><Search size={16} /></button>
           </form>
         </div>
-        {!canSave ? <p className="cost-source-muted">当前为只读模式</p> : null}
+        {!canSave ? <p className="cost-source-muted">只读</p> : null}
         {error ? <div role="alert" className="cost-source-error">{error}<Button size="sm" onPress={() => void load()}>重试</Button></div> : null}
-        {loading ? <p role="status">正在读取分配任务…</p> : null}
-        {!loading && !error && !items.length ? <p className="cost-source-empty">当前没有{status === 'pending' ? '待分配' : '已完成'}任务</p> : null}
+        {loading ? <p role="status">加载中…</p> : null}
+        {!loading && !error && !items.length ? <p className="cost-source-empty">暂无{status === 'pending' ? '待分配' : '已完成'}任务</p> : null}
         {items.map(item => {
           const id = item.relationCaseId; const state = states[id]; const active = expanded === id;
           return <article className={`cost-source-task${active ? ' is-expanded' : ''}`} key={id}>
@@ -134,10 +134,10 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
               <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : '已完成'}</span>{state?.dirty ? <span>未保存</span> : null}</span>
             </button>
             {active ? <>
-              {state?.loading ? <p role="status">正在读取该关联的来源…</p> : null}
+              {state?.loading ? <p role="status">加载中…</p> : null}
               {state?.task && state.draft ? <CostSourceAllocationForm key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
               {state?.unconfirmedRequest ? <Button size="sm" isDisabled={!!state.saving} onPress={() => void verifySave(id)}>核实保存结果</Button> : null}
-              {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) void loadDetail(id, true); }}>重新读取当前事实</Button> : null}
+              {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) void loadDetail(id, true); }}>重新加载</Button> : null}
             </> : null}
           </article>;
         })}

@@ -28,7 +28,6 @@
 .cost-source-evidence { margin:12px 16px 0; min-width:0; }
 .cost-source-form h3 { margin:0 0 8px; color:#475569; font-size:13px; font-weight:600; }
 .cost-evidence-headings { display:grid; grid-template-columns:1fr 1fr; }
-.cost-evidence-caption { margin:0 0 8px; color:#475569; font-size:12px; }
 .cost-source-evidence-table { background:#fff; border:1px solid #cbd5e1; border-radius:4px; overflow-x:auto; }
 .cost-source-evidence-table table { width:100%; min-width:960px; table-layout:fixed; border-collapse:collapse; }
 .cost-evidence-amount-col { width:112px; }
@@ -104,7 +103,6 @@
 .cost-source-option .cost-source-money { flex-shrink:0; }
 .cost-source-option[data-focused],.cost-source-option[data-selected] { background:#eaf2ff; }
 .cost-source-option[data-disabled] { opacity:.5; }
-.cost-source-option-state { font-size:12px; color:#64748b; }
 .cost-source-actions { display:flex; justify-content:flex-end; gap:2px; }
 .cost-source-icon { width:30px; height:32px; justify-content:center; flex-shrink:0; }
 .cost-source-add { color:#1d4ed8; }

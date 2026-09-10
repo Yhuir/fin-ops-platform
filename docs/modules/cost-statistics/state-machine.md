@@ -69,7 +69,7 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - `saving`：一次事务复核版本、事实、OA 目标、逐银行/退款/单元闭合及 C+X=N；只写分配与审计。按钮只在当前任务真正保存时禁用，错误保留输入。
 - `allocated`：已确定来源且所需银行信息完整；`pending` 原因为 amount_required/source_required/allocation_stale/bank_tag_missing/bank_account_missing/source_date_missing，可同时存在。保存 200 不等于 allocated，只有状态改变才移动任务和调整计数。
 - `validation-error`：400 保留输入；客户端不完整金额先就地提示，不发送 PUT。
-- `conflict`：409 保留草稿与“重新读取当前事实”操作；显式重读时确认替换草稿，绝不自动套用旧值。
+- `conflict`：409 保留草稿与“重新加载”操作；显式重读时确认替换草稿，绝不自动套用旧值。
 - 重新访问、浏览器刷新或页面内刷新都会发起全新请求；没有 `202 refreshing`、`409 read_model_not_fresh` 或后台轮询。
 - 页面打开期间事实源发生变化时不主动推送；用户下次刷新读取最新已提交事实。
 
@@ -79,7 +79,7 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - 两栏证据分别展示 OA 成本单元与真实流水，标题按展示行计数；下表每行绑定一个成本项和支出来源，新增位于该项首行操作格。表单无网络 I/O，容器负责会话草稿和 GET/PUT。
 - 详情读取失败显示重试，不能渲染成无 OA/无流水。重新读取期间锁定当前表单，避免覆盖新输入。
 - 4xx 保存拒绝保留草稿，409明确事实变化；权限错误不伪装成功。
-- 网络超时、5xx或成功响应无法解析：进入“保存结果待确认”，保留提交对象，暂停再次编辑/提交。用户核实仅GET，必须同时核对版本推进、fingerprint及全部实际金额/来源内容，不能只凭版本认定成功。核实失败仍保留草稿，可显式重新读取并确认替换。
+- 网络超时、5xx或成功响应无法解析：进入“保存结果待核实，修改已保留”，保留提交对象，暂停再次编辑/提交。用户核实仅GET，必须同时核对版本推进、fingerprint及全部实际金额/来源内容，不能只凭版本认定成功。核实失败仍保留草稿，可显式重新读取并确认替换。
 - 保存已确认成功后，统计刷新独立进行；读取失败由页面错误/重试呈现，不能触发第二次PUT。任务状态按服务端响应更新。
 - 单条详情与保存15秒超时。Cost PUT显式禁用通用客户端已有的HTML换前缀重试，防止不明确结果被二次提交；其他调用者的既有行为不变。
 

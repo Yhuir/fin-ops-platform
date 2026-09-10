@@ -50,14 +50,14 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
     setTouched(previous => new Set(previous).add(`${kind}.${id}.source`));
     current.onChange({ ...current.draft, [kind]: current.draft[kind].map(line => line.id === id ? { ...line, bankTransactionId: sourceId } : line) });
   }, []);
-  const disabledSourceReason = useCallback((id: number, sourceId: string) => {
+  const isSourceDisabled = useCallback((id: number, sourceId: string) => {
     const current = editState.current;
     const kind = sourceLineKind(current.draft, id);
     const line = current.draft[kind].find(item => item.id === id)!;
-    if (line.bankTransactionId === sourceId) return '';
-    if (current.draft[kind].some(other => other.id !== id && other.ownerId === line.ownerId && other.bankTransactionId === sourceId)) return '本项已使用';
+    if (line.bankTransactionId === sourceId) return false;
+    if (current.draft[kind].some(other => other.id !== id && other.ownerId === line.ownerId && other.bankTransactionId === sourceId)) return true;
     const source = current.sourceOptions.find(option => option.id === sourceId)!;
-    return (current.used.get(sourceId) ?? 0n) >= source.amountCents ? '已用完' : '';
+    return (current.used.get(sourceId) ?? 0n) >= source.amountCents;
   }, []);
   const refunds = task.bankEvents.filter(event => event.eventKind === 'wrong_payment_refund');
   useLayoutEffect(() => {
@@ -99,7 +99,7 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
     const source = sources.find(event => event.transactionId === line.bankTransactionId);
     const key = `${kind}.${line.id}`;
     return <>
-      <td><div className="cost-source-field"><CostSourcePicker value={line.bankTransactionId} options={sourceOptions} lineId={line.id} disabledReason={disabledSourceReason} label={`来源流水 ${index + 1}`} focusKey={key} invalid={visibleError(`${key}.source`)} disabled={disabled}
+      <td><div className="cost-source-field"><CostSourcePicker value={line.bankTransactionId} options={sourceOptions} lineId={line.id} isSourceDisabled={isSourceDisabled} label={`来源流水 ${index + 1}`} focusKey={key} invalid={visibleError(`${key}.source`)} disabled={disabled}
         onChange={chooseSource} />{showError(`${key}.source`)}</div>{showError(`${key}.owner`)}</td>
       <td>{source ? <CostChips values={[source.bankTagPrimaryLabel, source.bankTagSubLabel]} /> : <span className="cost-source-muted">—</span>}</td>
       <td><div className="cost-source-field"><input aria-label={`分配金额 ${index + 1}`} aria-invalid={visibleError(`${key}.amount`)} inputMode="decimal" placeholder="0.00" value={line.amount} disabled={disabled}
@@ -116,7 +116,7 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
   };
   return <div className="cost-source-form" ref={root}>
     {task.pendingReasons.includes('bank_tag_missing') ? <p className="cost-source-notice">银行标签待完善</p> : null}
-    {task.pendingReasons.includes('allocation_stale') ? <p className="cost-source-notice">关联事实已变化，请重新核对分配</p> : null}
+    {task.pendingReasons.includes('allocation_stale') ? <p className="cost-source-notice">数据已变化，请重新核对</p> : null}
     <CostSourceEvidence task={task} costLines={draft.costLines} nonCostLines={draft.nonCostLines} sourceError={sourceError} />
     <section className="cost-source-allocation"><h3>成本分配明细</h3>
       <div className="cost-source-table-scroll"><table className="cost-source-table" aria-label="成本分配明细">

@@ -73,7 +73,7 @@ async function sourceScenario(page: Page, options: { alignmentCase?: boolean; ma
     const url = new URL(route.request().url());
     if (route.request().method() === 'PUT') {
       writes++; savedBody = route.request().postDataJSON();
-      if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '关联事实已变化，请重新读取并核对；草稿已保留' } });
+      if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '数据已变化，请重新核对；修改已保留' } });
       task.source_allocations = savedBody!.source_allocations;
       task.suggested_source_allocations = null;
       task.allocations = savedBody!.allocations;
@@ -133,7 +133,7 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
   await expect(scene.drawer.locator('.cost-source-evidence').getByText('2026-09-03', { exact: true })).toBeVisible();
   await page.screenshot({ path: '/tmp/cost-drawer-app-1440.png', fullPage: false, animations: "disabled" });
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
-  await expect(scene.drawer.getByText('当前没有待分配任务')).toBeVisible();
+  await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
   expect(scene.writes()).toBe(1);
   expect(scene.body()!.source_allocations).toEqual({ cost_lines: [
     { unit_id: 'oa-1', bank_transaction_id: 'bank-a', amount: '350.00' },
@@ -164,9 +164,9 @@ test('retains input after a stale-version conflict and blocks incomplete amounts
   await page.keyboard.press('Escape');
   await fillSources(page, scene.unit);
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
-  await expect(scene.drawer.getByText('关联事实已变化，请重新读取并核对；草稿已保留')).toBeVisible();
+  await expect(scene.drawer.getByText('数据已变化，请重新核对；修改已保留')).toBeVisible();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 2', exact: true })).toHaveValue('250.00');
-  await expect(scene.drawer.getByRole('button', { name: '重新读取当前事实' })).toBeVisible();
+  await expect(scene.drawer.getByRole('button', { name: '重新加载' })).toBeVisible();
 });
 
 test('preserves read-only controls and fits narrow screens without horizontal overflow', async ({ page }) => {
@@ -186,7 +186,7 @@ test('reads a failed detail again without showing an empty task as fact', async 
   const scene = await sourceScenario(page, { detailFailure: true });
   await expect(scene.drawer.getByText('任务读取失败，请重试')).toBeVisible();
   await expect(scene.drawer.locator('.cost-source-table')).toHaveCount(0);
-  await scene.drawer.getByRole('button', { name: '重新读取当前事实' }).click();
+  await scene.drawer.getByRole('button', { name: '重新加载' }).click();
   await expect(scene.drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
   expect(scene.details()).toBe(2);
   expect(scene.writes()).toBe(0);
@@ -196,10 +196,10 @@ test('reconciles a committed write with a lost response using GET and never subm
   const scene = await sourceScenario(page, { interrupted: true });
   await fillSources(page, scene.unit);
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
-  await expect(scene.drawer.getByText('保存结果待确认，请核实保存结果；草稿已保留')).toBeVisible();
+  await expect(scene.drawer.getByText('保存结果待核实，修改已保留')).toBeVisible();
   await expect(scene.drawer.getByRole('button', { name: '保存分配' })).toBeDisabled();
   await scene.drawer.getByRole('button', { name: '核实保存结果' }).click();
-  await expect(scene.drawer.getByText('当前没有待分配任务')).toBeVisible();
+  await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
   expect(scene.writes()).toBe(1);
   expect(scene.details()).toBe(2);
 });
@@ -284,7 +284,7 @@ test('keeps a successful allocation committed when the statistics refresh fails'
   const failedRead = page.waitForResponse(response => response.url().includes('/cost-statistics/explorer') && response.status() === 503);
   await scene.drawer.getByRole('button', { name: '保存分配' }).click();
   await failedRead;
-  await expect(scene.drawer.getByText('当前没有待分配任务')).toBeVisible();
+  await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
   await scene.drawer.getByRole('radio', { name: '已完成 1' }).click();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('350.00');
   expect(scene.writes()).toBe(1);
@@ -370,7 +370,7 @@ for (const width of [1440, 390]) {
     const menu = page.getByRole('listbox', { name: '来源流水 1', exact: true });
     await expect(menu.getByRole('option')).toHaveCount(4);
     await expect(menu.getByText('已用完')).toHaveCount(0);
-    await expect(menu.getByText('本项已使用')).toHaveCount(1);
+    await expect(menu.getByText('本项已使用')).toHaveCount(0);
     const geometry = await menu.evaluate(element => {
       const options = [...element.querySelectorAll<HTMLElement>('[role="option"]')];
       return {
@@ -410,6 +410,7 @@ test('aligns seven chosen sources and keeps the balance hint legible on every ta
   const evidence = scene.drawer.getByRole('table',{name:'OA 与流水对照'});
   const rows = evidence.locator('tbody tr');
   await expect(rows).toHaveCount(7);
+  await expect(scene.drawer.getByText('按当前分配对齐，未保存的修改尚未生效')).toHaveCount(0);
   for (let i=0;i<7;i++) {
     const cells = rows.nth(i).locator('td');
     await expect(cells.nth(2)).toHaveText(await cells.nth(5).innerText());
@@ -456,7 +457,7 @@ test('shows many-to-many evidence as one group without duplicating bank facts',a
   const scene=await sourceScenario(page,{many:true});
   const evidence=scene.drawer.getByRole('table',{name:'OA 与流水对照'});
   await expect(evidence.locator('tbody')).toHaveCount(1);
-  await expect(evidence.getByText('同组分配 · 2 个成本项 / 2 笔流水（组内不逐行对应）')).toBeVisible();
+  await expect(evidence.getByText('多对多 · 2 项 / 2 笔')).toBeVisible();
   await expect(evidence.getByText('¥350.00',{exact:true})).toHaveCount(1);
   await expect(evidence.getByText('¥250.00',{exact:true})).toHaveCount(1);
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();

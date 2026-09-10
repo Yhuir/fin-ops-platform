@@ -49,13 +49,16 @@ it('hides exhausted hints while preserving capacity, duplicate, current selectio
   await user.click(first.getByRole('button', { name: '新增来源' }));
   await user.click(first.getAllByRole('combobox')[1]);
   expect(screen.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
-  expect(screen.getByText('本项已使用')).toBeInTheDocument();
+  expect(screen.queryByText('本项已使用')).not.toBeInTheDocument();
+  await user.keyboard('{ArrowDown}{Enter}{Escape}');
+  expect(first.getAllByRole('combobox')[1]).toHaveTextContent('选择流水');
 });
 
 describe('compact source allocation editor', () => {
   it('groups one OA document with two cost units and hides all internal identifiers', () => {
     const { container } = render(<Editor task={fixture()} />);
     expect(screen.getByRole('heading', { name: 'OA · 2 条' })).toBeInTheDocument();
+    expect(screen.queryByText('按当前分配对齐，未保存的修改尚未生效')).not.toBeInTheDocument();
     expect(container.textContent).not.toMatch(/internal-|unit-a|unit-b|已分|剩余/);
     expect(within(screen.getByRole('table', { name: '成本分配明细' })).getAllByRole('button', { name: '新增来源' })).toHaveLength(2);
     expect(within(screen.getByRole('table', { name: '成本分配明细' })).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['项目', 'OA / 成本项', '来源流水', '银行标签', '分配金额', '操作']);

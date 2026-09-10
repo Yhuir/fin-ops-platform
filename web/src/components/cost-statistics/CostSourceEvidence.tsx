@@ -46,7 +46,6 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, costL
   const cells = (content: ReactNode[], side: string, span: number) => content.map((value, index) => <td key={index} rowSpan={span} className={`cost-evidence-${side} cost-evidence-col-${index}`}>{value}</td>);
   return <section className="cost-source-evidence" aria-label="当前分配对照">
     <div className="cost-evidence-headings"><h3>OA · {task.units.length} 条</h3><h3>银行流水 · {task.bankEvents.length} 条</h3></div>
-    <p className="cost-evidence-caption">按当前分配对齐，未保存的修改尚未生效</p>
     <div className="cost-source-evidence-table"><table aria-label="OA 与流水对照">
       <colgroup><col /><col /><col className="cost-evidence-amount-col" /><col /><col /><col className="cost-evidence-amount-col" /></colgroup>
       <thead><tr>{['项目 / OA', '费用内容', 'OA 金额', '银行 / 时间', '对方 / 标签', '流水金额'].map((label, index) => <th key={label} scope="col" className={index >= 3 ? 'cost-evidence-bank' : ''}>{label}</th>)}</tr></thead>
@@ -56,7 +55,7 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, costL
         const matched = unitIndexes.length > 0 && bankIndexes.length > 0;
         return <tbody key={unitIndexes.length ? `oa-${unitIndexes[0]}` : `bank-${bankIndexes[0]}`} data-evidence-kind={many ? 'many' : matched ? 'matched' : 'unassigned'}>
           {many ? <>
-            <tr><th colSpan={6} className="cost-evidence-group-label" scope="rowgroup">同组分配 · {unitIndexes.length} 个成本项 / {bankIndexes.length} 笔流水（组内不逐行对应）</th></tr>
+            <tr><th colSpan={6} className="cost-evidence-group-label" scope="rowgroup">多对多 · {unitIndexes.length} 项 / {bankIndexes.length} 笔</th></tr>
             <tr><td colSpan={3} className="cost-evidence-group-cell">{unitIndexes.map(index => <div className="cost-evidence-group-item" key={index}>{unitContent(index).map((value, i) => <div key={i}>{value}</div>)}</div>)}</td>
               <td colSpan={3} className="cost-evidence-group-cell cost-evidence-bank">{bankIndexes.map(index => <div className="cost-evidence-group-item" key={index}>{bankContent(index).map((value, i) => <div key={i}>{value}</div>)}</div>)}</td></tr>
           </> : Array.from({ length: Math.max(unitIndexes.length, bankIndexes.length) }, (_, row) => {
