@@ -120,56 +120,158 @@ def automatic_source_allocations(task: dict[str, Any]) -> dict[str, Any] | None:
     return validate_source_allocations(task, allocations, non_cost, result)
 
 
+# Bound detail-only combinatorial work; exhaustion is unknown, never a match.
+SUGGESTION_MAX_STATES = 50000
+SUGGESTION_MAX_NODES = 128
+
+
+class _SuggestionLimit(Exception):
+    pass
+
+
 def suggest_source_allocations(
     task: dict[str, Any], bank_rows: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Prefill only explicit OA ownership with a unique amount distribution.
+    """Suggest unique whole-source/fixed-unit combinations for human confirmation.
 
-    This is a detail-only draft calculation. Never feed it into completion or
-    statistics. Display alignment and amount subset searches are not evidence.
+    Active relation membership is supplied by the scoped repository. Suggestions
+    never feed completion/statistics. Explicit OA references constrain candidates;
+    neither screen order nor a greedy exact-amount match proves uniqueness.
     """
     if (task["status"] != "pending" or task["version"] != 0
             or task["source_allocations"] is not None
             or "allocation_stale" in task["pending_reasons"]
             or not task["amounts_fixed"]
-            or Decimal(task["non_cost_amount"]) != ZERO
             or any(event["event_kind"] != "outflow" for event in task["bank_events"])):
         return None
-    units_by_oa: dict[str, list[dict[str, Any]]] = {}
-    for unit in task["units"]:
-        units_by_oa.setdefault(unit["oa_id"], []).append(unit)
-    events = {event["transaction_id"]: event for event in task["bank_events"]}
-    sources_by_oa: dict[str, list[dict[str, Any]]] = {}
-    blocked: set[str] = set()
-    for row in bank_rows:
-        source_id = row["id"]
-        if source_id not in events:
-            continue
-        owners = set(row.get("source_oa_ids", []))
-        if len(owners) != 1:
-            blocked.update(owners.intersection(units_by_oa))
-            continue
-        owner = next(iter(owners))
-        if owner in units_by_oa:
-            sources_by_oa.setdefault(owner, []).append(events[source_id])
-    result: dict[str, list[dict[str, str]]] = {"cost_lines": [], "refund_links": [], "non_cost_lines": []}
-    for owner, sources in sources_by_oa.items():
-        units = units_by_oa[owner]
-        positive = [unit for unit in units if Decimal(unit["oa_original_amount"]) > ZERO]
-        if (owner in blocked or not positive
-                or any(Decimal(source["amount"]) <= ZERO for source in sources)
-                or sum((Decimal(unit["oa_original_amount"]) for unit in units), ZERO)
-                != sum((Decimal(source["amount"]) for source in sources), ZERO)):
-            continue
-        if len(positive) == 1:
-            result["cost_lines"].extend({"unit_id": positive[0]["unit_id"],
-                "bank_transaction_id": source["transaction_id"], "amount": source["amount"]}
-                for source in sources)
-        elif len(sources) == 1:
-            result["cost_lines"].extend({"unit_id": unit["unit_id"],
-                "bank_transaction_id": sources[0]["transaction_id"], "amount": unit["oa_original_amount"]}
-                for unit in positive)
-    return result if result["cost_lines"] else None
+    units = [unit for unit in task["units"] if Decimal(unit["oa_original_amount"]) > ZERO]
+    events = [event for event in task["bank_events"] if event["event_kind"] == "outflow"]
+    if (not units or not events or len(units) + len(events) > SUGGESTION_MAX_NODES
+            or any(Decimal(event["amount"]) <= ZERO for event in events)):
+        return None
+    if (sum((Decimal(e["amount"]) for e in events), ZERO) != Decimal(task["net_outflow_total"])
+            or sum((Decimal(u["oa_original_amount"]) for u in units), ZERO) != Decimal(task["oa_total"])
+            or Decimal(task["non_cost_amount"]) != ZERO):
+        return None
+    owners = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows}
+    oa_ids = {unit["oa_id"] for unit in units}
+    # Conflicting scalar references are bad evidence, not several possible owners.
+    if any(len(refs) > 1 or not refs.issubset(oa_ids) for refs in owners.values()):
+        return None
+    eligible = [{i for i, unit in enumerate(units)
+                 if (not owners.get(event["transaction_id"])
+                     or unit["oa_id"] in owners[event["transaction_id"]])}
+                for event in events]
+    try:
+        lines = _unique_source_components(units, events, eligible)
+    except _SuggestionLimit:
+        return None
+    return {"cost_lines": lines, "refund_links": [], "non_cost_lines": []} if lines else None
+
+
+def _unique_source_components(
+    units: list[dict[str, Any]], events: list[dict[str, Any]], eligible: list[set[int]],
+) -> list[dict[str, str]]:
+    """Enumerate star candidates, then exact-cover each independent component.
+
+    A star is one unit paid by whole sources, or one source paying fixed units.
+    Arbitrary many-to-many slicing is intentionally not a candidate. Components
+    include every overlapping candidate, so a local match cannot steal a source
+    from an alternative. Two complete covers disprove uniqueness immediately.
+    """
+    remaining = SUGGESTION_MAX_STATES
+
+    def step() -> None:
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0:
+            raise _SuggestionLimit
+
+    def subsets(amounts: list[int], allowed: list[int], target: int) -> list[tuple[int, ...]]:
+        ordered = sorted((i for i in allowed if amounts[i] <= target), key=lambda i: (-amounts[i], i))
+        suffix = [0] * (len(ordered) + 1)
+        for pos in range(len(ordered) - 1, -1, -1):
+            suffix[pos] = suffix[pos + 1] + amounts[ordered[pos]]
+        found: list[tuple[int, ...]] = []
+
+        def visit(pos: int, needed: int, chosen: tuple[int, ...]) -> None:
+            step()
+            if needed == 0:
+                found.append(chosen)
+                return
+            if pos == len(ordered) or suffix[pos] < needed:
+                return
+            for j in range(pos, len(ordered)):
+                step()
+                i = ordered[j]
+                if amounts[i] <= needed:
+                    visit(j + 1, needed - amounts[i], (*chosen, i))
+
+        visit(0, target, ())
+        return found
+
+    targets = [int(Decimal(u["oa_original_amount"]) * 100) for u in units]
+    amounts = [int(Decimal(e["amount"]) * 100) for e in events]
+    size = len(units)
+    # Each candidate covers unit bits followed by source bits, with precise cents.
+    candidates: dict[int, list[tuple[int, int, int]]] = {}
+    for u, target in enumerate(targets):
+        for banks in subsets(amounts, [b for b, allowed in enumerate(eligible) if u in allowed], target):
+            mask = (1 << u) | sum(1 << (size + b) for b in banks)
+            candidates[mask] = [(u, b, amounts[b]) for b in banks]
+    for b, amount in enumerate(amounts):
+        for owners in subsets(targets, sorted(eligible[b]), amount):
+            mask = (1 << (size + b)) | sum(1 << u for u in owners)
+            candidates[mask] = [(u, b, targets[u]) for u in owners]
+
+    by_node: dict[int, list[int]] = {}
+    for mask in candidates:
+        for node in range(size + len(events)):
+            step()
+            if mask & (1 << node):
+                by_node.setdefault(node, []).append(mask)
+    unvisited = set(by_node)
+    resolved: list[tuple[int, int, int]] = []
+    while unvisited:
+        stack = [min(unvisited)]
+        component = 0
+        while stack:
+            node = stack.pop()
+            if node not in unvisited:
+                continue
+            unvisited.remove(node)
+            component |= 1 << node
+            for mask in by_node[node]:
+                step()
+                stack.extend(n for n in unvisited if mask & (1 << n))
+        solutions: list[list[int]] = []
+
+        def cover(open_nodes: int, chosen: list[int]) -> None:
+            step()
+            if len(solutions) == 2:
+                return
+            if not open_nodes:
+                solutions.append(chosen)
+                return
+            choices = None
+            for node in by_node:
+                if not open_nodes & (1 << node):
+                    continue
+                options = [m for m in by_node[node] if m & open_nodes == m]
+                if not options:
+                    return
+                if choices is None or len(options) < len(choices):
+                    choices = options
+            for mask in choices or []:
+                cover(open_nodes ^ mask, [*chosen, mask])
+                if len(solutions) == 2:
+                    return
+
+        cover(component, [])
+        if len(solutions) == 1:
+            resolved.extend(line for mask in solutions[0] for line in candidates[mask])
+    return [{"unit_id": units[u]["unit_id"], "bank_transaction_id": events[b]["transaction_id"],
+             "amount": f"{Decimal(amount) / 100:.2f}"} for u, b, amount in sorted(resolved)]
 
 
 def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -> dict[str, Any]:

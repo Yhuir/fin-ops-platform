@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64),
@@ -32,6 +32,23 @@ async function sourceScenario(page: Page, options: { prefill?: boolean; missingT
     cost_lines: task.bank_events.map(bank => ({unit_id: task.units[0].unit_id, bank_transaction_id: bank.transaction_id, amount: bank.amount})),
     refund_links: [], non_cost_lines: [],
   };
+  if (options.screenshotCase) {
+    task.oa_total = task.net_outflow_total = task.gross_outflow_total = '587000.00';
+    task.units = ['88050.00', '29350.00', '469600.00'].map((amount, i) => ({ ...task.units[0],
+      unit_id: `oa-${i + 1}`, oa_id: `oa-pay-${i + 1}`, project_name: '大理卷烟厂余热综合利用项目',
+      oa_original_amount: amount, expense_content: ['设备预付款', '设备定金', '设备尾款'][i] }));
+    task.bank_events = [
+      ['bank-a', '64996.69', '交通银行 3847', '2026-04-23'],
+      ['bank-b', '23053.31', '光大银行 8826', '2026-04-23'],
+      ['bank-c', '29350.00', '建设银行 8106', '2026-03-27'],
+      ['bank-d', '469600.00', '交通银行 3847', '2026-05-13'],
+    ].map(([transaction_id, amount, bank_account_label, trade_time]) => ({ ...task.bank_events[0], transaction_id,
+      amount, bank_account_label, trade_time, bank_tag_primary_label: '货款', bank_tag_sub_label: '设备采购', tags: ['货款', '设备采购'] }));
+    task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: unit.oa_original_amount }));
+    task.suggested_source_allocations = { cost_lines: task.bank_events.map((bank, i) => ({
+      unit_id: task.units[Math.max(0, i - 1)].unit_id, bank_transaction_id: bank.transaction_id, amount: bank.amount,
+    })), refund_links: [], non_cost_lines: [] };
+  }
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
@@ -39,6 +56,7 @@ async function sourceScenario(page: Page, options: { prefill?: boolean; missingT
       writes++; savedBody = route.request().postDataJSON();
       if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '关联事实已变化，请重新读取并核对；草稿已保留' } });
       task.source_allocations = savedBody!.source_allocations;
+      task.suggested_source_allocations = null;
       task.allocations = savedBody!.allocations;
       task.version++; task.status = options.missingTag ? 'pending' : 'allocated';
       task.pending_reasons = options.missingTag ? ['bank_tag_missing'] : [];
@@ -48,7 +66,7 @@ async function sourceScenario(page: Page, options: { prefill?: boolean; missingT
     if (url.pathname.endsWith('/source-case')) { details++; if (options.detailFailure && details === 1) return route.fulfill({ status: 503, json: { message: 'unavailable' } }); return route.fulfill({ json: task }); }
     const { units, bank_events, allocations, source_allocations, suggested_source_allocations, ...summary } = task;
     return route.fulfill({ json: {
-      items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: ['云南溯源科技'], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
+      items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: [...new Set(task.units.map(unit => unit.project_name))], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
       row_count: options.prefill ? 4 : 1, counts: { pending: task.status === 'pending' ? (options.prefill ? 4 : 1) : 0, allocated: task.status === 'allocated' ? (options.prefill ? 4 : 1) : 0 }, next_cursor: null,
     } });
   });
@@ -301,4 +319,26 @@ test('clearing prefill and collapsing the block does not recreate deleted input'
   await expect(scene.unit.getByRole('combobox')).toHaveCount(0);
   await expect(scene.unit.getByText('未分配')).toBeVisible();
   expect(scene.writes()).toBe(0);
+});
+
+
+test('COST-E2E-014 screenshot three OA four bank suggestions save as four source rows', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const scene = await sourceScenario(page, { screenshotCase: true });
+  const table = scene.drawer.locator('.cost-source-table');
+  await expect(table.getByRole('combobox')).toHaveCount(4);
+  await expect(table.locator('td[rowspan="2"]')).toHaveCount(2);
+  for (const amount of ['64996.69', '23053.31', '29350.00', '469600.00']) {
+    await expect(table.locator(`input[value="${amount}"]`)).toBeVisible();
+  }
+  expect(scene.writes()).toBe(0);
+  expect(scene.task.status).toBe('pending');
+  await page.screenshot({ path: '/tmp/cost-prefill-repair-screenshot-case.png', fullPage: false, animations: 'disabled' });
+  await scene.drawer.getByRole('button', { name: '保存分配', exact: true }).click();
+  await expect.poll(scene.writes).toBe(1);
+  expect(scene.body()!.allocations.map((line: {amount: string}) => line.amount)).toEqual(['88050.00', '29350.00', '469600.00']);
+  expect(scene.body()!.source_allocations.cost_lines.map((line: {amount: string}) => line.amount)).toEqual(['64996.69', '23053.31', '29350.00', '469600.00']);
+  await scene.drawer.getByRole('radio', { name: /已完成/ }).click();
+  await expect(scene.drawer.locator('.cost-source-table').getByRole('combobox')).toHaveCount(4);
+  await expectNoUnexpectedSuccessUiErrors(page);
 });

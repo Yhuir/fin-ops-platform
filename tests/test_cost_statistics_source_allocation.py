@@ -168,9 +168,9 @@ class SourceSuggestionTests(unittest.TestCase):
             {'id': key, 'source_oa_ids': value} for key, value in owners.items()
         ])
 
-    def test_exact_amounts_without_source_proof_stay_manual(self):
+    def test_unique_exact_amounts_offer_pending_draft(self):
         task = self.fixture()
-        self.assertIsNone(self.suggest(task, {'bank1': [], 'bank2': []}))
+        self.assertEqual(len(self.suggest(task, {'bank1': [], 'bank2': []})['cost_lines']), 2)
 
     def test_explicit_owners_produce_draft_without_completing_task(self):
         task = self.fixture()
@@ -189,15 +189,15 @@ class SourceSuggestionTests(unittest.TestCase):
         task['bank_events'][0]['amount'] = '350.00'
         task['bank_events'].append({**task['bank_events'][0], 'transaction_id': 'bank3', 'amount': '250.00'})
         result = self.suggest(task, {'bank1': ['a'], 'bank3': ['a'], 'bank2': []})
-        self.assertEqual([line['amount'] for line in result['cost_lines']], ['350.00', '250.00'])
-        self.assertIsNone(self.suggest(task, {'bank1': ['a'], 'bank3': [], 'bank2': []}))
+        self.assertEqual({line['amount'] for line in result['cost_lines']}, {'350.00', '250.00', '400.00'})
+        self.assertEqual(self.suggest(task, {'bank1': ['a'], 'bank3': [], 'bank2': []}), result)
 
     def test_one_source_multiple_cost_items_requires_known_parent_and_targets(self):
         task = self.fixture()
         task['units'][0]['oa_original_amount'] = '350.00'
         task['units'].append({'unit_id': 'a-item-2', 'oa_id': 'a', 'oa_original_amount': '250.00'})
         result = self.suggest(task, {'bank1': ['a'], 'bank2': ['b']})
-        self.assertEqual([line['amount'] for line in result['cost_lines']], ['350.00', '250.00', '400.00'])
+        self.assertEqual([line['amount'] for line in result['cost_lines']], ['350.00', '400.00', '250.00'])
         task['bank_events'][0]['amount'] = '300.00'
         task['bank_events'].append({**task['bank_events'][0], 'transaction_id': 'bank3'})
         result = self.suggest(task, {'bank1': ['a'], 'bank3': ['a'], 'bank2': ['b']})
@@ -217,3 +217,82 @@ class SourceSuggestionTests(unittest.TestCase):
         task = self.fixture()
         task['bank_events'].append({**task['bank_events'][0], 'transaction_id': 'refund', 'event_kind': 'wrong_payment_refund'})
         self.assertIsNone(self.suggest(task, {'bank1': ['a'], 'bank2': ['b']}))
+
+
+    def test_screenshot_three_oa_four_banks_prefills_four_rows_without_mutation(self):
+        task = self.fixture()
+        task['oa_total'] = task['net_outflow_total'] = '587000.00'
+        task['units'] = [{'unit_id': k, 'oa_id': k, 'oa_original_amount': a}
+                         for k, a in [('a', '88050.00'), ('b', '29350.00'), ('c', '469600.00')]]
+        task['bank_events'] = [dict(task['bank_events'][0], transaction_id=k, amount=a)
+                              for k, a in [('bank1', '469600.00'), ('bank2', '23053.31'),
+                                           ('bank3', '29350.00'), ('bank4', '64996.69')]]
+        before = deepcopy(task)
+        result = self.suggest(task, {e['transaction_id']: [] for e in task['bank_events']})
+        self.assertEqual({(r['unit_id'], r['bank_transaction_id'], r['amount']) for r in result['cost_lines']},
+                         {('a', 'bank4', '64996.69'), ('a', 'bank2', '23053.31'),
+                          ('b', 'bank3', '29350.00'), ('c', 'bank1', '469600.00')})
+        self.assertEqual(task, before)
+
+    def amount_case(self, targets, sources):
+        task = self.fixture()
+        task['units'] = [{'unit_id': str(i), 'oa_id': str(i), 'oa_original_amount': f'{a:.2f}'}
+                         for i, a in enumerate(targets)]
+        task['bank_events'] = [dict(task['bank_events'][0], transaction_id=str(i), amount=f'{a:.2f}')
+                              for i, a in enumerate(sources)]
+        task['oa_total'] = f'{sum(targets):.2f}'
+        task['net_outflow_total'] = f'{sum(sources):.2f}'
+        return task
+
+    def test_duplicate_amounts_and_arbitrary_slicing_stay_manual(self):
+        for targets, sources in [([500, 500], [500, 500]), ([600, 400], [500, 500]),
+                                 ([300, 200, 100], [300, 200, 100])]:
+            with self.subTest(targets=targets):
+                task = self.amount_case(targets, sources)
+                self.assertIsNone(self.suggest(task, {e['transaction_id']: [] for e in task['bank_events']}))
+
+    def test_independent_unique_component_can_prefill_beside_ambiguous_component(self):
+        task = self.amount_case([500, 500, 17], [500, 500, 17])
+        result = self.suggest(task, {'0': [], '1': [], '2': []})
+        self.assertEqual(result['cost_lines'], [{'unit_id': '2', 'bank_transaction_id': '2', 'amount': '17.00'}])
+
+    def test_one_bank_multiple_oa_units_and_zero_unit(self):
+        task = self.amount_case([350, 250, 0], [600])
+        result = self.suggest(task, {'0': []})
+        self.assertEqual([r['amount'] for r in result['cost_lines']], ['350.00', '250.00'])
+
+    def test_search_exhaustion_never_returns_an_unproven_solution(self):
+        from unittest.mock import patch
+        task = self.amount_case([600, 400], [600, 400])
+        with patch('fin_ops_platform.services.cost_statistics_source_allocation.SUGGESTION_MAX_STATES', 1):
+            self.assertIsNone(self.suggest(task, {'0': [], '1': []}))
+
+    def test_empty_and_nonpositive_source_do_not_prefill(self):
+        self.assertIsNone(self.suggest(self.amount_case([], []), {}))
+        task = self.amount_case([600, 400], [600, 400, 0])
+        self.assertIsNone(self.suggest(task, {'0': [], '1': [], '2': []}))
+
+
+    def test_order_does_not_select_between_alternative_covers(self):
+        from itertools import permutations
+        for sources in permutations([300, 200, 100]):
+            task = self.amount_case([300, 200, 100], sources)
+            self.assertIsNone(self.suggest(task, {'0': [], '1': [], '2': []}))
+
+    def test_missing_metadata_does_not_hide_known_sources(self):
+        task = self.fixture()
+        task['bank_events'][0]['bank_tag_code'] = ''
+        task['bank_events'][0]['trade_time'] = ''
+        result = self.suggest(task, {'bank1': [], 'bank2': []})
+        self.assertEqual(len(result['cost_lines']), 2)
+        completed = complete_source_task(task, result)
+        self.assertEqual(completed['status'], 'pending')
+        self.assertIn('bank_tag_missing', completed['pending_reasons'])
+        self.assertIn('source_date_missing', completed['pending_reasons'])
+
+    def test_saved_source_and_excess_input_size_do_not_prefill(self):
+        task = self.fixture()
+        task['source_allocations'] = confirmed_decision()
+        self.assertIsNone(self.suggest(task, {'bank1': [], 'bank2': []}))
+        task = self.amount_case([1] * 65, [1] * 65)
+        self.assertIsNone(self.suggest(task, {}))

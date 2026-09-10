@@ -15,6 +15,7 @@
 | `COST-E2E-011` | covered | 跨模块 E2E 与 runtime boundary tests；发布后 runtime smoke 补证 |
 | `COST-E2E-012` | covered | API 负面测试、旧 `bank` 400、旧 route 404、源码全仓扫描和前端旧规则 UI 不存在测试 |
 | `COST-E2E-013` | local-covered / production-measure | repository 查询预算、本地 API budget、`http_slo_probe`；发布后记录五视图生产分位数 |
+| `COST-E2E-014` | covered | 来源组合单元测试、PostgreSQL实际结构GET→PUT→统计、`cost-source-allocation.spec.ts`四行预填/保存/重读 |
 
 生产性能与真实数据抽样在每次改变成本人口或查询链后重新执行；本地 mock 结果不能替代生产证据。
 

@@ -81,3 +81,10 @@ cd web && npx playwright test e2e/cost-statistics-flow.spec.ts e2e/cost-statisti
 - `CostSourceAllocation.test.ts` / `CostSourceAllocationForm.test.tsx`：建议初始化、保存优先、stale 不回填、rowSpan 增删、删除首条保留后续来源、删除全部保留身份。
 - `cost-source-allocation.spec.ts`：浏览器端建议映射、人工保存前零 PUT、四种实色、两格 rowSpan、清空后折叠重开不重填；现有只读、失败反馈、冲突、窄屏与100行性能样本继续验证。`cost-statistics-flow` / `relation-fanout` 保护五视图及关系链路。
 - 七类测试适用性不变：1/2/3/5/6/7 适用，第4类无新的 read model/cache/job 生命周期；保护 canonical 直读与无额外请求即可。
+
+## 2026-09-10 预填实际场景修复
+
+- 单元测试替换“无显式引用一律为空”的旧预期；新增三OA四流水、重复金额、全局替代组合、独立确定部分、共享单来源、零目标、失效/已保存、缺资料、输入上限与搜索耗尽。
+- PostgreSQL + HTTP：无原始引用的唯一金额组合GET预填，保持pending/零写入；确认PUT后审计、重读及三个视角跨月闭环，保留冲突/并发/回滚测试。
+- COST-E2E-014：实际金额结构四行呈现、两格rowSpan、无自动PUT、保存并在已完成重读；原草稿保护/错误/只读/窄屏测试保留。
+- 类别1/2/3/5/6/7适用；第4类无read model/cache/job变更，仍验证列表不带建议和GET无写入。

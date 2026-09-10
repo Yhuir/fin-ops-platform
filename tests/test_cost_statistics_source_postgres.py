@@ -72,7 +72,7 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(reloaded["source_allocations"], payload["source_allocations"])
         self.assertIsNone(reloaded["suggested_source_allocations"])
 
-    def test_equal_amount_alignment_without_explicit_reference_has_no_suggestion(self):
+    def test_unique_amount_alignment_without_reference_offers_pending_suggestion(self):
         with self.connection.transaction() as writer:
             writer.execute("select set_config('fin_ops.correction_reason', 'isolated amount-only fixture', true)")
             writer.execute("""update app.bank_transactions set
@@ -80,8 +80,59 @@ class CostSourcePostgresTests(unittest.TestCase):
                 signed_amount=case legacy_mongo_id when 'bank-1' then -600 else -400 end
                 where legacy_mongo_id in ('bank-1','bank-2')""")
         task = self.service.get_task("cost-source-case", can_save=True)
-        self.assertIsNone(task["suggested_source_allocations"])
+        self.assertEqual(len(task["suggested_source_allocations"]["cost_lines"]), 2)
         self.assertEqual(task["status"], "pending")
+
+    def test_screenshot_prefill_http_save_reload_and_three_statistics_views(self):
+        from tests.test_bank_same_time_ordering_postgres import BankSameTimeOrderingPostgresTests
+        with self.connection.transaction() as writer:
+            writer.execute("select set_config('fin_ops.correction_reason', 'isolated screenshot prefill fixture', true)")
+            for bank, amount in [('bank-1', '64996.69'), ('bank-2', '23053.31')]:
+                writer.execute("update app.bank_transactions set amount=%s,signed_amount=-%s::numeric where legacy_mongo_id=%s", (amount, amount, bank))
+            for oa, amount in [('oa-a', '88050.00'), ('oa-b', '29350.00')]:
+                writer.execute("update app.oa_applications set amount=%s,normalized_payload=jsonb_set(normalized_payload,'{amount}',to_jsonb(%s::text)) where row_id=%s", (amount, amount, oa))
+        for bank, amount in [('bank-3', '29350.00'), ('bank-4', '469600.00')]:
+            BankSameTimeOrderingPostgresTests.add_transaction(self, bank, signed_amount='-' + amount, balance='1000.00', trade_time='2026-09-01 12:00:00+08', txn_date='2026-09-01', account_no='622200009486')
+        self.connection.execute("""insert into app.oa_applications
+            (oa_source_id,form_id,form_type,row_id,status,workflow_status,applicant,application_date,scope_month,approved_at,project_name,amount,currency,normalized_payload,raw_payload)
+            select 'oa-c','oa-c',form_type,'oa-c',status,workflow_status,applicant,application_date,scope_month,approved_at,project_name,469600,currency,
+                jsonb_set(jsonb_set(normalized_payload,'{id}','"oa-c"'::jsonb),'{amount}','"469600.00"'::jsonb),raw_payload
+            from app.oa_applications where row_id='oa-a'""")
+        self.connection.execute("""update app.workbench_pair_relations set
+            row_ids=array['oa-a','oa-b','oa-c','bank-1','bank-2','bank-3','bank-4'],
+            row_types=array['oa','oa','oa','bank','bank','bank','bank'] where case_id='cost-source-case'""")
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service  # noqa: SLF001
+        app._cost_statistics_api_routes._query_service = self.query  # noqa: SLF001
+        path = '/api/cost-statistics/manual-allocations/cost-source-case'
+        response = app.handle_request('GET', path)
+        self.assertEqual(response.status_code, 200, response.body)
+        task = json.loads(response.body)
+        expected = {('oa:oa-a', 'bank-1', '64996.69'), ('oa:oa-a', 'bank-2', '23053.31'),
+                    ('oa:oa-b', 'bank-3', '29350.00'), ('oa:oa-c', 'bank-4', '469600.00')}
+        suggestion = task['suggested_source_allocations']
+        self.assertEqual({(r['unit_id'], r['bank_transaction_id'], r['amount']) for r in suggestion['cost_lines']}, expected)
+        self.assertEqual(task['status'], 'pending')
+        self.assertIsNone(task['source_allocations'])
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
+        payload = {**self.payload(), 'allocations': task['allocations'], 'source_allocations': suggestion}
+        response = app.handle_request('PUT', path, body=json.dumps(payload))
+        self.assertEqual(response.status_code, 200, response.body)
+        saved = json.loads(response.body)
+        self.assertEqual(saved['version'], 1)
+        # Missing classifications may keep the saved decision pending; never invent tags.
+        self.assertIsNone(saved['suggested_source_allocations'])
+        reloaded = json.loads(app.handle_request('GET', path).body)
+        self.assertEqual(reloaded['source_allocations'], suggestion)
+        self.assertIsNone(reloaded['suggested_source_allocations'])
+        audit = self.connection.fetch_one("select payload from audit.events where action='cost_statistics.manual_allocation.save'")
+        self.assertEqual(audit['payload']['source_allocations'], suggestion)
+        for view in ('project', 'bank_account', 'cost_tag'):
+            for month, amount in [('all', '587000.00'), ('2026-08', '64996.69'), ('2026-09', '522003.31')]:
+                response = app.handle_request('GET', f'/api/cost-statistics/explorer?view={view}&scope={month}&page_size=20')
+                self.assertEqual(response.status_code, 200, response.body)
+                self.assertEqual(json.loads(response.body)['summary']['total_amount'], amount)
 
     def payload(self):
         task = self.service.get_task("cost-source-case", can_save=True)
