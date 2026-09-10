@@ -59,3 +59,7 @@ CashFlows只组合既有表格/录入，不复制业务；CashBooks已移除通�
 ## 验证与发布
 
 见[测试矩阵](tests.md)、[执行证据](../../dev/cash-module-implementation-plan.md)和[部署说明](../../operations/cash-module-deployment.md)。后端部署不等于页面交付。代码回退保留 cash 数据与权限；禁止 DROP 主数据库或现金业务表。生产只读验证不能代替测试库的写入/并发/回滚验证。
+
+## 2026-09-10 新增流水入口
+
+CashFlows 仅管理抽屉开关；CashFlowEditor 在普通新增内管理 receipt/payment/transfer 单选与草稿，任务/事项固定方向，已有流水保留方向选择及更正流程。类型切换保留日期、金额、用途、人员、备注、项目和各角色账户，清除分类；有相关事项先显式确认再清除。确认期间不能保存，不复制草稿或猜账户。转账使用转出/转入账户标签，不提交分类与关联事项。删除旧新增 Dropdown 和普通新增方向 Select，列表方向筛选不变。现金 DTO、HTTP、service/repository、权限及读写事实边界不变，未新增公共组件、依赖或迁移。样式限定 .cash-drawer。

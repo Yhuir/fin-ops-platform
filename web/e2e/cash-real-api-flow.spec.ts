@@ -197,7 +197,6 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
 
 async function enterReceipt(page: Page, account: string, category: string, amount: string, content: string): Promise<string> {
   await page.getByRole("button", { name: "新增流水", exact: true }).click();
-  await page.getByRole("menuitem", { name: "收入", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "新增现金流水" });
   await dialog.getByLabel("实际发生日", { exact: true }).fill("2026-09-03");
   await dialog.getByRole("textbox", { name: "金额（元）" }).fill(amount);

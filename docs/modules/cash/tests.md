@@ -53,3 +53,9 @@ Make移植测试责任矩阵（2026-09-07 已进入实现和验证，结果统�
 | 7 回归 | AppSidebar/PageRouteHost/Settings、普通银行与往来、AppDrawer、cash-special、普通API兼容；现金与普通页同时负载 |
 
 七类均适用，其中第4类只涉及直接查询，没有新增缓存/read model/worker，因此不为不存在的后台链路造测试。权限场景使用本地自动化输入，生产不创建现金受限角色，受限角色生产验证由用户负责。最新已运行命令、数量、性能和未测风险统一记录于实施计划§14，不另建门禁。
+
+## 2026-09-10 新增流水交互
+
+CashFlows.test.tsx 新增直接打开/关闭清空、收入切支出保留输入与角色账户、有关联事项取消/确认切换且无旧事项提交；现有转账测试改用转出/转入账户标签。cash-module-flow.spec.ts 新增三种类型键盘切换及 1440/780/390 宽度验证；cash-real-api-flow.spec.ts 使用直接新增入口，继续验证真实 HTTP/PostgreSQL 保存刷新。业务核心、前端 API 请求、组件、端到端、旧入口回归适用；service 与直接查询复用已有回归，无新增后台/cache/read model。
+
+本次本地结果：`cd web && npx vitest run` 98 文件、1296 测试通过；现金专项 149 测试通过；`npx playwright test e2e/cash-module-flow.spec.ts --project=chromium` 11 项通过，桌面/窄屏截图已人工审阅；独立 Docker PostgreSQL `fin_ops_cash_test_entry` 下 `PYTHONPATH=backend/src:tests python3 -m tests.test_cash_http_integration --browser-e2e` 2 项通过，覆盖真实录入/筛选/删除重读和个人事项/任务链路。初始独立环境缺少既有迁移要求的角色，补齐测试容器角色后全流程通过，未改迁移或生产角色。`npm run build`、`bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check` 通过。构建保留既有大 chunk 提示，无新增依赖。

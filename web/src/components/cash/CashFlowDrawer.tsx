@@ -42,9 +42,14 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
   const [correctionsValid, setCorrectionsValid] = useState(true);
   const [dirty, setDirty] = useState(false); const [closing, setClosing] = useState(false);
   const mutation = useCashMutation();
+  const [pendingKind, setPendingKind] = useState<CashFlowKind | null>(null);
+  function changeKind(value: CashFlowKind) {
+    setKind(value); setCategory(""); setParts([]); setPurpose("ordinary");
+    setPurposePartId(null); setError(null); setPendingKind(null); setDirty(true);
+  }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(null);
-    if (mutation.busy || !correctionsValid) return;
+    if (mutation.busy || !correctionsValid || pendingKind) return;
     let body: Record<string, unknown>;
     try {
       if (purpose === "personal" && (personal.loading || personal.error)) throw new Error("个人专账配置尚未成功读取，请读取成功后再保存。");
@@ -75,19 +80,33 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
   return <AppDrawer open title={flow ? "编辑现金流水" : task ? `办理任务 · ${task.title}` : "新增现金流水"} onClose={() => dirty || !correctionsValid ? setClosing(true) : onClose()}
     closeDisabled={mutation.busy} width={720} className="cash-drawer" footer={<>
       <Button size="sm" variant="secondary" isDisabled={mutation.busy} onPress={() => dirty || !correctionsValid ? setClosing(true) : onClose()}>取消</Button>
-      <Button size="sm" type="submit" form={formId} isPending={mutation.busy} isDisabled={!correctionsValid}>保存{task ? "并确认任务" : ""}</Button>
+      <Button size="sm" type="submit" form={formId} isPending={mutation.busy} isDisabled={!correctionsValid || pendingKind !== null}>保存{task ? "并确认任务" : ""}</Button>
     </>}>
     {closing && <div className="cash-confirm" role="alert"><p>未保存的内容将被丢弃。</p><Button size="sm" variant="secondary" onPress={() => setClosing(false)}>继续填写</Button><Button size="sm" variant="danger" onPress={onClose}>放弃并关闭</Button></div>}
     <CashNotice error={error || mutation.error?.message} />
     {task?.instructions && <p className="cash-hint">{task.instructions}</p>}
     {mutation.error?.status === 409 && <p className="cash-hint">记录已变化。请关闭后重新读取并确认，当前输入未被自动覆盖。</p>}
     <form id={formId} onSubmit={save} onChange={() => setDirty(true)} className="cash-form">
+      {flow ? <CashSelect label="方向" value={kind} disabled={mutation.busy} onChange={value => changeKind(value as CashFlowKind)} required options={Object.entries(cashFlowLabels).map(([value, label]) => ({ value, label }))} /> : task || existingItem ?
+        <div className="cash-flow-fixed-kind">{cashFlowLabels[kind]}</div> :
+        <fieldset className="cash-flow-kind" disabled={mutation.busy || pendingKind !== null}>
+          <legend className="sr-only">流水类型</legend>
+          {(["receipt", "payment", "transfer"] as const).map(value => <label key={value}>
+            <input type="radio" name={`${formId}-kind`} value={value} checked={kind === value}
+              onChange={() => parts.length ? setPendingKind(value) : changeKind(value)} />
+            <span>{cashFlowLabels[value]}</span>
+          </label>)}
+        </fieldset>}
+      {pendingKind && <div className="cash-confirm" role="alert">
+        <p>切换为{cashFlowLabels[pendingKind]}将清除已填写的关联事项。</p>
+        <Button size="sm" variant="secondary" onPress={() => setPendingKind(null)}>保留并返回</Button>
+        <Button size="sm" onPress={() => changeKind(pendingKind)}>清除并切换</Button>
+      </div>}
       <div className="cash-form-grid">
-        <CashSelect label="方向" value={kind} disabled={mutation.busy || Boolean(task || existingItem)} onChange={value => { setKind(value as CashFlowKind); setCategory(""); setParts([]); setPurpose("ordinary"); setPurposePartId(null); setDirty(true); }} required options={Object.entries(cashFlowLabels).map(([value, label]) => ({ value, label }))} />
         <CashInput label="实际发生日" type="date" value={date} onChange={setDate} required disabled={mutation.busy} />
         <CashInput label="金额（元）" value={amount} onChange={setAmount} required disabled={mutation.busy} />
-        {kind !== "receipt" && <CashConfigurationSelect name="accounts" label="付款账户" value={from} selected={flow?.from_account} onChange={value => { setFrom(value); setDirty(true); }} required disabled={mutation.busy} />}
-        {kind !== "payment" && <CashConfigurationSelect name="accounts" label="收款账户" value={to} selected={flow?.to_account} onChange={value => { setTo(value); setDirty(true); }} required disabled={mutation.busy} />}
+        {kind !== "receipt" && <CashConfigurationSelect name="accounts" label={kind === "transfer" && !flow ? "转出账户" : "付款账户"} value={from} selected={flow?.from_account} onChange={value => { setFrom(value); setDirty(true); }} required disabled={mutation.busy} />}
+        {kind !== "payment" && <CashConfigurationSelect name="accounts" label={kind === "transfer" && !flow ? "转入账户" : "收款账户"} value={to} selected={flow?.to_account} onChange={value => { setTo(value); setDirty(true); }} required disabled={mutation.busy} />}
         {kind !== "transfer" && <CashConfigurationSelect name="categories" label="费用分类" value={category} selected={flow?.category} group={kind} onChange={value => { setCategory(value); setDirty(true); }} required disabled={mutation.busy} />}
         <CashInput label="人员 / 经办对象（可选）" value={person} onChange={setPerson} disabled={mutation.busy} />
         <CashInput label="用途" value={content} onChange={setContent} required disabled={mutation.busy} />
@@ -115,7 +134,6 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
       </div>}
       {projectPicker && <CashProjectPicker onClose={() => setProjectPicker(false)} onSelect={row => { setProject(row); setDirty(true); setProjectPicker(false); }} />}
     </section>
-    {kind === "transfer" && <CashNotice>内部转账仅记录现金模块内两个账户之间的资金移动；只生成一笔流水，不算收入或费用，不连接银行流水池。</CashNotice>}
     {flow ? <CashFlowCorrections flowId={flow.id} mode="edit" onValidityChange={setCorrectionsValid} onChange={value => { setCorrections(value); if (value.source_corrections.length || value.settlement_changes.length || value.item_reference_changes.length) setDirty(true); }} /> :
       <CashFlowComposition parts={composedParts} kind={kind} existingItem={existingItem} personalEntry={purpose === "personal"} disabled={mutation.busy} onChange={value => { setParts(value); setDirty(true); if (purposePartId && !value.some(part => part.id === purposePartId)) { setPurpose("ordinary"); setPurposePartId(null); } }} />}
   </AppDrawer>;

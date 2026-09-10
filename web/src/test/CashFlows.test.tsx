@@ -4,6 +4,7 @@ import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CashFlowDrawer } from "../components/cash/CashFlowDrawer";
+import CashFlows from "../components/cash/CashFlows";
 import CashFlowTable, { initialCashFlowCriteria } from "../components/cash/CashFlowTable";
 import type { CashFlow, CashFlowDetail, CashFlowSummary } from "../components/cash/CashFlows.types";
 import type { CashItem } from "../components/cash/CashItems.types";
@@ -95,9 +96,59 @@ beforeEach(() => http.mockReset());
 afterEach(cleanup);
 
 describe("现金实际录入 HTTP 字段", () => {
+  it("新增按钮直接打开默认收入，关闭不保留录入草稿", async () => {
+    const user = userEvent.setup(); installHttp();
+    render(<CashProvider><CashFlows initialCriteria={initialCashFlowCriteria()} onCriteriaChange={() => {}} /></CashProvider>);
+    await user.click(await screen.findByRole("button", { name: "新增流水" }));
+    expect(screen.getByRole("dialog", { name: "新增现金流水" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "收入", exact: true })).toBeChecked();
+    expect(screen.queryByLabelText("方向")).not.toBeInTheDocument();
+    await inputCash(user);
+    await user.click(screen.getByRole("button", { name: "取消", exact: true }));
+    await user.click(screen.getByRole("button", { name: "放弃并关闭" }));
+    await user.click(screen.getByRole("button", { name: "新增流水" }));
+    expect(screen.getByRole("textbox", { name: "金额（元）" })).toHaveValue("");
+  });
+  it("收入切支出保留通用输入，不猜付款账户、不复用旧分类", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
+    render(<DrawerHarness />);
+    await select(user, "收款账户", "合成现金账户");
+    await select(user, "费用分类", "合成往来类型"); await inputCash(user, "42.35");
+    await user.click(screen.getByRole("radio", { name: "支出", exact: true }));
+    expect(screen.getByRole("textbox", { name: "金额（元）" })).toHaveValue("42.35");
+    expect(screen.getByRole("textbox", { name: "用途", exact: true })).toHaveValue("真实控件合成收付");
+    expect(screen.getByLabelText("付款账户", { selector: "button" })).not.toHaveTextContent("合成现金账户");
+    expect(screen.getByLabelText("费用分类", { selector: "button" })).not.toHaveTextContent("合成往来类型");
+    await select(user, "付款账户", "合成储蓄账户"); await select(user, "费用分类", "合成往来类型");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].body).toMatchObject({ kind: "payment", amount: "42.35", from_account_id: accountB, to_account_id: null });
+  });
+  it("有事项的切换先确认，取消保留，确认转账后不提交旧事项", async () => {
+    const user = userEvent.setup(); const writes = installHttp({ write: ({ body }) => created(body) });
+    render(<DrawerHarness kind="payment" />);
+    await inputCash(user, "42.35"); await select(user, "付款账户", "合成现金账户");
+    await select(user, "本次办理用途", "登记实际费用");
+    await user.click(screen.getByRole("radio", { name: "内部转账" }));
+    expect(screen.getByRole("radio", { name: "支出", exact: true })).toBeChecked();
+    expect(screen.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "保留并返回" }));
+    expect(screen.getByLabelText("本次办理用途", { selector: "button" })).toHaveTextContent("登记实际费用");
+    await user.click(screen.getByRole("radio", { name: "内部转账" }));
+    await user.click(screen.getByRole("button", { name: "清除并切换" }));
+    expect(screen.queryByLabelText("本次办理用途")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("费用分类")).not.toBeInTheDocument();
+    await select(user, "转入账户", "合成储蓄账户");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0].body).toMatchObject({ kind: "transfer", category_id: null, amount: "42.35", from_account_id: accountA, to_account_id: accountB, related_items: [], origin_items: [], allocations: [] });
+  });
+
   it("任务显式选择个人代付，携带一次借款和真实归属，不按标题猜测", async () => {
     const user = userEvent.setup(); const writes = installHttp({ write: () => json({ version: 1 }) });
     render(<DrawerHarness task={{ template_id: templateId, month: "2026-09", expected_version: 1, planned_amount: "125.50", title: "合成任意标题", kind: "payment", default_account_id: accountA, default_category_id: categoryId }} />);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     await inputCash(user);
     expect(screen.queryByRole("textbox", { name: "往来对象" })).not.toBeInTheDocument();
     await select(user, "本次办理用途", "个人实际代付 / 借出（含替个人还卡）");
@@ -226,10 +277,10 @@ describe("现金实际录入 HTTP 字段", () => {
     render(<DrawerHarness kind="transfer" />);
     expect(screen.queryByLabelText("费用分类")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "新增借款 / 代付" })).not.toBeInTheDocument();
-    await select(user, "付款账户", "合成现金账户"); await select(user, "收款账户", "合成现金账户"); await inputCash(user, "42.35");
+    await select(user, "转出账户", "合成现金账户"); await select(user, "转入账户", "合成现金账户"); await inputCash(user, "42.35");
     await user.click(screen.getByRole("button", { name: "保存", exact: true }));
     expect(await screen.findByRole("alert")).toHaveTextContent("两个账户必须不同"); expect(writes).toHaveLength(0);
-    await select(user, "收款账户", "合成储蓄账户");
+    await select(user, "转入账户", "合成储蓄账户");
     await user.click(screen.getByRole("button", { name: "保存", exact: true }));
     await screen.findByText("现金抽屉已关闭");
     expect(writes).toHaveLength(1);

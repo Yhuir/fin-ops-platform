@@ -201,3 +201,13 @@
 @media (prefers-reduced-motion: reduce) {
   .cash-page *, .cash-drawer *, .cash-filter-popover, .cash-filter-popover * { scroll-behavior: auto; animation-duration: 0s; transition-duration: 0s; }
 }
+
+/* Cash entry type is a mutually exclusive form choice, not page navigation. */
+.cash-drawer .cash-flow-kind { display: flex; gap: 4px; min-width: 0; margin: 0 0 16px; padding: 4px; border: 0; border-radius: 8px; background: #f1f3f7; }
+.cash-drawer .cash-flow-kind label { position: relative; flex: 1; min-width: 0; cursor: pointer; }
+.cash-drawer .cash-flow-kind input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.cash-drawer .cash-flow-kind span { display: flex; align-items: center; justify-content: center; min-height: 36px; padding: 6px 8px; border-radius: 6px; color: #475467; font-size: 13px; font-weight: 600; }
+.cash-drawer .cash-flow-kind input:checked + span { color: #fff; background: #1d4ed8; }
+.cash-drawer .cash-flow-kind input:focus-visible + span { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+.cash-drawer .cash-flow-kind:disabled label { cursor: default; opacity: .65; }
+.cash-drawer .cash-flow-fixed-kind { margin-bottom: 16px; font-weight: 600; color: #344054; }

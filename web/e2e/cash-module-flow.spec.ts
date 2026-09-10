@@ -86,6 +86,36 @@ async function installCashFixtures(page: Page, options: { firstCreateFailure?: b
 test.describe("cash module deterministic browser flow", () => {
   test.beforeEach(async ({ page }) => { await page.clock.setFixedTime(new Date(fixedNow)); });
 
+  test("entry opens directly with accessible type segments and preserves input across switches", async ({ page }, testInfo) => {
+    const api = await installCashFixtures(page);
+    await page.goto("/cash?section=flows");
+    await page.getByRole("button", { name: "新增流水", exact: true }).click();
+    const drawer = page.getByRole("dialog", { name: "新增现金流水" });
+    await expect(drawer.getByRole("radio", { name: "收入", exact: true })).toBeChecked();
+    await expect(page.getByRole("menuitem")).toHaveCount(0);
+    await drawer.getByRole("textbox", { name: "金额（元）" }).fill("88.60");
+    await drawer.getByRole("textbox", { name: "用途", exact: true }).fill("合成类型切换");
+    await drawer.getByRole("radio", { name: "收入", exact: true }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(drawer.getByRole("radio", { name: "支出", exact: true })).toBeChecked();
+    await expect(drawer.getByRole("button", { name: /付款账户$/ })).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    await expect(drawer.getByRole("radio", { name: "内部转账" })).toBeChecked();
+    await expect(drawer.getByRole("button", { name: /转出账户$/ })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: /转入账户$/ })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: /费用分类$/ })).toHaveCount(0);
+    await expect(drawer.getByRole("textbox", { name: "金额（元）" })).toHaveValue("88.60");
+    await expect(drawer.getByRole("textbox", { name: "用途", exact: true })).toHaveValue("合成类型切换");
+    for (const width of [1440, 780, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.screenshot({ path: testInfo.outputPath(`cash-entry-transfer-${width}.png`) });
+      expect(await drawer.evaluate(el => el.scrollWidth <= el.clientWidth + 2)).toBe(true);
+      await expect(drawer.getByRole("button", { name: "保存", exact: true })).toBeInViewport();
+    }
+    expect(api.submitted).toHaveLength(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
   test("renders all cash subpages, every tab, real table colors and confined wide-table overflow", async ({ page }, testInfo) => {
     await installCashFixtures(page); await page.goto("/cash?section=accounts");
     const navigation = page.getByRole("navigation", { name: "主导航" });
@@ -120,7 +150,7 @@ test.describe("cash module deterministic browser flow", () => {
   test("uses a stable submission ID on explicit retry and deletion rereads the cash pool and report", async ({ page }, testInfo) => {
     const api = await installCashFixtures(page, { firstCreateFailure: true }); await page.goto("/cash?section=accounts"); await expect(page.getByRole("grid", { name: "往来账总表" })).toBeVisible();
     await page.getByRole("link", { name: "现金流水", exact: true }).click(); await expect(page.getByRole("grid", { name: "现金流水明细" })).toBeVisible();
-    await page.getByRole("button", { name: "新增流水", exact: true }).click(); await page.getByRole("menuitem", { name: "收入", exact: true }).click();
+    await page.getByRole("button", { name: "新增流水", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "新增现金流水" }); await expect(dialog).toBeVisible();
     await dialog.getByRole("textbox", { name: "金额（元）" }).fill("88.60"); await dialog.getByRole("textbox", { name: "用途", exact: true }).fill("合成新增现金流水");
     await dialog.getByRole("button", { name: /收款账户$/ }).click(); await page.getByRole("option", { name: account.name }).click();
