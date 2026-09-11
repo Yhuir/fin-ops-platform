@@ -1406,8 +1406,6 @@ export default function ReconciliationWorkbenchPage() {
     [explicitSelectedPairedRows, pairedSelectionSourceGroups],
   );
 
-  const selectedOpenRows = openSelectionContext.includedRows;
-  const selectedOpenActionableRows = selectedOpenRows.filter((row) => !row.displayOnly);
   const openSelectionSummary = openSelectionContext.summary;
   const pairedSelectionSummary = pairedSelectionContext.summary;
   const contextualOpenRowIdentityKeys = openSelectionContext.relatedRowIdentityKeySet;
@@ -1446,7 +1444,7 @@ export default function ReconciliationWorkbenchPage() {
     && openSelectionContext.includedRowIdentityKeys.every((identityKey) => (
       selectedOpenFormalIdentityKeySet.has(identityKey)
     ));
-  const canConfirmOpenSelection = selectedOpenActionableRows.length >= 2 && !isExactOpenRelationSelection;
+  const canConfirmOpenSelection = openSelectionContext.includedRowIdentities.length >= 2 && !isExactOpenRelationSelection;
   const canWithdrawOpenSelection = isExactOpenRelationSelection;
   const selectedPairedGroupsForUnifiedAction = useMemo(() => {
     const selectedGroupIdSet = new Set(pairedSelectionContext.selectedRelationGroupIds);
@@ -2116,6 +2114,10 @@ export default function ReconciliationWorkbenchPage() {
       if (controller.signal.aborted || relationPreviewContextKeyRef.current !== requestContextKey) {
         return;
       }
+      if (preview.operation !== (kind === "confirm" ? "confirm_link" : "withdraw_link")) {
+        openActionResultDialog("预览操作与所选操作不一致，请重新预览。", "操作失败");
+        return;
+      }
       setRelationPreviewDialog({
         preview,
         rowIds,
@@ -2139,13 +2141,6 @@ export default function ReconciliationWorkbenchPage() {
         setRelationPreviewRequestKind(null);
       }
     }
-  };
-
-  const openConfirmPreview = async (rows: WorkbenchRecord[]) => {
-    await openRelationPreview(
-      "confirm",
-      rows.map((row) => ({ id: row.id, recordType: row.recordType })),
-    );
   };
 
   const openWithdrawPreview = async (rows: WorkbenchRecord[]) => {
@@ -2224,7 +2219,7 @@ export default function ReconciliationWorkbenchPage() {
     if (!ensureCanWriteWorkbench()) {
       return;
     }
-    if (selectedOpenActionableRows.length === 0) {
+    if (openSelectionContext.includedRowIdentities.length === 0) {
       openActionResultDialog("请先选择待处理记录。");
       return;
     }
@@ -2233,7 +2228,7 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     try {
-      await openConfirmPreview(selectedOpenActionableRows);
+      await openRelationPreview("confirm", openSelectionContext.includedRowIdentities);
     } catch (error) {
       openRelationPreviewErrorDialog(error);
     }
@@ -2254,6 +2249,18 @@ export default function ReconciliationWorkbenchPage() {
     }
     if (!canWithdrawOpenSelection) {
       openActionResultDialog("请精确选择一个现有正式关系。");
+      return;
+    }
+    const batchSummary = selectedOpenWithdrawableRelationGroups[0]?.summaryRow;
+    if (batchSummary && isBankFlowRuleBatchSummaryRow(batchSummary)) {
+      await runBlockingAction({
+        loadingMessage: "正在撤回流水规则批次...",
+        action: async () => {
+          await withdrawBankFlowRuleBatchSummaryRow(batchSummary);
+          clearOpenSelection();
+          return "已撤回流水规则批次。";
+        },
+      });
       return;
     }
     try {
@@ -2286,7 +2293,9 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
     const selectedBankFlowRuleBatchRows = uniqueBankFlowRuleBatchRows(
-      pairedSelectionContext.explicitRows.filter(isBankFlowRuleBatchSummaryRow),
+      selectedPairedGroupsForUnifiedAction
+        .flatMap((group) => group.summaryRow ? [group.summaryRow] : [])
+        .filter(isBankFlowRuleBatchSummaryRow),
     );
     if (selectedBankFlowRuleBatchRows.length > 0) {
       await runBlockingAction({

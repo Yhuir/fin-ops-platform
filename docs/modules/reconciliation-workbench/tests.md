@@ -707,3 +707,12 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 前端：`groupDisplayModel.test.ts`、`WorkbenchSupportingDocumentFiles.test.tsx`、`WorkbenchInvoiceEntryDrawer.test.tsx` 覆盖一项多文件全宽 cell、精确明细管理、只读权限、正式发票同行及共享布局回归。
 - 浏览器：`workbench-supporting-documents-flow.spec.ts` 用确定性 API fixture 验证上传 → 一次 canonical 回读 → 同行文件/预览 → 管理 → 删除 → 一次回读恢复录入入口；桌面与 390px 窄屏可见性。实际存储和状态规则由 PostgreSQL 集成验证，生产仅做真实文件预览与只读核对。
 - 无新 read model/cache/worker；此类别不适用。现有直接查询不会 enqueue 或创建缓存。
+
+## 2026-09-11 折叠银行批次回归
+
+- `WorkbenchSelection.test.tsx`：未水合批次＋OA／发票确认提交真实成员，拒绝确认接口返回撤回操作；分区撤回沿用批次 owner。
+- `test_workbench_page_selection_repository.py`、`test_workbench_query_postgres_integration.py`：汇总金额与成员金额搜索命中完整组，preview 不返回合成汇总 context、不重复计金额。
+- `test_workbench_write_characterization.py`：已有关系的确认预览保持 confirm 类型并禁止重复确认。
+- `test_workbench_relation_command_service.py`、`test_workbench_pair_relation_service.py`：连续合并、逐层恢复、批次撤回幂等及历史不足零写。
+- `test_app_postgres_mode_integration.py::test_bank_flow_owner_real_postgres_submit_withdraw_replay_and_event_failure`：真实 PostgreSQL/API 提交批次→合并→撤回恢复→重新合并→批次 owner 撤回；注入 event writer 失败验证 relations/history/batch/events 整体回滚。
+- 七类中 1/2/3/5/6/7 适用；第 4 类执行 canonical-only 和零 read-model event 负向回归，本次不新增或修改 worker/cache/read model。

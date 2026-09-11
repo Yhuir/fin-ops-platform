@@ -1496,7 +1496,7 @@ class WorkbenchPairRelationService:
                     for row_id in list(after_relation.get("row_ids") or [])
                     if str(row_id).strip()
                 }
-                if after_case_id == case_id or (row_ids and row_ids.issubset(after_row_ids)):
+                if after_case_id == case_id and row_ids == after_row_ids:
                     return deepcopy(history)
         return None
 

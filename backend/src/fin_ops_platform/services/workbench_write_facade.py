@@ -363,21 +363,6 @@ class WorkbenchWriteFacade:
             row_ids,
             requested_row_types,
         )
-        try:
-            (
-                is_active_selection,
-                withdraw_preview,
-                blocked_message,
-                row_id_aliases,
-            ) = self._active_relation_withdraw_preview(
-                before_relations=before_relations,
-                selected_rows=selected_rows,
-                selected_row_ids=row_ids,
-                selected_row_types=requested_row_types,
-                month=month,
-            )
-        except ValueError:
-            return self._withdraw_alias_conflict_result()
         rows = selected_rows
         row_types = requested_row_types
         rows_by_type = self._rows_by_type(rows)
@@ -396,28 +381,19 @@ class WorkbenchWriteFacade:
                 },
             )
         amount_check = confirm_plan.amount_check
-        if is_active_selection:
-            if blocked_message:
-                return WorkbenchWriteResult(
-                    HTTPStatus.OK,
-                    self._blocked_confirm_preview_payload(
-                        before_relations=before_relations,
-                        selected_rows=rows,
-                        amount_check=amount_check,
-                        message=blocked_message,
-                    ),
-                )
-            assert withdraw_preview is not None
-            preview_payload = self._withdraw_relation_preview_payload(
-                withdraw_preview,
-                alias_map=row_id_aliases,
-                selected_rows=rows,
+        selected_identities = set(zip(row_types, row_ids, strict=True))
+        if len(before_relations) == 1 and selected_identities == set(zip(
+            before_relations[0]["row_types"], before_relations[0]["row_ids"], strict=True,
+        )):
+            return WorkbenchWriteResult(
+                HTTPStatus.OK,
+                self._blocked_confirm_preview_payload(
+                    before_relations=before_relations,
+                    selected_rows=rows,
+                    amount_check=amount_check,
+                    message="所选记录已关联，无需重复确认。",
+                ),
             )
-            preview_payload["message"] = (
-                preview_payload.get("message")
-                or "所选记录已确认关联，可在此撤回这组配对关系。"
-            )
-            return WorkbenchWriteResult(HTTPStatus.OK, preview_payload)
 
         before_groups = self._relation_groups(before_relations, selected_rows=rows, ungrouped_selected_rows="separate")
         case_id = str(payload.get("case_id") or "preview:confirm")
@@ -462,70 +438,6 @@ class WorkbenchWriteFacade:
                 },
             },
         )
-
-    def _active_relation_withdraw_preview(
-        self,
-        *,
-        before_relations: list[dict[str, object]],
-        selected_rows: list[dict[str, object]],
-        selected_row_ids: list[str],
-        selected_row_types: list[str],
-        month: str,
-    ) -> tuple[bool, dict[str, object] | None, str | None, dict[str, str]]:
-        if not before_relations:
-            return False, None, None, {}
-        if len(before_relations) > 1:
-            return False, None, None, {}
-        active_relation = dict(before_relations[0])
-        active_row_ids = [str(row_id).strip() for row_id in list(active_relation.get("row_ids") or [])]
-        active_row_types = [str(row_type).strip() for row_type in list(active_relation.get("row_types") or [])]
-        if len(active_row_ids) != len(active_row_types):
-            return True, None, "所选关系成员类型已损坏，请联系管理员。", {}
-        selected_identities = list(zip(selected_row_types, selected_row_ids, strict=True))
-        active_identities = list(zip(active_row_types, active_row_ids, strict=True))
-        if not selected_identities or set(selected_identities) != set(active_identities):
-            return False, None, None, {}
-
-        row_id_aliases = self._withdraw_alias_map_from_rows(selected_rows)
-        relation_command = self._relation_command_service_for()
-        if relation_command is not None:
-            try:
-                preview = self._preview_withdraw_relation_via_command_service(
-                    relation_command,
-                    row_ids=selected_row_ids,
-                    row_types=selected_row_types,
-                    month=month,
-                    row_id_aliases=row_id_aliases,
-                )
-            except WorkbenchRelationCommandError as exc:
-                return (
-                    True,
-                    None,
-                    str(exc) or "所选记录已确认关联，但撤回预览暂时不可用。",
-                    row_id_aliases,
-                )
-            return True, preview, None, row_id_aliases
-
-        try:
-            preview = self._relation_read_snapshot_port.preview_withdraw_for_row_ids(selected_row_ids)
-        except Exception:
-            return True, None, "所选记录已确认关联，但撤回预览暂时不可用。", row_id_aliases
-        active_relation = dict(preview.get("active_relation") or active_relation)
-        preview_payload = {
-            "operation": "withdraw_link",
-            "operation_type": "withdraw_relation",
-            "preview_id": f"withdraw_relation:{active_relation.get('case_id') or 'active'}",
-            "can_submit": True,
-            "requires_note": False,
-            "message": "所选记录已确认关联，可在此撤回这组配对关系。",
-            "active_relation": active_relation,
-            "before_relations": [active_relation],
-            "after_relations": list(preview.get("after_relations") or []),
-            "submit_expected_versions": {
-                str(active_relation.get("case_id") or ""): active_relation.get("version", 1)
-            },
-        }
-        return True, preview_payload, None, row_id_aliases
 
     def _blocked_confirm_preview_payload(
         self,

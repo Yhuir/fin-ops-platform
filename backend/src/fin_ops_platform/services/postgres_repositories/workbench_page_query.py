@@ -5713,6 +5713,8 @@ class PostgresWorkbenchPageQueryRepository:
                 "or lower(coalesce(invoice.invoice_type, '')) like '%%sale%%' "
                 "or invoice.invoice_type like '%%销%%')"
             )
+        batch_amount_union = ""
+        batch_amount_params: list[Any] = []
         if amount is not None:
             oa_predicates.append("oa.amount = %s::numeric")
             oa_predicates.append(expense_item_amount_predicate("oa.normalized_payload"))
@@ -5729,6 +5731,28 @@ class PostgresWorkbenchPageQueryRepository:
             oa_params.extend([amount, amount])
             pending_params.extend([amount, amount])
             bank_params.append(amount)
+            # Match the same authoritative total used by the collapsed bank row.
+            # Return real members so the existing group matching/pagination stays intact.
+            batch_amount_union = """
+                union
+                select 'bank'::text, member.row_id
+                from all_active_relations relation
+                cross join lateral unnest(relation.row_ids, relation.row_types)
+                    member(row_id, row_type)
+                join needed_keys needed
+                  on needed.row_type = 'bank' and needed.row_id = member.row_id
+                where relation.relation_mode = 'bank_flow_rule_batch'
+                  and member.row_type = 'bank'
+                  and abs(coalesce(
+                      nullif(relation.special_metadata->>'total_amount', '')::numeric,
+                      (select sum(abs(batch_bank.amount))
+                       from app.bank_transactions batch_bank
+                       where batch_bank.status <> 'deleted'
+                         and coalesce(batch_bank.legacy_mongo_id, batch_bank.id::text)
+                             = any(relation.row_ids))
+                  )) = abs(%s::numeric)
+            """
+            batch_amount_params.append(amount)
             invoice_params.extend([amount, amount, amount])
             etc_predicates.append("etc_batch.total_amount = %s::numeric")
             etc_params.append(amount)
@@ -5802,9 +5826,10 @@ class PostgresWorkbenchPageQueryRepository:
                   ) = summary.external_batch_id
                  and etc_batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
                 where ({' or '.join(etc_predicates)})
+                {batch_amount_union}
             ),
             """,
-            [*oa_params, *pending_params, *bank_params, *invoice_params, *etc_params],
+            [*oa_params, *pending_params, *bank_params, *invoice_params, *etc_params, *batch_amount_params],
             hit_name,
         )
 

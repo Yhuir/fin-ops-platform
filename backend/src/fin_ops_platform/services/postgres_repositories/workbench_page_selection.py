@@ -343,6 +343,8 @@ class PostgresWorkbenchPageSelectionRepository:
         group_rows: list[dict[str, Any]] = []
         for group in groups:
             for row in PostgresWorkbenchPageHydrationRepository.group_rows(group):
+                if row.get("source_kind") == "bank_flow_rule_batch_summary":
+                    continue
                 row_type = self._row_type(row.get("type"))
                 row_id = str(row.get("id") or "").strip()
                 if not row_type or not row_id:

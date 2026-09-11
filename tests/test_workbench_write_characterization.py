@@ -1518,6 +1518,24 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             previous_case_ids,
         )
 
+    def test_confirm_preview_of_existing_relation_never_changes_to_withdraw(self) -> None:
+        app = self._build_app()
+        row_ids = self._default_open_row_ids(app)
+        with self._suppress_background_persistence(app):
+            confirm = self._post(app, "/api/workbench/actions/confirm-link", {
+                "month": "2026-03", "row_ids": row_ids, "case_id": "CASE-INTENT",
+            })
+            preview = self._post(app, "/api/workbench/actions/confirm-link/preview", {
+                "month": "2026-03", "row_ids": row_ids,
+            })
+        self.assertEqual(confirm.status_code, 200, confirm.body)
+        self.assertEqual(preview.status_code, 200, preview.body)
+        payload = _json_response(preview)
+        self.assertEqual(payload["operation"], "confirm_link")
+        self.assertFalse(payload["can_submit"])
+        self.assertIn("已关联", payload["message"])
+        self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-INTENT"))
+
     def test_stale_withdraw_preview_withdraws_current_relation_without_restoring_same_row_set(self) -> None:
         app = self._build_app()
         self._install_withdraw_link_uow(app)

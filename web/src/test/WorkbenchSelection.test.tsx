@@ -1357,7 +1357,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(dialog).getByRole("button", { name: "确认关联" }).closest(".relation-preview-actions")).toBeInTheDocument();
   });
 
-  test("confirm preview for an already linked selection submits withdraw instead of confirm", async () => {
+  test("confirm rejects a withdrawal response without offering the wrong operation", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       workbenchConfirmPreview: {
@@ -1425,23 +1425,10 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(await screen.findByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
     await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    const dialog = await screen.findByRole("dialog", { name: /^(确认|撤回)关联$/ });
-    expect(within(dialog).getByRole("heading", { name: "撤回关联" })).toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "确认撤回" }));
+    expect(await screen.findByText("预览操作与所选操作不一致，请重新预览。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认撤回" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => fetchPath(input) === "/api/workbench/actions/withdraw-link")).toBe(false);
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/workbench/actions/withdraw-link",
-        expect.objectContaining({
-          method: "POST",
-          body: expect.stringContaining("\"preview_id\":\"withdraw_relation:CASE-202603-101\""),
-        }),
-      );
-    });
-    expect(
-      fetchMock.mock.calls.filter(([input]) => fetchPath(input).startsWith("/api/workbench/actions/confirm-link")).length,
-    ).toBe(1);
   });
 
   test("one unpaired singleton never pulls legacy case siblings into the selection", async () => {
@@ -4135,10 +4122,61 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
-  test("compact bank-flow summary keeps canonical counts and uses only the dedicated batch withdrawal", async () => {
+  test("confirm includes unhydrated compact batch members alongside OA and invoice", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
-      transformWorkbenchPayload: withCompactBankFlowRelation,
+      transformWorkbenchPayload: (payload) => {
+        const compact = withCompactBankFlowRelation(payload);
+        const paired = payload.paired as { groups: Array<Record<string, unknown>> };
+        const source = paired.groups[0]!;
+        const original = {
+          ...source,
+          group_id: "case:OA-INVOICE",
+          group_type: "relation", zone: "unpaired",
+          bank_rows: [],
+          formal_member_ids: ["oa-p-202603-001", "iv-p-202603-001"],
+          formal_member_types: ["oa", "invoice"],
+        };
+        return {
+          ...payload,
+          paired: { ...paired, groups: [] },
+          unpaired: {
+            ...(payload.unpaired as object),
+            groups: [original, { ...compact.paired.groups[0], group_type: "relation", zone: "unpaired" }],
+          },
+        };
+      },
+    });
+    renderWorkbenchPage();
+    const zone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(zone).findByRole("row", { name: /流水规则专用批次/ }));
+    const oaRows = zone.querySelectorAll('[data-row-id]');
+    const oa = Array.from(oaRows).find((element) => element.getAttribute("data-row-id") === "oa-p-202603-001");
+    if (!oa) throw new Error("Missing OA fixture row");
+    await user.click(oa);
+    await user.click(within(zone).getByRole("button", { name: "确认关联" }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => fetchPath(input) === "/api/workbench/actions/confirm-link/preview");
+      expect(call).toBeDefined();
+      const body = JSON.parse(String(call![1]?.body));
+      expect(body.row_ids.slice().sort()).toEqual([
+        "oa-p-202603-001", "iv-p-202603-001", "compact-bank-1", "compact-bank-2",
+      ].sort());
+      expect(body.row_types.filter((type: string) => type === "bank")).toHaveLength(2);
+    });
+  });
+
+  test.each(["paired", "unpaired"] as const)("%s compact bank-flow summary uses only the dedicated batch withdrawal", async (zoneName) => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      transformWorkbenchPayload: (payload) => {
+        const compact = withCompactBankFlowRelation(payload);
+        if (zoneName === "paired") return compact;
+        return { ...compact, paired: { ...compact.paired, groups: [] }, unpaired: {
+          ...(payload.unpaired as object),
+          groups: compact.paired.groups.map((group) => ({ ...group, group_type: "relation", zone: "unpaired" })),
+        } };
+      },
     });
     const mockImplementation = fetchMock.getMockImplementation();
     if (!mockImplementation) {
@@ -4152,7 +4190,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    const pairedZone = await screen.findByTestId("zone-paired");
+    const pairedZone = await screen.findByTestId(`zone-${zoneName}`);
     const summaryRow = await within(pairedZone).findByRole("row", { name: /流水规则专用批次/ });
     await user.click(summaryRow);
 

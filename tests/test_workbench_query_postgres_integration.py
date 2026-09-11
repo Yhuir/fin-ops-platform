@@ -337,6 +337,37 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             """
         )
 
+    def test_collapsed_batch_search_matches_total_and_member_without_preview_double_count(self) -> None:
+        ids = [f"batch-search-{index}" for index in range(5)]
+        amounts = ["97.52", "157.29", "1087.20", "660.63", "213.92"]
+        for row_id, amount in zip(ids, amounts, strict=True):
+            self.raw_connection.execute("""
+                insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                    counterparty_name_raw, amount, signed_amount, txn_date, txn_month,
+                    trade_time, raw_payload, status)
+                values (%s, '8106', 'outflow', '批次搜索', %s, -%s::numeric,
+                    '2026-07-15', '2026-07-01', '2026-07-15 12:00:00+08', '{}'::jsonb, 'active')
+            """, (row_id, amount, amount))
+        self.raw_connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, version,
+                month_scope, row_ids, row_types, amount_check, special_metadata, raw_payload)
+            values ('batch-search', 'bank_flow_rule_batch', 'active', 1, '2026-07-01',
+                %s::text[], %s::text[], '{}'::jsonb,
+                '{"requires_oa":true,"requires_invoice":true,"total_amount":"2216.56"}'::jsonb, '{}'::jsonb)
+        """, (ids, ["bank"] * 5))
+        for search in ["2216.56", "97.52"]:
+            result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search=search)
+            batch = next(group for group in result["groups"] if group.get("detail_key") == "batch-search")
+            self.assertEqual(set(batch["formal_member_ids"]), set(ids))
+            self.assertEqual(batch["bank_rows"][0]["amount"], "2216.56")
+            self.assertEqual(batch["collapsed_row_counts"]["bank"], 5)
+        selection = self.selection_repository.get_workbench_relation_preview_selection(
+            scope_key="all", row_ids=ids, row_types=["bank"] * 5,
+        )
+        self.assertEqual(len(selection["rows"]), 5)
+        self.assertEqual(selection["context_rows"], [])
+        self.assertEqual({row["id"] for row in selection["rows"]}, set(ids))
+
     def _insert_supporting_document(self) -> None:
         self.raw_connection.execute("""
             insert into app.file_objects(id, storage_backend, storage_uri, object_key,

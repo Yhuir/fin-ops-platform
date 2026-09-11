@@ -4,10 +4,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
-from fin_ops_platform.services.bank_relation_requirement_recalculation import (
-    BANK_RELATION_REQUIREMENT_RECALCULATION_JOB_TYPE,
-    changed_requirement_tag_codes,
-)
 from fin_ops_platform.services.bank_batch_application_service import (
     MONTH_SCOPE_RE,
     BankBatchApplicationService,
@@ -28,6 +24,10 @@ from fin_ops_platform.services.bank_flow_rule_batch_canonical_query import (
     bank_flow_rule_batch_selected_row_proofs,
     build_live_bank_flow_rule_batch_service,
     eligible_bank_flow_rule_batch_codes,
+)
+from fin_ops_platform.services.bank_relation_requirement_recalculation import (
+    BANK_RELATION_REQUIREMENT_RECALCULATION_JOB_TYPE,
+    changed_requirement_tag_codes,
 )
 
 
@@ -961,6 +961,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         changed_scope_keys: list[str],
         changed_batch_ids: list[str] | None = None,
         candidate_guard: dict[str, object] | None = None,
+        expected_relation_versions: dict[str, int] | None = None,
     ) -> None:
         if self._state_store is None:
             return
@@ -986,6 +987,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 changed_case_ids=changed_case_ids,
                 changed_scope_keys=normalized_scope_keys,
                 changed_batch_ids=normalized_batch_ids,
+                expected_relation_versions=expected_relation_versions,
                 candidate_guard=(
                     dict(candidate_guard)
                     if isinstance(candidate_guard, dict)
@@ -993,6 +995,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 ),
             )
         except Exception as exc:
+            if "bank_flow_rule_batch_relation_version_conflict" in str(exc):
+                raise BankBatchRelationMutationError(
+                    "bank_flow_rule_batch_relation_version_conflict",
+                    "关联已变化，请刷新批次后重新撤回。",
+                ) from exc
             if "bank_flow_rule_batch_candidate_guard_conflict" in str(exc):
                 raise BankBatchRelationMutationError(
                     "bank_flow_rule_batch_candidate_conflict",

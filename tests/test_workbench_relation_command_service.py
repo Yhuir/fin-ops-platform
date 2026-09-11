@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
@@ -24,6 +24,44 @@ def command_service() -> WorkbenchRelationCommandService:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_batch_withdraw_unwinds_merges_preserves_other_relations_and_is_idempotent(self) -> None:
+        service = command_service()
+        bank_ids = [f"batch-bank-{index}" for index in range(5)]
+        for case_id, ids, types, mode in [
+            ("batch", bank_ids, ["bank"] * 5, "bank_flow_rule_batch"),
+            ("oa-invoice", ["oa", "invoice"], ["oa", "invoice"], "manual_confirmed"),
+            ("other-batch", ["other-bank-1", "other-bank-2"], ["bank"] * 2, "bank_flow_rule_batch"),
+        ]:
+            service.confirm_relation(case_id=case_id, row_ids=ids, row_types=types,
+                                     relation_mode=mode, actor_id="tester", month_scope="2026-06")
+        ids = ["oa", "invoice", *bank_ids]
+        types = ["oa", "invoice", *(["bank"] * 5)]
+        service.confirm_relation(case_id="merged", row_ids=ids, row_types=types,
+                                 relation_mode="manual_confirmed", actor_id="tester", replace_existing=True, history_operation_type="confirm_link")
+        service.confirm_relation(case_id="merged-again", row_ids=[*ids, "other-bank-1", "other-bank-2"],
+                                 row_types=[*types, "bank", "bank"], relation_mode="manual_confirmed",
+                                 actor_id="tester", replace_existing=True, history_operation_type="confirm_link")
+        result = service.withdraw_bank_flow_batch(case_id="batch", row_ids=bank_ids, actor_id="tester")
+        self.assertEqual(service.active_relations_for_row_ids(bank_ids), [])
+        self.assertEqual(service.get_active_relation_by_case_id("oa-invoice")["row_ids"], ["oa", "invoice"])
+        self.assertIsNotNone(service.get_active_relation_by_case_id("other-batch"))
+        self.assertIn("merged-again", result["changed_case_ids"])
+        history = service.list_history()
+        repeat = service.withdraw_bank_flow_batch(case_id="batch", row_ids=bank_ids, actor_id="tester")
+        self.assertEqual(repeat["changed_case_ids"], [])
+        self.assertEqual(history, service.list_history())
+        preview = service.preview_withdraw_relation(row_ids=["oa", "invoice"], row_types=["oa", "invoice"])
+        self.assertFalse(any(set(bank_ids).intersection(item["row_ids"]) for item in preview["after_relations"]))
+
+    def test_batch_withdraw_without_proven_history_does_not_change_relation(self) -> None:
+        service = command_service()
+        service.confirm_relation(case_id="unproven", row_ids=["bank", "oa"], row_types=["bank", "oa"],
+                                 relation_mode="manual_confirmed", actor_id="tester")
+        before = service.get_active_relation_by_case_id("unproven")
+        with self.assertRaises(WorkbenchRelationCommandError):
+            service.withdraw_bank_flow_batch(case_id="missing-batch", row_ids=["bank"], actor_id="tester")
+        self.assertEqual(before, service.get_active_relation_by_case_id("unproven"))
+
     def test_identical_formal_plan_rerun_is_a_true_noop(self) -> None:
         service = command_service()
         plan = SimpleNamespace(

@@ -247,8 +247,9 @@ class BankBatchApplicationService:
                 expected_version=expected_version,
                 reason=reason,
             )
+            relation_mutation = None
             if not already_withdrawn:
-                self._cancel_relation_for_batch(
+                relation_mutation = self._cancel_relation_for_batch(
                     batch,
                     actor=actor,
                     reason=reason,
@@ -268,6 +269,7 @@ class BankBatchApplicationService:
                 batch,
                 status="withdrawn",
                 persist=True,
+                relation_mutation=relation_mutation,
             )
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
@@ -428,22 +430,28 @@ class BankBatchApplicationService:
         history_operation_type: str = "no_oa_bank_batch_withdraw",
         idempotency_operation: str = "withdraw",
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
-    ) -> None:
+    ) -> dict[str, Any]:
         relation_command_service = self._require_relation_command_service()
         case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         if not case_id:
             raise ValueError(self._relation_case_id_required_error(relation_mode))
         try:
-            relation_command_service.cancel_relation(
-                case_id=case_id,
-                actor_id=str(actor or ""),
-                reason=reason,
-                idempotency_key=self._relation_idempotency_key(batch, operation=idempotency_operation),
-                history_operation_type=history_operation_type,
-            )
+            if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+                return relation_command_service.withdraw_bank_flow_batch(
+                    case_id=case_id,
+                    row_ids=list(batch["row_ids"]),
+                    actor_id=actor,
+                    reason=reason,
+                )
+            else:
+                return relation_command_service.cancel_relation(
+                    case_id=case_id,
+                    actor_id=str(actor or ""),
+                    reason=reason,
+                    idempotency_key=self._relation_idempotency_key(batch, operation=idempotency_operation),
+                    history_operation_type=history_operation_type,
+                )
         except WorkbenchRelationCommandError as exc:
-            if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE and exc.error_code == "workbench_relation_not_found":
-                return
             raise self._relation_command_error(exc) from exc
 
     def _require_relation_command_service(self) -> Any:
@@ -1211,15 +1219,25 @@ class BankBatchApplicationService:
         status: str,
         persist: bool,
         candidate_guard: dict[str, object] | None = None,
+        relation_mutation: dict[str, object] | None = None,
     ) -> dict[str, object]:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         relation = self.pair_relation_snapshot_by_case_id(relation_case_id)
         affected_months = self.affected_months(batch)
+        if relation_mutation is not None:
+            affected_months = sorted(set(affected_months) | set(relation_mutation.get("affected_months") or []))
         if persist:
             persist_kwargs: dict[str, object] = {
                 "changed_case_ids": [relation_case_id] if relation_case_id else [],
                 "changed_scope_keys": affected_months,
             }
+            if relation_mutation is not None:
+                persist_kwargs["changed_case_ids"] = sorted(set(
+                    [relation_case_id, *list(relation_mutation.get("changed_case_ids") or [])]
+                ))
+                persist_kwargs["changed_batch_ids"] = [str(batch["batch_id"])]
+                if "expected_relation_versions" in relation_mutation:
+                    persist_kwargs["expected_relation_versions"] = relation_mutation["expected_relation_versions"]
             if candidate_guard is not None:
                 persist_kwargs["candidate_guard"] = dict(candidate_guard)
             self.persist_mutation(**persist_kwargs)

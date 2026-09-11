@@ -367,7 +367,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             all(row["invoice_relation"]["code"] == "bank_flow_rule_batch" for row in paired_group["bank_rows"])
         )
 
-    def test_workbench_confirm_after_no_oa_submit_previews_withdraw_then_manual_replace(self) -> None:
+    def test_workbench_confirm_after_no_oa_submit_preserves_confirm_intent(self) -> None:
         app, row_ids = self._app_with_balanced_bank_rows(
             category_codes=["internal_transfer", "internal_transfer"]
         )
@@ -394,7 +394,8 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         confirm_response = self._post_confirm_link(app, row_ids)
 
         self.assertEqual(preview_response.status_code, 200, preview_response.body)
-        self.assertEqual(json.loads(preview_response.body)["operation"], "withdraw_link")
+        self.assertEqual(json.loads(preview_response.body)["operation"], "confirm_link")
+        self.assertFalse(json.loads(preview_response.body)["can_submit"])
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         confirm_payload = json.loads(confirm_response.body)
         self.assertEqual(confirm_payload["case_id"], "CASE-WORKBENCH-INTERNAL-TRANSFER")

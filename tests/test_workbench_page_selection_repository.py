@@ -331,3 +331,22 @@ def test_completed_pending_oa_resolution_is_narrow_and_fails_closed() -> None:
     assert "oa.row_id = requested.row_id" in sql
     assert "admission.oa_id = requested.row_id" in sql
     assert "canonical_groups" not in sql
+
+
+def test_preview_excludes_collapsed_bank_summary_from_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    ids = [f"bank-{index}" for index in range(5)]
+    rows = [{"id": identity, "type": "bank", "amount": "10.00"} for identity in ids]
+    summary = {"id": "relation_summary:batch", "type": "bank",
+               "source_kind": "bank_flow_rule_batch_summary", "amount": "50.00"}
+    repository = PostgresWorkbenchPageSelectionRepository(_Connection([]), tenant_id="test")
+    monkeypatch.setattr(repository, "_selection_descriptors", lambda **_: [{}])
+    monkeypatch.setattr(repository, "_validated_matches", lambda **_: [("bank", identity) for identity in ids])
+    monkeypatch.setattr(
+        "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
+        "PostgresWorkbenchPageHydrationRepository.hydrate_groups",
+        lambda *_, **__: [{"bank_rows": [summary], "summary_row": summary,
+                           "collapsed_rows": {"bank": rows}}],
+    )
+    result = repository._relation_preview_selection(scope_key="all", row_ids=ids, row_types=["bank"] * 5)
+    assert result["rows"] == rows
+    assert result["context_rows"] == []

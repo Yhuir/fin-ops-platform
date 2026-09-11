@@ -746,15 +746,11 @@ class PostgresStateStore:
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
         changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
         candidate_guard: dict[str, object] | None = None,
+        expected_relation_versions: dict[str, int] | None = None,
     ) -> None:
         normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
         _ = changed_scope_keys
         normalized_batch_ids = {str(batch_id).strip() for batch_id in changed_batch_ids if str(batch_id).strip()}
-        mutation_batch_ids = normalized_batch_ids | self._bank_flow_rule_batch_ids_from_mutation(
-            pair_relation_snapshot=pair_relation_snapshot,
-            bank_flow_rule_batch_snapshot=bank_flow_rule_batch_snapshot,
-            changed_case_ids=normalized_case_ids,
-        )
 
         def write(transaction: Any) -> None:
             transaction_repository = PostgresWorkbenchRepository(transaction)
@@ -763,15 +759,24 @@ class PostgresStateStore:
                     transaction,
                     candidate_guard,
                 )
+            if expected_relation_versions:
+                rows = transaction.fetch_all(
+                    "select case_id, version from app.workbench_pair_relations "
+                    "where case_id = any(%s::text[]) order by case_id for update",
+                    (sorted(expected_relation_versions),),
+                )
+                actual = {str(row["case_id"]): int(row["version"]) for row in rows}
+                if actual != expected_relation_versions:
+                    raise RuntimeError("bank_flow_rule_batch_relation_version_conflict")
             if normalized_case_ids:
                 transaction_repository.save_workbench_pair_relations(
                     pair_relation_snapshot,
                     changed_case_ids=normalized_case_ids,
                 )
-            if mutation_batch_ids:
+            if normalized_batch_ids:
                 transaction_repository.save_bank_flow_rule_batch_items(
                     bank_flow_rule_batch_snapshot,
-                    batch_ids=mutation_batch_ids,
+                    batch_ids=normalized_batch_ids,
                 )
             else:
                 raise ValueError("bank-flow rule batch mutation requires an explicit changed batch id")
@@ -931,36 +936,6 @@ class PostgresStateStore:
             or actual_rule_proof.get("eligible") is not True
         ):
             raise RuntimeError("bank_flow_rule_batch_candidate_guard_conflict")
-
-    @staticmethod
-    def _bank_flow_rule_batch_ids_from_mutation(
-        *,
-        pair_relation_snapshot: dict[str, Any],
-        bank_flow_rule_batch_snapshot: dict[str, Any],
-        changed_case_ids: set[str],
-    ) -> set[str]:
-        if not changed_case_ids:
-            return set()
-        batch_ids = set(changed_case_ids)
-        relations = pair_relation_snapshot.get("pair_relations") if isinstance(pair_relation_snapshot, dict) else None
-        if isinstance(relations, dict):
-            for case_id in changed_case_ids:
-                relation = relations.get(case_id)
-                metadata = relation.get("special_metadata") if isinstance(relation, dict) else None
-                source_batch_id = metadata.get("source_batch_id") if isinstance(metadata, dict) else None
-                normalized_source_batch_id = str(source_batch_id or "").strip()
-                if normalized_source_batch_id:
-                    batch_ids.add(normalized_source_batch_id)
-        batches = bank_flow_rule_batch_snapshot.get("batches") if isinstance(bank_flow_rule_batch_snapshot, dict) else None
-        if isinstance(batches, dict):
-            for batch_id, payload in batches.items():
-                normalized_batch_id = str(batch_id or "").strip()
-                if not normalized_batch_id or not isinstance(payload, dict):
-                    continue
-                relation_case_id = str(payload.get("relation_case_id") or payload.get("batch_id") or "").strip()
-                if relation_case_id in changed_case_ids:
-                    batch_ids.add(normalized_batch_id)
-        return {batch_id for batch_id in batch_ids if batch_id}
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         return self._bank_transaction_category_repository.load_snapshot()

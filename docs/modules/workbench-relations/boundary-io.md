@@ -123,3 +123,11 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 ## 2026-09-11 凭证资料完整性输入
 
 `evaluate_bank_relation_completion` 接收明确的 `supporting_documents_complete`（默认 false）。关联台 canonical grouping 仅在每个 OA 都有非空明细且所有明细都有 active、文件可用的补充凭证时传 true，用于满足缺正式发票时的资料要求；不增补 invoice row type、不修改 relation member/requirement metadata、不放宽银行、审批或金额规则。凭证上传与删除仍归 OA 凭证 service，正式关系 command/UoW 不接收页面凭证展示对象。
+
+## 2026-09-11 银行批次合并与撤回
+
+- 确认与撤回保持独立操作意图，确认预览不调用撤回计划。
+- 历史恢复定位当前 case 与 exact member set 对应的最近确认历史；不得用成员子集命中后来更大关系的历史，否则连续合并后撤回会再次恢复自身。
+- `withdraw_bank_flow_batch(case_id, row_ids, actor_id, reason)` 仅供银行批次 owner 调用。按真实成员读取当前关系与历史，逐层撤回后续合并，再取消原 batch case；保留其它恢复关系，输出全部 changed cases/history 及读取时的关系版本。owner writer 在实际持久化事务中锁定并校验版本，再一次保存，冲突零写。
+- 每层必须能由历史证明完整 batch membership，并严格缩小包含目标 batch 的关系；历史不足或成员归属改变明确返回业务冲突，不猜测拆分。批次已经无 active owner 时无关系写入。
+- batch/history/relations 的最终保存由 batch owner 持有；该命令不改批次表、HTTP 或页面 DTO。

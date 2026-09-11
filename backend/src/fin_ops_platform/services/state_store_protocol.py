@@ -273,6 +273,7 @@ class ApplicationStateStoreProtocol(Protocol):
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
         changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
         candidate_guard: dict[str, object] | None = None,
+        expected_relation_versions: dict[str, int] | None = None,
     ) -> None: ...
 
     def load_bank_transaction_categories(self) -> dict[str, Any]: ...

@@ -44,7 +44,7 @@
 | 正式关系 | `app.workbench_pair_relations` | 只接受 `status='active'`。active relation 决定占用；submitted 批次始终允许撤回，关系已缺失时 relation cancel 按幂等完成处理，仍提交批次状态和事件。禁止使用 `workbench_relation` projection。 |
 | 规则写入 | `GET/PUT /api/bank-flow-rule-batches/tag-rules` | PUT 使用 `expected_version` CAS；未知、停用、重复标签 fail fast；语义 no-op 不递增版本。OA/发票要求发生变化时，`app.app_settings`、`job.background_jobs` 与 `settings.bank_relation_requirements.recalculate.requested` outbox 在同一事务提交；任一步失败整体回滚。页面取得 job id 后查询同一个后台任务，只有任务成功才刷新并提示“已重算”；任务失败或超时必须明确显示，不能把旧关联台结果当成新规则结果。 |
 | 批量提交 | `submit-selection` / `submit` | `submit-selection` 必须携带 `scope_month=YYYY-MM`。流水、当前有效分类、标签规则、OA/发票 requirement 和 active relation 占用均从同一个 canonical source 读取，禁止回退到 import/category/settings 启动时快照；最终 `SERIALIZABLE` 写事务同时比较 selected-row proof 与 rule proof。selected-row proof 的时间先规范为同一 UTC 秒级时刻，业务无时区文本按 `Asia/Shanghai` 解释，避免等价 PostgreSQL `timestamptz` 序列化误报冲突；无法解析的时间仍按原文 fail closed。relation command、幂等/CAS、审计和 batch delta writer 原子提交。 |
-| 撤回 | `POST /api/bank-flow-rule-batches/{batch_id}/withdraw` | 只撤回用户明确选中的已提交批次；保持一次 relation command 与一次 changed-batch delta 保存，不直接改表，不同步 rebuild。active relation 已缺失视为 cancel 幂等完成，批次和事件仍原子持久化。 |
+| 撤回 | `POST /api/bank-flow-rule-batches/{batch_id}/withdraw` | 只撤回用户明确选中的已提交批次；调用 `withdraw_bank_flow_batch` 按真实成员定位当前有效关系，先按历史撤回后续合并，再取消原批次。目标成员已无 active owner 时关系操作幂等完成。全部 changed cases/history 与一个 changed batch/events 在同一事务提交，不直接改表、不 rebuild。 |
 | 权限/session | session / permissions | 读、规则写、提交和撤回分别 fail closed。 |
 
 ## 输出 I/O
@@ -157,3 +157,9 @@ Canonical facts：
 - Allowed writes：`BankFlowRuleBatchApplicationService`、relation command、明确 UoW/delta writer。
 - Allowed reads：`BankFlowRuleBatchCanonicalQueryRepository`、规则 read service。
 - Forbidden：shared broad snapshot、read-model projection、no-OA fallback、调用方直接改 batch/relation 状态。
+
+## 2026-09-11 撤回事务与关系恢复
+
+- 撤回计划携带全部 changed cases 的 `expected_relation_versions`；PostgreSQL writer 在最终写事务锁定并校验这些版本后，一次提交关系、批次和事件，版本冲突整体零写。本地状态后端在既有快照锁内执行相同校验。历史涉及其它成员时，计划前集合加载当前 owner 全部成员对应关系。
+- 撤回结果向持久化传递关系命令返回的全部 changed cases 和 affected months，`changed_batch_ids` 仅为目标批次，不能遗漏被取消的合并关系或恢复的其它关系。
+- 从关联台撤回后续合并只恢复批次关系，不撤销其提交；从批次页面撤回提交则释放目标成员并保留其它已恢复关系。后续关系撤回不得把已撤回批次从无关的更大关系历史重新启用。

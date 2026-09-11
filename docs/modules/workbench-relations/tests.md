@@ -113,3 +113,12 @@ cd web && npm test -- --run \
   src/test/WorkbenchWriteGate.test.ts \
   src/test/WorkbenchExceptionDrawer.test.tsx
 ```
+
+## 2026-09-11 折叠银行批次回归
+
+- `WorkbenchSelection.test.tsx`：未水合批次＋OA／发票确认提交真实成员，拒绝确认接口返回撤回操作；分区撤回沿用批次 owner。
+- `test_workbench_page_selection_repository.py`、`test_workbench_query_postgres_integration.py`：汇总金额与成员金额搜索命中完整组，preview 不返回合成汇总 context、不重复计金额。
+- `test_workbench_write_characterization.py`：已有关系的确认预览保持 confirm 类型并禁止重复确认。
+- `test_workbench_relation_command_service.py`、`test_workbench_pair_relation_service.py`：连续合并、逐层恢复、批次撤回幂等及历史不足零写。
+- `test_app_postgres_mode_integration.py::test_bank_flow_owner_real_postgres_submit_withdraw_replay_and_event_failure`：真实 PostgreSQL/API 提交批次→合并→撤回恢复→重新合并→批次 owner 撤回；注入 event writer 失败验证 relations/history/batch/events 整体回滚。
+- 七类中 1/2/3/5/6/7 适用；第 4 类执行 canonical-only 和零 read-model event 负向回归，本次不新增或修改 worker/cache/read model。

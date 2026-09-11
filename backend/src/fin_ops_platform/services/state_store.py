@@ -1007,6 +1007,7 @@ class ApplicationStateStore:
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
         changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
         candidate_guard: dict[str, object] | None = None,
+        expected_relation_versions: dict[str, int] | None = None,
     ) -> None:
         normalized_case_ids = [str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()]
         _ = changed_scope_keys
@@ -1042,6 +1043,11 @@ class ApplicationStateStore:
             raise ValueError("bank-flow rule batch mutation requires an explicit changed batch id")
         with self._local_pickle_lock:
             current_payload = self._load_local_pickle()
+            if expected_relation_versions:
+                relations = current_payload.get("workbench_pair_relations", {}).get("pair_relations", {})
+                actual = {key: int(relations[key]["version"]) for key in expected_relation_versions if key in relations}
+                if actual != expected_relation_versions:
+                    raise RuntimeError("bank_flow_rule_batch_relation_version_conflict")
             if normalized_case_ids:
                 normalized_relation_snapshot = (
                     pair_relation_snapshot

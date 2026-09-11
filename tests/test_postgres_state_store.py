@@ -454,7 +454,7 @@ class PostgresStateStoreTests(unittest.TestCase):
                                 "batch-2": {"batch_id": "batch-2", "relation_case_id": "CASE-2"},
                             }
                         },
-                        "batch_ids": {"CASE-1", "batch-1", "batch-2"},
+                        "batch_ids": {"batch-2"},
                     },
                 ),
             ],

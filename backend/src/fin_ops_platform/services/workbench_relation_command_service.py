@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-import json
 from typing import Any
 
 from fin_ops_platform.services.workbench_etc_batch_link import (
@@ -1264,6 +1264,66 @@ class WorkbenchRelationCommandService:
         )
         self._save_idempotency_result(idempotency_key, fingerprint, result)
         return result
+
+    def withdraw_bank_flow_batch(
+        self, *, case_id: str, row_ids: list[str], actor_id: str, reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Unwind later merges before releasing the original batch, in the owner's UoW."""
+        members = set(row_ids)
+        if not members:
+            raise WorkbenchRelationCommandError("invalid_bank_flow_batch", "批次缺少真实流水成员。")
+        self._acquire_relation_member_locks(sorted(members), case_ids=[case_id])
+        pair_service = self._pair_service_for_row_ids(sorted(members))
+        owner_members = {row_id for relation in pair_service.list_active_relations() for row_id in relation["row_ids"]}
+        if owner_members - members:
+            pair_service = self._pair_service_for_row_ids(sorted(owner_members), case_ids=[case_id])
+        original_relations = pair_service.snapshot()["pair_relations"]
+        histories: list[dict[str, Any]] = []
+        changed: set[str] = set()
+        affected_relations: list[dict[str, Any]] = []
+        while True:
+            owners = pair_service.active_relations_for_row_ids(sorted(members))
+            if not owners:
+                break
+            if len(owners) != 1 or not members.issubset(set(owners[0]["row_ids"])):
+                raise WorkbenchRelationCommandError(
+                    "bank_flow_batch_relation_changed", "批次成员所属关系已变化，请刷新后重新处理。",
+                )
+            active = owners[0]
+            active_id = str(active["case_id"])
+            affected_relations.append(active)
+            changed.add(active_id)
+            if active_id == case_id and set(active["row_ids"]) == members:
+                pair_service.cancel_relation(active_id)
+                histories.append(pair_service.record_history(
+                    operation_type="bank_flow_rule_batch_withdraw",
+                    before_relations=[active], after_relations=[],
+                    affected_row_ids=sorted(members), created_by=actor_id, note=reason,
+                ))
+                break
+            preview = pair_service.preview_withdraw_for_active_relation(active)
+            restored = list(preview["after_relations"])
+            batch_owners = [item for item in restored if members.intersection(item["row_ids"])]
+            if (len(batch_owners) != 1 or not members.issubset(set(batch_owners[0]["row_ids"]))
+                    or len(batch_owners[0]["row_ids"]) >= len(active["row_ids"])):
+                raise WorkbenchRelationCommandError(
+                    "bank_flow_batch_restore_unavailable",
+                    "当前关联历史无法完整恢复原批次，请先在关联台处理该关联。",
+                )
+            restored, history = pair_service.withdraw_latest_for_active_relation(
+                active, created_by=actor_id, note=reason,
+            )
+            histories.append(history)
+            changed.update(str(item["case_id"]) for item in restored)
+        if changed - original_relations.keys():
+            raise WorkbenchRelationCommandError(
+                "bank_flow_batch_relation_changed", "关联历史涉及的记录已变化，请刷新后重新处理。",
+            )
+        if changed:
+            self._save_changed_cases(pair_service, sorted(changed), history_events=histories)
+        return {"changed_case_ids": sorted(changed),
+                "expected_relation_versions": {key: int(original_relations[key]["version"]) for key in changed},
+                "affected_months": self._affected_months_for_relations(affected_relations)}
 
     def cancel_by_case_id(self, **kwargs: Any) -> dict[str, Any]:
         return self.cancel_relation(**kwargs)

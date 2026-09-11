@@ -514,6 +514,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
 
     def test_bank_flow_owner_real_postgres_submit_withdraw_replay_and_event_failure(self) -> None:
         app = self._build_app()
+        app._oa_sync_status_payload = lambda: {"status": "synced", "dirty_scopes": []}
         row_id = self._create_bank_transaction(app, counterparty_name="Synthetic fee vendor")
         connection = app._state_store._connection
         with connection.transaction() as transaction:
@@ -556,6 +557,39 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         detail = app.handle_request("GET", f"/api/bank-flow-rule-batches/{batch['batch_id']}")
         self.assertEqual(detail.status_code, 200, detail.body)
 
+        invoice_id = self._create_input_invoice(app, seller_name="Synthetic fee vendor", invoice_no="BATCH-LINK-INVOICE")
+        connection.execute("""
+            insert into app.oa_applications(oa_source_id, form_id, form_type, row_id, status,
+                workflow_status, applicant, application_date, scope_month, project_name,
+                amount, currency, normalized_payload, raw_payload)
+            values ('synthetic-oa', '2', 'payment_request', 'synthetic-oa', 'active', 'completed',
+                'Synthetic', '2026-05-20', '2026-05-01', 'Synthetic project', 118, 'CNY',
+                '{"id":"synthetic-oa","amount":"118","workflow_status":"completed"}'::jsonb, '{}'::jsonb)
+        """)
+        def confirm(case_id, ids, types):
+            response = app.handle_request("POST", "/api/workbench/actions/confirm-link", body=json.dumps({
+                "month": "all", "case_id": case_id, "row_ids": ids, "row_types": types,
+                "idempotency_key": case_id, "note": "Synthetic batch link closure",
+            }))
+            self.assertEqual(response.status_code, 200, response.body)
+        confirm("synthetic-oa-invoice", ["synthetic-oa", invoice_id], ["oa", "invoice"])
+        member_ids = ["synthetic-oa", row_id, invoice_id]
+        member_types = ["oa", "bank", "invoice"]
+        confirm("synthetic-merged", member_ids, member_types)
+        preview = app.handle_request("POST", "/api/workbench/actions/withdraw-link/preview", body=json.dumps({
+            "month": "all", "row_ids": member_ids, "row_types": member_types,
+        }))
+        self.assertEqual(preview.status_code, 200, preview.body)
+        plan = json.loads(preview.body)
+        restored = app.handle_request("POST", "/api/workbench/actions/withdraw-link", body=json.dumps({
+            "month": "all", "row_ids": member_ids, "row_types": member_types,
+            "preview_id": plan["preview_id"], "expected_versions": plan["submit_expected_versions"],
+            "operation_type": "withdraw_relation", "idempotency_key": "synthetic-restore",
+        }))
+        self.assertEqual(restored.status_code, 200, restored.body)
+        self.assertEqual(connection.fetch_one("select status from app.bank_flow_rule_batches where batch_id=%s", (batch["batch_id"],))["status"], "submitted")
+        confirm("synthetic-merged-again", member_ids, member_types)
+
         withdraw_path = f"/api/bank-flow-rule-batches/{batch['batch_id']}/withdraw"
         withdraw_body = json.dumps({"reason": "Synthetic closure cleanup"})
         committed = persisted()
@@ -564,6 +598,20 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         self.assertEqual(failed.status_code, 500, failed.body)
         self.assertEqual(json.loads(failed.body)["error"], "bank_flow_rule_batch_persistence_failed")
         self.assertEqual(persisted(), committed)
+
+        save_mutation = app._state_store.save_bank_flow_rule_batch_mutation
+        raced = {}
+        def change_version_before_save(**kwargs):
+            concurrent = app._state_store.load_workbench_pair_relations_for_row_ids([], case_ids=["synthetic-merged-again"])
+            concurrent["pair_relations"]["synthetic-merged-again"]["version"] += 1
+            app._state_store.save_workbench_pair_relations(concurrent, changed_case_ids=["synthetic-merged-again"])
+            raced.update(persisted())
+            return save_mutation(**kwargs)
+        with patch.object(app._state_store, "save_bank_flow_rule_batch_mutation", change_version_before_save):
+            conflict = app.handle_request("POST", withdraw_path, body=withdraw_body)
+        self.assertEqual(conflict.status_code, 400, conflict.body)
+        self.assertEqual(json.loads(conflict.body)["error"], "bank_flow_rule_batch_relation_version_conflict")
+        self.assertEqual(persisted(), raced)
 
         withdrawn = app.handle_request("POST", withdraw_path, body=withdraw_body)
         self.assertEqual(withdrawn.status_code, 200, withdrawn.body)
@@ -579,7 +627,10 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
                     [{key: value for key, value in row.items() if key not in {"created_at", "updated_at"}} for row in rows],
                     [{key: value for key, value in row.items() if key not in {"created_at", "updated_at"}} for row in finished[table]],
                 )
-        self.assertEqual(connection.fetch_all("select * from app.workbench_pair_relations where status='active'"), [])
+        remaining = connection.fetch_all("select case_id, row_ids from app.workbench_pair_relations where status='active'")
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["case_id"], "synthetic-oa-invoice")
+        self.assertNotIn(row_id, remaining[0]["row_ids"])
         self.assertEqual(connection.fetch_one("select count(*) as n from job.outbox_events where event_type like %s", ("%.read_model.refresh",))["n"], 0)
         self.assertEqual(connection.fetch_one("select count(*) as n from app.bank_transactions")["n"], 1)
 

@@ -249,3 +249,11 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 分页前 SQL 与当前页 Python 组装使用一致规则，复用已有异常分类及审阅合同。summary 水合最多三条批量语句（基础事实、银行分类、凭证元数据），无逐文件请求；full 水合固定上限仍为八条。
 - 前端一项一个全宽凭证单元格，列出全部文件名并点击预览；通过“管理凭证”复用原抽屉。上传/删除后等待一次 canonical GET，禁止局部补丁伪造分区或金额通过。
 - 移除旧逐文件伪发票卡片、局部替换 OA 凭证的 helper 和未被调用的凭证 SQL helper。保留现有上传权限、文件校验、内容去重、软删除及审计；不增加 migration、worker、read model 或依赖。
+
+## 2026-09-11 折叠流水批次操作与搜索
+
+- 前端确认与撤回请求使用 selection context 的 canonical typed identities，不从可见行重建成员；折叠、展开和跨搜索保留选择不改变成员集合。已加载 collapsed rows 可参与展示，但不得伪造未加载的行。
+- `confirm-link/preview` 始终返回 `confirm_link`；精确命中已有关系时 `can_submit=false`，不再转为撤回。浏览器拒绝与点击意图不一致的预览。
+- relation-preview selection 排除 `bank_flow_rule_batch_summary` 展示行，避免真实成员与汇总金额重复计入；汇总行不作为 context row 输出。
+- 银行金额搜索包含 active bank-flow batch 的展示总金额；命中返回真实成员，由原分组与分页逻辑输出完整批次。成员金额搜索仍命中完整关联，不在浏览器当前页过滤。
+- 已配对和未配对分区的纯折叠银行批次撤回都交由批次 owner；合并后的普通关系仍使用正式关系撤回预览。写后沿用 canonical GET，不引入 page cache/read model。

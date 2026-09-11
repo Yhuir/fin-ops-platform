@@ -311,7 +311,7 @@ function resolveFormalRelationSelection(group: WorkbenchRelationGroup): {
     return undefined;
   }
   const rowsByIdentity = new Map(
-    flattenWorkbenchGroup(group).map((row) => [workbenchRowIdentityKey(row), row]),
+    flattenWorkbenchGroupSelectionRows(group).map((row) => [workbenchRowIdentityKey(row), row]),
   );
   const resolvedRows: WorkbenchRecord[] = [];
   const seen = new Set<string>();
