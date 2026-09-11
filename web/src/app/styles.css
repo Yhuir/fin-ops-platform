@@ -21228,6 +21228,15 @@ body.column-layout-dragging {
   cursor: default;
 }
 
+.relation-preview-tri-pane .candidate-columnheader {
+  background: var(--fp-surface-muted);
+  color: var(--fp-text-primary);
+}
+
+.relation-preview-tri-pane .record-card-cell-content {
+  align-items: flex-start;
+}
+
 .relation-preview-pane {
   border: 1px solid var(--fp-border);
   border-radius: var(--fp-radius-sm);

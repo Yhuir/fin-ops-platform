@@ -77,9 +77,9 @@ function RelationPreviewTriPane({
   );
   const paneGridStyleByPane = useMemo(
     () => ({
-      oa: getWorkbenchPaneGridStyle("oa", columnLayouts),
-      bank: getWorkbenchPaneGridStyle("bank", columnLayouts),
-      invoice: getWorkbenchPaneGridStyle("invoice", columnLayouts),
+      oa: { ...getWorkbenchPaneGridStyle("oa", columnLayouts), minWidth: "560px" },
+      bank: { ...getWorkbenchPaneGridStyle("bank", columnLayouts), minWidth: "560px" },
+      invoice: { ...getWorkbenchPaneGridStyle("invoice", columnLayouts), minWidth: "560px" },
     }),
     [columnLayouts],
   );

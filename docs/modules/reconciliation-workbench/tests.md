@@ -716,3 +716,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `test_workbench_relation_command_service.py`、`test_workbench_pair_relation_service.py`：连续合并、逐层恢复、批次撤回幂等及历史不足零写。
 - `test_app_postgres_mode_integration.py::test_bank_flow_owner_real_postgres_submit_withdraw_replay_and_event_failure`：真实 PostgreSQL/API 提交批次→合并→撤回恢复→重新合并→批次 owner 撤回；注入 event writer 失败验证 relations/history/batch/events 整体回滚。
 - 七类中 1/2/3/5/6/7 适用；第 4 类执行 canonical-only 和零 read-model event 负向回归，本次不新增或修改 worker/cache/read model。
+
+- 生产浏览器检查确认／撤回预览的表头对比度、单条 OA／发票顶部可见性；1920 与 1440 宽度下，预览各栏保持最小宽度并通过既有同步横向滚动查看完整列，不能裁掉金额。

@@ -2943,7 +2943,7 @@ function RelationPreviewDialog({
       footer={footer}
       open
       title={operationCopy.title}
-      width="min(1080px, 100vw)"
+      width="min(1800px, 100vw)"
       onClose={closePreview}
     >
       <div className="relation-preview-body">
