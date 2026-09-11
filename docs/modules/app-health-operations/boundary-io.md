@@ -45,3 +45,7 @@
 `tests/test_app_health_api.py`、`tests/test_app_health_service.py`、
 `tests/test_app_status_overview_service.py`、`tests/test_audit_app_health_system.py`、
 `web/src/test/AppHealthOperationsPage.test.tsx`。
+
+## 2026-09-12 流水批次合并后的审计
+
+流水批次成员审计直接读取 submitted 批次与 active canonical relation。原始独立批次关系要求成员集合严格相等；批次并入普通 OA/发票关系后，要求全部银行成员包含于同一个 active 关系，允许该关系包含其它成员。缺失成员、非 submitted 批次仍占用原始批次关系、孤立批次关系仍报错。只读 SQL 边界及审计 API 不变，不修写业务事实。真实 PostgreSQL 回归覆盖完整合并、缺失成员、额外原始成员和已撤回批次残留。

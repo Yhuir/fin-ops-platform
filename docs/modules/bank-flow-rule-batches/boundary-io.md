@@ -173,3 +173,5 @@ Canonical facts：
 - summary/full hydration 各增加一次有界集合查询（预算 4/9）；页大小、批次数与成员数量不改变语句数。纯批次列表相对旧摘要会传输更多精简成员，以避免展开加载和第二份详情状态；生产验证同时测量 payload 和耗时。
 - 搜索按 submitted 批次的 total_amount 命中真实成员，不再依赖 relation_mode；合并后仍能搜批次总额。确认/撤回继续使用完整正式 typed members，摘要不能进入请求。合并关系走关系撤回；纯 batch relation 仍由批次 owner 撤回。
 - 测试覆盖 2/3/4 阈值、多批次与普通流水、OA/发票混合、已撤回与跨组批次、选择去重、搜索、真实 PostgreSQL summary/full 和无 N+1；浏览器覆盖双区域、展开/收起与 1440/1920 布局。无新 read model/cache/worker/schema。
+
+发布审计同时按实际 active relation 成员检查已合并批次，不要求合并后仍保留以 batch_id 为 case_id 的独立 active 关系；所有批次成员必须在同一 active 关系内，原始独立批次仍要求严格成员相等。参见 `../app-health-operations/boundary-io.md`。

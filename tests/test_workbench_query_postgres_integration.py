@@ -14,6 +14,9 @@ from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRep
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
+from fin_ops_platform.services.postgres_repositories.page_consumer_relation_audit import (
+    page_consumer_relation_edge_equality_issues,
+)
 from fin_ops_platform.services.postgres_repositories.workbench import (
     PostgresWorkbenchRepository,
 )
@@ -337,6 +340,39 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             )
             """
         )
+
+    def test_batch_audit_accepts_complete_manual_merge_but_rejects_missing_members(self) -> None:
+        self.raw_connection.execute("""
+            insert into app.bank_flow_rule_batches(batch_id,status,version,total_amount,bank_transaction_ids)
+            values ('audit-batch','submitted',1,30,array['audit-1','audit-2','audit-3'])
+        """)
+
+        def issues():
+            return [issue.details["mismatch_kind"] for issue in page_consumer_relation_edge_equality_issues(
+                self.raw_connection, consumer_contract="bank_flow_rule_batch_members", tenant_id="",
+                limit=50, code_prefix="bank_flow_rule_batches", label="batch")]
+
+        self.assertEqual(issues(), ["submitted_batch_missing_active_relation"])
+        self.raw_connection.execute("""
+            insert into app.workbench_pair_relations(case_id,relation_mode,status,version,row_ids,row_types)
+            values ('audit-merged','manual_confirmed','active',1,
+                array['audit-1','audit-2','audit-3','ordinary','oa'],array['bank','bank','bank','bank','oa'])
+        """)
+        self.assertEqual(issues(), [])
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set row_ids=array['audit-1','audit-2','ordinary','oa'],
+                row_types=array['bank','bank','bank','oa'] where case_id='audit-merged'
+        """)
+        self.assertEqual(issues(), ["submitted_batch_missing_active_relation"])
+        self.raw_connection.execute("delete from app.workbench_pair_relations where case_id='audit-merged'")
+        self.raw_connection.execute("""
+            insert into app.workbench_pair_relations(case_id,relation_mode,status,version,row_ids,row_types)
+            values ('audit-batch','bank_flow_rule_batch','active',1,
+                array['audit-1','audit-2','audit-3','extra'],array['bank','bank','bank','bank'])
+        """)
+        self.assertEqual(issues(), ["active_relation_member_set_mismatch"])
+        self.raw_connection.execute("update app.bank_flow_rule_batches set status='withdrawn' where batch_id='audit-batch'")
+        self.assertEqual(issues(), ["non_submitted_batch_has_active_relation"])
 
     def test_collapsed_batch_search_matches_total_and_member_without_preview_double_count(self) -> None:
         ids = [f"batch-search-{index}" for index in range(5)]

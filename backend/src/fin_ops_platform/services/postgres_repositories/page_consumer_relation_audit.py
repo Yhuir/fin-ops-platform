@@ -95,6 +95,7 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
                        when batch.status <> 'submitted' and relation.case_id is not null
                        then 'non_submitted_batch_has_active_relation'
                        when batch.status = 'submitted'
+                        and relation.relation_mode = 'bank_flow_rule_batch'
                         and relation.relation_member_ids <> batch.canonical_member_ids
                        then 'active_relation_member_set_mismatch'
                        else null
@@ -105,7 +106,12 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
                    relation.relation_member_ids
             from canonical_batches batch
             left join projected_batches projected on projected.batch_id = batch.batch_id
-            left join active_batch_relations relation on relation.case_id = batch.batch_id
+            left join active_bank_relations relation
+              on (relation.relation_mode = 'bank_flow_rule_batch' and relation.case_id = batch.batch_id)
+              or (batch.status = 'submitted'
+                  and relation.relation_mode <> 'bank_flow_rule_batch'
+                  and cardinality(batch.canonical_member_ids) > 0
+                  and batch.canonical_member_ids <@ relation.relation_member_ids)
         ),
         relation_orphans as (
             select relation.case_id as subject_id, ''::text as scope_key,
