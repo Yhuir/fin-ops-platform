@@ -771,6 +771,18 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
                     else:
                         self.assertNotIn("bank_batches", group)
 
+    def test_batch_summary_uses_canonical_direction_for_display_amount(self) -> None:
+        for direction, label, field in (("outflow", "支出", "debit_amount"), ("inflow", "收入", "credit_amount")):
+            rows = [{"id": str(i), "type": "bank", "amount": "10.00",
+                     "direction": label, "txn_direction": direction} for i in range(3)]
+            group = {"bank_rows": rows}
+            self.service.apply_bank_batches([group], [{"batch_id": "batch", "status": "submitted",
+                "row_ids": ["0", "1", "2"], "total_amount": "30.00", "version": 1}])
+            summary = group["bank_batches"][0]["summary_row"]
+            self.assertEqual(summary[field], "30.00")
+            self.assertEqual(summary["direction"], label)
+            self.assertEqual(summary["credit_amount" if field == "debit_amount" else "debit_amount"], "")
+
     def test_multiple_batches_preserve_ordinary_rows_and_ignore_withdrawn_or_split_batches(self) -> None:
         rows = [{"id": str(i), "type": "bank", "amount": "10"} for i in range(10)]
         group = {"bank_rows": rows}

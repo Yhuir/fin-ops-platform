@@ -642,8 +642,8 @@ class WorkbenchRelationGroupingService:
                     "id": f"bank_batch_summary:{batch['batch_id']}",
                     "source_kind": "bank_flow_rule_batch_summary",
                     "amount": str(batch["total_amount"]),
-                    "debit_amount": str(batch["total_amount"]) if row.get("direction") == "outflow" else "",
-                    "credit_amount": str(batch["total_amount"]) if row.get("direction") == "inflow" else "",
+                    "debit_amount": str(batch["total_amount"]) if row.get("txn_direction") == "outflow" else "",
+                    "credit_amount": str(batch["total_amount"]) if row.get("txn_direction") == "inflow" else "",
                     "available_actions": [],
                     "special_metadata": {"source_batch_id": batch["batch_id"], "batch_version": batch["version"]},
                 })
