@@ -4,6 +4,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from fin_ops_platform.services.cost_statistics_allocation_scope import merge_source_decision
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     PostgresCostStatisticsCanonicalRepository,
 )
@@ -200,6 +201,7 @@ class CostStatisticsManualAllocationService:
         allowed_fields = {
             "relation_case_id",
             "expected_version",
+            "scope_version",
             "source_fingerprint",
             "allocations",
             "source_allocations",
@@ -243,6 +245,12 @@ class CostStatisticsManualAllocationService:
             raise CostStatisticsManualAllocationConflictError(
                 "该关联关系当前不属于人工分配范围，请刷新后重试。"
             )
+        if type(payload.get("scope_version")) is not int or payload["scope_version"] < 1:
+            raise CostStatisticsManualAllocationValidationError("scope_version 必须是正整数。")
+        if payload["scope_version"] != task["scope_version"]:
+            raise CostStatisticsManualAllocationConflictError("项目成本范围已变化，请重新加载后保存。")
+        if not task["in_project_cost_scope"] or "scope_refund_required" in task["pending_reasons"]:
+            raise CostStatisticsManualAllocationValidationError("当前范围没有可分配来源，或退款来源尚未确认。")
         source_fingerprint = str(payload.get("source_fingerprint") or "").strip()
         if source_fingerprint != task["source_fingerprint"]:
             raise CostStatisticsManualAllocationConflictError(
@@ -289,18 +297,29 @@ class CostStatisticsManualAllocationService:
             raise CostStatisticsManualAllocationValidationError(
                 "operator identity is required"
             )
+        previous = snapshot["manual_allocations"].get(relation_case_id)
+        if (previous and previous["source_fingerprint"] == source_fingerprint
+                and previous["source_allocations"] is None
+                and Decimal(previous["gross_outflow_total"]) != Decimal(task["gross_outflow_total"])):
+            raise CostStatisticsManualAllocationValidationError("历史分配缺少逐笔来源，请先在完整范围确认来源。")
+        # Preserve all canonical unit identities, including units hidden by current scope.
+        all_units = [{"unit_id": line["unit_id"]} for line in previous["allocations"]] if previous and previous["source_fingerprint"] == source_fingerprint else task["units"]
+        merged = merge_source_decision({**task, "non_cost_reason": non_cost_reason}, previous, source_allocations, all_units)
+        merged["non_cost_reason"] = _non_cost_reason(merged["non_cost_reason"])
+        stored_refund = sum((Decimal(line["amount"]) for line in merged["source_allocations"]["refund_links"]), Decimal("0.00"))
+        stored_net = sum((Decimal(line["amount"]) for line in merged["allocations"]), Decimal(merged["non_cost_amount"]))
         saved = allocation_repository.save(
             relation_case_id=relation_case_id,
             relation_version=int(task["relation_version"]),
             source_fingerprint=source_fingerprint,
-            oa_total=str(task["oa_total"]),
-            gross_outflow_total=str(task["gross_outflow_total"]),
-            wrong_payment_refund_total=str(task["wrong_payment_refund_total"]),
-            net_outflow_total=str(task["net_outflow_total"]),
-            allocations=allocations,
-            source_allocations=source_allocations,
-            non_cost_amount=f"{non_cost_amount:.2f}",
-            non_cost_reason=non_cost_reason,
+            oa_total=str(previous["oa_total"] if previous and previous["source_fingerprint"] == source_fingerprint else task["oa_total"]),
+            gross_outflow_total=f"{stored_net + stored_refund:.2f}",
+            wrong_payment_refund_total=f"{stored_refund:.2f}",
+            net_outflow_total=f"{stored_net:.2f}",
+            allocations=merged["allocations"],
+            source_allocations=merged["source_allocations"],
+            non_cost_amount=merged["non_cost_amount"],
+            non_cost_reason=merged["non_cost_reason"],
             expected_version=expected_version,
             actor_id=actor_id,
         )

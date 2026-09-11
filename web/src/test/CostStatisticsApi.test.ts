@@ -23,7 +23,7 @@ describe("Cost statistics export API", () => {
     const task = {
       relation_case_id: "relation-1",
       relation_version: 3,
-      source_fingerprint: "b".repeat(64),
+      source_fingerprint: "b".repeat(64), scope_version: 1,
       status: "pending",
       pending_reasons: ["source_required"], amounts_fixed: true, suggested_source_allocations: null, source_allocations: null,
       project_names: ["云南溯源科技"], unit_count: 1, bank_event_count: 1,
@@ -94,7 +94,7 @@ describe("Cost statistics export API", () => {
     await saveCostStatisticsManualAllocation({
       relationCaseId: "relation-1",
       expectedVersion: 0,
-      sourceFingerprint: "b".repeat(64),
+      sourceFingerprint: "b".repeat(64), scopeVersion: 1,
       allocations: [{ unitId: "oa-1:parent", amount: "120.00" }],
       sourceAllocations: { costLines: [{unitId: "oa-1:parent", bankTransactionId: "bank-out", amount: "120.00"}], refundLinks: [], nonCostLines: [] },
       nonCostAmount: "0.00",
@@ -104,7 +104,7 @@ describe("Cost statistics export API", () => {
     expect(JSON.parse(String(putCall?.[1]?.body))).toEqual({
       relation_case_id: "relation-1",
       expected_version: 0,
-      source_fingerprint: "b".repeat(64),
+      source_fingerprint: "b".repeat(64), scope_version: 1,
       allocations: [{ unit_id: "oa-1:parent", amount: "120.00" }],
       source_allocations: { cost_lines: [{unit_id: "oa-1:parent", bank_transaction_id: "bank-out", amount: "120.00"}], refund_links: [], non_cost_lines: [] },
       non_cost_amount: "0.00",

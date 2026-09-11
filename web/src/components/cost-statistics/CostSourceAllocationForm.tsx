@@ -115,6 +115,7 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
     </table></div>;
   };
   return <div className="cost-source-form" ref={root}>
+    {task.pendingReasons.includes('scope_refund_required') ? <p className="cost-source-notice">请先确认退款对应的原支出</p> : null}
     {task.pendingReasons.includes('bank_tag_missing') ? <p className="cost-source-notice">银行标签待完善</p> : null}
     {task.pendingReasons.includes('allocation_stale') ? <p className="cost-source-notice">数据已变化，请重新核对</p> : null}
     <CostSourceEvidence task={task} costLines={draft.costLines} nonCostLines={draft.nonCostLines} sourceError={sourceError} />

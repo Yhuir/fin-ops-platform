@@ -8,7 +8,7 @@ import type { CostStatisticsManualAllocationTask } from '../features/cost-statis
 
 function fixture(): CostStatisticsManualAllocationTask {
   return {
-    relationCaseId: 'internal-case', relationVersion: 1, sourceFingerprint: 'fingerprint', status: 'pending', pendingReasons: ['source_required'], amountsFixed: false,
+    relationCaseId: 'internal-case', relationVersion: 1, sourceFingerprint: 'fingerprint', scopeVersion: 1, status: 'pending', pendingReasons: ['source_required'], amountsFixed: false,
     oaTotal: '700.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
     units: [
       { unitId: 'unit-a', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '材料', expenseContent: '材料采购', oaApplicant: '张先生', oaOriginalAmount: '500.00' },

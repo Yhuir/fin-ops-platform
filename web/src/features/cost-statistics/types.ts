@@ -156,6 +156,7 @@ export type CostStatisticsManualAllocationTask = {
   relationCaseId: string;
   relationVersion: number;
   sourceFingerprint: string;
+  scopeVersion: number;
   status: "pending" | "allocated";
   pendingReasons: string[];
   amountsFixed: boolean;
@@ -208,6 +209,7 @@ export type SaveCostStatisticsManualAllocationRequest = {
   relationCaseId: string;
   expectedVersion: number;
   sourceFingerprint: string;
+  scopeVersion: number;
   allocations: CostStatisticsManualAllocationLine[];
   nonCostAmount: string;
   nonCostReason: string;

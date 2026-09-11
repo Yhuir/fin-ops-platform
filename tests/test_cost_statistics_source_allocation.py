@@ -12,7 +12,7 @@ from fin_ops_platform.services.cost_statistics_source_allocation import (
 
 def task_fixture():
     return {
-        "status": "pending", "oa_total": "1000.00", "net_outflow_total": "1000.00",
+        "status": "pending", "amounts_fixed": True, "oa_total": "1000.00", "net_outflow_total": "1000.00",
         "non_cost_amount": "0.00", "non_cost_reason": "",
         "units": [{"unit_id": "a", "oa_original_amount": "600.00"}, {"unit_id": "b", "oa_original_amount": "400.00"}],
         "allocations": [{"unit_id": "a", "amount": "600.00"}, {"unit_id": "b", "amount": "400.00"}],
@@ -83,6 +83,7 @@ class SourceAllocationTests(unittest.TestCase):
     def test_refund_and_non_cost_close_original_source(self):
         task = task_fixture()
         task["oa_total"] = "1100.00"
+        task["amounts_fixed"] = False
         task["net_outflow_total"] = "900.00"
         task["allocations"][1]["amount"] = "200.00"
         task["non_cost_amount"] = "100.00"

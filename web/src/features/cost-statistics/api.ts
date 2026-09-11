@@ -135,6 +135,7 @@ type ApiCostStatisticsManualAllocationTask = {
   relation_case_id: string;
   relation_version: number;
   source_fingerprint: string;
+  scope_version: number;
   status: "pending" | "allocated";
   pending_reasons: string[];
   amounts_fixed: boolean;
@@ -416,7 +417,7 @@ function mapManualAllocationTask(
   return {
     relationCaseId: task.relation_case_id,
     relationVersion: task.relation_version,
-    sourceFingerprint: task.source_fingerprint,
+    sourceFingerprint: task.source_fingerprint, scopeVersion: task.scope_version,
     status: task.status,
     pendingReasons: task.pending_reasons,
     amountsFixed: task.amounts_fixed,
@@ -475,7 +476,7 @@ function mapSourceAllocations(value: ApiCostSourceAllocations): CostSourceAlloca
 function mapManualSummary(task: ApiCostManualAllocationSummary): CostStatisticsManualAllocationSummary {
   return {
     relationCaseId: task.relation_case_id, relationVersion: task.relation_version,
-    sourceFingerprint: task.source_fingerprint, status: task.status, pendingReasons: task.pending_reasons,
+    sourceFingerprint: task.source_fingerprint, scopeVersion: task.scope_version, status: task.status, pendingReasons: task.pending_reasons,
     amountsFixed: task.amounts_fixed, oaTotal: task.oa_total, grossOutflowTotal: task.gross_outflow_total,
     wrongPaymentRefundTotal: task.wrong_payment_refund_total, netOutflowTotal: task.net_outflow_total,
     nonCostAmount: task.non_cost_amount, nonCostReason: task.non_cost_reason,
@@ -632,6 +633,7 @@ export async function saveCostStatisticsManualAllocation(
         relation_case_id: request.relationCaseId,
         expected_version: request.expectedVersion,
         source_fingerprint: request.sourceFingerprint,
+        scope_version: request.scopeVersion,
         allocations: request.allocations.map((line) => ({
           unit_id: line.unitId,
           amount: line.amount,

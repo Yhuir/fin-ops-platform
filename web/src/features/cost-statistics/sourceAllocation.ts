@@ -54,6 +54,7 @@ export function sourceUnitAmounts(task: CostStatisticsManualAllocationTask, draf
 }
 export function validateSourceDraft(task: CostStatisticsManualAllocationTask, draft: SourceDraft): Record<string, string> {
   const errors: Record<string, string> = {};
+  if (task.pendingReasons.includes('scope_refund_required')) errors.total = '请先确认退款对应的原支出';
   const sources = new Map(task.bankEvents.filter(event => event.eventKind === 'outflow').map(event => [event.transactionId, event]));
   const units = new Set(task.units.map(unit => unit.unitId));
   const refunds = new Set(task.bankEvents.filter(event => event.eventKind === 'wrong_payment_refund').map(event => event.transactionId));
@@ -116,7 +117,7 @@ export function sourceSaveRequest(task: CostStatisticsManualAllocationTask, draf
     nonCostLines: draft.nonCostLines.map(line => ({ bankTransactionId: line.bankTransactionId, amount: normalized(line.amount) })),
   };
   return {
-    relationCaseId: task.relationCaseId, expectedVersion: task.version, sourceFingerprint: task.sourceFingerprint,
+    relationCaseId: task.relationCaseId, expectedVersion: task.version, sourceFingerprint: task.sourceFingerprint, scopeVersion: task.scopeVersion,
     allocations: task.units.map(unit => ({ unitId: unit.unitId, amount: money(targets.get(unit.unitId)!) })),
     sourceAllocations, nonCostAmount: normalized(draft.nonCostAmount), nonCostReason: draft.nonCostReason.trim(),
   };
@@ -124,7 +125,7 @@ export function sourceSaveRequest(task: CostStatisticsManualAllocationTask, draf
 
 // Reconcile an interrupted response against the actual saved decision, not version alone.
 export function sourceDecisionMatches(request: SaveCostStatisticsManualAllocationRequest, task: CostStatisticsManualAllocationTask): boolean {
-  if (task.version <= request.expectedVersion || task.sourceFingerprint !== request.sourceFingerprint
+  if (task.scopeVersion !== request.scopeVersion || task.version <= request.expectedVersion || task.sourceFingerprint !== request.sourceFingerprint
     || task.pendingReasons.includes('allocation_stale') || !task.sourceAllocations) return false;
   const ordered = (rows: string[][]) => JSON.stringify(rows.map(row => JSON.stringify(row)).sort());
   const matrix = (value: CostSourceAllocations) => [

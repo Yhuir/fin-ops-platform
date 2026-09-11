@@ -33,7 +33,7 @@ def validate_source_allocations(
     }:
         _fail("请填写完整的流水来源分配。", "source_allocations", "source_required")
     targets = {line["unit_id"]: Decimal(line["amount"]) for line in allocations}
-    if Decimal(task["oa_total"]) == Decimal(task["net_outflow_total"]):
+    if task["amounts_fixed"]:
         for unit in task["units"]:
             if targets[unit["unit_id"]] != Decimal(unit["oa_original_amount"]):
                 _fail("金额一致时，每个 OA 单元的成本目标必须保持原金额。", "allocations", "unit_amount_mismatch")
@@ -153,7 +153,8 @@ def suggest_source_allocations(
             or sum((Decimal(u["oa_original_amount"]) for u in units), ZERO) != Decimal(task["oa_total"])
             or Decimal(task["non_cost_amount"]) != ZERO):
         return None
-    owners = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows}
+    event_ids = {event["transaction_id"] for event in events}
+    owners = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows if row["id"] in event_ids}
     oa_ids = {unit["oa_id"] for unit in units}
     # Conflicting scalar references are bad evidence, not several possible owners.
     if any(len(refs) > 1 or not refs.issubset(oa_ids) for refs in owners.values()):
@@ -277,7 +278,7 @@ def _unique_source_components(
 def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -> dict[str, Any]:
     """Resolve current facts; saving a source decision need not resolve missing metadata."""
     reasons = []
-    if task["allocations"] and Decimal(task["oa_total"]) == Decimal(task["net_outflow_total"]):
+    if task["allocations"] and task["amounts_fixed"]:
         targets = {unit["unit_id"]: Decimal(unit["oa_original_amount"]) for unit in task["units"]}
         if any(Decimal(line["amount"]) != targets[line["unit_id"]] for line in task["allocations"]):
             _fail("保存的单元金额与当前 OA 目标不一致。", "allocations", "unit_amount_mismatch")
@@ -308,5 +309,4 @@ def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -
     task["source_allocations"] = source_allocations
     task["pending_reasons"] = list(dict.fromkeys(reasons))
     task["status"] = "pending" if reasons else "allocated"
-    task["amounts_fixed"] = Decimal(task["oa_total"]) == Decimal(task["net_outflow_total"])
     return task

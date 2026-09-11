@@ -159,7 +159,8 @@ class CostSourcePostgresTests(unittest.TestCase):
         for view in ("project", "cost_tag", "bank_account"):
             self.assertEqual(self.query.get_explorer_page(scope="all", view=view, filters={}, cursor=None, page_size=20)["summary"]["total_amount"], "0.00")
         self.assertEqual(self.service.list_tasks(cursor=None,page_size=20,status="pending",query=None,can_save=True)["counts"], {"pending":0,"allocated":0})
-        self.assertEqual(self.service.get_task("cost-source-case", can_save=True)["source_allocations"], original["source_allocations"])
+        self.assertIsNone(self.service.get_task("cost-source-case", can_save=True)["source_allocations"])
+        self.assertEqual(PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(["cost-source-case"])["cost-source-case"]["source_allocations"], original["source_allocations"])
         self.assertEqual(self.query.get_explorer_page(scope="all", view="time", filters={}, cursor=None, page_size=20), raw_before)
         result = self.scope_service().update_project_cost_scope({"expected_version": 2, "selected_tag_codes": []}, actor_id="cost-test")
         self.assertFalse(result["changed"])
@@ -246,10 +247,104 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(row["bank_tag_sub_label"],"")
         self.assertEqual(row["bank_tag_label_path"],["内部往来款"])
 
+    def exclude_second_source(self):
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id='bank-2'""")
+
+    def test_manual_scope_version_http_contract_rejects_invalid_and_stale_versions(self):
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service  # noqa: SLF001
+        path = "/api/cost-statistics/manual-allocations/cost-source-case"
+        payload = self.payload()
+        for value in (None, True, 0, "1"):
+            invalid = {**payload, "scope_version": value}
+            response = app.handle_request("PUT",path,body=json.dumps(invalid))
+            self.assertEqual(response.status_code,400)
+            self.assertEqual(json.loads(response.body)["error"],"invalid_cost_statistics_manual_allocation")
+        self.scope_service().update_project_cost_scope({"expected_version":1,"selected_tag_codes":[]},actor_id="cost-test")
+        response = app.handle_request("PUT",path,body=json.dumps(payload))
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(json.loads(response.body)["error"],"cost_statistics_manual_allocation_conflict")
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.cost_statistics_manual_allocations")["n"],0)
+
+    def test_legacy_unknown_sources_cannot_be_overwritten_by_a_scoped_save(self):
+        self.save(self.payload())
+        self.connection.execute("update app.cost_statistics_manual_allocations set source_allocations=null")
+        self.exclude_second_source()
+        payload = self.current_payload()
+        payload["allocations"] = [{"unit_id":"oa:oa-a","amount":"500.00"},{"unit_id":"oa:oa-b","amount":"0.00"}]
+        payload["source_allocations"] = {"cost_lines":[{"unit_id":"oa:oa-a","bank_transaction_id":"bank-1","amount":"500.00"}],"refund_links":[],"non_cost_lines":[]}
+        with self.assertRaisesRegex(CostStatisticsManualAllocationValidationError,"历史分配缺少逐笔来源"):
+            self.save(payload)
+        record = PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(["cost-source-case"])["cost-source-case"]
+        self.assertEqual(record["version"],1)
+        self.assertEqual(record["net_outflow_total"],"1000.00")
+
+    def current_payload(self):
+        task = self.service.get_task("cost-source-case", can_save=True)
+        return {"relation_case_id": task["relation_case_id"], "expected_version": task["version"],
+                "scope_version": task["scope_version"], "source_fingerprint": task["source_fingerprint"],
+                "allocations": task["allocations"], "source_allocations": task["source_allocations"],
+                "non_cost_amount": task["non_cost_amount"], "non_cost_reason": task["non_cost_reason"]}
+
+    def test_scoped_save_retains_outside_history_then_reenable_restores(self):
+        original = self.save(self.payload())
+        self.exclude_second_source()
+        task = self.service.get_task("cost-source-case", can_save=True)
+        self.assertEqual([e["transaction_id"] for e in task["bank_events"]], ["bank-1"])
+        self.assertEqual([u["unit_id"] for u in task["units"]], ["oa:oa-a"])
+        self.assertEqual(task["net_outflow_total"], "500.00")
+        self.save(self.current_payload())
+        stored = PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(["cost-source-case"])["cost-source-case"]
+        self.assertCountEqual(stored["source_allocations"]["cost_lines"], original["source_allocations"]["cost_lines"])
+        self.scope_service().update_project_cost_scope({"expected_version":1,"selected_tag_codes":["uncategorized","internal_transfer"]},actor_id="cost-test")
+        restored = self.service.get_task("cost-source-case", can_save=True)
+        self.assertEqual(restored["status"], original["status"])
+        self.assertEqual(restored["pending_reasons"], original["pending_reasons"])
+        self.assertCountEqual(restored["source_allocations"]["cost_lines"], original["source_allocations"]["cost_lines"])
+        for view in ("project","cost_tag","bank_account"):
+            self.assertEqual(self.query.get_explorer_page(scope="all",view=view,filters={},cursor=None,page_size=20)["summary"]["total_amount"], "1000.00")
+
+    def test_first_scoped_save_keeps_known_cost_after_reenable_requires_new_source(self):
+        self.exclude_second_source()
+        payload = self.current_payload()
+        payload["allocations"] = [{"unit_id":"oa:oa-a","amount":"500.00"},{"unit_id":"oa:oa-b","amount":"0.00"}]
+        payload["source_allocations"] = {"cost_lines":[{"unit_id":"oa:oa-a","bank_transaction_id":"bank-1","amount":"500.00"}],"refund_links":[],"non_cost_lines":[]}
+        self.save(payload)
+        self.scope_service().update_project_cost_scope({"expected_version":1,"selected_tag_codes":["uncategorized","internal_transfer"]},actor_id="cost-test")
+        task = self.service.get_task("cost-source-case", can_save=True)
+        self.assertEqual(task["status"], "pending")
+        self.assertEqual(task["pending_reasons"], ["source_required"])
+        self.assertEqual(len(task["bank_events"]), 2)
+        self.assertEqual(self.query.get_explorer_page(scope="all",view="project",filters={},cursor=None,page_size=20)["summary"]["total_amount"], "500.00")
+
+    def test_scope_version_conflict_rejects_old_draft_without_write(self):
+        payload = self.payload()
+        self.scope_service().update_project_cost_scope({"expected_version":1,"selected_tag_codes":[]},actor_id="cost-test")
+        with self.assertRaisesRegex(CostStatisticsManualAllocationConflictError,"范围已变化"):
+            self.save(payload)
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.cost_statistics_manual_allocations")["n"],0)
+
+    def test_forged_outside_source_is_rejected_and_scope_merge_rolls_back_with_audit(self):
+        self.save(self.payload())
+        self.exclude_second_source()
+        payload = self.current_payload()
+        payload["source_allocations"]["cost_lines"][0]["bank_transaction_id"] = "bank-2"
+        with self.assertRaises(CostStatisticsManualAllocationValidationError):
+            self.save(payload)
+        payload = self.current_payload()
+        with patch.object(PostgresOperationsAuditRepository,"append_operation_event",side_effect=RuntimeError("audit failure")):
+            with self.assertRaisesRegex(RuntimeError,"audit failure"):
+                self.save(payload)
+        self.assertEqual(self.service.get_task("cost-source-case",can_save=True)["version"],1)
+
     def payload(self):
         task = self.service.get_task("cost-source-case", can_save=True)
         return {"relation_case_id": task["relation_case_id"], "expected_version": task["version"],
-                "source_fingerprint": task["source_fingerprint"], "allocations": task["allocations"],
+                "source_fingerprint": task["source_fingerprint"], "scope_version": task["scope_version"], "allocations": task["allocations"],
                 "non_cost_amount": "0.00", "non_cost_reason": "", "source_allocations": {
                     "cost_lines": [{"unit_id": "oa:oa-a", "bank_transaction_id": "bank-1", "amount": "500.00"},
                                    {"unit_id": "oa:oa-a", "bank_transaction_id": "bank-2", "amount": "100.00"},

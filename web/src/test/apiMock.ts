@@ -4651,7 +4651,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   ) => ({
     relation_case_id: relationCaseId,
     relation_version: 1,
-    source_fingerprint: "a".repeat(64),
+    source_fingerprint: "a".repeat(64), scope_version: 1,
     status: allocations.length > 0 ? "allocated" : "pending",
     pending_reasons: allocations.length ? [] : ["amount_required"],
     amounts_fixed: false,

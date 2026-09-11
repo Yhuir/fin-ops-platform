@@ -54,8 +54,8 @@ PUT manual allocation
 ### 人工分配 I/O
 
 - `GET /manual-allocations` 仅返回摘要：关系 ID、项目名集合、OA 单元/银行流水计数、关系合计、状态、原因、版本、可写权限。`counts={pending,allocated}` 与 `row_count/next_cursor` 来自同一关系快照；不在 items 中带 units/bank_events/source_allocations。
-- `GET /manual-allocations/{case_id}` 定向读取该关联的完整 OA 单元、银行证据、当前有效分配。关系内支出与退款一次批量分类，使用 owner 的 `effective_category_*` 明确映射，不拆斜杠或猜主子标签。
-- `PUT` 请求固定为 `relation_case_id, expected_version, source_fingerprint, allocations, source_allocations, non_cost_amount, non_cost_reason`。单元合计只接受 `{unit_id,amount}`；来源明细分别为 `cost_lines[{unit_id,bank_transaction_id,amount}]`、`refund_links[{refund_transaction_id,bank_transaction_id,amount}]`、`non_cost_lines[{bank_transaction_id,amount}]`。金额为两位小数字符串；来源行必须正数，零成本单元允许明确 0。
+- `GET /manual-allocations/{case_id}` 定向读取该关联的完整 OA 单元、银行证据、当前有效分配。返回当前成本范围内支出及其已确认退款份额；完整关系事实仍在 repository 内保留。关系内支出与退款一次批量分类，使用 owner 的 `effective_category_*` 明确映射，不拆斜杠或猜主子标签。
+- `PUT` 请求固定为 `relation_case_id, expected_version, scope_version, source_fingerprint, allocations, source_allocations, non_cost_amount, non_cost_reason`。单元合计只接受 `{unit_id,amount}`；来源明细分别为 `cost_lines[{unit_id,bank_transaction_id,amount}]`、`refund_links[{refund_transaction_id,bank_transaction_id,amount}]`、`non_cost_lines[{bank_transaction_id,amount}]`。金额为两位小数字符串；来源行必须正数，零成本单元允许明确 0。
 - 选择来源后，银行账户、银行主/子标签与付款日期只读；不接受独立标签/银行字段。OA 费用类型仅作原始凭据。
 - 保留 `C+X=N`，并校验逐来源、逐退款和逐单元闭合；`O=N` 时逐单元目标必须等于 canonical OA 原额。
 - 保存先取得既有 relation member locks，再锁关系及来源银行/OA 行，重新核对事实与版本。一次事务写 allocation 和 audit；锁冲突、事实变化、CAS 冲突返回 409，不自动重试提交。
@@ -103,7 +103,7 @@ PUT manual allocation
 | --- | --- |
 | Frontend | `web/src/pages/CostStatisticsPage.tsx`、`web/src/components/cost-statistics/*`、`web/src/features/cost-statistics/*` |
 | Route | `backend/src/fin_ops_platform/app/routes_cost_statistics.py` |
-| Query / policy | `cost_statistics_query_service.py`、`cost_statistics_policy.py`、`cost_statistics_bank_tags.py`、`cost_statistics_manual_allocation_service.py`、`cost_statistics_source_allocation.py`、`cost_statistics_scope.py` |
+| Query / policy | `cost_statistics_query_service.py`、`cost_statistics_policy.py`、`cost_statistics_bank_tags.py`、`cost_statistics_manual_allocation_service.py`、`cost_statistics_source_allocation.py`、`cost_statistics_allocation_scope.py`、`cost_statistics_scope.py` |
 | Canonical repository | `cost_statistics_canonical_repository.py` |
 | Manual allocation repository | `postgres_repositories/cost_statistics_manual_allocation.py` |
 | Settings owner | `app_settings_service.py` |
@@ -181,11 +181,22 @@ PUT manual allocation
 - `GET /api/cost-statistics/project-cost-scope` 返回 `version,selected_tag_codes,available_tags,can_save`；清单包含系统内部往来、现行/归档规则及未标记，普通收入 `can_select=false`。
 - `PUT` 只接受 `expected_version,selected_tag_codes`；沿用成本页写权限，actor 来自 session。未知/重复/收入代码 400、权限不足 403、版本冲突 409。相同选择 `changed=false`，无重复审计。
 - Settings service 使用既有 settings 锁及 versioned family repository，读取字典、验证、只合并本 family、审计在同一 PostgreSQL 事务。其他设置 writer 保留最新范围。0170 仅在键缺失时初始化；空数组持久有效，GET 不补默认。
-- Policy 在完整金额/退款/来源闭合之后按来源有效代码过滤，一次构造集合，不增加逐行 SQL。无 OA 成本取虚拟映射与此范围交集。退款不受范围设置切断。
-- 任务详情保留完整事实；列表及计数排除全范围外关系，未知来源组内存在允许支出时保留。`bank_events[].in_project_cost_scope` 由 Policy 输出，前端仅显示“范围外”，不重新实现判断。
+- Policy 通过成本专用纯函数生成范围内来源、退款份额、金额与任务状态；正式成本、任务详情、来源建议及保存校验使用相同范围。一次构造标签集合，不增加逐行 SQL。无 OA 成本取虚拟映射与此范围交集。退款跟随已确认原支出，不按收入标签切断。
+- 任务详情只返回当前可分配范围；对照表、来源菜单、计数及金额同源，不显示“范围外”。全范围外关系从列表/计数排除，按 ID 读取为零可用来源，不能保存。原始银行事实、关联及范围外已保存来源仍完整保留。
 - 专用 Drawer 只接收数据与事件。页面拥有 GET/PUT、草稿、超时结果核实和成功后的本页失效；旧分页请求中止、路径重置，保留期间/搜索。不开新队列、缓存或跨页面请求。
 - 移除旧 source_pending 正式行生成、分面、导出状态和详情显示分支；保留现有来源 fingerprint、金额校验、事务与正式发布措施。
 
 ### 项目成本展示边界（2026-09-11）
 
 `CostStatisticsHierarchy` 只接收各栏的 key、label、amount、selectedKey 与 onSelect，输出选择事件和明细插槽；移除未使用的 description 输入。页面仍拥有查询和选择状态。项目成本根标记限定高度、内部滚动、紧凑样式的作用范围；祖先高度约束仅在该标记存在时生效，不修改 App Shell 或 FinanceTable 公共组件。银行流水两个视角保留公共列表辅助文字与时间 chip。无 API、服务、存储、权限或业务金额 I/O 变化。
+
+
+## 待分配范围闭环（2026-09-11）
+
+- `cost_statistics_allocation_scope.py` 仅拥有无 I/O 的任务投影、已覆盖来源校验与保存合并。输入完整任务/来源决定，输出范围内任务或合并后的来源决定；不分类、不读数据库、不修改公共银行/关联输入。
+- 所有任务 DTO 增加 `scope_version`，PUT 必须携带。保存读取设置时使用 SHARE 行锁，与范围设置写入串行；版本漂移 409，非法版本 400。沿用分配 CAS、来源 fingerprint、成员锁及审计事务，不新增 hash 或存储。
+- 当前编辑按范围内 `C+X=N` 及逐来源/退款/单元校验。未保存的歧义任务不能因范围缩小自动确认；可提供现有详情建议。历史有效来源按范围投影金额，不把截取后的来源金额强制恢复成完整 OA 原额。
+- 保存按来源 ID 替换范围内决定，保留范围外仍有效的成本/退款/非成本来源。持久化金额汇总覆盖已保存来源，不要求尚未分配的范围外银行金额闭合；单位身份保留完整集合。重新勾选后，新来源继续待分配，已确认来源仍进入统计，不清空已有成本。
+- OA 只在已有来源明确完全属于范围外、且当前来源均已明确时从任务隐藏；未知来源不按金额或序号猜 OA。历史失效分配不用于合并。既有 NULL 来源记录若不能定位范围外原决定，范围内保存明确拒绝覆盖，需先在完整范围确认来源；不猜测历史来源。
+- 跨范围退款按已确认退款链接分摊显示金额；归属不明返回 `scope_refund_required`，禁止猜测或保存错误净额。完整付款/退款仍可在关联台查看。
+- 删除旧范围外标记及待分配全量流水口径；原始银行两个视角、关联台、银行明细、无 OA 范围、权限与导出列结构不变。无迁移、备份、worker、缓存或新依赖。

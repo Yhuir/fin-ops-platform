@@ -209,6 +209,8 @@ class PostgresCostStatisticsCanonicalRepository:
                 PostgresWorkbenchRelationRepository(transaction).acquire_relation_member_locks(
                     [], case_ids=[normalized_case_id]
                 )
+            if for_update:
+                transaction.fetch_one("select settings_key from app.app_settings where settings_key = 'app_settings' for share")
             settings = _settings_payload(transaction)
             relations = _postgres_relations(
                 transaction,

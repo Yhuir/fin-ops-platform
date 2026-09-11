@@ -2,10 +2,10 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
-    relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64),
+    relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
     status: 'pending', pending_reasons: options.missingTag ? ['bank_tag_missing'] : ['source_required'], amounts_fixed: true,
     oa_total: '600.00', gross_outflow_total: '600.00', wrong_payment_refund_total: '0.00', net_outflow_total: '600.00',
     units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', oa_original_amount: '600.00' }],
@@ -16,6 +16,13 @@ async function sourceScenario(page: Page, options: { alignmentCase?: boolean; ma
     allocations: [{ unit_id: 'oa-1', amount: '600.00' }], suggested_source_allocations: null as unknown, source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
+  if (options.scopedLoan) {
+    task.oa_total = task.net_outflow_total = task.gross_outflow_total = '2100.00';
+    task.units = [{...task.units[0], oa_original_amount:'2100.00', expense_content:'住宿费'}];
+    task.allocations = [{unit_id:'oa-1',amount:'2100.00'}];
+    task.bank_events = [{...task.bank_events[0],transaction_id:'hotel',amount:'2100.00',trade_time:'2026-08-03 15:43:00',counterparty_name:'张丽芬',bank_tag_primary_label:'项目开销',bank_tag_sub_label:'住宿费',tags:['项目开销','住宿费']}];
+    task.suggested_source_allocations = {cost_lines:[{unit_id:'oa-1',bank_transaction_id:'hotel',amount:'2100.00'}],refund_links:[],non_cost_lines:[]};
+  }
   if (options.large) {
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '1000.00';
     task.units = Array.from({ length: 100 }, (_, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_id: `doc-${Math.floor(i / 2)}`, expense_content: `成本项目 ${i + 1}`, oa_original_amount: '10.00' }));
@@ -464,4 +471,31 @@ test('shows many-to-many evidence as one group without duplicating bank facts',a
   await evidence.screenshot({path:testInfo.outputPath('many-to-many.png'),animations:'disabled'});
   await scene.drawer.getByRole('button',{name:'保存分配'}).click();
   expect(scene.writes()).toBe(1);
+});
+
+
+test('scoped hotel task omits excluded loan, saves only scoped source and keeps green hint readable', async ({page}, testInfo) => {
+  await page.setViewportSize({width:1440,height:1000});
+  const scene = await sourceScenario(page,{scopedLoan:true});
+  await expect(scene.drawer.getByRole('heading',{name:'银行流水 · 1 条'})).toBeVisible();
+  await expect(scene.drawer.getByText(/范围外|借出款|2026-08-01/)).toHaveCount(0);
+  await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
+  await scene.unit.getByRole('combobox').click();
+  const menu=page.getByRole('listbox',{name:'来源流水 1',exact:true});
+  await expect(menu.getByRole('option')).toHaveCount(1);
+  await expect(menu).toContainText('住宿费');
+  await page.keyboard.press('Escape');
+  await scene.drawer.screenshot({path:testInfo.outputPath('scoped-hotel.png'),animations:'disabled'});
+  await scene.drawer.getByRole('button',{name:'保存分配',exact:true}).click();
+  await expect.poll(scene.writes).toBe(1);
+  expect(scene.body()!.scope_version).toBe(7);
+  expect(scene.body()!.non_cost_amount).toBe('0.00');
+  expect(scene.body()!.source_allocations.cost_lines).toEqual([{unit_id:'oa-1',bank_transaction_id:'hotel',amount:'2100.00'}]);
+  await scene.drawer.getByRole('radio',{name:'已完成 1'}).click();
+  await expect(scene.unit.getByRole('textbox')).toHaveValue('2100.00');
+  await page.setViewportSize({width:390,height:844});
+  await expect(scene.drawer.getByText(/范围外|借出款/)).toHaveCount(0);
+  await scene.drawer.getByRole('button',{name:'保存分配',exact:true}).scrollIntoViewIfNeeded();
+  await scene.drawer.screenshot({path:testInfo.outputPath('scoped-hotel-narrow.png'),animations:'disabled'});
+  await expectNoUnexpectedSuccessUiErrors(page);
 });

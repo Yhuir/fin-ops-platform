@@ -6,9 +6,9 @@ import unittest
 from decimal import Decimal
 
 from fin_ops_platform.services.cost_statistics_policy import (
+    UNRESOLVED_BANK_ACCOUNT_LABEL,
     CostStatisticsAllocationConflictError,
     CostStatisticsPolicy,
-    UNRESOLVED_BANK_ACCOUNT_LABEL,
 )
 
 
@@ -288,6 +288,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             manual_allocations={
                 "case-1": {
                     "source_fingerprint": pending["source_fingerprint"],
+                    "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
                     "allocations": [
                         self._line("oa:oa-exp-1:item:lodging", "1000.00"),
@@ -322,6 +323,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             manual_allocations={
                 "case-1": {
                     "source_fingerprint": pending["source_fingerprint"],
+                    "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
                     "allocations": [
                         self._line("oa:oa-a", "50.01"),
@@ -357,6 +359,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             manual_allocations={
                 "case-1": {
                     "source_fingerprint": pending["source_fingerprint"],
+                    "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
                     "allocations": [
                         self._line("oa:oa-a", "50.00"),
@@ -922,6 +925,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
     ) -> dict[str, object]:
         return {
             "source_fingerprint": pending["source_fingerprint"],
+                    "net_outflow_total": pending["net_outflow_total"],
             "version": 1,
             "allocations": allocations,
             "non_cost_amount": "0.00",

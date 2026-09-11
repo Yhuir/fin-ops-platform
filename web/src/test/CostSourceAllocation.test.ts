@@ -4,7 +4,7 @@ import type { CostStatisticsManualAllocationTask } from '../features/cost-statis
 
 export function sourceTask(): CostStatisticsManualAllocationTask {
   return {
-    relationCaseId: 'case-1', relationVersion: 1, sourceFingerprint: 'existing-version-fingerprint',
+    relationCaseId: 'case-1', relationVersion: 1, sourceFingerprint: 'existing-version-fingerprint', scopeVersion: 1,
     status: 'pending', pendingReasons: ['source_required'], amountsFixed: true,
     oaTotal: '600.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
     units: [{ unitId: 'oa-1:parent', oaId: 'oa-1', oaApplyType: '支付申请', expenseItemId: '', projectId: 'p-1', projectName: '项目 A', expenseType: '原 OA 分类', expenseContent: '材料采购', oaApplicant: '申请人', oaOriginalAmount: '600.00' }],
@@ -140,3 +140,13 @@ describe('cost source amount closure', () => {
    task.pendingReasons = ['allocation_stale'];
    expect(createSourceDraft(task).costLines).toEqual([]);
  });
+
+
+test('does not reconcile an interrupted save against a different scope version', () => {
+  const task = sourceTask();
+  const draft = createSourceDraft(task);
+  draft.costLines = task.bankEvents.map((bank, index) => ({id:index,ownerId:task.units[0].unitId,bankTransactionId:bank.transactionId,amount:bank.amount}));
+  const request = sourceSaveRequest(task,draft);
+  task.version = 1; task.scopeVersion = 2; task.sourceAllocations = request.sourceAllocations;
+  expect(sourceDecisionMatches(request, task)).toBe(false);
+});

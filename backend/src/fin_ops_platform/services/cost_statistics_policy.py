@@ -11,6 +11,7 @@ from fin_ops_platform.services.app_settings_service import (
     COST_STATISTICS_UNCATEGORIZED_TAG_CODE,
     AppSettingsService,
 )
+from fin_ops_platform.services.cost_statistics_allocation_scope import covered_source_task, project_source_task
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.cost_statistics_scope import read_project_cost_scope, source_in_project_cost_scope
 from fin_ops_platform.services.cost_statistics_source_allocation import SourceAllocationError, complete_source_task
@@ -515,7 +516,8 @@ def _cost_entries(
     event_owners: dict[str, str] = {}
     protected_bank_ids = set(oa_related_bank_ids)
     excluded_by_reason: dict[str, int] = {}
-    selected_codes = set(read_project_cost_scope(settings)["selected_tag_codes"])
+    scope = read_project_cost_scope(settings)
+    selected_codes = set(scope["selected_tag_codes"])
     refund_tag_codes = _paid_wrong_refund_tag_codes(settings)
     for group in groups:
         oa_rows = [
@@ -656,6 +658,7 @@ def _cost_entries(
             reconciliation=reconciliation, manual_record=manual_record,
             selected_codes=selected_codes,
         )
+        task["scope_version"] = scope["version"]
         if task["status"] == "pending" or manual_record is not None or difference != ZERO:
             manual_tasks.append(task)
         if not task["allocations"]:
@@ -876,6 +879,7 @@ def _manual_allocation_task(
         ],
         "net_outflow_total": reconciliation["net_outflow_total"],
         "difference": reconciliation["difference"],
+        "amounts_fixed": reconciliation["difference"] == "0.00",
         "units": units,
         "bank_events": bank_events,
         "allocations": [],
@@ -892,8 +896,8 @@ def _manual_allocation_task(
         ]
     if manual_record is None:
         _complete_source_task(task)
+        task = project_source_task(task, task["source_allocations"])
         if task["status"] == "allocated":
-            # No persisted/manual decision consumes a fingerprint on this automatic read path.
             return task
     source_fingerprint = _manual_allocation_source_fingerprint(
         group=group,
@@ -925,7 +929,7 @@ def _manual_allocation_task(
         task["non_cost_amount"] = "0.00"
         task["non_cost_reason"] = ""
         # A stale decision cannot choose a new source automatically.
-        return _complete_source_task(task)
+        return project_source_task(task, None)
     raw_allocations = [
         dict(line)
         for line in list(manual_record.get("allocations") or [])
@@ -957,7 +961,7 @@ def _manual_allocation_task(
         MONEY_QUANTUM
     )
     non_cost_amount = _required_nonnegative_money(task["non_cost_amount"])
-    net_outflow_total = _required_nonnegative_money(task["net_outflow_total"])
+    net_outflow_total = _required_nonnegative_money(manual_record["net_outflow_total"])
     if allocated_total + non_cost_amount != net_outflow_total:
         raise CostStatisticsAllocationConflictError(
             f"manual allocation {relation_case_id} does not close net outflow"
@@ -968,7 +972,15 @@ def _manual_allocation_task(
         )
     task["status"] = "allocated"
     task["allocations"] = ordered_allocations
-    return _complete_source_task(task, manual_record.get("source_allocations"))
+    decision = manual_record.get("source_allocations")
+    if decision is None:
+        _complete_source_task(task)
+        decision = task["source_allocations"]
+    else:
+        checked = covered_source_task(task, decision)
+        if checked["allocations"] != ordered_allocations or checked["non_cost_amount"] != task["non_cost_amount"]:
+            raise CostStatisticsAllocationConflictError("保存的来源明细与分配合计不一致。")
+    return project_source_task(task, decision)
 
 
 def _complete_source_task(task: dict[str, Any], source_allocations: Any = None) -> dict[str, Any]:

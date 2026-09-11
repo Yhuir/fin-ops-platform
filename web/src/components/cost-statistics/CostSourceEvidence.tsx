@@ -39,7 +39,7 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, costL
     const bank = task.bankEvents[index];
     return [
       <><span className="cost-source-evidence-identity">{index + 1}. <CostChips values={[shortBankAccount(bank.bankAccountLabel)]} /></span><CostChips values={[bank.tradeTime ? formatDateTimeText(bank.tradeTime) : '日期待完善']} /></>,
-      <><span className="cost-source-counterparty">{bank.counterpartyName}</span><CostChips values={[bank.bankTagPrimaryLabel, bank.bankTagSubLabel]} />{bank.eventKind === 'outflow' && !bank.inProjectCostScope ? <FinanceStatusTag>范围外</FinanceStatusTag> : null}{bank.eventKind === 'wrong_payment_refund' ? <FinanceStatusTag tone="success">退款</FinanceStatusTag> : null}{nonCostSources.has(bank.transactionId) ? <FinanceStatusTag>含非成本分配</FinanceStatusTag> : null}</>,
+      <><span className="cost-source-counterparty">{bank.counterpartyName}</span><CostChips values={[bank.bankTagPrimaryLabel, bank.bankTagSubLabel]} />{bank.eventKind === 'wrong_payment_refund' ? <FinanceStatusTag tone="success">退款</FinanceStatusTag> : null}{nonCostSources.has(bank.transactionId) ? <FinanceStatusTag>含非成本分配</FinanceStatusTag> : null}</>,
       <><span className="cost-source-money">{bank.eventKind === 'wrong_payment_refund' ? '−' : ''}¥{bank.amount}</span>{sourceError(bank.transactionId)}</>,
     ];
   };
