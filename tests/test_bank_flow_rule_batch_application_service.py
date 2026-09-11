@@ -1799,6 +1799,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         detail = service.detail_payload(
             str(batch["batch_id"]),
             scope_month="2026-05",
+            view="candidate",
         )
 
         self.assertEqual(detail["batch"]["batch_id"], batch["batch_id"])

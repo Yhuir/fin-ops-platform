@@ -15,6 +15,17 @@ afterEach(() => {
 });
 
 describe("bank flow rule batch API", () => {
+  test("requests formal history explicitly for workbench withdrawal", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      batch: { batch_id: "withdrawn-batch", status: "withdrawn", version: 3 }, rows: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const detail = await fetchBankFlowRuleBatchDetail("withdrawn-batch", undefined, "formal");
+    expect(fetch).toHaveBeenCalledWith("/api/bank-flow-rule-batches/withdrawn-batch?view=formal",
+      expect.objectContaining({ method: "GET" }));
+    expect(detail.batch.status).toBe("withdrawn");
+    expect(detail.batch.version).toBe(3);
+  });
+
   test("omits month and all filters when requesting the complete batch scope", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       summary: { categories: [] },
@@ -454,10 +465,10 @@ describe("bank flow rule batch API", () => {
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
 
-    const detail = await fetchBankFlowRuleBatchDetail("batch-fee-2026-05", "2026-05");
+    const detail = await fetchBankFlowRuleBatchDetail("batch-fee-2026-05", "2026-05", "candidate");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/bank-flow-rule-batches/batch-fee-2026-05?scope_month=2026-05",
+      "/api/bank-flow-rule-batches/batch-fee-2026-05?view=candidate&scope_month=2026-05",
       expect.objectContaining({ method: "GET" }),
     );
     expect(detail.rows[0]).toMatchObject({

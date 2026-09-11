@@ -117,3 +117,10 @@ git diff --check
 - `test_workbench_relation_command_service.py`、`test_workbench_pair_relation_service.py`：连续合并、逐层恢复、批次撤回幂等及历史不足零写。
 - `test_app_postgres_mode_integration.py::test_bank_flow_owner_real_postgres_submit_withdraw_replay_and_event_failure`：真实 PostgreSQL/API 提交批次→合并→撤回恢复→重新合并→批次 owner 撤回；注入 event writer 失败验证 relations/history/batch/events 整体回滚。
 - 七类中 1/2/3/5/6/7 适用；第 4 类执行 canonical-only 和零 read-model event 负向回归，本次不新增或修改 worker/cache/read model。
+
+## 2026-09-12 内部往来撤回后重提回归
+
+- Repository 测试比较列表和事务 guard 的完整 source、SQL、月份参数及固定两次读取，保护正式历史版本输入。
+- 真实 PostgreSQL/API 测试准备不同账户的一收一支 1666.67 元，执行候选版本 1 → 提交 2 → 撤回 3 → 候选 4 → 再提交 5 → 撤回 6；验证当前候选/正式历史详情分离、金额只计单边、成员、有效关系、重复提交无新增事件、非法 view/缺月份/候选消失。
+- 前端覆盖内部往来冲突一次 GET、零自动重提；同 ID 候选刷新后详情版本更新且只请求一次，普通提交与既有权限/错误交互回归。
+- 七类均有相关覆盖：1 状态/版本/金额，2 query/事务/回滚，3 API，4 页面详情缓存与 canonical 写后读（worker 未改），5 页面交互，6 PostgreSQL 完整生命周期，7 普通批次/关联撤回回归。

@@ -209,6 +209,9 @@ export default function BankFlowRuleBatchPage() {
   }, []);
 
   const applyBatchesPayload = useCallback((nextPayload: BankFlowRuleBatchesResponse) => {
+    detailRequestSeqRef.current += 1;
+    setDetails({});
+    setDetailErrors({});
     setPayload(nextPayload);
     clearSelection();
   }, [clearSelection]);
@@ -417,7 +420,7 @@ export default function BankFlowRuleBatchPage() {
   }, [selectedBatchId, visibleBatches]);
 
   useEffect(() => {
-    if (!selectedBatch || details[selectedBatch.batchId] || detailErrors[selectedBatch.batchId]) {
+    if (loading || !selectedBatch || details[selectedBatch.batchId] || detailErrors[selectedBatch.batchId]) {
       return undefined;
     }
     const batchId = selectedBatch.batchId;
@@ -425,7 +428,7 @@ export default function BankFlowRuleBatchPage() {
     const requestId = detailRequestSeqRef.current + 1;
     detailRequestSeqRef.current = requestId;
     let cancelled = false;
-    fetchBankFlowRuleBatchDetail(batchId, selectedBatch.scopeMonth, controller.signal)
+    fetchBankFlowRuleBatchDetail(batchId, selectedBatch.scopeMonth, bucket === "unsubmitted" ? "candidate" : "formal", controller.signal)
       .then((detail) => {
         if (!cancelled && requestId === detailRequestSeqRef.current) {
           setDetails((current) => ({ ...current, [batchId]: detail }));
@@ -446,7 +449,7 @@ export default function BankFlowRuleBatchPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [detailErrors, details, selectedBatch]);
+  }, [bucket, detailErrors, details, loading, selectedBatch]);
 
   useEffect(() => {
     if (!feedback || feedback.severity !== "success") {
@@ -509,6 +512,17 @@ export default function BankFlowRuleBatchPage() {
     setSelectedTransactionIds((current) => new Set([...current, ...rows.map((row) => row.transactionId)]));
   };
 
+  const refreshAfterCandidateConflict = async (caught: unknown, setMessage: (message: string) => void) => {
+    if (!isCandidateConflict(caught)) return;
+    suppressNextAutoSelectRef.current = true;
+    setSelectedBatchId("");
+    clearSelection();
+    setDetails({});
+    setDetailErrors({});
+    setMessage("候选已变化，正在刷新流水规则批次...");
+    await reloadBatchesAfterMutation();
+  };
+
   const handleSubmitSelected = async () => {
     if (!canOperateData || selectedTransactionIds.size === 0 || mutating) {
       return;
@@ -533,15 +547,7 @@ export default function BankFlowRuleBatchPage() {
           await reloadBatchesAfterMutation();
           return submitResult;
         } catch (caught) {
-          if (isCandidateConflict(caught)) {
-            suppressNextAutoSelectRef.current = true;
-            setSelectedBatchId("");
-            clearSelection();
-            setDetails({});
-            setDetailErrors({});
-            setMessage("候选已变化，正在刷新流水规则批次...");
-            await reloadBatchesAfterMutation();
-          }
+          await refreshAfterCandidateConflict(caught, setMessage);
           throw caught;
         } finally {
           setMutating(false);
@@ -577,6 +583,9 @@ export default function BankFlowRuleBatchPage() {
           setMessage("正在加载流水规则批次最新数据...");
           await reloadBatchesAfterMutation();
           return submitResult;
+        } catch (caught) {
+          await refreshAfterCandidateConflict(caught, setMessage);
+          throw caught;
         } finally {
           setMutating(false);
         }
@@ -742,7 +751,6 @@ export default function BankFlowRuleBatchPage() {
             className="bank-flow-rule-batches-button"
             isDisabled={loading}
             onPress={() => {
-              setDetails({});
               loadTagSelection();
               setRefreshToken((current) => current + 1);
             }}

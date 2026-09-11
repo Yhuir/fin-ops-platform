@@ -772,7 +772,7 @@ export default function ReconciliationWorkbenchPage() {
 
     let expectedVersion = readNumberMetadata(row.specialMetadata, "batch_version");
     if (expectedVersion === null) {
-      const detail = await fetchBankFlowRuleBatchDetail(sourceBatchId);
+      const detail = await fetchBankFlowRuleBatchDetail(sourceBatchId, undefined, "formal");
       expectedVersion = typeof detail.batch.version === "number" ? detail.batch.version : null;
     }
     if (expectedVersion === null) {

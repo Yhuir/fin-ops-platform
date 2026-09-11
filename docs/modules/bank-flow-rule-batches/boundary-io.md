@@ -35,7 +35,7 @@
 | 输入 | 事实源 | 合同 |
 | --- | --- | --- |
 | 页面查询 | `GET /api/bank-flow-rule-batches` | `month`、`type`、`status`、`bucket`、`account_key`、`page`、`page_size`；省略 `month` 表示全部月份，非法值 fail fast。repository 对精确月份使用内部转账 ±2 天窗口，对全部范围使用一次集合式 canonical 查询读取所有 non-deleted 候选输入；application service 在共享 live builder 结果上执行过滤、固定排序和分页，`page_size` 上限 200。所有 bucket 都读取同一范围内的候选输入和 active relation，使 submitted/withdrawn 状态重建、summary 与列表使用同一完整集合。 |
-| 批次详情 | `GET /api/bank-flow-rule-batches/{batch_id}` | 正式批次直接读取持久化 batch、成员、关系和 events；请求内 live candidate 传 `scope_month=YYYY-MM`，由列表与提交共用的 canonical builder 按 batch id 确定性重算。月份非法 fail fast；候选已消失或 identity 改变返回 not-found/conflict，不读取 persisted draft。 |
+| 批次详情 | `GET /api/bank-flow-rule-batches/{batch_id}` | `view=formal`（默认）读取持久化 batch、成员、关系和 events；请求内 live candidate 显式传 `view=candidate&scope_month=YYYY-MM`，由列表与提交共用的 canonical builder 按 batch id 确定性重算。月份非法 fail fast；候选已消失或 identity 改变返回 not-found/conflict，不读取 persisted draft。 |
 | 正式批次事实 | `app.bank_flow_rule_batches` | 只读取 submitted/withdrawn/stale 批次、成员、金额、版本和冻结 `normalized_payload`；persisted draft/unsubmitted 不参与列表、提交或 Audit expected set。 |
 | 批次事件 | `app.bank_flow_rule_batch_events` | 详情按 batch id 一次集合查询，保持 submitted/withdrawn/audit history。 |
 | 银行流水 | `app.bank_transactions` | 精确月份在边界窗口内批量读取 non-deleted 当前行；省略月份时一次读取全部 non-deleted 当前行；正式详情按 batch member ids 集合读取。共享分类 CTE 即使延迟完整 payload，也必须保留导入银行名称和账户尾号两个标量；候选账户身份直接使用由完整账号生成的 canonical `account_key`，禁止从银行名称与尾号重新拼接。 |
@@ -56,7 +56,7 @@
 | 详情 | 返回 batch、银行 rows、tag/direction counts、行级分类与 events。正式批次读取持久化历史；live candidate 使用列表项 `scope_month` 从同一 canonical snapshot 重算，列表生成的 candidate 不得因没有 persisted draft 而返回“批次不存在”。linked 提示可携带机器用 `relation_case_ids`，页面只展示业务提示和 OA/发票数量。 |
 | 规则保存 | 返回规则版本、`requirement_changed_tag_codes` 和可见 `recalculation_job`；关系月份由 worker 从实际命中的 active relation 得出，不由保存热路径扫描或猜测。 |
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
-| 写后页面状态 | submit-selection、submit、withdraw 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。真实 selected-row candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
+| 写后页面状态 | submit-selection、submit、withdraw 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。普通选择提交或内部往来单批提交发生真实 candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
 | 失败反馈 | Mutation 失败只由全局操作弹窗显示一次；后端 5xx 的 `requestId` 必须附在错误消息中用于精确查日志，页面不得再叠加第二个 feedback。 |
 | 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、`requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。当前 active relation 的要求可由增量任务通过正式 relation command 更新；有效已提交批次成员数 `>=3` 时只在银行栏折叠，1 到 2 行直接展示；人工关联 OA/发票后继续以批次身份折叠。 |
 
@@ -64,7 +64,7 @@
 
 - 一次列表请求中的 tag policy、total、page rows 和 summary aggregates 位于同一显式 `REPEATABLE READ / READ ONLY` transaction。
 - 列表使用固定数量的集合查询读取 settings、请求范围内全部 non-deleted 银行流水及其 effective category、正式历史和 active relation；精确月份包含内部转账 ±2 天窗口，省略月份时一次读取全部月份，禁止按月份循环。effective category 复用银行明细 canonical SQL compiler，Python live builder 只负责批次分组，月份数、批次数、分页深度和每批行数不增加查询次数。
-- 正式详情固定 4 次 SELECT：settings、batch、批量 bank rows/active relation aggregates、events。live candidate 详情先确认不存在正式批次，再执行一次与列表相同的月份 canonical snapshot；不逐行查询、不写 draft。
+- 正式详情固定 4 次 SELECT：settings、batch、批量 bank rows/active relation aggregates、events。live candidate 详情直接执行一次与列表相同的月份 canonical snapshot，不查询或回退到正式历史；不逐行查询、不写 draft。
 - repository 只有在调用方省略 `month`、明确请求全部范围时才允许一次加载跨月份 canonical 流水；精确月份仍必须保持窗口约束。application service 对同一完整 live candidate 集合统一计算 summary、过滤、排序和分页。不得逐月份、逐 batch、逐 row 或逐 relation N+1，也不得把分页下放浏览器。
 - 未提交 batch 由共享 builder 实时推导，必须同时满足：有效分类命中当前双 false 标签、所有成员仍存在且分类一致、成员未与任一 active relation overlap。禁止在 SQL 层仅按 manual/confirmation category 预筛，否则 auto-only 候选会被静默遗漏。
 - submitted 的可撤回性由 canonical batch 状态决定；active relation 已缺失不能阻断批次收口。
@@ -175,3 +175,10 @@ Canonical facts：
 - 测试覆盖 2/3/4 阈值、多批次与普通流水、OA/发票混合、已撤回与跨组批次、选择去重、搜索、真实 PostgreSQL summary/full 和无 N+1；浏览器覆盖双区域、展开/收起与 1440/1920 布局。无新 read model/cache/worker/schema。
 
 发布审计同时按实际 active relation 成员检查已合并批次，不要求合并后仍保留以 batch_id 为 case_id 的独立 active 关系；所有批次成员必须在同一 active 关系内，原始独立批次仍要求严格成员相等。参见 `../app-health-operations/boundary-io.md`。
+
+## 2026-09-12 撤回后候选重提一致性
+
+- 列表与 SERIALIZABLE 提交校验复用 repository `_read_candidate_source`：输入月份/可选账户和调用方事务，输出候选流水、当前有效关系、正式历史、标签字典与规则。正式历史与列表使用相同 scope/status 条件，既有版本推导规则不变；移除 guard 的空 `formal_items` 与重复 SQL。
+- 详情 `view=candidate|formal` 显式区分当前候选与正式历史，默认 formal 保持正式详情调用语义。候选必须有 scope_month，不先查历史，消失返回 conflict；formal 不存在返回 not-found。详情 API/client 和关联台撤回调用同步更新。
+- 列表成功刷新后清除详情及错误缓存，并使旧详情请求失效；加载列表时不发旧候选详情请求。内部往来和普通提交共用一次冲突刷新，不自动 POST 重试。
+- 没有 schema、worker、read model 或后台刷新合同变化；现有幂等/CAS、占用检查、规则检查与原子写保留。

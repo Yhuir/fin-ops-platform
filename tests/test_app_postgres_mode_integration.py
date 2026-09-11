@@ -634,23 +634,95 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         self.assertEqual(connection.fetch_one("select count(*) as n from job.outbox_events where event_type like %s", ("%.read_model.refresh",))["n"], 0)
         self.assertEqual(connection.fetch_one("select count(*) as n from app.bank_transactions")["n"], 1)
 
+    def test_internal_transfer_candidate_submit_withdraw_resubmit_uses_history_version(self) -> None:
+        app = self._build_app()
+        row_ids = [
+            self._create_bank_transaction(app, counterparty_name="Synthetic internal out", amount="1666.67"),
+            self._create_bank_transaction(app, counterparty_name="Synthetic internal in", credit=True,
+                                          account_no="622200005678", amount="1666.67"),
+        ]
+        connection = app._state_store._connection
+        with connection.transaction() as transaction:
+            for row_id in row_ids:
+                app._state_store.bank_transaction_category_repository.apply_mutation(
+                    transaction=transaction, transaction_id=row_id, mutation_type="manual_assign",
+                    record={"category_code": "internal_transfer", "manual_assignment": True},
+                    actor_id="synthetic-test", action="bank_detail_category_manually_assigned", metadata={},
+                )
+        def request(method, path, body=None, status=200):
+            response = app.handle_request(method, path, body=json.dumps(body) if body is not None else None)
+            self.assertEqual(response.status_code, status, response.body)
+            return json.loads(response.body)
+
+        rules = request("GET", "/api/bank-flow-rule-batches/tag-rules")
+        request("PUT", "/api/bank-flow-rule-batches/tag-rules", {
+            "expected_version": rules["version"],
+            "rules": [{**rule, "requires_oa": False, "requires_invoice": False}
+                      if rule["tag_code"] == "internal_transfer" else rule for rule in rules["rules"]],
+        })
+        list_path = "/api/bank-flow-rule-batches?month=2026-05&bucket=unsubmitted"
+        initial = request("GET", list_path)
+        self.assertEqual(len(initial["batches"]), 1)
+        batch = initial["batches"][0]
+        batch_path = f"/api/bank-flow-rule-batches/{batch['batch_id']}"
+        self.assertEqual(batch["version"], 1)
+        self.assertEqual(batch["total_amount"], "1666.67")
+        self.assertEqual(set(batch["row_ids"]), set(row_ids))
+        request("GET", batch_path + "?view=candidate", status=400)
+        request("GET", batch_path + "?view=bad", status=400)
+        request("GET", batch_path, status=404)
+
+        for expected in (1, 4):
+            candidate = request("GET", list_path)["batches"][0]
+            detail = request("GET", batch_path + "?view=candidate&scope_month=2026-05")
+            self.assertEqual(candidate["version"], expected)
+            self.assertEqual(detail["batch"]["version"], expected)
+            self.assertEqual(detail["batch"]["status"], "draft")
+            self.assertEqual({row["transaction_id"] for row in detail["rows"]}, set(row_ids))
+            if expected == 4:
+                history = request("GET", batch_path + "?view=formal")
+                self.assertEqual(history["batch"]["version"], 3)
+                self.assertEqual(history["batch"]["status"], "withdrawn")
+            submitted = request("POST", batch_path + "/submit", {
+                "expected_version": expected, "scope_month": "2026-05", "note": "Synthetic lifecycle",
+            })["batch"]
+            self.assertEqual(submitted["status"], "submitted")
+            self.assertEqual(submitted["version"], expected + 1)
+            self.assertEqual(request("GET", list_path)["batches"], [])
+            missing = request("GET", batch_path + "?view=candidate&scope_month=2026-05", status=409)
+            self.assertEqual(missing["error"], "bank_flow_rule_batch_candidate_conflict")
+            self.assertEqual(connection.fetch_one("select count(*) as n from app.workbench_pair_relations where status='active'")["n"], 1)
+            events_before = connection.fetch_one("select count(*) as n from app.bank_flow_rule_batch_events")["n"]
+            replay = request("POST", batch_path + "/submit", {
+                "expected_version": expected, "scope_month": "2026-05", "note": "Synthetic lifecycle",
+            })
+            self.assertEqual(replay["batch"]["status"], "submitted")
+            self.assertEqual(connection.fetch_one("select count(*) as n from app.bank_flow_rule_batch_events")["n"], events_before)
+            withdrawn = request("POST", batch_path + "/withdraw", {
+                "expected_version": submitted["version"], "reason": "Synthetic lifecycle cleanup",
+            })["batch"]
+            self.assertEqual(withdrawn["status"], "withdrawn")
+            self.assertEqual(withdrawn["version"], expected + 2)
+            self.assertEqual(connection.fetch_one("select count(*) as n from app.workbench_pair_relations where status='active'")["n"], 0)
+        self.assertEqual(connection.fetch_one("select count(*) as n from app.bank_transactions")["n"], 2)
+
     @staticmethod
-    def _create_bank_transaction(app: object, *, counterparty_name: str, credit: bool = False) -> str:
+    def _create_bank_transaction(app: object, *, counterparty_name: str, credit: bool = False, account_no: str = "622200001234", amount: str = "118.00") -> str:
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
             source_name="postgres-pending-invoice-bank.json",
             imported_by="api-test",
             rows=[
                 {
-                    "account_no": "622200001234",
+                    "account_no": account_no,
                     "txn_date": "2026-05-20",
                     "trade_time": "2026-05-20 10:00:00",
                     "counterparty_name": counterparty_name,
-                    "debit_amount": "" if credit else "118.00",
-                    "credit_amount": "118.00" if credit else "",
+                    "debit_amount": "" if credit else amount,
+                    "credit_amount": amount if credit else "",
                     "bank_serial_no": f"SERIAL-{counterparty_name}",
                     "selected_bank_name": "工商银行",
-                    "selected_bank_last4": "1234",
+                    "selected_bank_last4": account_no[-4:],
                 }
             ],
         )

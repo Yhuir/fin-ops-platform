@@ -93,6 +93,19 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             resolved_summary_filters.get("account_key")
             or resolved_filters.get("account_key")
         )
+        with self._snapshot() as transaction:
+            return self._read_candidate_source(
+                transaction, source_month=source_month, source_account_key=source_account_key
+            )
+
+    @classmethod
+    def _read_candidate_source(
+        cls,
+        transaction: Any,
+        *,
+        source_month: str,
+        source_account_key: str = "",
+    ) -> dict[str, object]:
         formal_scope_sql = ""
         formal_scope_params: list[object] = []
         if source_month:
@@ -102,105 +115,122 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         if source_account_key:
             formal_scope_sql += " and batch.account_key = %s"
             formal_scope_params.append(source_account_key)
-        with self._snapshot() as transaction:
-            tag_sources = self._tag_sources(transaction)
-            tag_policy = tag_sources["tag_policy"]
-            tag_dictionary = tag_sources["tag_dictionary"]
-            definitions = [
-                dict(definition)
-                for definition in list(tag_dictionary.get("definitions") or [])
-                if isinstance(definition, dict)
-            ]
-            scope_start = (
-                date.fromisoformat(month_start(source_month)) if source_month else None
+        tag_sources = cls._tag_sources(transaction)
+        tag_policy = tag_sources["tag_policy"]
+        tag_dictionary = tag_sources["tag_dictionary"]
+        definitions = [
+            dict(definition)
+            for definition in list(tag_dictionary.get("definitions") or [])
+            if isinstance(definition, dict)
+        ]
+        scope_start = (
+            date.fromisoformat(month_start(source_month)) if source_month else None
+        )
+        scope_end = (
+            date(
+                scope_start.year,
+                scope_start.month,
+                monthrange(scope_start.year, scope_start.month)[1],
             )
-            scope_end = (
-                date(
-                    scope_start.year,
-                    scope_start.month,
-                    monthrange(scope_start.year, scope_start.month)[1],
-                )
-                if scope_start is not None
-                else None
-            )
-            classification_sql, classification_params = bank_category_classification_cte(
-                definitions=definitions,
-                date_from=None,
-                date_to=None,
-                defer_full_payload=True,
-            )
-            candidate_rows_sql = (
-                _CLASSIFIED_SCOPED_CANDIDATE_ROWS_SQL
-                if scope_start is not None and scope_end is not None
-                else _CLASSIFIED_CANDIDATE_ROWS_SQL
-            )
-            candidate_scope_params = (
-                [scope_start.isoformat(), scope_end.isoformat()]
-                if scope_start is not None and scope_end is not None
-                else []
-            )
-            transaction.execute("set local jit = off")
-            source_result = transaction.fetch_one(
-                f"""
-                with {classification_sql},
-                bank_source as materialized (
-                    {candidate_rows_sql}
-                ),
-                bank_identities as materialized (
-                    select bank.id as bank_id, bank.transaction_id as identity
-                    from bank_source bank
-                    union
-                    select bank.id as bank_id, bank.id as identity
-                    from bank_source bank
-                ),
-                candidate_rows as materialized (
-                    select bank.*
-                    from bank_source bank
-                ),
-                candidate_identity_array as materialized (
-                    select array_agg(identity order by identity) as row_ids
-                    from bank_identities
-                ),
-                active_relations as materialized (
-                    select
-                        relation.case_id,
-                        relation.relation_mode,
-                        relation.status,
-                        relation.month_scope,
-                        relation.row_ids,
-                        relation.row_types,
-                        relation.note,
-                        relation.amount_check,
-                        relation.special_metadata,
-                        relation.created_by,
-                        relation.created_at,
-                        relation.updated_at
-                    from app.workbench_pair_relations relation
-                    cross join candidate_identity_array candidate_ids
-                    where relation.status = 'active'
-                      and candidate_ids.row_ids is not null
-                      and relation.row_ids && candidate_ids.row_ids
-                ),
-                formal_items as materialized (
-                    select
-                        batch.batch_id,
-                        batch.status,
-                        batch.status_bucket,
-                        batch.version,
-                        batch.scope_month,
-                        batch.account_key,
-                        batch.total_amount,
-                        batch.bank_transaction_ids,
-                        batch.submitted_by,
-                        batch.submitted_at,
-                        batch.withdrawn_by,
-                        batch.withdrawn_at,
-                        batch.source_versions,
-                        coalesce(
-                            batch.raw_payload->'normalized_payload',
-                            '{{}}'::jsonb
-                        ) as payload,
-                        exists (
+            if scope_start is not None
+            else None
+        )
+        classification_sql, classification_params = bank_category_classification_cte(
+            definitions=definitions,
+            date_from=None,
+            date_to=None,
+            defer_full_payload=True,
+        )
+        candidate_rows_sql = (
+            _CLASSIFIED_SCOPED_CANDIDATE_ROWS_SQL
+            if scope_start is not None and scope_end is not None
+            else _CLASSIFIED_CANDIDATE_ROWS_SQL
+        )
+        candidate_scope_params = (
+            [scope_start.isoformat(), scope_end.isoformat()]
+            if scope_start is not None and scope_end is not None
+            else []
+        )
+        transaction.execute("set local jit = off")
+        source_result = transaction.fetch_one(
+            f"""
+            with {classification_sql},
+            bank_source as materialized (
+                {candidate_rows_sql}
+            ),
+            bank_identities as materialized (
+                select bank.id as bank_id, bank.transaction_id as identity
+                from bank_source bank
+                union
+                select bank.id as bank_id, bank.id as identity
+                from bank_source bank
+            ),
+            candidate_rows as materialized (
+                select bank.*
+                from bank_source bank
+            ),
+            candidate_identity_array as materialized (
+                select array_agg(identity order by identity) as row_ids
+                from bank_identities
+            ),
+            active_relations as materialized (
+                select
+                    relation.case_id,
+                    relation.relation_mode,
+                    relation.status,
+                    relation.month_scope,
+                    relation.row_ids,
+                    relation.row_types,
+                    relation.note,
+                    relation.amount_check,
+                    relation.special_metadata,
+                    relation.created_by,
+                    relation.created_at,
+                    relation.updated_at
+                from app.workbench_pair_relations relation
+                cross join candidate_identity_array candidate_ids
+                where relation.status = 'active'
+                  and candidate_ids.row_ids is not null
+                  and relation.row_ids && candidate_ids.row_ids
+            ),
+            formal_items as materialized (
+                select
+                    batch.batch_id,
+                    batch.status,
+                    batch.status_bucket,
+                    batch.version,
+                    batch.scope_month,
+                    batch.account_key,
+                    batch.total_amount,
+                    batch.bank_transaction_ids,
+                    batch.submitted_by,
+                    batch.submitted_at,
+                    batch.withdrawn_by,
+                    batch.withdrawn_at,
+                    batch.source_versions,
+                    coalesce(
+                        batch.raw_payload->'normalized_payload',
+                        '{{}}'::jsonb
+                    ) as payload,
+                    exists (
+                        select 1
+                        from app.workbench_pair_relations relation
+                        where relation.status = 'active'
+                          and relation.case_id = coalesce(
+                              nullif(
+                                  batch.raw_payload->'normalized_payload'
+                                      ->>'relation_case_id',
+                                  ''
+                              ),
+                              batch.batch_id
+                          )
+                    ) as has_active_relation
+                from app.bank_flow_rule_batches batch
+                where (
+                    batch.status in ('submitted', 'withdrawn')
+                    or (
+                        batch.status = 'stale'
+                        and exists (
                             select 1
                             from app.workbench_pair_relations relation
                             where relation.status = 'active'
@@ -212,73 +242,55 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                                   ),
                                   batch.batch_id
                               )
-                        ) as has_active_relation
-                    from app.bank_flow_rule_batches batch
-                    where (
-                        batch.status in ('submitted', 'withdrawn')
-                        or (
-                            batch.status = 'stale'
-                            and exists (
-                                select 1
-                                from app.workbench_pair_relations relation
-                                where relation.status = 'active'
-                                  and relation.case_id = coalesce(
-                                      nullif(
-                                          batch.raw_payload->'normalized_payload'
-                                              ->>'relation_case_id',
-                                          ''
-                                      ),
-                                      batch.batch_id
-                                  )
-                            )
                         )
                     )
-                    {formal_scope_sql}
                 )
-                select
-                    coalesce(
-                        (
-                            select jsonb_agg(
-                                to_jsonb(candidate)
-                                order by candidate.txn_date, candidate.transaction_id
-                            )
-                            from candidate_rows candidate
-                        ),
-                        '[]'::jsonb
-                    ) as candidate_rows,
-                    coalesce(
-                        (
-                            select jsonb_agg(to_jsonb(relation) order by relation.case_id)
-                            from active_relations relation
-                        ),
-                        '[]'::jsonb
-                    ) as active_relations,
-                    coalesce(
-                        (
-                            select jsonb_agg(
-                                to_jsonb(batch)
-                                order by batch.scope_month, batch.batch_id
-                            )
-                            from formal_items batch
-                        ),
-                        '[]'::jsonb
-                    ) as formal_items
-                """,
-                tuple(
-                    [
-                        *classification_params,
-                        *candidate_scope_params,
-                        *formal_scope_params,
-                    ]
-                ),
-            ) or {}
+                {formal_scope_sql}
+            )
+            select
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            to_jsonb(candidate)
+                            order by candidate.txn_date, candidate.transaction_id
+                        )
+                        from candidate_rows candidate
+                    ),
+                    '[]'::jsonb
+                ) as candidate_rows,
+                coalesce(
+                    (
+                        select jsonb_agg(to_jsonb(relation) order by relation.case_id)
+                        from active_relations relation
+                    ),
+                    '[]'::jsonb
+                ) as active_relations,
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            to_jsonb(batch)
+                            order by batch.scope_month, batch.batch_id
+                        )
+                        from formal_items batch
+                    ),
+                    '[]'::jsonb
+                ) as formal_items
+            """,
+            tuple(
+                [
+                    *classification_params,
+                    *candidate_scope_params,
+                    *formal_scope_params,
+                ]
+            ),
+        ) or {}
         candidate_rows = source_result.get("candidate_rows")
         candidate_rows = candidate_rows if isinstance(candidate_rows, list) else []
         active_relations = source_result.get("active_relations")
         active_relations = active_relations if isinstance(active_relations, list) else []
         formal_items = source_result.get("formal_items")
         formal_items = formal_items if isinstance(formal_items, list) else []
-        resolved_candidate_rows, bank_rows_by_id = self._bank_row_payloads(
+        resolved_candidate_rows, bank_rows_by_id = cls._bank_row_payloads(
             candidate_rows
         )
         return {
@@ -287,8 +299,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
                 dict(row) for row in active_relations if isinstance(row, dict)
             ],
             "formal_items": [
-                self._batch_with_bank_identity(
-                    self._batch_payload(row),
+                cls._batch_with_bank_identity(
+                    cls._batch_payload(row),
                     bank_rows_by_id,
                 )
                 for row in formal_items
@@ -330,104 +342,8 @@ class BankFlowRuleBatchCanonicalQueryRepository:
         *,
         scope_month: str,
     ) -> dict[str, object]:
-        scope_start = date.fromisoformat(month_start(text(scope_month)))
-        scope_end = date(
-            scope_start.year,
-            scope_start.month,
-            monthrange(scope_start.year, scope_start.month)[1],
-        )
-        tag_sources = cls._tag_sources(transaction)
-        tag_policy = tag_sources["tag_policy"]
-        tag_dictionary = tag_sources["tag_dictionary"]
-        definitions = [
-            dict(definition)
-            for definition in list(tag_dictionary.get("definitions") or [])
-            if isinstance(definition, dict)
-        ]
-        classification_sql, classification_params = bank_category_classification_cte(
-            definitions=definitions,
-            date_from=None,
-            date_to=None,
-            defer_full_payload=True,
-        )
-        transaction.execute("set local jit = off")
-        result = transaction.fetch_one(
-            f"""
-            with {classification_sql},
-            candidate_rows as materialized (
-                {_CLASSIFIED_SCOPED_CANDIDATE_ROWS_SQL}
-            ),
-            candidate_identities as materialized (
-                select candidate.transaction_id as identity
-                from candidate_rows candidate
-                union
-                select candidate.id as identity
-                from candidate_rows candidate
-            ),
-            candidate_identity_array as materialized (
-                select array_agg(identity order by identity) as row_ids
-                from candidate_identities
-            ),
-            active_relations as materialized (
-                select relation.*
-                from app.workbench_pair_relations relation
-                cross join candidate_identity_array candidate_ids
-                where relation.status = 'active'
-                  and candidate_ids.row_ids is not null
-                  and relation.row_ids && candidate_ids.row_ids
-            )
-            select
-                coalesce(
-                    (
-                        select jsonb_agg(
-                            to_jsonb(candidate)
-                            order by candidate.txn_date, candidate.transaction_id
-                        )
-                        from candidate_rows candidate
-                    ),
-                    '[]'::jsonb
-                ) as candidate_rows,
-                coalesce(
-                    (
-                        select jsonb_agg(to_jsonb(relation) order by relation.case_id)
-                        from active_relations relation
-                    ),
-                    '[]'::jsonb
-                ) as active_relations
-            """,
-            tuple(
-                [
-                    *classification_params,
-                    scope_start.isoformat(),
-                    scope_end.isoformat(),
-                ]
-            ),
-        ) or {}
-        candidate_rows = result.get("candidate_rows")
-        active_relations = result.get("active_relations")
-        return {
-            "candidate_rows": (
-                [
-                    cls._bank_row_payload(row)
-                    for row in candidate_rows
-                    if isinstance(row, dict)
-                ]
-                if isinstance(candidate_rows, list)
-                else []
-            ),
-            "active_relations": (
-                [
-                    dict(row)
-                    for row in active_relations
-                    if isinstance(row, dict)
-                ]
-                if isinstance(active_relations, list)
-                else []
-            ),
-            "formal_items": [],
-            "tag_policy": tag_policy,
-            "tag_dictionary": tag_sources["tag_dictionary"],
-        }
+        normalized_month = date.fromisoformat(month_start(text(scope_month))).strftime("%Y-%m")
+        return cls._read_candidate_source(transaction, source_month=normalized_month)
 
     def read_detail(self, batch_id: str) -> dict[str, object] | None:
         normalized_batch_id = text(batch_id)

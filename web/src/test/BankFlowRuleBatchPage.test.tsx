@@ -1300,6 +1300,65 @@ describe("BankFlowRuleBatchPage", () => {
     });
   });
 
+  test("refreshes an internal transfer conflict once and explicitly requests candidate details", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    const original = fetchMock.getMockImplementation()!;
+    let listCalls = 0;
+    let submitCalls = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/bank-flow-rule-batches") listCalls += 1;
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer") {
+        expect(url.searchParams.get("view")).toBe("candidate");
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer/submit") {
+        submitCalls += 1;
+        return jsonResponse({ error: "bank_flow_rule_batch_candidate_conflict", message: "候选已变化" }, 409);
+      }
+      return original(input, init);
+    });
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "往来 1批 · 2条" }));
+    await user.click(await screen.findByRole("button", { name: "内部往来款 1批 · 2条" }));
+    await waitFor(() => expect(screen.queryByText("正在加载流水明细")).not.toBeInTheDocument());
+    const before = listCalls;
+    await user.click(await screen.findByRole("button", { name: "提交内部往来批次" }));
+    expect(await screen.findByText("候选已更新，请重新选择。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确定" }));
+    expect(listCalls).toBe(before + 1);
+    expect(submitCalls).toBe(1);
+  });
+
+  test("reloads details after a same-id candidate changes version on list refresh", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    const original = fetchMock.getMockImplementation()!;
+    let version = 1;
+    let detailCalls = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/bank-flow-rule-batches") {
+        return jsonResponse(withPagination({ ...listPayload, batches: listPayload.batches.map((batch) => (
+          batch.batch_id === "batch-draft-fee" ? { ...batch, version } : batch
+        )) }, url));
+      }
+      if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
+        detailCalls += 1;
+        return jsonResponse({ ...feeDetailPayload, batch: { ...feeDetailPayload.batch, version },
+          rows: feeDetailPayload.rows.map((row) => ({ ...row, counterparty_name: `候选版本${version}` })) });
+      }
+      return original(input, init);
+    });
+    renderPage();
+    expect((await screen.findAllByText("候选版本1")).length).toBeGreaterThan(0);
+    version = 4;
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+    expect((await screen.findAllByText("候选版本4")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("候选版本1")).not.toBeInTheDocument();
+    expect(detailCalls).toBe(2);
+  });
+
   test("shows one actionable server error with its request id", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

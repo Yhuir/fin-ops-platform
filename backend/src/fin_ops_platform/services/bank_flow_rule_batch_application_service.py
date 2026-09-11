@@ -794,6 +794,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         batch_id: str,
         *,
         scope_month: str | None = None,
+        view: str = "formal",
     ) -> dict[str, object]:
         normalized_month = str(scope_month or "").strip()
         if normalized_month and not MONTH_SCOPE_RE.match(normalized_month):
@@ -801,13 +802,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "invalid_bank_flow_rule_batch_month",
                 "流水规则候选月份无效，请刷新列表后重试。",
             )
-        read_detail = getattr(self._query_repository, "read_detail", None)
-        if not callable(read_detail):
-            raise RuntimeError("bank_flow_rule_batch canonical query repository requires read_detail.")
-        detail = read_detail(batch_id)
-        if not isinstance(detail, dict):
+        if view not in {"candidate", "formal"}:
+            raise ValueError("invalid_bank_flow_rule_batch_detail_view")
+        if view == "candidate":
             if not normalized_month:
-                raise KeyError("bank_flow_rule_batch_not_found")
+                raise ValueError("invalid_bank_flow_rule_batch_month")
             candidate, source = self._live_candidate(batch_id, normalized_month)
             detail = {
                 "batch": candidate,
@@ -816,6 +815,10 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "tag_policy": source.get("tag_policy"),
                 "tag_dictionary": source.get("tag_dictionary"),
             }
+        else:
+            detail = self._query_repository.read_detail(batch_id)
+            if not isinstance(detail, dict):
+                raise KeyError("bank_flow_rule_batch_not_found")
         batch = detail.get("batch")
         if not isinstance(batch, dict):
             raise KeyError("bank_flow_rule_batch_not_found")

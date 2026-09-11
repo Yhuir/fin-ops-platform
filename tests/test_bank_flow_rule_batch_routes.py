@@ -21,9 +21,9 @@ class FakeBankFlowRuleBatchApplicationService:
         self.calls.append(("list", query))
         return {"summary": {}, "batches": []}
 
-    def detail_payload(self, batch_id, *, scope_month=None):  # type: ignore[no-untyped-def]
+    def detail_payload(self, batch_id, *, scope_month=None, view="formal"):  # type: ignore[no-untyped-def]
         self.calls.append(
-            ("detail", {"batch_id": batch_id, "scope_month": scope_month})
+            ("detail", {"batch_id": batch_id, "scope_month": scope_month, "view": view})
         )
         return {"batch": {"batch_id": batch_id}, "rows": []}
 
@@ -128,7 +128,7 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         status, payload = routes.detail(
             "bank-flow-draft-1",
-            {"scope_month": ["2026-07"]},
+            {"scope_month": ["2026-07"], "view": ["candidate"]},
         )
 
         self.assertEqual(status, HTTPStatus.OK)
@@ -141,6 +141,7 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
                     {
                         "batch_id": "bank-flow-draft-1",
                         "scope_month": "2026-07",
+                        "view": "candidate",
                     },
                 )
             ],

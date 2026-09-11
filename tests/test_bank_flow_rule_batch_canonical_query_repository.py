@@ -350,7 +350,7 @@ def test_submit_guard_reuses_the_same_canonical_sql_classifier() -> None:
         for sql, params in connection.fetched_one
         if "candidate_rows as materialized" in sql
         and "candidate_identity_array" in sql
-        and "formal_items" not in sql
+        and "formal_items" in sql
     )
     assert result["candidate_rows"] == []
     assert "from classified_with_semantics candidate" in source_sql
@@ -486,3 +486,15 @@ def test_invalid_page_filters_fail_before_opening_snapshot(
         repository.read_page(filters)
 
     assert connection.transaction_enters == 0
+
+
+def test_submit_guard_reads_the_same_formal_history_and_scope_as_list() -> None:
+    page_connection = _Connection(include_formal_item=True)
+    guard_connection = _Connection(include_formal_item=True)
+    page = BankFlowRuleBatchCanonicalQueryRepository(page_connection).read_page({"month": "2026-05"})
+    with guard_connection.transaction() as transaction:
+        guard = BankFlowRuleBatchCanonicalQueryRepository.read_candidate_guard_source(transaction, scope_month="2026-05")
+    assert guard["formal_items"]
+    assert guard == page
+    assert guard_connection.fetched_one == page_connection.fetched_one
+    assert len(guard_connection.fetched_one) == 2

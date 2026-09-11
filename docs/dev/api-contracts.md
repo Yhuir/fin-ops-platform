@@ -352,7 +352,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `GET /api/bank-flow-rule-batches/{batch_id}`
 
-返回一个批次的银行流水明细、分类、标签、方向统计和 events。正式 submitted/withdrawn/stale 批次直接读取持久化正式事实。列表中的 live candidate 不是 persisted draft，前端必须把列表项月份作为 `scope_month=YYYY-MM` 查询参数；后端使用列表、提交 guard 和 Audit 共用的 canonical builder 按 `batch_id + scope_month` 确定性重算详情。非法月份返回 `400 invalid_bank_flow_rule_batch_month`；候选已变化、被占用或不再存在时不得返回旧 draft。
+返回一个批次的银行流水明细、分类、标签、方向统计和 events。`view=formal`（省略时的默认值）读取正式 submitted/withdrawn/stale 历史事实，关联台撤回也使用此视图。待提交页明确传 `view=candidate&scope_month=YYYY-MM`，用列表、提交 guard 和 Audit 共用的 canonical builder 重算当前候选，不先读取正式详情；同一批次的撤回历史不能覆盖新候选。候选月份缺失或非法返回 `400 invalid_bank_flow_rule_batch_month`，非法 view 返回 `400 invalid_bank_flow_rule_batch_detail_view`；候选消失或被占用返回 `409 bank_flow_rule_batch_candidate_conflict`，正式记录不存在返回 404，二者不互相回退。列表与事务校验复用同一个 repository source query，均读取同范围的正式批次状态及版本；撤回后候选版本按正式历史递增，不得把历史输入置空。
 
 `POST /api/bank-flow-rule-batches/submit-selection`
 

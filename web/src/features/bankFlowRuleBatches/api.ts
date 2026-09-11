@@ -586,10 +586,11 @@ export async function saveBankFlowRuleBatchTagSelection({
 
 export async function fetchBankFlowRuleBatchDetail(
   batchId: string,
-  scopeMonth?: string,
+  scopeMonth: string | undefined,
+  view: "candidate" | "formal",
   signal?: AbortSignal,
 ): Promise<BankFlowRuleBatchDetail> {
-  const search = scopeMonth ? `?scope_month=${encodeURIComponent(scopeMonth)}` : "";
+  const search = `?view=${view}${scopeMonth ? `&scope_month=${encodeURIComponent(scopeMonth)}` : ""}`;
   const payload = await requestJson<ApiBankFlowRuleBatchDetail>(
     `/api/bank-flow-rule-batches/${encodeURIComponent(batchId)}${search}`,
     { method: "GET", signal },

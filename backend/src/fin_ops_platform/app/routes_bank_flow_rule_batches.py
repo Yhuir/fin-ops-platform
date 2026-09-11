@@ -98,6 +98,7 @@ class BankFlowRuleBatchApiRoutes:
             return HTTPStatus.OK, self._application_service.detail_payload(
                 batch_id,
                 scope_month=scope_month,
+                view=str(((query or {}).get("view") or ["formal"])[0]).strip(),
             )
         except KeyError:
             return self._unknown_batch_response()
