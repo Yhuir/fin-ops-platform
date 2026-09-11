@@ -54,6 +54,7 @@ def evaluate_bank_relation_completion(
     relation_mode: str = "",
     amount_check: dict[str, Any] | None = None,
     oa_workflow_statuses: Iterable[str] | None = None,
+    supporting_documents_complete: bool = False,
 ) -> dict[str, object]:
     normalized_types = tuple(str(value or "").strip().lower() for value in row_types)
     metadata = special_metadata if isinstance(special_metadata, dict) else {}
@@ -65,7 +66,7 @@ def evaluate_bank_relation_completion(
         elif "bank" in present:
             if _requirement(metadata, "requires_oa", "paired_requires_oa") and "oa" not in present:
                 missing.append("oa")
-            if _requirement(metadata, "requires_invoice", "paired_requires_invoice") and "invoice" not in present:
+            if _requirement(metadata, "requires_invoice", "paired_requires_invoice") and "invoice" not in present and not supporting_documents_complete:
                 missing.append("invoice")
 
     blocking_reasons: list[str] = []

@@ -1430,6 +1430,27 @@ source_owned_relation_placement_rollups as materialized (
     where placement.owner_relation_case_id is not null
     group by placement.owner_relation_case_id
 ),
+active_supporting_document_items as materialized (
+    select distinct document.oa_row_id, document.expense_item_id
+    from app.workbench_oa_supporting_documents document
+    join app.file_objects file on file.id = document.file_object_id
+    where document.status = 'active' and file.tombstoned_at is null
+),
+fully_supported_relations as materialized (
+    select member.case_id
+    from all_active_relation_members member
+    join canonical_rows oa on oa.pane = 'oa' and oa.row_id = member.row_id
+    where member.row_type = 'oa'
+    group by member.case_id
+    having bool_and(jsonb_array_length(oa.oa_expense_items) > 0 and not exists (
+        select 1 from jsonb_array_elements(oa.oa_expense_items) item(value)
+        where not exists (
+            select 1 from active_supporting_document_items document
+            where document.oa_row_id = oa.row_id
+              and document.expense_item_id = coalesce(item.value->>'id', item.value->>'expense_item_id')
+        )
+    ))
+),
 relation_groups as materialized (
     select
         'case:' || relation.case_id as internal_key,
@@ -1452,7 +1473,8 @@ relation_groups as materialized (
                      (relation.special_metadata->>'requires_invoice')::boolean,
                      (relation.special_metadata->>'paired_requires_invoice')::boolean,
                      true
-                 ) and not ('invoice' = any(relation.normalized_row_types)) then 'unpaired'
+                 ) and not ('invoice' = any(relation.normalized_row_types))
+                 and supported.case_id is null then 'unpaired'
             else 'paired'
         end as zone,
         relation.row_ids || coalesce(
@@ -1486,6 +1508,7 @@ relation_groups as materialized (
                            true
                        )
                        and not ('invoice' = any(relation.normalized_row_types))
+                 and supported.case_id is null
                        and coalesce(relation.special_metadata->>'source', '') <> 'batch_accounting'
                  then 'invoice' end
         ], null)::text[] as missing_row_types
@@ -1494,6 +1517,7 @@ relation_groups as materialized (
       on in_progress_oa.relation_id = relation.id
     left join source_owned_relation_placement_rollups placement_rollup
       on placement_rollup.owner_relation_case_id = relation.case_id
+    left join fully_supported_relations supported on supported.case_id = relation.case_id
     cross join relation_member_guard
     where relation_member_guard.guard = 1
 ),
@@ -2011,8 +2035,11 @@ unlinked_expense_items as materialized (
         expense.case_id,
         expense.item_id,
         expense.item_amount,
-        expense.attachment_file_count
+        expense.attachment_file_count,
+        document.expense_item_id is not null as has_supporting_document
     from oa_expense_items expense
+    left join active_supporting_document_items document
+      on document.oa_row_id = expense.oa_row_id and document.expense_item_id = expense.item_id
     left join normalized_invoice_item_links linked
       on linked.internal_key = expense.internal_key
      and linked.canonical_expense_item_id = expense.item_id
@@ -2030,7 +2057,8 @@ unlinked_expense_items as materialized (
         expense.case_id,
         expense.item_id,
         expense.item_amount,
-        expense.attachment_file_count
+        expense.attachment_file_count,
+        document.expense_item_id
 ),
 unlinked_expense_anomaly_items as materialized (
     select
@@ -2055,6 +2083,14 @@ unlinked_expense_anomaly_items as materialized (
             'sha256'
         ), 'hex') as item_fingerprint
     from unlinked_expense_items totals
+    where not totals.has_supporting_document
+),
+supporting_document_totals as materialized (
+    select internal_key, sum(item_amount) as covered_amount
+    from unlinked_expense_items
+    where has_supporting_document
+    group by internal_key
+    having count(*) = count(item_amount)
 ),
 expense_anomaly_items as materialized (
     select
@@ -2183,38 +2219,47 @@ relation_comparison_totals as materialized (
         end as bank_total
     from relation_pane_totals totals
 ),
+relation_document_comparison_totals as materialized (
+    select totals.*,
+           totals.oa_total - coalesce(document.covered_amount, 0) as comparison_oa_total,
+           totals.bank_total - coalesce(document.covered_amount, 0) as comparison_bank_total,
+           case when totals.invoice_count = 0 and document.covered_amount is not null
+                then 0 else totals.invoice_total end as comparison_invoice_total
+    from relation_comparison_totals totals
+    left join supporting_document_totals document using (internal_key)
+),
 relation_amount_classifications as materialized (
     select
         totals.*,
         case
-            when totals.oa_total = totals.bank_total then
-                case when totals.invoice_total > totals.oa_total
+            when totals.comparison_oa_total = totals.comparison_bank_total then
+                case when totals.comparison_invoice_total > totals.comparison_oa_total
                      then 'oa_bank_equal_invoice_more'
                      else 'oa_bank_equal_invoice_less' end
-            when totals.oa_total = totals.invoice_total then
-                case when totals.bank_total > totals.oa_total
+            when totals.comparison_oa_total = totals.comparison_invoice_total then
+                case when totals.comparison_bank_total > totals.comparison_oa_total
                      then 'oa_invoice_equal_bank_more'
                      else 'oa_invoice_equal_bank_less' end
-            when totals.bank_total = totals.invoice_total then
-                case when totals.oa_total < totals.bank_total
+            when totals.comparison_bank_total = totals.comparison_invoice_total then
+                case when totals.comparison_oa_total < totals.comparison_bank_total
                      then 'bank_invoice_equal_oa_less'
                      else 'bank_invoice_equal_oa_more' end
             else 'all_amounts_different'
         end as code
-    from relation_comparison_totals totals
+    from relation_document_comparison_totals totals
     where totals.direction is not null
-      and totals.oa_count > 0 and totals.bank_count > 0 and totals.invoice_count > 0
+      and totals.oa_count > 0 and totals.bank_count > 0
       and totals.invalid_oa_amount_count = 0
       and totals.invalid_bank_amount_count = 0
       and totals.invalid_bank_direction_count = 0
       and totals.invalid_invoice_amount_count = 0
       and totals.invalid_invoice_direction_count = 0
-      and totals.oa_total is not null
-      and totals.bank_total is not null
-      and totals.invoice_total is not null
+      and totals.comparison_oa_total is not null
+      and totals.comparison_bank_total is not null
+      and totals.comparison_invoice_total is not null
       and not (
-          totals.oa_total = totals.bank_total
-          and totals.bank_total = totals.invoice_total
+          totals.comparison_oa_total = totals.comparison_bank_total
+          and totals.comparison_bank_total = totals.comparison_invoice_total
       )
 ),
 relation_amount_anomaly_items as materialized (
@@ -2225,11 +2270,11 @@ relation_amount_anomaly_items as materialized (
             convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
             convert_to(totals.code, 'UTF8') || decode('00', 'hex') ||
             convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
-            convert_to(coalesce(to_char(totals.oa_total,
+            convert_to(coalesce(to_char(totals.comparison_oa_total,
                 'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
-            convert_to(coalesce(to_char(totals.bank_total,
+            convert_to(coalesce(to_char(totals.comparison_bank_total,
                 'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
-            convert_to(coalesce(to_char(totals.invoice_total,
+            convert_to(coalesce(to_char(totals.comparison_invoice_total,
                 'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
             convert_to('0', 'UTF8') ||
             case when totals.invoice_row_ids_hex is not null

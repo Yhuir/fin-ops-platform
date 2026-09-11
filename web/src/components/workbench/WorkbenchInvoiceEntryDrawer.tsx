@@ -19,6 +19,7 @@ import type {
 
 type WorkbenchInvoiceEntryDrawerProps = {
   open: boolean;
+  initialMode?: "upload" | "manual";
   target: WorkbenchOaInvoiceSupplementTarget | null;
   disabled?: boolean;
   onClose: () => void;
@@ -26,11 +27,12 @@ type WorkbenchInvoiceEntryDrawerProps = {
   onSupportingDocumentsChanged?: (
     target: WorkbenchOaInvoiceSupplementTarget,
     documents: WorkbenchOaSupportingDocument[],
-  ) => void;
+  ) => Promise<void> | void;
 };
 
 export default function WorkbenchInvoiceEntryDrawer({
   open,
+  initialMode = "manual",
   target,
   disabled = false,
   onClose,
@@ -47,8 +49,8 @@ export default function WorkbenchInvoiceEntryDrawer({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) setMode("manual");
-  }, [open, target?.expenseItemId, target?.oaRowId]);
+    if (open) setMode(initialMode);
+  }, [open, initialMode, target?.expenseItemId, target?.oaRowId]);
 
   useEffect(() => {
     if (!open || !target || mode !== "upload") return;
@@ -72,7 +74,7 @@ export default function WorkbenchInvoiceEntryDrawer({
       created.forEach((document) => byId.set(document.id, document));
       const nextDocuments = Array.from(byId.values());
       setDocuments(nextDocuments);
-      onSupportingDocumentsChanged?.(target, nextDocuments);
+      await onSupportingDocumentsChanged?.(target, nextDocuments);
     } catch (error) {
       setErrorMessage(resolveWorkbenchActionErrorMessage(error, "补充凭证上传失败。"));
     } finally {
@@ -88,7 +90,7 @@ export default function WorkbenchInvoiceEntryDrawer({
       await deleteWorkbenchOaSupportingDocument(documentId);
       const nextDocuments = documents.filter((document) => document.id !== documentId);
       setDocuments(nextDocuments);
-      if (target) onSupportingDocumentsChanged?.(target, nextDocuments);
+      if (target) await onSupportingDocumentsChanged?.(target, nextDocuments);
     } catch (error) {
       setErrorMessage(resolveWorkbenchActionErrorMessage(error, "补充凭证删除失败。"));
     } finally { setLoading(false); }
@@ -122,7 +124,7 @@ export default function WorkbenchInvoiceEntryDrawer({
       closeLabel="关闭录入发票"
       onClose={onClose}
       open={open}
-      title="录入发票"
+      title={mode === "upload" ? "管理凭证" : "录入发票"}
       width="min(800px, 100vw)"
     >
       <Tabs selectedKey={mode} onSelectionChange={(key) => setMode(String(key) as "upload" | "manual")}>
@@ -172,7 +174,7 @@ export default function WorkbenchInvoiceEntryDrawer({
             />
           </label>
           <div className="workbench-supporting-documents__summary">
-            <p>仅补充报销证明材料，直接关联当前 OA 子付款项，不进入统一发票池，也不会参与发票配对。</p>
+            <p>补充凭证关联当前 OA 明细，不进入正式发票池。</p>
             {documents.length > 0 ? <Chip color="default" size="sm" variant="soft"><Chip.Label>{documents.length} 个文件</Chip.Label></Chip> : null}
           </div>
           <div className="workbench-supporting-documents__list">

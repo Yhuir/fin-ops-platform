@@ -26,6 +26,9 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql impo
 from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
     oa_source_aliases_sql,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
+    PostgresWorkbenchOaSupportingDocumentRepository,
+)
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
@@ -35,7 +38,7 @@ from fin_ops_platform.services.workbench_canonical_rows import (
 # lookup, one set-based ETC summary read, overrides, and anomaly decisions.  The
 # budget is independent of page/member count; a higher count is a regression.
 WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 8
-WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 2
+WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 3
 
 
 def oa_source_identity_aliases_sql(source_payload: str) -> str:
@@ -53,44 +56,6 @@ def oa_source_identity_aliases_sql(source_payload: str) -> str:
         ) identity(value)
         where nullif(btrim(identity.value), '') is not null
     ), '[]'::jsonb)"""
-
-
-def oa_expense_items_with_supporting_documents_sql(
-    oa_row_id_sql: str,
-    expense_items_sql: str,
-) -> str:
-    """Attach active supplemental evidence to each OA expense item in one SQL read."""
-
-    return f"""
-        coalesce((
-            select jsonb_agg(
-                item.value || jsonb_build_object(
-                    'supporting_documents', coalesce((
-                        select jsonb_agg(jsonb_build_object(
-                            'id', document.id::text,
-                            'file_name', document.original_filename,
-                            'content_type', document.content_type,
-                            'size_bytes', document.size_bytes,
-                            'created_at', document.created_at::text,
-                            'content_url', '/api/workbench/oa-invoice-supplements/documents/' || document.id::text || '/content'
-                        ) order by document.created_at, document.id)
-                        from app.workbench_oa_supporting_documents document
-                        where document.oa_row_id = {oa_row_id_sql}
-                          and document.expense_item_id = coalesce(
-                              item.value->>'id', item.value->>'expense_item_id'
-                          )
-                          and document.status = 'active'
-                    ), '[]'::jsonb)
-                )
-                order by item.ordinality
-            )
-            from jsonb_array_elements(
-                case when jsonb_typeof({expense_items_sql}) = 'array'
-                     then {expense_items_sql}
-                     else '[]'::jsonb end
-            ) with ordinality item(value, ordinality)
-        ), '[]'::jsonb)
-    """
 
 
 class _BudgetedReadConnection:
@@ -336,7 +301,8 @@ class PostgresWorkbenchPageHydrationRepository:
         decorations, row overrides, page-local amount-mismatch decisions, and
         ETC aggregates are returned by one statement whose cardinality is
         bounded by the already-selected page descriptors. A second statement
-        classifies only bank transaction IDs present on that page.
+        classifies only bank transaction IDs present on that page. A third
+        attaches active document metadata for the selected OA rows.
         """
 
         member_types: list[str] = []
@@ -1287,6 +1253,9 @@ class PostgresWorkbenchPageHydrationRepository:
                 connection=connection,
                 settings=settings,
             )
+        PostgresWorkbenchOaSupportingDocumentRepository(connection).attach_to_oa_rows([
+            row for (row_type, _), row in rows_by_typed_id.items() if row_type == "oa"
+        ])
         grouped = WorkbenchCanonicalRowsBuilder(
             connection=connection
         ).build_page_groups(
@@ -1635,5 +1604,4 @@ __all__ = [
     "PostgresWorkbenchPageHydrationRepository",
     "WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET",
     "WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET",
-    "oa_expense_items_with_supporting_documents_sql",
 ]

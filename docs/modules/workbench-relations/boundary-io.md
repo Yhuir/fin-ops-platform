@@ -119,3 +119,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 旧的人工 `--reapply-case-id` / `--expected-rule-version` 运维白名单路径已删除，不得恢复。规则要求迁移只能由设置事务产生的 durable job 驱动，并按变化 tag proof 集合式定位；历史 repair 工具继续只处理缺失/损坏 proof，不承担正常规则传播。
 - 银行导入 duplicate 恢复只能对 dry-run 冻结的唯一 `bank + invoice` active case 调用 `prepare_withdraw_relation` / `withdraw_relation`；必须逐项校验 case、version、preview id、expected versions、成员和发票事实，且 `after_relations=[]`。relation 表/history 不得直接 SQL 删除或改写，撤回审计历史必须保留。
 - 已删除 `ExistingEtcBatchLinkService`、`HistoricalEtcBusinessBatchMigrationService` 及其 CLI；禁止恢复这两条 operator-only 平行写链。历史数据补全由同一 matching worker + formal relation UoW 收敛。
+
+## 2026-09-11 凭证资料完整性输入
+
+`evaluate_bank_relation_completion` 接收明确的 `supporting_documents_complete`（默认 false）。关联台 canonical grouping 仅在每个 OA 都有非空明细且所有明细都有 active、文件可用的补充凭证时传 true，用于满足缺正式发票时的资料要求；不增补 invoice row type、不修改 relation member/requirement metadata、不放宽银行、审批或金额规则。凭证上传与删除仍归 OA 凭证 service，正式关系 command/UoW 不接收页面凭证展示对象。

@@ -215,8 +215,13 @@ class WorkbenchRelationGroupingService:
         case_id = str(relation["case_id"])
         special_metadata = relation.get("special_metadata")
         relation_mode = str(relation.get("relation_mode") or "manual_confirmed").strip() or "manual_confirmed"
+        oa_rows = [rows_by_id[row_id] for row_id in relation["row_ids"] if rows_by_id[row_id]["type"] == "oa"]
         completion = evaluate_bank_relation_completion(
             row_types=[str(rows_by_id[row_id]["type"]) for row_id in relation["row_ids"]],
+            supporting_documents_complete=bool(oa_rows) and all(
+                row.get("expense_items") and all(item.get("supporting_documents") for item in row["expense_items"])
+                for row in oa_rows
+            ),
             oa_workflow_statuses=[
                 str(rows_by_id[row_id].get("workflow_status") or "completed")
                 for row_id in relation["row_ids"]

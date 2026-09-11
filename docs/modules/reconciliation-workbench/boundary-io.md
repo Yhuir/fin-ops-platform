@@ -9,7 +9,7 @@
 - 通过 direct canonical API 读取 OA、银行流水、发票、ETC 批次和正式关系，并把当前提交事实划分为 `paired` / `unpaired`。
 - 提供同一只读快照内的首屏统计与两区首页、区域级搜索/筛选/排序、cursor 分页、filter options、group/row detail 和异常抽屉。
 - 提供人工正式关联、关系级撤回和系统异常审阅；撤回关系恢复最近一次确认前的稳定拓扑，撤回异常放行只改变展示分区。
-- 对“OA发票附件未解析”提供一个右侧录入抽屉：默认发票录入通过强身份创建或复用 canonical invoice 并原子扩展当前正式关系；次级补充凭证只关联当前 OA 子付款项且不进发票池、不参与配对。
+- 对“OA发票附件未解析”提供一个右侧录入抽屉：默认发票录入通过强身份创建或复用 canonical invoice 并原子扩展当前正式关系；次级补充凭证只关联当前 OA 子付款项且不进发票池、不创建正式关系成员；有效凭证满足该项资料完整性要求。
 - 对 active relation 内“发票待归属”的 relation invoice 提供显式费用明细归属：用户只可选择同关系内一个或多个真实 OA expense item；写入 `oa_expense_item_invoice` 来源边，不改变 relation membership 或 canonical amount。
 - 对 active relation 内“无 OA + 全部收入流水 + 全部销项发票”的关系提供收据草稿编辑和打印：无论关系位于 paired/unpaired，都以当前 canonical 事实生成可编辑草稿和 A5 横向一联 PDF，保存不可变快照并记录生成/打印请求审计，不把收据写入统一发票池或关系成员。
 - 保持权限、审计、幂等、canonical member exact-set、稳定加锁顺序，以及各 action 自己的并发合同：confirm 在提交事务内重解析并锁定 exact typed selection；withdraw 使用 preview fingerprint 与 relation/entity version。
@@ -133,7 +133,7 @@ requested tenant/scope
 | filter options | 表头菜单 | `options[{value,label,missing,group?}],page_size,has_more,next_cursor`；菜单惰性读取并支持 abort/latest-wins，`group` 只控制分组标题。 |
 | paired groups | 前端 | 冻结要求满足、OA workflow 已完成且无异常，或当前服务端异常 bundle 已明确 `accept_paired` 的 active formal relation；圆形感叹号是关系异常的唯一入口，原始系统分类 Chip、审阅审计及 `manual_confirmed` 的非空确认备注都只在该 Popover 展示。审阅人格式为 `操作账户（姓名）`，时间格式为 Asia/Shanghai `YYYY-MM-DD HH:mm:ss`，不得显示内部 actor id 或原始 ISO offset。精确归属于组内 OA、但不是正式 relation member 的发票可作为 `source_owned_display` 展示；它不改变正式成员、状态或动作。 |
 | unpaired groups | 前端 | 无 active owner 的 singleton、由精确当前 item owner 证明的 OA+发票 source-owned 展示组，以及要求未满足、含 in-progress OA、存在 pending/`keep_unpaired` 异常的完整 active relation；正式关系本身不被删除或拆散，展示组也不伪装为正式配对。 |
-| OA expense/invoice display | 前端 | OA direct page DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`；summary hydration 保持原有窄字段投影，录入抽屉通过专用列表 API 读取权威补充凭证。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零且无精确正式发票来源时为“发票附件缺失”；附件存在但未产生正式发票为“发票附件未解析”并保留“录入发票”；同 relation 存在 OA expense items、但发票没有有效 item edge 时为 row-scoped“发票待归属”并只保留“选择 OA 明细”。唯一例外是 `batch_accounting + canonical etc_invoice_summary`：其发票归属事实源是 ETC 批次，不进入 OA 附件资料异常规则，金额仍按三栏 canonical totals 校验。这些分类不直接平铺，只通过对应明细的感叹号 Popover 展示。APP 内正式发票来源边只补足归属证明，不改写 OA 原始附件数。显式归属后的同行由下一次 canonical DTO 的 `source_expense_item_ids[]` 决定，前端不得本地挪行。 |
+| OA expense/invoice display | 前端 | OA direct page DTO 输出 `expense_items[]` 及每项 `supporting_documents[]`；summary/detail/selection 通过一次有界批量查询附加 active 且文件未 tombstone 的凭证元数据；录入抽屉仍通过专用列表 API 管理凭证。OA attachment/manual supplement invoice 输出复数 canonical `source_expense_item_ids[]`；一张发票只出现一次。附件数为零且无精确正式发票来源时为“发票附件缺失”；附件存在但未产生正式发票为“发票附件未解析”并保留“录入发票”；同 relation 存在 OA expense items、但发票没有有效 item edge 时为 row-scoped“发票待归属”并只保留“选择 OA 明细”。唯一例外是 `batch_accounting + canonical etc_invoice_summary`：其发票归属事实源是 ETC 批次，不进入 OA 附件资料异常规则，金额仍按三栏 canonical totals 校验。这些分类不直接平铺，只通过对应明细的感叹号 Popover 展示。APP 内正式发票来源边只补足归属证明，不改写 OA 原始附件数。显式归属后的同行由下一次 canonical DTO 的 `source_expense_item_ids[]` 决定，前端不得本地挪行。 |
 | relation receipt action / draft / PDF | 前端、浏览器打印 | paired/unpaired 的合格 active relation 都在 OA 栏显示唯一“编辑并打印收据”，singleton 不显示；动作遵循 Workbench 写权限。点击先读取 draft 并打开单一右侧抽屉，按 `银行收据!A1:J12` 一联版式编辑付款单位、日期、摘要、金额、备注、主管和经手人，实时显示与收入固定金额的差额；不平衡、字段无效或冲销异常未确认时禁止打印。最终点击必须同步打开打印窗口，再提交编辑内容；成功后加载 A5 横向 PDF blob 并触发浏览器原生打印，失败关闭空窗口并显示明确错误。动作不改变 relation、canonical invoice、统计或分区。 |
 | write result | 前端 | 保留业务结果、affected ids/scopes、preview/CAS/idempotency信息；禁止 operation projection 和页面 freshness metadata。成功后恰好一次普通 direct refetch。 |
 | shared relation refresh | `workbench_relation` worker / other pages | confirm/withdraw 等 canonical relation 写入仍按 shared relation 合同标记精确 scope；这不是 Workbench 页面读取依赖。 |
@@ -240,3 +240,12 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 发布只从合并后 exact remote-main SHA 的干净 release checkout 激活。
 - 自动/人工回滚必须先进入维护模式，使用上一 immutable release 对保留的 page generation 表执行全 scope rehydrate 和 audit，验证 fresh 后再同时开放旧 backend/frontend/worker；禁止把 stale old generation 先暴露给用户。
 - 若未来为物理表清理单独创建临时逻辑备份，只能删除该任务明确记录并核验的临时文件；平台 PITR/组织级备份不属于任务临时备份，不得删除。
+
+## 2026-09-11 补充凭证明细闭环
+
+- 事实源仍为 `app.workbench_oa_supporting_documents` 与 `app.file_objects`，按 `(oa_row_id, expense_item_id)` 精确归属；历史凭证直接生效，不按旧 relation case 限制当前展示。active-only 查询不加载二进制。
+- 有有效凭证的子项不再生成 `absent/unparsed`，不再显示“录入发票”；删除最后一份有效凭证后按真实附件/发票事实恢复。所有 OA 子项均有有效凭证时，可满足关系的资料完整性要求，但不能代替银行、审批、金额及其它既有条件。
+- 仅凭证、无正式发票来源边的子项金额，从正式发票比较范围中扣除；OA/银行真实总额照常输出且两者差额不变。凭证与正式发票并存时，该项仍校验正式发票真实金额，共享发票只计一次。凭证没有虚构的发票金额、税额或票号，不改变统一发票池计数。
+- 分页前 SQL 与当前页 Python 组装使用一致规则，复用已有异常分类及审阅合同。summary 水合最多三条批量语句（基础事实、银行分类、凭证元数据），无逐文件请求；full 水合固定上限仍为八条。
+- 前端一项一个全宽凭证单元格，列出全部文件名并点击预览；通过“管理凭证”复用原抽屉。上传/删除后等待一次 canonical GET，禁止局部补丁伪造分区或金额通过。
+- 移除旧逐文件伪发票卡片、局部替换 OA 凭证的 helper 和未被调用的凭证 SQL helper。保留现有上传权限、文件校验、内容去重、软删除及审计；不增加 migration、worker、read model 或依赖。

@@ -1,7 +1,5 @@
 import type {
   WorkbenchInvoiceExpenseItemCandidate,
-  WorkbenchOaInvoiceSupplementTarget,
-  WorkbenchOaSupportingDocument,
   WorkbenchRelationGroup,
   WorkbenchGroupsPageQuery,
   WorkbenchPaneRows,
@@ -120,58 +118,6 @@ export function buildWorkbenchPaneRows(groups: WorkbenchRelationGroup[]): Workbe
     bank: groups.flatMap((group) => group.rows.bank),
     invoice: groups.flatMap((group) => group.rows.invoice),
   };
-}
-
-export function replaceWorkbenchSupportingDocuments(
-  groups: WorkbenchRelationGroup[],
-  target: WorkbenchOaInvoiceSupplementTarget,
-  documents: WorkbenchOaSupportingDocument[],
-): WorkbenchRelationGroup[] {
-  const supportingDocuments = documents.map((document) => ({
-    id: document.id,
-    fileName: document.fileName,
-    contentType: document.contentType,
-    sizeBytes: document.sizeBytes,
-    createdAt: document.createdAt,
-    contentUrl: document.contentUrl,
-  }));
-
-  function replaceOaRow(row: WorkbenchRecord) {
-    if (row.id !== target.oaRowId || !row.expenseItems?.some((item) => item.id === target.expenseItemId)) {
-      return row;
-    }
-    return {
-      ...row,
-      expenseItems: row.expenseItems.map((item) => item.id === target.expenseItemId
-        ? { ...item, supportingDocuments }
-        : item),
-    };
-  }
-
-  return groups.map((group) => {
-    const oaRows = group.rows.oa.map(replaceOaRow);
-    const summaryRow = group.summaryRow?.recordType === "oa"
-      ? replaceOaRow(group.summaryRow)
-      : group.summaryRow;
-    const collapsedOaRows = group.collapsedRows?.oa?.map(replaceOaRow);
-    const changed = oaRows.some((row, index) => row !== group.rows.oa[index])
-      || summaryRow !== group.summaryRow
-      || collapsedOaRows?.some((row, index) => row !== group.collapsedRows?.oa?.[index]);
-    if (!changed) {
-      return group;
-    }
-    return {
-      ...group,
-      rows: { ...group.rows, oa: oaRows },
-      ...(summaryRow ? { summaryRow } : {}),
-      ...(group.collapsedRows ? {
-        collapsedRows: {
-          ...group.collapsedRows,
-          ...(collapsedOaRows ? { oa: collapsedOaRows } : {}),
-        },
-      } : {}),
-    };
-  });
 }
 
 export function buildWorkbenchGroupDisplayLayout(
@@ -580,6 +526,7 @@ function missingInvoicePlaceholder(
   parent: WorkbenchRecord,
   item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
 ) {
+  if (item.supportingDocuments?.length) return [];
   const anomaly = item.workbenchAnomalies?.find((candidate) => [
     "oa_invoice_attachment_absent",
     "oa_invoice_attachment_unparsed",
@@ -621,40 +568,33 @@ function supportingDocumentRows(
   parent: WorkbenchRecord,
   item: NonNullable<WorkbenchRecord["expenseItems"]>[number],
 ): WorkbenchRecord[] {
-  return (item.supportingDocuments ?? []).map((document) => ({
-    id: `supporting-document:${document.id}`,
+  if (!item.supportingDocuments?.length) return [];
+  return [{
+    id: `supporting-documents:${parent.id}:${item.id}`,
     caseId: parent.caseId,
     recordType: "invoice",
     sourceKind: "oa_supporting_document",
     sourceOaId: parent.id,
     sourceExpenseItemIds: [item.id],
-    externalUrl: document.contentUrl,
-    label: document.fileName,
-    status: "补充凭证",
+    supportingDocuments: item.supportingDocuments,
+    label: "补充凭证",
+    status: "资料已补齐",
     statusCode: "supporting_document",
     statusTone: "info",
     exceptionHandled: true,
-    amount: "—",
-    counterparty: "—",
-    tableValues: {
-      sellerName: document.fileName,
-      sellerTaxId: "补充凭证（不进入发票池）",
-      buyerName: "—",
-      buyerTaxId: "—",
-      grossAmount: "—",
-      amount: "—",
-      issueDate: document.createdAt,
-    },
+    amount: "",
+    counterparty: "",
+    tableValues: {},
     detailFields: [],
     actionVariant: "detail-only",
     availableActions: [],
     displayOnly: true,
-  }));
+  }];
 }
 
 function hasExpandableExpenseItems(row: WorkbenchRecord) {
   const items = row.expenseItems ?? [];
-  return items.length > 1 || items.some((item) => [
+  return items.length > 1 || items.some((item) => Boolean(item.supportingDocuments?.length)) || items.some((item) => [
     "oa_invoice_attachment_absent",
     "oa_invoice_attachment_unparsed",
   ].some((code) => item.workbenchAnomalies?.some((anomaly) => anomaly.code === code)));

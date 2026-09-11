@@ -12,6 +12,7 @@ export type WorkbenchInlineAction =
   | "confirm-cash-ticket-purchase"
   | "cancel-cash-special"
   | "enter-invoice"
+  | "manage-supporting-documents"
   | "assign-invoice-expense-items";
 
 type RowActionsProps = {

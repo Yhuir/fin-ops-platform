@@ -7,7 +7,6 @@ from typing import Any
 from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_invoice_direction import invoice_flow_direction_from_row
 
-
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 
@@ -128,6 +127,8 @@ class WorkbenchAmountCheckService:
         ):
             if any(self._amount(row) is None for row in pane_rows):
                 totals[pane] = None
+        actual_totals = totals
+        totals = self._document_comparison_totals(totals, rows_by_type)
         has_three_way_comparison = (
             amount_check.get("status") != "unknown"
             and amount_check.get("direction") in {"payment", "receipt"}
@@ -206,7 +207,8 @@ class WorkbenchAmountCheckService:
             "items": self._display_items(
                 evidence_items,
                 relation_id=relation_id,
-                totals=totals,
+                totals=actual_totals,
+                comparison_totals=totals,
                 classification=classification,
                 oa_rows=oa_rows,
                 bank_rows=bank_rows,
@@ -247,6 +249,7 @@ class WorkbenchAmountCheckService:
         relation_id: str,
         totals: dict[str, Decimal | None],
         classification: tuple[str, str] | None,
+        comparison_totals: dict[str, Decimal | None],
         oa_rows: list[dict[str, Any]],
         bank_rows: list[dict[str, Any]],
         invoice_rows: list[dict[str, Any]],
@@ -302,7 +305,7 @@ class WorkbenchAmountCheckService:
                 "invoice_total": self._format_amount(totals["invoice"]),
                 "amount_delta": self._format_amount(self._amount_delta({
                     pane: amount
-                    for pane, amount in totals.items()
+                    for pane, amount in comparison_totals.items()
                     if amount is not None
                 })),
                 "mismatch_pair": None,
@@ -495,7 +498,7 @@ class WorkbenchAmountCheckService:
             )
         ]
         for expense_item_id, (oa_row, expense_item) in expense_by_id.items():
-            if item_invoice_ids[expense_item_id]:
+            if item_invoice_ids[expense_item_id] or expense_item.get("supporting_documents"):
                 continue
             attachment_count = self._non_negative_int(expense_item.get("attachment_file_count"))
             source_oa_id = self._row_id(oa_row)
@@ -719,6 +722,29 @@ class WorkbenchAmountCheckService:
         except ValueError:
             return 0
 
+    def _document_comparison_totals(
+        self, totals: dict[str, Decimal | None],
+        rows_by_type: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Decimal | None]:
+        linked_items = {
+            item_id for row in rows_by_type.get("invoice", [])
+            for item_id in self._source_expense_item_ids(row)
+        }
+        amounts = [
+            self._decimal(item.get("amount"))
+            for row in rows_by_type.get("oa", [])
+            for item in row.get("expense_items") or []
+            if item.get("supporting_documents") and item.get("id") not in linked_items
+        ]
+        if not amounts or any(amount is None for amount in amounts):
+            return totals
+        covered = sum((amount for amount in amounts if amount is not None), ZERO)
+        return {
+            "oa": totals["oa"] - covered if totals["oa"] is not None else None,
+            "bank": totals["bank"] - covered if totals["bank"] is not None else None,
+            "invoice": totals["invoice"] if rows_by_type.get("invoice") else ZERO,
+        }
+
     def check(
         self,
         rows_by_type: dict[str, list[dict[str, Any]]],
@@ -749,7 +775,10 @@ class WorkbenchAmountCheckService:
             for rows in normalized_rows.values()
             for row in rows
         )
-        comparable = {key: value for key, value in totals.items() if value is not None}
+        comparison = self._document_comparison_totals(
+            {key: totals[f"{key}_total"] for key in ("oa", "bank", "invoice")}, normalized_rows,
+        )
+        comparable = {f"{key}_total": value for key, value in comparison.items() if value is not None}
         mismatch_fields: list[str] = []
         status = "matched"
         requires_note = False

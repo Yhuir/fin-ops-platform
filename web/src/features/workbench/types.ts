@@ -152,6 +152,7 @@ export type WorkbenchBankCategoryResolutionStatus =
   | (string & {});
 
 export type WorkbenchRecord = {
+  supportingDocuments?: WorkbenchExpenseItem["supportingDocuments"];
   id: string;
   caseId?: string;
   exceptionCaseId?: string;

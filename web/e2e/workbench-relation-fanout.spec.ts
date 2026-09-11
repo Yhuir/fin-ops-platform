@@ -17,7 +17,7 @@ test.describe("workbench relation browser flow", () => {
     const unpairedZone = page.getByTestId("zone-unpaired");
     await unpairedZone.getByRole("button", { name: "录入发票" }).click();
 
-    const drawer = page.getByRole("dialog", { name: "录入发票" });
+    const drawer = page.getByRole("dialog");
     await expect(drawer).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(1);
     const modeTabs = drawer.getByRole("tablist", { name: "录入方式" });
@@ -34,7 +34,7 @@ test.describe("workbench relation browser flow", () => {
 
     await modeTabs.getByRole("tab", { name: "补充凭证" }).click();
     await expect(modeTabs.getByRole("tab", { name: "补充凭证" })).toHaveAttribute("aria-selected", "true");
-    await expect(drawer.getByText("不进入统一发票池", { exact: false })).toBeVisible();
+    await expect(drawer.getByText("不进入正式发票池", { exact: false })).toBeVisible();
     await expect(drawer.getByText("尚未上传补充凭证。", { exact: true })).toBeVisible();
     expect(api.count("GET /api/workbench/oa-invoice-supplements/documents")).toBe(1);
   });

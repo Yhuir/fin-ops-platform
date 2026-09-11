@@ -28,6 +28,9 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionAdapter,
     PostgresOAWorkflowRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
+    PostgresWorkbenchOaSupportingDocumentRepository,
+)
 from fin_ops_platform.services.workbench_etc_batch_link import (
     relation_external_etc_batch_id,
     workbench_etc_summary_row_id,
@@ -770,6 +773,7 @@ class WorkbenchCanonicalRowsBuilder:
             result.append(payload)
         missing_row_ids = wanted - {str(row.get("id") or "").strip() for row in result}
         result.extend(self._oa_projection_rows_by_sql_ids(missing_row_ids))
+        PostgresWorkbenchOaSupportingDocumentRepository(self._connection).attach_to_oa_rows(result)
         return result
 
     def _oa_projection_rows_by_sql_ids(self, row_ids: set[str]) -> list[dict[str, Any]]:

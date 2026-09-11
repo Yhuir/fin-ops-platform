@@ -787,6 +787,69 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
             )
         )
 
+    def test_supporting_documents_cover_only_document_only_items(self) -> None:
+        rows = {
+            "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
+                {"id": "fine", "amount": "100", "supporting_documents": [{"id": "doc-1"}, {"id": "doc-2"}]},
+                {"id": "hotel", "amount": "200", "supporting_documents": []},
+            ]}],
+            "bank": [self._bank_row("300")],
+            "invoice": [{**self._invoice_row("200"), "id": "inv-1", "source_expense_item_ids": ["hotel"]}],
+        }
+        self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="CASE-DOC"))
+        check = self.service.check(rows)
+        self.assertEqual(check["status"], "matched")
+        self.assertEqual(check["oa_total"], "300.00")
+        self.assertEqual(check["bank_total"], "300.00")
+        self.assertEqual(check["invoice_total"], "200.00")
+        rows["oa"][0]["expense_items"][0]["supporting_documents"] = []
+        anomaly = self.service.workbench_anomaly(rows, relation_id="CASE-DOC")
+        self.assertIn("oa_invoice_attachment_absent", {item["code"] for item in anomaly["items"]})
+
+    def test_supporting_documents_do_not_hide_formal_invoice_or_bank_difference(self) -> None:
+        rows = {
+            "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
+                {"id": "fine", "amount": "100", "supporting_documents": [{"id": "doc-1"}]},
+                {"id": "hotel", "amount": "200", "supporting_documents": [{"id": "doc-2"}]},
+            ]}],
+            "bank": [self._bank_row("300")],
+            "invoice": [{**self._invoice_row("190"), "id": "inv-1", "source_expense_item_ids": ["hotel"]}],
+        }
+        anomaly = self.service.workbench_anomaly(rows, relation_id="CASE-DOC")
+        self.assertEqual(anomaly["items"][0]["code"], "oa_bank_equal_invoice_less")
+        self.assertEqual(anomaly["items"][0]["invoice_total"], "190.00")
+        self.assertEqual(anomaly["items"][0]["oa_total"], "300.00")
+        self.assertEqual(anomaly["items"][0]["amount_delta"], "10.00")
+        rows["invoice"][0]["total_with_tax"] = "200"
+        rows["bank"] = [self._bank_row("310")]
+        anomaly = self.service.workbench_anomaly(rows, relation_id="CASE-DOC")
+        self.assertEqual(anomaly["items"][0]["code"], "oa_invoice_equal_bank_more")
+
+    def test_supporting_documents_do_not_double_subtract_shared_invoice_items(self) -> None:
+        rows = {
+            "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
+                {"id": "first", "amount": "100", "supporting_documents": [{"id": "doc"}]},
+                {"id": "second", "amount": "200"},
+            ]}],
+            "bank": [self._bank_row("300")],
+            "invoice": [{**self._invoice_row("300"), "id": "inv-1", "source_expense_item_ids": ["first", "second"]}],
+        }
+        self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="CASE-DOC"))
+        self.assertEqual(self.service.check(rows)["invoice_total"], "300.00")
+
+    def test_document_only_group_has_no_fake_invoice_and_preserves_bank_check(self) -> None:
+        rows = {
+            "oa": [{**self._oa_row("100"), "id": "oa-1", "expense_items": [
+                {"id": "fine", "amount": "100", "supporting_documents": [{"id": "doc"}]},
+            ]}],
+            "bank": [self._bank_row("100")], "invoice": [],
+        }
+        self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="CASE-DOC"))
+        self.assertIsNone(self.service.check(rows)["invoice_total"])
+        rows["bank"] = [self._bank_row("110")]
+        self.assertEqual(self.service.check(rows)["status"], "mismatch")
+        self.assertIsNotNone(self.service.workbench_anomaly(rows, relation_id="CASE-DOC"))
+
     @staticmethod
     def _oa_row(amount: str, *, reconciliation_amount: str | None = None) -> dict[str, str]:
         row = {

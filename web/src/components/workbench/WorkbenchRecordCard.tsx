@@ -21,6 +21,7 @@ import type {
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import { splitBankAccountLabel } from "../BankAccountValue";
+import WorkbenchSupportingDocumentFiles from "./WorkbenchSupportingDocumentFiles";
 import RowActions, { type WorkbenchInlineAction } from "./RowActions";
 import OaWorkflowStatusChip from "../common/OaWorkflowStatusChip";
 import { FinanceStatusTag } from "../common/FinanceTable";
@@ -100,7 +101,13 @@ function WorkbenchRecordCard({
       style={columnGridStyle}
       onClick={readOnly || row.displayOnly ? undefined : () => onSelectRow(row, zoneId)}
     >
-      {attachmentStatusAnomalies.length > 0 ? (
+      {paneId === "invoice" && row.supportingDocuments ? (
+        <WorkbenchSupportingDocumentFiles
+          documents={row.supportingDocuments}
+          canManage={!invoiceResolutionDisabled}
+          onManage={() => onRowAction(row, "manage-supporting-documents")}
+        />
+      ) : attachmentStatusAnomalies.length > 0 ? (
         <div className="workbench-invoice-status-cell" role="cell">
           <div className="workbench-invoice-status-row">
             <WorkbenchAnomalyIndicator
@@ -427,7 +434,6 @@ function renderCellValue(
       row.tableValues.invoiceType ?? "",
       row.sourceKinds,
       row.sourceKind,
-      row.externalUrl,
       searchQuery,
     );
   }
@@ -437,7 +443,6 @@ function renderCellValue(
       value,
       row.tableValues.buyerTaxId ?? "",
       "",
-      undefined,
       undefined,
       undefined,
       searchQuery,
@@ -838,7 +843,6 @@ function renderInvoicePartyValue(
   invoiceType: string,
   sourceKinds?: WorkbenchSourceKind[],
   sourceKind?: WorkbenchSourceKind,
-  externalUrl?: string,
   searchQuery = "",
 ) {
   const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
@@ -849,17 +853,7 @@ function renderInvoicePartyValue(
     <span className="compound-cell-value invoice-party-value">
       <span className="compound-cell-primary invoice-party-primary">
         <span className="invoice-party-text-stack">
-          {sourceKind === "oa_supporting_document" && externalUrl ? (
-            <a
-              className="invoice-oa-external-link cell-text-value cell-text-value-full"
-              href={externalUrl}
-              rel="noopener noreferrer"
-              target="_blank"
-              onClick={(event) => event.stopPropagation()}
-            >
-              {highlightSearchText(value, searchQuery)}
-            </a>
-          ) : <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>}
+          <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
           {hasTaxId ? <span className="cell-text-value cell-text-value-full cell-subtext-value">{highlightSearchText(taxId, searchQuery)}</span> : null}
           {flowLabel || sourceLabels.length > 0 ? (
             <span className="invoice-chip-row">

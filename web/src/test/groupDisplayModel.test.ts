@@ -5,7 +5,6 @@ import {
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
-  replaceWorkbenchSupportingDocuments,
   workbenchInvoiceSourceLabels,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
@@ -807,11 +806,12 @@ describe("groupDisplayModel time filter", () => {
       thumbnailUrl: "/api/documents/document-1/thumbnail",
     }];
 
-    const [updated] = replaceWorkbenchSupportingDocuments(
-      [group],
-      { caseId: "CASE-1", oaRowId: parent.id, expenseItemId: "item-support" },
-      documents,
-    );
+    const updated = {
+      ...group,
+      rows: { ...group.rows, oa: [{ ...parent, expenseItems: parent.expenseItems!.map(
+        (item) => item.id === "item-support" ? { ...item, supportingDocuments: documents } : item,
+      ) }] },
+    };
     const invoiceRows = buildWorkbenchGroupDisplayLayout(updated)?.segments
       .find(({ id }) => id === "item-support")?.rows.invoice;
 
@@ -820,9 +820,10 @@ describe("groupDisplayModel time filter", () => {
     ]);
     expect(invoiceRows).toEqual([
       expect.objectContaining({
-        id: "supporting-document:document-1",
+        id: `supporting-documents:${parent.id}:item-support`,
         sourceKind: "oa_supporting_document",
-        externalUrl: "/api/documents/document-1/content",
+        supportingDocuments: documents,
+        tableValues: {},
       }),
     ]);
   });

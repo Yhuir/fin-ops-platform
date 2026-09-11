@@ -891,10 +891,12 @@ def test_all_scope_does_not_join_source_rows_back_through_needed_keys() -> None:
     assert "needed_keys as materialized" in month_scope_sql
 
 
-def test_canonical_spine_defers_supporting_documents_to_page_hydration() -> None:
+def test_canonical_spine_reads_only_active_document_identity_for_completion() -> None:
     canonical_sql = " ".join(_SCOPED_CANONICAL_GROUPS_CTE.split())
 
-    assert "workbench_oa_supporting_documents" not in canonical_sql
+    assert canonical_sql.count("from app.workbench_oa_supporting_documents") == 1
+    assert "file.tombstoned_at is null" in canonical_sql
+    assert "document.original_filename" not in canonical_sql
     assert "normalized_payload->'expense_items'" in canonical_sql
     assert "source_payload->'expense_items'" in canonical_sql
 

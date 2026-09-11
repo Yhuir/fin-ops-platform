@@ -26109,3 +26109,44 @@ body.column-layout-dragging {
     grid-column: auto;
   }
 }
+
+.workbench-supporting-files {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 16px;
+}
+.workbench-supporting-files ul {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workbench-supporting-files li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+}
+.workbench-supporting-files li svg { flex-shrink: 0; }
+.workbench-supporting-files a {
+  color: #1d4ed8;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.workbench-supporting-files > button { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .workbench-supporting-files { flex-wrap: wrap; }
+  .workbench-supporting-files ul { flex-basis: 100%; }
+}
+
+@media (max-width: 720px) {
+  .workbench-zone-slot .candidate-pane-head {
+    height: 112px;
+    min-height: 112px;
+  }
+}

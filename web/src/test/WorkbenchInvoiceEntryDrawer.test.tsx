@@ -93,7 +93,7 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "补充凭证" }));
-    expect(await screen.findByText("仅补充报销证明材料，直接关联当前 OA 子付款项，不进入统一发票池，也不会参与发票配对。")).toBeInTheDocument();
+    expect(await screen.findByText("补充凭证关联当前 OA 明细，不进入正式发票池。")).toBeInTheDocument();
 
     const dropzoneText = await screen.findByText("拖拽文件到此处，或点击选择");
     const dropzone = dropzoneText.closest("label")!;

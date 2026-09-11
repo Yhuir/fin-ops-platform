@@ -50,7 +50,6 @@ import {
   createEmptyWorkbenchZoneDisplayState,
   hasWorkbenchServerPageCriteria,
   mergeWorkbenchGroupsById,
-  replaceWorkbenchSupportingDocuments,
   resolveWorkbenchActivePane,
   type WorkbenchPaneTimeFilter,
   type WorkbenchZoneDisplayState,
@@ -72,7 +71,6 @@ import type {
   WorkbenchInvoiceExpenseItemAssignmentTarget,
   WorkbenchOaSyncStatus,
   WorkbenchOaInvoiceSupplementTarget,
-  WorkbenchOaSupportingDocument,
   WorkbenchRecord,
   WorkbenchRecordIdentity,
   WorkbenchRecordType,
@@ -425,7 +423,7 @@ export default function ReconciliationWorkbenchPage() {
   const [exceptionDrawerContentGeneration, setExceptionDrawerContentGeneration] = useState(0);
   const [exceptionDrawerReloadGeneration, setExceptionDrawerReloadGeneration] = useState(0);
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
-  const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<WorkbenchOaInvoiceSupplementTarget | null>(null);
+  const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<(WorkbenchOaInvoiceSupplementTarget & { initialMode?: "upload" | "manual" }) | null>(null);
   const [invoiceAssignmentTarget, setInvoiceAssignmentTarget] = useState<WorkbenchInvoiceExpenseItemAssignmentTarget | null>(null);
   const hasOaSyncRefreshBlockingInteraction = detailRow !== null
     || isDetailLoading
@@ -1903,7 +1901,7 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    if (action === "enter-invoice") {
+    if (action === "enter-invoice" || action === "manage-supporting-documents") {
       const expenseItemId = row.sourceExpenseItemIds?.[0] ?? "";
       if (!row.sourceOaId || !expenseItemId) {
         openActionResultDialog("无法确定需要补录发票的 OA 子付款项，请刷新页面后重试。", "无法录入发票");
@@ -1916,6 +1914,7 @@ export default function ReconciliationWorkbenchPage() {
         caseId: row.caseId ?? "",
         oaRowId: row.sourceOaId,
         expenseItemId,
+        initialMode: action === "manage-supporting-documents" ? "upload" : "manual",
       });
       return;
     }
@@ -2030,25 +2029,11 @@ export default function ReconciliationWorkbenchPage() {
     openRelationPreviewErrorDialog,
   ]);
 
-  const handleSupportingDocumentsChanged = useCallback((
-    target: WorkbenchOaInvoiceSupplementTarget,
-    documents: WorkbenchOaSupportingDocument[],
-  ) => {
-    setWorkbenchData((current) => current ? {
-      ...current,
-      paired: {
-        groups: replaceWorkbenchSupportingDocuments(current.paired.groups, target, documents),
-      },
-      unpaired: {
-        groups: replaceWorkbenchSupportingDocuments(current.unpaired.groups, target, documents),
-      },
-    } : current);
-    setSelectionSourceGroups((current) => ({
-      paired: replaceWorkbenchSupportingDocuments(current.paired, target, documents),
-      unpaired: replaceWorkbenchSupportingDocuments(current.unpaired, target, documents),
-    }));
-    setExceptionDrawerGroups((current) => replaceWorkbenchSupportingDocuments(current, target, documents));
-  }, []);
+  const handleSupportingDocumentsChanged = useCallback(async () => {
+    if (!await rereadWorkbenchAfterCommit()) {
+      throw new Error("凭证变更已提交，但关联台重新读取失败，请刷新页面确认。");
+    }
+  }, [rereadWorkbenchAfterCommit]);
 
   const handleCloseCashTicketPurchaseDialog = useCallback(() => {
     setCashTicketPurchaseDialog(null);
@@ -2670,6 +2655,7 @@ export default function ReconciliationWorkbenchPage() {
         disabled={!canWriteWorkbench}
         open={invoiceEntryTarget !== null}
         target={invoiceEntryTarget}
+        initialMode={invoiceEntryTarget?.initialMode}
         onClose={() => setInvoiceEntryTarget(null)}
         onSupportingDocumentsChanged={handleSupportingDocumentsChanged}
         onCompleted={async () => {

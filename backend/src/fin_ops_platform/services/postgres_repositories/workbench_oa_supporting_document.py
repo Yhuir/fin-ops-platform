@@ -7,6 +7,37 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def attach_to_oa_rows(self, rows: list[dict[str, Any]]) -> None:
+        """Hydrate active evidence for one bounded canonical OA batch."""
+        if not rows:
+            return
+        documents = self._connection.fetch_all(
+            """
+            select document.oa_row_id, document.expense_item_id,
+                   document.id::text as id, document.original_filename as file_name,
+                   document.content_type, document.size_bytes,
+                   document.created_at::text as created_at,
+                   '/api/workbench/oa-invoice-supplements/documents/' ||
+                       document.id::text || '/content' as content_url
+            from app.workbench_oa_supporting_documents document
+            join app.file_objects file on file.id = document.file_object_id
+            where document.oa_row_id = any(%s::text[])
+              and document.status = 'active' and file.tombstoned_at is null
+            order by document.created_at, document.id
+            """,
+            ([str(row["id"]) for row in rows],),
+        )
+        by_item: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for document in documents:
+            key = (document["oa_row_id"], document["expense_item_id"])
+            by_item.setdefault(key, []).append({
+                name: value for name, value in document.items()
+                if name not in {"oa_row_id", "expense_item_id"}
+            })
+        for row in rows:
+            for item in row.get("expense_items") or []:
+                item["supporting_documents"] = by_item.get((str(row["id"]), str(item["id"])), [])
+
     def create(
         self,
         *,

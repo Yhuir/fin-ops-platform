@@ -337,6 +337,99 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             """
         )
 
+    def _insert_supporting_document(self) -> None:
+        self.raw_connection.execute("""
+            insert into app.file_objects(id, storage_backend, storage_uri, object_key,
+                filename, sha256, size_bytes, content_type)
+            values ('00000000-0000-0000-0000-000000000103', 's3', 's3://test/doc.png',
+                'doc.png', '凭证.png', repeat('a',64), 10, 'image/png')
+        """)
+        self.raw_connection.execute("""
+            insert into app.workbench_oa_supporting_documents(
+                oa_row_id, expense_item_id, file_object_id, original_filename,
+                content_type, content_sha256, size_bytes, created_by)
+            values ('oa-direct-1', 'oa-direct-1:item:0', '00000000-0000-0000-0000-000000000103',
+                '凭证.png', 'image/png', repeat('a',64), 10, 'test-suite')
+        """)
+
+    def test_supporting_documents_refresh_completion_and_preserve_invoice_pool(self) -> None:
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations
+            set row_ids = array['oa-direct-1','bank-direct-1'], row_types = array['oa','bank'],
+                special_metadata = '{"requires_invoice":true}'::jsonb
+            where case_id = 'CASE-DIRECT-1'
+        """)
+        before = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        count = before["statistics"]["invoice_total_count"]
+        self.assertEqual(before["summary"]["paired_count"], 0)
+        self._insert_supporting_document()
+        after = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        group = next(group for group in after["paired"]["groups"] if group.get("detail_key") == "CASE-DIRECT-1")
+        self.assertTrue(group["completion"]["is_complete"])
+        self.assertEqual(group["completion"]["missing_row_types"], [])
+        self.assertNotIn("workbench_anomaly", group)
+        self.assertEqual(group["invoice_rows"], [])
+        self.assertEqual(after["statistics"]["invoice_total_count"], count)
+        documents = group["oa_rows"][0]["expense_items"][0]["supporting_documents"]
+        self.assertEqual(documents[0]["file_name"], "凭证.png")
+        detail = self.repository.get_workbench_group_detail(scope_key="2026-07", zone="paired",
+            group_id=group["group_id"], detail_key=group["detail_key"])
+        self.assertEqual(detail["group"]["oa_rows"][0]["expense_items"][0]["supporting_documents"], documents)
+        self.raw_connection.execute("update app.workbench_oa_supporting_documents set status = 'deleted'")
+        deleted = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        restored = next(group for group in deleted["unpaired"]["groups"] if group.get("detail_key") == "CASE-DIRECT-1")
+        self.assertEqual(restored["completion"]["missing_row_types"], ["invoice"])
+        self.assertEqual(restored["oa_rows"][0]["expense_items"][0]["supporting_documents"], [])
+        self.assertEqual(restored["workbench_anomaly"]["items"][0]["code"], "oa_invoice_attachment_absent")
+        self.raw_connection.execute("update app.workbench_oa_supporting_documents set status = 'active'")
+        self.raw_connection.execute("update app.file_objects set tombstoned_at = now() where object_key = 'doc.png'")
+        tombstoned = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        self.assertFalse(any(group.get("detail_key") == "CASE-DIRECT-1" for group in tombstoned["paired"]["groups"]))
+
+    def test_mixed_document_and_invoice_sql_python_amount_parity(self) -> None:
+        self._insert_supporting_document()
+        self.raw_connection.execute("""
+            update app.oa_applications set normalized_payload = jsonb_set(normalized_payload,
+                '{expense_items}', '[{"id":"oa-direct-1:item:0","amount":"20"},
+                                    {"id":"oa-direct-1:item:1","amount":"80"}]'::jsonb)
+            where row_id = 'oa-direct-1'
+        """)
+        self.raw_connection.execute("""
+            insert into app.invoices(legacy_mongo_id, invoice_type, invoice_no, invoice_date,
+                invoice_month, amount, signed_amount, total_with_tax, status, source_links, raw_payload)
+            values ('doc-invoice', 'input', 'DOC-INVOICE', '2026-07-21', '2026-07-01', 80, 80, 80,
+                'active', '[{"source_type":"oa_expense_item_invoice","source_oa_id":"oa-direct-1",
+                            "source_expense_item_id":"oa-direct-1:item:1"}]'::jsonb, '{}'::jsonb)
+        """)
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set
+                row_ids = array['oa-direct-1','bank-direct-1','doc-invoice'],
+                row_types = array['oa','bank','invoice'], special_metadata = '{"requires_invoice":true}'::jsonb
+            where case_id = 'CASE-DIRECT-1'
+        """)
+        matched = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        group = next(group for group in matched["paired"]["groups"] if group.get("detail_key") == "CASE-DIRECT-1")
+        self.assertNotIn("workbench_anomaly", group)
+        self.assertEqual(group["amount_check"]["invoice_total"], "80.00")
+        self.assertEqual(group["amount_check"]["oa_total"], "100.00")
+        with self.raw_connection.transaction() as transaction:
+            transaction.execute("select set_config('fin_ops.correction_reason', '凭证比较测试', true)")
+            transaction.execute("select set_config('fin_ops.actor_id', 'test-suite', true)")
+            transaction.execute("update app.invoices set amount=79, signed_amount=79, total_with_tax=79 where legacy_mongo_id='doc-invoice'")
+        mismatched = self.repository.get_workbench_groups_page(scope_key="2026-07", zone="unpaired", exception_bucket="unpaired")
+        group = next(group for group in mismatched["groups"] if group.get("detail_key") == "CASE-DIRECT-1")
+        anomaly = group["workbench_anomaly"]
+        self.assertEqual([item["code"] for item in anomaly["items"]], ["oa_bank_equal_invoice_less"])
+        self.assertEqual(anomaly["items"][0]["amount_delta"], "1.00")
+        PostgresWorkbenchRepository(self.raw_connection).set_workbench_anomaly_review_decision(
+            fingerprint=anomaly["fingerprint"], group_id=group["group_id"], scope_key="2026-07",
+            actor_id="test-suite", actor_account="test-suite", actor_name="测试", decision="accept_paired",
+            note="金额差异仍然可审阅", detected_classification_codes=["oa_bank_equal_invoice_less"],
+            evidence_item_fingerprints=anomaly["evidence_item_fingerprints"],
+        )
+        accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        self.assertTrue(any(group.get("detail_key") == "CASE-DIRECT-1" for group in accepted["paired"]["groups"]))
+
     def test_direct_initial_and_groups_use_canonical_facts_without_read_model(self) -> None:
         initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
 
@@ -891,7 +984,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            3,
+            4,
         )
         exception_sql = next(
             str(statement.get("raw_sql") or "")
@@ -2144,7 +2237,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            3,
+            4,
         )
 
     def test_page_etc_hydration_is_one_statement_and_matches_legacy_dto(self) -> None:
@@ -3036,7 +3129,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 all(float(statement["duration_ms"]) >= 0 for statement in self.connection.statements)
             )
         self.assertEqual(statement_counts[0], statement_counts[1])
-        self.assertEqual(statement_counts, [3, 3])
+        self.assertEqual(statement_counts, [4, 4])
         if os.environ.get("FIN_OPS_PRINT_QUERY_TIMINGS") == "1":
             print(json.dumps(self.connection.statements, ensure_ascii=False, indent=2))
 

@@ -698,3 +698,12 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `tests/test_search_query.py` 与 `tests/test_workbench_routes.py` 保护 `2100`、`1320` 等整数金额保留尾零，`202.00` 等小数金额继续归一为等价搜索值。
 - `tests/test_oa_attachment_invoice_linking.py` 保护父 source 候选索引不改变唯一匹配，并让共享父 source 的多个 OA 继续判定为歧义。
 - `tests/test_workbench_query_postgres_integration.py`、pending OA relation lock、异常历史 snapshot 与 reviewer identity migration 在本机 disposable PostgreSQL 全量执行，覆盖 initial/groups/detail、搜索、确认关系和异常状态链；生产验证仅使用只读数据，真实财务关系写操作由 test-owned PostgreSQL 集成与发布门禁覆盖。
+
+## 2026-09-11 补充凭证同行与资料闭环
+
+- 业务单元：`test_workbench_amount_check_service.py` 覆盖仅凭证、混合正式发票、真实 OA/银行差额、已有发票差额、共享发票不重复计额、删除后恢复。
+- 服务与 API 回归：凭证 service、invoice supplement API/service 的既有上传/删除/权限/幂等/失败及 gallery 用例；接口及持久化合同未变化。
+- PostgreSQL 集成：`test_workbench_query_postgres_integration.py` 验证历史 active 凭证进入 initial/summary/detail、SQL/Python 分区及异常 fingerprint 一致、删除/文件 tombstone 恢复、统一发票池不变、固定批量查询数不随组数增加。
+- 前端：`groupDisplayModel.test.ts`、`WorkbenchSupportingDocumentFiles.test.tsx`、`WorkbenchInvoiceEntryDrawer.test.tsx` 覆盖一项多文件全宽 cell、精确明细管理、只读权限、正式发票同行及共享布局回归。
+- 浏览器：`workbench-supporting-documents-flow.spec.ts` 用确定性 API fixture 验证上传 → 一次 canonical 回读 → 同行文件/预览 → 管理 → 删除 → 一次回读恢复录入入口；桌面与 390px 窄屏可见性。实际存储和状态规则由 PostgreSQL 集成验证，生产仅做真实文件预览与只读核对。
+- 无新 read model/cache/worker；此类别不适用。现有直接查询不会 enqueue 或创建缓存。
