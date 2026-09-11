@@ -4,6 +4,7 @@ import json
 import os
 import time
 import unittest
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -355,12 +356,55 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 %s::text[], %s::text[], '{}'::jsonb,
                 '{"requires_oa":true,"requires_invoice":true,"total_amount":"2216.56"}'::jsonb, '{}'::jsonb)
         """, (ids, ["bank"] * 5))
+        self.raw_connection.execute("""
+            insert into app.bank_flow_rule_batches(batch_id, status, version, total_amount, bank_transaction_ids)
+            values ('batch-search', 'submitted', 1, 2216.56, %s::text[])
+        """, (ids,))
         for search in ["2216.56", "97.52"]:
             result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search=search)
             batch = next(group for group in result["groups"] if group.get("detail_key") == "batch-search")
             self.assertEqual(set(batch["formal_member_ids"]), set(ids))
-            self.assertEqual(batch["bank_rows"][0]["amount"], "2216.56")
-            self.assertEqual(batch["collapsed_row_counts"]["bank"], 5)
+            self.assertEqual(Decimal(batch["bank_batches"][0]["summary_row"]["amount"]), Decimal("2216.56"))
+            self.assertEqual(len(batch["bank_batches"][0]["member_ids"]), 5)
+            self.assertEqual(batch["row_counts"]["bank"], 5)
+        # Merge into the existing OA+ETC relation: original batch identity survives.
+        self.raw_connection.execute("delete from app.workbench_pair_relations where case_id = 'batch-search'")
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set row_ids = row_ids || %s::text[],
+                row_types = row_types || %s::text[], version = version + 1
+            where case_id = 'CASE-DIRECT-1'
+        """, (ids, ["bank"] * 5))
+        self.raw_connection.execute("""
+            update app.oa_applications set amount=2316.56,
+                normalized_payload = normalized_payload || '{"amount":"2316.56","expense_items":[]}'::jsonb
+            where row_id='oa-direct-1'
+        """)
+        self.raw_connection.execute("""
+            update app.etc_business_batches set total_amount=2316.56 where business_batch_id='etc_202607_linked'
+        """)
+        self.raw_connection.execute("""
+            update app.etc_invoices set amount=2316.56, total_with_tax=2316.56, tax_amount=0
+            where business_batch_id='etc_202607_linked'
+        """)
+        for detail_level in ("summary", "full"):
+            merged_page = self.repository.get_workbench_groups_page(
+                scope_key="all", zone="paired", search="2216.56", detail_level=detail_level)
+            merged = next(group for group in merged_page["groups"] if group["detail_key"] == "CASE-DIRECT-1")
+            self.assertEqual(merged["relation_mode"], "manual_confirmed")
+            self.assertEqual(merged["bank_batches"][0]["member_ids"], ids)
+            self.assertEqual(merged["row_counts"]["bank"], 6)
+            self.assertEqual(len(merged["oa_rows"]), 1)
+            self.assertEqual(len(merged["invoice_rows"]), 1)
+        self.raw_connection.execute("""
+            update app.bank_flow_rule_batches set status='withdrawn' where batch_id='batch-search'
+        """)
+        withdrawn = self.repository.get_workbench_groups_page(scope_key="all", zone="paired", search="97.52")
+        self.assertNotIn("bank_batches", withdrawn["groups"][0])
+        # Release only this fixture's association before checking exact standalone selection.
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set row_ids = array['oa-direct-1','bank-direct-1','etc-summary-etc_202607_linked'],
+                row_types = array['oa','bank','invoice'] where case_id='CASE-DIRECT-1'
+        """)
         selection = self.selection_repository.get_workbench_relation_preview_selection(
             scope_key="all", row_ids=ids, row_types=["bank"] * 5,
         )
@@ -1015,7 +1059,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            4,
+            5,  # Includes one set-based submitted-batch read.
         )
         exception_sql = next(
             str(statement.get("raw_sql") or "")
@@ -2268,7 +2312,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            4,
+            5,  # Includes one set-based submitted-batch read.
         )
 
     def test_page_etc_hydration_is_one_statement_and_matches_legacy_dto(self) -> None:
@@ -3160,7 +3204,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 all(float(statement["duration_ms"]) >= 0 for statement in self.connection.statements)
             )
         self.assertEqual(statement_counts[0], statement_counts[1])
-        self.assertEqual(statement_counts, [4, 4])
+        self.assertEqual(statement_counts, [5, 5])  # Includes one set-based submitted-batch read.
         if os.environ.get("FIN_OPS_PRINT_QUERY_TIMINGS") == "1":
             print(json.dumps(self.connection.statements, ensure_ascii=False, indent=2))
 

@@ -28,6 +28,7 @@ type RelationGroupCellProps = {
   readOnly?: boolean;
   allowInvoiceEntryInReadOnly?: boolean;
   leadingControl?: ReactNode;
+  rowControls?: Map<string, ReactNode>;
 };
 
 function RelationGroupCell({
@@ -49,6 +50,7 @@ function RelationGroupCell({
   readOnly = false,
   allowInvoiceEntryInReadOnly = false,
   leadingControl,
+  rowControls,
 }: RelationGroupCellProps) {
   const isSingleRecord = records.length === 1;
 
@@ -88,7 +90,7 @@ function RelationGroupCell({
             row={row}
             rowState={getRowState(row, zoneId)}
             sheetRowMode={isSingleRecord ? "stretched" : "split"}
-            leadingControl={index === 0 ? leadingControl : undefined}
+            leadingControl={rowControls?.get(row.id) ?? (index === 0 ? leadingControl : undefined)}
             showWorkflowActions={showWorkflowActions}
             canOperateData={canOperateData}
             readOnly={readOnly}

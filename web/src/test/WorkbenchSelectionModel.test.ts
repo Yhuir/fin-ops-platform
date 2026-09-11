@@ -724,44 +724,27 @@ describe("buildWorkbenchSelectionContext", () => {
     });
   });
 
-  test("keeps compact bank-flow formal identities without inventing unhydrated records", () => {
-    const summaryRow = row("bank-flow-summary", "bank", "124.50");
-    summaryRow.sourceKind = "bank_flow_rule_batch_summary";
+  test.each(["paired", "unpaired"] as const)("batch summaries and expanded members select identical canonical members in %s", (zoneId) => {
+    const banks = [row("bank-1", "bank", "10"), row("bank-2", "bank", "20"), row("bank-3", "bank", "30")];
+    const oa = row("oa-1", "oa", "60");
+    const invoice = row("invoice-1", "invoice", "60");
+    const summary = row("bank-batch-summary", "bank", "60");
+    summary.sourceKind = "bank_flow_rule_batch_summary";
     const sourceGroup: WorkbenchRelationGroup = {
-      id: "bank-flow-rule-batch:compact",
-      groupType: "paired",
-      rawGroupType: "relation",
-      relationMode: "bank_flow_rule_batch",
-      matchConfidence: "high",
-      reason: "active_formal_relation",
-      summaryRow,
-      formalMemberIdentities: [
-        { id: "bank-detail-1", recordType: "bank" },
-        { id: "bank-detail-2", recordType: "bank" },
-      ],
-      rows: { oa: [], bank: [summaryRow], invoice: [] },
-      amountCheck: authoritativeAmountCheck("0.00", "124.50", "0.00"),
+      ...group("mixed"), rawGroupType: "relation", relationMode: "manual_confirmed", groupType: zoneId,
+      rows: { oa: [oa], bank: banks, invoice: [invoice] },
+      formalMemberIdentities: [oa, ...banks, invoice].map(({ id, recordType }) => ({ id, recordType })),
+      amountCheck: authoritativeAmountCheck("60.00", "60.00", "60.00"),
+      bankBatches: [{ batchId: "batch", memberIds: banks.map(({ id }) => id), summaryRow: summary }],
     };
-
-    const context = buildWorkbenchSelectionContext({
-      explicitRows: [summaryRow],
-      sourceGroups: [sourceGroup],
-      zoneId: "paired",
-    });
-
-    expect(context.explicitRows).toEqual([summaryRow]);
-    expect(context.includedRows).toEqual([]);
-    expect(context.includedRowIdentities).toEqual([
-      { id: "bank-detail-1", recordType: "bank" },
-      { id: "bank-detail-2", recordType: "bank" },
-    ]);
-    expect(context.selectedRelationGroupIds).toEqual(["bank-flow-rule-batch:compact"]);
-    expect(context.summary).toMatchObject({
-      explicitTotal: 1,
-      total: 2,
-      bank: 2,
-      amounts: { oa: "0.00", bank: "124.50", invoice: "0.00" },
-    });
+    const collapsed = buildWorkbenchSelectionContext({ explicitRows: [summary], sourceGroups: [sourceGroup], zoneId });
+    const expanded = buildWorkbenchSelectionContext({ explicitRows: [banks[0]], sourceGroups: [sourceGroup], zoneId });
+    const both = buildWorkbenchSelectionContext({ explicitRows: [summary, ...banks], sourceGroups: [sourceGroup], zoneId });
+    expect(collapsed.includedRowIdentities).toEqual(expanded.includedRowIdentities);
+    expect(both.includedRowIdentities).toEqual(expanded.includedRowIdentities);
+    expect(collapsed.summary).toMatchObject({ total: 5, bank: 3, oa: 1, invoice: 1,
+      amounts: { bank: "60.00", oa: "60.00", invoice: "60.00" } });
+    expect(collapsed.includedRowIdentities.some(({ id }) => id === summary.id)).toBe(false);
   });
 
   test("keeps valid formal identities selectable when hydration and amount display are incomplete", () => {

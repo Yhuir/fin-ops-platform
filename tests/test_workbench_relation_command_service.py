@@ -11,6 +11,7 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     WorkbenchRelationCommandError,
     WorkbenchRelationCommandService,
 )
+from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 
 def command_service() -> WorkbenchRelationCommandService:
@@ -24,6 +25,37 @@ def command_service() -> WorkbenchRelationCommandService:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_confirm_and_withdraw_keep_submitted_batch_display_identity(self) -> None:
+        service = command_service()
+        grouping = WorkbenchRelationGroupingService()
+        bank_ids = [f"bank-{index}" for index in range(3)]
+        rows = {rid: {"id": rid, "type": "bank", "object_identity_key": rid, "amount": "10.00"} for rid in bank_ids}
+        rows.update({kind: {"id": kind, "type": kind, "object_identity_key": kind, "amount": "30.00"} for kind in ("oa", "invoice")})
+        batch = {"batch_id": "batch", "status": "submitted", "version": 1,
+                 "row_ids": bank_ids, "total_amount": "30.00"}
+
+        def displayed_batch():
+            payload = grouping.group_payload("all", rows_by_id=rows,
+                active_relations=service.active_relations_for_row_ids(list(rows)))
+            groups = [*payload["paired"]["groups"], *payload["unpaired"]["groups"]]
+            grouping.apply_bank_batches(groups, [batch])
+            return next(group for group in groups if group.get("bank_batches"))
+
+        service.confirm_relation(case_id="batch", row_ids=bank_ids, row_types=["bank"] * 3,
+            relation_mode="bank_flow_rule_batch", actor_id="tester")
+        before = displayed_batch()["bank_batches"]
+        service.confirm_relation(case_id="merged", row_ids=list(rows),
+            row_types=[rows[rid]["type"] for rid in rows], relation_mode="manual_confirmed",
+            actor_id="tester", replace_existing=True, history_operation_type="confirm_link")
+        self.assertEqual(displayed_batch()["bank_batches"][0]["batch_id"], before[0]["batch_id"])
+        self.assertEqual(displayed_batch()["bank_batches"][0]["member_ids"], bank_ids)
+        preview = service.preview_withdraw_relation(row_ids=list(rows), row_types=[rows[rid]["type"] for rid in rows])
+        service.withdraw_relation(case_id="merged", actor_id="tester", row_ids=list(rows),
+            row_types=[rows[rid]["type"] for rid in rows], preview_id=preview["preview_id"],
+            operation_type=preview["operation_type"], expected_versions=preview["submit_expected_versions"])
+        self.assertEqual(displayed_batch()["bank_batches"][0]["member_ids"], bank_ids)
+        self.assertEqual(service.get_active_relation_by_case_id("batch")["row_ids"], bank_ids)
+
     def test_batch_withdraw_unwinds_merges_preserves_other_relations_and_is_idempotent(self) -> None:
         service = command_service()
         bank_ids = [f"batch-bank-{index}" for index in range(5)]

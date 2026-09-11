@@ -116,12 +116,6 @@ function resolveCollapsedSummaryCopy(
       countUnit: "张",
     };
   }
-  if (group.relationMode === "bank_flow_rule_batch") {
-    return {
-      detailLabel: "流水规则批次明细",
-      countUnit: "条",
-    };
-  }
 
   return {
     detailLabel: "折叠明细",
@@ -483,11 +477,55 @@ function RelationGroupGrid({
     <div ref={gridBodyRef} className="candidate-grid-body" role="rowgroup">
       {groups.length === 0 ? <div className="state-panel">当前区域暂无记录。</div> : null}
       {groups.map((group, index) => {
+        const bankRowControls = new Map<string, ReactNode>();
+        const bankBatchByMember = new Map(
+          (group.bankBatches ?? []).flatMap((batch) => batch.memberIds.map((id) => [id, batch] as const)),
+        );
+        const bankRowsByBatch = new Map<string, WorkbenchRecord[]>();
+        group.rows.bank.forEach((row) => {
+          const batch = bankBatchByMember.get(row.id);
+          if (batch) {
+            const members = bankRowsByBatch.get(batch.batchId) ?? [];
+            members.push(row);
+            bankRowsByBatch.set(batch.batchId, members);
+          }
+        });
+        const emittedBatches = new Set<string>();
+        const bankDisplayRows = group.rows.bank.flatMap((row) => {
+          const batch = bankBatchByMember.get(row.id);
+          if (!batch) return [row];
+          if (emittedBatches.has(batch.batchId)) return [];
+          emittedBatches.add(batch.batchId);
+          const key = `bank-batch:${batch.batchId}`;
+          const expanded = expandedPaneGroups.has(key);
+          const members = bankRowsByBatch.get(batch.batchId)!;
+          const visible = expanded ? members : [batch.summaryRow];
+          bankRowControls.set(visible[0].id, (
+            <button
+              aria-expanded={expanded}
+              aria-label={`${expanded ? "收起" : "展开"}流水批次，${batch.memberIds.length} 条`}
+              className="row-action-btn candidate-group-collapse-control"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setExpandedPaneGroups((current) => {
+                  const next = new Set(current);
+                  if (expanded) next.delete(key); else next.add(key);
+                  return next;
+                });
+              }}
+            >
+              {expanded ? "收起明细" : `展开 ${batch.memberIds.length} 条明细`}
+            </button>
+          ));
+          return visible;
+        });
         const paneIsCollapsed = (paneId: WorkbenchRecordType) => (
           (group.collapsedRowCounts?.[paneId] ?? 0) > 0
           || (group.collapsedRows?.[paneId]?.length ?? 0) > 0
         );
         const paneRecords = (paneId: WorkbenchRecordType) => {
+          if (paneId === "bank" && group.bankBatches?.length) return bankDisplayRows;
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];
           if (!paneIsCollapsed(paneId)) {
             return group.rows[paneId];
@@ -644,6 +682,7 @@ function RelationGroupGrid({
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
                       leadingControl={renderCollapseControls(paneId)}
+                      rowControls={paneId === "bank" ? bankRowControls : undefined}
                       searchQuery={displayState.searchQuery}
                       onOpenDetail={onOpenDetail}
                       onRowAction={(row, action) => onRowAction(row, action, group)}
@@ -737,6 +776,7 @@ function RelationGroupGrid({
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
                       leadingControl={renderCollapseControls(paneId)}
+                      rowControls={paneId === "bank" ? bankRowControls : undefined}
                       searchQuery={displayState.searchQuery}
                       onOpenDetail={onOpenDetail}
                       onRowAction={(row, action) => onRowAction(row, action, group)}

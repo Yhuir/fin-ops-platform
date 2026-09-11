@@ -1418,7 +1418,7 @@ function bankFlowRuleInvoiceRequiredGroup(
 function bankFlowRuleWorkbenchGroups(
   zone: WorkbenchZone,
   invoiceRequiredConfirmed = false,
-  includeFullCollapsedRows = false,
+  _includeFullCollapsedRows = false,
   includeFeeGroup = true,
 ) {
   const invoiceRequiredGroup = bankFlowRuleInvoiceRequiredGroup(zone, invoiceRequiredConfirmed);
@@ -1451,19 +1451,13 @@ function bankFlowRuleWorkbenchGroups(
       match_confidence: "high",
       reason: "流水规则手续费批次",
       relation_mode: "bank_flow_rule_batch",
-      display_mode: "collapsed_summary",
-      default_collapsed: true,
-      summary_row: summaryRow,
-      collapsed_rows: {
-        bank: includeFullCollapsedRows ? collapsedRows : collapsedRows.slice(0, 3),
-        oa: [],
-        invoice: [],
-      },
-      collapsed_row_counts: { oa: 0, bank: 4, invoice: 0 },
+      bank_batches: [{ batch_id: "bank_flow_rule_batch_e2e_fee", member_ids: collapsedRows.map((row) => row.id), summary_row: summaryRow }],
+      formal_member_ids: collapsedRows.map((row) => row.id),
+      formal_member_types: collapsedRows.map(() => "bank"),
       row_counts: { oa: 0, bank: 4, invoice: 0 },
       display_row_counts: { oa: 0, bank: 1, invoice: 0 },
       oa_rows: [],
-      bank_rows: [summaryRow],
+      bank_rows: collapsedRows,
       invoice_rows: [],
       can_withdraw: false,
     };

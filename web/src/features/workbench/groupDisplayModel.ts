@@ -151,7 +151,8 @@ export function buildWorkbenchGroupDisplayLayout(
     !rowExpenseItemIds(row).some((itemId) => expenseItemIds.has(itemId))
   ));
   const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
-    !(paneId === "bank" && hasExpenseClaimItems && sourceGroup.rows.oa.length === 1)
+    !(paneId === "bank" && group.bankBatches?.length)
+    && !(paneId === "bank" && hasExpenseClaimItems && sourceGroup.rows.oa.length === 1)
     && (
       (paneId === "invoice" && hasUnassignedInvoices)
       || Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
@@ -795,7 +796,7 @@ function groupMatchesPaneCriteria(group: WorkbenchRelationGroup, state: Workbenc
 }
 
 function isCollapsedSummaryGroup(group: WorkbenchRelationGroup) {
-  return group.displayMode === "collapsed_summary";
+  return group.displayMode === "collapsed_summary" || Boolean(group.bankBatches?.length);
 }
 
 function applyPaneCriteriaToGroup(

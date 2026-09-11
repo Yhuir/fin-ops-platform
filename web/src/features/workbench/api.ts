@@ -462,6 +462,7 @@ type ApiWorkbenchGroup = {
   display_mode?: string | null;
   default_collapsed?: boolean | null;
   summary_row?: ApiWorkbenchRow | null;
+  bank_batches?: { batch_id: string; member_ids: string[]; summary_row: ApiWorkbenchRow }[];
   formal_member_ids?: unknown[] | null;
   formal_member_types?: unknown[] | null;
   row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
@@ -1153,6 +1154,7 @@ function normalizeRowAvailableActions(row: ApiWorkbenchRow) {
     return ["detail"];
   }
   const actions = row.available_actions ?? [];
+  if (row.source_kind === "bank_flow_rule_batch_summary") return actions;
   if (!isNoOaBatchRow(row) && !isBankFlowRuleBatchRow(row)) {
     return actions;
   }
@@ -1657,6 +1659,9 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
       : undefined,
     defaultCollapsed: group.default_collapsed === true ? true : undefined,
     summaryRow,
+    bankBatches: group.bank_batches?.map((batch) => ({
+      batchId: batch.batch_id, memberIds: batch.member_ids, summaryRow: mapRow(batch.summary_row),
+    })),
     formalMemberIdentities,
     rows,
     rowCounts,

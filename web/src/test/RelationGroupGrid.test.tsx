@@ -1,7 +1,6 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
-import { useState } from "react";
 
 import RelationGroupGrid from "../components/workbench/RelationGroupGrid";
 import RelationGroupCell from "../components/workbench/RelationGroupCell";
@@ -266,97 +265,17 @@ describe("Workbench candidate grouping layout", () => {
   }
 
   function createBankFlowCollapsedGroup(): WorkbenchRelationGroup {
-    const summary = createNoOaBankRecord("bank-flow-summary-BATCH-202603-FEE", "流水规则手续费批次", "124.50", "15 条手续费");
+    const bankRows = Array.from({ length: 15 }, (_, i) => createNoOaBankRecord(
+      `bank-fee-${i}`, i === 0 ? "建设银行手续费" : `手续费明细${i}`, "8.30", "账户管理费",
+    ));
+    const summary = createNoOaBankRecord("bank-flow-summary-BATCH-202603-FEE", "流水规则手续费批次", "124.50", "");
     return {
-      ...createNoOaCollapsedGroup(),
-      id: "bank-flow-rule-batch:BATCH-202603-FEE",
-      relationMode: "bank_flow_rule_batch",
-      reason: "流水规则手续费批次",
-      displayMode: "collapsed_summary",
-      defaultCollapsed: true,
-      summaryRow: summary,
-      rows: {
-        oa: [],
-        bank: [summary],
-        invoice: [],
-      },
-      rowCounts: {
-        oa: 0,
-        bank: 15,
-        invoice: 0,
-        rows: 15,
-      },
-      displayRowCounts: {
-        oa: 0,
-        bank: 1,
-        invoice: 0,
-        rows: 1,
-      },
-      collapsedRows: {
-        bank: [
-          createNoOaBankRecord("bk-bank-flow-fee-001", "建设银行手续费", "8.30", "摘要：账户管理费"),
-          createNoOaBankRecord("bk-bank-flow-fee-002", "网银服务费", "7.20", "摘要：企业网银年费"),
-        ],
-      },
-      collapsedRowCounts: {
-        bank: 15,
-      },
-    };
-  }
-
-  function createBankFlowPlaceholderGroup(): WorkbenchRelationGroup {
-    const group = createBankFlowCollapsedGroup();
-    const placeholder: WorkbenchRecord = {
-      ...createNoOaBankRecord("bk-bank-flow-placeholder-001", "占位明细", "--", "--"),
-      label: "--",
-      status: "待处理",
-      statusCode: "pending_match",
-      statusTone: "warn",
-      amount: "--",
-      tableValues: {
-        transactionTime: "--",
-        direction: "--",
-        amount: "--",
-        debitAmount: "--",
-        creditAmount: "--",
-        counterparty: "占位明细",
-        paymentAccount: "--",
-        invoiceRelationStatus: "待处理",
-        note: "--",
-        loanRepaymentDate: "--",
-      },
-      specialMetadata: undefined,
-    };
-    return {
-      ...group,
-      collapsedRows: {
-        bank: [placeholder],
-      },
-      collapsedRowCounts: {
-        bank: 15,
-      },
-    };
-  }
-
-  function createBankFlowFullDetailGroup(): WorkbenchRelationGroup {
-    const group = createBankFlowCollapsedGroup();
-    const collapsedRows = Array.from({ length: 15 }, (_, index) => {
-      const itemNumber = index + 1;
-      return createNoOaBankRecord(
-        `bk-bank-flow-fee-${String(itemNumber).padStart(3, "0")}`,
-        itemNumber === 1 ? "建设银行手续费" : `网银服务费${itemNumber}`,
-        (8.3 + index).toFixed(2),
-        `摘要：手续费${itemNumber}`,
-      );
-    });
-    return {
-      ...group,
-      collapsedRows: {
-        bank: collapsedRows,
-      },
-      collapsedRowCounts: {
-        bank: 15,
-      },
+      ...createNoOaCollapsedGroup(), id: "bank-flow-rule-batch:BATCH-202603-FEE",
+      relationMode: "bank_flow_rule_batch", rawGroupType: "relation",
+      rows: { oa: [], bank: bankRows, invoice: [] },
+      formalMemberIdentities: bankRows.map((row) => ({ id: row.id, recordType: "bank" })),
+      bankBatches: [{ batchId: "BATCH-202603-FEE", memberIds: bankRows.map((row) => row.id), summaryRow: summary }],
+      rowCounts: { oa: 0, bank: 15, invoice: 0, rows: 15 },
     };
   }
 
@@ -780,14 +699,11 @@ describe("Workbench candidate grouping layout", () => {
       group_id: "bank-flow-rule-batch:BANKFLOW-202603-FEE",
       reason: "流水规则手续费批次",
       relation_mode: "bank_flow_rule_batch",
-      display_mode: "collapsed_summary",
-      default_collapsed: true,
-      summary_row: summaryRow,
-      bank_rows: [summaryRow],
+      bank_batches: [{ batch_id: "BANKFLOW-202603-FEE", member_ids: collapsedBankRows.map((row) => row.id), summary_row: summaryRow }],
+      bank_rows: collapsedBankRows,
       formal_member_ids: collapsedBankRows.map((row) => row.id),
       formal_member_types: collapsedBankRows.map(() => "bank"),
-      collapsed_rows: { bank: collapsedBankRows },
-      collapsed_row_counts: { bank: 4 },
+
       row_counts: { oa: 0, bank: 4, invoice: 0, rows: 4 },
       display_row_counts: { oa: 0, bank: 1, invoice: 0, rows: 1 },
     });
@@ -1000,7 +916,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(ensureGroupDetail).not.toHaveBeenCalled();
   });
 
-  test("keeps truncated collapsed summary detail lazy until the user expands it", () => {
+  test("expands bank members already loaded by the page without a detail request", () => {
     const group = createBankFlowCollapsedGroup();
     const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
 
@@ -1024,6 +940,10 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "展开流水批次，15 条" }));
+    expect(screen.getByText("建设银行手续费")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "收起流水批次，15 条" }));
+    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
     expect(ensureGroupDetail).not.toHaveBeenCalled();
   });
 
@@ -1755,7 +1675,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
     expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
     expect(screen.queryByText("隐藏内容命中")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "展开流水批次，15 条" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
@@ -1810,67 +1730,43 @@ describe("Workbench candidate grouping layout", () => {
     expect(invoiceCell).not.toHaveTextContent("ETC-002");
   });
 
-  test("does not expand a new search result after an earlier detail request finishes", async () => {
-    const group = createBankFlowPlaceholderGroup();
-    let resolveDetail!: () => void;
-    const detailLoaded = new Promise<void>((resolve) => {
-      resolveDetail = resolve;
-    });
-    const ensureGroupDetail = vi.fn(() => detailLoaded);
-    const renderGrid = (searchQuery: string) => {
-      const state = createEmptyWorkbenchZoneDisplayState();
-      state.searchQuery = searchQuery;
-      return (
-        <RelationGroupGrid
-          canOperateData
-          displayState={state}
-          getRowState={() => "idle"}
-          groups={[group]}
-          onEnsureGroupDetail={ensureGroupDetail}
-          onOpenDetail={() => undefined}
-          onRowAction={() => undefined}
-          onSelectRow={() => undefined}
-          panes={[
-            { id: "oa", title: "OA", rows: [] },
-            { id: "bank", title: "银行流水", rows: group.rows.bank },
-            { id: "invoice", title: "进销项发票", rows: [] },
-          ]}
-          rowTemplateColumns="1fr 8px 1fr 8px 1fr"
-          zoneId="paired"
-        />
-      );
+
+  test.each(["paired", "unpaired"] as const)("keeps multiple batches independently collapsible in %s mixed relations", (zoneId) => {
+    const group = createBankFlowCollapsedGroup();
+    const first = group.rows.bank.slice(0, 3);
+    const second = group.rows.bank.slice(3, 6);
+    const ordinary = createNoOaBankRecord("ordinary", "普通流水", "5.00", "");
+    group.relationMode = "manual_confirmed";
+    group.rows = { oa: [createOaRecord("batch-oa", "申请人", "54.80")],
+      bank: [...first, ...second, ordinary], invoice: [createInvoiceRecord("batch-invoice", "INV-BATCH")] };
+    group.bankBatches = [
+      { batchId: "first", memberIds: first.map((row) => row.id), summaryRow: { ...group.bankBatches![0].summaryRow, id: "first-summary" } },
+      { batchId: "second", memberIds: second.map((row) => row.id), summaryRow: { ...group.bankBatches![0].summaryRow, id: "second-summary" } },
+    ];
+    const props = {
+      canOperateData: true, displayState: createEmptyWorkbenchZoneDisplayState(),
+      getRowState: () => "idle" as const, groups: [group], onOpenDetail: vi.fn(), onRowAction: vi.fn(), onSelectRow: vi.fn(),
+      panes: [{ id: "oa" as const, title: "OA", rows: group.rows.oa }, { id: "bank" as const, title: "银行流水", rows: group.rows.bank },
+        { id: "invoice" as const, title: "发票", rows: group.rows.invoice }], rowTemplateColumns: "1fr 8px 1fr 8px 1fr", zoneId,
     };
-    const { rerender } = render(renderGrid("手续费"));
-
-    fireEvent.click(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" }));
-    expect(screen.getByText("加载中")).toBeInTheDocument();
-
-    rerender(renderGrid("ETC"));
-
-    expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(screen.queryByText("加载中")).not.toBeInTheDocument();
-
-    await act(async () => {
-      resolveDetail();
-      await detailLoaded;
-    });
-
-    expect(ensureGroupDetail).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-    expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
-    expect(screen.queryByText("占位明细")).not.toBeInTheDocument();
+    const { rerender } = render(<RelationGroupGrid {...props} />);
+    expect(screen.getAllByRole("button", { name: "展开流水批次，3 条" })).toHaveLength(2);
+    expect(screen.getByText("普通流水")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "展开流水批次，3 条" })[0]);
+    expect(screen.getByText("建设银行手续费")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "展开流水批次，3 条" })).toHaveLength(1);
+    rerender(<RelationGroupGrid {...props} groups={[{ ...group }]} />);
+    expect(screen.getByRole("button", { name: "收起流水批次，3 条" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "收起流水批次，3 条" }));
+    expect(screen.getAllByRole("button", { name: "展开流水批次，3 条" })).toHaveLength(2);
+    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
+    expect(screen.getByText("INV-BATCH")).toBeInTheDocument();
   });
 
   test("renders bank-flow summary rows without overlapping collapsed count copy", () => {
     renderNoOaGrid(createBankFlowCollapsedGroup());
 
-    const expandButton = screen.getByRole("button", { name: "展开流水规则批次明细，15 条" });
+    const expandButton = screen.getByRole("button", { name: "展开流水批次，15 条" });
     const summaryRow = screen.getByRole("row", { name: /流水规则手续费批次/ });
     expect(expandButton).toHaveTextContent("展开 15 条明细");
     expect(within(summaryRow).queryByRole("button", { name: /^查看银行流水 .* 详情$|^详情$/ })).not.toBeInTheDocument();
@@ -1915,61 +1811,6 @@ describe("Workbench candidate grouping layout", () => {
     expect(ensureGroupDetail).not.toHaveBeenCalled();
   });
 
-  test("waits for full collapsed detail before expanding truncated summary rows", async () => {
-    const summaryGroup = createBankFlowPlaceholderGroup();
-    const fullDetailGroup = createBankFlowFullDetailGroup();
-    const ensureGroupDetail = vi.fn();
-    let resolveDetail!: () => void;
-    const detailLoaded = new Promise<void>((resolve) => {
-      resolveDetail = resolve;
-    });
-
-    function GridHarness() {
-      const [group, setGroup] = useState(summaryGroup);
-      return (
-        <RelationGroupGrid
-          canOperateData
-          displayState={createEmptyWorkbenchZoneDisplayState()}
-          getRowState={() => "idle"}
-          groups={[group]}
-          onEnsureGroupDetail={async (zoneId, groupId) => {
-            ensureGroupDetail(zoneId, groupId);
-            await detailLoaded;
-            setGroup(fullDetailGroup);
-          }}
-          onOpenDetail={() => undefined}
-          onRowAction={() => undefined}
-          onSelectRow={() => undefined}
-          panes={[
-            { id: "oa", title: "OA", rows: [] },
-            { id: "bank", title: "银行流水", rows: group.rows.bank },
-            { id: "invoice", title: "进销项发票", rows: [] },
-          ]}
-          rowTemplateColumns="1fr 8px 1fr 8px 1fr"
-          zoneId="paired"
-        />
-      );
-    }
-
-    render(<GridHarness />);
-
-    fireEvent.click(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" }));
-
-    expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
-    expect(screen.getByText("加载中")).toBeInTheDocument();
-    expect(screen.queryByText("占位明细")).not.toBeInTheDocument();
-    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
-    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
-
-    await act(async () => {
-      resolveDetail();
-      await detailLoaded;
-    });
-
-    expect(await screen.findByText("建设银行手续费")).toBeInTheDocument();
-    expect(screen.queryByText("占位明细")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "收起流水规则批次明细" })).toBeInTheDocument();
-  });
 
   test("returns an expanded pane to its summary when canonical reload replaces full detail with compact rows", () => {
     const fullDetailGroup = createEtcCollapsedGroup();
@@ -2015,46 +1856,6 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText("ETC-002")).not.toBeInTheDocument();
   });
 
-  test("keeps truncated collapsed summary closed when full detail loading fails", async () => {
-    const group = createBankFlowCollapsedGroup();
-    const ensureGroupDetail = vi.fn().mockRejectedValue(new Error("stale"));
-    render(
-      <RelationGroupGrid
-        canOperateData
-        displayState={createEmptyWorkbenchZoneDisplayState()}
-        getRowState={() => "idle"}
-        groups={[group]}
-        onEnsureGroupDetail={ensureGroupDetail}
-        onOpenDetail={() => undefined}
-        onRowAction={() => undefined}
-        onSelectRow={() => undefined}
-        panes={[
-          { id: "oa", title: "OA", rows: [] },
-          { id: "bank", title: "银行流水", rows: group.rows.bank },
-          { id: "invoice", title: "进销项发票", rows: [] },
-        ]}
-        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
-        zoneId="paired"
-      />,
-    );
-
-    expect(ensureGroupDetail).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" }));
-
-    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
-    const retryButton = await screen.findByRole("button", { name: "加载流水规则批次明细失败，点击重试" });
-    expect(retryButton).toHaveTextContent("加载失败，点击重试");
-    expect(retryButton).not.toBeDisabled();
-    expect(retryButton).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
-    expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
-    expect(screen.queryByText("网银服务费")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "收起流水规则批次明细" })).not.toBeInTheDocument();
-
-    fireEvent.click(retryButton);
-    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledTimes(2));
-  });
 
   test("renders the ETC summary while collapsed and only real invoices while expanded", () => {
     const group = createEtcCollapsedGroup();

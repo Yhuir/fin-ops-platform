@@ -257,3 +257,13 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - relation-preview selection 排除 `bank_flow_rule_batch_summary` 展示行，避免真实成员与汇总金额重复计入；汇总行不作为 context row 输出。
 - 银行金额搜索包含 active bank-flow batch 的展示总金额；命中返回真实成员，由原分组与分页逻辑输出完整批次。成员金额搜索仍命中完整关联，不在浏览器当前页过滤。
 - 已配对和未配对分区的纯折叠银行批次撤回都交由批次 owner；合并后的普通关系仍使用正式关系撤回预览。写后沿用 canonical GET，不引入 page cache/read model。
+
+## 2026-09-12 关联前后独立批次折叠
+
+- 批次事实由 `BankFlowRuleBatchCanonicalQueryRepository.read_display_batches(connection, row_ids)` 在调用方只读事务内一次集合读取，输入当前页真实银行 ID，输出 submitted 批次 ID、version、total_amount 和完整 row_ids；不读取事件历史、不写状态、不按金额推断批次。已撤回/stale 批次不进入展示集合。
+- `WorkbenchRelationGroupingService.apply_bank_batches(groups, batches)` 是纯展示组装：同一个有效批次至少 3 个成员且完整属于当前组时，输出 `bank_batches[{batch_id,member_ids,summary_row}]`。成员分散时保持当前关系和普通行，不能跨组收拢；重复有效归属明确报错。
+- `bank_rows` 始终为真实成员；批次摘要只进入 `bank_batches`，不参与 row_counts、金额、formal_member_ids 或写操作。ETC 的 summary/collapsed_rows 合同保留。旧纯 bank-flow relation、无 OA/发票、>3 的银行折叠入口已删除。
+- 前端按 batch ID 保存当前展开状态；多个批次独立，普通流水混排。精简成员已在列表数据中，展开/收起不增加请求；重新进入默认收起。银行批次作为完整单元跨越所属关联组，不参与 OA 单笔金额的显示级拆分。
+- summary/full hydration 各增加一次有界集合查询（预算 4/9）；页大小、批次数与成员数量不改变语句数。纯批次列表相对旧摘要会传输更多精简成员，以避免展开加载和第二份详情状态；生产验证同时测量 payload 和耗时。
+- 搜索按 submitted 批次的 total_amount 命中真实成员，不再依赖 relation_mode；合并后仍能搜批次总额。确认/撤回继续使用完整正式 typed members，摘要不能进入请求。合并关系走关系撤回；纯 batch relation 仍由批次 owner 撤回。
+- 测试覆盖 2/3/4 阈值、多批次与普通流水、OA/发票混合、已撤回与跨组批次、选择去重、搜索、真实 PostgreSQL summary/full 和无 N+1；浏览器覆盖双区域、展开/收起与 1440/1920 布局。无新 read model/cache/worker/schema。

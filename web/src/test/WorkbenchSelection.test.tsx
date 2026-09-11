@@ -637,16 +637,15 @@ function withCompactBankFlowRelation(payload: Record<string, unknown>) {
       groups: [{
         ...sourceGroup,
         group_id: "bank-flow-rule-batch:COMPACT-202603",
+        amount_check: { status: "matched", direction: "payment", oa_total: "0.00", bank_total: "128000.00", invoice_total: "0.00", requires_note: false },
         relation_mode: "bank_flow_rule_batch",
-        display_mode: "collapsed_summary",
-        default_collapsed: true,
-        summary_row: summaryRow,
-        formal_member_ids: ["compact-bank-1", "compact-bank-2"],
-        formal_member_types: ["bank", "bank"],
+        bank_batches: [{ batch_id: "COMPACT-202603", member_ids: ["compact-bank-1", "compact-bank-2", "compact-bank-3"], summary_row: summaryRow }],
+        formal_member_ids: ["compact-bank-1", "compact-bank-2", "compact-bank-3"],
+        formal_member_types: ["bank", "bank", "bank"],
         oa_rows: [],
-        bank_rows: [summaryRow],
+        bank_rows: [1, 2, 3].map((i) => ({ ...summaryRow, id: `compact-bank-${i}`, source_kind: "bank", debit_amount: i === 3 ? "28000.00" : "50000.00", available_actions: ["detail"] })),
         invoice_rows: [],
-        row_counts: { oa: 0, bank: 2, invoice: 0, rows: 2 },
+        row_counts: { oa: 0, bank: 3, invoice: 0, rows: 3 },
         display_row_counts: { oa: 0, bank: 1, invoice: 0, rows: 1 },
       }],
     },
@@ -4122,7 +4121,7 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
-  test("confirm includes unhydrated compact batch members alongside OA and invoice", async () => {
+  test("confirm includes all collapsed batch members alongside OA and invoice", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       transformWorkbenchPayload: (payload) => {
@@ -4160,9 +4159,9 @@ describe("Workbench row selection and detail drawer", () => {
       expect(call).toBeDefined();
       const body = JSON.parse(String(call![1]?.body));
       expect(body.row_ids.slice().sort()).toEqual([
-        "oa-p-202603-001", "iv-p-202603-001", "compact-bank-1", "compact-bank-2",
+        "oa-p-202603-001", "iv-p-202603-001", "compact-bank-1", "compact-bank-2", "compact-bank-3",
       ].sort());
-      expect(body.row_types.filter((type: string) => type === "bank")).toHaveLength(2);
+      expect(body.row_types.filter((type: string) => type === "bank")).toHaveLength(3);
     });
   });
 
@@ -4196,7 +4195,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(summaryRow).toHaveAttribute("data-row-state", "selected");
     expect(within(pairedZone).getByText("已选 1")).toBeInTheDocument();
-    expect(within(pairedZone).getByText("流水 2 / --")).toBeInTheDocument();
+    expect(within(pairedZone).getByText("流水 3 / 128000.00")).toBeInTheDocument();
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
 
     await user.click(within(pairedZone).getByRole("button", { name: "撤回关联" }));

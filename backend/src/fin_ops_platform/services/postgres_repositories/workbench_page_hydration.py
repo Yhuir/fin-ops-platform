@@ -13,6 +13,9 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
     normalize_oa_attachment_expense_item_ids,
 )
+from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
+    BankFlowRuleBatchCanonicalQueryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.common import (
     row_payload,
     serialize_value,
@@ -33,12 +36,13 @@ from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
 )
+from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 # One relation lookup, one batch read per present canonical pane, one settings
-# lookup, one set-based ETC summary read, overrides, and anomaly decisions.  The
+# lookup, set-based ETC and bank batch reads, overrides, and anomaly decisions. The
 # budget is independent of page/member count; a higher count is a regression.
-WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 8
-WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 3
+WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 9
+WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 4
 
 
 def oa_source_identity_aliases_sql(source_payload: str) -> str:
@@ -250,6 +254,13 @@ class PostgresWorkbenchPageHydrationRepository:
             for group in list((grouped.get(zone) or {}).get("groups") or [])
             if isinstance(group, dict)
         ]
+        WorkbenchRelationGroupingService.apply_bank_batches(
+            grouped_groups,
+            BankFlowRuleBatchCanonicalQueryRepository.read_display_batches(
+                connection,
+                {row_id for row_type, row_id in rows_by_typed_id if row_type == "bank"},
+            ),
+        )
         groups_by_id = {
             str(group.get("group_id") or ""): group for group in grouped_groups
         }
@@ -302,7 +313,8 @@ class PostgresWorkbenchPageHydrationRepository:
         ETC aggregates are returned by one statement whose cardinality is
         bounded by the already-selected page descriptors. A second statement
         classifies only bank transaction IDs present on that page. A third
-        attaches active document metadata for the selected OA rows.
+        attaches active document metadata for the selected OA rows. A fourth
+        reads submitted bank batch identity for the selected bank members.
         """
 
         member_types: list[str] = []
@@ -1272,6 +1284,13 @@ class PostgresWorkbenchPageHydrationRepository:
             for group in list((grouped.get(zone) or {}).get("groups") or [])
             if isinstance(group, dict)
         ]
+        WorkbenchRelationGroupingService.apply_bank_batches(
+            grouped_groups,
+            BankFlowRuleBatchCanonicalQueryRepository.read_display_batches(
+                connection,
+                {row_id for row_type, row_id in rows_by_typed_id if row_type == "bank"},
+            ),
+        )
         groups_by_id = {
             str(group.get("group_id") or ""): group for group in grouped_groups
         }

@@ -20,4 +20,4 @@
 - relation mode 为 `bank_flow_rule_batch`。
 - `selected_tag_codes` 不参与写入。
 - paired/unpaired 由 active formal relation 及其当前持久化 requirement 判定，checkbox 语义变化经后台任务写入该 requirement。
-- 大于 3 条银行流水折叠展示。
+- 至少 3 条有效批次流水在已配对/未配对中独立折叠展示。

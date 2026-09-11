@@ -54,6 +54,24 @@ class BankFlowRuleBatchCanonicalQueryRepository:
             raise ValueError("Bank flow rule batch canonical queries require a PostgreSQL connection.")
         self._connection = connection
 
+    @staticmethod
+    def read_display_batches(connection: Any, row_ids: set[str]) -> list[dict[str, Any]]:
+        """Read submitted batch identity in the caller's read-only snapshot."""
+        if not row_ids:
+            return []
+        return [
+            {**row, "row_ids": text_list(row["bank_transaction_ids"])}
+            for row in connection.fetch_all(
+                """
+                select batch_id, status, version, total_amount, bank_transaction_ids
+                from app.bank_flow_rule_batches
+                where status = 'submitted' and bank_transaction_ids && %s::text[]
+                order by batch_id
+                """,
+                (sorted(row_ids),),
+            )
+        ]
+
     def read_page(
         self,
         filters: dict[str, object] | None = None,

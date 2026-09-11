@@ -5731,26 +5731,17 @@ class PostgresWorkbenchPageQueryRepository:
             oa_params.extend([amount, amount])
             pending_params.extend([amount, amount])
             bank_params.append(amount)
-            # Match the same authoritative total used by the collapsed bank row.
-            # Return real members so the existing group matching/pagination stays intact.
+            # Batch identity survives merging into a manual OA/invoice relation.
+            # Return real members, retaining normal group filtering/pagination.
             batch_amount_union = """
                 union
                 select 'bank'::text, member.row_id
-                from all_active_relations relation
-                cross join lateral unnest(relation.row_ids, relation.row_types)
-                    member(row_id, row_type)
+                from app.bank_flow_rule_batches batch
+                cross join lateral unnest(batch.bank_transaction_ids) member(row_id)
                 join needed_keys needed
                   on needed.row_type = 'bank' and needed.row_id = member.row_id
-                where relation.relation_mode = 'bank_flow_rule_batch'
-                  and member.row_type = 'bank'
-                  and abs(coalesce(
-                      nullif(relation.special_metadata->>'total_amount', '')::numeric,
-                      (select sum(abs(batch_bank.amount))
-                       from app.bank_transactions batch_bank
-                       where batch_bank.status <> 'deleted'
-                         and coalesce(batch_bank.legacy_mongo_id, batch_bank.id::text)
-                             = any(relation.row_ids))
-                  )) = abs(%s::numeric)
+                where batch.status = 'submitted'
+                  and abs(batch.total_amount) = abs(%s::numeric)
             """
             batch_amount_params.append(amount)
             invoice_params.extend([amount, amount, amount])

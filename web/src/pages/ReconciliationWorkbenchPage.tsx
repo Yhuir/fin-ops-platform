@@ -2251,7 +2251,9 @@ export default function ReconciliationWorkbenchPage() {
       openActionResultDialog("请精确选择一个现有正式关系。");
       return;
     }
-    const batchSummary = selectedOpenWithdrawableRelationGroups[0]?.summaryRow;
+    const selectedGroup = selectedOpenWithdrawableRelationGroups[0];
+    const batchSummary = selectedGroup?.relationMode === "bank_flow_rule_batch"
+      ? selectedGroup.bankBatches?.[0]?.summaryRow : undefined;
     if (batchSummary && isBankFlowRuleBatchSummaryRow(batchSummary)) {
       await runBlockingAction({
         loadingMessage: "正在撤回流水规则批次...",
@@ -2294,7 +2296,8 @@ export default function ReconciliationWorkbenchPage() {
     }
     const selectedBankFlowRuleBatchRows = uniqueBankFlowRuleBatchRows(
       selectedPairedGroupsForUnifiedAction
-        .flatMap((group) => group.summaryRow ? [group.summaryRow] : [])
+        .flatMap((group) => group.relationMode === "bank_flow_rule_batch"
+          ? (group.bankBatches ?? []).map((batch) => batch.summaryRow) : [])
         .filter(isBankFlowRuleBatchSummaryRow),
     );
     if (selectedBankFlowRuleBatchRows.length > 0) {

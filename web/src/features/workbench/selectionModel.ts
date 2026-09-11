@@ -408,6 +408,7 @@ function flattenWorkbenchGroupSelectionRows(group: WorkbenchRelationGroup) {
   return [
     ...flattenWorkbenchGroup(group),
     ...(group.summaryRow ? [group.summaryRow] : []),
+    ...(group.bankBatches ?? []).map((batch) => batch.summaryRow),
     ...paneIds.flatMap((paneId) => group.collapsedRows?.[paneId] ?? []),
   ];
 }

@@ -45,7 +45,7 @@
 | --- | --- | --- |
 | `unpaired` | 无 active relation，或 active relation 当前持久化 requirement 未满足 | 无 owner 时为 singleton；有 owner 时保持同 case 并显示待补类型。 |
 | `paired` | active formal relation 且当前持久化 requirement 已满足 | relation 完整成员进入已配对区。 |
-| `collapsed` | relation 内银行流水数 `>3` | 默认显示 bank-flow summary，原始行位于 `collapsed_rows.bank`。 |
+| `collapsed` | 有效已提交批次成员数 `>=3` | `bank_batches` 提供独立摘要与成员身份；真实行保留在 `bank_rows`。 |
 | `expanded` | 银行流水数 `<=3` 或用户展开 | 展示原始银行流水。 |
 
 禁止在页面读路径临时回查规则或本地推断 paired/unpaired。规则变化必须先由受审计 worker 更新 canonical relation metadata/history，再由精确月份 read model 刷新发布新分区。
