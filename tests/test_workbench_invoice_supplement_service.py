@@ -201,16 +201,19 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
             selected_file_ids=existing_preview.file_ids,
         )
         existing_invoice = self.imports.list_invoices()[0]
+        original_names = (existing_invoice.buyer_name, existing_invoice.seller_name, existing_invoice.counterparty.name)
         existing_invoice.source_links.append({
             "source_type": "oa_attachment_invoice",
             "derived_from_oa_id": "oa-405",
             "source_expense_item_id": "oa-405:item:3:old",
         })
+        duplicate_payload = _invoice_payload("26117000001052654676", "27.05", "26.26", "0.79")
+        duplicate_payload.update({"buyer_name": "购方识别错字", "seller_name": "销方识别错字"})
         link_preview = ManualInvoiceEntryService(
             file_import_service=self.files,
             document_recognizer=_Recognizer(),
         ).preview_workbench_batch(
-            payloads=[_invoice_payload("26117000001052654676", "27.05", "26.26", "0.79")],
+            payloads=[duplicate_payload],
             imported_by="finance-user",
         )
         self.session_id = link_preview.session.id
@@ -220,6 +223,10 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
 
         self.assertEqual(result["invoice_row_ids"], [existing_invoice.id])
         self.assertEqual(len(self.imports.list_invoices()), 1)
+        self.assertEqual((existing_invoice.buyer_name, existing_invoice.seller_name, existing_invoice.counterparty.name), original_names)
+        imported = self.imports.get_batch(link_preview.session.files[0].preview_batch_id)
+        self.assertEqual(imported.normalized_rows[0]["buyer_name"], "购方识别错字")
+        self.assertEqual(imported.row_results[0].decision.value, "duplicate_skipped")
         source_links = existing_invoice.source_links
         self.assertTrue(any(
             link.get("source_type") == "oa_attachment_invoice"

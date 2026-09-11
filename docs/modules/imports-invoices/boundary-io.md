@@ -68,6 +68,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 
 - Own read model：无；App 内不存在 read model manifest。
 - Page Audit：`imports.invoices` 是 direct-canonical 页面；在同一 repeatable-read read-only snapshot 内证明 file/session/batch/row、canonical invoice、`manual_invoice_import` source-link 与本页 job/outbox。
+- 重复导入名称审计：已有正式 owner 的 `duplicate_skipped` 行不拥有名称覆盖权。仅在强身份、购销双方税号相同且原正式 owner 来源边完整时，购方/销方/对方名称差异报告 `invoice_import_duplicate_name_difference` warning，保留双方原值；新建、更新、首次正式化、身份/税号/金额及来源边不一致仍为 error。混合 created/updated 的同票明细组件不适用重复名称语义。审计不写数据，也不改变导入或关联接口。
 - 下游 direct-canonical consumer：税金抵扣与成本统计在 import job 提交 `app.invoices` 后由各自页面 GET 直接读取新事实，不等待页面 read model。
 - 其他消费者：Workbench、发票生命周期、待找发票、进/销项、OA 待付款、税金和成本均通过各自 canonical query API 读取；`workbench-matching` 只负责候选匹配领域任务。
 - Worker：import job/runtime handlers。

@@ -59,6 +59,8 @@
 
 ## 历史 bug 回归库
 
+- 2026-09-11：`test_audit_invoice_import_page.py` 覆盖已有正式 owner 的重复名称差异为 warning、原始输入只读、金额/身份/税号/来源边错误继续阻断，以及 created/updated/原 owner 名称漂移仍为 error。`test_workbench_invoice_supplement_service.py` 覆盖人工补录命中既有发票后保留正式名称、错误输入证据和 OA 来源关系。无 API、前端、schema、缓存或 worker 变更；沿用现有 PostgreSQL 页面审计测试。
+
 | 风险 | 保护测试 |
 | --- | --- |
 | 占位电子发票号遮蔽稳定 code+number key | `tests/test_import_service.py::ImportNormalizationServiceTests::test_invoice_placeholder_digital_number_does_not_mask_stable_code_number_key` |

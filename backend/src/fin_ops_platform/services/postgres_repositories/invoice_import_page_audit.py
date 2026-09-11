@@ -593,7 +593,39 @@ def _invoice_field_issues(row: dict[str, Any], invoice: dict[str, Any], *, batch
     }
     if _text(row.get("source_unique_key")) and _text(invoice.get("data_fingerprint")):
         mismatches["data_fingerprint"] = {"row": "canonical_identity_present", "invoice": invoice.get("data_fingerprint")}
-    return [_issue("invoice_import_invoice_field_mismatch", _text(row.get("row_id")), {"fields": mismatches})] if mismatches else []
+    # Repeated formal imports retain existing names; their input remains provenance.
+    # Only classify name differences when identity, both tax IDs and the original
+    # formal owner are proven. All other field/edge/payload checks stay strict.
+    owner = _text(invoice.get("source_batch_id"))
+    repeated_formal_import = (
+        _text(row.get("decision")) == "duplicate_skipped"
+        and bool(owner) and owner != _text(row.get("batch_id"))
+        and bool(_text(row.get("source_unique_key")))
+        and _text(row.get("source_unique_key")) == _text(invoice.get("source_unique_key"))
+        and all(
+            bool(_text(normalized.get(field)))
+            and _text(normalized.get(field)) == _text(invoice.get(field))
+            for field in ("seller_tax_no", "buyer_tax_no")
+        )
+        and any(
+            _text(_dict(link).get("source_type")) == "manual_invoice_import"
+            and _text(_dict(link).get("batch_id")) == owner
+            and _text(_dict(link).get("source_id")) == _text(invoice.get("source_unique_key"))
+            for link in _list(invoice.get("source_links"))
+        )
+    )
+    issues: list[AuditIssue] = []
+    if repeated_formal_import:
+        names = {field: mismatches.pop(field) for field in ("buyer_name", "seller_name", "counterparty_name") if field in mismatches}
+        if names:
+            issues.append(AuditIssue(
+                "warning", "invoice_import_duplicate_name_difference",
+                "重复导入的名称与已有正式发票不同；保留正式名称和原始输入证据。",
+                _text(row.get("row_id")), "invoice_import", {"fields": names, "source_batch_id": owner},
+            ))
+    if mismatches:
+        issues.append(_issue("invoice_import_invoice_field_mismatch", _text(row.get("row_id")), {"fields": mismatches}))
+    return issues
 
 
 def _invoice_component_field_issues(
@@ -604,6 +636,10 @@ def _invoice_component_field_issues(
 ) -> list[AuditIssue]:
     if len(rows) == 1:
         return _invoice_field_issues(rows[0], invoice, batch_type=batch_type)
+    synthetic = dict(rows[0])
+    # Mixed components own facts even when the first physical row was skipped.
+    if any(_text(row.get("decision")) != "duplicate_skipped" for row in rows):
+        synthetic["decision"] = "created"
     normalized_rows = [_normalized_row(row) for row in rows]
     try:
         aggregated_rows = aggregate_invoice_line_rows(normalized_rows)
@@ -616,12 +652,11 @@ def _invoice_component_field_issues(
             )
         ]
     if len(aggregated_rows) != 1:
-        return _invoice_field_issues(rows[0], invoice, batch_type=batch_type)
+        return _invoice_field_issues(synthetic, invoice, batch_type=batch_type)
     aggregate = dict(aggregated_rows[0])
     aggregate["signed_amount"] = str(
         sum((Decimal(_decimal_text(row.get("signed_amount")) or "0") for row in normalized_rows), Decimal("0"))
     )
-    synthetic = dict(rows[0])
     synthetic["row_id"] = f"{_text(rows[0].get('batch_id'))}:{_text(invoice.get('invoice_id'))}"
     synthetic["raw_payload"] = {"normalized_payload": {"normalized_row": aggregate}}
     return _invoice_field_issues(synthetic, invoice, batch_type=batch_type)

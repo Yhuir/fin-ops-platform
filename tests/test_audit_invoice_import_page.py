@@ -255,6 +255,90 @@ class FakeConnection:
 
 
 class InvoiceImportPageAuditTests(unittest.TestCase):
+    def _duplicate_name_fixture(self) -> FakeConnection:
+        connection = FakeConnection()
+        batch = deepcopy(connection.batches[0])
+        batch["batch_id"] = "batch-2"
+        batch["raw_payload"]["normalized_payload"]["id"] = "batch-2"
+        row = deepcopy(connection.rows[0])
+        row.update({"row_id": "row-2", "batch_id": "batch-2", "decision": "duplicate_skipped"})
+        payload = row["raw_payload"]["normalized_payload"]
+        payload.update({"id": "row-2", "decision": "duplicate_skipped"})
+        payload["normalized_row"].update({
+            "seller_name": "供应商识别错字", "counterparty_name": "供应商识别错字", "buyer_name": "购方识别错字",
+        })
+        connection.batches.append(batch)
+        connection.rows.append(row)
+        connection.invoices[0]["source_links"].append({
+            "source_type": "manual_invoice_import", "batch_id": "batch-2", "source_id": row["source_unique_key"],
+        })
+        connection.invoices[0]["raw_payload"]["normalized_payload"]["source_links"] = deepcopy(connection.invoices[0]["source_links"])
+        return connection
+
+    def _canonical_issues(self, connection: FakeConnection):
+        return invoice_import_page_audit._canonical_invoice_issues(
+            connection.batches, connection.rows, connection.invoices,
+            known_batch_ids={row["batch_id"] for row in connection.batches},
+        )
+
+    def test_duplicate_names_preserve_evidence_without_declaring_canonical_corrupt(self) -> None:
+        connection = self._duplicate_name_fixture()
+        before = deepcopy((connection.rows, connection.invoices))
+        issues = self._canonical_issues(connection)
+        self.assertEqual([issue.code for issue in issues], ["invoice_import_duplicate_name_difference"])
+        self.assertEqual(issues[0].severity, "warning")
+        self.assertEqual(set(issues[0].details["fields"]), {"buyer_name", "seller_name", "counterparty_name"})
+        self.assertEqual((connection.rows, connection.invoices), before)
+
+    def test_duplicate_name_handling_does_not_hide_amount_identity_or_tax_drift(self) -> None:
+        for field, value in (("amount", "99.00"), ("digital_invoice_no", "wrong"), ("seller_tax_no", "wrong"), ("buyer_tax_no", "")):
+            with self.subTest(field=field):
+                connection = self._duplicate_name_fixture()
+                connection.rows[1]["raw_payload"]["normalized_payload"]["normalized_row"][field] = value
+                self.assertIn("invoice_import_invoice_field_mismatch", [issue.code for issue in self._canonical_issues(connection)])
+
+    def test_duplicate_requires_original_owner_and_source_links(self) -> None:
+        for damage in ("owner", "original_link", "duplicate_link", "identity"):
+            with self.subTest(damage=damage):
+                connection = self._duplicate_name_fixture()
+                invoice = connection.invoices[0]
+                if damage == "owner":
+                    invoice["source_batch_id"] = "batch-2"
+                elif damage == "original_link":
+                    invoice["source_links"] = invoice["source_links"][1:]
+                elif damage == "duplicate_link":
+                    invoice["source_links"] = invoice["source_links"][:1]
+                else:
+                    connection.rows[1]["source_unique_key"] = "wrong"
+                self.assertTrue(any(issue.severity == "error" for issue in self._canonical_issues(connection)))
+
+    def test_created_and_updated_name_drift_remains_error(self) -> None:
+        for decision in ("created", "status_updated"):
+            connection = self._duplicate_name_fixture()
+            connection.rows[1]["decision"] = decision
+            issues = self._canonical_issues(connection)
+            self.assertIn("invoice_import_invoice_field_mismatch", [issue.code for issue in issues])
+            self.assertNotIn("invoice_import_duplicate_name_difference", [issue.code for issue in issues])
+
+    def test_original_owner_name_corruption_is_not_hidden_by_duplicate(self) -> None:
+        connection = self._duplicate_name_fixture()
+        invoice = connection.invoices[0]
+        invoice["seller_name"] = "被错误改写"
+        invoice["raw_payload"]["normalized_payload"]["seller_name"] = "被错误改写"
+        issues = self._canonical_issues(connection)
+        self.assertTrue(any(issue.code == "invoice_import_invoice_field_mismatch" and issue.subject_id == "row-1" for issue in issues))
+
+    def test_mixed_component_does_not_take_duplicate_name_semantics_from_first_row(self) -> None:
+        connection = self._duplicate_name_fixture()
+        first = connection.rows[1]
+        second = deepcopy(first)
+        second["row_id"] = "row-3"
+        second["decision"] = "created"
+        for members in ([first, second], [second, first]):
+            issues = invoice_import_page_audit._invoice_component_field_issues(members, connection.invoices[0], batch_type="input_invoice")
+            self.assertIn("invoice_import_invoice_field_mismatch", [issue.code for issue in issues])
+            self.assertNotIn("invoice_import_duplicate_name_difference", [issue.code for issue in issues])
+
     def test_logical_manual_entry_does_not_fabricate_a_physical_file_object(self) -> None:
         connection = FakeConnection()
         file_row = connection.files[0]
