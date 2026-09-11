@@ -826,8 +826,8 @@ def _bank_flow_live_expected_set_issues(
         )
         first = build_live_bank_flow_rule_batch_service(source)
         second = build_live_bank_flow_rule_batch_service(source)
-        first_batches = _bank_flow_batch_signature(first.snapshot())
-        second_batches = _bank_flow_batch_signature(second.snapshot())
+        first_batches = _bank_flow_candidate_signature(first.snapshot())
+        second_batches = _bank_flow_candidate_signature(second.snapshot())
         occupied_row_ids = {
             str(row_id).strip()
             for relation in list(source.get("active_relations") or [])
@@ -927,7 +927,7 @@ def _bank_flow_live_expected_set_issues(
     return issues[:limit]
 
 
-def _bank_flow_batch_signature(snapshot: dict[str, object]) -> dict[str, dict[str, object]]:
+def _bank_flow_candidate_signature(snapshot: dict[str, object]) -> dict[str, dict[str, object]]:
     batches = snapshot.get("batches")
     if not isinstance(batches, dict):
         return {}
@@ -945,6 +945,7 @@ def _bank_flow_batch_signature(snapshot: dict[str, object]) -> dict[str, dict[st
         }
         for batch_id, batch in batches.items()
         if isinstance(batch, dict)
+        and str(batch.get("status") or "").strip() in {"draft", "unsubmitted", "conflict"}
     }
 
 

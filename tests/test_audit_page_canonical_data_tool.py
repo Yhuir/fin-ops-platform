@@ -309,6 +309,30 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
 
         self.assertEqual(report["overall_status"], "pass")
 
+    def test_withdrawn_history_does_not_duplicate_or_cover_live_candidates(self) -> None:
+        source = _bank_flow_188500_candidate_source()
+        current = next(iter(page_business_audit.build_live_bank_flow_rule_batch_service(source).snapshot()["batches"].values()))
+        history = {**current, "batch_id": "no_oa_batch_old_history", "status": "withdrawn", "version": 3}
+        source["formal_items"] = [history]
+        with (
+            patch.object(page_business_audit.BankFlowRuleBatchCanonicalQueryRepository,
+                         "candidate_scope_months", return_value=["2026-05"]),
+            patch.object(page_business_audit.BankFlowRuleBatchCanonicalQueryRepository,
+                         "read_candidate_guard_source", return_value=source),
+        ):
+            report = audit_page_canonical_data.audit_page_canonical_data(FakeConnection(), domain_key="bank_flow_rule_batches")
+            self.assertEqual(report["overall_status"], "pass", report["issues"])
+            # History alone cannot hide a missing live candidate.
+            history_only = SimpleNamespace(snapshot=lambda: {"batches": {history["batch_id"]: history}})
+            with patch.object(page_business_audit, "build_live_bank_flow_rule_batch_service", return_value=history_only):
+                missing = audit_page_canonical_data.audit_page_canonical_data(FakeConnection(), domain_key="bank_flow_rule_batches")
+            self.assertIn("live_candidate_source_row_uncovered", {issue["details"].get("mismatch_kind") for issue in missing["issues"]})
+            duplicate = {**current, "batch_id": "duplicate-live"}
+            duplicate_service = SimpleNamespace(snapshot=lambda: {"batches": {current["batch_id"]: current, "duplicate-live": duplicate}})
+            with patch.object(page_business_audit, "build_live_bank_flow_rule_batch_service", return_value=duplicate_service):
+                duplicated = audit_page_canonical_data.audit_page_canonical_data(FakeConnection(), domain_key="bank_flow_rule_batches")
+            self.assertIn("live_candidate_member_duplicated", {issue["details"].get("mismatch_kind") for issue in duplicated["issues"]})
+
     def test_bank_flow_rule_batch_audit_proves_page_and_active_relation_member_sets(self) -> None:
         connection = FakeConnection()
 

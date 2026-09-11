@@ -703,6 +703,9 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             })["batch"]
             self.assertEqual(withdrawn["status"], "withdrawn")
             self.assertEqual(withdrawn["version"], expected + 2)
+            from fin_ops_platform.tools.audit_page_canonical_data import audit_page_canonical_data
+            audit = audit_page_canonical_data(connection, domain_key="bank_flow_rule_batches")
+            self.assertEqual(audit["overall_status"], "pass", audit["issues"])
             self.assertEqual(connection.fetch_one("select count(*) as n from app.workbench_pair_relations where status='active'")["n"], 0)
         self.assertEqual(connection.fetch_one("select count(*) as n from app.bank_transactions")["n"], 2)
 
