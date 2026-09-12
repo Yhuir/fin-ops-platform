@@ -520,6 +520,31 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(selection["context_rows"], [])
         self.assertEqual({row["id"] for row in selection["rows"]}, set(ids))
 
+    def test_bank_only_total_search_prunes_nonmatching_micro_fee_relations(self) -> None:
+        ids = [f"micro-fee-{i}" for i in range(8)]
+        for row_id in ids:
+            self.raw_connection.execute("""
+                insert into app.bank_transactions(legacy_mongo_id, account_no, txn_direction,
+                    amount, signed_amount, txn_date, txn_month, trade_time, summary, raw_payload, status, counterparty_name_raw)
+                values (%s, '8106', 'outflow', 0.25, -0.25,
+                    '2026-07-15', '2026-07-01', '2026-07-15 12:00:00+08', '材料款', '{}'::jsonb, 'active', '银行手续费')
+            """, (row_id,))
+        self.raw_connection.execute("""
+            insert into app.workbench_pair_relations(case_id, relation_mode, status, version,
+                month_scope, row_ids, row_types, amount_check, special_metadata, raw_payload)
+            values ('micro-fee', 'bank_flow_rule_batch', 'active', 1, '2026-07-01',
+                %s::text[], %s::text[], '{}'::jsonb,
+                '{"requires_oa":false,"requires_invoice":false}'::jsonb, '{}'::jsonb)
+        """, (ids, ['bank'] * 8))
+        self.connection.statements.clear()
+        result = self.repository.get_workbench_groups_page(scope_key="all", zone="paired", search="1.00")
+        self.assertFalse(any(g.get("detail_key") == "micro-fee" for g in result["groups"]))
+        self.assertEqual(sum(s["operation"] == "fetch_all" for s in self.connection.statements), 2)
+        matched = self.repository.get_workbench_groups_page(scope_key="all", zone="paired", search="2.00")
+        group = next(g for g in matched["groups"] if g.get("detail_key") == "micro-fee")
+        self.assertEqual(set(group["bank_folds"][0]["member_ids"]), set(ids))
+        self.assertEqual(Decimal(group["bank_folds"][0]["summary_row"]["amount"]), Decimal('2.00'))
+
     def _insert_supporting_document(self) -> None:
         self.raw_connection.execute("""
             insert into app.file_objects(id, storage_backend, storage_uri, object_key,

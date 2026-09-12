@@ -5440,7 +5440,9 @@ class PostgresWorkbenchPageQueryRepository:
         """Numeric search uses the same folds as display, before pagination.
 
         SQL narrows to active relations with >=4 banks each no greater than
-        the searched total, and sufficient gross amount. Only their compact DTOs are read in this request's snapshot;
+        the searched total, and sufficient gross amount. Bank-only relations fold as
+        one whole pane, so their candidate sum must equal the searched total.
+        Only their compact DTOs are read in this request's snapshot;
         there is no full-detail/global payload or per-relation query loop.
         """
         if not search:
@@ -5470,8 +5472,10 @@ class PostgresWorkbenchPageQueryRepository:
                 where relation.status = 'active'
                   and (scope.scope_key = 'all' or relation.month_scope = scope.scope_month
                        or {self._relation_has_scoped_member_sql('relation')})
-                group by relation.case_id
+                group by relation.case_id, relation.row_types
                 having count(*) >= 4 and sum(abs(bank.amount)) >= %s::numeric
+                   and (relation.row_types && array['oa','invoice']::text[]
+                        or sum(abs(bank.amount)) = %s::numeric)
             )
             select 'case:' || relation.case_id as internal_key,
                    relation.case_id as detail_key, 'relation'::text as group_kind,
@@ -5482,7 +5486,7 @@ class PostgresWorkbenchPageQueryRepository:
             from app.workbench_pair_relations relation
             join eligible using (case_id)
             order by relation.case_id
-        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, amount, amount))
+        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, amount, amount, amount))
         groups = self._hydrate_groups(month=scope_key, descriptors=descriptors, detail_level="summary")
         result = sorted({member for group in groups for fold in group.get("bank_folds", [])
                          if Decimal(fold["summary_row"]["amount"]) == amount for member in fold["member_ids"]})
