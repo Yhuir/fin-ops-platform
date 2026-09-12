@@ -43,7 +43,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
 
         service.confirm_relation(case_id="batch", row_ids=bank_ids, row_types=["bank"] * 4,
             relation_mode="bank_flow_rule_batch", actor_id="tester")
-        self.assertFalse(any(g.get("bank_folds") for g in display_groups()))
+        self.assertEqual(next(g for g in display_groups() if g.get("bank_folds"))["bank_folds"][0]["member_ids"], bank_ids)
         service.confirm_relation(case_id="merged", row_ids=list(rows),
             row_types=[rows[rid]["type"] for rid in rows], relation_mode="manual_confirmed",
             actor_id="tester", replace_existing=True, history_operation_type="confirm_link")
@@ -54,7 +54,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         service.withdraw_relation(case_id="merged", actor_id="tester", row_ids=list(rows),
             row_types=[rows[rid]["type"] for rid in rows], preview_id=preview["preview_id"],
             operation_type=preview["operation_type"], expected_versions=preview["submit_expected_versions"])
-        self.assertFalse(any(g.get("bank_folds") for g in display_groups()))
+        self.assertEqual(next(g for g in display_groups() if g.get("bank_folds"))["bank_folds"][0]["member_ids"], bank_ids)
         self.assertEqual(service.get_active_relation_by_case_id("batch")["row_ids"], bank_ids)
 
     def test_batch_withdraw_unwinds_merges_preserves_other_relations_and_is_idempotent(self) -> None:

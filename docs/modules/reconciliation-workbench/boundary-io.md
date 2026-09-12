@@ -260,7 +260,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 ## 2026-09-12 按对应区域折叠银行流水
 
-- 折叠由关联台展示规则统一拥有，与流水规则批次来源、批次状态无关。已配对/未配对使用同一规则：已证明的同一 OA/发票对应区域内至少 4 条真实银行流水，effective category_code、收支方向和币种一致才折叠；纯银行关系、1–3 条、标签混合或归属不明确的多对多区域不折叠。不同对应区域不合并。
+- 折叠由关联台展示规则统一拥有，与流水规则批次来源、批次状态无关。已配对/未配对使用同一规则：已证明的同一 OA/发票对应区域，或没有 OA/发票的同一正式纯流水关系组内至少 4 条真实银行流水，effective category_code、收支方向和币种一致才折叠；1–3 条、标签混合或归属不明确的多对多区域不折叠。不同对应区域不合并。
 - `services/workbench_bank_folds.py::apply_bank_folds(groups)` 是无 I/O 的纯展示函数，输入 canonical 精简/完整行和 `display_subgroups`，输出可选 `bank_folds[{fold_id,member_ids,summary_row}]`。`display_subgroups.resolved` 区分已证明区域与未决余项。单 OA 或只有发票的正式关系共用银行栏；已有报销子项展示仍保留。
 - 摘要 source_kind 为 `bank_fold_summary`，只出现在 bank_folds，不进入真实 bank_rows、formal_member_ids、row_counts、金额校验或写操作。摘要金额按真实成员 Decimal 求和；账户/对方不同显示“多个账户/多个对方”，不同时间不伪装为第一条时间。摘要不提供单笔详情操作。
 - 数字搜索先用 SQL 缩小正式关系候选，再在同一只读快照内用精简水合和同一折叠函数计算总额，命中转为真实成员 ID 后进入原搜索、筛选和分页。当前请求仅复用一次计算结果，不新增跨请求缓存或 read model。ETC 沿用 canonical 身份映射。

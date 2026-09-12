@@ -1436,6 +1436,13 @@ function bankFlowRuleWorkbenchGroups(
       display_row_counts: { oa: 0, bank: 4, invoice: 0 },
       oa_rows: [],
       bank_rows: collapsedRows,
+      bank_folds: [{
+        fold_id: "bank-flow-fee",
+        member_ids: collapsedRows.map((row) => row.id),
+        summary_row: { ...collapsedRows[0], id: "bank_fold_summary:bank-flow-fee",
+          source_kind: "bank_fold_summary", debit_amount: "35.20", amount: "35.20",
+          remark: "", trade_time: "", available_actions: [], special_metadata: {} },
+      }],
       invoice_rows: [],
       can_withdraw: false,
     };

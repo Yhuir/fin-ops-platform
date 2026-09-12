@@ -10,14 +10,13 @@ def apply_bank_folds(groups: list[dict[str, Any]]) -> None:
         group.pop("bank_folds", None)
         banks = group.get("bank_rows", [])
         oa = group.get("oa_rows", [])
-        invoices = group.get("invoice_rows", [])
         if len(banks) < 4 or not group.get("formal_member_ids"):
             continue
         parts = group.get("display_subgroups", [])
         if parts:
             areas = [p["bank_row_ids"] for p in parts if p["resolved"] and p["oa_row_ids"]]
-        elif len(oa) == 1 or (not oa and invoices):
-            # A single OA, or an invoice-only relation, shares its bank pane.
+        elif len(oa) <= 1:
+            # A single OA or a relation without OA shares its existing bank pane.
             areas = [[r["id"] for r in banks]]
         else:
             continue

@@ -457,12 +457,30 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             insert into app.bank_flow_rule_batches(batch_id, status, version, total_amount, bank_transaction_ids)
             values ('batch-search', 'submitted', 1, 2216.56, %s::text[])
         """, (ids,))
+        self.raw_connection.execute("update app.bank_transactions set summary='材料款' where legacy_mongo_id=any(%s::text[])", (ids,))
         result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="97.52")
         batch = next(g for g in result["groups"] if g.get("detail_key") == "batch-search")
-        self.assertNotIn("bank_folds", batch)  # No OA/invoice owner: not a fold.
-        result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="2216.56")
-        self.assertFalse(any(g.get("detail_key") == "batch-search" for g in result["groups"]))
-        self.raw_connection.execute("update app.bank_transactions set summary='材料款' where legacy_mongo_id=any(%s::text[])", (ids,))
+        self.assertEqual(set(batch["bank_folds"][0]["member_ids"]), set(ids))
+        for zone, required in (("unpaired", True), ("paired", False)):
+            self.raw_connection.execute("""
+                update app.workbench_pair_relations set special_metadata =
+                    special_metadata || jsonb_build_object('requires_oa', %s::boolean, 'requires_invoice', %s::boolean)
+                where case_id='batch-search'
+            """, (required, required))
+            for detail_level in ("summary", "full"):
+                result = self.repository.get_workbench_groups_page(
+                    scope_key="all", zone=zone, search="2216.56", detail_level=detail_level, page_size=1)
+                pure = next(g for g in result["groups"] if g.get("detail_key") == "batch-search")
+                self.assertEqual(pure["oa_rows"], [])
+                self.assertEqual(pure["invoice_rows"], [])
+                self.assertEqual(pure["row_counts"]["bank"], 5)
+                self.assertEqual(set(pure["formal_member_ids"]), set(ids))
+                self.assertEqual(set(pure["bank_folds"][0]["member_ids"]), set(ids))
+                self.assertEqual(Decimal(pure["bank_folds"][0]["summary_row"]["amount"]), Decimal("2216.56"))
+        # Presentation folding is independent of the business batch's status.
+        self.raw_connection.execute("update app.bank_flow_rule_batches set status='withdrawn' where batch_id='batch-search'")
+        independent = self.repository.get_workbench_groups_page(scope_key="all", zone="paired", search="2216.56")
+        self.assertTrue(any(g.get("detail_key") == "batch-search" for g in independent["groups"]))
         # Merge into the existing OA+ETC relation: original batch identity survives.
         self.raw_connection.execute("delete from app.workbench_pair_relations where case_id = 'batch-search'")
         self.raw_connection.execute("""

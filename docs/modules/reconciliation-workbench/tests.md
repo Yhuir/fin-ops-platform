@@ -730,8 +730,14 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 
 ## 2026-09-12 对应区域折叠验证
 
-- 规则：`test_workbench_bank_folds.py` 覆盖 0/1/3/4/8、4+1、OA/发票区域、未决归属、币种/方向/标签差异及混合账户摘要。
+- 规则：`test_workbench_bank_folds.py` 覆盖 0/1/3/4/9、4+1、OA/发票及纯流水区域、未决归属、币种/方向/标签差异及混合账户摘要。
 - 真实 PostgreSQL：`test_workbench_query_postgres_integration.py` 验证分页前总额/成员搜索、summary/full 一致、ETC 身份、移除批次来源依赖和集合查询次数。
 - 关联闭环：`test_workbench_relation_command_service.py` 覆盖真实成员确认→折叠→撤回恢复；原版本冲突、幂等、合并历史恢复继续验证。
 - 前端：RelationGroupGrid/WorkbenchSelection/WorkbenchSelectionModel/WorkbenchApi/groupDisplayModel 测试覆盖独立展开、成员搜索展开、清空搜索、选择不重复、纯批次撤回 owner 及已有 ETC/凭证/权限。
 - 发布后以生产只读全量 summary/full、原金额/成员比较、确认与撤回预览、浏览器 1920/1440 视觉、API 与展开耗时实测验证。生产不通过修改真实业务关系来制造测试数据。
+
+### 纯流水关系折叠补齐
+
+- 移除展示和金额搜索对 OA/发票存在的限制，正式关系边界、同标签/方向/币种、至少 4 条保持不变。
+- PostgreSQL 验证纯流水总金额和成员金额搜索、summary/full 一致；service 验证合并确认与撤回恢复纯流水后仍可折叠。
+- 浏览器/组件覆盖无 OA/发票的默认折叠、展开/收起、双分区成员搜索、折叠状态下批次 owner 撤回；摘要 metadata 为空也不影响操作真实成员。

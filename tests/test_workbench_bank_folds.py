@@ -9,14 +9,14 @@ from test_workbench_display_subgroups import event, group, relation, row
 def fixture(count=4, kind="oa"):
     banks = [dict(row("bank", f"b{i}", "10.01"), category_code="interest", currency="CNY",
                   payment_account_label="bank A", counterparty_name="party", trade_time="2026-05-01") for i in range(count)]
-    g = group([row(kind, "owner", "40.04"), *banks])
+    g = group([*([row(kind, "owner", "40.04")] if kind else []), *banks])
     g["group_id"] = "case:merged"
     return g
 
 
-@pytest.mark.parametrize("count", [0, 1, 3, 4, 8])
-@pytest.mark.parametrize("kind", ["oa", "invoice"])
-def test_threshold_and_invoice_or_oa_owner_preserve_canonical_members(count, kind):
+@pytest.mark.parametrize("count", [0, 1, 3, 4, 9])
+@pytest.mark.parametrize("kind", ["oa", "invoice", None])
+def test_threshold_preserves_canonical_members_with_or_without_owner(count, kind):
     g = fixture(count, kind)
     original = deepcopy(g)
     apply_bank_folds([g])
@@ -32,8 +32,9 @@ def test_threshold_and_invoice_or_oa_owner_preserve_canonical_members(count, kin
 
 @pytest.mark.parametrize("field,value", [("category_code", "other"), ("category_code", ""),
                                         ("currency", "USD"), ("txn_direction", "inflow")])
-def test_mixed_or_missing_classification_never_folds(field, value):
-    g = fixture()
+@pytest.mark.parametrize("kind", ["oa", None])
+def test_mixed_or_missing_classification_never_folds(field, value, kind):
+    g = fixture(kind=kind)
     g["bank_rows"][0][field] = value
     apply_bank_folds([g])
     assert "bank_folds" not in g
@@ -69,12 +70,19 @@ def test_summary_does_not_impersonate_first_account_or_date_and_direction_is_exa
     assert summary["debit_amount"] == ""
 
 
-def test_pure_bank_and_unresolved_shared_area_stay_unfolded():
-    g = fixture()
-    g["oa_rows"] = []
-    apply_bank_folds([g])
-    assert "bank_folds" not in g
+def test_unresolved_shared_area_stays_unfolded():
     g = fixture()
     g["display_subgroups"] = [{"resolved": False, "oa_row_ids": ["owner"], "bank_row_ids": ["b0", "b1", "b2", "b3"]}]
     apply_bank_folds([g])
     assert "bank_folds" not in g
+
+
+def test_unrelated_bank_rows_never_fold_and_formal_groups_never_merge():
+    g = fixture(kind=None)
+    g["formal_member_ids"] = []
+    apply_bank_folds([g])
+    assert "bank_folds" not in g
+    groups = [fixture(3, kind=None), fixture(3, kind=None)]
+    groups[1]["group_id"] = "case:other"
+    apply_bank_folds(groups)
+    assert not any(g.get("bank_folds") for g in groups)

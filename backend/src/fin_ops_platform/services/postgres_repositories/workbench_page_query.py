@@ -5468,7 +5468,6 @@ class PostgresWorkbenchPageQueryRepository:
                  and bank.status <> 'deleted'
                  and abs(bank.amount) <= %s::numeric
                 where relation.status = 'active'
-                  and relation.row_types && array['oa','invoice']::text[]
                   and (scope.scope_key = 'all' or relation.month_scope = scope.scope_month
                        or {self._relation_has_scoped_member_sql('relation')})
                 group by relation.case_id

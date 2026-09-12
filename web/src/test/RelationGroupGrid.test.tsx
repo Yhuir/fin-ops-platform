@@ -1768,13 +1768,13 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByText("INV-BATCH")).toBeInTheDocument();
   });
 
-  test("member amount search expands its fold and clearing search restores compact rows", () => {
+  test.each(["paired", "unpaired"] as const)("bank-only member search expands and clearing restores folds in %s", (zoneId) => {
     const group = createBankFlowCollapsedGroup();
     const props = {
       canOperateData: true, displayState: createEmptyWorkbenchZoneDisplayState(),
       getRowState: () => "idle" as const, groups: [group], onOpenDetail: vi.fn(), onSelectRow: vi.fn(),
       panes: [{ id: "oa" as const, title: "OA", rows: [] }, { id: "bank" as const, title: "银行流水", rows: group.rows.bank },
-        { id: "invoice" as const, title: "发票", rows: [] }], rowTemplateColumns: "1fr 8px 1fr 8px 1fr", zoneId: "paired" as const,
+        { id: "invoice" as const, title: "发票", rows: [] }], rowTemplateColumns: "1fr 8px 1fr 8px 1fr", zoneId,
     };
     const { rerender } = render(<RelationGroupGrid {...props} />);
     expect(screen.getByRole("button", { name: "展开流水明细，15 条" })).toBeInTheDocument();
@@ -2054,11 +2054,12 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByRole("button", { name: /折叠明细/ })).not.toBeInTheDocument();
   });
 
-  test("withdraws an unfolded bank-only business batch through its owner API", async () => {
+  test.each([false, true])("withdraws a bank-only business batch through its owner API (folded=%s)", async (folded) => {
     const payload = buildBankFlowRuleWorkbenchPayload();
     const source = payload.paired.groups[0];
     source.bank_rows.forEach((row) => { row.special_metadata = source.bank_folds[0].summary_row.special_metadata; });
-    delete source.bank_folds;
+    if (!folded) delete source.bank_folds;
+    else source.bank_folds[0].summary_row.special_metadata = {};
     const fetchMock = mockWorkbenchPageFetch(payload);
     renderWorkbenchPage();
 

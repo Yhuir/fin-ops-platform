@@ -15,7 +15,7 @@
 
 ## 当前业务边界
 
-银行折叠统一按已证明的 OA/发票对应区域、同标签、同收支方向和币种、至少 4 条判断，与提交批次来源无关；详细 I/O 和搜索规则见 [模块边界](boundary-io.md#2026-09-12-按对应区域折叠银行流水)。
+银行折叠统一按已证明的 OA/发票对应区域（无 OA/发票时使用同一正式纯流水关系组）、同标签、同收支方向和币种、至少 4 条判断，与提交批次来源无关；详细 I/O 和搜索规则见 [模块边界](boundary-io.md#2026-09-12-按对应区域折叠银行流水)。
 
 关联台是 canonical OA、银行流水和发票事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：满足冻结 OA/发票要求的 active relation 进入 `paired`；未满足要求的 active relation 保持同 case 分组进入 `unpaired` 并显示缺失类型；无 active owner 的 canonical facts 各自作为单行进入 `unpaired`。人工确认允许至少 2 个不同 canonical 成员，不以跨栏、金额相等或材料完整为创建门槛；只有既有 `amount_check.requires_note=true` 时才要求 `note`，创建后仍按页面完成合同分区。银行分类不选择人工写入链：选择中的银行成员部分或全部为 `internal_transfer` 时，`confirm-link` 仍以 `manual_confirmed` 进入标准 relation command/UoW，不得转交 no-OA batch；独立 no-OA batch 功能及其业务入口保持不变。唯一窄例外是 OA 与完整 canonical 外部往来收支闭环同时确认：关联台复用既有 Turnover 校验器写 `turnover_manual_closure`，金额按 OA 同方向本金侧比较；结构化语义不完整时明确失败，不做文本或金额形态兜底。
 
