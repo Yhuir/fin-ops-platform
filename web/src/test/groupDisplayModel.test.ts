@@ -1060,3 +1060,23 @@ describe("groupDisplayModel time filter", () => {
     expect(buildWorkbenchDisplayGroups(groups, monthState).map((group) => group.id)).toEqual(["group-2026-04"]);
   });
 });
+
+describe("historical display partitions", () => {
+  test("keeps repeated amounts in their original bank blocks and invoices shared", () => {
+    const group = buildGroup("merged", "2026-07-01");
+    group.rows = { oa: [buildOaRow("a"), buildOaRow("b"), buildOaRow("c")],
+      bank: [buildBankRow("x", ""), buildBankRow("y", "")], invoice: [buildInvoiceRow("i")] };
+    group.displaySubgroups = [{ oaRowIds: ["a", "b"], bankRowIds: ["y"] }, { oaRowIds: ["c"], bankRowIds: ["x"] }];
+    const original = structuredClone(group);
+    const layout = buildWorkbenchGroupDisplayLayout(group)!;
+    expect(layout.segmentedPaneIds).toEqual(["oa", "bank"]);
+    expect(layout.segments.map((part) => ({ oa: part.rows.oa.map((r) => r.id), bank: part.rows.bank.map((r) => r.id) })))
+      .toEqual([{ oa: ["a", "b"], bank: ["y"] }, { oa: ["c"], bank: ["x"] }]);
+    expect(group).toEqual(original);
+    // Filtering a pane must neither infer a new link nor duplicate hidden members.
+    const filtered = { ...group, rows: { ...group.rows, bank: [group.rows.bank[0]] } };
+    const filteredLayout = buildWorkbenchGroupDisplayLayout(filtered, group)!;
+    expect(filteredLayout.segments[0].rows.bank).toEqual([]);
+    expect(filteredLayout.segments[1].rows.bank.map((r) => r.id)).toEqual(["x"]);
+  });
+});

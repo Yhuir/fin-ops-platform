@@ -462,6 +462,7 @@ type ApiWorkbenchGroup = {
   display_mode?: string | null;
   default_collapsed?: boolean | null;
   summary_row?: ApiWorkbenchRow | null;
+  display_subgroups?: { oa_row_ids: string[]; bank_row_ids: string[] }[];
   bank_batches?: { batch_id: string; member_ids: string[]; summary_row: ApiWorkbenchRow }[];
   formal_member_ids?: unknown[] | null;
   formal_member_types?: unknown[] | null;
@@ -1659,6 +1660,9 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
       : undefined,
     defaultCollapsed: group.default_collapsed === true ? true : undefined,
     summaryRow,
+    displaySubgroups: group.display_subgroups?.map((part) => ({
+      oaRowIds: part.oa_row_ids, bankRowIds: part.bank_row_ids,
+    })),
     bankBatches: group.bank_batches?.map((batch) => ({
       batchId: batch.batch_id, memberIds: batch.member_ids, summaryRow: mapRow(batch.summary_row),
     })),

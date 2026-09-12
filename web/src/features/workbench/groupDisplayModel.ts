@@ -124,6 +124,25 @@ export function buildWorkbenchGroupDisplayLayout(
   group: WorkbenchRelationGroup,
   sourceGroup: WorkbenchRelationGroup = group,
 ): WorkbenchGroupDisplayLayout | null {
+  if (sourceGroup.displaySubgroups?.length) {
+    // These are display partitions, not new formal relations. Invoices retain
+    // their shared group pane unless they have explicit expense-item ownership.
+    const oaRows = new Map(group.rows.oa.map((row) => [row.id, row]));
+    const bankRows = new Map(group.rows.bank.map((row) => [row.id, row]));
+    return {
+      segmentedPaneIds: ["oa", "bank"],
+      segments: sourceGroup.displaySubgroups.map((part, index) => {
+        return {
+          id: `${group.id}:subgroup:${index}`,
+          rows: {
+            oa: part.oaRowIds.flatMap((id) => oaRows.has(id) ? [oaRows.get(id)!] : []),
+            bank: part.bankRowIds.flatMap((id) => bankRows.has(id) ? [bankRows.get(id)!] : []),
+            invoice: [],
+          },
+        };
+      }).filter((part) => part.rows.oa.length > 0 || part.rows.bank.length > 0),
+    };
+  }
   const segments = buildWorkbenchGroupSourceSegments(group);
   const sourceSegments = sourceGroup === group ? segments : buildWorkbenchGroupSourceSegments(sourceGroup);
   if (!segments || !sourceSegments) {

@@ -264,6 +264,15 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - `WorkbenchRelationGroupingService.apply_bank_batches(groups, batches)` 是纯展示组装：同一个有效批次至少 3 个成员且完整属于当前组时，输出 `bank_batches[{batch_id,member_ids,summary_row}]`。成员分散时保持当前关系和普通行，不能跨组收拢；重复有效归属明确报错。
 - `bank_rows` 始终为真实成员；批次摘要只进入 `bank_batches`，不参与 row_counts、金额、formal_member_ids 或写操作。ETC 的 summary/collapsed_rows 合同保留。旧纯 bank-flow relation、无 OA/发票、>3 的银行折叠入口已删除。
 - 前端按 batch ID 保存当前展开状态；多个批次独立，普通流水混排。精简成员已在列表数据中，展开/收起不增加请求；重新进入默认收起。银行批次作为完整单元跨越所属关联组，不参与 OA 单笔金额的显示级拆分。
-- summary/full hydration 各增加一次有界集合查询（预算 4/9）；页大小、批次数与成员数量不改变语句数。纯批次列表相对旧摘要会传输更多精简成员，以避免展开加载和第二份详情状态；生产验证同时测量 payload 和耗时。
+- 当时 summary/full hydration 各增加一次有界集合查询（原预算 4/9，现行上限见下文历史分段修复）；页大小、批次数与成员数量不改变语句数。纯批次列表相对旧摘要会传输更多精简成员，以避免展开加载和第二份详情状态；生产验证同时测量 payload 和耗时。
 - 搜索按 submitted 批次的 total_amount 命中真实成员，不再依赖 relation_mode；合并后仍能搜批次总额。确认/撤回继续使用完整正式 typed members，摘要不能进入请求。合并关系走关系撤回；纯 batch relation 仍由批次 owner 撤回。
 - 测试覆盖 2/3/4 阈值、多批次与普通流水、OA/发票混合、已撤回与跨组批次、选择去重、搜索、真实 PostgreSQL summary/full 和无 N+1；浏览器覆盖双区域、展开/收起与 1440/1920 布局。无新 read model/cache/worker/schema。
+
+## 2026-09-12 历史 OA/流水展示分段
+
+- 页面 hydration 在同一只读快照内，对当前页普通多 OA 关系一次集合读取 `app.workbench_pair_relation_history`。精确 `case_id + typed members` 的确认前后快照提供历史分组证据；复用 case ID、连续合并和撤回均不能套用较大或不同成员的快照。
+- 新增可选输出 `display_subgroups: [{oa_row_ids: string[], bank_row_ids: string[]}]`，由纯函数模块 `services/workbench_display_subgroups.py` 生成。它只用于 OA/银行列共享行轨；不写 relation/source ownership，不修改金额、成员、版本、审批、配对区或成本口径。发票没有逐项归属证据时继续占整组共享栏。已有费用子项/补充凭证展示链保留。
+- 优先保留历史 OA+银行小组；剩余记录仅按无歧义金额匹配，一侧单项且总额闭合时共享一个区块；无法唯一判断的多对多保留共享区块，不猜测重复金额归属。不同 pane 的相同文本 ID 按 typed identity 区分。
+- 同一提交银行批次不得跨展示区块拆开；相交区块合并为共享带。批次仍沿用 `bank_batches` 的成员、汇总行和 >=3 折叠规则，展开/收起不改变 selection 或 action identity。
+- 前端 API mapper 仅转为 `displaySubgroups`；主表消费该分段，不再为这些普通多 OA 组调用原金额推断/残余行分支。旧报销明细与显式发票来源逻辑仍服务原业务，不做并行替代实现。
+- 当前 hydration 的完整明细上限为 11 次集合查询（原既有完整组成实际最多 10 次，加一次历史读取），精简明细为 5 次；这是单次 hydration，不是整个 initial 请求。原上限 9 漏算 OA 凭证/批次混合场景，已用真实 PostgreSQL 的 OA+普通发票+ETC+流水混合页回归证明会误报 500。不得通过捕获异常、返回摘要或空页绕开错误。

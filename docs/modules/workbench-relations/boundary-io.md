@@ -131,3 +131,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - `withdraw_bank_flow_batch(case_id, row_ids, actor_id, reason)` 仅供银行批次 owner 调用。按真实成员读取当前关系与历史，逐层撤回后续合并，再取消原 batch case；保留其它恢复关系，输出全部 changed cases/history 及读取时的关系版本。owner writer 在实际持久化事务中锁定并校验版本，再一次保存，冲突零写。
 - 每层必须能由历史证明完整 batch membership，并严格缩小包含目标 batch 的关系；历史不足或成员归属改变明确返回业务冲突，不猜测拆分。批次已经无 active owner 时无关系写入。
 - batch/history/relations 的最终保存由 batch owner 持有；该命令不改批次表、HTTP 或页面 DTO。
+
+## 2026-09-12 历史快照作为页面展示证据
+
+关联台页面只读消费已有确认历史的 before/after typed membership，为普通多 OA 组保留原 OA/流水小组。输出属于 reconciliation-workbench 的 `display_subgroups`，不构成新的 active relation、支付证明或成本分配。正式关联、合并、撤回、版本和审计写入继续由本模块原 command/UoW 负责；历史对应不足时页面显示共享区块，禁止按重复金额生成关系事实。

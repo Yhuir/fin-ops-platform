@@ -718,3 +718,12 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 七类中 1/2/3/5/6/7 适用；第 4 类执行 canonical-only 和零 read-model event 负向回归，本次不新增或修改 worker/cache/read model。
 
 - 生产浏览器检查确认／撤回预览的表头对比度、单条 OA／发票顶部可见性；1920 与 1440 宽度下，预览各栏保持最小宽度并通过既有同步横向滚动查看完整列，不能裁掉金额。
+
+## 2026-09-12 历史分段回归
+
+- `test_workbench_display_subgroups.py`：重复金额保留旧小组、连续合并/撤回、多对一、歧义共享带、批次不拆分、typed ID 碰撞、空输入和费用子项隔离；金额分配器三个重复分配失败场景。
+- `test_workbench_query_postgres_integration.py`：历史一次批读，full/summary 一致，读后 relation version/members 不变；OA 凭证、普通发票、ETC、银行批次混合完整分页不再超过错误的查询上限。
+- `groupDisplayModel.test.ts`、`WorkbenchApi.test.ts`：共享带、筛选后剩余行、发票整组共享、DTO additive 字段不污染正式选择身份。
+- `RelationGroupGrid.test.tsx`：paired/unpaired 分段内多个批次独立展开/收起，刷新保留 UI 展开状态、普通流水和发票仍显示。
+- 七类覆盖：业务核心、服务、API/DTO、页面读取、前端交互、PostgreSQL 关系历史到页面集成、已有功能回归。没有新增 cache/read model/background job，相关 freshness/worker 专项不适用；正式关系写入幂等、权限、撤回沿用现有回归套件。
+- 浏览器验收：电信 7 OA/14 流水分成 7 带；重复加油款按历史对应；钢材两组多 OA/单流水；利息合并关系保留批次折叠。生产读取扫描同时核对数量、typed members、金额与原异常决定，不把 UI 对齐当作金额已一致。

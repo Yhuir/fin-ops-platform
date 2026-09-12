@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
@@ -50,6 +51,7 @@ class WorkbenchRelationAlignmentService:
         oa_amounts = {self._row_id(row): self._money(row.get("amount")) for row in oa_rows}
         bank_amounts = {self._row_id(row): self._bank_amount(row) for row in bank_rows}
 
+        bank_amount_counts = Counter(bank_amounts.values())
         for bank_row in bank_rows:
             bank_id = self._row_id(bank_row)
             bank_amount = bank_amounts.get(bank_id)
@@ -60,7 +62,7 @@ class WorkbenchRelationAlignmentService:
                 for oa_id in oa_ids
                 if oa_amounts.get(oa_id) is not None and oa_amounts.get(oa_id) == bank_amount
             ]
-            if len(candidate_oa_ids) == 1:
+            if len(candidate_oa_ids) == 1 and bank_amount_counts[bank_amount] == 1:
                 link = self._link_for_oa(links_by_oa, candidate_oa_ids[0])
                 link["bank_row_ids"].append(bank_id)
                 self._append_evidence(link, "exact_amount")
@@ -81,23 +83,27 @@ class WorkbenchRelationAlignmentService:
             if (bank_id := self._row_id(row)) and bank_id not in used_bank_ids and bank_id not in unresolved_row_ids
         ]
         subset_matches_by_oa = self._unique_subset_matches(
-            oa_ids=oa_ids,
+            oa_ids=[oa_id for oa_id in oa_ids if not links_by_oa.get(oa_id, {}).get("bank_row_ids")],
             oa_amounts=oa_amounts,
             bank_rows=remaining_bank_rows,
             bank_amounts=bank_amounts,
         )
-        used_subset_bank_ids: set[str] = set()
+        subset_usage = Counter(
+            bank_id
+            for matches in subset_matches_by_oa.values()
+            if len(matches) == 1
+            for bank_id in matches[0]
+        )
         for oa_id in oa_ids:
             matches = subset_matches_by_oa.get(oa_id) or []
             if len(matches) != 1:
                 continue
             bank_ids = list(matches[0])
-            if used_subset_bank_ids.intersection(bank_ids):
+            if any(subset_usage[bank_id] > 1 for bank_id in bank_ids):
                 continue
             link = self._link_for_oa(links_by_oa, oa_id)
             link["bank_row_ids"].extend(bank_ids)
             self._append_evidence(link, "unique_bank_sum")
-            used_subset_bank_ids.update(bank_ids)
 
         for link in links_by_oa.values():
             self._append_evidence(link, "same_active_relation")

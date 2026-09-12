@@ -585,6 +585,19 @@ function RelationGroupGrid({
         };
         const displayLayout = buildWorkbenchGroupDisplayLayout(group, sourceGroupById.get(group.id) ?? group);
         const displaySegments = displayLayout?.segments ?? null;
+        const bankSegmentByMember = new Map(
+          (displaySegments ?? []).flatMap((segment) => segment.rows.bank.map((row) => [row.id, segment.id] as const)),
+        );
+        const summaryMember = new Map((group.bankBatches ?? []).map((batch) => [batch.summaryRow.id, batch.memberIds[0]]));
+        const bankRecordsBySegment = new Map<string, WorkbenchRecord[]>();
+        bankDisplayRows.forEach((row) => {
+          const segmentId = bankSegmentByMember.get(summaryMember.get(row.id) ?? row.id);
+          if (segmentId) {
+            const records = bankRecordsBySegment.get(segmentId) ?? [];
+            records.push(row);
+            bankRecordsBySegment.set(segmentId, records);
+          }
+        });
         const segmentCount = displaySegments?.length ?? 0;
         const segmentedPaneIds = new Set(displayLayout?.segmentedPaneIds ?? []);
         const visibleAnomalyFingerprints = new Set(
@@ -646,7 +659,8 @@ function RelationGroupGrid({
                           onRowAction={(row, action) => onRowAction(row, action, group)}
                           onSelectRow={onSelectRow}
                           paneId={paneId}
-                          records={segment.rows[paneId]}
+                          records={paneId === "bank" ? bankRecordsBySegment.get(segment.id) ?? [] : segment.rows[paneId]}
+                          rowControls={paneId === "bank" ? bankRowControls : undefined}
                           scrollPaneId={paneId}
                           scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${segment.id}-${pane.id}`}
                           showWorkflowActions={zoneId !== "unpaired"}

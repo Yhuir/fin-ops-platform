@@ -36,13 +36,16 @@ from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
 )
+from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 # One relation lookup, one batch read per present canonical pane, one settings
-# lookup, set-based ETC and bank batch reads, overrides, and anomaly decisions. The
-# budget is independent of page/member count; a higher count is a regression.
-WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 9
-WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 4
+# lookup, set-based ETC/bank batch/history reads, overrides, and anomaly decisions. The
+# Full pages also attach OA supporting documents. The maximum is ten existing
+# set queries plus one history query; mixed full pages previously exceeded nine.
+# The budget is independent of page/member count; a higher count is a regression.
+WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 11
+WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 5
 
 
 def oa_source_identity_aliases_sql(source_payload: str) -> str:
@@ -261,6 +264,7 @@ class PostgresWorkbenchPageHydrationRepository:
                 {row_id for row_type, row_id in rows_by_typed_id if row_type == "bank"},
             ),
         )
+        self._attach_display_subgroups(grouped_groups, connection)
         groups_by_id = {
             str(group.get("group_id") or ""): group for group in grouped_groups
         }
@@ -314,7 +318,8 @@ class PostgresWorkbenchPageHydrationRepository:
         bounded by the already-selected page descriptors. A second statement
         classifies only bank transaction IDs present on that page. A third
         attaches active document metadata for the selected OA rows. A fourth
-        reads submitted bank batch identity for the selected bank members.
+        reads submitted bank batch identity for the selected bank members. A fifth
+        reads historical partitions only when ordinary multi-OA groups need them.
         """
 
         member_types: list[str] = []
@@ -1291,6 +1296,7 @@ class PostgresWorkbenchPageHydrationRepository:
                 {row_id for row_type, row_id in rows_by_typed_id if row_type == "bank"},
             ),
         )
+        self._attach_display_subgroups(grouped_groups, connection)
         groups_by_id = {
             str(group.get("group_id") or ""): group for group in grouped_groups
         }
@@ -1321,6 +1327,25 @@ class PostgresWorkbenchPageHydrationRepository:
             result_payload["detail_key"] = str(descriptor.get("detail_key") or "")
             result.append(self._compact_group(result_payload))
         return result
+
+    @staticmethod
+    def _attach_display_subgroups(groups: list[dict[str, Any]], connection: Any) -> None:
+        targets = [g for g in groups if g.get("formal_member_ids")
+                   and len(g.get("oa_rows", [])) > 1 and g.get("bank_rows")
+                   and not any(r.get("expense_items") for r in g["oa_rows"])]
+        if not targets:
+            return
+        row_ids = sorted({r["id"] for g in targets for r in g["oa_rows"]})
+        rows = connection.fetch_all("""
+            select h.raw_payload
+            from app.workbench_pair_relation_history h
+            where h.case_id in (
+                select r.case_id from app.workbench_pair_relations r
+                where r.row_ids && %s::text[]
+            )
+            order by h.occurred_at, h.case_id, h.id
+        """, (row_ids,))
+        apply_display_subgroups(targets, [row_payload(row, "raw_payload") for row in rows])
 
     @staticmethod
     def _settings_payload(connection: Any) -> dict[str, Any]:

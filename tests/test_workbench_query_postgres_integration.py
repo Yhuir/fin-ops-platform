@@ -341,6 +341,67 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             """
         )
 
+    def test_full_unpaired_page_with_oa_documents_banks_invoices_and_etc(self) -> None:
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set row_ids=array['oa-direct-1','bank-direct-1'],
+                row_types=array['oa','bank'], special_metadata='{"requires_invoice":true}'::jsonb
+            where case_id='CASE-DIRECT-1'
+        """)
+        self.connection.statements.clear()
+        full = self.repository.get_workbench_groups_page(scope_key="2026-07", zone="unpaired", page_size=100, detail_level="full")
+        summary = self.repository.get_workbench_groups_page(scope_key="2026-07", zone="unpaired", page_size=100, detail_level="summary")
+        self.assertEqual({g["group_id"] for g in full["groups"]}, {g["group_id"] for g in summary["groups"]})
+        self.assertTrue(any(g["oa_rows"] for g in full["groups"]))
+        self.assertTrue(any(g["bank_rows"] for g in full["groups"]))
+        self.assertTrue(any(r["id"] == "same-text-id" for g in full["groups"] for r in g["invoice_rows"]))
+        self.assertTrue(any(r["id"].startswith("etc-summary-") for g in full["groups"] for r in g["invoice_rows"]))
+
+    def test_display_history_is_batched_and_full_summary_keep_formal_members(self) -> None:
+        self.raw_connection.execute("""
+            update app.oa_applications set normalized_payload = normalized_payload - 'expense_items'
+            where row_id='oa-direct-1'
+        """)
+        self.raw_connection.execute("""
+            insert into app.oa_applications(oa_source_id,form_id,form_type,row_id,status,workflow_status,
+                applicant,application_date,scope_month,project_name,amount,currency,normalized_payload,raw_payload)
+            select 'second-source',form_id,form_type,'oa-direct-2',status,workflow_status,
+                applicant,application_date,scope_month,project_name,amount,currency,
+                normalized_payload || '{"id":"oa-direct-2"}'::jsonb,raw_payload
+            from app.oa_applications where row_id='oa-direct-1'
+        """)
+        self.raw_connection.execute("""
+            insert into app.bank_transactions(legacy_mongo_id,account_no,txn_direction,counterparty_name_raw,status,
+                amount,signed_amount,txn_date,txn_month,raw_payload)
+            values ('bank-direct-2','8106','outflow','供应商','active',100,-100,'2026-07-21','2026-07-01','{}'::jsonb)
+        """)
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set
+                row_ids=array['oa-direct-1','oa-direct-2','bank-direct-1','bank-direct-2'],
+                row_types=array['oa','oa','bank','bank'] where case_id='CASE-DIRECT-1'
+        """)
+        after = {"case_id": "CASE-DIRECT-1", "row_ids": ["oa-direct-1", "oa-direct-2", "bank-direct-1", "bank-direct-2"],
+                 "row_types": ["oa", "oa", "bank", "bank"]}
+        history = {"operation_type": "confirm_link", "after_relations": [after], "before_relations": [
+            {"case_id": "old1", "row_ids": ["oa-direct-1", "bank-direct-2"], "row_types": ["oa", "bank"]},
+            {"case_id": "old2", "row_ids": ["oa-direct-2", "bank-direct-1"], "row_types": ["oa", "bank"]}]}
+        PostgresWorkbenchRelationRepository(self.raw_connection)._append_workbench_pair_relation_history(
+            self.raw_connection, [history], changed_case_ids=None)
+        expected = [{"oa_row_ids": ["oa-direct-1"], "bank_row_ids": ["bank-direct-2"]},
+                    {"oa_row_ids": ["oa-direct-2"], "bank_row_ids": ["bank-direct-1"]}]
+        for detail_level in ("summary", "full"):
+            self.connection.statements.clear()
+            page = self.repository.get_workbench_groups_page(
+                scope_key="2026-07", zone="paired", page_size=100, detail_level=detail_level)
+            target = next(g for g in page["groups"] if g["case_id"] == "CASE-DIRECT-1")
+            self.assertEqual(sorted(target["display_subgroups"], key=lambda p: p["oa_row_ids"]), expected)
+            self.assertEqual(set(zip(target["formal_member_types"], target["formal_member_ids"])),
+                             set(zip(after["row_types"], after["row_ids"])))
+            history_reads = [q for q in self.connection.statements if "select h.raw_payload" in q.get("raw_sql", "")]
+            self.assertEqual(len(history_reads), 1)
+        unchanged = self.raw_connection.fetch_one("select version,row_ids from app.workbench_pair_relations where case_id='CASE-DIRECT-1'")
+        self.assertEqual(unchanged["version"], 1)
+        self.assertEqual(unchanged["row_ids"], after["row_ids"])
+
     def test_batch_audit_accepts_complete_manual_merge_but_rejects_missing_members(self) -> None:
         self.raw_connection.execute("""
             insert into app.bank_flow_rule_batches(batch_id,status,version,total_amount,bank_transaction_ids)

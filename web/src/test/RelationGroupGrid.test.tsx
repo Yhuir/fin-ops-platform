@@ -1743,6 +1743,11 @@ describe("Workbench candidate grouping layout", () => {
       { batchId: "first", memberIds: first.map((row) => row.id), summaryRow: { ...group.bankBatches![0].summaryRow, id: "first-summary" } },
       { batchId: "second", memberIds: second.map((row) => row.id), summaryRow: { ...group.bankBatches![0].summaryRow, id: "second-summary" } },
     ];
+    group.rows.oa.push(createOaRecord("other-oa", "另一申请人", "20.00"));
+    group.displaySubgroups = [
+      { oaRowIds: ["batch-oa"], bankRowIds: first.map((r) => r.id) },
+      { oaRowIds: ["other-oa"], bankRowIds: [...second, ordinary].map((r) => r.id) },
+    ];
     const props = {
       canOperateData: true, displayState: createEmptyWorkbenchZoneDisplayState(),
       getRowState: () => "idle" as const, groups: [group], onOpenDetail: vi.fn(), onRowAction: vi.fn(), onSelectRow: vi.fn(),
