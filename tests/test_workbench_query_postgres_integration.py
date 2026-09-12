@@ -486,6 +486,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         """)
         withdrawn = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="97.52")
         self.assertEqual(len(withdrawn["groups"][0]["bank_folds"][0]["member_ids"]), 6)
+        self.connection.statements.clear()
+        small = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="1.00")
+        self.assertFalse(any(g.get("detail_key") == "CASE-DIRECT-1" for g in small["groups"]))
+        self.assertEqual(sum(item["operation"] == "fetch_all" for item in self.connection.statements), 2)  # No candidate hydration.
         # Release only this fixture's association before checking exact standalone selection.
         self.raw_connection.execute("""
             update app.workbench_pair_relations set row_ids = array['oa-direct-1','bank-direct-1','etc-summary-etc_202607_linked'],

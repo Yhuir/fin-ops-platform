@@ -5439,8 +5439,8 @@ class PostgresWorkbenchPageQueryRepository:
     def _fold_amount_member_ids(self, scope_key: str, search: str | None) -> list[str]:
         """Numeric search uses the same folds as display, before pagination.
 
-        SQL narrows to active relations with >=4 banks and sufficient gross
-        amount. Only their compact DTOs are read in this request's snapshot;
+        SQL narrows to active relations with >=4 banks each no greater than
+        the searched total, and sufficient gross amount. Only their compact DTOs are read in this request's snapshot;
         there is no full-detail/global payload or per-relation query loop.
         """
         if not search:
@@ -5466,6 +5466,7 @@ class PostgresWorkbenchPageQueryRepository:
                   on member.row_type = 'bank'
                  and member.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
                  and bank.status <> 'deleted'
+                 and abs(bank.amount) <= %s::numeric
                 where relation.status = 'active'
                   and relation.row_types && array['oa','invoice']::text[]
                   and (scope.scope_key = 'all' or relation.month_scope = scope.scope_month
@@ -5482,7 +5483,7 @@ class PostgresWorkbenchPageQueryRepository:
             from app.workbench_pair_relations relation
             join eligible using (case_id)
             order by relation.case_id
-        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, amount))
+        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, amount, amount))
         groups = self._hydrate_groups(month=scope_key, descriptors=descriptors, detail_level="summary")
         result = sorted({member for group in groups for fold in group.get("bank_folds", [])
                          if Decimal(fold["summary_row"]["amount"]) == amount for member in fold["member_ids"]})
