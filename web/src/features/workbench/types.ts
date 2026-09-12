@@ -367,7 +367,7 @@ export type WorkbenchRelationGroup = {
   defaultCollapsed?: boolean;
   summaryRow?: WorkbenchRecord;
   displaySubgroups?: { oaRowIds: string[]; bankRowIds: string[] }[];
-  bankBatches?: { batchId: string; memberIds: string[]; summaryRow: WorkbenchRecord }[];
+  bankFolds?: { foldId: string; memberIds: string[]; summaryRow: WorkbenchRecord }[];
   formalMemberIdentities?: WorkbenchRecordIdentity[];
   rows: WorkbenchPaneRows;
   rowCounts?: WorkbenchPaneRowCounts;

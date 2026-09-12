@@ -254,25 +254,23 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 - 前端确认与撤回请求使用 selection context 的 canonical typed identities，不从可见行重建成员；折叠、展开和跨搜索保留选择不改变成员集合。已加载 collapsed rows 可参与展示，但不得伪造未加载的行。
 - `confirm-link/preview` 始终返回 `confirm_link`；精确命中已有关系时 `can_submit=false`，不再转为撤回。浏览器拒绝与点击意图不一致的预览。
-- relation-preview selection 排除 `bank_flow_rule_batch_summary` 展示行，避免真实成员与汇总金额重复计入；汇总行不作为 context row 输出。
-- 银行金额搜索包含 active bank-flow batch 的展示总金额；命中返回真实成员，由原分组与分页逻辑输出完整批次。成员金额搜索仍命中完整关联，不在浏览器当前页过滤。
+- relation-preview selection 只读取真实成员；bank_folds 摘要不进入 context row 或写请求。
+- 银行金额搜索按下文“对应区域折叠”的实际汇总与成员金额工作，不再读取批次总额。
 - 已配对和未配对分区的纯折叠银行批次撤回都交由批次 owner；合并后的普通关系仍使用正式关系撤回预览。写后沿用 canonical GET，不引入 page cache/read model。
 
-## 2026-09-12 关联前后独立批次折叠
+## 2026-09-12 按对应区域折叠银行流水
 
-- 批次事实由 `BankFlowRuleBatchCanonicalQueryRepository.read_display_batches(connection, row_ids)` 在调用方只读事务内一次集合读取，输入当前页真实银行 ID，输出 submitted 批次 ID、version、total_amount 和完整 row_ids；不读取事件历史、不写状态、不按金额推断批次。已撤回/stale 批次不进入展示集合。
-- `WorkbenchRelationGroupingService.apply_bank_batches(groups, batches)` 是纯展示组装：同一个有效批次至少 3 个成员且完整属于当前组时，输出 `bank_batches[{batch_id,member_ids,summary_row}]`。成员分散时保持当前关系和普通行，不能跨组收拢；重复有效归属明确报错。
-- `bank_rows` 始终为真实成员；批次摘要只进入 `bank_batches`，不参与 row_counts、金额、formal_member_ids 或写操作。ETC 的 summary/collapsed_rows 合同保留。旧纯 bank-flow relation、无 OA/发票、>3 的银行折叠入口已删除。
-- 前端按 batch ID 保存当前展开状态；多个批次独立，普通流水混排。精简成员已在列表数据中，展开/收起不增加请求；重新进入默认收起。银行批次作为完整单元跨越所属关联组，不参与 OA 单笔金额的显示级拆分。
-- 当时 summary/full hydration 各增加一次有界集合查询（原预算 4/9，现行上限见下文历史分段修复）；页大小、批次数与成员数量不改变语句数。纯批次列表相对旧摘要会传输更多精简成员，以避免展开加载和第二份详情状态；生产验证同时测量 payload 和耗时。
-- 搜索按 submitted 批次的 total_amount 命中真实成员，不再依赖 relation_mode；合并后仍能搜批次总额。确认/撤回继续使用完整正式 typed members，摘要不能进入请求。合并关系走关系撤回；纯 batch relation 仍由批次 owner 撤回。
-- 测试覆盖 2/3/4 阈值、多批次与普通流水、OA/发票混合、已撤回与跨组批次、选择去重、搜索、真实 PostgreSQL summary/full 和无 N+1；浏览器覆盖双区域、展开/收起与 1440/1920 布局。无新 read model/cache/worker/schema。
+- 折叠由关联台展示规则统一拥有，与流水规则批次来源、批次状态无关。已配对/未配对使用同一规则：已证明的同一 OA/发票对应区域内至少 4 条真实银行流水，effective category_code、收支方向和币种一致才折叠；纯银行关系、1–3 条、标签混合或归属不明确的多对多区域不折叠。不同对应区域不合并。
+- `services/workbench_bank_folds.py::apply_bank_folds(groups)` 是无 I/O 的纯展示函数，输入 canonical 精简/完整行和 `display_subgroups`，输出可选 `bank_folds[{fold_id,member_ids,summary_row}]`。`display_subgroups.resolved` 区分已证明区域与未决余项。单 OA 或只有发票的正式关系共用银行栏；已有报销子项展示仍保留。
+- 摘要 source_kind 为 `bank_fold_summary`，只出现在 bank_folds，不进入真实 bank_rows、formal_member_ids、row_counts、金额校验或写操作。摘要金额按真实成员 Decimal 求和；账户/对方不同显示“多个账户/多个对方”，不同时间不伪装为第一条时间。摘要不提供单笔详情操作。
+- 数字搜索先用 SQL 缩小正式关系候选，再在同一只读快照内用精简水合和同一折叠函数计算总额，命中转为真实成员 ID 后进入原搜索、筛选和分页。当前请求仅复用一次计算结果，不新增跨请求缓存或 read model。ETC 沿用 canonical 身份映射。
+- 前端以 fold_id 管理独立展开状态。搜索具体成员金额自动展开，用户仍可收起；清空搜索恢复用户展开状态。展开/收起不额外请求接口，真实成员选择和确认/撤回事务保持原链路。
+- 删除旧 read_display_batches、apply_bank_batches、bank_batches DTO、按批次总额搜索和跨对应区域强制合并逻辑。业务批次提交/撤回/历史保留；纯银行批次撤回从真实成员 metadata 找 owner，不依赖摘要。
+- 当前单次 hydration 的 full/summary 查询上限分别为 10/4，去掉一次批次查找；无新增 schema、worker、依赖、hash 或 gate。
 
 ## 2026-09-12 历史 OA/流水展示分段
 
 - 页面 hydration 在同一只读快照内，对当前页普通多 OA 关系一次集合读取 `app.workbench_pair_relation_history`。精确 `case_id + typed members` 的确认前后快照提供历史分组证据；复用 case ID、连续合并和撤回均不能套用较大或不同成员的快照。
-- 新增可选输出 `display_subgroups: [{oa_row_ids: string[], bank_row_ids: string[]}]`，由纯函数模块 `services/workbench_display_subgroups.py` 生成。它只用于 OA/银行列共享行轨；不写 relation/source ownership，不修改金额、成员、版本、审批、配对区或成本口径。发票没有逐项归属证据时继续占整组共享栏。已有费用子项/补充凭证展示链保留。
+- 新增可选输出 `display_subgroups: [{oa_row_ids: string[], bank_row_ids: string[], resolved: boolean}]`，由纯函数模块 `services/workbench_display_subgroups.py` 生成。它只用于 OA/银行列共享行轨；不写 relation/source ownership，不修改金额、成员、版本、审批、配对区或成本口径。发票没有逐项归属证据时继续占整组共享栏。已有费用子项/补充凭证展示链保留。
 - 优先保留历史 OA+银行小组；剩余记录仅按无歧义金额匹配，一侧单项且总额闭合时共享一个区块；无法唯一判断的多对多保留共享区块，不猜测重复金额归属。不同 pane 的相同文本 ID 按 typed identity 区分。
-- 同一提交银行批次不得跨展示区块拆开；相交区块合并为共享带。批次仍沿用 `bank_batches` 的成员、汇总行和 >=3 折叠规则，展开/收起不改变 selection 或 action identity。
 - 前端 API mapper 仅转为 `displaySubgroups`；主表消费该分段，不再为这些普通多 OA 组调用原金额推断/残余行分支。旧报销明细与显式发票来源逻辑仍服务原业务，不做并行替代实现。
-- 当前 hydration 的完整明细上限为 11 次集合查询（原既有完整组成实际最多 10 次，加一次历史读取），精简明细为 5 次；这是单次 hydration，不是整个 initial 请求。原上限 9 漏算 OA 凭证/批次混合场景，已用真实 PostgreSQL 的 OA+普通发票+ETC+流水混合页回归证明会误报 500。不得通过捕获异常、返回摘要或空页绕开错误。

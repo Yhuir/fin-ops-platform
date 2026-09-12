@@ -58,7 +58,7 @@
 | 写命令 receipt | 保留 batch、relation command 结果、affected months、幂等/CAS/冲突合同；删除 read-model/freshness/operation-barrier envelope。 |
 | 写后页面状态 | submit-selection、submit、withdraw 和规则保存成功后，各执行一次当前列表 GET；不先本地伪造最终批次，不 polling。普通选择提交或内部往来单批提交发生真实 candidate conflict 会先清空旧选择与旧详情，再只执行一次当前列表 GET，禁止自动重提。 |
 | 失败反馈 | Mutation 失败只由全局操作弹窗显示一次；后端 5xx 的 `requestId` 必须附在错误消息中用于精确查日志，页面不得再叠加第二个 feedback。 |
-| 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、`requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。当前 active relation 的要求可由增量任务通过正式 relation command 更新；有效已提交批次成员数 `>=3` 时只在银行栏折叠，1 到 2 行直接展示；人工关联 OA/发票后继续以批次身份折叠。 |
+| 关联台 | relation metadata 保持 `source=bank_flow_rule_batch`、`relation_mode=bank_flow_rule_batch`、`source_batch_id`、`flow_rule_tag_code/version`、`requires_oa/requires_invoice`、`source_row_count` 和 `collapsed_bank_rows`。当前 active relation 的要求可由增量任务通过正式 relation command 更新；折叠由关联台按 OA/发票对应区域和 `>=4` 条同标签规则负责，纯银行批次不折叠。 |
 
 ## 一致性与查询预算
 
@@ -164,15 +164,9 @@ Canonical facts：
 - 撤回结果向持久化传递关系命令返回的全部 changed cases 和 affected months，`changed_batch_ids` 仅为目标批次，不能遗漏被取消的合并关系或恢复的其它关系。
 - 从关联台撤回后续合并只恢复批次关系，不撤销其提交；从批次页面撤回提交则释放目标成员并保留其它已恢复关系。后续关系撤回不得把已撤回批次从无关的更大关系历史重新启用。
 
-## 2026-09-12 关联前后独立批次折叠
+## 2026-09-12 关联台折叠职责
 
-- 批次事实由 `BankFlowRuleBatchCanonicalQueryRepository.read_display_batches(connection, row_ids)` 在调用方只读事务内一次集合读取，输入当前页真实银行 ID，输出 submitted 批次 ID、version、total_amount 和完整 row_ids；不读取事件历史、不写状态、不按金额推断批次。已撤回/stale 批次不进入展示集合。
-- `WorkbenchRelationGroupingService.apply_bank_batches(groups, batches)` 是纯展示组装：同一个有效批次至少 3 个成员且完整属于当前组时，输出 `bank_batches[{batch_id,member_ids,summary_row}]`。成员分散时保持当前关系和普通行，不能跨组收拢；重复有效归属明确报错。
-- `bank_rows` 始终为真实成员；批次摘要只进入 `bank_batches`，不参与 row_counts、金额、formal_member_ids 或写操作。ETC 的 summary/collapsed_rows 合同保留。旧纯 bank-flow relation、无 OA/发票、>3 的银行折叠入口已删除。
-- 前端按 batch ID 保存当前展开状态；多个批次独立，普通流水混排。精简成员已在列表数据中，展开/收起不增加请求；重新进入默认收起。银行批次作为完整单元跨越所属关联组，不参与 OA 单笔金额的显示级拆分。
-- summary/full hydration 各增加一次有界集合查询（预算 4/9）；页大小、批次数与成员数量不改变语句数。纯批次列表相对旧摘要会传输更多精简成员，以避免展开加载和第二份详情状态；生产验证同时测量 payload 和耗时。
-- 搜索按 submitted 批次的 total_amount 命中真实成员，不再依赖 relation_mode；合并后仍能搜批次总额。确认/撤回继续使用完整正式 typed members，摘要不能进入请求。合并关系走关系撤回；纯 batch relation 仍由批次 owner 撤回。
-- 测试覆盖 2/3/4 阈值、多批次与普通流水、OA/发票混合、已撤回与跨组批次、选择去重、搜索、真实 PostgreSQL summary/full 和无 N+1；浏览器覆盖双区域、展开/收起与 1440/1920 布局。无新 read model/cache/worker/schema。
+关联台折叠与批次来源解耦，详见 [关联台边界](../reconciliation-workbench/boundary-io.md)。本模块不再提供 read_display_batches 展示查询，保留批次业务关系、标签、提交、撤回、版本与历史。关联台从真实成员 metadata 发起纯批次撤回；合并关系走正式关联撤回。
 
 发布审计同时按实际 active relation 成员检查已合并批次，不要求合并后仍保留以 batch_id 为 case_id 的独立 active 关系；所有批次成员必须在同一 active 关系内，原始独立批次仍要求严格成员相等。参见 `../app-health-operations/boundary-io.md`。
 

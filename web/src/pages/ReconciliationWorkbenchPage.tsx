@@ -249,9 +249,8 @@ function createWorkbenchZoneServerPageQueryKeys(
   };
 }
 
-function isBankFlowRuleBatchSummaryRow(row: WorkbenchRecord) {
-  return row.sourceKind === "bank_flow_rule_batch_summary"
-    || readStringMetadata(row.specialMetadata, "relation_mode") === "bank_flow_rule_batch";
+function isBankFlowRuleBatchMember(row: WorkbenchRecord) {
+  return readStringMetadata(row.specialMetadata, "relation_mode") === "bank_flow_rule_batch";
 }
 
 function bankFlowRuleBatchSourceBatchId(row: WorkbenchRecord) {
@@ -1992,7 +1991,7 @@ export default function ReconciliationWorkbenchPage() {
     }
 
     if (action === "unlink") {
-      if (isBankFlowRuleBatchSummaryRow(row)) {
+      if (isBankFlowRuleBatchMember(row)) {
         await runBlockingAction({
           loadingMessage: "正在撤回流水规则批次...",
           action: () => withdrawBankFlowRuleBatchSummaryRow(row),
@@ -2253,8 +2252,8 @@ export default function ReconciliationWorkbenchPage() {
     }
     const selectedGroup = selectedOpenWithdrawableRelationGroups[0];
     const batchSummary = selectedGroup?.relationMode === "bank_flow_rule_batch"
-      ? selectedGroup.bankBatches?.[0]?.summaryRow : undefined;
-    if (batchSummary && isBankFlowRuleBatchSummaryRow(batchSummary)) {
+      ? selectedGroup.rows.bank.find(isBankFlowRuleBatchMember) : undefined;
+    if (batchSummary && isBankFlowRuleBatchMember(batchSummary)) {
       await runBlockingAction({
         loadingMessage: "正在撤回流水规则批次...",
         action: async () => {
@@ -2297,8 +2296,8 @@ export default function ReconciliationWorkbenchPage() {
     const selectedBankFlowRuleBatchRows = uniqueBankFlowRuleBatchRows(
       selectedPairedGroupsForUnifiedAction
         .flatMap((group) => group.relationMode === "bank_flow_rule_batch"
-          ? (group.bankBatches ?? []).map((batch) => batch.summaryRow) : [])
-        .filter(isBankFlowRuleBatchSummaryRow),
+          ? group.rows.bank : [])
+        .filter(isBankFlowRuleBatchMember),
     );
     if (selectedBankFlowRuleBatchRows.length > 0) {
       await runBlockingAction({

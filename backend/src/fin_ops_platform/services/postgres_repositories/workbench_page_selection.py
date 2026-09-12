@@ -20,8 +20,8 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_query import
 from fin_ops_platform.services.workbench_direct_query_errors import (
     WorkbenchDirectQueryUnavailable,
     WorkbenchRelationPreviewSelectionError,
-    is_workbench_data_integrity_query_error,
     is_transient_postgres_query_error,
+    is_workbench_data_integrity_query_error,
 )
 from fin_ops_platform.services.workbench_filter_options import (
     normalize_workbench_scope_key,
@@ -31,7 +31,6 @@ from fin_ops_platform.services.workbench_row_identity import (
     workbench_row_identity_key,
 )
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
-
 
 T = TypeVar("T")
 ROW_TYPES = frozenset({"oa", "bank", "invoice"})
@@ -343,8 +342,6 @@ class PostgresWorkbenchPageSelectionRepository:
         group_rows: list[dict[str, Any]] = []
         for group in groups:
             for row in PostgresWorkbenchPageHydrationRepository.group_rows(group):
-                if row.get("source_kind") == "bank_flow_rule_batch_summary":
-                    continue
                 row_type = self._row_type(row.get("type"))
                 row_id = str(row.get("id") or "").strip()
                 if not row_type or not row_id:

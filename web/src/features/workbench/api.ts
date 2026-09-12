@@ -463,7 +463,7 @@ type ApiWorkbenchGroup = {
   default_collapsed?: boolean | null;
   summary_row?: ApiWorkbenchRow | null;
   display_subgroups?: { oa_row_ids: string[]; bank_row_ids: string[] }[];
-  bank_batches?: { batch_id: string; member_ids: string[]; summary_row: ApiWorkbenchRow }[];
+  bank_folds?: { fold_id: string; member_ids: string[]; summary_row: ApiWorkbenchRow }[];
   formal_member_ids?: unknown[] | null;
   formal_member_types?: unknown[] | null;
   row_counts?: Partial<Record<WorkbenchRecordType, number | string | null>> | null;
@@ -1129,9 +1129,8 @@ function rowRelation(row: ApiWorkbenchRow) {
   return row.invoice_bank_relation;
 }
 
-function isBankFlowRuleBatchSummaryRow(row: ApiWorkbenchRow) {
-  return row.source_kind === "bank_flow_rule_batch_summary"
-    || row.special_metadata?.relation_mode === "bank_flow_rule_batch";
+function isBankFlowRuleBatchMember(row: ApiWorkbenchRow) {
+  return row.special_metadata?.relation_mode === "bank_flow_rule_batch";
 }
 
 function isNoOaBatchRow(row: ApiWorkbenchRow) {
@@ -1141,7 +1140,7 @@ function isNoOaBatchRow(row: ApiWorkbenchRow) {
 }
 
 function isBankFlowRuleBatchRow(row: ApiWorkbenchRow) {
-  return isBankFlowRuleBatchSummaryRow(row)
+  return isBankFlowRuleBatchMember(row)
     || (row.type === "bank" && rowRelation(row)?.code === "bank_flow_rule_batch" && hasNoOaSourceBatchId(row));
 }
 
@@ -1155,7 +1154,7 @@ function normalizeRowAvailableActions(row: ApiWorkbenchRow) {
     return ["detail"];
   }
   const actions = row.available_actions ?? [];
-  if (row.source_kind === "bank_flow_rule_batch_summary") return actions;
+  if (row.source_kind === "bank_fold_summary") return actions;
   if (!isNoOaBatchRow(row) && !isBankFlowRuleBatchRow(row)) {
     return actions;
   }
@@ -1197,8 +1196,8 @@ function rowLabel(row: ApiWorkbenchRow) {
   if (row.type === "oa") {
     return toDisplayValue(row.apply_type, "OA");
   }
-  if (row.source_kind === "bank_flow_rule_batch_summary") {
-    return "流水规则批次";
+  if (row.source_kind === "bank_fold_summary") {
+    return "流水合计";
   }
   if (row.type === "bank") {
     return row.debit_amount ? "支取" : "收入";
@@ -1663,8 +1662,8 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     displaySubgroups: group.display_subgroups?.map((part) => ({
       oaRowIds: part.oa_row_ids, bankRowIds: part.bank_row_ids,
     })),
-    bankBatches: group.bank_batches?.map((batch) => ({
-      batchId: batch.batch_id, memberIds: batch.member_ids, summaryRow: mapRow(batch.summary_row),
+    bankFolds: group.bank_folds?.map((batch) => ({
+      foldId: batch.fold_id, memberIds: batch.member_ids, summaryRow: mapRow(batch.summary_row),
     })),
     formalMemberIdentities,
     rows,

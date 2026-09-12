@@ -13,9 +13,6 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
     normalize_oa_attachment_expense_item_ids,
 )
-from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
-    BankFlowRuleBatchCanonicalQueryRepository,
-)
 from fin_ops_platform.services.postgres_repositories.common import (
     row_payload,
     serialize_value,
@@ -32,20 +29,19 @@ from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import 
 from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
     PostgresWorkbenchOaSupportingDocumentRepository,
 )
+from fin_ops_platform.services.workbench_bank_folds import apply_bank_folds
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
 )
 from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
-from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 # One relation lookup, one batch read per present canonical pane, one settings
-# lookup, set-based ETC/bank batch/history reads, overrides, and anomaly decisions. The
-# Full pages also attach OA supporting documents. The maximum is ten existing
-# set queries plus one history query; mixed full pages previously exceeded nine.
+# lookup, set-based ETC/history reads, overrides, and anomaly decisions.
+# Full pages also attach OA supporting documents; folding itself performs no I/O.
 # The budget is independent of page/member count; a higher count is a regression.
-WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 11
-WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 5
+WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET = 10
+WORKBENCH_SUMMARY_HYDRATION_STATEMENT_BUDGET = 4
 
 
 def oa_source_identity_aliases_sql(source_payload: str) -> str:
@@ -257,14 +253,8 @@ class PostgresWorkbenchPageHydrationRepository:
             for group in list((grouped.get(zone) or {}).get("groups") or [])
             if isinstance(group, dict)
         ]
-        WorkbenchRelationGroupingService.apply_bank_batches(
-            grouped_groups,
-            BankFlowRuleBatchCanonicalQueryRepository.read_display_batches(
-                connection,
-                {row_id for row_type, row_id in rows_by_typed_id if row_type == "bank"},
-            ),
-        )
         self._attach_display_subgroups(grouped_groups, connection)
+        apply_bank_folds(grouped_groups)
         groups_by_id = {
             str(group.get("group_id") or ""): group for group in grouped_groups
         }
@@ -1289,14 +1279,8 @@ class PostgresWorkbenchPageHydrationRepository:
             for group in list((grouped.get(zone) or {}).get("groups") or [])
             if isinstance(group, dict)
         ]
-        WorkbenchRelationGroupingService.apply_bank_batches(
-            grouped_groups,
-            BankFlowRuleBatchCanonicalQueryRepository.read_display_batches(
-                connection,
-                {row_id for row_type, row_id in rows_by_typed_id if row_type == "bank"},
-            ),
-        )
         self._attach_display_subgroups(grouped_groups, connection)
+        apply_bank_folds(grouped_groups)
         groups_by_id = {
             str(group.get("group_id") or ""): group for group in grouped_groups
         }

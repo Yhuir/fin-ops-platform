@@ -1424,38 +1424,16 @@ function bankFlowRuleWorkbenchGroups(
   const invoiceRequiredGroup = bankFlowRuleInvoiceRequiredGroup(zone, invoiceRequiredConfirmed);
   if (zone === "paired") {
     const collapsedRows = [1, 2, 3, 4].map((index) => bankFlowRuleSourceRow(index));
-    const summaryRow = {
-      ...bankFlowRuleSourceRow(0, {
-        id: "bank-flow-rule-summary-e2e-fee",
-        source_kind: "bank_flow_rule_batch_summary",
-        trade_time: "2026-05",
-        debit_amount: "35.20",
-        counterparty_name: "流水规则手续费批次",
-        remark: "4 条手续费流水",
-      }),
-      special_metadata: {
-        source: "bank_flow_rule_batch",
-        source_batch_id: "bank_flow_rule_batch_e2e_fee",
-        relation_mode: "bank_flow_rule_batch",
-        flow_rule_tag_code: "fee",
-        flow_rule_version: 3,
-        requires_oa: false,
-        requires_invoice: false,
-        source_row_count: 4,
-        collapsed_bank_rows: true,
-      },
-    };
     const feeGroup = {
       group_id: "bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee",
       group_type: "relation",
       match_confidence: "high",
       reason: "流水规则手续费批次",
       relation_mode: "bank_flow_rule_batch",
-      bank_batches: [{ batch_id: "bank_flow_rule_batch_e2e_fee", member_ids: collapsedRows.map((row) => row.id), summary_row: summaryRow }],
       formal_member_ids: collapsedRows.map((row) => row.id),
       formal_member_types: collapsedRows.map(() => "bank"),
       row_counts: { oa: 0, bank: 4, invoice: 0 },
-      display_row_counts: { oa: 0, bank: 1, invoice: 0 },
+      display_row_counts: { oa: 0, bank: 4, invoice: 0 },
       oa_rows: [],
       bank_rows: collapsedRows,
       invoice_rows: [],

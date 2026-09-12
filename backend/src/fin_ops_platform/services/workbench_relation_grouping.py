@@ -19,7 +19,6 @@ from fin_ops_platform.services.workbench_relation_requirements import (
 ROW_TYPES = ("oa", "bank", "invoice")
 DISPLAY_ROLES = frozenset({"summary", "collapsed_summary"})
 LEGACY_CANDIDATE_CASE_PREFIXES = ("candidate:", "decision:", "temp:")
-BANK_FLOW_RULE_BATCH_COLLAPSE_THRESHOLD = 3
 
 
 def _canonical_expense_item_id(item: dict[str, Any]) -> str:
@@ -609,47 +608,6 @@ class WorkbenchRelationGroupingService:
             group["collapsed_rows"] = {"invoice": details}
         if detail_count > 0:
             group["collapsed_row_counts"] = {"invoice": detail_count}
-
-    @staticmethod
-    def apply_bank_batches(groups: list[dict[str, Any]], batches: list[dict[str, Any]]) -> None:
-        """Decorate complete in-group batches; never change canonical membership."""
-        batches_by_member: dict[str, dict[str, Any]] = {}
-        for batch in batches:
-            if batch["status"] != "submitted":
-                continue
-            members = batch["row_ids"]
-            if len(set(members)) != len(members):
-                raise ValueError("Bank batch contains duplicate members.")
-            for member in members:
-                if member in batches_by_member:
-                    raise ValueError("Bank member belongs to multiple submitted batches.")
-                batches_by_member[member] = batch
-        for group in groups:
-            rows = group["bank_rows"]
-            by_id = {row["id"]: row for row in rows}
-            seen: set[str] = set()
-            displays = []
-            for row in rows:
-                batch = batches_by_member.get(row["id"])
-                if batch is None or batch["batch_id"] in seen:
-                    continue
-                seen.add(batch["batch_id"])
-                members = batch["row_ids"]
-                if len(members) < BANK_FLOW_RULE_BATCH_COLLAPSE_THRESHOLD or not set(members) <= by_id.keys():
-                    continue
-                summary = deepcopy(row)
-                summary.update({
-                    "id": f"bank_batch_summary:{batch['batch_id']}",
-                    "source_kind": "bank_flow_rule_batch_summary",
-                    "amount": str(batch["total_amount"]),
-                    "debit_amount": str(batch["total_amount"]) if row.get("txn_direction") == "outflow" else "",
-                    "credit_amount": str(batch["total_amount"]) if row.get("txn_direction") == "inflow" else "",
-                    "available_actions": [],
-                    "special_metadata": {"source_batch_id": batch["batch_id"], "batch_version": batch["version"]},
-                })
-                displays.append({"batch_id": batch["batch_id"], "member_ids": members, "summary_row": summary})
-            if displays:
-                group["bank_batches"] = displays
 
     @staticmethod
     def _row_amount(row: dict[str, Any]) -> Decimal:

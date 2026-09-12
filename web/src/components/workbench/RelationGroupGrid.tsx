@@ -169,6 +169,7 @@ function RelationGroupGrid({
   const nextPageSentinelRef = useRef<HTMLDivElement | null>(null);
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
   const [expandedPaneGroups, setExpandedPaneGroups] = useState<Set<string>>(() => new Set());
+  const [searchFoldOverrides, setSearchFoldOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [loadingPaneGroups, setLoadingPaneGroups] = useState<Set<string>>(() => new Set());
   const [failedPaneGroups, setFailedPaneGroups] = useState<Set<string>>(() => new Set());
   const searchGenerationRef = useRef(0);
@@ -212,7 +213,8 @@ function RelationGroupGrid({
   }, [canOperateData, onEditReceipt]);
   useLayoutEffect(() => {
     searchGenerationRef.current += 1;
-    setExpandedPaneGroups(new Set());
+    setExpandedPaneGroups((current) => new Set([...current].filter((key) => key.startsWith("bank-fold:"))));
+    setSearchFoldOverrides(new Map());
     setLoadingPaneGroups(new Set());
     setFailedPaneGroups(new Set());
   }, [normalizedSearchQuery]);
@@ -478,32 +480,35 @@ function RelationGroupGrid({
       {groups.length === 0 ? <div className="state-panel">当前区域暂无记录。</div> : null}
       {groups.map((group, index) => {
         const bankRowControls = new Map<string, ReactNode>();
-        const bankBatchByMember = new Map(
-          (group.bankBatches ?? []).flatMap((batch) => batch.memberIds.map((id) => [id, batch] as const)),
+        const bankFoldByMember = new Map(
+          (group.bankFolds ?? []).flatMap((batch) => batch.memberIds.map((id) => [id, batch] as const)),
         );
-        const bankRowsByBatch = new Map<string, WorkbenchRecord[]>();
+        const bankRowsByFold = new Map<string, WorkbenchRecord[]>();
         group.rows.bank.forEach((row) => {
-          const batch = bankBatchByMember.get(row.id);
+          const batch = bankFoldByMember.get(row.id);
           if (batch) {
-            const members = bankRowsByBatch.get(batch.batchId) ?? [];
+            const members = bankRowsByFold.get(batch.foldId) ?? [];
             members.push(row);
-            bankRowsByBatch.set(batch.batchId, members);
+            bankRowsByFold.set(batch.foldId, members);
           }
         });
-        const emittedBatches = new Set<string>();
+        const emittedFolds = new Set<string>();
         const bankDisplayRows = group.rows.bank.flatMap((row) => {
-          const batch = bankBatchByMember.get(row.id);
+          const batch = bankFoldByMember.get(row.id);
           if (!batch) return [row];
-          if (emittedBatches.has(batch.batchId)) return [];
-          emittedBatches.add(batch.batchId);
-          const key = `bank-batch:${batch.batchId}`;
-          const expanded = expandedPaneGroups.has(key);
-          const members = bankRowsByBatch.get(batch.batchId)!;
+          if (emittedFolds.has(batch.foldId)) return [];
+          emittedFolds.add(batch.foldId);
+          const key = `bank-fold:${batch.foldId}`;
+          const members = bankRowsByFold.get(batch.foldId)!;
+          const searchAmount = normalizedSearchQuery.replace(/,/g, "");
+          const memberHit = searchAmount !== "" && Number.isFinite(Number(searchAmount))
+            && members.some((member) => Number(member.amount.replace(/,/g, "")) === Number(searchAmount));
+          const expanded = searchFoldOverrides.get(key) ?? (expandedPaneGroups.has(key) || memberHit);
           const visible = expanded ? members : [batch.summaryRow];
           bankRowControls.set(visible[0].id, (
             <button
               aria-expanded={expanded}
-              aria-label={`${expanded ? "收起" : "展开"}流水批次，${batch.memberIds.length} 条`}
+              aria-label={`${expanded ? "收起" : "展开"}流水明细，${batch.memberIds.length} 条`}
               className="row-action-btn candidate-group-collapse-control"
               type="button"
               onClick={(event) => {
@@ -513,6 +518,7 @@ function RelationGroupGrid({
                   if (expanded) next.delete(key); else next.add(key);
                   return next;
                 });
+                setSearchFoldOverrides((current) => new Map(current).set(key, !expanded));
               }}
             >
               {expanded ? "收起明细" : `展开 ${batch.memberIds.length} 条明细`}
@@ -525,7 +531,7 @@ function RelationGroupGrid({
           || (group.collapsedRows?.[paneId]?.length ?? 0) > 0
         );
         const paneRecords = (paneId: WorkbenchRecordType) => {
-          if (paneId === "bank" && group.bankBatches?.length) return bankDisplayRows;
+          if (paneId === "bank" && group.bankFolds?.length) return bankDisplayRows;
           const collapsedRows = group.collapsedRows?.[paneId] ?? [];
           if (!paneIsCollapsed(paneId)) {
             return group.rows[paneId];
@@ -588,7 +594,7 @@ function RelationGroupGrid({
         const bankSegmentByMember = new Map(
           (displaySegments ?? []).flatMap((segment) => segment.rows.bank.map((row) => [row.id, segment.id] as const)),
         );
-        const summaryMember = new Map((group.bankBatches ?? []).map((batch) => [batch.summaryRow.id, batch.memberIds[0]]));
+        const summaryMember = new Map((group.bankFolds ?? []).map((batch) => [batch.summaryRow.id, batch.memberIds[0]]));
         const bankRecordsBySegment = new Map<string, WorkbenchRecord[]>();
         bankDisplayRows.forEach((row) => {
           const segmentId = bankSegmentByMember.get(summaryMember.get(row.id) ?? row.id);
@@ -852,6 +858,7 @@ function RelationGroupGrid({
     columnsByPane,
     displayState,
     expandedPaneGroups,
+    searchFoldOverrides,
     failedPaneGroups,
     getRowState,
     groups,

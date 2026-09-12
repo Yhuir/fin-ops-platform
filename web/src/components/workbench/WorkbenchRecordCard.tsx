@@ -70,7 +70,7 @@ function WorkbenchRecordCard({
   leadingControl,
 }: WorkbenchRecordCardProps) {
   const columns = columnsProp ?? getWorkbenchColumns(paneId);
-  const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_flow_rule_batch_summary";
+  const isSummaryRow = row.sourceKind === "etc_invoice_summary" || row.sourceKind === "bank_fold_summary";
   const attachmentStatusAnomalies = paneId === "invoice" && row.displayOnly
     ? row.workbenchAnomalies?.filter((anomaly) => isOaAttachmentStatus(anomaly.code)) ?? []
     : [];

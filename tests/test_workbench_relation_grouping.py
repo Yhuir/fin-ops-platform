@@ -745,61 +745,6 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-a", "bank-b"])
         self.assertNotIn("collapsed_rows", group)
 
-    def test_bank_batches_collapse_at_three_without_changing_relation_members(self) -> None:
-        for count in (2, 3, 4):
-            for mode in ("bank_flow_rule_batch", "manual_confirmed"):
-                with self.subTest(count=count, mode=mode):
-                    rows = {f"bank-{i}": {"id": f"bank-{i}", "type": "bank",
-                        "object_identity_key": f"bank-{i}", "amount": "10.00"} for i in range(count)}
-                    bank_ids = list(rows)
-                    if mode == "manual_confirmed":
-                        rows.update({kind: {"id": kind, "type": kind, "object_identity_key": kind,
-                            "amount": str(count * 10)} for kind in ("oa", "invoice")})
-                    relation = {"case_id": "batch-case", "row_ids": list(rows), "status": "active",
-                        "relation_mode": mode, "special_metadata": {"requires_oa": False, "requires_invoice": False}}
-                    payload = self.service.group_payload("2026-05", rows_by_id=rows, active_relations=[relation])
-                    groups = payload["paired"]["groups"]
-                    self.service.apply_bank_batches(groups, [{"batch_id": "batch", "status": "submitted",
-                        "version": 1, "row_ids": bank_ids, "total_amount": str(count * 10)}])
-                    group = groups[0]
-                    self.assertEqual(group["formal_member_ids"], list(rows))
-                    self.assertEqual([row["id"] for row in group["bank_rows"]], bank_ids)
-                    self.assertNotIn("collapsed_rows", group)
-                    if count >= 3:
-                        self.assertEqual(group["bank_batches"][0]["member_ids"], bank_ids)
-                        self.assertEqual(group["bank_batches"][0]["summary_row"]["amount"], str(count * 10))
-                    else:
-                        self.assertNotIn("bank_batches", group)
-
-    def test_batch_summary_uses_canonical_direction_for_display_amount(self) -> None:
-        for direction, label, field in (("outflow", "支出", "debit_amount"), ("inflow", "收入", "credit_amount")):
-            rows = [{"id": str(i), "type": "bank", "amount": "10.00",
-                     "direction": label, "txn_direction": direction} for i in range(3)]
-            group = {"bank_rows": rows}
-            self.service.apply_bank_batches([group], [{"batch_id": "batch", "status": "submitted",
-                "row_ids": ["0", "1", "2"], "total_amount": "30.00", "version": 1}])
-            summary = group["bank_batches"][0]["summary_row"]
-            self.assertEqual(summary[field], "30.00")
-            self.assertEqual(summary["direction"], label)
-            self.assertEqual(summary["credit_amount" if field == "debit_amount" else "debit_amount"], "")
-
-    def test_multiple_batches_preserve_ordinary_rows_and_ignore_withdrawn_or_split_batches(self) -> None:
-        rows = [{"id": str(i), "type": "bank", "amount": "10"} for i in range(10)]
-        group = {"bank_rows": rows}
-        batches = [{"batch_id": str(i), "status": status, "version": 1,
-            "row_ids": members, "total_amount": "30"} for i, (status, members) in enumerate([
-                ("submitted", ["0", "1", "2"]), ("submitted", ["3", "4", "5"]),
-                ("withdrawn", ["6", "7", "8"]), ("submitted", ["9", "outside", "other"]),
-            ])]
-        self.service.apply_bank_batches([group], batches)
-        self.assertEqual([batch["batch_id"] for batch in group["bank_batches"]], ["0", "1"])
-        self.assertEqual(group["bank_rows"], rows)
-        self.service.apply_bank_batches([], [])
-        with self.assertRaisesRegex(ValueError, "multiple submitted"):
-            self.service.apply_bank_batches([group], [batches[0], {**batches[0], "batch_id": "duplicate"}])
-        with self.assertRaisesRegex(ValueError, "duplicate members"):
-            self.service.apply_bank_batches([group], [{**batches[0], "row_ids": ["0", "0", "1"]}])
-
     def test_bank_relation_required_invoice_stays_grouped_in_unpaired(self) -> None:
         rows = {
             "oa-a": {"id": "oa-a", "type": "oa", "object_identity_key": "oa-a"},

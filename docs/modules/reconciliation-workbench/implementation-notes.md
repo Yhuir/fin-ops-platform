@@ -1967,3 +1967,13 @@
 - 决策：复用已有关系历史，在页面读取边界生成只读 `display_subgroups`。不新增表、持久化映射、hash、cache、worker 或业务写入；新展示路径替换普通多 OA 组原前端推断分支。有效费用子项逻辑保留。
 - 同轮修正完整混合分页的既有查询次数上限，并用真实 PostgreSQL 重现旧上限抛错，禁止降级摘要/空页。
 - docs impact：页面输出与展示文件范围变化，更新本模块 boundary/tests/README、关系 owner 边界；成本、银行明细、正式关系写入和部署架构没有改变。
+
+## 2026-09-12 按对应区域折叠银行流水
+
+- 折叠由关联台展示规则统一拥有，与流水规则批次来源、批次状态无关。已配对/未配对使用同一规则：已证明的同一 OA/发票对应区域内至少 4 条真实银行流水，effective category_code、收支方向和币种一致才折叠；纯银行关系、1–3 条、标签混合或归属不明确的多对多区域不折叠。不同对应区域不合并。
+- `services/workbench_bank_folds.py::apply_bank_folds(groups)` 是无 I/O 的纯展示函数，输入 canonical 精简/完整行和 `display_subgroups`，输出可选 `bank_folds[{fold_id,member_ids,summary_row}]`。`display_subgroups.resolved` 区分已证明区域与未决余项。单 OA 或只有发票的正式关系共用银行栏；已有报销子项展示仍保留。
+- 摘要 source_kind 为 `bank_fold_summary`，只出现在 bank_folds，不进入真实 bank_rows、formal_member_ids、row_counts、金额校验或写操作。摘要金额按真实成员 Decimal 求和；账户/对方不同显示“多个账户/多个对方”，不同时间不伪装为第一条时间。摘要不提供单笔详情操作。
+- 数字搜索先用 SQL 缩小正式关系候选，再在同一只读快照内用精简水合和同一折叠函数计算总额，命中转为真实成员 ID 后进入原搜索、筛选和分页。当前请求仅复用一次计算结果，不新增跨请求缓存或 read model。ETC 沿用 canonical 身份映射。
+- 前端以 fold_id 管理独立展开状态。搜索具体成员金额自动展开，用户仍可收起；清空搜索恢复用户展开状态。展开/收起不额外请求接口，真实成员选择和确认/撤回事务保持原链路。
+- 删除旧 read_display_batches、apply_bank_batches、bank_batches DTO、按批次总额搜索和跨对应区域强制合并逻辑。业务批次提交/撤回/历史保留；纯银行批次撤回从真实成员 metadata 找 owner，不依赖摘要。
+- 当前单次 hydration 的 full/summary 查询上限分别为 10/4，去掉一次批次查找；无新增 schema、worker、依赖、hash 或 gate。

@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from fin_ops_platform.services.workbench_bank_folds import apply_bank_folds
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
     WorkbenchRelationCommandRepositoryAdapter,
@@ -25,35 +26,35 @@ def command_service() -> WorkbenchRelationCommandService:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
-    def test_confirm_and_withdraw_keep_submitted_batch_display_identity(self) -> None:
+    def test_confirm_folds_real_members_and_withdraw_restores_bank_only_batch(self) -> None:
         service = command_service()
         grouping = WorkbenchRelationGroupingService()
-        bank_ids = [f"bank-{index}" for index in range(3)]
-        rows = {rid: {"id": rid, "type": "bank", "object_identity_key": rid, "amount": "10.00"} for rid in bank_ids}
-        rows.update({kind: {"id": kind, "type": kind, "object_identity_key": kind, "amount": "30.00"} for kind in ("oa", "invoice")})
-        batch = {"batch_id": "batch", "status": "submitted", "version": 1,
-                 "row_ids": bank_ids, "total_amount": "30.00"}
+        bank_ids = [f"bank-{index}" for index in range(4)]
+        rows = {rid: {"id": rid, "type": "bank", "object_identity_key": rid, "amount": "10.00",
+                      "category_code": "interest", "txn_direction": "outflow", "currency": "CNY"} for rid in bank_ids}
+        rows.update({kind: {"id": kind, "type": kind, "object_identity_key": kind, "amount": "40.00"} for kind in ("oa", "invoice")})
 
-        def displayed_batch():
+        def display_groups():
             payload = grouping.group_payload("all", rows_by_id=rows,
                 active_relations=service.active_relations_for_row_ids(list(rows)))
             groups = [*payload["paired"]["groups"], *payload["unpaired"]["groups"]]
-            grouping.apply_bank_batches(groups, [batch])
-            return next(group for group in groups if group.get("bank_batches"))
+            apply_bank_folds(groups)
+            return groups
 
-        service.confirm_relation(case_id="batch", row_ids=bank_ids, row_types=["bank"] * 3,
+        service.confirm_relation(case_id="batch", row_ids=bank_ids, row_types=["bank"] * 4,
             relation_mode="bank_flow_rule_batch", actor_id="tester")
-        before = displayed_batch()["bank_batches"]
+        self.assertFalse(any(g.get("bank_folds") for g in display_groups()))
         service.confirm_relation(case_id="merged", row_ids=list(rows),
             row_types=[rows[rid]["type"] for rid in rows], relation_mode="manual_confirmed",
             actor_id="tester", replace_existing=True, history_operation_type="confirm_link")
-        self.assertEqual(displayed_batch()["bank_batches"][0]["batch_id"], before[0]["batch_id"])
-        self.assertEqual(displayed_batch()["bank_batches"][0]["member_ids"], bank_ids)
+        folded = next(g for g in display_groups() if g.get("bank_folds"))
+        self.assertEqual(set(folded["bank_folds"][0]["member_ids"]), set(bank_ids))
+        self.assertEqual(folded["bank_folds"][0]["summary_row"]["amount"], "40.00")
         preview = service.preview_withdraw_relation(row_ids=list(rows), row_types=[rows[rid]["type"] for rid in rows])
         service.withdraw_relation(case_id="merged", actor_id="tester", row_ids=list(rows),
             row_types=[rows[rid]["type"] for rid in rows], preview_id=preview["preview_id"],
             operation_type=preview["operation_type"], expected_versions=preview["submit_expected_versions"])
-        self.assertEqual(displayed_batch()["bank_batches"][0]["member_ids"], bank_ids)
+        self.assertFalse(any(g.get("bank_folds") for g in display_groups()))
         self.assertEqual(service.get_active_relation_by_case_id("batch")["row_ids"], bank_ids)
 
     def test_batch_withdraw_unwinds_merges_preserves_other_relations_and_is_idempotent(self) -> None:

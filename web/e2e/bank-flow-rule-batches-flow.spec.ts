@@ -657,7 +657,8 @@ test.describe("bank flow rule batches browser flow", () => {
       "candidate-group-paired-bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee",
     );
     await expect(canonicalGroup).toBeVisible();
-    await expect(canonicalGroup).toContainText("流水规则手续费批次");
+    await expect(canonicalGroup).toContainText("流水规则手续费明细 1");
+    await expect(canonicalGroup).toContainText("流水规则手续费明细 4");
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -740,17 +741,11 @@ test.describe("bank flow rule batches browser flow", () => {
     const pairedGroup = page.getByTestId("candidate-group-paired-bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee");
 
     await expect(pairedGroup).toBeVisible();
-    await expect(pairedZone.getByText("流水规则手续费批次")).toBeVisible();
     await expect(pairedZone.getByRole("button", { name: "加载更多" })).toHaveCount(0);
-    await expect(pairedZone.getByText("流水规则手续费明细 1")).toHaveCount(0);
-
-    const expandButton = pairedZone.getByRole("button", { name: "展开流水批次，4 条" });
-    await expect(expandButton).toBeVisible();
-    expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
-    await expandButton.click();
+    // A bank-only business batch has no OA/invoice correspondence area.
     await expect(pairedZone.getByText("流水规则手续费明细 1")).toBeVisible();
     await expect(pairedZone.getByText("流水规则手续费明细 4")).toBeVisible();
-    await expect(pairedZone.getByRole("button", { name: "收起流水批次，4 条" })).toBeVisible();
+    await expect(pairedZone.getByRole("button", { name: /展开流水/ })).toHaveCount(0);
     expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
 
     const invoiceRequiredGroup = page.getByTestId(

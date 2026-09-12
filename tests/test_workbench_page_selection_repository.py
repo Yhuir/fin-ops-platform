@@ -337,15 +337,15 @@ def test_preview_excludes_collapsed_bank_summary_from_context(monkeypatch: pytes
     ids = [f"bank-{index}" for index in range(5)]
     rows = [{"id": identity, "type": "bank", "amount": "10.00"} for identity in ids]
     summary = {"id": "relation_summary:batch", "type": "bank",
-               "source_kind": "bank_flow_rule_batch_summary", "amount": "50.00"}
+               "source_kind": "bank_fold_summary", "amount": "50.00"}
     repository = PostgresWorkbenchPageSelectionRepository(_Connection([]), tenant_id="test")
     monkeypatch.setattr(repository, "_selection_descriptors", lambda **_: [{}])
     monkeypatch.setattr(repository, "_validated_matches", lambda **_: [("bank", identity) for identity in ids])
     monkeypatch.setattr(
         "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
         "PostgresWorkbenchPageHydrationRepository.hydrate_groups",
-        lambda *_, **__: [{"bank_rows": [summary], "summary_row": summary,
-                           "collapsed_rows": {"bank": rows}}],
+        lambda *_, **__: [{"bank_rows": rows, "bank_folds": [{"fold_id": "fold",
+                           "member_ids": ids, "summary_row": summary}]}],
     )
     result = repository._relation_preview_selection(scope_key="all", row_ids=ids, row_types=["bank"] * 5)
     assert result["rows"] == rows

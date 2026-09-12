@@ -729,13 +729,13 @@ describe("buildWorkbenchSelectionContext", () => {
     const oa = row("oa-1", "oa", "60");
     const invoice = row("invoice-1", "invoice", "60");
     const summary = row("bank-batch-summary", "bank", "60");
-    summary.sourceKind = "bank_flow_rule_batch_summary";
+    summary.sourceKind = "bank_fold_summary";
     const sourceGroup: WorkbenchRelationGroup = {
       ...group("mixed"), rawGroupType: "relation", relationMode: "manual_confirmed", groupType: zoneId,
       rows: { oa: [oa], bank: banks, invoice: [invoice] },
       formalMemberIdentities: [oa, ...banks, invoice].map(({ id, recordType }) => ({ id, recordType })),
       amountCheck: authoritativeAmountCheck("60.00", "60.00", "60.00"),
-      bankBatches: [{ batchId: "batch", memberIds: banks.map(({ id }) => id), summaryRow: summary }],
+      bankFolds: [{ foldId: "batch", memberIds: banks.map(({ id }) => id), summaryRow: summary }],
     };
     const collapsed = buildWorkbenchSelectionContext({ explicitRows: [summary], sourceGroups: [sourceGroup], zoneId });
     const expanded = buildWorkbenchSelectionContext({ explicitRows: [banks[0]], sourceGroups: [sourceGroup], zoneId });

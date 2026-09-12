@@ -96,17 +96,11 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
                 remaining = set()
         if remaining:
             resolved.append(frozenset(remaining))
-        # A batch is indivisible for display. Merge intersecting blocks, never
-        # duplicate its summary or select only part of its real members.
-        for batch in group.get("bank_batches", []):
-            batch_members = {("bank", k) for k in batch["member_ids"]}
-            touched = [part for part in resolved if part & batch_members]
-            if len(touched) > 1:
-                resolved = [part for part in resolved if part not in touched] + [frozenset().union(*touched)]
         oa_order = {r["id"]: i for i, r in enumerate(oa_rows)}
         resolved.sort(key=lambda part: min((oa_order[k] for t, k in part if t == "oa"), default=len(oa_rows)))
         group["display_subgroups"] = [
             {
+                "resolved": part != remaining,
                 "oa_row_ids": [r["id"] for r in oa_rows if ("oa", r["id"]) in part],
                 "bank_row_ids": [r["id"] for r in bank_rows if ("bank", r["id"]) in part],
             }

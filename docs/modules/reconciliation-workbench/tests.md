@@ -281,7 +281,7 @@
 
 ## 2026-07-28 逐栏折叠、普通行直显与搜索真实预览
 
-- Business core：`no_oa_bank_batch` 与普通关系保留全部真实行；有效 submitted 批次成员数 `>=3` 时生成 `bank_batches`，不依赖关联 mode 或 OA/发票是否存在；真实银行行保持完整，1 到 2 行直接显示；ETC 仍只折叠发票栏。
+- 旧提交批次折叠规则已被 2026-09-12 对应区域规则替代；批次业务测试仍保留。
 - Repository/read model：summary page 不再把普通银行/发票行截成 3 行；折叠栏传 canonical summary + count，ETC 发票栏同样只传汇总行，不把第一张真实发票混入首屏。搜索只决定组命中、不自动展开全部 collapsed rows。ETC business batch 即使只有部分成员已建立严格 link，折叠汇总仍保留完整 `invoice_ids` 成员并按发票身份去重。schema v12 淘汰旧 generation/page cache，并统一 ETC relation proof，不新增表、worker、cache 或 API。
 - API/Frontend：group detail 按 `collapsed_row_counts.<pane>` 逐栏验证；ETC 的 OA/银行栏验证正常 rows，发票栏验证 collapsed rows。闭合态搜索只保留命中组并渲染 summary，不显示折叠成员或“隐藏内容命中”，也不自动展开或预取详情。
 - Regression：普通多行与 legacy no-OA 不出现通用“还有 N 条，展开”；bank-flow 与 ETC 保留 click-only detail、失败可重试和同 generation fail-closed。
@@ -727,3 +727,11 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `RelationGroupGrid.test.tsx`：paired/unpaired 分段内多个批次独立展开/收起，刷新保留 UI 展开状态、普通流水和发票仍显示。
 - 七类覆盖：业务核心、服务、API/DTO、页面读取、前端交互、PostgreSQL 关系历史到页面集成、已有功能回归。没有新增 cache/read model/background job，相关 freshness/worker 专项不适用；正式关系写入幂等、权限、撤回沿用现有回归套件。
 - 浏览器验收：电信 7 OA/14 流水分成 7 带；重复加油款按历史对应；钢材两组多 OA/单流水；利息合并关系保留批次折叠。生产读取扫描同时核对数量、typed members、金额与原异常决定，不把 UI 对齐当作金额已一致。
+
+## 2026-09-12 对应区域折叠验证
+
+- 规则：`test_workbench_bank_folds.py` 覆盖 0/1/3/4/8、4+1、OA/发票区域、未决归属、币种/方向/标签差异及混合账户摘要。
+- 真实 PostgreSQL：`test_workbench_query_postgres_integration.py` 验证分页前总额/成员搜索、summary/full 一致、ETC 身份、移除批次来源依赖和集合查询次数。
+- 关联闭环：`test_workbench_relation_command_service.py` 覆盖真实成员确认→折叠→撤回恢复；原版本冲突、幂等、合并历史恢复继续验证。
+- 前端：RelationGroupGrid/WorkbenchSelection/WorkbenchSelectionModel/WorkbenchApi/groupDisplayModel 测试覆盖独立展开、成员搜索展开、清空搜索、选择不重复、纯批次撤回 owner 及已有 ETC/凭证/权限。
+- 发布后以生产只读全量 summary/full、原金额/成员比较、确认与撤回预览、浏览器 1920/1440 视觉、API 与展开耗时实测验证。生产不通过修改真实业务关系来制造测试数据。

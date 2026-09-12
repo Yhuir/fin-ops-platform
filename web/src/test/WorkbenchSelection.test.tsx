@@ -617,7 +617,7 @@ function withCompactBankFlowRelation(payload: Record<string, unknown>) {
   const summaryRow = {
     id: "bank-flow-summary-COMPACT-202603",
     type: "bank",
-    source_kind: "bank_flow_rule_batch_summary",
+    source_kind: "bank_fold_summary",
     trade_time: "2026-03-31 23:59:59",
     debit_amount: "128000.00",
     counterparty_name: "流水规则专用批次",
@@ -639,7 +639,7 @@ function withCompactBankFlowRelation(payload: Record<string, unknown>) {
         group_id: "bank-flow-rule-batch:COMPACT-202603",
         amount_check: { status: "matched", direction: "payment", oa_total: "0.00", bank_total: "128000.00", invoice_total: "0.00", requires_note: false },
         relation_mode: "bank_flow_rule_batch",
-        bank_batches: [{ batch_id: "COMPACT-202603", member_ids: ["compact-bank-1", "compact-bank-2", "compact-bank-3"], summary_row: summaryRow }],
+        bank_folds: [{ fold_id: "COMPACT-202603", member_ids: ["compact-bank-1", "compact-bank-2", "compact-bank-3"], summary_row: summaryRow }],
         formal_member_ids: ["compact-bank-1", "compact-bank-2", "compact-bank-3"],
         formal_member_types: ["bank", "bank", "bank"],
         oa_rows: [],

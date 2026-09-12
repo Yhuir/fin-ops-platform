@@ -37,7 +37,7 @@ def test_repeated_amounts_follow_historical_subgroups_without_changing_facts():
     ]
     apply_display_subgroups([g], history)
     assert g.pop("display_subgroups") == [
-        {"oa_row_ids": [f"o{i}"], "bank_row_ids": [f"b{i * 2}", f"b{i * 2 + 1}"]} for i in range(3)
+        {"resolved": True, "oa_row_ids": [f"o{i}"], "bank_row_ids": [f"b{i * 2}", f"b{i * 2 + 1}"]} for i in range(3)
     ]
     assert g == original
 
@@ -52,8 +52,8 @@ def test_nested_merge_uses_exact_members_and_preserves_many_to_one():
     history = [event(middle, [old]), event(relation("merged", rows), [middle])]
     apply_display_subgroups([g], history)
     assert g["display_subgroups"] == [
-        {"oa_row_ids": ["o0", "o1"], "bank_row_ids": ["x"]},
-        {"oa_row_ids": ["o2", "o3"], "bank_row_ids": ["y"]},
+        {"resolved": True, "oa_row_ids": ["o0", "o1"], "bank_row_ids": ["x"]},
+        {"resolved": True, "oa_row_ids": ["o2", "o3"], "bank_row_ids": ["y"]},
     ]
     # After withdrawal the middle snapshot cannot use the later merged event.
     restored = group([a, b, c, d, x, y], "reused")
@@ -61,15 +61,15 @@ def test_nested_merge_uses_exact_members_and_preserves_many_to_one():
     assert restored["display_subgroups"] == g["display_subgroups"]
 
 
-def test_ambiguous_many_to_many_stays_shared_and_batch_is_not_split():
+def test_ambiguous_many_to_many_stays_shared_and_batch_cannot_override_alignment():
     rows = [row("oa", "a", 100), row("oa", "b", 100), row("bank", "x", 40), row("bank", "y", 60)]
     g = group(rows)
     apply_display_subgroups([g], [])
-    assert g["display_subgroups"] == [{"oa_row_ids": ["a", "b"], "bank_row_ids": ["x", "y"]}]
+    assert g["display_subgroups"] == [{"resolved": False, "oa_row_ids": ["a", "b"], "bank_row_ids": ["x", "y"]}]
     g["bank_batches"] = [{"member_ids": ["x", "y"]}]
     history = [event(relation("merged", rows), [relation("a", [rows[0], rows[2]]), relation("b", [rows[1], rows[3]])])]
     apply_display_subgroups([g], history)
-    assert len(g["display_subgroups"]) == 1
+    assert len(g["display_subgroups"]) == 2
 
 
 def test_typed_identity_does_not_drop_bank_with_same_id_as_oa():
@@ -77,8 +77,8 @@ def test_typed_identity_does_not_drop_bank_with_same_id_as_oa():
     g = group(rows)
     apply_display_subgroups([g], [])
     assert g["display_subgroups"] == [
-        {"oa_row_ids": ["same"], "bank_row_ids": ["same"]},
-        {"oa_row_ids": ["other"], "bank_row_ids": ["b"]},
+        {"resolved": True, "oa_row_ids": ["same"], "bank_row_ids": ["same"]},
+        {"resolved": True, "oa_row_ids": ["other"], "bank_row_ids": ["b"]},
     ]
 
 

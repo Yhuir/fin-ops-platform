@@ -7,24 +7,33 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from typing import Any, TypeVar
 
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+)
+from fin_ops_platform.services.oa_attachment_invoice_linking import (
+    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
+)
 from fin_ops_platform.services.postgres_repositories.common import (
     int_value,
     month_start,
     text,
     text_list,
 )
-from fin_ops_platform.services.bank_details_canonical_query import (
-    PostgresBankDetailsCanonicalQueryRepository,
-)
-from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
-    PostgresWorkbenchPageHydrationRepository,
-)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )
-from fin_ops_platform.services.oa_attachment_invoice_linking import (
-    OA_EXTERNAL_SOURCE_ID_FIELD_NAMES,
+from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
+    PostgresWorkbenchPageHydrationRepository,
+)
+from fin_ops_platform.services.workbench_anomaly_contract import (
+    AMOUNT_EXCEPTION_CODES,
+    EXCEPTION_VIEWS,
+)
+from fin_ops_platform.services.workbench_direct_query_errors import (
+    WorkbenchDirectQueryUnavailable,
+    is_transient_postgres_query_error,
+    is_workbench_data_integrity_query_error,
 )
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
@@ -35,15 +44,6 @@ from fin_ops_platform.services.workbench_filter_options import (
     normalize_workbench_time_filters,
     workbench_time_range,
 )
-from fin_ops_platform.services.workbench_direct_query_errors import (
-    WorkbenchDirectQueryUnavailable,
-    is_workbench_data_integrity_query_error,
-    is_transient_postgres_query_error,
-)
-from fin_ops_platform.services.workbench_anomaly_contract import (
-    AMOUNT_EXCEPTION_CODES,
-    EXCEPTION_VIEWS,
-)
 from fin_ops_platform.services.workbench_page_cursor import (
     WorkbenchPageCursor,
     WorkbenchPageCursorError,
@@ -51,7 +51,6 @@ from fin_ops_platform.services.workbench_page_cursor import (
     encode_workbench_page_cursor,
     workbench_query_hash,
 )
-
 
 T = TypeVar("T")
 WORKBENCH_DIRECT_QUERY_TIMEOUT_SECONDS = 5
@@ -2492,6 +2491,7 @@ class PostgresWorkbenchPageQueryRepository:
 
     def __init__(self, connection: Any, *, tenant_id: str) -> None:
         self._connection = connection
+        self._fold_search_results: dict[tuple[str, Decimal], list[str]] = {}
         self._tenant_id = str(tenant_id or "").strip()
         if not self._tenant_id:
             raise ValueError("tenant_id is required for Workbench direct queries.")
@@ -2886,6 +2886,7 @@ class PostgresWorkbenchPageQueryRepository:
         search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
             prefix=zone,
             search=normalized_search,
+            fold_member_ids=self._fold_amount_member_ids(scope_key, normalized_search),
         )
         bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
             scope_key=scope_key,
@@ -3242,6 +3243,7 @@ class PostgresWorkbenchPageQueryRepository:
         search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
             prefix="groups",
             search=normalized_search,
+            fold_member_ids=self._fold_amount_member_ids(normalized_scope, normalized_search),
         )
         bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
             scope_key=normalized_scope,
@@ -4441,6 +4443,7 @@ class PostgresWorkbenchPageQueryRepository:
         search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
             prefix="options",
             search=normalized_search,
+            fold_member_ids=self._fold_amount_member_ids(normalized_scope, normalized_search),
         )
         bank_tag_row_ids = self._resolve_bank_tag_filter_row_ids(
             scope_key=normalized_scope,
@@ -5357,6 +5360,7 @@ class PostgresWorkbenchPageQueryRepository:
         search_ctes, search_params, search_hit_name = self._source_search_hit_ctes(
             prefix="bank_tag_candidates",
             search=search,
+            fold_member_ids=self._fold_amount_member_ids(scope_key, search),
         )
         where_sql, where_params = self._group_filters(
             zone=zone,
@@ -5432,11 +5436,65 @@ class PostgresWorkbenchPageQueryRepository:
             in selected
         ]
 
+    def _fold_amount_member_ids(self, scope_key: str, search: str | None) -> list[str]:
+        """Numeric search uses the same folds as display, before pagination.
+
+        SQL narrows to active relations with >=4 banks and sufficient gross
+        amount. Only their compact DTOs are read in this request's snapshot;
+        there is no full-detail/global payload or per-relation query loop.
+        """
+        if not search:
+            return []
+        try:
+            amount = abs(Decimal(search.replace(",", "")))
+        except InvalidOperation:
+            return []
+        if not amount.is_finite():
+            return []
+        key = (scope_key, amount)
+        if key in self._fold_search_results:
+            return self._fold_search_results[key]
+        descriptors = self._connection.fetch_all(f"""
+            with requested_scope as (
+                select %s::text as scope_key, %s::date as scope_month, %s::text as tenant_id
+            ), eligible as materialized (
+                select relation.case_id
+                from app.workbench_pair_relations relation
+                cross join requested_scope scope
+                cross join lateral unnest(relation.row_ids, relation.row_types) member(row_id, row_type)
+                join app.bank_transactions bank
+                  on member.row_type = 'bank'
+                 and member.row_id = coalesce(bank.legacy_mongo_id, bank.id::text)
+                 and bank.status <> 'deleted'
+                where relation.status = 'active'
+                  and relation.row_types && array['oa','invoice']::text[]
+                  and (scope.scope_key = 'all' or relation.month_scope = scope.scope_month
+                       or {self._relation_has_scoped_member_sql('relation')})
+                group by relation.case_id
+                having count(*) >= 4 and sum(abs(bank.amount)) >= %s::numeric
+            )
+            select 'case:' || relation.case_id as internal_key,
+                   relation.case_id as detail_key, 'relation'::text as group_kind,
+                   null::text as zone, relation.row_ids as member_ids, relation.row_types as member_types,
+                   relation.row_ids as formal_member_ids, relation.row_types as formal_member_types,
+                   relation.version as relation_version, relation.month_scope as scope_month,
+                   {_RELATION_EXTERNAL_BATCH_SQL} as external_etc_batch_id
+            from app.workbench_pair_relations relation
+            join eligible using (case_id)
+            order by relation.case_id
+        """, (scope_key, None if scope_key == 'all' else month_start(scope_key), self._tenant_id, amount))
+        groups = self._hydrate_groups(month=scope_key, descriptors=descriptors, detail_level="summary")
+        result = sorted({member for group in groups for fold in group.get("bank_folds", [])
+                         if Decimal(fold["summary_row"]["amount"]) == amount for member in fold["member_ids"]})
+        self._fold_search_results[key] = result
+        return result
+
     @staticmethod
     def _source_search_hit_ctes(
         *,
         prefix: str,
         search: str | None,
+        fold_member_ids: list[str] | None = None,
     ) -> tuple[str, list[Any], str | None]:
         normalized = PostgresWorkbenchPageQueryRepository._search(search)
         if not normalized:
@@ -5713,8 +5771,8 @@ class PostgresWorkbenchPageQueryRepository:
                 "or lower(coalesce(invoice.invoice_type, '')) like '%%sale%%' "
                 "or invoice.invoice_type like '%%销%%')"
             )
-        batch_amount_union = ""
-        batch_amount_params: list[Any] = []
+        fold_amount_union = ""
+        fold_amount_params: list[Any] = []
         if amount is not None:
             oa_predicates.append("oa.amount = %s::numeric")
             oa_predicates.append(expense_item_amount_predicate("oa.normalized_payload"))
@@ -5731,19 +5789,15 @@ class PostgresWorkbenchPageQueryRepository:
             oa_params.extend([amount, amount])
             pending_params.extend([amount, amount])
             bank_params.append(amount)
-            # Batch identity survives merging into a manual OA/invoice relation.
-            # Return real members, retaining normal group filtering/pagination.
-            batch_amount_union = """
-                union
-                select 'bank'::text, member.row_id
-                from app.bank_flow_rule_batches batch
-                cross join lateral unnest(batch.bank_transaction_ids) member(row_id)
-                join needed_keys needed
-                  on needed.row_type = 'bank' and needed.row_id = member.row_id
-                where batch.status = 'submitted'
-                  and abs(batch.total_amount) = abs(%s::numeric)
-            """
-            batch_amount_params.append(amount)
+            if fold_member_ids:
+                fold_amount_union = """
+                    union
+                    select 'bank'::text, member.row_id
+                    from unnest(%s::text[]) member(row_id)
+                    join needed_keys needed
+                      on needed.row_type = 'bank' and needed.row_id = member.row_id
+                """
+                fold_amount_params.append(fold_member_ids)
             invoice_params.extend([amount, amount, amount])
             etc_predicates.append("etc_batch.total_amount = %s::numeric")
             etc_params.append(amount)
@@ -5817,10 +5871,10 @@ class PostgresWorkbenchPageQueryRepository:
                   ) = summary.external_batch_id
                  and etc_batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
                 where ({' or '.join(etc_predicates)})
-                {batch_amount_union}
+                {fold_amount_union}
             ),
             """,
-            [*oa_params, *pending_params, *bank_params, *invoice_params, *etc_params, *batch_amount_params],
+            [*oa_params, *pending_params, *bank_params, *invoice_params, *etc_params, *fold_amount_params],
             hit_name,
         )
 

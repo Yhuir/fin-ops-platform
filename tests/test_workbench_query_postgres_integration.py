@@ -386,8 +386,8 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             {"case_id": "old2", "row_ids": ["oa-direct-2", "bank-direct-1"], "row_types": ["oa", "bank"]}]}
         PostgresWorkbenchRelationRepository(self.raw_connection)._append_workbench_pair_relation_history(
             self.raw_connection, [history], changed_case_ids=None)
-        expected = [{"oa_row_ids": ["oa-direct-1"], "bank_row_ids": ["bank-direct-2"]},
-                    {"oa_row_ids": ["oa-direct-2"], "bank_row_ids": ["bank-direct-1"]}]
+        expected = [{"resolved": True, "oa_row_ids": ["oa-direct-1"], "bank_row_ids": ["bank-direct-2"]},
+                    {"resolved": True, "oa_row_ids": ["oa-direct-2"], "bank_row_ids": ["bank-direct-1"]}]
         for detail_level in ("summary", "full"):
             self.connection.statements.clear()
             page = self.repository.get_workbench_groups_page(
@@ -435,7 +435,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.raw_connection.execute("update app.bank_flow_rule_batches set status='withdrawn' where batch_id='audit-batch'")
         self.assertEqual(issues(), ["non_submitted_batch_has_active_relation"])
 
-    def test_collapsed_batch_search_matches_total_and_member_without_preview_double_count(self) -> None:
+    def test_fold_search_uses_same_relation_area_and_ignores_batch_provenance(self) -> None:
         ids = [f"batch-search-{index}" for index in range(5)]
         amounts = ["97.52", "157.29", "1087.20", "660.63", "213.92"]
         for row_id, amount in zip(ids, amounts, strict=True):
@@ -457,13 +457,12 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             insert into app.bank_flow_rule_batches(batch_id, status, version, total_amount, bank_transaction_ids)
             values ('batch-search', 'submitted', 1, 2216.56, %s::text[])
         """, (ids,))
-        for search in ["2216.56", "97.52"]:
-            result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search=search)
-            batch = next(group for group in result["groups"] if group.get("detail_key") == "batch-search")
-            self.assertEqual(set(batch["formal_member_ids"]), set(ids))
-            self.assertEqual(Decimal(batch["bank_batches"][0]["summary_row"]["amount"]), Decimal("2216.56"))
-            self.assertEqual(len(batch["bank_batches"][0]["member_ids"]), 5)
-            self.assertEqual(batch["row_counts"]["bank"], 5)
+        result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="97.52")
+        batch = next(g for g in result["groups"] if g.get("detail_key") == "batch-search")
+        self.assertNotIn("bank_folds", batch)  # No OA/invoice owner: not a fold.
+        result = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="2216.56")
+        self.assertFalse(any(g.get("detail_key") == "batch-search" for g in result["groups"]))
+        self.raw_connection.execute("update app.bank_transactions set summary='材料款' where legacy_mongo_id=any(%s::text[])", (ids,))
         # Merge into the existing OA+ETC relation: original batch identity survives.
         self.raw_connection.execute("delete from app.workbench_pair_relations where case_id = 'batch-search'")
         self.raw_connection.execute("""
@@ -471,32 +470,22 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 row_types = row_types || %s::text[], version = version + 1
             where case_id = 'CASE-DIRECT-1'
         """, (ids, ["bank"] * 5))
-        self.raw_connection.execute("""
-            update app.oa_applications set amount=2316.56,
-                normalized_payload = normalized_payload || '{"amount":"2316.56","expense_items":[]}'::jsonb
-            where row_id='oa-direct-1'
-        """)
-        self.raw_connection.execute("""
-            update app.etc_business_batches set total_amount=2316.56 where business_batch_id='etc_202607_linked'
-        """)
-        self.raw_connection.execute("""
-            update app.etc_invoices set amount=2316.56, total_with_tax=2316.56, tax_amount=0
-            where business_batch_id='etc_202607_linked'
-        """)
+        self.raw_connection.execute("update app.oa_applications set normalized_payload=normalized_payload - 'expense_items' where row_id='oa-direct-1'")
         for detail_level in ("summary", "full"):
             merged_page = self.repository.get_workbench_groups_page(
-                scope_key="all", zone="paired", search="2216.56", detail_level=detail_level)
+                scope_key="all", zone="unpaired", search="2316.56", detail_level=detail_level)
             merged = next(group for group in merged_page["groups"] if group["detail_key"] == "CASE-DIRECT-1")
             self.assertEqual(merged["relation_mode"], "manual_confirmed")
-            self.assertEqual(merged["bank_batches"][0]["member_ids"], ids)
+            self.assertEqual(set(merged["bank_folds"][0]["member_ids"]), set(["bank-direct-1", *ids]))
+            self.assertEqual(Decimal(merged["bank_folds"][0]["summary_row"]["amount"]), Decimal("2316.56"))
             self.assertEqual(merged["row_counts"]["bank"], 6)
             self.assertEqual(len(merged["oa_rows"]), 1)
             self.assertEqual(len(merged["invoice_rows"]), 1)
         self.raw_connection.execute("""
             update app.bank_flow_rule_batches set status='withdrawn' where batch_id='batch-search'
         """)
-        withdrawn = self.repository.get_workbench_groups_page(scope_key="all", zone="paired", search="97.52")
-        self.assertNotIn("bank_batches", withdrawn["groups"][0])
+        withdrawn = self.repository.get_workbench_groups_page(scope_key="all", zone="unpaired", search="97.52")
+        self.assertEqual(len(withdrawn["groups"][0]["bank_folds"][0]["member_ids"]), 6)
         # Release only this fixture's association before checking exact standalone selection.
         self.raw_connection.execute("""
             update app.workbench_pair_relations set row_ids = array['oa-direct-1','bank-direct-1','etc-summary-etc_202607_linked'],
@@ -1156,7 +1145,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            5,  # Includes one set-based submitted-batch read.
+            4,  # Folding no longer queries submitted batches.
         )
         exception_sql = next(
             str(statement.get("raw_sql") or "")
@@ -2409,7 +2398,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 statement["operation"] == "fetch_all"
                 for statement in self.connection.statements
             ),
-            5,  # Includes one set-based submitted-batch read.
+            4,  # Folding no longer queries submitted batches.
         )
 
     def test_page_etc_hydration_is_one_statement_and_matches_legacy_dto(self) -> None:
@@ -3301,7 +3290,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 all(float(statement["duration_ms"]) >= 0 for statement in self.connection.statements)
             )
         self.assertEqual(statement_counts[0], statement_counts[1])
-        self.assertEqual(statement_counts, [5, 5])  # Includes one set-based submitted-batch read.
+        self.assertEqual(statement_counts, [4, 4])  # No submitted-batch lookup in display.
         if os.environ.get("FIN_OPS_PRINT_QUERY_TIMINGS") == "1":
             print(json.dumps(self.connection.statements, ensure_ascii=False, indent=2))
 
