@@ -415,7 +415,7 @@ class CostSourcePostgresTests(unittest.TestCase):
             tx.execute("select set_config('fin_ops.correction_reason', 'isolated supplemental cost fixture', true)")
             tx.execute("update app.bank_transactions set amount=1192,signed_amount=-1192 where legacy_mongo_id='bank-1'")
             tx.execute("update app.workbench_pair_relations set row_ids=array['oa-a','oa-b','bank-1'],row_types=array['oa','oa','bank']")
-            tx.execute("""update app.app_settings set settings_payload=settings_payload || %s::jsonb""", (json.dumps({"bank_transaction_tags":{"definitions":[{"code":"manual-fee","label":"服务费","path":["费用","服务费"],"output_primary_label":"费用","output_sub_label":"服务费","status":"active"}]}}),))
+            tx.execute("""update app.app_settings set settings_payload=settings_payload || %s::jsonb""", (json.dumps({"bank_transaction_tags":{"definitions":[{"code":"manual-fee","label":"服务费","path":["费用","服务费"],"output_primary_label":"费用","output_sub_label":"服务费","status":"active","rules":{}}]}}),))
         task = self.service.get_task('cost-source-case', can_save=True)
         self.assertEqual(task['manual_options']['projects'], [{'id':'','name':'测试项目'}])
         suggestion = task['suggested_source_allocations']
@@ -426,6 +426,19 @@ class CostSourcePostgresTests(unittest.TestCase):
         return {**self.payload(), 'manual_items':[item],
                 'allocations':[{'unit_id':'oa:oa-a','amount':'600.00'},{'unit_id':'oa:oa-b','amount':'400.00'},{'unit_id':identity,'amount':'192.00'}],
                 'source_allocations':{**suggestion,'cost_lines':[*suggestion['cost_lines'],{'unit_id':identity,'bank_transaction_id':'bank-1','amount':'192.00'}]}}
+
+    def test_manual_tag_archived_after_read_rejects_new_item_and_preserves_saved_history(self):
+        payload = self.manual_payload()
+        self.connection.execute("update app.app_settings set settings_payload=jsonb_set(settings_payload, '{bank_transaction_tags,definitions,0,status}', '\"archived\"'::jsonb)")
+        with self.assertRaises(CostStatisticsManualAllocationValidationError):
+            self.save(payload)
+        self.assertEqual(self.service.get_task('cost-source-case', can_save=True)['version'], 0)
+        self.connection.execute("update app.app_settings set settings_payload=jsonb_set(settings_payload, '{bank_transaction_tags,definitions,0,status}', '\"active\"'::jsonb)")
+        saved = self.save(payload)
+        self.connection.execute("update app.app_settings set settings_payload=jsonb_set(settings_payload, '{bank_transaction_tags,definitions,0,status}', '\"archived\"'::jsonb)")
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertNotIn('manual-fee', [tag['code'] for tag in task['manual_options']['tags']])
+        self.assertEqual(task['manual_items'], saved['manual_items'])
 
     def test_manual_cost_http_save_reload_views_export_and_fact_isolation(self):
         from tests.app_test_support import build_local_state_application

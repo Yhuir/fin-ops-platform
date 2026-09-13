@@ -44,3 +44,41 @@ class ManualCostItemsTests(unittest.TestCase):
         saved = validate_manual_items([self.item], options, [])
         self.assertEqual(saved[0]["project_id"], "")
         self.assertEqual(saved[0]["project_name"], "项目甲")
+
+    def test_manual_catalogue_uses_bank_active_rules_not_internal_path_or_legacy_definitions(self):
+        from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+        definitions = [
+            {"code": "salary-test", "label": "工资", "path": ["自动识别", "工资"], "output_primary_label": "薪资社保福利", "output_sub_label": "工资", "rules": {}, "status": "active"},
+            {"code": "slash-test", "label": "运费/邮费/杂费", "output_primary_label": "费用", "output_sub_label": "运费/邮费/杂费", "rules": {}, "status": "active"},
+            {"code": "single-test", "label": "单层", "output_primary_label": "单层", "output_sub_label": "", "rules": {}, "status": "active"},
+            {"code": "legacy-test", "label": "旧定义", "status": "active"},
+            {"code": "archived-test", "label": "停用", "rules": {}, "status": "archived"},
+        ]
+        settings = {"bank_transaction_tags": {"definitions": definitions}}
+        before = deepcopy(settings)
+        tags = AppSettingsService.cost_manual_tags_from_settings(settings)
+        by_code = {tag['code']: tag for tag in tags}
+        expected = BankTransactionCategoryService.auto_tag_rules_payload(settings['bank_transaction_tags'])
+        self.assertEqual(set(by_code), {r['code'] for r in expected['active_rules']} | {'internal_transfer'})
+        self.assertEqual(by_code['salary-test']['label'], '薪资社保福利 / 工资')
+        self.assertEqual(by_code['slash-test']['sub_label'], '运费/邮费/杂费')
+        self.assertEqual(by_code['single-test']['sub_label'], '')
+        self.assertEqual(by_code['internal_transfer']['sub_label'], '')
+        self.assertEqual(settings, before)
+
+    def test_tag_route_respects_read_permission_and_only_returns_catalogue(self):
+        from http import HTTPStatus
+        from unittest.mock import Mock
+        from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
+        settings = Mock()
+        settings.get_cost_manual_tags.side_effect = [{'tags': []}, {'tags': self.options['tags']}]
+        session = Mock()
+        route = CostStatisticsApiRoutes(query_service=Mock(), json_response=lambda status, body: (status, body),
+            file_response=Mock(), app_settings_service=settings, resolve_read_session=lambda headers: (session, None))
+        for expected in ([], self.options['tags']):
+            status, body = route.route('GET', '/api/cost-statistics/manual-tags', {})
+            self.assertEqual(status, HTTPStatus.OK)
+            self.assertEqual(body, {'tags': expected})
+        route._resolve_read_session = lambda headers: (None, (HTTPStatus.FORBIDDEN, {'error':'forbidden'}))
+        self.assertEqual(route.route('GET', '/api/cost-statistics/manual-tags', {}), (HTTPStatus.FORBIDDEN, {'error':'forbidden'}))
+        self.assertEqual(settings.get_cost_manual_tags.call_count, 2)

@@ -2,9 +2,9 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import Drawer from '../components/cost-statistics/CostStatisticsManualAllocationDrawer';
-import { fetchCostStatisticsManualAllocation, fetchCostStatisticsManualAllocations, saveCostStatisticsManualAllocation } from '../features/cost-statistics/api';
+import { fetchCostManualTags, fetchCostStatisticsManualAllocation, fetchCostStatisticsManualAllocations, saveCostStatisticsManualAllocation } from '../features/cost-statistics/api';
 import type { CostStatisticsManualAllocationTask } from '../features/cost-statistics/types';
-vi.mock('../features/cost-statistics/api',()=>({fetchCostStatisticsManualAllocation:vi.fn(),fetchCostStatisticsManualAllocations:vi.fn(),saveCostStatisticsManualAllocation:vi.fn()}));
+vi.mock('../features/cost-statistics/api',()=>({fetchCostManualTags:vi.fn(),fetchCostStatisticsManualAllocation:vi.fn(),fetchCostStatisticsManualAllocations:vi.fn(),saveCostStatisticsManualAllocation:vi.fn()}));
 let task:CostStatisticsManualAllocationTask;
 beforeEach(()=>{
  vi.clearAllMocks();
@@ -88,4 +88,30 @@ it('retains acknowledged save feedback when unchanged pending facts refresh', as
   task={...task,version:2};
   view.rerender(<Drawer {...props} refreshKey="3"/>);
   await waitFor(()=>expect(screen.queryByText('已保存，银行信息待完善')).not.toBeInTheDocument());
+});
+
+it('discards an older tag catalogue response without resetting manual draft', async () => {
+  const user=userEvent.setup();
+  let finish!:(tags:CostStatisticsManualAllocationTask['manualOptions']['tags'])=>void;
+  vi.mocked(fetchCostManualTags).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  vi.mocked(fetchCostManualTags).mockResolvedValue([{code:'new',label:'费用 / 新标签',primary_label:'费用',sub_label:'新标签'}]);
+  render(<Drawer canSave onSaved={vi.fn()}/>);
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await screen.findByRole('textbox',{name:'分配金额 1'});
+  await user.click(screen.getByRole('button',{name:'新增人工成本'}));
+  const content=screen.getByRole('textbox',{name:'人工成本项'});
+  await user.type(content,'保留输入');
+  const picker=screen.getByRole('combobox',{name:'人工成本标签'});
+  await user.click(picker);
+  await waitFor(()=>expect(finish).toBeDefined());
+  await user.keyboard('{Escape}');
+  await user.click(picker);
+  await user.click(await screen.findByRole('option',{name:'费用',exact:true}));
+  await screen.findByRole('option',{name:'新标签',exact:true});
+  await act(async()=>finish([{code:'old',label:'费用 / 旧标签',primary_label:'费用',sub_label:'旧标签'}]));
+  expect(screen.queryByRole('option',{name:'旧标签',exact:true})).not.toBeInTheDocument();
+  await user.click(screen.getByRole('option',{name:'新标签',exact:true}));
+  expect(content).toHaveValue('保留输入');
+  expect(picker).toHaveTextContent('费用 / 新标签');
+  expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
 });

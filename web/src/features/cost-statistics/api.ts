@@ -1,3 +1,4 @@
+import type { CostManualOptions } from "./types";
 import type {
   CostBankExplorerRow,
   CostBankTagPrimaryExplorerRow,
@@ -1030,4 +1031,12 @@ export function saveProjectCostScope(version: number, codes: string[]): Promise<
     method: "PUT", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expected_version: version, selected_tag_codes: codes }),
   }, { timeoutMs: 15000, timeoutMessage: "保存结果待核实", allowHtmlFallback: false });
+}
+
+export async function fetchCostManualTags(signal?: AbortSignal): Promise<CostManualOptions['tags']> {
+  const payload = await apiRequestJson<{ tags: CostManualOptions['tags'] }>(
+    '/api/cost-statistics/manual-tags', { method: 'GET', signal },
+    { timeoutMs: 10000, timeoutMessage: '标签读取超时，请重试' },
+  );
+  return payload.tags;
 }

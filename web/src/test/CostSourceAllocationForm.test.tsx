@@ -21,7 +21,7 @@ function fixture(): CostStatisticsManualAllocationTask {
 function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocationTask; save?: () => void }) {
   task = {...task, relationDisplayGroups: [{unitIds:task.units.map(u=>u.unitId),bankTransactionIds:task.bankEvents.map(b=>b.transactionId),sourcesExcluded:false}]};
   const [draft, setDraft] = useState(() => createSourceDraft(task));
-  return <CostSourceAllocationForm task={task} draft={draft} disabled={false} saving={false} onChange={setDraft} onSave={save} />;
+  return <CostSourceAllocationForm tagLoading={false} onLoadTags={() => {}} task={task} draft={draft} disabled={false} saving={false} onChange={setDraft} onSave={save} />;
 }
 
 it('hides exhausted hints while preserving capacity, duplicate, current selection and released capacity', async () => {
@@ -250,7 +250,7 @@ it('shows balance only for complete allocations without changing formal correspo
 it.each([{saving:true}, {error:'保存结果待确认'}, {error:'关联事实已变化'}, {notice:'已保存，银行信息待完善'}])('prioritizes save feedback over balance: %j', state => {
   const task = fixture();
   task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'400.00'},{unitId:'unit-b',bankTransactionId:'internal-bank',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
-  render(<CostSourceAllocationForm task={task} draft={createSourceDraft(task)} disabled={false} saving={false} {...state} onChange={vi.fn()} onSave={vi.fn()} />);
+  render(<CostSourceAllocationForm tagLoading={false} onLoadTags={() => {}} task={task} draft={createSourceDraft(task)} disabled={false} saving={false} {...state} onChange={vi.fn()} onSave={vi.fn()} />);
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
 });
 
@@ -265,7 +265,9 @@ it('adds 192 manual cost to OA sources, validates metadata, then edits and remov
   await user.click(screen.getByRole('button',{name:'新增人工成本'}));
   await user.selectOptions(screen.getByRole('combobox',{name:'人工成本项目'}),'项目甲');
   await user.type(screen.getByRole('textbox',{name:'人工成本项'}),'补充服务费');
-  await user.selectOptions(screen.getByRole('combobox',{name:'人工成本标签'}),'service');
+  await user.click(screen.getByRole('combobox',{name:'人工成本标签'}));
+  await user.click(screen.getByRole('option',{name:'费用',exact:true}));
+  await user.click(screen.getByRole('option',{name:'服务费',exact:true}));
   const manual=within(container.querySelectorAll('.cost-source-table tbody')[2] as HTMLElement);
   await user.click(manual.getByRole('combobox',{name:'来源流水 3'}));
   await user.click(screen.getByRole('option',{name:/建行 8106/}));

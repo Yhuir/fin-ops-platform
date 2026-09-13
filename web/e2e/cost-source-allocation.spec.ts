@@ -553,7 +553,10 @@ test('manual supplemental cost closes residual, saves and reloads without creati
   await scene.drawer.getByRole('button',{name:'新增人工成本'}).click();
   await scene.drawer.getByRole('combobox',{name:'人工成本项目',exact:true}).selectOption('云南溯源科技');
   await scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true}).fill('补充服务费');
-  await scene.drawer.getByRole('combobox',{name:'人工成本标签',exact:true}).selectOption('service');
+  await page.route('**/api/cost-statistics/manual-tags', route => route.fulfill({json:{tags:scene.task.manual_options.tags}}));
+  await scene.drawer.getByRole('combobox',{name:'人工成本标签',exact:true}).click();
+  await page.getByRole('option',{name:'费用',exact:true}).click();
+  await page.getByRole('option',{name:'服务费',exact:true}).click();
   const manual=scene.drawer.getByRole('table',{name:'成本分配明细',exact:true}).locator('tbody').last();
   await manual.getByRole('combobox',{name:'来源流水 2',exact:true}).click();
   await page.getByRole('option',{name:/建设银行 8106/}).click();
@@ -572,4 +575,41 @@ test('manual supplemental cost closes residual, saves and reloads without creati
   await page.setViewportSize({width:1280,height:800});
   await scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true}).scrollIntoViewIfNeeded();
   await page.screenshot({path:testInfo.outputPath('manual-cost-1280.png'),fullPage:false});
+});
+
+test('manual tag catalogue refreshes on open, retries failure without losing draft, and stays inside viewport', async ({page}, testInfo) => {
+  await page.setViewportSize({width:1280,height:800});
+  const scene=await sourceScenario(page,{manual:true});
+  let requests=0, fail=true;
+  const tags=[...scene.task.manual_options.tags,{code:'salary',label:'薪资社保福利 / 工资',primary_label:'薪资社保福利',sub_label:'工资'}, {code:'internal_transfer',label:'内部往来款',primary_label:'内部往来款',sub_label:''}];
+  await page.route('**/api/cost-statistics/manual-tags', route=>{
+    requests++;
+    return fail ? route.fulfill({status:503,json:{error:'unavailable'}}) : route.fulfill({json:{tags}});
+  });
+  await scene.drawer.getByRole('button',{name:'新增人工成本'}).click();
+  const content=scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true});
+  await content.fill('保留草稿');
+  const picker=scene.drawer.getByRole('combobox',{name:'人工成本标签',exact:true});
+  await picker.click();
+  const menu=page.getByRole('dialog',{name:'选择成本标签',exact:true});
+  await expect(menu.getByRole('alert')).toContainText('标签读取失败');
+  await expect(menu.getByRole('option')).toHaveCount(0);
+  fail=false;
+  await menu.getByRole('button',{name:'重试'}).click();
+  await menu.getByRole('option',{name:'薪资社保福利',exact:true}).click();
+  await expect(menu.getByRole('option',{name:'工资',exact:true})).toBeVisible();
+  const bounds=await menu.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(1280);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);expect(bounds!.y+bounds!.height).toBeLessThanOrEqual(800);
+  await page.screenshot({path:testInfo.outputPath('manual-tags-1280.png')});
+  await menu.getByRole('option',{name:'工资',exact:true}).click();
+  await expect(picker).toContainText('薪资社保福利 / 工资');
+  await expect(content).toHaveValue('保留草稿');
+  expect(requests).toBe(2);
+  await picker.click();
+  await expect(menu.getByRole('option',{name:'工资',exact:true})).toBeVisible();
+  await menu.getByRole('option',{name:'内部往来款',exact:true}).click();
+  await expect(picker).toHaveText('内部往来款');
+  expect(requests).toBe(3);
+  expect(scene.writes()).toBe(0);
 });

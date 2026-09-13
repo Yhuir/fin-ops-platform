@@ -150,3 +150,7 @@
 ## 成本目录只读消费（2026-09-13）
 
 成本人工补充使用 `AppSettingsService.cost_manual_options_from_settings(settings, oa_projects)` 导出有效项目/成本标签。OA canonical项目名称及可选ID由成本repository批量提供，名称是现有成本视角的选择维度，与已有同步/人工项目设置合并；不返回设置其它字段或凭据，不修改settings API、ACL或银行标签。人工成本标签只存成本allocation，不反写分类规则。
+
+## 人工成本标签只读目录（2026-09-13）
+
+`get_cost_manual_tags()` 从现有持久设置刷新后返回成本专用窄 DTO；与详情/保存复用 `cost_manual_tags_from_settings`，它消费银行分类 owner 的有效规则及系统内部往来款，保留主子标签结构。人工成本目录不再展示历史 path 或非规则旧定义；不删除定义或影响其他设置 family。无新存储、队列或版本机制。

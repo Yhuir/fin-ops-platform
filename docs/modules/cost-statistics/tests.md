@@ -180,3 +180,11 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - 前端：`CostSourceAllocationForm.test.tsx` 验证选项目/标签/来源、金额绿字、超额撤销绿字、删除释放192余额以及证据区不受编辑影响；API与既有刷新/错误恢复测试更新新字段。
 - 浏览器：`cost-source-allocation.spec.ts` 的 manual supplemental 场景验证真实页面新增、保存、已完成重开、1440与1280窗口截图；既有来源分配、成本五视图及关联变动回归继续运行。
 - 七类：1、2、3、5、6、7适用；4不适用，成本保持canonical直接读取，无read model/cache/job改变。性能分开报告公网GET与浏览器交互耗时；生产不编造192用途来执行财务保存。
+
+## 人工成本标签二级选择（2026-09-13）
+
+- `test_cost_statistics_manual_items.py`：与银行当前规则同源、排除 legacy/archived、单层标签、斜杠名称、输入不变、目录 API 权限和窄输出。
+- `test_cost_statistics_source_postgres.py`：读取后标签停用，新明细保存失败且版本不变；历史保存明细继续回显。既有保存/审计回滚/三视角/导出/权限用例继续保护原链路。
+- `CostManualTagPicker.test.tsx`：主子切换、定位、同名子标签按代码选择、单层选择、失败不展示旧选项、重试、禁用。
+- `cost-source-allocation.spec.ts`：二级选择后保存重开；目录首次失败→重试取得新标签→选择→再次打开刷新，草稿保持，1280窗口弹层完整可见。
+- 七类测试中业务核心、服务、API、前端、端到端和既有回归适用；read model/cache/worker 不适用，没有新增或修改这些链路。

@@ -6,8 +6,10 @@ import { cents, money, usedBySource, validateSourceDraft, type SourceDraft, type
 import { formatDateTimeText } from '../../features/dateTime';
 import { CostChips, CostSourceEvidence, CostText, shortBankAccount } from './CostSourceEvidence';
 import CostSourcePicker from './CostSourcePicker';
+import CostManualTagPicker from './CostManualTagPicker';
 
 type Props = {
+  tagLoading: boolean; tagError?: string; onLoadTags: () => void;
   task: CostStatisticsManualAllocationTask; draft: SourceDraft; disabled: boolean; saving: boolean;
   error?: string; notice?: string; onChange: (draft: SourceDraft) => void; onSave: () => void;
 };
@@ -20,7 +22,7 @@ function FieldIssue({ message, field, open, onOpenChange }: { message: string; f
   </Popover>;
 }
 
-export default function CostSourceAllocationForm({ task, draft, disabled, saving, error, notice, onChange, onSave }: Props) {
+export default function CostSourceAllocationForm({ tagLoading, tagError, onLoadTags, task, draft, disabled, saving, error, notice, onChange, onSave }: Props) {
   const [submitted, setSubmitted] = useState(0);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [openIssue, setOpenIssue] = useState<string | null>(null);
@@ -109,7 +111,7 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
     return <>
       <td><div className="cost-source-field"><CostSourcePicker value={line.bankTransactionId} options={sourceOptions} lineId={line.id} isSourceDisabled={isSourceDisabled} label={`来源流水 ${index + 1}`} focusKey={key} invalid={visibleError(`${key}.source`)} disabled={disabled}
         onChange={chooseSource} />{showError(`${key}.source`)}</div>{showError(`${key}.owner`)}</td>
-      <td>{manual ? <><select aria-label="人工成本标签" value={manual.costTagCode} disabled={disabled} onChange={event => { const tag = task.manualOptions.tags.find(t => t.code === event.target.value); updateManual(manual.unitId, { costTagCode: event.target.value, costTagPrimaryLabel: tag?.primary_label ?? '', costTagSubLabel: tag?.sub_label ?? '' }); }}><option value="">选择成本标签</option>{manual.costTagCode && !task.manualOptions.tags.some(t => t.code === manual.costTagCode) ? <option value={manual.costTagCode}>{manual.costTagPrimaryLabel} / {manual.costTagSubLabel}（已停用）</option> : null}{task.manualOptions.tags.map(tag => <option key={tag.code} value={tag.code}>{tag.label}</option>)}</select>{showError(`manual.${manual.unitId}.tag`)}</> : source ? <CostChips values={[source.bankTagPrimaryLabel, source.bankTagSubLabel]} /> : <span className="cost-source-muted">—</span>}</td>
+      <td>{manual ? <><CostManualTagPicker value={manual.costTagCode} savedLabel={[manual.costTagPrimaryLabel, manual.costTagSubLabel].filter(Boolean).join(' / ')} tags={task.manualOptions.tags} loading={tagLoading} error={tagError} onLoad={onLoadTags} disabled={disabled} onChange={tag => updateManual(manual.unitId, { costTagCode: tag.code, costTagPrimaryLabel: tag.primary_label, costTagSubLabel: tag.sub_label })} />{showError(`manual.${manual.unitId}.tag`)}</> : source ? <CostChips values={[source.bankTagPrimaryLabel, source.bankTagSubLabel]} /> : <span className="cost-source-muted">—</span>}</td>
       <td><div className="cost-source-field"><input aria-label={`分配金额 ${index + 1}`} aria-invalid={visibleError(`${key}.amount`)} inputMode="decimal" placeholder="0.00" value={line.amount} disabled={disabled}
         onChange={event => { touch(`${key}.edited`); updateLine(kind, line.id, { amount: event.target.value }); }} onBlur={() => { if (touched.has(`${key}.edited`)) touch(`${key}.amount`); const amount = cents(line.amount); if (amount !== null) updateLine(kind, line.id, { amount: money(amount) }); }} />{showError(`${key}.amount`)}</div></td>
       <td><div className="cost-source-actions">{first && !manual ? addButton(kind, line.ownerId) : null}<button type="button" className="cost-source-icon" aria-label={`删除来源行 ${index + 1}`} disabled={disabled} onClick={() => remove(kind, line)}><Trash2 size={14} /></button></div></td>

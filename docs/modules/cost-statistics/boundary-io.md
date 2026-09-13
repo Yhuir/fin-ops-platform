@@ -236,3 +236,11 @@ PUT manual allocation
 人工成本项目选择包含已有的已完成项目，支持历史成本补录；项目完成状态不作为成本补录限制。标签仍取当前有效标签，历史保存但已停用的标签只允许原条目保留。
 
 人工成本项目选择与现有成本统计一致，以 canonical 项目名称为维度；保存提交 `project_name`，服务端按当前目录验证。历史 OA 只有名称而无项目 ID 时合法，输出 `project_id` 保持空，不伪造 ID、不调用外部项目服务、不修改 OA。目录包含头表与费用明细的项目名称。
+
+## 人工成本标签目录与二级菜单（2026-09-13）
+
+- 人工成本的 GET 详情、成功 PUT 与保存验证统一复用 `BankTransactionCategoryService.auto_tag_rules_payload` 的 active rules + system internal_transfer，与银行明细人工分类目录一致。按结构化 output_primary_label/output_sub_label 输出；空子标签保持空。旧业务定义仍保留在设置中，不再进入新建人工成本目录；停用或退出目录的已保存条目仍可原样保留。
+- 新增 `GET /api/cost-statistics/manual-tags`，沿用成本读取权限，返回 `{tags:[{code,label,primary_label,sub_label}]}`。Settings owner 每次从持久设置读取，只输出目录，无凭据、规则条件、OA/银行扫描或预填计算；保存仍在原事务中使用当前目录验证。无 schema/worker/read model 改动。
+- 抽屉容器拥有目录请求、取消与错误状态，选择器打开时读取；成功只更新任务的 manual_options.tags，不覆盖草稿。失败不展示旧选项，允许重试。金额编辑和主标签切换不请求目录。
+- `CostManualTagPicker` 仅接收目录/选中值/加载状态/错误并输出打开、重试和选择事件，不拥有 HTTP 或银行分类写入。左主右子，单层直接选择，名称内斜杠不拆层级，标签身份始终为 code；菜单限高、内部滚动、弹层避让窗口边界。
+- 删除人工原生 select 和 path 拼接标签名称路径；不修改成本范围字典、银行明细、关联台或公共 ListBox。人工标签不改变来源有效银行标签和范围准入。历史金额、原 OA 与关系不写入。

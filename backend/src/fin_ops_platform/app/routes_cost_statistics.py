@@ -78,6 +78,11 @@ class CostStatisticsApiRoutes:
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> Any | None:
+        if method == "GET" and route_path == "/api/cost-statistics/manual-tags":
+            _, error = self._read_session(headers)
+            if error is not None:
+                return error
+            return self._json_response(HTTPStatus.OK, self._settings_service().get_cost_manual_tags())
         if route_path == "/api/cost-statistics/project-cost-scope" and method in {"GET", "PUT"}:
             return self.handle_project_cost_scope(method, body, headers)
         if method == "GET" and route_path == "/api/cost-statistics/no-oa-rules":

@@ -2522,11 +2522,27 @@ class AppSettingsService:
                     if p["id"] and p["project_name"]}
         configured_ids = {p["id"] for p in projects.values()}
         projects = {**{p["name"]: p for p in oa_projects if not p["id"] or p["id"] not in configured_ids}, **projects}
-        tags = AppSettingsService._cost_statistics_tag_definitions(settings.get("bank_transaction_tags", {}))
         return {"projects": sorted(projects.values(), key=lambda p: (p["name"], p["id"])),
-                "tags": [{"code": t["code"], "label": " / ".join(t["path"]),
-                          "primary_label": t["output_primary_label"], "sub_label": t["output_sub_label"]}
-                         for t in tags if t["status"] == "active" and t["code"] != COST_STATISTICS_UNCATEGORIZED_TAG_CODE]}
+                "tags": AppSettingsService.cost_manual_tags_from_settings(settings)}
+
+    @staticmethod
+    def cost_manual_tags_from_settings(settings: dict[str, Any]) -> list[dict[str, str]]:
+        """Same selectable catalogue as Bank Details manual assignment; no legacy paths."""
+        rules = BankTransactionCategoryService.auto_tag_rules_payload(
+            settings.get("bank_transaction_tags", {}), can_save=False,
+        )
+        tags = [{"code": rule["code"],
+                 "label": " / ".join(part for part in (rule["output_primary_label"], rule["output_sub_label"]) if part),
+                 "primary_label": rule["output_primary_label"], "sub_label": rule["output_sub_label"]}
+                for rule in rules["active_rules"]]
+        system = rules["system_rule"]
+        tags.append({"code": system["code"], "label": system["label"],
+                     "primary_label": system["label"], "sub_label": ""})
+        return tags
+
+    def get_cost_manual_tags(self) -> dict[str, Any]:
+        self._refresh_snapshot_from_state_store()
+        return {"tags": self.cost_manual_tags_from_settings(self._snapshot)}
 
     @staticmethod
     def _cost_statistics_tag_definitions(bank_transaction_tags: dict[str, Any]) -> list[dict[str, Any]]:

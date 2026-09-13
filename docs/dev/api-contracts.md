@@ -1513,3 +1513,7 @@ System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 18 �
 
 旧状态、提醒、手工红蓝票、正式收据、收据历史和收据编号设置端点均已删除并返回
 `404 not_found`；不得重新添加兼容 fallback。
+
+### 人工成本标签目录
+
+`GET /api/cost-statistics/manual-tags` 沿用成本统计读取权限。返回 `tags` 数组，每项含 `code,label,primary_label,sub_label`，其中 sub_label 可为空，表示单层标签。目录与银行明细人工分类同源；不含规则匹配条件或设置凭据。菜单打开时读取，写入仍走原 manual-allocations PUT 并校验当前有效目录，保留现有权限、事务、审计和历史明细规则。

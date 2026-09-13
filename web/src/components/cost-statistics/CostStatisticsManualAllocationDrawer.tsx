@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../features/apiClient';
 import AppDrawer from '../common/AppDrawer';
 import CostSourceAllocationForm from './CostSourceAllocationForm';
-import { fetchCostStatisticsManualAllocation, fetchCostStatisticsManualAllocations, saveCostStatisticsManualAllocation } from '../../features/cost-statistics/api';
+import { fetchCostManualTags, fetchCostStatisticsManualAllocation, fetchCostStatisticsManualAllocations, saveCostStatisticsManualAllocation } from '../../features/cost-statistics/api';
 import { createSourceDraft, sourceDecisionMatches, sourceSaveRequest, type SourceDraft } from '../../features/cost-statistics/sourceAllocation';
 import type { CostStatisticsManualAllocationSummary, CostStatisticsManualAllocationTask, SaveCostStatisticsManualAllocationRequest } from '../../features/cost-statistics/types';
 import './costSourceAllocation.css';
@@ -12,6 +12,26 @@ import './costSourceAllocation.css';
 type Props = { refreshKey?: string; active?: boolean; canSave: boolean; pendingCount?: number; onSaved: () => void };
 type TaskState = { task?: CostStatisticsManualAllocationTask; draft?: SourceDraft; dirty?: boolean; conflict?: boolean; loading?: boolean; saving?: boolean; error?: string; notice?: string; unconfirmedRequest?: SaveCostStatisticsManualAllocationRequest };
 export default function CostStatisticsManualAllocationDrawer({ canSave, pendingCount, onSaved, refreshKey = '', active = true }: Props) {
+  const [tagLoading, setTagLoading] = useState(false);
+  const [tagError, setTagError] = useState<string>();
+  const tagRequest = useRef<AbortController | null>(null);
+  const loadTags = async () => {
+    tagRequest.current?.abort();
+    const controller = new AbortController(); tagRequest.current = controller;
+    setTagLoading(true); setTagError(undefined);
+    try {
+      const tags = await fetchCostManualTags(controller.signal);
+      if (controller.signal.aborted) return;
+      setStates(current => Object.fromEntries(Object.entries(current).map(([id, state]) => [id,
+        state.task ? { ...state, task: { ...state.task, manualOptions: { ...state.task.manualOptions, tags } } } : state,
+      ])));
+    } catch {
+      if (!controller.signal.aborted) setTagError('标签读取失败，请重试');
+    } finally {
+      if (!controller.signal.aborted) setTagLoading(false);
+    }
+  };
+  useEffect(() => () => tagRequest.current?.abort(), []);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<'pending' | 'allocated'>('pending');
   const [queryDraft, setQueryDraft] = useState('');
@@ -155,7 +175,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
             </button>
             {active ? <>
               {state?.loading ? <p role="status">加载中…</p> : null}
-              {state?.task && state.draft ? <CostSourceAllocationForm key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest || !!state.conflict} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
+              {state?.task && state.draft ? <CostSourceAllocationForm tagLoading={tagLoading} tagError={tagError} onLoadTags={() => void loadTags()} key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest || !!state.conflict} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
               {state?.unconfirmedRequest ? <Button size="sm" isDisabled={!!state.saving} onPress={() => void verifySave(id)}>核实保存结果</Button> : null}
               {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) { void loadDetail(id, true, true); } }}>重新加载</Button> : null}
             </> : null}
