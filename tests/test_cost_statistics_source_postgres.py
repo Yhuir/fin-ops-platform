@@ -303,6 +303,31 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.assertEqual(app.handle_request('GET', path).status_code, 404)
         self.assertEqual(app.handle_request('PUT', path, body=json.dumps(payload)).status_code, 409)
 
+    def test_single_payment_added_oa_members_are_not_excluded_by_merge_history(self):
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason', 'isolated single-payment history regression', true)")
+            tx.execute("update app.bank_transactions set amount=1000,signed_amount=-1000 where legacy_mongo_id='bank-1'")
+            tx.execute("update app.workbench_pair_relations set row_ids=array['oa-a','oa-b','bank-1'],row_types=array['oa','oa','bank']")
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions where legacy_mongo_id='bank-1'""")
+        self.scope_service().update_project_cost_scope({'expected_version':1,'selected_tag_codes':['internal_transfer']}, actor_id='cost-test')
+        current = {'case_id':'cost-source-case','row_ids':['oa-a','oa-b','bank-1'],'row_types':['oa','oa','bank']}
+        history = {'operation_type':'confirm_link','after_relations':[current],
+                   'before_relations':[{'case_id':'old-partial','row_ids':['oa-a','bank-1'],'row_types':['oa','bank']}]}
+        self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values ('cost-source-case','confirm_link',%s::jsonb)", (json.dumps(history),))
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(task['status'], 'allocated')
+        self.assertEqual(task['unallocated_amount'], '0.00')
+        self.assertCountEqual(task['source_allocations']['cost_lines'], [
+            {'unit_id':'oa:oa-a','bank_transaction_id':'bank-1','amount':'600.00'},
+            {'unit_id':'oa:oa-b','bank_transaction_id':'bank-1','amount':'400.00'}])
+        for view in ('project','cost_tag','bank_account'):
+            self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={},cursor=None,page_size=20)['summary']['total_amount'], '1000.00')
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from audit.events where action='cost_statistics.manual_allocation.save'")['n'], 0)
+
     def test_partial_automatic_cost_preserves_targets_then_manual_save_closes_remainder(self):
         from tests.test_bank_same_time_ordering_postgres import BankSameTimeOrderingPostgresTests
         BankSameTimeOrderingPostgresTests.add_transaction(self, 'bank-3', signed_amount='-145.00', balance='1000.00', trade_time='2026-09-01 12:00:00+08', txn_date='2026-09-01', account_no='622200009486')

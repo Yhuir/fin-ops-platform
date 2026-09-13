@@ -258,6 +258,7 @@ PUT manual allocation
 
 - Cost repository 的列表、explorer、详情与事务内保存重读均批量读取相关正式 history，复用 `relation_history_partitions`，一次解析生成内部 `source_relation_groups`。详情显示继续复用原显示投影，热路径不调用展示金额对齐。原银行视角不读取关系 history。
 - `automatic_relation_sources` 只拥有证据限定的独立组件计算，复用 `automatic_source_allocations`；不读写数据库、不枚举金额子集。相同候选 OA 集合只索引一次，避免构建银行×OA 矩阵。证据冲突阻止相关组件自动计算。
+- 完整当前关系只有一笔支出时，保留当前全部 OA 目标；历史子组可能早于后来追加的 OA，不能据此排除新成员。正式历史只在多支出间限定范围，明确 canonical 引用仍参与限制；不采用“先失败再回退”的双计算路径。
 - Policy 与范围投影区分固定目标与部分确定金额，自动结果用现有 `source_allocations/status/pending_reasons` 返回；部分来源不松动原 OA 目标。自动任务也提供既有 fingerprint/version，已完成可查询和首次人工编辑。原 fingerprint 计算口径不变。
 - 详情建议只对版本0未解决部分计算；前端草稿初始化合并互不重叠的确定行和建议。版本大于0的有效人工决定优先，仍使用原 CAS/事务/审计与范围外决定保留。
 - 已删除详情独占来源证据、外层多对多直接拒绝自动、自动完成提前返回缺身份、自动任务排除于已完成列表的旧路径。金额组合建议仍是人工业务能力，不作为自动结果或兜底。

@@ -365,6 +365,17 @@ class AutomaticFormalSourceTests(unittest.TestCase):
         self.assertEqual(policy.manual_allocation_tasks[0]['status'], 'allocated')
         self.assertEqual(len(policy.serialized_cost_rows), 2)
 
+    def test_single_payment_current_members_supersede_incomplete_historical_subset(self):
+        groups = [{'oa_row_ids': ['0'], 'bank_row_ids': ['0']}, {'oa_row_ids': ['1'], 'bank_row_ids': []}]
+        policy, _ = self.policy(sources=(349,), groups=groups)
+        task = policy.manual_allocation_tasks[0]
+        self.assertEqual(task['status'], 'allocated')
+        self.assertEqual(task['unallocated_amount'], '0.00')
+        self.assertCountEqual([r['amount'] for r in policy.serialized_cost_rows], ['145.00', '204.00'])
+        constrained, _ = self.policy(sources=(349,), groups=groups, refs={'0': ['0']})
+        self.assertEqual(constrained.serialized_cost_rows, [])
+        self.assertEqual(constrained.manual_allocation_tasks[0]['status'], 'pending')
+
     def test_conflicting_reference_cannot_steal_another_components_source(self):
         groups = [{'oa_row_ids': [str(i)], 'bank_row_ids': [str(i)]} for i in range(2)]
         policy, _ = self.policy(groups=groups, refs={'0': ['1']})
