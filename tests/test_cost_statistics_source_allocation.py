@@ -167,7 +167,7 @@ class SourceSuggestionTests(unittest.TestCase):
         from fin_ops_platform.services.cost_statistics_source_allocation import suggest_source_allocations
         return suggest_source_allocations(task, [
             {'id': key, 'source_oa_ids': value} for key, value in owners.items()
-        ])
+        ], [])
 
     def test_unique_exact_amounts_offer_pending_draft(self):
         task = self.fixture()

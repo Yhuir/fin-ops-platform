@@ -17,7 +17,7 @@ from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allo
     PostgresCostStatisticsManualAllocationRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
+from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups, relation_history_partitions
 
 OA_COST_FORM_TYPES = ("支付申请", "日常报销")
 
@@ -1249,6 +1249,19 @@ def _attach_relation_display(group: dict[str, Any], history: list[dict[str, Any]
         "oa_rows": [{**row, "type": "oa"} for row in group["oa_rows"]],
         "bank_rows": [{**row, "type": "bank"} for row in group["bank_rows"]],
     }
+    # Reuse the same exact-history partition as Workbench, before its amount-only
+    # display alignment. Mixed historical groups bound source ownership; isolated
+    # members remain together for the existing unique-allocation search.
+    current = {"case_id": group["group_id"], "row_ids": group["row_ids"], "row_types": group["row_types"]}
+    available = {("oa", r["id"]) for r in group["oa_rows"]} | {("bank", r["id"]) for r in group["bank_rows"]}
+    parts = [part & available for part in relation_history_partitions([current], history)[0]]
+    mixed = [part for part in parts if any(t == "oa" for t, _ in part) and any(t == "bank" for t, _ in part)]
+    remaining = available - set().union(*mixed)
+    group["source_relation_groups"] = [
+        {"oa_row_ids": [r["id"] for r in group["oa_rows"] if ("oa", r["id"]) in part],
+         "bank_row_ids": [r["id"] for r in group["bank_rows"] if ("bank", r["id"]) in part]}
+        for part in [*mixed, remaining] if part
+    ]
     apply_display_subgroups([display], history)
     # Single OA and itemized OA relations have a shared parent block: its bank
     # ownership does not assert individual expense-item allocation amounts.

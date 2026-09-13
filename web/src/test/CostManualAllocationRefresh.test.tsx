@@ -68,3 +68,24 @@ it('reopens an inactive task whose earlier request was aborted by refresh', asyn
   await screen.findAllByText('原始费用');
   await act(async()=>finish(task));
 });
+
+
+it('retains acknowledged save feedback when unchanged pending facts refresh', async () => {
+  const user=userEvent.setup();
+  vi.mocked(saveCostStatisticsManualAllocation).mockImplementation(async()=>{
+    task={...task,version:1,pendingReasons:['bank_tag_missing'],sourceAllocations:task.suggestedSourceAllocations,suggestedSourceAllocations:null};
+    return structuredClone(task);
+  });
+  const props={canSave:true,onSaved:vi.fn()};
+  const view=render(<Drawer {...props} refreshKey="1"/>);
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  await screen.findByRole('textbox',{name:'分配金额 1'});
+  await user.click(screen.getByRole('button',{name:'保存分配'}));
+  await screen.findByText('已保存，银行信息待完善');
+  view.rerender(<Drawer {...props} refreshKey="2"/>);
+  await waitFor(()=>expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(2));
+  expect(screen.getByText('已保存，银行信息待完善')).toBeVisible();
+  task={...task,version:2};
+  view.rerender(<Drawer {...props} refreshKey="3"/>);
+  await waitFor(()=>expect(screen.queryByText('已保存，银行信息待完善')).not.toBeInTheDocument());
+});

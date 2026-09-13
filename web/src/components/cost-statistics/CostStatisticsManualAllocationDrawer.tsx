@@ -39,11 +39,11 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
       const task = await fetchCostStatisticsManualAllocation(id, controller.signal);
       if (controller.signal.aborted) return;
       const latest = currentStates.current[id];
+      const changed = latest?.task?.relationVersion !== task.relationVersion || latest?.task?.sourceFingerprint !== task.sourceFingerprint || latest?.task?.scopeVersion !== task.scopeVersion || latest?.task?.version !== task.version;
       if (!discardDraft && (latest?.dirty || latest?.unconfirmedRequest)) {
-        const changed = latest.task?.relationVersion !== task.relationVersion || latest.task?.sourceFingerprint !== task.sourceFingerprint || latest.task?.scopeVersion !== task.scopeVersion || latest.task?.version !== task.version;
         setCase(id, { task, loading: false, ...(changed ? { conflict: true, error: '关联或分配已变化，草稿已保留；请重新加载后核对' } : {}) });
       } else {
-        setCase(id, { task, draft: createSourceDraft(task), dirty: false, conflict: false, loading: false, error: undefined, notice: undefined, unconfirmedRequest: undefined });
+        setCase(id, { task, draft: createSourceDraft(task), dirty: false, conflict: false, loading: false, error: undefined, notice: !discardDraft && !changed && latest?.task?.status === task.status ? latest.notice : undefined, unconfirmedRequest: undefined });
       }
     } catch (caught) {
       if (!controller.signal.aborted) setCase(id, { loading: false, conflict: true, error: '任务读取失败或关系已失效，请重新加载' });

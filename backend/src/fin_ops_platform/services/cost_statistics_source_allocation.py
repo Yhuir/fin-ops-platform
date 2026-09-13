@@ -131,6 +131,7 @@ class _SuggestionLimit(Exception):
 
 def suggest_source_allocations(
     task: dict[str, Any], bank_rows: list[dict[str, Any]],
+    relation_groups: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Suggest unique whole-source/fixed-unit combinations for human confirmation.
 
@@ -163,6 +164,16 @@ def suggest_source_allocations(
                  if (not owners.get(event["transaction_id"])
                      or unit["oa_id"] in owners[event["transaction_id"]])}
                 for event in events]
+    # Group boundaries come from exact relation history, never visual alignment.
+    # Intersect with explicit references; conflicting evidence cannot be bypassed.
+    group_by_bank = {bank_id: set(block["oa_row_ids"])
+                     for block in relation_groups for bank_id in block["bank_row_ids"]}
+    for index, event in enumerate(events):
+        if event["transaction_id"] in group_by_bank:
+            allowed_oa = group_by_bank[event["transaction_id"]]
+            eligible[index] &= {i for i, unit in enumerate(units) if unit["oa_id"] in allowed_oa}
+            if not eligible[index]:
+                return None
     try:
         lines = _unique_source_components(units, events, eligible)
     except _SuggestionLimit:

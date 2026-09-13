@@ -164,3 +164,11 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - `CostSourceAllocationForm.test.tsx`：编辑来源/金额不改上方关系；`CostManualAllocationRefresh.test.tsx`：脏草稿冲突保留、连续刷新不能解锁、显式重读恢复、旧请求不能覆盖新事实、窗口聚焦重读且无 PUT。
 - `cost-source-allocation.spec.ts`、`cost-statistics-relation-fanout.spec.ts`：浏览器保存/重读、错误/权限/结果核实、关系刷新、三个成本及原银行视角回归、宽窄屏与交互耗时。
 - 七类中的1/2/3/5/6/7适用；4中的前端会话缓存失效和旧响应竞态已覆盖，服务端 read model/queue/worker 不适用（仍直接读取 canonical，不新增后台刷新）。生产只读核对全部待分配正式成员、目标关系分组、浏览器视觉与请求耗时；写入闭环在隔离 PostgreSQL 验证。
+
+
+## 正式子关系预填回归（2026-09-13）
+
+- `test_cost_relation_display.py`：电信 7 OA/14 流水、重复等额 5 对、利息 2 OA/16 流水完整预填；金额展示不等于来源、旧历史成员不匹配、范围裁剪/引用冲突、多费用项歧义。
+- `test_cost_statistics_source_postgres.py`：真实隔离 PostgreSQL + HTTP 的重复金额历史关系→预填零写入→保存/审计→重新读取→三成本视角→撤回后读取和旧提交拒绝；原并发、退款、范围和回滚测试继续运行。
+- `cost-source-allocation.spec.ts`：7 组14行预填、无重复、可编辑、金额提示、保存后完成页重读。原刷新保护、权限、错误、保存结果核实、100行交互测量继续覆盖。
+- 无新 read model/cache/worker；更新验证由现有 canonical GET、抽屉刷新测试承担。

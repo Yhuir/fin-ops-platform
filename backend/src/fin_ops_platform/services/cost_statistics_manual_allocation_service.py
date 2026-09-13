@@ -136,7 +136,7 @@ class CostStatisticsManualAllocationService:
         group = next(group for group in snapshot["cost_groups"]
                      if group["group_id"] == relation_case_id)
         return {**task, "can_save": can_save,
-                "suggested_source_allocations": suggest_source_allocations(task, group["bank_rows"]),
+                "suggested_source_allocations": suggest_source_allocations(task, group["bank_rows"], group["source_relation_groups"]),
                 "relation_display_groups": _relation_display_groups(task, group)}
 
     def save(

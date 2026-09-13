@@ -1,4 +1,4 @@
-"""Read-only OA/bank display partitions; never creates relation ownership."""
+"""Read-only relation history partitions and OA/bank display alignment; never writes ownership."""
 
 from __future__ import annotations
 
@@ -16,7 +16,10 @@ def members(relation: dict[str, Any]) -> frozenset[tuple[str, str]]:
     return frozenset(zip(types, ids, strict=True))
 
 
-def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str, Any]]) -> None:
+def relation_history_partitions(
+    relations: list[dict[str, Any]], history: list[dict[str, Any]],
+) -> list[list[frozenset[tuple[str, str]]]]:
+    """Partition exact active snapshots by their merge history, without amount inference."""
     # Histories are ordered oldest to newest by the repository. Index exact
     # snapshots, not just case IDs: a reused case cannot supply stale evidence.
     index: dict[tuple[str, frozenset[tuple[str, str]]], list[tuple[int, dict[str, Any]]]] = {}
@@ -43,20 +46,23 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
             result.append(frozenset(remainder))
         return result or [current]
 
+    return [partition(relation, len(history)) for relation in relations]
+
+
+def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str, Any]]) -> None:
     service = WorkbenchRelationAlignmentService()
-    for group in groups:
-        oa_rows, bank_rows = group.get("oa_rows", []), group.get("bank_rows", [])
-        if len(oa_rows) < 2 or not bank_rows or any(row.get("expense_items") for row in oa_rows):
-            continue
-        current = {
-            "case_id": group.get("case_id"),
-            "row_ids": group["formal_member_ids"],
-            "row_types": group["formal_member_types"],
-        }
+    eligible = [group for group in groups
+                if len(group.get("oa_rows", [])) >= 2 and group.get("bank_rows")
+                and not any(row.get("expense_items") for row in group["oa_rows"])]
+    partitions = relation_history_partitions([
+        {"case_id": group.get("case_id"), "row_ids": group["formal_member_ids"],
+         "row_types": group["formal_member_types"]} for group in eligible
+    ], history)
+    for group, parts in zip(eligible, partitions, strict=True):
+        oa_rows, bank_rows = group["oa_rows"], group["bank_rows"]
         oa_by_id = {r["id"]: r for r in oa_rows}
         bank_by_id = {r["id"]: r for r in bank_rows}
         available = {("oa", k) for k in oa_by_id} | {("bank", k) for k in bank_by_id}
-        parts = partition(current, len(history))
         resolved: list[frozenset[tuple[str, str]]] = []
         for part in parts:
             part = part & available

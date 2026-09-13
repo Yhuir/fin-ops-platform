@@ -140,3 +140,8 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 ## 展示历史共享读取（2026-09-13）
 
 `PostgresWorkbenchRelationRepository.load_display_history(oa_ids)` 在调用方一致性 snapshot 内集合读取相关正式历史，按事件顺序返回 raw payload。Workbench hydration 与 Cost 人工分配单条详情共用此只读 port，并共用 `apply_display_subgroups`；删除 hydration 中重复 SQL。Cost 先对完整 typed members 分组再裁剪成本范围，不能用分配草稿修改正式关系。此读取不参与确认/撤回命令，不更改 history、关系成员或 worker/read model。
+
+
+## 精确历史分组复用（2026-09-13）
+
+`workbench_display_subgroups.relation_history_partitions(relations, history)` 提供无 I/O 的 typed-member 历史分组，输入当前完整关系与按时间排序的正式事件，输出各关系的互不重叠成员分区。原展示函数复用此解析并继续自己的金额对齐；Cost 只消费金额推断前的历史分区，用于待确认来源建议。历史索引按批构建，不增加逐行查询；不改变关联命令、数据库关系、版本、OA 状态或 Workbench DTO。

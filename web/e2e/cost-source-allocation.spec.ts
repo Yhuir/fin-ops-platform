@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
@@ -77,6 +77,16 @@ async function sourceScenario(page: Page, options: { scopedLoan?: boolean; align
   });
   task.relation_display_groups = options.alignmentCase ? task.units.map(unit => ({unit_ids:[unit.unit_id],bank_transaction_ids: task.bank_events.filter(b=>b.amount===unit.oa_original_amount).map(b=>b.transaction_id),sources_excluded:false}))
     : [{unit_ids:task.units.map(u=>u.unit_id),bank_transaction_ids:task.bank_events.map(b=>b.transaction_id),sources_excluded:false}];
+  if (options.telecom) {
+    const parts = [['164.00','35.00'],['167.00','35.00'],['164.10','35.20'],['164.00','35.00'],['164.00','35.00'],['174.20','35.00'],['164.00','35.00']];
+    const totals = ['199.00','202.00','199.30','199.00','199.00','209.20','199.00'];
+    task.oa_total = task.net_outflow_total = task.gross_outflow_total = '1406.50';
+    task.units = totals.map((amount,i)=>({...task.units[0],unit_id:`unit-${i}`,oa_id:`oa-${i}`,oa_original_amount:amount,expense_content:`电话费 ${i+1}`}));
+    task.bank_events = parts.flatMap((part,i)=>part.map((amount,j)=>({...task.bank_events[0],transaction_id:`bank-${i}-${j}`,amount})));
+    task.allocations = task.units.map(u=>({unit_id:u.unit_id,amount:u.oa_original_amount}));
+    task.relation_display_groups = task.units.map((u,i)=>({unit_ids:[u.unit_id],bank_transaction_ids:parts[i].map((_,j)=>`bank-${i}-${j}`),sources_excluded:false}));
+    task.suggested_source_allocations = {cost_lines:parts.flatMap((part,i)=>part.map((amount,j)=>({unit_id:`unit-${i}`,bank_transaction_id:`bank-${i}-${j}`,amount}))),refund_links:[],non_cost_lines:[]};
+  }
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
@@ -499,5 +509,31 @@ test('scoped hotel task omits excluded loan, saves only scoped source and keeps 
   await expect(scene.drawer.getByText(/范围外|借出款/)).toHaveCount(0);
   await scene.drawer.getByRole('button',{name:'保存分配',exact:true}).scrollIntoViewIfNeeded();
   await scene.drawer.screenshot({path:testInfo.outputPath('scoped-hotel-narrow.png'),animations:'disabled'});
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
+
+
+test('seven historical OA groups prefill fourteen sources, stay editable and survive save/reopen', async ({page}, testInfo) => {
+  await page.setViewportSize({width:1440,height:1000});
+  const scene = await sourceScenario(page,{telecom:true});
+  const table = scene.drawer.getByRole('table',{name:'成本分配明细',exact:true});
+  await expect(table.getByRole('combobox')).toHaveCount(14);
+  await expect(table.getByText('未分配',{exact:true})).toHaveCount(0);
+  await expect(scene.drawer.getByRole('table',{name:'OA 与流水对照'}).locator('tbody')).toHaveCount(7);
+  const expected = scene.task.bank_events.map(b=>b.amount);
+  expect(await table.getByRole('textbox').evaluateAll(inputs=>inputs.map(input=>(input as HTMLInputElement).value))).toEqual(expected);
+  expect(scene.writes()).toBe(0);
+  const amount = table.getByRole('textbox').first();
+  await amount.fill('163.00');
+  await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toHaveCount(0);
+  await amount.fill('164.00');
+  await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
+  await table.screenshot({path:testInfo.outputPath('telecom-fourteen-prefilled.png'),animations:'disabled'});
+  await scene.drawer.getByRole('button',{name:'保存分配',exact:true}).click();
+  await expect.poll(scene.writes).toBe(1);
+  expect(scene.body()!.source_allocations.cost_lines).toHaveLength(14);
+  await scene.drawer.getByRole('radio',{name:'已完成 1'}).click();
+  await expect(table.getByRole('combobox')).toHaveCount(14);
+  expect(await table.getByRole('textbox').evaluateAll(inputs=>inputs.map(input=>(input as HTMLInputElement).value))).toEqual(expected);
   await expectNoUnexpectedSuccessUiErrors(page);
 });

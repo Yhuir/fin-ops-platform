@@ -162,6 +162,50 @@ class CostSourcePostgresTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.body)
                 self.assertEqual(json.loads(response.body)['summary']['total_amount'], amount)
 
+    def test_duplicate_amount_history_prefill_http_save_reload_and_cancel(self):
+        # Equal OA and bank amounts are ambiguous until the current merge history
+        # supplies the two original OA/bank relations.
+        self.connection.execute("update app.oa_applications set amount=500,normalized_payload=jsonb_set(normalized_payload,'{amount}','\"500.00\"'::jsonb)")
+        self.assertIsNone(self.service.get_task("cost-source-case", can_save=True)["suggested_source_allocations"])
+        current = {"case_id":"cost-source-case", "row_ids":["oa-a","oa-b","bank-1","bank-2"], "row_types":["oa","oa","bank","bank"]}
+        prior = [{"case_id":"old-a", "row_ids":["oa-a","bank-2"], "row_types":["oa","bank"]},
+                 {"case_id":"old-b", "row_ids":["oa-b","bank-1"], "row_types":["oa","bank"]}]
+        history = {"operation_type":"confirm_link", "after_relations":[current], "before_relations":prior}
+        self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values (%s,'confirm_link',%s::jsonb)", ("cost-source-case",json.dumps(history)))
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service  # noqa: SLF001
+        app._cost_statistics_api_routes._query_service = self.query  # noqa: SLF001
+        path = '/api/cost-statistics/manual-allocations/cost-source-case'
+        response = app.handle_request('GET', path)
+        self.assertEqual(response.status_code, 200)
+        task = json.loads(response.body)
+        suggestion = task['suggested_source_allocations']
+        self.assertEqual(suggestion['cost_lines'], [
+            {'unit_id':'oa:oa-a','bank_transaction_id':'bank-2','amount':'500.00'},
+            {'unit_id':'oa:oa-b','bank_transaction_id':'bank-1','amount':'500.00'},
+        ])
+        self.assertEqual(task['status'], 'pending')
+        self.assertIsNone(task['source_allocations'])
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
+        for block, line in zip(task['relation_display_groups'], suggestion['cost_lines'], strict=True):
+            self.assertEqual(block['unit_ids'], [line['unit_id']])
+            self.assertEqual(block['bank_transaction_ids'], [line['bank_transaction_id']])
+        payload = {**self.payload(), 'allocations':task['allocations'], 'source_allocations':suggestion}
+        response = app.handle_request('PUT', path, body=json.dumps(payload))
+        self.assertEqual(response.status_code, 200, response.body)
+        reloaded = json.loads(app.handle_request('GET', path).body)
+        self.assertEqual(reloaded['source_allocations'], suggestion)
+        self.assertIsNone(reloaded['suggested_source_allocations'])
+        self.assertEqual(self.connection.fetch_one("select payload from audit.events where action='cost_statistics.manual_allocation.save'")['payload']['source_allocations'], suggestion)
+        for view in ('project','cost_tag','bank_account'):
+            response = app.handle_request('GET', f'/api/cost-statistics/explorer?view={view}&scope=all&page_size=20')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(json.loads(response.body)['summary']['total_amount'], '1000.00')
+        self.connection.execute("update app.workbench_pair_relations set status='cancelled',version=version+1 where case_id='cost-source-case'")
+        self.assertEqual(app.handle_request('GET', path).status_code, 404)
+        self.assertEqual(app.handle_request('PUT', path, body=json.dumps(payload)).status_code, 409)
+
     def scope_service(self):
         from pathlib import Path
 
