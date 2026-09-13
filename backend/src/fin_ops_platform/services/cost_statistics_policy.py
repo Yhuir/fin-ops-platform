@@ -560,11 +560,11 @@ def _cost_entries(
             continue
         if not oa_rows:
             continue
-        if not all(_is_completed_oa_cost_row(row) for row in oa_rows):
-            excluded_by_reason["incomplete_oa_relation"] = (
-                excluded_by_reason.get("incomplete_oa_relation", 0) + 1
-            )
+        completed_ids = {_clean_text(row.get("id") or row.get("row_id")) for row in oa_rows if _is_completed_oa_cost_row(row)}
+        if not completed_ids:
+            excluded_by_reason["ineligible_oa"] = excluded_by_reason.get("ineligible_oa", 0) + len(oa_rows)
             continue
+        waiting_ids = {_clean_text(row.get("id") or row.get("row_id")) for row in oa_rows} - completed_ids
         outflows = [
             row for row in group_bank_rows if _outflow_amount(row) is not None
         ]
@@ -572,6 +572,10 @@ def _cost_entries(
         group_reasons: list[str] = []
         for oa_row in oa_rows:
             row_contexts, reasons = _oa_allocation_contexts(oa_row)
+            if _clean_text(oa_row.get("id") or oa_row.get("row_id")) in waiting_ids and reasons:
+                continue
+            for context in row_contexts:
+                context["cost_eligible"] = _clean_text(oa_row.get("id") or oa_row.get("row_id")) in completed_ids
             contexts.extend(row_contexts)
             group_reasons.extend(reasons)
             for reason in reasons:
@@ -654,7 +658,7 @@ def _cost_entries(
             continue
         manual_record = manual_allocations.get(relation_case_id)
         task = _manual_allocation_task(
-            group=group, contexts=contexts, outflows=outflows, refunds=refunds,
+            group={**group, "waiting_oa_ids": sorted(waiting_ids)}, contexts=contexts, outflows=outflows, refunds=refunds,
             reconciliation=reconciliation, manual_record=manual_record,
             selected_codes=selected_codes,
         )
@@ -820,6 +824,8 @@ def _append_source_allocation_entries(
         if line["unit_id"] in manual_by_id:
             entries.append(_manual_cost_entry(manual_by_id[line["unit_id"]], bank_row, amount, relation_case_id, payment_evidence, reconciliation))
             continue
+        if not contexts_by_id[line["unit_id"]].get("cost_eligible", True):
+            continue
         entries.append(_allocation_entry(
             contexts_by_id[line["unit_id"]], bank_row=bank_row,
             allocated_amount=amount, oa_total=oa_total,
@@ -853,6 +859,7 @@ def _manual_allocation_task(
             "oa_applicant": context["oa_applicant"],
             "oa_apply_type": context["oa_apply_type"],
             "oa_original_amount": _money(context["allocation_amount"]),
+            "cost_eligible": context["cost_eligible"],
         }
         for context in contexts
     ]
@@ -864,12 +871,32 @@ def _manual_allocation_task(
         {**_manual_allocation_bank_event(row, event_kind="wrong_payment_refund"), "in_project_cost_scope": False}
         for row in refunds
     )
+    if group.get("waiting_oa_ids"):
+        units_by_oa: dict[str, list[str]] = {}
+        for unit in units:
+            if unit["cost_eligible"]:
+                units_by_oa.setdefault(unit["oa_id"], []).append(unit["unit_id"])
+        source_rows = {_bank_transaction_id(row): row for row in [*outflows, *refunds]}
+        for event in bank_events:
+            refs = set(source_rows[event["transaction_id"]].get("source_oa_ids", []))
+            if refs:
+                event["allowed_unit_ids"] = sorted({id for oa_id in refs for id in units_by_oa.get(oa_id, [])})
     bank_events = sorted(
         bank_events,
         key=lambda event: (
             str(event["event_kind"]),
             str(event["transaction_id"]),
         ),
+    )
+    saved_usage: dict[str, Decimal] = {}
+    if manual_record and manual_record.get("source_allocations") is not None:
+        for lines in manual_record["source_allocations"].values():
+            for line in lines:
+                bank_id = line["bank_transaction_id"]
+                saved_usage[bank_id] = saved_usage.get(bank_id, ZERO) + Decimal(line["amount"])
+    partial_source = any(
+        event["transaction_id"] in saved_usage and saved_usage[event["transaction_id"]] < Decimal(event["amount"])
+        for event in bank_events if event["event_kind"] == "outflow"
     )
     task: dict[str, Any] = {
         "in_project_cost_scope": any(source_in_project_cost_scope(row, selected_codes) for row in outflows),
@@ -885,6 +912,8 @@ def _manual_allocation_task(
         "difference": reconciliation["difference"],
         "amounts_fixed": reconciliation["difference"] == "0.00",
         "units": units,
+        "allows_partial": bool(group.get("waiting_oa_ids")) or partial_source,
+        "waiting_oa_ids": group.get("waiting_oa_ids", []),
         "manual_items": [],
         "bank_events": bank_events,
         "allocations": [],
@@ -894,7 +923,7 @@ def _manual_allocation_task(
         "updated_by": "",
         "updated_at": "",
     }
-    if reconciliation["difference"] == "0.00":
+    if reconciliation["difference"] == "0.00" and not task["allows_partial"]:
         task["allocations"] = [
             {"unit_id": unit["unit_id"], "amount": unit["oa_original_amount"]}
             for unit in units
@@ -983,9 +1012,14 @@ def _manual_allocation_task(
         _complete_source_task(task)
         decision = task["source_allocations"]
     else:
-        checked = covered_source_task(task, decision)
+        stored_task = {**task, "units": [{**u, "cost_eligible": True} for u in units],
+                       "bank_events": [{k: v for k, v in e.items() if k != "allowed_unit_ids"} for e in task["bank_events"]]}
+        checked = covered_source_task(stored_task, decision)
         if checked["allocations"] != ordered_allocations or checked["non_cost_amount"] != task["non_cost_amount"]:
             raise CostStatisticsAllocationConflictError("保存的来源明细与分配合计不一致。")
+    if task["waiting_oa_ids"] and decision is not None:
+        eligible_ids = {u["unit_id"] for u in units if u["cost_eligible"]} | {u["unit_id"] for u in task["manual_items"]}
+        decision = {**decision, "cost_lines": [line for line in decision["cost_lines"] if line["unit_id"] in eligible_ids]}
     return project_source_task(task, decision)
 
 
@@ -1057,7 +1091,7 @@ def _manual_allocation_source_fingerprint(
         {
             key: value
             for key, value in unit.items()
-            if key != "oa_apply_type"
+            if key not in {"oa_apply_type", "cost_eligible"}
         }
         for unit in units
     ]
@@ -1272,8 +1306,6 @@ def _bank_flow_direction(row: dict[str, Any]) -> str:
 def _oa_allocation_contexts(
     row: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    if not _is_completed_oa_cost_row(row):
-        return [], ["ineligible_oa"]
     apply_type = _clean_text(row.get("apply_type"))
     parent, parent_reason = _oa_cost_context(row)
     if apply_type == PAYMENT_APPLICATION_TYPE:

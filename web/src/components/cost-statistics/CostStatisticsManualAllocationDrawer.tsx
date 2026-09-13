@@ -100,7 +100,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
   useEffect(() => () => { listRequest.current?.abort(); details.current.forEach(controller => controller.abort()); }, []);
   const acceptSaved = (id: string, saved: CostStatisticsManualAllocationTask) => {
     const previous = currentStates.current[id].task;
-    setCase(id, { task: saved, draft: createSourceDraft(saved), dirty: false, conflict: false, saving: false, error: undefined, unconfirmedRequest: undefined, notice: saved.status === 'allocated' ? '分配已保存' : '已保存，银行信息待完善' });
+    setCase(id, { task: saved, draft: createSourceDraft(saved), dirty: false, conflict: false, saving: false, error: undefined, unconfirmedRequest: undefined, notice: saved.status === 'allocated' ? '分配已保存' : saved.allowsPartial ? '已保存，剩余金额待分配或等待 OA 完成' : '已保存，银行信息待完善' });
     if (previous && saved.status !== previous.status) setCounts(value => value ? { pending: value.pending + (saved.status === 'pending' ? 1 : -1), allocated: value.allocated + (saved.status === 'allocated' ? 1 : -1) } : null);
     if (saved.status !== status) {
       setItems(list => list.filter(item => item.relationCaseId !== id)); setExpanded(null);

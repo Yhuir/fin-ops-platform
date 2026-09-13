@@ -33,10 +33,25 @@ def validate_source_allocations(
     }:
         _fail("请填写完整的流水来源分配。", "source_allocations", "source_required")
     targets = {line["unit_id"]: Decimal(line["amount"]) for line in allocations}
-    if task["amounts_fixed"]:
+    partial = task.get("allows_partial", False)
+    if partial:
+        for unit in task["units"]:
+            amount = targets[unit["unit_id"]]
+            if amount > Decimal(unit["oa_original_amount"]) or (not unit.get("cost_eligible", True) and amount):
+                _fail("只能分配已完成 OA 的有效金额。", "allocations", "unit_not_eligible")
+    if partial and task.get("waiting_oa_ids"):
+        manual_ids = {item["unit_id"] for item in task.get("manual_items", [])}
+        supplemental = sum((amount for id, amount in targets.items() if id in manual_ids), ZERO)
+        surplus = max(ZERO, Decimal(task["net_outflow_total"]) - Decimal(task["oa_total"]))
+        if not set(task["waiting_oa_ids"]) <= {u.get("oa_id") for u in task["units"]}:
+            surplus = ZERO
+        if supplemental + non_cost_amount > surplus:
+            _fail("等待审批的 OA 金额不能转为人工成本或非成本。", "allocations", "waiting_amount_reserved")
+    if task["amounts_fixed"] and not partial:
         for unit in task["units"]:
             if targets[unit["unit_id"]] != Decimal(unit["oa_original_amount"]):
                 _fail("金额一致时，每个 OA 单元的成本目标必须保持原金额。", "allocations", "unit_amount_mismatch")
+    events_by_id = {e["transaction_id"]: e for e in task["bank_events"]}
     sources = {
         event["transaction_id"]: Decimal(event["amount"])
         for event in task["bank_events"] if event["event_kind"] == "outflow"
@@ -73,6 +88,10 @@ def validate_source_allocations(
             if not isinstance(row["amount"], str) or not MONEY.fullmatch(row["amount"]) or Decimal(row["amount"]) <= ZERO:
                 _fail("分配金额必须是大于零的两位小数。", path + ".amount", "invalid_amount")
             amount = Decimal(row["amount"])
+            event = events_by_id[bank_id]
+            allowed = event.get("allowed_unit_ids")
+            if allowed is not None and (kind == "cost_lines" and item_id not in allowed or kind == "non_cost_lines" and not allowed):
+                _fail("该来源不属于此已完成成本项。", path, "source_owner_mismatch")
             used[bank_id] += amount
             if kind == "cost_lines":
                 if item_id not in targets:
@@ -90,7 +109,7 @@ def validate_source_allocations(
         if len(lines) != 1:
             _fail("每条人工成本必须对应一笔来源流水。", "manual_items", "manual_source_required")
     for bank_id, amount in sources.items():
-        if used[bank_id] != amount:
+        if used[bank_id] > amount or (not partial and used[bank_id] != amount):
             _fail("每笔支出的成本、退款冲减和非成本合计必须等于该流水金额。", "source_allocations", "source_amount_mismatch")
     if unit_used != targets:
         _fail("每个 OA 单元的来源分配合计必须等于本项成本。", "source_allocations.cost_lines", "unit_amount_mismatch")
@@ -104,6 +123,29 @@ def validate_source_allocations(
 def automatic_source_allocations(task: dict[str, Any]) -> dict[str, Any] | None:
     """Only unique solutions: one outflow, or one positive unit without deductions."""
     allocations = task["allocations"]
+    if task.get("allows_partial"):
+        if any(e["event_kind"] != "outflow" for e in task["bank_events"]):
+            return None
+        eligible = [u for u in task["units"] if u.get("cost_eligible", True)]
+        sources = [e for e in task["bank_events"] if e["event_kind"] == "outflow"]
+        # Preserve existing many-source confirmation semantics; a shared single
+        # payment uniquely supports each eligible OA at its original amount.
+        known_waiting = set(task.get("waiting_oa_ids", [])) <= {u["oa_id"] for u in task["units"]}
+        total = sum((Decimal(u["oa_original_amount"]) for u in task["units"]), ZERO)
+        if len(sources) != 1 or not known_waiting or total > Decimal(sources[0]["amount"]):
+            return None
+        source = sources[0]
+        allowed = source.get("allowed_unit_ids")
+        lines = [{"unit_id": unit["unit_id"], "bank_transaction_id": source["transaction_id"], "amount": unit["oa_original_amount"]}
+                 for unit in eligible if Decimal(unit["oa_original_amount"]) > ZERO
+                 and (allowed is None or unit["unit_id"] in allowed)]
+        if not lines:
+            return None
+        amounts = {u["unit_id"]: ZERO for u in task["units"]}
+        for line in lines:
+            amounts[line["unit_id"]] += Decimal(line["amount"])
+        task["allocations"] = [{"unit_id": id, "amount": f"{amount:.2f}"} for id, amount in amounts.items()]
+        return validate_source_allocations(task, task["allocations"], ZERO, {"cost_lines": lines, "refund_links": [], "non_cost_lines": []})
     if not allocations:
         return None
     sources = [event for event in task["bank_events"] if event["event_kind"] == "outflow"]
@@ -147,6 +189,8 @@ def suggest_source_allocations(
             or task["source_allocations"] is not None
             or "allocation_stale" in task["pending_reasons"]
             or any(event["event_kind"] != "outflow" for event in task["bank_events"])):
+        return None
+    if task.get("allows_partial"):
         return None
     units = [unit for unit in task["units"] if Decimal(unit["oa_original_amount"]) > ZERO]
     events = [event for event in task["bank_events"] if event["event_kind"] == "outflow"]
@@ -299,7 +343,10 @@ def _unique_source_components(
 def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -> dict[str, Any]:
     """Resolve current facts; saving a source decision need not resolve missing metadata."""
     reasons = []
-    if task["allocations"] and task["amounts_fixed"]:
+    partial = task.get("allows_partial", False)
+    if partial and task["status"] != "stale" and source_allocations is None:
+        source_allocations = automatic_source_allocations(task)
+    if task["allocations"] and task["amounts_fixed"] and not partial:
         targets = {unit["unit_id"]: Decimal(unit["oa_original_amount"]) for unit in task["units"]}
         if any(Decimal(line["amount"]) != targets[line["unit_id"]] for line in task["allocations"] if line["unit_id"] in targets):
             _fail("保存的单元金额与当前 OA 目标不一致。", "allocations", "unit_amount_mismatch")
@@ -326,6 +373,14 @@ def complete_source_task(task: dict[str, Any], source_allocations: Any = None) -
                     reasons.append("bank_account_missing")
                 if not event["trade_time"]:
                     reasons.append("source_date_missing")
+    allocated = sum((Decimal(line["amount"]) for line in (source_allocations or {}).get("cost_lines", [])), ZERO)
+    non_cost = sum((Decimal(line["amount"]) for line in (source_allocations or {}).get("non_cost_lines", [])), ZERO)
+    task["unallocated_amount"] = f"{Decimal(task['net_outflow_total']) - allocated - non_cost:.2f}"
+    if partial:
+        if task.get("waiting_oa_ids"):
+            reasons.append("oa_in_progress")
+        if Decimal(task["unallocated_amount"]) > ZERO:
+            reasons.append("source_required")
     task["suggested_source_allocations"] = None
     task["source_allocations"] = source_allocations
     task["pending_reasons"] = list(dict.fromkeys(reasons))

@@ -50,7 +50,7 @@ export function sourceUnitAmounts(task: CostStatisticsManualAllocationTask, draf
     sums.set(line.ownerId, previous === null || amount === null || amount <= 0n ? null : (previous ?? 0n) + amount);
   }
   const zero = new Set(draft.zeroUnitIds);
-  return new Map([...task.units.map(unit => [unit.unitId, task.amountsFixed
+  return new Map([...task.units.map(unit => [unit.unitId, task.allowsPartial ? (sums.get(unit.unitId) ?? 0n) : task.amountsFixed
     ? cents(unit.oaOriginalAmount)
     : zero.has(unit.unitId) ? 0n : sums.get(unit.unitId) ?? null] as const), ...draft.manualItems.map(item => [item.unitId, sums.get(item.unitId) ?? null] as const)]);
 }
@@ -69,6 +69,9 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
     for (const line of draft[kind]) {
       const field = `${kind}.${line.id}`;
       if (!sources.has(line.bankTransactionId)) errors[`${field}.source`] = '请选择本关联中的支出流水';
+      const allowed = sources.get(line.bankTransactionId)?.allowedUnitIds;
+      if (allowed && (kind === 'costLines' && !allowed.includes(line.ownerId) || kind === 'nonCostLines' && !allowed.length)) errors[`${field}.source`] = '该来源不属于此已完成成本项';
+      if (kind === 'costLines' && task.units.some(u => u.unitId === line.ownerId && u.costEligible === false)) errors[`${field}.owner`] = '进行中的 OA 暂不计入成本';
       if (kind === 'costLines' && !units.has(line.ownerId)) errors[`${field}.owner`] = '请选择有效的 OA 成本项';
       if (kind === 'refundLinks' && !refunds.has(line.ownerId)) errors[`${field}.owner`] = '请选择有效的退款流水';
       const amount = cents(line.amount);
@@ -96,6 +99,7 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
   for (const unit of task.units) {
     const target = targets.get(unit.unitId);
     const key = `unit.${unit.unitId}`;
+    if (task.allowsPartial && target != null && target > cents(unit.oaOriginalAmount)!) errors[key] = '分配金额超过 OA 原金额';
     if (target === null || target === undefined) errors[key] = '请分配来源，或明确设为零成本';
     else {
       total += target;
@@ -110,7 +114,7 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
     if (sum(draft.nonCostLines) !== nonCost) errors.nonCost = '非成本来源合计与金额不一致';
     if (nonCost === 0n && draft.nonCostReason.trim()) errors.nonCost = '非成本为零时请清空原因';
     if (nonCost > 0n && !draft.nonCostReason.trim()) errors.nonCost = '请填写不计入成本的原因';
-    if (total + nonCost !== cents(task.netOutflowTotal)) errors.total = '成本与非成本合计须等于净支出';
+    if (total + nonCost > cents(task.netOutflowTotal)! || !task.allowsPartial && total + nonCost !== cents(task.netOutflowTotal)) errors.total = '成本与非成本合计须等于净支出';
   }
   for (const refund of task.bankEvents.filter(event => event.eventKind === 'wrong_payment_refund')) {
     if (sum(draft.refundLinks.filter(line => line.ownerId === refund.transactionId)) !== cents(refund.amount)) errors[`refund.${refund.transactionId}`] = '请完整分配此笔退款';
@@ -118,8 +122,14 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
   const used = usedBySource(draft);
   for (const source of sources.values()) {
     const allocated = used.get(source.transactionId) ?? 0n;
-    if (allocated !== cents(source.amount)) errors[`source.${source.transactionId}`] = allocated > cents(source.amount)!
+    if (allocated > cents(source.amount)! || !task.allowsPartial && allocated !== cents(source.amount)) errors[`source.${source.transactionId}`] = allocated > cents(source.amount)!
       ? '分配金额超过该流水金额' : '该流水尚未完整分配';
+  }
+  if (task.allowsPartial && task.waitingOaIds?.length) {
+    const supplemental = draft.manualItems.reduce((sum, item) => sum + (targets.get(item.unitId) ?? 0n), 0n);
+    const knownWaiting = task.waitingOaIds.every(id => task.units.some(unit => unit.oaId === id));
+    const surplus = knownWaiting ? cents(task.netOutflowTotal)! - cents(task.oaTotal)! : 0n;
+    if (supplemental + (nonCost ?? 0n) > (surplus > 0n ? surplus : 0n)) errors.total = '等待审批的金额不能转为人工成本或非成本';
   }
   return errors;
 }

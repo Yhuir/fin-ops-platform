@@ -144,6 +144,8 @@ type ApiCostStatisticsManualAllocationTask = {
   status: "pending" | "allocated";
   pending_reasons: string[];
   amounts_fixed: boolean;
+  allows_partial: boolean;
+  waiting_oa_ids: string[];
   source_allocations: ApiCostSourceAllocations | null;
   suggested_source_allocations: ApiCostSourceAllocations | null;
   relation_display_groups: Array<{ unit_ids: string[]; bank_transaction_ids: string[]; sources_excluded: boolean }>;
@@ -162,9 +164,11 @@ type ApiCostStatisticsManualAllocationTask = {
     expense_content: string;
     oa_applicant: string;
     oa_original_amount: string;
+    cost_eligible: boolean;
   }>;
   bank_events: Array<{
     transaction_id: string;
+    allowed_unit_ids?: string[];
     event_kind: "outflow" | "wrong_payment_refund";
     in_project_cost_scope: boolean;
     amount: string;
@@ -427,6 +431,7 @@ function mapManualAllocationTask(
     status: task.status,
     pendingReasons: task.pending_reasons,
     amountsFixed: task.amounts_fixed,
+    allowsPartial: task.allows_partial, waitingOaIds: task.waiting_oa_ids,
     manualItems: task.manual_items.map(item => ({ unitId: item.unit_id, projectId: item.project_id, expenseContent: item.expense_content,
       costTagCode: item.cost_tag_code, projectName: item.project_name, costTagPrimaryLabel: item.cost_tag_primary_label, costTagSubLabel: item.cost_tag_sub_label })),
     manualOptions: task.manual_options,
@@ -448,9 +453,11 @@ function mapManualAllocationTask(
       expenseContent: unit.expense_content,
       oaApplicant: unit.oa_applicant,
       oaOriginalAmount: unit.oa_original_amount,
+      costEligible: unit.cost_eligible,
     })),
     bankEvents: task.bank_events.map((event) => ({
       transactionId: event.transaction_id,
+      allowedUnitIds: event.allowed_unit_ids,
       eventKind: event.event_kind,
       inProjectCostScope: event.in_project_cost_scope,
       amount: event.amount,

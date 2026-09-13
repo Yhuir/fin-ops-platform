@@ -108,6 +108,8 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None) -
         # Narrowing scope must not silently confirm a previously ambiguous/manual task.
         result.update(status='pending', pending_reasons=['source_required' if result['allocations'] else 'amount_required'])
         return result
+    if result.get('allows_partial'):
+        return complete_source_task(result, scoped)
     if scoped is not None:
         covered_source_task(result, scoped)
         covered = {line['bank_transaction_id'] for kind in KINDS for line in scoped[kind]}

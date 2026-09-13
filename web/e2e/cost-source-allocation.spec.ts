@@ -2,13 +2,14 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
     status: 'pending', pending_reasons: options.missingTag ? ['bank_tag_missing'] : ['source_required'], amounts_fixed: true,
+    allows_partial: !!options.partial, waiting_oa_ids: [] as string[],
     oa_total: '600.00', gross_outflow_total: '600.00', wrong_payment_refund_total: '0.00', net_outflow_total: '600.00',
-    units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', oa_original_amount: '600.00' }],
+    units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', cost_eligible: true, oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', oa_original_amount: '600.00' }],
     bank_events: [
       { transaction_id: 'bank-a', event_kind: 'outflow', in_project_cost_scope: true, amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
       { transaction_id: 'bank-b', event_kind: 'outflow', in_project_cost_scope: true, amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
@@ -16,6 +17,14 @@ async function sourceScenario(page: Page, options: { manual?: boolean;  telecom?
     allocations: [{ unit_id: 'oa-1', amount: '600.00' }], relation_display_groups: [] as Array<{unit_ids:string[];bank_transaction_ids:string[];sources_excluded:boolean}>, manual_items: [] as Array<Record<string,string>>, manual_options: { projects: [{id:"p-1",name:"云南溯源科技"}], tags: [{code:"service",label:"费用 / 服务费",primary_label:"费用",sub_label:"服务费"}] }, suggested_source_allocations: null as unknown, source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
+  if (options.partial) {
+    task.oa_total = task.gross_outflow_total = task.net_outflow_total = '16000.00';
+    task.units = [true, false].map((cost_eligible, i) => ({...task.units[0], unit_id: `oa-${i + 1}`, oa_id: `doc-${i + 1}`,
+      oa_original_amount: '8000.00', cost_eligible, project_name: '大理中水项目', expense_content: i ? '紫外线配件尾款' : '紫外线配件预付款'}));
+    task.bank_events.forEach(event => {event.amount = '8000.00';});
+    task.allocations = []; task.waiting_oa_ids = ['doc-2']; task.pending_reasons = ['oa_in_progress', 'source_required'];
+    task.relation_display_groups = [{unit_ids: ['oa-1', 'oa-2'], bank_transaction_ids: ['bank-a', 'bank-b'], sources_excluded: false}];
+  }
   if (options.manual) {
     task.units[0].project_id=""; task.manual_options.projects[0].id="";
     task.amounts_fixed=false; task.pending_reasons=['amount_required'];
@@ -104,8 +113,8 @@ async function sourceScenario(page: Page, options: { manual?: boolean;  telecom?
       task.source_allocations = savedBody!.source_allocations;
       task.suggested_source_allocations = null;
       task.allocations = savedBody!.allocations;
-      task.version++; task.status = options.missingTag ? 'pending' : 'allocated';
-      task.pending_reasons = options.missingTag ? ['bank_tag_missing'] : [];
+      task.version++; task.status = options.missingTag || options.partial ? 'pending' : 'allocated';
+      task.pending_reasons = options.partial ? ['oa_in_progress', 'source_required'] : options.missingTag ? ['bank_tag_missing'] : [];
       if (options.interrupted) return route.fulfill({ status: 502, json: { message: 'upstream response lost after commit' } });
       return route.fulfill({ json: task });
     }
@@ -143,6 +152,27 @@ async function fillSources(page: Page, unit: ReturnType<Page['locator']>) {
     await unit.getByRole('textbox', { name: `分配金额 ${index + 1}`, exact: true }).fill(amount);
   }
 }
+
+test('mixed approval saves only completed 8000 and keeps the other 8000 waiting after reopening', async ({page}) => {
+  await page.setViewportSize({width: 1440, height: 1000});
+  const scene = await sourceScenario(page, {partial: true});
+  await expect(scene.drawer.getByText('等待 OA 完成，暂不计入成本')).toBeVisible();
+  await scene.unit.getByRole('button', {name: '新增来源', exact: true}).click();
+  await scene.unit.getByRole('combobox', {name: '来源流水 1', exact: true}).click();
+  await page.getByRole('option', {name: /建设银行 8106/}).click();
+  await scene.unit.getByRole('textbox', {name: '分配金额 1', exact: true}).fill('8000');
+  await expect(scene.drawer.getByText('分配金额一致', {exact: true})).toHaveCount(0);
+  await scene.drawer.getByRole('button', {name: '保存分配'}).click();
+  await expect(scene.drawer.getByText('已保存，剩余金额待分配或等待 OA 完成')).toBeVisible();
+  expect(scene.body()!.allocations).toEqual([{unit_id: 'oa-1', amount: '8000.00'}, {unit_id: 'oa-2', amount: '0.00'}]);
+  expect(scene.body()!.non_cost_amount).toBe('0.00');
+  await scene.drawer.getByRole('button', {name: /关闭/}).click();
+  await page.getByRole('button', {name: '打开成本人工分配'}).click();
+  await expect(scene.unit.getByRole('textbox', {name: '分配金额 1', exact: true})).toHaveValue('8000.00');
+  await expect(scene.drawer.getByText('等待 OA 完成，暂不计入成本')).toBeVisible();
+  await page.screenshot({path: '/tmp/cost-mixed-partial-1440.png', animations: 'disabled'});
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
 
 test('splits 600 across real bank accounts, moves only completed tasks, and preserves the source matrix', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });

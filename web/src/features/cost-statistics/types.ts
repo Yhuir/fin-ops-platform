@@ -131,10 +131,12 @@ export type CostStatisticsManualAllocationUnit = {
   expenseContent: string;
   oaApplicant: string;
   oaOriginalAmount: string;
+  costEligible?: boolean;
 };
 
 export type CostStatisticsManualAllocationBankEvent = {
   transactionId: string;
+  allowedUnitIds?: string[];
   eventKind: "outflow" | "wrong_payment_refund";
   inProjectCostScope: boolean;
   amount: string;
@@ -167,6 +169,8 @@ export type CostStatisticsManualAllocationTask = {
   status: "pending" | "allocated";
   pendingReasons: string[];
   amountsFixed: boolean;
+  allowsPartial?: boolean;
+  waitingOaIds?: string[];
   sourceAllocations: CostSourceAllocations | null;
   suggestedSourceAllocations: CostSourceAllocations | null;
   relationDisplayGroups: Array<{ unitIds: string[]; bankTransactionIds: string[]; sourcesExcluded: boolean }>;

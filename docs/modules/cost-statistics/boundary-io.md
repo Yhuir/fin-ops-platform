@@ -25,7 +25,7 @@
 单个 `REPEATABLE READ READ ONLY` snapshot 按请求范围批量读取。两个流水 view 只读取银行流水和批量有效分类投影并立即返回；三个项目成本 view 再按需读取其余事实。未配置无 OA 项目时，项目成本只加载关系成员，并以同一 snapshot 内的一次基础聚合读取全量流水收支数量和可用年份；该聚合不执行标签分类：
 
 - `app.bank_transactions`
-- `app.oa_applications.normalized_payload` 的成本字段和 canonical `expense_items`
+- `app.oa_applications.normalized_payload` 的成本字段和 canonical `expense_items`；尚未进入正式表的 OA 成员通过 `PostgresOaPendingPaymentAdmissionRepository` 读取原始 admission 记录，正式表优先，同一快照批量读取。
 - `app.workbench_pair_relations` 中 `status='active'` 的正式关系
 - `app.bank_transaction_categories` 与 confirmations 的批量有效分类投影
 - `app.app_settings` 中银行账户映射、`cost_statistics_no_oa_projects` 和 `cost_statistics_project_cost_scope`
@@ -34,7 +34,7 @@
 
 成本模块不读取银行明细页面的 payload/read model。银行有效分类通过银行分类 owner 的批量 projection port 取得；不得复制分类算法或增加 SQL/Python fallback。
 
-OA 成本资格由 Policy 按表单类型和 canonical 审批完成状态判断。`completed_at` / 输出 `oa_completed_at` 仅为可为空的凭据信息，缺失沿用既有空字符串输出，不阻断单据、报销明细或整组成本；不补造时间。Repository 保留原始时间投影，不维护第二套完成状态判断。来源付款日期仍是成本归属年月的唯一日期依据；进行中、关系成员不完整、金额或来源未定的处理不变。
+OA 成本资格由 Policy 按表单类型和 canonical 审批完成状态判断。`completed_at` / 输出 `oa_completed_at` 仅为可为空的凭据信息，缺失沿用既有空字符串输出，不阻断单据、报销明细或整组成本；不补造时间。Repository 保留原始时间投影，不维护第二套完成状态判断。来源付款日期仍是成本归属年月的唯一日期依据；进行中单元不计成本，但已完成兄弟单元可独立分配；真正缺失关系成员仍不猜测事实，金额或来源未定的部分保留待处理。
 
 ## 请求闭环
 
@@ -48,7 +48,7 @@ GET explorer/detail/export
 
 PUT manual allocation
   -> CostStatisticsManualAllocationService
-  -> lock relation facts + validate version/fingerprint/C+X=N
+  -> lock relation facts + validate version/fingerprint/source capacity
   -> allocation + audit.events in one transaction
 ```
 
@@ -58,7 +58,7 @@ PUT manual allocation
 - `GET /manual-allocations/{case_id}` 定向读取该关联的完整 OA 单元、银行证据、当前有效分配。返回当前成本范围内支出及其已确认退款份额；完整关系事实仍在 repository 内保留。关系内支出与退款一次批量分类，使用 owner 的 `effective_category_*` 明确映射，不拆斜杠或猜主子标签。
 - `PUT` 请求固定为 `relation_case_id, expected_version, scope_version, source_fingerprint, allocations, source_allocations, non_cost_amount, non_cost_reason`。单元合计只接受 `{unit_id,amount}`；来源明细分别为 `cost_lines[{unit_id,bank_transaction_id,amount}]`、`refund_links[{refund_transaction_id,bank_transaction_id,amount}]`、`non_cost_lines[{bank_transaction_id,amount}]`。金额为两位小数字符串；来源行必须正数，零成本单元允许明确 0。
 - 选择来源后，银行账户与付款日期只读。OA 行标签取来源；人工补充行通过 cost_tag_code 单独选择成本标签，不写银行分类。OA 费用类型仅作原始凭据。
-- 保留 `C+X=N`，并校验逐来源、逐退款和逐单元闭合；`O=N` 时逐单元目标必须等于 canonical OA 原额。
+- 完整分配保持 `C+X=N`；混合审批及已保存的单来源部分决定允许 `C+X≤N`。逐来源不得超分、逐退款必须完整、逐单元来源合计必须与其分配金额相等。部分分配只允许已完成 OA，单元金额不超过原额；等待审批的预算不转成人工成本或非成本。全部完成的普通任务继续在 `O=N` 时固定原额目标。
 - 保存先取得既有 relation member locks，再锁关系及来源银行/OA 行，重新核对事实与版本。一次事务写 allocation 和 audit；锁冲突、事实变化、CAS 冲突返回 409，不自动重试提交。
 - 0169 只为既有 manual allocation 表增加 nullable JSONB `source_allocations`。旧 NULL 表示没有显式来源决定，只在当前事实确实存在唯一解时推导，不反推历史多对多。
 - 标签补齐可复用已保存来源；账户/日期变化仍受既有 fingerprint 保护，可能要求重新确认。单条详情按关联读取，同时检查共享成员关联，避免局部读取漏掉重复归属。
@@ -146,7 +146,7 @@ PUT manual allocation
 ## 待确认来源预填与合并单元格（2026-09-10 修复）
 
 - `GET /manual-allocations/{case_id}` 新增必有的 `suggested_source_allocations: null | {cost_lines,refund_links,non_cost_lines}`；`PUT` 响应该字段为 null，列表摘要不携带它。PUT 入参、存储、权限、审计及原有自动完成规则不变。
-- repository 仅在定向关系 snapshot 投影银行 raw_payload 中现有的 `source_oa_row_id`、`oa_row_id`、`derived_from_oa_id`、`source_workbench_row_id` 四个标量引用为内部 `source_oa_ids`。普通 explorer 和任务列表不取原始 payload、不增加查询。只识别与当前 canonical OA ID 精确匹配的引用；别名或互相冲突的引用不猜测。
+- repository 在成本 snapshot（总表、任务及详情）投影银行 raw_payload 中现有的 `source_oa_row_id`、`oa_row_id`、`derived_from_oa_id`、`source_workbench_row_id` 四个标量引用为内部 `source_oa_ids`。仅投影这四个标量，普通 explorer 和任务列表不取完整原始 payload、不增加银行查询。只识别与当前 canonical OA ID 精确匹配的引用；别名或互相冲突的引用不猜测。
 - `suggest_source_allocations(task, bank_rows, relation_groups)` 是详情专用无 I/O 纯函数。只处理版本0、未保存、未过期、固定目标且无退款/非成本的 pending 任务；输入合计必须闭合。枚举一单元对应整笔来源子集、一来源对应固定单元子集，按候选重叠划分独立组件，逐组件搜索完整覆盖；只有唯一覆盖输出建议。搜索到两个解即判定该组件歧义，不能取局部贪心匹配或前两个解的公共行。没有候选的部分保持人工。
 - 固定上限为128个正成本单元与来源节点合计、50000步候选/覆盖工作；超限返回null，绝不把截断搜索当唯一解。只在展开详情计算，列表与explorer不计算、不增查询。没有通用求解器、依赖、新缓存/worker/表。
 - 当前有效历史子关系先约束来源允许归属的 OA，原始明确引用与其取交集；冲突或无法解析的引用不按金额绕过。当前精简OA投影不含足够的外部身份别名，继续只接受canonical引用，不伪造别名。退款缺少逐来源归属证据，非固定成本缺少确定目标，这两类不生成金额建议，保留完整人工编辑/保存链。
@@ -196,7 +196,7 @@ PUT manual allocation
 
 - `cost_statistics_allocation_scope.py` 仅拥有无 I/O 的任务投影、已覆盖来源校验与保存合并。输入完整任务/来源决定，输出范围内任务或合并后的来源决定；不分类、不读数据库、不修改公共银行/关联输入。
 - 所有任务 DTO 增加 `scope_version`，PUT 必须携带。保存读取设置时使用 SHARE 行锁，与范围设置写入串行；版本漂移 409，非法版本 400。沿用分配 CAS、来源 fingerprint、成员锁及审计事务，不新增 hash 或存储。
-- 当前编辑按范围内 `C+X=N` 及逐来源/退款/单元校验。未保存的歧义任务不能因范围缩小自动确认；可提供现有详情建议。历史有效来源按范围投影金额，不把截取后的来源金额强制恢复成完整 OA 原额。
+- 当前编辑按范围内完整/部分分配规则及逐来源/退款/单元校验。未保存的歧义任务不能因范围缩小自动确认；可提供现有详情建议。历史有效来源按范围投影金额，不把截取后的来源金额强制恢复成完整 OA 原额。
 - 保存按来源 ID 替换范围内决定，保留范围外仍有效的成本/退款/非成本来源。持久化金额汇总覆盖已保存来源，不要求尚未分配的范围外银行金额闭合；单位身份保留完整集合。重新勾选后，新来源继续待分配，已确认来源仍进入统计，不清空已有成本。
 - OA 只在已有来源明确完全属于范围外、且当前来源均已明确时从任务隐藏；未知来源不按金额或序号猜 OA。历史失效分配不用于合并。既有 NULL 来源记录若不能定位范围外原决定，范围内保存明确拒绝覆盖，需先在完整范围确认来源；不猜测历史来源。
 - 跨范围退款按已确认退款链接分摊显示金额；归属不明返回 `scope_refund_required`，禁止猜测或保存错误净额。完整付款/退款仍可在关联台查看。
@@ -244,3 +244,10 @@ PUT manual allocation
 - 抽屉容器拥有目录请求、取消与错误状态，选择器打开时读取；成功只更新任务的 manual_options.tags，不覆盖草稿。失败不展示旧选项，允许重试。金额编辑和主标签切换不请求目录。
 - `CostManualTagPicker` 仅接收目录/选中值/加载状态/错误并输出打开、重试和选择事件，不拥有 HTTP 或银行分类写入。左主右子，单层直接选择，名称内斜杠不拆层级，标签身份始终为 code；菜单限高、内部滚动、弹层避让窗口边界。
 - 删除人工原生 select 和 path 拼接标签名称路径；不修改成本范围字典、银行明细、关联台或公共 ListBox。人工标签不改变来源有效银行标签和范围准入。历史金额、原 OA 与关系不写入。
+
+### 混合审批状态 DTO 与保存边界（2026-09-13）
+
+- 详情返回 `allows_partial, waiting_oa_ids`，单元返回 `cost_eligible`；来源有明确 OA 引用时，混合任务返回 `allowed_unit_ids` 约束，空数组表示不属于已完成单元，不伪造归属。`unallocated_amount` 为当前可分配净支出减已分成本及非成本。
+- PUT 复用原请求与 storage，进行中单元提交 0；剩余金额不存为新成本类别。保存仍按当前 snapshot 校验状态、scope/version、来源容量并原子写 allocation/audit。审批状态不加入原有财务 fingerprint，避免同组审批完成使已保存金额整体过期；当前资格每次重新判断。
+- 保存沿用 member locks、银行与正式 OA SHARE locks，并锁定相关 admission 行。正常 GET 无行锁。没有新表、迁移、read model、缓存或 worker。
+- 删除旧 `incomplete_oa_relation` 整组排除分支。保留成员完整性、重复归属、权限、事务及范围保护；关联台、银行明细与 OA 同步写路径不变。

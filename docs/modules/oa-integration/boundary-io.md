@@ -135,3 +135,7 @@
 ## 成本项目只读目录（2026-09-13）
 
 成本详情repository在同一数据库快照中批量读取 `app.oa_applications.normalized_payload` 主单与expense_items的真实project_name及可选project_id（历史空ID合法），用于人工成本项目选择；不调用外部OA provider，不写OA投影，不生成新OA。成本模块拥有目录响应，OA同步写入责任不变。
+
+### 成本统计的混合审批成员读取（2026-09-13）
+
+成本 repository 通过既有 `PostgresOaPendingPaymentAdmissionRepository` 按关系 OA ID 批量补齐尚未进入正式表的成员，与正式 OA、银行、关系及分配在同一 PostgreSQL snapshot 中读取。正式 OA 优先；成本 Policy 逐 OA 判断当前完成资格。这个消费者不新增 admission、不调用外部 OA、不修改工作流状态或 OA 同步写入语义。成本保存对相关正式 OA/admission 行使用事务 SHARE lock，避免状态更新与保存交错。

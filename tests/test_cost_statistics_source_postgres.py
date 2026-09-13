@@ -56,6 +56,84 @@ class CostSourcePostgresTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.service.get_task("cost-source-case", can_save=True)
 
+    def test_mixed_status_partial_http_save_completion_and_withdrawal(self):
+        from tests.app_test_support import build_local_state_application
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service  # noqa: SLF001
+        app._cost_statistics_api_routes._query_service = self.query  # noqa: SLF001
+        path = "/api/cost-statistics/manual-allocations/cost-source-case"
+        self.connection.execute("update app.oa_applications set workflow_status='in_progress' where row_id='oa-b'")
+        task = json.loads(app.handle_request('GET', path).body)
+        self.assertTrue(task['allows_partial'])
+        self.assertEqual(task['waiting_oa_ids'], ['oa-b'])
+        self.assertIsNone(task['source_allocations'])
+        payload = self.payload()
+        payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'}, {'unit_id': 'oa:oa-b', 'amount': '0.00'}]
+        payload['source_allocations']['cost_lines'].pop()
+        saved = app.handle_request('PUT', path, body=json.dumps(payload))
+        self.assertEqual(saved.status_code, 200, saved.body)
+        result = json.loads(saved.body)
+        self.assertEqual(result['unallocated_amount'], '400.00')
+        self.assertIn('oa_in_progress', result['pending_reasons'])
+        for view in ('project', 'cost_tag', 'bank_account'):
+            response = app.handle_request('GET', f'/api/cost-statistics/explorer?view={view}&scope=all')
+            self.assertEqual(response.status_code, 200, response.body)
+            self.assertEqual(json.loads(response.body)['summary']['total_amount'], '600.00')
+        repeat = app.handle_request('PUT', path, body=json.dumps(payload))
+        self.assertEqual(repeat.status_code, 409, repeat.body)
+        self.connection.execute("update app.oa_applications set workflow_status='completed' where row_id='oa-b'")
+        reloaded = json.loads(app.handle_request('GET', path).body)
+        self.assertEqual(reloaded['waiting_oa_ids'], [])
+        self.assertEqual(reloaded['source_allocations'], payload['source_allocations'])
+        self.assertEqual(reloaded['unallocated_amount'], '400.00')
+        completed_payload = self.payload()
+        completed_payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'}, {'unit_id': 'oa:oa-b', 'amount': '400.00'}]
+        response = app.handle_request('PUT', path, body=json.dumps(completed_payload))
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(json.loads(response.body)['unallocated_amount'], '0.00')
+        for view in ('project', 'cost_tag', 'bank_account'):
+            response = app.handle_request('GET', f'/api/cost-statistics/explorer?view={view}&scope=all')
+            self.assertEqual(json.loads(response.body)['summary']['total_amount'], '1000.00')
+        # Current approval state is re-read even though it is not a financial identity change.
+        self.connection.execute("update app.oa_applications set workflow_status='in_progress' where row_id='oa-b'")
+        response = app.handle_request('GET', '/api/cost-statistics/explorer?view=project&scope=all')
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(json.loads(response.body)['summary']['total_amount'], '600.00')
+        self.connection.execute("update app.workbench_pair_relations set status='withdrawn',version=version+1 where case_id='cost-source-case'")
+        response = app.handle_request('GET', '/api/cost-statistics/explorer?view=project&scope=all')
+        self.assertEqual(json.loads(response.body)['summary']['total_amount'], '0.00')
+        response = app.handle_request('PUT', path, body=json.dumps(completed_payload))
+        self.assertEqual(response.status_code, 409, response.body)
+
+    def test_mixed_status_reads_admission_fact_without_importing_it_as_completed(self):
+        from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import PostgresOaPendingPaymentAdmissionRepository
+        self.connection.execute("delete from app.oa_applications where row_id='oa-b'")
+        PostgresOaPendingPaymentAdmissionRepository(self.connection).replace_scope(scope_key='2026-08', records=[{
+            'id': 'oa-b', 'apply_type': '支付申请', 'workflow_status': 'in_progress', 'amount': '400.00',
+            'project_name': '测试项目', 'expense_type': '原OA分类', 'expense_content': '测试采购', 'applicant': '测试申请人',
+            'month': '2026-08', 'section': 'unmatched', 'case_id': None, 'counterparty_name': '供应商',
+            'reason': '测试采购', 'relation_code': 'unmatched', 'relation_label': '未配对', 'relation_tone': 'warning',
+        }])
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual({u['oa_id']: u['cost_eligible'] for u in task['units']}, {'oa-a': True, 'oa-b': False})
+        pending = self.service.list_tasks(cursor=None, page_size=20, status='pending', query=None, can_save=True)
+        self.assertEqual(len(pending['items']), 1)
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.oa_applications")['n'], 1)
+
+    def test_pending_oa_cannot_be_saved_or_use_its_explicit_source(self):
+        self.connection.execute("update app.oa_applications set workflow_status='in_progress' where row_id='oa-b'")
+        payload = self.payload()
+        payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'}, {'unit_id': 'oa:oa-b', 'amount': '400.00'}]
+        with self.assertRaises(CostStatisticsManualAllocationValidationError):
+            self.save(payload)
+        self.connection.execute("update app.bank_transactions set raw_payload=jsonb_build_object('source_oa_row_id','oa-b') where legacy_mongo_id='bank-2'")
+        payload = self.payload()
+        payload['allocations'] = [{'unit_id': 'oa:oa-a', 'amount': '600.00'}, {'unit_id': 'oa:oa-b', 'amount': '0.00'}]
+        payload['source_allocations']['cost_lines'].pop()
+        with self.assertRaises(CostStatisticsManualAllocationValidationError):
+            self.save(payload)
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
+
     def test_formal_history_display_is_current_and_independent_of_cost_save(self):
         current = {"case_id":"cost-source-case", "row_ids":["oa-a","oa-b","bank-1","bank-2"], "row_types":["oa","oa","bank","bank"]}
         prior = [{"case_id":"old-a", "row_ids":["oa-a","bank-2"], "row_types":["oa","bank"]},

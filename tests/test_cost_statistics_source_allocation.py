@@ -33,6 +33,42 @@ def confirmed_decision():
 
 
 class SourceAllocationTests(unittest.TestCase):
+    def test_partial_save_reserves_waiting_amount_without_inventing_non_cost(self):
+        task = task_fixture()
+        task.update(allows_partial=True, waiting_oa_ids=['oa-b'])
+        task['units'][1]['cost_eligible'] = False
+        task['allocations'][1]['amount'] = '0.00'
+        decision = confirmed_decision()
+        decision['cost_lines'].pop()
+        resolved = complete_source_task(task, decision)
+        self.assertEqual(resolved['unallocated_amount'], '400.00')
+        self.assertEqual(resolved['non_cost_amount'], '0.00')
+        self.assertIn('oa_in_progress', resolved['pending_reasons'])
+        decision['non_cost_lines'] = [{'bank_transaction_id': 'bank2', 'amount': '400.00'}]
+        with self.assertRaises(SourceAllocationError) as error:
+            validate_source_allocations(task, task['allocations'], Decimal('400'), decision)
+        self.assertEqual(error.exception.code, 'waiting_amount_reserved')
+
+    def test_partial_rejects_overallocation_pending_cost_and_outside_sources(self):
+        for mutation in ('over', 'pending', 'outside'):
+            with self.subTest(mutation=mutation):
+                task = task_fixture()
+                task.update(allows_partial=True, waiting_oa_ids=['oa-b'])
+                task['units'][1]['cost_eligible'] = False
+                task['allocations'][1]['amount'] = '0.00'
+                decision = confirmed_decision()
+                decision['cost_lines'].pop()
+                if mutation == 'over':
+                    task['allocations'][0]['amount'] = '601.00'
+                    decision['cost_lines'][1]['amount'] = '101.00'
+                elif mutation == 'pending':
+                    task['allocations'][1]['amount'] = '1.00'
+                    decision['cost_lines'].append({'unit_id': 'b', 'bank_transaction_id': 'bank2', 'amount': '1.00'})
+                else:
+                    decision['cost_lines'][0]['bank_transaction_id'] = 'outside'
+                with self.assertRaises(SourceAllocationError):
+                    validate_source_allocations(task, task['allocations'], Decimal('0'), decision)
+
     def test_equal_totals_do_not_resolve_many_to_many(self):
         task = complete_source_task(task_fixture())
         self.assertEqual(task["pending_reasons"], ["source_required"])

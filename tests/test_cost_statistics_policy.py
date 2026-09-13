@@ -393,7 +393,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 {
                     key: value
                     for key, value in dict(task["units"][0]).items()
-                    if key != "oa_apply_type"
+                    if key not in {"oa_apply_type", "cost_eligible"}
                 }
             ],
             "sources": [
@@ -467,8 +467,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 policy = self._policy([self._group(oa_rows=[self._oa("oa-1", workflow_status=status)],
                     bank_rows=[self._bank("bank-1", "100.00")])])
                 self.assertEqual(policy.serialized_cost_rows, [])
+                self.assertEqual(policy.manual_allocation_tasks, [])
 
-    def test_any_ongoing_oa_excludes_entire_relation(self) -> None:
+    def test_ongoing_oa_does_not_block_completed_part_of_shared_payment(self) -> None:
         policy = self._policy(
             [
                 self._group(
@@ -481,11 +482,12 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(policy.serialized_cost_rows, [])
-        self.assertEqual(
-            policy.allocation_quality["excluded_by_reason"],
-            [{"reason": "incomplete_oa_relation", "count": 1}],
-        )
+        self.assertEqual([(r["oa_id"], r["amount"]) for r in policy.serialized_cost_rows], [("oa-ok", "100.00")])
+        task = policy.manual_allocation_tasks[0]
+        self.assertTrue(task["allows_partial"])
+        self.assertEqual(task["unallocated_amount"], "300.00")
+        self.assertIn("oa_in_progress", task["pending_reasons"])
+        self.assertEqual(task["waiting_oa_ids"], ["oa-progress"])
 
     def test_invalid_daily_item_excludes_entire_relation_without_parent_fallback(self) -> None:
         policy = self._policy(

@@ -188,3 +188,10 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - `CostManualTagPicker.test.tsx`：主子切换、定位、同名子标签按代码选择、单层选择、失败不展示旧选项、重试、禁用。
 - `cost-source-allocation.spec.ts`：二级选择后保存重开；目录首次失败→重试取得新标签→选择→再次打开刷新，草稿保持，1280窗口弹层完整可见。
 - 七类测试中业务核心、服务、API、前端、端到端和既有回归适用；read model/cache/worker 不适用，没有新增或修改这些链路。
+
+## 混合审批状态回归（2026-09-13）
+
+- Policy/source：单支出共享的已完成部分、等待审批预算、超分/错误来源/进行中成本拒绝，旧 fingerprint 不受展示资格字段影响。
+- PostgreSQL + HTTP：admission 事实读取、部分 PUT → 三视图 600 → 审批完成保持 600 → 补分配到 1000 → 审批状态退回到 600 → 撤回关系到 0；CAS 重复保存 409、原审计回滚/并发/范围/导出测试继续执行。
+- 组件：未完成行不可编辑、剩余金额不伪报绿色一致、部分请求中等待单元为 0、非成本不能核销等待预算。
+- 浏览器：`cost-source-allocation.spec.ts` 的 mixed approval 场景保存 8000、重开抽屉保留、其余 8000 等待；1440×1000 截图肉眼检查。

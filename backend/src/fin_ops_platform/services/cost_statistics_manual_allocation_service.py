@@ -294,9 +294,11 @@ class CostStatisticsManualAllocationService:
             start=Decimal("0.00"),
         )
         net_outflow_total = Decimal(str(task["net_outflow_total"]))
-        if allocated_total + non_cost_amount != net_outflow_total:
+        if (allocated_total + non_cost_amount > net_outflow_total or
+                not task["allows_partial"] and allocated_total + non_cost_amount != net_outflow_total):
             raise CostStatisticsManualAllocationValidationError(
-                "分配金额合计与不计入成本金额之和必须等于净支出。"
+                "分配金额合计与不计入成本金额之和不能超过净支出。" if task["allows_partial"]
+                else "分配金额合计与不计入成本金额之和必须等于净支出。"
             )
         try:
             source_allocations = validate_source_allocations(

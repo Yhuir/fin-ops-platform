@@ -16,6 +16,7 @@ from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
     PostgresCostStatisticsManualAllocationRepository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import PostgresOaPendingPaymentAdmissionRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups, relation_history_partitions
 
@@ -67,6 +68,7 @@ class PostgresCostStatisticsCanonicalRepository:
                     scope_value=scope_value if scoped else None,
                     settings=settings,
                     transaction_ids=relation_only_bank_ids,
+                    include_source_references=not bank_flow_view,
                 )
             )
             bank_overview = (
@@ -163,6 +165,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 transaction,
                 settings=settings,
                 transaction_ids=relation_bank_ids,
+                include_source_references=True,
             )
             categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
                 transaction,
@@ -228,6 +231,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 # SHARE blocks amount/date edits too; KEY SHARE would only protect identity.
                 transaction.fetch_all("select id from app.bank_transactions where legacy_mongo_id = any(%s::text[]) order by id for share", (bank_ids,))
                 transaction.fetch_all("select id from app.oa_applications where row_id = any(%s::text[]) order by id for share", (_relation_member_ids(relations, {"oa"}),))
+                transaction.fetch_all("select oa_id from app.oa_pending_payment_admissions where tenant_id = 'default' and oa_id = any(%s::text[]) order by oa_id for share", (_relation_member_ids(relations, {"oa"}),))
             bank_rows = _postgres_bank_rows(
                 transaction,
                 settings=settings,
@@ -638,7 +642,7 @@ def _postgres_bank_rows(
         transaction_ids=transaction_ids,
     )
     # Only explicit canonical OA references already consumed by the relation owner.
-    # The detail path projects four scalars, never the complete raw payload.
+    # Cost reads project four scalars, never the complete raw payload.
     source_projection = """
         , array_remove(array[
             nullif(btrim(raw_payload->>'source_oa_row_id'), ''),
@@ -796,7 +800,7 @@ def _postgres_oa_rows(
             *filter_params,
         ),
     )
-    return [
+    completed_rows = [
         payload
         for row in rows
         if (
@@ -809,6 +813,16 @@ def _postgres_oa_rows(
             )
         )
     ]
+
+    loaded = {row["id"] for row in completed_rows}
+    admission = PostgresOaPendingPaymentAdmissionRepository(connection)
+    records = (admission.list_application_records_by_row_ids([id for id in oa_ids if id not in loaded])
+               if oa_ids is not None else admission.list_all_application_records())
+    for record in records:
+        if record.id not in loaded:
+            completed_rows.append(_cost_oa_payload(_object_payload(record), row_id=record.id))
+            loaded.add(record.id)
+    return completed_rows
 
 
 def _cost_oa_payload(

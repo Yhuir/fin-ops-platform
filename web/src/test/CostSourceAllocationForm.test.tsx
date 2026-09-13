@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import CostSourceAllocationForm from '../components/cost-statistics/CostSourceAllocationForm';
-import { createSourceDraft } from '../features/cost-statistics/sourceAllocation';
+import { createSourceDraft, sourceSaveRequest, validateSourceDraft } from '../features/cost-statistics/sourceAllocation';
 import type { CostStatisticsManualAllocationTask } from '../features/cost-statistics/types';
 
 function fixture(): CostStatisticsManualAllocationTask {
@@ -23,6 +23,28 @@ function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocation
   const [draft, setDraft] = useState(() => createSourceDraft(task));
   return <CostSourceAllocationForm tagLoading={false} onLoadTags={() => {}} task={task} draft={draft} disabled={false} saving={false} onChange={setDraft} onSave={save} />;
 }
+
+it('saves completed OA alone and shows pending approval without a false balanced message', async () => {
+  const task = fixture(); const user = userEvent.setup(); const save = vi.fn();
+  task.allowsPartial = true; task.waitingOaIds = ['pending-oa'];
+  task.units[1] = {...task.units[1], oaId: 'pending-oa', costEligible: false};
+  task.oaTotal = task.netOutflowTotal = task.bankEvents[0].amount = '700.00';
+  task.sourceAllocations = {costLines: [{unitId: 'unit-a', bankTransactionId: 'internal-bank', amount: '500.00'}], refundLinks: [], nonCostLines: []};
+  task.pendingReasons = ['oa_in_progress', 'source_required'];
+  render(<Editor task={task} save={save} />);
+  expect(screen.getByText('等待 OA 完成，暂不计入成本')).toBeInTheDocument();
+  expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+  expect(within(screen.getByRole('table', {name: '成本分配明细'})).getAllByRole('button', {name: '新增来源'})).toHaveLength(1);
+  await user.click(screen.getByRole('button', {name: '保存分配'}));
+  expect(save).toHaveBeenCalledTimes(1);
+  const draft = createSourceDraft(task);
+  const request = sourceSaveRequest(task, draft);
+  expect(request.allocations).toEqual([{unitId: 'unit-a', amount: '500.00'}, {unitId: 'unit-b', amount: '0.00'}]);
+  expect(request.nonCostAmount).toBe('0.00');
+  draft.nonCostAmount = '200.00'; draft.nonCostReason = '不能自动核销';
+  draft.nonCostLines = [{id: 99, bankTransactionId: 'internal-bank', ownerId: 'non-cost', amount: '200.00'}];
+  expect(validateSourceDraft(task, draft).total).toBe('等待审批的金额不能转为人工成本或非成本');
+});
 
 it('hides exhausted hints while preserving capacity, duplicate, current selection and released capacity', async () => {
   const task = fixture(); const user = userEvent.setup();

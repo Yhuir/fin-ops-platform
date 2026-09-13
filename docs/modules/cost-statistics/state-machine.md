@@ -66,7 +66,7 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 - `manual-allocation-loading`：只有用户在三个项目成本 view 中打开“待分配” Drawer 后才读取全局关系任务的有界摘要页，展开后定向读取详情；两个流水 view 不显示该入口，也不读取人工分配。
 - `pending / allocated`：pending 视图包含 pending 与 stale，allocated 包含当前已解决的来源分配；两者都使用服务端 search 和稳定 cursor，计数来自同一次全局任务快照，不由浏览过的成本项累积。
 - `editing`：OA 单元下可以新增/删除来源行。选支出后展示只读账户、主/子标签和付款日期。固定目标不可改，人工目标按来源行精确汇总，零行默认未分配；允许时显式设零，新增取消零标记。当前有效 source_allocations 即使仍 pending 也回填；stale 决定不回填。
-- `saving`：一次事务复核版本、事实、OA 目标、逐银行/退款/单元闭合及 C+X=N；只写分配与审计。按钮只在当前任务真正保存时禁用，错误保留输入。
+- `saving`：一次事务复核版本、事实、OA 目标、逐银行/退款/单元闭合及完整/部分金额规则；只写分配与审计。按钮只在当前任务真正保存时禁用，错误保留输入。
 - `allocated`：已确定来源且所需银行信息完整；`pending` 原因为 amount_required/source_required/allocation_stale/bank_tag_missing/bank_account_missing/source_date_missing，可同时存在。保存 200 不等于 allocated，只有状态改变才移动任务和调整计数。
 - `validation-error`：400 保留输入；客户端不完整金额先就地提示，不发送 PUT。
 - `conflict`：409 保留草稿与“重新加载”操作；显式重读时确认替换草稿，绝不自动套用旧值。
@@ -99,3 +99,9 @@ manual-allocation-loading / manual-allocation-ready / manual-allocation-error
 ## 人工补充编辑
 
 新增/编辑/删除人工行只改变当前任务草稿。金额和来源闭合后可保存，保存成功再刷新列表、统计、详情。错误/版本冲突保留草稿；相同请求重放不会重复写版本。草稿绿色金额提示与 pending/allocated、未保存/已保存分别计算。取消范围保留历史，重新纳入按当前关系校验；撤回关系后不再统计旧人工项。
+
+## 混合审批状态
+
+- `oa_in_progress`：同组仍有未完成 OA，已完成部分允许独立保存；未完成行没有成本编辑按钮。保存后仍 pending，不因 HTTP 200 显示已全部分配。
+- 已保存部分始终按当前 OA 资格生成成本；审批完成后下一次 GET 保留原决定，未分来源继续 pending，补齐后才按现有完整性规则进入 allocated。
+- 底部显示当前成本与剩余金额；有等待审批 OA 或未分金额时不显示绿色“分配金额一致”。
