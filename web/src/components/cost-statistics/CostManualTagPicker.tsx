@@ -32,7 +32,9 @@ export default function CostManualTagPicker({ value, savedLabel, tags, loading, 
     </Popover.Trigger>
     <Popover.Content className="cost-manual-tag-popover" placement="bottom end" offset={4}>
       <Popover.Dialog aria-label="选择成本标签">
-        {loading ? <p role="status">正在读取标签…</p> : error ? <div role="alert">{error}<button type="button" onClick={onLoad}>重试</button></div> : !tags.length ? <p>暂无可选标签</p> : <div className="cost-manual-tag-columns">
+        {loading ? <p role="status">正在读取标签…</p> : error ? <div role="alert">{error}<button type="button" onClick={onLoad}>重试</button></div> : !tags.length ? <p>暂无可选标签</p> : <div className="cost-manual-tag-columns" onKeyDownCapture={event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); }
+        }}>
           <ListBox aria-label="主标签" selectionMode="single" selectedKeys={primary ? [primary] : []} onSelectionChange={keys => {
             if (keys === 'all' || !keys.size) return;
             const key = [...keys][0];

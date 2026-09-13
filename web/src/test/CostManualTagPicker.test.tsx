@@ -49,3 +49,14 @@ it('disabled picker cannot open or request data',async()=>{
   expect(onLoad).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+it('Escape closes the popup after a primary selection rather than only clearing list selection', async () => {
+  const user=userEvent.setup();
+  render(<CostManualTagPicker tags={tags} value="" savedLabel="" loading={false} disabled={false} onLoad={vi.fn()} onChange={vi.fn()}/>);
+  const trigger=screen.getByRole('combobox');
+  await user.click(trigger);
+  await user.click(screen.getByRole('option',{name:'费用',exact:true}));
+  await screen.findByRole('option',{name:'运费/邮费/杂费',exact:true});
+  await user.keyboard('{Escape}');
+  expect(trigger).toHaveAttribute('aria-expanded','false');
+});
