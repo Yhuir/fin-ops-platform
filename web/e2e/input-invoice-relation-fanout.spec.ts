@@ -211,9 +211,9 @@ test.describe("input invoice usage relation browser fan-out", () => {
       actionType: "click",
     }, async (mark) => {
       await linkedProject.click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("option", { name: /设备货款及材料费/ })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("option", { name: "选择成本主标签 项目开销" })).toBeVisible());
     });
-    const linkedExpenseType = page.getByRole("option", { name: /设备货款及材料费/ });
+    const linkedExpenseType = page.getByRole("option", { name: "选择成本主标签 项目开销" });
     await expect(linkedExpenseType).toBeVisible();
     await expect(linkedExpenseType).toContainText("58000.00");
     await recordLatency({
@@ -221,13 +221,14 @@ test.describe("input invoice usage relation browser fan-out", () => {
       pageKey: "cost-statistics",
       module: "cost-statistics",
       operationId: "cost-statistics.expand-linked-expense-type-after-input-invoice-confirm",
-      visibleLabel: "设备货款及材料费",
+      visibleLabel: "项目开销 / 设备材料",
       actionType: "click",
     }, async (mark) => {
       await linkedExpenseType.click();
-      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "项目成本明细表" })).toContainText("智能工厂设备尾款"));
+      await page.getByRole("option", { name: "选择成本子标签 设备材料" }).click();
+      await mark("finalSettledLatencyMs", expect(page.getByRole("grid", { name: "成本明细表" })).toContainText("智能工厂设备尾款"));
     });
-    const projectRows = page.getByRole("grid", { name: "项目成本明细表" });
+    const projectRows = page.getByRole("grid", { name: "成本明细表" });
     await expect(projectRows).toContainText("智能工厂设备尾款");
     await expect(projectRows).toContainText("浏览器成本申请人");
     await expectNoUnexpectedSuccessUiErrors(page);

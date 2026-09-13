@@ -24,6 +24,7 @@
 
 ## 功能实施与计划
 
+- [确定来源自动分配实施计划](cost-statistics-automatic-source-allocation-plan.md)：正式来源证据、自动成本与部分待办闭环、旧路径移除、七类测试及性能验证；2026-09-14 已实施，本地验证与发布记录见成本模块实施说明，不使用 GSD。
 - [成本待分配抽屉双表格与Chip改进计划](cost-allocation-drawer-grid-refinement-plan.md)：已按 Impeccable 实施并部署，双只读表、Chip、字段错误浮层、同行新增与组色；真实浏览器/测试/性能和生产结果见[实施记录](../modules/cost-statistics/implementation-notes.md)，不使用GSD。
 - [成本待分配抽屉第一轮紧凑重构](cost-allocation-drawer-redesign-plan.md)：已实施上线，实际结果见[实施记录](../modules/cost-statistics/implementation-notes.md)；后续调整以上一项新计划为准。
 - [成本统计银行来源分配完整实施计划](cost-statistics-source-allocation-plan.md)：首轮前后端已实施并部署，生产链路与性能限制见[实施记录](../modules/cost-statistics/implementation-notes.md)；配套 [Figma Make设计交接](../modules/cost-statistics/figma-make-design-brief.md)。后续抽屉UI改进见上一项计划。

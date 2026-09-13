@@ -18,6 +18,19 @@ export function sourceTask(): CostStatisticsManualAllocationTask {
 }
 
 describe('cost source amount closure', () => {
+  test('keeps automatic sources while initializing suggestions for the remainder', () => {
+    const task = sourceTask();
+    task.sourceAllocations = { costLines: [{ unitId: 'oa-1:parent', bankTransactionId: 'bank-a', amount: '350.00' }], refundLinks: [], nonCostLines: [] };
+    task.suggestedSourceAllocations = { costLines: [{ unitId: 'oa-1:parent', bankTransactionId: 'bank-b', amount: '250.00' }], refundLinks: [], nonCostLines: [] };
+    const before = JSON.stringify(task);
+    const draft = createSourceDraft(task);
+    expect(draft.costLines).toHaveLength(2);
+    expect(validateSourceDraft(task, draft)).toEqual({});
+    expect(sourceSaveRequest(task, draft).expectedVersion).toBe(0);
+    expect(JSON.stringify(task)).toBe(before);
+    task.version = 1;
+    expect(createSourceDraft(task).costLines).toHaveLength(1);
+  });
   test('uses exact cents and distinguishes blank from explicit zero', () => {
     expect(cents('')).toBeNull(); expect(cents('0')).toBe(0n);
     expect(cents('0.001')).toBeNull(); expect(cents('-1')).toBeNull();

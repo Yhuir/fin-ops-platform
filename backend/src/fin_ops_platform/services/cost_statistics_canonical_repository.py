@@ -16,7 +16,9 @@ from fin_ops_platform.services.postgres_repositories.common import row_payload
 from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
     PostgresCostStatisticsManualAllocationRepository,
 )
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import PostgresOaPendingPaymentAdmissionRepository
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
+    PostgresOaPendingPaymentAdmissionRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups, relation_history_partitions
 
@@ -144,6 +146,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 oa_rows=oa_rows,
                 relations=relations,
                 manual_allocations=manual_allocations,
+                relation_history=_postgres_source_history(transaction, relations),
                 available_years=available_years,
                 bank_statistics=(
                     dict(bank_overview["statistics"])
@@ -192,6 +195,7 @@ class PostgresCostStatisticsCanonicalRepository:
                 oa_rows=oa_rows,
                 relations=relations,
                 manual_allocations=manual_allocations,
+                relation_history=_postgres_source_history(transaction, relations),
                 available_years=[],
             )
 
@@ -254,6 +258,7 @@ class PostgresCostStatisticsCanonicalRepository:
             manual_allocations = PostgresCostStatisticsManualAllocationRepository(
                 transaction
             ).list_by_case_ids([item["case_id"] for item in relations])
+            history = _postgres_source_history(transaction, relations)
             snapshot = _build_snapshot(
                 settings=settings,
                 bank_rows=bank_rows,
@@ -261,15 +266,13 @@ class PostgresCostStatisticsCanonicalRepository:
                 oa_rows=oa_rows,
                 relations=relations,
                 manual_allocations=manual_allocations,
+                relation_history=history,
                 available_years=_bank_available_years(bank_rows),
             )
 
             group = next((g for g in snapshot["cost_groups"] if g["group_id"] == normalized_case_id), None)
             if group is None:
                 raise KeyError(normalized_case_id)
-            history = PostgresWorkbenchRelationRepository(transaction).load_display_history(
-                [row["id"] for row in group["oa_rows"]]
-            ) if len(group["oa_rows"]) > 1 and not any(row["expense_items"] for row in group["oa_rows"]) else []
             _attach_relation_display(group, history)
             # Read project identities from canonical OA facts, including expense-level projects.
             snapshot["manual_projects"] = _postgres_manual_projects(transaction)
@@ -907,6 +910,7 @@ def _build_snapshot(
     manual_allocations: dict[str, dict[str, Any]] | None = None,
     available_years: list[str] | None = None,
     bank_statistics: dict[str, int] | None = None,
+    relation_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     banks_by_id = {
         _text(row.get("id") or row.get("transaction_id") or row.get("row_id")): row
@@ -976,6 +980,7 @@ def _build_snapshot(
                     ),
                 }
             )
+    _attach_source_relations(groups, relation_history or [])
     return {
         "settings": settings,
         "bank_rows": list(banks_by_id.values()),
@@ -1266,19 +1271,6 @@ def _attach_relation_display(group: dict[str, Any], history: list[dict[str, Any]
         "oa_rows": [{**row, "type": "oa"} for row in group["oa_rows"]],
         "bank_rows": [{**row, "type": "bank"} for row in group["bank_rows"]],
     }
-    # Reuse the same exact-history partition as Workbench, before its amount-only
-    # display alignment. Mixed historical groups bound source ownership; isolated
-    # members remain together for the existing unique-allocation search.
-    current = {"case_id": group["group_id"], "row_ids": group["row_ids"], "row_types": group["row_types"]}
-    available = {("oa", r["id"]) for r in group["oa_rows"]} | {("bank", r["id"]) for r in group["bank_rows"]}
-    parts = [part & available for part in relation_history_partitions([current], history)[0]]
-    mixed = [part for part in parts if any(t == "oa" for t, _ in part) and any(t == "bank" for t, _ in part)]
-    remaining = available - set().union(*mixed)
-    group["source_relation_groups"] = [
-        {"oa_row_ids": [r["id"] for r in group["oa_rows"] if ("oa", r["id"]) in part],
-         "bank_row_ids": [r["id"] for r in group["bank_rows"] if ("bank", r["id"]) in part]}
-        for part in [*mixed, remaining] if part
-    ]
     apply_display_subgroups([display], history)
     # Single OA and itemized OA relations have a shared parent block: its bank
     # ownership does not assert individual expense-item allocation amounts.
@@ -1316,3 +1308,23 @@ def _postgres_manual_projects(connection: Any) -> list[dict[str, str]]:
             order by name, nullif(id,'') nulls last, row_id desc
         ) select id, name from distinct_projects order by name, id
         """, (list(OA_COST_FORM_TYPES), list(OA_COST_FORM_TYPES)))]
+
+
+def _postgres_source_history(transaction: Any, relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    oa_ids = {id for relation in relations if relation["row_types"].count("oa") > 1
+              for id, kind in zip(relation["row_ids"], relation["row_types"], strict=True) if kind == "oa"}
+    return PostgresWorkbenchRelationRepository(transaction).load_display_history(sorted(oa_ids))
+
+
+def _attach_source_relations(groups: list[dict[str, Any]], history: list[dict[str, Any]]) -> None:
+    """Batch exact history partitions; no amount alignment on the cost read path."""
+    relations = [{"case_id": g["group_id"], "row_ids": g["row_ids"], "row_types": g["row_types"]} for g in groups]
+    for group, parts in zip(groups, relation_history_partitions(relations, history), strict=True):
+        available = {("oa", r["id"]) for r in group["oa_rows"]} | {("bank", r["id"]) for r in group["bank_rows"]}
+        parts = [part & available for part in parts]
+        mixed = [part for part in parts if any(t == "oa" for t, _ in part) and any(t == "bank" for t, _ in part)]
+        remaining = available - set().union(*mixed)
+        group["source_relation_groups"] = [
+            {"oa_row_ids": sorted(id for kind, id in part if kind == "oa"),
+             "bank_row_ids": sorted(id for kind, id in part if kind == "bank")}
+            for part in [*mixed, remaining] if part]

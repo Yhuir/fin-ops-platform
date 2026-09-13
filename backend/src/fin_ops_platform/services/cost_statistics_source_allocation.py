@@ -166,6 +166,75 @@ def automatic_source_allocations(task: dict[str, Any]) -> dict[str, Any] | None:
     return validate_source_allocations(task, allocations, non_cost, result)
 
 
+def automatic_relation_sources(
+    task: dict[str, Any], bank_rows: list[dict[str, Any]], relation_groups: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Resolve independent formal ownership components, never amount combinations."""
+    units_by_oa: dict[str, list[dict[str, Any]]] = {}
+    for unit in task["units"]:
+        units_by_oa.setdefault(unit["oa_id"], []).append(unit)
+    all_oa = frozenset(units_by_oa)
+    if not set(task.get("waiting_oa_ids", [])) <= all_oa:
+        return None
+    allowed_by_bank = {id: frozenset(group["oa_row_ids"]) & all_oa
+                       for group in relation_groups for id in group["bank_row_ids"]}
+    refs_by_bank = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows}
+    # Index identical ownership sets once, avoiding a banks × OA adjacency matrix.
+    candidates: dict[frozenset[str], list[dict[str, Any]]] = {}
+    blocked: set[str] = set()
+    for event in task["bank_events"]:
+        allowed = allowed_by_bank.get(event["transaction_id"], all_oa)
+        refs = refs_by_bank.get(event["transaction_id"], set())
+        if refs:
+            if len(refs) != 1 or not refs <= allowed:
+                blocked.update(allowed | (refs & all_oa))
+            else:
+                allowed = frozenset(refs)
+        candidates.setdefault(allowed, []).append(event)
+    parents = {id: id for id in all_oa}
+
+    def root(id: str) -> str:
+        while parents[id] != id:
+            parents[id] = parents[parents[id]]
+            id = parents[id]
+        return id
+
+    for allowed in candidates:
+        iterator = iter(allowed)
+        first = next(iterator, None)
+        if first is not None:
+            for id in iterator:
+                parents[root(id)] = root(first)
+    component_units: dict[str, list[dict[str, Any]]] = {}
+    component_events: dict[str, list[dict[str, Any]]] = {}
+    for id, units in units_by_oa.items():
+        component_units.setdefault(root(id), []).extend(units)
+    for allowed, events in candidates.items():
+        if allowed:
+            component_events.setdefault(root(next(iter(allowed))), []).extend(events)
+    blocked_roots = {root(id) for id in blocked}
+    result: dict[str, list[dict[str, str]]] = {"cost_lines": [], "refund_links": [], "non_cost_lines": []}
+    for key, units in component_units.items():
+        events = component_events.get(key, [])
+        if key in blocked_roots or not events:
+            continue
+        original = sum((Decimal(u["oa_original_amount"]) for u in units), ZERO)
+        outflow = sum((Decimal(e["amount"]) for e in events if e["event_kind"] == "outflow"), ZERO)
+        refund = sum((Decimal(e["amount"]) for e in events if e["event_kind"] == "wrong_payment_refund"), ZERO)
+        waiting = [u["oa_id"] for u in units if not u.get("cost_eligible", True)]
+        subtask = {**task, "units": units, "bank_events": events,
+                   "oa_total": f"{original:.2f}", "net_outflow_total": f"{outflow - refund:.2f}",
+                   "amounts_fixed": original == outflow - refund,
+                   "allows_partial": bool(waiting), "waiting_oa_ids": waiting,
+                   "allocations": [{"unit_id": u["unit_id"], "amount": u["oa_original_amount"]} for u in units]
+                   if original == outflow - refund else []}
+        decision = automatic_source_allocations(subtask)
+        if decision is not None:
+            for kind in result:
+                result[kind].extend(decision[kind])
+    return result if any(result.values()) else None
+
+
 # Bound detail-only combinatorial work; exhaustion is unknown, never a match.
 SUGGESTION_MAX_STATES = 50000
 SUGGESTION_MAX_NODES = 128
@@ -185,6 +254,17 @@ def suggest_source_allocations(
     never feed completion/statistics. Explicit OA references constrain candidates;
     neither screen order nor a greedy exact-amount match proves uniqueness.
     """
+    if task.get("source_allocations") is not None:
+        if task["version"] != 0 or task["status"] != "pending" or not task["amounts_fixed"]:
+            return None
+        known = task["source_allocations"]["cost_lines"]
+        unit_ids = {line["unit_id"] for line in known}
+        bank_ids = {line["bank_transaction_id"] for line in known}
+        units = [u for u in task["units"] if u["unit_id"] not in unit_ids]
+        events = [e for e in task["bank_events"] if e["transaction_id"] not in bank_ids]
+        task = {**task, "units": units, "bank_events": events, "source_allocations": None,
+                "oa_total": f"{sum((Decimal(u['oa_original_amount']) for u in units), ZERO):.2f}",
+                "net_outflow_total": f"{sum((Decimal(e['amount']) for e in events), ZERO):.2f}"}
     if (task["status"] != "pending" or task["version"] != 0
             or task["source_allocations"] is not None
             or "allocation_stale" in task["pending_reasons"]

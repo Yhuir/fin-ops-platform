@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { automatic?: boolean; partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
@@ -103,6 +103,10 @@ async function sourceScenario(page: Page, options: { partial?: boolean; manual?:
     task.relation_display_groups = task.units.map((u,i)=>({unit_ids:[u.unit_id],bank_transaction_ids:parts[i].map((_,j)=>`bank-${i}-${j}`),sources_excluded:false}));
     task.suggested_source_allocations = {cost_lines:parts.flatMap((part,i)=>part.map((amount,j)=>({unit_id:`unit-${i}`,bank_transaction_id:`bank-${i}-${j}`,amount}))),refund_links:[],non_cost_lines:[]};
   }
+  if (options.automatic) {
+    task.status = 'allocated'; task.pending_reasons = [];
+    task.source_allocations = {cost_lines: task.bank_events.map(bank => ({unit_id: 'oa-1', bank_transaction_id: bank.transaction_id, amount: bank.amount})), refund_links: [], non_cost_lines: []};
+  }
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
@@ -137,6 +141,10 @@ async function sourceScenario(page: Page, options: { partial?: boolean; manual?:
   });
   await page.getByRole('button', { name: '打开成本人工分配' }).click();
   const drawer = page.getByRole('dialog', { name: '成本人工分配' });
+  if (options.automatic) {
+    await expect(drawer.getByText('暂无待分配任务')).toBeVisible();
+    await drawer.getByRole('radio', {name: '已完成 1'}).click();
+  }
   if (!options.detailFailure) await expect(drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
   const unit = drawer.locator('.cost-source-table tbody').first();
   return { drawer, unit, task, writes: () => writes, body: () => savedBody, details: () => details };
@@ -152,6 +160,22 @@ async function fillSources(page: Page, unit: ReturnType<Page['locator']>) {
     await unit.getByRole('textbox', { name: `分配金额 ${index + 1}`, exact: true }).fill(amount);
   }
 }
+
+test('automatic allocation is visible without a write and supports explicit manual save', async ({page}) => {
+  const scene = await sourceScenario(page, {automatic: true});
+  await expect(scene.drawer.getByText('自动分配', {exact: true})).toBeVisible();
+  await expect(scene.unit.getByRole('textbox', {name: '分配金额 1', exact: true})).toHaveValue('350.00');
+  await expect(scene.unit.getByRole('textbox', {name: '分配金额 2', exact: true})).toHaveValue('250.00');
+  expect(scene.writes()).toBe(0);
+  await scene.drawer.getByRole('button', {name: '保存分配', exact: true}).click();
+  await expect(scene.drawer.getByText('分配已保存')).toBeVisible();
+  expect(scene.writes()).toBe(1);
+  await expect(scene.drawer.getByText('自动分配', {exact: true})).toHaveCount(0);
+  expect(scene.body()?.expected_version).toBe(0);
+  await scene.drawer.getByRole('radio', {name: '已完成 1'}).click();
+  await expect(scene.drawer.getByText('自动分配', {exact: true})).toHaveCount(0);
+  await expectNoUnexpectedSuccessUiErrors(page);
+});
 
 test('mixed approval saves only completed 8000 and keeps the other 8000 waiting after reopening', async ({page}) => {
   await page.setViewportSize({width: 1440, height: 1000});

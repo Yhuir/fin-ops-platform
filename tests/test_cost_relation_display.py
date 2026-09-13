@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 import pytest
-from fin_ops_platform.services.cost_statistics_canonical_repository import _attach_relation_display
+from fin_ops_platform.services.cost_statistics_canonical_repository import _attach_relation_display, _attach_source_relations
 from fin_ops_platform.services.cost_statistics_manual_allocation_service import _relation_display_groups
 from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
 
@@ -18,11 +18,13 @@ def test_cost_and_workbench_share_history_partition(amounts, parts):
     cost={'group_id':'merged','row_ids':wb['formal_member_ids'],'row_types':wb['formal_member_types'],'oa_rows':oas,'bank_rows':banks}
     before=deepcopy(cost)
     apply_display_subgroups([wb],history)
-    _attach_relation_display(cost,history)
+    _attach_source_relations([cost], history)
+    _attach_relation_display(cost, history)
     assert cost.pop('relation_display_groups')==wb['display_subgroups']
     cost.pop('source_relation_groups')
     assert cost==before
-    _attach_relation_display(cost,history)
+    _attach_source_relations([cost], history)
+    _attach_relation_display(cost, history)
     task={'units':[{'unit_id':f'unit-{r["id"]}','oa_id':r['id']} for r in oas], 'bank_events':[{'transaction_id':r['id']} for r in banks]}
     blocks=_relation_display_groups(task,cost)
     assert len(blocks)==len(oas)
@@ -35,7 +37,8 @@ def test_cost_and_workbench_share_history_partition(amounts, parts):
 def test_itemized_oa_keeps_shared_parent_without_inventing_cost_splits():
     oa={**row('oa','oa',100),'expense_items':[{'expense_item_id':'a'},{'expense_item_id':'b'}]}
     cost={'group_id':'one','row_ids':['oa','bank'],'row_types':['oa','bank'],'oa_rows':[oa],'bank_rows':[row('bank','bank',90)]}
-    _attach_relation_display(cost,[])
+    _attach_source_relations([cost], [])
+    _attach_relation_display(cost, [])
     task={'units':[{'unit_id':'a','oa_id':'oa'},{'unit_id':'b','oa_id':'oa'}],'bank_events':[]}
     assert _relation_display_groups(task,cost)==[{'unit_ids':['a','b'],'bank_transaction_ids':[],'sources_excluded':True}]
 
@@ -62,6 +65,7 @@ def test_formal_partitions_prefill_every_source_without_changing_task(amounts, p
         expected.extend({'unit_id': unit['unit_id'], 'bank_transaction_id': b['id'], 'amount': f"{Decimal(b['amount']):.2f}"} for b in subset)
         offset += len(part)
     cost = {'group_id':'merged','row_ids':[r['id'] for r in rows], 'row_types':[r['type'] for r in rows], 'oa_rows':oas,'bank_rows':banks}
+    _attach_source_relations([cost], [event(relation('merged', rows), prior)])
     _attach_relation_display(cost, [event(relation('merged', rows), prior)])
     before = deepcopy(task)
     suggestion = suggest_source_allocations(task, banks, cost['source_relation_groups'])
@@ -80,6 +84,7 @@ def test_amount_display_is_not_ownership_and_old_history_cannot_leak():
     cost = {'group_id':'reused','row_ids':[r['id'] for r in rows], 'row_types':[r['type'] for r in rows], 'oa_rows':rows[:3],'bank_rows':rows[3:]}
     outdated = relation('reused', rows[:-1])
     history = [event(outdated, [relation('old', [rows[0], rows[3]])])]
+    _attach_source_relations([cost], history)
     _attach_relation_display(cost, history)
     assert len(cost['relation_display_groups']) == 3  # Amount-based visual alignment.
     assert len(cost['source_relation_groups']) == 1  # No matching historical snapshot.

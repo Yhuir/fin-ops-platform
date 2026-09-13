@@ -154,7 +154,12 @@ class CostSourcePostgresTests(unittest.TestCase):
         with self.assertRaises(CostStatisticsManualAllocationConflictError):
             self.save(old_payload)
 
-    def test_prefill_reads_explicit_references_without_writing_then_saves(self):
+    def test_explicit_references_auto_allocate_without_writing_then_manual_save(self):
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions""")
+        self.scope_service().update_project_cost_scope({'expected_version':1,'selected_tag_codes':['uncategorized','internal_transfer']}, actor_id='cost-test')
         with self.connection.transaction() as writer:
             writer.execute("select set_config('fin_ops.correction_reason', 'isolated prefill evidence fixture', true)")
             for bank, oa, amount in (("bank-1", "oa-a", "600.00"), ("bank-2", "oa-b", "400.00")):
@@ -163,15 +168,15 @@ class CostSourcePostgresTests(unittest.TestCase):
                     where legacy_mongo_id=%s""", (amount, amount, oa, bank))
         before = self.service.list_tasks(cursor=None, page_size=20, status="pending", query=None, can_save=True)
         task = self.service.get_task("cost-source-case", can_save=True)
-        self.assertEqual(task["status"], "pending")
-        self.assertIsNone(task["source_allocations"])
-        self.assertEqual(len(task["suggested_source_allocations"]["cost_lines"]), 2)
+        self.assertEqual(task["status"], "allocated")
+        self.assertIsNone(task["suggested_source_allocations"])
+        self.assertEqual(len(task["source_allocations"]["cost_lines"]), 2)
         self.assertEqual(self.connection.fetch_one("select count(*) as n from app.cost_statistics_manual_allocations")["n"], 0)
         after = self.service.list_tasks(cursor=None, page_size=20, status="pending", query=None, can_save=True)
         self.assertEqual(before, after)
-        self.assertNotIn("suggested_source_allocations", after["items"][0])
+        self.assertEqual(after["items"], [])
         payload = self.payload()
-        payload["source_allocations"] = task["suggested_source_allocations"]
+        payload["source_allocations"] = task["source_allocations"]
         saved = self.save(payload)
         self.assertEqual(saved["version"], 1)
         reloaded = self.service.get_task("cost-source-case", can_save=True)
@@ -240,7 +245,12 @@ class CostSourcePostgresTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.body)
                 self.assertEqual(json.loads(response.body)['summary']['total_amount'], amount)
 
-    def test_duplicate_amount_history_prefill_http_save_reload_and_cancel(self):
+    def test_duplicate_amount_history_auto_http_save_reload_and_cancel(self):
+        self.connection.execute("""insert into app.bank_transaction_categories
+            (bank_transaction_id,legacy_transaction_id,category,source,status,raw_payload)
+            select id,legacy_mongo_id,'internal_transfer','manual','active','{"manual_assignment":true}'::jsonb
+            from app.bank_transactions""")
+        self.scope_service().update_project_cost_scope({'expected_version':1,'selected_tag_codes':['uncategorized','internal_transfer']}, actor_id='cost-test')
         # Equal OA and bank amounts are ambiguous until the current merge history
         # supplies the two original OA/bank relations.
         self.connection.execute("update app.oa_applications set amount=500,normalized_payload=jsonb_set(normalized_payload,'{amount}','\"500.00\"'::jsonb)")
@@ -258,17 +268,26 @@ class CostSourcePostgresTests(unittest.TestCase):
         response = app.handle_request('GET', path)
         self.assertEqual(response.status_code, 200)
         task = json.loads(response.body)
-        suggestion = task['suggested_source_allocations']
+        suggestion = task['source_allocations']
         self.assertEqual(suggestion['cost_lines'], [
             {'unit_id':'oa:oa-a','bank_transaction_id':'bank-2','amount':'500.00'},
             {'unit_id':'oa:oa-b','bank_transaction_id':'bank-1','amount':'500.00'},
         ])
-        self.assertEqual(task['status'], 'pending')
-        self.assertIsNone(task['source_allocations'])
+        self.assertEqual(task['status'], 'allocated')
+        self.assertIsNone(task['suggested_source_allocations'])
         self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
         for block, line in zip(task['relation_display_groups'], suggestion['cost_lines'], strict=True):
             self.assertEqual(block['unit_ids'], [line['unit_id']])
             self.assertEqual(block['bank_transaction_ids'], [line['bank_transaction_id']])
+        for view in ('project', 'cost_tag', 'bank_account'):
+            response = app.handle_request('GET', f'/api/cost-statistics/explorer?view={view}&scope=all&page_size=20')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(json.loads(response.body)['summary']['total_amount'], '1000.00')
+        pending = self.service.list_tasks(cursor=None, page_size=20, status='pending', query=None, can_save=True)
+        completed = self.service.list_tasks(cursor=None, page_size=20, status='allocated', query=None, can_save=True)
+        self.assertEqual(pending['items'], [])
+        self.assertEqual(completed['items'][0]['version'], 0)
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from audit.events where action='cost_statistics.manual_allocation.save'")['n'], 0)
         payload = {**self.payload(), 'allocations':task['allocations'], 'source_allocations':suggestion}
         response = app.handle_request('PUT', path, body=json.dumps(payload))
         self.assertEqual(response.status_code, 200, response.body)
@@ -283,6 +302,35 @@ class CostSourcePostgresTests(unittest.TestCase):
         self.connection.execute("update app.workbench_pair_relations set status='cancelled',version=version+1 where case_id='cost-source-case'")
         self.assertEqual(app.handle_request('GET', path).status_code, 404)
         self.assertEqual(app.handle_request('PUT', path, body=json.dumps(payload)).status_code, 409)
+
+    def test_partial_automatic_cost_preserves_targets_then_manual_save_closes_remainder(self):
+        from tests.test_bank_same_time_ordering_postgres import BankSameTimeOrderingPostgresTests
+        BankSameTimeOrderingPostgresTests.add_transaction(self, 'bank-3', signed_amount='-145.00', balance='1000.00', trade_time='2026-09-01 12:00:00+08', txn_date='2026-09-01', account_no='622200009486')
+        self.connection.execute("""insert into app.oa_applications
+            (oa_source_id,form_id,form_type,row_id,status,workflow_status,applicant,application_date,scope_month,approved_at,project_name,amount,currency,normalized_payload,raw_payload)
+            select 'oa-c','oa-c',form_type,'oa-c',status,workflow_status,applicant,application_date,scope_month,approved_at,project_name,145,currency,
+                jsonb_set(jsonb_set(normalized_payload,'{id}','"oa-c"'::jsonb),'{amount}','"145.00"'::jsonb),raw_payload
+            from app.oa_applications where row_id='oa-a'""")
+        ids = ['oa-a', 'oa-b', 'oa-c', 'bank-1', 'bank-2', 'bank-3']
+        kinds = ['oa', 'oa', 'oa', 'bank', 'bank', 'bank']
+        self.connection.execute("update app.workbench_pair_relations set row_ids=%s,row_types=%s where case_id='cost-source-case'", (ids, kinds))
+        history = {'operation_type': 'confirm_link',
+                   'after_relations': [{'case_id': 'cost-source-case', 'row_ids': ids, 'row_types': kinds}],
+                   'before_relations': [{'case_id': 'old-c', 'row_ids': ['oa-c', 'bank-3'], 'row_types': ['oa', 'bank']}]}
+        self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values ('cost-source-case','confirm_link',%s::jsonb)", (json.dumps(history),))
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertTrue(task['amounts_fixed'])
+        self.assertEqual(task['unallocated_amount'], '1000.00')
+        self.assertEqual(task['source_allocations']['cost_lines'], [{'unit_id': 'oa:oa-c', 'bank_transaction_id': 'bank-3', 'amount': '145.00'}])
+        for view in ('project', 'cost_tag', 'bank_account'):
+            self.assertEqual(self.query.get_explorer_page(scope='all',view=view,filters={},cursor=None,page_size=20)['summary']['total_amount'], '145.00')
+        payload = self.payload()
+        payload['source_allocations']['cost_lines'].extend(task['source_allocations']['cost_lines'])
+        saved = self.save(payload)
+        self.assertEqual(saved['version'], 1)
+        self.assertEqual(saved['unallocated_amount'], '0.00')
+        self.assertEqual(len(saved['source_allocations']['cost_lines']), 4)
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'], '1145.00')
 
     def scope_service(self):
         from pathlib import Path

@@ -14,7 +14,11 @@ from fin_ops_platform.services.app_settings_service import (
 from fin_ops_platform.services.cost_statistics_allocation_scope import covered_source_task, project_source_task
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
 from fin_ops_platform.services.cost_statistics_scope import read_project_cost_scope, source_in_project_cost_scope
-from fin_ops_platform.services.cost_statistics_source_allocation import SourceAllocationError, complete_source_task
+from fin_ops_platform.services.cost_statistics_source_allocation import (
+    SourceAllocationError,
+    automatic_relation_sources,
+    complete_source_task,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
 )
@@ -663,8 +667,7 @@ def _cost_entries(
             selected_codes=selected_codes,
         )
         task["scope_version"] = scope["version"]
-        if task["status"] == "pending" or manual_record is not None or difference != ZERO:
-            manual_tasks.append(task)
+        manual_tasks.append(task)
         if not task["allocations"]:
             reason = "stale_manual_allocation" if "allocation_stale" in task["pending_reasons"] else "pending_manual_allocation"
             excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
@@ -928,11 +931,6 @@ def _manual_allocation_task(
             {"unit_id": unit["unit_id"], "amount": unit["oa_original_amount"]}
             for unit in units
         ]
-    if manual_record is None:
-        _complete_source_task(task)
-        task = project_source_task(task, task["source_allocations"])
-        if task["status"] == "allocated":
-            return task
     source_fingerprint = _manual_allocation_source_fingerprint(
         group=group,
         relation_case_id=relation_case_id,
@@ -944,7 +942,8 @@ def _manual_allocation_task(
     )
     task["source_fingerprint"] = source_fingerprint
     if manual_record is None:
-        return task
+        decision = automatic_relation_sources(task, [*outflows, *refunds], group.get("source_relation_groups", []))
+        return project_source_task(task, decision, automatic=True)
     task.update(
         {
             "version": int(manual_record.get("version") or 0),

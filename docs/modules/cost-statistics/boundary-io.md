@@ -151,7 +151,7 @@ PUT manual allocation
 - 固定上限为128个正成本单元与来源节点合计、50000步候选/覆盖工作；超限返回null，绝不把截断搜索当唯一解。只在展开详情计算，列表与explorer不计算、不增查询。没有通用求解器、依赖、新缓存/worker/表。
 - 当前有效历史子关系先约束来源允许归属的 OA，原始明确引用与其取交集；冲突或无法解析的引用不按金额绕过。当前精简OA投影不含足够的外部身份别名，继续只接受canonical引用，不伪造别名。退款缺少逐来源归属证据，非固定成本缺少确定目标，这两类不生成金额建议，保留完整人工编辑/保存链。
 - Workbench 的 `exact_amount` / `unique_bank_sum` 是展示对齐，不作为来源证据；不新增子集合搜索、比例算法、hash、表、cache、worker 或 fallback。截图 CASE-AUTO-0016 的金额组合可以作为人工判断线索，但没有原始明确引用时不会自动预填。
-- 服务只在 GET 详情计算建议，不把建议送入 policy、统计或持久化。前端草稿初始化优先已保存来源，再读取建议；stale 不复用。已有会话草稿（包括手动删空）不重新初始化。最终保存继续完整校验来源和金额并使用既有事务/版本约束。
+- 服务只在 GET 详情计算建议，不把建议送入 policy、统计或持久化。前端草稿初始化保留确定来源，版本0时合并剩余建议；人工版本只使用已保存来源，stale 不复用。已有会话草稿（包括手动删空）不重新初始化。最终保存继续完整校验来源和金额并使用既有事务/版本约束。
 - 同一成本单元的项目格和 OA 格使用原生 rowSpan；新增、删除来源后同步更新跨度，删除最后一条仍保留身份与新增入口。不同 OA/成本单元不因项目同名而合并。
 - Block 使用四色循环 `#C5D4B8` / `#E8C5A5` / `#DDB9C3` / `#B9CCDF`；数据表格与输入保持白底，颜色不表示财务状态。已删除旧两色选择器、续行空身份格及依赖首个 td 的项目样式，不保留重复路径。
 - 上游 Workbench、银行分类与账户页面的写入、DTO 和职责不变；Cost 只消费既有原始引用。read model / worker 合同不变。本轮没有数据库迁移或备份。
@@ -217,7 +217,7 @@ PUT manual allocation
 
 ## 正式子关系约束预填（2026-09-13）
 
-- 定向详情 snapshot 复用 `relation_history_partitions` 解析精确 case ID + typed members 的正式合并历史，返回内部 `source_relation_groups[{oa_row_ids,bank_row_ids}]`。只有历史中的 OA+流水子组提供边界，其余未归属成员集中交由现有唯一性算法判断。此字段不进入 HTTP DTO、列表、explorer 或持久化。
+- 成本 snapshot 复用 `relation_history_partitions` 解析精确 case ID + typed members 的正式合并历史，返回内部 `source_relation_groups[{oa_row_ids,bank_row_ids}]`。历史中的 OA+流水子组提供边界，其余未归属成员保持当前关系范围；2026-09-14 起所有成本读取入口共用该证据，自动计算与详情建议分别消费。此字段不进入 HTTP DTO 或持久化。
 - Workbench 展示与 Cost 共用历史分组解析；金额对齐后的 `display_subgroups.resolved` 不作为来源证据。历史成员不匹配时不得采用旧分组；不复制历史解析或按屏幕顺序推断。
 - 详情预填将历史子组约束与现有原始 OA 引用取交集，阻止不同子组的重复金额互相成为候选。多个费用子单元仍使用固定目标及完整唯一性判断，不平分、不任意切分、不改变自动完成或保存规则。
 - 删除详情预填忽略历史边界、仅用全组金额候选的旧调用路径。沿用 128 节点/50000 步上限、来源与金额校验、权限、CAS、现有 fingerprint、事务及审计；不新增 gate/hash/cache/worker、数据库字段或查询。
@@ -253,3 +253,12 @@ PUT manual allocation
 - PUT 复用原请求与 storage，进行中单元提交 0；剩余金额不存为新成本类别。保存仍按当前 snapshot 校验状态、scope/version、来源容量并原子写 allocation/audit。审批状态不加入原有财务 fingerprint，避免同组审批完成使已保存金额整体过期；当前资格每次重新判断。
 - 保存沿用 member locks、银行与正式 OA SHARE locks，并锁定相关 admission 行。正常 GET 无行锁。没有新表、迁移、read model、缓存或 worker。
 - 删除旧 `incomplete_oa_relation` 整组排除分支。保留成员完整性、重复归属、权限、事务及范围保护；关联台、银行明细与 OA 同步写路径不变。
+
+## 确定来源自动分配 I/O（2026-09-14）
+
+- Cost repository 的列表、explorer、详情与事务内保存重读均批量读取相关正式 history，复用 `relation_history_partitions`，一次解析生成内部 `source_relation_groups`。详情显示继续复用原显示投影，热路径不调用展示金额对齐。原银行视角不读取关系 history。
+- `automatic_relation_sources` 只拥有证据限定的独立组件计算，复用 `automatic_source_allocations`；不读写数据库、不枚举金额子集。相同候选 OA 集合只索引一次，避免构建银行×OA 矩阵。证据冲突阻止相关组件自动计算。
+- Policy 与范围投影区分固定目标与部分确定金额，自动结果用现有 `source_allocations/status/pending_reasons` 返回；部分来源不松动原 OA 目标。自动任务也提供既有 fingerprint/version，已完成可查询和首次人工编辑。原 fingerprint 计算口径不变。
+- 详情建议只对版本0未解决部分计算；前端草稿初始化合并互不重叠的确定行和建议。版本大于0的有效人工决定优先，仍使用原 CAS/事务/审计与范围外决定保留。
+- 已删除详情独占来源证据、外层多对多直接拒绝自动、自动完成提前返回缺身份、自动任务排除于已完成列表的旧路径。金额组合建议仍是人工业务能力，不作为自动结果或兜底。
+- HTTP 路径、PUT/持久化形状、权限、上游关系/银行写入不变。无迁移、备份、read model、cache、worker、新依赖或新 gate。

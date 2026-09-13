@@ -22,13 +22,15 @@ export function money(value: bigint): string {
 }
 export function createSourceDraft(task: CostStatisticsManualAllocationTask): SourceDraft {
   let id = 0;
-  const saved = task.pendingReasons.includes('allocation_stale') ? null : (task.sourceAllocations ?? task.suggestedSourceAllocations);
+  const stale = task.pendingReasons.includes('allocation_stale');
+  const saved = stale ? null : task.sourceAllocations;
+  const suggested = stale || task.version !== 0 ? null : task.suggestedSourceAllocations;
   return {
     manualItems: task.pendingReasons.includes("allocation_stale") ? [] : task.manualItems.map(item => ({ ...item })),
     zeroUnitIds: task.pendingReasons.includes('allocation_stale') ? [] : task.allocations.filter(line => cents(line.amount) === 0n).map(line => line.unitId),
-    costLines: (saved?.costLines ?? []).map(line => ({ ...line, ownerId: line.unitId, id: ++id })),
-    refundLinks: (saved?.refundLinks ?? []).map(line => ({ ...line, ownerId: line.refundTransactionId, id: ++id })),
-    nonCostLines: (saved?.nonCostLines ?? []).map(line => ({ ...line, ownerId: '', id: ++id })),
+    costLines: [...(saved?.costLines ?? []), ...(suggested?.costLines ?? [])].map(line => ({ ...line, ownerId: line.unitId, id: ++id })),
+    refundLinks: [...(saved?.refundLinks ?? []), ...(suggested?.refundLinks ?? [])].map(line => ({ ...line, ownerId: line.refundTransactionId, id: ++id })),
+    nonCostLines: [...(saved?.nonCostLines ?? []), ...(suggested?.nonCostLines ?? [])].map(line => ({ ...line, ownerId: '', id: ++id })),
     nonCostAmount: task.nonCostAmount,
     nonCostReason: task.nonCostReason,
   };

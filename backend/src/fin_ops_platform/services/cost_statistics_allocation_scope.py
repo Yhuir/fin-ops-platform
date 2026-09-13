@@ -46,7 +46,7 @@ def covered_source_task(task: dict[str, Any], decision: dict[str, Any]) -> dict[
     return result
 
 
-def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None) -> dict[str, Any]:
+def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None, *, automatic: bool = False) -> dict[str, Any]:
     """Expose the current cost scope without changing canonical facts or stored decisions."""
     sources = [e for e in task['bank_events'] if e['event_kind'] == 'outflow']
     selected = {e['transaction_id'] for e in sources if e['in_project_cost_scope']}
@@ -93,14 +93,33 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None) -
         result.update(allocations=allocations, non_cost_amount=f'{non_cost:.2f}',
                       non_cost_reason=task['non_cost_reason'] if non_cost else '')
         # A source slice is an explicit amount decision, not the original full OA target.
-        result['amounts_fixed'] = result['amounts_fixed'] and all(
-            next(line['amount'] for line in allocations if line['unit_id'] == unit['unit_id']) == unit['oa_original_amount'] for unit in units)
+        result['amounts_fixed'] = result['amounts_fixed'] and (automatic or all(
+            next(line['amount'] for line in allocations if line['unit_id'] == unit['unit_id']) == unit['oa_original_amount'] for unit in units))
     elif selected != all_ids:
         result.update(allocations=[{'unit_id': u['unit_id'], 'amount': u['oa_original_amount']} for u in units]
                       if result['amounts_fixed'] else [], non_cost_amount='0.00', non_cost_reason='')
     if not selected or unresolved_refund:
         result.update(status='pending', pending_reasons=['scope_refund_required'] if unresolved_refund else [],
                       allocations=[], source_allocations=None)
+        return result
+    if automatic:
+        reasons = []
+        allocated = non_cost = ZERO
+        if scoped is not None:
+            checked = covered_source_task(result, scoped)
+            completed = complete_source_task(checked, scoped)
+            reasons.extend(completed['pending_reasons'])
+            allocated = sum((Decimal(line['amount']) for line in scoped['cost_lines']), ZERO)
+            non_cost = Decimal(checked['non_cost_amount'])
+        remaining = gross - refund_total - allocated - non_cost
+        if remaining > ZERO:
+            reasons.append('source_required' if task['allocations'] or scoped else 'amount_required')
+        if task.get('waiting_oa_ids'):
+            reasons.append('oa_in_progress')
+        if result['amounts_fixed'] and not result.get('allows_partial'):
+            result['allocations'] = [{'unit_id': u['unit_id'], 'amount': u['oa_original_amount']} for u in units]
+        result.update(status='pending' if reasons else 'allocated', pending_reasons=list(dict.fromkeys(reasons)),
+                      unallocated_amount=f'{remaining:.2f}')
         return result
     if task['status'] == 'stale':
         return complete_source_task(result)

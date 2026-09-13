@@ -171,7 +171,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
           return <article className={`cost-source-task${active ? ' is-expanded' : ''}`} key={id}>
             <button type="button" className="cost-source-task-heading" aria-expanded={active} onClick={() => { setExpanded(active ? null : id); if (!active) void loadDetail(id); }}>
               <ChevronRight size={15} className={active ? 'is-expanded' : ''} /><strong>{item.projectNames.join('、') || '项目未填写'}</strong>
-              <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : '已完成'}</span>{state?.dirty ? <span>未保存</span> : null}</span>
+              <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : (state?.task?.version ?? item.version) === 0 ? '自动分配' : '已完成'}</span>{state?.dirty ? <span>未保存</span> : null}</span>
             </button>
             {active ? <>
               {state?.loading ? <p role="status">加载中…</p> : null}
