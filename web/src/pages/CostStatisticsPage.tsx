@@ -14,7 +14,6 @@ import BusinessPeriodPicker from "../components/common/BusinessPeriodPicker";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import QuerySearch from "../components/common/QuerySearch";
 import CostStatisticsHierarchy, { type CostHierarchyLane } from "../components/cost-statistics/CostStatisticsHierarchy";
-import CostExplorerList from "../components/cost-statistics/CostExplorerList";
 import CostStatisticsManualAllocationDrawer from "../components/cost-statistics/CostStatisticsManualAllocationDrawer";
 import CostStatisticsNoOaRulesDrawer from "../components/cost-statistics/CostStatisticsNoOaRulesDrawer";
 import ExportCenterModal, {
@@ -45,8 +44,6 @@ import { formatCostAmount } from "../features/cost-statistics/format";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import type {
   CostBankExplorerRow,
-  CostBankTagPrimaryExplorerRow,
-  CostBankTagSubExplorerRow,
   CostTagExplorerRow,
   CostProjectExplorerRow,
   CostStatisticsNoOaProject,
@@ -210,12 +207,10 @@ function EntryIdentity({
   label,
   occurredAt,
   secondaryLabel,
-  compact = false,
 }: {
   label: string;
   occurredAt: string | null;
   secondaryLabel?: string;
-  compact?: boolean;
 }) {
   const formattedTradeTime = formatCostTradeTime(occurredAt);
   return (
@@ -230,16 +225,7 @@ function EntryIdentity({
           {secondaryLabel}
         </span>
       ) : null}
-      {compact ? <time className="cost-entry-time" dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款来源或日期待确定"}</time> : <Chip
-        className="cost-transaction-time-chip"
-        color="default"
-        size="sm"
-        variant="soft"
-      >
-        <Chip.Label>
-          <time dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款来源或日期待确定"}</time>
-        </Chip.Label>
-      </Chip>}
+      <time className="cost-entry-time" dateTime={occurredAt ?? undefined}>{formattedTradeTime || "付款来源或日期待确定"}</time>
     </span>
   );
 }
@@ -911,13 +897,35 @@ export default function CostStatisticsPage() {
   const costPrimaryRows = costAncestorsReady ? explorerData?.facets.costTagPrimary ?? [] : [];
   const costSubRows = costAncestorsReady && loadedRequest?.bankTagPrimaryKey === explorerRequest.bankTagPrimaryKey ? explorerData?.facets.costTagSub ?? [] : [];
   const costLanes: CostHierarchyLane[] = [];
-  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, amount: row.totalAmount })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
-  if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, amount: row.totalAmount })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
-  costLanes.push({ title: "成本主标签", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
-  costLanes.push({ title: "成本子标签", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
+  if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", loading: false, emptyLabel: "当前范围暂无数据", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
+  if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", loading: false, emptyLabel: viewMode === "bankAccount" && !selectedBankAccountLabel ? "请先选择银行账户" : "当前范围暂无数据", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
+  costLanes.push({ title: "成本主标签", loading: false, emptyLabel: viewMode !== "costTag" && !(viewMode === "project" ? selectedProjectName : selectedBankProjectName) ? "请先选择项目名" : "当前范围暂无数据", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
+  costLanes.push({ title: "成本子标签", loading: false, emptyLabel: !selectedCostPrimary ? "请先选择成本主标签" : "当前范围暂无数据", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, meta: <span className="cost-list-amount">{formatCostAmount(row.totalAmount)}</span> })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
   const costPathComplete = costLanes.every(lane => lane.selectedKey !== null);
   const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
   const bankTagSubRows = isChildrenTransition ? [] : explorerData?.facets.bankTagSub ?? [];
+  const bankTagLanes: CostHierarchyLane[] = viewMode === "bankTag" ? [
+    {
+      title: "主标签", selectedKey: selectedBankTagPrimaryLabel, loading: false,
+      emptyLabel: "当前时间范围没有银行标签。",
+      items: bankTagPrimaryRows.map(row => ({
+        key: row.primaryLabel, label: row.primaryLabel,
+        secondary: <Chip className="cost-list-count" size="sm" variant="soft"><Chip.Label>{row.subTagCount} 个子标签</Chip.Label></Chip>,
+        meta: <div className="cost-explorer-item-meta-stack"><DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" hideWhenZero /><DirectionAmount amount={row.incomeAmount} label="收入" tone="income" hideWhenZero /></div>,
+      })),
+      onSelect: key => { setSelectedBankTagPrimaryLabel(key); setSelectedBankTagSubLabel(null); setSelectedBankTagEntryId(null); setEntryDetail(null); },
+    },
+    {
+      title: "子标签", selectedKey: selectedBankTagSubLabel, loading: isChildrenTransition,
+      emptyLabel: selectedBankTagPrimaryLabel ? "该主标签下没有子标签。" : "请先选择主标签。",
+      items: bankTagSubRows.map(row => ({
+        key: row.subLabel, label: row.subLabel,
+        secondary: <Chip className="cost-list-count" size="sm" variant="soft"><Chip.Label>{row.transactionCount} 条流水</Chip.Label></Chip>,
+        meta: <div className="cost-explorer-item-meta-stack"><DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" hideWhenZero /><DirectionAmount amount={row.incomeAmount} label="收入" tone="income" hideWhenZero /></div>,
+      })),
+      onSelect: key => { setSelectedBankTagSubLabel(key); setSelectedBankTagEntryId(null); setEntryDetail(null); },
+    },
+  ] : [];
   const selectedTimeRows = viewMode === "time" ? pageRows : [];
   const selectedBankTagRows = selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? pageRows : [];
   const bankFlowExpenseAmount = explorerData?.summary.expenseAmount ?? "0.00";
@@ -1504,6 +1512,7 @@ export default function CostStatisticsPage() {
           {
             key: "counterparty",
             header: "对方户名 / 时间",
+            headerClassName: "cost-entry-identity",
             flex: 1.15,
             getTextValue: (row) => `${row.counterpartyName} ${formatCostTradeTime(row.occurredAt)}`,
             render: (row) => (
@@ -1513,6 +1522,7 @@ export default function CostStatisticsPage() {
           {
             key: "amount",
             header: "流水金额",
+            headerClassName: "cost-entry-amount",
             width: 190,
             cellClassName: "cost-table-cell-money",
             render: (row) => ({
@@ -1545,7 +1555,6 @@ export default function CostStatisticsPage() {
             getTextValue: (row) => `${row.projectName} ${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
             render: (row) => (
               <EntryIdentity
-                compact
                 label={row.projectName}
                 secondaryLabel={row.oaApplicant}
                 occurredAt={row.occurredAt}
@@ -1558,7 +1567,7 @@ export default function CostStatisticsPage() {
               headerClassName: "cost-entry-identity",
               cellClassName: "cost-entry-identity",
               getTextValue: (row) => `${row.oaApplicant} ${formatCostTradeTime(row.occurredAt)}`,
-              render: (row) => <EntryIdentity compact label={row.oaApplicant} occurredAt={row.occurredAt} />,
+              render: (row) => <EntryIdentity label={row.oaApplicant} occurredAt={row.occurredAt} />,
             };
       return [
         identityColumn,
@@ -1640,7 +1649,7 @@ export default function CostStatisticsPage() {
   );
 
   return (
-    <div className={`page-stack cost-page gap-3 bg-[var(--fp-page)]${isBankFlowView ? "" : " cost-page--project"}`}>
+    <div className="page-stack cost-page gap-3 bg-[var(--fp-page)]">
       <header className="page-header cost-page-header">
         <div className="cost-page-header-main">
           <div className="page-title-row">
@@ -1804,7 +1813,7 @@ export default function CostStatisticsPage() {
                 </div>
                 {explorerData.allocationQuality && explorerData.allocationQuality.undatedRowCount > 0 ? <p className="cost-source-muted">仍有成本 {explorerData.allocationQuality.undatedAmount} 元尚未确定付款来源或月份，仅在全部期间展示。</p> : null}
                 {explorerTransitionScope === "surface" ? <CostSurfaceSkeleton loading={isExplorerLoading} /> : (
-                  <CostStatisticsHierarchy key={viewMode} lanes={costLanes}>
+                  <CostStatisticsHierarchy key={viewMode} lanes={costLanes} detailTitle="成本明细" navigationLabel="成本下钻路径">
                     <section aria-busy={isExplorerLoading && isRowsTransition} className="cost-explorer-lane cost-explorer-lane-table"><header className="cost-explorer-lane-header"><h2>成本明细</h2><CostLaneCount value={isRowsTransition ? 0 : explorerData.rowCount} /></header>
                       {isRowsTransition ? <div className="cost-explorer-empty" /> : costPathComplete ? <CostStatisticsTable ariaLabel="成本明细表" columns={entryColumns} rows={pageRows} getRowKey={getCostEntryRowRenderKey} onRowClick={row => void openEntryDetail(row, viewMode)} getRowActionLabel={costEntryActionLabel} emptyLabel="当前选择下暂无成本明细" {...tablePaginationProps} /> : <div className="cost-explorer-empty">依次选择{costLanes.map(lane => lane.title).join("、")}查看成本明细</div>}
                     </section>
@@ -1831,7 +1840,7 @@ export default function CostStatisticsPage() {
                     {costViewSearch}
                   </div>
                 </div>
-                <div className="cost-explorer-grid time grid min-h-0 grid-cols-1">
+                <div className="cost-time-workspace">
                   {explorerTransitionScope === "surface" ? (
                     <CostSurfaceSkeleton loading={isExplorerLoading} />
                   ) : (
@@ -1877,51 +1886,7 @@ export default function CostStatisticsPage() {
                 {explorerTransitionScope === "surface" ? (
                   <CostSurfaceSkeleton loading={isExplorerLoading} />
                 ) : (
-                  <div className="cost-explorer-grid bank-tag grid min-h-[520px] grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.9fr)_minmax(220px,0.9fr)_minmax(0,2.2fr)]">
-                    <CostExplorerList<CostBankTagPrimaryExplorerRow>
-                      title="主标签"
-                      count={bankTagPrimaryRows.length}
-                      items={bankTagPrimaryRows}
-                      emptyLabel="当前时间范围没有银行标签。"
-                      getKey={(row) => row.primaryLabel}
-                      isActive={(row) => row.primaryLabel === selectedBankTagPrimaryLabel}
-                      onSelect={(row) => {
-                        setSelectedBankTagPrimaryLabel(row.primaryLabel);
-                        setSelectedBankTagSubLabel(null);
-                        setSelectedBankTagEntryId(null);
-                        setEntryDetail(null);
-                      }}
-                      getPrimaryText={(row) => row.primaryLabel}
-                      renderSecondary={(row) => `${row.subTagCount} 个子标签`}
-                      renderMeta={(row) => (
-                        <div className="cost-explorer-item-meta-stack">
-                          <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" hideWhenZero />
-                          <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" hideWhenZero />
-                        </div>
-                      )}
-                    />
-                    <CostExplorerList<CostBankTagSubExplorerRow>
-                      title="子标签"
-                      count={bankTagSubRows.length}
-                      items={bankTagSubRows}
-                      loading={isChildrenTransition}
-                      emptyLabel={selectedBankTagPrimaryLabel ? "该主标签下没有子标签。" : "请先选择主标签。"}
-                      getKey={(row) => `${row.primaryLabel}:${row.subLabel}`}
-                      isActive={(row) => row.subLabel === selectedBankTagSubLabel}
-                      onSelect={(row) => {
-                        setSelectedBankTagSubLabel(row.subLabel);
-                        setSelectedBankTagEntryId(null);
-                        setEntryDetail(null);
-                      }}
-                      getPrimaryText={(row) => row.subLabel}
-                      renderSecondary={(row) => `${row.transactionCount} 条流水`}
-                      renderMeta={(row) => (
-                        <div className="cost-explorer-item-meta-stack">
-                          <DirectionAmount amount={row.expenseAmount} label="支出" tone="expense" hideWhenZero />
-                          <DirectionAmount amount={row.incomeAmount} label="收入" tone="income" hideWhenZero />
-                        </div>
-                      )}
-                    />
+                  <CostStatisticsHierarchy key={viewMode} lanes={bankTagLanes} detailTitle="银行流水明细" navigationLabel="银行流水下钻路径">
                     <section className="cost-explorer-lane cost-explorer-lane-table">
                       <header className="cost-explorer-lane-header">
                         <h2>银行流水明细</h2>
@@ -1942,7 +1907,7 @@ export default function CostStatisticsPage() {
                         />
                       ) : <div className="cost-explorer-empty">依次选择主标签和子标签</div>}
                     </section>
-                  </div>
+                  </CostStatisticsHierarchy>
                 )}
               </div>
             ) : null}

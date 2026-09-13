@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
-test("project-cost layouts stay contained, compact and readable across views and widths", async ({ page }, testInfo) => {
+test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const now = Date.now();
     sessionStorage.setItem("finops:pageSession:v1:e2e-user:cost-statistics:explorerState", JSON.stringify({
@@ -25,6 +25,9 @@ test("project-cost layouts stay contained, compact and readable across views and
       },
     }));
   });
+});
+
+test("project-cost layouts stay contained, compact and readable across views and widths", async ({ page }, testInfo) => {
   await installDeterministicApiMocks(page, { sessionMode: "user", costStatisticsLargeDataset: true });
   await page.setViewportSize({ width: 1920, height: 900 });
   await page.goto("/cost-statistics");
@@ -82,6 +85,88 @@ test("project-cost layouts stay contained, compact and readable across views and
     }
   }
   await page.getByRole("radio", { name: "按时间", exact: true }).click();
-  await expect(page.locator(".cost-page--project")).toHaveCount(0);
-  await expect(page.locator(".cost-transaction-time-chip").first()).toBeVisible();
+  await expect(page.locator(".cost-time-workspace .cost-entry-time").first()).toBeVisible();
+});
+
+
+test("bank-flow layouts share the compact workspace and leave other pages unaffected", async ({ page }, testInfo) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user", costStatisticsLargeDataset: true });
+  await page.setViewportSize({ width: 1920, height: 1200 });
+  await page.goto("/cost-statistics");
+  await expect(page.getByRole("option", { name: "选择项目名 云南溯源科技", exact: true })).toBeVisible();
+  const projectItemHeight = await page.getByRole("option", { name: "选择项目名 云南溯源科技", exact: true }).evaluate(node => node.getBoundingClientRect().height);
+  const reads: string[] = [];
+  page.on("request", request => { if (request.url().includes("/cost-statistics/explorer")) reads.push(request.url()); });
+  for (const view of ["按标签", "按时间"]) {
+    await page.getByRole("radio", { name: view, exact: true }).click();
+    if (view === "按标签") {
+      const option = page.getByRole("option", { name: "选择主标签 项目开销", exact: true });
+      await expect(option).toContainText("个子标签");
+      await expect(option.getByText("支", { exact: true })).toBeVisible();
+      const height = await option.evaluate(node => node.getBoundingClientRect().height);
+      expect(height).toBeGreaterThanOrEqual(projectItemHeight);
+      expect(height).toBeLessThan(66);
+      await option.click();
+      await page.getByRole("option", { name: "选择子标签 设备材料", exact: true }).click();
+    }
+    const grid = page.getByRole("grid", { name: view === "按标签" ? "按标签银行流水表" : "按时间银行流水表" });
+    await expect(grid).toContainText("大型成本流水费用内容");
+    for (const size of [{ width: 1920, height: 1200 }, { width: 1440, height: 720 }, { width: 1024, height: 600 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(size);
+      await expect(grid).toBeVisible();
+      const lane = grid.locator("xpath=ancestor::section[1]");
+      const laneBounds = await lane.boundingBox();
+      expect(laneBounds!.y + laneBounds!.height).toBeGreaterThan(size.height - 30);
+      expect(laneBounds!.y + laneBounds!.height).toBeLessThanOrEqual(size.height);
+      await expect.poll(() => page.evaluate(() => ({ x: document.documentElement.scrollWidth <= innerWidth + 1, y: document.documentElement.scrollHeight <= innerHeight + 1 }))).toEqual({ x: true, y: true });
+      const footer = page.locator(".cost-table-pagination-footer");
+      const footerBounds = await footer.boundingBox();
+      expect(footerBounds!.y + footerBounds!.height).toBeLessThanOrEqual(size.height);
+      await expect(footer.getByRole("button", { name: "下一页" })).toBeVisible();
+      const times = await grid.locator(".cost-entry-time").evaluateAll(nodes => nodes.map(node => ({ height: node.getBoundingClientRect().height, width: node.getBoundingClientRect().width, scrollWidth: node.scrollWidth })));
+      for (const time of times) { expect(time.height).toBeLessThanOrEqual(19); expect(time.scrollWidth).toBeLessThanOrEqual(time.width + 1); }
+      const scroll = page.locator(".cost-page .finance-table__scroll");
+      const before = reads.length;
+      await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+      const header = await scroll.locator("thead").boundingBox();
+      const bounds = await scroll.boundingBox();
+      expect(header!.y).toBeGreaterThanOrEqual(bounds!.y - 1);
+      expect(header!.y + header!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height + 1);
+      expect(await page.evaluate(() => scrollY)).toBe(0);
+      expect(reads.length).toBe(before);
+      await scroll.evaluate(node => { node.scrollTop = 0; });
+      await page.screenshot({ path: testInfo.outputPath(`${view}-${size.width}.png`) });
+    }
+    if (view === "按标签") {
+      await page.getByRole("navigation", { name: "银行流水下钻路径" }).getByRole("button", { name: /^主标签/ }).click();
+      await expect(page.getByRole("listbox", { name: "主标签", exact: true })).toBeVisible();
+      await page.getByRole("option", { name: "选择主标签 项目开销", exact: true }).click();
+      await expect(page.getByRole("listbox", { name: "子标签", exact: true })).toBeVisible();
+    }
+    await page.setViewportSize({ width: 1920, height: 1200 });
+  }
+  await page.getByRole("link", { name: "银行明细", exact: true }).click();
+  await expect(page.locator(".cost-page:visible")).toHaveCount(0);
+  expect(await page.locator(".app-shell-content").evaluate(node => getComputedStyle(node).overflow)).not.toBe("hidden");
+  await expect(page.getByRole("heading", { name: "银行明细", exact: true })).toBeVisible();
+});
+
+
+test("embedded OA cost views keep footer and long dates reachable in a compact content viewport", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user", costStatisticsLargeDataset: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/cost-statistics?embedded=oa");
+  await expect(page.locator(".app-shell.embedded-shell")).toBeVisible();
+  await page.setViewportSize({ width: 1152, height: 720 });
+  for (const label of ["按标签", "按时间"]) {
+    await page.getByRole("radio", { name: label, exact: true }).click();
+    if (label === "按标签") {
+      await page.getByRole("option", { name: "选择主标签 项目开销", exact: true }).click();
+      await page.getByRole("option", { name: "选择子标签 设备材料", exact: true }).click();
+    }
+    await expect(page.getByRole("grid", { name: label === "按标签" ? "按标签银行流水表" : "按时间银行流水表" })).toBeVisible();
+    const footer = await page.locator(".cost-table-pagination-footer").boundingBox();
+    expect(footer!.y + footer!.height).toBeLessThanOrEqual(720);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  }
 });

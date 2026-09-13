@@ -2,6 +2,8 @@ import { Chip, ListBox } from "@heroui/react";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 
+import { hasSelectedTextWithin } from "./textSelection";
+
 type CostExplorerListProps<Row> = {
   title: string;
   count: number;
@@ -64,30 +66,42 @@ export default function CostExplorerList<Row>({
           className="cost-explorer-list"
           onSelectionChange={(keys) => {
             if (keys === "all") return;
-            const [key] = Array.from(keys);
+            // Toggling the current item means entering that same drill-down path again.
+            const [key] = keys.size === 0 ? selectedKeys : Array.from(keys);
             const selectedItem = itemByKey.get(String(key));
             if (selectedItem) onSelect(selectedItem);
           }}
           selectedKeys={selectedKeys}
           selectionMode="single"
         >
-          {preparedItems.map(({ item, key, primaryText }) => (
-            <ListBox.Item
-              aria-label={`选择${title} ${primaryText}`}
-              className="cost-explorer-item"
-              id={key}
-              key={key}
-              textValue={primaryText}
-            >
-              <div className="cost-explorer-item-content">
-                <div className="cost-explorer-item-main">
-                  <strong>{primaryText}</strong>
-                  {renderSecondary ? <span>{renderSecondary(item)}</span> : null}
+          {preparedItems.map(({ item, key, primaryText }) => {
+            const secondary = renderSecondary?.(item);
+            return (
+              <ListBox.Item
+                aria-label={`选择${title} ${primaryText}`}
+                className="cost-explorer-item"
+                id={key}
+                key={key}
+                textValue={primaryText}
+              >
+                <div
+                  className="cost-explorer-item-content"
+                  onPointerDown={event => event.stopPropagation()}
+                  onMouseDown={event => event.stopPropagation()}
+                  onClick={event => {
+                    event.stopPropagation();
+                    if (!hasSelectedTextWithin(event.currentTarget)) onSelect(item);
+                  }}
+                >
+                  <div className="cost-explorer-item-main">
+                    <strong>{primaryText}</strong>
+                    {secondary != null ? <span className="cost-explorer-item-secondary">{secondary}</span> : null}
+                  </div>
+                  {renderMeta ? <div className="cost-explorer-item-meta">{renderMeta(item)}</div> : null}
                 </div>
-                {renderMeta ? <div className="cost-explorer-item-meta">{renderMeta(item)}</div> : null}
-              </div>
-            </ListBox.Item>
-          ))}
+              </ListBox.Item>
+            );
+          })}
         </ListBox>
       )}
     </section>

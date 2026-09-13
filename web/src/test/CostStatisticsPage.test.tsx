@@ -113,6 +113,31 @@ describe("Cost statistics page", () => {
     rendered.unmount();
   });
 
+  test("keeps pagination disabled during loading and exposes a failed-page retry", async () => {
+    const user = userEvent.setup();
+    const onPageChange = vi.fn();
+    const onRetryPage = vi.fn();
+    const props = {
+      ariaLabel: "分页状态测试表",
+      columns: [{ key: "label", header: "内容", render: (row: { id: string }) => row.id }],
+      getRowKey: (row: { id: string }) => row.id,
+      onPageChange, onRetryPage, page: 1, pageSize: 1, rows: [{ id: "已加载行" }], total: 2,
+    };
+    const { rerender } = render(<CostStatisticsTable {...props} isPageLoading />);
+    expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+    expect(onPageChange).not.toHaveBeenCalled();
+    rerender(<CostStatisticsTable {...props} pageError="本页读取失败" />);
+    expect(screen.getByText("已加载行")).toBeVisible();
+    expect(screen.getByText("本页读取失败")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    expect(onRetryPage).toHaveBeenCalledTimes(1);
+    rerender(<CostStatisticsTable {...props} page={2} />);
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "上一页" })).toBeEnabled();
+  });
+
   test("keeps project-cost views and restores the two bank-flow views", async () => {
     installMockApiFetch();
     renderPage();
@@ -179,7 +204,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按时间" }));
     expect(await screen.findByRole("heading", { name: "按时间统计" })).toBeInTheDocument();
     const timeGrid = await screen.findByRole("grid", { name: "按时间银行流水表" });
-    expect(timeGrid.closest(".cost-explorer-grid.time")).not.toBeNull();
+    expect(timeGrid.closest(".cost-time-workspace")).not.toBeNull();
     expect(timeGrid.closest(".cost-table-shell")?.querySelector(".cost-table-pagination-footer")).not.toBeNull();
     expect(screen.getAllByText("收", { exact: true }).length).toBeGreaterThan(0);
     expect(screen.queryByText("净支出", { exact: true })).not.toBeInTheDocument();

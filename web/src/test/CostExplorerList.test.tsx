@@ -67,3 +67,26 @@ test("keeps keyboard selection accessible", async () => {
 
   expect(onSelect).toHaveBeenCalledWith(rows[2]);
 });
+
+
+test("preserves both amounts and counts and distinguishes loading from empty", () => {
+  const props = { title: "主标签", count: 1, items: rows.slice(0, 1), emptyLabel: "没有标签", getKey: (row: Row) => row.id, getPrimaryText: (row: Row) => row.name, isActive: () => false, onSelect: vi.fn(), renderSecondary: () => "2 个子标签", renderMeta: () => <><span>支 120.00</span><span>收 80.00</span></> };
+  const { rerender } = render(<CostExplorerList {...props} />);
+  expect(screen.getByText("2 个子标签")).toBeVisible();
+  expect(screen.getByText("支 120.00")).toBeVisible();
+  expect(screen.getByText("收 80.00")).toBeVisible();
+  rerender(<CostExplorerList {...props} items={[]} loading />);
+  expect(screen.queryByText("没有标签")).not.toBeInTheDocument();
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  rerender(<CostExplorerList {...props} count={0} items={[]} />);
+  expect(screen.getByText("没有标签")).toBeVisible();
+});
+
+
+test("activates the already selected item when returning to an ancestor", async () => {
+  const user = userEvent.setup();
+  const { onSelect } = renderList();
+  await user.click(screen.getByRole("option", { name: `选择项目名 ${rows[0].name}` }));
+  expect(onSelect).toHaveBeenCalledTimes(1);
+  expect(onSelect).toHaveBeenCalledWith(rows[0]);
+});

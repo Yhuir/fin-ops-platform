@@ -187,9 +187,11 @@ PUT manual allocation
 - 专用 Drawer 只接收数据与事件。页面拥有 GET/PUT、草稿、超时结果核实和成功后的本页失效；旧分页请求中止、路径重置，保留期间/搜索。不开新队列、缓存或跨页面请求。
 - 移除旧 source_pending 正式行生成、分面、导出状态和详情显示分支；保留现有来源 fingerprint、金额校验、事务与正式发布措施。
 
-### 项目成本展示边界（2026-09-11）
+### 五视角展示边界（2026-09-14）
 
-`CostStatisticsHierarchy` 只接收各栏的 key、label、amount、selectedKey 与 onSelect，输出选择事件和明细插槽；移除未使用的 description 输入。页面仍拥有查询和选择状态。项目成本根标记限定高度、内部滚动、紧凑样式的作用范围；祖先高度约束仅在该标记存在时生效，不修改 App Shell 或 FinanceTable 公共组件。银行流水两个视角保留公共列表辅助文字与时间 chip。无 API、服务、存储、权限或业务金额 I/O 变化。
+`CostStatisticsHierarchy` 接收每栏的 title、selectedKey、items（key、label、meta、可选 secondary）、loading、emptyLabel 与 onSelect，以及 detailTitle/navigationLabel 和明细插槽。meta/secondary 只承载页面准备的展示内容：成本单金额或流水收支与计数。输出选择事件和布局，不读取 API、不识别业务 DTO、不聚合金额。页面仍拥有查询、取消、选择与分页状态；列表复用 HeroUI ListBox 的键盘选择模型；内容区保留原生指针拖选，复用已有 hasSelectedTextWithin 判断，复制不触发下钻，普通点击及重复激活已选项均进入对应下一级。
+
+项目成本与银行标签共用层级布局，按时间保持单表并共用成本页高度/明细规则。工作区根节点限定祖先高度、内部滚动与紧凑样式；离页卸载后恢复其他页面默认布局。公共 App Shell/FinanceTable 和分配抽屉样式不变。已删除银行视角旧高度变量、独立标签布局和日期 Chip/compact 双路径，不保留兼容回退。无 API、服务、存储、权限、worker 或业务金额 I/O 变化。
 
 
 ## 待分配范围闭环（2026-09-11）

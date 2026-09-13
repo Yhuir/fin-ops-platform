@@ -17822,7 +17822,6 @@ body.column-layout-dragging {
 }
 
 .cost-page {
-  --cost-workspace-height: clamp(520px, calc(100dvh - 180px), 840px);
   gap: var(--fp-space-3);
   min-width: 0;
 }
@@ -19498,10 +19497,6 @@ body.column-layout-dragging {
   min-height: 52px;
 }
 
-.cost-explorer-lane-table .cost-finance-table .finance-table__row {
-  min-height: 64px;
-}
-
 .cost-finance-table .finance-table__row.cost-table-row--clickable {
   cursor: pointer;
   transition:
@@ -19626,26 +19621,6 @@ body.column-layout-dragging {
   gap: var(--fp-space-3);
 }
 
-.cost-explorer-grid {
-  height: var(--cost-workspace-height);
-}
-
-.cost-explorer-grid.time {
-  min-height: 0;
-  height: var(--cost-workspace-height);
-}
-
-.cost-explorer-grid.time > .cost-explorer-lane {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-}
-
-.cost-explorer-grid.time .finance-table__scroll {
-  max-height: none;
-}
-
 @media (max-width: 720px) {
   .cost-table-pagination-footer {
     grid-template-columns: minmax(0, 1fr);
@@ -19662,44 +19637,6 @@ body.column-layout-dragging {
 
 .cost-analysis-layout.explorer-layout {
   grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 1025px) {
-  .cost-explorer-grid {
-    align-items: stretch;
-  }
-
-  .cost-explorer-grid > .cost-explorer-lane {
-    min-height: 0;
-  }
-
-  .cost-explorer-lane-table .cost-table-shell {
-    display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .cost-explorer-grid > .cost-explorer-lane {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    height: 100%;
-  }
-
-  .cost-explorer-grid .cost-explorer-list {
-    min-height: 0;
-    overflow: auto;
-  }
-
-  .cost-explorer-lane-table .cost-table-shell,
-  .cost-explorer-lane-table .cost-finance-table,
-  .cost-explorer-lane-table .finance-table__scroll {
-    height: 100%;
-    min-height: 0;
-  }
-
-  .cost-explorer-lane-table .finance-table__scroll {
-    max-height: none;
-    overflow: auto;
-  }
 }
 
 .cost-section-heading,
@@ -19769,14 +19706,6 @@ body.column-layout-dragging {
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
-}
-
-.cost-transaction-time-chip {
-  width: fit-content;
-  min-height: 20px;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
 .cost-bank-tag-chip,
@@ -20396,7 +20325,7 @@ body.column-layout-dragging {
   height: auto;
   min-width: 0;
   max-width: 100%;
-  min-height: 66px;
+  min-height: 42px;
   border-bottom: 1px solid var(--fp-border-subtle);
   border-radius: 0;
   background: var(--fp-surface);
@@ -20413,13 +20342,13 @@ body.column-layout-dragging {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: var(--fp-space-3);
+  gap: 8px;
   width: 100%;
   height: auto;
   min-width: 0;
   max-width: 100%;
-  min-height: 66px;
-  padding: 11px var(--fp-space-3);
+  min-height: 42px;
+  padding: 10px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -20613,10 +20542,6 @@ body.column-layout-dragging {
 }
 
 @media (max-width: 1024px) {
-  .cost-explorer-grid.time {
-    height: clamp(280px, calc(100dvh - 424px), 600px);
-  }
-
   .cost-toolbar,
   .tax-layout {
     grid-template-columns: 1fr;
@@ -20720,15 +20645,8 @@ body.column-layout-dragging {
   }
 
   .cost-analysis-layout.explorer-layout,
-  .cost-explorer-grid.project,
-  .cost-explorer-grid.expense,
-  .cost-explorer-grid.bank-tag,
   .cost-surface-skeleton {
     grid-template-columns: 1fr;
-  }
-
-  .cost-explorer-grid {
-    height: auto;
   }
 
   .project-export-modal-layer {
