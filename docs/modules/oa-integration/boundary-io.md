@@ -134,4 +134,4 @@
 
 ## 成本项目只读目录（2026-09-13）
 
-成本详情repository在同一数据库快照中批量读取 `app.oa_applications.normalized_payload` 主单与expense_items的真实project_id/project_name，用于人工成本项目选择；不调用外部OA provider，不写OA投影，不生成新OA。成本模块拥有目录响应，OA同步写入责任不变。
+成本详情repository在同一数据库快照中批量读取 `app.oa_applications.normalized_payload` 主单与expense_items的真实project_name及可选project_id（历史空ID合法），用于人工成本项目选择；不调用外部OA provider，不写OA投影，不生成新OA。成本模块拥有目录响应，OA同步写入责任不变。

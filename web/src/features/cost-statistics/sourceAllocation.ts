@@ -86,7 +86,7 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
     const prior = task.manualItems.find(row => row.unitId === item.unitId);
     if (!/^manual:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(item.unitId) || seenManual.has(item.unitId)) errors[key] = '人工成本标识无效或重复';
     seenManual.add(item.unitId);
-    if (!task.manualOptions.projects.some(p => p.id === item.projectId) && !(prior && prior.projectId === item.projectId)) errors[`${key}.project`] = '请选择已有项目';
+    if (!task.manualOptions.projects.some(p => p.name === item.projectName) && !(prior && prior.projectName === item.projectName)) errors[`${key}.project`] = '请选择已有项目';
     if (!item.expenseContent.trim() || item.expenseContent.trim().length > 500) errors[`${key}.content`] = '请填写不超过 500 字的成本项';
     if (!task.manualOptions.tags.some(t => t.code === item.costTagCode) && !(prior && prior.costTagCode === item.costTagCode)) errors[`${key}.tag`] = '请选择成本标签';
     const lines = draft.costLines.filter(line => line.ownerId === item.unitId);
@@ -150,7 +150,7 @@ export function sourceDecisionMatches(request: SaveCostStatisticsManualAllocatio
     ordered(value.refundLinks.map(line => [line.refundTransactionId, line.bankTransactionId, line.amount])),
     ordered(value.nonCostLines.map(line => [line.bankTransactionId, line.amount])),
   ].join('|');
-  const manualMatrix = (items: import('./types').CostManualItem[]) => ordered(items.map(item => [item.unitId, item.projectId, item.expenseContent, item.costTagCode]));
+  const manualMatrix = (items: import('./types').CostManualItem[]) => ordered(items.map(item => [item.unitId, item.projectName, item.expenseContent, item.costTagCode]));
   return manualMatrix(request.manualItems) === manualMatrix(task.manualItems) && matrix(request.sourceAllocations) === matrix(task.sourceAllocations)
     && ordered(request.allocations.map(line => [line.unitId, line.amount])) === ordered(task.allocations.map(line => [line.unitId, line.amount]))
     && request.nonCostAmount === task.nonCostAmount && request.nonCostReason === task.nonCostReason;

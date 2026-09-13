@@ -257,13 +257,13 @@ it.each([{saving:true}, {error:'保存结果待确认'}, {error:'关联事实已
 it('adds 192 manual cost to OA sources, validates metadata, then edits and removes it without touching evidence', async () => {
   const user=userEvent.setup(); const task=fixture(); const save=vi.fn();
   task.bankEvents[0].amount=task.netOutflowTotal=task.grossOutflowTotal='892.00';
-  task.manualOptions={projects:[{id:'project',name:'项目甲'}],tags:[{code:'service',label:'费用 / 服务费',primary_label:'费用',sub_label:'服务费'}]};
+  task.manualOptions={projects:[{id:'',name:'项目甲'}],tags:[{code:'service',label:'费用 / 服务费',primary_label:'费用',sub_label:'服务费'}]};
   task.suggestedSourceAllocations={costLines:task.units.map(unit=>({unitId:unit.unitId,bankTransactionId:'internal-bank',amount:unit.oaOriginalAmount})),refundLinks:[],nonCostLines:[]};
   const {container}=render(<Editor task={task} save={save}/>);
   const originalEvidence=container.querySelector('.cost-source-evidence')!.textContent;
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
   await user.click(screen.getByRole('button',{name:'新增人工成本'}));
-  await user.selectOptions(screen.getByRole('combobox',{name:'人工成本项目'}),'project');
+  await user.selectOptions(screen.getByRole('combobox',{name:'人工成本项目'}),'项目甲');
   await user.type(screen.getByRole('textbox',{name:'人工成本项'}),'补充服务费');
   await user.selectOptions(screen.getByRole('combobox',{name:'人工成本标签'}),'service');
   const manual=within(container.querySelectorAll('.cost-source-table tbody')[2] as HTMLElement);

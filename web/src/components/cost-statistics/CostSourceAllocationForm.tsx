@@ -140,7 +140,7 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
           </tbody>;
         })}
         {draft.manualItems.map((item, index) => <tbody key={item.unitId}><tr>
-          <td><ManualProjectPicker value={item.projectId} name={item.projectName} projects={task.manualOptions.projects} disabled={disabled} onChange={(projectId, projectName) => updateManual(item.unitId, { projectId, projectName })} />{showError(`manual.${item.unitId}.project`)}</td>
+          <td><ManualProjectPicker value={item.projectName} projects={task.manualOptions.projects} disabled={disabled} onChange={(projectId, projectName) => updateManual(item.unitId, { projectId, projectName })} />{showError(`manual.${item.unitId}.project`)}</td>
           <td><span className="cost-source-muted">人工补充</span><input aria-label="人工成本项" maxLength={500} value={item.expenseContent} disabled={disabled} onChange={event => updateManual(item.unitId, { expenseContent: event.target.value })} />{showError(`manual.${item.unitId}.content`)}{showError(`manual.${item.unitId}`)}</td>
           {draft.costLines.filter(line => line.ownerId === item.unitId).map(line => <Fragment key={line.id}>{lineCells('costLines', line, task.units.length + index, true)}</Fragment>)}
         </tr></tbody>)}
@@ -152,7 +152,7 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
   </div>;
 }
 
-function ManualProjectPicker({ value, name, projects, disabled, onChange }: { value: string; name: string; projects: Array<{ id: string; name: string }>; disabled: boolean; onChange: (id: string, name: string) => void }) {
+function ManualProjectPicker({ value, projects, disabled, onChange }: { value: string; projects: Array<{ id: string; name: string }>; disabled: boolean; onChange: (id: string, name: string) => void }) {
   const [query, setQuery] = useState('');
-  return <div className="cost-manual-project"><input aria-label="搜索人工成本项目" placeholder="搜索项目" value={query} disabled={disabled} onChange={event => setQuery(event.target.value)} /><select aria-label="人工成本项目" value={value} disabled={disabled} onChange={event => { const project = projects.find(p => p.id === event.target.value); onChange(project?.id ?? '', project?.name ?? ''); }}><option value="">选择已有项目</option>{value && !projects.some(p => p.id === value) ? <option value={value}>{name}（已停用）</option> : null}{projects.filter(p => p.id === value || p.name.includes(query.trim())).map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>;
+  return <div className="cost-manual-project"><input aria-label="搜索人工成本项目" placeholder="搜索项目" value={query} disabled={disabled} onChange={event => setQuery(event.target.value)} /><select aria-label="人工成本项目" value={value} disabled={disabled} onChange={event => { const project = projects.find(p => p.name === event.target.value); onChange(project?.id ?? '', project?.name ?? ''); }}><option value="">选择已有项目</option>{value && !projects.some(p => p.name === value) ? <option value={value}>{value}（已停用）</option> : null}{projects.filter(p => p.name === value || p.name.includes(query.trim())).map(project => <option key={project.name} value={project.name}>{project.name}</option>)}</select></div>;
 }

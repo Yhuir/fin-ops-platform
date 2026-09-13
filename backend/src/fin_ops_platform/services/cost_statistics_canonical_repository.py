@@ -1279,8 +1279,8 @@ def _manual_projects(oa_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
     for row in oa_rows:
         for item in [row, *row.get("expense_items", [])]:
             identity, name = _text(item.get("project_id")), _text(item.get("project_name"))
-            if identity and name:
-                projects[identity] = {"id": identity, "name": name}
+            if name:
+                projects[name] = {"id": identity, "name": name}
     return sorted(projects.values(), key=lambda project: (project["name"], project["id"]))
 
 
@@ -1297,8 +1297,8 @@ def _postgres_manual_projects(connection: Any) -> list[dict[str, str]]:
             cross join lateral jsonb_array_elements(coalesce(oa.normalized_payload->'expense_items','[]'::jsonb)) item
             where oa.form_type = any(%s::text[])
         ), distinct_projects as (
-            select distinct on (id) id, name from projects
-            where nullif(btrim(id),'') is not null and nullif(btrim(name),'') is not null
-            order by id, row_id desc, name
+            select distinct on (name) coalesce(id,'') as id, name from projects
+            where nullif(btrim(name),'') is not null
+            order by name, nullif(id,'') nulls last, row_id desc
         ) select id, name from distinct_projects order by name, id
         """, (list(OA_COST_FORM_TYPES), list(OA_COST_FORM_TYPES)))]

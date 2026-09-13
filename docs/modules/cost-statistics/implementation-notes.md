@@ -374,6 +374,8 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_cost_stati
 
 ## 2026-09-13：人工补充成本与单来源残差预填
 
-复用来源分配 service/repository、草稿与成本 policy；只有元数据校验新增小型纯函数模块，持久化在原allocation表增加JSONB。移除预填仅支持总额相等的全局短路，保留各唯一解分支和既有保护。目录读取OA真实项目ID与标签代码，避免空旧项目设置导致无法选择。不新增依赖、hash、冻结contract、baseline或gate，不使用GSD。
+复用来源分配 service/repository、草稿与成本 policy；只有元数据校验新增小型纯函数模块，持久化在原allocation表增加JSONB。移除预填仅支持总额相等的全局短路，保留各唯一解分支和既有保护。目录读取OA真实项目名称与标签代码，避免空旧项目设置导致无法选择。不新增依赖、hash、冻结contract、baseline或gate，不使用GSD。
 
 数据迁移仅追加列，不创建业务备份，不删除主库。上线后验证目标11项原额建议、192余额、人工草稿绿字与五视图一致性；写入闭环在隔离测试数据库完成，实际192用途由用户决定。
+
+生产视觉验收发现历史 OA 普遍只有项目名称、没有项目 ID；移除本功能按非空 ID 筛选目录的错误条件，统一按现有成本项目名称选择与校验。真实 PostgreSQL 保存闭环样例改为无项目 ID，覆盖该生产形态。

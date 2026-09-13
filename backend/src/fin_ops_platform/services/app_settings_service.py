@@ -2516,11 +2516,12 @@ class AppSettingsService:
     @staticmethod
     def cost_manual_options_from_settings(settings: dict[str, Any], oa_projects: list[dict[str, str]]) -> dict[str, Any]:
         """Cost's read-only catalogue; never return credentials or mutate project/tag facts."""
-        projects = {p["id"]: {"id": p["id"], "name": p["project_name"]}
+        projects = {p["project_name"]: {"id": p["id"], "name": p["project_name"]}
                     for family in ("synced_projects", "manual_projects")
                     for p in settings.get(family, [])
                     if p["id"] and p["project_name"]}
-        projects = {**{p["id"]: p for p in oa_projects}, **projects}
+        configured_ids = {p["id"] for p in projects.values()}
+        projects = {**{p["name"]: p for p in oa_projects if not p["id"] or p["id"] not in configured_ids}, **projects}
         tags = AppSettingsService._cost_statistics_tag_definitions(settings.get("bank_transaction_tags", {}))
         return {"projects": sorted(projects.values(), key=lambda p: (p["name"], p["id"])),
                 "tags": [{"code": t["code"], "label": " / ".join(t["path"]),

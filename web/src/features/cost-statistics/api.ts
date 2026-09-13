@@ -643,7 +643,7 @@ export async function saveCostStatisticsManualAllocation(
         expected_version: request.expectedVersion,
         source_fingerprint: request.sourceFingerprint,
         scope_version: request.scopeVersion,
-        manual_items: request.manualItems.map(item => ({ unit_id: item.unitId, project_id: item.projectId, expense_content: item.expenseContent, cost_tag_code: item.costTagCode })),
+        manual_items: request.manualItems.map(item => ({ unit_id: item.unitId, project_name: item.projectName, expense_content: item.expenseContent, cost_tag_code: item.costTagCode })),
         allocations: request.allocations.map((line) => ({
           unit_id: line.unitId,
           amount: line.amount,

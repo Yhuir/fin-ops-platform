@@ -226,7 +226,7 @@ PUT manual allocation
 ## 人工补充 I/O（2026-09-13）
 
 - GET/PUT `/api/cost-statistics/manual-allocations/{case}` 增加 `manual_items`；GET/成功 PUT 同时返回 `manual_options{projects:[{id,name}],tags:[{code,label,primary_label,sub_label}]}`。列表摘要不含目录、明细，搜索/项目名称覆盖人工行。
-- PUT 的人工元数据只接受 `{unit_id,project_id,expense_content,cost_tag_code}`，`unit_id=manual:<UUID4>`，最多200条；内容1–500字，项目/标签必须有效。响应另带服务端项目与成本标签名称。金额仍只通过既有 `allocations` / `source_allocations.cost_lines` 提交，不在元数据复制金额。
+- PUT 的人工元数据只接受 `{unit_id,project_name,expense_content,cost_tag_code}`，`unit_id=manual:<UUID4>`，最多200条；内容1–500字，项目/标签必须有效。响应另带服务端项目与成本标签名称。金额仍只通过既有 `allocations` / `source_allocations.cost_lines` 提交，不在元数据复制金额。
 - 人工 ID 不是 OA ID；每个人工项必须有且只有一条正数两位小数成本来源。来源必须属于当前任务范围内支出，逐笔成本+退款+非成本等于流水原额。前后端共同核对，最终以事务内 canonical 校验为准。
 - Repository 在既有 allocation 表新增0171 `manual_items jsonb not null default []`；同一事务保存来源、元数据、版本与审计。目录由定向详情事务批量读取 OA 项目标识/名称、设置和标签；不让前端调用 OA provider，不增加 worker/cache/read model。
 - 保留现有 relation/source/scope/version 冲突机制。旧客户端省略 manual_items 且已有人工记录时明确409，禁止静默丢弃。范围外人工项与对应来源一同保留，范围内删除仅在新的完整有效分配保存后生效。关联/金额变化使原决定失效，不自动重用旧人工成本。
@@ -234,3 +234,5 @@ PUT manual allocation
 - 不写 `oa_applications`、银行金额/分类或 Workbench 关系；不修改其它页面 I/O。普通 OA 与历史有效分配沿用原路，无并行旧人工实现。
 
 人工成本项目选择包含已有的已完成项目，支持历史成本补录；项目完成状态不作为成本补录限制。标签仍取当前有效标签，历史保存但已停用的标签只允许原条目保留。
+
+人工成本项目选择与现有成本统计一致，以 canonical 项目名称为维度；保存提交 `project_name`，服务端按当前目录验证。历史 OA 只有名称而无项目 ID 时合法，输出 `project_id` 保持空，不伪造 ID、不调用外部项目服务、不修改 OA。目录包含头表与费用明细的项目名称。

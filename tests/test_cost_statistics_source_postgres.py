@@ -415,15 +415,14 @@ class CostSourcePostgresTests(unittest.TestCase):
             tx.execute("select set_config('fin_ops.correction_reason', 'isolated supplemental cost fixture', true)")
             tx.execute("update app.bank_transactions set amount=1192,signed_amount=-1192 where legacy_mongo_id='bank-1'")
             tx.execute("update app.workbench_pair_relations set row_ids=array['oa-a','oa-b','bank-1'],row_types=array['oa','oa','bank']")
-            tx.execute("update app.oa_applications set normalized_payload=normalized_payload || '{\"project_id\":\"project-real\"}'::jsonb")
             tx.execute("""update app.app_settings set settings_payload=settings_payload || %s::jsonb""", (json.dumps({"bank_transaction_tags":{"definitions":[{"code":"manual-fee","label":"服务费","path":["费用","服务费"],"output_primary_label":"费用","output_sub_label":"服务费","status":"active"}]}}),))
         task = self.service.get_task('cost-source-case', can_save=True)
-        self.assertEqual(task['manual_options']['projects'], [{'id':'project-real','name':'测试项目'}])
+        self.assertEqual(task['manual_options']['projects'], [{'id':'','name':'测试项目'}])
         suggestion = task['suggested_source_allocations']
         self.assertEqual([r['amount'] for r in suggestion['cost_lines']], ['600.00','400.00'])
         self.assertEqual(task['status'], 'pending')
         identity = 'manual:00000000-0000-4000-8000-000000000001'
-        item = {'unit_id':identity,'project_id':'project-real','expense_content':'人工补充测试费用','cost_tag_code':'manual-fee'}
+        item = {'unit_id':identity,'project_name':'测试项目','expense_content':'人工补充测试费用','cost_tag_code':'manual-fee'}
         return {**self.payload(), 'manual_items':[item],
                 'allocations':[{'unit_id':'oa:oa-a','amount':'600.00'},{'unit_id':'oa:oa-b','amount':'400.00'},{'unit_id':identity,'amount':'192.00'}],
                 'source_allocations':{**suggestion,'cost_lines':[*suggestion['cost_lines'],{'unit_id':identity,'bank_transaction_id':'bank-1','amount':'192.00'}]}}
@@ -485,7 +484,7 @@ class CostSourcePostgresTests(unittest.TestCase):
     def test_manual_cost_invalid_metadata_sources_and_amounts_are_atomic(self):
         from copy import deepcopy
         good=self.manual_payload()
-        for field,value in [('project_id','missing'),('cost_tag_code','missing'),('expense_content',''),('unit_id','oa:fake')]:
+        for field,value in [('project_name','missing'),('cost_tag_code','missing'),('expense_content',''),('unit_id','oa:fake')]:
             payload=deepcopy(good);payload['manual_items'][0][field]=value
             with self.subTest(field=field), self.assertRaises(CostStatisticsManualAllocationValidationError):
                 self.save(payload)

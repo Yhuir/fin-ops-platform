@@ -8,13 +8,13 @@ from fin_ops_platform.services.cost_statistics_manual_items import validate_manu
 class ManualCostItemsTests(unittest.TestCase):
     def setUp(self):
         self.options={'projects':[{'id':'p','name':'项目甲'}], 'tags':[{'code':'t','primary_label':'费用','sub_label':'服务费'}]}
-        self.item={'unit_id':'manual:00000000-0000-4000-8000-000000000001','project_id':'p','expense_content':' 服务费 ','cost_tag_code':'t'}
+        self.item={'unit_id':'manual:00000000-0000-4000-8000-000000000001','project_name':'项目甲','expense_content':' 服务费 ','cost_tag_code':'t'}
 
     def test_metadata_does_not_accept_or_fabricate_oa_bank_or_amount_fields(self):
         result=validate_manual_items([self.item],self.options,[])
         self.assertEqual(result[0]['expense_content'],'服务费')
         self.assertEqual(result[0]['project_name'],'项目甲')
-        for key in ('oa_id','bank_tag_code','amount','project_name'):
+        for key in ('oa_id','bank_tag_code','amount','project_id'):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 validate_manual_items([{**self.item,key:'invented'}],self.options,[])
 
@@ -28,7 +28,7 @@ class ManualCostItemsTests(unittest.TestCase):
         self.assertEqual(validate_manual_items([self.item],{'projects':[],'tags':[]},saved),saved)
         changed=deepcopy(self.item);changed['unit_id']='manual:00000000-0000-4000-8000-000000000002'
         with self.assertRaises(ValueError): validate_manual_items([changed],{'projects':[],'tags':[]},saved)
-        for field,value in [('project_id','unknown'),('cost_tag_code','unknown'),('expense_content',' '*2),('expense_content','长'*501),('project_id',1)]:
+        for field,value in [('project_name','unknown'),('cost_tag_code','unknown'),('expense_content',' '*2),('expense_content','长'*501),('project_name',1)]:
             with self.subTest(field=field,value=str(value)[:10]),self.assertRaises(ValueError):
                 validate_manual_items([{**self.item,field:value}],self.options,[])
 
@@ -38,3 +38,9 @@ class ManualCostItemsTests(unittest.TestCase):
             [{"id": "p", "name": "旧名称"}, {"id": "oa-only", "name": "OA项目"}],
         )
         self.assertEqual({p["id"]: p["name"] for p in options["projects"]}, {"p": "已竣工项目", "oa-only": "OA项目"})
+
+    def test_named_canonical_project_needs_no_invented_project_id(self):
+        options = {**self.options, "projects": [{"id": "", "name": "项目甲"}]}
+        saved = validate_manual_items([self.item], options, [])
+        self.assertEqual(saved[0]["project_id"], "")
+        self.assertEqual(saved[0]["project_name"], "项目甲")

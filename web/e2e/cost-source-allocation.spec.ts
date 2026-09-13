@@ -17,6 +17,7 @@ async function sourceScenario(page: Page, options: { manual?: boolean;  telecom?
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
   if (options.manual) {
+    task.units[0].project_id=""; task.manual_options.projects[0].id="";
     task.amounts_fixed=false; task.pending_reasons=['amount_required'];
     task.gross_outflow_total=task.net_outflow_total='792.00';
     task.bank_events=[{...task.bank_events[0],amount:'792.00'}];
@@ -99,7 +100,7 @@ async function sourceScenario(page: Page, options: { manual?: boolean;  telecom?
     if (route.request().method() === 'PUT') {
       writes++; savedBody = route.request().postDataJSON();
       if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '数据已变化，请重新核对；修改已保留' } });
-      task.manual_items = savedBody!.manual_items.map((item: Record<string,string>) => ({...item,project_name:'云南溯源科技',cost_tag_primary_label:'费用',cost_tag_sub_label:'服务费'}));
+      task.manual_items = savedBody!.manual_items.map((item: Record<string,string>) => ({...item,project_id:'',project_name:'云南溯源科技',cost_tag_primary_label:'费用',cost_tag_sub_label:'服务费'}));
       task.source_allocations = savedBody!.source_allocations;
       task.suggested_source_allocations = null;
       task.allocations = savedBody!.allocations;
@@ -550,7 +551,7 @@ test('manual supplemental cost closes residual, saves and reloads without creati
   await page.setViewportSize({width:1440,height:1000});
   const scene=await sourceScenario(page,{manual:true});
   await scene.drawer.getByRole('button',{name:'新增人工成本'}).click();
-  await scene.drawer.getByRole('combobox',{name:'人工成本项目',exact:true}).selectOption('p-1');
+  await scene.drawer.getByRole('combobox',{name:'人工成本项目',exact:true}).selectOption('云南溯源科技');
   await scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true}).fill('补充服务费');
   await scene.drawer.getByRole('combobox',{name:'人工成本标签',exact:true}).selectOption('service');
   const manual=scene.drawer.getByRole('table',{name:'成本分配明细',exact:true}).locator('tbody').last();
@@ -562,6 +563,7 @@ test('manual supplemental cost closes residual, saves and reloads without creati
   await scene.drawer.getByRole('button',{name:'保存分配'}).click();
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.manual_items).toHaveLength(1);
+  expect(scene.body()!.manual_items[0]).toEqual({unit_id:expect.stringMatching(/^manual:/),project_name:'云南溯源科技',expense_content:'补充服务费',cost_tag_code:'service'});
   expect(scene.body()!.source_allocations.cost_lines.map((r:{amount:string})=>r.amount)).toEqual(['600.00','192.00']);
   expect(scene.task.units).toHaveLength(1);
   await scene.drawer.getByRole('radio',{name:/已完成/}).click();

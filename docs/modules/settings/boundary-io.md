@@ -149,4 +149,4 @@
 
 ## 成本目录只读消费（2026-09-13）
 
-成本人工补充使用 `AppSettingsService.cost_manual_options_from_settings(settings, oa_projects)` 导出有效项目/成本标签。OA canonical项目ID/名称由成本repository批量提供，与已有同步/人工项目设置合并；不返回设置其它字段或凭据，不修改settings API、ACL或银行标签。人工成本标签只存成本allocation，不反写分类规则。
+成本人工补充使用 `AppSettingsService.cost_manual_options_from_settings(settings, oa_projects)` 导出有效项目/成本标签。OA canonical项目名称及可选ID由成本repository批量提供，名称是现有成本视角的选择维度，与已有同步/人工项目设置合并；不返回设置其它字段或凭据，不修改settings API、ACL或银行标签。人工成本标签只存成本allocation，不反写分类规则。
