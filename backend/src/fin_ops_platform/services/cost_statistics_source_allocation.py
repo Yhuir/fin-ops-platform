@@ -179,9 +179,11 @@ def automatic_relation_sources(
     # With one payment, the current formal relation owns every OA target. A
     # historical subset may predate later OA additions; it is not exclusive.
     multiple_sources = sum(e["event_kind"] == "outflow" for e in task["bank_events"]) > 1
+    refs_by_bank = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows}
+    if not any(refs_by_bank.values()) and (not multiple_sources or len(all_oa) == 1):
+        return automatic_source_allocations({**task})
     allowed_by_bank = {id: frozenset(group["oa_row_ids"]) & all_oa
                        for group in relation_groups for id in group["bank_row_ids"]} if multiple_sources else {}
-    refs_by_bank = {row["id"]: set(row.get("source_oa_ids", [])) for row in bank_rows}
     # Index identical ownership sets once, avoiding a banks × OA adjacency matrix.
     candidates: dict[frozenset[str], list[dict[str, Any]]] = {}
     blocked: set[str] = set()
