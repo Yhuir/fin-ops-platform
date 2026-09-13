@@ -2,6 +2,7 @@ import type { CostSourceAllocations, CostStatisticsManualAllocationTask, SaveCos
 
 export type SourceDraftLine = { id: number; ownerId: string; bankTransactionId: string; amount: string };
 export type SourceDraft = {
+  manualItems: import("./types").CostManualItem[];
   zeroUnitIds: string[];
   costLines: SourceDraftLine[];
   refundLinks: SourceDraftLine[];
@@ -23,6 +24,7 @@ export function createSourceDraft(task: CostStatisticsManualAllocationTask): Sou
   let id = 0;
   const saved = task.pendingReasons.includes('allocation_stale') ? null : (task.sourceAllocations ?? task.suggestedSourceAllocations);
   return {
+    manualItems: task.pendingReasons.includes("allocation_stale") ? [] : task.manualItems.map(item => ({ ...item })),
     zeroUnitIds: task.pendingReasons.includes('allocation_stale') ? [] : task.allocations.filter(line => cents(line.amount) === 0n).map(line => line.unitId),
     costLines: (saved?.costLines ?? []).map(line => ({ ...line, ownerId: line.unitId, id: ++id })),
     refundLinks: (saved?.refundLinks ?? []).map(line => ({ ...line, ownerId: line.refundTransactionId, id: ++id })),
@@ -48,15 +50,15 @@ export function sourceUnitAmounts(task: CostStatisticsManualAllocationTask, draf
     sums.set(line.ownerId, previous === null || amount === null || amount <= 0n ? null : (previous ?? 0n) + amount);
   }
   const zero = new Set(draft.zeroUnitIds);
-  return new Map(task.units.map(unit => [unit.unitId, task.amountsFixed
+  return new Map([...task.units.map(unit => [unit.unitId, task.amountsFixed
     ? cents(unit.oaOriginalAmount)
-    : zero.has(unit.unitId) ? 0n : sums.get(unit.unitId) ?? null]));
+    : zero.has(unit.unitId) ? 0n : sums.get(unit.unitId) ?? null] as const), ...draft.manualItems.map(item => [item.unitId, sums.get(item.unitId) ?? null] as const)]);
 }
 export function validateSourceDraft(task: CostStatisticsManualAllocationTask, draft: SourceDraft): Record<string, string> {
   const errors: Record<string, string> = {};
   if (task.pendingReasons.includes('scope_refund_required')) errors.total = '请先确认退款对应的原支出';
   const sources = new Map(task.bankEvents.filter(event => event.eventKind === 'outflow').map(event => [event.transactionId, event]));
-  const units = new Set(task.units.map(unit => unit.unitId));
+  const units = new Set([...task.units, ...draft.manualItems].map(unit => unit.unitId));
   const refunds = new Set(task.bankEvents.filter(event => event.eventKind === 'wrong_payment_refund').map(event => event.transactionId));
   const totals = new Map<string, bigint>();
   const targets = sourceUnitAmounts(task, draft);
@@ -78,6 +80,19 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
     }
   }
   let total = 0n;
+  const seenManual = new Set<string>();
+  for (const item of draft.manualItems) {
+    const key = `manual.${item.unitId}`;
+    const prior = task.manualItems.find(row => row.unitId === item.unitId);
+    if (!/^manual:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(item.unitId) || seenManual.has(item.unitId)) errors[key] = '人工成本标识无效或重复';
+    seenManual.add(item.unitId);
+    if (!task.manualOptions.projects.some(p => p.id === item.projectId) && !(prior && prior.projectId === item.projectId)) errors[`${key}.project`] = '请选择已有项目';
+    if (!item.expenseContent.trim() || item.expenseContent.trim().length > 500) errors[`${key}.content`] = '请填写不超过 500 字的成本项';
+    if (!task.manualOptions.tags.some(t => t.code === item.costTagCode) && !(prior && prior.costTagCode === item.costTagCode)) errors[`${key}.tag`] = '请选择成本标签';
+    const lines = draft.costLines.filter(line => line.ownerId === item.unitId);
+    if (lines.length !== 1 || targets.get(item.unitId) == null) errors[key] = '每条人工成本须完整分配一笔来源';
+    total += targets.get(item.unitId) ?? 0n;
+  }
   for (const unit of task.units) {
     const target = targets.get(unit.unitId);
     const key = `unit.${unit.unitId}`;
@@ -93,6 +108,7 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
   if (nonCost === null) errors.nonCost = '请填写非成本金额，未发生请填 0';
   else {
     if (sum(draft.nonCostLines) !== nonCost) errors.nonCost = '非成本来源合计与金额不一致';
+    if (nonCost === 0n && draft.nonCostReason.trim()) errors.nonCost = '非成本为零时请清空原因';
     if (nonCost > 0n && !draft.nonCostReason.trim()) errors.nonCost = '请填写不计入成本的原因';
     if (total + nonCost !== cents(task.netOutflowTotal)) errors.total = '成本与非成本合计须等于净支出';
   }
@@ -118,7 +134,8 @@ export function sourceSaveRequest(task: CostStatisticsManualAllocationTask, draf
   };
   return {
     relationCaseId: task.relationCaseId, expectedVersion: task.version, sourceFingerprint: task.sourceFingerprint, scopeVersion: task.scopeVersion,
-    allocations: task.units.map(unit => ({ unitId: unit.unitId, amount: money(targets.get(unit.unitId)!) })),
+    manualItems: draft.manualItems.map(item => ({ ...item, expenseContent: item.expenseContent.trim() })),
+    allocations: [...task.units, ...draft.manualItems].map(unit => ({ unitId: unit.unitId, amount: money(targets.get(unit.unitId)!) })),
     sourceAllocations, nonCostAmount: normalized(draft.nonCostAmount), nonCostReason: draft.nonCostReason.trim(),
   };
 }
@@ -133,7 +150,8 @@ export function sourceDecisionMatches(request: SaveCostStatisticsManualAllocatio
     ordered(value.refundLinks.map(line => [line.refundTransactionId, line.bankTransactionId, line.amount])),
     ordered(value.nonCostLines.map(line => [line.bankTransactionId, line.amount])),
   ].join('|');
-  return matrix(request.sourceAllocations) === matrix(task.sourceAllocations)
+  const manualMatrix = (items: import('./types').CostManualItem[]) => ordered(items.map(item => [item.unitId, item.projectId, item.expenseContent, item.costTagCode]));
+  return manualMatrix(request.manualItems) === manualMatrix(task.manualItems) && matrix(request.sourceAllocations) === matrix(task.sourceAllocations)
     && ordered(request.allocations.map(line => [line.unitId, line.amount])) === ordered(task.allocations.map(line => [line.unitId, line.amount]))
     && request.nonCostAmount === task.nonCostAmount && request.nonCostReason === task.nonCostReason;
 }

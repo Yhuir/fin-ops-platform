@@ -15,7 +15,7 @@ function fixture(): CostStatisticsManualAllocationTask {
       { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', oaOriginalAmount: '200.00' },
     ],
     bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', inProjectCostScope: true, amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
-    allocations: [], suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
+    allocations: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
   };
 }
 function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocationTask; save?: () => void }) {
@@ -60,9 +60,9 @@ describe('compact source allocation editor', () => {
     const { container } = render(<Editor task={fixture()} />);
     expect(screen.getByRole('heading', { name: 'OA · 2 条' })).toBeInTheDocument();
     expect(screen.queryByText('按当前分配对齐，未保存的修改尚未生效')).not.toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/internal-|unit-a|unit-b|已分|剩余/);
+    expect(container.textContent).not.toMatch(/internal-|unit-a|unit-b|已分/);
     expect(within(screen.getByRole('table', { name: '成本分配明细' })).getAllByRole('button', { name: '新增来源' })).toHaveLength(2);
-    expect(within(screen.getByRole('table', { name: '成本分配明细' })).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['项目', 'OA / 成本项', '来源流水', '银行标签', '分配金额', '操作']);
+    expect(within(screen.getByRole('table', { name: '成本分配明细' })).getAllByRole('columnheader').map(cell => cell.textContent)).toEqual(['项目', 'OA / 成本项', '来源流水', '成本标签', '分配金额', '操作']);
   });
   it('requires explicit zero and clears zero when adding a source; removing the last row stays unallocated', async () => {
     const user = userEvent.setup(); const task = fixture(); const save = vi.fn();
@@ -252,4 +252,32 @@ it.each([{saving:true}, {error:'保存结果待确认'}, {error:'关联事实已
   task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'400.00'},{unitId:'unit-b',bankTransactionId:'internal-bank',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
   render(<CostSourceAllocationForm task={task} draft={createSourceDraft(task)} disabled={false} saving={false} {...state} onChange={vi.fn()} onSave={vi.fn()} />);
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+});
+
+it('adds 192 manual cost to OA sources, validates metadata, then edits and removes it without touching evidence', async () => {
+  const user=userEvent.setup(); const task=fixture(); const save=vi.fn();
+  task.bankEvents[0].amount=task.netOutflowTotal=task.grossOutflowTotal='892.00';
+  task.manualOptions={projects:[{id:'project',name:'项目甲'}],tags:[{code:'service',label:'费用 / 服务费',primary_label:'费用',sub_label:'服务费'}]};
+  task.suggestedSourceAllocations={costLines:task.units.map(unit=>({unitId:unit.unitId,bankTransactionId:'internal-bank',amount:unit.oaOriginalAmount})),refundLinks:[],nonCostLines:[]};
+  const {container}=render(<Editor task={task} save={save}/>);
+  const originalEvidence=container.querySelector('.cost-source-evidence')!.textContent;
+  expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button',{name:'新增人工成本'}));
+  await user.selectOptions(screen.getByRole('combobox',{name:'人工成本项目'}),'project');
+  await user.type(screen.getByRole('textbox',{name:'人工成本项'}),'补充服务费');
+  await user.selectOptions(screen.getByRole('combobox',{name:'人工成本标签'}),'service');
+  const manual=within(container.querySelectorAll('.cost-source-table tbody')[2] as HTMLElement);
+  await user.click(manual.getByRole('combobox',{name:'来源流水 3'}));
+  await user.click(screen.getByRole('option',{name:/建行 8106/}));
+  await user.type(manual.getByRole('textbox',{name:'分配金额 3'}),'192');
+  expect(screen.getByText('分配金额一致')).toBeInTheDocument();
+  await user.click(screen.getByRole('button',{name:'保存分配'}));
+  expect(save).toHaveBeenCalledOnce();
+  expect(container.querySelector('.cost-source-evidence')!.textContent).toBe(originalEvidence);
+  await user.clear(manual.getByRole('textbox',{name:'分配金额 3'}));
+  await user.type(manual.getByRole('textbox',{name:'分配金额 3'}),'193');
+  expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
+  await user.click(manual.getByRole('button',{name:'删除来源行 3'}));
+  expect(screen.queryByRole('textbox',{name:'人工成本项'})).not.toBeInTheDocument();
+  expect(screen.getByText(/剩余 192.00/)).toBeInTheDocument();
 });

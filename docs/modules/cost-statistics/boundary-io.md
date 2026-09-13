@@ -57,7 +57,7 @@ PUT manual allocation
 - `GET /manual-allocations` 仅返回摘要：关系 ID、项目名集合、OA 单元/银行流水计数、关系合计、状态、原因、版本、可写权限。`counts={pending,allocated}` 与 `row_count/next_cursor` 来自同一关系快照；不在 items 中带 units/bank_events/source_allocations。
 - `GET /manual-allocations/{case_id}` 定向读取该关联的完整 OA 单元、银行证据、当前有效分配。返回当前成本范围内支出及其已确认退款份额；完整关系事实仍在 repository 内保留。关系内支出与退款一次批量分类，使用 owner 的 `effective_category_*` 明确映射，不拆斜杠或猜主子标签。
 - `PUT` 请求固定为 `relation_case_id, expected_version, scope_version, source_fingerprint, allocations, source_allocations, non_cost_amount, non_cost_reason`。单元合计只接受 `{unit_id,amount}`；来源明细分别为 `cost_lines[{unit_id,bank_transaction_id,amount}]`、`refund_links[{refund_transaction_id,bank_transaction_id,amount}]`、`non_cost_lines[{bank_transaction_id,amount}]`。金额为两位小数字符串；来源行必须正数，零成本单元允许明确 0。
-- 选择来源后，银行账户、银行主/子标签与付款日期只读；不接受独立标签/银行字段。OA 费用类型仅作原始凭据。
+- 选择来源后，银行账户与付款日期只读。OA 行标签取来源；人工补充行通过 cost_tag_code 单独选择成本标签，不写银行分类。OA 费用类型仅作原始凭据。
 - 保留 `C+X=N`，并校验逐来源、逐退款和逐单元闭合；`O=N` 时逐单元目标必须等于 canonical OA 原额。
 - 保存先取得既有 relation member locks，再锁关系及来源银行/OA 行，重新核对事实与版本。一次事务写 allocation 和 audit；锁冲突、事实变化、CAS 冲突返回 409，不自动重试提交。
 - 0169 只为既有 manual allocation 表增加 nullable JSONB `source_allocations`。旧 NULL 表示没有显式来源决定，只在当前事实确实存在唯一解时推导，不反推历史多对多。
@@ -222,3 +222,15 @@ PUT manual allocation
 - 预填仅初始化未保存草稿；上下证据、编辑保护、范围刷新和保存重读保持既有边界。本次无数据库迁移或备份。
 
 - 保存后相同版本、相同关系/范围且状态未变的刷新保留已确认保存提示；事实变化或显式重载清除提示。不会阻止读取或恢复旧草稿。
+
+## 人工补充 I/O（2026-09-13）
+
+- GET/PUT `/api/cost-statistics/manual-allocations/{case}` 增加 `manual_items`；GET/成功 PUT 同时返回 `manual_options{projects:[{id,name}],tags:[{code,label,primary_label,sub_label}]}`。列表摘要不含目录、明细，搜索/项目名称覆盖人工行。
+- PUT 的人工元数据只接受 `{unit_id,project_id,expense_content,cost_tag_code}`，`unit_id=manual:<UUID4>`，最多200条；内容1–500字，项目/标签必须有效。响应另带服务端项目与成本标签名称。金额仍只通过既有 `allocations` / `source_allocations.cost_lines` 提交，不在元数据复制金额。
+- 人工 ID 不是 OA ID；每个人工项必须有且只有一条正数两位小数成本来源。来源必须属于当前任务范围内支出，逐笔成本+退款+非成本等于流水原额。前后端共同核对，最终以事务内 canonical 校验为准。
+- Repository 在既有 allocation 表新增0171 `manual_items jsonb not null default []`；同一事务保存来源、元数据、版本与审计。目录由定向详情事务批量读取 OA 项目标识/名称、设置和标签；不让前端调用 OA provider，不增加 worker/cache/read model。
+- 保留现有 relation/source/scope/version 冲突机制。旧客户端省略 manual_items 且已有人工记录时明确409，禁止静默丢弃。范围外人工项与对应来源一同保留，范围内删除仅在新的完整有效分配保存后生效。关联/金额变化使原决定失效，不自动重用旧人工成本。
+- 查询生成 `row_kind=manual_allocation`，详情 `kind=manual_allocation`、`oa_original_amount=null`、OA ID空；人工金额进入三个成本视角和原有导出，银行流水视角不变。成本标签覆盖不参与来源范围准入，准入仍按原银行有效标签。
+- 不写 `oa_applications`、银行金额/分类或 Workbench 关系；不修改其它页面 I/O。普通 OA 与历史有效分配沿用原路，无并行旧人工实现。
+
+人工成本项目选择包含已有的已完成项目，支持历史成本补录；项目完成状态不作为成本补录限制。标签仍取当前有效标签，历史保存但已停用的标签只允许原条目保留。

@@ -34,7 +34,7 @@ type ApiCostSummary = {
 
 type ApiCostExplorerEntryRow = {
   entry_id: string;
-  row_kind: "bank_transaction" | "oa_allocation";
+  row_kind: "bank_transaction" | "oa_allocation" | "manual_allocation";
   transaction_id?: string | null;
   allocation_id?: string | null;
   occurred_at: string | null;
@@ -131,7 +131,11 @@ type ApiCostStatisticsExplorerPage = {
   } | null;
 };
 
+type ApiCostManualItem = { unit_id: string; project_id: string; expense_content: string; cost_tag_code: string;
+  project_name: string; cost_tag_primary_label: string; cost_tag_sub_label: string };
 type ApiCostStatisticsManualAllocationTask = {
+  manual_items: ApiCostManualItem[];
+  manual_options: import('./types').CostManualOptions;
   relation_case_id: string;
   relation_version: number;
   source_fingerprint: string;
@@ -189,7 +193,7 @@ type ApiCostSourceAllocations = {
   non_cost_lines: Array<{ bank_transaction_id: string; amount: string }>;
 };
 
-type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations" | "suggested_source_allocations" | "relation_display_groups"> & {
+type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations" | "suggested_source_allocations" | "relation_display_groups" | "manual_items" | "manual_options"> & {
   project_names: string[]; unit_count: number; bank_event_count: number;
 };
 
@@ -225,7 +229,7 @@ type ApiCostBankTransactionDetail = {
 
 type ApiCostAllocationDetail = {
   month: string;
-  kind: "oa_allocation";
+  kind: "oa_allocation" | "manual_allocation";
   allocation: {
     allocation_id: string;
     transaction_id: string | null;
@@ -248,7 +252,7 @@ type ApiCostAllocationDetail = {
     payment_account_label: string;
     bank_account_label: string;
     oa_applicant: string;
-    oa_original_amount: string;
+    oa_original_amount: string | null;
     oa_allocation_weight: string;
     bank_event_amount: string;
   };
@@ -422,6 +426,9 @@ function mapManualAllocationTask(
     status: task.status,
     pendingReasons: task.pending_reasons,
     amountsFixed: task.amounts_fixed,
+    manualItems: task.manual_items.map(item => ({ unitId: item.unit_id, projectId: item.project_id, expenseContent: item.expense_content,
+      costTagCode: item.cost_tag_code, projectName: item.project_name, costTagPrimaryLabel: item.cost_tag_primary_label, costTagSubLabel: item.cost_tag_sub_label })),
+    manualOptions: task.manual_options,
     relationDisplayGroups: task.relation_display_groups.map(group => ({ unitIds: group.unit_ids, bankTransactionIds: group.bank_transaction_ids, sourcesExcluded: group.sources_excluded })),
     suggestedSourceAllocations: task.suggested_source_allocations === null ? null : mapSourceAllocations(task.suggested_source_allocations),
     sourceAllocations: task.source_allocations === null ? null : mapSourceAllocations(task.source_allocations),
@@ -636,6 +643,7 @@ export async function saveCostStatisticsManualAllocation(
         expected_version: request.expectedVersion,
         source_fingerprint: request.sourceFingerprint,
         scope_version: request.scopeVersion,
+        manual_items: request.manualItems.map(item => ({ unit_id: item.unitId, project_id: item.projectId, expense_content: item.expenseContent, cost_tag_code: item.costTagCode })),
         allocations: request.allocations.map((line) => ({
           unit_id: line.unitId,
           amount: line.amount,

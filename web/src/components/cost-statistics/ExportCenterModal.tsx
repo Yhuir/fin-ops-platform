@@ -122,7 +122,7 @@ function CostTagSelector({ title, options, labels, selected, onChange }: CostTag
           ))}
         </div>
       ) : (
-        <div className="cost-explorer-empty">当前没有可选银行主标签。</div>
+        <div className="cost-explorer-empty">当前没有可选成本主标签。</div>
       )}
     </section>
   );
@@ -269,7 +269,7 @@ export default function ExportCenterModal({
               size="sm"
               variant={mode === "cost_tag" ? "primary" : "secondary"}
             >
-              按银行主标签
+              按成本主标签
             </Button>
           </div>
 
@@ -388,7 +388,7 @@ export default function ExportCenterModal({
                 />
               </section>
               <CostTagSelector
-                title="银行主标签"
+                title="成本主标签"
                 options={costTagOptions}
                 labels={costTagLabels}
                 selected={projectCostTags}
@@ -403,7 +403,7 @@ export default function ExportCenterModal({
                 <div className="export-center-section-header">
                   <h3>时间范围</h3>
                 </div>
-                <RadioGroup aria-label="银行主标签时间范围" className="project-export-radio-group" onChange={(value) => onCostTagRangeModeChange(value as ExportRangeMode)} value={costTagRangeMode}>
+                <RadioGroup aria-label="成本主标签时间范围" className="project-export-radio-group" onChange={(value) => onCostTagRangeModeChange(value as ExportRangeMode)} value={costTagRangeMode}>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
@@ -432,7 +432,7 @@ export default function ExportCenterModal({
                 )}
               </section>
               <CostTagSelector
-                title="银行主标签"
+                title="成本主标签"
                 options={costTagOptions}
                 labels={costTagLabels}
                 selected={costTagSelections}

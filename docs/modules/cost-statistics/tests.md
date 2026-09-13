@@ -172,3 +172,11 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - `test_cost_statistics_source_postgres.py`：真实隔离 PostgreSQL + HTTP 的重复金额历史关系→预填零写入→保存/审计→重新读取→三成本视角→撤回后读取和旧提交拒绝；原并发、退款、范围和回滚测试继续运行。
 - `cost-source-allocation.spec.ts`：7 组14行预填、无重复、可编辑、金额提示、保存后完成页重读。原刷新保护、权限、错误、保存结果核实、100行交互测量继续覆盖。
 - 无新 read model/cache/worker；更新验证由现有 canonical GET、抽屉刷新测试承担。
+
+## 人工补充专项（2026-09-13）
+
+- 核心：`test_cost_statistics_manual_items.py` 覆盖有效/空/重复/非法字段、停用目录只保留原选择。`test_cost_statistics_source_allocation.py` 保护逐来源/退款/OA单元校验。
+- 真实 PostgreSQL + HTTP：`test_cost_statistics_source_postgres.py` 的 `manual_cost` 用例覆盖192残差预填、人工保存/重读/修改/删除、三个视图、详情/导出、审计原子失败、CAS重放、403、范围排除/恢复、局部保存保留其它来源人工项、撤回关系，断言OA/银行/关系事实零变化。
+- 前端：`CostSourceAllocationForm.test.tsx` 验证选项目/标签/来源、金额绿字、超额撤销绿字、删除释放192余额以及证据区不受编辑影响；API与既有刷新/错误恢复测试更新新字段。
+- 浏览器：`cost-source-allocation.spec.ts` 的 manual supplemental 场景验证真实页面新增、保存、已完成重开、1440与1280窗口截图；既有来源分配、成本五视图及关联变动回归继续运行。
+- 七类：1、2、3、5、6、7适用；4不适用，成本保持canonical直接读取，无read model/cache/job改变。性能分开报告公网GET与浏览器交互耗时；生产不编造192用途来执行财务保存。

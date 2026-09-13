@@ -36,12 +36,12 @@ test.describe("cost statistics relation browser fan-out", () => {
     await expect(linkedProject).toContainText("58000.00");
     await linkedProject.click();
 
-    const linkedExpenseType = page.getByRole("option", { name: "选择银行主标签 项目开销" });
+    const linkedExpenseType = page.getByRole("option", { name: "选择成本主标签 项目开销" });
     await expect(linkedExpenseType).toBeVisible();
     await expect(linkedExpenseType).toContainText("58000.00");
     await linkedExpenseType.click();
 
-    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    await page.getByRole("option", { name: "选择成本子标签 设备材料" }).click();
     const projectRows = page.getByRole("grid", { name: "成本明细表" });
     await expect(projectRows).toBeVisible();
     await expect(projectRows).toContainText("智能工厂设备尾款");
@@ -49,7 +49,7 @@ test.describe("cost statistics relation browser fan-out", () => {
     const detailRequest = page.waitForRequest((request) =>
       decodeURIComponent(requestPath(request.url())).endsWith("/api/cost-statistics/allocations/oa:bk-o-202603-001"),
     );
-    await projectRows.getByRole("button", { name: /^查看OA 成本归集 智能工厂项目/ }).click();
+    await projectRows.getByRole("button", { name: /^查看成本明细 智能工厂项目/ }).click();
     expect(new URL((await detailRequest).url()).searchParams.has("project_scope")).toBe(false);
 
     const detailDialog = page.getByRole("dialog", { name: "OA 成本归集明细" });

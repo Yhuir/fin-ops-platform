@@ -408,7 +408,7 @@ class CostStatisticsPolicy:
             "oa_id": match["oa_id"],
             "oa_apply_type": match["oa_apply_type"],
             "expense_item_id": match["expense_item_id"],
-            "oa_original_amount": _money(match["oa_original_amount"]),
+            "oa_original_amount": None if match["row_kind"] == "manual_allocation" else _money(match["oa_original_amount"]),
             "oa_allocation_weight": match["oa_allocation_weight"],
             "bank_event_amount": match["bank_event_amount"],
             "payment_evidence": [dict(row) for row in match["payment_evidence"]],
@@ -809,12 +809,16 @@ def _append_source_allocation_entries(
     decision = task["source_allocations"]
     if decision is None:
         return
+    manual_by_id = {item["unit_id"]: item for item in task["manual_items"]}
     for line in decision["cost_lines"]:
         amount = _required_nonnegative_money(line["amount"])
         if amount == ZERO:
             continue
         bank_row = sources[line["bank_transaction_id"]]
         if not source_in_project_cost_scope(bank_row, selected_codes):
+            continue
+        if line["unit_id"] in manual_by_id:
+            entries.append(_manual_cost_entry(manual_by_id[line["unit_id"]], bank_row, amount, relation_case_id, payment_evidence, reconciliation))
             continue
         entries.append(_allocation_entry(
             contexts_by_id[line["unit_id"]], bank_row=bank_row,
@@ -881,6 +885,7 @@ def _manual_allocation_task(
         "difference": reconciliation["difference"],
         "amounts_fixed": reconciliation["difference"] == "0.00",
         "units": units,
+        "manual_items": [],
         "bank_events": bank_events,
         "allocations": [],
         "non_cost_amount": "0.00",
@@ -930,12 +935,13 @@ def _manual_allocation_task(
         task["non_cost_reason"] = ""
         # A stale decision cannot choose a new source automatically.
         return project_source_task(task, None)
+    task["manual_items"] = list(manual_record.get("manual_items", []))
     raw_allocations = [
         dict(line)
         for line in list(manual_record.get("allocations") or [])
         if isinstance(line, dict)
     ]
-    expected_unit_ids = [str(unit["unit_id"]) for unit in units]
+    expected_unit_ids = [str(unit["unit_id"]) for unit in units + task["manual_items"]]
     allocations_by_unit: dict[str, Decimal] = {}
     for line in raw_allocations:
         unit_id = _clean_text(line.get("unit_id"))
@@ -1478,6 +1484,24 @@ def _allocation_entry(
     }
 
 
+def _manual_cost_entry(item: dict[str, Any], bank: dict[str, Any], amount: Decimal,
+                       case_id: str, evidence: list[dict[str, Any]], reconciliation: dict[str, Any]) -> dict[str, Any]:
+    source = _serialize_bank_row(bank)
+    identity = f"relation:{case_id}:unit:{item['unit_id']}:source:{source['transaction_id']}"
+    path = list(dict.fromkeys(v for v in [item["cost_tag_primary_label"], item["cost_tag_sub_label"]] if v))
+    return {**source, "entry_id": identity, "row_key": identity, "allocation_id": identity,
+            "row_kind": "manual_allocation", "relation_case_id": case_id, "group_id": case_id,
+            "project_id": item["project_id"], "project_name": item["project_name"],
+            "expense_content": item["expense_content"], "expense_type": "人工补充", "oa_id": "",
+            "oa_applicant": "", "oa_apply_type": "", "oa_completed_at": "", "expense_item_id": "",
+            "oa_original_amount": None, "oa_allocation_weight": "", "bank_event_amount": source["amount"],
+            "amount_decimal": amount, "occurred_at": source["trade_time"],
+            "bank_account_label": source["payment_account_label"],
+            "bank_tag_code": item["cost_tag_code"], "bank_tag_primary_label": item["cost_tag_primary_label"],
+            "bank_tag_sub_label": item["cost_tag_sub_label"], "bank_tag_label_path": path,
+            "bank_tag_label": " / ".join(path), "payment_evidence": evidence, "reconciliation": reconciliation}
+
+
 def _payment_evidence(bank_row: dict[str, Any]) -> dict[str, Any]:
     row = _serialize_bank_row(bank_row)
     return {
@@ -1854,6 +1878,7 @@ def _aggregate_export_rows(
         bucket["transactions"].add(_row_identity(row))
     return [
         {
+            "row_kind": "aggregate",
             "period_label": bucket["period_label"],
             "project_name": bucket["project_name"],
             "bank_tag_primary_label": bucket["bank_tag_primary_label"],

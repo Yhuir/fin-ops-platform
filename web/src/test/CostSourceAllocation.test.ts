@@ -12,7 +12,7 @@ export function sourceTask(): CostStatisticsManualAllocationTask {
       { transactionId: 'bank-a', eventKind: 'outflow', amount: '350.00', counterpartyName: '供应商', tradeTime: '2026-08-15', tags: ['采购', '材料款'], bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
       { transactionId: 'bank-b', eventKind: 'outflow', amount: '250.00', counterpartyName: '供应商', tradeTime: '2026-09-03', tags: ['采购', '材料款'], bankAccountLabel: '民生 9486', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
     ],
-    allocations: [{ unitId: 'oa-1:parent', amount: '600.00' }], suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null,
+    allocations: [{ unitId: 'oa-1:parent', amount: '600.00' }], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null,
     nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedAt: '', updatedBy: '', canSave: true,
   };
 }

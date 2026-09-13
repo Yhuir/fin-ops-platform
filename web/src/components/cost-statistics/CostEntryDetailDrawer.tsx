@@ -15,8 +15,8 @@ type Props = {
 };
 
 export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, error, onClose, onRetry }: Props) {
-  const allocationView = rowKind === "oa_allocation";
-  const title = allocationView ? "OA 成本归集明细" : "银行流水详情";
+  const allocationView = rowKind !== "bank_transaction";
+  const title = rowKind === "manual_allocation" ? "人工成本明细" : allocationView ? "OA 成本归集明细" : "银行流水详情";
   return (
     <AppDrawer
       ariaBusy={loading}

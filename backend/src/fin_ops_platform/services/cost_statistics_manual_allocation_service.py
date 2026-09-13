@@ -4,10 +4,12 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.cost_statistics_allocation_scope import merge_source_decision
 from fin_ops_platform.services.cost_statistics_canonical_repository import (
     PostgresCostStatisticsCanonicalRepository,
 )
+from fin_ops_platform.services.cost_statistics_manual_items import allocation_targets, validate_manual_items
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 from fin_ops_platform.services.cost_statistics_source_allocation import (
     SourceAllocationError,
@@ -136,6 +138,7 @@ class CostStatisticsManualAllocationService:
         group = next(group for group in snapshot["cost_groups"]
                      if group["group_id"] == relation_case_id)
         return {**task, "can_save": can_save,
+                "manual_options": AppSettingsService.cost_manual_options_from_settings(snapshot["settings"], snapshot["manual_projects"]),
                 "suggested_source_allocations": suggest_source_allocations(task, group["bank_rows"], group["source_relation_groups"]),
                 "relation_display_groups": _relation_display_groups(task, group)}
 
@@ -205,6 +208,7 @@ class CostStatisticsManualAllocationService:
             "scope_version",
             "source_fingerprint",
             "allocations",
+            "manual_items",
             "source_allocations",
             "non_cost_amount",
             "non_cost_reason",
@@ -262,9 +266,18 @@ class CostStatisticsManualAllocationService:
             raise CostStatisticsManualAllocationConflictError(
                 "人工分配版本已变化，请刷新后重试。"
             )
+        previous = snapshot["manual_allocations"].get(relation_case_id)
+        if "manual_items" not in payload and previous and previous.get("manual_items"):
+            raise CostStatisticsManualAllocationConflictError("分配包含人工成本，请刷新页面后再保存。")
+        options = AppSettingsService.cost_manual_options_from_settings(snapshot["settings"], snapshot["manual_projects"])
+        try:
+            manual_items = validate_manual_items(payload.get("manual_items", []), options, task["manual_items"])
+        except ValueError as exc:
+            raise CostStatisticsManualAllocationValidationError(str(exc)) from exc
+        task = {**task, "manual_items": manual_items}
         allocations = _validate_allocations(
             payload.get("allocations"),
-            units=list(task.get("units") or []),
+            units=allocation_targets(task),
         )
         non_cost_amount = _optional_money(payload.get("non_cost_amount"))
         non_cost_reason = _non_cost_reason(payload.get("non_cost_reason"))
@@ -304,7 +317,15 @@ class CostStatisticsManualAllocationService:
                 and Decimal(previous["gross_outflow_total"]) != Decimal(task["gross_outflow_total"])):
             raise CostStatisticsManualAllocationValidationError("历史分配缺少逐笔来源，请先在完整范围确认来源。")
         # Preserve all canonical unit identities, including units hidden by current scope.
-        all_units = [{"unit_id": line["unit_id"]} for line in previous["allocations"]] if previous and previous["source_fingerprint"] == source_fingerprint else task["units"]
+        valid_previous = previous if previous and previous["source_fingerprint"] == source_fingerprint else None
+        selected = {e["transaction_id"] for e in task["bank_events"] if e["event_kind"] == "outflow"}
+        outside_ids = {line["unit_id"] for line in valid_previous["source_allocations"]["cost_lines"] if line["bank_transaction_id"] not in selected} if valid_previous and valid_previous["source_allocations"] else set()
+        retained_manual = [item for item in valid_previous.get("manual_items", []) if item["unit_id"] in outside_ids] if valid_previous else []
+        if {i["unit_id"] for i in retained_manual} & {i["unit_id"] for i in manual_items}:
+            raise CostStatisticsManualAllocationValidationError("人工成本不能跨当前范围修改来源。")
+        stored_manual = retained_manual + manual_items
+        oa_ids = [line["unit_id"] for line in valid_previous["allocations"] if not line["unit_id"].startswith("manual:")] if valid_previous else [u["unit_id"] for u in task["units"]]
+        all_units = [{"unit_id": id} for id in oa_ids] + stored_manual
         merged = merge_source_decision({**task, "non_cost_reason": non_cost_reason}, previous, source_allocations, all_units)
         merged["non_cost_reason"] = _non_cost_reason(merged["non_cost_reason"])
         stored_refund = sum((Decimal(line["amount"]) for line in merged["source_allocations"]["refund_links"]), Decimal("0.00"))
@@ -319,6 +340,7 @@ class CostStatisticsManualAllocationService:
             net_outflow_total=f"{stored_net:.2f}",
             allocations=merged["allocations"],
             source_allocations=merged["source_allocations"],
+            manual_items=stored_manual,
             non_cost_amount=merged["non_cost_amount"],
             non_cost_reason=merged["non_cost_reason"],
             expected_version=expected_version,
@@ -349,6 +371,7 @@ class CostStatisticsManualAllocationService:
                         "version": int(saved["version"]),
                         "net_outflow_total": str(task["net_outflow_total"]),
                         "allocations": allocations,
+                        "manual_items": manual_items,
                         "source_allocations": source_allocations,
                         "non_cost_amount": f"{non_cost_amount:.2f}",
                         "non_cost_reason": non_cost_reason,
@@ -359,6 +382,7 @@ class CostStatisticsManualAllocationService:
         return complete_source_task({
             **task,
             "status": "allocated",
+            "manual_options": options,
             "relation_display_groups": _relation_display_groups(task, group),
             "allocations": allocations,
             "non_cost_amount": f"{non_cost_amount:.2f}",
@@ -484,7 +508,7 @@ def _task_search_text(task: dict[str, Any]) -> str:
         str(task.get("updated_by") or ""),
         str(task.get("updated_at") or ""),
     ]
-    for unit in list(task.get("units") or []):
+    for unit in allocation_targets(task):
         if isinstance(unit, dict):
             visible_values.extend(
                 str(unit.get(key) or "")
@@ -516,9 +540,9 @@ def _task_search_text(task: dict[str, Any]) -> str:
 def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value for key, value in task.items()
-        if key not in {"units", "bank_events", "allocations", "source_allocations", "suggested_source_allocations"}
+        if key not in {"units", "bank_events", "allocations", "source_allocations", "suggested_source_allocations", "manual_items", "manual_options"}
     } | {
-        "project_names": list(dict.fromkeys(unit["project_name"] for unit in task["units"])),
+        "project_names": list(dict.fromkeys(unit["project_name"] for unit in allocation_targets(task))),
         "unit_count": len(task["units"]),
         "bank_event_count": len(task["bank_events"]),
     }

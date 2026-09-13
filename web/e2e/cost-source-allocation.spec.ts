@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
@@ -13,9 +13,15 @@ async function sourceScenario(page: Page, options: { telecom?: boolean; scopedLo
       { transaction_id: 'bank-a', event_kind: 'outflow', in_project_cost_scope: true, amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
       { transaction_id: 'bank-b', event_kind: 'outflow', in_project_cost_scope: true, amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
     ],
-    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], relation_display_groups: [] as Array<{unit_ids:string[];bank_transaction_ids:string[];sources_excluded:boolean}>, suggested_source_allocations: null as unknown, source_allocations: null as unknown,
+    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], relation_display_groups: [] as Array<{unit_ids:string[];bank_transaction_ids:string[];sources_excluded:boolean}>, manual_items: [] as Array<Record<string,string>>, manual_options: { projects: [{id:"p-1",name:"云南溯源科技"}], tags: [{code:"service",label:"费用 / 服务费",primary_label:"费用",sub_label:"服务费"}] }, suggested_source_allocations: null as unknown, source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
+  if (options.manual) {
+    task.amounts_fixed=false; task.pending_reasons=['amount_required'];
+    task.gross_outflow_total=task.net_outflow_total='792.00';
+    task.bank_events=[{...task.bank_events[0],amount:'792.00'}];
+    task.suggested_source_allocations={cost_lines:[{unit_id:'oa-1',bank_transaction_id:'bank-a',amount:'600.00'}],refund_links:[],non_cost_lines:[]};
+  }
   if (options.scopedLoan) {
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '2100.00';
     task.units = [{...task.units[0], oa_original_amount:'2100.00', expense_content:'住宿费'}];
@@ -93,6 +99,7 @@ async function sourceScenario(page: Page, options: { telecom?: boolean; scopedLo
     if (route.request().method() === 'PUT') {
       writes++; savedBody = route.request().postDataJSON();
       if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '数据已变化，请重新核对；修改已保留' } });
+      task.manual_items = savedBody!.manual_items.map((item: Record<string,string>) => ({...item,project_name:'云南溯源科技',cost_tag_primary_label:'费用',cost_tag_sub_label:'服务费'}));
       task.source_allocations = savedBody!.source_allocations;
       task.suggested_source_allocations = null;
       task.allocations = savedBody!.allocations;
@@ -140,7 +147,7 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
   await page.setViewportSize({ width: 1440, height: 1000 });
   const scene = await sourceScenario(page);
   await fillSources(page, scene.unit);
-  await expect(scene.drawer.getByText(/剩余|已分 |bank-a|bank-b|source-case|OA-202608-001/)).toHaveCount(0);
+  await expect(scene.drawer.getByText(/已分 |bank-a|bank-b|source-case|OA-202608-001/)).toHaveCount(0);
   expect(scene.details()).toBe(1);
   expect(scene.writes()).toBe(0);
   const evidence = scene.drawer.locator('.cost-source-evidence');
@@ -536,4 +543,31 @@ test('seven historical OA groups prefill fourteen sources, stay editable and sur
   await expect(table.getByRole('combobox')).toHaveCount(14);
   expect(await table.getByRole('textbox').evaluateAll(inputs=>inputs.map(input=>(input as HTMLInputElement).value))).toEqual(expected);
   await expectNoUnexpectedSuccessUiErrors(page);
+});
+
+
+test('manual supplemental cost closes residual, saves and reloads without creating an OA', async ({ page }, testInfo) => {
+  await page.setViewportSize({width:1440,height:1000});
+  const scene=await sourceScenario(page,{manual:true});
+  await scene.drawer.getByRole('button',{name:'新增人工成本'}).click();
+  await scene.drawer.getByRole('combobox',{name:'人工成本项目',exact:true}).selectOption('p-1');
+  await scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true}).fill('补充服务费');
+  await scene.drawer.getByRole('combobox',{name:'人工成本标签',exact:true}).selectOption('service');
+  const manual=scene.drawer.getByRole('table',{name:'成本分配明细',exact:true}).locator('tbody').last();
+  await manual.getByRole('combobox',{name:'来源流水 2',exact:true}).click();
+  await page.getByRole('option',{name:/建设银行 8106/}).click();
+  await manual.getByRole('textbox',{name:'分配金额 2',exact:true}).fill('192');
+  await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('manual-cost-1440.png'),fullPage:false});
+  await scene.drawer.getByRole('button',{name:'保存分配'}).click();
+  await expect.poll(scene.writes).toBe(1);
+  expect(scene.body()!.manual_items).toHaveLength(1);
+  expect(scene.body()!.source_allocations.cost_lines.map((r:{amount:string})=>r.amount)).toEqual(['600.00','192.00']);
+  expect(scene.task.units).toHaveLength(1);
+  await scene.drawer.getByRole('radio',{name:/已完成/}).click();
+  await expect(scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true})).toHaveValue('补充服务费');
+  await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
+  await page.setViewportSize({width:1280,height:800});
+  await scene.drawer.getByRole('textbox',{name:'人工成本项',exact:true}).scrollIntoViewIfNeeded();
+  await page.screenshot({path:testInfo.outputPath('manual-cost-1280.png'),fullPage:false});
 });

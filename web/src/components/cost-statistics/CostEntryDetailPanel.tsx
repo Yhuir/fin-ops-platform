@@ -33,7 +33,7 @@ function costDetailSections(detail: CostEntryDetail) {
     title: "基本信息",
     fields: [
       { label: "本项净成本", value: formatCostAmount(allocation.amount) },
-      { label: "OA 原始金额", value: formatCostAmount(allocation.oaOriginalAmount) },
+      ...(allocation.oaOriginalAmount === null ? [] : [{ label: "OA 原始金额", value: formatCostAmount(allocation.oaOriginalAmount) }]),
       { label: "OA 金额占比", value: allocation.oaAllocationWeight },
       { label: "本笔支出流水原额", value: formatCostAmount(allocation.bankEventAmount) },
       { label: "审批完成时间", value: allocation.oaCompletedAt },
@@ -81,10 +81,10 @@ function costDetailSections(detail: CostEntryDetail) {
     fields: [
       { label: "来源流水", value: allocation.transactionId || "来源待分配" },
       { label: "付款日期", value: allocation.occurredAt || "付款日期待完善" },
-      { label: "银行主标签", value: allocation.bankTagPrimaryLabel || "银行标签待完善" },
-      { label: "银行子标签", value: allocation.bankTagSubLabel || "未设置子标签" },
-      { label: "完整银行标签", value: allocation.bankTagLabelPath.join(" / ") },
-      { label: "原 OA 费用类型", value: allocation.expenseType },
+      { label: "成本主标签", value: allocation.bankTagPrimaryLabel || "银行标签待完善" },
+      { label: "成本子标签", value: allocation.bankTagSubLabel || "未设置子标签" },
+      { label: "完整成本标签", value: allocation.bankTagLabelPath.join(" / ") },
+      { label: detail.kind === "manual_allocation" ? "明细来源" : "原 OA 费用类型", value: allocation.expenseType },
     ],
   }];
 }

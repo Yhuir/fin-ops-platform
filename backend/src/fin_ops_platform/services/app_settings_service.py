@@ -2514,6 +2514,20 @@ class AppSettingsService:
         return active_tags
 
     @staticmethod
+    def cost_manual_options_from_settings(settings: dict[str, Any], oa_projects: list[dict[str, str]]) -> dict[str, Any]:
+        """Cost's read-only catalogue; never return credentials or mutate project/tag facts."""
+        projects = {p["id"]: {"id": p["id"], "name": p["project_name"]}
+                    for family in ("synced_projects", "manual_projects")
+                    for p in settings.get(family, [])
+                    if p["id"] and p["project_name"]}
+        projects = {**{p["id"]: p for p in oa_projects}, **projects}
+        tags = AppSettingsService._cost_statistics_tag_definitions(settings.get("bank_transaction_tags", {}))
+        return {"projects": sorted(projects.values(), key=lambda p: (p["name"], p["id"])),
+                "tags": [{"code": t["code"], "label": " / ".join(t["path"]),
+                          "primary_label": t["output_primary_label"], "sub_label": t["output_sub_label"]}
+                         for t in tags if t["status"] == "active" and t["code"] != COST_STATISTICS_UNCATEGORIZED_TAG_CODE]}
+
+    @staticmethod
     def _cost_statistics_tag_definitions(bank_transaction_tags: dict[str, Any]) -> list[dict[str, Any]]:
         active_tags: list[dict[str, Any]] = []
         seen_codes: set[str] = set()

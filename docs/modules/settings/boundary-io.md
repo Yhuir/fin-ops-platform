@@ -146,3 +146,7 @@
 ## 项目成本范围（2026-09-11）
 
 `cost_statistics_project_cost_scope={version,selected_tag_codes}` 由 AppSettingsService 的窄命令管理。GET 读取正式配置与银行标签清单；PUT 在现有 settings advisory/row lock 下校验最新字典及版本，通过 versioned family repository 只更新本项并同事务写 audit。相同选择无写入。普通设置保存及 normalized replacement 保留此 family 最新值，标签改名/新增不自动扩选。0170 显式初始化；缺键不运行时全选，空数组不重置。HTTP 权限仍由成本 route 负责。
+
+## 成本目录只读消费（2026-09-13）
+
+成本人工补充使用 `AppSettingsService.cost_manual_options_from_settings(settings, oa_projects)` 导出有效项目/成本标签。OA canonical项目ID/名称由成本repository批量提供，与已有同步/人工项目设置合并；不返回设置其它字段或凭据，不修改settings API、ACL或银行标签。人工成本标签只存成本allocation，不反写分类规则。

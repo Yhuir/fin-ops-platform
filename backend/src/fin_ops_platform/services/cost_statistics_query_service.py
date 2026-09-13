@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import base64
-from decimal import Decimal
-from io import BytesIO
 import json
 import re
+from decimal import Decimal
+from io import BytesIO
 from typing import Any
 
 from openpyxl import Workbook
 
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 from fin_ops_platform.services.search_query import normalize_money_search_query
-
 
 COST_STATISTICS_EXPORT_ROW_LIMIT = 20000
 COST_STATISTICS_EXPORT_PREVIEW_SIZE = 8
@@ -247,7 +246,7 @@ class CostStatisticsQueryService:
             raise KeyError(allocation_id)
         return {
             "month": str(row.get("month") or "")[:7] or "all",
-            "kind": "oa_allocation",
+            "kind": row["row_kind"],
             "allocation": {
                 key: row.get(key)
                 for key in (
@@ -735,6 +734,7 @@ class CostStatisticsQueryService:
                 or ""
             ).strip(),
             "allocation_id": str(raw_row.get("allocation_id") or "").strip(),
+            "row_kind": raw_row["row_kind"],
             "transaction_id": raw_row.get("transaction_id"),
             "allocation_state": raw_row.get("allocation_state", "source_resolved"),
             "oa_id": str(raw_row.get("oa_id") or "").strip(),
@@ -929,7 +929,7 @@ class CostStatisticsQueryService:
                 entry["bank_tag_primary_label"], entry["bank_tag_sub_label"], " / ".join(entry["bank_tag_label_path"]),
                 entry["amount"], entry["expense_content"], entry["oa_applicant"], entry["transaction_id"],
                 entry["entry_id"], entry["oa_id"], entry["expense_type"],
-                "来源已确定"]
+                "人工补充" if entry["row_kind"] == "manual_allocation" else "来源已确定"]
 
     @staticmethod
     def _table_workbook(

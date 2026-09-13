@@ -25,6 +25,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                 net_outflow_total,
                 unit_allocations,
                 source_allocations,
+                manual_items,
                 non_cost_amount,
                 non_cost_reason,
                 version,
@@ -56,6 +57,7 @@ class PostgresCostStatisticsManualAllocationRepository:
         net_outflow_total: str,
         allocations: list[dict[str, str]],
         source_allocations: dict[str, Any],
+        manual_items: list[dict[str, Any]],
         non_cost_amount: str,
         non_cost_reason: str,
         expected_version: int,
@@ -74,6 +76,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     net_outflow_total,
                     unit_allocations,
                     source_allocations,
+                    manual_items,
                     non_cost_amount,
                     non_cost_reason,
                     version,
@@ -81,7 +84,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     updated_by
                 ) values (
                     %s, %s, %s, %s::numeric, %s::numeric, %s::numeric, %s::numeric,
-                    %s, %s, %s::numeric, %s, 1, %s, %s
+                    %s, %s, %s, %s::numeric, %s, 1, %s, %s
                 )
                 on conflict (relation_case_id) do nothing
                 returning *
@@ -96,6 +99,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     net_outflow_total,
                     jsonb(serialize_value(allocations)),
                     jsonb(serialize_value(source_allocations)),
+                    jsonb(serialize_value(manual_items)),
                     non_cost_amount,
                     non_cost_reason,
                     actor_id,
@@ -114,6 +118,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     net_outflow_total = %s::numeric,
                     unit_allocations = %s,
                     source_allocations = %s,
+                    manual_items = %s,
                     non_cost_amount = %s::numeric,
                     non_cost_reason = %s,
                     version = version + 1,
@@ -132,6 +137,7 @@ class PostgresCostStatisticsManualAllocationRepository:
                     net_outflow_total,
                     jsonb(serialize_value(allocations)),
                     jsonb(serialize_value(source_allocations)),
+                    jsonb(serialize_value(manual_items)),
                     non_cost_amount,
                     non_cost_reason,
                     actor_id,
@@ -182,6 +188,7 @@ def _record(row: dict[str, Any]) -> dict[str, Any]:
         ),
         "net_outflow_total": str(row.get("net_outflow_total") or "0.00"),
         "source_allocations": row.get("source_allocations"),
+        "manual_items": row["manual_items"],
         "allocations": [
             dict(line)
             for line in list(row.get("unit_allocations") or [])

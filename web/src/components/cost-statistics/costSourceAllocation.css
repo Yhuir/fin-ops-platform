@@ -117,3 +117,8 @@
 .cost-source-save-actions { display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-shrink:0; margin-left:auto; }
 .cost-source-balanced { color:#14532d; font-size:13px; font-weight:600; line-height:20px; min-height:20px; min-width:7em; white-space:nowrap; }
 @media(max-width:640px) { .cost-source-form footer { flex-wrap:wrap; }.cost-source-save-actions { width:100%; } }
+
+.cost-source-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.cost-source-heading h3 { margin: 0; }
+.cost-source-table select { width: 100%; min-width: 0; border: 1px solid #d5deec; border-radius: 4px; background: white; padding: 8px; color: inherit; }
+.cost-manual-project { display: grid; gap: 6px; }

@@ -410,6 +410,151 @@ class CostSourcePostgresTests(unittest.TestCase):
                 self.save(payload)
         self.assertEqual(self.service.get_task("cost-source-case",can_save=True)["version"],1)
 
+    def manual_payload(self):
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason', 'isolated supplemental cost fixture', true)")
+            tx.execute("update app.bank_transactions set amount=1192,signed_amount=-1192 where legacy_mongo_id='bank-1'")
+            tx.execute("update app.workbench_pair_relations set row_ids=array['oa-a','oa-b','bank-1'],row_types=array['oa','oa','bank']")
+            tx.execute("update app.oa_applications set normalized_payload=normalized_payload || '{\"project_id\":\"project-real\"}'::jsonb")
+            tx.execute("""update app.app_settings set settings_payload=settings_payload || %s::jsonb""", (json.dumps({"bank_transaction_tags":{"definitions":[{"code":"manual-fee","label":"服务费","path":["费用","服务费"],"output_primary_label":"费用","output_sub_label":"服务费","status":"active"}]}}),))
+        task = self.service.get_task('cost-source-case', can_save=True)
+        self.assertEqual(task['manual_options']['projects'], [{'id':'project-real','name':'测试项目'}])
+        suggestion = task['suggested_source_allocations']
+        self.assertEqual([r['amount'] for r in suggestion['cost_lines']], ['600.00','400.00'])
+        self.assertEqual(task['status'], 'pending')
+        identity = 'manual:00000000-0000-4000-8000-000000000001'
+        item = {'unit_id':identity,'project_id':'project-real','expense_content':'人工补充测试费用','cost_tag_code':'manual-fee'}
+        return {**self.payload(), 'manual_items':[item],
+                'allocations':[{'unit_id':'oa:oa-a','amount':'600.00'},{'unit_id':'oa:oa-b','amount':'400.00'},{'unit_id':identity,'amount':'192.00'}],
+                'source_allocations':{**suggestion,'cost_lines':[*suggestion['cost_lines'],{'unit_id':identity,'bank_transaction_id':'bank-1','amount':'192.00'}]}}
+
+    def test_manual_cost_http_save_reload_views_export_and_fact_isolation(self):
+        from tests.app_test_support import build_local_state_application
+        payload = self.manual_payload()
+        facts_before = self.connection.fetch_all('select row_id,normalized_payload from app.oa_applications order by row_id')
+        relation_before = self.connection.fetch_one('select row_ids,row_types,version from app.workbench_pair_relations')
+        banks_before = self.connection.fetch_all('select id,amount,signed_amount,raw_payload from app.bank_transactions order by id')
+        app = build_local_state_application()
+        app._cost_statistics_api_routes._manual_allocation_service = self.service  # noqa: SLF001
+        app._cost_statistics_api_routes._query_service = self.query  # noqa: SLF001
+        path='/api/cost-statistics/manual-allocations/cost-source-case'
+        response=app.handle_request('PUT',path,body=json.dumps(payload))
+        self.assertEqual(response.status_code,200,response.body)
+        saved=json.loads(response.body)
+        self.assertEqual(saved['manual_items'][0]['project_name'],'测试项目')
+        self.assertEqual(saved['oa_total'],'1000.00')
+        self.assertEqual(saved['net_outflow_total'],'1192.00')
+        reloaded=json.loads(app.handle_request('GET',path).body)
+        self.assertEqual(reloaded['manual_items'],saved['manual_items'])
+        self.assertEqual(reloaded['source_allocations'],payload['source_allocations'])
+        for view in ('project','cost_tag','bank_account'):
+            page=self.query.get_explorer_page(scope='all',view=view,filters={},cursor=None,page_size=20)
+            self.assertEqual(page['summary']['total_amount'],'1192.00')
+            details_page=self.query.get_explorer_page(scope='all',view=view,filters={'project_name':'测试项目','bank_account_label':self.repository.load_relation_snapshot('cost-source-case')['bank_rows'][0]['payment_account_label'], 'bank_tag_primary_key':'label:费用','bank_tag_sub_key':'label:服务费'},cursor=None,page_size=20)
+            manual=next(r for r in details_page['rows'] if r['row_kind']=='manual_allocation')
+            self.assertEqual(manual['amount'],'192.00')
+            self.assertEqual(manual['bank_tag_sub_label'],'服务费')
+            self.assertEqual(manual['transaction_id'],'bank-1')
+            response=app.handle_request('GET',f"/api/cost-statistics/allocations/{manual['allocation_id']}?scope=all&view={view}")
+            self.assertEqual(response.status_code,200,response.body)
+            detail=json.loads(response.body)
+            self.assertEqual(detail['kind'],'manual_allocation')
+            self.assertIsNone(detail['allocation']['oa_original_amount'])
+            self.assertEqual(detail['allocation']['oa_id'],'')
+            self.assertEqual(detail['reconciliation']['difference'],'192.00')
+        response=app.handle_request('GET','/api/cost-statistics/export-preview?month=2026-08&view=project&project_name=测试项目')
+        self.assertEqual(response.status_code,200,response.body)
+        self.assertIn('人工补充测试费用',response.body)
+        self.assertIn('人工补充',response.body)
+        for status in ('pending','allocated'):
+            tasks=self.service.list_tasks(cursor=None,page_size=20,status=status,query='人工补充测试费用',can_save=True)
+            if tasks['items']:
+                self.assertEqual(tasks['items'][0]['relation_case_id'],'cost-source-case')
+                break
+        else:
+            self.fail('manual cost content must be searchable')
+        self.assertEqual(facts_before,self.connection.fetch_all('select row_id,normalized_payload from app.oa_applications order by row_id'))
+        self.assertEqual(relation_before,self.connection.fetch_one('select row_ids,row_types,version from app.workbench_pair_relations'))
+        self.assertEqual(banks_before,self.connection.fetch_all('select id,amount,signed_amount,raw_payload from app.bank_transactions order by id'))
+        audit=self.connection.fetch_one("select payload from audit.events where action='cost_statistics.manual_allocation.save'")['payload']
+        self.assertEqual(audit['manual_items'],saved['manual_items'])
+        # Existing write permission remains authoritative for manual costs too.
+        app._cost_statistics_api_routes._resolve_write_session=lambda headers:(None,app._json_response(403,{'error':'forbidden'}))
+        self.assertEqual(app.handle_request('PUT',path,body=json.dumps(payload)).status_code,403)
+
+    def test_manual_cost_invalid_metadata_sources_and_amounts_are_atomic(self):
+        from copy import deepcopy
+        good=self.manual_payload()
+        for field,value in [('project_id','missing'),('cost_tag_code','missing'),('expense_content',''),('unit_id','oa:fake')]:
+            payload=deepcopy(good);payload['manual_items'][0][field]=value
+            with self.subTest(field=field), self.assertRaises(CostStatisticsManualAllocationValidationError):
+                self.save(payload)
+        for amount in ('0.00','-1.00','192.001','193.00'):
+            payload=deepcopy(good);payload['source_allocations']['cost_lines'][-1]['amount']=amount
+            with self.subTest(amount=amount), self.assertRaises(CostStatisticsManualAllocationValidationError):
+                self.save(payload)
+        payload=deepcopy(good);payload['source_allocations']['cost_lines'][-1]['bank_transaction_id']='bank-2'
+        with self.assertRaises(CostStatisticsManualAllocationValidationError): self.save(payload)
+        payload=deepcopy(good);payload['manual_items']*=2
+        with self.assertRaises(CostStatisticsManualAllocationValidationError): self.save(payload)
+        with patch.object(PostgresOperationsAuditRepository,'append_operation_event',side_effect=RuntimeError('audit failure')):
+            with self.assertRaisesRegex(RuntimeError,'audit failure'): self.save(good)
+        self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'],0)
+
+    def test_manual_cost_edit_delete_concurrency_scope_and_relation_lifecycle(self):
+        from copy import deepcopy
+        payload=self.manual_payload()
+        saved=self.save(payload)
+        with self.assertRaises(CostStatisticsManualAllocationConflictError): self.save(payload)
+        edited=deepcopy(payload);edited['expected_version']=saved['version'];edited['manual_items'][0]['expense_content']='修改后的成本'
+        edited_saved=self.save(edited)
+        old_client=deepcopy(edited);old_client['expected_version']=edited_saved['version'];del old_client['manual_items']
+        with self.assertRaises(CostStatisticsManualAllocationConflictError): self.save(old_client)
+        scope=self.scope_service()
+        scope.update_project_cost_scope({'expected_version':1,'selected_tag_codes':[]},actor_id='test')
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'0.00')
+        scope.update_project_cost_scope({'expected_version':2,'selected_tag_codes':['uncategorized']},actor_id='test')
+        restored=self.service.get_task('cost-source-case',can_save=True)
+        self.assertEqual(restored['manual_items'][0]['expense_content'],'修改后的成本')
+        deleted=deepcopy(edited);deleted.update(expected_version=restored['version'],scope_version=restored['scope_version'],manual_items=[],non_cost_amount='192.00',non_cost_reason='测试排除用途')
+        deleted['allocations']=deleted['allocations'][:2]
+        deleted['source_allocations']['cost_lines']=deleted['source_allocations']['cost_lines'][:2]
+        deleted['source_allocations']['non_cost_lines']=[{'bank_transaction_id':'bank-1','amount':'192.00'}]
+        self.save(deleted)
+        self.assertEqual(self.service.get_task('cost-source-case',can_save=True)['manual_items'],[])
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'1000.00')
+        self.connection.execute("update app.workbench_pair_relations set status='cancelled',version=version+1")
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'0.00')
+
+    def test_manual_cost_scoped_edit_retains_other_source_metadata(self):
+        from copy import deepcopy
+        payload=self.manual_payload()
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason', 'isolated split manual fixture', true)")
+            tx.execute("update app.bank_transactions set amount=692,signed_amount=-692 where legacy_mongo_id='bank-1'")
+            tx.execute("update app.workbench_pair_relations set row_ids=array['oa-a','oa-b','bank-1','bank-2'],row_types=array['oa','oa','bank','bank']")
+        task=self.service.get_task('cost-source-case',can_save=True)
+        first=payload['manual_items'][0]['unit_id']
+        second='manual:00000000-0000-4000-8000-000000000002'
+        payload.update(source_fingerprint=task['source_fingerprint'])
+        payload['manual_items'].append({**payload['manual_items'][0],'unit_id':second,'expense_content':'第二笔补充'})
+        payload['allocations']=[{'unit_id':u,'amount':a} for u,a in [('oa:oa-a','600.00'),('oa:oa-b','400.00'),(first,'92.00'),(second,'100.00')]]
+        payload['source_allocations']['cost_lines']=[{'unit_id':u,'bank_transaction_id':b,'amount':a} for u,b,a in [('oa:oa-a','bank-1','600.00'),('oa:oa-b','bank-2','400.00'),(first,'bank-1','92.00'),(second,'bank-2','100.00')]]
+        self.save(payload)
+        self.exclude_second_source()
+        current=self.service.get_task('cost-source-case',can_save=True)
+        self.assertEqual([m['unit_id'] for m in current['manual_items']],[first])
+        edit=deepcopy(payload)
+        edit.update(expected_version=current['version'],scope_version=current['scope_version'],manual_items=[],allocations=[{'unit_id':'oa:oa-a','amount':'600.00'}],non_cost_amount='92.00',non_cost_reason='当前来源不计成本')
+        edit['source_allocations']={'cost_lines':[payload['source_allocations']['cost_lines'][0]],'refund_links':[],'non_cost_lines':[{'bank_transaction_id':'bank-1','amount':'92.00'}]}
+        self.save(edit)
+        stored=PostgresCostStatisticsManualAllocationRepository(self.connection).list_by_case_ids(['cost-source-case'])['cost-source-case']
+        self.assertEqual([m['unit_id'] for m in stored['manual_items']],[second])
+        self.scope_service().update_project_cost_scope({'expected_version':1,'selected_tag_codes':['uncategorized','internal_transfer']},actor_id='test')
+        restored=self.service.get_task('cost-source-case',can_save=True)
+        self.assertEqual([m['unit_id'] for m in restored['manual_items']],[second])
+        self.assertEqual(self.query.get_explorer_page(scope='all',view='project',filters={},cursor=None,page_size=20)['summary']['total_amount'],'1100.00')
+
     def payload(self):
         task = self.service.get_task("cost-source-case", can_save=True)
         return {"relation_case_id": task["relation_case_id"], "expected_version": task["version"],

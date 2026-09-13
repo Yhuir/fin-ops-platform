@@ -267,6 +267,8 @@ class PostgresCostStatisticsCanonicalRepository:
                 [row["id"] for row in group["oa_rows"]]
             ) if len(group["oa_rows"]) > 1 and not any(row["expense_items"] for row in group["oa_rows"]) else []
             _attach_relation_display(group, history)
+            # Read project identities from canonical OA facts, including expense-level projects.
+            snapshot["manual_projects"] = _postgres_manual_projects(transaction)
             return snapshot
 
     def load_no_oa_tag_candidate_snapshot(self) -> dict[str, Any]:
@@ -969,6 +971,7 @@ def _build_snapshot(
             else _bank_statistics_from_rows(bank_rows)
         ),
         "cost_groups": groups,
+        "manual_projects": _manual_projects(oa_rows),
         "oa_related_bank_ids": sorted(oa_related_bank_ids),
         "active_relation_count": len(relations),
         "available_years": list(available_years or []),
@@ -1269,3 +1272,33 @@ def _attach_relation_display(group: dict[str, Any], history: list[dict[str, Any]
         "oa_row_ids": [row["id"] for row in group["oa_rows"]],
         "bank_row_ids": [row["id"] for row in group["bank_rows"]],
     }]
+
+
+def _manual_projects(oa_rows: list[dict[str, Any]]) -> list[dict[str, str]]:
+    projects = {}
+    for row in oa_rows:
+        for item in [row, *row.get("expense_items", [])]:
+            identity, name = _text(item.get("project_id")), _text(item.get("project_name"))
+            if identity and name:
+                projects[identity] = {"id": identity, "name": name}
+    return sorted(projects.values(), key=lambda project: (project["name"], project["id"]))
+
+
+def _postgres_manual_projects(connection: Any) -> list[dict[str, str]]:
+    # Project picker reads just identities/names in one query, not full OA documents.
+    return [dict(row) for row in connection.fetch_all("""
+        with projects as (
+            select row_id, normalized_payload->>'project_id' as id,
+                   normalized_payload->>'project_name' as name
+            from app.oa_applications where form_type = any(%s::text[])
+            union all
+            select oa.row_id, item->>'project_id', item->>'project_name'
+            from app.oa_applications oa
+            cross join lateral jsonb_array_elements(coalesce(oa.normalized_payload->'expense_items','[]'::jsonb)) item
+            where oa.form_type = any(%s::text[])
+        ), distinct_projects as (
+            select distinct on (id) id, name from projects
+            where nullif(btrim(id),'') is not null and nullif(btrim(name),'') is not null
+            order by id, row_id desc, name
+        ) select id, name from distinct_projects order by name, id
+        """, (list(OA_COST_FORM_TYPES), list(OA_COST_FORM_TYPES)))]

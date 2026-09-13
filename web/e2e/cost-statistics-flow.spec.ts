@@ -49,7 +49,7 @@ test.describe("cost statistics browser flow", () => {
     const views = switcher.getByRole("radiogroup", { name: "项目成本统计视图" });
     await expect(views.getByRole("radio")).toHaveCount(3);
     await expect(views.getByRole("radio", { name: "按项目" })).toBeVisible();
-    await expect(views.getByRole("radio", { name: "按流水标签" })).toBeVisible();
+    await expect(views.getByRole("radio", { name: "按成本标签" })).toBeVisible();
     await expect(views.getByRole("radio", { name: "按银行账户" })).toBeVisible();
     await expect(switcher.getByText("银行流水")).toBeVisible();
     const bankFlowViews = switcher.getByRole("radiogroup", { name: "银行流水统计视图" });
@@ -164,14 +164,14 @@ test.describe("cost statistics browser flow", () => {
       && url.searchParams.get("project_name") === "云南溯源科技"
       && url.searchParams.get("bank_tag_primary_key") === "primary:项目开销"
     ));
-    await page.getByRole("option", { name: "选择银行主标签 项目开销" }).click();
+    await page.getByRole("option", { name: "选择成本主标签 项目开销" }).click();
     await rowsResponse;
 
-    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    await page.getByRole("option", { name: "选择成本子标签 设备材料" }).click();
     const grid = page.getByRole("grid", { name: "成本明细表" });
     await expect(grid).toBeVisible();
     await expect(grid).toContainText("PLC 模块采购");
-    await grid.getByRole("button", { name: /查看OA 成本归集 云南溯源科技 2026-03-10/ }).click();
+    await grid.getByRole("button", { name: /查看成本明细 云南溯源科技 2026-03-10/ }).click();
     const drawer = page.getByRole("dialog", { name: "OA 成本归集明细" });
     await expect(drawer).toContainText("浏览器成本统计明细");
     await expect(drawer).toContainText("工商银行 账户 0001");
@@ -201,8 +201,8 @@ test.describe("cost statistics browser flow", () => {
     await page.getByRole("option", { name: "选择项目名 云南溯源科技" }).click();
     await rowsResponse;
 
-    await page.getByRole("option", { name: "选择银行主标签 项目开销" }).click();
-    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    await page.getByRole("option", { name: "选择成本主标签 项目开销" }).click();
+    await page.getByRole("option", { name: "选择成本子标签 设备材料" }).click();
     const grid = page.getByRole("grid", { name: "成本明细表" });
     await expect(grid).toBeVisible();
     await expect(grid).toContainText("PLC 模块采购");
@@ -213,16 +213,16 @@ test.describe("cost statistics browser flow", () => {
 
     await page.goto("/cost-statistics");
     const expenseListResponse = waitForExplorer(page, (url) => url.searchParams.get("view") === "cost_tag");
-    await page.getByRole("radio", { name: "按流水标签" }).click();
+    await page.getByRole("radio", { name: "按成本标签" }).click();
     await expenseListResponse;
 
     const rowsResponse = waitForExplorer(page, (url) => (
       url.searchParams.get("view") === "cost_tag"
       && url.searchParams.get("bank_tag_primary_key") === "primary:项目开销"
     ));
-    await page.getByRole("option", { name: "选择银行主标签 项目开销" }).click();
+    await page.getByRole("option", { name: "选择成本主标签 项目开销" }).click();
     await rowsResponse;
-    await page.getByRole("option", { name: "选择银行子标签 设备材料" }).click();
+    await page.getByRole("option", { name: "选择成本子标签 设备材料" }).click();
     await expect(page.getByRole("grid", { name: "成本明细表" })).toContainText("云南溯源科技");
   });
 

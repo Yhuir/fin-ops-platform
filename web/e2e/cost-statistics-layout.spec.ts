@@ -30,13 +30,13 @@ test("project-cost layouts stay contained, compact and readable across views and
   await page.goto("/cost-statistics");
   const reads: string[] = [];
   page.on("request", request => { if (request.url().includes("/cost-statistics/explorer")) reads.push(request.url()); });
-  for (const view of ["按项目", "按流水标签", "按银行账户"]) {
+  for (const view of ["按项目", "按成本标签", "按银行账户"]) {
     await page.getByRole("radio", { name: view, exact: true }).click();
     if (view === "按银行账户") await page.getByRole("option", { name: "选择银行账户 工商银行 账户 0001", exact: true }).click();
-    if (view !== "按流水标签") await page.getByRole("option", { name: "选择项目名 云南溯源科技", exact: true }).click();
-    await page.getByRole("option", { name: "选择银行主标签 项目开销", exact: true }).click();
-    await page.getByRole("option", { name: "选择银行子标签 设备材料", exact: true }).click();
-    await expect(page.getByRole("grid", { name: "成本明细表" })).toContainText(view === "按流水标签" ? "大型成本流水费用内容" : "PLC 模块采购");
+    if (view !== "按成本标签") await page.getByRole("option", { name: "选择项目名 云南溯源科技", exact: true }).click();
+    await page.getByRole("option", { name: "选择成本主标签 项目开销", exact: true }).click();
+    await page.getByRole("option", { name: "选择成本子标签 设备材料", exact: true }).click();
+    await expect(page.getByRole("grid", { name: "成本明细表" })).toContainText(view === "按成本标签" ? "大型成本流水费用内容" : "PLC 模块采购");
     await expect(page.locator(".cost-hierarchy .cost-explorer-item-main > span")).toHaveCount(0);
     for (const size of [{ width: 1920, height: 900 }, { width: 1440, height: 720 }, { width: 1024, height: 600 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(size);

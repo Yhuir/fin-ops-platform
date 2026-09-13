@@ -123,7 +123,7 @@ describe("Cost statistics page", () => {
     const views = within(switcher).getByRole("radiogroup", { name: "项目成本统计视图" });
     expect(within(views).getAllByRole("radio").map((item) => item.textContent)).toEqual([
       "按项目",
-      "按流水标签",
+      "按成本标签",
       "按银行账户",
     ]);
     expect(within(switcher).getByText("银行流水")).toBeInTheDocument();
@@ -229,8 +229,8 @@ describe("Cost statistics page", () => {
     await waitUntilReady();
 
     await user.click(screen.getByRole("option", { name: "选择项目名 云南溯源科技" }));
-    await user.click(await screen.findByRole("option", { name: "选择银行主标签 项目开销" }));
-    await user.click(await screen.findByRole("option", { name: "选择银行子标签 设备材料" }));
+    await user.click(await screen.findByRole("option", { name: "选择成本主标签 项目开销" }));
+    await user.click(await screen.findByRole("option", { name: "选择成本子标签 设备材料" }));
     expect(await screen.findByRole("grid", { name: "成本明细表" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("view=project&project_name="),
@@ -252,8 +252,8 @@ describe("Cost statistics page", () => {
     const account = await screen.findByRole("option", { name: "选择银行账户 工商银行 账户 0001" });
     await user.click(account);
     await user.click(await screen.findByRole("option", { name: /选择项目名 云南溯源科技/ }));
-    await user.click(await screen.findByRole("option", { name: "选择银行主标签 项目开销" }));
-    await user.click(await screen.findByRole("option", { name: "选择银行子标签 设备材料" }));
+    await user.click(await screen.findByRole("option", { name: "选择成本主标签 项目开销" }));
+    await user.click(await screen.findByRole("option", { name: "选择成本子标签 设备材料" }));
 
     expect(await screen.findByRole("grid", { name: "成本明细表" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -268,9 +268,9 @@ describe("Cost statistics page", () => {
     renderPage();
     await waitUntilReady();
 
-    await user.click(screen.getByRole("radio", { name: "按流水标签" }));
-    await user.click(await screen.findByRole("option", { name: "选择银行主标签 项目开销" }));
-    await user.click(await screen.findByRole("option", { name: "选择银行子标签 设备材料" }));
+    await user.click(screen.getByRole("radio", { name: "按成本标签" }));
+    await user.click(await screen.findByRole("option", { name: "选择成本主标签 项目开销" }));
+    await user.click(await screen.findByRole("option", { name: "选择成本子标签 设备材料" }));
     expect(await screen.findByRole("grid", { name: "成本明细表" })).toBeInTheDocument();
   });
 
@@ -298,7 +298,7 @@ describe("Cost statistics page", () => {
       "按标签",
       "按银行账户",
       "按项目",
-      "按银行主标签",
+      "按成本主标签",
     ]);
     await user.click(within(tabs).getByRole("button", { name: "按时间" }));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));

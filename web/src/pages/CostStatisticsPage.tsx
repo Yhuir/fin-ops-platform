@@ -245,8 +245,8 @@ function EntryIdentity({
 }
 
 function costEntryActionLabel(row: CostExplorerEntryRow) {
-  const target = row.rowKind === "oa_allocation" ? row.projectName || "未命名项目" : row.counterpartyName || "未知对方";
-  return `查看${row.rowKind === "oa_allocation" ? "OA 成本归集" : "银行流水"} ${target} ${formatCostTradeTime(row.occurredAt) || "时间未知"} ${formatCostAmount(row.amount)}`;
+  const target = row.rowKind !== "bank_transaction" ? row.projectName || "未命名项目" : row.counterpartyName || "未知对方";
+  return `查看${row.rowKind !== "bank_transaction" ? "成本明细" : "银行流水"} ${target} ${formatCostTradeTime(row.occurredAt) || "时间未知"} ${formatCostAmount(row.amount)}`;
 }
 
 function buildMonthDateBounds(month: string) {
@@ -913,8 +913,8 @@ export default function CostStatisticsPage() {
   const costLanes: CostHierarchyLane[] = [];
   if (viewMode === "bankAccount") costLanes.push({ title: "银行账户", selectedKey: selectedBankAccountLabel, items: bankRows.map(row => ({ key: row.bankAccountLabel, label: row.bankAccountLabel, amount: row.totalAmount })), onSelect: key => { setSelectedBankAccountLabel(key); setSelectedBankProjectName(null); clearCostTags(); } });
   if (viewMode === "project" || viewMode === "bankAccount") costLanes.push({ title: "项目名", selectedKey: viewMode === "project" ? selectedProjectName : selectedBankProjectName, items: (viewMode === "project" ? projectRows : bankProjectRows).map(row => ({ key: row.projectName, label: row.projectName, amount: row.totalAmount })), onSelect: key => { if (viewMode === "project") setSelectedProjectName(key); else setSelectedBankProjectName(key); clearCostTags(); } });
-  costLanes.push({ title: "银行主标签", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
-  costLanes.push({ title: "银行子标签", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
+  costLanes.push({ title: "成本主标签", selectedKey: selectedCostPrimary, items: costPrimaryRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostPrimary(key); setSelectedCostSub(null); resetDetailSelection(); } });
+  costLanes.push({ title: "成本子标签", selectedKey: selectedCostSub, items: costSubRows.map(row => ({ key: row.key, label: row.label, amount: row.totalAmount })), onSelect: key => { setSelectedCostSub(key); resetDetailSelection(); } });
   const costPathComplete = costLanes.every(lane => lane.selectedKey !== null);
   const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
   const bankTagSubRows = isChildrenTransition ? [] : explorerData?.facets.bankTagSub ?? [];
@@ -1094,7 +1094,7 @@ export default function CostStatisticsPage() {
       }
     } catch (caught) {
       if (!controller.signal.aborted && !isAbortLikeError(caught)) {
-        setDetailError(`${rowKind === "oa_allocation" ? "OA 成本归集明细" : "银行流水详情"}加载失败，请稍后重试。`);
+        setDetailError(`${rowKind !== "bank_transaction" ? "成本明细" : "银行流水详情"}加载失败，请稍后重试。`);
       }
     } finally {
       if (detailRequestRef.current === controller) {
@@ -1673,7 +1673,7 @@ export default function CostStatisticsPage() {
                   size="sm"
                 >
                   <ToggleButton className="cost-view-tab" id="project">按项目</ToggleButton>
-                  <ToggleButton className="cost-view-tab" id="costTag">按流水标签</ToggleButton>
+                  <ToggleButton className="cost-view-tab" id="costTag">按成本标签</ToggleButton>
                   <ToggleButton className="cost-view-tab" id="bankAccount">按银行账户</ToggleButton>
                 </ToggleButtonGroup>
               </div>
@@ -1799,7 +1799,7 @@ export default function CostStatisticsPage() {
             {!isBankFlowView ? (
               <div className="cost-analysis-layout explorer-layout grid min-h-0 grid-cols-1 gap-3">
                 <div className="cost-section-heading cost-view-scope-heading">
-                  <div className="cost-section-heading-copy"><h2>{viewMode === "project" ? "按项目统计" : viewMode === "bankAccount" ? "按银行账户统计" : "按流水标签统计"}</h2><DirectionAmount amount={explorerData.summary.totalAmount} label="成本金额" tone="expense" /></div>
+                  <div className="cost-section-heading-copy"><h2>{viewMode === "project" ? "按项目统计" : viewMode === "bankAccount" ? "按银行账户统计" : "按成本标签统计"}</h2><DirectionAmount amount={explorerData.summary.totalAmount} label="成本金额" tone="expense" /></div>
                   <div className="cost-section-heading-actions cost-project-scope-actions"><BusinessPeriodPicker ariaLabel="成本统计时间范围" onChange={selection => updateScopeSelection(viewMode, selection)} selection={{ mode: activeScopeMode, year: activeScopeYear, month: activeScopeMonth }} years={availableScopeYears} />{costViewSearch}</div>
                 </div>
                 {explorerData.allocationQuality && explorerData.allocationQuality.undatedRowCount > 0 ? <p className="cost-source-muted">仍有成本 {explorerData.allocationQuality.undatedAmount} 元尚未确定付款来源或月份，仅在全部期间展示。</p> : null}

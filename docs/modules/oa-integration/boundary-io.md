@@ -131,3 +131,7 @@
 - Downstream outputs: canonical/source versions 与信息性 changed scopes；各消费页自己的 access-time freshness gateway 决定是否创建精确 dirty scope。
 - Forbidden paths: production API 不得直接读 OA 财务 Mongo；现金项目元数据仅允许上述窄 OA owner 例外。HTTP 进程不得启动 OA polling、热重建 Workbench read model 或 fallback inline sync；OA cache 不得当作正式发票池；OA source alias 不得由弱业务指纹自动激活；OA credential 不得通过 settings snapshot fallback 写入。
 - Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback、进程内 `OASyncService` polling/hot rebuild、HTTP `Application` 附件发票 promotion、无调用方 fingerprint polling、sync service 多 list 扫描、snapshot repository queue dependency 和 sync downstream fan-out 必须保持删除；migration/audit/rollback 工具保留不算 closure。
+
+## 成本项目只读目录（2026-09-13）
+
+成本详情repository在同一数据库快照中批量读取 `app.oa_applications.normalized_payload` 主单与expense_items的真实project_id/project_name，用于人工成本项目选择；不调用外部OA provider，不写OA投影，不生成新OA。成本模块拥有目录响应，OA同步写入责任不变。

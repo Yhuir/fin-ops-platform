@@ -4,6 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from fin_ops_platform.services.cost_statistics_manual_items import allocation_targets
 from fin_ops_platform.services.cost_statistics_source_allocation import (
     SourceAllocationError,
     complete_source_task,
@@ -38,7 +39,7 @@ def covered_source_task(task: dict[str, Any], decision: dict[str, Any]) -> dict[
             if amount > Decimal(event['amount']):
                 raise SourceAllocationError('退款分配超过原始退款金额。', path='source_allocations.refund_links', code='refund_amount_mismatch')
             events.append({**event, 'amount': f'{amount:.2f}'})
-    allocations, non_cost = source_totals(task['units'], decision)
+    allocations, non_cost = source_totals(allocation_targets(task), decision)
     result = {**task, 'bank_events': events, 'allocations': allocations,
               'non_cost_amount': f'{non_cost:.2f}', 'amounts_fixed': False}
     validate_source_allocations(result, allocations, non_cost, decision)
@@ -76,22 +77,24 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None) -
         outside_units = {line['unit_id'] for line in decision['cost_lines'] if line['bank_transaction_id'] not in selected}
         inside_units = {line['unit_id'] for line in scoped['cost_lines']}
         units = [unit for unit in units if unit['unit_id'] not in outside_units - inside_units]
+    manual_ids = {line['unit_id'] for line in scoped['cost_lines']} if scoped else set()
+    manual_items = [item for item in task.get('manual_items', []) if item['unit_id'] in manual_ids]
     events = [e for e in sources if e['transaction_id'] in selected] + refund_events
     gross = sum((Decimal(e['amount']) for e in events if e['event_kind'] == 'outflow'), ZERO)
     refund_total = sum((Decimal(e['amount']) for e in refund_events), ZERO)
     oa_total = sum((Decimal(u['oa_original_amount']) for u in units), ZERO)
-    result = {**task, 'units': units, 'bank_events': events, 'oa_total': f'{oa_total:.2f}',
+    result = {**task, 'units': units, 'manual_items': manual_items, 'bank_events': events, 'oa_total': f'{oa_total:.2f}',
               'gross_outflow_total': f'{gross:.2f}', 'wrong_payment_refund_total': f'{refund_total:.2f}',
               'net_outflow_total': f'{gross - refund_total:.2f}', 'difference': f'{gross - refund_total - oa_total:.2f}',
               'in_project_cost_scope': bool(selected), 'amounts_fixed': oa_total == gross - refund_total,
               'source_allocations': scoped, 'suggested_source_allocations': None}
     if scoped is not None:
-        allocations, non_cost = source_totals(units, scoped)
+        allocations, non_cost = source_totals(allocation_targets(result), scoped)
         result.update(allocations=allocations, non_cost_amount=f'{non_cost:.2f}',
                       non_cost_reason=task['non_cost_reason'] if non_cost else '')
         # A source slice is an explicit amount decision, not the original full OA target.
         result['amounts_fixed'] = result['amounts_fixed'] and all(
-            line['amount'] == unit['oa_original_amount'] for line, unit in zip(allocations, units, strict=True))
+            next(line['amount'] for line in allocations if line['unit_id'] == unit['unit_id']) == unit['oa_original_amount'] for unit in units)
     elif selected != all_ids:
         result.update(allocations=[{'unit_id': u['unit_id'], 'amount': u['oa_original_amount']} for u in units]
                       if result['amounts_fixed'] else [], non_cost_amount='0.00', non_cost_reason='')

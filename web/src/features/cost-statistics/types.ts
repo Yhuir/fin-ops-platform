@@ -22,7 +22,7 @@ export type CostStatisticsPageStatistics = {
 
 export type CostExplorerEntryRow = {
   entryId: string;
-  rowKind: "bank_transaction" | "oa_allocation";
+  rowKind: "bank_transaction" | "oa_allocation" | "manual_allocation";
   transactionId: string | null;
   allocationState: "source_resolved";
   allocationId?: string;
@@ -152,7 +152,14 @@ export type CostStatisticsManualAllocationLine = {
   amount: string;
 };
 
+export type CostManualItem = { unitId: string; projectId: string; expenseContent: string; costTagCode: string;
+  projectName: string; costTagPrimaryLabel: string; costTagSubLabel: string };
+export type CostManualOptions = { projects: Array<{ id: string; name: string }>;
+  tags: Array<{ code: string; label: string; primary_label: string; sub_label: string }> };
+
 export type CostStatisticsManualAllocationTask = {
+  manualItems: CostManualItem[];
+  manualOptions: CostManualOptions;
   relationCaseId: string;
   relationVersion: number;
   sourceFingerprint: string;
@@ -184,7 +191,7 @@ export type CostSourceAllocations = {
   nonCostLines: Array<{ bankTransactionId: string; amount: string }>;
 };
 
-export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations" | "suggestedSourceAllocations" | "relationDisplayGroups"> & {
+export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations" | "suggestedSourceAllocations" | "relationDisplayGroups" | "manualItems" | "manualOptions"> & {
   projectNames: string[];
   unitCount: number;
   bankEventCount: number;
@@ -206,6 +213,7 @@ export type CostStatisticsManualAllocationPageRequest = {
 };
 
 export type SaveCostStatisticsManualAllocationRequest = {
+  manualItems: CostManualItem[];
   sourceAllocations: CostSourceAllocations;
   relationCaseId: string;
   expectedVersion: number;
@@ -256,7 +264,7 @@ export type CostBankTransactionDetail = {
 
 export type CostAllocationDetail = {
   month: string;
-  kind: "oa_allocation";
+  kind: "oa_allocation" | "manual_allocation";
   allocation: {
     allocationId: string;
     transactionId: string | null;
@@ -279,7 +287,7 @@ export type CostAllocationDetail = {
     paymentAccountLabel: string;
     bankAccountLabel: string;
     oaApplicant: string;
-    oaOriginalAmount: string;
+    oaOriginalAmount: string | null;
     oaAllocationWeight: string;
     bankEventAmount: string;
   };
