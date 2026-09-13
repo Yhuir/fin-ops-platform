@@ -118,7 +118,7 @@ export default function CostSourceAllocationForm({ task, draft, disabled, saving
     {task.pendingReasons.includes('scope_refund_required') ? <p className="cost-source-notice">请先确认退款对应的原支出</p> : null}
     {task.pendingReasons.includes('bank_tag_missing') ? <p className="cost-source-notice">银行标签待完善</p> : null}
     {task.pendingReasons.includes('allocation_stale') ? <p className="cost-source-notice">数据已变化，请重新核对</p> : null}
-    <CostSourceEvidence task={task} costLines={draft.costLines} nonCostLines={draft.nonCostLines} sourceError={sourceError} />
+    <CostSourceEvidence task={task} sourceError={sourceError} />
     <section className="cost-source-allocation"><h3>成本分配明细</h3>
       <div className="cost-source-table-scroll"><table className="cost-source-table" aria-label="成本分配明细">
         <colgroup><col className="cost-source-project-col" /><col className="cost-source-unit-col" /><col /><col className="cost-source-tag-col" /><col className="cost-source-amount-col" /><col className="cost-source-action-col" /></colgroup>

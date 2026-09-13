@@ -13,7 +13,7 @@ async function sourceScenario(page: Page, options: { scopedLoan?: boolean; align
       { transaction_id: 'bank-a', event_kind: 'outflow', in_project_cost_scope: true, amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
       { transaction_id: 'bank-b', event_kind: 'outflow', in_project_cost_scope: true, amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
     ],
-    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], suggested_source_allocations: null as unknown, source_allocations: null as unknown,
+    allocations: [{ unit_id: 'oa-1', amount: '600.00' }], relation_display_groups: [] as Array<{unit_ids:string[];bank_transaction_ids:string[];sources_excluded:boolean}>, suggested_source_allocations: null as unknown, source_allocations: null as unknown,
     non_cost_amount: '0.00', non_cost_reason: '', version: 0, updated_by: '', updated_at: '', can_save: options.canSave !== false,
   };
   if (options.scopedLoan) {
@@ -75,6 +75,8 @@ async function sourceScenario(page: Page, options: { scopedLoan?: boolean; align
     bank.bank_account_label = `云南省大理白族自治州项目结算专用${bank.bank_account_label}`;
     bank.bank_tag_sub_label = '设备采购安装与运输综合费用';
   });
+  task.relation_display_groups = options.alignmentCase ? task.units.map(unit => ({unit_ids:[unit.unit_id],bank_transaction_ids: task.bank_events.filter(b=>b.amount===unit.oa_original_amount).map(b=>b.transaction_id),sources_excluded:false}))
+    : [{unit_ids:task.units.map(u=>u.unit_id),bank_transaction_ids:task.bank_events.map(b=>b.transaction_id),sources_excluded:false}];
   let writes = 0; let details = 0; let savedBody: Record<string, any> | null = null;
   await page.route('**/api/cost-statistics/manual-allocations**', async route => {
     const url = new URL(route.request().url());
@@ -191,7 +193,7 @@ test('preserves read-only controls and fits narrow screens without horizontal ov
 
 test('reads a failed detail again without showing an empty task as fact', async ({ page }) => {
   const scene = await sourceScenario(page, { detailFailure: true });
-  await expect(scene.drawer.getByText('任务读取失败，请重试')).toBeVisible();
+  await expect(scene.drawer.getByText('任务读取失败或关系已失效，请重新加载')).toBeVisible();
   await expect(scene.drawer.locator('.cost-source-table')).toHaveCount(0);
   await scene.drawer.getByRole('button', { name: '重新加载' }).click();
   await expect(scene.drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();

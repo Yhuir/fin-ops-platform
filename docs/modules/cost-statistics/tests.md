@@ -120,7 +120,7 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 ## 当前分配对照与金额提示（2026-09-10）
 
 - `CostSourceEvidence.test.ts`：只按现有来源 ID 分组，覆盖一对一、一对多、多对一、多对多连通、重复边、无效/空选择、退款、未分配与原始顺序；不修改输入，不重复事实。
-- `CostSourceAllocationForm.test.tsx`：完整闭合显示；未分配或总额相等但逐单元/来源错误隐藏；来源切换更新对照和合并单元格；保存中、冲突、未确认结果、刷新失败提示不显示成功暗示。旧全文查询从双 grid 更新为统一 table。
+- `CostSourceAllocationForm.test.tsx`：完整闭合显示；未分配或总额相等但逐单元/来源错误隐藏；来源切换保持正式关系对照和合并单元格不变；保存中、冲突、未确认结果、刷新失败提示不显示成功暗示。旧全文查询从双 grid 更新为统一 table。
 - `cost-source-allocation.spec.ts`：七笔截图金额逐行对齐、原始流水序号不重编、多对多每笔只出现一次、四背景实测文字对比度、150% 内容缩放和390px窄屏、文字变化时按钮不跳动；既有保存重读、409、失联核实、只读、退款/非成本和2/100行20次交互性能继续执行。
 - `FinanceTableMigration.test.ts`：仅登记成本对照表这个需要 rowspan/colspan 的原生表格例外；公共组件与其他消费者的旧检查不变。
 - 七类：1复用既有金额规则测试；5/7新增展示分组、组件和浏览器回归；6复用已有保存/重读与关系到成本浏览器链。2/3/4没有服务、HTTP 合同、存储或后台生命周期变化，不新增对应测试。生产浏览器验证只读和未提交草稿，实际保存用隔离浏览器场景验证。
@@ -154,3 +154,13 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 - 前端：来源草稿核实同时比较范围版本；浏览器 `cost-source-allocation.spec.ts` 验证单笔住宿费的表格/菜单/计数、绿色提示、保存、宽窄屏截图及既有多来源/退款/失效交互。
 - E2E：真实 PG 保存后从项目/标签/账户视角核对同一金额；浏览器验证抽屉保存/任务切换。生产验证仅只读，不对用户真实分配做试验性保存。
 - 读模型/cache/worker 不适用：本次只修改 canonical 成本读取和事务内分配保存，不新增或修改异步链。其余六类测试覆盖当前受影响业务；银行流水原始收支、关联关系与导出保持回归。
+
+
+## 正式关系对照与刷新（2026-09-13）
+
+- `test_cost_relation_display.py`：电信重复金额7 OA/14流水、油卡5/5、利息2/16三类历史分组与 Workbench 同源，范围裁剪不重新分组，报销父子共有证据不生成分配，输入不变。
+- `test_cost_statistics_source_postgres.py`：真实 PostgreSQL 历史→详情分组→保存→重读→撤回失效完整流；旧任务不可保存。复用权限、409、范围与事务回滚用例。
+- `CostSourceEvidence.test.ts`：按正式 ID 分组、稳定排序、共享块、范围排除、未知成员明确失败；删除旧草稿边分组断言。
+- `CostSourceAllocationForm.test.tsx`：编辑来源/金额不改上方关系；`CostManualAllocationRefresh.test.tsx`：脏草稿冲突保留、连续刷新不能解锁、显式重读恢复、旧请求不能覆盖新事实、窗口聚焦重读且无 PUT。
+- `cost-source-allocation.spec.ts`、`cost-statistics-relation-fanout.spec.ts`：浏览器保存/重读、错误/权限/结果核实、关系刷新、三个成本及原银行视角回归、宽窄屏与交互耗时。
+- 七类中的1/2/3/5/6/7适用；4中的前端会话缓存失效和旧响应竞态已覆盖，服务端 read model/queue/worker 不适用（仍直接读取 canonical，不新增后台刷新）。生产只读核对全部待分配正式成员、目标关系分组、浏览器视觉与请求耗时；写入闭环在隔离 PostgreSQL 验证。

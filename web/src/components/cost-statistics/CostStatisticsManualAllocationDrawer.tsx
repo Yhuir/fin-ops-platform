@@ -9,9 +9,9 @@ import { createSourceDraft, sourceDecisionMatches, sourceSaveRequest, type Sourc
 import type { CostStatisticsManualAllocationSummary, CostStatisticsManualAllocationTask, SaveCostStatisticsManualAllocationRequest } from '../../features/cost-statistics/types';
 import './costSourceAllocation.css';
 
-type Props = { scopeRefresh?: number; canSave: boolean; pendingCount?: number; onSaved: () => void };
-type TaskState = { task?: CostStatisticsManualAllocationTask; draft?: SourceDraft; dirty?: boolean; loading?: boolean; saving?: boolean; error?: string; notice?: string; unconfirmedRequest?: SaveCostStatisticsManualAllocationRequest };
-export default function CostStatisticsManualAllocationDrawer({ canSave, pendingCount, onSaved, scopeRefresh = 0 }: Props) {
+type Props = { refreshKey?: string; active?: boolean; canSave: boolean; pendingCount?: number; onSaved: () => void };
+type TaskState = { task?: CostStatisticsManualAllocationTask; draft?: SourceDraft; dirty?: boolean; conflict?: boolean; loading?: boolean; saving?: boolean; error?: string; notice?: string; unconfirmedRequest?: SaveCostStatisticsManualAllocationRequest };
+export default function CostStatisticsManualAllocationDrawer({ canSave, pendingCount, onSaved, refreshKey = '', active = true }: Props) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<'pending' | 'allocated'>('pending');
   const [queryDraft, setQueryDraft] = useState('');
@@ -28,18 +28,25 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
   const currentStates = useRef(states); currentStates.current = states;
   const saving = Object.values(states).some(state => state.saving);
   const setCase = (id: string, patch: Partial<TaskState>) => setStates(current => ({ ...current, [id]: { ...current[id], ...patch } }));
-  const loadDetail = async (id: string, force = false) => {
+  const loadDetail = async (id: string, force = false, discardDraft = false) => {
     const current = currentStates.current[id];
-    if (!force && (current?.task || current?.loading)) return;
+    const inFlight = details.current.get(id);
+    if (current?.saving || (!force && inFlight && !inFlight.signal.aborted)) return;
     details.current.get(id)?.abort();
     const controller = new AbortController(); details.current.set(id, controller);
-    setCase(id, { loading: true, error: undefined });
+    setCase(id, { loading: true, error: current?.conflict ? current.error : undefined });
     try {
       const task = await fetchCostStatisticsManualAllocation(id, controller.signal);
       if (controller.signal.aborted) return;
-      setCase(id, { task, draft: createSourceDraft(task), dirty: false, loading: false, notice: undefined, unconfirmedRequest: undefined });
+      const latest = currentStates.current[id];
+      if (!discardDraft && (latest?.dirty || latest?.unconfirmedRequest)) {
+        const changed = latest.task?.relationVersion !== task.relationVersion || latest.task?.sourceFingerprint !== task.sourceFingerprint || latest.task?.scopeVersion !== task.scopeVersion || latest.task?.version !== task.version;
+        setCase(id, { task, loading: false, ...(changed ? { conflict: true, error: '关联或分配已变化，草稿已保留；请重新加载后核对' } : {}) });
+      } else {
+        setCase(id, { task, draft: createSourceDraft(task), dirty: false, conflict: false, loading: false, error: undefined, notice: undefined, unconfirmedRequest: undefined });
+      }
     } catch (caught) {
-      if (!controller.signal.aborted) setCase(id, { loading: false, error: '任务读取失败，请重试' });
+      if (!controller.signal.aborted) setCase(id, { loading: false, conflict: true, error: '任务读取失败或关系已失效，请重新加载' });
     } finally { if (details.current.get(id) === controller) details.current.delete(id); }
   };
   const load = async (targetStatus = status, targetQuery = query, cursor?: string) => {
@@ -51,23 +58,29 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
       setItems(current => cursor ? [...current, ...page.items.filter(item => !current.some(old => old.relationCaseId === item.relationCaseId))] : page.items);
       setCounts(page.counts); setNextCursor(page.nextCursor);
       if (!cursor) {
-        const first = page.items[0]?.relationCaseId ?? null;
-        setExpanded(first); if (first) void loadDetail(first);
+        const first = page.items.some(item => item.relationCaseId === expanded) ? expanded : page.items[0]?.relationCaseId ?? null;
+        setExpanded(first); if (first) void loadDetail(first, true);
       }
     } catch (caught) { if (!controller.signal.aborted) setError('人工分配任务加载失败，请重试'); }
     finally { if (listRequest.current === controller) setLoading(false); }
   };
   useEffect(() => {
     listRequest.current?.abort(); details.current.forEach(controller => controller.abort());
-    setCounts(null); setStates({}); setItems([]);
-    if (open) void load();
-    // Scope changes invalidate this drawer; ordinary draft edits do not.
+    if (open && active) void load();
+    // Refresh the visible facts without discarding edits in this drawer session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeRefresh]);
+  }, [refreshKey, active]);
+  useEffect(() => {
+    const refresh = () => { if (open && active && document.visibilityState === 'visible' && !saving) void load(); };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, active, saving, status, query, expanded]);
   useEffect(() => () => { listRequest.current?.abort(); details.current.forEach(controller => controller.abort()); }, []);
   const acceptSaved = (id: string, saved: CostStatisticsManualAllocationTask) => {
     const previous = currentStates.current[id].task;
-    setCase(id, { task: saved, draft: createSourceDraft(saved), dirty: false, saving: false, error: undefined, unconfirmedRequest: undefined, notice: saved.status === 'allocated' ? '分配已保存' : '已保存，银行信息待完善' });
+    setCase(id, { task: saved, draft: createSourceDraft(saved), dirty: false, conflict: false, saving: false, error: undefined, unconfirmedRequest: undefined, notice: saved.status === 'allocated' ? '分配已保存' : '已保存，银行信息待完善' });
     if (previous && saved.status !== previous.status) setCounts(value => value ? { pending: value.pending + (saved.status === 'pending' ? 1 : -1), allocated: value.allocated + (saved.status === 'allocated' ? 1 : -1) } : null);
     if (saved.status !== status) {
       setItems(list => list.filter(item => item.relationCaseId !== id)); setExpanded(null);
@@ -92,14 +105,14 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
   };
   const save = async (id: string) => {
     const current = currentStates.current[id];
-    if (!current.task || !current.draft || current.saving || current.unconfirmedRequest || !canSave || !current.task.canSave) return;
+    if (!current.task || !current.draft || current.saving || current.conflict || current.loading || current.unconfirmedRequest || !canSave || !current.task.canSave) return;
     const request = sourceSaveRequest(current.task, current.draft);
     setCase(id, { saving: true, error: undefined, notice: undefined });
     let saved: CostStatisticsManualAllocationTask;
     try { saved = await saveCostStatisticsManualAllocation(request); }
     catch (caught) {
       if (caught instanceof ApiClientError && caught.status >= 400 && caught.status < 500) {
-        setCase(id, { saving: false, error: caught.status === 409 ? '数据已变化，请重新核对；修改已保留' : caught.status === 403 ? '当前无保存权限' : '分配未保存，请核对金额和来源；草稿已保留' });
+        setCase(id, { saving: false, conflict: caught.status === 409, error: caught.status === 409 ? '数据已变化，请重新核对；修改已保留' : caught.status === 403 ? '当前无保存权限' : '分配未保存，请核对金额和来源；草稿已保留' });
       } else {
         setCase(id, { saving: false, unconfirmedRequest: request, error: '保存结果待核实，修改已保留' });
       }
@@ -142,9 +155,9 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
             </button>
             {active ? <>
               {state?.loading ? <p role="status">加载中…</p> : null}
-              {state?.task && state.draft ? <CostSourceAllocationForm key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
+              {state?.task && state.draft ? <CostSourceAllocationForm key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest || !!state.conflict} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
               {state?.unconfirmedRequest ? <Button size="sm" isDisabled={!!state.saving} onPress={() => void verifySave(id)}>核实保存结果</Button> : null}
-              {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) void loadDetail(id, true); }}>重新加载</Button> : null}
+              {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) { void loadDetail(id, true, true); } }}>重新加载</Button> : null}
             </> : null}
           </article>;
         })}

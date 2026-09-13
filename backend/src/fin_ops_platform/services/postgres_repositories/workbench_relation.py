@@ -3,6 +3,9 @@ from __future__ import annotations
 from hashlib import sha1
 from typing import Any, Callable
 
+from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
+    OA_PAYMENT_STATUS_RECONCILE_EVENT,
+)
 from fin_ops_platform.services.postgres_repositories.common import (
     event_uuid,
     int_value,
@@ -15,9 +18,6 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
 )
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_workbench_pair_relations
-from fin_ops_platform.services.oa_payment_status_reconcile_contract import (
-    OA_PAYMENT_STATUS_RECONCILE_EVENT,
-)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
@@ -27,6 +27,21 @@ class PostgresWorkbenchRelationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
         self._post_commit_callback_registrar: Callable[[Callable[[], None]], None] | None = None
+
+    def load_display_history(self, oa_ids: list[str]) -> list[dict[str, Any]]:
+        """Read the shared display evidence in the caller's snapshot, in event order."""
+        if not oa_ids:
+            return []
+        rows = self._connection.fetch_all("""
+            select h.raw_payload
+            from app.workbench_pair_relation_history h
+            where h.case_id in (
+                select r.case_id from app.workbench_pair_relations r
+                where r.row_ids && %s::text[]
+            )
+            order by h.occurred_at, h.case_id, h.id
+        """, (sorted(set(oa_ids)),))
+        return [row_payload(row, "raw_payload") for row in rows]
 
     def bind_post_commit_callback_registrar(
         self,

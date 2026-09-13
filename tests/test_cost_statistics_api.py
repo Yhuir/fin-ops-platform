@@ -290,6 +290,9 @@ class CostStatisticsApiTests(unittest.TestCase):
         }
         manual_repository = self.app._cost_statistics_manual_allocation_repository  # noqa: SLF001
 
+        from fin_ops_platform.services.cost_statistics_canonical_repository import _attach_relation_display
+        _attach_relation_display(snapshot["cost_groups"][0], [])
+
         def mismatch_snapshot(**_kwargs):
             return {
                 **snapshot,

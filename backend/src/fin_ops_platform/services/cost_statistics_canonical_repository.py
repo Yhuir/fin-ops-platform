@@ -17,6 +17,7 @@ from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allo
     PostgresCostStatisticsManualAllocationRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
 
 OA_COST_FORM_TYPES = ("支付申请", "日常报销")
 
@@ -249,7 +250,7 @@ class PostgresCostStatisticsCanonicalRepository:
             manual_allocations = PostgresCostStatisticsManualAllocationRepository(
                 transaction
             ).list_by_case_ids([item["case_id"] for item in relations])
-            return _build_snapshot(
+            snapshot = _build_snapshot(
                 settings=settings,
                 bank_rows=bank_rows,
                 relation_bank_rows=bank_rows,
@@ -258,6 +259,15 @@ class PostgresCostStatisticsCanonicalRepository:
                 manual_allocations=manual_allocations,
                 available_years=_bank_available_years(bank_rows),
             )
+
+            group = next((g for g in snapshot["cost_groups"] if g["group_id"] == normalized_case_id), None)
+            if group is None:
+                raise KeyError(normalized_case_id)
+            history = PostgresWorkbenchRelationRepository(transaction).load_display_history(
+                [row["id"] for row in group["oa_rows"]]
+            ) if len(group["oa_rows"]) > 1 and not any(row["expense_items"] for row in group["oa_rows"]) else []
+            _attach_relation_display(group, history)
+            return snapshot
 
     def load_no_oa_tag_candidate_snapshot(self) -> dict[str, Any]:
         """Load only the canonical facts required by the no-OA tag picker."""
@@ -443,6 +453,7 @@ class LocalCostStatisticsCanonicalRepository:
         ]
         if not groups:
             raise KeyError(normalized_case_id)
+        _attach_relation_display(groups[0], [])
         return snapshot
 
     def load_manual_allocation_task_snapshot(self) -> dict[str, Any]:
@@ -1227,3 +1238,21 @@ def _decimal(value: Any) -> Decimal | None:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _attach_relation_display(group: dict[str, Any], history: list[dict[str, Any]]) -> None:
+    """Project Cost facts to the existing relation display input; never allocate cost."""
+    display = {
+        "case_id": group["group_id"],
+        "formal_member_ids": group["row_ids"],
+        "formal_member_types": group["row_types"],
+        "oa_rows": [{**row, "type": "oa"} for row in group["oa_rows"]],
+        "bank_rows": [{**row, "type": "bank"} for row in group["bank_rows"]],
+    }
+    apply_display_subgroups([display], history)
+    # Single OA and itemized OA relations have a shared parent block: its bank
+    # ownership does not assert individual expense-item allocation amounts.
+    group["relation_display_groups"] = display["display_subgroups"] if "display_subgroups" in display else [{
+        "oa_row_ids": [row["id"] for row in group["oa_rows"]],
+        "bank_row_ids": [row["id"] for row in group["bank_rows"]],
+    }]

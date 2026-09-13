@@ -1721,7 +1721,8 @@ export default function CostStatisticsPage() {
             <>
               <Button className="cost-page-action" size="sm" variant="secondary" onPress={() => setScopeOpen(true)}>项目成本范围</Button>
               <CostStatisticsManualAllocationDrawer
-                scopeRefresh={scopeRefresh}
+                active={active}
+                refreshKey={`${activationGeneration}:${domainRefreshNonce}:${scopeRefresh}`}
                 pendingCount={explorerData?.allocationQuality ? explorerData.allocationQuality.pendingManualAllocationCount + explorerData.allocationQuality.staleManualAllocationCount : undefined}
                 canSave={canOperateData && !interactionLocked}
                 onSaved={handleManualRefresh}

@@ -1,6 +1,5 @@
 import { Button, Popover } from '@heroui/react';
 import { memo, useMemo, type ReactNode } from 'react';
-import type { SourceDraftLine } from '../../features/cost-statistics/sourceAllocation';
 import { groupSourceEvidence } from '../../features/cost-statistics/sourceEvidence';
 import type { CostStatisticsManualAllocationTask } from '../../features/cost-statistics/types';
 import { formatDateTimeText } from '../../features/dateTime';
@@ -20,13 +19,9 @@ export const CostText = memo(function CostText({ text, label }: { text: string; 
   </Popover>;
 });
 
-// Amount edits do not change the source relationship shown in this readonly table.
-export const CostSourceEvidence = memo(function CostSourceEvidence({ task, costLines, nonCostLines, sourceError }: {
-  task: CostStatisticsManualAllocationTask; costLines: SourceDraftLine[]; nonCostLines: SourceDraftLine[];
-  sourceError: (id: string) => ReactNode;
-}) {
-  const groups = useMemo(() => groupSourceEvidence(task, costLines), [task, costLines]);
-  const nonCostSources = new Set(nonCostLines.map(line => line.bankTransactionId));
+// Formal relation display does not depend on editable cost allocation choices.
+export const CostSourceEvidence = memo(function CostSourceEvidence({ task, sourceError }: { task: CostStatisticsManualAllocationTask; sourceError: (id: string) => ReactNode }) {
+  const groups = useMemo(() => groupSourceEvidence(task), [task]);
   const unitContent = (index: number) => {
     const unit = task.units[index];
     return [
@@ -39,12 +34,12 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, costL
     const bank = task.bankEvents[index];
     return [
       <><span className="cost-source-evidence-identity">{index + 1}. <CostChips values={[shortBankAccount(bank.bankAccountLabel)]} /></span><CostChips values={[bank.tradeTime ? formatDateTimeText(bank.tradeTime) : '日期待完善']} /></>,
-      <><span className="cost-source-counterparty">{bank.counterpartyName}</span><CostChips values={[bank.bankTagPrimaryLabel, bank.bankTagSubLabel]} />{bank.eventKind === 'wrong_payment_refund' ? <FinanceStatusTag tone="success">退款</FinanceStatusTag> : null}{nonCostSources.has(bank.transactionId) ? <FinanceStatusTag>含非成本分配</FinanceStatusTag> : null}</>,
+      <><span className="cost-source-counterparty">{bank.counterpartyName}</span><CostChips values={[bank.bankTagPrimaryLabel, bank.bankTagSubLabel]} />{bank.eventKind === 'wrong_payment_refund' ? <FinanceStatusTag tone="success">退款</FinanceStatusTag> : null}</>,
       <><span className="cost-source-money">{bank.eventKind === 'wrong_payment_refund' ? '−' : ''}¥{bank.amount}</span>{sourceError(bank.transactionId)}</>,
     ];
   };
   const cells = (content: ReactNode[], side: string, span: number) => content.map((value, index) => <td key={index} rowSpan={span} className={`cost-evidence-${side} cost-evidence-col-${index}`}>{value}</td>);
-  return <section className="cost-source-evidence" aria-label="当前分配对照">
+  return <section className="cost-source-evidence" aria-label="当前配对关系">
     <div className="cost-evidence-headings"><h3>OA · {task.units.length} 条</h3><h3>银行流水 · {task.bankEvents.length} 条</h3></div>
     <div className="cost-source-evidence-table"><table aria-label="OA 与流水对照">
       <colgroup><col /><col /><col className="cost-evidence-amount-col" /><col /><col /><col className="cost-evidence-amount-col" /></colgroup>
@@ -61,14 +56,12 @@ export const CostSourceEvidence = memo(function CostSourceEvidence({ task, costL
           </> : Array.from({ length: Math.max(unitIndexes.length, bankIndexes.length) }, (_, row) => {
             const span = Math.max(unitIndexes.length, bankIndexes.length);
             return <tr key={row}>
-              {unitIndexes.length ? (unitIndexes.length === 1 ? row === 0 && cells(unitContent(unitIndexes[0]), 'oa', span) : cells(unitContent(unitIndexes[row]), 'oa', 1)) : row === 0 && <td colSpan={3} rowSpan={span} className="cost-evidence-unassigned">{bankIndexes.some(index => task.bankEvents[index].eventKind === 'wrong_payment_refund' || nonCostSources.has(task.bankEvents[index].transactionId)) ? '退款 / 非成本来源' : '尚未对应 OA'}</td>}
-              {bankIndexes.length ? (bankIndexes.length === 1 ? row === 0 && cells(bankContent(bankIndexes[0]), 'bank', span) : cells(bankContent(bankIndexes[row]), 'bank', 1)) : row === 0 && <td colSpan={3} rowSpan={span} className="cost-evidence-bank cost-evidence-unassigned">尚未对应流水</td>}
+              {unitIndexes.length ? (unitIndexes.length === 1 ? row === 0 && cells(unitContent(unitIndexes[0]), 'oa', span) : cells(unitContent(unitIndexes[row]), 'oa', 1)) : row === 0 && <td colSpan={3} rowSpan={span} className="cost-evidence-unassigned">{bankIndexes.some(index => task.bankEvents[index].eventKind === 'wrong_payment_refund') ? '退款来源' : '尚未对应 OA'}</td>}
+              {bankIndexes.length ? (bankIndexes.length === 1 ? row === 0 && cells(bankContent(bankIndexes[0]), 'bank', span) : cells(bankContent(bankIndexes[row]), 'bank', 1)) : row === 0 && <td colSpan={3} rowSpan={span} className="cost-evidence-bank cost-evidence-unassigned">{group.sourcesExcluded ? '—' : '尚未对应流水'}</td>}
             </tr>;
           })}
         </tbody>;
       })}
     </table></div>
   </section>;
-}, (previous, next) => previous.task === next.task && previous.sourceError === next.sourceError
-  && previous.costLines.length === next.costLines.length && previous.costLines.every((line, index) => line.ownerId === next.costLines[index].ownerId && line.bankTransactionId === next.costLines[index].bankTransactionId)
-  && previous.nonCostLines.length === next.nonCostLines.length && previous.nonCostLines.every((line, index) => line.bankTransactionId === next.nonCostLines[index].bankTransactionId));
+});

@@ -162,6 +162,7 @@ export type CostStatisticsManualAllocationTask = {
   amountsFixed: boolean;
   sourceAllocations: CostSourceAllocations | null;
   suggestedSourceAllocations: CostSourceAllocations | null;
+  relationDisplayGroups: Array<{ unitIds: string[]; bankTransactionIds: string[]; sourcesExcluded: boolean }>;
   oaTotal: string;
   grossOutflowTotal: string;
   wrongPaymentRefundTotal: string;
@@ -183,7 +184,7 @@ export type CostSourceAllocations = {
   nonCostLines: Array<{ bankTransactionId: string; amount: string }>;
 };
 
-export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations" | "suggestedSourceAllocations"> & {
+export type CostStatisticsManualAllocationSummary = Omit<CostStatisticsManualAllocationTask, "units" | "bankEvents" | "allocations" | "sourceAllocations" | "suggestedSourceAllocations" | "relationDisplayGroups"> & {
   projectNames: string[];
   unitCount: number;
   bankEventCount: number;

@@ -1,6 +1,6 @@
 # 成本统计边界与 I/O
 
-日期：2026-09-11
+日期：2026-09-13
 
 ## 模块状态
 
@@ -30,6 +30,7 @@
 - `app.bank_transaction_categories` 与 confirmations 的批量有效分类投影
 - `app.app_settings` 中银行账户映射、`cost_statistics_no_oa_projects` 和 `cost_statistics_project_cost_scope`
 - `app.cost_statistics_manual_allocations`
+- 仅人工分配单条详情/保存读取复杂 OA 关系时，通过关系 repository 的 `load_display_history(oa_ids)` 在同一 snapshot 内一次读取相关正式关系历史；列表、explorer、统计与导出不加载展示历史。
 
 成本模块不读取银行明细页面的 payload/read model。银行有效分类通过银行分类 owner 的批量 projection port 取得；不得复制分类算法或增加 SQL/Python fallback。
 
@@ -68,7 +69,7 @@ PUT manual allocation
 
 - 容器拥有列表/详情/独立草稿/保存；表单只收任务、草稿、权限和回调，输出编辑/保存事件。sourceAllocation纯工具按来源行构造既有单元金额，不重写服务端政策。
 - 固定金额取原始目标；可编辑金额不再保存targets副本，只存来源行和显式zeroUnitIds。来源/金额无效时拒绝构造PUT。
-- 证据按oaId分组，表格行以内部稳定ID保持身份；内部主键不进入可见文字。无字段补猜、演示数据回退或全局样式。
+- 证据按详情必有的 `relation_display_groups` 分组，表格行以内部稳定ID保持身份；内部主键不进入可见文字。无字段补猜、演示数据回退或全局样式。
 - 详情GET/保存PUT使用现有客户端15秒超时；PUT选择allowHtmlFallback=false。结果不明确时GET核对版本及实际内容，不自动重发PUT。数据库/审计/权限保持既有合同；详情 DTO 的预填扩展见下节。
 
 ### Explorer 与日期合同
@@ -136,7 +137,7 @@ PUT manual allocation
 ## 双表格抽屉界面边界（2026-09-09）
 
 - 容器继续独占 GET/PUT、权限、草稿、未知保存结果核实及刷新；本轮没有新增 HTTP、DTO、数据库、worker 或 read model。
-- `CostSourceEvidence.tsx` 接收 task、当前草稿 costLines/nonCostLines 和来源错误展示，只读 OA 成本单元与流水，两侧计数按事实条目。当前统一对照表的边界见文末；旧双 FinanceTable 已被替换。
+- `CostSourceEvidence.tsx` 接收 task 和来源错误展示，只读 OA 成本单元与流水，两侧计数按事实条目。当前统一对照表的边界见文末；旧双 FinanceTable 已被替换。
 - `CostSourcePicker.tsx` 接收 options/value/disabled/error、输出 transactionId；使用 HeroUI Popover/ListBox，不请求网络、不分配金额、不推断账户或标签。
 - 表单仍接收 task/draft、输出 onChange/onSave；`sourceAllocation.ts` 错误键分为 source/amount/owner，保留精确金额、零、双边闭合及未知写结果核实。
 - OA 原费用类型只读展示；成本行标签只读来源流水结构化主/子标签。替换来源不改变已输入金额。
@@ -161,10 +162,10 @@ PUT manual allocation
 - 已用完及同项重复来源保留灰色及真实禁用状态，不显示“已用完／本项已使用”。部分可用、当前行已选中与金额释放后的判断继续由表单拥有；Picker 接收 isSourceDisabled(lineId, sourceId): boolean，输出来源 ID，HTTP 和金额规则不变。
 - 删除旧 disabledReason 字符串回调、原因文字节点及 cost-source-option-state 样式；不保留旧属性或兼容分支。
 
-## 当前分配对照与金额提示（2026-09-10）
+## 正式关系对照与金额提示（2026-09-13 更新）
 
-- `sourceEvidence.ts` 是无 I/O 的展示分组函数：输入单元 ID、流水 ID/类型与草稿 owner/source ID，输出原始索引分组；以已有来源边构建连通组，复杂度 O(单元数+流水数+来源行数)，不读取金额、不推导新的配对。
-- `CostSourceEvidence.tsx` 用局部原生语义表格展示该分组：一对一同行，一对多/多对一 rowspan，多对多明确组标题并独立列出两侧事实。每项事实仅出现一次，序号保持来源列表顺序；未选择、无效来源对应的事实、退款与非成本来源均保留。无效输入的错误责任仍在既有校验。
+- `sourceEvidence.ts` 是无 I/O 的索引投影函数：输入任务事实及 `relation_display_groups`，输出原始索引分组；未知 ID 明确失败。删除按草稿 owner/source 边构建连通组的旧逻辑，不读取金额、不推导配对。
+- `CostSourceEvidence.tsx` 用局部原生语义表格展示该分组：一对一同行，一对多/多对一 rowspan，多对多明确组标题并独立列出两侧事实。每项事实仅出现一次，序号保持来源列表顺序；上方不随草稿选择、金额或非成本决定重新分组。范围外流水按既有成本范围裁剪，已被范围排除的来源位置显示“—”，不误称未配对。无效输入的错误责任仍在既有校验。
 - OA 白底、流水浅灰底与中央分隔线共同区分两侧；表格在窄屏内部横向滚动，外部抽屉及保存区不溢出。样式作用域只在成本模块。`React.memo` 比较来源身份，金额输入不重画未变化的证据表；不新增缓存层、依赖或网络请求。
 - 表单复用 `validateSourceDraft` 的完整错误集合，全部通过且不在保存/错误/提示状态时，保存按钮左侧显示深绿色“分配金额一致”。逐来源、逐单元、退款、非成本和精度规则保持原样；不另造金额判断、自动保存或成本准入规则。
 - 已删除旧的独立双表渲染及对应两栏/公共表格覆盖样式，不保留并行展示路径。FinanceTable 公共实现、API、存储、权限、审计、worker/read model 均无变化；本轮不创建数据库备份。
@@ -200,3 +201,13 @@ PUT manual allocation
 - OA 只在已有来源明确完全属于范围外、且当前来源均已明确时从任务隐藏；未知来源不按金额或序号猜 OA。历史失效分配不用于合并。既有 NULL 来源记录若不能定位范围外原决定，范围内保存明确拒绝覆盖，需先在完整范围确认来源；不猜测历史来源。
 - 跨范围退款按已确认退款链接分摊显示金额；归属不明返回 `scope_refund_required`，禁止猜测或保存错误净额。完整付款/退款仍可在关联台查看。
 - 删除旧范围外标记及待分配全量流水口径；原始银行两个视角、关联台、银行明细、无 OA 范围、权限与导出列结构不变。无迁移、备份、worker、缓存或新依赖。
+
+
+## 待分配正式关系读取闭环（2026-09-13）
+
+- 事实源为当前 active relation typed members、canonical OA/银行以及相关正式历史。Cost 与 Workbench 共用 `apply_display_subgroups` 和关系 repository 的历史查询，不从 Workbench 页面接口、旧分配、缓存或草稿反推关系。
+- `GET /manual-allocations/{case_id}` 和成功 `PUT` 的任务 DTO 必有 `relation_display_groups[{unit_ids,bank_transaction_ids,sources_excluded}]`；列表摘要不携带该字段。分组先基于完整关系计算，再按当前成本范围裁剪，保持一对多/多对多与共有父 OA 边界。报销子单元共享父 OA 的银行证据，不因此补造逐项来源金额。
+- 打开抽屉、展开任务、搜索/状态切换、页面重新激活、已有领域刷新、范围保存与窗口重新获得焦点时重新读取；AbortController 丢弃过期响应。这里的实时指当前 GET 读取最新已提交事实，并在上述交互边界刷新，不增加轮询、WebSocket 或后台任务。
+- 干净草稿按新详情初始化；脏草稿/保存结果待核实保留。关系版本、来源 fingerprint、范围版本或分配版本变化时，上方更新事实、下方停止保存并提示重新核对；显式重新加载经既有草稿确认后恢复编辑。读取失败明确显示错误，不能把旧任务当作可保存的新事实。
+- 删除详情“有缓存就不读”、范围刷新直接清空草稿和草稿驱动证据分组的旧路径。保留权限、来源校验、事务、成员锁、现有版本/fingerprint 与未知写结果核实机制。
+- 不改变成本准入、分配存储/PUT 入参、银行原始视角、关联确认/撤回命令或 read model/worker。无迁移、数据库备份、新依赖或新增门禁。

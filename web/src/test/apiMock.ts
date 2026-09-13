@@ -4657,6 +4657,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     amounts_fixed: false,
     source_allocations: manualSourceAllocations,
     suggested_source_allocations: null,
+    relation_display_groups: [{unit_ids: ["oa-1:parent", "oa-2:expense-2"], bank_transaction_ids: ["bank-manual-001", "bank-manual-002"], sources_excluded: false}],
     project_names: ["项目 A", "项目 B"], unit_count: 2, bank_event_count: 2,
     oa_total: "1010.00",
     gross_outflow_total: "1000.00",

@@ -15,10 +15,11 @@ function fixture(): CostStatisticsManualAllocationTask {
       { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', oaOriginalAmount: '200.00' },
     ],
     bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', inProjectCostScope: true, amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
-    allocations: [], suggestedSourceAllocations: null, sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
+    allocations: [], suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
   };
 }
 function Editor({ task, save = vi.fn() }: { task: CostStatisticsManualAllocationTask; save?: () => void }) {
+  task = {...task, relationDisplayGroups: [{unitIds:task.units.map(u=>u.unitId),bankTransactionIds:task.bankEvents.map(b=>b.transactionId),sourcesExcluded:false}]};
   const [draft, setDraft] = useState(() => createSourceDraft(task));
   return <CostSourceAllocationForm task={task} draft={draft} disabled={false} saving={false} onChange={setDraft} onSave={save} />;
 }
@@ -222,7 +223,7 @@ it('keeps source ordinals aligned with bank evidence when refunds appear first',
    expect(within(group as HTMLElement).queryByRole('combobox')).not.toBeInTheDocument();
  });
 
-it('shows balance only for complete allocations and updates the current source correspondence', async () => {
+it('shows balance only for complete allocations without changing formal correspondence', async () => {
   const task = fixture(); const user = userEvent.setup();
   task.amountsFixed = true; task.oaTotal = '600.00'; task.units[0].oaOriginalAmount = '400.00';
   task.bankEvents[0].amount = '400.00';
@@ -231,7 +232,7 @@ it('shows balance only for complete allocations and updates the current source c
   const {container} = render(<Editor task={task} />);
   const evidence = screen.getByRole('table', {name:'OA 与流水对照'});
   expect(screen.getByText('分配金额一致')).toBeVisible();
-  expect(within(evidence).getAllByRole('rowgroup')).toHaveLength(3);
+  const formalHtml = evidence.innerHTML;
   const groups = container.querySelectorAll('.cost-source-table tbody');
   const first = within(groups[0] as HTMLElement); const second = within(groups[1] as HTMLElement);
   await user.clear(second.getByRole('textbox')); await user.type(second.getByRole('textbox'),'100');
@@ -242,8 +243,7 @@ it('shows balance only for complete allocations and updates the current source c
   await user.clear(first.getByRole('textbox')); await user.type(first.getByRole('textbox'),'400');
   await user.click(first.getByRole('combobox'));
   await user.click(screen.getByRole('option',{name:/民生银行 9486/}));
-  expect(evidence.querySelectorAll('td[rowspan="2"]')).toHaveLength(3);
-  expect(evidence.querySelector('[data-evidence-kind="unassigned"]')).toHaveTextContent('建行 8106');
+  expect(evidence.innerHTML).toBe(formalHtml);
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
 });
 

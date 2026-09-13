@@ -141,6 +141,7 @@ type ApiCostStatisticsManualAllocationTask = {
   amounts_fixed: boolean;
   source_allocations: ApiCostSourceAllocations | null;
   suggested_source_allocations: ApiCostSourceAllocations | null;
+  relation_display_groups: Array<{ unit_ids: string[]; bank_transaction_ids: string[]; sources_excluded: boolean }>;
   oa_total: string;
   gross_outflow_total: string;
   wrong_payment_refund_total: string;
@@ -188,7 +189,7 @@ type ApiCostSourceAllocations = {
   non_cost_lines: Array<{ bank_transaction_id: string; amount: string }>;
 };
 
-type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations" | "suggested_source_allocations"> & {
+type ApiCostManualAllocationSummary = Omit<ApiCostStatisticsManualAllocationTask, "units" | "bank_events" | "allocations" | "source_allocations" | "suggested_source_allocations" | "relation_display_groups"> & {
   project_names: string[]; unit_count: number; bank_event_count: number;
 };
 
@@ -421,6 +422,7 @@ function mapManualAllocationTask(
     status: task.status,
     pendingReasons: task.pending_reasons,
     amountsFixed: task.amounts_fixed,
+    relationDisplayGroups: task.relation_display_groups.map(group => ({ unitIds: group.unit_ids, bankTransactionIds: group.bank_transaction_ids, sourcesExcluded: group.sources_excluded })),
     suggestedSourceAllocations: task.suggested_source_allocations === null ? null : mapSourceAllocations(task.suggested_source_allocations),
     sourceAllocations: task.source_allocations === null ? null : mapSourceAllocations(task.source_allocations),
     oaTotal: task.oa_total,

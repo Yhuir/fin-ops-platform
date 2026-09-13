@@ -1320,16 +1320,8 @@ class PostgresWorkbenchPageHydrationRepository:
         if not targets:
             return
         row_ids = sorted({r["id"] for g in targets for r in g["oa_rows"]})
-        rows = connection.fetch_all("""
-            select h.raw_payload
-            from app.workbench_pair_relation_history h
-            where h.case_id in (
-                select r.case_id from app.workbench_pair_relations r
-                where r.row_ids && %s::text[]
-            )
-            order by h.occurred_at, h.case_id, h.id
-        """, (row_ids,))
-        apply_display_subgroups(targets, [row_payload(row, "raw_payload") for row in rows])
+        from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+        apply_display_subgroups(targets, PostgresWorkbenchRelationRepository(connection).load_display_history(row_ids))
 
     @staticmethod
     def _settings_payload(connection: Any) -> dict[str, Any]:

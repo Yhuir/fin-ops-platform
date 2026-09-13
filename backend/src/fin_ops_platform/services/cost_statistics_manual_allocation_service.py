@@ -136,7 +136,8 @@ class CostStatisticsManualAllocationService:
         group = next(group for group in snapshot["cost_groups"]
                      if group["group_id"] == relation_case_id)
         return {**task, "can_save": can_save,
-                "suggested_source_allocations": suggest_source_allocations(task, group["bank_rows"])}
+                "suggested_source_allocations": suggest_source_allocations(task, group["bank_rows"]),
+                "relation_display_groups": _relation_display_groups(task, group)}
 
     def save(
         self,
@@ -354,9 +355,11 @@ class CostStatisticsManualAllocationService:
                     },
                 }
             )
+        group = next(g for g in snapshot["cost_groups"] if g["group_id"] == relation_case_id)
         return complete_source_task({
             **task,
             "status": "allocated",
+            "relation_display_groups": _relation_display_groups(task, group),
             "allocations": allocations,
             "non_cost_amount": f"{non_cost_amount:.2f}",
             "non_cost_reason": non_cost_reason,
@@ -519,3 +522,17 @@ def _task_summary(task: dict[str, Any]) -> dict[str, Any]:
         "unit_count": len(task["units"]),
         "bank_event_count": len(task["bank_events"]),
     }
+
+
+def _relation_display_groups(task: dict[str, Any], group: dict[str, Any]) -> list[dict[str, Any]]:
+    """Clip current relation blocks to Cost scope without regrouping their members."""
+    banks = {row["transaction_id"] for row in task["bank_events"]}
+    result = []
+    for block in group["relation_display_groups"]:
+        oa_ids = set(block["oa_row_ids"])
+        units = [u["unit_id"] for u in task["units"] if u["oa_id"] in oa_ids]
+        sources = [id for id in block["bank_row_ids"] if id in banks]
+        if units or sources:
+            result.append({"unit_ids": units, "bank_transaction_ids": sources,
+                           "sources_excluded": bool(block["bank_row_ids"]) and not sources})
+    return result

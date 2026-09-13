@@ -51,6 +51,31 @@ class CostSourcePostgresTests(unittest.TestCase):
             values ('cost-source-case',1,'manual_confirmed',%s::text[],%s::text[],'2026-08-01','active','{}'::jsonb)""",
             (["oa-a", "oa-b", "bank-1", "bank-2"], ["oa", "oa", "bank", "bank"]))
 
+    def test_relation_without_cost_members_is_not_a_detail_task(self):
+        self.connection.execute("update app.workbench_pair_relations set row_ids=array['bank-1','bank-2'], row_types=array['bank','bank'] where case_id='cost-source-case'")
+        with self.assertRaises(KeyError):
+            self.service.get_task("cost-source-case", can_save=True)
+
+    def test_formal_history_display_is_current_and_independent_of_cost_save(self):
+        current = {"case_id":"cost-source-case", "row_ids":["oa-a","oa-b","bank-1","bank-2"], "row_types":["oa","oa","bank","bank"]}
+        prior = [{"case_id":"old-a", "row_ids":["oa-a","bank-2"], "row_types":["oa","bank"]},
+                 {"case_id":"old-b", "row_ids":["oa-b","bank-1"], "row_types":["oa","bank"]}]
+        history = {"operation_type":"confirm_link", "after_relations":[current], "before_relations":prior}
+        self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values (%s,'confirm_link',%s::jsonb)", ("cost-source-case",json.dumps(history)))
+        task = self.service.get_task("cost-source-case",can_save=True)
+        expected = [{"unit_ids":["oa:oa-a"],"bank_transaction_ids":["bank-2"],"sources_excluded":False},
+                    {"unit_ids":["oa:oa-b"],"bank_transaction_ids":["bank-1"],"sources_excluded":False}]
+        self.assertEqual(task["relation_display_groups"],expected)
+        self.assertIsNone(task["source_allocations"])
+        self.assertEqual(self.save(self.payload())["relation_display_groups"],expected)
+        self.assertEqual(self.service.get_task("cost-source-case",can_save=True)["relation_display_groups"],expected)
+        old_payload=self.payload()
+        self.connection.execute("update app.workbench_pair_relations set status='cancelled',version=version+1 where case_id='cost-source-case'")
+        with self.assertRaises(KeyError):
+            self.service.get_task("cost-source-case",can_save=True)
+        with self.assertRaises(CostStatisticsManualAllocationConflictError):
+            self.save(old_payload)
+
     def test_prefill_reads_explicit_references_without_writing_then_saves(self):
         with self.connection.transaction() as writer:
             writer.execute("select set_config('fin_ops.correction_reason', 'isolated prefill evidence fixture', true)")

@@ -135,3 +135,8 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 ## 2026-09-12 历史快照作为页面展示证据
 
 关联台页面只读消费已有确认历史的 before/after typed membership，为普通多 OA 组保留原 OA/流水小组。输出属于 reconciliation-workbench 的 `display_subgroups`，不构成新的 active relation、支付证明或成本分配。正式关联、合并、撤回、版本和审计写入继续由本模块原 command/UoW 负责；历史对应不足时页面显示共享区块，禁止按重复金额生成关系事实。
+
+
+## 展示历史共享读取（2026-09-13）
+
+`PostgresWorkbenchRelationRepository.load_display_history(oa_ids)` 在调用方一致性 snapshot 内集合读取相关正式历史，按事件顺序返回 raw payload。Workbench hydration 与 Cost 人工分配单条详情共用此只读 port，并共用 `apply_display_subgroups`；删除 hydration 中重复 SQL。Cost 先对完整 typed members 分组再裁剪成本范围，不能用分配草稿修改正式关系。此读取不参与确认/撤回命令，不更改 history、关系成员或 worker/read model。
