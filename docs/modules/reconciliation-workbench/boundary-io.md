@@ -274,3 +274,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 新增可选输出 `display_subgroups: [{oa_row_ids: string[], bank_row_ids: string[], resolved: boolean}]`，由纯函数模块 `services/workbench_display_subgroups.py` 生成。它只用于 OA/银行列共享行轨；不写 relation/source ownership，不修改金额、成员、版本、审批、配对区或成本口径。发票没有逐项归属证据时继续占整组共享栏。已有费用子项/补充凭证展示链保留。
 - 优先保留历史 OA+银行小组；剩余记录仅按无歧义金额匹配，一侧单项且总额闭合时共享一个区块；无法唯一判断的多对多保留共享区块，不猜测重复金额归属。不同 pane 的相同文本 ID 按 typed identity 区分。
 - 前端 API mapper 仅转为 `displaySubgroups`；主表消费该分段，不再为这些普通多 OA 组调用原金额推断/残余行分支。旧报销明细与显式发票来源逻辑仍服务原业务，不做并行替代实现。
+
+## 2026-09-14 确认与撤回的月份 I/O
+
+- 来源 selection 的现有月份通过内部 `scope_month` 传递；preview descriptor 暂存选中成员月份，复用既有查询。该内部字段在 preview grouping 输出时移除，不进入公共页面 row DTO。
+- 预览使用只读选择快照，提交使用事务内重新验证的来源。affected months 覆盖真实选中月份；取消单月关系直接使用关系的明确 scope，跨月关系才批量读取成员日期。
+- `workbench_relation_scope_invalid` 表示服务端业务月份无效，使用 500 和稳定中文提示；前端保留备注、请求编号，要求修正来源后重新预览，不能盲目重试。未知临时错误保留原处理。
+- 当前页面仍为 PostgreSQL canonical 直接读取；本次不增加 read model、worker、轮询或跨页刷新 I/O。

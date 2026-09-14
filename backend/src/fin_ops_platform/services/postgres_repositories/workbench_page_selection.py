@@ -27,6 +27,7 @@ from fin_ops_platform.services.workbench_filter_options import (
     normalize_workbench_scope_key,
 )
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
+from fin_ops_platform.services.workbench_relation_scope import canonical_month
 from fin_ops_platform.services.workbench_row_identity import (
     workbench_row_identity_key,
 )
@@ -209,6 +210,7 @@ class PostgresWorkbenchPageSelectionRepository:
                 "pane": row_type,
                 "source_kind": str(source.get("source_kind") or row_type),
                 "external_etc_batch_id": str(source.get("external_etc_batch_id") or ""),
+                "scope_month": canonical_month(source.get("scope_month")),
             })
         return result
 
@@ -243,6 +245,7 @@ class PostgresWorkbenchPageSelectionRepository:
                 "pane": row_type,
                 "source_kind": str(source.get("source_kind") or row_type),
                 "external_etc_batch_id": str(source.get("external_etc_batch_id") or ""),
+                "scope_month": canonical_month(source.get("scope_month")),
             })
             result.append(row)
         return result
@@ -360,7 +363,18 @@ class PostgresWorkbenchPageSelectionRepository:
                 code="relation_preview_rows_missing",
                 message="所选工作台记录已变化，请刷新后重试。",
             )
-        selected_rows = [rows_by_identity[identity] for identity in matched_identities]
+        months_by_identity = {
+            (row_type, row_id): month
+            for descriptor in descriptors
+            for row_type, row_id, month in zip(
+                descriptor["selected_row_types"], descriptor["selected_row_ids"],
+                descriptor["selected_scope_months"], strict=True,
+            )
+        }
+        selected_rows = [
+            {**rows_by_identity[identity], "scope_month": months_by_identity[identity]}
+            for identity in matched_identities
+        ]
         selected_set = set(matched_identities)
         context_rows = self._dedupe_rows(
             row
@@ -418,7 +432,7 @@ class PostgresWorkbenchPageSelectionRepository:
         scope_months = [row.get("scope_month") for row in sources]
         updated_ats = [row.get("updated_at") for row in sources]
         normalized_member_type = self._normalized_member_type_sql("member.row_type")
-        return self._connection.fetch_all(
+        descriptors = self._connection.fetch_all(
             f"""
             with selected_sources as materialized (
                 select
@@ -665,6 +679,19 @@ class PostgresWorkbenchPageSelectionRepository:
             ),
         )
 
+        months_by_identity = {
+            (str(source["row_type"]), str(source["row_id"])): canonical_month(source.get("scope_month"))
+            for source in sources
+        }
+        for descriptor in descriptors:
+            descriptor["selected_scope_months"] = [
+                months_by_identity[(row_type, row_id)]
+                for row_type, row_id in zip(
+                    descriptor["selected_row_types"], descriptor["selected_row_ids"], strict=True,
+                )
+            ]
+        return descriptors
+
     @classmethod
     def _validated_matches(
         cls,
@@ -755,11 +782,11 @@ class PostgresWorkbenchPageSelectionRepository:
             },
         )
         result: dict[str, dict[str, Any]] = {}
-        for identity in identities:
+        for identity, source in zip(identities, source_rows, strict=True):
             row_type, row_id = identity
             if row_id in result:
                 raise ValueError(f"Canonical Workbench row id is ambiguous: {row_id}.")
-            result[row_id] = rows[(row_type, row_id)]
+            result[row_id] = {**rows[(row_type, row_id)], "scope_month": canonical_month(source.get("scope_month"))}
         return result
 
     def _resolve_source_identities(

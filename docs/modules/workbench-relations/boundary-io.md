@@ -145,3 +145,11 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 ## 精确历史分组复用（2026-09-13）
 
 `workbench_display_subgroups.relation_history_partitions(relations, history)` 提供无 I/O 的 typed-member 历史分组，输入当前完整关系与按时间排序的正式事件，输出各关系的互不重叠成员分区。原展示函数复用此解析并继续自己的金额对齐；Cost 只消费金额推断前的历史分区，用于待确认来源建议。历史索引按批构建，不增加逐行查询；不改变关联命令、数据库关系、版本、OA 状态或 Workbench DTO。
+
+## 2026-09-14 关联月份事实源修正
+
+- 人工关联月份只来自 selection repository 的 canonical `scope_month`；内部输入为 `YYYY-MM | null`。同月使用该月，跨月或源合同允许的空值使用 `all`；受影响月份为全部已知具体月份的排序去重集合。请求筛选月份不覆盖业务日期。
+- `services/workbench_relation_scope.py` 只做范围计算；relation repository 复用既有严格年月校验。不得从任意记录 ID、当前时间、展示文本补月份。公共 `common.month_start` 合同不变。
+- 人工确认在现有事务 selection 中计算最终范围，通常无额外日期查询；替换或撤回涉及未选中的旧关系成员时，只对缺少的 typed identities 批量补读一次，受影响月份覆盖操作前后完整成员。人工撤回将同事务来源月份传给 command；新恢复关系及本次撤回事件使用正确范围，原始 predecessor history 不改写。其他业务生产者继续拥有自身 scope 规则。
+- `postgres_repositories/workbench_scope_repair.py` 是明确的离线月份元数据修复 adapter；工具入口 `tools/workbench_scope_repair.py`。只按经调查的计划修正关系范围和已提交响应的 affected months，现有锁和旧值比较保护竞争，事务内追加 `audit.events`。不推进拓扑版本、不发 OA 支付事件、不改原始 relation history，不进入 API/worker/replay 热路径。
+- 已删除 `ROW_ID_MONTH_RE`、ID 月份 helper、相关注入、弱日期解析和伪 scope 合并分支。无新增 schema、缓存、worker、hash 或 gate。

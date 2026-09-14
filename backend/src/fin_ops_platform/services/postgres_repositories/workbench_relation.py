@@ -20,6 +20,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_workbench_pair_relations
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
+from fin_ops_platform.services.workbench_relation_scope import validate_relation_scope
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
@@ -473,6 +474,13 @@ class PostgresWorkbenchRelationRepository:
             )
         return ordered_keys
 
+    def canonical_relation_scope_months(self, row_ids, *, row_types, tenant_id):
+        from fin_ops_platform.services.postgres_repositories.workbench_page_selection import PostgresWorkbenchPageSelectionRepository
+        rows = PostgresWorkbenchPageSelectionRepository(self._connection, tenant_id=tenant_id).validate_workbench_relation_selection_in_current_transaction(
+            action="withdraw_link", scope_key="all", row_ids=row_ids, row_types=row_types,
+        )
+        return {(row["pane"], row["row_id"]): row["scope_month"] for row in rows}
+
     def lock_canonical_relation_members(
         self,
         row_ids: list[str],
@@ -708,7 +716,7 @@ class PostgresWorkbenchRelationRepository:
                         text(payload.get("relation_mode") or payload.get("mode") or "unknown"),
                         text(payload.get("status") or "active"),
                         int_value(payload.get("version"), 1),
-                        month_start(payload.get("month_scope") or payload.get("scope_month") or payload.get("month")),
+                        month_start(validate_relation_scope(payload.get("month_scope") or payload.get("scope_month") or payload.get("month"))),
                         text_list(payload.get("row_ids")),
                         text_list(payload.get("row_types")),
                         text(payload.get("note")),

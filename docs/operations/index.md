@@ -7,6 +7,7 @@
 - `external-control-evidence.md`：银行/OA/发票/ETC 外部完整快照 manifest 的独立采集边界、校验、登记、撤销、System Audit 判定和生产授权门禁。
 - `invoice-pool-cleanup.md`：统一发票池清理、备份、dry-run、soft reference gate 和重导验收。
 - `object-identity-dedup.md`：业务对象 identity/dedup 统一规则审计、blocking issue、人工 repair 原则。
+- [workbench-scope-repair.md](workbench-scope-repair.md)：关联月份错误的只读调查、事务定点修复、审计、恢复和临时副本清理。
 - `postgresql-runtime.md`：当前 PostgreSQL primary runtime、queue/read model、备份、回滚和验证边界。
 - `performance-contract.md`：核心读 API、写后可见性、并发、响应体和数据库资源的生产性能合同与证据规则。
 - `read-model-production-evidence-runbook.md`：已退役 projection 的生产零残留验证与 canonical API 性能证据。

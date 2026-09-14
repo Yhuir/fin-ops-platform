@@ -87,6 +87,7 @@ class _RecordingUoW:
     def __init__(self) -> None:
         self.replay_commands: list[object] = []
         self.run_commands: list[object] = []
+        self.scope_months: dict[str, str] = {}
 
     def replay_committed(self, command: object) -> None:
         self.replay_commands.append(command)
@@ -113,7 +114,7 @@ class _RecordingUoW:
                 {
                     "validate_workbench_relation_selection_in_current_transaction": staticmethod(
                         lambda **_: [
-                            {"pane": row_type, "row_id": row_id}
+                            {"pane": row_type, "row_id": row_id, "scope_month": "2026-05"}
                             for row_type, row_id in zip(
                                 list(getattr(command, "row_types")),
                                 list(getattr(command, "row_ids")),
@@ -123,7 +124,7 @@ class _RecordingUoW:
                     ),
                     "load_validated_workbench_relation_selection_in_current_transaction": staticmethod(
                         lambda **_: [
-                            {"pane": row_type, "row_id": row_id, "type": row_type}
+                            {"pane": row_type, "row_id": row_id, "type": row_type, "scope_month": self.scope_months.get(row_id, "2026-05")}
                             for row_type, row_id in zip(
                                 list(getattr(command, "row_types")),
                                 list(getattr(command, "row_ids")),
@@ -195,6 +196,7 @@ class _HandlerCallingUoW:
                     if row_id.startswith(("invoice", "etc-summary-"))
                     else "bank"
                 ),
+                "scope_month": "2026-05",
                 "source_kind": "etc_invoice_summary" if row_id.startswith("etc-summary-") else "",
                 "external_etc_batch_id": (
                     row_id.removeprefix("etc-summary-") if row_id.startswith("etc-summary-") else ""
@@ -585,9 +587,7 @@ def _new_facade(
     exception_case_service: object | None = None,
     live_rows: list[dict[str, object]] | None = None,
     relation_groups: object | None = None,
-    withdraw_rows_and_after_relations: object | None = None,
-    scope_keys_for_row_ids: object | None = None,
-    scope_keys_for_rows: object | None = None,
+    preview_rows_provider: object | None = None,
     resolve_rows_for_amount_check: object | None = None,
     resolve_live_rows_direct: object | None = None,
     pair_relation_service: object | None = None,
@@ -607,7 +607,7 @@ def _new_facade(
         return "bank"
 
     resolved_amount_rows = resolve_rows_for_amount_check or (
-        lambda row_ids, **_: [{"id": row_id, "type": default_row_type(row_id)} for row_id in row_ids]
+        lambda row_ids, **_: [{"id": row_id, "type": default_row_type(row_id), "scope_month": "2026-05"} for row_id in row_ids]
     )
 
     def normalize_row_ids(values: list[object]) -> list[str]:
@@ -634,8 +634,8 @@ def _new_facade(
             for row in list(live_rows or [])
             if isinstance(row, dict) and str(row.get("id") or row.get("row_id") or "").strip()
         }
-        if not fixture_rows_by_id and withdraw_rows_and_after_relations is not None:
-            preview_rows = withdraw_rows_and_after_relations(
+        if not fixture_rows_by_id and preview_rows_provider is not None:
+            preview_rows = preview_rows_provider(
                 active_relation={},
                 after_relations=[],
                 month=_month,
@@ -673,12 +673,8 @@ def _new_facade(
         resolve_rows_for_amount_check=resolved_amount_rows,
         merge_relation_snapshots=lambda before, synthetic: list(before) + list(synthetic),
         synthetic_existing_case_relations=lambda *_, **__: [],
-        month_scope_for_selected_row_ids=lambda **_: "2026-05",
-        scope_keys_for_row_ids=scope_keys_for_row_ids or (lambda **_: {"2026-05"}),
-        scope_keys_for_rows=scope_keys_for_rows or (lambda rows, **_: ["2026-05"]),
         resolve_live_rows_direct=resolve_live_rows_direct or (lambda *_, **__: list(live_rows or [])),
         relation_groups=relation_groups or (lambda *_, **__: []),
-        withdraw_rows_and_after_relations=withdraw_rows_and_after_relations or (lambda *_, **__: ([], [], [])),
         amount_check_for_rows_by_type=amount_check_for_rows_by_type or (lambda _: {}),
         transaction_amount_for_row_id=lambda _: 0,
         save_exception_cases_snapshot=lambda: None,
@@ -1216,22 +1212,13 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         uow = _RecordingUoW()
         row_ids = ["oa-imported-2048", "txn_imported_1361", "txn_imported_1269"]
         selected_rows = [
-            {"id": "oa-imported-2048", "type": "oa", "summary_fields": {"申请日期": "2026-03-09"}},
-            {"id": "txn_imported_1361", "type": "bank", "trade_time": "2026-03-09 12:06:30"},
-            {"id": "txn_imported_1269", "type": "bank", "trade_time": "2026-02-03 09:16:49"},
+            {"id": "oa-imported-2048", "type": "oa", "scope_month": "2026-03", "summary_fields": {"申请日期": "2026-03-09"}},
+            {"id": "txn_imported_1361", "type": "bank", "scope_month": "2026-03", "trade_time": "2026-03-09 12:06:30"},
+            {"id": "txn_imported_1269", "type": "bank", "scope_month": "2026-02", "trade_time": "2026-02-03 09:16:49"},
         ]
         facade = _new_facade(
             confirm_uow=uow,
             resolve_rows_for_amount_check=lambda *_args, **_kwargs: selected_rows,
-            scope_keys_for_row_ids=lambda **_: {"all"},
-            scope_keys_for_rows=lambda rows, **_: [
-                "all",
-                *[
-                    str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期"))[:7]
-                    for row in rows
-                    if str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期") or "")[:7]
-                ],
-            ],
         )
 
         result = facade.confirm_link(
@@ -1246,8 +1233,8 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
-        self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
+        self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-02", "2026-03"])
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-02", "2026-03"])
         self.assertNotIn("freshness_targets", result.payload)
 
     def test_cancel_link_replay_and_run_commands_use_explicit_actor_and_tenant_context(self) -> None:
@@ -1394,7 +1381,8 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 {
                     "id": row_id,
                     "type": "invoice" if row_id == etc_row_id else "bank",
-                    "source_kind": "etc_invoice_summary" if row_id == etc_row_id else "bank",
+                    "scope_month": "2026-05",
+                "source_kind": "etc_invoice_summary" if row_id == etc_row_id else "bank",
                 }
                 for row_id in row_ids
             ],
@@ -1483,7 +1471,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         facade = _new_facade(
             withdraw_uow=_RecordingUoW(),
             relation_command_service=_RecordingRelationCommandService(),
-            withdraw_rows_and_after_relations=forbidden_projection_rebuild,
+            preview_rows_provider=forbidden_projection_rebuild,
         )
 
         result = facade.withdraw_link(
@@ -1633,7 +1621,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                     "before_relation": active_relation,
                     "history": {"operation_type": "withdraw_link"},
                     "changed_case_ids": ["CASE-ALL"],
-                    "affected_months": ["all"],
+                    "affected_months": ["2026-02", "2026-03"],
                     "affected_row_ids": list(kwargs["row_ids"]),
                     "restored_relations": [],
                     "version": 8,
@@ -1647,24 +1635,16 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         uow = _RecordingUoW()
         row_ids = ["oa-imported-2048", "txn_imported_1361", "txn_imported_1269"]
         preview_rows = [
-            {"id": "oa-imported-2048", "type": "oa", "summary_fields": {"申请日期": "2026-03-09"}},
-            {"id": "txn_imported_1361", "type": "bank", "trade_time": "2026-03-09 12:06:30"},
-            {"id": "txn_imported_1269", "type": "bank", "trade_time": "2026-02-03 09:16:49"},
+            {"id": "oa-imported-2048", "type": "oa", "scope_month": "2026-03", "summary_fields": {"申请日期": "2026-03-09"}},
+            {"id": "txn_imported_1361", "type": "bank", "scope_month": "2026-03", "trade_time": "2026-03-09 12:06:30"},
+            {"id": "txn_imported_1269", "type": "bank", "scope_month": "2026-02", "trade_time": "2026-02-03 09:16:49"},
         ]
+        uow.scope_months = {row["id"]: row["scope_month"] for row in preview_rows}
         relation_command = _AllScopeWithdrawRelationCommandService()
         facade = _new_facade(
             withdraw_uow=uow,
             relation_command_service=relation_command,
-            scope_keys_for_row_ids=lambda **_: {"all"},
-            scope_keys_for_rows=lambda rows, **_: [
-                "all",
-                *[
-                    str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期"))[:7]
-                    for row in rows
-                    if str(row.get("trade_time") or row.get("summary_fields", {}).get("申请日期") or "")[:7]
-                ],
-            ],
-            withdraw_rows_and_after_relations=lambda **_: (preview_rows, [], row_ids),
+            preview_rows_provider=lambda **_: (preview_rows, [], row_ids),
         )
 
         result = facade.withdraw_link(
@@ -1682,7 +1662,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), [])
         self.assertEqual(len(relation_command.preview_withdraw_calls), 0)
         self.assertEqual(relation_command.withdraw_calls[0]["row_ids"], row_ids)
-        self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
+        self.assertEqual(result.payload["affected_scope_keys"], ["2026-02", "2026-03"])
         self.assertNotIn("freshness_targets", result.payload)
 
     def test_confirm_and_cancel_link_map_in_progress_idempotency_to_stable_conflict_payload(self) -> None:
@@ -1830,7 +1810,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             resolve_live_rows_direct=lambda row_ids, **_: direct_resolution_calls.append(
                 list(row_ids)
             ),
-            withdraw_rows_and_after_relations=lambda **_: (_ for _ in ()).throw(
+            preview_rows_provider=lambda **_: (_ for _ in ()).throw(
                 AssertionError("withdraw preview must not use the legacy full-payload row scan")
             ),
         )
@@ -1933,7 +1913,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         ]
         resolved_active_row_ids: list[list[str]] = []
 
-        def withdraw_rows_and_after_relations(**kwargs: object) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
+        def preview_rows_provider(**kwargs: object) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
             active_relation = dict(kwargs["active_relation"])
             resolved_active_row_ids.append(list(active_relation.get("row_ids") or []))
             return live_rows, list(kwargs.get("after_relations") or []), list(active_relation.get("row_ids") or [])
@@ -1950,8 +1930,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             ),
             relation_command_service=relation_command,
             live_rows=live_rows,
-            scope_keys_for_row_ids=lambda **_: {"all"},
-            withdraw_rows_and_after_relations=withdraw_rows_and_after_relations,
+            preview_rows_provider=preview_rows_provider,
         )
 
         preview = facade.preview_withdraw_link(
@@ -2007,7 +1986,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             relation_command_service=relation_command,
             live_rows=live_rows,
             relation_groups=_preview_relation_groups(),
-            withdraw_rows_and_after_relations=lambda **_: (live_rows, [], selected_row_ids),
+            preview_rows_provider=lambda **_: (live_rows, [], selected_row_ids),
         )
 
         preview = facade.preview_withdraw_link(
@@ -2061,7 +2040,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         facade = _new_facade(
             relation_command_service=relation_command,
             relation_groups=_preview_relation_groups(),
-            withdraw_rows_and_after_relations=lambda **_: (rows, [], [str(row["id"]) for row in rows]),
+            preview_rows_provider=lambda **_: (rows, [], [str(row["id"]) for row in rows]),
         )
 
         preview = facade.preview_withdraw_link(

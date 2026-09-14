@@ -204,13 +204,13 @@ from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.live_workbench_service import LiveWorkbenchService
-from fin_ops_platform.services.manual_invoice_entry_service import (
-    ManualInvoiceEntryError,
-    ManualInvoiceEntryService,
-)
 from fin_ops_platform.services.manual_bank_transaction_entry_service import (
     ManualBankTransactionEntryError,
     ManualBankTransactionEntryService,
+)
+from fin_ops_platform.services.manual_invoice_entry_service import (
+    ManualInvoiceEntryError,
+    ManualInvoiceEntryService,
 )
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.no_oa_bank_batch_application_service import (
@@ -273,10 +273,6 @@ from fin_ops_platform.services.operation_history_evidence import (
 from fin_ops_platform.services.operation_history_semantics import operation_semantics
 from fin_ops_platform.services.operations_audit_service import OperationsAuditService, PageAuditUnavailableError
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
-from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
-    InMemoryCostStatisticsManualAllocationRepository,
-    PostgresCostStatisticsManualAllocationRepository,
-)
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
@@ -311,6 +307,10 @@ from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
 )
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.cost_statistics_manual_allocation import (
+    InMemoryCostStatisticsManualAllocationRepository,
+    PostgresCostStatisticsManualAllocationRepository,
+)
 from fin_ops_platform.services.postgres_repositories.import_lifecycle import PostgresImportLifecycleRepository
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
@@ -340,9 +340,6 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
-from fin_ops_platform.services.postgres_repositories.workbench_relation_receipt import (
-    PostgresWorkbenchRelationReceiptRepository,
-)
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import (
     APP_SETTINGS_KEY,
     PostgresOpsTaxEtcRepository,
@@ -366,6 +363,9 @@ from fin_ops_platform.services.postgres_repositories.workbench_page_selection im
     PostgresWorkbenchPageSelectionRepository,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation_receipt import (
+    PostgresWorkbenchRelationReceiptRepository,
+)
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
@@ -447,10 +447,6 @@ from fin_ops_platform.services.workbench_invoice_supplement_service import (
     WorkbenchInvoiceSupplementError,
     WorkbenchInvoiceSupplementService,
 )
-from fin_ops_platform.services.workbench_relation_receipt_pdf import WorkbenchReceiptPdfRenderer
-from fin_ops_platform.services.workbench_relation_receipt_service import (
-    WorkbenchRelationReceiptService,
-)
 from fin_ops_platform.services.workbench_oa_retention_date_parser import WorkbenchOaRetentionDateParser
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     SupportingDocumentUpload,
@@ -481,6 +477,10 @@ from fin_ops_platform.services.workbench_relation_command_service import (
 from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationGroupingService,
     WorkbenchRelationPreviewGroupingService,
+)
+from fin_ops_platform.services.workbench_relation_receipt_pdf import WorkbenchReceiptPdfRenderer
+from fin_ops_platform.services.workbench_relation_receipt_service import (
+    WorkbenchRelationReceiptService,
 )
 from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
@@ -562,7 +562,6 @@ def _build_content_disposition(filename: str) -> str:
     encoded_name = quote(filename, safe="")
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
 
-ROW_ID_MONTH_RE = re.compile(r"(20\d{2})(\d{2})")
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 class Application:
@@ -2536,12 +2535,8 @@ class Application:
             resolve_rows_for_amount_check=self._resolve_rows_for_amount_check,
             merge_relation_snapshots=self._merge_relation_snapshots,
             synthetic_existing_case_relations=self._synthetic_existing_case_relations,
-            month_scope_for_selected_row_ids=self._month_scope_for_selected_row_ids,
-            scope_keys_for_row_ids=self._scope_keys_for_row_ids,
-            scope_keys_for_rows=self._scope_keys_for_rows,
             resolve_live_rows_direct=self._resolve_live_rows_direct,
             relation_groups=preview_grouping.group_relations,
-            withdraw_rows_and_after_relations=self._withdraw_rows_and_after_relations,
             amount_check_for_rows_by_type=self._amount_check_for_rows_by_type,
             transaction_amount_for_row_id=self._workbench_transaction_amount_for_row_id,
             save_exception_cases_snapshot=self._save_workbench_exception_cases_snapshot,
@@ -9147,82 +9142,6 @@ class Application:
             }
         )
 
-    def _scope_keys_for_row_ids(
-        self,
-        *,
-        month: str,
-        row_ids: list[str],
-        month_scope: str | None = None,
-    ) -> set[str]:
-        scope_keys = {"all"}
-        if month and month != "all":
-            scope_keys.add(month)
-        if month_scope and month_scope != "all":
-            scope_keys.add(month_scope)
-        for row_id in row_ids:
-            row_month = self._row_month_scope_from_row_id(row_id)
-            if row_month:
-                scope_keys.add(row_month)
-        return scope_keys
-
-    def _scope_keys_for_rows(
-        self,
-        *,
-        month: str,
-        rows: list[dict[str, object]],
-    ) -> list[str]:
-        scope_keys = {"all"}
-        if month and month != "all":
-            scope_keys.add(month)
-        for row in rows:
-            row_month = self._row_month_scope(row)
-            if row_month:
-                scope_keys.add(row_month)
-        return list(scope_keys)
-
-    @staticmethod
-    def _row_month_scope_from_row_id(row_id: str) -> str | None:
-        match = ROW_ID_MONTH_RE.search(str(row_id))
-        if match is not None:
-            return f"{match.group(1)}-{match.group(2)}"
-        return None
-
-    def _row_month_scope(self, row: dict[str, object]) -> str | None:
-        row_type = str(row.get("type", ""))
-        if row_type == "bank":
-            for value in (row.get("trade_time"), row.get("pay_receive_time")):
-                resolved_month = self._normalize_month_from_value(value)
-                if resolved_month is not None:
-                    return resolved_month
-        elif row_type == "invoice":
-            resolved_month = self._normalize_month_from_value(row.get("issue_date"))
-            if resolved_month is not None:
-                return resolved_month
-        elif row_type == "oa":
-            summary_fields = row.get("summary_fields")
-            if isinstance(summary_fields, dict):
-                for key in ("申请日期", "日期"):
-                    resolved_month = self._normalize_month_from_value(summary_fields.get(key))
-                    if resolved_month is not None:
-                        return resolved_month
-            detail_fields = row.get("detail_fields")
-            if isinstance(detail_fields, dict):
-                for key in ("申请日期", "单据日期"):
-                    resolved_month = self._normalize_month_from_value(detail_fields.get(key))
-                    if resolved_month is not None:
-                        return resolved_month
-        return self._row_month_scope_from_row_id(str(row.get("id", "")))
-
-    @staticmethod
-    def _normalize_month_from_value(value: object) -> str | None:
-        if value in (None, ""):
-            return None
-        resolved = str(value).strip()
-        if len(resolved) >= 7 and resolved[4] == "-" and resolved[5:7].isdigit():
-            return resolved[:7]
-        return None
-
-
     def _grouped_rows_by_id(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
         rows_by_id: dict[str, dict[str, object]] = {}
         for section in ("paired", "unpaired"):
@@ -9290,24 +9209,6 @@ class Application:
     @staticmethod
     def _plain_money(value: Decimal) -> str:
         return f"{value.quantize(Decimal('0.01')):.2f}"
-
-    def _withdraw_rows_and_after_relations(
-        self,
-        *,
-        active_relation: dict[str, object],
-        after_relations: list[dict[str, object]],
-        month: str,
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
-        affected_row_ids = self._normalize_row_ids(
-            [
-                *list(active_relation.get("row_ids") or []),
-                *[row_id for relation in after_relations for row_id in list(relation.get("row_ids") or [])],
-            ]
-        )
-        rows = self._resolve_rows_for_amount_check(affected_row_ids, month=month)
-        if after_relations:
-            return rows, after_relations, affected_row_ids
-        return rows, [], affected_row_ids
 
     def _synthetic_existing_case_relations(
         self,
@@ -9498,18 +9399,6 @@ class Application:
     @staticmethod
     def _row_type_for_row_id(row_id: str) -> str:
         return row_type_for_workbench_row_id(row_id)
-
-    def _month_scope_for_selected_row_ids(self, *, month: str, row_ids: list[str]) -> str:
-        if month != "all":
-            return month
-        row_months = {
-            resolved_month
-            for resolved_month in (self._row_month_scope_from_row_id(row_id) for row_id in row_ids)
-            if resolved_month
-        }
-        if len(row_months) == 1:
-            return next(iter(row_months))
-        return "all"
 
     def _resolve_rows_from_workbench_canonical_selection(
         self,

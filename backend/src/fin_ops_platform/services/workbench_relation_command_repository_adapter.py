@@ -208,6 +208,11 @@ class WorkbenchRelationCommandRepositoryAdapter:
             if row_id
         )
 
+    def canonical_relation_scope_months(self, row_ids, *, row_types, tenant_id):
+        return self._repository.canonical_relation_scope_months(
+            row_ids, row_types=row_types, tenant_id=tenant_id,
+        )
+
     def lock_canonical_relation_members(
         self,
         row_ids: list[str],

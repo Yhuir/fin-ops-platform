@@ -82,6 +82,7 @@ class _CanonicalSelectionRepository:
         return [
             {
                 **dict(self._rows[row_id]),
+                "scope_month": "2026-03",
                 "row_id": row_id,
                 "pane": row_type,
             }

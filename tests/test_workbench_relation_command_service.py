@@ -21,11 +21,48 @@ def command_service() -> WorkbenchRelationCommandService:
         relation_repository=WorkbenchRelationCommandRepositoryAdapter(
             pair_relation_service=pair_service,
             save_repository=False,
-        )
+        ),
+        tenant_id="default",
     )
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_withdraw_loads_missing_predecessor_months_once(self):
+        from unittest.mock import Mock
+        service = command_service()
+        service.confirm_relation(case_id="old", row_ids=["bank", "invoice"], row_types=["bank", "invoice"],
+            relation_mode="manual_confirmed", actor_id="tester", month_scope="2097-03", history_operation_type="confirm_link")
+        service.confirm_relation(case_id="new", row_ids=["bank", "oa"], row_types=["bank", "oa"],
+            relation_mode="manual_confirmed", actor_id="tester", month_scope="2026-08", replace_existing=True, history_operation_type="confirm_link")
+        reader = Mock(return_value={("invoice", "invoice"): "2026-07"})
+        service._relation_repository.canonical_relation_scope_months = reader
+        preview = service.preview_withdraw_relation(row_ids=["bank", "oa"], row_types=["bank", "oa"])
+        result = service.withdraw_relation(case_id="new", actor_id="tester", row_ids=["bank", "oa"], row_types=["bank", "oa"],
+            preview_id=preview["preview_id"], expected_versions=preview["submit_expected_versions"],
+            canonical_scope_months={("bank", "bank"): "2026-08", ("oa", "oa"): "2026-08"})
+        reader.assert_called_once_with(["invoice"], row_types=["invoice"], tenant_id="default")
+        self.assertEqual(result["affected_months"], ["2026-07", "2026-08"])
+        self.assertEqual(result["restored_relations"][0]["month_scope"], "all")
+
+    def test_withdraw_recalculates_restored_scope_without_rewriting_original_history(self):
+        service = command_service()
+        service.confirm_relation(case_id="old", row_ids=["bank", "invoice"],
+            row_types=["bank", "invoice"], relation_mode="manual_confirmed", actor_id="tester",
+            month_scope="2097-03", history_operation_type="confirm_link")
+        service.confirm_relation(case_id="merged", row_ids=["bank", "invoice", "oa"],
+            row_types=["bank", "invoice", "oa"], relation_mode="manual_confirmed", actor_id="tester",
+            month_scope="all", replace_existing=True, history_operation_type="confirm_link")
+        preview = service.preview_withdraw_relation(row_ids=["bank", "invoice", "oa"], row_types=["bank", "invoice", "oa"])
+        result = service.withdraw_relation(case_id="merged", actor_id="tester",
+            row_ids=["bank", "invoice", "oa"], row_types=["bank", "invoice", "oa"],
+            preview_id=preview["preview_id"], expected_versions=preview["submit_expected_versions"],
+            canonical_scope_months={(kind, kind): "2026-08" for kind in ("bank", "invoice", "oa")})
+        self.assertEqual(result["restored_relations"][0]["month_scope"], "2026-08")
+        self.assertEqual(service.get_active_relation_by_case_id("old")["month_scope"], "2026-08")
+        snapshot = service._relation_repository.load_workbench_pair_relations()
+        original = next(event for event in snapshot["pair_relation_history"] if event["operation_type"] == "confirm_link")
+        self.assertEqual(original["after_relations"][0]["month_scope"], "2097-03")
+
     def test_confirm_folds_real_members_and_withdraw_restores_bank_only_batch(self) -> None:
         service = command_service()
         grouping = WorkbenchRelationGroupingService()

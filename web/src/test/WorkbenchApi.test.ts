@@ -926,6 +926,7 @@ describe("workbench api bank amount mapping", () => {
     ["unknown_auth_error", 401, "登录状态已失效，请重新登录。"],
     ["unknown_permission_error", 403, "当前账号无权执行此操作。"],
     ["unknown_conflict", 409, "关联台数据已变化，请刷新后重新预览。"],
+    ["workbench_relation_scope_invalid", 500, "关联记录的业务月份无效，请修正来源数据后重新预览。"],
     ["unknown_server_error", 503, "关联台服务暂时不可用，请稍后重试。"],
   ])("maps %s/%i to an approved Chinese message", async (code, status, expectedMessage) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

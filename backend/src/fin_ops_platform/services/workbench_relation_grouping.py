@@ -847,4 +847,4 @@ class WorkbenchRelationPreviewGroupingService:
         pane = group.get(pane_key)
         if not isinstance(pane, list):
             raise TypeError(f"Workbench preview group pane must be a list: {pane_key}")
-        pane.append(row)
+        pane.append({key: value for key, value in row.items() if key != "scope_month"})

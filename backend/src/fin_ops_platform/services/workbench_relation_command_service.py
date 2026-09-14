@@ -13,6 +13,7 @@ from fin_ops_platform.services.workbench_etc_batch_link import (
 )
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
+from fin_ops_platform.services.workbench_relation_scope import affected_months, relation_scope
 
 IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE = "无法撤回：OA 附件发票必须和来源 OA 保持绑定。"
 
@@ -1854,6 +1855,7 @@ class WorkbenchRelationCommandService:
         expected_versions: dict[str, Any] | None = None,
         row_id_aliases: dict[str, str] | None = None,
         preparation: WorkbenchRelationWithdrawPreparation | None = None,
+        canonical_scope_months: dict[tuple[str, str], object] | None = None,
     ) -> dict[str, Any]:
         resolved_case_id = str(case_id or "").strip()
         resolved_operation_type = str(operation_type or "withdraw_relation").strip()
@@ -1978,6 +1980,33 @@ class WorkbenchRelationCommandService:
             created_at=occurred_at,
             row_id_aliases=row_id_aliases,
         )
+        if canonical_scope_months is not None:
+            canonical_scope_months = dict(canonical_scope_months)
+            all_ids, all_types = self._canonical_relation_members(
+                [before_relation, *restored_relations], row_id_aliases=row_id_aliases,
+            )
+            missing = [(kind, rid) for kind, rid in zip(all_types, all_ids, strict=True)
+                       if (kind, rid) not in canonical_scope_months]
+            if missing:
+                canonical_scope_months.update(self._relation_repository.canonical_relation_scope_months(
+                    [rid for kind, rid in missing], row_types=[kind for kind, rid in missing],
+                    tenant_id=self._canonical_tenant_id(None),
+                ))
+            # Only this new operation is updated; predecessor audit facts stay immutable.
+            for restored in restored_relations:
+                member_ids, member_types = self._canonical_relation_members(
+                    [restored], row_id_aliases=row_id_aliases,
+                )
+                restored["month_scope"] = relation_scope([
+                    {"scope_month": canonical_scope_months[(kind, row_id)]}
+                    for kind, row_id in zip(member_types, member_ids, strict=True)
+                ])
+            history["after_relations"] = deepcopy(restored_relations)
+            pair_service.apply_snapshot_delta(
+                {"pair_relations": {item["case_id"]: item for item in restored_relations},
+                 "pair_relation_history": [history]},
+                replace_history=False,
+            )
         if history_operation_type != "withdraw_link":
             history = pair_service.record_history(
                 operation_type=history_operation_type,
@@ -2013,7 +2042,8 @@ class WorkbenchRelationCommandService:
                 relation=relation,
                 history=history,
                 changed_case_ids=changed_case_ids,
-                affected_months=self._affected_months(str(before_relation.get("month_scope") or "all")),
+                affected_months=(affected_months([{"scope_month": value} for value in canonical_scope_months.values()])
+                                 if canonical_scope_months is not None else self._affected_months(str(before_relation.get("month_scope") or "all"))),
                 idempotent_replay=False,
             ),
             "restored_relations": deepcopy(restored_relations),

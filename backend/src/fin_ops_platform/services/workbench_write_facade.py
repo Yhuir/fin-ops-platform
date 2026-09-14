@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from http import HTTPStatus
-import logging
-import re
 from time import monotonic
 from typing import Any, Callable
 
 from fin_ops_platform.services.bank_turnover_tag_semantics import EXTERNAL_TURNOVER_ROLE
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_alias_map
 from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationService,
     TurnoverRelationValidationError,
@@ -18,7 +19,6 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
 )
-from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_alias_map
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_modes import (
     MANUAL_CONFIRMED_RELATION_MODE,
@@ -28,10 +28,15 @@ from fin_ops_platform.services.workbench_relation_modes import (
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
+from fin_ops_platform.services.workbench_relation_scope import (
+    WorkbenchRelationScopeError,
+    affected_months,
+    relation_scope,
+    validate_relation_scope,
+)
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
-
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 LOGGER = logging.getLogger(__name__)
@@ -260,12 +265,8 @@ class WorkbenchWriteFacade:
         resolve_rows_for_amount_check: Callable[..., list[dict[str, object]]],
         merge_relation_snapshots: Callable[..., list[dict[str, object]]],
         synthetic_existing_case_relations: Callable[..., list[dict[str, object]]],
-        month_scope_for_selected_row_ids: Callable[..., str],
-        scope_keys_for_row_ids: Callable[..., set[str]],
-        scope_keys_for_rows: Callable[..., list[str]],
         resolve_live_rows_direct: Callable[..., list[dict[str, object]]],
         relation_groups: Callable[..., list[dict[str, object]]],
-        withdraw_rows_and_after_relations: Callable[..., tuple[list[dict[str, object]], list[dict[str, object]], list[str]]],
         amount_check_for_rows_by_type: Callable[..., dict[str, object]],
         transaction_amount_for_row_id: Callable[[str], object],
         save_exception_cases_snapshot: Callable[[], None],
@@ -292,12 +293,8 @@ class WorkbenchWriteFacade:
         self._resolve_rows_for_amount_check = resolve_rows_for_amount_check
         self._merge_relation_snapshots = merge_relation_snapshots
         self._synthetic_existing_case_relations = synthetic_existing_case_relations
-        self._month_scope_for_selected_row_ids = month_scope_for_selected_row_ids
-        self._scope_keys_for_row_ids = scope_keys_for_row_ids
-        self._scope_keys_for_rows = scope_keys_for_rows
         self._resolve_live_rows_direct = resolve_live_rows_direct
         self._relation_groups = relation_groups
-        self._withdraw_rows_and_after_relations = withdraw_rows_and_after_relations
         self._amount_check_for_rows_by_type = amount_check_for_rows_by_type
         self._transaction_amount_for_row_id = transaction_amount_for_row_id
         self._save_exception_cases_snapshot = save_exception_cases_snapshot
@@ -409,7 +406,7 @@ class WorkbenchWriteFacade:
             "row_types": row_types,
             "status": "active",
             "relation_mode": confirm_plan.relation_mode,
-            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            "month_scope": relation_scope(rows),
             "amount_check": amount_check,
             "special_metadata": {
                 **paired_policy_metadata,
@@ -557,15 +554,10 @@ class WorkbenchWriteFacade:
             self._synthetic_existing_case_relations(
                 selected_rows,
                 existing_relations=before_relations,
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+                month_scope=relation_scope(selected_rows),
             ),
         )
-        changed_scope_keys = self._operation_scope_keys_for_rows_and_row_ids(
-            month=month,
-            rows=selected_rows,
-            row_ids=row_ids,
-            month_scope=month,
-        )
+        changed_scope_keys = affected_months(selected_rows)
         relation_special_metadata = {
             **paired_policy_metadata,
             **self._turnover_closure_special_metadata(
@@ -606,7 +598,7 @@ class WorkbenchWriteFacade:
                     row_ids=row_ids,
                     row_types=row_types,
                     actor_id=actor_id,
-                    month=month,
+                    month=relation_scope(selected_rows),
                     note=note,
                     confirm_plan=confirm_plan,
                     history_before_relations=history_before_relations,
@@ -706,7 +698,7 @@ class WorkbenchWriteFacade:
         )
 
         def handler(ctx: object) -> dict[str, object]:
-            nonlocal failure_phase
+            nonlocal failure_phase, changed_scope_keys
             failure_phase = "transaction_context"
             transaction = getattr(ctx, "transaction", None)
             if transaction is None:
@@ -764,6 +756,15 @@ class WorkbenchWriteFacade:
                     expected={"external_etc_batch_count": 1},
                     actual={"external_etc_batch_ids": external_etc_batch_ids},
                 )
+            prior_members = sorted({
+                (kind, rid) for relation in history_before_relations
+                for kind, rid in zip(relation["row_types"], relation["row_ids"], strict=True)
+            } - set(expected_identities))
+            prior_sources = validate_selection(
+                action=action_name, scope_key="all",
+                row_ids=[rid for kind, rid in prior_members], row_types=[kind for kind, rid in prior_members],
+            ) if prior_members else []
+            changed_scope_keys = affected_months([*canonical_selection, *prior_sources])
             transaction_metadata = dict(relation_special_metadata)
             if external_etc_batch_ids:
                 transaction_metadata["external_etc_batch_id"] = external_etc_batch_ids[0]
@@ -778,7 +779,7 @@ class WorkbenchWriteFacade:
                 row_ids=row_ids,
                 row_types=row_types,
                 actor_id=actor_id,
-                month=month,
+                month=relation_scope(canonical_selection),
                 note=note,
                 confirm_plan=confirm_plan,
                 history_before_relations=history_before_relations,
@@ -821,6 +822,9 @@ class WorkbenchWriteFacade:
             return WorkbenchWriteResult(HTTPStatus(exc.status_code), dict(conflict_payload["payload"]))
         except WorkbenchRelationCommandError as exc:
             return self._relation_command_error_result(exc)
+        except WorkbenchRelationScopeError as exc:
+            LOGGER.exception("Workbench canonical scope invalid. request_id=%s", request_id)
+            return WorkbenchWriteResult(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "workbench_relation_scope_invalid", "message": str(exc)})
         except Exception:
             LOGGER.exception(
                 "Workbench confirm-link UoW failed at phase=%s.",
@@ -868,7 +872,7 @@ class WorkbenchWriteFacade:
             "row_types": list(row_types),
             "relation_mode": confirm_plan.relation_mode,
             "actor_id": _normalize_actor_id(actor_id),
-            "month_scope": self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+            "month_scope": month,
             "note": note,
             "amount_check": dict(confirm_plan.amount_check),
             "special_metadata": dict(relation_special_metadata),
@@ -1124,70 +1128,6 @@ class WorkbenchWriteFacade:
             normalized.append(value)
         return normalized
 
-    def _operation_scope_keys_for_rows_and_row_ids(
-        self,
-        *,
-        month: str,
-        rows: list[dict[str, object]],
-        row_ids: list[str],
-        month_scope: str | None = None,
-    ) -> list[str]:
-        return self._normalize_operation_scope_keys([
-            *self._scope_keys_for_rows(month=month, rows=rows),
-            *self._scope_keys_for_row_ids(month=month, row_ids=row_ids, month_scope=month_scope or ""),
-        ])
-
-    def _withdraw_changed_scope_keys(
-        self,
-        *,
-        month: str,
-        active_relation: dict[str, object],
-        preview: dict[str, object],
-        affected_row_ids: list[str],
-        alias_map: dict[str, str],
-    ) -> list[str]:
-        changed_scope_keys = self._normalize_operation_scope_keys(
-            list(preview.get("affected_months") or [])
-        )
-        if changed_scope_keys:
-            return changed_scope_keys
-
-        month_scope = str(active_relation.get("month_scope") or "")
-        changed_scope_keys = self._operation_scope_keys_for_rows_and_row_ids(
-            month=month,
-            rows=[],
-            row_ids=affected_row_ids,
-            month_scope=month_scope,
-        )
-        if changed_scope_keys:
-            return changed_scope_keys
-
-        before_relations = [
-            self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
-            for relation in list(preview.get("before_relations") or [])
-            if isinstance(relation, dict)
-        ]
-        canonical_active_relation = before_relations[0] if before_relations else self._canonicalize_withdraw_relation(
-            active_relation,
-            alias_map=alias_map,
-        )
-        canonical_after_relations = [
-            self._canonicalize_withdraw_relation(dict(relation), alias_map=alias_map)
-            for relation in list(preview.get("after_relations") or [])
-            if isinstance(relation, dict)
-        ]
-        rows, _synthetic_after_relations, _affected_row_ids = self._withdraw_rows_and_after_relations(
-            active_relation=canonical_active_relation,
-            after_relations=canonical_after_relations,
-            month=month,
-        )
-        return self._operation_scope_keys_for_rows_and_row_ids(
-            month=month,
-            rows=rows,
-            row_ids=affected_row_ids,
-            month_scope=month_scope,
-        )
-
     @staticmethod
     def _affected_scope_envelope(scope_keys: list[str]) -> dict[str, object]:
         return {"affected_scope_keys": list(dict.fromkeys(scope_keys))}
@@ -1319,13 +1259,7 @@ class WorkbenchWriteFacade:
             started_at=resolve_rows_started_at,
             detail=f"rows={len(affected_row_ids)}",
         )
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
-                month=month,
-                row_ids=affected_row_ids,
-                month_scope=str(active_relation.get("month_scope") or ""),
-            )
-        )
+        changed_scope_keys = self._affected_months_for_relation(active_relation)
         changed_case_ids = [str(active_relation.get("case_id") or "")]
         if self._cancel_link_uow is not None:
             return self._cancel_link_with_uow(
@@ -1882,6 +1816,7 @@ class WorkbenchWriteFacade:
                 row_id_aliases=row_id_aliases,
                 row_ids=row_ids,
                 row_types=row_types,
+                canonical_scope_months={(str(row["pane"]), str(row["row_id"])): row.get("scope_month") for row in canonical_selection},
             )
             before_relation = dict(result.get("before_relation") or result.get("relation") or {})
             case_id = str(result.get("case_id") or before_relation.get("case_id") or "").strip()
@@ -1909,17 +1844,7 @@ class WorkbenchWriteFacade:
                         alias_map=row_id_aliases or {},
                     ),
                 )
-            changed_scope_keys = self._normalize_operation_scope_keys(
-                list(result.get("affected_months") or [])
-            )
-            if not changed_scope_keys:
-                changed_scope_keys = self._withdraw_changed_scope_keys(
-                    month=month,
-                    active_relation=before_relation,
-                    preview={"affected_months": result.get("affected_months") or []},
-                    affected_row_ids=affected_row_ids,
-                    alias_map=row_id_aliases,
-                )
+            changed_scope_keys = self._normalize_operation_scope_keys(list(result["affected_months"]))
             self._emit_timing_if_requested(
                 request_id=request_id,
                 action_name=action_name,
@@ -1993,7 +1918,7 @@ class WorkbenchWriteFacade:
             preview_withdraw_relation(
                 row_ids=list(row_ids),
                 row_types=list(row_types),
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+                month_scope=month,
                 row_id_aliases=row_id_aliases,
             )
             or {}
@@ -2013,6 +1938,7 @@ class WorkbenchWriteFacade:
         row_id_aliases: dict[str, str] | None = None,
         row_ids: list[str] | None = None,
         row_types: list[str] | None = None,
+        canonical_scope_months: dict[tuple[str, str], object] | None = None,
     ) -> dict[str, object]:
         withdraw_relation = getattr(relation_command, "withdraw_relation", None)
         if not callable(withdraw_relation):
@@ -2037,6 +1963,7 @@ class WorkbenchWriteFacade:
                 if isinstance(payload.get("expected_versions"), dict)
                 else None,
                 row_id_aliases=row_id_aliases,
+                **({"canonical_scope_months": canonical_scope_months} if canonical_scope_months is not None else {}),
             )
             or {}
         )
@@ -2501,7 +2428,7 @@ class WorkbenchWriteFacade:
                 },
             )
 
-        changed_scope_keys = self._scope_keys_for_rows(month=month, rows=rows)
+        changed_scope_keys = affected_months(rows)
         before_relations = self._relation_read_snapshot_port.active_relations_for_typed_rows(
             row_ids,
             row_types,
@@ -2511,7 +2438,7 @@ class WorkbenchWriteFacade:
             self._synthetic_existing_case_relations(
                 rows,
                 existing_relations=before_relations,
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+                month_scope=relation_scope(rows),
             ),
         )
         relation_command = self._relation_command_service_for()
@@ -2543,7 +2470,7 @@ class WorkbenchWriteFacade:
                 row_types=row_types,
                 relation_mode=PERSONAL_ADVANCE_REPAYMENT_MODE,
                 actor_id="system",
-                month_scope=self._month_scope_for_selected_row_ids(month=month, row_ids=row_ids),
+                month_scope=relation_scope(rows),
                 note=note,
                 amount_check=amount_check,
                 special_metadata={
@@ -2723,6 +2650,15 @@ class WorkbenchWriteFacade:
             raise ValueError(f"{field_name} must be greater than or equal to 0.")
         return f"{amount:.2f}"
 
+    def _affected_months_for_relation(self, relation: dict[str, object]) -> list[str]:
+        scope = validate_relation_scope(relation.get("month_scope"))
+        if scope != "all":
+            return [scope]
+        # A cross-month relation has no single stored date; load its exact members once.
+        return affected_months(self._resolve_live_rows_direct(
+            list(relation["row_ids"]), row_types=list(relation["row_types"]), month_hint="all",
+        ))
+
     def _after_cash_special_relation_update(
         self,
         *,
@@ -2731,14 +2667,7 @@ class WorkbenchWriteFacade:
         request_id: str | None,
         action_name: str,
     ) -> list[str]:
-        row_ids = self._normalize_row_ids(list(relation.get("row_ids") or []))
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
-                month=month,
-                row_ids=row_ids,
-                month_scope=str(relation.get("month_scope") or ""),
-            )
-        )
+        changed_scope_keys = self._affected_months_for_relation(relation)
         self._schedule_pair_relation_persist(
             changed_case_ids=[str(relation.get("case_id") or "")],
             request_id=request_id,

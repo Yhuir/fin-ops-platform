@@ -170,6 +170,120 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.raw_connection.close()
         truncate_test_database(self.database_url)
 
+    def test_random_id_month_confirm_replay_withdraw_and_rollback(self):
+        from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+        from fin_ops_platform.services.workbench_relation_command_repository_adapter import WorkbenchRelationCommandRepositoryAdapter
+        from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
+        from tests.test_workbench_auth_context_idempotency import _new_facade
+        from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
+
+        bank_id = 'txn_imported_b072b36d7209440abc7a5cd65e0a0fd4'
+        oa_ids = [f'oa-scope-{index}' for index in range(3)]
+        invoice_ids = [f'invoice-scope-{index}' for index in range(7)]
+        for index, (amount, month) in enumerate(zip([52, 351, 34], ['2026-05', '2026-06', '2026-07'], strict=True)):
+            payload = {'id': oa_ids[index], 'amount': str(amount), 'workflow_status': 'completed', 'applicant': 'scope-test'}
+            self.raw_connection.execute('''insert into app.oa_applications
+                (oa_source_id, form_id, form_type, row_id, status, workflow_status, applicant, application_date, scope_month, amount, normalized_payload, raw_payload)
+                values (%s, 'payment_request', '付款申请', %s, 'active', 'completed', 'scope-test', %s::date, %s::date, %s, %s::jsonb, '{}'::jsonb)''',
+                (oa_ids[index], oa_ids[index], month+'-15', month+'-01', amount, json.dumps(payload)))
+        self.raw_connection.execute('''insert into app.bank_transactions
+            (legacy_mongo_id, account_no, txn_direction, counterparty_name_raw, amount, signed_amount, txn_date, txn_month, trade_time, status, raw_payload)
+            values (%s, '8106', 'outflow', 'scope-test', 437, -437, '2026-08-20', '2026-08-01', '2026-08-20 15:26:06+08', 'active', '{}'::jsonb)''', (bank_id,))
+        for index, amount in enumerate([25, 1, 25, 1, 50, 300, 35]):
+            self.raw_connection.execute('''insert into app.invoices
+                (legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month, amount, signed_amount, total_with_tax, status, workbench_visibility, raw_payload)
+                values (%s, 'input', %s, '2026-07-15', '2026-07-01', %s, %s, %s, 'active', 'visible', '{}'::jsonb)''',
+                (invoice_ids[index], f'SCOPE-{index}', amount, amount, amount))
+        ids = [*oa_ids, bank_id, *invoice_ids]
+        types = ['oa']*3 + ['bank'] + ['invoice']*7
+        pair_service = WorkbenchPairRelationService()
+
+        def repository_factory(transaction):
+            return SimpleNamespace(pair_relations=PostgresWorkbenchRelationRepository(transaction),
+                exception_cases=PostgresWorkbenchRepository(transaction), row_overrides=PostgresWorkbenchRepository(transaction),
+                canonical_query=PostgresWorkbenchPageSelectionRepository(transaction, tenant_id='default'))
+
+        uow = WorkbenchWriteUnitOfWork(connection=self.raw_connection, repository_factory=repository_factory,
+            idempotency_store=PostgresWorkbenchIdempotencyRepository(self.raw_connection))
+
+        def command_factory(repository=None):
+            return WorkbenchRelationCommandService(relation_repository=WorkbenchRelationCommandRepositoryAdapter(
+                pair_relation_service=pair_service, repository=repository or PostgresWorkbenchRelationRepository(self.raw_connection)))
+
+        def rows(row_ids, **kwargs):
+            loaded = self.selection_repository.get_canonical_rows_by_ids(row_ids, row_types=kwargs.get('row_types'))
+            return [loaded[row_id] for row_id in row_ids]
+
+        facade = _new_facade(confirm_uow=uow, withdraw_uow=uow, pair_relation_service=pair_service,
+            relation_command_service=command_factory(), resolve_rows_for_amount_check=rows,
+            resolve_live_rows_direct=rows, amount_check_for_rows_by_type=WorkbenchAmountCheckService().check)
+        facade._relation_command_service_factory = command_factory
+        request = {'month': 'all', 'row_ids': ids, 'row_types': types, 'case_id': 'CASE-SCOPE',
+                   'idempotency_key': 'scope-confirm', 'note': 'scope integration test'}
+        confirmed = facade.confirm_link(request, actor_id='scope-test', tenant_id='default')
+        self.assertEqual(confirmed.status_code, 200, confirmed.payload)
+        self.assertEqual([confirmed.payload['amount_check'][key] for key in ('oa_total', 'bank_total', 'invoice_total')], ['437.00'] * 3)
+        self.assertEqual(confirmed.payload['affected_months'], ['2026-05', '2026-06', '2026-07', '2026-08'])
+        relation = self.raw_connection.fetch_one("select month_scope,row_ids from app.workbench_pair_relations where case_id='CASE-SCOPE'")
+        self.assertIsNone(relation['month_scope'])
+        self.assertEqual(set(relation['row_ids']), set(ids))
+        counts = self.raw_connection.fetch_one("select (select count(*) from app.workbench_pair_relation_history) h,(select count(*) from job.outbox_events) e")
+        replay = facade.confirm_link(request, actor_id='scope-test', tenant_id='default')
+        self.assertEqual(replay.payload, confirmed.payload)
+        self.assertEqual(counts, self.raw_connection.fetch_one("select (select count(*) from app.workbench_pair_relation_history) h,(select count(*) from job.outbox_events) e"))
+        preview = command_factory().preview_withdraw_relation(row_ids=ids, row_types=types)
+        withdrawn = facade.withdraw_link({**request, 'idempotency_key': 'scope-withdraw',
+            'preview_id': preview['preview_id'], 'expected_versions': preview['submit_expected_versions']},
+            actor_id='scope-test', tenant_id='default')
+        self.assertEqual(withdrawn.status_code, 200, withdrawn.payload)
+        self.assertEqual(withdrawn.payload['affected_months'], confirmed.payload['affected_months'])
+        self.assertEqual(self.raw_connection.fetch_one("select status from app.workbench_pair_relations where case_id='CASE-SCOPE'")['status'], 'cancelled')
+        before_failure = self.raw_connection.fetch_one("select (select count(*) from app.workbench_pair_relation_history) h,(select count(*) from job.outbox_events) e")
+        from fin_ops_platform.services.workbench_relation_scope import WorkbenchRelationScopeError
+        with patch.object(PostgresWorkbenchRelationRepository, '_append_workbench_pair_relation_history', side_effect=WorkbenchRelationScopeError('invalid source month')):
+            failed = facade.confirm_link({**request, 'case_id': 'CASE-SCOPE-FAIL', 'idempotency_key': 'scope-fail'}, actor_id='scope-test', tenant_id='default')
+        self.assertEqual(failed.payload['error'], 'workbench_relation_scope_invalid')
+        self.assertIsNone(self.raw_connection.fetch_one("select case_id from app.workbench_pair_relations where case_id='CASE-SCOPE-FAIL'"))
+        self.assertIsNone(self.raw_connection.fetch_one("select idempotency_key from app.workbench_idempotency_records where idempotency_key='scope-fail'"))
+        self.assertEqual(before_failure, self.raw_connection.fetch_one("select (select count(*) from app.workbench_pair_relation_history) h,(select count(*) from job.outbox_events) e"))
+
+    def test_scope_only_repair_is_atomic_audited_idempotent_and_reversible(self):
+        from copy import deepcopy
+        from fin_ops_platform.services.postgres_repositories.workbench_scope_repair import PostgresWorkbenchScopeRepairRepository
+        repository = PostgresWorkbenchScopeRepairRepository(self.raw_connection)
+        response = {'case_id': 'CASE-DIRECT-1', 'success': True, 'affected_months': ['2097-03'], 'outbox_event_ids': ['existing-event']}
+        self.raw_connection.execute('''insert into app.workbench_idempotency_records
+            (tenant_id,actor_id,action_name,idempotency_key,request_fingerprint,status,response_payload)
+            values ('default','repair-test','confirm_link','repair-test',%s,'committed',%s::jsonb)''', ('a'*64, json.dumps(response)))
+        self.raw_connection.execute("update app.workbench_pair_relations set raw_payload=jsonb_build_object('normalized_payload', jsonb_build_object('month_scope','2026-07')) where case_id='CASE-DIRECT-1'")
+        state = repository.read_state(['CASE-DIRECT-1'])
+        plan = {'relations': [{'before': state['relations'][0], 'after_scope': '2026-08'}],
+                'responses': [{'before': state['responses'][0], 'after_payload': {**response, 'affected_months': ['2026-08']}}]}
+        history_before = self.raw_connection.fetch_all('select * from app.workbench_pair_relation_history order by id')
+        outbox_before = self.raw_connection.fetch_all('select * from job.outbox_events order by id')
+        broken = deepcopy(plan)
+        broken['responses'][0]['before']['response_payload']['success'] = False
+        with self.assertRaises(ValueError):
+            repository.apply(broken, actor='repair-test', reason='test rollback')
+        self.assertEqual(repository.read_state(['CASE-DIRECT-1']), state)
+        self.assertEqual(repository.apply(plan, actor='repair-test', reason='scope test'), {'relations': 1, 'responses': 1})
+        self.assertEqual(repository.apply(plan, actor='repair-test', reason='scope test'), {'relations': 0, 'responses': 0})
+        self.assertEqual(self.raw_connection.fetch_all('select * from app.workbench_pair_relation_history order by id'), history_before)
+        self.assertEqual(self.raw_connection.fetch_all('select * from job.outbox_events order by id'), outbox_before)
+        self.assertEqual(self.raw_connection.fetch_one("select count(*) n from audit.events where event_type='workbench.scope_metadata_repaired'")['n'], 2)
+        repaired = repository.read_state(['CASE-DIRECT-1'])
+        self.assertEqual(repaired['relations'][0]['version'], state['relations'][0]['version'])
+        self.assertEqual(repaired['responses'][0]['response_payload']['outbox_event_ids'], ['existing-event'])
+        self.assertEqual(repository.apply(plan, actor='repair-test', reason='rollback test', rollback=True), {'relations': 1, 'responses': 1})
+        restored = repository.read_state(['CASE-DIRECT-1'])
+        for field in ('month_scope', 'raw_payload', 'version', 'row_ids', 'row_types', 'status'):
+            self.assertEqual(restored['relations'][0][field], state['relations'][0][field])
+        self.assertEqual(restored['responses'], state['responses'])
+        stale = deepcopy(plan)
+        stale['relations'][0]['before']['version'] += 1
+        with self.assertRaises(ValueError):
+            repository.apply(stale, actor='repair-test', reason='stale test')
+
     def _insert_canonical_fixtures(self) -> None:
         settings_payload = {
             "page_access_accounts": [],

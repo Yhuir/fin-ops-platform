@@ -2401,6 +2401,9 @@ function topLevelReasonFromPayload(payload: unknown) {
 }
 
 function resolveWorkbenchApiErrorMessage(status: number, code: string, payload: unknown) {
+  if (code === "workbench_relation_scope_invalid") {
+    return "关联记录的业务月份无效，请修正来源数据后重新预览。";
+  }
   if (WORKBENCH_API_ERROR_MESSAGES[code]) {
     return WORKBENCH_API_ERROR_MESSAGES[code];
   }

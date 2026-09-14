@@ -122,3 +122,12 @@ cd web && npm test -- --run \
 - `test_workbench_relation_command_service.py`、`test_workbench_pair_relation_service.py`：连续合并、逐层恢复、批次撤回幂等及历史不足零写。
 - `test_app_postgres_mode_integration.py::test_bank_flow_owner_real_postgres_submit_withdraw_replay_and_event_failure`：真实 PostgreSQL/API 提交批次→合并→撤回恢复→重新合并→批次 owner 撤回；注入 event writer 失败验证 relations/history/batch/events 整体回滚。
 - 七类中 1/2/3/5/6/7 适用；第 4 类执行 canonical-only 和零 read-model event 负向回归，本次不新增或修改 worker/cache/read model。
+
+## 2026-09-14 月份错误回归
+
+- 单元：`tests/test_workbench_relation_scope.py` 覆盖随机 ID 的合法/非法年月片段、同月/跨月/null、非法非空日期。
+- 内部 I/O：`test_workbench_page_selection_repository.py` 验证现有单条来源查询携带月份，不增加 full hydration。
+- Service/API：`test_workbench_auth_context_idempotency.py`、`test_workbench_relation_command_service.py` 覆盖真实月份输入、撤回恢复纠正和原始历史不变；`test_workbench_v2_api.py` 保护单月取消零来源读取。
+- PostgreSQL：`test_workbench_query_postgres_integration.py` 的 `test_random_id_month_confirm_replay_withdraw_and_rollback` 覆盖 3 OA/1 bank/7 invoice、437 元跨月、真实 UoW/SQL/幂等/撤回及写后故障回滚。`test_scope_only_repair_is_atomic_audited_idempotent_and_reversible` 覆盖定点修复、竞争、重复执行、回滚、审计以及无额外 history/outbox。
+- 前端：WorkbenchApi 错误映射和 WorkbenchSelection 备注保留/不可盲目重试。原关联、撤回、权限浏览器流程继续回归。
+- read model/cache 本次不适用；现有 OA 事件零额外副作用属于适用的任务回归。生产执行与清理见月份修复 runbook。

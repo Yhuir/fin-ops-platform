@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
     PostgresWorkbenchPageSelectionRepository,
 )
@@ -48,6 +47,7 @@ def _descriptor(
         "selected_row_types": row_types,
         "selected_row_ids": row_ids,
         "selected_source_kinds": row_types,
+        "selected_scope_months": ["2026-07"] * len(row_ids),
     }
 
 
@@ -184,6 +184,7 @@ def test_transaction_revalidation_returns_hydrated_canonical_rows(
             "pane": "oa",
             "source_kind": "oa",
             "external_etc_batch_id": "",
+            "scope_month": "2026-07",
         }
     ]
     assert len(connection.calls) == 1
@@ -220,6 +221,7 @@ def test_transaction_validation_keeps_confirm_on_narrow_source_query(
             "pane": "bank",
             "source_kind": "bank_transaction",
             "external_etc_batch_id": "",
+            "scope_month": "2026-07",
         }
     ]
     assert len(connection.calls) == 1
@@ -339,7 +341,7 @@ def test_preview_excludes_collapsed_bank_summary_from_context(monkeypatch: pytes
     summary = {"id": "relation_summary:batch", "type": "bank",
                "source_kind": "bank_fold_summary", "amount": "50.00"}
     repository = PostgresWorkbenchPageSelectionRepository(_Connection([]), tenant_id="test")
-    monkeypatch.setattr(repository, "_selection_descriptors", lambda **_: [{}])
+    monkeypatch.setattr(repository, "_selection_descriptors", lambda **_: [_descriptor(positions=list(range(1, 6)), row_types=["bank"] * 5, row_ids=ids)])
     monkeypatch.setattr(repository, "_validated_matches", lambda **_: [("bank", identity) for identity in ids])
     monkeypatch.setattr(
         "fin_ops_platform.services.postgres_repositories.workbench_page_selection."
@@ -348,5 +350,5 @@ def test_preview_excludes_collapsed_bank_summary_from_context(monkeypatch: pytes
                            "member_ids": ids, "summary_row": summary}]}],
     )
     result = repository._relation_preview_selection(scope_key="all", row_ids=ids, row_types=["bank"] * 5)
-    assert result["rows"] == rows
+    assert result["rows"] == [{**row, "scope_month": "2026-07"} for row in rows]
     assert result["context_rows"] == []

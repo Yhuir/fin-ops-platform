@@ -1191,16 +1191,19 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
-  test("amount mismatch submit failure keeps the note and exposes a safe request id", async () => {
+  test.each([
+    ["workbench_state_persistence_unavailable", 503, "关联台服务暂时不可用，请稍后重试。", true],
+    ["workbench_relation_scope_invalid", 500, "关联记录的业务月份无效，请修正来源数据后重新预览。", false],
+  ] as const)("submit error %s preserves note and offers only valid retry", async (code, status, message, retryable) => {
     const user = userEvent.setup();
     const defaultFetch = installMockApiFetch();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (fetchPath(input) === "/api/workbench/actions/confirm-link") {
         return jsonResponse({
-          error: "workbench_state_persistence_unavailable",
+          error: code,
           message: "INTERNAL ENGLISH SENTINEL: database details",
           requestId: "req-confirm-safe",
-        }, 503);
+        }, status);
       }
       return defaultFetch(input, init);
     }));
@@ -1217,10 +1220,16 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
     expect(await within(dialog).findByText(
-      "关联台服务暂时不可用，请稍后重试。（请求编号：req-confirm-safe）",
+      `${message}（请求编号：req-confirm-safe）`,
     )).toBeInTheDocument();
     expect(note).toHaveValue("发票税额尾差，财务已复核");
-    expect(within(dialog).getByRole("button", { name: "重试确认" })).toBeEnabled();
+    if (retryable) {
+      expect(within(dialog).getByRole("button", { name: "重试确认" })).toBeEnabled();
+    } else {
+      expect(within(dialog).queryByRole("button", { name: "重试确认" })).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "关闭", exact: true })).toBeEnabled();
+    }
     expect(screen.queryByText(/INTERNAL ENGLISH SENTINEL/)).not.toBeInTheDocument();
   });
 
