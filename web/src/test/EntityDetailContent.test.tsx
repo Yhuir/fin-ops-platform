@@ -71,3 +71,16 @@ describe("EntityDetailContent", () => {
     expect(screen.getByText("未返回公开详情")).toBeInTheDocument();
   });
 });
+
+
+test("public OA expense counts preserve zero while internal counts remain hidden", () => {
+  const sections = preparePublicDetailSections([{ title: "费用明细 1", fields: [
+    { label: "票据张数", value: 34 },
+    { label: "附件文件数", value: 0 },
+    { label: "expense_item_id", value: "private-item" },
+    { label: "internal_count", value: 91 },
+  ] }]);
+  expect(sections).toEqual([{title: "费用明细 1", fields: [
+    { label: "票据张数", value: 34 }, { label: "附件文件数", value: 0 },
+  ]}]);
+});

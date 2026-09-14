@@ -74,6 +74,7 @@ test("OA detail exposes every expense including duplicate labels without exposin
   row.expenseItems = ["299.00", "1.22"].map((amount, index) => ({
     id: `private-item-${index}`, rowIndex: String(index), projectName: "公司",
     amount, expenseContent: "设备报销", reimbursementDate: "2025-12-27",
+    paymentMethod: "微信支付", invoiceKind: "普通发票/行政收据", ticketCount: index === 0 ? "34" : "0", attachmentFileCount: 0,
   }));
   render(<DetailDrawer row={row} loading={false} error={null} onClose={() => undefined} />);
   expect(screen.getByText("费用明细 1")).toBeInTheDocument();
@@ -81,5 +82,9 @@ test("OA detail exposes every expense including duplicate labels without exposin
   expect(screen.getAllByText("设备报销")).toHaveLength(2);
   expect(screen.getByText("299.00")).toBeInTheDocument();
   expect(screen.getByText("1.22")).toBeInTheDocument();
+  expect(screen.getAllByText("票据张数")).toHaveLength(2);
+  expect(screen.getByText("34")).toBeInTheDocument();
+  expect(screen.getAllByText("附件文件数")).toHaveLength(2);
+  expect(screen.getAllByText("微信支付")).toHaveLength(2);
   expect(screen.queryByText("private-item-0")).not.toBeInTheDocument();
 });

@@ -749,3 +749,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 前端：`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx`、`WorkbenchApi.test.ts`、`DetailDrawer.test.tsx` 保护 1/4 子项、ETC 折叠、原始内容、精简 DTO 和详情；`e2e/workbench-relation-fanout.spec.ts` 覆盖真实 API 映射→折叠组子项→点击子项→父 OA 选择。
 - 跨页面：现有 OA 待付款、进项使用、待发票和成本分配浏览器回归；不修改成本分配金额或来源身份。
 - read model/cache/job 类别不适用：新增字段沿现有 canonical direct query 返回，没有新缓存、后台任务或状态机；既有权限、失败响应、关系事务仍由现有回归覆盖。
+
+- 生产浏览器追加发现共享详情白名单遗漏“票据张数”和“附件文件数”；`EntityDetailContent.test.tsx` 与 `DetailDrawer.test.tsx` 增加真实字段/零值显示及内部字段继续隐藏的断言。
