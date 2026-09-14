@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import fin_ops_platform.services.etc_document_parsers as etc_document_parsers
@@ -111,6 +111,23 @@ class EtcReconciliationSourceUploadService:
                 require_source_file=True,
             )
         return task
+
+    def reparse_source(self, *, task_id: str, file_id: str, expected_version: int, actor: str) -> Any:
+        task = self._task_service.get_task(task_id)
+        if task.version != expected_version:
+            raise ValueError("task_version_conflict")
+        self._task_service._assert_mutable_task(task)
+        source, content = self._task_service.read_source_file(task_id=task_id, file_id=file_id)
+        if source.source_kind not in {SourceFileKind.CREDIT_CARD_STATEMENT, SourceFileKind.TICKET_ROOT}:
+            raise ValueError("source_kind_cannot_be_reparsed")
+        upload = EtcReconciliationSourceUpload(file_name=source.original_name, content=content)
+        document = self._validated_documents(source_kind=source.source_kind, uploads=[upload])[0]
+        decoded = decode_text_file_content(content)[0] if document.kind == "text" else None
+        result = self._parse_uploaded_source(source_kind=source.source_kind, source_file=source, upload=upload,
+            validated_document=document, ticket_root_upload_mode=ticket_root_upload_source_mode(document),
+            ticket_root_text=decoded, evidence_kind_override=None)
+        return self._task_service.apply_parse_result(task_id=task_id, parse_result=result, actor=actor,
+            require_source_file=True, expected_version=expected_version)
 
     @staticmethod
     def _validated_documents(

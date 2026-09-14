@@ -47,6 +47,7 @@ from fin_ops_platform.services.untrusted_document_policy import (
     inspect_untrusted_document,
 )
 
+from tests.etc_task_store_support import NarrowTaskStoreMixin
 from tests.mock_import_files import ticket_root_txt_sample
 
 SYNTHETIC_TICKET_ROOT_TXT_SAMPLES = {
@@ -277,7 +278,7 @@ def ready_task_with_requirement(
 
 
 class EtcReconciliationServiceTests(unittest.TestCase):
-    class _PostgresLikeReconciliationStateStore:
+    class _PostgresLikeReconciliationStateStore(NarrowTaskStoreMixin):
         data_dir = None
 
         def __init__(self) -> None:
@@ -336,7 +337,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         def save_etc_reconciliation_state(self, snapshot: dict) -> None:
             super().save_etc_reconciliation_state(deepcopy(snapshot))
 
-    def test_source_registration_blocks_reload_until_file_and_metadata_commit(self) -> None:
+    def test_source_registration_does_not_block_unrelated_task_reads(self) -> None:
         store = self._ReloadingPostgresStateStore()
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name), state_store=store)
         first = service.create_task(title="upload", created_by="alice")
@@ -370,7 +371,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
                     self.assertTrue(storing.wait(5))
                     read = pool.submit(read_other_task)
                     self.assertTrue(reading.wait(5))
-                    self.assertFalse(reloaded.wait(0.1), "reload replaced the task during source registration")
+                    self.assertEqual(read.result(timeout=1).task_id, second.task_id)
                 finally:
                     allow_store.set()
                 source = upload.result(timeout=5)
@@ -407,7 +408,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             start.set()
             ids = [future.result(timeout=10) for future in futures]
         self.assertEqual(len(set(ids)), len(tasks))
-        self.assertEqual(set(ids), {f"ETC-RECON-FILE-{index:06d}" for index in range(1, len(tasks) + 1)})
+        self.assertTrue(all(value.startswith("ETC-RECON-FILE-") for value in ids))
         restored = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name), state_store=store)
         self.assertTrue(all(len(restored.get_task(task.task_id).ticket_root_items) == 4 for task in tasks))
 
@@ -1135,7 +1136,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(confirmed.approved_delta, Decimal("0.00"))
 
     def test_delete_source_file_rolls_back_memory_state_when_persist_fails(self) -> None:
-        class FlakyStateStore:
+        class FlakyStateStore(NarrowTaskStoreMixin):
             data_dir = None
 
             def __init__(self) -> None:
@@ -1243,7 +1244,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             self.assertIsNone(current.etc_batch_id)
             self.assertIsNone(current.oa_draft_status)
             self.assertEqual(current.audit_events, before.audit_events)
-            self.assertEqual(service.snapshot()["audit_counter"], 0)
+            self.assertEqual(len(current.audit_events), 0)
 
             retried = service.record_oa_draft_created(
                 task_id=task_id,
@@ -1264,7 +1265,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             [event.event_type for event in durable.audit_events],
             ["oa_draft_created"],
         )
-        self.assertEqual(durable.audit_events[0].event_id, "ETC-RECON-AUDIT-000001")
+        self.assertTrue(durable.audit_events[0].event_id.startswith("ETC-RECON-AUDIT-"))
 
     def test_delete_source_file_requires_expected_version_mutable_status_and_known_file(self) -> None:
         service, task_id = self._parsed_task()
@@ -1331,7 +1332,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             reloaded.get_task(task.task_id)
         self.assertNotEqual(next_task.task_id, task.task_id)
-        self.assertTrue(next_task.task_id.endswith("000002"))
+        self.assertNotEqual(next_task.task_id, task.task_id)
 
     def test_delete_reviewing_task_enforces_expected_version(self) -> None:
         service, task_id = self._parsed_task()
@@ -1578,7 +1579,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(statuses["微信支付-云南昆明南站高速通行费"], "suggested_match")
         self.assertEqual(statuses["云南九龙池站高速通行费"], "missing_ticket")
         self.assertEqual(ticket_statuses["2026-03-03 17:06:18"], "suggested_match")
-        self.assertEqual(ticket_statuses["2026-03-04 09:30:00"], "needs_review")
+        self.assertEqual(ticket_statuses["2026-03-04 09:30:00"], "extra_ticket")
         self.assertEqual(
             next(item for item in task.ticket_root_items if item.transaction_at == "2026-03-03 17:06:18").linked_credit_card_item_ids,
             [next(item for item in task.credit_card_items if item.description == "微信支付-云南昆明南站高速通行费").item_id],
@@ -1665,12 +1666,12 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         }
         self.assertEqual(status_by_amount_and_date[("2026-05-15", Decimal("88.35"))], "suggested_match")
         self.assertEqual(status_by_amount_and_date[("2026-05-25", Decimal("88.35"))], "suggested_match")
-        self.assertEqual(status_by_amount_and_date[("2026-05-10", Decimal("23.50"))], "suggested_match")
+        self.assertEqual(status_by_amount_and_date[("2026-05-10", Decimal("23.50"))], "missing_ticket")
         linked_by_time = {item.transaction_at: item.linked_credit_card_item_ids for item in task.ticket_root_items}
         card_by_date = {item.transaction_date: item for item in task.credit_card_items}
         self.assertEqual(linked_by_time["2026-05-15 14:47:17"], [card_by_date["2026-05-15"].item_id])
         self.assertEqual(linked_by_time["2026-05-25 17:02:37"], [card_by_date["2026-05-25"].item_id])
-        self.assertEqual(linked_by_time["2026-05-22 17:09:29"], [card_by_date["2026-05-10"].item_id])
+        self.assertEqual(linked_by_time["2026-05-22 17:09:29"], [])
         self.assertEqual(linked_by_time["2026-05-24 19:15:18"], [])
 
     def test_matching_prefers_closest_ticket_when_more_tickets_than_cards(self) -> None:
@@ -1757,7 +1758,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             },
         )
 
-    def test_matching_links_repeated_amount_batches_and_fills_nearest_fallback_gap(self) -> None:
+    def test_matching_links_repeated_amount_batches_and_rejects_out_of_window(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
         task = service.create_task(title="2026-04 production ETC", created_by="alice")
         statement_text = """
@@ -1848,11 +1849,11 @@ class EtcReconciliationServiceTests(unittest.TestCase):
                 sorted(item.item_id for item in cards),
             )
         self.assertEqual(statuses["高速通行费缺票"], "missing_ticket")
-        self.assertEqual(statuses["高速通行费跨窗"], "suggested_match")
+        self.assertEqual(statuses["高速通行费跨窗"], "missing_ticket")
         self.assertEqual(linked_by_ticket_time["2026-03-09 08:00:00"], [])
         self.assertEqual(
             linked_by_ticket_time["2026-04-23 08:00:00"],
-            [next(item for item in task.credit_card_items if item.description == "高速通行费跨窗").item_id],
+            [],
         )
 
     def test_matching_uses_description_business_date_as_primary_anchor(self) -> None:
@@ -1960,7 +1961,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
 
         self.assertEqual(task.ticket_root_items[0].linked_credit_card_item_ids, [task.credit_card_items[0].item_id])
         self.assertEqual(task.credit_card_items[0].recommendation_status, "suggested_match")
-        self.assertEqual(task.credit_card_items[1].recommendation_status, "needs_review")
+        self.assertEqual(task.credit_card_items[1].recommendation_status, "missing_ticket")
 
     def test_matching_finds_large_repeated_amount_set_without_greedy_loss(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
@@ -2047,6 +2048,13 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             actor="alice",
             payload={"action": "link_ticket", "ticketItemId": ticket.item_id},
         )
+        with self.assertRaisesRegex(ValueError, "ticket_already_manually_linked"):
+            service.patch_item(task_id=task.task_id, item_id=second_card.item_id,
+                expected_version=task.version, actor="alice",
+                payload={"action": "link_ticket", "ticketItemId": ticket.item_id})
+        task = service.patch_item(task_id=task.task_id, item_id=first_card.item_id,
+            expected_version=task.version, actor="alice",
+            payload={"action": "unlink_ticket", "ticketItemId": ticket.item_id})
         task = service.patch_item(
             task_id=task.task_id,
             item_id=second_card.item_id,
@@ -3165,7 +3173,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual({issue["error"] for issue in preview.blocking_issues}, {"ambiguous_etc_invoice_match"})
 
     def test_uploaded_source_file_uses_state_store_file_storage_api_when_available(self) -> None:
-        class FakeStateStore:
+        class FakeStateStore(NarrowTaskStoreMixin):
             data_dir = None
 
             def __init__(self) -> None:
@@ -3214,7 +3222,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(store.stored[0]["content"], b"ticket bytes")
 
     def test_upload_rolls_back_memory_state_when_persist_fails_and_retry_can_overwrite_blob(self) -> None:
-        class FlakyStateStore:
+        class FlakyStateStore(NarrowTaskStoreMixin):
             data_dir = None
 
             def __init__(self) -> None:
@@ -3269,7 +3277,7 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             created_by="alice",
         )
 
-        self.assertEqual(uploaded.file_id, "ETC-RECON-FILE-000001")
+        self.assertTrue(uploaded.file_id.startswith("ETC-RECON-FILE-"))
         self.assertEqual(len(service.get_task(task.task_id).source_files), 1)
 
     def test_create_task_returns_draft_task_and_persists_to_state_store(self) -> None:

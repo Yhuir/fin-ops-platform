@@ -61,6 +61,9 @@ class CreditCardItem:
     amount: Decimal
     settlement_amount: Decimal
     is_etc_candidate: bool
+    settlement_currency: str | None = None
+    rejected_ticket_ids: list[str] = field(default_factory=list)
+    match_reason: str | None = None
     candidate_reason: str | None = None
     source_page: int | None = None
     source_line: int | None = None

@@ -1743,7 +1743,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("grid", { name: "ETC双侧核对明细" })).toBeInTheDocument();
     await openEtcDisclosure(page, user, /人工处理/);
     expect(within(page).getByRole("region", { name: "人工核对处理" })).toBeInTheDocument();
-    expect(within(page).getByRole("button", { name: "接受推荐票根" })).toBeDisabled();
+    expect(within(page).getByRole("button", { name: "固定当前配对" })).toBeDisabled();
     expect(within(page).getByRole("button", { name: "关联所选记录" })).toBeDisabled();
     expect(within(page).getByText("ETC补充凭证")).toBeInTheDocument();
     await openEtcDisclosure(page, user, /解析异常/);
@@ -3561,7 +3561,7 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     await openEtcDisclosure(page, user, /人工处理/);
     await user.click(await within(page).findByText("财付通-微信支付-贵州黔通智联"));
-    const acceptButton = within(page).getByRole("button", { name: "接受推荐票根" });
+    const acceptButton = within(page).getByRole("button", { name: "固定当前配对" });
     await waitFor(() => expect(acceptButton).toBeEnabled());
     await user.click(acceptButton);
 
@@ -3611,7 +3611,7 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     await within(page).findByRole("grid", { name: "ETC双侧核对明细" });
     await openEtcDisclosure(page, user, /人工处理/);
-    expect(within(page).getByRole("button", { name: "接受推荐票根" })).toBeDisabled();
+    expect(within(page).getByRole("button", { name: "固定当前配对" })).toBeDisabled();
     expect(within(page).getByRole("button", { name: "关联所选记录" })).toBeDisabled();
     expect(within(page).getByRole("button", { name: "排除非ETC" })).toBeDisabled();
     expect(within(page).getByRole("button", { name: "手工确认" })).toBeDisabled();

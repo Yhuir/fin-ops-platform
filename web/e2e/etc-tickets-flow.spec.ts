@@ -991,3 +991,33 @@ test.describe("ETC ticket management browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 });
+
+test("ETC-TICKET-E2E-012 uses versioned matches, excludes repayments and ignores removed links", async ({ page }) => {
+  const browserErrors = startStrictBrowserErrorCapture(page);
+  await installDeterministicApiMocks(page, {
+    etcTicketReconciliationWorkflow: true, etcTicketWorkflowTaskMatchesBusinessBatch: true, sessionMode: "user",
+  });
+  const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/etc/reconciliation-tasks/etc-recon-e2e-001");
+  await page.goto("/etc-tickets");
+  const task = await (await loaded).json();
+  const initialVersion = task.version;
+  const versions: number[] = [];
+  task.credit_card_items.push({ ...task.credit_card_items[0], item_id: "repayment", description: "自动还款", amount: "-95.00", settlement_amount: "-95.00", is_etc_candidate: false, recommendation_status: "not_candidate" });
+  task.ticket_root_items[0].linked_credit_card_item_ids = [task.credit_card_items[0].item_id];
+  task.ticket_root_items[0].recommendation_status = "suggested_match";
+  task.ticket_root_items.unshift({ ...task.ticket_root_items[0], item_id: "removed-trip", removed: true, vehicle_plate: "已移除车牌" });
+  await page.route("**/api/etc/reconciliation-tasks/etc-recon-e2e-001/refresh-matches", async (route) => {
+    versions.push(route.request().postDataJSON().expectedVersion);
+    if (versions.length === 1) task.version += 1;
+    await route.fulfill({ json: task });
+  });
+  await openEtcDisclosure(page, /双侧核对/);
+  await page.getByRole("button", { name: "刷新匹配", exact: true }).click();
+  await expect(page.getByText("不参与核对", { exact: true })).toBeVisible();
+  await expect(page.getByText("已移除车牌", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("1 个配对", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "刷新匹配", exact: true }).click();
+  await expect.poll(() => versions.length).toBe(2);
+  expect(versions).toEqual([initialVersion, initialVersion + 1]);
+  expect(browserErrors).toEqual([]);
+});

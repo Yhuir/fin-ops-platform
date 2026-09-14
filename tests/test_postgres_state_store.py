@@ -46,6 +46,9 @@ class FakePostgresConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.queries.append(sql)
         normalized = " ".join(sql.lower().split())
+        if "returning task_id" in normalized or "returning file_id" in normalized:
+            self.execute(sql, params)
+            return {"task_id": params[1]}
         if "with canonical_groups as" in normalized and "canonical_members as" in normalized:
             return {
                 "paired_count": 0,

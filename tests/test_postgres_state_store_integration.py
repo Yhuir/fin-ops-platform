@@ -70,6 +70,78 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._temp_dir.cleanup()
 
+    def test_etc_task_cas_isolates_other_tasks_and_rejects_concurrent_updates(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+        from copy import deepcopy
+
+        service = EtcReconciliationTaskService(state_store=self.store)
+        first = service.create_task(title="first", created_by="test")
+        second = service.create_task(title="second", created_by="test")
+        untouched = self.store.get_etc_reconciliation_task_record(second.task_id)
+        candidates = [deepcopy(first), deepcopy(first)]
+        for index, task in enumerate(candidates):
+            task.version += 1
+            task.title = f"winner-{index}"
+        def save(task):
+            try:
+                self.store.save_etc_reconciliation_task(task, expected_version=first.version, expected_status="draft")
+                return "saved"
+            except ValueError as error:
+                return str(error)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(save, candidates))
+        self.assertCountEqual(results, ["saved", "task_version_conflict"])
+        self.assertEqual(self.store.get_etc_reconciliation_task_record(second.task_id), untouched)
+        self.assertEqual(service.get_task(first.task_id).version, first.version + 1)
+        with self.assertRaisesRegex(ValueError, "task_version_conflict"):
+            self.store.save_etc_reconciliation_task(first, expected_version=None)
+
+    def test_etc_formal_sources_and_file_owner_conflict_are_atomic(self) -> None:
+        from copy import deepcopy
+
+        service = EtcReconciliationTaskService(state_store=self.store)
+        first = service.create_task(title="owner", created_by="test")
+        source = service.store_uploaded_source_file(task_id=first.task_id, source_kind=SourceFileKind.TICKET_ROOT,
+            original_name="trips.txt", content_type="text/plain", content=b"trip", created_by="test")
+        second = service.create_task(title="other", created_by="test")
+        before = self.store.get_etc_reconciliation_task_record(second.task_id)
+        invalid = deepcopy(second)
+        invalid.source_files = [deepcopy(source)]
+        invalid.source_files[0].task_id = second.task_id
+        invalid.version += 1
+        with self.assertRaisesRegex(ValueError, "reconciliation_file_identity_conflict"):
+            self.store.save_etc_reconciliation_task(invalid, expected_version=second.version)
+        self.assertEqual(self.store.get_etc_reconciliation_task_record(second.task_id), before)
+        self.connection.execute(
+            "update app.etc_reconciliation_tasks set raw_payload = raw_payload #- '{normalized_payload,source_files}' where task_id = %s",
+            (first.task_id,),
+        )
+        self.assertEqual(service.get_task(first.task_id).source_files[0].file_id, source.file_id)
+        before_row = self.connection.fetch_one("select updated_at from app.etc_reconciliation_tasks where task_id = %s", (first.task_id,))
+        task = service.get_task(first.task_id)
+        unchanged = service.refresh_matches(task_id=first.task_id, expected_version=task.version)
+        self.assertEqual(unchanged.version, task.version)
+        self.assertEqual(self.connection.fetch_one("select updated_at from app.etc_reconciliation_tasks where task_id = %s", (first.task_id,)), before_row)
+
+    def test_etc_import_transition_checks_status_without_changing_confirmation_version(self) -> None:
+        from copy import deepcopy
+
+        service = EtcReconciliationTaskService(state_store=self.store)
+        task = service.create_task(title="import", created_by="test")
+        task.status = EtcReconciliationTaskStatus.READY_FOR_IMPORT
+        task.version += 1
+        self.store.save_etc_reconciliation_task(task, expected_version=1)
+        next_task = deepcopy(task)
+        next_task.status = EtcReconciliationTaskStatus.IMPORTING
+        next_task.import_batch_id = "first-session"
+        self.store.save_etc_reconciliation_task(next_task, expected_version=task.version, expected_status="ready_for_import")
+        next_task.import_batch_id = "second-session"
+        with self.assertRaisesRegex(ValueError, "task_version_conflict"):
+            self.store.save_etc_reconciliation_task(next_task, expected_version=task.version, expected_status="ready_for_import")
+        stored = service.get_task(task.task_id)
+        self.assertEqual(stored.version, task.version)
+        self.assertEqual(stored.import_batch_id, "first-session")
+
     def test_migrations_health_summary_and_transaction_rollback(self) -> None:
         versions = fetch_scalar(self.database_url, "select string_agg(version, ',' order by version) from public.schema_migrations;")
         expected_versions = [migration.version for migration in migrate.discover_migrations()]

@@ -1,5 +1,12 @@
 # API 契约
 
+## ETC 对账刷新与来源重解析（2026-09-14）
+
+- `POST /api/etc/reconciliation-tasks/{task_id}/refresh-matches`：JSON `{expectedVersion: number}`，返回当前 task DTO；无变化不增版本/审计。缺字段400，版本冲突/不可编辑409，使用已有 mutation 权限和认证actor。
+- `POST /api/etc/reconciliation-tasks/{task_id}/source-files/{file_id}/reparse`：相同版本请求，只重解析已保存的信用卡/票根来源，返回完整task；不新增来源、不重复上传、不隐式运行于刷新。
+- Credit card DTO 新增 `match_reason`；ticket DTO `removed` 必须传递。`suggested_match` 兼容已有存储字段，但有效链接即已分配，页面不显示待接受/高度可信；自动计算不新增 `needs_review`。
+
+
 ## 现金独立 API（后端先行）
 
 `/api/cash/*` 的字段、命令和响应唯一说明见[现金技术设计](cash-module-technical-design.md)，实际边界见[现金模块](../modules/cash/boundary-io.md)。需要现金页面二态授权；仅 005 管理页面 ACL。Cash 响应 no-store、金额字符串、无普通财务读取/全局操作历史/worker；前端尚未接入。独立后端部署范围与实测见[实施记录](cash-module-implementation-plan.md)。

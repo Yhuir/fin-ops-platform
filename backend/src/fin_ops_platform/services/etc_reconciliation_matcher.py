@@ -1,204 +1,131 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left, bisect_right
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from functools import lru_cache
 
+from fin_ops_platform.services.etc_document_parsers import PLATE_RE, REPAYMENT_KEYWORDS, _is_etc_candidate
 from fin_ops_platform.services.etc_reconciliation_models import CreditCardItem, TicketRootItem
 
 
 def refresh_reconciliation_matches(
-    *,
-    credit_card_items: list[CreditCardItem],
-    ticket_root_items: list[TicketRootItem],
-    date_window_days: int = 1,
+    *, credit_card_items: list[CreditCardItem], ticket_root_items: list[TicketRootItem], date_window_days: int = 7,
 ) -> tuple[list[CreditCardItem], list[TicketRootItem]]:
-    active_tickets = [ticket for ticket in ticket_root_items if not ticket.removed]
-    manually_resolved_card_ids = {
-        card.item_id
-        for card in credit_card_items
-        if card.manual_resolution == "included_etc"
-    }
-    manual_link_by_ticket: dict[str, list[str]] = {}
-    for ticket in active_tickets:
-        manual_ids = [
-            card_id
-            for card_id in ticket.linked_credit_card_item_ids
-            if card_id in manually_resolved_card_ids
-        ]
-        if manual_ids:
-            manual_link_by_ticket[ticket.item_id] = list(dict.fromkeys(manual_ids))
-    manually_consumed_ticket_ids = set(manual_link_by_ticket)
-
-    ticket_candidates_by_card: dict[str, list[TicketRootItem]] = {}
-    card_candidates_by_ticket: dict[str, list[CreditCardItem]] = {}
-
-    for card in credit_card_items:
-        if not card.is_etc_candidate or card.manual_resolution != "unresolved":
-            continue
-        candidates = [
-            ticket
-            for ticket in active_tickets
-            if ticket.item_id not in manually_consumed_ticket_ids
-            if _money(ticket.amount) == _money(card.settlement_amount)
-            and _date_in_card_window(
-                ticket.transaction_at[:10],
-                transaction_date=card.transaction_date,
-                posting_date=card.posting_date,
-                description=card.description,
-                fallback_days=date_window_days,
-            )
-        ]
-        ticket_candidates_by_card[card.item_id] = candidates
-        for ticket in candidates:
-            card_candidates_by_ticket.setdefault(ticket.item_id, []).append(card)
-
-    cards_by_id = {card.item_id: card for card in credit_card_items}
-    tickets_by_id = {ticket.item_id: ticket for ticket in active_tickets}
-    auto_link_by_ticket = _stable_auto_links(
-        ticket_candidates_by_card=ticket_candidates_by_card,
-        card_candidates_by_ticket=card_candidates_by_ticket,
-        cards_by_id=cards_by_id,
-        tickets_by_id=tickets_by_id,
-    )
-    fallback_ticket_candidates_by_card, fallback_card_candidates_by_ticket = _nearest_amount_fallback_candidates(
-        credit_card_items=credit_card_items,
-        active_tickets=active_tickets,
-        manually_consumed_ticket_ids=manually_consumed_ticket_ids,
-        already_linked_card_ids={
-            card_id
-            for card_ids in auto_link_by_ticket.values()
-            for card_id in card_ids
-        },
-        already_linked_ticket_ids=set(auto_link_by_ticket),
-    )
-    fallback_link_by_ticket = _stable_auto_links(
-        ticket_candidates_by_card=fallback_ticket_candidates_by_card,
-        card_candidates_by_ticket=fallback_card_candidates_by_ticket,
-        cards_by_id=cards_by_id,
-        tickets_by_id=tickets_by_id,
-    )
-    auto_link_by_ticket = {**auto_link_by_ticket, **fallback_link_by_ticket}
-    auto_linked_card_ids = {
-        card_id
-        for card_ids in auto_link_by_ticket.values()
-        for card_id in card_ids
-    }
-
-    refreshed_cards: list[CreditCardItem] = []
-    for card in credit_card_items:
-        if not card.is_etc_candidate:
-            refreshed_cards.append(replace(card, recommendation_status="not_candidate"))
-            continue
-        if card.manual_resolution == "covered_by_supplement":
-            refreshed_cards.append(replace(card, recommendation_status="suggested_match"))
-            continue
-        if card.item_id in manually_resolved_card_ids or card.item_id in auto_linked_card_ids:
-            refreshed_cards.append(replace(card, recommendation_status="suggested_match"))
-            continue
-        candidates = [*ticket_candidates_by_card.get(card.item_id, []), *fallback_ticket_candidates_by_card.get(card.item_id, [])]
-        if candidates:
-            status = "needs_review"
-        else:
-            status = "missing_ticket"
-        refreshed_cards.append(replace(card, recommendation_status=status))
-
-    refreshed_tickets: list[TicketRootItem] = []
+    """One candidate policy and one maximum-cardinality, minimum-cost assignment."""
+    manual_cards = {c.item_id for c in credit_card_items if c.manual_resolution == "included_etc"}
+    manual_links: dict[str, list[str]] = {}
+    seen_manual: set[str] = set()
+    by_amount: dict[int, list[TicketRootItem]] = {}
+    active_tickets = []
     for ticket in ticket_root_items:
         if ticket.removed:
-            refreshed_tickets.append(ticket)
             continue
-        linked_ids = list(dict.fromkeys([*manual_link_by_ticket.get(ticket.item_id, []), *auto_link_by_ticket.get(ticket.item_id, [])]))
-        candidates = [*card_candidates_by_ticket.get(ticket.item_id, []), *fallback_card_candidates_by_ticket.get(ticket.item_id, [])]
-        if linked_ids:
-            status = "suggested_match"
-        elif candidates:
-            status = "needs_review"
+        ids = [key for key in ticket.linked_credit_card_item_ids if key in manual_cards]
+        if len(ids) > 1 or seen_manual.intersection(ids):
+            raise ValueError("conflicting_manual_ticket_links")
+        if ids:
+            manual_links[ticket.item_id] = ids
+            seen_manual.update(ids)
+        try:
+            datetime.fromisoformat(ticket.transaction_at)
+        except ValueError:
+            continue
+        active_tickets.append(ticket)
+        if not ids:
+            by_amount.setdefault(_cents(ticket.amount), []).append(ticket)
+    for tickets in by_amount.values():
+        tickets.sort(key=_ticket_sort_key)
+    dates_by_amount = {amount: [t.transaction_at[:10] for t in tickets] for amount, tickets in by_amount.items()}
+    candidates_by_card: dict[str, list[TicketRootItem]] = {}
+    candidates_by_ticket: dict[str, list[CreditCardItem]] = {}
+    cards = []
+    for original in credit_card_items:
+        description = re.sub(r"\s+", "", original.description).lower()
+        excluded = (original.settlement_amount <= 0 or any(k in description for k in REPAYMENT_KEYWORDS)
+                    or any(k in description for k in ("加油", "餐饮", "餐厅", "超市"))
+                    or original.manual_resolution in {"excluded_non_etc", "excluded_error"})
+        card = replace(original, is_etc_candidate=not excluded, match_reason=None)
+        cards.append(card)
+        if excluded or card.manual_resolution != "unresolved":
+            continue
+        if card.settlement_currency != "CNY":
+            card.match_reason = "结算币种缺失或非人民币，请核对来源"
+            continue
+        try:
+            transaction = date.fromisoformat(card.transaction_date)
+            posting = date.fromisoformat(card.posting_date)
+            business_date = _extract_business_date(card.description)
+        except ValueError:
+            card.match_reason = "交易日期或记账日期不合法"
+            continue
+        known = _is_etc_candidate(card.description, card.settlement_amount)
+        start = business_date or (transaction - timedelta(days=date_window_days if known else 0))
+        end = business_date or (min(transaction + timedelta(days=1), posting) if known else transaction)
+        amount = _cents(card.settlement_amount)
+        rows = by_amount.get(amount, [])
+        dates = dates_by_amount.get(amount, [])
+        plates = set(PLATE_RE.findall(card.description.upper()))
+        rejected = set(card.rejected_ticket_ids)
+        entry = re.search(r"入口(?:收费)?站\s*[:：]\s*([^\s,，;；]+)", card.description)
+        exit_station = re.search(r"出口(?:收费)?站\s*[:：]\s*([^\s,，;；]+)", card.description)
+        candidates = [t for t in rows[bisect_left(dates, start.isoformat()):bisect_right(dates, end.isoformat())]
+                      if t.item_id not in rejected and (not plates or t.vehicle_plate in plates)
+                      and _station_matches(entry.group(1) if entry else "", t.entry_station)
+                      and _station_matches(exit_station.group(1) if exit_station else "", t.exit_station)]
+        candidates_by_card[card.item_id] = candidates
+        for ticket in candidates:
+            candidates_by_ticket.setdefault(ticket.item_id, []).append(card)
+    auto = _stable_auto_links(ticket_candidates_by_card=candidates_by_card,
+        card_candidates_by_ticket=candidates_by_ticket, cards_by_id={c.item_id: c for c in cards},
+        tickets_by_id={t.item_id: t for t in active_tickets})
+    links = {**auto, **manual_links}
+    linked = {key: tid for tid, keys in links.items() for key in keys}
+    for card in cards:
+        if card.item_id in linked:
+            card.recommendation_status = "suggested_match"
+            card.match_reason = "人工指定" if card.item_id in seen_manual else "金额一致，按通行日期与商户信息全局分配"
+        elif card.manual_resolution == "covered_by_supplement":
+            card.recommendation_status = "suggested_match"
+            card.match_reason = "补充凭证"
+        elif not card.is_etc_candidate:
+            card.recommendation_status = "not_candidate"
         else:
-            status = "extra_ticket"
-        refreshed_tickets.append(replace(ticket, recommendation_status=status, linked_credit_card_item_ids=linked_ids))
-
-    return refreshed_cards, refreshed_tickets
-
-
-def _money(value: Decimal) -> Decimal:
-    return Decimal(value).quantize(Decimal("0.01"))
+            card.recommendation_status = "missing_ticket"
+            card.match_reason = card.match_reason or ("合格票根已分配给其他交易" if candidates_by_card.get(card.item_id) else "未找到符合金额、日期和身份条件的票根")
+    return cards, [replace(t, linked_credit_card_item_ids=links.get(t.item_id, []) if not t.removed else [],
+        recommendation_status="suggested_match" if t.item_id in links and not t.removed else "extra_ticket") for t in ticket_root_items]
 
 
-def _date_in_card_window(
-    candidate_date: str,
-    *,
-    transaction_date: str,
-    posting_date: str,
-    description: str,
-    fallback_days: int,
-) -> bool:
-    try:
-        candidate = _parse_date(candidate_date)
-        transaction = _parse_date(transaction_date)
-    except ValueError:
-        return False
-    business_date = _extract_business_date(description)
-    if business_date:
-        return candidate == business_date
-    try:
-        posting = _parse_date(posting_date)
-    except ValueError:
-        return transaction - timedelta(days=fallback_days) <= candidate <= transaction + timedelta(days=fallback_days)
-    window_start = transaction - timedelta(days=fallback_days)
-    return window_start <= candidate <= posting
+def _cents(value: Decimal) -> int:
+    amount = Decimal(value) * 100
+    if not amount.is_finite() or amount != amount.to_integral_value():
+        raise ValueError("invalid_reconciliation_amount")
+    return int(amount)
 
 
-def _parse_date(value: str) -> date:
-    raw = str(value or "").strip()
-    try:
-        return date.fromisoformat(raw[:10])
-    except ValueError:
-        return datetime.fromisoformat(raw).date()
+def _station_matches(explicit: str, actual: str) -> bool:
+    if not explicit or not actual:
+        return True
+    return explicit == actual or explicit.endswith(actual) or actual.endswith(explicit)
 
 
 def _extract_business_date(description: str) -> date | None:
-    for match in re.finditer(r"(?<!\d)(\d{8})(?!\d)", str(description or "")):
-        raw = match.group(1)
-        try:
-            return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
-        except ValueError:
-            continue
-    return None
+    match = re.search(r"(?<!\d)(\d{8})(?!\d)\s*(?:高速|通行|收费)|(?:通行日期|通行时间)\s*[:：]?\s*(\d{4}[-/]?\d{2}[-/]?\d{2})", description)
+    if match is None:
+        return None
+    raw = (match.group(1) or match.group(2)).replace("-", "").replace("/", "")
+    return date(int(raw[:4]), int(raw[4:6]), int(raw[6:]))
 
 
-def _nearest_amount_fallback_candidates(
-    *,
-    credit_card_items: list[CreditCardItem],
-    active_tickets: list[TicketRootItem],
-    manually_consumed_ticket_ids: set[str],
-    already_linked_card_ids: set[str],
-    already_linked_ticket_ids: set[str],
-) -> tuple[dict[str, list[TicketRootItem]], dict[str, list[CreditCardItem]]]:
-    available_tickets = [
-        ticket
-        for ticket in active_tickets
-        if ticket.item_id not in manually_consumed_ticket_ids
-        and ticket.item_id not in already_linked_ticket_ids
-    ]
-    ticket_candidates_by_card: dict[str, list[TicketRootItem]] = {}
-    card_candidates_by_ticket: dict[str, list[CreditCardItem]] = {}
-    for card in credit_card_items:
-        if not card.is_etc_candidate or card.manual_resolution != "unresolved" or card.item_id in already_linked_card_ids:
-            continue
-        candidates = [
-            ticket
-            for ticket in available_tickets
-            if _money(ticket.amount) == _money(card.settlement_amount)
-        ]
-        if not candidates:
-            continue
-        ticket_candidates_by_card[card.item_id] = candidates
-        for ticket in candidates:
-            card_candidates_by_ticket.setdefault(ticket.item_id, []).append(card)
-    return ticket_candidates_by_card, card_candidates_by_ticket
+def _card_sort_key(card: CreditCardItem) -> tuple:
+    return (card.transaction_date, card.posting_date, card.source_page or 0, card.source_line or 0,
+            card.description, card.card_last4, card.item_id)
+
+
+def _ticket_sort_key(ticket: TicketRootItem) -> tuple:
+    return (ticket.transaction_at, ticket.vehicle_plate, ticket.entry_station, ticket.exit_station, ticket.item_id)
 
 
 def _stable_auto_links(
@@ -269,184 +196,59 @@ def _candidate_component(
 
 
 def _stable_component_pairs(
-    *,
-    cards: list[CreditCardItem],
-    tickets: list[TicketRootItem],
+    *, cards: list[CreditCardItem], tickets: list[TicketRootItem],
     ticket_candidates_by_card: dict[str, list[TicketRootItem]],
 ) -> list[tuple[CreditCardItem, TicketRootItem]]:
-    ticket_order = {ticket.item_id: index for index, ticket in enumerate(tickets)}
-    candidate_ticket_ids_by_card = {
-        card.item_id: [
-            ticket.item_id
-            for ticket in sorted(
-                ticket_candidates_by_card.get(card.item_id, []),
-                key=lambda ticket, card=card: _ticket_candidate_sort_key(card, ticket),
-            )
-            if ticket.item_id in ticket_order
-        ]
-        for card in cards
-    }
-    if len(tickets) <= 16:
-        pairs = _best_stable_pairs(
-            cards=cards,
-            tickets=tickets,
-            ticket_order=ticket_order,
-            candidate_ticket_ids_by_card=candidate_ticket_ids_by_card,
-        )
-        return [(cards[card_index], tickets[ticket_index]) for card_index, ticket_index in pairs]
-
-    matched_card_to_ticket = _deterministic_bipartite_pairs(
-        cards=cards,
-        candidate_ticket_ids_by_card=candidate_ticket_ids_by_card,
-    )
-    return [
-        (card, tickets[ticket_order[matched_card_to_ticket[card.item_id]]])
-        for card in cards
-        if card.item_id in matched_card_to_ticket
-    ]
-
-
-def _deterministic_bipartite_pairs(
-    *,
-    cards: list[CreditCardItem],
-    candidate_ticket_ids_by_card: dict[str, list[str]],
-) -> dict[str, str]:
-    matched_ticket_to_card: dict[str, str] = {}
-
-    def assign(card_id: str, seen_ticket_ids: set[str]) -> bool:
-        for ticket_id in candidate_ticket_ids_by_card.get(card_id, []):
-            if ticket_id in seen_ticket_ids:
-                continue
-            seen_ticket_ids.add(ticket_id)
-            current_card_id = matched_ticket_to_card.get(ticket_id)
-            if current_card_id is None or assign(current_card_id, seen_ticket_ids):
-                matched_ticket_to_card[ticket_id] = card_id
-                return True
-        return False
-
-    for card in reversed(cards):
-        assign(card.item_id, set())
-    return {card_id: ticket_id for ticket_id, card_id in matched_ticket_to_card.items()}
-
-
-def _best_stable_pairs(
-    *,
-    cards: list[CreditCardItem],
-    tickets: list[TicketRootItem],
-    ticket_order: dict[str, int],
-    candidate_ticket_ids_by_card: dict[str, list[str]],
-) -> tuple[tuple[int, int], ...]:
-    pair_scores = {
-        (card_index, ticket_order[ticket_id]): _pair_score(cards[card_index], tickets[ticket_order[ticket_id]])
-        for card_index, card in enumerate(cards)
-        for ticket_id in candidate_ticket_ids_by_card.get(card.item_id, [])
-    }
-
-    @lru_cache(maxsize=None)
-    def choose(card_index: int, used_ticket_indexes: frozenset[int]) -> tuple[tuple[int, int], ...]:
-        if card_index >= len(cards):
-            return ()
-
-        best = choose(card_index + 1, used_ticket_indexes)
-        card = cards[card_index]
-        for ticket_id in candidate_ticket_ids_by_card.get(card.item_id, []):
-            ticket_index = ticket_order[ticket_id]
-            if ticket_index in used_ticket_indexes:
-                continue
-            candidate = (
-                (card_index, ticket_index),
-                *choose(card_index + 1, frozenset((*used_ticket_indexes, ticket_index))),
-            )
-            if _stable_pair_tuple_is_better(candidate, best, pair_scores=pair_scores):
-                best = candidate
-        return best
-
-    return choose(0, frozenset())
-
-
-def _stable_pair_tuple_is_better(
-    candidate: tuple[tuple[int, int], ...],
-    current: tuple[tuple[int, int], ...],
-    *,
-    pair_scores: dict[tuple[int, int], tuple[int, int]],
-) -> bool:
-    if len(candidate) != len(current):
-        return len(candidate) > len(current)
-    candidate_score = _pair_tuple_score(candidate, pair_scores=pair_scores)
-    current_score = _pair_tuple_score(current, pair_scores=pair_scores)
-    if candidate_score != current_score:
-        return candidate_score < current_score
-    return candidate < current
-
-
-def _pair_tuple_score(
-    pairs: tuple[tuple[int, int], ...],
-    *,
-    pair_scores: dict[tuple[int, int], tuple[int, int]],
-) -> tuple[int, int]:
-    total_days = 0
-    total_direction = 0
-    for pair in pairs:
-        days, direction = pair_scores[pair]
-        total_days += days
-        total_direction += direction
-    return total_days, total_direction
-
-
-def _ticket_candidate_sort_key(card: CreditCardItem, ticket: TicketRootItem) -> tuple[int, int, datetime, int, str]:
-    days, direction = _pair_score(card, ticket)
-    ticket_sort = _ticket_sort_key(ticket)
-    return days, direction, ticket_sort[0], ticket_sort[1], ticket_sort[2]
-
-
-def _pair_score(card: CreditCardItem, ticket: TicketRootItem) -> tuple[int, int]:
-    anchor = _extract_business_date(card.description) or _parse_date_or_max(card.transaction_date)
-    ticket_date = _parse_date_or_max(ticket.transaction_at)
-    if anchor == date.max or ticket_date == date.max:
-        return 10**9, 10**9
-    days = abs((ticket_date - anchor).days)
-    if ticket_date == anchor:
-        direction = 0
-    elif ticket_date < anchor:
-        direction = 1
-    else:
-        direction = 2
-    return days, direction
-
-
-def _card_sort_key(card: CreditCardItem) -> tuple[date, date, date, int, str]:
-    transaction = _parse_date_or_max(card.transaction_date)
-    return (
-        _extract_business_date(card.description) or transaction,
-        transaction,
-        _parse_date_or_max(card.posting_date),
-        card.source_line if card.source_line is not None else 10**9,
-        card.item_id,
-    )
-
-
-def _ticket_sort_key(ticket: TicketRootItem) -> tuple[datetime, int, str]:
-    return (
-        _parse_datetime_or_max(ticket.transaction_at),
-        ticket.source_page if ticket.source_page is not None else 10**9,
-        ticket.item_id,
-    )
-
-
-def _parse_date_or_max(value: str) -> date:
-    try:
-        return _parse_date(value)
-    except ValueError:
-        return date.max
-
-
-def _parse_datetime_or_max(value: str) -> datetime:
-    raw = str(value or "").strip()
-    try:
-        return datetime.fromisoformat(raw)
-    except ValueError:
-        try:
-            parsed_date = _parse_date(raw)
-        except ValueError:
-            return datetime.max
-        return datetime.combine(parsed_date, datetime.min.time())
+    # Rectangular Hungarian assignment. Dummy columns represent unmatched cards;
+    # their cost exceeds the sum of every possible real edge (cardinality first).
+    n, real_count = len(cards), len(tickets)
+    order = {t.item_id: j for j, t in enumerate(tickets)}
+    edge_scores = []
+    for card in cards:
+        anchor = _extract_business_date(card.description) or date.fromisoformat(card.transaction_date)
+        weak = int(not _is_etc_candidate(card.description, card.settlement_amount))
+        edge_scores.append({order[t.item_id]: (weak, abs((date.fromisoformat(t.transaction_at[:10]) - anchor).days),
+                            int(date.fromisoformat(t.transaction_at[:10]) > anchor))
+                            for t in ticket_candidates_by_card.get(card.item_id, [])})
+    max_days = max((score[1] for row in edge_scores for score in row.values()), default=0)
+    day_weight = n + 1
+    evidence_weight = (n * max_days + 1) * day_weight
+    costs = [{j: weak * evidence_weight + days * day_weight + direction for j, (weak, days, direction) in row.items()}
+             for row in edge_scores]
+    unmatched = n * max((cost for row in costs for cost in row.values()), default=0) + 1
+    forbidden = (n + 1) * unmatched + 1
+    matrix = [[row.get(j, forbidden) for j in range(real_count)] + [unmatched] * n for row in costs]
+    m = real_count + n
+    u, v, owner, way = [0] * (n + 1), [0] * (m + 1), [0] * (m + 1), [0] * (m + 1)
+    for i in range(1, n + 1):
+        owner[0] = i
+        j0 = 0
+        minimum, used = [forbidden * (n + 1)] * (m + 1), [False] * (m + 1)
+        while True:
+            used[j0] = True
+            i0 = owner[j0]
+            delta, j1 = forbidden * (n + 1), 0
+            row = matrix[i0 - 1]
+            for j in range(1, m + 1):
+                if used[j]:
+                    continue
+                cost = row[j - 1] - u[i0] - v[j]
+                if cost < minimum[j]:
+                    minimum[j], way[j] = cost, j0
+                if minimum[j] < delta:
+                    delta, j1 = minimum[j], j
+            for j in range(m + 1):
+                if used[j]:
+                    u[owner[j]] += delta
+                    v[j] -= delta
+                else:
+                    minimum[j] -= delta
+            j0 = j1
+            if owner[j0] == 0:
+                break
+        while j0:
+            previous = way[j0]
+            owner[j0] = owner[previous]
+            j0 = previous
+    return [(cards[owner[j] - 1], tickets[j - 1]) for j in range(1, real_count + 1)
+            if owner[j] and j - 1 in costs[owner[j] - 1]]

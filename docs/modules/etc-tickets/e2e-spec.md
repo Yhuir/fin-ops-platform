@@ -29,6 +29,8 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 | `ETC-TICKET-E2E-010` | 真实基础设施 worker drain | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储/Nginx 环境下，导入、source file、OA 草稿、人工确认、delete/reset、Workbench summary、税金/成本最终页面展示；该项必须在 staging/runtime smoke 验证。 |
 | `ETC-TICKET-E2E-011` | OA 草稿后发票 PDF 合并下载 | P0 | 只有已有 OA 草稿的 actor-scope 业务批次显示下载入口；read-export 用户可下载。服务端以 `business_batch.invoice_ids` 为成员，稳定排序并输出 N 张发票=N 页，任一 PDF 缺失、损坏、hash 不一致或非单页时整体失败；浏览器使用服务端 UTF-8 文件名且无隐藏错误。 |
 
+| `ETC-TICKET-E2E-012` | 版本刷新与明确匹配结果 | P0 | 刷新提交当前 expectedVersion；正常支出按有效链接配对；还款显示不参与；removed 旧链接不出现在表格、配对计数或全选中；重复刷新使用最新版本，无隐藏错误。 |
+
 ## 不属于本地 deterministic E2E 的风险
 
 - 真实大 ZIP、票根网 PDF/XML/TXT 混合包、Nginx 上传超时、对象存储权限和 source file 大文件 I/O。

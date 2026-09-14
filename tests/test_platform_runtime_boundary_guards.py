@@ -3245,7 +3245,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("ETC reconciliation route owner confirm does not delegate to task service")
         if "reopen_task(" not in route_owner_reopen_task:
             violations.append("ETC reconciliation route owner reopen does not delegate to task service")
-        if "refresh_matches(task_id=task_id)" not in route_owner_refresh_matches:
+        if not all(fragment in route_owner_refresh_matches for fragment in ("refresh_matches(", "task_id=task_id", "expected_version=", "actor=")):
             violations.append("ETC reconciliation route owner refresh-matches does not delegate to task service")
         for required_route in (
             'route_path == "/api/etc/reconciliation-tasks"',

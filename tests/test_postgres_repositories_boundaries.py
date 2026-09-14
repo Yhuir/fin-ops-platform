@@ -80,6 +80,9 @@ class RecordingConnection:
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.fetched_one.append((" ".join(sql.split()), params))
+        if "returning task_id" in sql or "returning file_id" in sql:
+            self.execute(sql, params)
+            return {"task_id": params[1]}
         return None
 
 

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import fields, replace
-from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
 import hashlib
 import json
 import pickle
 import re
 import shutil
+from copy import deepcopy
+from dataclasses import fields, replace
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 from typing import Any, Iterable
+from uuid import uuid4
 
 from fin_ops_platform.services.etc_document_parsers import SupplementEvidenceParser, with_task_id
 from fin_ops_platform.services.etc_reconciliation_matcher import refresh_reconciliation_matches
@@ -34,7 +35,6 @@ from fin_ops_platform.services.etc_reconciliation_models import (
 )
 from fin_ops_platform.services.runtime_paths import default_data_dir
 
-
 SCHEMA_VERSION = 1
 FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -46,11 +46,8 @@ class EtcReconciliationTaskService:
         self._state_store = state_store
         self._root = self._data_dir / "etc_reconciliation"
         self._state_path = self._root / "tasks.pkl"
-        self._task_counter = 0
-        self._file_counter = 0
-        self._audit_counter = 0
         self._tasks: dict[str, EtcReconciliationTask] = {}
-        self._source_parse_commit_lock = Lock()
+        self._source_parse_commit_lock = RLock()
         self._root.mkdir(parents=True, exist_ok=True)
         self._hydrate(self._load_snapshot())
 
@@ -71,8 +68,7 @@ class EtcReconciliationTaskService:
         return service
 
     def create_task(self, *, title: str, created_by: str) -> EtcReconciliationTask:
-        self._task_counter += 1
-        task_id = f"ETC-RECON-{self._task_counter:06d}"
+        task_id = f"ETC-RECON-{uuid4().hex}"
         now = datetime.now(UTC)
         task = EtcReconciliationTask(
             task_id=task_id,
@@ -92,11 +88,10 @@ class EtcReconciliationTaskService:
             )
         )
         self._tasks[task_id] = task
-        self._persist()
+        self._persist_task(task)
         return replace(task)
 
     def get_task(self, task_id: str) -> EtcReconciliationTask:
-        self._reload_from_state_store()
         task = self._get_active_task_mutable(task_id)
         return _copy_task(task)
 
@@ -125,9 +120,10 @@ class EtcReconciliationTaskService:
                 task_id=task_id,
                 event_type="task_title_updated",
                 actor=actor,
+                before_status=task.status.value,
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def list_tasks(self) -> list[EtcReconciliationTask]:
@@ -156,6 +152,11 @@ class EtcReconciliationTaskService:
         ]
 
     def _get_active_task_mutable(self, task_id: str) -> EtcReconciliationTask:
+        if str(getattr(self._state_store, "storage_backend", "")) == "postgres":
+            raw = self._state_store.get_etc_reconciliation_task_record(task_id)
+            if not isinstance(raw, dict):
+                raise KeyError(task_id)
+            self._tasks[task_id] = _task_from_snapshot(raw)
         task = self._tasks[task_id]
         if task.status == EtcReconciliationTaskStatus.DELETED:
             raise KeyError(task_id)
@@ -169,6 +170,11 @@ class EtcReconciliationTaskService:
         actor: str,
         import_cleanup_confirmed: bool = False,
     ) -> dict[str, object]:
+        if str(getattr(self._state_store, "storage_backend", "")) == "postgres":
+            raw = self._state_store.get_etc_reconciliation_task_record(task_id)
+            if not isinstance(raw, dict):
+                raise KeyError(task_id)
+            self._tasks[task_id] = _task_from_snapshot(raw)
         task = self._tasks[task_id]
         if task.status == EtcReconciliationTaskStatus.DELETED:
             return {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"}
@@ -180,7 +186,7 @@ class EtcReconciliationTaskService:
         ):
             raise ValueError("reconciliation_task_import_cleanup_required")
 
-        self._delete_task_uploads(task)
+        uploaded_task = _copy_task(task)
         before_status = task.status.value
         task.status = EtcReconciliationTaskStatus.DELETED
         task.period_start = None
@@ -223,7 +229,9 @@ class EtcReconciliationTaskService:
                 after_status=task.status.value,
             )
         )
-        self._persist()
+        self._tasks[task_id] = task
+        self._persist_task(task)
+        self._delete_task_uploads(uploaded_task)
         return {"deleted": True, "taskId": task_id, "kind": "reconciliation_task"}
 
     def store_uploaded_source_file(
@@ -248,17 +256,14 @@ class EtcReconciliationTaskService:
                 if existing_file.source_kind == normalized_kind and existing_file.sha256 == sha256:
                     return replace(existing_file)
 
-            previous_file_counter = self._file_counter
             previous_source_files = list(task.source_files)
             previous_audit_events = list(task.audit_events)
             previous_version = task.version
             previous_updated_at = task.updated_at
-            self._file_counter += 1
-            file_id = f"ETC-RECON-FILE-{self._file_counter:06d}"
+            file_id = f"ETC-RECON-FILE-{uuid4().hex}"
             try:
                 stored_path = self._store_file(task_id=task_id, file_id=file_id, original_name=original_name, content=content_bytes)
             except Exception:
-                self._file_counter = previous_file_counter
                 task.source_files = previous_source_files
                 task.audit_events = previous_audit_events
                 task.version = previous_version
@@ -288,9 +293,8 @@ class EtcReconciliationTaskService:
                 )
             )
             try:
-                self._persist()
+                self._persist_task(task)
             except Exception:
-                self._file_counter = previous_file_counter
                 task.source_files = previous_source_files
                 task.audit_events = previous_audit_events
                 task.version = previous_version
@@ -305,10 +309,13 @@ class EtcReconciliationTaskService:
         parse_result: FileParseResult,
         actor: str,
         require_source_file: bool = False,
+        expected_version: int | None = None,
     ) -> EtcReconciliationTask:
         with self._source_parse_commit_lock:
             task = self._get_active_task_mutable(task_id)
             self._assert_mutable_task(task)
+            if expected_version is not None:
+                self._assert_expected_version(task, expected_version)
             result = with_task_id(parse_result, task_id)
             if require_source_file and not any(source.file_id == result.file_id for source in task.source_files):
                 raise ValueError("source_file_deleted_during_parse")
@@ -332,7 +339,7 @@ class EtcReconciliationTaskService:
                     affected_item_ids=affected_item_ids,
                 )
             )
-            self._persist()
+            self._persist_task(task)
             return _copy_task(task)
 
     def upload_supplement_evidences_for_card(
@@ -358,8 +365,6 @@ class EtcReconciliationTaskService:
             raise ValueError("credit_card_item_already_resolved")
 
         previous_task = deepcopy(task)
-        previous_file_counter = self._file_counter
-        previous_audit_counter = self._audit_counter
         created_source_files: list[UploadedSourceFileMetadata] = []
         try:
             parse_results: list[FileParseResult] = []
@@ -374,8 +379,7 @@ class EtcReconciliationTaskService:
                 ):
                     raise ValueError("duplicate_supplement_evidence_file")
 
-                self._file_counter += 1
-                file_id = f"ETC-RECON-FILE-{self._file_counter:06d}"
+                file_id = f"ETC-RECON-FILE-{uuid4().hex}"
                 stored_path = self._store_file(task_id=task_id, file_id=file_id, original_name=original_name, content=content_bytes)
                 source_file = UploadedSourceFileMetadata(
                     file_id=file_id,
@@ -460,11 +464,9 @@ class EtcReconciliationTaskService:
                     affected_item_ids=[card.item_id, *new_evidence_ids],
                 )
             )
-            self._persist()
+            self._persist_task(task)
         except Exception:
             self._tasks[task_id] = previous_task
-            self._file_counter = previous_file_counter
-            self._audit_counter = previous_audit_counter
             for source_file in created_source_files:
                 try:
                     self._delete_uploaded_source_file(source_file)
@@ -556,7 +558,7 @@ class EtcReconciliationTaskService:
             )
         )
         try:
-            self._persist()
+            self._persist_task(task)
         except Exception:
             self._tasks[task_id] = previous_task
             raise
@@ -567,14 +569,20 @@ class EtcReconciliationTaskService:
                 pass
         return _copy_task(task)
 
-    def refresh_matches(self, *, task_id: str) -> EtcReconciliationTask:
-        task = self._get_active_task_mutable(task_id)
-        task.credit_card_items, task.ticket_root_items = refresh_reconciliation_matches(
-            credit_card_items=task.credit_card_items,
-            ticket_root_items=task.ticket_root_items,
-        )
-        self._persist()
-        return _copy_task(task)
+    def refresh_matches(self, *, task_id: str, expected_version: int | None = None, actor: str = "system") -> EtcReconciliationTask:
+        with self._source_parse_commit_lock:
+            task = self._get_active_task_mutable(task_id)
+            if expected_version is not None:
+                self._assert_expected_version(task, expected_version)
+            self._assert_mutable_task(task)
+            cards, tickets = refresh_reconciliation_matches(credit_card_items=task.credit_card_items, ticket_root_items=task.ticket_root_items)
+            if cards == task.credit_card_items and tickets == task.ticket_root_items:
+                return _copy_task(task)
+            task.credit_card_items, task.ticket_root_items = cards, tickets
+            self._touch(task)
+            task.audit_events.append(self._new_audit_event(task_id=task_id, event_type="matches_refreshed", actor=actor))
+            self._persist_task(task)
+            return _copy_task(task)
 
     def patch_item(
         self,
@@ -597,19 +605,15 @@ class EtcReconciliationTaskService:
             card = self._card_item(task, item_id)
             ticket = self._ticket_item(task, ticket_id)
             previous_card_ids = [card_id for card_id in ticket.linked_credit_card_item_ids if card_id != card.item_id]
-            for previous_card_id in previous_card_ids:
-                previous_card = self._card_item(task, previous_card_id)
-                if previous_card.manual_resolution == "included_etc":
-                    self._replace_card(
-                        task,
-                        replace(
-                            previous_card,
-                            manual_resolution="unresolved",
-                            manual_resolution_reason=None,
-                            review_note=None,
-                        ),
-                    )
-            self._replace_card(task, replace(card, manual_resolution="included_etc"))
+            if ticket.removed:
+                raise ValueError("removed_ticket_cannot_be_linked")
+            if any(self._card_item(task, key).manual_resolution == "included_etc" for key in previous_card_ids):
+                raise ValueError("ticket_already_manually_linked")
+            for previous in task.ticket_root_items:
+                if card.item_id in previous.linked_credit_card_item_ids:
+                    previous.linked_credit_card_item_ids = [key for key in previous.linked_credit_card_item_ids if key != card.item_id]
+            self._replace_card(task, replace(card, manual_resolution="included_etc",
+                rejected_ticket_ids=[key for key in card.rejected_ticket_ids if key != ticket_id]))
             self._replace_ticket(task, replace(ticket, linked_credit_card_item_ids=[card.item_id]))
             event_type = "item_linked"
             affected = [*previous_card_ids, card.item_id, ticket.item_id]
@@ -617,11 +621,18 @@ class EtcReconciliationTaskService:
             ticket_id = _required_text(payload, "ticketItemId")
             card = self._card_item(task, item_id)
             ticket = self._ticket_item(task, ticket_id)
-            self._replace_card(task, replace(card, manual_resolution="unresolved"))
+            self._replace_card(task, replace(card, manual_resolution="unresolved",
+                rejected_ticket_ids=list(dict.fromkeys([*card.rejected_ticket_ids, ticket_id]))))
             linked = [linked_id for linked_id in ticket.linked_credit_card_item_ids if linked_id != card.item_id]
             self._replace_ticket(task, replace(ticket, linked_credit_card_item_ids=linked))
             event_type = "item_unlinked"
             affected = [card.item_id, ticket.item_id]
+        elif action == "restore_auto":
+            card = self._card_item(task, item_id)
+            self._replace_card(task, replace(card, manual_resolution="unresolved", rejected_ticket_ids=[],
+                manual_resolution_reason=None, review_note=None))
+            event_type = "automatic_matching_restored"
+            affected = [card.item_id]
         elif action == "remove_ticket":
             ticket = self._ticket_item(task, item_id)
             reason = _required_note(note)
@@ -712,7 +723,7 @@ class EtcReconciliationTaskService:
                 affected_item_ids=affected,
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def confirm_task(
@@ -735,8 +746,9 @@ class EtcReconciliationTaskService:
             EtcReconciliationTaskStatus.CLOSED,
         }:
             raise ValueError("invalid_reconciliation_task_status")
-        self.refresh_matches(task_id=task_id)
-        task = self._get_active_task_mutable(task_id)
+        task.credit_card_items, task.ticket_root_items = refresh_reconciliation_matches(
+            credit_card_items=task.credit_card_items, ticket_root_items=task.ticket_root_items,
+        )
         if not task.credit_card_items:
             raise ValueError("credit_card_statement_required")
 
@@ -839,7 +851,7 @@ class EtcReconciliationTaskService:
                 after_status=task.status.value,
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def reopen_task(self, *, task_id: str, expected_version: int, actor: str) -> EtcReconciliationTask:
@@ -868,7 +880,7 @@ class EtcReconciliationTaskService:
                 after_status=task.status.value,
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def begin_import(
@@ -904,7 +916,7 @@ class EtcReconciliationTaskService:
                 after_status=task.status.value,
             )
         )
-        self._persist()
+        self._persist_task(task, preserve_version=True)
         return _copy_task(task)
 
     def mark_import_failed(
@@ -933,7 +945,7 @@ class EtcReconciliationTaskService:
                 after_status=task.status.value,
             )
         )
-        self._persist()
+        self._persist_task(task, preserve_version=True)
         return _copy_task(task)
 
     def mark_imported(
@@ -967,7 +979,7 @@ class EtcReconciliationTaskService:
                 after_status=task.status.value,
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def remove_imported_invoices(
@@ -1008,7 +1020,7 @@ class EtcReconciliationTaskService:
                 affected_item_ids=[normalized_import_batch_id],
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def find_task_for_import_batch_ids(self, import_batch_ids: list[str]) -> EtcReconciliationTask | None:
@@ -1070,7 +1082,6 @@ class EtcReconciliationTaskService:
         if task.status not in {EtcReconciliationTaskStatus.IMPORTED, EtcReconciliationTaskStatus.CLOSED}:
             raise ValueError("invalid_reconciliation_task_status")
         previous_task = _copy_task(task)
-        previous_audit_counter = self._audit_counter
         try:
             task.oa_draft_batch_id = oa_draft_batch_id
             task.oa_draft_status = "draft_created"
@@ -1084,10 +1095,9 @@ class EtcReconciliationTaskService:
                     affected_item_ids=[oa_draft_batch_id],
                 )
             )
-            self._persist()
+            self._persist_task(task)
         except Exception:
             self._tasks[task_id] = previous_task
-            self._audit_counter = previous_audit_counter
             raise
         return _copy_task(task)
 
@@ -1119,7 +1129,7 @@ class EtcReconciliationTaskService:
                 affected_item_ids=[oa_draft_batch_id],
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def record_oa_draft_deleted(
@@ -1156,23 +1166,17 @@ class EtcReconciliationTaskService:
                 ],
             )
         )
-        self._persist()
+        self._persist_task(task)
         return _copy_task(task)
 
     def snapshot(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
-            "task_counter": self._task_counter,
-            "file_counter": self._file_counter,
-            "audit_counter": self._audit_counter,
             "tasks": self._tasks,
         }
 
     def _hydrate(self, snapshot: dict[str, Any] | None) -> None:
         payload = snapshot if isinstance(snapshot, dict) else {}
-        self._task_counter = int(payload.get("task_counter", 0) or 0)
-        self._file_counter = int(payload.get("file_counter", 0) or 0)
-        self._audit_counter = int(payload.get("audit_counter", 0) or 0)
         raw_tasks = dict(payload.get("tasks") or {})
         self._tasks = {
             str(task_id): _task_from_snapshot(task_payload)
@@ -1185,8 +1189,6 @@ class EtcReconciliationTaskService:
         active_import_session_ids: Iterable[str] | None = None,
     ) -> bool:
         changed = self._recover_interrupted_imports(active_import_session_ids=active_import_session_ids)
-        if changed:
-            self._persist()
         return changed
 
     def _recover_interrupted_imports(
@@ -1220,6 +1222,7 @@ class EtcReconciliationTaskService:
                     after_status=task.status.value,
                 )
             )
+            self._persist_task(task)
             changed = True
         return changed
 
@@ -1239,13 +1242,30 @@ class EtcReconciliationTaskService:
         with self._source_parse_commit_lock:
             self._hydrate(self._load_snapshot())
 
-    def _persist(self) -> None:
-        if self._state_store is not None and hasattr(self._state_store, "save_etc_reconciliation_state"):
-            self._state_store.save_etc_reconciliation_state(self.snapshot())
-            return
-        self._root.mkdir(parents=True, exist_ok=True)
-        with self._state_path.open("wb") as handle:
-            pickle.dump(self.snapshot(), handle)
+    def _persist_task(self, task: EtcReconciliationTask, *, preserve_version: bool = False) -> None:
+        try:
+            if self._state_store is not None:
+                self._state_store.save_etc_reconciliation_task(task,
+                    expected_version=task.version if preserve_version else task.version - 1 if task.version > 1 else None,
+                    expected_status=task.audit_events[-1].before_status if task.audit_events else None)
+            else:
+                pending = self._state_path.with_suffix(".tmp")
+                with pending.open("wb") as handle:
+                    pickle.dump(self.snapshot(), handle)
+                pending.replace(self._state_path)
+        except Exception:
+            # Discard the failed in-memory mutation. Never replay a failed write.
+            self._hydrate(self._load_snapshot())
+            raise
+
+    def read_source_file(self, *, task_id: str, file_id: str) -> tuple[UploadedSourceFileMetadata, bytes]:
+        task = self.get_task(task_id)
+        source = next((file for file in task.source_files if file.file_id == file_id), None)
+        if source is None:
+            raise KeyError("unknown_source_file")
+        content = (self._state_store.read_etc_reconciliation_file(source.stored_path)
+                   if self._state_store is not None else Path(source.stored_path).read_bytes())
+        return source, content
 
     def _store_file(self, *, task_id: str, file_id: str, original_name: str, content: bytes) -> str:
         if self._state_store is not None and hasattr(self._state_store, "store_etc_reconciliation_file"):
@@ -1278,23 +1298,64 @@ class EtcReconciliationTaskService:
             path.unlink()
 
     def _rebuild_task_from_parse_results(self, task: EtcReconciliationTask) -> None:
-        previous_cards = {item.item_id: item for item in task.credit_card_items}
-        previous_tickets = {item.item_id: item for item in task.ticket_root_items}
+        previous_cards = {}
+        for card in task.credit_card_items:
+            previous_cards.setdefault(_card_natural_key(card), []).append(card)
+        previous_tickets = {}
+        for ticket in task.ticket_root_items:
+            previous_tickets.setdefault(_ticket_natural_key(ticket), []).append(ticket)
         credit_card_items: list[CreditCardItem] = []
         ticket_root_items: list[TicketRootItem] = []
         supplement_evidences: list[SupplementEvidence] = []
-        seen_clipboard_ticket_natural_keys: set[tuple[str, str, str, str, str]] = set()
+        seen_cards: set[tuple] = set()
+        seen_ticket_counts: dict[tuple, int] = {}
         for result in task.parse_results:
-            credit_card_items.extend(_merge_card_item(previous_cards.get(item.item_id), item) for item in result.credit_card_items)
+            result.issues = [issue for issue in result.issues if issue.field_name != "duplicate_statement"]
+            card_keys = [_card_natural_key(item) for item in result.credit_card_items]
+            overlap = seen_cards.intersection(card_keys)
+            if overlap:
+                result.issues.append(ParseIssue(issue_id=f"{result.file_id}:duplicate_statement", file_id=result.file_id,
+                    severity=ParseIssueSeverity.WARNING,
+                    message="该账单与已上传账单重复或部分重叠，本来源不重复参与；内容有修正时请删除旧来源后重新解析。",
+                    field_name="duplicate_statement"))
+            else:
+                occurrences: dict[tuple, int] = {}
+                for item, key in zip(result.credit_card_items, card_keys, strict=True):
+                    index = occurrences.get(key, 0)
+                    occurrences[key] = index + 1
+                    previous = previous_cards.get(key, [])
+                    prior = previous[index] if index < len(previous) else None
+                    credit_card_items.append(_merge_card_item(prior, item))
+                seen_cards.update(card_keys)
+            occurrences = {}
             for item in result.ticket_root_items:
-                merged = _merge_ticket_item(previous_tickets.get(item.item_id), item)
-                if result.parser_code == "ticket_root_clipboard_text_v1":
-                    natural_key = _ticket_natural_key(merged)
-                    if natural_key in seen_clipboard_ticket_natural_keys:
-                        continue
-                    seen_clipboard_ticket_natural_keys.add(natural_key)
-                ticket_root_items.append(merged)
+                key = _ticket_natural_key(item)
+                index = occurrences.get(key, 0)
+                occurrences[key] = index + 1
+                if result.parser_code == "ticket_root_clipboard_text_v1" and index < seen_ticket_counts.get(key, 0):
+                    continue
+                previous = previous_tickets.get(key, [])
+                prior = previous[index] if index < len(previous) else None
+                ticket_root_items.append(_merge_ticket_item(prior, item))
+            for key, count in occurrences.items():
+                seen_ticket_counts[key] = max(seen_ticket_counts.get(key, 0), count)
             supplement_evidences.extend(result.supplement_evidences)
+        current_card_ids = {card.item_id for card in credit_card_items}
+        current_ticket_ids = {ticket.item_id for ticket in ticket_root_items}
+        for previous_group in previous_cards.values():
+            for previous in previous_group:
+                lost_card = previous.item_id not in current_card_ids and (
+                    previous.manual_resolution != "unresolved" or previous.rejected_ticket_ids)
+                lost_rejection = any(key not in current_ticket_ids for key in previous.rejected_ticket_ids)
+                if lost_card or lost_rejection:
+                    owner = next((result for result in task.parse_results if result.file_id == previous.statement_file_id), None)
+                    if owner is not None:
+                        issue_id = f"{previous.item_id}:manual_source_changed"
+                        owner.issues = [issue for issue in owner.issues if issue.issue_id != issue_id]
+                        owner.issues.append(ParseIssue(issue_id=issue_id, file_id=owner.file_id,
+                            severity=ParseIssueSeverity.WARNING, field_name="manual_source_changed",
+                            source_page=previous.source_page, source_line=previous.source_line,
+                            message=f"原交易 {previous.transaction_date} / {previous.settlement_amount} 的人工决定对应来源已改变，请重新处理；未猜测迁移。"))
         task.credit_card_items = credit_card_items
         task.ticket_root_items = ticket_root_items
         task.credit_card_items, task.ticket_root_items = refresh_reconciliation_matches(
@@ -1373,9 +1434,8 @@ class EtcReconciliationTaskService:
         after_status: str | None = None,
         affected_item_ids: list[str] | None = None,
     ) -> AuditEvent:
-        self._audit_counter += 1
         return AuditEvent(
-            event_id=f"ETC-RECON-AUDIT-{self._audit_counter:06d}",
+            event_id=f"ETC-RECON-AUDIT-{uuid4().hex}",
             task_id=task_id,
             event_type=event_type,
             actor=actor,
@@ -1449,7 +1509,6 @@ class EtcReconciliationTaskService:
     ) -> None:
         existing = next((item for item in task.reconciled_items if item.credit_card_item_id == credit_card_item_id), None)
         if existing is None:
-            self._audit_counter += 0
             task.reconciled_items.append(
                 ReconciledItem(
                     item_id=f"RECONCILED-{credit_card_item_id}",
@@ -1828,7 +1887,7 @@ def _simple_dataclass_from_snapshot(cls: type[Any], value: Any) -> Any:
 
 def _raw_dataclass(value: Any, cls: type[Any]) -> dict[str, Any]:
     if isinstance(value, cls):
-        return {field.name: getattr(value, field.name) for field in fields(cls)}
+        return {field.name: getattr(value, field.name) for field in fields(cls) if hasattr(value, field.name)}
     return dict(value or {})
 
 
@@ -1927,15 +1986,22 @@ def _required_delta_note(note: str | None) -> str:
     return str(note).strip()
 
 
+def _card_natural_key(card: CreditCardItem) -> tuple:
+    return (card.card_last4, card.transaction_date, card.posting_date, card.amount, card.settlement_amount,
+            card.currency, re.sub(r"\s+", "", card.description))
+
+
 def _merge_card_item(previous: CreditCardItem | None, current: CreditCardItem) -> CreditCardItem:
     if previous is None:
         return current
     return replace(
         current,
+        item_id=previous.item_id,
         recommendation_status=previous.recommendation_status,
         manual_resolution=previous.manual_resolution,
         manual_resolution_reason=previous.manual_resolution_reason,
         review_note=previous.review_note,
+        rejected_ticket_ids=list(previous.rejected_ticket_ids),
     )
 
 
@@ -1944,6 +2010,7 @@ def _merge_ticket_item(previous: TicketRootItem | None, current: TicketRootItem)
         return current
     return replace(
         current,
+        item_id=previous.item_id,
         recommendation_status=previous.recommendation_status,
         linked_credit_card_item_ids=list(previous.linked_credit_card_item_ids),
         removed=previous.removed,

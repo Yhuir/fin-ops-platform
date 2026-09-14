@@ -1,5 +1,10 @@
 # ETC发票导入测试矩阵
 
+## 2026-09-14 上游匹配回归
+
+现有 task 确认→ZIP preview→confirm→job→业务批次/ETC回读继续运行；新增真实 PostgreSQL 测试验证 import status CAS 不改变已确认 preview 版本，并拒绝同版本并发 session。匹配修复没有新增导入job或改变ZIP发票身份规则。
+
+
 ## 2026-08-19 重复发票当前批次成员回归
 
 - `tests/test_etc_backend.py::EtcServiceTests::test_business_batch_import_reuses_duplicate_invoice_as_current_batch_member` 保护重复完整发票不重建、仍进入当前 import/business batch、首次 provenance 不被覆盖，且 OA prepare 不拉入旧批次其它发票。

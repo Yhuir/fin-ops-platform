@@ -49,6 +49,7 @@ import {
   manualEtcBusinessBatchOaStatus,
   patchEtcReconciliationItem,
   refreshEtcReconciliationMatches,
+  reparseEtcSource,
   reopenEtcReconciliationTask,
   uploadEtcCreditCardStatement,
   uploadEtcSupplementEvidenceForCard,
@@ -1008,7 +1009,7 @@ export default function EtcTicketManagementPage() {
     businessBatchDeleteBlockReason(batch) || "当前批次暂不可删除";
   const deleteBatchDisabledReason = (batch: EtcBusinessBatchSummary) => deleteBusinessBatchDisabledReason(batch);
   const evidenceRows = useMemo<EvidenceRow[]>(() => {
-    const ticketRows = (selectedTask?.ticketRootItems ?? []).map((item: EtcTicketRootItem) => ({
+    const ticketRows = (selectedTask?.ticketRootItems ?? []).filter((item) => !item.removed).map((item: EtcTicketRootItem) => ({
       id: item.itemId,
       source: "ticket" as const,
       transactionTime: item.transactionAt,
@@ -1044,10 +1045,12 @@ export default function EtcTicketManagementPage() {
     const consumedEvidenceIds = new Set<string>();
     const rows: ReconciliationRow[] = [];
 
+    const linkedTicketByCard = new Map<string, EtcTicketRootItem>();
+    selectedTask.ticketRootItems.filter((ticket) => !ticket.removed).forEach((ticket) => {
+      ticket.linkedCreditCardItemIds.forEach((id) => linkedTicketByCard.set(id, ticket));
+    });
     selectedTask.creditCardItems.forEach((card) => {
-      const linkedTicket = selectedTask.ticketRootItems.find((ticket) =>
-        ticket.linkedCreditCardItemIds.includes(card.itemId)
-      );
+      const linkedTicket = linkedTicketByCard.get(card.itemId);
       const linkedSupplementId = reconciledByCardId.get(card.itemId)?.supplementEvidenceIds[0] ?? "";
       const matchedEvidence = linkedTicket
         ? evidenceById.get(linkedTicket.itemId) ?? null
@@ -1057,7 +1060,7 @@ export default function EtcTicketManagementPage() {
       }
 
       const manual = manualHighlight(card.manualResolution);
-      const rowHighlight = matchedEvidence ? "matched" : manual || "missing";
+      const rowHighlight = matchedEvidence ? "matched" : manual || (card.isEtcCandidate ? "missing" : "excluded");
       const evidenceHighlight = matchedEvidence
         ? (matchedEvidence.source === "supplement" ? "covered" : "matched")
         : "";
@@ -1192,12 +1195,12 @@ export default function EtcTicketManagementPage() {
     () => evidenceRows.find((item) => item.id === selectedEvidenceRowId) ?? null,
     [evidenceRows, selectedEvidenceRowId],
   );
-  const suggestedTicket = useMemo(() => {
+  const linkedSelectedTicket = useMemo(() => {
     if (!selectedTask || !selectedCardItem) {
       return null;
     }
     return selectedTask.ticketRootItems.find((item) =>
-      item.linkedCreditCardItemIds.includes(selectedCardItem.itemId)
+      !item.removed && item.linkedCreditCardItemIds.includes(selectedCardItem.itemId)
     ) ?? null;
   }, [selectedCardItem, selectedTask]);
 
@@ -1321,7 +1324,7 @@ export default function EtcTicketManagementPage() {
     if (!taskMutationTarget) {
       return;
     }
-    await runTaskAction(() => refreshEtcReconciliationMatches(taskMutationTarget.taskId));
+    await runTaskAction(() => refreshEtcReconciliationMatches(taskMutationTarget.taskId, taskMutationTarget.version));
   };
 
   const handleToggleReconciliationRow = (rowId: string) => {
@@ -1414,14 +1417,14 @@ export default function EtcTicketManagementPage() {
     await runTaskAction(() => patchEtcReconciliationItem(taskMutationTarget.taskId, selectedCardItem.itemId, taskMutationTarget.version, payload));
   };
 
-  const handleAcceptSuggestedTicket = async () => {
-    if (!suggestedTicket) {
-      setActionError("当前信用卡明细没有可接受的推荐票根。");
+  const handlePinLinkedTicket = async () => {
+    if (!linkedSelectedTicket) {
+      setActionError("当前信用卡明细没有已匹配票根。");
       return;
     }
     await patchSelectedCard({
       action: "link_ticket",
-      ticketItemId: suggestedTicket.itemId,
+      ticketItemId: linkedSelectedTicket.itemId,
     });
   };
 
@@ -1835,9 +1838,9 @@ export default function EtcTicketManagementPage() {
     );
   };
 
-  const renderEvidenceTimeCell = (evidence: EvidenceRow | null) => {
+  const renderEvidenceTimeCell = (evidence: EvidenceRow | null, card: EtcCreditCardItem | null) => {
     if (!evidence) {
-      return <span className="etc-reconciliation-empty">未找到票根/凭证</span>;
+      return <span className="etc-reconciliation-empty" title={card?.matchReason}>{card && !card.isEtcCandidate ? "不参与核对" : "未找到票根/凭证"}</span>;
     }
     const parts = splitDateTimeParts(evidence.transactionTime);
     const showFallback = parts.date === "-" && evidence.fallbackTimeLabel;
@@ -2357,6 +2360,15 @@ export default function EtcTicketManagementPage() {
                                               <span className="etc-source-file-id">{sourceSummary.dateRange}</span>
                                             ) : null}
                                           </div>
+                                          {taskIsMutable && ["credit_card_statement", "ticket_root"].includes(sourceFile.sourceKind) ? (
+                                            <button type="button" className="etc-button etc-button--ghost"
+                                              disabled={taskActionLoading || deleteSubmitting}
+                                              aria-label={`重新解析 ${sourceFile.originalName}`}
+                                              onClick={() => taskMutationTarget && runTaskAction(() => reparseEtcSource(
+                                                taskMutationTarget.taskId, sourceFile.fileId, taskMutationTarget.version))}>
+                                              重新解析
+                                            </button>
+                                          ) : null}
                                           <button
                                             type="button"
                                             className="etc-icon-action etc-icon-action--danger"
@@ -2390,9 +2402,9 @@ export default function EtcTicketManagementPage() {
                                   <span>{selectedCardItem?.description ?? "点击信用卡侧明细行后处理。"}</span>
                                 </div>
                                 <div className="etc-manual-review-card">
-                                  <span className="etc-manual-review-label">推荐票根</span>
-                                  <strong>{suggestedTicket ? `${suggestedTicket.vehiclePlate} / ${formatMoney(suggestedTicket.amount)}` : "无可接受建议"}</strong>
-                                  <span>{suggestedTicket ? "金额与信用卡项一致，可人工确认后接受。" : "仅在推荐候选命中时可直接接受。"}</span>
+                                  <span className="etc-manual-review-label">当前配对票根</span>
+                                  <strong>{linkedSelectedTicket ? `${linkedSelectedTicket.vehiclePlate} / ${formatMoney(linkedSelectedTicket.amount)}` : "未找到"}</strong>
+                                  <span>{linkedSelectedTicket ? "当前已匹配，固定后不随自动分配改变。" : "可以选择记录明确关联，或补充来源。"}</span>
                                 </div>
                                 <label className="etc-manual-review-field">
                                   <span>选择票根/凭证</span>
@@ -2423,10 +2435,10 @@ export default function EtcTicketManagementPage() {
                                 <button
                                   type="button"
                                   className="etc-primary-action"
-                                  disabled={!taskIsMutable || taskActionLoading || !selectedCardItem || !suggestedTicket}
-                                  onClick={handleAcceptSuggestedTicket}
+                                  disabled={!taskIsMutable || taskActionLoading || !selectedCardItem || !linkedSelectedTicket}
+                                  onClick={handlePinLinkedTicket}
                                 >
-                                  接受推荐票根
+                                  固定当前配对
                                 </button>
                                 <button
                                   type="button"
@@ -2435,6 +2447,16 @@ export default function EtcTicketManagementPage() {
                                   onClick={handleLinkSelectedEvidence}
                                 >
                                   关联所选记录
+                                </button>
+                                <button type="button" className="etc-secondary-action"
+                                  disabled={!taskIsMutable || taskActionLoading || !linkedSelectedTicket}
+                                  onClick={() => linkedSelectedTicket && patchSelectedCard({ action: "unlink_ticket", ticketItemId: linkedSelectedTicket.itemId })}>
+                                  解除当前配对
+                                </button>
+                                <button type="button" className="etc-secondary-action"
+                                  disabled={!taskIsMutable || taskActionLoading || !selectedCardItem}
+                                  onClick={() => patchSelectedCard({ action: "restore_auto" })}>
+                                  恢复自动分配
                                 </button>
                                 <button
                                   type="button"
@@ -2595,7 +2617,7 @@ export default function EtcTicketManagementPage() {
                                           dataHighlight={row.evidenceHighlight || undefined}
                                           onClick={() => row.evidence && setSelectedEvidenceRowId(row.evidence.id)}
                                         >
-                                          {renderEvidenceTimeCell(row.evidence)}
+                                          {renderEvidenceTimeCell(row.evidence, row.card)}
                                         </FinanceTableCell>
                                         <FinanceTableCell
                                           className="etc-reconciliation-evidence-side-cell etc-reconciliation-evidence-column"

@@ -21,6 +21,7 @@ import {
   patchEtcReconciliationItem,
   previewEtcZipFiles,
   refreshEtcReconciliationMatches,
+  reparseEtcSource,
   reopenEtcReconciliationTask,
   revokeEtcBusinessBatchOaDraft,
   uploadEtcCreditCardStatement,
@@ -56,6 +57,17 @@ afterEach(() => {
 });
 
 describe("etc api", () => {
+  test("reparses one stored source with a version and preserves conflict errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "task_version_conflict", message: "版本已变化" }), {
+      status: 409, headers: { "Content-Type": "application/json" },
+    }));
+    global.fetch = fetchMock as typeof fetch;
+    await expect(reparseEtcSource("task-1", "file-1", 7)).rejects.toThrow("版本已变化");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/etc/reconciliation-tasks/task-1/source-files/file-1/reparse");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ expectedVersion: 7 });
+  });
+
   test("does not repost a file upload to alternate URLs after an HTML response", async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response("<html>upstream timed out</html>", {
       status: 504,
@@ -935,7 +947,7 @@ describe("etc api", () => {
     });
     expect((await createEtcReconciliationTask({ title: "2026-02 ETC" })).taskId).toBe("etc-recon-task-002");
     expect((await fetchEtcReconciliationTask("etc-recon-task-001")).taskId).toBe("etc-recon-task-001");
-    expect(await refreshEtcReconciliationMatches("etc-recon-task-001")).toMatchObject({
+    expect(await refreshEtcReconciliationMatches("etc-recon-task-001", 3)).toMatchObject({
       taskId: "etc-recon-task-001",
       version: 4,
       ticketRootItems: [{ itemId: "ticket-item-001", linkedCreditCardItemIds: ["card-item-001"] }],
@@ -1019,7 +1031,7 @@ describe("etc api", () => {
       }),
     );
     const refreshRequest = fetchMock.mock.calls.find(([url]) => url === "/api/etc/reconciliation-tasks/etc-recon-task-001/refresh-matches")?.[1] as RequestInit;
-    expect(refreshRequest.body).toBeUndefined();
+    expect(JSON.parse(String(refreshRequest.body))).toEqual({ expectedVersion: 3 });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/etc/reconciliation-tasks/etc-recon-task-001/items/card-item-001",
       expect.objectContaining({

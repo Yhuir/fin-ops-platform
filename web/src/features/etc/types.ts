@@ -290,6 +290,7 @@ export type EtcCreditCardItem = {
   settlementAmount: string;
   isEtcCandidate: boolean;
   candidateReason: string;
+  matchReason?: string;
   recommendationStatus: EtcRecommendationStatus;
   manualResolution: EtcManualResolution;
   manualResolutionReason: string;
@@ -297,6 +298,7 @@ export type EtcCreditCardItem = {
 };
 
 export type EtcTicketRootItem = {
+  removed?: boolean;
   itemId: string;
   sourceFileId: string;
   vehiclePlate: string;

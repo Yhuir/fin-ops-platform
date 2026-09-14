@@ -430,6 +430,8 @@ type ApiEtcCreditCardItem = {
   is_etc_candidate?: boolean | null;
   candidateReason?: string | null;
   candidate_reason?: string | null;
+  match_reason?: string | null;
+  matchReason?: string | null;
   recommendationStatus?: string;
   recommendation_status?: string;
   manualResolution?: string;
@@ -441,6 +443,7 @@ type ApiEtcCreditCardItem = {
 };
 
 type ApiEtcTicketRootItem = {
+  removed?: boolean;
   itemId?: string;
   item_id?: string;
   sourceFileId?: string;
@@ -988,6 +991,7 @@ function mapCreditCardItem(item: ApiEtcCreditCardItem) {
     settlementAmount: normalizeMoney(item.settlementAmount ?? item.settlement_amount),
     isEtcCandidate: Boolean(item.isEtcCandidate ?? item.is_etc_candidate),
     candidateReason: item.candidateReason ?? item.candidate_reason ?? "",
+    matchReason: item.matchReason ?? item.match_reason ?? "",
     recommendationStatus: item.recommendationStatus ?? item.recommendation_status ?? "not_candidate",
     manualResolution: item.manualResolution ?? item.manual_resolution ?? "unresolved",
     manualResolutionReason: item.manualResolutionReason ?? item.manual_resolution_reason ?? "",
@@ -997,6 +1001,7 @@ function mapCreditCardItem(item: ApiEtcCreditCardItem) {
 
 function mapTicketRootItem(item: ApiEtcTicketRootItem) {
   return {
+    removed: Boolean(item.removed),
     itemId: item.itemId ?? item.item_id ?? "",
     sourceFileId: item.sourceFileId ?? item.source_file_id ?? item.ticketFileId ?? item.ticket_file_id ?? "",
     vehiclePlate: item.vehiclePlate ?? item.vehicle_plate ?? "",
@@ -1135,11 +1140,12 @@ export async function fetchEtcReconciliationTask(taskId: string, signal?: AbortS
   return mapEtcReconciliationTask(task);
 }
 
-export async function refreshEtcReconciliationMatches(taskId: string): Promise<EtcReconciliationTask> {
+export async function refreshEtcReconciliationMatches(taskId: string, expectedVersion: number): Promise<EtcReconciliationTask> {
   const task = await requestJson<ApiEtcReconciliationTask>(
     `/api/etc/reconciliation-tasks/${encodeURIComponent(taskId)}/refresh-matches`,
     {
       method: "POST",
+      body: JSON.stringify({ expectedVersion }),
     },
   );
   return mapEtcReconciliationTask(task);
@@ -1650,4 +1656,11 @@ export async function discardEtcImportSession(sessionId: string): Promise<void> 
     },
     body: JSON.stringify({ sessionId }),
   });
+}
+
+export async function reparseEtcSource(taskId: string, fileId: string, expectedVersion: number): Promise<EtcReconciliationTask> {
+  return mapEtcReconciliationTask(await requestJson<ApiEtcReconciliationTask>(
+    `/api/etc/reconciliation-tasks/${encodeURIComponent(taskId)}/source-files/${encodeURIComponent(fileId)}/reparse`,
+    { method: "POST", body: JSON.stringify({ expectedVersion }) },
+  ));
 }

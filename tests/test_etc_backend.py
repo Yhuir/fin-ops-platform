@@ -73,6 +73,7 @@ from tests.app_test_support import (
     configure_access_control,
     install_durable_import_queue,
 )
+from tests.etc_task_store_support import NarrowTaskStoreMixin
 from tests.mock_import_files import ticket_root_txt_sample
 
 TICKET_ROOT_TEXT = """
@@ -2323,7 +2324,7 @@ class EtcServiceTests(unittest.TestCase):
 
 class EtcApiTests(unittest.TestCase):
     def test_etc_query_services_reload_worker_writes_from_postgres_state_store(self) -> None:
-        class SharedPostgresEtcStateStore(MemoryEtcStateStore):
+        class SharedPostgresEtcStateStore(NarrowTaskStoreMixin, MemoryEtcStateStore):
             storage_backend = "postgres"
 
             def __init__(self, data_dir: Path) -> None:
@@ -2804,10 +2805,11 @@ class EtcApiTests(unittest.TestCase):
             live_task.ticket_root_items[0].linked_credit_card_item_ids = []
             live_task.ticket_root_items[0].recommendation_status = "unmatched"
 
-            response = app.handle_request("POST", f"/api/etc/reconciliation-tasks/{task.task_id}/refresh-matches")
+            response = app.handle_request("POST", f"/api/etc/reconciliation-tasks/{task.task_id}/refresh-matches", body=json.dumps({"expectedVersion": task.version}))
             prefixed_response = app.handle_request(
                 "POST",
                 f"/fin-ops-api/api/etc/reconciliation-tasks/{task.task_id}/refresh-matches",
+                body=json.dumps({"expectedVersion": json.loads(response.body)["version"]}),
             )
             payload = json.loads(response.body)
             prefixed_payload = json.loads(prefixed_response.body)
@@ -2824,11 +2826,23 @@ class EtcApiTests(unittest.TestCase):
             readiness["entrypoints"],
         )
 
+    def test_refresh_reconciliation_requires_version_and_preserves_task_on_conflict(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="refresh", created_by="test")
+            path = f"/api/etc/reconciliation-tasks/{task.task_id}/refresh-matches"
+            missing = app.handle_request("POST", path, body="{}")
+            self.assertEqual(missing.status_code, 400)
+            stale = app.handle_request("POST", path, body=json.dumps({"expectedVersion": task.version + 1}))
+            self.assertEqual(stale.status_code, 409)
+            self.assertEqual(json.loads(stale.body)["error"], "task_version_conflict")
+            self.assertEqual(app._etc_reconciliation_task_service.get_task(task.task_id), task)
+
     def test_refresh_reconciliation_matches_route_returns_404_for_unknown_task(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
 
-            response = app.handle_request("POST", "/api/etc/reconciliation-tasks/missing-task/refresh-matches")
+            response = app.handle_request("POST", "/api/etc/reconciliation-tasks/missing-task/refresh-matches", body=json.dumps({"expectedVersion": 1}))
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(json.loads(response.body)["error"], "unknown_reconciliation_task")
@@ -3535,7 +3549,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(json.loads(list_response.body)["tasks"], [])
         self.assertNotEqual(next_created["taskId"], created["taskId"])
-        self.assertTrue(next_created["taskId"].endswith("000002"))
 
     def test_deleted_business_batch_route_tombstones_task_after_postgres_rehydrate(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3578,7 +3591,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(task_list["tasks"], [])
         self.assertEqual(business_batches["data"]["items"], [])
         self.assertNotEqual(next_created["taskId"], created_task["taskId"])
-        self.assertTrue(next_created["taskId"].endswith("000002"))
 
     def test_business_batch_create_without_task_id_creates_linked_task_and_batch(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3774,7 +3786,7 @@ class EtcApiTests(unittest.TestCase):
             app._etc_reconciliation_task_service._get_active_task_mutable(task.task_id).status = (  # noqa: SLF001
                 EtcReconciliationTaskStatus.IMPORTED
             )
-            app._etc_reconciliation_task_service._persist()  # noqa: SLF001
+            app._etc_reconciliation_task_service._state_store.save_etc_reconciliation_state(app._etc_reconciliation_task_service.snapshot())  # noqa: SLF001
 
             create_response = app.handle_request(
                 "POST",
@@ -4191,7 +4203,7 @@ class EtcApiTests(unittest.TestCase):
             app._etc_reconciliation_task_service._get_active_task_mutable(task.task_id).status = (  # noqa: SLF001
                 EtcReconciliationTaskStatus.IMPORTED
             )
-            app._etc_reconciliation_task_service._persist()  # noqa: SLF001
+            app._etc_reconciliation_task_service._state_store.save_etc_reconciliation_state(app._etc_reconciliation_task_service.snapshot())  # noqa: SLF001
             queue = QueueRecorder()
             object.__setattr__(app._runtime_repositories, "queue_repository", queue)
 
@@ -4427,7 +4439,7 @@ class EtcApiTests(unittest.TestCase):
             app._etc_reconciliation_task_service._get_active_task_mutable(task.task_id).status = (  # noqa: SLF001
                 EtcReconciliationTaskStatus.IMPORTED
             )
-            app._etc_reconciliation_task_service._persist()  # noqa: SLF001
+            app._etc_reconciliation_task_service._state_store.save_etc_reconciliation_state(app._etc_reconciliation_task_service.snapshot())  # noqa: SLF001
 
             create_response = app.handle_request(
                 "POST",
@@ -4993,9 +5005,9 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(json.loads(missing_version_patch.body)["error"], "expected_version_required")
         self.assertEqual(missing_version_upload.status_code, 400)
         self.assertEqual(json.loads(missing_version_upload.body)["error"], "expected_version_required")
-        self.assertEqual(ready_patch.status_code, 400)
+        self.assertEqual(ready_patch.status_code, 409)
         self.assertEqual(json.loads(ready_patch.body)["error"], "reconciliation_task_not_mutable")
-        self.assertEqual(ready_upload.status_code, 400)
+        self.assertEqual(ready_upload.status_code, 409)
         self.assertEqual(json.loads(ready_upload.body)["error"], "reconciliation_task_not_mutable")
 
     def test_credit_card_statement_upload_returns_structured_storage_error(self) -> None:
@@ -5318,7 +5330,7 @@ class EtcApiTests(unittest.TestCase):
             json.loads(retry_confirm_response.body)["job"]["job_id"],
             json.loads(confirm_response.body)["job"]["job_id"],
         )
-        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(completed_job["status"], "succeeded", completed_job)
         self.assertEqual(invoices["total"], 1)
         self.assertEqual(invoices["items"][0]["invoice_number"], "ETC001")
         self.assertEqual(task.status.value, "imported")
@@ -5487,7 +5499,7 @@ class EtcApiTests(unittest.TestCase):
             {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["reconciliationFilter"]["items"]},
             {"ETC2950": "included", "ETC4175": "included", "EXTRA": "excluded_extra_zip_invoice"},
         )
-        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(completed_job["status"], "succeeded", completed_job)
         self.assertEqual(invoices["total"], 2)
         self.assertEqual({item["invoice_number"] for item in invoices["items"]}, {"ETC2950", "ETC4175"})
         self.assertEqual(business_batches["data"]["total"], 1)
@@ -5644,7 +5656,7 @@ class EtcApiTests(unittest.TestCase):
             {item["invoiceNumber"]: item["filterStatus"] for item in preview_payload["reconciliationFilter"]["items"]},
             {"EXTRA": "excluded_extra_zip_invoice"},
         )
-        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(completed_job["status"], "succeeded", completed_job)
         self.assertEqual(invoices["total"], 0)
 
     def test_etc_confirm_returns_background_job_and_imports_asynchronously(self) -> None:
@@ -5671,7 +5683,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(job["route"], "/imports/etc-invoices")
         self.assertEqual(job["source"]["task_id"], task_id)
         self.assertEqual(job["total"], 2)
-        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(completed_job["status"], "succeeded", completed_job)
         self.assertEqual(completed_job["current"], 2)
         self.assertEqual(completed_job["total"], 2)
         self.assertEqual(completed_job["result_summary"]["created"], 2)
@@ -5917,7 +5929,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(failed_job["status"], "failed")
         self.assertEqual(second_response.status_code, 202)
         self.assertEqual(second_job["job_id"], first_job["job_id"])
-        self.assertEqual(completed_job["status"], "succeeded")
+        self.assertEqual(completed_job["status"], "succeeded", completed_job)
         self.assertEqual(json.loads(query_response.body)["total"], 1)
 
     def test_etc_confirm_job_partial_success_when_some_items_fail(self) -> None:
@@ -5972,7 +5984,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(draft_payload["oaDraftId"], "oa-draft-001")
         self.assertEqual(draft_payload["invoiceSummary"], {"count": 1, "amount": "13.07"})
         self.assertEqual(len(fake_oa.uploads), 2)
-        self.assertEqual(Path(fake_oa.uploads[1]).name, "ETC-RECON-FILE-000001_supplement-ride.pdf")
+        self.assertRegex(Path(fake_oa.uploads[1]).name, r"^ETC-RECON-FILE-[0-9a-f]{32}_supplement-ride\.pdf$")
         payload = fake_oa.draft_payloads[0]["payload"]
         self.assertEqual(payload["data"]["amount"], "101.07")
         uploaded_names = [item["name"] for item in payload["data"]["field101"]["list"]]

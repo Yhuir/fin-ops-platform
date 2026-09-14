@@ -4,7 +4,6 @@ from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import unquote
 
-from fin_ops_platform.services.etc_service import EtcBatchDeleteError, EtcBatchNotFoundError
 from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
@@ -12,6 +11,7 @@ from fin_ops_platform.services.etc_reconciliation_source_upload_service import (
     EtcReconciliationSourceUploadService,
     EtcReconciliationWrongSourceSlotError,
 )
+from fin_ops_platform.services.etc_service import EtcBatchDeleteError, EtcBatchNotFoundError
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 
 
@@ -129,6 +129,8 @@ class EtcReconciliationTaskApiRoutes:
             return self.detail(task_id)
         if method == "DELETE" and len(parts) == 1:
             return self.delete_task(task_id, body, actor_id=actor_id)
+        if method == "POST" and len(parts) == 4 and parts[1] == "source-files" and parts[3] == "reparse":
+            return self.reparse_source(task_id, parts[2], body, actor_id=actor_id)
         if method == "DELETE" and len(parts) == 3 and parts[1] == "source-files":
             return self.delete_source_file(task_id, parts[2], body, actor_id=actor_id)
         if method == "POST" and len(parts) == 2 and parts[1] == "credit-card-statement":
@@ -172,7 +174,7 @@ class EtcReconciliationTaskApiRoutes:
         if method == "POST" and len(parts) == 2 and parts[1] == "reopen":
             return self.reopen_task(task_id, body, actor_id=actor_id)
         if method == "POST" and len(parts) == 2 and parts[1] == "refresh-matches":
-            return self.refresh_matches(task_id)
+            return self.refresh_matches(task_id, body, actor_id=actor_id)
         if method == "DELETE" and len(parts) == 2 and parts[1] == "imported-invoices":
             return self.delete_imported_invoices(task_id, body, actor_id=actor_id)
         return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task_route"})
@@ -483,9 +485,28 @@ class EtcReconciliationTaskApiRoutes:
             return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._task_payload(task))
 
-    def refresh_matches(self, task_id: str) -> Any:
+    def refresh_matches(self, task_id: str, body: str | bytes | None, *, actor_id: str) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
         try:
-            task = self._task_service.refresh_matches(task_id=task_id)
+            expected_version = self._expected_version_from_payload(payload)
+            task = self._task_service.refresh_matches(task_id=task_id, expected_version=expected_version, actor=actor_id)
         except KeyError:
             return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_reconciliation_task"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
+        return self._json_response(HTTPStatus.OK, self._task_payload(task))
+
+    def reparse_source(self, task_id: str, file_id: str, body: str | bytes | None, *, actor_id: str) -> Any:
+        payload, error = self._load_json_body(body)
+        if error is not None:
+            return error
+        try:
+            task = self._source_upload_service.reparse_source(task_id=task_id, file_id=file_id,
+                expected_version=self._expected_version_from_payload(payload), actor=actor_id)
+        except KeyError:
+            return self._json_response(HTTPStatus.NOT_FOUND, {"error": "unknown_source_file"})
+        except ValueError as error:
+            return self._reconciliation_error_response(error)
         return self._json_response(HTTPStatus.OK, self._task_payload(task))

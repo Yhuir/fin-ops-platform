@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from decimal import Decimal
 from typing import Any, Iterator
 
+from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     int_value,
@@ -23,7 +24,6 @@ from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_brid
     reconcile_oa_attachment_cache_identity_sources,
 )
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_app_health_alerts
-from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.state_store_protocol import (
     SETTINGS_ACCESS_CONTROL_KEYS,
     SettingsAccessControlCommitOutcomeUnknown,
@@ -31,7 +31,6 @@ from fin_ops_platform.services.state_store_protocol import (
     default_settings_access_control,
     settings_access_control_from_payload,
 )
-
 
 OA_SYNC_STATE_KEY = "oa_sync_state"
 APP_SETTINGS_KEY = "app_settings"
@@ -1317,11 +1316,28 @@ class PostgresOpsTaxEtcRepository:
 
     def get_etc_reconciliation_task_record(self, task_id: str) -> dict[str, Any] | None:
         row = self._connection.fetch_one(
-            "select raw_payload from app.etc_reconciliation_tasks where task_id = %s",
+            """
+            select raw_payload,
+                case when status <> 'deleted' and coalesce(
+                    raw_payload #> '{normalized_payload,source_files}', raw_payload -> 'source_files', '[]'::jsonb
+                ) = '[]'::jsonb then (
+                    select jsonb_agg(coalesce(file.raw_payload -> 'normalized_payload', file.raw_payload)
+                        order by file.created_at, file.file_id)
+                    from app.etc_reconciliation_files file
+                    where file.task_id = task.task_id and file.status <> 'deleted'
+                ) end as formal_sources
+            from app.etc_reconciliation_tasks task where task_id = %s
+            """,
             (str(task_id or "").strip(),),
         )
         payload = row_payload(row, "raw_payload")
-        return dict(payload) if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        result = dict(payload)
+        # Preserve historical formal-file ownership reads in the same bounded query.
+        if result.get("status") != "deleted" and not result.get("source_files") and row.get("formal_sources"):
+            result["source_files"] = row["formal_sources"]
+        return result
 
     def list_etc_reconciliation_import_task_summaries(self) -> list[dict[str, Any]]:
         rows = self._connection.fetch_all(
@@ -1621,94 +1637,118 @@ class PostgresOpsTaxEtcRepository:
             "tasks": tasks,
         }
 
-    def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None:
+    def save_etc_reconciliation_task(self, task: Any, *, expected_version: int | None, expected_status: str | None = None) -> None:
         def write(connection: Any) -> None:
-            normalized = serialize_value(snapshot)
-            tasks = normalized.get("tasks") if isinstance(normalized, dict) else None
-            for task_id, payload in iter_mapping(tasks):
-                source_files = payload.get("source_files") if isinstance(payload.get("source_files"), list) else []
-                source_file = next((item for item in source_files if isinstance(item, dict)), {})
-                task_status = text(payload.get("status") or "draft")
-                connection.execute(
+            payload = serialize_value(task)
+            task_id = str(payload["task_id"])
+            previous = connection.fetch_one(
+                "select raw_payload from app.etc_reconciliation_tasks where task_id = %s", (task_id,)
+            )
+            if (previous is None) != (expected_version is None):
+                raise ValueError("task_version_conflict")
+            previous_payload = row_payload(previous, "raw_payload") or {}
+            source_files = payload.get("source_files") if isinstance(payload.get("source_files"), list) else []
+            source_file = next((item for item in source_files if isinstance(item, dict)), {})
+            task_status = text(payload.get("status") or "draft")
+            saved = connection.fetch_one(
+                """
+                insert into app.etc_reconciliation_tasks(
+                    legacy_mongo_id, task_id, status, scope_month, source_file_id,
+                    result_summary, version, raw_payload
+                )
+                values (%s, %s, %s, %s::date, %s, %s, %s, %s)
+                on conflict (task_id) do update set
+                    status = excluded.status,
+                    scope_month = excluded.scope_month,
+                    source_file_id = excluded.source_file_id,
+                    result_summary = excluded.result_summary,
+                    version = excluded.version,
+                    raw_payload = excluded.raw_payload,
+                    updated_at = now()
+                where app.etc_reconciliation_tasks.version = %s
+                  and (%s::text is null or app.etc_reconciliation_tasks.status = %s)
+                returning task_id
+                """,
+                (
+                    task_id,
+                    task_id,
+                    task_status,
+                    month_start(payload.get("period_start") or payload.get("statement_period_start") or payload.get("created_at")),
+                    text(source_file.get("file_id") if isinstance(source_file, dict) else None),
+                    jsonb(self._reconciliation_result_summary(payload)),
+                    int_value(payload.get("version"), 1),
+                    jsonb({"normalized_payload": payload}),
+                    expected_version, expected_status, expected_status,
+                ),
+            )
+            if saved is None:
+                raise ValueError("task_version_conflict")
+            if task_status == "deleted":
+                connection.execute("delete from app.etc_reconciliation_files where task_id = %s", (task_id,))
+                return
+            if source_files == previous_payload.get("source_files", []):
+                return
+            source_file_ids = [
+                file_id
+                for file_payload in source_files
+                if isinstance(file_payload, dict)
+                if (file_id := text(file_payload.get("file_id")))
+            ]
+            connection.execute(
+                """
+                update app.etc_reconciliation_files
+                set status = 'deleted', updated_at = now()
+                where task_id = %s
+                  and status <> 'deleted'
+                  and not (file_id = any(%s))
+                """,
+                (task_id, source_file_ids),
+            )
+            for file_payload in source_files:
+                if not isinstance(file_payload, dict):
+                    continue
+                file_id = text(file_payload.get("file_id"))
+                if not file_id:
+                    continue
+                saved_file = connection.fetch_one(
                     """
-                    insert into app.etc_reconciliation_tasks(
-                        legacy_mongo_id, task_id, status, scope_month, source_file_id,
-                        result_summary, version, raw_payload
+                    insert into app.etc_reconciliation_files(
+                        legacy_mongo_id, task_id, file_id, file_kind, status,
+                        file_path, file_sha256, raw_payload
                     )
-                    values (%s, %s, %s, %s::date, %s, %s, %s, %s)
-                    on conflict (task_id) do update set
+                    values (%s, %s, %s, %s, 'stored', %s, %s, %s)
+                    on conflict (file_id) do update set
+                        task_id = excluded.task_id,
+                        file_kind = excluded.file_kind,
                         status = excluded.status,
-                        scope_month = excluded.scope_month,
-                        source_file_id = excluded.source_file_id,
-                        result_summary = excluded.result_summary,
-                        version = excluded.version,
+                        file_path = excluded.file_path,
+                        file_sha256 = excluded.file_sha256,
                         raw_payload = excluded.raw_payload,
                         updated_at = now()
+                    where app.etc_reconciliation_files.task_id = excluded.task_id
+                    returning file_id
                     """,
                     (
+                        file_id,
                         task_id,
-                        task_id,
-                        task_status,
-                        month_start(payload.get("period_start") or payload.get("statement_period_start") or payload.get("created_at")),
-                        text(source_file.get("file_id") if isinstance(source_file, dict) else None),
-                        jsonb(self._reconciliation_result_summary(payload)),
-                        int_value(payload.get("version"), 1),
-                        jsonb({"normalized_payload": payload}),
+                        file_id,
+                        text(file_payload.get("source_kind") or "unknown"),
+                        text(file_payload.get("stored_path") or file_payload.get("file_path")),
+                        text(file_payload.get("sha256") or file_payload.get("file_sha256")),
+                        jsonb({"normalized_payload": file_payload}),
                     ),
                 )
-                if task_status == "deleted":
-                    connection.execute("delete from app.etc_reconciliation_files where task_id = %s", (task_id,))
-                    continue
-                source_file_ids = [
-                    file_id
-                    for file_payload in source_files
-                    if isinstance(file_payload, dict)
-                    if (file_id := text(file_payload.get("file_id")))
-                ]
-                connection.execute(
-                    """
-                    update app.etc_reconciliation_files
-                    set status = 'deleted', updated_at = now()
-                    where task_id = %s
-                      and status <> 'deleted'
-                      and not (file_id = any(%s))
-                    """,
-                    (task_id, source_file_ids),
-                )
-                for file_payload in source_files:
-                    if not isinstance(file_payload, dict):
-                        continue
-                    file_id = text(file_payload.get("file_id"))
-                    if not file_id:
-                        continue
-                    connection.execute(
-                        """
-                        insert into app.etc_reconciliation_files(
-                            legacy_mongo_id, task_id, file_id, file_kind, status,
-                            file_path, file_sha256, raw_payload
-                        )
-                        values (%s, %s, %s, %s, 'stored', %s, %s, %s)
-                        on conflict (file_id) do update set
-                            task_id = excluded.task_id,
-                            file_kind = excluded.file_kind,
-                            status = excluded.status,
-                            file_path = excluded.file_path,
-                            file_sha256 = excluded.file_sha256,
-                            raw_payload = excluded.raw_payload,
-                            updated_at = now()
-                        """,
-                        (
-                            file_id,
-                            task_id,
-                            file_id,
-                            text(file_payload.get("source_kind") or "unknown"),
-                            text(file_payload.get("stored_path") or file_payload.get("file_path")),
-                            text(file_payload.get("sha256") or file_payload.get("file_sha256")),
-                            jsonb({"normalized_payload": file_payload}),
-                        ),
-                    )
+                if saved_file is None:
+                    raise ValueError("reconciliation_file_identity_conflict")
 
         run_in_transaction(self._connection, write)
+
+    def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None:
+        """Explicit fixture/maintenance seeding; application commands use the task CAS port."""
+        for task_id, payload in iter_mapping(serialize_value(snapshot).get("tasks")):
+            current = self.get_etc_reconciliation_task_record(task_id)
+            payload["task_id"] = task_id
+            self.save_etc_reconciliation_task(payload, expected_version=int(current["version"]) if current else None)
 
     def save_historical_etc_repair_bundle_metadata(self, payload: dict[str, Any], *, file_object_id: str | None) -> None:
         normalized_bundle_id = text(payload.get("bundle_id") or payload.get("_id"))

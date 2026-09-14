@@ -1,5 +1,13 @@
 # ETC票据管理 测试矩阵
 
+## 2026-09-14 匹配完整性与性能
+
+- `test_etc_matching_regressions.py`：OCR 商户漏字、人民币结算列、非法行/日期、未知商户/日期/车牌/站点冲突、全局分配、16/17/40密集重复、拒绝/重启/恢复、去重代表删除、重解析与过期版本、混合PDF/跨页支出核平。
+- `test_postgres_state_store_integration.py`：独立 PostgreSQL 并发两写仅一成功、其他任务保持、创建主键冲突、导入状态CAS且确认版本不变。
+- Service/API 套件：人工改配冲突、删除/恢复、窄写失败、可编辑状态与版本，旧跨任意日期强配断言改为明确未找到。
+- 页面/API 与 `ETC-TICKET-E2E-012`：刷新携带版本、有效链接为配对事实、还款/removed显示计数、原选择/确认/权限链路回归。无新增 read model/cache/job，原 worker/导入/关联台测试继续覆盖受影响调用。
+
+
 ## 2026-09-08 无扩展名文本与损坏记录闭环
 
 - `test_untrusted_document_policy.py`：显式许可/默认拒绝、UTF/BOM/GB、空/NUL/非法字节、真实 PDF/图片/ZIP、未知和双后缀、全批预检零存储、GB 错入口识别；OA/图片/PDF 限制回归。

@@ -32,8 +32,8 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresOAProjectionRepository,
     PostgresOpsTaxEtcRepository,
     PostgresSettingsDataResetRepository,
-    PostgresWorkbenchRelationRepository,
     PostgresWorkbenchMatchingQueueRepository,
+    PostgresWorkbenchRelationRepository,
     PostgresWorkbenchRepository,
 )
 from fin_ops_platform.services.postgres_repositories.bank_flow_rule_batch_canonical_query import (
@@ -404,6 +404,9 @@ class PostgresStateStore:
 
     def load_etc_reconciliation_state(self) -> dict[str, Any]:
         return self._ops_tax_etc_repository.load_etc_reconciliation_state()
+
+    def save_etc_reconciliation_task(self, task: Any, *, expected_version: int | None, expected_status: str | None = None) -> None:
+        self._ops_tax_etc_repository.save_etc_reconciliation_task(task, expected_version=expected_version, expected_status=expected_status)
 
     def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_etc_reconciliation_state(snapshot)

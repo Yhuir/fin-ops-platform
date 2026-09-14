@@ -1,5 +1,15 @@
 # ETC票据管理模块边界与 I/O
 
+## 2026-09-14 信用卡与票根匹配边界
+
+- Parser 逐页提取文字/扫描页 OCR，保留结算币种与页行定位；合计按完整文档核对。Matcher 为纯计算：人民币整数分、明确通行日/车牌/站点约束、已知 ETC 商户前7日至至多次日且不晚于记账日、未知商户仅同日；统一最大数量/最小代价一对一分配，不保留第二次金额兜底或大小组算法切换。
+- 对有效支出直接返回匹配/未找到。`suggested_match` 仍是现有 DTO 存储枚举，但有效链接就是已分配，不产生 `needs_review` 工作流；非参与行单列，`match_reason` 解释结果，removed 票根不显示或计数。
+- `POST .../refresh-matches` 必传 `expectedVersion`；`POST .../source-files/{file_id}/reparse` 同样必传版本并由认证 session 注入 actor。重解析使用存储原件、既有文档边界，在锁外解析后按当前版本提交。已确认/关闭任务须通过既有 reopen。
+- Service 只读写当前任务；repository `save_etc_reconciliation_task` 以版本及必要状态 CAS，task/审计/当前来源元数据同事务，无变化 refresh 零写。Import 开始/失败保留 confirmation version，以状态 CAS 防并发覆盖。无新增 read model/worker/下游事实写入。
+- `unlink_ticket` 持久拒绝当前边；`restore_auto` 清除人工指定/拒绝。人工指定不能抢另一笔人工指定。去重代表切换保留自然行身份，无法对应的重解析人工决定明确列问题。
+- 已移除运行时整批 snapshot 回写；同名 store 方法只为测试/维护播种并委托窄写。新 ID 采用旧前缀+标准 UUID4，旧ID保持读取。细节见[实施记录](../../dev/etc-credit-card-ticket-matching-plan.md)。
+
+
 日期：2026-08-20
 
 > 2026-09-08：[票根文本上传修复与验证](../../dev/etc-ticket-root-text-upload-repair-plan.md)。仅票根入口显式接受无扩展名文本；TXT/手工粘贴按记录边界解析，坏文件保留原件和 issue、零可核对 items。公开 DTO、其他入口及持久化 owner 不变。

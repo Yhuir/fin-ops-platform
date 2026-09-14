@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
-import re
 from typing import Any, Callable, Iterator
-from uuid import uuid5, NAMESPACE_URL
+from uuid import NAMESPACE_URL, uuid5
 
 try:
     import fitz
@@ -33,7 +33,6 @@ from fin_ops_platform.services.etc_reconciliation_models import (
 )
 from fin_ops_platform.services.untrusted_document_policy import ValidatedDocument
 
-
 CCB_ROW_RE = re.compile(
     r"^(?P<transaction_date>\d{4}[-/]\d{2}[-/]\d{2})\s+"
     r"(?P<posting_date>\d{4}[-/]\d{2}[-/]\d{2})\s+"
@@ -41,10 +40,10 @@ CCB_ROW_RE = re.compile(
     r"(?P<description>.+?)\s+"
     r"(?P<currency>[A-Z]{3}|人民币|CNY)\s+"
     r"(?P<amount>-?[0-9][0-9,]*(?:\.[0-9]{1,2})?)\s+"
-    r"(?:(?:[A-Z]{3}|人民币|CNY)\s+)?"
+    r"(?:(?P<settlement_currency>[A-Z]{3}|人民币)\s+)?"
     r"(?P<settlement_amount>-?[0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*$"
 )
-ETC_KEYWORDS = ("etc", "高速", "通行费", "收费站", "联网公司", "联网收费", "票根", "黔通智联", "贵州黔通智联", "北京速通", "速通科技")
+ETC_KEYWORDS = ("etc", "高速", "通行费", "收费站", "联网公司", "联网收费", "票根", "黔通智联", "贵州黔通智联", "贵州通智联", "北京速通", "速通科技")
 REPAYMENT_KEYWORDS = ("还款", "自动还款", "存入", "退款")
 PLATE_RE = re.compile(r"[\u4e00-\u9fff][A-Z][A-Z0-9]{5,6}")
 DATETIME_RE = re.compile(r"(\d{4}[-/]\d{2}[-/]\d{2}\s*\d{2}:\d{2}(?::\d{2})?)")
@@ -142,12 +141,26 @@ class CcbCreditCardStatementParser:
                 ],
             )
         items: list[CreditCardItem] = []
+        issues: list[ParseIssue] = []
         for line_no, raw_line in enumerate(text.splitlines(), start=1):
             line = raw_line.strip()
             if not line:
                 continue
             match = CCB_ROW_RE.match(line)
-            if match is None:
+            valid_dates = False
+            if match is not None:
+                try:
+                    datetime.fromisoformat(match.group("transaction_date").replace("/", "-"))
+                    datetime.fromisoformat(match.group("posting_date").replace("/", "-"))
+                    valid_dates = True
+                except ValueError:
+                    pass
+            if match is None or not valid_dates:
+                if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}", line):
+                    issues.append(ParseIssue(issue_id=_stable_id("issue", file_id, line_no, "invalid_statement_row"),
+                        file_id=file_id, severity=ParseIssueSeverity.WARNING,
+                        message=f"信用卡第 {line_no} 行日期或金额格式不完整，未参与匹配，请核对原件。",
+                        source_page=1, source_line=line_no, field_name="statement_rows"))
                 continue
             amount = _parse_decimal(match.group("amount"))
             settlement_amount = _parse_decimal(match.group("settlement_amount"))
@@ -165,12 +178,13 @@ class CcbCreditCardStatementParser:
                 description=description,
                 currency="CNY" if match.group("currency") == "人民币" else match.group("currency"),
                 amount=amount,
+                settlement_currency=(match.group("settlement_currency") or match.group("currency")).replace("人民币", "CNY"),
                 settlement_amount=settlement_amount,
                 is_etc_candidate=is_candidate,
                 candidate_reason="etc_keyword" if is_candidate else None,
                 source_page=1,
                 source_line=line_no,
-                recommendation_status="needs_review" if is_candidate else "not_candidate",
+                recommendation_status="missing_ticket" if is_candidate else "not_candidate",
             )
             items.append(item)
         if not items:
@@ -187,7 +201,8 @@ class CcbCreditCardStatementParser:
                     )
                 ],
             )
-        return FileParseResult(file_id=file_id, parser_code=self.parser_code, credit_card_items=items)
+        issues.extend(_statement_total_issues(file_id, text, items))
+        return FileParseResult(file_id=file_id, parser_code=self.parser_code, credit_card_items=items, issues=issues)
 
     def parse_pdf_bytes(
         self,
@@ -198,42 +213,70 @@ class CcbCreditCardStatementParser:
     ) -> FileParseResult:
         if document.kind != "pdf":
             raise ValueError("credit_card_statement_requires_pdf")
-        text_result = self.parse_text(
-            file_id=file_id,
-            text=(
-                self._pdf_text_extractor(document.content)
-                if self._pdf_text_extractor is not None
-                else _extract_pdf_text(document)
-            ),
-            task_id=task_id,
-        )
-        if text_result.credit_card_items:
-            return text_result
-        page_texts = (
-            self._ocr_text_extractor(document.content)
-            if self._ocr_text_extractor is not None
-            else TicketRootOcrTextExtractor(render_scale=3, group_by_row=True)(document)
-        )
-        ocr_text = "\n".join(page_text for page_text in page_texts if page_text.strip())
-        if not ocr_text:
-            return text_result
-        ocr_text = _normalize_credit_card_ocr_text(ocr_text)
-        ocr_result = self.parse_text(file_id=file_id, text=ocr_text, task_id=task_id)
-        if ocr_result.credit_card_items:
-            ocr_result.issues.append(
-                ParseIssue(
-                    issue_id=_stable_id("issue", file_id, "credit_card_ocr_review"),
-                    file_id=file_id,
-                    severity=ParseIssueSeverity.WARNING,
-                    message="图像型信用卡账单已通过 OCR 识别，请核对交易明细是否完整，并确认日期和金额准确。",
-                    extraction_method="ocr",
-                    field_name="statement_rows",
-                )
-            )
+        page_documents = []
+        if self._pdf_text_extractor is not None:
+            page_texts = self._pdf_text_extractor(document.content).split("\f")
         else:
-            for issue in ocr_result.issues:
-                issue.extraction_method = "ocr"
-        return ocr_result
+            if fitz is None:
+                raise RuntimeError("pdf_renderer_unavailable")
+            with fitz.open(stream=document.content, filetype="pdf") as pdf:
+                for index in range(len(pdf)):
+                    with fitz.open() as single:
+                        single.insert_pdf(pdf, from_page=index, to_page=index)
+                        page_documents.append(replace(document, content=single.tobytes(), pdf_page_count=1))
+            page_texts = [_extract_pdf_text(page) for page in page_documents]
+        result = FileParseResult(file_id=file_id, parser_code=self.parser_code)
+        ocr_pages = None
+        extracted_texts: list[str] = []
+        extractor = TicketRootOcrTextExtractor(render_scale=3, group_by_row=True)
+        for page_index, text in enumerate(page_texts):
+            extraction = "pdf_text"
+            # An empty text layer is a scanned page, even if an earlier page had rows.
+            if not text.strip():
+                extraction = "ocr"
+                if self._ocr_text_extractor is not None:
+                    if ocr_pages is None:
+                        ocr_pages = self._ocr_text_extractor(document.content)
+                    text = ocr_pages[page_index] if page_index < len(ocr_pages) else ""
+                else:
+                    text = "\n".join(extractor(page_documents[page_index]))
+                text = _normalize_credit_card_ocr_text(text)
+            extracted_texts.append(text)
+            page_result = self.parse_text(file_id=file_id, text=text, task_id=task_id)
+            page_result.issues = [issue for issue in page_result.issues if issue.field_name != "statement_total"]
+            for item in page_result.credit_card_items:
+                item.source_page = page_index + 1
+                item.item_id = _stable_id("ccb_page", file_id, page_index + 1, item.item_id)
+            result.credit_card_items.extend(page_result.credit_card_items)
+            # Non-transaction explanatory text is not a malformed transaction page.
+            if page_result.credit_card_items or not text.strip() or any(issue.severity == ParseIssueSeverity.WARNING for issue in page_result.issues):
+                for issue in page_result.issues:
+                    issue.source_page = page_index + 1
+                    issue.extraction_method = extraction
+                    issue.issue_id = _stable_id("issue_page", page_index + 1, issue.issue_id)
+                result.issues.extend(page_result.issues)
+            if extraction == "ocr" and page_result.credit_card_items:
+                result.issues.append(ParseIssue(issue_id=_stable_id("issue", file_id, page_index, "credit_card_ocr_review"),
+                    file_id=file_id, severity=ParseIssueSeverity.WARNING, source_page=page_index + 1,
+                    message="图像型信用卡账单已通过 OCR 识别，请核对日期、金额和明细完整性。",
+                    extraction_method="ocr", field_name="statement_rows"))
+        if not result.credit_card_items and not result.issues:
+            return self.parse_text(file_id=file_id, text="", task_id=task_id)
+        result.issues.extend(_statement_total_issues(file_id, "\n".join(extracted_texts), result.credit_card_items))
+        return result
+
+
+def _statement_total_issues(file_id: str, text: str, items: list[CreditCardItem]) -> list[ParseIssue]:
+    issues: list[ParseIssue] = []
+    total_match = re.search(r"(?:本期消费合计|本期消费金额|支出合计)\s*[:：]?\s*(?:人民币|CNY|￥|¥)?\s*([0-9][0-9,]*\.[0-9]{2})", text)
+    if total_match is not None:
+        declared = _parse_decimal(total_match.group(1))
+        actual = sum((item.settlement_amount for item in items if item.settlement_amount > 0), Decimal("0"))
+        if declared is not None and declared != actual:
+            issues.append(ParseIssue(issue_id=_stable_id("issue", file_id, "statement_total_difference"),
+                file_id=file_id, severity=ParseIssueSeverity.WARNING, field_name="statement_total",
+                message=f"账单明确列示支出 {declared:.2f} 元，已解析支出 {actual:.2f} 元，请核对缺失明细；未自动补值。"))
+    return issues
 
 
 class TicketRootPdfTextParser:
@@ -355,9 +398,19 @@ class TicketRootClipboardTextParser:
 
         items: list[TicketRootItem] = []
         issues: list[ParseIssue] = []
+        plates_by_line = {}
+        current_plate = ""
+        for line_no, raw_line in enumerate(text.splitlines(), start=1):
+            found = PLATE_RE.search(raw_line.upper())
+            if found:
+                current_plate = found.group(0)
+            plates_by_line[line_no] = current_plate
         for record_index, (line_no, block) in enumerate(_clipboard_record_blocks(text), start=1):
+            plate = plates_by_line[line_no]
             fields = _clipboard_record_fields(block)
             record_issues: list[tuple[str, str]] = []
+            if not plate:
+                record_issues.append(("vehicle_plate", "该记录前缺少车牌号"))
             for field_name, label in (("transaction_at", "交易时间"), ("amount", "交易金额"), ("invoice_count", "发票数量")):
                 values = fields[field_name]
                 if len(values) > 1:
@@ -642,16 +695,16 @@ class SupplementEvidenceParser:
 
 
 def _is_etc_candidate(description: str, amount: Decimal) -> bool:
-    if amount < 0:
+    if amount <= 0:
         return False
-    lowered = description.lower()
+    lowered = re.sub(r"\s+", "", description).lower()
     if any(keyword in lowered for keyword in REPAYMENT_KEYWORDS):
         return False
     return _contains_etc_keyword(description)
 
 
 def _contains_etc_keyword(text: str) -> bool:
-    lowered = text.lower()
+    lowered = re.sub(r"\s+", "", text).lower()
     return any(keyword in lowered for keyword in ETC_KEYWORDS)
 
 
@@ -902,7 +955,7 @@ def _clipboard_record_blocks(text: str) -> Iterator[tuple[int, str]]:
         line = raw_line.replace("\u3000", " ").replace("¥", "￥").strip()
         if not line:
             continue
-        if "交易时间" in line and lines:
+        if ("交易时间" in line or PLATE_RE.search(line)) and lines:
             yield start_line, "\n".join(lines)
             lines = []
         # Ignore page chrome before a record, but retain orphan record fields to report missing time.

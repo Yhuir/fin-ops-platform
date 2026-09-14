@@ -4253,9 +4253,18 @@ class Application:
             "ticket_root_source_mode_conflict_text_file",
             "ticket_root_source_mode_conflict_mixed_upload",
             "source_file_deleted_during_parse",
+            "reconciliation_task_not_mutable",
+            "ticket_already_manually_linked",
+            "conflicting_manual_ticket_links",
+            "reconciliation_file_identity_conflict",
         } else HTTPStatus.BAD_REQUEST
         messages = {
             "task_version_conflict": "当前批次已更新，请核对最新文件与数据后再操作。",
+            "reconciliation_task_not_mutable": "当前批次已确认或已进入导入流程，请先重新打开核对。",
+            "ticket_already_manually_linked": "该票根已有人工指定关系，请先解除原关系。",
+            "conflicting_manual_ticket_links": "已有人工关系重复占用，请解除重复关系后刷新。",
+            "reconciliation_file_identity_conflict": "来源文件身份冲突，本次操作未保存。",
+            "removed_ticket_cannot_be_linked": "已移除的票根不能关联，请先恢复。",
             "ticket_root_source_mode_conflict": "已有手工粘贴票根网源，请先删除已有票根来源后才能切换导入方式。",
             "ticket_root_source_mode_conflict_pdf": "已有票根网 PDF/JPG 源文件，请先删除已有票根来源后才能切换导入方式。",
             "ticket_root_source_mode_conflict_text_file": "已有票根网 TXT 源文件，请先删除已有票根来源后才能切换导入方式。",

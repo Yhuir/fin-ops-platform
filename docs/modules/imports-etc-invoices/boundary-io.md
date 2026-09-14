@@ -1,5 +1,10 @@
 # ETC发票导入模块边界与 I/O
 
+## 2026-09-14 对账任务持久化调用
+
+匹配修复仅改变上游对账分配和当前 task 保存：确认后的 `ExpectedEtcInvoiceRequirement` 仍沿用既有通行日期、车牌、金额和发票数量合同。开始/失败导入不推进 confirmation version，持久化以该版本及原状态 CAS；导入、OA同步的所有 task 写入走同一窄端口，不回写其他批次。ZIP发票识别、成员身份、权限与 canonical invoice 写入边界不变。
+
+
 日期：2026-08-19
 
 ## 模块化状态

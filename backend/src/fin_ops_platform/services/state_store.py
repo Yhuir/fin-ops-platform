@@ -624,11 +624,25 @@ class ApplicationStateStore:
             loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
         return loaded if isinstance(loaded, dict) else {}
 
+    def save_etc_reconciliation_task(self, task: Any, *, expected_version: int | None, expected_status: str | None = None) -> None:
+        with self._local_pickle_lock:
+            snapshot = self.load_etc_reconciliation_state()
+            tasks = snapshot.setdefault("tasks", {})
+            previous = tasks.get(task.task_id)
+            version = previous.get("version") if isinstance(previous, dict) else getattr(previous, "version", None)
+            status = previous.get("status") if isinstance(previous, dict) else getattr(previous, "status", None)
+            if version != expected_version or (expected_status is not None and status != expected_status):
+                raise ValueError("task_version_conflict")
+            tasks[task.task_id] = deepcopy(task)
+            self.save_etc_reconciliation_state(snapshot)
+
     def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         self._etc_reconciliation_state_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._etc_reconciliation_state_path.open("wb") as handle:
+        pending = self._etc_reconciliation_state_path.with_suffix(".tmp")
+        with pending.open("wb") as handle:
             pickle.dump(normalized_snapshot, handle)
+        pending.replace(self._etc_reconciliation_state_path)
 
     def store_etc_reconciliation_file(self, *, task_id: str, file_id: str, file_name: str, content: bytes) -> str:
         sanitized_name = self._sanitize_name(file_name)
