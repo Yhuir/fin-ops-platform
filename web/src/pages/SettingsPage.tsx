@@ -297,7 +297,7 @@ export default function SettingsPage() {
       setAccessControlStatus({
         tone: "error",
         message: conflictVersion === null
-          ? normalizeSettingsError(error, "访问账户保存失败，请稍后重试。")
+          ? `${normalizeSettingsError(error, "访问账户保存失败，请稍后重试。")}${error instanceof WorkbenchApiError && error.requestId ? `（请求编号：${error.requestId}）` : ""}`
           : "访问账户已被其他管理员更新，请保留当前编辑并刷新后重试。",
       });
     } finally {

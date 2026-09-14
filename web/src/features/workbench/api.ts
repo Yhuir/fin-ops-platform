@@ -2410,7 +2410,19 @@ function topLevelReasonFromPayload(payload: unknown) {
   return String((payload as { reason?: unknown }).reason ?? "").trim();
 }
 
+const ACCESS_CONTROL_ERROR_MESSAGES: Record<string, string> = {
+  oa_role_configuration_invalid: "OA 入口角色配置不完整，访问权限未保存。请联系管理员修复角色配置。",
+  oa_access_accounts_invalid: "账户已停用、已删除或不存在。请核对异常账户并移除无效的访问授权。",
+  oa_role_sync_failed: "OA 入口权限同步失败，App 访问权限未保存。请稍后重试。",
+  oa_user_directory_failed: "OA 账户资料读取失败，请稍后重试。",
+  oa_role_sync_uncertain: "OA 入口权限保存结果无法确认，请联系管理员核对后再操作。",
+  access_control_persistence_failed: "App 访问权限未保存，相关 OA 入口变更已恢复。请稍后重试。",
+  access_control_sync_inconsistent: "权限保存结果无法确认，请联系管理员核对 App 与 OA 授权状态。",
+  access_control_version_conflict: "访问账户已被其他管理员更新，当前编辑已保留，请刷新核对后重试。",
+};
+
 function resolveWorkbenchApiErrorMessage(status: number, code: string, payload: unknown) {
+  if (ACCESS_CONTROL_ERROR_MESSAGES[code]) return ACCESS_CONTROL_ERROR_MESSAGES[code];
   if (code === "workbench_relation_scope_invalid") {
     return "关联记录的业务月份无效，请修正来源数据后重新预览。";
   }

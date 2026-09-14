@@ -161,3 +161,11 @@
 - 验证命令：见 `tests.md` 和 `docs/dev/testing-closure-state.md` 最近验证命令。
 - 未测风险：真实生产 reset worker drain、Redis/cache 清理、真实 OA 登录/草稿、真实 PostgreSQL pgcrypto key 和所有下游页面最终 smoke。
 - 后续事项：改 settings 时必须先补旧功能 regression/characterization test；若发现真实 reset/OA bug，登记到 `docs/dev/regression-bug-bank.md`。
+
+## 2026-09-15 访问账户保存与布局
+
+生产根因：App 已要求两角色，OA 仍为旧三角色；App 授权中还有 OA 已删除账户。前端通用 5xx 映射掩盖了根因。修复范围为 Settings/OA role 边界和访问账户局部布局。
+
+决策：保留完整名单＋版本提交；页面与成员变化分开；保留 GET/PUT 字段，在写前读取名称，提交后不依赖外部显示资料；成员差量写入及真实成员恢复；原 ListBox 替换两个独立背景按钮。清理全量删除再插入、旧名单补偿和错误文案路径。
+
+验收：005 保存成功并回读，普通账号页面及直接 API 授权一致；失败不丢草稿；多宽度浏览器视觉检查；生产验证还原临时权限；只清理本次临时测试资源。

@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from fin_ops_platform.services.state_store_protocol import settings_access_control_from_payload
-
 
 OARoleKind = Literal["user", "admin"]
 OA_MENU_PERMISSION = "finops:app:view"
 
 
 class OARoleSyncError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str = "oa_role_sync_failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class OARoleSyncConfigurationError(OARoleSyncError):
@@ -36,8 +37,17 @@ class OAUserSummary:
     active: bool
 
 
+@dataclass(slots=True, frozen=True)
+class OARoleChange:
+    role_ids: tuple[int, ...]
+    before: frozenset[tuple[int, int]]
+    after: frozenset[tuple[int, int]]
+
+
 class OARoleSyncExecutor(Protocol):
-    def apply(self, assignments: list[OARoleAssignment]) -> None: ...
+    def apply(self, assignments: list[OARoleAssignment]) -> OARoleChange: ...
+
+    def restore(self, change: OARoleChange) -> None: ...
 
     def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]: ...
 
@@ -103,10 +113,15 @@ class OARoleSyncService:
     def build_assignments(snapshot: dict[str, Any]) -> list[OARoleAssignment]:
         return _build_assignments_from_snapshot(snapshot)
 
-    def sync_access_control(self, snapshot: dict[str, Any]) -> None:
+    def sync_access_control(self, snapshot: dict[str, Any]) -> OARoleChange:
         if self._executor is None:
             raise OARoleSyncConfigurationError("OA role sync is disabled or not configured.")
-        self._executor.apply(self.build_assignments(snapshot))
+        return self._executor.apply(self.build_assignments(snapshot))
+
+    def restore_access_control(self, change: OARoleChange) -> None:
+        if self._executor is None:
+            raise OARoleSyncConfigurationError("OA role sync is disabled or not configured.")
+        self._executor.restore(change)
 
     def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
         if self._executor is None:
@@ -171,7 +186,7 @@ class MySQLOARoleSyncExecutor:
             )
         )
 
-    def apply(self, assignments: list[OARoleAssignment]) -> None:
+    def apply(self, assignments: list[OARoleAssignment]) -> OARoleChange:
         connection = self._connect()
         try:
             with connection.cursor() as cursor:
@@ -179,16 +194,69 @@ class MySQLOARoleSyncExecutor:
                 menu_id = self._load_menu_id(cursor)
                 self._validate_menu_bindings(cursor, menu_id, role_ids)
                 user_ids = self._load_user_ids(cursor, assignments)
-                self._delete_obsolete_assignments(cursor, role_ids, user_ids)
-                self._insert_assignments(cursor, role_ids, user_ids, assignments)
-            connection.commit()
-        except Exception as exc:  # pragma: no cover - exercised in deployed env
+                scope = tuple(sorted(role_ids.values()))
+                before = self._load_memberships(cursor, scope)
+                after = frozenset(
+                    (user_ids[item.username], role_ids[self._role_key_for_assignment(item.role)])
+                    for item in assignments
+                )
+                self._write_memberships(cursor, before, after)
+            try:
+                connection.commit()
+            except Exception as exc:
+                raise OARoleSyncError(
+                    "OA role commit result is unknown.", code="oa_role_sync_uncertain"
+                ) from exc
+            return OARoleChange(scope, before, after)
+        except Exception as exc:
+            if isinstance(exc, OARoleSyncError) and exc.code == "oa_role_sync_uncertain":
+                # A lost commit acknowledgement cannot be settled by rollback on
+                # the broken connection. Preserve the uncertain outcome.
+                raise
             connection.rollback()
             if isinstance(exc, OARoleSyncError):
                 raise
-            raise OARoleSyncExecutionError(f"Failed to sync OA roles: {exc}") from exc
+            raise OARoleSyncExecutionError("Failed to sync OA roles.") from exc
         finally:
             connection.close()
+
+    def restore(self, change: OARoleChange) -> None:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                role_ids = self._load_role_ids(cursor)
+                self._validate_menu_bindings(cursor, self._load_menu_id(cursor), role_ids)
+                if tuple(sorted(role_ids.values())) != change.role_ids:
+                    raise OARoleSyncExecutionError("OA roles changed during compensation.")
+                current = self._load_memberships(cursor, change.role_ids)
+                if current != change.after:
+                    raise OARoleSyncExecutionError("OA memberships changed during compensation.")
+                self._write_memberships(cursor, current, change.before)
+            connection.commit()
+        except Exception as exc:
+            connection.rollback()
+            if isinstance(exc, OARoleSyncError):
+                raise
+            raise OARoleSyncExecutionError("Failed to restore OA memberships.") from exc
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _load_memberships(cursor, role_ids: tuple[int, ...]) -> frozenset[tuple[int, int]]:
+        cursor.execute(
+            f"SELECT user_id, role_id FROM sys_user_role WHERE role_id IN ({_placeholders(len(role_ids))}) FOR UPDATE",
+            role_ids,
+        )
+        return frozenset((int(user_id), int(role_id)) for user_id, role_id in cursor.fetchall())
+
+    @staticmethod
+    def _write_memberships(cursor, before: frozenset[tuple[int, int]], after: frozenset[tuple[int, int]]) -> None:
+        removed = sorted(before - after)
+        added = sorted(after - before)
+        if removed:
+            cursor.executemany("DELETE FROM sys_user_role WHERE user_id = %s AND role_id = %s", removed)
+        if added:
+            cursor.executemany("INSERT INTO sys_user_role (user_id, role_id) VALUES (%s, %s)", added)
 
     def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
         normalized = sorted({str(username or "").strip() for username in usernames if str(username or "").strip()})
@@ -267,9 +335,9 @@ class MySQLOARoleSyncExecutor:
         role_ids = {str(role_key): int(role_id) for role_id, role_key in rows}
         missing = sorted(set(role_keys).difference(role_ids))
         if missing:
-            raise OARoleSyncExecutionError("Missing OA roles: " + ", ".join(missing))
+            raise OARoleSyncExecutionError("Missing OA roles: " + ", ".join(missing), code="oa_role_configuration_invalid")
         if len(rows) != len(role_keys):
-            raise OARoleSyncExecutionError("OA dedicated role keys must each resolve exactly once.")
+            raise OARoleSyncExecutionError("OA dedicated role keys must each resolve exactly once.", code="oa_role_configuration_invalid")
         return role_ids
 
     def _load_menu_id(self, cursor) -> int:
@@ -280,7 +348,7 @@ class MySQLOARoleSyncExecutor:
         rows = list(cursor.fetchall() or [])
         if len(rows) != 1:
             raise OARoleSyncExecutionError(
-                f"OA menu permission {self._settings.required_permission} must resolve exactly once."
+                f"OA menu permission {self._settings.required_permission} must resolve exactly once.", code="oa_role_configuration_invalid"
             )
         return int(rows[0][0])
 
@@ -294,7 +362,7 @@ class MySQLOARoleSyncExecutor:
         expected_role_ids = set(role_ids.values())
         if len(actual_role_ids) != len(expected_role_ids) or set(actual_role_ids) != expected_role_ids:
             raise OARoleSyncExecutionError(
-                "OA fin-ops menu bindings must contain exactly the two dedicated roles."
+                "OA fin-ops menu bindings must contain exactly the two dedicated roles.", code="oa_role_configuration_invalid"
             )
 
     def _load_user_ids(self, cursor, assignments: list[OARoleAssignment]) -> dict[str, int]:
@@ -312,54 +380,8 @@ class MySQLOARoleSyncExecutor:
         user_ids = {str(username): int(user_id) for user_id, username in rows}
         missing = sorted(set(usernames).difference(user_ids))
         if missing:
-            raise OARoleSyncExecutionError("OA users not found: " + ", ".join(missing))
+            raise OARoleSyncExecutionError("OA users not found: " + ", ".join(missing), code="oa_access_accounts_invalid")
         return user_ids
-
-    def _delete_obsolete_assignments(self, cursor, role_ids: dict[str, int], user_ids: dict[str, int]) -> None:
-        finops_role_ids = [
-            role_ids[self._settings.user_role_key],
-            role_ids[self._settings.admin_role_key],
-        ]
-        if user_ids:
-            target_user_ids = list(user_ids.values())
-            cursor.execute(
-                (
-                    f"DELETE FROM sys_user_role WHERE role_id IN ({_placeholders(len(finops_role_ids))}) "
-                    f"AND user_id NOT IN ({_placeholders(len(target_user_ids))})"
-                ),
-                [*finops_role_ids, *target_user_ids],
-            )
-            cursor.execute(
-                (
-                    f"DELETE FROM sys_user_role WHERE role_id IN ({_placeholders(len(finops_role_ids))}) "
-                    f"AND user_id IN ({_placeholders(len(target_user_ids))})"
-                ),
-                [*finops_role_ids, *target_user_ids],
-            )
-            return
-        cursor.execute(
-            f"DELETE FROM sys_user_role WHERE role_id IN ({_placeholders(len(finops_role_ids))})",
-            finops_role_ids,
-        )
-
-    def _insert_assignments(
-        self,
-        cursor,
-        role_ids: dict[str, int],
-        user_ids: dict[str, int],
-        assignments: list[OARoleAssignment],
-    ) -> None:
-        for assignment in assignments:
-            role_id = role_ids[self._role_key_for_assignment(assignment.role)]
-            user_id = user_ids[assignment.username]
-            cursor.execute(
-                (
-                    "INSERT INTO sys_user_role (user_id, role_id) "
-                    "SELECT %s, %s FROM DUAL "
-                    "WHERE NOT EXISTS (SELECT 1 FROM sys_user_role WHERE user_id = %s AND role_id = %s)"
-                ),
-                (user_id, role_id, user_id, role_id),
-            )
 
     def _role_key_for_assignment(self, role: OARoleKind) -> str:
         return self._settings.admin_role_key if role == "admin" else self._settings.user_role_key

@@ -1,7 +1,7 @@
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import fin_ops_platform.tools.settings_access_control_preflight as preflight
@@ -166,6 +166,7 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
                 (12, "finops_admin"),
             ],
             [(10,), (11,), (12,)],
+            [],
         ])
         connection = _Connection(cursor)
         with patch.object(preflight, "_oa_connect", return_value=connection):
@@ -176,7 +177,24 @@ class SettingsAccessControlPreflightTests(unittest.TestCase):
         self.assertFalse(connection.rolled_back)
         statements = "\n".join(sql for sql, _ in cursor.executed)
         self.assertIn("update sys_role set role_key", statements)
-        self.assertIn("delete from sys_user_role", statements)
+        self.assertNotIn("delete from sys_user_role", statements)
+
+    def test_release_check_rejects_legacy_topology_even_with_valid_database(self):
+        with (
+            patch.object(preflight, "collect_database_facts", return_value={"migration_0165_applied": True, "constraint_present": True, "constraint_validated": True}),
+            patch.object(preflight, "_postgres_settings", return_value=object()),
+            patch.object(preflight, "PostgresConnection", return_value=object()),
+            patch.object(preflight, "collect_oa_role_facts", return_value={"topology": "legacy"}),
+        ):
+            self.assertEqual(preflight.main(["--release", "test", "--database-guard-only", "--verify-oa-topology"]), 2)
+
+    def test_migration_preserves_roles_used_by_other_oa_menus(self):
+        cursor = _Cursor([[(99,)], [(10, "finops_read_export"), (11, "finops_full_access"), (12, "finops_admin")], [(10,), (11,), (12,)], [(123,)]] )
+        connection = _Connection(cursor)
+        with patch.object(preflight, "_oa_connect", return_value=connection), self.assertRaises(RuntimeError):
+            preflight.migrate_oa_role_topology()
+        self.assertTrue(connection.rolled_back)
+        self.assertFalse(any(sql.lstrip().startswith(("update", "delete")) for sql, _ in cursor.executed))
 
     def test_database_guard_cli_fails_closed_when_constraint_is_not_validated(self) -> None:
         with (

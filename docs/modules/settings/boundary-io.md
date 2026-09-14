@@ -16,7 +16,7 @@
 
 - 平台设置页面、工作台设置、OA 凭证设置、数据重置入口。
 - 调用 app settings、credential provider、data reset service。
-- 拥有 `/settings` 唯一人工 ACL I/O、专用 admin-only GET/PUT command、ACL normalization、独立 version/CAS、OA target/补偿编排，以及 canonical ACL 与 durable audit 的原子提交。
+- 拥有 `/settings` 唯一人工 ACL I/O、专用 admin-only GET/PUT command、ACL normalization、独立 version/CAS、OA 成员变化/实际成员恢复编排，以及 canonical ACL 与 durable audit 的原子提交。
 - 设置变更只提交 setting facts、version 与审计；普通保存不触发跨页面
   read-model fan-out，canonical 页面在下次 normal GET 读取最新设置。
 - app settings 中跨模块只读/写控制面事实，例如成本统计标签规则。
@@ -53,7 +53,7 @@
 | 设置 payload/result | 前端页面 | 不泄露 secret |
 | ACL result | Settings ACL UI、permissions evaluator | `{administrator, version, accounts}`；no-op 为 `changed=false`，stale 为 `409 current_version`，不提供兼容 payload |
 | Durable ACL audit | `audit.events` | 与 canonical ACL/version 同一 PostgreSQL transaction；记录 session actor、server request id、mutation/version 与 changed username hashes，不记录 token 或完整 ACL payload |
-| OA target / compensation | `OARoleSyncService` | 只替换 `finops_app_user` 与 `finops_admin` 两个专用角色 members；目标失败 502 且零 app write，PG 失败最多一次恢复旧 snapshot，无法确认则 503 inconsistent |
+| OA target / compensation | `OARoleSyncService` | 页面集合变化不写 OA；成员变化只差量更新 `finops_app_user` 与 `finops_admin`。目标失败 502 且零 app write；OA commit 不确定返回 503。PG 明确失败最多一次按本次 OA 变更前实际成员恢复，恢复前验证当前成员仍等于本次目标，无法确认则 503 inconsistent |
 | Reset job | process-owned `BackgroundJobService` / app health | 可查询、可恢复；OA reset 的 runtime service reload 必须复用同一 background-job owner，禁止在任务执行中替换实例、双写同一 job store 或把当前任务误标为进程重启中断。只有应用进程首次启动/真正重启才创建 owner 并执行 interrupted-job recovery。job `completed` 只证明清理和 durable lifecycle 登记完成；OA `rebuild_status` 在下游 fresh 前必须是 `pending`。 |
 | Affected scope/version | 调用页面 | 普通保存只返回业务 version 和信息性 affected scopes；不写页面 refresh queue |
 | OA manual import / attachment refresh result | 设置页 | manual import 仍只允许 `completed` 且 `can_import=true` 的 OA，并返回精确 affected scopes；附件刷新是独立能力，POST 返回 202/event id，GET 返回受控 durable status，只有 `done` 才含逐 row 计数、promotion summary 和 affected scopes。页面随后必须用 exact row ID、原 form type、`statuses=completed,in_progress` 和 `page_size=2` 回读，并同时要求 `total=1` 与 row ID 唯一命中；0/多条均 fail closed。`in_progress` 日常报销只显示“附件已解析，待 OA 完成后进入统一发票池”，不得启用正式导入。`freshness_targets` 与 `operation_barrier_targets` 为空；后续业务页面 normal GET 读取 canonical facts。 |
@@ -154,3 +154,11 @@
 ## 人工成本标签只读目录（2026-09-13）
 
 `get_cost_manual_tags()` 从现有持久设置刷新后返回成本专用窄 DTO；与详情/保存复用 `cost_manual_tags_from_settings`，它消费银行分类 owner 的有效规则及系统内部往来款，保留主子标签结构。人工成本目录不再展示历史 path 或非规则旧定义；不删除定义或影响其他设置 family。无新存储、队列或版本机制。
+
+## 2026-09-15 访问账户修复
+
+- GET/PUT 返回字段保持不变；PUT 在写入前一次批量解析账户显示资料，提交后只使用已提交版本组装响应，不再访问 OA 名称目录。
+- 无变化不写权限/version/audit/角色；页面变化不写 OA 成员；新增和移除账户走成员同步。被修改的无效账户明确失败，未修改的历史异常账户不阻断其他账户的页面编辑。
+- UI 使用 HeroUI ListBox 单选项统一表面；已有账户筛选与 OA 新增搜索分离；显示未保存账户数量，支持取消修改；移除访问授权位于当前账户操作区。
+- 错误按角色配置、无效账户、同步失败、持久化失败和结果不确定分类；不展示底层异常，不再使用关联台通用提示。
+- 没有新增 read model、worker、缓存或数据库迁移。

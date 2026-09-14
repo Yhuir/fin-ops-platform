@@ -61,3 +61,13 @@ cd web && npm run build
 
 真实 OA credential provider、生产 reset、对象存储和跨页面数据可见性必须在发布窗口以
 受控 smoke 验证；本地测试不能替代这些外部依赖。
+
+## 访问账户回归（2026-09-15）
+
+- `tests/test_access_control_save_flow.py`：单次目录读取、提交后不读 OA、页面变化不写角色、无效账户/目录失败零提交、页面保存失败不补偿。
+- `tests/test_oa_role_sync_service.py`：差量成员更新、实际成员恢复（含已删除用户）、外部并发变更不覆盖。
+- `tests/test_settings_access_control_preflight.py`：数据库正确而 OA 仍旧时发布检查失败；其他菜单授权不被迁移清除。
+- `web/e2e/settings-access-accounts.spec.ts`：六账户选择、失败保留草稿、恢复保存、取消、筛选、键盘操作和 1920/1440/1280/768 浏览器截图。
+- `web/e2e/permissions-role-matrix.spec.ts`：既有管理员/普通用户授权与撤销主链。
+
+本次无新 read model/cache/worker；第 4 类仅运行已有无关刷新隔离回归。其他六类均适用。

@@ -6,14 +6,16 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.oa_role_sync_service import OARoleChange, OARoleSyncError, OAUserSummary
 from pymongo.errors import NetworkTimeout
 
 from tests.app_test_support import (
     build_local_state_application as build_application,
+)
+from tests.app_test_support import (
     configure_access_control,
 )
-from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.oa_role_sync_service import OARoleSyncError, OAUserSummary
 
 
 class ExplodingSyncService:
@@ -31,8 +33,11 @@ class CompensationFailingSyncService:
     def sync_access_control(self, snapshot: dict[str, object]) -> None:
         del snapshot
         self.calls += 1
-        if self.calls == 2:
-            raise OARoleSyncError("OA compensation failed")
+        return OARoleChange((1, 2), frozenset(), frozenset({(5, 2)}))
+
+    def restore_access_control(self, change: OARoleChange) -> None:
+        self.calls += 1
+        raise OARoleSyncError("OA compensation failed")
 
     def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
         return [OAUserSummary(username=username, display_name=username, active=True) for username in usernames]
@@ -61,6 +66,26 @@ class WorkbenchSettingsSyncApiTests(unittest.TestCase):
             roles=["finance"],
             permissions=["finops:access"],
         )
+
+    def test_acl_error_codes_are_preserved_without_exposing_provider_details(self):
+        for code, status in [("oa_role_configuration_invalid", 502), ("oa_role_sync_uncertain", 503)]:
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as temp_dir:
+                app = build_application(data_dir=Path(temp_dir))
+                sync = ExplodingSyncService()
+                def fail(_snapshot):
+                    raise OARoleSyncError("private provider details", code=code)
+                sync.sync_access_control = fail
+                app._app_settings_service._oa_role_sync_service = sync
+                app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                    user_id="admin-id", username="YNSYLP005", nickname="admin", display_name="admin", roles=[], permissions=[])
+                response = app.handle_request("PUT", "/api/workbench/settings/access-control",
+                    body=json.dumps({"expected_version": 1, "accounts": [{"username": "USER001", "page_keys": ["settings"]}]}),
+                    headers={"Authorization": "Bearer admin"})
+                payload = json.loads(response.body)
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(payload["error"], code)
+                self.assertNotIn("private provider details", response.body)
+                self.assertEqual(app._app_settings_service.get_access_control_snapshot()["access_control_version"], 1)
 
     def test_settings_update_returns_bad_gateway_when_oa_role_sync_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

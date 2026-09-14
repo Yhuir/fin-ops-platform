@@ -3,8 +3,8 @@ import { expect, type Locator, setCheckbox, test } from "./fixtures/strictTest";
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 async function expectAccountRowsToRemainSeparated(accountList: Locator) {
-  const geometry = await accountList.locator(".settings-access-account-row").evaluateAll((rows) => rows.map((row) => {
-    const select = row.querySelector<HTMLElement>(".settings-access-account-select");
+  const geometry = await accountList.locator(".settings-access-account-item").evaluateAll((rows) => rows.map((row) => {
+    const select = row.querySelector<HTMLElement>(".settings-access-account-copy");
     if (!select) throw new Error("Account row is missing its selection control.");
     const rowRect = row.getBoundingClientRect();
     const selectRect = select.getBoundingClientRect();
@@ -95,15 +95,16 @@ test.describe("page access browser matrix", () => {
     await expect(region).toBeVisible();
     await expect(region.getByText("YNSYLP005")).toBeVisible();
     await expect(region.getByText("005 为固定权限管理员")).toHaveCount(0);
-    await expect(region.getByLabel("账户列表")).toBeVisible();
+    await expect(region.getByRole("complementary", { name: "账户列表", exact: true })).toBeVisible();
     await expect(region.getByLabel("页面访问权限")).toBeVisible();
 
+    await region.getByRole("button", { name: "新增账户", exact: true }).click();
     await region.getByRole("searchbox", { name: "搜索 OA 账户" }).fill("YNSYLP006");
-    const addButton = region.getByRole("option", { name: "新增账户 YNSYLP006" });
+    const addButton = region.getByRole("button", { name: "新增账户 YNSYLP006" });
     await expect(addButton).toBeVisible();
     await addButton.click();
 
-    await expect(region.getByText("YNSYLP006 用户")).toBeVisible();
+    await expect(region.getByLabel("页面访问权限").getByText("YNSYLP006 用户")).toBeVisible();
     await setCheckbox(region.getByRole("checkbox", { name: "关联台" }), true);
     await setCheckbox(region.getByRole("checkbox", { name: "银行明细" }), true);
 
@@ -138,14 +139,15 @@ test.describe("page access browser matrix", () => {
     const region = page.getByRole("region", { name: "访问账户" });
     const search = region.getByRole("searchbox", { name: "搜索 OA 账户" });
     for (const username of ["YNSYLP002", "YNSYLP006", "YNSYLP007", "YNSYLP010", "YNSYLP044"]) {
+      await region.getByRole("button", { name: "新增账户", exact: true }).click();
       await search.fill(username);
-      const addButton = region.getByRole("option", { name: `新增账户 ${username}` });
+      const addButton = region.getByRole("button", { name: `新增账户 ${username}` });
       await expect(addButton).toBeVisible();
       await addButton.click();
     }
 
-    const accountList = region.getByLabel("账户列表");
-    await expect(accountList.locator(".settings-access-account-row")).toHaveCount(5);
+    const accountList = region.getByRole("complementary", { name: "账户列表", exact: true });
+    await expect(accountList.locator(".settings-access-account-item")).toHaveCount(5);
     await expectAccountRowsToRemainSeparated(accountList);
 
     await page.setViewportSize({ width: 1280, height: 800 });

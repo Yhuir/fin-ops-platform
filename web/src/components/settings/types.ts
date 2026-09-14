@@ -128,6 +128,8 @@ export type SettingsOaApplicantCredentialsSectionProps = {
 };
 
 export type SettingsAccessAccountsSectionProps = {
+  savedAccounts: ManagedAccessAccount[];
+  onReset: () => void;
   controlsDisabled: boolean;
   administrator: WorkbenchAccessControl["administrator"] | null;
   managedAccessAccounts: ManagedAccessAccount[];

@@ -886,6 +886,8 @@ export default function SettingsPageContent({
 
               {activeSectionId === "access_accounts" && canManageAccessControl ? (
                 <SettingsAccessAccountsSection
+                  savedAccounts={buildManagedAccessAccounts(accessControl)}
+                  onReset={() => setManagedAccessAccounts(buildManagedAccessAccounts(accessControl))}
                   controlsDisabled={accessControlControlsDisabled}
                   administrator={accessControl?.administrator ?? null}
                   managedAccessAccounts={managedAccessAccounts}

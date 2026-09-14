@@ -365,8 +365,9 @@ describe("Settings page", () => {
     expect(within(region).queryByRole("textbox", { name: "YNSYLP005 账户" })).not.toBeInTheDocument();
     expect(within(region).queryByText(/固定权限管理员|自动拥有全部页面|为每个OA账户选择/)).not.toBeInTheDocument();
 
+    await user.click(within(region).getByRole("button", { name: "新增账户" }));
     await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
-    await user.click(await within(region).findByRole("option", { name: "新增账户 READONLY001" }));
+    await user.click(await within(region).findByRole("button", { name: "新增账户 READONLY001" }));
     await user.click(within(region).getByRole("checkbox", { name: "关联台" }));
     await user.click(within(region).getByRole("button", { name: "保存访问权限" }));
     expect(await within(region).findByText("已保存访问账户。")).toBeInTheDocument();
@@ -406,8 +407,9 @@ describe("Settings page", () => {
     const tree = await screen.findByRole("tree", { name: "设置分类" });
     await user.click(within(tree).getByRole("treeitem", { name: /访问账户/ }));
     const region = screen.getByRole("region", { name: "访问账户" });
+    await user.click(within(region).getByRole("button", { name: "新增账户" }));
     await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "CONFLICT001");
-    await user.click(await within(region).findByRole("option", { name: "新增账户 CONFLICT001" }));
+    await user.click(await within(region).findByRole("button", { name: "新增账户 CONFLICT001" }));
     await user.click(within(region).getByRole("checkbox", { name: "关联台" }));
     await user.click(within(region).getByRole("button", { name: "保存访问权限" }));
 

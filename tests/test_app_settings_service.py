@@ -7,29 +7,33 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.app_test_support import (
-    build_local_state_application as build_application,
-    configure_access_control,
-    configure_default_test_access,
-)
+from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.app_settings_service import (
-    AppSettingsService,
     AppSettingsPersistenceError,
+    AppSettingsService,
     AppSettingsValidationError,
     BankAutoTagRulesValidationError,
 )
-from fin_ops_platform.services.oa_role_sync_service import (
-    OARoleAssignment,
-    OARoleSyncConfigurationError,
-    OARoleSyncService,
-    OAUserSummary,
-)
-from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
     INPUT_INVOICE_USAGE_OA_DRAFT_PREFILL_FAMILY,
 )
+from fin_ops_platform.services.oa_role_sync_service import (
+    OARoleAssignment,
+    OARoleChange,
+    OARoleSyncConfigurationError,
+    OARoleSyncService,
+    OAUserSummary,
+)
 from fin_ops_platform.services.state_store import ApplicationStateStore
+
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+)
+from tests.app_test_support import (
+    configure_access_control,
+    configure_default_test_access,
+)
 
 
 class FakeMongoCollection:
@@ -55,10 +59,15 @@ class RecordingSyncService:
     def __init__(self) -> None:
         self.assignments: list[OARoleAssignment] | None = None
         self.calls: list[list[OARoleAssignment]] = []
+        self.restored: list[OARoleChange] = []
 
-    def sync_access_control(self, snapshot: dict[str, object]) -> None:
+    def sync_access_control(self, snapshot: dict[str, object]) -> OARoleChange:
         self.assignments = OARoleSyncService.build_assignments(snapshot)
         self.calls.append(list(self.assignments))
+        return OARoleChange((1, 2), frozenset({(5, 2)}), frozenset({(5, 2), (1, 1)}))
+
+    def restore_access_control(self, change: OARoleChange) -> None:
+        self.restored.append(change)
 
     def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
         return [OAUserSummary(username, f"{username} 用户", True) for username in usernames]
@@ -2011,12 +2020,10 @@ class AppSettingsServiceTests(unittest.TestCase):
                     request_id="db-failure",
                 )
 
-        self.assertEqual(len(sync_service.calls), 2)
+        self.assertEqual(len(sync_service.calls), 1)
         self.assertIn(OARoleAssignment(username="FULL001", role="user"), sync_service.calls[0])
-        self.assertEqual(
-            sync_service.calls[1],
-            [OARoleAssignment(username="YNSYLP005", role="admin")],
-        )
+        self.assertEqual(len(sync_service.restored), 1)
+        self.assertEqual(sync_service.restored[0].before, frozenset({(5, 2)}))
 
     def test_workbench_settings_api_rejects_legacy_access_control_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

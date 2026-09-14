@@ -61,7 +61,7 @@ canonical query，也可能影响 `workbench` 或 `workbench_relation` owner 的
 
 - 桌面端使用 224px 设置导航 + 内容区，移动端切换为 HeroUI `Select`；导航仅显示子页面名称。
 - 子页面采用自然文档流和三档内容宽度：紧凑 720px、标准 1040px、表格/访问账户按内容自适应；不使用大卡片或海报式栅格。
-- 表单、按钮、标签页、选择器、复选框、状态标签、进度条和弹窗使用 HeroUI；原生 button 只保留在 `treeitem` 与 OA 搜索 `option` 两个需要专用 ARIA role 的语义节点。
+- 表单、按钮、标签页、选择器、复选框、状态标签、进度条和弹窗使用 HeroUI；原生 button 只保留在设置导航 `treeitem`；访问账户使用 HeroUI ListBox，OA 新增使用 HeroUI Button。
 - 访问账户保留账户/页面双栏；项目状态和待找发票筛选使用标签页；数据重置使用紧凑操作列表。静态说明文案已移除，运行状态、校验错误和不可逆操作确认仍按安全合同显示。
 
 ## 关键影响
@@ -71,7 +71,7 @@ canonical query，也可能影响 `workbench` 或 `workbench_relation` owner 的
 | 待找发票规则保存 | income/expense rule version 原子递增 | 待找发票下一次 GET 直接应用；不 fan-out retired page scope |
 | 银行标签/自动标签保存 | 只允许银行明细规则 API 写入并记录 audit | canonical 页面下次 GET 读取；共享 no-OA/Search 只按各自 owner 合同处理 |
 | 项目范围变化 | project settings/version | 成本统计、关联台等 direct 页面下次 GET 直接读取；不发布 page Workbench refresh |
-| 访问控制 no-op / 真实变化 | `app.app_settings` ACL family + 独立 version；真实变化同事务写 `audit.events` | no-op 零 I/O；真实变化严格投影 OA 三专用角色后提交，下一次 session/API 使用新 snapshot；失败按补偿状态返回 502/503 |
+| 访问控制 no-op / 真实变化 | `app.app_settings` ACL family + 独立 version；真实变化同事务写 `audit.events` | no-op 零写入；页面变化仅提交 App，成员变化差量投影 OA 两专用角色；下一次 session/API 使用新 snapshot；失败按同步/恢复状态返回 502/503 |
 | OA 导入过滤/留存/promotion | state store，供后续 OA sync/reset 使用 | 页面下次 GET 读取已提交 OA canonical facts |
 | OA 申请人凭据维护 | 独立 credential repository | 进项 OA 反提 token provider 使用；普通 settings payload 不含 secret |
 | 数据重置 | `settings.data_reset.requested` durable event + `settings-maintenance` worker | API 只校验权限/密码并入队；worker 执行 canonical cleanup、登记派生刷新并请求 Gunicorn graceful reload，job 显示进度/失败 |

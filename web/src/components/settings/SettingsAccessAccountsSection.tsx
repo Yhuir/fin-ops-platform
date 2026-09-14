@@ -1,4 +1,4 @@
-import { Button, Checkbox, Input } from "@heroui/react";
+import { Button, Checkbox, Input, ListBox } from "@heroui/react";
 import { Search, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -9,6 +9,8 @@ import type { SettingsAccessAccountsSectionProps } from "./types";
 const OA_SEARCH_DELAY_MS = 250;
 
 export default function SettingsAccessAccountsSection({
+  savedAccounts,
+  onReset,
   controlsDisabled,
   administrator,
   managedAccessAccounts,
@@ -24,6 +26,16 @@ export default function SettingsAccessAccountsSection({
 }: SettingsAccessAccountsSectionProps) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
+  const changedAccountIds = useMemo(() => {
+    const before = new Map(savedAccounts.map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
+    const after = new Map(managedAccessAccounts.map((account) => [account.id, [...account.pageKeys].sort().join(",")]));
+    return new Set([...before.keys(), ...after.keys()].filter((id) => before.get(id) !== after.get(id)));
+  }, [savedAccounts, managedAccessAccounts]);
+  const filteredAccounts = managedAccessAccounts.filter((account) =>
+    `${account.username} ${account.displayName}`.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()),
+  );
   const [results, setResults] = useState<WorkbenchAccessUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -90,6 +102,8 @@ export default function SettingsAccessAccountsSection({
     setSelectedAccountId(`access-${user.username}`);
     setQuery("");
     setResults([]);
+    setIsAdding(false);
+    setFilter("");
   };
 
   return (
@@ -108,49 +122,57 @@ export default function SettingsAccessAccountsSection({
 
       <div className="settings-access-workspace">
         <aside className="settings-access-account-pane" aria-label="账户列表">
-          <div className="settings-access-search">
+          <div className="settings-access-list-heading"><strong>账户 <span>{managedAccessAccounts.length}</span></strong>
+            <Button variant="ghost" size="sm" isDisabled={controlsDisabled} onPress={() => { setIsAdding(!isAdding); setQuery(""); }}><UserPlus size={15} />{isAdding ? "收起" : "新增账户"}</Button>
+          </div>
+          <Input aria-label="筛选已有账户" placeholder="搜索已有账户或姓名" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} />
+          {isAdding ? <div className="settings-access-add-panel"><div className="settings-access-search">
             <Search aria-hidden="true" size={15} />
-            <Input aria-label="搜索 OA 账户" disabled={controlsDisabled} placeholder="输入账户或姓名" type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <Input aria-label="搜索 OA 账户" disabled={controlsDisabled} placeholder="从 OA 搜索并新增账户" type="search" value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
           {query.trim() ? (
-            <div className="settings-access-search-results" role="listbox" aria-label="OA 账户搜索结果">
+            <div className="settings-access-search-results" role="group" aria-label="OA 账户搜索结果">
               {isSearching ? <span className="settings-access-search-state">正在查询 OA...</span> : null}
               {!isSearching && searchError ? <span className="settings-access-search-state settings-access-search-state--error">{searchError}</span> : null}
               {!isSearching && !searchError && results.length === 0 ? <span className="settings-access-search-state">未找到可新增的有效账户</span> : null}
               {results.map((user) => (
-                <button key={user.username} aria-label={`新增账户 ${user.username}`} className="settings-access-search-result" disabled={!user.active || controlsDisabled} role="option" type="button" onClick={() => addUser(user)}>
+                <Button key={user.username} aria-label={`新增账户 ${user.username}`} className="settings-access-search-result" isDisabled={!user.active || controlsDisabled} variant="ghost" onPress={() => addUser(user)}>
                   <UserPlus aria-hidden="true" size={15} />
                   <span><strong>{user.username}</strong><small>{user.displayName || "未设置姓名"}</small></span>
                   {!user.active ? <em>已停用</em> : null}
-                </button>
+                </Button>
               ))}
             </div>
           ) : null}
 
-          <div className="settings-access-account-list">
-            {managedAccessAccounts.length === 0 ? <div className="settings-access-empty">暂无账户</div> : managedAccessAccounts.map((account) => (
-              <div key={account.id} className={`settings-access-account-row${selectedAccount?.id === account.id ? " is-selected" : ""}`}>
-                <Button className="settings-access-account-select" slot={null} variant="tertiary" onPress={() => setSelectedAccountId(account.id)}>
-                  <strong>{account.username}</strong>
-                  <small>{account.displayName || "OA 未返回姓名"}</small>
-                  <span>{account.pageKeys.length} 个页面{account.oaStatus !== "active" ? " · OA 状态异常" : ""}</span>
-                </Button>
-                <Button aria-label={`删除账户 ${account.username}`} className="settings-access-delete" isDisabled={controlsDisabled} isIconOnly size="sm" variant="tertiary" onPress={() => onDeleteManagedAccessAccount(account.id)}>
-                  <Trash2 aria-hidden="true" size={15} />
-                </Button>
-              </div>
+          </div> : null}
+          <ListBox aria-label="访问账户列表" className="settings-access-account-list" selectionMode="single" disallowEmptySelection
+            selectedKeys={selectedAccount ? [selectedAccount.id] : []}
+            onSelectionChange={(keys) => { if (keys !== "all") { const id = [...keys][0]; if (id !== undefined) setSelectedAccountId(String(id)); } }}
+            renderEmptyState={() => <div className="settings-access-empty">{filter ? "没有匹配的账户" : "暂无访问账户"}</div>}>
+            {filteredAccounts.map((account) => (
+              <ListBox.Item key={account.id} id={account.id} textValue={`${account.username} ${account.displayName}`} className="settings-access-account-item">
+                <div className="settings-access-account-copy">
+                  <strong>{account.displayName || account.username}</strong>
+                  <small>{account.username}</small>
+                  <span>{account.pageKeys.length} 个页面{changedAccountIds.has(account.id) ? " · 未保存" : ""}</span>
+                  {account.oaStatus !== "active" ? <em>OA 账户已停用或不可用</em> : null}
+                </div>
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
             ))}
-          </div>
+          </ListBox>
         </aside>
 
         <div className="settings-access-page-pane" aria-label="页面访问权限">
           {selectedAccount ? (
             <>
               <div className="settings-access-page-toolbar">
-                <div><strong>{selectedAccount.username}</strong><span>可访问页面</span></div>
+                <div className="settings-access-account-identity"><strong>{selectedAccount.displayName || selectedAccount.username}</strong><span>{selectedAccount.username} · 页面访问权限</span></div>
                 <div>
-                  <Button isDisabled={controlsDisabled} size="sm" variant="tertiary" onPress={() => updateSelectedPages(assignablePageOptions.map((page) => page.pageKey))}>全选</Button>
-                  <Button isDisabled={controlsDisabled} size="sm" variant="tertiary" onPress={() => updateSelectedPages([])}>清空</Button>
+                  <Button aria-label={`删除账户 ${selectedAccount.username}`} isDisabled={controlsDisabled || isSaving} size="sm" variant="ghost" onPress={() => onDeleteManagedAccessAccount(selectedAccount.id)}><Trash2 size={14} />移除访问授权</Button>
+                  <Button isDisabled={controlsDisabled} size="sm" variant="ghost" onPress={() => updateSelectedPages(assignablePageOptions.map((page) => page.pageKey))}>全选</Button>
+                  <Button isDisabled={controlsDisabled} size="sm" variant="ghost" onPress={() => updateSelectedPages([])}>清空</Button>
                 </div>
               </div>
               <div className="settings-access-page-groups">
@@ -176,7 +198,9 @@ export default function SettingsAccessAccountsSection({
       </div>
 
       <footer className="settings-access-footer">
-        <Button isDisabled={controlsDisabled || isLoading || isSaving || validationMessage !== null} isPending={isSaving} variant="primary" onPress={() => void onSave()}>
+        <span role="status">{changedAccountIds.size ? `${changedAccountIds.size} 个账户有未保存修改 · 保存将提交全部修改` : isLoading ? "正在读取访问权限..." : "无未保存修改"}</span>
+        <Button variant="ghost" isDisabled={controlsDisabled || isSaving || changedAccountIds.size === 0} onPress={onReset}>取消修改</Button>
+        <Button isDisabled={controlsDisabled || isLoading || isSaving || changedAccountIds.size === 0 || validationMessage !== null} isPending={isSaving} variant="primary" onPress={() => void onSave()}>
           {isSaving ? "保存中..." : "保存访问权限"}
         </Button>
       </footer>

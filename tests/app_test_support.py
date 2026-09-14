@@ -8,11 +8,12 @@ from unittest.mock import patch
 from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJob
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
-from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.oa_role_sync_service import (
     OARoleAssignment,
+    OARoleChange,
     OARoleSyncService,
     OAUserSummary,
 )
@@ -31,7 +32,10 @@ DEFAULT_TEST_USERNAME = "test_finops_user"
 
 
 class _TestOARoleSyncExecutor:
-    def apply(self, _assignments: list[OARoleAssignment]) -> None:
+    def apply(self, _assignments: list[OARoleAssignment]) -> OARoleChange:
+        return OARoleChange((1, 2), frozenset(), frozenset())
+
+    def restore(self, change: OARoleChange) -> None:
         return None
 
     def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:

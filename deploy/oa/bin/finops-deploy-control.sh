@@ -904,6 +904,7 @@ assert_settings_access_control_database_guard() (
       "$API_PYTHON" -m fin_ops_platform.tools.settings_access_control_preflight \
         --release "$release" \
         --database-guard-only \
+        --verify-oa-topology \
         --json
   )
 )
@@ -2309,6 +2310,9 @@ activate_release() {
     || die "unsupported activation profile: $release_profile"
   src="$(release_src "$release")"
   assert_runtime_env_contract
+  if [[ "$release_profile" == "frontend" ]]; then
+    assert_settings_access_control_database_guard "$src"
+  fi
   active_workers="$(active_worker_services)"
   stop_oa_sync_enqueue_timer
   systemctl stop fin-ops.service

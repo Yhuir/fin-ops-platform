@@ -43,7 +43,9 @@ from fin_ops_platform.services.oa_draft_prefill import (
     oa_draft_prefill_options,
 )
 from fin_ops_platform.services.oa_role_sync_service import (
+    OARoleChange,
     OARoleSyncConfigurationError,
+    OARoleSyncError,
     OARoleSyncService,
 )
 from fin_ops_platform.services.pending_invoice_rules import (
@@ -320,6 +322,7 @@ class AppSettingsService:
             raise AppSettingsPersistenceError("Settings persistence is unavailable.")
         next_acl = self._access_control_from_accounts(accounts)
         mutation_id = uuid4().hex
+        role_change: OARoleChange | None = None
         try:
             with self._state_store.begin_settings_acl_critical_section(expected_version) as critical_section:
                 previous_acl = settings_access_control_from_payload(critical_section.locked_current)
@@ -328,7 +331,17 @@ class AppSettingsService:
                     return {"changed": False, **self._public_access_control_payload(previous_acl)}
                 if self._oa_role_sync_service is None:
                     raise OARoleSyncConfigurationError("OA role sync is disabled or not configured.")
-                self._oa_role_sync_service.sync_access_control(next_acl)
+                # Resolve display data before either system is changed. The success
+                # response must not depend on another OA request after commit.
+                response_payload = self._public_access_control_payload(next_acl)
+                previous_pages = dict(self._access_control_memberships(previous_acl))
+                for account in response_payload["accounts"]:
+                    key = settings_username_comparison_key(account["username"])
+                    if account["oa_status"] != "active" and previous_pages.get(key) != tuple(account["page_keys"]):
+                        raise OARoleSyncError("Changed OA account is inactive or missing.", code="oa_access_accounts_invalid")
+                next_members = {settings_username_comparison_key(item["username"]) for item in next_acl["page_access_accounts"]}
+                if set(previous_pages) != next_members:
+                    role_change = self._oa_role_sync_service.sync_access_control(next_acl)
                 try:
                     committed_acl = critical_section.commit(
                         next_acl,
@@ -343,7 +356,7 @@ class AppSettingsService:
                 except SettingsAccessControlCommitOutcomeUnknown:
                     raise
                 except Exception as exc:
-                    self._compensate_oa_access_control(previous_acl, request_id=request_id)
+                    self._compensate_oa_access_control(role_change, request_id=request_id)
                     raise AppSettingsPersistenceError("Settings access-control persistence failed.") from exc
         except SettingsAccessControlCommitOutcomeUnknown:
             recovery = self._state_store.recover_settings_acl_commit(mutation_id)
@@ -367,7 +380,7 @@ class AppSettingsService:
                             raise AccessControlSyncInconsistentError(
                                 f"Settings access-control changed during recovery; request_id={request_id}."
                             )
-                        self._compensate_oa_access_control(locked_recovery, request_id=request_id)
+                        self._compensate_oa_access_control(role_change, request_id=request_id)
                 except AccessControlSyncInconsistentError:
                     raise
                 except Exception as exc:
@@ -380,13 +393,13 @@ class AppSettingsService:
                     f"Settings access-control commit outcome is inconsistent; request_id={request_id}."
                 )
         self._snapshot = {**self._snapshot, **committed_acl}
-        return {"changed": True, **self._public_access_control_payload(committed_acl)}
+        return {"changed": True, **response_payload, "version": committed_acl["access_control_version"]}
 
-    def _compensate_oa_access_control(self, previous_acl: dict[str, Any], *, request_id: str) -> None:
-        if self._oa_role_sync_service is None:
+    def _compensate_oa_access_control(self, change: OARoleChange | None, *, request_id: str) -> None:
+        if change is None:
             return
         try:
-            self._oa_role_sync_service.sync_access_control(previous_acl)
+            self._oa_role_sync_service.restore_access_control(change)
         except Exception as exc:
             raise AccessControlSyncInconsistentError(
                 f"OA access-control compensation failed; request_id={request_id}."

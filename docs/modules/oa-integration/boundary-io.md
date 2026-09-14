@@ -34,8 +34,8 @@
 | --- | --- | --- |
 | OA session/token | `auth.py`、session API | 只认证 canonical username；roles/permissions 仅为信息，不能 grant APP access |
 | OA password reauthentication | Settings data reset | 复用 OA login client 获取新 token，再经 identity endpoint 解析；只有 user id 与 canonical username 都等于当前 session 才成功。登录失败返回 false，配置/网络/未知响应 fail closed；禁止复用改密接口或凭 message/code 猜测成功。 |
-| Canonical ACL snapshot | Settings owner | casefold-preserve-canonical 的 page-access accounts，加固定 `YNSYLP005` admin；是 role sync 唯一输入 |
-| Fixed menu target | fixed OA selector env、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、三个唯一专用 role和 exact 三 binding 必须在任何 DML 前成立 |
+| Canonical ACL snapshot | Settings owner | casefold-preserve-canonical 的 page-access accounts，加固定 `YNSYLP005` admin；是 role sync 目标输入；恢复使用同一操作返回的 OARoleChange（角色 ID、变更前/后实际成员集合），不从失效的旧 App 名单重建 |
+| Fixed menu target | fixed OA selector env、OA MySQL | selector 必须精确为 `finops:app:view`；唯一 menu、两个唯一专用 role 和 exact 两 binding 必须在任何 DML 前成立 |
 | Deployment ACL preflight artifact | preflight/deploy control | 显式专项验收可接受 release-bound、secret-safe、SHA-256 绑定的 canonical ACL、migration/env 与 OA exact topology 只读证据；标准发布的任何 profile 都不消费 006 或该 artifact |
 | OA Mongo/query | `mongo_oa_adapter.py` | projection sync 只调用 `load_sync_application_batch(scope_key, retention_cutoff_month=...)`：每个启用 form/scope 单次读取；`all` 在字段校验和附件解析前排除 retention cutoff 以前的文档，然后输出 `projection_records` 与 `admission_records` 两个不可变视图。前者遵守通用 OA form/status 配置；后者固定接纳 completed + in-progress，不受通用 status filter 污染。任一 form 读取失败或保留期内 status/identity 无法稳定判定时整批 fail-closed，不得提交部分集合。合法 in-progress 草稿允许未填写 amount/applicant/reason，仍按稳定 identity 进入 admission，空金额持久化为 `NULL`；保留期内 completed 缺既有必填业务字段仍 fail-closed。费用类型必须按表单精确读取：支付申请父记录读取 `EtcOAFormFieldMapping.category` 对应的顶层字段（默认 `category`，环境可覆盖），日常报销明细只读取 `schedule[].purposeType`；不得恢复两种表单共用候选键或递归同名字段搜索。两者都复用 `oa_draft_prefill.OA_APPLICATION_TYPE_OPTIONS` 映射为真实中文费用类型。`schedule[].category`、`schedule[].feeType` 和 `data.detailReimbursementType` 均不得污染日常报销费用类型。只有 OA 显式返回 `13s` 时才是“其他”，未知码或无法从既有确定性文本规则判断时保持空值。 |
 | OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 普通同步使用 month/all scope；设置页精确附件刷新复用同一 event type，并显式携带 `operation=refresh_attachments + row_ids[]`。两者都必须入 durable queue；HTTP 进程不得 inline sync、自行轮询 Mongo、执行 OCR 或承担附件发票 canonical promotion。精确刷新只处理请求中的 completed OA 或 `in_progress + expense_claim`，不执行权威 snapshot stale deletion。 |
@@ -143,3 +143,8 @@
 ## 2026-09-15 日常报销子项展示修复
 
 Mongo 日常报销 schedule 新保留 detailPaymentMethod、detailTypeOfInvoice、detailNumberOfBills，分别输出 payment_method、invoice_kind、ticket_count；枚举复用 OA 草稿现有官方选项，未知代码原样保留。services/oa_expense_details.py 只做公共字段白名单和详情节投影，无数据库/HTTP/附件 I/O；不得根据父申请事由创建子项。历史补齐只读取唯一原始 OA 的同 row_index、同金额、同内容子项，事务更新元数据及 audit.events，保留子项 ID 和关系。
+
+### 访问账户同步与迁移
+
+成员写入只执行差集 DELETE/INSERT，保留未变化的行；在锁定两个角色和菜单绑定后读取实际成员。失败恢复先核对角色 ID 与目标成员仍相同，禁止覆盖其他操作。运行时只更新成员，不迁移菜单。
+专项一次性迁移仅允许旧 App 角色绑定本入口及其直接父菜单；保留旧只读角色成员和父菜单关系，只移除其 App 入口绑定。其他业务菜单引用明确拒绝自动迁移。标准发布的既有权限检查增加 OA 两角色实际结构验证，不自动执行迁移。

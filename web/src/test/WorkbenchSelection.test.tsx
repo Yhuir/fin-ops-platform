@@ -3320,8 +3320,9 @@ describe("Workbench row selection and detail drawer", () => {
     const accessRegion = within(settingsPage).getByRole("region", { name: "访问账户" });
     expect(within(accessRegion).getByRole("heading", { name: "访问账户" })).toBeInTheDocument();
 
+    await user.click(within(accessRegion).getByRole("button", { name: "新增账户" }));
     await user.type(within(accessRegion).getByRole("searchbox", { name: "搜索 OA 账户" }), "READONLY001");
-    await user.click(await within(accessRegion).findByRole("option", { name: "新增账户 READONLY001" }));
+    await user.click(await within(accessRegion).findByRole("button", { name: "新增账户 READONLY001" }));
     await user.click(within(accessRegion).getByRole("checkbox", { name: "关联台" }));
     await user.click(within(accessRegion).getByRole("button", { name: "保存访问权限" }));
     expect(await screen.findByText("已保存访问账户。")).toBeInTheDocument();

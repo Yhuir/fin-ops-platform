@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
 import hashlib
 import json
 import os
-from pathlib import Path
 import statistics
 import sys
 import time
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 from fin_ops_platform.services.access_control_service import ASSIGNABLE_PAGE_KEYS
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
-
 
 CONTRACT = "settings-access-control-v1"
 PROTECTED_ADMIN_USERNAME = "YNSYLP005"
@@ -322,6 +321,14 @@ def migrate_oa_role_topology() -> str:
                 raise RuntimeError("OA legacy menu bindings are not the exact migratable state.")
 
             cursor.execute(
+                "select menu_id from sys_role_menu where role_id in (%s, %s) and menu_id <> %s "
+                "and menu_id not in (select parent_id from sys_menu where menu_id = %s) for update",
+                (legacy_user_ids[0], legacy_read_ids[0], menu_id, menu_id),
+            )
+            if cursor.fetchall():
+                raise RuntimeError("Legacy OA roles also grant other menus; automatic migration is not allowed.")
+
+            cursor.execute(
                 "update sys_role set role_key = %s where role_id = %s and role_key = %s",
                 (USER_ROLE_KEY, legacy_user_ids[0], LEGACY_USER_ROLE_KEY),
             )
@@ -329,7 +336,8 @@ def migrate_oa_role_topology() -> str:
                 "delete from sys_role_menu where role_id = %s and menu_id = %s",
                 (legacy_read_ids[0], menu_id),
             )
-            cursor.execute("delete from sys_user_role where role_id = %s", (legacy_read_ids[0],))
+            # Keep the old role's members and parent-menu access. Only its App
+            # entry binding is retired; it no longer grants App access.
             connection.commit()
             return "migrated"
     except Exception:
@@ -465,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--deployment-facts-json")
     parser.add_argument("--post-deploy", action="store_true")
     parser.add_argument("--database-guard-only", action="store_true")
+    parser.add_argument("--verify-oa-topology", action="store_true")
     parser.add_argument("--preflight-artifact")
     parser.add_argument("--base-url", default="http://127.0.0.1:18001")
     parser.add_argument("--oa-base-url", default=(os.getenv("FIN_OPS_OA_BASE_URL") or "").strip())
@@ -485,6 +494,11 @@ def main(argv: list[str] | None = None) -> int:
                 "constraint_validated": database["constraint_validated"],
             },
         }
+        if args.verify_oa_topology:
+            topology = collect_oa_role_facts()["topology"]
+            report["oa_topology"] = topology
+            passed = passed and topology == "page_access"
+            report["status"] = "pass" if passed else "fail"
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if passed else 2

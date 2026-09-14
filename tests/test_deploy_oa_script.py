@@ -810,10 +810,10 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('assert_settings_access_control_database_guard "$src"', activate)
         self.assertLess(
             activate.index('run_schema_migrations "$src"'),
-            activate.index('assert_settings_access_control_database_guard "$src"'),
+            activate.rindex('assert_settings_access_control_database_guard "$src"'),
         )
         self.assertLess(
-            activate.index('assert_settings_access_control_database_guard "$src"'),
+            activate.rindex('assert_settings_access_control_database_guard "$src"'),
             activate.index('sync_python_envs "$src"'),
         )
 

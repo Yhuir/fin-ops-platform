@@ -1,12 +1,14 @@
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fin_ops_platform.services.oa_role_sync_service import (
     MySQLOARoleSyncExecutor,
     OARoleAssignment,
+    OARoleChange,
     OARoleSyncConfigurationError,
+    OARoleSyncError,
     OARoleSyncExecutionError,
     OARoleSyncService,
     OARoleSyncSettings,
@@ -18,8 +20,9 @@ class RecordingExecutor:
     def __init__(self) -> None:
         self.assignments: list[OARoleAssignment] | None = None
 
-    def apply(self, assignments: list[OARoleAssignment]) -> None:
+    def apply(self, assignments: list[OARoleAssignment]) -> OARoleChange:
         self.assignments = list(assignments)
+        return OARoleChange((11, 12), frozenset(), frozenset())
 
     def resolve_users(self, usernames: list[str]) -> list[OAUserSummary]:
         return [OAUserSummary(username, f"{username} 姓名", True) for username in usernames]
@@ -48,6 +51,10 @@ class ScriptedCursor:
             raise TimeoutError("synthetic OA timeout")
         if sql.lstrip().startswith("SELECT"):
             self._rows = self._responses.pop(0)
+
+    def executemany(self, sql, rows):
+        for row in rows:
+            self.execute(sql, row)
 
     def fetchall(self):
         return list(self._rows)
@@ -154,6 +161,7 @@ class OARoleSyncServiceTests(unittest.TestCase):
             [(99,)],
             [(11,), (12,)],
             [(101, "USER001"), (102, "YNSYLP005")],
+            [(102, 12), (99, 11)],
         ])
         connection = ScriptedConnection(cursor)
         _, kwargs = _with_connection(
@@ -181,6 +189,39 @@ class OARoleSyncServiceTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(OARoleSyncExecutionError):
                 _with_connection(connection, lambda executor: executor.apply([]))
             self.assertFalse(any(sql.lstrip().startswith(("DELETE", "INSERT")) for sql, _ in cursor.executed))
+
+    def test_restore_uses_original_members_including_deleted_user_without_directory_lookup(self):
+        change = OARoleChange((11, 12), frozenset({(63, 11), (5, 12)}), frozenset({(5, 12)}))
+        connection = ScriptedConnection(ScriptedCursor([
+            [(11, "finops_app_user"), (12, "finops_admin")], [(99,)], [(11,), (12,)], [(5, 12)],
+        ]))
+        _with_connection(connection, lambda executor: executor.restore(change))
+        self.assertTrue(connection.committed)
+        self.assertIn(("INSERT INTO sys_user_role (user_id, role_id) VALUES (%s, %s)", (63, 11)), connection.cursor_value.executed)
+        self.assertFalse(any("FROM sys_user WHERE" in sql for sql, _ in connection.cursor_value.executed))
+
+    def test_lost_commit_acknowledgement_remains_uncertain(self):
+        connection = ScriptedConnection(ScriptedCursor([
+            [(11, "finops_app_user"), (12, "finops_admin")], [(99,)], [(11,), (12,)],
+            [(5, "YNSYLP005")], [(5, 12)],
+        ]))
+        connection.commit = Mock(side_effect=TimeoutError("commit acknowledgement lost"))
+        connection.rollback = Mock(side_effect=ConnectionError("connection closed"))
+        with self.assertRaises(OARoleSyncError) as raised:
+            _with_connection(connection, lambda executor: executor.apply([OARoleAssignment("YNSYLP005", "admin")]))
+        self.assertEqual(raised.exception.code, "oa_role_sync_uncertain")
+        connection.rollback.assert_not_called()
+        self.assertTrue(connection.closed)
+
+    def test_restore_does_not_overwrite_concurrent_oa_member_change(self):
+        change = OARoleChange((11, 12), frozenset({(63, 11), (5, 12)}), frozenset({(5, 12)}))
+        connection = ScriptedConnection(ScriptedCursor([
+            [(11, "finops_app_user"), (12, "finops_admin")], [(99,)], [(11,), (12,)], [(5, 12), (9, 11)],
+        ]))
+        with self.assertRaises(OARoleSyncExecutionError):
+            _with_connection(connection, lambda executor: executor.restore(change))
+        self.assertTrue(connection.rolled_back)
+        self.assertFalse(any(sql.startswith(("INSERT", "DELETE")) for sql, _ in connection.cursor_value.executed))
 
     def test_directory_resolve_and_search_return_oa_names_and_status(self) -> None:
         resolve_connection = ScriptedConnection(ScriptedCursor([

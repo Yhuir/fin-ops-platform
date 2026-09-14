@@ -465,8 +465,8 @@ class SettingsApiRoutes:
             )
         except OARoleSyncError as exc:
             return self._json_response(
-                HTTPStatus.BAD_GATEWAY,
-                {"error": "oa_role_sync_failed", "message": f"OA 角色同步失败：{exc}"},
+                HTTPStatus.SERVICE_UNAVAILABLE if exc.code == "oa_role_sync_uncertain" else HTTPStatus.BAD_GATEWAY,
+                {"error": exc.code, "message": "OA 访问授权更新失败，请根据错误类型核对账户与角色配置。"},
             )
         except AccessControlSyncInconsistentError as exc:
             return self._json_response(
