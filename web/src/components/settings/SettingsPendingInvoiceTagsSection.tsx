@@ -56,7 +56,7 @@ export default function SettingsPendingInvoiceTagsSection({
   return (
     <section
       aria-labelledby="settings-section-pending-invoice-tags-title"
-      className="settings-section-panel settings-section-panel--standard"
+      className="settings-section-panel"
       id="settings-section-pending-invoice-tags"
       role="region"
     >

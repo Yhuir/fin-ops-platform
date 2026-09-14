@@ -57,11 +57,11 @@ describe("Finance operations shell", () => {
       }
 
       expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-      const settingsTree = await screen.findByRole("tree", { name: "设置分类" });
-      expect(within(settingsTree).getAllByRole("treeitem").filter((item) => item.textContent?.includes("访问账户"))).toHaveLength(
+      const settingsTree = await screen.findByRole("tablist", { name: "设置分类" });
+      expect(within(settingsTree).getAllByRole("tab").filter((item) => item.textContent?.includes("访问账户"))).toHaveLength(
         canAdminAccess ? 1 : 0,
       );
-      expect(screen.getByRole("button", { name: "保存设置" })).toHaveProperty("disabled", !canSaveSettings);
+      expect(screen.getByRole("button", { name: "保存全部设置" })).toHaveProperty("disabled", !canSaveSettings);
     },
   );
 

@@ -76,11 +76,11 @@ test.describe("page access browser matrix", () => {
 
     await page.goto("/settings");
     await expect(page.getByTestId("settings-page")).toBeVisible();
-    await expect(page.getByRole("button", { name: "保存设置" })).toBeEnabled();
-    const tree = page.getByRole("tree", { name: "设置分类" });
-    await expect(tree.getByRole("treeitem", { name: /访问账户/ })).toHaveCount(0);
-    await expect(tree.getByRole("treeitem", { name: /OA申请人凭据/ })).toHaveCount(0);
-    await expect(tree.getByRole("treeitem", { name: /数据重置/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "保存全部设置" })).toBeEnabled();
+    const tree = page.getByRole("tablist", { name: "设置分类" });
+    await expect(tree.getByRole("tab", { name: /访问账户/ })).toHaveCount(0);
+    await expect(tree.getByRole("tab", { name: /OA申请人凭据/ })).toHaveCount(0);
+    await expect(tree.getByRole("tab", { name: /数据重置/ })).toHaveCount(0);
     expect(api.count("GET /api/workbench/settings/access-control")).toBe(0);
   });
 
@@ -88,8 +88,8 @@ test.describe("page access browser matrix", () => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
 
     await page.goto("/settings");
-    const tree = page.getByRole("tree", { name: "设置分类" });
-    await tree.getByRole("treeitem", { name: /访问账户/ }).click();
+    const tree = page.getByRole("tablist", { name: "设置分类" });
+    await tree.getByRole("tab", { name: /访问账户/ }).click();
 
     const region = page.getByRole("region", { name: "访问账户" });
     await expect(region).toBeVisible();
@@ -133,8 +133,8 @@ test.describe("page access browser matrix", () => {
     await page.setViewportSize({ width: 1600, height: 1000 });
 
     await page.goto("/settings");
-    const tree = page.getByRole("tree", { name: "设置分类" });
-    await tree.getByRole("treeitem", { name: /访问账户/ }).click();
+    const tree = page.getByRole("tablist", { name: "设置分类" });
+    await tree.getByRole("tab", { name: /访问账户/ }).click();
 
     const region = page.getByRole("region", { name: "访问账户" });
     const search = region.getByRole("searchbox", { name: "搜索 OA 账户" });

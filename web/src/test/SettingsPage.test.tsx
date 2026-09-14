@@ -10,7 +10,7 @@ import { renderAppAt } from "./renderHelpers";
 const settingsSourceFiles = [
   "src/pages/SettingsPage.tsx",
   "src/components/settings/SettingsPageContent.tsx",
-  "src/components/settings/SettingsTreeNav.tsx",
+  "src/components/settings/SettingsTabs.tsx",
   "src/components/settings/SettingsProjectsSection.tsx",
   "src/components/settings/SettingsBankAccountsSection.tsx",
   "src/components/settings/SettingsPendingInvoiceTagsSection.tsx",
@@ -164,9 +164,8 @@ describe("Settings page", () => {
     const oaManualTableSource = sourceByPath["src/components/settings/OaManualSearchImportTable.tsx"];
     const missingPrimitiveTargets = [
       pageSource.includes("SettingsPageContent") ? null : "SettingsPage.tsx should keep SettingsPageContent",
-      contentSource.includes("SettingsTreeNav") ? null : "SettingsPageContent.tsx should keep SettingsTreeNav",
-      /role=["']treeitem["']/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should preserve treeitem semantics",
-      /ListBox, Select/.test(sourceByPath["src/components/settings/SettingsTreeNav.tsx"]) ? null : "SettingsTreeNav should use the HeroUI mobile section selector",
+      contentSource.includes("SettingsTabs") ? null : "SettingsPageContent.tsx should keep SettingsTabs",
+      sourceByPath["src/components/settings/SettingsTabs.tsx"].includes("<Tabs.Panel") ? null : "SettingsTabs must connect tabs and panel",
       /ariaLabel=["']OA全量搜索导入结果["']/.test(oaManualTableSource) ? null : "OA manual search should preserve table accessible name",
       /确认数据重置/.test(dataResetDialogsSource) && /OA 密码复核/.test(dataResetDialogsSource) ? null : "Data reset should keep two modal dialog labels",
       /minLength=\{5\}/.test(dataResetDialogsSource) && /操作原因（必填）/.test(dataResetDialogsSource) ? null : "Data reset should expose its reason requirement",
@@ -175,57 +174,14 @@ describe("Settings page", () => {
     expect(missingPrimitiveTargets).toEqual([]);
   });
 
-  test("keeps the compact settings workspace and removes obsolete card layouts", () => {
+  test("removes the old settings navigation while preserving shared table semantics", () => {
     const styles = readWebSource("src/app/styles.css");
-    const layoutRule = cssRule(styles, ".settings-layout", "224px");
-    const navRule = cssRule(styles, ".settings-nav-shell", "border-right: 1px");
-    const contentRule = cssRule(styles, ".settings-content-panel", "18px 22px 28px");
-    const compactPanelRule = cssRule(styles, ".settings-section-panel--compact");
-    const treeMotionRule = cssRule(styles, ".settings-tree-item", "--motion-fast");
-    const fieldRule = cssRule(styles, ".settings-field > [data-slot=\"input-wrapper\"],\n.settings-field > [data-slot=\"select\"],\n.settings-field [data-slot=\"select-trigger\"],\n.settings-table-input [data-slot=\"input-wrapper\"]");
-    const tableRule = cssRule(styles, ".settings-native-table th,\n.settings-native-table td");
-    const amountRule = cssRule(styles, ".settings-table-code,\n.settings-table-input--code,\n.settings-table-amount");
-    const tagRule = cssRule(styles, ".settings-selected-tag,\n.oa-manual-import__metrics span");
-    const bankFormRule = cssRule(styles, ".settings-bank-mapping-form", "grid-template-columns");
-    const dataResetRule = cssRule(styles, ".settings-data-reset-list");
-    const accessRule = cssRule(styles, ".settings-access-workspace", "minmax(250px, 300px)");
-    const oaTableRule = cssRule(styles, ".oa-manual-import__table");
-    const selectedRule = cssRule(styles, ".settings-native-table-row--selected > td");
-
-    expect(layoutRule).toContain("grid-template-columns: 224px minmax(0, 1fr)");
-    expect(navRule).toContain("border-right: 1px solid var(--fp-border)");
-    expect(contentRule).toContain("padding: 18px 22px 28px");
-    expect(compactPanelRule).toContain("max-width: 720px");
-    expect(treeMotionRule).toContain("--motion-fast");
-    expect(treeMotionRule).toContain("--ease-out-quart");
-    expect(fieldRule).toContain("min-height: 34px");
-    expect(tableRule).toContain("height: 36px");
-    expect(amountRule).toContain("font-variant-numeric: tabular-nums");
-    expect(amountRule).toContain("text-align: right");
-    expect(tagRule).toContain("min-height: var(--fp-tag-height-table)");
-    expect(tagRule).toContain("border-radius: var(--fp-tag-radius-table)");
-    expect(bankFormRule).toContain("minmax(220px, 280px) 120px minmax(140px, 180px) auto");
-    expect(dataResetRule).toContain("border-top: 1px solid var(--fp-border)");
-    expect(accessRule).toContain("minmax(250px, 300px) minmax(0, 1fr)");
-    expect(oaTableRule).toContain("min-width: 1500px");
-    expect(oaTableRule).toContain("table-layout: fixed");
-    expect(selectedRule).toContain("var(--fp-primary-soft)");
-    expect([
-      layoutRule,
-      navRule,
-      contentRule,
-      treeMotionRule,
-      fieldRule,
-      tableRule,
-      bankFormRule,
-      dataResetRule,
-      accessRule,
-      selectedRule,
-    ].join("\n")).not.toMatch(/#102a43|#486581|#e7edf5|#fbfdff|#ffffff|#f0fff4|#fff5f5|#9f1d1d|#0f4c81|180ms ease-out/i);
-    expect(styles).not.toMatch(/settings-data-reset-card|settings-project-column|settings-tree-copy|settings-save-button|data-reset-card/);
+    expect(styles).not.toMatch(/settings-tree-item|settings-nav-shell|settings-mobile-section-select|settings-section-panel--compact/);
+    expect(cssRule(styles, ".settings-table-code,\n.settings-table-input--code,\n.settings-table-amount")).toContain("font-variant-numeric: tabular-nums");
+    expect(cssRule(styles, ".oa-manual-import__table")).toContain("min-width: 1500px");
   });
 
-  test("renders as a tree-and-panel page without an extra page header title", async () => {
+  test("renders as native tabs and a panel without an extra page header title", async () => {
     installMockApiFetch();
     renderAppAt("/settings");
 
@@ -234,10 +190,10 @@ describe("Settings page", () => {
     expect(screen.queryByRole("dialog", { name: "关联台设置" })).not.toBeInTheDocument();
     expect(screen.queryByText("管理关联台项目、账户、OA导入与高风险维护配置。")).not.toBeInTheDocument();
 
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    expect(screen.getByLabelText("移动端设置分类")).toBeInTheDocument();
-    expect(within(tree).getByRole("treeitem", { name: /项目状态/ })).toHaveAttribute("aria-selected", "true");
-    expect(within(tree).getByRole("treeitem", { name: /银行账户/ })).toHaveAttribute("aria-controls", "settings-section-bank-accounts");
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    expect(screen.queryByLabelText("移动端设置分类")).not.toBeInTheDocument();
+    expect(within(tree).getByRole("tab", { name: /项目状态/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "项目状态" })).toContainElement(screen.getByRole("region", { name: "项目状态管理" }));
     expect(screen.getByRole("region", { name: "项目状态管理" })).toHaveAttribute("id", "settings-section-projects");
 
     expect(screen.getByRole("region", { name: "项目状态管理" })).toBeInTheDocument();
@@ -250,11 +206,33 @@ describe("Settings page", () => {
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
 
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    await user.click(within(tree).getByRole("treeitem", { name: /银行账户/ }));
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tree).getByRole("tab", { name: /银行账户/ }));
 
     expect(screen.getByRole("region", { name: "银行账户映射" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "项目状态管理" })).not.toBeInTheDocument();
+  });
+
+  test("keeps ordinary drafts across tabs and clears the unsaved status after saving", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({ sessionRole: "admin", sessionUsername: "YNSYLP005" });
+    renderAppAt("/settings");
+    const tabs = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tabs).getByRole("tab", { name: "冲账规则" }));
+    const input = screen.getByRole("textbox", { name: "冲账申请人" });
+    await user.clear(input);
+    await user.type(input, "测试申请人");
+    expect(screen.getByText("有未保存修改")).toBeInTheDocument();
+    await user.click(within(tabs).getByRole("tab", { name: "银行账户" }));
+    await user.click(within(tabs).getByRole("tab", { name: "冲账规则" }));
+    expect(screen.getByRole("textbox", { name: "冲账申请人" })).toHaveValue("测试申请人");
+    const settingsWrites = () => fetchMock.mock.calls.filter(([url, init]) =>
+      String(url).endsWith("/api/workbench/settings") && init?.method === "POST");
+    expect(settingsWrites()).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "保存全部设置" }));
+    await waitFor(() => expect(screen.queryByText("有未保存修改")).not.toBeInTheDocument());
+    expect(settingsWrites()).toHaveLength(1);
+    expect(JSON.parse(String(settingsWrites()[0][1]?.body)).oa_invoice_offset.applicant_names).toEqual(["测试申请人"]);
   });
 
   test("keeps workbench-only header actions out of standalone settings", async () => {
@@ -273,7 +251,7 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "保存设置" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "保存全部设置" })).toBeEnabled();
   });
 
   test("lets admin maintain OA applicant credentials through dedicated endpoints", async () => {
@@ -285,8 +263,8 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    await user.click(within(tree).getByRole("treeitem", { name: /OA申请人凭据/ }));
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tree).getByRole("tab", { name: /OA申请人凭据/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "OA申请人凭据" });
     expect(within(region).getByText("陈秀云")).toBeInTheDocument();
@@ -321,9 +299,9 @@ describe("Settings page", () => {
       password: "target-password",
     });
 
-    expect(within(settingsPage).queryByRole("button", { name: "保存设置" })).not.toBeInTheDocument();
-    await user.click(within(tree).getByRole("treeitem", { name: "项目状态" }));
-    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    expect(within(settingsPage).queryByRole("button", { name: "保存全部设置" })).not.toBeInTheDocument();
+    await user.click(within(tree).getByRole("tab", { name: "项目状态" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input, init]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -344,8 +322,8 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     await screen.findByTestId("settings-page");
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    expect(within(tree).queryByRole("treeitem", { name: /OA申请人凭据/ })).not.toBeInTheDocument();
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    expect(within(tree).queryByRole("tab", { name: /OA申请人凭据/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "OA申请人凭据" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/workbench/settings/access-control")).toBe(false);
   });
@@ -358,8 +336,8 @@ describe("Settings page", () => {
     });
     renderAppAt("/settings");
 
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    await user.click(within(tree).getByRole("treeitem", { name: /访问账户/ }));
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tree).getByRole("tab", { name: /访问账户/ }));
     const region = screen.getByRole("region", { name: "访问账户" });
     expect(within(region).getByText("YNSYLP005")).toBeInTheDocument();
     expect(within(region).queryByRole("textbox", { name: "YNSYLP005 账户" })).not.toBeInTheDocument();
@@ -404,8 +382,8 @@ describe("Settings page", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderAppAt("/settings");
 
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    await user.click(within(tree).getByRole("treeitem", { name: /访问账户/ }));
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tree).getByRole("tab", { name: /访问账户/ }));
     const region = screen.getByRole("region", { name: "访问账户" });
     await user.click(within(region).getByRole("button", { name: "新增账户" }));
     await user.type(within(region).getByRole("searchbox", { name: "搜索 OA 账户" }), "CONFLICT001");
@@ -428,8 +406,8 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    await user.click(within(tree).getByRole("treeitem", { name: /数据重置/ }));
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tree).getByRole("tab", { name: /数据重置/ }));
     expect(within(settingsPage).queryByText(/高风险操作|不会触碰|会被清空/)).not.toBeInTheDocument();
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
 
@@ -466,11 +444,11 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    expect(within(tree).queryByRole("treeitem", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    expect(within(tree).queryByRole("tab", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
     expect(within(tree).queryByText("全 app 银行明细标签字典")).not.toBeInTheDocument();
-    expect(within(tree).queryByRole("treeitem", { name: /银行流水标签/ })).not.toBeInTheDocument();
-    await user.click(within(tree).getByRole("treeitem", { name: /待找发票筛选/ }));
+    expect(within(tree).queryByRole("tab", { name: /银行流水标签/ })).not.toBeInTheDocument();
+    await user.click(within(tree).getByRole("tab", { name: /待找发票筛选/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "待找发票筛选" });
     expect(within(region).getByRole("tab", { name: /需要开票/ })).toBeInTheDocument();
@@ -483,7 +461,7 @@ describe("Settings page", () => {
     await user.click(within(region).getByRole("button", { name: /已有标签/ }));
     await user.click(await screen.findByRole("option", { name: "内部往来款" }));
     await user.click(within(region).getByRole("button", { name: "添加标签" }));
-    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input, init]) => {
@@ -502,13 +480,13 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    await user.click(within(tree).getByRole("treeitem", { name: /OA导入设置/ }));
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tree).getByRole("tab", { name: /OA导入设置/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "OA导入设置" });
-    await user.click(within(region).getByRole("button", { name: /OA附件发票晋级/ }));
-    await user.click(await screen.findByRole("option", { name: "禁用晋级" }));
-    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    await user.click(within(region).getByRole("button", { name: /OA附件发票处理/ }));
+    await user.click(await screen.findByRole("option", { name: "不处理附件发票" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -527,8 +505,8 @@ describe("Settings page", () => {
     renderAppAt("/settings");
 
     const settingsPage = await screen.findByTestId("settings-page");
-    const tree = await screen.findByRole("tree", { name: "设置分类" });
-    await user.click(within(tree).getByRole("treeitem", { name: /待找发票筛选/ }));
+    const tree = await screen.findByRole("tablist", { name: "设置分类" });
+    await user.click(within(tree).getByRole("tab", { name: /待找发票筛选/ }));
 
     const region = within(settingsPage).getByRole("region", { name: "待找发票筛选" });
     expect(within(region).getByText("missing_tag")).toBeInTheDocument();
@@ -536,17 +514,17 @@ describe("Settings page", () => {
     expect(within(region).getByText("工资")).toBeInTheDocument();
     expect(within(region).getByText("标签已停用")).toBeInTheDocument();
 
-    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
     expect(await within(settingsPage).findByText("待找发票筛选引用了不存在的银行明细标签，请移除后再保存。")).toBeInTheDocument();
     expect(getPostCount()).toBe(0);
 
     await user.click(within(region).getByRole("button", { name: "missing_tag 移除" }));
-    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
     expect(await within(settingsPage).findByText("待找发票筛选引用了已停用的银行明细标签，请先从待找发票筛选中移除。")).toBeInTheDocument();
     expect(getPostCount()).toBe(0);
 
     await user.click(within(region).getByRole("button", { name: "工资 移除" }));
-    await user.click(within(settingsPage).getByRole("button", { name: "保存设置" }));
+    await user.click(within(settingsPage).getByRole("button", { name: "保存全部设置" }));
     await waitFor(() => expect(getPostCount()).toBe(1));
   });
 

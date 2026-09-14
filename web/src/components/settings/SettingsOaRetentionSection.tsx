@@ -8,7 +8,7 @@ const attachmentInvoicePromotionOptions: Array<{
   value: WorkbenchOaImportSettings["attachmentInvoicePromotionMode"];
   label: string;
 }> = [
-  { value: "disabled", label: "禁用晋级" },
+  { value: "disabled", label: "不处理附件发票" },
   { value: "link_existing_only", label: "仅关联已有发票" },
   { value: "create_missing", label: "允许创建缺失发票" },
 ];
@@ -32,7 +32,7 @@ export default function SettingsOaRetentionSection({
   return (
     <section
       aria-labelledby="settings-section-oa-retention-title"
-      className="settings-section-panel settings-section-panel--fluid"
+      className="settings-section-panel"
       id="settings-section-oa-retention"
       role="region"
     >
@@ -41,7 +41,7 @@ export default function SettingsOaRetentionSection({
       </header>
       <div className="settings-section-body">
         <div className="settings-oa-config">
-          <label className="settings-field settings-field--date">
+          <label className="settings-field settings-preference-row">
             <span>OA导入起始日期</span>
             <Input
               aria-label="OA导入起始日期"
@@ -52,47 +52,51 @@ export default function SettingsOaRetentionSection({
             />
           </label>
 
-          <fieldset className="settings-checkbox-group" disabled={controlsDisabled}>
-            <legend>表单类型</legend>
-            <div className="settings-checkbox-list">
-              {formTypeOptions.map((option) => (
-                <Checkbox
-                  className="settings-checkbox-row"
-                  isDisabled={controlsDisabled}
-                  isSelected={oaImport.formTypes.includes(option.value)}
-                  key={option.value}
-                  slot={null}
-                  onChange={() => onToggleFormType(option.value)}
-                >
-                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                  <span>{option.label}</span>
-                </Checkbox>
-              ))}
-            </div>
-          </fieldset>
-          <fieldset className="settings-checkbox-group" disabled={controlsDisabled}>
-            <legend>流程状态</legend>
-            <div className="settings-checkbox-list">
-              {statusOptions.map((option) => (
-                <Checkbox
-                  className="settings-checkbox-row"
-                  isDisabled={controlsDisabled}
-                  isSelected={oaImport.statuses.includes(option.value)}
-                  key={option.value}
-                  slot={null}
-                  onChange={() => onToggleStatus(option.value)}
-                >
-                  <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                  <span>{option.label}</span>
-                </Checkbox>
-              ))}
-            </div>
-          </fieldset>
+          <div className="settings-preference-row">
+            <span id="settings-form-types">表单类型</span>
+            <fieldset className="settings-checkbox-group" aria-labelledby="settings-form-types" disabled={controlsDisabled}>
+              <div className="settings-checkbox-list">
+                {formTypeOptions.map((option) => (
+                  <Checkbox
+                    className="settings-checkbox-row"
+                    isDisabled={controlsDisabled}
+                    isSelected={oaImport.formTypes.includes(option.value)}
+                    key={option.value}
+                    slot={null}
+                    onChange={() => onToggleFormType(option.value)}
+                  >
+                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                    <span>{option.label}</span>
+                  </Checkbox>
+                ))}
+              </div>
+            </fieldset>
+          </div>
+          <div className="settings-preference-row">
+            <span id="settings-flow-statuses">流程状态</span>
+            <fieldset className="settings-checkbox-group" aria-labelledby="settings-flow-statuses" disabled={controlsDisabled}>
+              <div className="settings-checkbox-list">
+                {statusOptions.map((option) => (
+                  <Checkbox
+                    className="settings-checkbox-row"
+                    isDisabled={controlsDisabled}
+                    isSelected={oaImport.statuses.includes(option.value)}
+                    key={option.value}
+                    slot={null}
+                    onChange={() => onToggleStatus(option.value)}
+                  >
+                    <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                    <span>{option.label}</span>
+                  </Checkbox>
+                ))}
+              </div>
+            </fieldset>
+          </div>
 
-          <label className="settings-field settings-field--promotion">
-            <span>OA附件发票晋级</span>
+          <label className="settings-field settings-preference-row">
+            <span>OA附件发票处理</span>
             <Select
-              aria-label="OA附件发票晋级"
+              aria-label="OA附件发票处理"
               isDisabled={controlsDisabled}
               selectedKey={oaImport.attachmentInvoicePromotionMode}
               onSelectionChange={(key) =>

@@ -26,7 +26,7 @@ async function openWorkbenchSettingsPage(user: ReturnType<typeof userEvent.setup
   const settingsPage = await screen.findByTestId("settings-page", undefined, {
     timeout: ROUTE_RENDER_TIMEOUT,
   });
-  await within(settingsPage).findByRole("tree", { name: "设置分类" });
+  await within(settingsPage).findByRole("tablist", { name: "设置分类" });
   return settingsPage;
 }
 
@@ -3278,22 +3278,22 @@ describe("Workbench row selection and detail drawer", () => {
     });
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
     expect(within(settingsPage).queryByRole("heading", { name: "设置分类" })).not.toBeInTheDocument();
     expect(screen.queryByText("设置项")).not.toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /项目状态/ })).toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /银行账户/ })).toBeInTheDocument();
-    expect(within(settingsTree).queryByRole("treeitem", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
-    expect(within(settingsTree).queryByRole("treeitem", { name: /银行流水标签/ })).not.toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /待找发票筛选/ })).toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /OA导入设置/ })).toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
-    expect(within(settingsTree).getByRole("treeitem", { name: /访问账户/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("tab", { name: /项目状态/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("tab", { name: /银行账户/ })).toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /银行明细标签管理/ })).not.toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /银行流水标签/ })).not.toBeInTheDocument();
+    expect(within(settingsTree).getByRole("tab", { name: /待找发票筛选/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("tab", { name: /OA导入设置/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("tab", { name: /冲账规则/ })).toBeInTheDocument();
+    expect(within(settingsTree).getByRole("tab", { name: /访问账户/ })).toBeInTheDocument();
     expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
 
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
+    await user.click(within(settingsTree).getByRole("tab", { name: /银行账户/ }));
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /OA导入设置/ }));
+    await user.click(within(settingsTree).getByRole("tab", { name: /OA导入设置/ }));
     expect(within(settingsPage).getByRole("heading", { name: "OA导入设置" })).toBeInTheDocument();
     expect(within(settingsPage).getByRole("heading", { name: "OA全量搜索导入" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "支付申请" })).toBeChecked();
@@ -3308,7 +3308,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.clear(screen.getByLabelText("OA导入起始日期"));
     await user.type(screen.getByLabelText("OA导入起始日期"), "2026-02-01");
     await user.click(screen.getByRole("checkbox", { name: "进行中" }));
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
+    await user.click(within(settingsTree).getByRole("tab", { name: /冲账规则/ }));
     await waitFor(() => {
       expect(within(settingsPage).getByRole("region", { name: "冲账规则" })).toBeInTheDocument();
     });
@@ -3316,7 +3316,7 @@ describe("Workbench row selection and detail drawer", () => {
     const applicantInput = within(oaInvoiceOffsetSection).getByRole("textbox");
     await user.clear(applicantInput);
     await user.type(applicantInput, "周洁莹、李四");
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /访问账户/ }));
+    await user.click(within(settingsTree).getByRole("tab", { name: /访问账户/ }));
     const accessRegion = within(settingsPage).getByRole("region", { name: "访问账户" });
     expect(within(accessRegion).getByRole("heading", { name: "访问账户" })).toBeInTheDocument();
 
@@ -3326,8 +3326,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(accessRegion).getByRole("checkbox", { name: "关联台" }));
     await user.click(within(accessRegion).getByRole("button", { name: "保存访问权限" }));
     expect(await screen.findByText("已保存访问账户。")).toBeInTheDocument();
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /项目状态/ }));
-    await user.click(screen.getByRole("button", { name: "保存设置" }));
+    await user.click(within(settingsTree).getByRole("tab", { name: /项目状态/ }));
+    await user.click(screen.getByRole("button", { name: "保存全部设置" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/workbench/settings/access-control",
@@ -3380,10 +3380,10 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    expect(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ })).toBeInTheDocument();
-    expect(within(settingsTree).queryByRole("treeitem", { name: /访问账户/ })).not.toBeInTheDocument();
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /冲账规则/ }));
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    expect(within(settingsTree).getByRole("tab", { name: /冲账规则/ })).toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /访问账户/ })).not.toBeInTheDocument();
+    await user.click(within(settingsTree).getByRole("tab", { name: /冲账规则/ }));
     expect(within(settingsPage).getByRole("heading", { name: "冲账规则" })).toBeInTheDocument();
   });
 
@@ -3397,10 +3397,10 @@ describe("Workbench row selection and detail drawer", () => {
 
     const settingsPage = await screen.findByTestId("settings-page");
     await waitFor(() => {
-      expect(within(settingsPage).getByRole("tree", { name: "设置分类" })).toBeInTheDocument();
+      expect(within(settingsPage).getByRole("tablist", { name: "设置分类" })).toBeInTheDocument();
     });
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /银行账户/ }));
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("tab", { name: /银行账户/ }));
 
     expect(within(settingsPage).getByRole("heading", { name: "银行账户映射" })).toBeInTheDocument();
     const bankMappingTable = within(settingsPage).getByRole("grid", { name: "银行账户映射" });
@@ -3432,8 +3432,8 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /项目状态/ }));
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("tab", { name: /项目状态/ }));
 
     expect(within(settingsPage).getByRole("heading", { name: "项目状态管理" })).toBeInTheDocument();
     expect(within(settingsPage).getByRole("tab", { name: /进行中/ })).toBeInTheDocument();
@@ -3493,10 +3493,10 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    expect(within(settingsTree).getByRole("treeitem", { name: /数据重置/ })).toBeInTheDocument();
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    expect(within(settingsTree).getByRole("tab", { name: /数据重置/ })).toBeInTheDocument();
 
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    await user.click(within(settingsTree).getByRole("tab", { name: /数据重置/ }));
     expect(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" })).toBeInTheDocument();
     expect(within(settingsPage).getByRole("button", { name: "清除所有发票（进销）数据" })).toBeInTheDocument();
     expect(within(settingsPage).getByRole("button", { name: "清除所有 OA 数据并重新写入" })).toBeInTheDocument();
@@ -3541,8 +3541,8 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     let settingsPage = await openWorkbenchSettingsPage(user);
-    let settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    let settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("tab", { name: /数据重置/ }));
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有银行流水数据" }));
     await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
     const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
@@ -3555,8 +3555,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(screen.getByRole("link", { name: "关联台" }));
     await screen.findByTestId("zone-unpaired");
     settingsPage = await openWorkbenchSettingsPage(user);
-    settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("tab", { name: /数据重置/ }));
 
     expect(await within(settingsPage).findByRole("button", { name: /正在清理 app 内部状态。 25%/ })).toBeDisabled();
     expect(within(settingsPage).getByRole("button", { name: "清除所有发票（进销）数据" })).toBeDisabled();
@@ -3574,8 +3574,8 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("tab", { name: /数据重置/ }));
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有 OA 数据并重新写入" }));
     await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
     const passwordDialog = await screen.findByRole("dialog", { name: "OA 密码复核" });
@@ -3597,8 +3597,8 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    await user.click(within(settingsTree).getByRole("tab", { name: /数据重置/ }));
     await user.click(within(settingsPage).getByRole("button", { name: "清除所有发票（进销）数据" }));
     await user.click(within(await screen.findByRole("dialog", { name: "确认数据重置" })).getByRole("button", { name: "继续" }));
 
@@ -3622,10 +3622,10 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    expect(within(settingsTree).queryByRole("treeitem", { name: /访问账户/ })).not.toBeInTheDocument();
-    expect(within(settingsTree).queryByRole("treeitem", { name: /冲账规则/ })).not.toBeInTheDocument();
-    expect(within(settingsTree).queryByRole("treeitem", { name: /数据重置/ })).not.toBeInTheDocument();
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    expect(within(settingsTree).queryByRole("tab", { name: /访问账户/ })).not.toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /冲账规则/ })).not.toBeInTheDocument();
+    expect(within(settingsTree).queryByRole("tab", { name: /数据重置/ })).not.toBeInTheDocument();
     expect(screen.queryByText("访问账户管理")).not.toBeInTheDocument();
   });
 
@@ -3638,8 +3638,8 @@ describe("Workbench row selection and detail drawer", () => {
     renderAppAt("/");
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    const settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
-    expect(within(settingsTree).queryByRole("treeitem", { name: /数据重置/ })).not.toBeInTheDocument();
+    const settingsTree = within(settingsPage).getByRole("tablist", { name: "设置分类" });
+    expect(within(settingsTree).queryByRole("tab", { name: /数据重置/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "清除所有 OA 数据并重新写入" })).not.toBeInTheDocument();
   });
 
@@ -4070,7 +4070,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
     const settingsPage = await openWorkbenchSettingsPage(user);
-    expect(within(settingsPage).getByRole("button", { name: "保存设置" })).toBeEnabled();
+    expect(within(settingsPage).getByRole("button", { name: "保存全部设置" })).toBeEnabled();
   });
 
   test("paired zone withdraw action enables when one row in a relation is selected", async () => {

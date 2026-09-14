@@ -12,7 +12,7 @@ export default function SettingsDataResetSection({
   return (
     <section
       aria-labelledby="settings-section-data-reset-title"
-      className="settings-section-panel settings-section-panel--compact"
+      className="settings-section-panel"
       id="settings-section-data-reset"
       role="region"
     >
@@ -60,7 +60,7 @@ export default function SettingsDataResetSection({
                   variant="danger"
                   onPress={() => onOpenDataResetConfirm(item.action)}
                 >
-                  {progress ? `${progress.percent}%` : "执行"}
+                  {progress ? `${progress.percent}%` : "重置数据"}
                 </Button>
               </div>
             );

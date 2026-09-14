@@ -10,7 +10,7 @@ export default function SettingsOaInvoiceOffsetSection({
   return (
     <section
       aria-labelledby="settings-section-oa-invoice-offset-title"
-      className="settings-section-panel settings-section-panel--compact"
+      className="settings-section-panel"
       id="settings-section-oa-invoice-offset"
       role="region"
     >
@@ -18,7 +18,7 @@ export default function SettingsOaInvoiceOffsetSection({
         <h3 id="settings-section-oa-invoice-offset-title">冲账规则</h3>
       </header>
       <div className="settings-section-body">
-        <label className="settings-field settings-field--wide">
+        <label className="settings-field settings-preference-row">
           <span>冲账申请人</span>
           <Input
             aria-label="冲账申请人"

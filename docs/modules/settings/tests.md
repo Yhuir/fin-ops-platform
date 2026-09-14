@@ -16,6 +16,8 @@
 
 ## 七类测试
 
+2026-09-15 顶部 Tabs 改版：新增普通草稿跨 Tab 保留、保存前零写入与保存成功清除提示测试；浏览器检查 4 种宽度、8 个 Tab/Panel 的位置与页面溢出，并确认 32 次切换不增加普通设置请求。此次新增/更新覆盖第 5、6、7 类。第 1–4 类没有新增测试：此次不改变业务规则、service、API、持久化或 worker/read model，仅保留并运行相关前端及跨页回归；先前 ACL 修复的七类证据独立保留。
+
 | 类别 | 适用性 | 当前入口 |
 | --- | --- | --- |
 | 1. 业务核心 | 适用 | `tests/test_app_settings_service.py`、`tests/test_session_api.py`、`tests/test_oa_role_sync_service.py`：canonical page accounts、casefold/重复、固定 005、页面允许/拒绝、permission-present 006、no-op/version、两个专用 OA 角色与补偿；成本统计无 OA 设置默认空、命名校验、schema v3、CAS 与标签归档保留 |

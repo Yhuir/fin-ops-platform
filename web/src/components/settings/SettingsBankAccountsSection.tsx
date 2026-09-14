@@ -32,7 +32,7 @@ export default function SettingsBankAccountsSection({
   return (
     <section
       aria-labelledby="settings-section-bank-accounts-title"
-      className="settings-section-panel settings-section-panel--standard"
+      className="settings-section-panel"
       id="settings-section-bank-accounts"
       role="region"
     >

@@ -118,7 +118,7 @@ export default function SettingsProjectsSection({
   return (
     <section
       aria-labelledby="settings-section-projects-title"
-      className="settings-section-panel settings-section-panel--fluid"
+      className="settings-section-panel"
       id="settings-section-projects"
       role="region"
     >

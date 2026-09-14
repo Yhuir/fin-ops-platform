@@ -24,7 +24,7 @@ test("access accounts preserve drafts, report OA failure, save and render respon
     return route.fulfill({ json: { version, administrator: { username: "YNSYLP005", display_name: "权限管理员", protected: true }, accounts } });
   });
   await page.goto("/settings");
-  await page.getByRole("treeitem", { name: /访问账户/ }).click();
+  await page.getByRole("tab", { name: /访问账户/ }).click();
   const section = page.getByRole("region", { name: "访问账户" });
   const list = section.getByRole("listbox", { name: "访问账户列表" });
   await expect(list.getByRole("option")).toHaveCount(6);

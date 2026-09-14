@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+
 import { expect, test, type Page, type TestInfo } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
@@ -82,49 +84,64 @@ function expectDirectCanonicalPayload(payload: Record<string, unknown>) {
 }
 
 test.describe("settings data reset browser flow", () => {
-  test("keeps every settings section compact on desktop and narrow screens", async ({ page }) => {
+  test("centers all eight settings panels with native tabs at four widths", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
+    let settingsReads = 0;
+    page.on("request", (request) => {
+      if (request.method() === "GET" && new URL(request.url()).pathname === "/api/workbench/settings") settingsReads += 1;
+    });
     await installDeterministicApiMocks(page, { sessionMode: "admin" });
-    await page.setViewportSize({ width: 1600, height: 1000 });
-
-    const settingsResponse = waitForSettings(page);
     await page.goto("/settings");
-    expect((await settingsResponse).status()).toBe(200);
-    await expect(page.getByRole("heading", { name: "设置", exact: true })).toBeVisible();
-    await expect(page.getByText("管理关联台项目、账户、OA导入与高风险维护配置。")).toHaveCount(0);
-
-    const navBox = await page.locator(".settings-nav-shell").boundingBox();
-    expect(navBox).not.toBeNull();
-    expect(navBox?.width).toBeLessThanOrEqual(224);
-
+    const tabs = page.getByRole("tablist", { name: "设置分类" });
+    await expect(tabs.getByRole("tab")).toHaveCount(8);
+    const initialSettingsReads = settingsReads;
     const sections = [
-      { nav: "项目状态", region: "项目状态管理", maxWidth: null },
-      { nav: "银行账户", region: "银行账户映射", maxWidth: 1040 },
-      { nav: "待找发票筛选", region: "待找发票筛选", maxWidth: 1040 },
-      { nav: "OA导入设置", region: "OA导入设置", maxWidth: null },
-      { nav: "冲账规则", region: "冲账规则", maxWidth: 720 },
-      { nav: "OA申请人凭据", region: "OA申请人凭据", maxWidth: 1040 },
-      { nav: "访问账户", region: "访问账户", maxWidth: null },
-      { nav: "数据重置", region: "数据重置", maxWidth: 720 },
-    ] as const;
-
-    for (const section of sections) {
-      const navigationItem = page.getByRole("treeitem", { name: section.nav, exact: true });
-      await navigationItem.click();
-      await expect(navigationItem).toHaveAttribute("aria-selected", "true");
-      const region = page.getByRole("region", { name: section.region, exact: true });
-      await expect(region).toBeVisible();
-      const regionBox = await region.boundingBox();
-      expect(regionBox).not.toBeNull();
-      if (section.maxWidth !== null) {
-        expect(regionBox?.width).toBeLessThanOrEqual(section.maxWidth + 1);
+      { nav: "项目状态", region: "项目状态管理" },
+      { nav: "银行账户", region: "银行账户映射" },
+      { nav: "待找发票筛选", region: "待找发票筛选" },
+      { nav: "OA导入设置", region: "OA导入设置" },
+      { nav: "冲账规则", region: "冲账规则" },
+      { nav: "OA申请人凭据", region: "OA申请人凭据" },
+      { nav: "访问账户", region: "访问账户" },
+      { nav: "数据重置", region: "数据重置" },
+    ];
+    const samples: {width: number; section: string; elapsedMs: number}[] = [];
+    for (const width of [1920, 1440, 1280, 768]) {
+      await page.setViewportSize({ width, height: 1100 });
+      if (width >= 1440) {
+        const list = await tabs.boundingBox();
+        for (const tab of await tabs.getByRole("tab").all()) {
+          const box = await tab.boundingBox();
+          expect(box!.x).toBeGreaterThanOrEqual(list!.x);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(list!.x + list!.width);
+        }
+      }
+      for (const [index, section] of sections.entries()) {
+        const started = performance.now();
+        const tab = tabs.getByRole("tab", { name: section.nav, exact: true });
+        await tab.click();
+        await expect(tab).toHaveAttribute("aria-selected", "true");
+        await expect(page.getByRole("tabpanel", { name: section.nav, exact: true })).toBeVisible();
+        const region = page.getByRole("region", { name: section.region, exact: true });
+        await expect(region).toBeVisible();
+        samples.push({width, section: section.nav, elapsedMs: performance.now() - started});
+        const workspace = await page.locator(".settings-workspace").boundingBox();
+        const panel = await region.boundingBox();
+        expect(Math.abs(panel!.x - workspace!.x)).toBeLessThan(2);
+        expect(Math.abs(panel!.width - workspace!.width)).toBeLessThan(2);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        for (const field of await region.locator(".settings-field:has(> input)").all()) {
+          const fieldBox = await field.boundingBox();
+          const inputBox = await field.locator(":scope > input").boundingBox();
+          expect(inputBox!.x + inputBox!.width).toBeLessThanOrEqual(fieldBox!.x + fieldBox!.width + 1);
+        }
+        await page.locator(".settings-workspace").screenshot({ path: testInfo.outputPath(`settings-${width}-${index}.png`) });
       }
     }
-
-    await page.setViewportSize({ width: 720, height: 900 });
-    await expect(page.locator(".settings-mobile-section-select")).toBeVisible();
-    await expect(page.getByRole("tree", { name: "设置分类" })).toBeHidden();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(settingsReads).toBe(initialSettingsReads);
+    const timingPath = testInfo.outputPath("tab-switch-timings.json");
+    writeFileSync(timingPath, JSON.stringify({ initialSettingsReads, settingsReads, samples }, null, 2));
+    await testInfo.attach("tab-switch-timings", {path: timingPath, contentType: "application/json"});
     expect(browserErrors).toEqual([]);
   });
 
@@ -144,8 +161,8 @@ test.describe("settings data reset browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByRole("heading", { name: "设置", exact: true })).toBeVisible());
     });
     await expect(page.getByRole("heading", { name: "设置", exact: true })).toBeVisible();
-    await expect(page.getByRole("tree", { name: "设置分类" })).toBeVisible();
-    await expect(page.getByRole("treeitem", { name: /数据重置/ })).toBeVisible();
+    await expect(page.getByRole("tablist", { name: "设置分类" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /数据重置/ })).toBeVisible();
 
     const dataResetRegion = page.getByRole("region", { name: "数据重置" });
     await recordLatency({
@@ -153,7 +170,7 @@ test.describe("settings data reset browser flow", () => {
       visibleLabel: "数据重置",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("treeitem", { name: /数据重置/ }).click();
+      await page.getByRole("tab", { name: /数据重置/ }).click();
       await mark("finalSettledLatencyMs", expect(dataResetRegion).toBeVisible());
     });
     await expect(dataResetRegion).toBeVisible();
@@ -299,7 +316,7 @@ test.describe("settings data reset browser flow", () => {
       visibleLabel: "项目状态",
       actionType: "click",
     }, async (mark) => {
-      await page.getByRole("treeitem", { name: /项目状态/ }).click();
+      await page.getByRole("tab", { name: /项目状态/ }).click();
       await mark("finalSettledLatencyMs", expect(projectsRegion).toBeVisible());
     });
     await expect(projectsRegion).toBeVisible();
@@ -322,11 +339,11 @@ test.describe("settings data reset browser flow", () => {
     let saveResponseStatus: number | undefined;
     await recordLatency({
       operationId: "settings.save-project-status",
-      visibleLabel: "保存设置",
+      visibleLabel: "保存全部设置",
       actionType: "click",
     }, async (mark) => {
       const saveResponse = waitForSettingsSave(page);
-      await page.getByRole("button", { name: "保存设置" }).click();
+      await page.getByRole("button", { name: "保存全部设置" }).click();
       saveResponseStatus = (await mark("apiLatencyMs", saveResponse)).status();
       await mark("finalSettledLatencyMs", expect(page.getByText("已保存关联台设置。")).toBeVisible());
     });

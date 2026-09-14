@@ -79,6 +79,8 @@
 
 ## 文件范围
 
+2026-09-15 页面布局更新：`SettingsTabs.tsx` 只接收分类、活动分类和选择回调并呈现子内容；不访问 API。`SettingsPageContent` 保有普通草稿及提交编排，`SettingsPage` 保有加载/权限边界。旧 `SettingsTreeNav.tsx`、桌面左栏、移动端分类 Select 和三档子页宽度 CSS 已删除。API DTO、数据库、worker、read model 和其他页面边界不变。
+
 | 层 | 文件或目录 |
 | --- | --- |
 | Frontend page | `web/src/pages/SettingsPage.tsx` |

@@ -26,7 +26,7 @@ import SettingsOaInvoiceOffsetSection from "./SettingsOaInvoiceOffsetSection";
 import SettingsOaRetentionSection from "./SettingsOaRetentionSection";
 import SettingsPendingInvoiceTagsSection from "./SettingsPendingInvoiceTagsSection";
 import SettingsProjectsSection from "./SettingsProjectsSection";
-import SettingsTreeNav from "./SettingsTreeNav";
+import SettingsTabs from "./SettingsTabs";
 import type {
   DataResetActionConfig,
   DataResetStatus,
@@ -326,6 +326,19 @@ export default function SettingsPageContent({
   const [isDataResetting, setIsDataResetting] = useState(false);
 
   const controlsDisabled = !canSave || isSaving || isDataResetting || isProjectActionBusy;
+  const hasUnsavedSettings = useMemo(() => {
+    const sameValues = (left: string[], right: string[]) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+    return !sameValues(completedProjectIds, settings.projects.completedProjectIds)
+      || JSON.stringify(mappings) !== JSON.stringify(settings.bankAccountMappings)
+      || oaRetentionCutoffDate !== settings.oaRetention.cutoffDate
+      || !sameValues(oaImportFormTypes, settings.oaImport.formTypes)
+      || !sameValues(oaImportStatuses, settings.oaImport.statuses)
+      || oaAttachmentInvoicePromotionMode !== settings.oaImport.attachmentInvoicePromotionMode
+      || !sameValues(parseApplicantNames(oaInvoiceOffsetApplicantsText), settings.oaInvoiceOffset.applicantNames)
+      || (Object.keys(pendingInvoiceTagGroups) as Array<keyof typeof pendingInvoiceTagGroups>)
+        .some((key) => !sameValues(pendingInvoiceTagGroups[key], settings.pendingInvoiceTagGroups[key]));
+  }, [completedProjectIds, mappings, oaRetentionCutoffDate, oaImportFormTypes, oaImportStatuses,
+    oaAttachmentInvoicePromotionMode, oaInvoiceOffsetApplicantsText, pendingInvoiceTagGroups, settings]);
   const accessControlControlsDisabled = !canSave
     || isAccessControlLoading
     || isAccessControlSaving
@@ -745,15 +758,7 @@ export default function SettingsPageContent({
 
   return (
     <div className="settings-layout">
-        <nav className="settings-nav-shell">
-          <SettingsTreeNav
-            items={settingsNavigationItems}
-            activeSectionId={activeSectionId}
-            onSelect={setActiveSectionId}
-          />
-        </nav>
-
-        <section aria-label="设置内容" className="settings-content-panel">
+      <div className="settings-workspace">
           <header className="settings-content-header">
             <div className="settings-content-title">
               <h1>设置</h1>
@@ -768,18 +773,20 @@ export default function SettingsPageContent({
             </div>
             {!["access_accounts", "oa_applicant_credentials", "data_reset"].includes(activeSectionId) ? (
               <div className="settings-save-actions">
+                {hasUnsavedSettings ? <span className="settings-draft-status" role="status">有未保存修改</span> : null}
                 <Button
                   isDisabled={controlsDisabled}
                   isPending={isSaving}
                   variant="primary"
                   onPress={handleSave}
                 >
-                  {isSaving ? "保存中..." : "保存设置"}
+                  {isSaving ? "保存中..." : "保存全部设置"}
                 </Button>
               </div>
             ) : null}
           </header>
-
+          <SettingsTabs items={settingsNavigationItems} activeSectionId={activeSectionId} onSelect={setActiveSectionId}>
+            <section aria-label="设置内容" className="settings-content-panel">
             {activeSectionId === "projects" ? (
                 <SettingsProjectsSection
                   activeProjects={activeProjects}
@@ -916,7 +923,9 @@ export default function SettingsPageContent({
                   onOpenDataResetConfirm={handleOpenDataResetConfirm}
                 />
               ) : null}
-        </section>
+            </section>
+          </SettingsTabs>
+      </div>
       {dataResetDialog ? (
         <SettingsDataResetDialogs
           config={dataResetActionConfig(dataResetDialog.action)}

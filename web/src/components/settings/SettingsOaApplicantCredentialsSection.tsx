@@ -50,7 +50,7 @@ export default function SettingsOaApplicantCredentialsSection({
   return (
     <section
       aria-labelledby="settings-section-oa-applicant-credentials-title"
-      className="settings-section-panel settings-section-panel--standard"
+      className="settings-section-panel"
       id="settings-section-oa-applicant-credentials"
       role="region"
     >
@@ -58,7 +58,7 @@ export default function SettingsOaApplicantCredentialsSection({
         <h3 id="settings-section-oa-applicant-credentials-title">OA申请人凭据</h3>
       </header>
       <div className="settings-section-body">
-        <div className="settings-access-form">
+        <div className="settings-credentials-form">
           <label className="settings-field">
             <span>目标 OA 申请人</span>
             <Input
