@@ -170,3 +170,14 @@ def test_duplicate_ticket_representative_removal_preserves_rejection(tmp_path):
     assert task.ticket_root_items[0].item_id == 't'
     assert task.credit_card_items[0].rejected_ticket_ids == ['t']
     assert task.ticket_root_items[0].linked_credit_card_item_ids == []
+
+
+def test_selectable_pdf_header_does_not_hide_scanned_transaction_table():
+    from fin_ops_platform.services.untrusted_document_policy import ValidatedDocument
+    row = '2026-08-01 2026-08-02 1234 高速 CNY 23.50 23.50'
+    parser = CcbCreditCardStatementParser(pdf_text_extractor=lambda _: '建行信用卡账单', ocr_text_extractor=lambda _: [row])
+    result = parser.parse_pdf_bytes(file_id='header', document=ValidatedDocument(file_name='header.pdf', kind='pdf', content=b'',
+        content_type='application/pdf', content_sha256='test', pdf_page_count=1))
+    assert len(result.credit_card_items) == 1
+    assert result.credit_card_items[0].source_page == 1
+    assert any(issue.extraction_method == 'ocr' for issue in result.issues)

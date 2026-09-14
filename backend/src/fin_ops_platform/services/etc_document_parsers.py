@@ -214,6 +214,7 @@ class CcbCreditCardStatementParser:
         if document.kind != "pdf":
             raise ValueError("credit_card_statement_requires_pdf")
         page_documents = []
+        page_has_images: list[bool] = []
         if self._pdf_text_extractor is not None:
             page_texts = self._pdf_text_extractor(document.content).split("\f")
         else:
@@ -221,6 +222,7 @@ class CcbCreditCardStatementParser:
                 raise RuntimeError("pdf_renderer_unavailable")
             with fitz.open(stream=document.content, filetype="pdf") as pdf:
                 for index in range(len(pdf)):
+                    page_has_images.append(bool(pdf[index].get_images()))
                     with fitz.open() as single:
                         single.insert_pdf(pdf, from_page=index, to_page=index)
                         page_documents.append(replace(document, content=single.tobytes(), pdf_page_count=1))
@@ -231,8 +233,10 @@ class CcbCreditCardStatementParser:
         extractor = TicketRootOcrTextExtractor(render_scale=3, group_by_row=True)
         for page_index, text in enumerate(page_texts):
             extraction = "pdf_text"
-            # An empty text layer is a scanned page, even if an earlier page had rows.
-            if not text.strip():
+            text_result = self.parse_text(file_id=file_id, text=text, task_id=task_id)
+            # A selectable header must not hide a scanned transaction table on this page.
+            has_scanned_content = page_has_images[page_index] if page_has_images else self._ocr_text_extractor is not None
+            if not text.strip() or (not text_result.credit_card_items and has_scanned_content):
                 extraction = "ocr"
                 if self._ocr_text_extractor is not None:
                     if ocr_pages is None:
@@ -242,7 +246,7 @@ class CcbCreditCardStatementParser:
                     text = "\n".join(extractor(page_documents[page_index]))
                 text = _normalize_credit_card_ocr_text(text)
             extracted_texts.append(text)
-            page_result = self.parse_text(file_id=file_id, text=text, task_id=task_id)
+            page_result = self.parse_text(file_id=file_id, text=text, task_id=task_id) if extraction == "ocr" else text_result
             page_result.issues = [issue for issue in page_result.issues if issue.field_name != "statement_total"]
             for item in page_result.credit_card_items:
                 item.source_page = page_index + 1
