@@ -281,3 +281,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 预览使用只读选择快照，提交使用事务内重新验证的来源。affected months 覆盖真实选中月份；取消单月关系直接使用关系的明确 scope，跨月关系才批量读取成员日期。
 - `workbench_relation_scope_invalid` 表示服务端业务月份无效，使用 500 和稳定中文提示；前端保留备注、请求编号，要求修正来源后重新预览，不能盲目重试。未知临时错误保留原处理。
 - 当前页面仍为 PostgreSQL canonical 直接读取；本次不增加 read model、worker、轮询或跨页刷新 I/O。
+
+## 2026-09-15 日常报销子项展示修复
+
+日常报销保留父 OA 作为关系与选择单位，所有 canonical expense_items 按原始顺序展示，包括单子项、重复费用内容、ETC collapsed_summary 组；发票折叠只控制发票栏。主栏和详情使用 expense_content，原始 fee_content/fee_description 单独保留；DTO 新增 expense_content、reimbursement_date、payment_method、invoice_kind、ticket_count。completed OA 日期统一读取原始申请时间/申请日期，再读取已有 canonical application_date，搜索、排序与显示共用表达式。移除整组 collapsed_summary 提前返回及单子项隐藏条件；不改 relation member、金额、成本分配或 worker。

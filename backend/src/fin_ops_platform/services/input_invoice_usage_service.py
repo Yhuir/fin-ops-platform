@@ -11,6 +11,9 @@ from typing import Any
 from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.imports import ImportNormalizationService
+from fin_ops_platform.services.input_invoice_usage_payment_rules import (
+    InputInvoiceUsagePaymentRulesProvider,
+)
 from fin_ops_platform.services.input_invoice_usage_query_contract import (
     FILTER_CONFIG,
     SORT_FIELDS,
@@ -19,12 +22,10 @@ from fin_ops_platform.services.input_invoice_usage_query_contract import (
     parse_input_invoice_usage_filters,
     parse_input_invoice_usage_sort,
 )
-from fin_ops_platform.services.input_invoice_usage_payment_rules import (
-    InputInvoiceUsagePaymentRulesProvider,
-)
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import DistributedInvoiceRelationContext
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_expense_details import public_oa_expense_items
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
 ZERO = Decimal("0.00")
@@ -335,7 +336,7 @@ class InputInvoiceUsageQueryService:
             "completedAt": record.completed_at or "",
             "expenseType": record.expense_type or "",
             "expenseContent": record.expense_content or "",
-            "expenseItems": deepcopy(record.expense_items),
+            "expenseItems": public_oa_expense_items(record.expense_items),
             "detailFields": deepcopy(record.detail_fields),
             "openUrl": str(record.detail_fields.get("url") or record.detail_fields.get("open_url") or ""),
         }

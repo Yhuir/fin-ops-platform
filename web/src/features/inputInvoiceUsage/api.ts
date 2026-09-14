@@ -391,6 +391,9 @@ function mapInvoiceDetailResponse(payload: unknown): InputInvoiceUsageDetailResp
       detailField("费用内容", camelOrSnake(expense, "expenseContent", "expense_content") ?? camelOrSnake(expense, "feeContent", "fee_content")),
       detailField("费用说明", camelOrSnake(expense, "feeDescription", "fee_description")),
       detailField("报销日期", camelOrSnake(expense, "reimbursementDate", "reimbursement_date")),
+      detailField("支付方式", camelOrSnake(expense, "paymentMethod", "payment_method")),
+      detailField("发票种类", camelOrSnake(expense, "invoiceKind", "invoice_kind")),
+      detailField("票据张数", camelOrSnake(expense, "ticketCount", "ticket_count")),
       detailField("报销附件", camelOrSnake(expense, "attachmentFileCount", "attachment_file_count")),
     ]);
   }));

@@ -34,7 +34,21 @@ export default function DetailDrawer({ row, loading, error, onClose }: DetailDra
           label: field.label,
           value: sanitizeAttachmentValue(field.value),
         })),
-      }])
+      }, ...(row.expenseItems ?? []).map((item, index) => ({
+        title: `费用明细 ${index + 1}`,
+        fields: [
+          { label: "项目名称", value: item.projectName },
+          { label: "报销金额", value: item.amount },
+          { label: "费用类型", value: item.expenseType ?? "—" },
+          { label: "费用内容", value: item.expenseContent ?? "—" },
+          { label: "费用说明", value: item.feeDescription ?? "—" },
+          { label: "报销日期", value: item.reimbursementDate ?? "—" },
+          { label: "支付方式", value: item.paymentMethod ?? "—" },
+          { label: "发票种类", value: item.invoiceKind ?? "—" },
+          { label: "票据张数", value: item.ticketCount ?? "—" },
+          { label: "附件文件数", value: String(item.attachmentFileCount ?? "—") },
+        ],
+      }))])
     : [];
 
   return (

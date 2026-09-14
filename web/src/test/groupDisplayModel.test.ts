@@ -1080,3 +1080,28 @@ describe("historical display partitions", () => {
     expect(filteredLayout.segments[1].rows.bank.map((r) => r.id)).toEqual(["x"]);
   });
 });
+
+
+describe("OA child rows independent of invoice folding", () => {
+  test.each([1, 4])("shows all %i canonical items while ETC invoices remain shared", (count) => {
+    const parent = buildOaRow("oa-exp-fold", "100");
+    parent.expenseItems = Array.from({ length: count }, (_, index) => ({
+      id: `item-${index}`, rowIndex: String(index), projectName: "项目",
+      amount: String(100 / count), expenseContent: `费用${index}`,
+    }));
+    const bank = buildBankRow("bank-only", "2026-01-14");
+    const group: WorkbenchRelationGroup = {
+      id: "fold", groupType: "paired", matchConfidence: "high", reason: "active",
+      displayMode: "collapsed_summary", rows: { oa: [parent], bank: [bank], invoice: [] },
+    };
+    const layout = buildWorkbenchGroupDisplayLayout(group)!;
+    const children = layout.segments.flatMap(s => s.rows.oa).filter(r => r.displayRole === "expense-claim-item");
+    expect(children).toHaveLength(count);
+    expect(children.map(r => r.sourceExpenseItemIds?.[0])).toEqual(parent.expenseItems.map(i => i.id));
+    expect(children.every(r => r.id === parent.id)).toBe(true);
+    expect(children[0].tableValues.reason).toContain("费用0");
+    expect(layout.segmentedPaneIds).toEqual(["oa"]);
+    expect(group.rows.bank).toEqual([bank]);
+    expect(group.rows.oa).toEqual([parent]);
+  });
+});

@@ -67,3 +67,19 @@ describe("DetailDrawer", () => {
     expect(screen.queryByText("付款凭证金额与附件发票金额一致")).not.toBeInTheDocument();
   });
 });
+
+
+test("OA detail exposes every expense including duplicate labels without exposing item identities", () => {
+  const row = buildOaRow();
+  row.expenseItems = ["299.00", "1.22"].map((amount, index) => ({
+    id: `private-item-${index}`, rowIndex: String(index), projectName: "公司",
+    amount, expenseContent: "设备报销", reimbursementDate: "2025-12-27",
+  }));
+  render(<DetailDrawer row={row} loading={false} error={null} onClose={() => undefined} />);
+  expect(screen.getByText("费用明细 1")).toBeInTheDocument();
+  expect(screen.getByText("费用明细 2")).toBeInTheDocument();
+  expect(screen.getAllByText("设备报销")).toHaveLength(2);
+  expect(screen.getByText("299.00")).toBeInTheDocument();
+  expect(screen.getByText("1.22")).toBeInTheDocument();
+  expect(screen.queryByText("private-item-0")).not.toBeInTheDocument();
+});

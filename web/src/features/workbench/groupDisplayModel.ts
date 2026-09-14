@@ -171,6 +171,7 @@ export function buildWorkbenchGroupDisplayLayout(
   ));
   const segmentedPaneIds = (["bank", "invoice"] as const).filter((paneId) => (
     !(paneId === "bank" && hasExpenseClaimItems && sourceGroup.rows.oa.length === 1)
+    && !(paneId === "invoice" && group.displayMode === "collapsed_summary")
     && (
       (paneId === "invoice" && hasUnassignedInvoices)
       || Array.from(alignedRowIdsByPane[paneId].values()).some((rowIds) => (
@@ -256,13 +257,10 @@ export function buildWorkbenchGroupDisplayLayout(
 function buildWorkbenchGroupSourceSegments(
   group: WorkbenchRelationGroup,
 ): WorkbenchGroupDisplaySegment[] | null {
-  if (group.displayMode === "collapsed_summary" || group.rows.oa.length === 0) {
+  if (group.rows.oa.length === 0) {
     return null;
   }
-  const hasExpenseClaimItems = group.rows.oa.some((oaRow) => shouldExpandExpenseClaim(
-    oaRow,
-    group.rows.invoice.filter((invoiceRow) => normalizeSourceOaId(invoiceRow.sourceOaId) === oaRow.id),
-  ));
+  const hasExpenseClaimItems = group.rows.oa.some((oaRow) => shouldExpandExpenseClaim(oaRow));
   if (group.rows.oa.length < 2 && !hasExpenseClaimItems) {
     return null;
   }
@@ -422,7 +420,7 @@ function canUseAmountFallback(
 function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): WorkbenchGroupDisplaySegment[] {
   const parent = segment.rows.oa[0];
   const items = parent?.expenseItems ?? [];
-  if (!parent || !shouldExpandExpenseClaim(parent, segment.rows.invoice)) {
+  if (!parent || !shouldExpandExpenseClaim(parent)) {
     return [segment];
   }
 
@@ -504,7 +502,8 @@ function expandExpenseClaimSegment(segment: WorkbenchGroupDisplaySegment): Workb
             amount: item.amount,
             counterparty: "—",
             reason: [
-              item.feeContent ? `费用内容：${item.feeContent}` : "",
+              item.expenseContent ? `费用内容：${item.expenseContent}` : "",
+              item.feeContent && item.feeContent !== item.expenseContent ? `原始费用内容：${item.feeContent}` : "",
               item.feeDescription ? `费用说明：${item.feeDescription}` : "",
             ].filter(Boolean).join("；") || "—",
             reconciliationStatus: "—",
@@ -611,19 +610,8 @@ function supportingDocumentRows(
   }];
 }
 
-function hasExpandableExpenseItems(row: WorkbenchRecord) {
-  const items = row.expenseItems ?? [];
-  return items.length > 1 || items.some((item) => Boolean(item.supportingDocuments?.length)) || items.some((item) => [
-    "oa_invoice_attachment_absent",
-    "oa_invoice_attachment_unparsed",
-  ].some((code) => item.workbenchAnomalies?.some((anomaly) => anomaly.code === code)));
-}
-
-function shouldExpandExpenseClaim(parent: WorkbenchRecord, invoiceRows: WorkbenchRecord[]) {
-  return (parent.expenseItems?.length ?? 0) > 0 && (
-    hasExpandableExpenseItems(parent)
-    || invoiceRows.some((row) => row.sourceKind === "oa_attachment_invoice")
-  );
+function shouldExpandExpenseClaim(parent: WorkbenchRecord) {
+  return (parent.expenseItems?.length ?? 0) > 0;
 }
 
 function rowExpenseItemIds(row: WorkbenchRecord) {

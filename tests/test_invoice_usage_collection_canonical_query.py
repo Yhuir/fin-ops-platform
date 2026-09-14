@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import unittest
+from contextlib import contextmanager
 
 from fin_ops_platform.domain.enums import InvoiceType
-from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.invoice_relation_query_context import (
-    DistributedInvoiceRelationContext,
-)
 from fin_ops_platform.services.input_invoice_usage_canonical_query_service import (
     InputInvoiceUsageCanonicalQueryService,
 )
+from fin_ops_platform.services.invoice_relation_query_context import (
+    DistributedInvoiceRelationContext,
+)
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.output_invoice_collection_canonical_query_service import (
     OutputInvoiceCollectionCanonicalQueryService,
 )
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
+    _INPUT_FIELDS,
+    _OUTPUT_FIELDS,
     InvoiceUsageCollectionCanonicalSnapshot,
     PostgresInputInvoiceUsageQueryRepository,
     PostgresOutputInvoiceCollectionQueryRepository,
-    _INPUT_FIELDS,
-    _OUTPUT_FIELDS,
     _facet_counts,
     _where_sql,
 )
@@ -384,6 +384,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
             relation_tone="success",
             workflow_status="completed",
         )
+        record.expense_items = [{"amount": "120.00", "expense_content": "实际明细", "attachment_files": ["private"]}]
         repository = RecordingInputDetailRepository(record)
         service = InputInvoiceUsageCanonicalQueryService(
             repository=repository,
@@ -396,6 +397,7 @@ class InvoiceUsageCollectionCanonicalQueryTests(unittest.TestCase):
         self.assertTrue(detail["detailAvailable"])
         self.assertEqual(detail["oaId"], "oa-detail-1")
         self.assertEqual(detail["workflowNo"], "OA-001")
+        self.assertEqual(detail["expenseItems"], [{"amount": "120.00", "expense_content": "实际明细"}])
         self.assertEqual(detail["workflowStatus"], "completed")
         self.assertNotIn("status", detail)
 

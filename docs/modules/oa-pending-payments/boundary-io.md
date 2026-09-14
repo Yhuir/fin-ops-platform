@@ -156,3 +156,7 @@ frontend -> page API only
 - 禁止恢复旧 filter endpoint、全量 `all_rows()`、Python/浏览器分页。
 - 禁止因历史表仍存在而恢复本页 read model 依赖。
 - 禁止把银行流水、发票、relation/raw payload 或页面筛选条件并入 OA 事实源导出。
+
+## 2026-09-15 日常报销子项展示修复
+
+OA 详情复用同次 canonical 批量 hydration，按请求 OA ID 选择原单据，追加全部费用明细节；多 OA 关系不得误取主 OA。列表保持父 OA 行和原有响应形状；详情不传附件原始载荷或内部子项 ID。无每子项查询、缓存或新 worker。

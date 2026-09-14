@@ -101,3 +101,7 @@
 - 独立 Search runtime 已删除；`workbench_relation` 共享 distribution 只保留给明确登记消费者，本页面不消费它。
 - `read_model.pending_invoice_*` 历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
 - `app.pending_invoice_manual_invoice_commands` 名称为历史遗留，但仍承载当前 attach-existing/income-status command 并保存既有审计数据；不得据此恢复已删除的 manual invoice writer。
+
+## 2026-09-15 日常报销子项展示修复
+
+OA detail SQL 读取原单据 canonical expense_items，服务使用共享公共详情投影追加费用明细节；移除旧服务重复拼装逻辑。详情展示原始子项，不创建关系、不改变发票/银行详情、列表、导出或 worker。

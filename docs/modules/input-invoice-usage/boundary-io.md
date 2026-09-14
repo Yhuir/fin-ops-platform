@@ -102,3 +102,7 @@
 ## 跨页面清理结果
 
 `InvoiceUsageCollectionSqlProjectionBuilder` 的 input projection、invoice-usage-collection worker/handler/registry/manifest/deploy、input read-model scope/App Status/audit/repair 注册项已删除。历史 migration/表暂留作回滚证据，没有运行时 reader/writer。
+
+## 2026-09-15 日常报销子项展示修复
+
+OA 详情 expenseItems 使用公共费用字段白名单（项目、金额、费用类型/内容/说明、报销日期、支付方式、发票种类、票据张数、附件文件数），页面按顺序展示所有子项。canonical 及现有非 PG service 共用纯投影，禁止输出附件原始载荷。列表、关联写入和成本分配不变。

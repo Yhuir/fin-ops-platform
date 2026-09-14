@@ -4,14 +4,9 @@ from datetime import date
 from http import HTTPStatus
 from typing import Any, Callable
 
-from fin_ops_platform.services.oa_pending_payment_canonical_rows import build_oa_pending_payment_rows
-from fin_ops_platform.services.oa_pending_payment_query_contract import (
-    OaPendingPaymentError,
-    filter_config,
-    parse_filters,
-    parse_positive_int,
-    parse_sort,
-    parse_view_mode,
+from fin_ops_platform.services.oa_pending_payment_canonical_rows import (
+    build_oa_pending_payment_rows,
+    oa_pending_payment_oa_summary,
 )
 from fin_ops_platform.services.oa_pending_payment_details import (
     oa_pending_payment_bank_detail_from_row,
@@ -24,6 +19,14 @@ from fin_ops_platform.services.oa_pending_payment_export import (
     build_oa_pending_payment_export_workbook,
     oa_pending_payment_export_filename,
     parse_oa_pending_payment_export_sources,
+)
+from fin_ops_platform.services.oa_pending_payment_query_contract import (
+    OaPendingPaymentError,
+    filter_config,
+    parse_filters,
+    parse_positive_int,
+    parse_sort,
+    parse_view_mode,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentStatusSnapshotReader,
@@ -260,7 +263,10 @@ class OaPendingPaymentQueryService:
                         not_found_message,
                         status_code=HTTPStatus.NOT_FOUND,
                     )
-                rows = self._hydrate_rows(snapshot, [descriptor], tenant_id=tenant_id)
+                rows = self._hydrate_rows(
+                    snapshot, [descriptor], tenant_id=tenant_id,
+                    detail_oa_id=identifier if identifier_kind == "oa" else None,
+                )
         except OaPendingPaymentError:
             raise
         except ValueError as exc:
@@ -282,6 +288,7 @@ class OaPendingPaymentQueryService:
         descriptors: list[dict[str, Any]],
         *,
         tenant_id: str,
+        detail_oa_id: str | None = None,
     ) -> list[dict[str, Any]]:
         if not descriptors:
             return []
@@ -324,7 +331,14 @@ class OaPendingPaymentQueryService:
             raise RuntimeError(
                 "OA pending payment canonical hydration is incomplete: " + ", ".join(missing_ids)
             )
-        return [rows_by_id[row_id] for row_id in expected_ids]
+        result = [rows_by_id[row_id] for row_id in expected_ids]
+        if detail_oa_id:
+            record = next((record for record in [*completed_records, *in_progress_records]
+                           if record.id == detail_oa_id), None)
+            if record is None:
+                raise RuntimeError("OA detail target is absent from canonical hydration")
+            result = [{**row, "oa": oa_pending_payment_oa_summary(record), "expense_items": record.expense_items} for row in result]
+        return result
 
     def _repository_required(self) -> Any:
         if self._repository is None:

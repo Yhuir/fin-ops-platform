@@ -135,6 +135,11 @@ type ApiWorkbenchRow = {
     project_name?: string | null;
     amount?: string | number | null;
     expense_type?: string | null;
+    expense_content?: string | null;
+    reimbursement_date?: string | null;
+    payment_method?: string | null;
+    invoice_kind?: string | null;
+    ticket_count?: string | number | null;
     fee_content?: string | null;
     fee_description?: string | null;
     attachment_file_count?: string | number | null;
@@ -1546,6 +1551,11 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
       projectName: toDisplayValue(item.project_name),
       amount: toWorkbenchAmountDisplayValue(item.amount),
       expenseType: toDisplayValue(item.expense_type, "") || undefined,
+      expenseContent: toDisplayValue(item.expense_content, ""),
+      reimbursementDate: toDisplayValue(item.reimbursement_date, ""),
+      paymentMethod: toDisplayValue(item.payment_method, ""),
+      invoiceKind: toDisplayValue(item.invoice_kind, ""),
+      ticketCount: toDisplayValue(item.ticket_count, ""),
       feeContent: toDisplayValue(item.fee_content, ""),
       feeDescription: toDisplayValue(item.fee_description, ""),
       attachmentFileCount: toCount(item.attachment_file_count),

@@ -20,6 +20,8 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text_list,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
+    completed_oa_application_date_sql,
+    completed_oa_application_time_sql,
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )
@@ -905,7 +907,7 @@ completed_oa_facts as materialized (
         oa.id,
         oa.row_id,
         oa.scope_month,
-        oa.application_date,
+        {completed_oa_application_date_sql("oa")} as application_date,
         oa.updated_at,
         oa.applicant,
         oa.project_name,
@@ -5575,12 +5577,7 @@ class PostgresWorkbenchPageQueryRepository:
         except ValueError:
             pass
 
-        completed_oa_application_time_sql = """coalesce(
-            nullif(btrim(oa.normalized_payload->>'apply_time'), ''),
-            nullif(btrim(oa.normalized_payload->>'application_time'), ''),
-            nullif(btrim(oa.normalized_payload#>>'{detail_fields,申请时间}'), ''),
-            oa.application_date::text
-        )"""
+        application_time_sql = completed_oa_application_time_sql("oa")
         oa_text, oa_params = text_predicates(
             [
                 "oa.applicant",
@@ -5592,7 +5589,7 @@ class PostgresWorkbenchPageQueryRepository:
                 "coalesce(oa.normalized_payload->>'counterparty_name', "
                 "oa.normalized_payload#>>'{detail_fields,往来单位}')",
                 "oa.normalized_payload->>'reason'",
-                completed_oa_application_time_sql,
+                application_time_sql,
             ]
         )
         oa_expense_text, oa_expense_params = expense_item_text_predicate(

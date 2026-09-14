@@ -331,3 +331,26 @@ test.describe("workbench relation browser flow", () => {
     expect(api.count("GET /api/bank-details/transactions")).toBeGreaterThan(bankTransactionRequestCountBefore);
   });
 });
+
+test("collapsed invoice summary retains every reimbursement item and parent selection", async ({ page }) => {
+  await installDeterministicApiMocks(page, { sessionMode: "user", workbenchOaExpenseItemsScenario: true });
+  const response = page.waitForResponse(r => new URL(r.url()).pathname === "/api/workbench");
+  await page.goto("/");
+  const payload = await (await response).json();
+  const group = payload.unpaired.groups.find((g: { group_id: string }) => g.group_id === "row:oa-exp-2035");
+  group.display_mode = "collapsed_summary";
+  group.oa_rows[0].expense_items.forEach((item: Record<string, unknown>, index: number) => {
+    item.expense_content = `原始费用子项${index + 1}`;
+  });
+  await page.route("**/api/workbench?*", route => route.fulfill({ json: payload }));
+  await page.reload();
+  const zone = page.getByTestId("zone-unpaired");
+  for (let i = 1; i <= 3; i += 1) {
+    await expect(zone.getByText(`费用内容：原始费用子项${i}`, { exact: true })).toBeVisible();
+  }
+  // Selection remains attached to the original application, regardless of the child clicked.
+  const item = zone.getByText("费用内容：原始费用子项2", { exact: true });
+  await item.click();
+  await expect(zone.getByText(/OA 1\s*\/\s*324\.80/)).toBeVisible();
+  await expectNoUnexpectedSuccessUiErrors(page);
+});

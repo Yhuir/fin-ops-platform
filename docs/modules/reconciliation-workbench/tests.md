@@ -741,3 +741,11 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 移除展示和金额搜索对 OA/发票存在的限制，正式关系边界、同标签/方向/币种、至少 4 条保持不变。
 - PostgreSQL 验证纯流水总金额和成员金额搜索、summary/full 一致；service 验证合并确认与撤回恢复纯流水后仍可折叠。
 - 浏览器/组件覆盖无 OA/发票的默认折叠、展开/收起、双分区成员搜索、折叠状态下批次 owner 撤回；摘要 metadata 为空也不影响操作真实成员。
+
+## 2026-09-15 日常报销子项完整性
+
+- 单元/服务/API：`test_oa_expense_details.py`、`test_mongo_oa_adapter.py`、`test_workbench_query_service.py`、`test_oa_pending_payment_query_service.py`、`test_pending_invoice_canonical_query.py`、`test_invoice_usage_collection_canonical_query.py` 覆盖原始字段、零值、重复内容、空集合、公共字段白名单、多 OA 组按请求身份打开详情、列表不扩张、批量查询不增加。
+- 真实 PostgreSQL：`test_workbench_query_postgres_integration.py::test_completed_application_date_uses_original_detail_date` 验证历史月首占位日期不会盖掉申请日期；现有 summary/full、筛选/排序、配对/撤回、查询数量回归继续适用。
+- 前端：`groupDisplayModel.test.ts`、`RelationGroupGrid.test.tsx`、`WorkbenchApi.test.ts`、`DetailDrawer.test.tsx` 保护 1/4 子项、ETC 折叠、原始内容、精简 DTO 和详情；`e2e/workbench-relation-fanout.spec.ts` 覆盖真实 API 映射→折叠组子项→点击子项→父 OA 选择。
+- 跨页面：现有 OA 待付款、进项使用、待发票和成本分配浏览器回归；不修改成本分配金额或来源身份。
+- read model/cache/job 类别不适用：新增字段沿现有 canonical direct query 返回，没有新缓存、后台任务或状态机；既有权限、失败响应、关系事务仍由现有回归覆盖。

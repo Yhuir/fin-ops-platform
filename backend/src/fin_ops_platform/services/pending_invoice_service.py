@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-import hashlib
 from http import HTTPStatus
-import json
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import InvoiceType, TransactionDirection
@@ -14,6 +14,12 @@ from fin_ops_platform.services.bank_transaction_category_service import BankTran
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_expense_details import oa_expense_detail_sections
+from fin_ops_platform.services.pending_invoice_relation_identity import (
+    infer_pending_invoice_relation_row_type,
+    is_valid_pending_invoice_oa_row_id,
+    pending_invoice_relation_identity,
+)
 from fin_ops_platform.services.pending_invoice_rules import (
     PENDING_INVOICE_CASH_INCOME_GROUP,
     PENDING_INVOICE_NO_INVOICE_GROUP,
@@ -25,14 +31,8 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_available_actions,
     pending_invoice_status_payload,
 )
-from fin_ops_platform.services.pending_invoice_relation_identity import (
-    infer_pending_invoice_relation_row_type,
-    is_valid_pending_invoice_oa_row_id,
-    pending_invoice_relation_identity,
-)
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
-
 
 ATTACH_EXISTING_INVOICE_RELATION_MODE = "pending_invoice_attach_existing_invoice"
 EXPENSE_FILTERS = {"requires_invoice", "bank_statement_as_invoice", "no_invoice_required"}
@@ -1463,21 +1463,7 @@ class PendingInvoiceQueryService:
             **{str(key): value for key, value in dict(record.detail_fields or {}).items() if value not in (None, "")},
         }
         sections = [{"title": "基本信息", "fields": _detail_fields(detail)}]
-        for index, item in enumerate(record.expense_items or [], start=1):
-            if not isinstance(item, dict):
-                continue
-            sections.append({
-                "title": f"费用明细 {index}",
-                "fields": _detail_fields({
-                    "project_name": item.get("project_name"),
-                    "amount": item.get("amount"),
-                    "expense_type": item.get("expense_type"),
-                    "expense_content": item.get("expense_content") or item.get("fee_content"),
-                    "expense_description": item.get("fee_description"),
-                    "expense_date": item.get("reimbursement_date"),
-                    "报销附件": item.get("attachment_file_count"),
-                }),
-            })
+        sections.extend(oa_expense_detail_sections(record.expense_items))
         return {
             "title": "OA详情",
             "subtitle": record.apply_type or "OA详情",

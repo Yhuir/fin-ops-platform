@@ -20,6 +20,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
     without_keys,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
+    completed_oa_application_time_sql,
     pending_oa_application_date_sql,
     pending_oa_application_time_sql,
 )
@@ -397,12 +398,7 @@ class PostgresWorkbenchPageHydrationRepository:
                         'status', 'unpaired',
                         'workflow_status', coalesce(nullif(oa.workflow_status, ''), 'completed'),
                         'applicant', oa.applicant,
-                        'apply_time', coalesce(
-                            oa.normalized_payload->>'apply_time',
-                            oa.normalized_payload->>'application_time',
-                            oa.normalized_payload#>>'{detail_fields,申请时间}',
-                            oa.application_date::text
-                        ),
+                        'apply_time', __COMPLETED_OA_APPLICATION_TIME_SQL__,
                         'application_date', oa.application_date::text,
                         'completed_at', coalesce(
                             oa.normalized_payload->>'completed_at',
@@ -444,6 +440,11 @@ class PostgresWorkbenchPageHydrationRepository:
                                         item.value->>'settlement_amount',
                                         item.value->>'total_with_tax'
                                     ),
+                                    'expense_content', item.value->>'expense_content',
+                                    'reimbursement_date', item.value->>'reimbursement_date',
+                                    'payment_method', item.value->>'payment_method',
+                                    'invoice_kind', item.value->>'invoice_kind',
+                                    'ticket_count', item.value->>'ticket_count',
                                     'fee_content', item.value->>'fee_content',
                                     'fee_description', item.value->>'fee_description',
                                     'attachment_file_count', item.value->>'attachment_file_count'
@@ -527,6 +528,11 @@ class PostgresWorkbenchPageHydrationRepository:
                                         item.value->>'settlement_amount',
                                         item.value->>'total_with_tax'
                                     ),
+                                    'expense_content', item.value->>'expense_content',
+                                    'reimbursement_date', item.value->>'reimbursement_date',
+                                    'payment_method', item.value->>'payment_method',
+                                    'invoice_kind', item.value->>'invoice_kind',
+                                    'ticket_count', item.value->>'ticket_count',
                                     'fee_content', item.value->>'fee_content',
                                     'fee_description', item.value->>'fee_description',
                                     'attachment_file_count', item.value->>'attachment_file_count'
@@ -1155,6 +1161,7 @@ class PostgresWorkbenchPageHydrationRepository:
                 "__PENDING_OA_APPLICATION_TIME_SQL__",
                 pending_oa_application_time_sql("admission"),
             )
+            .replace("__COMPLETED_OA_APPLICATION_TIME_SQL__", completed_oa_application_time_sql("oa"))
             .replace(
                 "__PENDING_OA_APPLICATION_DATE_SQL__",
                 pending_oa_application_date_sql("admission"),
@@ -1320,7 +1327,9 @@ class PostgresWorkbenchPageHydrationRepository:
         if not targets:
             return
         row_ids = sorted({r["id"] for g in targets for r in g["oa_rows"]})
-        from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+        from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+            PostgresWorkbenchRelationRepository,
+        )
         apply_display_subgroups(targets, PostgresWorkbenchRelationRepository(connection).load_display_history(row_ids))
 
     @staticmethod

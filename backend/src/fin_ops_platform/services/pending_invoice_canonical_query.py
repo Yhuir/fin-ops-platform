@@ -1,26 +1,27 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
-import json
 from typing import Any, Callable, Iterator, Mapping
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.services.bank_details_canonical_query import (
     compile_bank_category_rule_sql,
 )
+from fin_ops_platform.services.bank_transaction_category_service import (
+    bank_transaction_tag_dictionary_display_payload,
+)
+from fin_ops_platform.services.oa_expense_details import oa_expense_detail_sections
+from fin_ops_platform.services.pending_invoice_relation_identity import (
+    is_valid_pending_invoice_oa_row_id,
+)
 from fin_ops_platform.services.pending_invoice_rules import (
     pending_invoice_effective_category_payload,
     pending_invoice_group_for_category,
     pending_invoice_tag_group_sets,
-)
-from fin_ops_platform.services.bank_transaction_category_service import (
-    bank_transaction_tag_dictionary_display_payload,
-)
-from fin_ops_platform.services.pending_invoice_relation_identity import (
-    is_valid_pending_invoice_oa_row_id,
 )
 from fin_ops_platform.services.pending_invoice_service import (
     INVOICE_CANDIDATE_SORT_FIELDS,
@@ -35,7 +36,6 @@ from fin_ops_platform.services.pending_invoice_status import (
     pending_invoice_status_payload,
 )
 from fin_ops_platform.services.search_query import normalize_money_search_query
-
 
 PAGE_SIZE_LIMIT = 200
 FILTER_OPTION_LIMIT = 50
@@ -1420,7 +1420,8 @@ select
         ''
     ) as reason,
     coalesce(oa.normalized_payload->>'expense_type', '') as expense_type,
-    coalesce(oa.normalized_payload->>'expense_content', '') as expense_content
+    coalesce(oa.normalized_payload->>'expense_content', '') as expense_content,
+    coalesce(oa.normalized_payload->'expense_items', '[]'::jsonb) as expense_items
 from workflow_oa oa
 where oa.row_id = %s
 limit 1
@@ -2201,7 +2202,8 @@ class PendingInvoiceCanonicalQueryService:
             "title": detail["workflow_no"] or "OA详情",
             "subtitle": detail["project_name"],
             "detail_available": True,
-            "sections": [{"title": _oa_section_title(detail), "fields": _oa_detail_fields(detail)}],
+            "sections": [{"title": _oa_section_title(detail), "fields": _oa_detail_fields(detail)}]
+            + oa_expense_detail_sections(row.get("expense_items") or []),
         }
 
     def relation_detail(

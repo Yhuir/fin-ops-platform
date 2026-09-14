@@ -633,12 +633,16 @@ class PendingInvoiceCanonicalQueryServiceTests(unittest.TestCase):
             "project_name": "大理余热项目",
             "amount": "332",
             "detail_fields": {"费用类型": "交通费", "OA单号": "2047"},
+            "expense_items": [{"amount": "332", "expense_content": "实际子项", "expense_item_id": "private-id"}],
         }
         service = PendingInvoiceCanonicalQueryService(repository=repository)
 
         bank = service.bank_transaction_detail("bank-1")
         invoice = service.invoice_detail("invoice-1")
         oa = service.oa_detail("oa-exp-2047")
+        self.assertEqual(oa["sections"][1]["title"], "费用明细 1")
+        self.assertIn({"label": "费用内容", "value": "实际子项"}, oa["sections"][1]["fields"])
+        self.assertNotIn("private-id", json.dumps(oa))
 
         self.assertEqual(bank["sections"][0]["title"], "支出流水")
         self.assertIn({"label": "账号", "value": "8106"}, bank["sections"][0]["fields"])

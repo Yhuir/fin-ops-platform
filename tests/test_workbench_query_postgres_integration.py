@@ -170,12 +170,29 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.raw_connection.close()
         truncate_test_database(self.database_url)
 
+    def test_completed_application_date_uses_original_detail_date(self):
+        from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
+            completed_oa_application_date_sql,
+            completed_oa_application_time_sql,
+        )
+        result = self.raw_connection.fetch_one(
+            f"select {completed_oa_application_date_sql('oa')} as day, "
+            f"{completed_oa_application_time_sql('oa')} as time "
+            "from (select %s::jsonb as normalized_payload, '2025-12-01'::date as application_date) oa",
+            (json.dumps({"detail_fields": {"申请日期": "2025-12-30"}}),),
+        )
+        self.assertEqual(str(result["day"]), "2025-12-30")
+        self.assertEqual(result["time"], "2025-12-30")
+
     def test_random_id_month_confirm_replay_withdraw_and_rollback(self):
-        from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-        from fin_ops_platform.services.workbench_relation_command_repository_adapter import WorkbenchRelationCommandRepositoryAdapter
-        from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
-        from tests.test_workbench_auth_context_idempotency import _new_facade
         from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
+        from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+        from fin_ops_platform.services.workbench_relation_command_repository_adapter import (
+            WorkbenchRelationCommandRepositoryAdapter,
+        )
+        from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
+
+        from tests.test_workbench_auth_context_idempotency import _new_facade
 
         bank_id = 'txn_imported_b072b36d7209440abc7a5cd65e0a0fd4'
         oa_ids = [f'oa-scope-{index}' for index in range(3)]
@@ -249,7 +266,10 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
 
     def test_scope_only_repair_is_atomic_audited_idempotent_and_reversible(self):
         from copy import deepcopy
-        from fin_ops_platform.services.postgres_repositories.workbench_scope_repair import PostgresWorkbenchScopeRepairRepository
+
+        from fin_ops_platform.services.postgres_repositories.workbench_scope_repair import (
+            PostgresWorkbenchScopeRepairRepository,
+        )
         repository = PostgresWorkbenchScopeRepairRepository(self.raw_connection)
         response = {'case_id': 'CASE-DIRECT-1', 'success': True, 'affected_months': ['2097-03'], 'outbox_event_ids': ['existing-event']}
         self.raw_connection.execute('''insert into app.workbench_idempotency_records

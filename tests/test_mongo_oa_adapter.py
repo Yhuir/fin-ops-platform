@@ -372,6 +372,8 @@ class MongoOAAdapterTests(unittest.TestCase):
                                     "detailCostStatement": "生产工具采购",
                                     "detailReimbursementDate": "2026-01-06",
                                     "detailTypeOfInvoice": "VAT_ordinary_invoice",
+                                    "detailPaymentMethod": "WeChat_pay",
+                                    "detailNumberOfBills": "3",
                                 },
                                 {
                                     "row_index": 1,
@@ -420,6 +422,9 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(reimbursement.detail_fields["流程请求ID"], "")
         self.assertEqual(reimbursement.detail_fields["Mongo文档ID"], "expense-doc-1")
         self.assertEqual(reimbursement.amount, "139")
+        self.assertEqual(reimbursement.expense_items[0]["payment_method"], "微信支付")
+        self.assertEqual(reimbursement.expense_items[0]["invoice_kind"], "增值税专用发票")
+        self.assertEqual(reimbursement.expense_items[0]["ticket_count"], "3")
         self.assertEqual(reimbursement.amount_source, "detail_sum")
         self.assertEqual(reimbursement.reason, "角磨机（刘晓宇申请）；工控机改标签邮寄费用")
         self.assertEqual(reimbursement.expense_type, "运费/邮费/杂费")

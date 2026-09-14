@@ -4,14 +4,14 @@ from datetime import date
 from typing import Any
 
 from fin_ops_platform.services.imports import ImportNormalizationService
-from fin_ops_platform.services.input_invoice_usage_query_contract import (
-    input_invoice_usage_filter_config,
-)
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     PaymentStatusEvaluationContext,
     evaluate_payment_status,
     normalize_payment_status_rules_settings,
     public_payment_status_rules_payload,
+)
+from fin_ops_platform.services.input_invoice_usage_query_contract import (
+    input_invoice_usage_filter_config,
 )
 from fin_ops_platform.services.input_invoice_usage_service import (
     InputInvoiceUsageError,
@@ -19,10 +19,11 @@ from fin_ops_platform.services.input_invoice_usage_service import (
     _money,
     input_invoice_usage_relation_details_from_row,
 )
+from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import (
     DistributedInvoiceRelationContext,
 )
-from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
+from fin_ops_platform.services.oa_expense_details import public_oa_expense_items
 from fin_ops_platform.services.postgres_repositories.invoice_usage_collection_query import (
     InvoiceUsageCollectionCanonicalSnapshot,
 )
@@ -664,6 +665,7 @@ def _oa_detail(record: Any | None, *, oa_id: str) -> dict[str, Any]:
         "reason": record.reason,
         "counterpartyName": record.counterparty_name,
         "detailFields": dict(record.detail_fields),
+        "expenseItems": public_oa_expense_items(record.expense_items),
         "openUrl": str(
             record.detail_fields.get("url")
             or record.detail_fields.get("open_url")

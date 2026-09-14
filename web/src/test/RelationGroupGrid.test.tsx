@@ -1107,6 +1107,7 @@ describe("Workbench candidate grouping layout", () => {
           projectName: "曲靖项目",
           amount: "60.00",
           expenseType: "住宿费",
+          expenseContent: "住宿费",
           feeContent: "住宿费",
           feeDescription: "曲靖住宿",
         },

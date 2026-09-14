@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
-import json
 from typing import Any, Callable
 
 from fin_ops_platform.domain.models import BankTransaction, Invoice
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_relation_query_context import relation_status, summary_is_linked
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID
-
+from fin_ops_platform.services.oa_payment_status_service import PAY_STATUS_PAID, OAPaymentStatusRecord
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -132,7 +131,7 @@ def _single_oa_row(
     payment_status = _payment_status_for_amount(record.amount, bank_payload, lifecycle_policy)
     row = {
         "id": _row_id(record.id),
-        "oa": _oa_summary(record),
+        "oa": oa_pending_payment_oa_summary(record),
         "paymentStatus": payment_status,
         "oaPaymentWriteback": _oa_payment_writeback_status(
             [record],
@@ -210,7 +209,7 @@ def _oa_group_payload(records: list[OAApplicationRecord], relation: dict[str, An
     }
 
 
-def _oa_summary(record: OAApplicationRecord) -> dict[str, Any]:
+def oa_pending_payment_oa_summary(record: OAApplicationRecord) -> dict[str, Any]:
     summary = _oa_relation_summary(record)
     return {
         "id": summary["oaId"],

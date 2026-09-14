@@ -34,6 +34,11 @@ export type WorkbenchExpenseItem = {
   projectName: string;
   amount: string;
   expenseType?: string;
+  expenseContent?: string;
+  reimbursementDate?: string;
+  paymentMethod?: string;
+  invoiceKind?: string;
+  ticketCount?: string;
   feeContent?: string;
   feeDescription?: string;
   attachmentFileCount?: number;

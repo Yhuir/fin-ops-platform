@@ -139,3 +139,7 @@
 ### 成本统计的混合审批成员读取（2026-09-13）
 
 成本 repository 通过既有 `PostgresOaPendingPaymentAdmissionRepository` 按关系 OA ID 批量补齐尚未进入正式表的成员，与正式 OA、银行、关系及分配在同一 PostgreSQL snapshot 中读取。正式 OA 优先；成本 Policy 逐 OA 判断当前完成资格。这个消费者不新增 admission、不调用外部 OA、不修改工作流状态或 OA 同步写入语义。成本保存对相关正式 OA/admission 行使用事务 SHARE lock，避免状态更新与保存交错。
+
+## 2026-09-15 日常报销子项展示修复
+
+Mongo 日常报销 schedule 新保留 detailPaymentMethod、detailTypeOfInvoice、detailNumberOfBills，分别输出 payment_method、invoice_kind、ticket_count；枚举复用 OA 草稿现有官方选项，未知代码原样保留。services/oa_expense_details.py 只做公共字段白名单和详情节投影，无数据库/HTTP/附件 I/O；不得根据父申请事由创建子项。历史补齐只读取唯一原始 OA 的同 row_index、同金额、同内容子项，事务更新元数据及 audit.events，保留子项 ID 和关系。

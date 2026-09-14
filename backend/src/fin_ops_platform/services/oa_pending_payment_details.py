@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from fin_ops_platform.services.oa_expense_details import oa_expense_detail_sections
+
 
 def oa_pending_payment_oa_detail_from_row(row: dict[str, Any]) -> dict[str, Any]:
     oa = _mapping(row.get("oa"))
@@ -26,7 +28,7 @@ def oa_pending_payment_oa_detail_from_row(row: dict[str, Any]) -> dict[str, Any]
                     {"label": "往来方", "value": oa.get("counterpartyName")},
                 ],
             }
-        ],
+        ] + oa_expense_detail_sections(row.get("expense_items") or []),
         "raw": deepcopy(oa),
     }
 

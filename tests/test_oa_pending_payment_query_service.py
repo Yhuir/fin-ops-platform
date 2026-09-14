@@ -1,14 +1,12 @@
 from __future__ import annotations
 
+import json
+import unittest
 from contextlib import contextmanager
 from datetime import date
 from hashlib import sha1
 from io import BytesIO
-import json
-import unittest
 from unittest.mock import patch
-
-from openpyxl import load_workbook
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
@@ -16,6 +14,7 @@ from fin_ops_platform.services.oa_pending_payment_query_service import OaPending
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_query import (
     PostgresOaPendingPaymentQueryRepository,
 )
+from openpyxl import load_workbook
 
 
 class OaPendingPaymentQueryServiceTests(unittest.TestCase):
@@ -117,6 +116,47 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
             service.bank_transaction_detail("missing-bank", tenant_id="tenant-a")
         self.assertEqual(caught.exception.status_code, 404)
         self.assertEqual(caught.exception.error_code, "bank_transaction_not_found")
+
+    def test_oa_detail_includes_all_items_without_expanding_the_list_payload(self) -> None:
+        repository = CanonicalQueryRepository()
+        record = _record()
+        record.expense_items = [
+            {"expense_item_id": "first", "amount": "30", "expense_content": "交通", "attachment_files": [{"url": "private"}]},
+            {"expense_item_id": "second", "amount": "70", "expense_content": "交通"},
+        ]
+        original = repository.load_facts
+        def load(*args, **kwargs):
+            return {**original(*args, **kwargs), "completed_records": [record]}
+        repository.load_facts = load
+        service = OaPendingPaymentQueryService(repository=repository)
+        detail = service.oa_detail(record.id, tenant_id="default")
+        self.assertEqual([s["title"] for s in detail["sections"]], ["OA信息", "费用明细 1", "费用明细 2"])
+        self.assertIn({"label": "报销金额", "value": "70"}, detail["sections"][2]["fields"])
+        self.assertNotIn("private", json.dumps(detail))
+        self.assertEqual(len(repository.load_calls), 1)
+        listing = service.rows({}, tenant_id="default")
+        self.assertNotIn("expense_items", listing["rows"][0])
+
+    def test_oa_detail_selects_requested_member_of_a_multi_oa_relation(self):
+        from tests.test_oa_pending_payment_canonical_rows import OaPendingPaymentProjectionRowsTests
+        fixture = OaPendingPaymentProjectionRowsTests()
+        first, second = fixture._oa("oa-1", "40.00"), fixture._oa("oa-2", "60.00")
+        second.expense_items = [{"expense_content": "第二张原始明细", "amount": "60.00"}]
+        bank = fixture._bank("bank-1", "100.00")
+        relations = [fixture._relation("case-1", [first.id, second.id, bank.id])]
+        row = fixture._build(records=[first, second], relations=relations, banks=[bank])[0]
+        repository = CanonicalQueryRepository()
+        repository.find_descriptor = lambda **kwargs: {
+            "row_id": row["id"], "scope_key": first.month, "source_kind": "completed", "oa_ids": [first.id, second.id],
+        }
+        repository.load_facts = lambda *args, **kwargs: {
+            "completed_records": [first, second], "in_progress_records": [], "relations": relations,
+            "bank_transactions": [bank], "invoices": [], "payment_statuses": {},
+        }
+        detail = OaPendingPaymentQueryService(repository=repository).oa_detail(second.id, tenant_id="default")
+        self.assertEqual(detail["id"], second.id)
+        self.assertIn({"label": "金额", "value": "60.00"}, detail["sections"][0]["fields"])
+        self.assertIn({"label": "费用内容", "value": "第二张原始明细"}, detail["sections"][1]["fields"])
 
     def test_bank_candidates_use_canonical_snapshot_and_preserve_query_contract(self) -> None:
         repository = CanonicalQueryRepository()

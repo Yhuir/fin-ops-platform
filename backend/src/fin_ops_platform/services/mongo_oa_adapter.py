@@ -33,6 +33,7 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import (
 )
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.oa_draft_prefill import OA_APPLICATION_TYPE_OPTIONS
+from fin_ops_platform.services.oa_expense_details import oa_expense_source_metadata
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 from fin_ops_platform.services.search_query import normalize_money_search_query
 
@@ -1167,6 +1168,7 @@ class MongoOAAdapter(OAAdapter):
                     "expense_content": expense_content or "—",
                     "fee_content": fee_content,
                     "fee_description": fee_description,
+                    **oa_expense_source_metadata(item),
                     "reimbursement_date": reimbursement_date,
                     "attachment_file_count": str(len(item_attachment_files)),
                     "attachment_files": [
