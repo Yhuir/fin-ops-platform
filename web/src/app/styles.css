@@ -1395,35 +1395,7 @@ textarea {
 }
 
 .input-invoice-usage-search {
-  display: grid;
   width: min(360px, 100%);
-  gap: var(--fp-space-1);
-  color: var(--fp-text-secondary);
-  font-size: var(--fp-text-caption);
-  font-weight: 700;
-}
-
-.input-invoice-usage-search input {
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid var(--fp-border);
-  border-radius: var(--fp-radius-sm);
-  background: var(--fp-surface);
-  color: var(--fp-text-primary);
-  font: inherit;
-  font-size: var(--fp-text-body);
-  outline: none;
-  padding: 0 var(--fp-space-3);
-  transition: border-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
-}
-
-.input-invoice-usage-search input:hover {
-  border-color: var(--fp-border-strong);
-}
-
-.input-invoice-usage-search input:focus-visible {
-  border-color: var(--fp-primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 18%, transparent);
 }
 
 .input-invoice-usage-button {

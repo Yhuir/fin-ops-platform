@@ -65,6 +65,12 @@
 - OA 详情使用一个独立只读 repeatable-read transaction 和一次有界 OA identity 查询；禁止加载页面 row group、发票或流水作为间接查找。
 - 只有 EXPLAIN 或真实慢查询证据支持时才增加索引；本模块不自行创建 migration。
 
+## 搜索控件展示边界
+
+- 页面复用 `QuerySearch` 和 HeroUI `SearchField`，只控制工具栏排列与搜索区域宽度；内部输入、图标和清除按钮由原生组件管理。
+- 搜索外框承担统一边框与聚焦反馈，页面不得通过后代 `input` 选择器再次添加边框、背景或聚焦阴影。旧原生输入框的普通、hover、focus-visible 样式已删除。
+- 关键词草稿、提交、清除、分页和查询 API 合同保持不变。
+
 ## 统一详情展示合同
 
 - OA、银行流水和发票详情统一使用共享 `EntityDetailContent` 与 HeroUI `Table`/`Chip`；标签在左、真实值在右，页面不得维护第二套详情 renderer。

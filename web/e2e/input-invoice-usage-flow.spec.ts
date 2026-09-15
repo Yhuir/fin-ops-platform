@@ -61,6 +61,73 @@ function waitForInputInvoiceUsageRows(page: Page) {
   });
 }
 
+test("search keeps a single focus frame and usable controls at desktop and narrow widths", async ({ page }, testInfo) => {
+  const api = await installDeterministicApiMocks(page, { sessionMode: "admin" });
+  await page.goto("/input-invoice-usage");
+  const search = page.getByRole("searchbox", { name: "进项发票使用情况搜索" });
+  const form = page.getByRole("search");
+  const group = form.locator(".search-field__group");
+  await expect(search).toBeVisible();
+  await expect(page.getByRole("grid", { name: "进项发票使用情况表" })).toBeVisible();
+
+  for (const width of [1440, 1280, 768]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.getByRole("heading", { name: "进项发票使用情况", exact: true }).click();
+    await expect(search).toHaveCSS("border-top-width", "0px");
+    await expect(search).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await search.click();
+    await expect(search).toBeFocused();
+    await expect(group).toHaveAttribute("data-focus-within", "true");
+    await expect(search).toHaveCSS("border-top-width", "0px");
+    await expect(search).not.toHaveCSS("box-shadow", /0px 0px 0px 3px/);
+
+    const readsBeforeTyping = api.calls.filter((call) => call.startsWith("GET /api/input-invoice-usage/rows")).length;
+    await search.fill("中文供应商 OA 12345678901234567890");
+    const clear = form.getByRole("button", { name: "清除查询" });
+    await expect(clear).toBeVisible();
+    const geometry = await group.evaluate((element) => {
+      const input = element.querySelector("input")!;
+      const icon = element.querySelector("svg")!;
+      const clearButton = element.querySelector("button")!;
+      return {
+        input: input.getBoundingClientRect().toJSON(),
+        icon: icon.getBoundingClientRect().toJSON(),
+        clear: clearButton.getBoundingClientRect().toJSON(),
+        group: element.getBoundingClientRect().toJSON(),
+      };
+    });
+    expect(geometry.input.left).toBeGreaterThanOrEqual(geometry.icon.right - 1);
+    expect(geometry.input.right).toBeLessThanOrEqual(geometry.clear.left + 1);
+    expect(geometry.clear.right).toBeLessThanOrEqual(geometry.group.right);
+    expect(geometry.input.width).toBeGreaterThan(80);
+    const formBox = await form.boundingBox();
+    expect(formBox!.x).toBeGreaterThanOrEqual(0);
+    expect(formBox!.x + formBox!.width).toBeLessThanOrEqual(width);
+    expect(api.calls.filter((call) => call.startsWith("GET /api/input-invoice-usage/rows")).length).toBe(readsBeforeTyping);
+    await page.screenshot({ path: testInfo.outputPath(`search-${width}.png`) });
+    await clear.click();
+    await expect(search).toHaveValue("");
+  }
+
+  await search.fill("浏览器进项供应商");
+  const responsePromise = waitForInputInvoiceUsageRows(page);
+  await search.press("Enter");
+  const response = await responsePromise;
+  expect(new URL(response.url()).searchParams.get("keyword")).toBe("浏览器进项供应商");
+  expect(new URL(response.url()).searchParams.get("page")).toBe("1");
+  expect(response.ok()).toBeTruthy();
+  await search.press("Tab");
+  await expect(form.getByRole("button", { name: "查询", exact: true })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(search).toBeFocused();
+  await expect(search).toHaveCSS("border-top-width", "0px");
+  const clearResponsePromise = waitForInputInvoiceUsageRows(page);
+  await form.getByRole("button", { name: "清除查询" }).click();
+  const clearResponse = await clearResponsePromise;
+  expect(new URL(clearResponse.url()).searchParams.has("keyword")).toBe(false);
+  await expect(search).toHaveValue("");
+});
+
 function waitForInputInvoiceUsageExportPreview(page: Page) {
   return page.waitForResponse((response) => {
     const url = new URL(response.url());
