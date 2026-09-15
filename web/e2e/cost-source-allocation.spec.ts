@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./fixtures/strictTest";
 import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 import { installDeterministicApiMocks } from './fixtures/apiMocks';
 
-async function sourceScenario(page: Page, options: { automatic?: boolean; partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
+async function sourceScenario(page: Page, options: { detailDelayMs?: number; automatic?: boolean; partial?: boolean; manual?: boolean;  telecom?: boolean; scopedLoan?: boolean; alignmentCase?: boolean; many?: boolean; longMenu?: boolean; screenshotCase?: boolean; prefill?: boolean; missingTag?: boolean; conflict?: boolean; canSave?: boolean; interrupted?: boolean; detailFailure?: boolean; large?: boolean; performance?: boolean; refreshFailure?: boolean } = {}) {
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
@@ -122,7 +122,7 @@ async function sourceScenario(page: Page, options: { automatic?: boolean; partia
       if (options.interrupted) return route.fulfill({ status: 502, json: { message: 'upstream response lost after commit' } });
       return route.fulfill({ json: task });
     }
-    if (url.pathname.endsWith('/source-case')) { details++; if (options.detailFailure && details === 1) return route.fulfill({ status: 503, json: { message: 'unavailable' } }); return route.fulfill({ json: task }); }
+    if (url.pathname.endsWith('/source-case')) { details++; if (options.detailDelayMs) await new Promise(resolve=>setTimeout(resolve,options.detailDelayMs)); if (options.detailFailure && details === 1) return route.fulfill({ status: 503, json: { message: 'unavailable' } }); return route.fulfill({ json: task }); }
     const { units, bank_events, allocations, source_allocations, suggested_source_allocations, ...summary } = task;
     return route.fulfill({ json: {
       items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: [...new Set(task.units.map(unit => unit.project_name))], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
@@ -521,13 +521,20 @@ test('aligns seven chosen sources and keeps the balance hint legible on every ta
   await amount.fill('210042');await expect(hint).toBeVisible();
   const task=scene.drawer.locator('.cost-source-task').first();
   await task.evaluate(element=>{(element as HTMLElement).style.zoom='1.5';});
+  // Scroll after the animated content has reached its new wrapping height.
+  const expectPanelSettled = () => expect.poll(() => task.locator('.cost-source-panel').evaluate(element =>
+    Math.abs(element.getBoundingClientRect().height - element.firstElementChild!.getBoundingClientRect().height) < 1 && element.getAnimations().length === 0,
+  )).toBe(true);
+  await expectPanelSettled();
   await save.evaluate(element=>element.scrollIntoView({block:'center'}));
   await expect(save).toBeInViewport();await expect(hint).toBeInViewport();
   expect(await hint.evaluate(element=>{const box=element.getBoundingClientRect();return element.contains(document.elementFromPoint(box.x+box.width/2,box.y+box.height/2));})).toBe(true);
   await page.screenshot({path:testInfo.outputPath('balance-150percent.png'),animations:'disabled'});
   await task.evaluate(element=>{(element as HTMLElement).style.zoom='1';});
+  await expectPanelSettled();
   await scene.drawer.locator('.cost-source-evidence').screenshot({path:testInfo.outputPath('aligned-seven.png'),animations:'disabled'});
   await page.setViewportSize({width:390,height:844});
+  await expectPanelSettled();
   expect(await scene.drawer.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
   await save.scrollIntoViewIfNeeded();await expect(save).toBeInViewport();await expect(hint).toBeInViewport();
   expect(scene.writes()).toBe(0);expect(scene.details()).toBe(1);
@@ -670,4 +677,88 @@ test('manual tag catalogue refreshes on open, retries failure without losing dra
   await expect(picker).toHaveText('内部往来款');
   expect(requests).toBe(4);
   expect(scene.writes()).toBe(0);
+});
+
+
+for (const large of [false, true]) {
+  test(`project accordion animates both directions and releases ${large ? 100 : 2} rows`, async ({page}, testInfo) => {
+    const scene = await sourceScenario(page, {large, performance:true});
+    const block = scene.drawer.locator('.cost-source-task').first();
+    const sample = async () => block.evaluate(async element => {
+      const panel = element.querySelector<HTMLElement>('.cost-source-panel')!;
+      const frames: {time:number;height:number}[] = [];
+      const start = performance.now();
+      element.querySelector<HTMLButtonElement>('.cost-source-task-heading')!.click();
+      do {
+        await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+        frames.push({time:performance.now()-start,height:panel.getBoundingClientRect().height});
+      } while (performance.now()-start < 400);
+      return frames;
+    });
+    // Let initial detail rendering settle before measuring an explicit interaction.
+    await expect.poll(()=>block.locator('.cost-source-panel').evaluate(e=>e.getAnimations().length)).toBe(0);
+    const full = await block.locator('.cost-source-panel').evaluate(e=>e.getBoundingClientRect().height);
+    const closing = await sample();
+    expect(closing.some(f=>f.height>1 && f.height<full-1)).toBe(true);
+    expect(closing.at(-1)!.height).toBe(0);
+    await expect(block.locator('.cost-source-form')).toHaveCount(0);
+    const opening = await sample();
+    expect(opening.some(f=>f.height>1 && f.height<full-1)).toBe(true);
+    await expect(scene.drawer.getByRole('textbox',{name:'分配金额 1',exact:true}).first()).toHaveValue(large ? '10.00' : '350.00');
+    expect(scene.details()).toBe(2); expect(scene.writes()).toBe(0);
+    await testInfo.attach('accordion-frames', {body:JSON.stringify({rows:large?100:2,full,closing,opening}),contentType:'application/json'});
+    console.log(JSON.stringify({accordionMotion:{rows:large?100:2,closeFrames:closing.length,openFrames:opening.length,maxFrameGap:Math.max(...[closing,opening].flatMap(frames=>frames.slice(1).map((f,i)=>f.time-frames[i].time)))}}));
+    await page.screenshot({path:testInfo.outputPath('accordion-expanded.png')});
+    // Reverse before the previous transition finishes; only the last action wins.
+    await block.evaluate(async element=>{
+      const trigger=element.querySelector<HTMLButtonElement>('.cost-source-task-heading')!;
+      trigger.click(); await new Promise<void>(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>r())));
+      trigger.click(); await new Promise<void>(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>r())));
+      trigger.click();
+    });
+    await expect(block.locator('.cost-source-form')).toHaveCount(0);
+    await expect(block.locator('.cost-source-task-heading')).toHaveAttribute('aria-expanded','false');
+    await block.locator('.cost-source-task-heading').click();
+    await expect(block.getByRole('table',{name:'成本分配明细',exact:true})).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+}
+
+test('project accordion respects reduced motion and keyboard collapse', async ({page}) => {
+  await page.emulateMedia({reducedMotion:'reduce'});
+  const scene=await sourceScenario(page,{prefill:true});
+  const block=scene.drawer.locator('.cost-source-task').first();
+  const heading=block.locator('.cost-source-task-heading');
+  await heading.focus(); await page.keyboard.press('Enter');
+  await expect(block.locator('.cost-source-form')).toHaveCount(0);
+  expect(await block.locator('.cost-source-panel').evaluate(e=>Math.max(...getComputedStyle(e).transitionDuration.split(',').map(Number.parseFloat)))).toBeLessThanOrEqual(0.001);
+  await page.keyboard.press('Tab');
+  await expect(scene.drawer.locator('.cost-source-task-heading').nth(1)).toBeFocused();
+  await heading.focus(); await page.keyboard.press('Space');
+  await expect(block.getByRole('table',{name:'成本分配明细',exact:true})).toBeVisible();
+  expect(scene.details()).toBe(2); expect(scene.writes()).toBe(0);
+});
+
+
+test('project accordion smoothly accommodates the first delayed detail', async ({page}, testInfo) => {
+  await page.addInitScript(()=>{
+    const heights:number[]=[];
+    (window as any).__allocationHeights=heights;
+    const observer=new MutationObserver(()=>{
+      const panel=document.querySelector('.cost-source-panel');
+      if (!panel) return;
+      observer.disconnect();
+      const start=performance.now();
+      const sample=()=>{heights.push(panel.getBoundingClientRect().height);if(performance.now()-start<1200) requestAnimationFrame(sample);};
+      requestAnimationFrame(sample);
+    });
+    observer.observe(document,{childList:true,subtree:true});
+  });
+  const scene=await sourceScenario(page,{detailDelayMs:250,prefill:true});
+  await expect.poll(()=>scene.drawer.locator('.cost-source-panel').first().evaluate(e=>e.getAnimations().length)).toBe(0);
+  const heights=await page.evaluate(()=>(window as any).__allocationHeights as number[]);
+  const full=await scene.drawer.locator('.cost-source-panel').first().evaluate(e=>e.getBoundingClientRect().height);
+  await testInfo.attach('async-height-frames',{body:JSON.stringify({heights,full}),contentType:'application/json'});
+  expect(heights.some(height=>height>60 && height<full-10)).toBe(true);
+  expect(scene.details()).toBe(1);expect(scene.writes()).toBe(0);
 });

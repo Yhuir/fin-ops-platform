@@ -1,6 +1,6 @@
-import { Button, Chip } from '@heroui/react';
+import { Accordion, Button, Chip } from '@heroui/react';
 import { ChevronRight, Search } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiClientError } from '../../features/apiClient';
 import AppDrawer from '../common/AppDrawer';
 import CostSourceAllocationForm from './CostSourceAllocationForm';
@@ -11,6 +11,33 @@ import './costSourceAllocation.css';
 
 type Props = { refreshKey?: string; active?: boolean; canSave: boolean; pendingCount?: number; onSaved: () => void };
 type TaskState = { task?: CostStatisticsManualAllocationTask; draft?: SourceDraft; dirty?: boolean; conflict?: boolean; loading?: boolean; saving?: boolean; error?: string; notice?: string; unconfirmedRequest?: SaveCostStatisticsManualAllocationRequest };
+// Keep the form only until HeroUI finishes hiding the panel; drafts live in the drawer.
+function AllocationPanel({ expanded, children }: { expanded: boolean; children: ReactNode }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  // Native disclosure measures only toggles. Observe this form for async details and row edits.
+  useLayoutEffect(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      panel.current!.style.setProperty('--cost-content-height', `${entry.contentRect.height}px`);
+    });
+    observer.observe(content.current!);
+    return () => observer.disconnect();
+  }, []);
+  const [retained, setRetained] = useState(expanded);
+  useLayoutEffect(() => {
+    if (expanded) { setRetained(true); return; }
+    const element = panel.current!;
+    const release = () => { if (element.hasAttribute('hidden')) setRetained(false); };
+    const observer = new MutationObserver(release);
+    observer.observe(element, { attributes: true, attributeFilter: ['hidden'] });
+    release();
+    return () => observer.disconnect();
+  }, [expanded]);
+  return <Accordion.Panel ref={panel} className="cost-source-panel" inert={!expanded}>
+    <div ref={content} className="cost-source-panel-content">{expanded || retained ? children : null}</div>
+  </Accordion.Panel>;
+}
+
 export default function CostStatisticsManualAllocationDrawer({ canSave, pendingCount, onSaved, refreshKey = '', active = true }: Props) {
   const [tagLoading, setTagLoading] = useState(false);
   const [tagError, setTagError] = useState<string>();
@@ -166,21 +193,28 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
         {error ? <div role="alert" className="cost-source-error">{error}<Button size="sm" onPress={() => void load()}>重试</Button></div> : null}
         {loading ? <p role="status">加载中…</p> : null}
         {!loading && !error && !items.length ? <p className="cost-source-empty">暂无{status === 'pending' ? '待分配' : '已完成'}任务</p> : null}
+        <Accordion className="cost-source-tasks" hideSeparator expandedKeys={expanded ? [expanded] : []} onExpandedChange={keys => {
+          const id = [...keys][0];
+          const next = id === undefined ? null : String(id);
+          setExpanded(next);
+          if (next && next !== expanded) void loadDetail(next);
+        }}>
         {items.map(item => {
           const id = item.relationCaseId; const state = states[id]; const active = expanded === id;
-          return <article className={`cost-source-task${active ? ' is-expanded' : ''}`} key={id}>
-            <button type="button" className="cost-source-task-heading" aria-expanded={active} onClick={() => { setExpanded(active ? null : id); if (!active) void loadDetail(id); }}>
-              <ChevronRight size={15} className={active ? 'is-expanded' : ''} /><strong>{item.projectNames.join('、') || '项目未填写'}</strong>
+          return <Accordion.Item className="cost-source-task" key={id} id={id}>
+            <Accordion.Heading><Accordion.Trigger className="cost-source-task-heading">
+              <Accordion.Indicator className="cost-source-indicator"><ChevronRight size={15} /></Accordion.Indicator><strong>{item.projectNames.join('、') || '项目未填写'}</strong>
               <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : (state?.task?.version ?? item.version) === 0 ? '自动分配' : '已完成'}</span>{state?.dirty ? <span>未保存</span> : null}</span>
-            </button>
-            {active ? <>
+            </Accordion.Trigger></Accordion.Heading>
+            <AllocationPanel expanded={active}>
               {state?.loading ? <p role="status">加载中…</p> : null}
               {state?.task && state.draft ? <CostSourceAllocationForm tagLoading={tagLoading} tagError={tagError} onLoadTags={() => void loadTags()} key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest || !!state.conflict} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
               {state?.unconfirmedRequest ? <Button size="sm" isDisabled={!!state.saving} onPress={() => void verifySave(id)}>核实保存结果</Button> : null}
               {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) { void loadDetail(id, true, true); } }}>重新加载</Button> : null}
-            </> : null}
-          </article>;
+            </AllocationPanel>
+          </Accordion.Item>;
         })}
+        </Accordion>
         {nextCursor ? <Button size="sm" isDisabled={loading || saving} onPress={() => void load(status, query, nextCursor)}>加载更多</Button> : null}
       </div>
     </AppDrawer>

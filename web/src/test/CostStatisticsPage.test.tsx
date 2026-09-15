@@ -168,6 +168,8 @@ describe("Cost statistics page", () => {
   });
 
   test("keeps bank labels and original OA expense types distinct in manual allocation", async () => {
+    // jsdom has no layout; browser tests cover observed panel heights.
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
     const user = userEvent.setup();
     installMockApiFetch();
     renderPage();

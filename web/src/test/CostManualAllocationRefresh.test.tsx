@@ -8,6 +8,8 @@ vi.mock('../features/cost-statistics/api',()=>({fetchCostManualTags:vi.fn(),fetc
 let task:CostStatisticsManualAllocationTask;
 beforeEach(()=>{
  vi.clearAllMocks();
+ // jsdom has no layout; actual height transitions are verified in Playwright.
+ vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
  task={relationCaseId:'case',relationVersion:1,sourceFingerprint:'first',scopeVersion:1,status:'pending',pendingReasons:['source_required'],amountsFixed:true,oaTotal:'100.00',grossOutflowTotal:'100.00',wrongPaymentRefundTotal:'0.00',netOutflowTotal:'100.00',nonCostAmount:'0.00',nonCostReason:'',version:0,updatedBy:'',updatedAt:'',canSave:true,
  units:[{unitId:'u',oaId:'o',oaApplyType:'支付申请',expenseItemId:'',projectId:'p',projectName:'项目',expenseType:'材料',expenseContent:'原始费用',oaApplicant:'申请人',oaOriginalAmount:'100.00'}],
  bankEvents:[{transactionId:'b',eventKind:'outflow',inProjectCostScope:true,amount:'100.00',tradeTime:'2026-09-01',counterpartyName:'供应商',bankAccountLabel:'建行 8106',bankTagCode:'material',bankTagPrimaryLabel:'材料',bankTagSubLabel:'采购',tags:[]}],
@@ -19,11 +21,11 @@ it('refreshes formal facts while preserving a conflicting dirty draft until expl
  const user=userEvent.setup();const props={canSave:true,onSaved:vi.fn(),refreshKey:'1'};
  const view=render(<Drawer {...props}/>);await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
  const input=await screen.findByRole('textbox',{name:'分配金额 1'});
- await user.clear(input);await user.type(input,'80');
+ await user.clear(input);await user.type(input,'80');await user.tab();
  task={...task,sourceFingerprint:'changed',relationVersion:2,units:task.units.map(u=>({...u,expenseContent:'更新的费用'}))};
  view.rerender(<Drawer {...props} refreshKey="2"/>);
  await screen.findByText('关联或分配已变化，草稿已保留；请重新加载后核对');
- expect(input).toHaveValue('80');expect(screen.getByRole('button',{name:'保存分配'})).toBeDisabled();
+ expect(input).toHaveValue('80.00');expect(screen.getByRole('button',{name:'保存分配'})).toBeDisabled();
  expect(within(screen.getByRole('table',{name:'OA 与流水对照'})).getByText('更新的费用')).toBeVisible();
  // Further refresh cannot clear the conflict or overwrite the draft.
  view.rerender(<Drawer {...props} refreshKey="3"/>);await waitFor(()=>expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(3));
@@ -113,5 +115,29 @@ it('discards an older tag catalogue response without resetting manual draft', as
   await user.click(screen.getByRole('option',{name:'新标签',exact:true}));
   expect(content).toHaveValue('保留输入');
   expect(picker).toHaveTextContent('费用 / 新标签');
+  expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
+});
+
+
+it('keeps one expanded task, preserves edits, and does not reopen on a late response', async () => {
+  const summary = {...task, projectNames:['项目'], unitCount:1, bankEventCount:1};
+  vi.mocked(fetchCostStatisticsManualAllocations).mockResolvedValue({items:[summary,{...summary,relationCaseId:'case-2',projectNames:['项目二']}],counts:{pending:2,allocated:0},rowCount:2});
+  const user = userEvent.setup();
+  render(<Drawer canSave onSaved={vi.fn()}/>);
+  await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
+  const amount = await screen.findByRole('textbox',{name:'分配金额 1'});
+  await user.clear(amount); await user.type(amount,'80');
+  let finish!:(t:CostStatisticsManualAllocationTask)=>void;
+  vi.mocked(fetchCostStatisticsManualAllocation).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  const second = screen.getByRole('button',{name:'项目二 待分配'});
+  await user.click(second);
+  expect(screen.getByRole('button',{name:/^项目 待分配/})).toHaveAttribute('aria-expanded','false');
+  await user.click(second);
+  await act(async()=>finish({...task,relationCaseId:'case-2'}));
+  expect(second).toHaveAttribute('aria-expanded','false');
+  expect(screen.queryByRole('textbox',{name:'分配金额 1'})).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button',{name:/^项目 待分配/}));
+  expect(await screen.findByRole('textbox',{name:'分配金额 1'})).toHaveValue('80.00');
+  expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(3);
   expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
 });
