@@ -3,7 +3,7 @@ import {
   PopoverRoot, PopoverTrigger, Select,
 } from "@heroui/react";
 import { FileSearch, Plus, Upload } from "lucide-react";
-import { type DragEvent, type ReactNode, useId, useMemo, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useId, useMemo, useRef, useEffect, useState } from "react";
 
 import {
   previewManualInvoices, recognizeManualInvoice, resolveImportApiErrorMessage,
@@ -40,7 +40,7 @@ type Entry = { id: number; values: ManualInvoiceEntryValues; saved: boolean; fil
 type ManualInvoiceBatchEditorProps = {
   disabled?: boolean;
   submitLabel: string;
-  onCancel: () => void;
+  onBusyChange?: (busy: boolean) => void;
   onSubmit: (preview: ManualInvoiceEntryBatchPreview) => Promise<void>;
   previewInvoices?: (values: ManualInvoiceEntryValues[]) => Promise<ManualInvoiceEntryBatchPreview>;
 };
@@ -62,7 +62,7 @@ function formatPreviewValue(key: keyof ManualInvoiceEntryValues, value: string, 
 export default function ManualInvoiceBatchEditor({
   disabled = false,
   submitLabel,
-  onCancel,
+  onBusyChange,
   onSubmit,
   previewInvoices = previewManualInvoices,
 }: ManualInvoiceBatchEditorProps) {
@@ -79,6 +79,7 @@ export default function ManualInvoiceBatchEditor({
   const current = entries.find((entry) => entry.id === selectedId) ?? entries[0];
   const values = current.values;
   const busy = isRecognizing || isSubmitting;
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   const invoiceCodeRequired = !isDigitalInvoiceNumber(values.invoiceNumber);
   const allSaved = entries.every((entry) => entry.saved);
   const summary = useMemo(() => entries.map((entry, index) => ({ ...entry, label: `新发票${index + 1}` })), [entries]);
@@ -147,7 +148,7 @@ export default function ManualInvoiceBatchEditor({
             <Field label="开票日期"><Input aria-label="开票日期" disabled={busy || disabled} type="date" value={values.invoiceDate} onChange={(event) => updateValue("invoiceDate", event.currentTarget.value)} /></Field><Field label="税率 %"><Input aria-label="税率" disabled={busy || disabled} inputMode="decimal" value={values.taxRate} onChange={(event) => updateValue("taxRate", event.currentTarget.value.replace(/%/g, ""))} /></Field>
             {moneyInput("netAmount", "不含税价格")}{moneyInput("taxAmount", "税额")}{moneyInput("totalWithTax", "价税合计")}
           </div>
-          <div className="manual-invoice-entry__footer"><Button isDisabled={busy} size="sm" variant="secondary" onPress={onCancel}>取消</Button><Button isDisabled={busy || disabled} size="sm" variant="primary" onPress={() => { const error = validate(); if (error) setErrorMessage(error); else setPage("preview"); }}>预览</Button></div>
+          <div className="manual-invoice-entry__footer"><Button isDisabled={busy || disabled} size="sm" variant="primary" onPress={() => { const error = validate(); if (error) setErrorMessage(error); else setPage("preview"); }}>预览</Button></div>
         </>}
     <div className="manual-invoice-entry__batch-footer"><span>{allSaved ? `已保存 ${entries.length} 张发票` : "请先预览并保存每张发票信息"}</span><Button isDisabled={!allSaved || busy || disabled} isPending={isSubmitting} size="sm" variant="primary" onPress={() => { void submitBatch(); }}>{isSubmitting ? "提交中..." : submitLabel}</Button></div>
   </div>;

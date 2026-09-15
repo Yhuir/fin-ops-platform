@@ -129,3 +129,7 @@
 - 旧 Turnover read model 中即使有残留错误行，也不能改变页面响应。
 - 任一写操作后没有 `turnover_ledger.read_model.refresh`、Turnover dirty scope 或无关页面 I/O。
 - 页面 GET 失败可由普通刷新重试，不依赖人工清队列或版本修复。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

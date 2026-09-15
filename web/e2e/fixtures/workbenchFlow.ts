@@ -124,5 +124,9 @@ export async function confirmWorkbenchRelation(
     await mark("firstVisibleResponseLatencyMs", expect(pairedGroup).toBeVisible());
     await mark("finalSettledLatencyMs", expect(pairedGroup).toBeVisible());
   });
+  const completed = page.getByRole("dialog", { name: "确认关联" });
+  await expect(completed.getByRole("status")).toHaveText("关联操作已完成");
+  await completed.getByRole("button", { name: "关闭关联预览" }).click();
+  await expect(completed).toBeHidden();
   await expectNoUnexpectedSuccessUiErrors(page);
 }

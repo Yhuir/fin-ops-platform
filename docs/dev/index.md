@@ -24,6 +24,8 @@
 
 ## 功能实施与计划
 
+- [右侧抽屉关闭行为](right-drawer-dismissal.md)：55 个抽屉模板、X 唯一主动退出入口、完成状态与验证范围。
+
 - [ETC 信用卡与票根匹配实施计划](etc-credit-card-ticket-matching-plan.md)：漏配根因、单一自动分配、逐页解析、当前任务窄写、旧逻辑删除、性能目标及七类测试；2026-09-14 仅计划与复审，不使用 GSD，尚未实施。
 - [确定来源自动分配实施计划](cost-statistics-automatic-source-allocation-plan.md)：正式来源证据、自动成本与部分待办闭环、旧路径移除、七类测试及性能验证；2026-09-14 已实施，本地验证与发布记录见成本模块实施说明，不使用 GSD。
 - [成本待分配抽屉双表格与Chip改进计划](cost-allocation-drawer-grid-refinement-plan.md)：已按 Impeccable 实施并部署，双只读表、Chip、字段错误浮层、同行新增与组色；真实浏览器/测试/性能和生产结果见[实施记录](../modules/cost-statistics/implementation-notes.md)，不使用GSD。

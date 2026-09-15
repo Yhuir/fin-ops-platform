@@ -292,9 +292,7 @@ export default function WorkbenchReceiptDrawer({
           <span className="workbench-receipt-drawer__footer-status">
             {submitting ? "正在生成 PDF…" : canPrint ? "金额已核对，可以打印" : "请完成收据核对"}
           </span>
-          <Button isDisabled={submitting} onPress={closeDrawer} size="sm" variant="secondary">
-            取消
-          </Button>
+
           <Button isDisabled={!canPrint} isPending={submitting} onPress={() => { void submitPrint(); }} size="sm" variant="primary">
             打印收据
           </Button>

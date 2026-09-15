@@ -386,6 +386,7 @@ export default function InputInvoiceUsagePage() {
         刷新
       </Button>
       <Button
+        isDisabled={query.activeWorkflow !== null}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "paymentRules" }))}
         size="sm"
         variant="secondary"
@@ -400,7 +401,7 @@ export default function InputInvoiceUsagePage() {
         OA 草稿预填管理
       </Button>
       <Button
-        isDisabled={exportDisabled}
+        isDisabled={exportDisabled || query.activeWorkflow !== null}
         onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "export" }))}
         size="sm"
         variant="secondary"
@@ -409,7 +410,7 @@ export default function InputInvoiceUsagePage() {
         筛选内容导出
       </Button>
     </PageToolbar>
-  ), [exportDisabled, loadRows, loading, refreshing, setQuery]);
+  ), [exportDisabled, loadRows, loading, query.activeWorkflow, refreshing, setQuery]);
   const visibleStatistics = statistics;
   const titleAccessory = useMemo(() => (
     <div className="page-title-accessory-group">
@@ -443,7 +444,8 @@ export default function InputInvoiceUsagePage() {
               right={(
                 <div className="input-invoice-usage-query-actions">
                   <Button
-                    onPress={() => setQuery((current) => ({ ...current, activeWorkflow: "oaReverse" }))}
+                    isDisabled={query.activeWorkflow !== null && query.activeWorkflow !== "oaReverse"}
+                    onPress={() => setQuery((current) => current.activeWorkflow === "oaReverse" ? current : ({ ...current, activeWorkflow: "oaReverse" }))}
                     size="sm"
                     variant="primary"
                   >

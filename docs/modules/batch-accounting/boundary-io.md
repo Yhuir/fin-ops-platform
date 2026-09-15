@@ -143,3 +143,7 @@ BatchAccountingPage
 ## 边界变化触发文档更新
 
 如果候选业务口径、canonical 表、API shape、权限、relation command、query count、文件范围或依赖方向变化，必须同步本文件、`README.md`、`tests.md`，并按长期事实影响更新 app architecture、API 或产品文档。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

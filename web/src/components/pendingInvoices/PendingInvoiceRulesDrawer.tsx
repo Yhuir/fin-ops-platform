@@ -157,7 +157,7 @@ export default function PendingInvoiceRulesDrawer({
       onClose={onClose}
       footer={(
         <div className="pending-invoice-drawer-actions">
-          <Button className="pending-invoices-button" isDisabled={saving} onPress={onClose} size="sm" variant="secondary">取消</Button>
+
           <Button
             className="pending-invoices-button pending-invoices-button--primary"
             isDisabled={!payload?.permissions.canSave || loading || saving}

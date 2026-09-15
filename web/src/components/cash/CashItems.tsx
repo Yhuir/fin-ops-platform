@@ -107,6 +107,7 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
   const originalRefId = item?.related_obligation_id ?? item?.ticket_source_id;
   const originalRef = useCashQuery<CashItemDetailData>(originalRefId && !refCleared && !ref ? `/items/${originalRefId}` : null);
   const linked = ref ?? (!refCleared && originalRef.data ? originalRef.data.item : null);
+  const [completed, setCompleted] = useState(false);
   const [closing, setClosing] = useState(false);
   const action = useItemWrite();
   const obligation = type === "loan" || type === "company_receivable";
@@ -119,7 +120,7 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
     || billLabel !== (item?.bill_label_id ?? "") || billMonth !== (item?.bill_month ?? "")
     || showBill !== Boolean(item?.bill_label_id) || (refCleared && Boolean(originalRefId || ticketSource))
     || Boolean(ref && ref.id !== (originalRefId ?? ticketSource?.id));
-  const requestClose = () => { if (dirty) setClosing(true); else onClose(); };
+  const requestClose = () => { if (completed) { onSaved?.(id); onClose(); } else if (dirty) setClosing(true); else onClose(); };
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -142,10 +143,10 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
         ticket_source_id: type === "company_receivable" ? linked?.id ?? null : null,
         expected_related_versions: { items: linked ? [{ id: linked.id, version: linked.version }] : [], flows: [], occurrences: [] },
       };
-      await action.write(item ? `/items/${id}` : "/items", item ? "PUT" : "POST", body, () => { onSaved?.(id); onClose(); });
+      await action.write(item ? `/items/${id}` : "/items", item ? "PUT" : "POST", body, () => setCompleted(true));
     } catch (error) { if (!(error instanceof Error)) throw error; action.setError(error.message); }
   }
-  return <AppDrawer open title={item ? "更正事项" : "新建事项"} width={620} className="cash-module cash-drawer" closeDisabled={action.busy} onClose={requestClose}>
+  return <AppDrawer completion={completed ? "事项已保存" : undefined} open title={item ? "更正事项" : "新建事项"} width={620} className="cash-module cash-drawer" closeDisabled={action.busy} onClose={requestClose}>
     {closing && <div role="alert" className="cash-confirm"><p>未保存的事项内容将被丢弃。</p><Button size="sm" variant="secondary" onPress={() => setClosing(false)}>继续填写</Button><Button size="sm" variant="danger" onPress={onClose}>放弃并关闭</Button></div>}
     <form className="cash-form" onSubmit={submit}>
       <CashNotice error={action.error} />
@@ -161,7 +162,7 @@ export function CashItemEditor({ item, initialType = "loan", opening: initialOpe
       {(type === "expense" || type === "company_receivable") && <><div className="cash-toolbar"><span>{type === "expense" ? "往来展示归属" : "对应票据来源"}：{linked?.content ?? "未关联"}</span><Button size="sm" variant="tertiary" onPress={() => setRefPicker(!refPicker)}>选择事项</Button>{(linked || originalRefId) && <Button size="sm" variant="tertiary" onPress={() => { setRef(null); setRefCleared(true); }}>解除引用</Button>}</div><CashNotice error={originalRef.error?.message} />{refPicker && <CashItemPicker label={type === "expense" ? "选择往来义务" : "选择票据来源"} params={{ type: type === "company_receivable" ? "ticket_source" : undefined, purpose: type === "expense" ? "settlement_target" : "list", settlement_kind: type === "expense" ? "non_ticket_offset" : undefined }} onSelect={row => { setRef(row); setRefCleared(false); setRefPicker(false); }} onCancel={() => setRefPicker(false)} />}</>}
       <CashInput label="备注" value={remark} onChange={setRemark} />
       {protectedSource && <p className="cash-muted">金额、日期、项目和期初由来源流水管理，请在该流水详情更正。</p>}
-      <div className="cash-form-actions"><Button variant="secondary" onPress={requestClose} isDisabled={action.busy}>取消</Button><Button type="submit" isDisabled={action.busy || Boolean(originalRefId && !refCleared && !linked)}>保存事项</Button></div>
+      <div className="cash-form-actions"><Button type="submit" isDisabled={action.busy || Boolean(originalRefId && !refCleared && !linked)}>保存事项</Button></div>
     </form>
   </AppDrawer>;
 }
@@ -170,8 +171,9 @@ const cashKinds: CashSettlementKind[] = ["cash_repayment", "company_collection",
 type FlowCandidate = { id: string; version: number; occurred_on: string; content: string; amount: string; available_amount: string; allocated_amount: string; selectable: boolean; kind: string; from_account: { name: string } | null; to_account: { name: string } | null; source_kind: string };
 
 export function CashSettlementEditor({ target, source, settlement, initialKind, onClose }: {
-  target?: RefItem; source?: RefItem; settlement?: CashSettlement; initialKind: CashSettlementKind; onClose: () => void;
+  target?: RefItem; source?: RefItem; settlement?: CashSettlement; initialKind: CashSettlementKind; onClose?: () => void;
 }) {
+  const [completed, setCompleted] = useState(false);
   const [id] = useState(() => crypto.randomUUID()); const [kind, setKind] = useState(initialKind);
   const [amount, setAmount] = useState(settlement?.amount ?? ""); const [date, setDate] = useState(settlement?.occurred_on ?? cashToday()); const [remark, setRemark] = useState(settlement?.remark ?? "");
   const [category, setCategory] = useState(settlement?.category_id ?? "");
@@ -198,9 +200,10 @@ export function CashSettlementEditor({ target, source, settlement, initialKind, 
         for (const value of [targetRef, sourceRef]) if (value && !versions.items.some(row => row.id === value.id)) versions.items.push({ id: value.id, version: value.version });
         body = { ...fields, expected_version: settlement.version, expected_related_versions: versions };
       } else body = { id, ...fields, expected_item_version: targetRef?.version ?? null, expected_source_item_version: sourceRef?.version ?? null, expected_flow_version: flow?.version ?? null };
-      await action.write(settlement ? `/settlements/${settlement.id}` : "/settlements", settlement ? "PUT" : "POST", body, onClose);
+      await action.write(settlement ? `/settlements/${settlement.id}` : "/settlements", settlement ? "PUT" : "POST", body, () => { if (onClose) onClose(); else setCompleted(true); });
     } catch (error) { if (!(error instanceof Error)) throw error; action.setError(error.message); }
   }
+  if (completed) return <p role="status">处理已保存</p>;
   return <section className="cash-form" aria-label={settlement ? "更正处理记录" : "登记处理"}>
     <h3>{settlement ? "更正处理记录" : "登记处理"}</h3><CashNotice error={action.error} />
     <form className="cash-form" onSubmit={submit}>
@@ -214,7 +217,7 @@ export function CashSettlementEditor({ target, source, settlement, initialKind, 
       {kind === "non_ticket_offset" && !chosenSource && <CashConfigurationSelect name="categories" label="无来源调整分类" value={category} selected={settlement?.category} groups={["turnover"]} onChange={setCategory} required />}
       {!isCash && chosenSource && <p className="cash-hint">分类沿用来源事项；来源项目与借款项目分别保留，提交时核对归属和当前可用额。</p>}
       <p className="cash-muted">{isCash ? "只关联选中的现金，不生成第二笔流水。" : "此操作不产生现金流水，不改变现金账户余额。"}</p>
-      <div className="cash-form-actions"><Button variant="secondary" onPress={onClose} isDisabled={action.busy}>取消处理</Button><Button type="submit" isDisabled={action.busy || flows.loading}>保存处理</Button></div>
+      <div className="cash-form-actions">{onClose && <Button variant="secondary" onPress={onClose} isDisabled={action.busy}>取消处理</Button>}<Button type="submit" isDisabled={action.busy || flows.loading}>保存处理</Button></div>
     </form>
   </section>;
 }
@@ -240,16 +243,17 @@ export function CashSettlementTable({ params, onItem, onFlow }: { params: QueryP
 const amountLabels: Record<string, string> = { original_amount: "原始金额", cash_settled_amount: "现金已结", ticket_offset_amount: "票抵", non_ticket_offset_amount: "无票 / 其他冲抵", remaining_obligation_amount: "当前未结", paid_amount: "已付款", refund_amount: "已退款", net_expense_amount: "真实花销", available_offset_amount: "可冲抵费用", provided_amount: "提供金额", used_amount: "已使用", offset_amount: "用于抵债", available_source_amount: "来源可用" };
 
 export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow }: { itemId: string; onClose: () => void; onFlow?: (id: string) => void; onActualFlow?: (item: CashItem, kind: CashSettlementKind) => void }) {
+  const [deleted, setDeleted] = useState(false);
   const [currentId, setCurrentId] = useState(itemId);
-  const query = useCashQuery<CashItemDetailData>(`/items/${currentId}`);
-  const [editing, setEditing] = useState(false); const [actionKind, setActionKind] = useState<CashSettlementKind | null>(null);
-  const [view, setView] = useState("target"); const [deleteConfirm, setDeleteConfirm] = useState(false); const [companyCreate, setCompanyCreate] = useState(false);
+  const query = useCashQuery<CashItemDetailData>(deleted ? null : `/items/${currentId}`);
+  const [editing, setEditing] = useState<CashItem | null>(null); const [actionKind, setActionKind] = useState<CashSettlementKind | null>(null);
+  const [view, setView] = useState("target"); const [deleteConfirm, setDeleteConfirm] = useState(false); const [companyCreate, setCompanyCreate] = useState<CashItem | null>(null);
   const action = useItemWrite(); const item = query.data?.item;
   function openRelated(id: string) { setCurrentId(id); setActionKind(null); setView("target"); setDeleteConfirm(false); }
-  if (editing && item) return <CashItemEditor item={item} onClose={() => setEditing(false)} />;
-  if (companyCreate && item) return <CashItemEditor initialType="company_receivable" ticketSource={item} onClose={() => setCompanyCreate(false)} onSaved={openRelated} />;
+  if (editing) return <CashItemEditor item={editing} onClose={() => setEditing(null)} />;
+  if (companyCreate) return <CashItemEditor initialType="company_receivable" ticketSource={companyCreate} onClose={() => setCompanyCreate(null)} onSaved={openRelated} />;
   const cashKind: CashSettlementKind | null = item?.type === "loan" ? "cash_repayment" : item?.type === "company_receivable" ? "company_collection" : item?.type === "expense" ? "expense_payment" : null;
-  return <AppDrawer open title="事项详情" width={860} className="cash-module cash-drawer" onClose={onClose} closeDisabled={action.busy}>
+  return <AppDrawer completion={deleted ? "事项已删除" : undefined} open title="事项详情" width={860} className="cash-module cash-drawer" onClose={onClose} closeDisabled={action.busy}>
     <CashNotice error={query.error?.message ?? action.error} />{query.loading && <p role="status">正在读取事项…</p>}
     {item && query.data && !query.loading && <>
       <div className="cash-detail-heading"><h3>{item.content}</h3><p>{itemTypeLabels[item.type]} · {item.counterparty ?? item.ticket_provider ?? "—"} · {item.project_name_snapshot ?? "无项目"}</p></div>
@@ -257,13 +261,13 @@ export function CashItemDetail({ itemId, onClose, onFlow, onActualFlow }: { item
       <dl className="cash-facts"><div><dt>{item.is_opening ? "起算日期" : "实际日期"}</dt><dd>{item.origin_date}</dd></div>{(item.type === "expense" || item.type === "ticket_source") && <div><dt>费用类型</dt><dd>{item.category === null ? "未分类" : item.category.name}</dd></div>}{Object.entries(query.data.amounts).map(([key, value]) => <div key={key}><dt>{amountLabels[key]}</dt><dd>{cashAmount(value)}</dd></div>)}</dl>
       {item.bill_month && <p>实际代付月份：{item.origin_date.slice(0, 7)} · 账单月份：{item.bill_month}{item.origin_date.slice(0, 7) < item.bill_month ? " · 提前代付（计入实际发生月份）" : ""}</p>}
       <p>{item.remark ?? "无备注"}</p>
-      <div className="cash-toolbar"><Button size="sm" variant="secondary" onPress={() => setEditing(true)}>更正事项</Button>{item.origin_flow_id && onFlow ? <Button size="sm" variant="tertiary" onPress={() => onFlow(item.origin_flow_id!)}>来源流水 / 纠错</Button> : !item.origin_flow_id && <Button size="sm" variant="tertiary" onPress={() => setDeleteConfirm(true)}>删除错误事项</Button>}
+      <div className="cash-toolbar"><Button size="sm" variant="secondary" onPress={() => setEditing(item)}>更正事项</Button>{item.origin_flow_id && onFlow ? <Button size="sm" variant="tertiary" onPress={() => onFlow(item.origin_flow_id!)}>来源流水 / 纠错</Button> : !item.origin_flow_id && <Button size="sm" variant="tertiary" onPress={() => setDeleteConfirm(true)}>删除错误事项</Button>}
         {cashKind && <><Button size="sm" variant="secondary" onPress={() => setActionKind(cashKind)}>关联已录现金</Button>{onActualFlow && <Button size="sm" onPress={() => onActualFlow(item, cashKind)}>登记实际收付</Button>}</>}
         {item.type === "expense" && <Button size="sm" variant="secondary" onPress={() => setActionKind("expense_refund")}>关联费用退款</Button>}
         {(item.type === "loan" || item.type === "company_receivable") && <><Button size="sm" variant="secondary" onPress={() => setActionKind("ticket_offset")}>票据抵债</Button><Button size="sm" variant="secondary" onPress={() => setActionKind("non_ticket_offset")}>无票 / 其他冲抵</Button></>}
-        {item.type === "ticket_source" && <><Button size="sm" variant="secondary" onPress={() => setActionKind("ticket_use")}>登记使用</Button><Button size="sm" variant="secondary" onPress={() => setActionKind("ticket_offset")}>用于抵债</Button><Button size="sm" variant="secondary" onPress={() => setCompanyCreate(true)}>建立明确公司应收</Button></>}
+        {item.type === "ticket_source" && <><Button size="sm" variant="secondary" onPress={() => setActionKind("ticket_use")}>登记使用</Button><Button size="sm" variant="secondary" onPress={() => setActionKind("ticket_offset")}>用于抵债</Button><Button size="sm" variant="secondary" onPress={() => setCompanyCreate(item)}>建立明确公司应收</Button></>}
       </div>
-      {deleteConfirm && <div role="alert" className="cash-confirm"><p>确认删除此错误事项？这不是删除现金流水；仍有真实使用、结算或引用时，须先在处理明细中明确更正。</p><Button size="sm" variant="secondary" isDisabled={action.busy} onPress={() => setDeleteConfirm(false)}>取消</Button><Button size="sm" variant="danger" isDisabled={action.busy} onPress={() => void action.write(`/items/${item.id}/remove`, "POST", { expected_version: item.version }, onClose)}>确认删除事项</Button></div>}
+      {deleteConfirm && <div role="alert" className="cash-confirm"><p>确认删除此错误事项？这不是删除现金流水；仍有真实使用、结算或引用时，须先在处理明细中明确更正。</p><Button size="sm" variant="secondary" isDisabled={action.busy} onPress={() => setDeleteConfirm(false)}>取消</Button><Button size="sm" variant="danger" isDisabled={action.busy} onPress={() => void action.write(`/items/${item.id}/remove`, "POST", { expected_version: item.version }, () => setDeleted(true))}>确认删除事项</Button></div>}
       {actionKind && <CashSettlementEditor key={actionKind} initialKind={actionKind} target={item.type === "ticket_source" ? undefined : item} source={item.type === "ticket_source" ? item : undefined} onClose={() => setActionKind(null)} />}
       <CashTabs value={view} onChange={setView} tabs={[{ id: "target", label: item.type === "ticket_source" ? "使用 / 抵债明细" : "处理明细" }, ...(item.type === "expense" ? [{ id: "source", label: "作为冲抵来源" }] : []), ...(item.type === "ticket_source" ? [{ id: "receivables", label: "公司应收 / 实际回款" }] : item.type === "loan" || item.type === "company_receivable" ? [{ id: "expenses", label: "关联费用" }] : []), { id: "flows", label: "关联现金" }]} />
       {view === "flows" ? <CashItemFlows itemId={item.id} onFlow={onFlow} /> : view === "receivables" ? <CashItemPicker label="对应公司应收" params={{ type: "company_receivable", ticket_source_id: item.id }} onSelect={row => openRelated(row.id)} /> : view === "expenses" ? <CashItemPicker label="归属该往来的费用" params={{ type: "expense", related_obligation_id: item.id }} onSelect={row => openRelated(row.id)} /> : <CashSettlementTable key={`${item.id}-${view}`} params={item.type === "ticket_source" || view === "source" ? { source_item_id: item.id } : { item_id: item.id }} onFlow={onFlow} onItem={openRelated} />}

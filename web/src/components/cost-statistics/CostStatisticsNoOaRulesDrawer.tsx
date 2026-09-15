@@ -106,7 +106,7 @@ export default function CostStatisticsNoOaRulesDrawer({
         <div className="cost-tag-rules-footer" inert={interactionLocked ? true : undefined}>
           <div className="cost-tag-rules-footer-status" role="status">{rules ? `${projects.length} 个虚拟项目 · 已分配 ${assignedCount} 个标签` : ""}</div>
           <div className="cost-tag-rules-footer-actions">
-            <Button isDisabled={saving || interactionLocked} onPress={onClose} size="sm" variant="secondary">取消</Button>
+
             <Button isDisabled={!rules || loading || saving || interactionLocked || !canSave || hasIncompleteProject} isPending={saving} onPress={onSave} size="sm" variant="primary">保存</Button>
           </div>
         </div>

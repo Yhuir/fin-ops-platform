@@ -218,7 +218,6 @@ export default function OaPendingPaymentsPage() {
   ) => {
     setFeedback(message);
     setSelectedOaRowIds(new Set());
-    setBankLinkDrawerOpen(false);
     loadRows("refresh");
   }, [loadRows]);
 
@@ -494,6 +493,8 @@ function OaBankLinkDrawer({
   onError: (message: string) => void;
   onClose: () => void;
 }) {
+  const [completion, setCompletion] = useState<string | undefined>();
+  useEffect(() => { if (!open) setCompletion(undefined); }, [open]);
   const [relationStatus, setRelationStatus] = useState<OaPendingPaymentBankCandidateRelationStatus>("all");
   const [keywordDraft, setKeywordDraft] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -507,10 +508,10 @@ function OaBankLinkDrawer({
   const [searchGeneration, setSearchGeneration] = useState(0);
   const candidateRequestSeqRef = useRef(0);
   const pageCount = Math.max(1, Math.ceil(total / BANK_CANDIDATE_PAGE_SIZE));
-  const closeBlocked = loading || submitting;
+  const closeBlocked = (!completion && loading) || submitting;
 
   const loadCandidates = useCallback((signal?: AbortSignal) => {
-    if (!open) {
+    if (!open || completion) {
       return;
     }
     const requestId = candidateRequestSeqRef.current + 1;
@@ -546,7 +547,7 @@ function OaBankLinkDrawer({
           setLoading(false);
         }
       });
-  }, [keyword, open, page, relationStatus, selectedOaRowIds]);
+  }, [completion, keyword, open, page, relationStatus, selectedOaRowIds]);
 
   useEffect(() => {
     if (!open) {
@@ -588,6 +589,7 @@ function OaBankLinkDrawer({
           bankTransactionIds: [...selectedBankIds],
           idempotencyKey: `oa-pending-link-${selectedOaRowIds.join("-")}-${[...selectedBankIds].join("-")}-${Date.now()}`,
         });
+        setCompletion("支出流水关联已保存");
         await onLinked(linkBankSuccessMessage(result), result);
       } catch (caught: unknown) {
         onError(caught instanceof Error ? caught.message : "关联支出流水失败。");
@@ -600,13 +602,14 @@ function OaBankLinkDrawer({
   return (
     <AppDrawer
       ariaBusy={closeBlocked}
+      completion={completion}
       ariaLabel="关联支出流水抽屉"
       className="oa-pending-payments-bank-drawer"
       closeDisabled={closeBlocked}
       closeLabel="关闭关联支出流水抽屉"
       footer={(
         <div className="oa-pending-payments-bank-drawer__footer">
-          <Button isDisabled={closeBlocked} onPress={onClose} size="sm" variant="secondary">取消</Button>
+
           <Button
             className="oa-pending-payments-button oa-pending-payments-button--primary"
             isDisabled={loading || submitting || selectedOaRowIds.length === 0 || selectedBankIds.size === 0}

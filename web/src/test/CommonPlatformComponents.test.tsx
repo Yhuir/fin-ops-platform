@@ -186,8 +186,8 @@ describe("common platform components", () => {
 
     await user.keyboard("{Escape}");
     expect(onClose).not.toHaveBeenCalled();
-    expect(appDrawerSource).toContain("isDismissable={!closeDisabled}");
-    expect(appDrawerSource).toContain("isKeyboardDismissDisabled={closeDisabled}");
+    expect(appDrawerSource).toContain("isDismissable={false}");
+    expect(appDrawerSource).toContain("isKeyboardDismissDisabled");
   });
 
   test("retains the last open modal content throughout its exit", async () => {

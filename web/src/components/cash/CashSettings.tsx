@@ -83,6 +83,7 @@ function CashAccounts({ initial, onChange }: { initial: AccountCriteria; onChang
 }
 
 function CashAccountEditor({ account, onClose }: { account: CashAccountSetting | null; onClose: () => void }) {
+  const [completed, setCompleted] = useState(false);
   const [id] = useState(() => crypto.randomUUID());
   const [name, setName] = useState(account?.name ?? "");
   const [kind, setKind] = useState<string>(account?.kind ?? "");
@@ -97,9 +98,9 @@ function CashAccountEditor({ account, onClose }: { account: CashAccountSetting |
   const save = async () => {
     const result = await mutation.run(account ? `/settings/accounts/${account.id}` : "/settings/accounts",
       { ...(account ? { expected_version: account.version } : { id }), name, kind, opening_date: openingDate, opening_amount: amount, enabled, remark: remark || null }, account ? "PUT" : "POST");
-    if (result !== null) onClose();
+    if (result !== null) setCompleted(true);
   };
-  return <AppDrawer open title={account ? "编辑现金账户" : "新增现金账户"} className="cash-drawer" width={520} onClose={close.requestClose} closeDisabled={mutation.busy} footer={<><Button variant="tertiary" isDisabled={mutation.busy} onPress={close.requestClose}>取消</Button><Button type="submit" form="cash-account-form" isDisabled={mutation.busy || (openingChanged && !confirmed)}>保存账户</Button></>}>
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title={account ? "编辑现金账户" : "新增现金账户"} className="cash-drawer" width={520} onClose={completed ? onClose : close.requestClose} closeDisabled={mutation.busy} footer={<><Button type="submit" form="cash-account-form" isDisabled={mutation.busy || (openingChanged && !confirmed)}>保存账户</Button></>}>
     <form id="cash-account-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <CashNotice error={mutation.error?.message} />
       <CashInput label="账户名称" value={name} onChange={setName} required disabled={mutation.busy} />
@@ -153,6 +154,7 @@ function CashCategories({ initial, onChange }: { initial: CategoryCriteria; onCh
 }
 
 function CashCategoryEditor({ category, onClose }: { category: CashCategorySetting | null; onClose: () => void }) {
+  const [completed, setCompleted] = useState(false);
   const [id] = useState(() => crypto.randomUUID());
   const [name, setName] = useState(category?.name ?? "");
   const [group, setGroup] = useState<string>(category?.group ?? "");
@@ -160,10 +162,10 @@ function CashCategoryEditor({ category, onClose }: { category: CashCategorySetti
   const [remark, setRemark] = useState(category?.remark ?? "");
   const mutation = useCashMutation();
   const close = useCashTaskSettingsCloseGuard([name, group, enabled, remark], onClose, mutation.busy);
-  return <AppDrawer open title={category ? "编辑费用类型" : "新增费用类型"} width={480} className="cash-drawer" onClose={close.requestClose} closeDisabled={mutation.busy} footer={<><Button variant="tertiary" onPress={close.requestClose} isDisabled={mutation.busy}>取消</Button><Button type="submit" form="cash-category-form" isDisabled={mutation.busy}>保存费用类型</Button></>}>
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title={category ? "编辑费用类型" : "新增费用类型"} width={480} className="cash-drawer" onClose={completed ? onClose : close.requestClose} closeDisabled={mutation.busy} footer={<><Button type="submit" form="cash-category-form" isDisabled={mutation.busy}>保存费用类型</Button></>}>
     <form id="cash-category-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void (async () => {
       const result = await mutation.run(category ? `/settings/categories/${category.id}` : "/settings/categories", { ...(category ? { expected_version: category.version } : { id }), name, group, enabled, remark: remark || null }, category ? "PUT" : "POST");
-      if (result !== null) onClose();
+      if (result !== null) setCompleted(true);
     })(); }}>
       <CashNotice error={mutation.error?.message} />
       <CashInput label="费用类型名称" value={name} onChange={setName} required disabled={mutation.busy} />
@@ -193,15 +195,16 @@ function CashPersonalOpening() {
 }
 
 function CashOpeningDateEditor({ setting, onClose }: { setting: CashPersonalSetting; onClose: () => void }) {
+  const [completed, setCompleted] = useState(false);
   const [date, setDate] = useState(setting.opening_date ?? "");
   const [counterparty, setCounterparty] = useState(setting.counterparty ?? "");
   const [confirmed, setConfirmed] = useState(false);
   const mutation = useCashMutation();
   const close = useCashTaskSettingsCloseGuard([date, counterparty], onClose, mutation.busy);
-  return <AppDrawer open title="设置个人账起算" width={480} className="cash-drawer" onClose={close.requestClose} closeDisabled={mutation.busy} footer={<><Button variant="tertiary" onPress={close.requestClose} isDisabled={mutation.busy}>取消</Button><Button type="submit" form="cash-personal-opening-form" isDisabled={mutation.busy || Boolean(setting.opening_date && !confirmed)}>保存起算</Button></>}>
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title="设置个人账起算" width={480} className="cash-drawer" onClose={completed ? onClose : close.requestClose} closeDisabled={mutation.busy} footer={<><Button type="submit" form="cash-personal-opening-form" isDisabled={mutation.busy || Boolean(setting.opening_date && !confirmed)}>保存起算</Button></>}>
     <form id="cash-personal-opening-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void (async () => {
       const result = await mutation.run("/settings/personal-opening", { expected_version: setting.version, opening_date: date || null, counterparty: counterparty.trim() || null }, "PUT");
-      if (result !== null) onClose();
+      if (result !== null) setCompleted(true);
     })(); }}>
       <CashNotice error={mutation.error?.message} /><CashInput label="个人账起算日期" type="date" value={date} onChange={(value) => { setDate(value); setConfirmed(false); }} disabled={mutation.busy} />
       <CashInput label="个人专账归属人" value={counterparty} onChange={value => { setCounterparty(value); setConfirmed(false); }} disabled={mutation.busy} required={Boolean(date)} />
@@ -295,14 +298,15 @@ export function CashBillLabels() {
 }
 
 function CashBillEditor({ row, onClose }: { row: CashBillLabelSetting | null; onClose: () => void }) {
+  const [completed, setCompleted] = useState(false);
   const [id] = useState(() => crypto.randomUUID());
   const [bank, setBank] = useState(row?.bank_name ?? "");
   const [label, setLabel] = useState(row?.label ?? "");
   const [enabled, setEnabled] = useState(row?.enabled ?? true);
   const mutation = useCashMutation();
   const close = useCashTaskSettingsCloseGuard([bank, label, enabled], onClose, mutation.busy);
-  return <AppDrawer open title={row ? "编辑账单分组" : "新增账单分组"} width={480} className="cash-drawer" onClose={close.requestClose} closeDisabled={mutation.busy} footer={<Button type="submit" form="cash-bill-form" isDisabled={mutation.busy}>保存分组</Button>}>
-    <form id="cash-bill-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void (async () => { const result = await mutation.run(row ? `/settings/bill-labels/${row.id}` : "/settings/bill-labels", { ...(row ? { expected_version: row.version } : { id }), bank_name: bank, label, enabled }, row ? "PUT" : "POST"); if (result !== null) onClose(); })(); }}>
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title={row ? "编辑账单分组" : "新增账单分组"} width={480} className="cash-drawer" onClose={completed ? onClose : close.requestClose} closeDisabled={mutation.busy} footer={<Button type="submit" form="cash-bill-form" isDisabled={mutation.busy}>保存分组</Button>}>
+    <form id="cash-bill-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void (async () => { const result = await mutation.run(row ? `/settings/bill-labels/${row.id}` : "/settings/bill-labels", { ...(row ? { expected_version: row.version } : { id }), bank_name: bank, label, enabled }, row ? "PUT" : "POST"); if (result !== null) setCompleted(true); })(); }}>
       <CashNotice error={mutation.error?.message} /><CashInput label="银行名称" value={bank} onChange={setBank} required disabled={mutation.busy} /><CashInput label="账单别名" value={label} onChange={setLabel} required disabled={mutation.busy} />
       <Checkbox isSelected={enabled} onChange={setEnabled} isDisabled={mutation.busy}><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>启用分组</span></Checkbox>
     </form>

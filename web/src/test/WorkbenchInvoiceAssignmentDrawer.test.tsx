@@ -89,7 +89,8 @@ describe("WorkbenchInvoiceAssignmentDrawer", () => {
         idempotencyKey: "assignment-stable-1",
       });
       expect(onCompleted).toHaveBeenCalledTimes(1);
-      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toHaveTextContent("发票归属已保存");
     });
   });
 
@@ -160,7 +161,8 @@ describe("WorkbenchInvoiceAssignmentDrawer", () => {
 
     await user.click(screen.getByRole("button", { name: "重试刷新结果" }));
 
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    await screen.findByText("发票归属已保存");
+    expect(onClose).not.toHaveBeenCalled();
     expect(assignWorkbenchInvoiceExpenseItems).toHaveBeenCalledTimes(1);
     expect(onCompleted).toHaveBeenCalledTimes(2);
   });

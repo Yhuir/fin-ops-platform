@@ -1415,9 +1415,9 @@ describe("Turnover ledger page", () => {
       },
       affected_months: ["2026-05"],
     }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "确认外部往来闭环" })).not.toBeInTheDocument();
-    });
+    await screen.findByText("外部往来闭环操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭确认外部往来闭环" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认外部往来闭环" })).not.toBeInTheDocument());
   });
 
   test("reloads exactly once after confirm without calling the operation barrier", async () => {
@@ -1448,9 +1448,9 @@ describe("Turnover ledger page", () => {
       });
       expect(request).toBeDefined();
     });
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "确认外部往来闭环" })).not.toBeInTheDocument();
-    });
+    await screen.findByText("外部往来闭环操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭确认外部往来闭环" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认外部往来闭环" })).not.toBeInTheDocument());
     expect(screen.queryByText("操作已提交，后台同步尚未完成，请稍后刷新。")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
     expect(requestUrls(fetchMock, "/api/turnover-ledger")).toHaveLength(2);

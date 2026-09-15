@@ -142,3 +142,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - 当前严格合同 Audit 必须按导入时记录的 sheet role 选择事实口径：header-driven 导入比较 `发票基础信息`，历史 detail-only 导入才按同一 batch + canonical invoice 重算合计；两者都不得把第一条物理商品明细误当整票金额。
 - 本次 11 张历史表头事实恢复只更新批准号码的 canonical 发票金额、税额、价税合计、空表头税率和 provenance；保留 invoice ID、关系、source link 与明细证据，并由工作簿 hash、精确计数、repeatable-read dry-run fingerprint、serializable transaction、CAS 和 rollback manifest 约束。运行时导入链不调用修复工具。
 - `0134` 是一次性 provenance 修复：仅当 canonical 发票已有 `oa_attachment_invoice`、正式 import row 仍精确指向该发票、对应 `manual_invoice_import(batch_id, source_id)` 却缺失时，从 durable batch/row 事实恢复全部来源边和原 owner。无 OA 交集、无行证据、多义或已完整的发票零写；运行时不保留扫描或 fallback。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

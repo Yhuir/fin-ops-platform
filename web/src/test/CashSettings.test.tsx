@@ -165,7 +165,7 @@ describe("现金配置表单", () => {
     expect(screen.queryByText("信用卡账户")).not.toBeInTheDocument();
   });
 
-  it("期初更正明确确认并携带原版本；成功关闭抽屉", async () => {
+  it("期初更正明确确认并携带原版本；成功保留结果并由 X 关闭", async () => {
     const user = userEvent.setup(); installAccounts();
     render(<CashProvider><CashSettings /></CashProvider>);
     await screen.findByText("合成测试账户");
@@ -176,7 +176,10 @@ describe("现金配置表单", () => {
     await user.click(screen.getByRole("checkbox", { name: "确认更正期初，后续余额将重新计算" }));
     await user.click(screen.getByRole("button", { name: "保存账户" }));
     await waitFor(() => expect(request).toHaveBeenCalledWith(`/settings/accounts/${account.id}`, expect.objectContaining({ method: "PUT", body: expect.objectContaining({ expected_version: 2, opening_amount: "125.50" }) })));
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "确认期初金额" })).not.toBeInTheDocument());
+    expect(await screen.findByRole("status")).toHaveTextContent("操作已完成");
+    expect(screen.queryByRole("button", { name: "保存账户" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("关闭已编辑账户先确认，继续编辑保留草稿，放弃不写入", async () => {
@@ -185,10 +188,10 @@ describe("现金配置表单", () => {
     await screen.findByText("合成测试账户");
     await user.click(screen.getByRole("button", { name: "编辑", exact: true }));
     await user.type(screen.getByRole("textbox", { name: "说明" }), "尚未保存的用途");
-    await user.click(screen.getByRole("button", { name: "取消", exact: true }));
+    await user.click(screen.getByRole("button", { name: "关闭抽屉", exact: true }));
     await user.click(await screen.findByRole("button", { name: "继续编辑" }));
     expect(screen.getByRole("textbox", { name: "说明" })).toHaveValue("尚未保存的用途");
-    await user.click(screen.getByRole("button", { name: "取消", exact: true }));
+    await user.click(screen.getByRole("button", { name: "关闭抽屉", exact: true }));
     await user.click(await screen.findByRole("button", { name: "放弃修改" }));
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "说明" })).not.toBeInTheDocument());
     expect(request.mock.calls.some(([, options]) => options?.method === "PUT")).toBe(false);

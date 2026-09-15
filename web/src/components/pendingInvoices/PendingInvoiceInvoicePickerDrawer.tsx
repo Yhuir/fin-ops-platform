@@ -100,6 +100,8 @@ export default function PendingInvoiceInvoicePickerDrawer({
   onConfirmed,
   onClose,
 }: PendingInvoiceInvoicePickerDrawerProps) {
+  const [completion, setCompletion] = useState<string | undefined>();
+  useEffect(() => { if (!open) setCompletion(undefined); }, [open]);
   const [payload, setPayload] = useState<PendingInvoiceCandidatesResponse | null>(null);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(() => new Set());
   const [preview, setPreview] = useState<AttachExistingInvoicesPreview | null>(null);
@@ -224,7 +226,10 @@ export default function PendingInvoiceInvoicePickerDrawer({
     setError(null);
     try {
       const result = await confirmAttach(transactionIds, selectedInvoiceIdsForSubmit, preview.previewId, confirmRequestId);
-      await onConfirmed(result);
+      setCompletion("发票关联已保存");
+      try { await onConfirmed(result); } catch (reason) {
+        setCompletion(`发票关联已保存，刷新失败：${reason instanceof Error ? reason.message : "请刷新页面查看"}`);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "关系确认失败");
     } finally {
@@ -240,10 +245,12 @@ export default function PendingInvoiceInvoicePickerDrawer({
   const to = Math.min(total, currentPage * currentPageSize);
   return (
     <PendingInvoiceDrawerFrame
+      completion={completion}
+      closeDisabled={busy}
       closeLabel="关闭发票选择抽屉"
       footer={(
         <div className="pending-invoice-drawer-actions">
-          <Button className="pending-invoices-button" isDisabled={busy} onPress={onClose} size="sm" variant="secondary">取消</Button>
+
           <Button
             className="pending-invoices-button"
             isDisabled={selectedInvoiceIdsForSubmit.length === 0 || loading || busy}

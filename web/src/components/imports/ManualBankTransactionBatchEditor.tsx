@@ -1,6 +1,6 @@
 import { Alert, Button, Chip, Input, ListBox, Select, TextArea } from "@heroui/react";
 import { Plus, Trash2 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useEffect, useState } from "react";
 
 import {
   discardImportSession,
@@ -40,7 +40,7 @@ type Entry = { id: number; values: ManualBankTransactionEntryValues };
 type ManualBankTransactionBatchEditorProps = {
   bankAccounts: BankAccountMapping[];
   disabled?: boolean;
-  onCancel: () => void;
+  onBusyChange?: (busy: boolean) => void;
   onPreviewSessionChange: (sessionId: string | null) => void;
   onSubmit: (preview: ManualBankTransactionEntryBatchPreview) => Promise<void>;
   previewTransactions?: (
@@ -104,7 +104,7 @@ function previewTone(decision: ImportRowDecision) {
 export default function ManualBankTransactionBatchEditor({
   bankAccounts,
   disabled = false,
-  onCancel,
+  onBusyChange,
   onPreviewSessionChange,
   onSubmit,
   previewTransactions = previewManualBankTransactions,
@@ -120,6 +120,7 @@ export default function ManualBankTransactionBatchEditor({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const current = entries.find((entry) => entry.id === selectedId) ?? entries[0];
   const busy = isPreviewing || isDiscarding || isSubmitting;
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   const bankAccountMap = useMemo(
     () => new Map(bankAccounts.map((account) => [account.id, account])),
     [bankAccounts],
@@ -375,7 +376,7 @@ export default function ManualBankTransactionBatchEditor({
             </Field>
           </div>
           <div className="manual-bank-entry__footer">
-            <Button isDisabled={busy} size="sm" variant="secondary" onPress={onCancel}>取消</Button>
+
             <Button isDisabled={disabled || busy || bankAccounts.length === 0} isPending={isPreviewing} size="sm" variant="primary" onPress={() => { void createPreview(); }}>
               {isPreviewing ? "预览中..." : `预览 ${entries.length} 笔流水`}
             </Button>

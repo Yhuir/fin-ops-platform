@@ -113,16 +113,17 @@ function CashTaskMonth({ initial, onChange }: { initial: MonthCriteria; onChange
 }
 
 function CashOccurrenceAction({ row, mode, onClose }: { row: CashTaskOccurrence; mode: "adjust" | "unpaid" | "check"; onClose: () => void }) {
+  const [completed, setCompleted] = useState(false);
   const [date, setDate] = useState(row.due_on);
   const [planned, setPlanned] = useState(row.planned_amount ?? "");
   const [note, setNote] = useState(row.note ?? "");
   const mutation = useCashMutation();
   const close = useCashTaskSettingsCloseGuard([date, planned, note], onClose, mutation.busy);
   const title = mode === "adjust" ? "调整本月" : mode === "check" ? "完成核对" : row.kind === "receipt" ? "标记未收" : "标记未付 / 未还";
-  return <AppDrawer open title={title} width={520} className="cash-drawer" onClose={close.requestClose} closeDisabled={mutation.busy} footer={<><Button variant="tertiary" onPress={close.requestClose} isDisabled={mutation.busy}>取消</Button><Button type="submit" form="cash-occurrence-form" isDisabled={mutation.busy}>{mode === "adjust" ? "保存本月调整" : title}</Button></>}>
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title={title} width={520} className="cash-drawer" onClose={completed ? onClose : close.requestClose} closeDisabled={mutation.busy} footer={<><Button type="submit" form="cash-occurrence-form" isDisabled={mutation.busy}>{mode === "adjust" ? "保存本月调整" : title}</Button></>}>
     <form id="cash-occurrence-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void (async () => {
       const result = await mutation.run(`/task-occurrences/${mode === "adjust" ? "adjust" : mode === "check" ? "complete-check" : "mark-unpaid"}`, { ...cashTaskIdentity(row), note: note || null, ...(mode === "adjust" ? { due_on: date, planned_amount: row.kind === "check" || !planned ? null : planned } : {}) });
-      if (result !== null) onClose();
+      if (result !== null) setCompleted(true);
     })(); }}>
       <p>{row.title} · {row.month}</p>{row.instructions && <p className="cash-hint">{row.instructions}</p>}<CashNotice error={mutation.error?.message} />
       {mode === "adjust" && <><CashInput label="本月执行日期" type="date" value={date} onChange={setDate} required disabled={mutation.busy} />{row.kind !== "check" && <CashInput label="本月目标金额" value={planned} onChange={setPlanned} required={row.actual_amount !== "0.00"} disabled={mutation.busy} placeholder="未确定可留空" />}<p className="cash-hint">仅调整此归属月，不修改实际流水或其他月份。日期可在归属月前后各 31 天内调整。</p></>}
@@ -143,6 +144,7 @@ type TaskFlow = {
 };
 
 function CashTaskLink({ row, onClose }: { row: CashTaskOccurrence; onClose: () => void }) {
+  const [completed, setCompleted] = useState(false);
   const { revision } = useCashScope();
   const [from, setFrom] = useState(`${row.month}-01`);
   const [to, setTo] = useState(() => {
@@ -159,9 +161,9 @@ function CashTaskLink({ row, onClose }: { row: CashTaskOccurrence; onClose: () =
   const query = useCashQuery<CashTasksPage<TaskFlow>>("/flows", { purpose: "task_link", template_id: row.template_id, month: row.month, date_from: from, date_to: to, page, page_size: 50, keyword: keyword || undefined }, revision);
   const selectionCurrent = Boolean(selected && query.data?.rows.some((flow) => flow.id === selected.id && flow.version === selected.version && flow.selectable));
   const reason = { direction_mismatch: "收付方向不同", already_claimed: "已关联月任务", target_incompatible: "任务月份不可办理" };
-  return <AppDrawer open title="关联已录现金" width={880} className="cash-drawer" onClose={close.requestClose} closeDisabled={mutation.busy} footer={<><Button variant="tertiary" onPress={close.requestClose} isDisabled={mutation.busy}>取消</Button><Button isDisabled={!selectionCurrent || query.loading || mutation.busy || (row.need_planned_amount && !planned)} onPress={() => { if (!selected || !selectionCurrent) return; void (async () => {
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title="关联已录现金" width={880} className="cash-drawer" onClose={completed ? onClose : close.requestClose} closeDisabled={mutation.busy} footer={<><Button isDisabled={!selectionCurrent || query.loading || mutation.busy || (row.need_planned_amount && !planned)} onPress={() => { if (!selected || !selectionCurrent) return; void (async () => {
       const result = await mutation.run("/task-occurrences/confirm", { ...cashTaskIdentity(row), mode: "existing_flow", ...(row.need_planned_amount ? { planned_amount: planned } : {}), existing_flow: { flow_id: selected.id, expected_flow_version: selected.version } });
-      if (result !== null) onClose();
+      if (result !== null) setCompleted(true);
     })(); }}>确认关联</Button></>}>
     <p>{row.title} · {row.month}</p><p className="cash-hint">只认领明确选中的现金流水，保留原来源和已有分配，不重复生成现金。</p>
     <CashNotice error={mutation.error?.message ?? query.error?.message} />
@@ -178,20 +180,21 @@ function CashTaskLink({ row, onClose }: { row: CashTaskOccurrence; onClose: () =
 }
 
 function CashTaskDetails({ row, onClose, onFlow }: { row: CashTaskOccurrence; onClose: () => void; onFlow: (id: string) => void }) {
+  const [completed, setCompleted] = useState(false);
   const { revision } = useCashScope();
   const [page, setPage] = useState(1);
   const [unlink, setUnlink] = useState<TaskFlow | null>(null);
   const mutation = useCashMutation();
   const query = useCashQuery<CashTasksPage<TaskFlow>>(row.occurrence_id ? "/flows" : null, { task_occurrence_id: row.occurrence_id, page, page_size: 50 }, revision);
-  return <AppDrawer open title="月任务处理明细" width={880} className="cash-drawer" onClose={onClose} closeDisabled={mutation.busy}>
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title="月任务处理明细" width={880} className="cash-drawer" onClose={onClose} closeDisabled={mutation.busy}>
     <p>{row.title} · {row.month}</p><div className="cash-summary"><span>{cashTaskStateLabels[row.state]}</span><span>当月目标 {cashAmount(row.planned_amount)}</span><span>实际累计 {cashAmount(row.actual_amount)}</span></div>{row.instructions && <p className="cash-hint">办理说明：{row.instructions}</p>}<p className="cash-hint">{row.note ?? "未填写本月说明"}</p>
     <CashNotice error={query.error?.message ?? mutation.error?.message}>{!row.occurrence_id ? "本月尚未办理，没有关联现金。" : query.loading ? "正在读取处理明细…" : query.data?.rows.length === 0 ? "本月没有有效关联现金。" : null}</CashNotice>
-    {row.kind === "check" && row.state === "completed" && row.occurrence_id && <Button variant="tertiary" isDisabled={mutation.busy} onPress={() => { void (async () => { const result = await mutation.run(`/task-occurrences/${row.occurrence_id}/reopen-check`, { expected_version: row.version }); if (result !== null) onClose(); })(); }}>重新核对</Button>}
+    {row.kind === "check" && row.state === "completed" && row.occurrence_id && <Button variant="tertiary" isDisabled={mutation.busy} onPress={() => { void (async () => { const result = await mutation.run(`/task-occurrences/${row.occurrence_id}/reopen-check`, { expected_version: row.version }); if (result !== null) setCompleted(true); })(); }}>重新核对</Button>}
     <FinanceTable ariaLabel="任务关联现金" minWidth={740} footer={<FinanceTablePagination page={page} pageSize={50} total={query.data?.pagination.total ?? 0} onPageChange={setPage} isDisabled={query.loading || Boolean(query.error) || mutation.busy} />}>
       <FinanceTableHeader>{["日期", "内容", "金额", "来源", "操作"].map((name, i) => <FinanceTableColumn id={name} key={name} isRowHeader={i === 1}>{name}</FinanceTableColumn>)}</FinanceTableHeader>
       <FinanceTableBody>{(query.data?.rows ?? []).map((flow) => <FinanceTableRow id={flow.id} key={flow.id}><FinanceTableCell columnRole="date">{flow.occurred_on}</FinanceTableCell><FinanceTableCell columnRole="description">{flow.content}</FinanceTableCell><FinanceTableCell columnRole="amount">{cashAmount(flow.amount)}</FinanceTableCell><FinanceTableCell columnRole="status">{flow.source_kind === "manual" ? "手工录入" : "每月任务"}</FinanceTableCell><FinanceTableCell columnRole="action"><Button variant="tertiary" onPress={() => onFlow(flow.id)}>流水详情</Button>{flow.source_kind === "manual" && <Button variant="tertiary" isDisabled={mutation.busy} onPress={() => setUnlink(flow)}>解除误关联</Button>}</FinanceTableCell></FinanceTableRow>)}</FinanceTableBody>
     </FinanceTable>
-    {unlink && <div className="cash-confirm" role="group" aria-label="确认解除任务关联"><p>只解除“{unlink.content}”的任务关系，保留现金和已有事项分配。</p><Button variant="tertiary" onPress={() => setUnlink(null)} isDisabled={mutation.busy}>取消</Button><Button isDisabled={mutation.busy} onPress={() => { void (async () => { const result = await mutation.run(`/flows/${unlink.id}/unlink-task`, { expected_version: unlink.version, expected_occurrence_version: unlink.task!.occurrence_version }); if (result !== null) onClose(); })(); }}>确认解除关联</Button></div>}
+    {unlink && <div className="cash-confirm" role="group" aria-label="确认解除任务关联"><p>只解除“{unlink.content}”的任务关系，保留现金和已有事项分配。</p><Button variant="tertiary" onPress={() => setUnlink(null)} isDisabled={mutation.busy}>取消</Button><Button isDisabled={mutation.busy} onPress={() => { void (async () => { const result = await mutation.run(`/flows/${unlink.id}/unlink-task`, { expected_version: unlink.version, expected_occurrence_version: unlink.task!.occurrence_version }); if (result !== null) setCompleted(true); })(); }}>确认解除关联</Button></div>}
   </AppDrawer>;
 }
 
@@ -225,6 +228,7 @@ function CashTaskTemplates({ initial, onChange }: { initial: TemplateCriteria; o
 }
 
 function CashTaskTemplateEditor({ template, onClose }: { template: CashTaskTemplate | null; onClose: () => void }) {
+  const [completed, setCompleted] = useState(false);
   const [id] = useState(() => crypto.randomUUID());
   const [title, setTitle] = useState(template?.title ?? "");
   const [kind, setKind] = useState<string>(template?.kind ?? "");
@@ -261,9 +265,9 @@ function CashTaskTemplateEditor({ template, onClose }: { template: CashTaskTempl
       default_category_id: kind === "check" ? null : category || null, instructions: instructions || null,
     };
     const result = await mutation.run(template ? `/tasks/${template.id}` : "/tasks", body, template ? "PUT" : "POST");
-    if (result !== null) onClose();
+    if (result !== null) setCompleted(true);
   };
-  return <AppDrawer open title={template ? "编辑每月任务" : "新增每月任务"} width={580} className="cash-drawer" onClose={close.requestClose} closeDisabled={mutation.busy} footer={<><Button variant="tertiary" onPress={close.requestClose} isDisabled={mutation.busy}>取消</Button><Button type="submit" form="cash-task-template-form" isDisabled={mutation.busy}>保存任务</Button></>}>
+  return <AppDrawer completion={completed ? "操作已完成" : undefined} open title={template ? "编辑每月任务" : "新增每月任务"} width={580} className="cash-drawer" onClose={completed ? onClose : close.requestClose} closeDisabled={mutation.busy} footer={<><Button type="submit" form="cash-task-template-form" isDisabled={mutation.busy}>保存任务</Button></>}>
     <form id="cash-task-template-form" className="cash-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <CashNotice error={validation ?? mutation.error?.message} />
       <CashInput label="任务内容" value={title} onChange={setTitle} required disabled={mutation.busy} />

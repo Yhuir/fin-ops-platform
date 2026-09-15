@@ -26,12 +26,16 @@ export default function ManualBankTransactionEntryDrawer({
   onClose,
   onImportAccepted,
 }: ManualBankTransactionEntryDrawerProps) {
+  const [completed, setCompleted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [closing, setClosing] = useState(false);
   const [previewSessionId, setPreviewSessionId] = useState<string | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [editorKey, setEditorKey] = useState(0);
 
   useEffect(() => {
     if (!open) {
+      setCompleted(false);
       setPreviewSessionId(null);
       setCloseError(null);
       setEditorKey((current) => current + 1);
@@ -40,20 +44,26 @@ export default function ManualBankTransactionEntryDrawer({
 
   async function closeDrawer() {
     setCloseError(null);
+    if (closing || busy) return;
+    setClosing(true);
     if (previewSessionId) {
       try {
         await discardImportSession(previewSessionId);
       } catch (caught) {
         setCloseError(resolveImportApiErrorMessage(caught, "放弃预览失败，抽屉已保留。"));
+        setClosing(false);
         return;
       }
     }
     setPreviewSessionId(null);
+    setClosing(false);
     onClose();
   }
 
   return (
     <AppDrawer
+      completion={completed ? "流水录入已提交" : undefined}
+      closeDisabled={busy || closing}
       className="manual-bank-entry"
       closeLabel="关闭流水录入"
       onClose={() => { void closeDrawer(); }}
@@ -66,13 +76,13 @@ export default function ManualBankTransactionEntryDrawer({
         bankAccounts={bankAccounts}
         disabled={disabled}
         key={editorKey}
-        onCancel={() => { void closeDrawer(); }}
+        onBusyChange={setBusy}
         onPreviewSessionChange={setPreviewSessionId}
         onSubmit={async (preview) => {
           const payload = await confirmImportFiles(preview.importSession.session.id, preview.fileIds);
           setPreviewSessionId(null);
           onImportAccepted(payload);
-          onClose();
+          setCompleted(true);
         }}
       />
     </AppDrawer>

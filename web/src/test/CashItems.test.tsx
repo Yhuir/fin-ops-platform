@@ -72,7 +72,10 @@ describe("cash item and settlement interaction", () => {
     await userEvent.click(screen.getByRole("button", { name: "保存事项" }));
     await waitFor(() => expect(mocks.run).toHaveBeenCalledOnce());
     expect(mocks.run).toHaveBeenCalledWith("/items", expect.objectContaining({ is_opening: true, original_amount: "12000.00", ledger_group: "company", obligation_direction: "receivable", oa_project_id: null, ticket_provider: null }), "POST");
-    expect(mocks.query.mock.calls.some(([path]) => path === "/projects")).toBe(false); expect(close).toHaveBeenCalledOnce();
+    expect(mocks.query.mock.calls.some(([path]) => path === "/projects")).toBe(false); expect(close).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent("事项已保存");
+    await userEvent.click(screen.getByRole("button", { name: "关闭抽屉" }));
+    expect(close).toHaveBeenCalledOnce();
   });
   test("invalid amount preserves the form and does not send a command", async () => {
     render(<CashItemEditor onClose={vi.fn()} />);
@@ -86,10 +89,10 @@ describe("cash item and settlement interaction", () => {
   test("unsaved item edits require an explicit discard and do not write", async () => {
     const close = vi.fn(); render(<CashItemEditor onClose={close} />);
     await userEvent.type(screen.getByRole("textbox", { name: "事项内容" }), "未保存内容");
-    await userEvent.click(screen.getByRole("button", { name: "取消", exact: true }));
+    await userEvent.click(screen.getByRole("button", { name: "关闭抽屉", exact: true }));
     expect(close).not.toHaveBeenCalled(); expect(screen.getByRole("alert")).toHaveTextContent("未保存的事项内容");
     await userEvent.click(screen.getByRole("button", { name: "继续填写" })); expect(screen.getByRole("textbox", { name: "事项内容" })).toHaveValue("未保存内容");
-    await userEvent.click(screen.getByRole("button", { name: "取消", exact: true })); await userEvent.click(screen.getByRole("button", { name: "放弃并关闭" }));
+    await userEvent.click(screen.getByRole("button", { name: "关闭抽屉", exact: true })); await userEvent.click(screen.getByRole("button", { name: "放弃并关闭" }));
     expect(close).toHaveBeenCalledOnce(); expect(mocks.run).not.toHaveBeenCalled();
   });
   test("a failed write keeps user input and does not claim success", async () => {

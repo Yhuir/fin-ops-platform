@@ -58,7 +58,7 @@ function expectRelationPreviewBlocking(_preview: HTMLElement, submitLabel: strin
   expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
   expect(currentPreview).toHaveAttribute("aria-busy", "true");
   expect(within(currentPreview).getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
-  expect(within(currentPreview).getByRole("button", { name: "取消" })).toBeDisabled();
+  expect(within(currentPreview).queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
   expect(within(currentPreview).getByRole("button", { name: submitLabel })).toBeDisabled();
 }
 
@@ -849,7 +849,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(screen.queryByRole("dialog", { name: "发票详情" })).not.toBeInTheDocument();
   });
 
-  test("drawer supports closing with escape", async () => {
+  test("drawer ignores Escape and closes with X", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
@@ -863,6 +863,8 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.keyboard("{Escape}");
 
+    expect(screen.getByRole("dialog", { name: "发票详情" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭详情抽屉" }));
     expect(screen.queryByRole("dialog", { name: "发票详情" })).not.toBeInTheDocument();
   });
 
@@ -1228,7 +1230,7 @@ describe("Workbench row selection and detail drawer", () => {
     } else {
       expect(within(dialog).queryByRole("button", { name: "重试确认" })).not.toBeInTheDocument();
       expect(within(dialog).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
-      expect(within(dialog).getByRole("button", { name: "关闭", exact: true })).toBeEnabled();
+      expect(within(dialog).getByRole("button", { name: "关闭关联预览", exact: true })).toBeEnabled();
     }
     expect(screen.queryByText(/INTERNAL ENGLISH SENTINEL/)).not.toBeInTheDocument();
   });
@@ -1648,9 +1650,8 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(preview).getByText("正在确认关联...")).toBeInTheDocument();
     expect(unpairedZone).toHaveTextContent("2026-03-28");
     expect(unpairedZone).toHaveTextContent("智能工厂设备商");
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-    }, { timeout: 5_000 });
+    await screen.findByText("关联操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭关联预览" }));
     expect(
       within(unpairedZone).queryByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,
@@ -1732,9 +1733,8 @@ describe("Workbench row selection and detail drawer", () => {
     expect(new Headers(postCommitRequest[1]?.headers).get("Cache-Control")).toBe("no-cache");
 
     releaseBackgroundRead();
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-    });
+    await screen.findByText("关联操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭关联预览" }));
   }, 8_000);
 
   test("each OA completion bypasses an older in-flight direct snapshot", async () => {
@@ -1928,9 +1928,8 @@ describe("Workbench row selection and detail drawer", () => {
     expect(initialReadCount).toBe(2);
 
     releasePostCommitRead();
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "确认关联" })).not.toBeInTheDocument();
-    });
+    await screen.findByText("关联操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭关联预览" }));
     await waitFor(() => expect(initialReadCount).toBe(3));
     expect(initialReadCount).toBe(3);
   }, 8_000);
@@ -2336,9 +2335,8 @@ describe("Workbench row selection and detail drawer", () => {
     expectRelationPreviewBlocking(preview, "确认关联");
     expect(unpairedZone).toHaveTextContent("2026-03-28");
     expect(unpairedZone).toHaveTextContent("智能工厂设备商");
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /^(确认|撤回)关联$/ })).not.toBeInTheDocument();
-    });
+    await screen.findByText("关联操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭关联预览" }));
   });
 
   test("initial workbench rows render before slow settings request finishes", async () => {
@@ -2379,9 +2377,8 @@ describe("Workbench row selection and detail drawer", () => {
     expectRelationPreviewSummary(within(preview).getByTestId("relation-preview-after"));
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "撤回关联" })).not.toBeInTheDocument();
-    }, { timeout: 5_000 });
+    await screen.findByText("关联操作已完成");
+    await user.click(screen.getByRole("button", { name: "关闭关联预览" }));
     expect(within(pairedZone).queryByRole("row", {
       name: /2026-03-25 14:22.*华东设备供应商/,
     })).not.toBeInTheDocument();
@@ -3044,7 +3041,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
 
-    await user.click(within(preview).getByRole("button", { name: "取消" }));
+    await user.click(within(preview).getByRole("button", { name: "关闭关联预览" }));
     expect(screen.queryByRole("dialog", { name: "确认关联" })).not.toBeInTheDocument();
     expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
     expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(1);
@@ -3227,7 +3224,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(candidate);
     await user.click(within(drawer).getByRole("button", { name: "确认归属" }));
 
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "选择 OA 明细" })).not.toBeInTheDocument());
+    await screen.findByText("发票归属已保存");
+    await user.click(screen.getByRole("button", { name: "关闭选择 OA 明细" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input))).toHaveLength(2);
     });
@@ -4371,6 +4369,9 @@ describe("Workbench row selection and detail drawer", () => {
         operation_type: "withdraw_relation",
       });
     });
+
+    await screen.findByText("关联操作已完成");
+    await user.click(within(preview).getByRole("button", { name: "关闭关联预览" }));
 
     await waitFor(() => {
       expect(

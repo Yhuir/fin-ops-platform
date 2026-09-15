@@ -173,6 +173,19 @@ test.describe("right drawer motion", () => {
     expect(requestsAfterOpen - requestsBeforeOpen).toBeLessThanOrEqual(1);
     expect(api.count(detailRequest)).toBe(detailRequestsBeforeOpen + 1);
 
+    // Exercise real pointer events outside the panel, including a cross-boundary release.
+    const box = await drawer.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.click(Math.max(1, box!.x - 20), 120);
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeVisible();
+    await page.mouse.move(box!.x + 20, 160);
+    await page.mouse.down();
+    await page.mouse.move(Math.max(1, box!.x - 20), 160);
+    await page.mouse.up();
+    await expect(drawer).toBeVisible();
+    expect(businessCallCount()).toBe(requestsAfterOpen);
+
     await armDrawerSampler(page);
     await drawer.getByRole("button", { name: "关闭详情抽屉" }).click();
     const exiting = await drawerSamples(page);
@@ -235,7 +248,7 @@ test.describe("right drawer motion", () => {
     const drawer = page.getByRole("dialog", { name: "关联支出流水抽屉" });
     await expect(drawer).toBeVisible();
     await expect(drawer.getByText("加载中")).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "取消" })).toBeDisabled();
+    await expect(drawer.getByRole("button", { name: "取消" })).toHaveCount(0);
     await expect(drawer.getByRole("button", { name: "关闭关联支出流水抽屉" })).toBeDisabled();
     await page.keyboard.press("Escape");
     await page.locator(".finance-drawer__backdrop").evaluate((backdrop: HTMLElement) => backdrop.click());
@@ -259,7 +272,7 @@ test.describe("right drawer motion", () => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     await page.goto("/input-invoice-usage");
-    const opener = page.getByRole("button", { name: "以发票反提 OA" });
+    const opener = page.getByRole("button", { name: "以发票反提 OA", exact: true });
     await expect(opener).toBeEnabled();
 
     await armDrawerSampler(page);
@@ -267,7 +280,13 @@ test.describe("right drawer motion", () => {
     const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
     await expect(workflow).toBeVisible();
     expectFullWidthTravel(await drawerSamples(page), "enter");
+    await expect(page.getByRole("button", { name: "发票与支付状态规则设置" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "筛选内容导出" })).toBeDisabled();
     const requestsBeforeClose = api.calls.length;
+    await page.keyboard.press("Escape");
+    await page.getByRole("heading", { name: "进项发票使用情况", exact: true }).click({ position: { x: 5, y: 5 } });
+    await expect(workflow).toBeVisible();
+    expect(api.calls.length).toBe(requestsBeforeClose);
 
     await armDrawerSampler(page);
     await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();

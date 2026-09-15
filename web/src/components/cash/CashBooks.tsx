@@ -11,7 +11,7 @@ import { cashAmount, cashToday, settlementLabels, type CashItem, type CashItemTy
 import { CashInput, CashNotice, CashSelect, CashTabs } from "./CashUi";
 import { CashColumnHeader, CashFilterPopover, CashSortMenu, CashTextFilter, type CashFilterOption, type CashFilterValue } from "./CashFilters";
 import { CashConfigurationFilter, CashHistoricalProjectFilter } from "./CashFlowSelectors";
-import type { CashPersonalSetting } from "./CashItems.types";
+import type { CashPersonalContext, CashPersonalSetting } from "./CashItems.types";
 import { CashUnsettledBook, initialUnsettledCriteria, type CashUnsettledCriteria } from "./CashUnsettledBook";
 
 type Period = { date_from: string; date_to: string };
@@ -283,7 +283,7 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
     {drill && <AppDrawer open title={drill.month + " 实际发生本金"} width={760} className="cash-module cash-drawer" onClose={() => setDrill(null)}>
       <CashItemPicker label="本月本金来源" params={{ type: "loan", ledger_group: "personal", is_opening: false, origin_date_from: drill.month + "-01", origin_date_to: new Date(Number(drill.month.slice(0, 4)), Number(drill.month.slice(5)), 0).toLocaleDateString("sv-SE"), bill_label_id: drill.row.bill_label?.id, has_bill_label: drill.row.bill_label ? undefined : false, project_ids: projects }} onSelect={item => { setDrill(null); onItem(item.id); }} />
     </AppDrawer>}
-    {editing && <AppDrawer open title={settlementLabels[editing.kind]} width={760} className="cash-module cash-drawer" onClose={() => setEditing(null)}><CashSettlementEditor settlement={editing} initialKind={editing.kind} onClose={() => setEditing(null)} /></AppDrawer>}
+    {editing && <AppDrawer open title={settlementLabels[editing.kind]} width={760} className="cash-module cash-drawer" onClose={() => setEditing(null)}><CashSettlementEditor settlement={editing} initialKind={editing.kind} /></AppDrawer>}
   </>;
 }
 
@@ -296,7 +296,14 @@ export default function CashBooks({ initialCriteria, onCriteriaChange }: { initi
   useEffect(() => { onCriteriaChange?.({ tab, turnoverView, ticketsView, turnover, unsettled, tickets, pendingTickets, personal }); }, [tab, turnoverView, ticketsView, turnover, unsettled, tickets, pendingTickets, personal, onCriteriaChange]); const [itemId, setItemId] = useState<string | null>(null);
   const [manageItems, setManageItems] = useState(false);
   const [createItem, setCreateItem] = useState<CashItemType | null>(null);
-  const personalSetting = useCashQuery<CashPersonalSetting>(createItem && tab === "personal" ? "/settings/personal-opening" : null);
+  const [personalEntryContext, setPersonalEntryContext] = useState<CashPersonalContext | null>(null);
+  const personalSetting = useCashQuery<CashPersonalSetting>(createItem && tab === "personal" && !personalEntryContext ? "/settings/personal-opening" : null);
+  useEffect(() => {
+    if (!createItem || tab !== "personal") setPersonalEntryContext(null);
+    else if (!personalEntryContext && !personalSetting.loading && !personalSetting.error && personalSetting.data?.counterparty && personalSetting.data.opening_date) {
+      setPersonalEntryContext({ counterparty: personalSetting.data.counterparty, opening_date: personalSetting.data.opening_date });
+    }
+  }, [createItem, tab, personalEntryContext, personalSetting.data, personalSetting.loading, personalSetting.error]);
   const [flow, setFlow] = useState<{ id?: string; kind?: "receipt" | "payment" | "transfer"; item?: CashItem; settlementKind?: CashSettlementKind } | null>(null);
   const openFlow = (id: string) => { setItemId(null); setFlow({ id }); };
   const actualFlow = (item: CashItem, kind: CashSettlementKind) => {
@@ -310,7 +317,7 @@ export default function CashBooks({ initialCriteria, onCriteriaChange }: { initi
     {tab === "personal" && <PersonalBook onItem={setItemId} onFlow={openFlow} initial={personal} onChange={setPersonal} />}
     {itemId && <CashItemDetail key={itemId} itemId={itemId} onClose={() => setItemId(null)} onFlow={openFlow} onActualFlow={actualFlow} />}
     {createItem && tab !== "personal" && <CashItemEditor initialType={createItem} onClose={() => setCreateItem(null)} onSaved={setItemId} />}
-    {createItem && tab === "personal" && (personalSetting.data?.counterparty && personalSetting.data.opening_date && !personalSetting.loading && !personalSetting.error ? <CashItemEditor initialType="loan" personalContext={{ counterparty: personalSetting.data.counterparty, opening_date: personalSetting.data.opening_date }} onClose={() => setCreateItem(null)} onSaved={setItemId} /> : <AppDrawer open title="个人专账录入" className="cash-drawer" onClose={() => setCreateItem(null)}><CashNotice error={personalSetting.error?.message} /><p role="status">{personalSetting.loading ? "正在读取个人账配置…" : "请先在基础设置 → 现金账户与期初，确认个人专账归属人和起算日期。"}</p>{personalSetting.error && <Button onPress={personalSetting.reload}>重新读取</Button>}</AppDrawer>)}
+    {createItem && tab === "personal" && (personalEntryContext ? <CashItemEditor initialType="loan" personalContext={personalEntryContext} onClose={() => setCreateItem(null)} onSaved={setItemId} /> : <AppDrawer open title="个人专账录入" className="cash-drawer" onClose={() => setCreateItem(null)}><CashNotice error={personalSetting.error?.message} /><p role="status">{personalSetting.loading ? "正在读取个人账配置…" : "请先在基础设置 → 现金账户与期初，确认个人专账归属人和起算日期。"}</p>{personalSetting.error && <Button onPress={personalSetting.reload}>重新读取</Button>}</AppDrawer>)}
     {manageItems && <AppDrawer open title="事项管理" width={780} className="cash-module cash-drawer" onClose={() => setManageItems(false)}><CashItemPicker label="全部现金事项" onSelect={item => { setManageItems(false); setItemId(item.id); }} /></AppDrawer>}
     {flow && <CashFlowDrawer open flowId={flow.id} kind={flow.kind} existingItem={flow.item} settlementKind={flow.settlementKind} onClose={() => setFlow(null)} />}
   </>;

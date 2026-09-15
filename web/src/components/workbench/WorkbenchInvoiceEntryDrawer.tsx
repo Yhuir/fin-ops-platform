@@ -39,6 +39,8 @@ export default function WorkbenchInvoiceEntryDrawer({
   onCompleted,
   onSupportingDocumentsChanged,
 }: WorkbenchInvoiceEntryDrawerProps) {
+  const [completion, setCompletion] = useState<string | undefined>();
+  const [entryBusy, setEntryBusy] = useState(false);
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
@@ -49,7 +51,7 @@ export default function WorkbenchInvoiceEntryDrawer({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) setMode(initialMode);
+    if (open) { setMode(initialMode); setCompletion(undefined); }
   }, [open, initialMode, target?.expenseItemId, target?.oaRowId]);
 
   useEffect(() => {
@@ -118,9 +120,10 @@ export default function WorkbenchInvoiceEntryDrawer({
 
   return (
     <AppDrawer
+      completion={completion}
+      closeDisabled={loading || entryBusy}
       ariaBusy={loading}
       className="workbench-invoice-entry-drawer manual-invoice-entry"
-      closeDisabled={loading}
       closeLabel="关闭录入发票"
       onClose={onClose}
       open={open}
@@ -141,11 +144,13 @@ export default function WorkbenchInvoiceEntryDrawer({
           disabled={disabled}
           previewInvoices={previewWorkbenchManualInvoices}
           submitLabel="确认录入并关联"
-          onCancel={onClose}
+          onBusyChange={setEntryBusy}
           onSubmit={async (preview) => {
             await confirmWorkbenchManualInvoiceSupplement(target, preview);
-            await onCompleted();
-            onClose();
+            setCompletion("发票已录入");
+            try { await onCompleted(); } catch (error) {
+              setCompletion(`发票已录入，但页面刷新失败：${resolveWorkbenchActionErrorMessage(error, "请刷新页面查看。")}`);
+            }
           }}
         />
       ) : mode === "upload" ? (

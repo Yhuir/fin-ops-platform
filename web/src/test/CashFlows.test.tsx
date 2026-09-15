@@ -105,7 +105,7 @@ describe("现金实际录入 HTTP 字段", () => {
     expect(screen.getByRole("radio", { name: "收入", exact: true })).toBeChecked();
     expect(screen.queryByLabelText("方向")).not.toBeInTheDocument();
     await inputCash(user);
-    await user.click(screen.getByRole("button", { name: "取消", exact: true }));
+    await user.click(screen.getByRole("button", { name: "关闭抽屉", exact: true }));
     await user.click(screen.getByRole("button", { name: "放弃并关闭" }));
     await user.click(screen.getByRole("button", { name: "新增流水" }));
     expect(screen.getByRole("textbox", { name: "金额（元）" })).toHaveValue("");
@@ -233,7 +233,7 @@ describe("现金实际录入 HTTP 字段", () => {
     expect(writes[0].body.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(writes[0].body).not.toHaveProperty("source_kind");
     await user.click(screen.getByRole("button", { name: "保存", exact: true }));
-    await screen.findByText("现金抽屉已关闭");
+    await screen.findByText("现金流水已保存");
     expect(writes).toHaveLength(2); expect(writes[1].body).toEqual(writes[0].body);
     expect(writes[1].init.cache).toBe("no-store");
   });
@@ -247,7 +247,7 @@ describe("现金实际录入 HTTP 字段", () => {
     await inputCash(user, "20.01");
     if (planned === null) await user.type(screen.getByRole("textbox", { name: "本月计划金额" }), "300");
     await user.click(screen.getByRole("button", { name: "保存并确认任务" }));
-    await screen.findByText("现金抽屉已关闭");
+    await screen.findByText("现金流水已保存");
     expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({ path: "/api/cash/task-occurrences/confirm", body: { template_id: templateId, month: "2026-09", expected_version: null, expected_template_version: 4, mode: "new_flow", new_flow: { amount: "20.01", kind: "payment", from_account_id: accountA, to_account_id: null, category_id: categoryId } } });
     if (planned === null) expect(writes[0].body.planned_amount).toBe("300.00");
@@ -265,7 +265,7 @@ describe("现金实际录入 HTTP 字段", () => {
     await select(user, "收款账户", "合成现金账户"); await select(user, "费用分类", "合成往来类型"); await inputCash(user, "17.30");
     await user.type(screen.getByRole("textbox", { name: "本次处理金额" }), "17.30");
     await user.click(screen.getByRole("button", { name: "保存", exact: true }));
-    await screen.findByText("现金抽屉已关闭");
+    await screen.findByText("现金流水已保存");
     expect(writes[0].body).toMatchObject({ project_mode: "existing_item", project_item_id: itemId, expected_project_item_version: 9, amount: "17.30", allocations: [{ item_id: itemId, target_is_new: false, expected_item_version: 9, kind: "cash_repayment", amount: "17.30" }] });
     expect(writes[0].body).not.toHaveProperty("oa_project_id");
     expect(writes[0].body).not.toHaveProperty("related_items");
@@ -282,7 +282,7 @@ describe("现金实际录入 HTTP 字段", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("两个账户必须不同"); expect(writes).toHaveLength(0);
     await select(user, "转入账户", "合成储蓄账户");
     await user.click(screen.getByRole("button", { name: "保存", exact: true }));
-    await screen.findByText("现金抽屉已关闭");
+    await screen.findByText("现金流水已保存");
     expect(writes).toHaveLength(1);
     expect(writes[0].body).toMatchObject({ kind: "transfer", category_id: null, amount: "42.35", from_account_id: accountA, to_account_id: accountB, related_items: [], origin_items: [], allocations: [] });
     expect(http.mock.calls.some(([url]) => url.includes("/settings/categories"))).toBe(false);
@@ -352,6 +352,24 @@ describe("现金读取、更正、删除", () => {
     params = new URL(http.mock.calls.filter(([url]) => url.startsWith("/api/cash/flows?")).at(-1)![0], "http://test").searchParams;
     expect(params.has("category_ids")).toBe(false); expect(params.has("project_ids")).toBe(true);
     expect(writes).toHaveLength(0);
+  });
+
+  it("编辑保存后刷新详情不会重挂编辑表单或丢失完成结果", async () => {
+    const user = userEvent.setup();
+    let version = 7;
+    const writes = installHttp({ getDetail: () => detail(flow({ version })), write: ({ body }) => { version++; return created(body); } });
+    render(<DrawerHarness flowId={flowId} />);
+    await user.click(await screen.findByRole("button", { name: "编辑", exact: true }));
+    await screen.findByText("本笔现金没有来源事项。");
+    await user.type(screen.getByRole("textbox", { name: "备注（可选）" }), "保存后保留结果");
+    await user.click(screen.getByRole("button", { name: "保存", exact: true }));
+    expect(await screen.findByText("现金流水已保存")).toBeVisible();
+    await waitFor(() => expect(http.mock.calls.filter(([url]) => url === `/api/cash/flows/${flowId}`).length).toBeGreaterThan(1));
+    expect(screen.queryByRole("button", { name: "保存", exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("现金流水已保存")).toBeVisible();
+    expect(writes).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
+    expect(await screen.findByText("现金抽屉已关闭")).toBeVisible();
   });
 
   it("编辑携带详情读取的初始版本，409 后不自动抬版本覆盖", async () => {

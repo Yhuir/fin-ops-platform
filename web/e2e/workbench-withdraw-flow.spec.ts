@@ -49,6 +49,8 @@ test.describe("workbench withdraw browser flow", () => {
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "确认撤回" }).click();
     await expect(previewDialog.getByText("正在撤回关联...")).toBeVisible();
+    await expect(previewDialog.getByRole("status")).toHaveText("关联操作已完成");
+    await previewDialog.getByRole("button", { name: "关闭关联预览" }).click();
     await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
@@ -115,12 +117,14 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(previewDialog).toHaveAttribute("aria-busy", "true");
     await expect(previewDialog.getByText("正在撤回关联...")).toBeVisible();
     await expect(previewDialog.getByRole("button", { name: "确认撤回" })).toBeDisabled();
-    await expect(previewDialog.getByRole("button", { name: "取消" })).toBeDisabled();
+    await expect(previewDialog.getByRole("button", { name: "取消" })).toHaveCount(0);
     await expect(previewDialog.getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
     await expect(previewDialog.getByRole("textbox", { name: "撤回说明" })).toBeDisabled();
     await expect(pairedGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
 
+    await expect(previewDialog.getByRole("status")).toHaveText("关联操作已完成");
+    await previewDialog.getByRole("button", { name: "关闭关联预览" }).click();
     await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();

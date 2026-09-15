@@ -168,7 +168,7 @@ describe("WorkbenchReceiptDrawer", () => {
     await user.clear(screen.getByRole("textbox", { name: "收据 1 明细 1 摘要" }));
     await user.type(screen.getByRole("textbox", { name: "收据 1 明细 1 摘要" }), "编辑后的服务费");
 
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(screen.getByRole("button", { name: "关闭收据编辑" }));
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
 
@@ -197,7 +197,7 @@ describe("WorkbenchReceiptDrawer", () => {
     }));
 
     await waitFor(() => expect(screen.getByText("金额已核对，可以打印")).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(screen.getByRole("button", { name: "关闭收据编辑" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledTimes(1);
   });

@@ -158,7 +158,11 @@ test.describe("cash module deterministic browser flow", () => {
     await page.screenshot({ path: testInfo.outputPath("cash-entry-drawer.png"), fullPage: true });
     await dialog.getByRole("button", { name: "保存", exact: true }).click(); await expect(dialog.getByRole("alert")).toContainText("现金暂忙");
     await expect(dialog.getByRole("textbox", { name: "用途", exact: true })).toHaveValue("合成新增现金流水");
-    await dialog.getByRole("button", { name: "保存", exact: true }).click(); await expect(dialog).toHaveCount(0);
+    await dialog.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(dialog.getByRole("status")).toHaveText("现金流水已保存");
+    await expect(dialog.getByRole("button", { name: "保存", exact: true })).toHaveCount(0);
+    await page.keyboard.press("Escape"); await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "关闭抽屉" }).click(); await expect(dialog).toHaveCount(0);
     expect(api.submitted).toHaveLength(2); expect(api.submitted[0].id).toMatch(/^[0-9a-f-]{36}$/); expect(api.submitted[1].id).toBe(api.submitted[0].id);
     await expect(page.getByRole("grid", { name: "现金流水明细" })).toContainText("合成新增现金流水");
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -166,7 +170,10 @@ test.describe("cash module deterministic browser flow", () => {
     await page.getByRole("row").filter({ hasText: "合成现金归还" }).getByRole("button", { name: "详情", exact: true }).click();
     const detail = page.getByRole("dialog", { name: "现金流水详情" }); await expect(detail).toBeVisible(); await detail.getByRole("button", { name: "删除", exact: true }).click();
     const deletion = page.getByRole("dialog", { name: "删除现金流水" }); await expect(deletion.getByText("本笔现金没有来源事项。")).toBeVisible();
-    await deletion.getByRole("button", { name: "确认删除", exact: true }).click(); await expect(deletion).toHaveCount(0);
+    await deletion.getByRole("button", { name: "确认删除", exact: true }).click();
+    await expect(deletion.getByRole("status")).toHaveText("现金流水已删除");
+    await expect(deletion.getByRole("button", { name: "确认删除", exact: true })).toHaveCount(0);
+    await deletion.getByRole("button", { name: "关闭抽屉" }).click(); await expect(deletion).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     await expect(page.getByRole("grid", { name: "现金流水明细" })).not.toContainText("合成现金归还"); expect(api.count("GET", "/flows")).toBeGreaterThan(beforeFlows);
     const beforeReport = api.count("GET", "/reports/turnover"); await page.getByRole("link", { name: "现金账目", exact: true }).click();
@@ -406,6 +413,8 @@ test.describe("cash module deterministic browser flow", () => {
     for (const label of ["筛选项目", "筛选往来对象", "筛选往来类别"]) await check(label);
     await page.getByRole("button", { name: /往来账视图$/ }).click(); await page.getByRole("option", { name: "本期处理记录", exact: true }).click();
     await page.getByRole("tab", { name: "有票支付", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "有票支付", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: /有票支付视图$/ })).toBeVisible();
     for (const label of ["筛选项目", "筛选提供人", "筛选使用状态"]) await check(label);
     await page.getByRole("button", { name: /有票支付视图$/ }).click(); await page.getByRole("option", { name: "待回款", exact: true }).click();
     for (const label of ["筛选项目", "筛选提供人"]) await check(label);

@@ -177,3 +177,7 @@ worker 更新导入 background job 的 running/progress/terminal 状态时，只
 - migration 0101 为新 `app.import_files` 设置 `audit_contract_revision=import-page-audit.v1` 默认值，但不回填历史行。
 - 当前真实文件 revision 的新导入必须严格证明 file object/hash/session/batch/row/canonical transaction 全链路与双向 expected-set；任何缺失均阻断 Audit。手工流水 revision 必须证明 template/session/payload 合同一致且文件 provenance 全部为空；混入任何文件对象字段同样阻断 Audit。
 - revision 为 NULL 的 pre-contract 历史只输出 `legacy_provenance_unproven` warning；不得补造文件对象、hash 或 session。历史 canonical 银行流水仍由银行明细及下游页面 Audit 证明。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

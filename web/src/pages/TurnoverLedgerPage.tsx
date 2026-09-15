@@ -341,6 +341,7 @@ export default function TurnoverLedgerPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [savingExtra, setSavingExtra] = useState(false);
   const [mutatingRelation, setMutatingRelation] = useState(false);
+  const [closureCompletion, setClosureCompletion] = useState<string | undefined>();
   const [closureDrawerOpen, setClosureDrawerOpen] = useState(false);
   const [closureSubmitting, setClosureSubmitting] = useState(false);
   const [closureSelection, setClosureSelection] = useState<ClosureSelection | null>(null);
@@ -668,8 +669,8 @@ export default function TurnoverLedgerPage() {
             expectedVersions,
             idempotencyKey: closureIdempotencyKey(bankRowIds),
           });
+          setClosureCompletion("外部往来闭环操作已完成");
           setClosureSelection(null);
-          setClosureDrawerOpen(false);
           setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
@@ -892,8 +893,8 @@ export default function TurnoverLedgerPage() {
           const mutationResult = relationId
             ? await withdrawTurnoverRelation({ relationId })
             : await withdrawTurnoverClosure({ cashClosureCaseId });
+          setClosureCompletion("外部往来闭环操作已完成");
           setClosureSelection(null);
-          setClosureDrawerOpen(false);
           setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
@@ -940,7 +941,6 @@ export default function TurnoverLedgerPage() {
           });
           setTagSelection(saved);
           setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
-          setTagDrawerOpen(false);
           setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await reloadLedgerAfterWrite(
             reloadLedgerAfterMutation,
@@ -1106,6 +1106,7 @@ export default function TurnoverLedgerPage() {
                       void handleWithdrawSelectedCashClosure();
                       return;
                     }
+                    setClosureCompletion(undefined);
                     setClosureDrawerOpen(true);
                   }}
                   size="sm"
@@ -1142,6 +1143,7 @@ export default function TurnoverLedgerPage() {
 
       <AppDrawer
         className="turnover-ledger-drawer"
+        closeDisabled={tagSaving}
         closeLabel="关闭外部往来款标签设置"
         open={tagDrawerOpen}
         onClose={() => setTagDrawerOpen(false)}
@@ -1235,6 +1237,8 @@ export default function TurnoverLedgerPage() {
 
       <AppDrawer
         className="turnover-ledger-drawer"
+        completion={closureCompletion}
+        closeDisabled={closureSubmitting}
         closeLabel="关闭确认外部往来闭环"
         open={closureDrawerOpen}
         onClose={() => setClosureDrawerOpen(false)}
@@ -1278,7 +1282,7 @@ export default function TurnoverLedgerPage() {
             ) : null}
           </div>
           <div className="turnover-ledger-drawer__footer">
-            <Button className="turnover-ledger-button" isDisabled={closureSubmitting} onPress={() => setClosureDrawerOpen(false)} size="sm" variant="secondary">取消</Button>
+
             <Button
               className="turnover-ledger-button turnover-ledger-button--primary"
               isDisabled={!closurePreview.canConfirm || closureSubmitting}

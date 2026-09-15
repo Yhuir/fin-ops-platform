@@ -21,6 +21,7 @@ export function CashFlowDrawer(props: Props) {
 }
 
 function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task, existingItem, settlementKind, flow }: Props & { flow?: CashFlow }) {
+  const [completed, setCompleted] = useState(false);
   const formId = useId();
   const [id] = useState(() => flow?.id ?? crypto.randomUUID());
   const [expectedVersion] = useState(flow?.version);
@@ -75,11 +76,10 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
       setError(failure.message); return;
     }
     const result = await mutation.run(task ? "/task-occurrences/confirm" : flow ? `/flows/${id}` : "/flows", body, flow ? "PUT" : "POST");
-    if (result) { onSaved?.(); onClose(); }
+    if (result) { setCompleted(true); setDirty(false); onSaved?.(); }
   }
-  return <AppDrawer open title={flow ? "编辑现金流水" : task ? `办理任务 · ${task.title}` : "新增现金流水"} onClose={() => dirty || !correctionsValid ? setClosing(true) : onClose()}
+  return <AppDrawer completion={completed ? "现金流水已保存" : undefined} open title={flow ? "编辑现金流水" : task ? `办理任务 · ${task.title}` : "新增现金流水"} onClose={() => !completed && (dirty || !correctionsValid) ? setClosing(true) : onClose()}
     closeDisabled={mutation.busy} width={720} className="cash-drawer" footer={<>
-      <Button size="sm" variant="secondary" isDisabled={mutation.busy} onPress={() => dirty || !correctionsValid ? setClosing(true) : onClose()}>取消</Button>
       <Button size="sm" type="submit" form={formId} isPending={mutation.busy} isDisabled={!correctionsValid || pendingKind !== null}>保存{task ? "并确认任务" : ""}</Button>
     </>}>
     {closing && <div className="cash-confirm" role="alert"><p>未保存的内容将被丢弃。</p><Button size="sm" variant="secondary" onPress={() => setClosing(false)}>继续填写</Button><Button size="sm" variant="danger" onPress={onClose}>放弃并关闭</Button></div>}
@@ -140,7 +140,9 @@ function CashFlowEditor({ onClose, onSaved, kind: initialKind = "receipt", task,
 }
 
 function CashFlowDetailDrawer({ flowId, onClose, onSaved }: Props & { flowId: string }) {
-  const query = useCashQuery<CashFlowDetail>(`/flows/${flowId}`);
+  const [deleted, setDeleted] = useState(false);
+  const query = useCashQuery<CashFlowDetail>(deleted ? null : `/flows/${flowId}`);
+  const [editingFlow, setEditingFlow] = useState<CashFlow | null>(null);
   const [mode, setMode] = useState("details"); const [page, setPage] = useState(1); const [itemId, setItemId] = useState<string | null>(null);
   const [linkedFlow, setLinkedFlow] = useState<string | null>(null);
   const [actualFlow, setActualFlow] = useState<{ item: CashItem; kind: CashSettlementKind } | null>(null);
@@ -149,11 +151,11 @@ function CashFlowDetailDrawer({ flowId, onClose, onSaved }: Props & { flowId: st
   const mutation = useCashMutation();
   const settlements = useCashQuery<CashPageRows<CashSettlement>>(mode === "allocations" ? "/settlements" : null, { flow_id: flowId, page, page_size: 20 });
   const flow = query.data?.flow;
-  if (mode === "edit" && flow) return <CashFlowEditor open onClose={onClose} onSaved={onSaved} flow={flow} />;
+  if (editingFlow) return <CashFlowEditor open onClose={onClose} onSaved={onSaved} flow={editingFlow} />;
   async function remove() {
     if (!flow || !correctionsValid) return;
     const result = await mutation.run(`/flows/${flow.id}/delete`, { expected_version: flow.version, ...corrections });
-    if (result) { onSaved?.(); onClose(); }
+    if (result) { setDeleted(true); onSaved?.(); }
   }
   async function unlinkTask() {
     if (!flow?.task) return;
@@ -164,10 +166,10 @@ function CashFlowDetailDrawer({ flowId, onClose, onSaved }: Props & { flowId: st
   if (actualFlow) return <CashFlowDrawer open existingItem={actualFlow.item} settlementKind={actualFlow.kind}
     kind={actualFlow.kind === "expense_payment" || actualFlow.item.obligation_direction === "payable" ? "payment" : "receipt"} onClose={() => setActualFlow(null)} />;
   if (itemId) return <CashItemDetail itemId={itemId} onClose={() => setItemId(null)} onFlow={setLinkedFlow} onActualFlow={(item, kind) => setActualFlow({ item, kind })} />;
-  return <AppDrawer open title={mode === "delete" ? "删除现金流水" : "现金流水详情"} onClose={onClose} closeDisabled={mutation.busy} width={720} className="cash-drawer" footer={flow && <>
+  return <AppDrawer completion={deleted ? "现金流水已删除" : undefined} open title={mode === "delete" ? "删除现金流水" : "现金流水详情"} onClose={onClose} closeDisabled={mutation.busy} width={720} className="cash-drawer" footer={flow && <>
     {mode === "delete" ? <><Button size="sm" variant="secondary" onPress={() => setMode("details")} isDisabled={mutation.busy}>返回详情</Button><Button size="sm" variant="danger" isPending={mutation.busy} isDisabled={!correctionsValid} onPress={remove}>确认删除</Button></> :
       mode === "unlink" ? <><Button size="sm" variant="secondary" onPress={() => setMode("details")}>取消解除</Button><Button size="sm" isPending={mutation.busy} onPress={unlinkTask}>确认解除任务关联</Button></> :
-        <><Button size="sm" variant="danger" onPress={() => setMode("delete")}>删除</Button><Button size="sm" variant="secondary" onPress={() => setMode("edit")}>编辑</Button></>}
+        <><Button size="sm" variant="danger" onPress={() => setMode("delete")}>删除</Button><Button size="sm" variant="secondary" onPress={() => setEditingFlow(flow)}>编辑</Button></>}
   </>}>
     <CashNotice error={query.error?.message || mutation.error?.message} />
     {query.loading && <p role="status">正在读取流水详情…</p>}

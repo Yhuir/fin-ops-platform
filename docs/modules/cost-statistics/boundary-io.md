@@ -270,3 +270,7 @@ PUT manual allocation
 待分配和已完成共用 HeroUI Accordion，单个受控 expanded 状态负责切换；展开沿用原详情 GET，收起不提交、不修改草稿。原生面板负责过渡及隐藏，局部 AllocationPanel 仅观察内容尺寸以衔接异步详情/表单行变化，并在原生隐藏后释放表单；观察器随组件或状态清理。收起时 inert 阻止隐藏控件交互，草稿继续归抽屉所有。无全局样式、HTTP、权限、保存、数据库或 worker 变化。
 
 已移除旧 article/button 条件挂载路径和箭头 is-expanded 规则，不保留平行折叠实现。验证入口为 CostManualAllocationRefresh.test.tsx 和 cost-source-allocation.spec.ts，包含动态中间帧、延迟详情、反向切换、减少动态效果和大明细卸载。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

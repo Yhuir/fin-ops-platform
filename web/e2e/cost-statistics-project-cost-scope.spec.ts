@@ -30,7 +30,9 @@ test("scope drawer saves once, refreshes costs, and stays readable at narrow wid
   expect(writes).toBe(0);
   const fresh = page.waitForResponse(response => response.url().includes("/cost-statistics/explorer") && response.request().method() === "GET");
   await drawer.getByRole("button", { name: "保存范围" }).click();
-  await fresh; await expect(drawer).not.toBeVisible();
+  await fresh; await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: "关闭抽屉" }).click();
+  await expect(drawer).not.toBeVisible();
   expect(writes).toBe(1); expect(codes).toContain("internal_transfer");
   await page.getByRole("button", { name: "项目成本范围", exact: true }).click();
   await expect(drawer.getByRole("checkbox", { name: "内部往来款", exact: true })).toBeChecked();

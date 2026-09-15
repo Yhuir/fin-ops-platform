@@ -643,7 +643,6 @@ export default function CostStatisticsPage() {
     setDomainRefreshNonce(current => current + 1);
     setScopeRefresh(current => current + 1);
     setScopeUnconfirmed(null);
-    setScopeOpen(false);
   }, [invalidateExportReferenceData, resetExplorerSelection]);
 
   useEffect(() => {
@@ -726,7 +725,6 @@ export default function CostStatisticsPage() {
       if (viewMode === "project" || viewMode === "bankAccount" || viewMode === "costTag") {
         setDomainRefreshNonce((current) => current + 1);
       }
-      setIsNoOaRulesOpen(false);
     } catch (caught) {
       setNoOaRulesError(getCostStatisticsActionErrorMessage(caught));
     } finally {

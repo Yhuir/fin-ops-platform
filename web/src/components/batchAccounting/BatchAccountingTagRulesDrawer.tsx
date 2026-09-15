@@ -50,9 +50,7 @@ export default function BatchAccountingTagRulesDrawer({
             {rules ? `已选 ${visibleSelectedCount} / ${tags.length}` : ""}
           </span>
           <div className="batch-accounting-rules-drawer__actions">
-            <Button isDisabled={saving} onPress={onClose} size="sm" variant="tertiary">
-              取消
-            </Button>
+
             <Button
               isDisabled={!rules?.canSave || loading || saving || !dirty}
               onPress={onSave}

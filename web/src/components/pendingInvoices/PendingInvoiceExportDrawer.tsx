@@ -86,7 +86,7 @@ export default function PendingInvoiceExportDrawer({
       closeLabel="关闭导出抽屉"
       footer={(
         <div className="pending-invoice-drawer-actions">
-          <Button className="pending-invoices-button" isDisabled={downloading} onPress={onClose} size="sm" variant="secondary">取消</Button>
+
           <Button
             className="pending-invoices-button pending-invoices-button--primary"
             isDisabled={!preview || loading || downloading}

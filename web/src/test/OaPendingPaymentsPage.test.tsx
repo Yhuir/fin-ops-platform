@@ -1227,7 +1227,7 @@ describe("OA pending payments page", () => {
     await user.click(within(page).getByRole("button", { name: "关联支出流水" }));
 
     const drawer = await screen.findByLabelText("关联支出流水抽屉");
-    expect(within(drawer).getByRole("button", { name: "取消" })).toBeDisabled();
+    expect(within(drawer).queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
     expect(within(drawer).getByRole("button", { name: "关闭关联支出流水抽屉" })).toBeDisabled();
     await user.keyboard("{Escape}");
     fireEvent.click(drawer.closest(".finance-drawer__backdrop") as HTMLElement);
@@ -1235,7 +1235,7 @@ describe("OA pending payments page", () => {
     expect(linkBankRequests(fetchMock)).toHaveLength(0);
 
     candidates.resolve();
-    await waitFor(() => expect(within(drawer).getByRole("button", { name: "取消" })).toBeEnabled());
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "关闭关联支出流水抽屉" })).toBeEnabled());
   });
 
   test("paginates bank candidate drawer and keeps filter context", async () => {
@@ -1565,26 +1565,25 @@ describe("OA pending payments page", () => {
     expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
   });
 
-  test("keeps pending invoice rules drawer stable during parent query refresh", async () => {
-    const fetchMock = installOaPendingPaymentsFetch();
+  test("keeps pending invoice rules drawer stable when an in-flight parent query finishes", async () => {
+    const pending = deferred();
+    const fetchMock = installOaPendingPaymentsFetch({ rowsResponses: [
+      { status: 200, payload: rowsPayload },
+      { status: 200, payload: rowsPayload, delay: pending.promise },
+    ] });
     const user = userEvent.setup();
-
     renderAuthenticatedAppAt("/oa-pending-payments");
-
     const page = await screen.findByTestId("oa-pending-payments-page");
+    await within(page).findByText("张三");
+    await user.click(within(page).getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
     await user.click(within(page).getByRole("button", { name: "支出流水无需开票规则设置" }));
     await screen.findByRole("heading", { name: "支出流水无需开票规则设置" });
     expect(rulesRequests(fetchMock)).toHaveLength(1);
-
-    const tableFrame = within(page).getByTestId("oa-pending-payments-table-frame");
-    const initialRowsRequestCount = rowsRequests(fetchMock).length;
-    await user.type(within(tableFrame).getByLabelText("搜索OA待付款核对"), "刘际涛");
-    await user.click(within(tableFrame).getByRole("button", { name: "查询" }));
-
-    await waitFor(() => {
-      expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequestCount);
-    });
+    await act(async () => pending.resolve());
+    expect(screen.getByRole("heading", { name: "支出流水无需开票规则设置" })).toBeVisible();
     expect(rulesRequests(fetchMock)).toHaveLength(1);
+    expect(rowsRequests(fetchMock)).toHaveLength(2);
   });
 
   test("loads the canonical page once without background polling", async () => {

@@ -2188,7 +2188,6 @@ export default function ReconciliationWorkbenchPage() {
         },
       });
       setLastActionMessage(message);
-      setRelationPreviewDialog(null);
       return;
     }
 
@@ -2211,7 +2210,6 @@ export default function ReconciliationWorkbenchPage() {
       },
     });
     setLastActionMessage(message);
-    setRelationPreviewDialog(null);
   };
 
   const handleConfirmOpenSelection = async () => {
@@ -2786,6 +2784,7 @@ function CashTicketPurchaseModal({
 }
 
 type RelationPreviewSubmitState =
+  | { phase: "completed"; message: string; committed: true }
   | { phase: "idle"; message: string; committed: false }
   | { phase: WorkbenchActionProgressPhase; message: string; committed: boolean }
   | { phase: "error"; message: string; committed: boolean; retryable: boolean };
@@ -2859,7 +2858,7 @@ function RelationPreviewDialog({
   const isCommittedError = submitState.phase === "error" && submitState.committed;
   const isNonRetryableError = submitState.phase === "error" && !submitState.retryable;
   const canSubmit = preview.canSubmit && (!noteRequired || note.trim().length > 0);
-  const primaryDisabled = !canSubmit || isBusy || isCommittedError || isNonRetryableError;
+  const primaryDisabled = !canSubmit || isBusy || submitState.committed || isNonRetryableError;
   const rowCounts = countRelationPreviewRows(preview.after.groups);
   const closePreview = () => {
     if (!isBusy) {
@@ -2878,6 +2877,7 @@ function RelationPreviewDialog({
     setProgress({ phase: "submitting", message: operationCopy.submittingMessage, committed: false });
     try {
       await onSubmit(note.trim(), setProgress);
+      setSubmitState({ phase: "completed", committed: true, message: "关联操作已完成" });
     } catch (error) {
       const message = actionErrorMessage(error);
       const retryable = !committed && isRelationPreviewRetryableSubmitError(message);
@@ -2913,15 +2913,9 @@ function RelationPreviewDialog({
   );
   const footer = (
     <div className="relation-preview-actions">
-      {isCommittedError || isNonRetryableError ? (
-        <Button onPress={closePreview} size="sm" variant="secondary">
-          关闭
-        </Button>
-      ) : (
+      {isCommittedError || isNonRetryableError ? null : (
         <>
-          <Button isDisabled={isBusy} onPress={closePreview} size="sm" variant="secondary">
-            取消
-          </Button>
+
           <Button
             isDisabled={primaryDisabled}
             isPending={isBusy}
@@ -2941,6 +2935,7 @@ function RelationPreviewDialog({
       ariaBusy={isBusy}
       className={`relation-preview-drawer${isBusy ? " relation-preview-drawer-busy" : ""}`}
       closeDisabled={isBusy}
+      completion={submitState.phase === "completed" ? submitState.message : undefined}
       closeLabel="关闭关联预览"
       footer={footer}
       open

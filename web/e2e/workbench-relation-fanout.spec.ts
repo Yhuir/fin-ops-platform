@@ -214,6 +214,8 @@ test.describe("workbench relation browser flow", () => {
     const workbenchReadsBeforeSubmit = api.count("GET /api/workbench");
     await drawer.getByRole("button", { name: "确认归属" }).click();
 
+    await expect(drawer.getByRole("status")).toHaveText("发票归属已保存");
+    await drawer.getByRole("button", { name: "关闭选择 OA 明细" }).click();
     await expect(drawer).toBeHidden();
     expect(api.count("POST /api/workbench/actions/assign-invoice-expense-items")).toBe(1);
     expect(api.lastBody("POST /api/workbench/actions/assign-invoice-expense-items")).toMatchObject({
@@ -303,6 +305,10 @@ test.describe("workbench relation browser flow", () => {
     });
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSubmit + 1);
+
+    const completedPreview = page.getByRole("dialog", { name: "确认关联" });
+    await expect(completedPreview.getByRole("status")).toHaveText("关联操作已完成");
+    await completedPreview.getByRole("button", { name: "关闭关联预览" }).click();
 
     await recordLatency({
       route: "/bank-details",

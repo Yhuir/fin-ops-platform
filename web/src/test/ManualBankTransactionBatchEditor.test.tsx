@@ -82,7 +82,6 @@ describe("ManualBankTransactionBatchEditor", () => {
           shortName: "建行",
           last4: "8106",
         }]}
-        onCancel={vi.fn()}
         onPreviewSessionChange={onPreviewSessionChange}
         onSubmit={onSubmit}
         previewTransactions={previewTransactions}
@@ -119,7 +118,6 @@ describe("ManualBankTransactionBatchEditor", () => {
     render(
       <ManualBankTransactionBatchEditor
         bankAccounts={[]}
-        onCancel={vi.fn()}
         onPreviewSessionChange={vi.fn()}
         onSubmit={vi.fn()}
       />,

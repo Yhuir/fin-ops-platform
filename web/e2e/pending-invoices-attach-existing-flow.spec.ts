@@ -206,9 +206,11 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       const confirmResponse = waitForAttachExistingConfirm(page);
       await picker.getByRole("button", { name: "确认建立关系" }).click();
       expect((await mark("apiLatencyMs", confirmResponse)).status()).toBe(200);
-      await mark("firstVisibleResponseLatencyMs", expect(picker).toBeHidden());
+      await mark("firstVisibleResponseLatencyMs", expect(picker.getByRole("status")).toHaveText("发票关联已保存"));
       await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm);
     });
+    await expect(picker.getByRole("status")).toHaveText("发票关联已保存");
+    await picker.getByRole("button", { name: "关闭发票选择抽屉" }).click();
     await expect(picker).toBeHidden();
     expect(api.lastBody("POST /api/pending-invoices/attach-existing-invoices")).toMatchObject({
       invoice_ids: ["iv-o-202603-001", "iv-o-202603-002"],
@@ -326,11 +328,13 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       const recoveredConfirm = waitForAttachExistingConfirm(page);
       await picker.getByRole("button", { name: "确认建立关系" }).click();
       expect((await mark("apiLatencyMs", recoveredConfirm)).status()).toBe(200);
-      await mark("firstVisibleResponseLatencyMs", expect(picker).toBeHidden());
+      await mark("firstVisibleResponseLatencyMs", expect(picker.getByRole("status")).toHaveText("发票关联已保存"));
       await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm);
     });
     expect(api.count("POST /api/pending-invoices/attach-existing-invoices")).toBe(2);
 
+    await expect(picker.getByRole("status")).toHaveText("发票关联已保存");
+    await picker.getByRole("button", { name: "关闭发票选择抽屉" }).click();
     await expect(picker).toBeHidden();
     await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm);
     const firstRow = page.getByRole("row", { name: /智能工厂设备商/ }).first();

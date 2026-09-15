@@ -25,6 +25,23 @@ beforeEach(() => {
 });
 
 describe("cash books", () => {
+  test("personal entry retains its initialized context when surrounding queries refresh", async () => {
+    const initial = initialCashBooksCriteria(); initial.tab = "personal";
+    const originalQuery = mocks.query.getMockImplementation()!;
+    let loading = false;
+    mocks.query.mockImplementation((path, params) => path === "/settings/personal-opening"
+      ? result(loading ? null : { counterparty: "测试个人", opening_date: "2026-01-01", version: 1 }, { loading })
+      : originalQuery(path, params));
+    const view = render(<CashBooks initialCriteria={initial} />);
+    await userEvent.click(screen.getByRole("button", { name: "新建事项", exact: true }));
+    await userEvent.type(await screen.findByRole("textbox", { name: "事项内容" }), "保留个人事项草稿");
+    loading = true;
+    view.rerender(<CashBooks initialCriteria={initial} />);
+    expect(screen.getByRole("textbox", { name: "事项内容" })).toHaveValue("保留个人事项草稿");
+    expect(screen.getByRole("textbox", { name: "往来对象" })).toHaveValue("测试个人");
+    expect(screen.queryByText("正在读取个人账配置…")).not.toBeInTheDocument();
+  });
+
   test("unsettled uses a cutoff-only item view, retains separate event criteria, and reads no other cash book", async () => {
     const originalQuery = mocks.query.getMockImplementation()!;
     mocks.query.mockImplementation((path, params) => path === "/reports/turnover" && params.view === "unsettled" ? result({ view: "unsettled", rows: [{ item_id: "old-loan", type: "loan", origin_date: "2025-02-01", ledger_group: "company", counterparty: "旧公司", project: null, content: "去年无新动作欠款", obligation_direction: "receivable", original_amount: "1000.00", settled_amount: "200.00", remaining_amount: "800.00", version: 3 }], summary: { item_count: 1, remaining_obligation_amount: { receivable: "800.00", payable: "0.00" } }, pagination: { ...pagination, total: 1 } }) : originalQuery(path, params));

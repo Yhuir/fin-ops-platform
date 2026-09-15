@@ -176,3 +176,7 @@ Canonical facts：
 - 详情 `view=candidate|formal` 显式区分当前候选与正式历史，默认 formal 保持正式详情调用语义。候选必须有 scope_month，不先查历史，消失返回 conflict；formal 不存在返回 not-found。详情 API/client 和关联台撤回调用同步更新。
 - 列表成功刷新后清除详情及错误缓存，并使旧详情请求失效；加载列表时不发旧候选详情请求。内部往来和普通提交共用一次冲突刷新，不自动 POST 重试。
 - 没有 schema、worker、read model 或后台刷新合同变化；现有幂等/CAS、占用检查、规则检查与原子写保留。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

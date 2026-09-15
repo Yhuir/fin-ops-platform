@@ -8,6 +8,7 @@ type AppDrawerProps = {
   ariaBusy?: boolean;
   className?: string;
   children: ReactNode;
+  completion?: ReactNode;
   closeDisabled?: boolean;
   closeLabel?: string;
   footer?: ReactNode;
@@ -30,6 +31,7 @@ export default function AppDrawer({
   ariaBusy,
   className,
   children,
+  completion,
   closeDisabled = false,
   closeLabel,
   footer,
@@ -38,6 +40,12 @@ export default function AppDrawer({
   width = 420,
   onClose,
 }: AppDrawerProps) {
+  // The caller owns completion; replacing the form removes stale submit actions.
+  if (completion != null) {
+    children = <div role="status">{completion}</div>;
+    footer = undefined;
+    headerActions = undefined;
+  }
   const titleId = useId();
   const [persistentMounted, setPersistentMounted] = useState(open);
   const [persistentVisible, setPersistentVisible] = useState(false);
@@ -184,14 +192,9 @@ export default function AppDrawer({
   return (
     <Drawer.Backdrop
       className="finance-drawer__backdrop"
-      isDismissable={!closeDisabled}
-      isKeyboardDismissDisabled={closeDisabled}
+      isDismissable={false}
+      isKeyboardDismissDisabled
       isOpen={open}
-      onOpenChange={(isOpen) => {
-        if (!isOpen && !closeDisabled) {
-          onClose();
-        }
-      }}
     >
       <Drawer.Content className="finance-drawer__content" data-placement="right" placement="right">
         <Drawer.Dialog

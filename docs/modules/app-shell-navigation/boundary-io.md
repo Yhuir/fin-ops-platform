@@ -96,3 +96,7 @@
 
 
 通用HTTP客户端参数补充（2026-09-09）：`ApiRequestJsonOptions.allowHtmlFallback`允许业务调用方显式禁止已有的HTML换API前缀重试。Cost保存设为false，避免不明确写结果重复请求；默认行为、身份头、URL解析和其他页面不变。客户端不解释成本分配内容，结果核实由Cost容器拥有。对应`ApiClient.test.ts`同时保护禁止重试与既有默认路径。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

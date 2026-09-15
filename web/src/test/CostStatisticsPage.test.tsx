@@ -85,6 +85,9 @@ describe("Cost statistics page", () => {
     expect(await screen.findByText("保存结果待核实，修改已保留")).toBeVisible();
     expect(screen.getByRole("button", { name: "保存范围" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "核实保存结果" }));
+    await waitFor(() => expect(screen.queryByText("保存结果待核实，修改已保留")).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: "项目成本范围" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "关闭抽屉" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "项目成本范围" })).not.toBeInTheDocument());
     expect(writes).toBe(1); expect(codes).toEqual([]);
   });

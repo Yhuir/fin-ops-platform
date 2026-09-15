@@ -90,9 +90,7 @@ export default function OutputInvoiceCollectionExportDrawer({
       closeLabel="关闭销项发票收款情况导出"
       footer={(
         <>
-          <Button className="output-invoice-collections-button" isDisabled={downloading} onPress={onClose} size="sm" variant="secondary">
-            取消
-          </Button>
+
           <Button
             className="output-invoice-collections-button output-invoice-collections-button--primary"
             isDisabled={!preview || loading || downloading}

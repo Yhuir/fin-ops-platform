@@ -69,7 +69,7 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
     vi.mocked(previewWorkbenchManualInvoices).mockResolvedValue(batchPreview);
     vi.mocked(confirmWorkbenchManualInvoiceSupplement).mockResolvedValue({ case_id: "CASE-1" });
 
-    render(
+    const { rerender } = render(
       <WorkbenchInvoiceEntryDrawer
         open
         target={target}
@@ -89,9 +89,14 @@ describe("WorkbenchInvoiceEntryDrawer", () => {
       expect(previewWorkbenchManualInvoices).toHaveBeenCalledTimes(1);
       expect(confirmWorkbenchManualInvoiceSupplement).toHaveBeenCalledWith(target, batchPreview);
       expect(onCompleted).toHaveBeenCalledTimes(1);
-      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toHaveTextContent("发票已录入");
     });
 
+    await user.click(screen.getByRole("button", { name: "关闭录入发票" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    rerender(<WorkbenchInvoiceEntryDrawer open={false} target={target} onClose={onClose} onCompleted={onCompleted} onSupportingDocumentsChanged={onSupportingDocumentsChanged} />);
+    rerender(<WorkbenchInvoiceEntryDrawer open target={target} onClose={onClose} onCompleted={onCompleted} onSupportingDocumentsChanged={onSupportingDocumentsChanged} />);
     await user.click(screen.getByRole("tab", { name: "补充凭证" }));
     expect(await screen.findByText("补充凭证关联当前 OA 明细，不进入正式发票池。")).toBeInTheDocument();
 

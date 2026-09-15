@@ -123,3 +123,7 @@ Workbench matcher 只复用同一号码 key 尝试正式化，不是页面展示
 ## 旧代码删除条件
 
 旧 lifecycle/status/reminder/receipt/manual-red 文件、route、frontend drawer、API client、DTO、E2E mock 和权限 opener 必须保持删除。历史 schema/migration 只有在独立、可回滚的数据迁移中才物理删除。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

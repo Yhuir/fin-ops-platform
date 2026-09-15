@@ -410,7 +410,6 @@ export default function PendingInvoicesPage() {
       throw operationResult.error;
     }
     clearSelectedTransactions();
-    closeDrawer();
   }
 
   const loadRelation = useCallback(

@@ -183,6 +183,8 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     expect(api.count("POST /api/operation-barrier/status")).toBe(barriersBeforeLink);
 
     await expect(page.getByText("已关联支出流水，OA 支付状态正在自动同步。")).toBeVisible();
+    await expect(drawer.getByRole("status")).toHaveText("支出流水关联已保存");
+    await drawer.getByRole("button", { name: "关闭关联支出流水抽屉" }).click();
     await expect(page.getByRole("heading", { name: "关联支出流水" })).toHaveCount(0);
     await expect.poll(() => api.count(ROWS_PATH)).toBeGreaterThan(rowsBeforeLink);
 

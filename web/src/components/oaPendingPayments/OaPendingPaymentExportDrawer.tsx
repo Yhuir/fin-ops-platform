@@ -84,9 +84,7 @@ export default function OaPendingPaymentExportDrawer({
       closeLabel="关闭导出 OA 抽屉"
       footer={(
         <div className="oa-pending-payment-export-drawer__footer">
-          <Button isDisabled={downloading} onPress={onClose} size="sm" variant="secondary">
-            取消
-          </Button>
+
           <Button
             className="oa-pending-payments-button oa-pending-payments-button--primary"
             isDisabled={downloading || selectedSources.size === 0}

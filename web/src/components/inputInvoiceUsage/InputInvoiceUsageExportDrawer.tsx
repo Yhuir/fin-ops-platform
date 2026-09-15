@@ -87,9 +87,7 @@ export default function InputInvoiceUsageExportDrawer({
       closeLabel="关闭进项发票使用情况导出"
       footer={(
         <>
-          <Button className="input-invoice-usage-button" isDisabled={downloading} onPress={onClose} size="sm" variant="secondary">
-            取消
-          </Button>
+
           <Button
             className="input-invoice-usage-button input-invoice-usage-button--primary"
             isDisabled={!preview || loading || downloading}

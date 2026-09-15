@@ -26,6 +26,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
   onClose,
   onCompleted,
 }: WorkbenchInvoiceAssignmentDrawerProps) {
+  const [completed, setCompleted] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -37,6 +38,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
     if (!open) {
       return;
     }
+    setCompleted(false);
     setSelectedKeys(new Set());
     setErrorMessage(null);
     setSubmitting(false);
@@ -73,7 +75,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
         setCommittedSignature(signature);
       }
       await onCompleted();
-      onClose();
+      setCompleted(true);
     } catch (error) {
       setErrorMessage(resolveWorkbenchActionErrorMessage(
         error,
@@ -92,6 +94,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
 
   return (
     <AppDrawer
+      completion={completed ? "发票归属已保存" : undefined}
       ariaBusy={submitting}
       className="workbench-invoice-assignment-drawer"
       closeDisabled={submitting}
@@ -103,9 +106,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
               ? "归属已保存，等待刷新"
               : selectedCount > 0 ? `已选 ${selectedCount} 项` : "尚未选择"}
           </span>
-          <Button isDisabled={submitting} size="sm" variant="secondary" onPress={onClose}>
-            取消
-          </Button>
+
           <Button
             isDisabled={disabled || submitting || selectedCount === 0 || !hasCandidates}
             size="sm"

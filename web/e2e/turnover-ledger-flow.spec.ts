@@ -206,6 +206,8 @@ test.describe("turnover ledger browser flow", () => {
     });
 
     await expect(page.getByText("外部往来款标签设置已保存")).toBeVisible();
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "关闭外部往来款标签设置" }).click();
     await expect(drawer).toHaveCount(0);
     expect(api.lastBody("PUT /api/turnover-ledger/tag-selection")).toEqual({
       expected_version: 1,
@@ -469,6 +471,9 @@ test.describe("turnover ledger browser flow", () => {
     await expect(page.getByText("收支闭环").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "关闭确认外部往来闭环" }).click();
+    await expect(drawer).toBeHidden();
     const costExplorerResponse = page.waitForResponse((response) =>
       response.request().method() === "GET"
       && responsePathMatches(response.url(), "/api/cost-statistics/explorer")

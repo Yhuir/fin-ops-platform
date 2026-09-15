@@ -287,3 +287,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 日常报销保留父 OA 作为关系与选择单位，所有 canonical expense_items 按原始顺序展示，包括单子项、重复费用内容、ETC collapsed_summary 组；发票折叠只控制发票栏。主栏和详情使用 expense_content，原始 fee_content/fee_description 单独保留；DTO 新增 expense_content、reimbursement_date、payment_method、invoice_kind、ticket_count。completed OA 日期统一读取原始申请时间/申请日期，再读取已有 canonical application_date，搜索、排序与显示共用表达式。移除整组 collapsed_summary 提前返回及单子项隐藏条件；不改 relation member、金额、成本分配或 worker。
 
 共享 `EntityDetailContent` 继续执行显式公共字段白名单；本次增加“票据张数”“附件文件数”两个业务计数标签，保留零值，不放开未知字段、内部 ID 或 raw payload。所有费用详情消费者共用此规则。
+
+## 右侧抽屉交互（2026-09-15）
+
+本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。

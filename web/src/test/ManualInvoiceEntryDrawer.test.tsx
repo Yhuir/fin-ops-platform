@@ -131,7 +131,9 @@ describe("ManualInvoiceEntryDrawer", () => {
       })]);
       expect(confirmImportFiles).toHaveBeenCalledWith("manual_session_1", ["manual_file_1"]);
       expect(onImportAccepted).toHaveBeenCalledTimes(1);
-      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toHaveTextContent("发票录入已提交");
+      expect(screen.queryByRole("button", { name: "录入发票池" })).not.toBeInTheDocument();
     });
   });
 

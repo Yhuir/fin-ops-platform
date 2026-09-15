@@ -652,7 +652,6 @@ export default function BankFlowRuleBatchPage() {
           });
           setTagSelection(saved);
           setDraftTagRequirements(requirementsFromSelection(saved));
-          setTagDrawerOpen(false);
           clearSelection();
           setSelectedBatchId("");
           setDetails({});
