@@ -2073,7 +2073,7 @@ class Application:
         if method == "GET" and route_path == "/api/workbench/oa-invoice-supplements/gallery":
             return self._handle_workbench_supporting_document_gallery(query)
         if method == "POST" and route_path == "/api/workbench/oa-invoice-supplements/documents":
-            return self._handle_workbench_supporting_document_upload(
+            return self._handle_workbench_supporting_document_save(
                 body,
                 headers,
                 actor_id=request_actor_id,
@@ -2086,12 +2086,7 @@ class Application:
         if method == "GET" and route_path.startswith("/api/workbench/oa-invoice-supplements/documents/") and route_path.endswith("/thumbnail"):
             document_id = route_path.removesuffix("/thumbnail").rsplit("/", 1)[-1]
             return self._handle_workbench_supporting_document_thumbnail(document_id)
-        if method == "DELETE" and route_path.startswith("/api/workbench/oa-invoice-supplements/documents/"):
-            document_id = route_path.rsplit("/", 1)[-1]
-            return self._handle_workbench_supporting_document_delete(
-                document_id,
-                actor_id=request_actor_id,
-            )
+
         if method == "POST" and route_path == "/imports/files/preview":
             return self._handle_import_file_preview(body, headers, imported_by=request_actor_id)
         if method == "POST" and route_path == "/imports/files/confirm":
@@ -7815,7 +7810,7 @@ class Application:
             target_exists=self._workbench_oa_expense_item_target_exists,
         )
 
-    def _handle_workbench_supporting_document_upload(
+    def _handle_workbench_supporting_document_save(
         self,
         body: str | bytes | None,
         headers: dict[str, str] | None,
@@ -7824,89 +7819,66 @@ class Application:
     ) -> Response:
         fields, files, error = self._load_multipart_body(body, headers)
         if error is not None:
-            _REQUEST_AUDIT_EVIDENCE.set(
-                build_operation_evidence(
-                    failure_code="invalid_supporting_document_upload",
-                    failure_message="上传请求格式无效，文件未保存。",
-                )
-            )
             return error
         case_id = str((fields.get("case_id") or [""])[0] or "")
         oa_row_id = str((fields.get("oa_row_id") or [""])[0] or "")
         expense_item_id = str((fields.get("expense_item_id") or [""])[0] or "")
-        target = workbench_oa_target(
-            case_id=case_id,
-            oa_row_id=oa_row_id,
-            expense_item_id=expense_item_id,
-        )
+        target = workbench_oa_target(case_id=case_id, oa_row_id=oa_row_id, expense_item_id=expense_item_id)
         attempted_artifacts = attempted_supporting_document_artifacts(files)
-        _REQUEST_AUDIT_EVIDENCE.set(
-            build_operation_evidence(target=target, artifacts=attempted_artifacts)
-        )
+        _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(target=target, artifacts=attempted_artifacts))
         try:
-            documents = self._workbench_oa_supporting_document_service().upload(
-                relation_case_id=case_id,
-                oa_row_id=oa_row_id,
-                expense_item_id=expense_item_id,
-                actor_id=actor_id,
-                uploads=[
-                    SupportingDocumentUpload(file_name=file.file_name, content=file.content)
-                    for file in files
-                ],
+            try:
+                retained = json.loads((fields.get("retained_document_ids") or [""])[0])
+                raw_version = (fields.get("expected_version") or [""])[0]
+                if not re.fullmatch(r"[0-9]+", raw_version):
+                    raise ValueError("invalid version")
+                expected_version = int(raw_version)
+            except (ValueError, TypeError):
+                raise WorkbenchOaSupportingDocumentError(
+                    "invalid_supporting_document_save", "请提供有效的凭证文件列表和版本。",
+                ) from None
+            result = self._workbench_oa_supporting_document_service().save(
+                relation_case_id=case_id, oa_row_id=oa_row_id, expense_item_id=expense_item_id,
+                actor_id=actor_id, retained_document_ids=retained,
+                total_amount=(fields.get("total_amount") or [None])[0],
+                expected_version=expected_version,
+                uploads=[SupportingDocumentUpload(file_name=file.file_name, content=file.content) for file in files],
             )
         except WorkbenchOaSupportingDocumentError as exc:
-            _REQUEST_AUDIT_EVIDENCE.set(
-                build_operation_evidence(
-                    target=target,
-                    artifacts=attempted_artifacts,
-                    failure_code=exc.error,
-                    failure_message=exc.message,
-                )
-            )
-            return self._json_response(HTTPStatus.BAD_REQUEST, {"error": exc.error, "message": exc.message})
+            _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(
+                target=target, artifacts=attempted_artifacts, failure_code=exc.error, failure_message=exc.message,
+            ))
+            payload = {"error": exc.error, "message": exc.message}
+            if exc.current_version is not None:
+                payload["current_version"] = exc.current_version
+            status = HTTPStatus.CONFLICT if exc.error == "supporting_document_version_conflict" else HTTPStatus.BAD_REQUEST
+            return self._json_response(status, payload)
         except RuntimeError:
-            _REQUEST_AUDIT_EVIDENCE.set(
-                build_operation_evidence(
-                    target=target,
-                    artifacts=attempted_artifacts,
-                    failure_code="supporting_document_unavailable",
-                    failure_message="文件存储暂时不可用，上传未保存。请稍后重试。",
-                )
-            )
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {
-                    "error": "supporting_document_unavailable",
-                    "message": "文件存储暂时不可用，上传未保存。请稍后重试。",
-                },
-            )
-        _REQUEST_AUDIT_EVIDENCE.set(
-            build_operation_evidence(
-                target=target,
-                artifacts=[supporting_document_artifact(document) for document in documents],
-                changes=[
-                    {
-                        "label": "补充凭证",
-                        "before": "未上传",
-                        "after": f"已关联 {len(documents)} 个文件",
-                    }
-                ],
-            )
-        )
-        return self._json_response(HTTPStatus.CREATED, {"documents": documents})
+            _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(
+                target=target, artifacts=attempted_artifacts,
+                failure_code="supporting_document_unavailable",
+                failure_message="凭证存储暂时不可用，请刷新后重试。",
+            ))
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "supporting_document_unavailable", "message": "凭证存储暂时不可用，请刷新后重试。",
+            })
+        _REQUEST_AUDIT_EVIDENCE.set(build_operation_evidence(
+            target=target, artifacts=[supporting_document_artifact(document) for document in result["documents"]],
+            changes=[{"label": "补充凭证", "after": f"{len(result['documents'])} 个文件，金额 {result['total_amount'] or '未填写'}"}],
+        ))
+        return self._json_response(HTTPStatus.OK, result)
 
     def _handle_workbench_supporting_document_list(self, query: dict[str, list[str]]) -> Response:
         try:
-            documents = self._workbench_oa_supporting_document_service().list(
+            result = self._workbench_oa_supporting_document_service().list(
                 oa_row_id=str((query.get("oa_row_id") or [""])[0] or ""),
                 expense_item_id=str((query.get("expense_item_id") or [""])[0] or ""),
             )
-        except RuntimeError as exc:
-            return self._json_response(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "supporting_document_unavailable", "message": str(exc)},
-            )
-        return self._json_response(HTTPStatus.OK, {"documents": documents})
+        except RuntimeError:
+            return self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "supporting_document_unavailable", "message": "补充凭证暂时不可用，请稍后重试。",
+            })
+        return self._json_response(HTTPStatus.OK, result)
 
     def _handle_workbench_supporting_document_gallery(self, query: dict[str, list[str]]) -> Response:
         raw_page_size = str((query.get("page_size") or ["9"])[0] or "9")
@@ -7969,30 +7941,6 @@ class Application:
                 "ETag": f'"{sha}-thumbnail-v1"',
             },
         )
-
-    def _handle_workbench_supporting_document_delete(self, document_id: str, *, actor_id: str) -> Response:
-        try:
-            document = self._workbench_oa_supporting_document_service().delete(document_id, actor_id=actor_id)
-        except WorkbenchOaSupportingDocumentError as exc:
-            _REQUEST_AUDIT_EVIDENCE.set(
-                build_operation_evidence(
-                    failure_code=exc.error,
-                    failure_message=exc.message,
-                )
-            )
-            return self._json_response(HTTPStatus.NOT_FOUND, {"error": exc.error, "message": exc.message})
-        _REQUEST_AUDIT_EVIDENCE.set(
-            build_operation_evidence(
-                target=workbench_oa_target(
-                    case_id=str(document.get("relation_case_id") or ""),
-                    oa_row_id=str(document.get("oa_row_id") or ""),
-                    expense_item_id=str(document.get("expense_item_id") or ""),
-                ),
-                artifacts=[supporting_document_artifact(document, availability="deleted")],
-                changes=[{"label": "补充凭证", "before": "可预览", "after": "已删除"}],
-            )
-        )
-        return self._json_response(HTTPStatus.OK, {"status": "deleted", "document_id": document_id})
 
     def _handle_import_file_preview(
         self,

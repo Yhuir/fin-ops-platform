@@ -1,6 +1,6 @@
 import unittest
 
-from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
+from fin_ops_platform.services.workbench_amount_check_service import AMOUNT_DISPLAY_LABELS, WorkbenchAmountCheckService
 
 
 class WorkbenchAmountCheckServiceTests(unittest.TestCase):
@@ -790,7 +790,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
     def test_supporting_documents_cover_only_document_only_items(self) -> None:
         rows = {
             "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
-                {"id": "fine", "amount": "100", "supporting_documents": [{"id": "doc-1"}, {"id": "doc-2"}]},
+                {"id": "fine", "amount": "100", "supporting_document_amount": "100.00", "supporting_document_version": 1, "supporting_documents": [{"id": "doc-1"}, {"id": "doc-2"}]},
                 {"id": "hotel", "amount": "200", "supporting_documents": []},
             ]}],
             "bank": [self._bank_row("300")],
@@ -809,7 +809,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
     def test_supporting_documents_do_not_hide_formal_invoice_or_bank_difference(self) -> None:
         rows = {
             "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
-                {"id": "fine", "amount": "100", "supporting_documents": [{"id": "doc-1"}]},
+                {"id": "fine", "amount": "100", "supporting_document_amount": "100.00", "supporting_document_version": 1, "supporting_documents": [{"id": "doc-1"}]},
                 {"id": "hotel", "amount": "200", "supporting_documents": [{"id": "doc-2"}]},
             ]}],
             "bank": [self._bank_row("300")],
@@ -828,7 +828,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
     def test_supporting_documents_do_not_double_subtract_shared_invoice_items(self) -> None:
         rows = {
             "oa": [{**self._oa_row("300"), "id": "oa-1", "expense_items": [
-                {"id": "first", "amount": "100", "supporting_documents": [{"id": "doc"}]},
+                {"id": "first", "amount": "100", "supporting_document_amount": "100.00", "supporting_document_version": 1, "supporting_documents": [{"id": "doc"}]},
                 {"id": "second", "amount": "200"},
             ]}],
             "bank": [self._bank_row("300")],
@@ -840,7 +840,7 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
     def test_document_only_group_has_no_fake_invoice_and_preserves_bank_check(self) -> None:
         rows = {
             "oa": [{**self._oa_row("100"), "id": "oa-1", "expense_items": [
-                {"id": "fine", "amount": "100", "supporting_documents": [{"id": "doc"}]},
+                {"id": "fine", "amount": "100", "supporting_document_amount": "100.00", "supporting_document_version": 1, "supporting_documents": [{"id": "doc"}]},
             ]}],
             "bank": [self._bank_row("100")], "invoice": [],
         }
@@ -849,6 +849,73 @@ class WorkbenchAmountCheckServiceTests(unittest.TestCase):
         rows["bank"] = [self._bank_row("110")]
         self.assertEqual(self.service.check(rows)["status"], "mismatch")
         self.assertIsNotNone(self.service.workbench_anomaly(rows, relation_id="CASE-DOC"))
+
+    def test_partial_formal_invoice_total_stays_unknown_with_voucher(self) -> None:
+        rows = {"oa": [{**self._oa_row("100"), "id": "oa-1", "expense_items": [
+            {"id": "a", "amount": "20", "supporting_document_amount": "20.00",
+             "supporting_documents": [{"id": "doc-a"}]},
+        ]}], "bank": [self._bank_row("100")], "invoice": [
+            {**self._invoice_row("80"), "id": "i-1"},
+            {"type": "invoice", "invoice_type": "input", "id": "i-2", "amount": None},
+        ]}
+        check = self.service.check(rows)
+        self.assertIsNone(check["invoice_total"])
+        self.assertIsNone(check["evidence_total"])
+        self.assertFalse(check["evidence_complete"])
+        anomaly = self.service.workbench_anomaly(rows, relation_id="unknown-invoice")
+        self.assertFalse(any(item["code"] in AMOUNT_DISPLAY_LABELS for item in anomaly["items"]))
+
+    def test_voucher_amount_is_actual_once_not_oa_amount_or_file_count(self) -> None:
+        rows = {"oa": [{**self._oa_row("100"), "id": "oa-1", "expense_items": [{
+            "id": "item-1", "amount": "100", "supporting_document_amount": "80.00",
+            "supporting_document_version": 1, "supporting_documents": [{"id": "a"}, {"id": "b"}],
+        }]}], "bank": [self._bank_row("100")], "invoice": []}
+        result = self.service.check(rows)
+        self.assertEqual((result["oa_total"], result["bank_total"], result["invoice_total"]), ("100.00", "100.00", None))
+        self.assertEqual((result["supporting_document_total"], result["evidence_total"]), ("80.00", "80.00"))
+        self.assertEqual((result["status"], result["amount_delta"]), ("mismatch", "20.00"))
+        item = rows["oa"][0]["expense_items"][0]
+        item["supporting_document_amount"] = None
+        result = self.service.check(rows)
+        self.assertEqual(result["status"], "unknown")
+        self.assertFalse(result["evidence_complete"])
+        anomaly = self.service.workbench_anomaly(rows, relation_id="voucher")
+        self.assertEqual(anomaly["items"][0]["code"], "oa_supporting_document_amount_missing")
+        item["supporting_document_amount"] = "0.00"
+        self.assertEqual(self.service.check(rows)["amount_delta"], "100.00")
+        item["supporting_document_amount"] = "100.00"
+        self.assertIsNone(self.service.workbench_anomaly(rows, relation_id="voucher"))
+        rows["invoice"] = [{**self._invoice_row("90"), "id": "inv", "source_expense_item_ids": ["item-1"]}]
+        result = self.service.check(rows)
+        self.assertEqual((result["supporting_document_total"], result["evidence_total"]), ("0.00", "90.00"))
+        self.assertEqual(result["status"], "mismatch")
+        rows["invoice"] = []
+        self.assertEqual(self.service.check(rows)["evidence_total"], "100.00")
+        item["supporting_documents"] = []
+        self.assertIsNone(self.service.check(rows)["evidence_total"])
+
+    def test_voucher_item_differences_do_not_cancel_and_review_binds_evidence(self) -> None:
+        rows = {"oa": [{**self._oa_row("200"), "id": "oa-1", "expense_items": [
+            {"id": "a", "amount": "100", "supporting_document_amount": "90.00",
+             "supporting_document_version": 1, "supporting_documents": [{"id": "doc-a"}]},
+            {"id": "b", "amount": "100", "supporting_document_amount": "110.00",
+             "supporting_document_version": 1, "supporting_documents": [{"id": "doc-b"}]},
+        ]}], "bank": [self._bank_row("200")], "invoice": []}
+        check = self.service.check(rows)
+        self.assertEqual((check["status"], check["amount_delta"]), ("mismatch", "10.00"))
+        first = self.service.workbench_anomaly(rows, relation_id="voucher")
+        self.assertEqual(first["items"][0]["code"], "expense_item_amount_mismatch")
+        self.assertEqual(len(first["items"][0]["expense_item_differences"]), 2)
+        rows["oa"][0]["expense_items"][0]["supporting_document_version"] = 2
+        second = self.service.workbench_anomaly(rows, relation_id="voucher")
+        self.assertNotEqual(first["fingerprint"], second["fingerprint"])
+        rows["oa"][0]["expense_items"][0]["amount"] = "70"
+        rows["oa"][0]["expense_items"][1]["amount"] = "130"
+        changed_oa = self.service.workbench_anomaly(rows, relation_id="voucher")
+        self.assertNotEqual(second["fingerprint"], changed_oa["fingerprint"])
+        rows["bank"] = []
+        third = self.service.workbench_anomaly(rows, relation_id="voucher")
+        self.assertEqual(third["items"][0]["code"], "expense_item_amount_mismatch")
 
     @staticmethod
     def _oa_row(amount: str, *, reconciliation_amount: str | None = None) -> dict[str, str]:

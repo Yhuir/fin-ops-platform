@@ -6,15 +6,11 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
-  test("missing invoice item can select existing invoices without creating another invoice", async ({ page }) => {
+  test("missing invoice item keeps one entry point without the external existing-invoice picker", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "user", workbenchOaInvoiceUnparsedScenario: true });
     await page.goto("/");
-    await page.getByRole("button", { name: "选择已有发票" }).click();
-    const drawer = page.getByRole("dialog", { name: "选择已有发票" });
-    await expect(drawer.getByText("当前组没有待归属发票。")).toBeVisible();
-    await expect(drawer.getByText(/其他组或尚未关联/)).toBeVisible();
-    await drawer.getByRole("button", { name: "关闭选择已有发票" }).click();
-    await expect(drawer).toBeHidden();
+    await expect(page.getByRole("button", { name: "录入发票" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "选择已有发票" })).toHaveCount(0);
   });
 
   test("opens one OA invoice supplement drawer with invoice entry as the primary mode", async ({ page }) => {

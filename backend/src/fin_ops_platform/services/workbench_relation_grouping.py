@@ -217,7 +217,10 @@ class WorkbenchRelationGroupingService:
         completion = evaluate_bank_relation_completion(
             row_types=[str(rows_by_id[row_id]["type"]) for row_id in relation["row_ids"]],
             supporting_documents_complete=bool(oa_rows) and all(
-                row.get("expense_items") and all(item.get("supporting_documents") for item in row["expense_items"])
+                row.get("expense_items") and all(
+                    item.get("supporting_documents") and item.get("supporting_document_amount") is not None
+                    for item in row["expense_items"]
+                )
                 for row in oa_rows
             ),
             oa_workflow_statuses=[

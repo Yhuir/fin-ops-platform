@@ -778,3 +778,11 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 查询/服务/集成：`test_workbench_query_postgres_integration.py` 验证 2 OA + 2 银行 + 1 共享发票在未配对保持逐笔展示，initial/full/summary/detail、搜索、筛选一致，OA 完成后原 case 换区且关系成员/version 不改写。
 - ETC：`test_etc_formal_matching_postgres.py` 验证先建来源关联、后到流水扩展、进行中保持未配对、审批完成后原 case 进入已配对。
 - API shape/权限、成本准入、银行与发票 ownership 不变，复跑现有 API、组件和跨页回归。无新 read model/cache/job；SQL 查询预算由既有回归保护。
+
+## 2026-09-21 凭证金额闭环验证
+
+- 业务：`test_workbench_amount_check_service.py` 验证凭证实际金额、多文件计一次、未知/零、正式发票优先及关联撤回、明细差额抵消、OA 子项金额变化使审阅指纹失效、正式发票缺金额不输出假合计。
+- Service/API/事务：凭证 service/API 和 `test_workbench_oa_supporting_document_postgres_integration.py`验证原子发布、审计失败回滚、CAS、重试、历史未知和清空。
+- Canonical SQL：`test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 验证金额/分类/指纹/审阅的 SQL/Python 一致性、分页前明细分类及原固定查询预算；`test_workbench_page_query_repository.py` 保持 scope-first 与 OA 来源优先约束。
+- 前端/E2E：凭证编辑、异常抽屉、三栏组件及 `workbench-supporting-documents-flow.spec.ts` 覆盖一次保存、双入口、取消/失败/刷新、旧按钮移除和只读权限。
+- 回归：既有进行中 OA、ETC、共享发票、确认/撤回、强身份补录、税金与成本隔离。无新增 read model/cache；现有 matching 通知属于任务验证范围。性能对照现有 HTTP SLO，不以 mock 响应代替生产证据。

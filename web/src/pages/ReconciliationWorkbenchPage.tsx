@@ -425,7 +425,6 @@ export default function ReconciliationWorkbenchPage() {
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<(WorkbenchOaInvoiceSupplementTarget & { initialMode?: "upload" | "manual" }) | null>(null);
   const [invoiceAssignmentTarget, setInvoiceAssignmentTarget] = useState<WorkbenchInvoiceExpenseItemAssignmentTarget | null>(null);
-  const [existingInvoicePicker, setExistingInvoicePicker] = useState<{ group: WorkbenchRelationGroup; oaRowId: string; expenseItemId: string } | null>(null);
   const hasOaSyncRefreshBlockingInteraction = detailRow !== null
     || isDetailLoading
     || explicitSelectedPairedRows.length > 0
@@ -437,8 +436,7 @@ export default function ReconciliationWorkbenchPage() {
     || exceptionDrawerOpen
     || cashTicketPurchaseDialog !== null
     || invoiceEntryTarget !== null
-    || invoiceAssignmentTarget !== null
-    || existingInvoicePicker !== null;
+    || invoiceAssignmentTarget !== null;
   const hasOaSyncRefreshBlockingInteractionRef = useRef(hasOaSyncRefreshBlockingInteraction);
   useLayoutEffect(() => {
     hasOaSyncRefreshBlockingInteractionRef.current = hasOaSyncRefreshBlockingInteraction;
@@ -1929,13 +1927,6 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
-    if (action === "select-existing-invoice") {
-      if (row.sourceOaId && row.sourceExpenseItemIds?.[0]) {
-        setExistingInvoicePicker({ group, oaRowId: row.sourceOaId, expenseItemId: row.sourceExpenseItemIds[0] });
-      }
-      return;
-    }
-
     if (action === "assign-invoice-expense-items") {
       const anomaly = row.workbenchAnomalies?.find(
         (candidate) => candidate.code === "oa_invoice_attachment_unassigned",
@@ -2645,6 +2636,8 @@ export default function ReconciliationWorkbenchPage() {
         />
       ) : null}
       <WorkbenchExceptionDrawer
+        columnLayouts={workbenchSettings?.workbenchColumnLayouts}
+        onManageSupportingDocuments={(row, group) => { void handleRowAction(row, "manage-supporting-documents", group); }}
         bucket={exceptionDrawerBucket}
         bucketCounts={{
           unpaired: workbenchData?.summary.unpairedExceptionCount ?? 0,
@@ -2697,19 +2690,6 @@ export default function ReconciliationWorkbenchPage() {
           }
         }}
       />
-      {existingInvoicePicker ? <AppDrawer open onClose={() => setExistingInvoicePicker(null)}
-        title="选择已有发票" closeLabel="关闭选择已有发票" width="min(640px, 100vw)">
-        <p>选择当前关联组的待归属发票。其他组或尚未关联的发票，请先在关联台选择 OA 与发票建立关联。</p>
-        {existingInvoicePicker?.group.rows.invoice.filter((row) => !row.displayOnly && row.workbenchAnomalies?.some((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")).map((row) => (
-          <Button key={row.id} variant="tertiary" isDisabled={!canWriteWorkbench} onPress={() => {
-            const picker = existingInvoicePicker;
-            void handleRowAction(row, "assign-invoice-expense-items", picker.group);
-            setInvoiceAssignmentTarget((target) => target ? { ...target, initialTargets: [{ oaRowId: picker.oaRowId, expenseItemId: picker.expenseItemId }] } : null);
-            setExistingInvoicePicker(null);
-          }}>{row.tableValues.invoiceNo ?? row.label} · {row.tableValues.grossAmount ?? row.amount}</Button>
-        ))}
-        {existingInvoicePicker && !existingInvoicePicker.group.rows.invoice.some((row) => !row.displayOnly && row.workbenchAnomalies?.some((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")) ? <p>当前组没有待归属发票。</p> : null}
-      </AppDrawer> : null}
       <WorkbenchInvoiceAssignmentDrawer
         disabled={!canWriteWorkbench}
         open={invoiceAssignmentTarget !== null}

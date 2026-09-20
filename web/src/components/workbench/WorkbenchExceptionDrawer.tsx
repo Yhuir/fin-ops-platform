@@ -15,6 +15,7 @@ import {
   WORKBENCH_AMOUNT_ANOMALY_CODES,
   WORKBENCH_AMOUNT_ANOMALY_LABELS,
   type WorkbenchAmountAnomalyCode,
+  type WorkbenchColumnLayouts,
   type WorkbenchExceptionCounts,
   type WorkbenchExceptionView,
   type WorkbenchRecord,
@@ -39,6 +40,8 @@ type WorkbenchExceptionDrawerProps = {
   total: number;
   hasMore: boolean;
   canOperateData: boolean;
+  columnLayouts?: WorkbenchColumnLayouts;
+  onManageSupportingDocuments?: (row: WorkbenchRecord, group: WorkbenchRelationGroup) => void;
   onBucketChange: (bucket: "unpaired" | "paired") => void;
   onViewChange: (view: WorkbenchExceptionView) => void;
   onExceptionCodeChange: (code: WorkbenchAmountAnomalyCode) => void;
@@ -79,6 +82,10 @@ const AMOUNT_RULE_FAMILIES: Array<{
     label: "三项互异",
     codes: ["all_amounts_different"],
   },
+  {
+    label: "费用明细",
+    codes: ["expense_item_amount_mismatch"],
+  },
 ];
 const AMOUNT_RULE_SHORT_LABELS: Record<WorkbenchAmountAnomalyCode, string> = {
   oa_bank_equal_invoice_more: "票多",
@@ -88,6 +95,7 @@ const AMOUNT_RULE_SHORT_LABELS: Record<WorkbenchAmountAnomalyCode, string> = {
   bank_invoice_equal_oa_less: "OA 提少",
   bank_invoice_equal_oa_more: "OA 提多",
   all_amounts_different: "三项不一致",
+  expense_item_amount_mismatch: "明细金额不一致",
 };
 const DRAWER_DETAIL_COLUMNS = "minmax(320px, 1fr) 1px minmax(320px, 1fr) 1px minmax(320px, 1fr)";
 export default function WorkbenchExceptionDrawer({
@@ -105,6 +113,8 @@ export default function WorkbenchExceptionDrawer({
   total,
   hasMore,
   canOperateData,
+  columnLayouts,
+  onManageSupportingDocuments,
   onBucketChange,
   onViewChange,
   onExceptionCodeChange,
@@ -169,8 +179,8 @@ export default function WorkbenchExceptionDrawer({
           }
         })
         .finally(() => {
-          detailRequestsRef.current.delete(groupId);
           if (detailGenerationRef.current === requestGeneration) {
+            detailRequestsRef.current.delete(groupId);
             setDetailLoadingIds((current) => {
               const next = new Set(current);
               next.delete(groupId);
@@ -377,9 +387,12 @@ export default function WorkbenchExceptionDrawer({
                             canOperateData={false}
                             getRowState={() => "idle"}
                             groups={[detailGroup]}
-                            hidePaneHeaders
+                            columnLayouts={columnLayouts}
                             onOpenDetail={() => undefined}
                             onRowAction={(row, action, actionGroup) => {
+                              if (action === "manage-supporting-documents") {
+                                onManageSupportingDocuments?.(row, actionGroup);
+                              }
                               if (action === "enter-invoice") {
                                 onInvoiceEntry(row, actionGroup);
                               }
@@ -484,10 +497,6 @@ function ExceptionReviewPanel({
 
 function groupPaneRows(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) {
   return group.collapsedRows?.[paneId] ?? group.rows[paneId];
-}
-
-function allGroupRows(group: WorkbenchRelationGroup) {
-  return PANE_IDS.flatMap((paneId) => groupPaneRows(group, paneId));
 }
 
 function paneSummary(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) {

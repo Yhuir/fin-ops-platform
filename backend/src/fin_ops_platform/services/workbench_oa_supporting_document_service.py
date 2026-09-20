@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+import logging
+import re
 from base64 import b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from hashlib import sha256
-import json
 from pathlib import Path
 from typing import Any, Callable
 from uuid import UUID, uuid4
@@ -16,7 +19,6 @@ from fin_ops_platform.services.untrusted_document_policy import (
     render_document_thumbnail,
 )
 
-
 MAX_SUPPORTING_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_GALLERY_PAGE_SIZE = 9
 SUPPORTING_DOCUMENT_THUMBNAIL_EDGE = 360
@@ -25,10 +27,11 @@ SUPPORTING_DOCUMENT_LIMITS = DocumentLimits(max_bytes=MAX_SUPPORTING_DOCUMENT_BY
 
 
 class WorkbenchOaSupportingDocumentError(ValueError):
-    def __init__(self, error: str, message: str) -> None:
+    def __init__(self, error: str, message: str, *, current_version: int | None = None) -> None:
         super().__init__(message)
         self.error = error
         self.message = message
+        self.current_version = current_version
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,105 +52,105 @@ class WorkbenchOaSupportingDocumentService:
         self._file_store = file_store
         self._target_exists = target_exists
 
-    def upload(
+    def save(
         self,
         *,
         relation_case_id: str,
         oa_row_id: str,
         expense_item_id: str,
         actor_id: str,
+        retained_document_ids: list[str],
+        total_amount: str | None,
+        expected_version: int,
         uploads: list[SupportingDocumentUpload],
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         oa_row_id = str(oa_row_id or "").strip()
         expense_item_id = str(expense_item_id or "").strip()
         actor_id = str(actor_id or "").strip()
-        if not oa_row_id or not expense_item_id or not actor_id or not uploads:
+        if not oa_row_id or not expense_item_id or not actor_id:
             raise WorkbenchOaSupportingDocumentError(
-                "invalid_supporting_document_upload",
-                "OA付款项、子付款项、操作人和文件不能为空。",
+                "invalid_supporting_document_save", "OA付款项、子付款项和操作人不能为空。",
             )
+        if type(expected_version) is not int or expected_version < 0:
+            raise WorkbenchOaSupportingDocumentError(
+                "supporting_document_version_invalid", "请提供有效的凭证组版本。",
+            )
+        if not isinstance(retained_document_ids, list) or any(
+            not isinstance(value, str) or not value.strip() for value in retained_document_ids
+        ) or len(set(retained_document_ids)) != len(retained_document_ids):
+            raise WorkbenchOaSupportingDocumentError(
+                "supporting_document_selection_invalid", "保留的凭证文件列表无效或有重复。",
+            )
+        amount = self._validate_amount(total_amount, has_documents=bool(retained_document_ids or uploads))
         if not self._target_exists(oa_row_id, expense_item_id):
             raise WorkbenchOaSupportingDocumentError(
-                "supporting_document_target_not_found",
-                "目标 OA 子付款项不存在或已变化，请刷新后重试。",
+                "supporting_document_target_not_found", "目标 OA 子付款项不存在或已变化，请刷新后重试。",
             )
         validated = [self._validate_upload(upload) for upload in uploads]
-        documents: list[dict[str, Any]] = []
-        created_resources: list[tuple[str, str]] = []
+        prepared: dict[str, dict[str, Any]] = {}
         try:
             for upload, content_type in validated:
                 content_sha256 = sha256(upload.content).hexdigest()
-                existing = self._repository.find_active_by_content(
-                    oa_row_id=oa_row_id,
-                    expense_item_id=expense_item_id,
-                    content_sha256=content_sha256,
-                )
-                if existing is not None:
-                    documents.append(self._present(existing))
+                if content_sha256 in prepared:
                     continue
-                storage_id = f"oa-support-{uuid4().hex}"
                 stored = self._file_store.store_workbench_oa_supporting_document(
-                    document_id=storage_id,
-                    file_name=upload.file_name,
-                    content=upload.content,
-                    content_type=content_type,
+                    document_id=f"oa-support-{uuid4().hex}", file_name=upload.file_name,
+                    content=upload.content, content_type=content_type,
                 )
-                try:
-                    document = self._repository.create(
-                        relation_case_id=str(relation_case_id or "").strip(),
-                        oa_row_id=oa_row_id,
-                        expense_item_id=expense_item_id,
-                        file_object_id=str(stored["file_object_id"]),
-                        original_filename=upload.file_name,
-                        content_type=content_type,
-                        content_sha256=content_sha256,
-                        size_bytes=int(stored["size_bytes"]),
-                        created_by=actor_id,
-                    )
-                except Exception:
-                    self._file_store.delete_workbench_oa_supporting_document(
-                        str(stored["storage_uri"])
-                    )
-                    raise
-                if document is None:
-                    self._file_store.delete_workbench_oa_supporting_document(
-                        str(stored["storage_uri"])
-                    )
-                    existing = self._repository.find_active_by_content(
-                        oa_row_id=oa_row_id,
-                        expense_item_id=expense_item_id,
-                        content_sha256=content_sha256,
-                    )
-                    if existing is None:
-                        raise RuntimeError("supporting document conflict could not be resolved")
-                    documents.append(self._present(existing))
-                    continue
-                created_resources.append((str(document["id"]), str(stored["storage_uri"])))
-                documents.append(self._present(document))
-        except Exception as exc:
-            cleanup_errors: list[str] = []
-            for document_id, storage_uri in reversed(created_resources):
-                try:
-                    self._repository.soft_delete(document_id, deleted_by=actor_id)
-                    self._file_store.delete_workbench_oa_supporting_document(storage_uri)
-                except Exception as cleanup_exc:
-                    cleanup_errors.append(str(cleanup_exc) or cleanup_exc.__class__.__name__)
-            if cleanup_errors:
-                raise WorkbenchOaSupportingDocumentError(
-                    "supporting_document_cleanup_failed",
-                    "补充凭证批量上传失败，且清理未完整完成，请联系管理员处理。",
-                ) from exc
-            raise
-        return documents
-
-    def list(self, *, oa_row_id: str, expense_item_id: str) -> list[dict[str, Any]]:
-        return [
-            self._present(document)
-            for document in self._repository.list_active(
-                oa_row_id=str(oa_row_id or "").strip(),
-                expense_item_id=str(expense_item_id or "").strip(),
+                prepared[content_sha256] = {
+                    **stored, "original_filename": upload.file_name,
+                    "content_type": content_type, "content_sha256": content_sha256,
+                }
+            result = self._repository.save_bundle(
+                relation_case_id=str(relation_case_id or "").strip(),
+                oa_row_id=oa_row_id, expense_item_id=expense_item_id, actor_id=actor_id,
+                retained_document_ids=retained_document_ids, total_amount=amount,
+                expected_version=expected_version, documents=list(prepared.values()),
             )
-        ]
+        except Exception:
+            self._cleanup_resources([str(document["storage_uri"]) for document in prepared.values()])
+            raise
+        used = {str(document["file_object_id"]) for document in result["documents"]}
+        self._cleanup_resources([
+            str(document["storage_uri"]) for document in prepared.values()
+            if str(document["file_object_id"]) not in used
+        ] + result.pop("removed_storage_uris", []))
+        return self._present_bundle(result)
+
+    def _cleanup_resources(self, storage_uris: list[str]) -> None:
+        for storage_uri in storage_uris:
+            try:
+                self._file_store.delete_workbench_oa_supporting_document(storage_uri)
+            except Exception:
+                # Canonical publication has completed (or rolled back). A storage cleanup
+                # failure must never turn a committed edit into an apparent failed edit.
+                logging.getLogger(__name__).exception("Supporting document resource cleanup failed")
+
+    @staticmethod
+    def _validate_amount(value: str | None, *, has_documents: bool) -> str | None:
+        if not has_documents:
+            if value not in (None, ""):
+                raise WorkbenchOaSupportingDocumentError(
+                    "supporting_document_amount_invalid", "没有补充凭证文件时金额必须为空。",
+                )
+            return None
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,18}(?:\.[0-9]{1,2})?", value):
+            raise WorkbenchOaSupportingDocumentError(
+                "supporting_document_amount_invalid", "请填写非负凭证总金额，最多保留两位小数。",
+            )
+        return format(Decimal(value), ".2f")
+
+    def list(self, *, oa_row_id: str, expense_item_id: str) -> dict[str, Any]:
+        return self._present_bundle(self._repository.get_bundle(
+            oa_row_id=str(oa_row_id or "").strip(),
+            expense_item_id=str(expense_item_id or "").strip(),
+        ))
+
+    def _present_bundle(self, bundle: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "documents": [self._present(document) for document in bundle["documents"]],
+            "total_amount": bundle["total_amount"], "version": bundle["version"],
+        }
 
     def gallery(self, *, page_size: int = MAX_GALLERY_PAGE_SIZE, cursor: str = "") -> dict[str, Any]:
         if not isinstance(page_size, int) or page_size < 1 or page_size > MAX_GALLERY_PAGE_SIZE:
@@ -201,24 +204,6 @@ class WorkbenchOaSupportingDocumentService:
                 "补充凭证缩略图暂时无法生成，请打开原文件查看。",
             ) from None
         return document, thumbnail
-
-    def delete(self, document_id: str, *, actor_id: str) -> dict[str, Any]:
-        document = self._repository.get_active(str(document_id or "").strip())
-        if document is None:
-            raise WorkbenchOaSupportingDocumentError(
-                "supporting_document_not_found",
-                "补充凭证不存在或已删除。",
-            )
-        deleted = self._repository.soft_delete(document["id"], deleted_by=actor_id)
-        if deleted is None:
-            raise WorkbenchOaSupportingDocumentError(
-                "supporting_document_not_found",
-                "补充凭证不存在或已删除。",
-            )
-        self._file_store.delete_workbench_oa_supporting_document(
-            str(document.get("storage_uri") or "")
-        )
-        return self._present(document)
 
     @staticmethod
     def _validate_upload(

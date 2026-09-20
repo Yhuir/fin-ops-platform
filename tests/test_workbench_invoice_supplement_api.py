@@ -6,11 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from fin_ops_platform.services.audit import AuditTrailService
+from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     WorkbenchOaSupportingDocumentError,
 )
 
-from tests.app_test_support import build_local_state_application
+from tests.app_test_support import build_local_state_application, configure_access_control
 
 
 def _multipart_document() -> tuple[bytes, dict[str, str]]:
@@ -20,6 +21,9 @@ def _multipart_document() -> tuple[bytes, dict[str, str]]:
         ("case_id", "CASE-1"),
         ("oa_row_id", "oa-1"),
         ("expense_item_id", "oa-1:item:0"),
+        ("retained_document_ids", "[]"),
+        ("total_amount", "100.00"),
+        ("expected_version", "0"),
     ):
         chunks.extend([
             f"--{boundary}\r\n".encode(),
@@ -186,8 +190,8 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
             "content_url": "/api/workbench/oa-invoice-supplements/documents/document-1/content",
         }
         service = SimpleNamespace(
-            upload=Mock(return_value=[document]),
-            list=Mock(return_value=[document]),
+            save=Mock(return_value={"documents": [document], "total_amount": "100.00", "version": 1}),
+            list=Mock(return_value={"documents": [document], "total_amount": "100.00", "version": 1}),
             content=Mock(return_value=({"content_type": "application/pdf", "original_filename": "voucher.pdf"}, b"%PDF-1.7")),
             delete=Mock(return_value=document),
         )
@@ -213,10 +217,10 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
                 "/api/workbench/oa-invoice-supplements/documents/document-1",
             )
 
-        self.assertEqual(upload.status_code, 201)
+        self.assertEqual(upload.status_code, 200)
         self.assertEqual(json.loads(upload.body)["documents"][0]["id"], "document-1")
-        service.upload.assert_called_once()
-        upload_call = service.upload.call_args.kwargs
+        service.save.assert_called_once()
+        upload_call = service.save.call_args.kwargs
         self.assertEqual(upload_call["oa_row_id"], "oa-1")
         self.assertEqual(upload_call["expense_item_id"], "oa-1:item:0")
         self.assertEqual(upload_call["uploads"][0].content, b"%PDF-1.7\ncontent")
@@ -225,8 +229,49 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
         self.assertEqual(content.status_code, 200)
         self.assertEqual(content.body, b"%PDF-1.7")
         self.assertEqual(content.headers["Content-Type"], "application/pdf")
-        self.assertEqual(deleted.status_code, 200)
-        service.delete.assert_called_once()
+        self.assertEqual(deleted.status_code, 404)
+        service.delete.assert_not_called()
+
+    def test_document_save_reports_conflict_and_requires_edit_contract(self) -> None:
+        app = build_local_state_application()
+        service = SimpleNamespace(save=Mock(side_effect=WorkbenchOaSupportingDocumentError(
+            "supporting_document_version_conflict", "请刷新后重试。", current_version=3,
+        )))
+        body, headers = _multipart_document()
+        with patch.object(app, "_workbench_oa_supporting_document_service", return_value=service):
+            response = app.handle_request("POST", "/api/workbench/oa-invoice-supplements/documents", body=body, headers=headers)
+            invalid = app.handle_request("POST", "/api/workbench/oa-invoice-supplements/documents",
+                                         body=body.replace(b'name="expected_version"', b'name="old_version"'), headers=headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(json.loads(response.body)["current_version"], 3)
+        self.assertEqual(json.loads(response.body)["error"], "supporting_document_version_conflict")
+        self.assertEqual(invalid.status_code, 400)
+        service.save.assert_called_once()
+
+    def test_document_permissions_protect_read_and_save_and_authenticated_actor(self) -> None:
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        app = build_local_state_application(data_dir=Path(directory.name), install_test_session=False)
+        service = SimpleNamespace(save=Mock(return_value={"documents": [], "total_amount": None, "version": 1}))
+        body, headers = _multipart_document()
+        with patch.object(app, "_workbench_oa_supporting_document_service", return_value=service):
+            missing = app.handle_request("POST", "/api/workbench/oa-invoice-supplements/documents", body=body, headers=headers)
+            configure_access_control(app, page_access={"USER001": ["pending-invoices"]})
+            app._oa_identity_service.resolve_identity = lambda _: OAUserIdentity("user-id", "USER001", "User", "User", roles=[], permissions=[])
+            headers["Authorization"] = "Bearer test"
+            denied = app.handle_request("POST", "/api/workbench/oa-invoice-supplements/documents", body=body, headers=headers)
+            denied_read = app.handle_request("GET", "/api/workbench/oa-invoice-supplements/documents", headers=headers)
+            configure_access_control(app, page_access={"USER001": ["reconciliation-workbench"]})
+            allowed = app.handle_request("POST", "/api/workbench/oa-invoice-supplements/documents", body=body, headers=headers)
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied_read.status_code, 403)
+        self.assertEqual(json.loads(denied.body)["error"], "page_access_denied")
+        self.assertEqual(allowed.status_code, 200)
+        service.save.assert_called_once()
+        self.assertEqual(service.save.call_args.kwargs["actor_id"], "USER001")
 
     def test_document_gallery_and_thumbnail_are_read_only_and_bounded(self) -> None:
         app = build_local_state_application()
@@ -302,7 +347,7 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
         with patch.object(
             app,
             "_workbench_oa_supporting_document_service",
-            return_value=SimpleNamespace(upload=Mock(return_value=[document])),
+            return_value=SimpleNamespace(save=Mock(return_value={"documents": [document], "total_amount": "100.00", "version": 1})),
         ):
             response = app.handle_request(
                 "POST",
@@ -311,7 +356,7 @@ class WorkbenchInvoiceSupplementApiTests(unittest.TestCase):
                 headers=headers,
             )
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 200)
         completed = next(event for event in audit_repository.events if event["event_type"] == "operation.completed")
         evidence = completed["payload"]["metadata"]["evidence"]
         self.assertEqual(evidence["target"]["title"], "关联关系 CASE-1")

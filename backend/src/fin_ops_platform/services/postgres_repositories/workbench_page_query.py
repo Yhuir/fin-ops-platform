@@ -1432,10 +1432,15 @@ source_owned_relation_placement_rollups as materialized (
     group by placement.owner_relation_case_id
 ),
 active_supporting_document_items as materialized (
-    select distinct document.oa_row_id, document.expense_item_id
+    select document.oa_row_id, document.expense_item_id, bundle.total_amount,
+           coalesce(bundle.version, 0) as version,
+           string_agg(document.id::text, ',' order by document.id::text) as document_ids
     from app.workbench_oa_supporting_documents document
     join app.file_objects file on file.id = document.file_object_id
+    left join app.workbench_oa_supporting_document_bundles bundle
+      on bundle.oa_row_id = document.oa_row_id and bundle.expense_item_id = document.expense_item_id
     where document.status = 'active' and file.tombstoned_at is null
+    group by document.oa_row_id, document.expense_item_id, bundle.total_amount, bundle.version
 ),
 fully_supported_relations as materialized (
     select member.case_id
@@ -1449,6 +1454,7 @@ fully_supported_relations as materialized (
             select 1 from active_supporting_document_items document
             where document.oa_row_id = oa.row_id
               and document.expense_item_id = coalesce(item.value->>'id', item.value->>'expense_item_id')
+              and document.total_amount is not null
         )
     ))
 ),
@@ -2037,7 +2043,10 @@ unlinked_expense_items as materialized (
         expense.item_id,
         expense.item_amount,
         expense.attachment_file_count,
-        document.expense_item_id is not null as has_supporting_document
+        document.expense_item_id is not null as has_supporting_document,
+        document.total_amount as supporting_document_amount,
+        document.version as supporting_document_version,
+        document.document_ids
     from oa_expense_items expense
     left join active_supporting_document_items document
       on document.oa_row_id = expense.oa_row_id and document.expense_item_id = expense.item_id
@@ -2059,7 +2068,7 @@ unlinked_expense_items as materialized (
         expense.item_id,
         expense.item_amount,
         expense.attachment_file_count,
-        document.expense_item_id
+        document.expense_item_id, document.total_amount, document.version, document.document_ids
 ),
 unlinked_expense_anomaly_items as materialized (
     select
@@ -2068,8 +2077,8 @@ unlinked_expense_anomaly_items as materialized (
         encode(digest(
             convert_to(totals.case_id, 'UTF8') || decode('00', 'hex') ||
             convert_to(
-                case when totals.attachment_file_count = 0
-                     then 'oa_invoice_attachment_absent'
+                case when totals.has_supporting_document then 'oa_supporting_document_amount_missing'
+                     when totals.attachment_file_count = 0 then 'oa_invoice_attachment_absent'
                      else 'oa_invoice_attachment_unparsed' end,
                 'UTF8'
             ) || decode('00', 'hex') ||
@@ -2084,14 +2093,31 @@ unlinked_expense_anomaly_items as materialized (
             'sha256'
         ), 'hex') as item_fingerprint
     from unlinked_expense_items totals
-    where not totals.has_supporting_document
+    where not totals.has_supporting_document or totals.supporting_document_amount is null
 ),
 supporting_document_totals as materialized (
-    select internal_key, sum(item_amount) as covered_amount
+    select internal_key, sum(supporting_document_amount) as supporting_amount,
+           bool_or(supporting_document_amount is null) as has_unknown_amount,
+           bool_or(item_amount <> supporting_document_amount) as has_item_mismatch
     from unlinked_expense_items
     where has_supporting_document
     group by internal_key
-    having count(*) = count(item_amount)
+),
+supporting_document_fingerprints as materialized (
+    select item.internal_key, item.case_id,
+           encode(digest(
+               convert_to(item.case_id, 'UTF8') || decode('00', 'hex') ||
+               convert_to('supporting-document', 'UTF8') || decode('00', 'hex') ||
+               convert_to(item.item_id, 'UTF8') || decode('00', 'hex') ||
+               convert_to(coalesce(to_char(item.item_amount,
+                   'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
+               convert_to(coalesce(to_char(item.supporting_document_amount,
+                   'FM999999999999999999990.00'), ''), 'UTF8') || decode('00', 'hex') ||
+               convert_to(item.supporting_document_version::text, 'UTF8') || decode('00', 'hex') ||
+               convert_to(item.document_ids, 'UTF8'), 'sha256'
+           ), 'hex') as item_fingerprint
+    from unlinked_expense_items item
+    where item.has_supporting_document
 ),
 expense_anomaly_items as materialized (
     select
@@ -2212,6 +2238,7 @@ relation_comparison_totals as materialized (
     select
         totals.*,
         case
+            when totals.bank_count = 0 then null
             when totals.relation_mode = 'turnover_manual_closure'
              and totals.bank_gross_total > 0
              and totals.bank_gross_total = totals.bank_contra_total
@@ -2222,14 +2249,18 @@ relation_comparison_totals as materialized (
 ),
 relation_document_comparison_totals as materialized (
     select totals.*,
-           totals.oa_total - coalesce(document.covered_amount, 0) as comparison_oa_total,
-           totals.bank_total - coalesce(document.covered_amount, 0) as comparison_bank_total,
-           case when totals.invoice_count = 0 and document.covered_amount is not null
-                then 0 else totals.invoice_total end as comparison_invoice_total
+           totals.oa_total as comparison_oa_total,
+           totals.bank_total as comparison_bank_total,
+           coalesce(document.has_item_mismatch, false) as has_item_mismatch,
+           case when document.has_unknown_amount then null
+                when document.internal_key is not null then
+                    coalesce(totals.invoice_total, 0) + document.supporting_amount
+                when totals.invoice_count > 0 then totals.invoice_total
+                else null end as comparison_invoice_total
     from relation_comparison_totals totals
     left join supporting_document_totals document using (internal_key)
 ),
-relation_amount_classifications as materialized (
+relation_group_amount_classifications as materialized (
     select
         totals.*,
         case
@@ -2261,6 +2292,17 @@ relation_amount_classifications as materialized (
       and not (
           totals.comparison_oa_total = totals.comparison_bank_total
           and totals.comparison_bank_total = totals.comparison_invoice_total
+      )
+),
+relation_amount_classifications as materialized (
+    select * from relation_group_amount_classifications
+    union all
+    select totals.*, 'expense_item_amount_mismatch'::text as code
+    from relation_document_comparison_totals totals
+    where totals.has_item_mismatch
+      and not exists (
+          select 1 from relation_group_amount_classifications classified
+          where classified.internal_key = totals.internal_key
       )
 ),
 relation_amount_anomaly_items as materialized (
@@ -2303,6 +2345,12 @@ all_anomaly_items as materialized (
         item.exception_code,
         item.has_document_anomaly
     from relation_amount_anomaly_items item
+    union all
+    select item.internal_key, item.case_id, item.item_fingerprint,
+           null::text as exception_code, false as has_document_anomaly
+    from supporting_document_fingerprints item
+    where exists (select 1 from expense_anomaly_items anomaly where anomaly.internal_key = item.internal_key)
+       or exists (select 1 from relation_amount_anomaly_items anomaly where anomaly.internal_key = item.internal_key)
 ),
 anomaly_fingerprints as materialized (
     select

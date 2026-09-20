@@ -105,6 +105,9 @@ function WorkbenchRecordCard({
       {paneId === "invoice" && row.supportingDocuments ? (
         <WorkbenchSupportingDocumentFiles
           documents={row.supportingDocuments}
+          totalAmount={row.supportingDocumentAmount}
+          oaAmount={row.supportingDocumentOaAmount}
+          coveredByInvoice={row.supportingDocumentCoveredByInvoice}
           canManage={!invoiceResolutionDisabled}
           onManage={() => onRowAction(row, "manage-supporting-documents")}
         />
@@ -117,11 +120,7 @@ function WorkbenchRecordCard({
               levelLabel="该付款项"
             />
             {hasUnparsedAttachment && row.availableActions.includes("enter_invoice") ? (
-                <>
-                  <InvoiceEntryAction disabled={invoiceResolutionDisabled} onPress={() => onRowAction(row, "enter-invoice")} />
-                  <Button size="sm" variant="tertiary" isDisabled={invoiceResolutionDisabled}
-                    onPress={() => onRowAction(row, "select-existing-invoice")}>选择已有发票</Button>
-                </>
+                <InvoiceEntryAction disabled={invoiceResolutionDisabled} onPress={() => onRowAction(row, "enter-invoice")} />
               ) : null}
           </div>
         </div>

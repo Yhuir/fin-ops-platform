@@ -25941,3 +25941,12 @@ body.column-layout-dragging {
     min-height: 112px;
   }
 }
+
+.workbench-supporting-documents__amount,
+.workbench-supporting-files__amount { display: grid; gap: 6px; min-width: 0; }
+.workbench-supporting-documents__amount > span:last-child,
+.workbench-supporting-files__amount > span { color: var(--fp-text-muted); font-size: 12px; }
+.workbench-supporting-documents__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.workbench-supporting-files__amount { font-variant-numeric: tabular-nums; }
+.workbench-supporting-files__amount strong,
+.workbench-supporting-documents__item > span { overflow-wrap: anywhere; }

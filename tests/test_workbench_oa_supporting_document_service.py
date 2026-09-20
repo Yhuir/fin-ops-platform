@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-from io import BytesIO
 import unittest
+from io import BytesIO
 from uuid import UUID
 
 import fitz
-from PIL import Image
-
 from fin_ops_platform.services.postgres_repositories.workbench_oa_supporting_document import (
     PostgresWorkbenchOaSupportingDocumentRepository,
 )
@@ -16,6 +14,7 @@ from fin_ops_platform.services.workbench_oa_supporting_document_service import (
     WorkbenchOaSupportingDocumentError,
     WorkbenchOaSupportingDocumentService,
 )
+from PIL import Image
 
 
 class _FileStore:
@@ -28,7 +27,7 @@ class _FileStore:
         uri = f"store://{document_id}"
         self.contents[uri] = content
         return {
-            "file_object_id": "00000000-0000-0000-0000-000000000001",
+            "file_object_id": document_id,
             "storage_uri": uri,
             "sha256": hashlib.sha256(content).hexdigest(),
             "size_bytes": len(content),
@@ -48,29 +47,40 @@ class _Repository:
         self.counter = 0
         self.fail_on_create = 0
 
-    def create(self, **values):
-        self.counter += 1
-        if self.fail_on_create == self.counter:
-            raise RuntimeError("create failed")
-        row = {
-            "id": f"document-{self.counter}",
-            "storage_uri": f"store://{values['file_object_id']}",
-            "status": "active",
-            **values,
-        }
-        # The production repository obtains storage_uri through app.file_objects on reads.
-        row["storage_uri"] = next(reversed(self._file_store.contents)) if hasattr(self, "_file_store") else ""
-        self.rows[row["id"]] = row
-        return row
+    def save_bundle(self, **values):
+        from copy import deepcopy
+        rows_before = deepcopy(self.rows)
+        current = self.list_active(oa_row_id=values["oa_row_id"], expense_item_id=values["expense_item_id"])
+        retained = {row["content_sha256"] for row in current if row["id"] in values["retained_document_ids"]}
+        hashes = retained | {row["content_sha256"] for row in values["documents"]}
+        before = self.get_bundle(oa_row_id=values["oa_row_id"], expense_item_id=values["expense_item_id"])
+        if hashes == {row["content_sha256"] for row in current} and before["total_amount"] == values["total_amount"]:
+            return before
+        removed = [row for row in current if row["content_sha256"] not in hashes]
+        try:
+            for row in removed:
+                row["status"] = "deleted"
+            for document in values["documents"]:
+                if any(row["content_sha256"] == document["content_sha256"] for row in current):
+                    continue
+                self.counter += 1
+                if self.fail_on_create == self.counter:
+                    raise RuntimeError("create failed")
+                row = {**document, "id": f"document-{self.counter}", "status": "active",
+                       "oa_row_id": values["oa_row_id"], "expense_item_id": values["expense_item_id"],
+                       "relation_case_id": values["relation_case_id"], "created_by": values["actor_id"]}
+                self.rows[row["id"]] = row
+        except Exception:
+            self.rows = rows_before
+            raise
+        self.amount = values["total_amount"]
+        self.version = before["version"] + 1
+        return {**self.get_bundle(oa_row_id=values["oa_row_id"], expense_item_id=values["expense_item_id"]),
+                "removed_storage_uris": [row["storage_uri"] for row in removed]}
 
-    def find_active_by_content(self, *, oa_row_id: str, expense_item_id: str, content_sha256: str):
-        return next((
-            row for row in self.rows.values()
-            if row["status"] == "active"
-            and row["oa_row_id"] == oa_row_id
-            and row["expense_item_id"] == expense_item_id
-            and row["content_sha256"] == content_sha256
-        ), None)
+    def get_bundle(self, *, oa_row_id, expense_item_id):
+        return {"documents": self.list_active(oa_row_id=oa_row_id, expense_item_id=expense_item_id),
+                "total_amount": getattr(self, "amount", None), "version": getattr(self, "version", 0)}
 
     def list_active(self, *, oa_row_id: str, expense_item_id: str):
         return [row for row in self.rows.values() if row["status"] == "active" and row["oa_row_id"] == oa_row_id and row["expense_item_id"] == expense_item_id]
@@ -92,13 +102,6 @@ class _Repository:
         row = self.rows.get(document_id)
         return row if row and row["status"] == "active" else None
 
-    def soft_delete(self, document_id: str, *, deleted_by: str):
-        row = self.get_active(document_id)
-        if row is None:
-            return None
-        row["status"] = "deleted"
-        row["deleted_by"] = deleted_by
-        return row
 
 
 class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
@@ -114,7 +117,8 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         )
 
     def test_upload_list_preview_and_delete_stay_outside_invoice_pool(self) -> None:
-        documents = self.service.upload(
+        documents = self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
             relation_case_id="CASE-1",
             oa_row_id="oa-1",
             expense_item_id="oa-1:item:0",
@@ -122,23 +126,26 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
             uploads=[SupportingDocumentUpload("凭证.pdf", b"%PDF-1.7\ncontent")],
         )
 
-        self.assertEqual(documents[0]["file_name"], "凭证.pdf")
-        self.assertEqual(documents[0]["content_url"], "/api/workbench/oa-invoice-supplements/documents/document-1/content")
+        self.assertEqual(documents["documents"][0]["file_name"], "凭证.pdf")
+        self.assertEqual(documents["documents"][0]["content_url"], "/api/workbench/oa-invoice-supplements/documents/document-1/content")
         listed = self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0")
-        self.assertEqual([item["id"] for item in listed], ["document-1"])
+        self.assertEqual([item["id"] for item in listed["documents"]], ["document-1"])
         _document, content = self.service.content("document-1")
         self.assertEqual(content, b"%PDF-1.7\ncontent")
 
-        deleted = self.service.delete("document-1", actor_id="finance-user")
+        deleted = self.service.save(relation_case_id="CASE-1", oa_row_id="oa-1", expense_item_id="oa-1:item:0",
+                                    actor_id="finance-user", retained_document_ids=[], total_amount=None,
+                                    expected_version=1, uploads=[])
 
-        self.assertEqual(self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0"), [])
+        self.assertEqual(self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0")["documents"], [])
         self.assertEqual(len(self.store.deleted), 1)
-        self.assertEqual(deleted["file_name"], "凭证.pdf")
-        self.assertEqual(deleted["relation_case_id"], "CASE-1")
+        self.assertEqual(deleted["total_amount"], None)
+        self.assertEqual(deleted["version"], 2)
 
     def test_rejects_extension_signature_mismatch_before_storage(self) -> None:
         with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "文件内容与扩展名不一致"):
-            self.service.upload(
+            self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
                 relation_case_id="CASE-1",
                 oa_row_id="oa-1",
                 expense_item_id="oa-1:item:0",
@@ -149,7 +156,8 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         self.assertEqual(self.store.contents, {})
     def test_rejects_unsupported_type_and_empty_target(self) -> None:
         with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "仅支持 JPG"):
-            self.service.upload(
+            self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
                 relation_case_id="CASE-1",
                 oa_row_id="oa-1",
                 expense_item_id="oa-1:item:0",
@@ -157,7 +165,8 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
                 uploads=[SupportingDocumentUpload("transfer.docx", b"docx")],
             )
         with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "不能为空"):
-            self.service.upload(
+            self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
                 relation_case_id="CASE-1",
                 oa_row_id="",
                 expense_item_id="oa-1:item:0",
@@ -169,7 +178,8 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         self.target_exists = False
 
         with self.assertRaisesRegex(WorkbenchOaSupportingDocumentError, "不存在或已变化"):
-            self.service.upload(
+            self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
                 relation_case_id="CASE-1",
                 oa_row_id="oa-1",
                 expense_item_id="oa-other:item:0",
@@ -180,7 +190,8 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         self.assertEqual(self.store.contents, {})
 
     def test_accepts_jpeg_and_png_and_preserves_content_type(self) -> None:
-        documents = self.service.upload(
+        documents = self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
             relation_case_id="CASE-1",
             oa_row_id="oa-1",
             expense_item_id="oa-1:item:0",
@@ -192,21 +203,23 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [document["content_type"] for document in documents],
+            [document["content_type"] for document in documents["documents"]],
             ["image/jpeg", "image/png"],
         )
 
     def test_retrying_same_file_is_idempotent_for_one_oa_expense_item(self) -> None:
         upload = SupportingDocumentUpload("凭证.pdf", b"%PDF-1.7\ncontent")
 
-        first = self.service.upload(
+        first = self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
             relation_case_id="CASE-1",
             oa_row_id="oa-1",
             expense_item_id="oa-1:item:0",
             actor_id="finance-user",
             uploads=[upload],
         )
-        second = self.service.upload(
+        second = self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
             relation_case_id="CASE-1",
             oa_row_id="oa-1",
             expense_item_id="oa-1:item:0",
@@ -214,9 +227,27 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
             uploads=[upload],
         )
 
-        self.assertEqual(first[0]["id"], second[0]["id"])
+        self.assertEqual(first["documents"][0]["id"], second["documents"][0]["id"])
         self.assertEqual(len(self.repository.rows), 1)
         self.assertEqual(len(self.store.contents), 1)
+
+    def test_amount_validation_rejects_missing_negative_precision_and_non_numbers(self) -> None:
+        for amount in (None, "", "-1", "1.001", "NaN", "Infinity", "1e2", " 2", "1000000000000000000.00"):
+            with self.subTest(amount=amount), self.assertRaises(WorkbenchOaSupportingDocumentError):
+                self.service.save(relation_case_id="CASE-1", oa_row_id="oa-1", expense_item_id="oa-1:item:0",
+                                  actor_id="user", retained_document_ids=[], total_amount=amount,
+                                  expected_version=0, uploads=[SupportingDocumentUpload("a.pdf", b"%PDF-a")])
+        self.assertEqual(self.store.contents, {})
+
+    def test_empty_group_only_accepts_null_amount_and_zero_is_valid_with_file(self) -> None:
+        with self.assertRaises(WorkbenchOaSupportingDocumentError):
+            self.service.save(relation_case_id="", oa_row_id="oa-1", expense_item_id="oa-1:item:0",
+                              actor_id="user", retained_document_ids=[], total_amount="0",
+                              expected_version=0, uploads=[])
+        result = self.service.save(relation_case_id="", oa_row_id="oa-1", expense_item_id="oa-1:item:0",
+                                   actor_id="user", retained_document_ids=[], total_amount="0",
+                                   expected_version=0, uploads=[SupportingDocumentUpload("a.pdf", b"%PDF-a")])
+        self.assertEqual(result["total_amount"], "0.00")
 
     def test_gallery_uses_stable_cursor_pages_and_only_returns_metadata(self) -> None:
         for index in range(11):
@@ -297,7 +328,8 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
         self.repository.fail_on_create = 2
 
         with self.assertRaisesRegex(RuntimeError, "create failed"):
-            self.service.upload(
+            self.service.save(
+            retained_document_ids=[], total_amount="100.00", expected_version=0,
                 relation_case_id="CASE-1",
                 oa_row_id="oa-1",
                 expense_item_id="oa-1:item:0",
@@ -308,41 +340,11 @@ class WorkbenchOaSupportingDocumentServiceTests(unittest.TestCase):
                 ],
             )
 
-        self.assertEqual(self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0"), [])
+        self.assertEqual(self.service.list(oa_row_id="oa-1", expense_item_id="oa-1:item:0")["documents"], [])
         self.assertEqual(self.store.contents, {})
 
 
 class PostgresWorkbenchOaSupportingDocumentRepositoryTests(unittest.TestCase):
-    def test_create_uses_partial_unique_conflict_as_idempotent_noop(self) -> None:
-        class _Connection:
-            def __init__(self) -> None:
-                self.sql = ""
-                self.params = ()
-
-            def fetch_one(self, sql, params):
-                self.sql = " ".join(sql.split()).lower()
-                self.params = params
-                return None
-
-        connection = _Connection()
-        created = PostgresWorkbenchOaSupportingDocumentRepository(connection).create(
-            relation_case_id="CASE-1",
-            oa_row_id="oa-1",
-            expense_item_id="oa-1:item:0",
-            file_object_id="00000000-0000-0000-0000-000000000001",
-            original_filename="凭证.png",
-            content_type="image/png",
-            content_sha256="sha",
-            size_bytes=8,
-            created_by="finance-user",
-        )
-
-        self.assertIsNone(created)
-        self.assertIn(
-            "on conflict (oa_row_id, expense_item_id, content_sha256) where status = 'active' do nothing",
-            connection.sql,
-        )
-
     def test_gallery_page_query_is_keyset_bounded_and_active_only(self) -> None:
         class _Connection:
             def __init__(self) -> None:

@@ -33,13 +33,7 @@ class OperationHistorySemanticsTests(unittest.TestCase):
             (
                 "POST",
                 "/api/workbench/oa-invoice-supplements/documents",
-                "上传 OA 补充凭证",
-                "OA 补充凭证",
-            ),
-            (
-                "DELETE",
-                "/api/workbench/oa-invoice-supplements/documents/document-1",
-                "删除 OA 补充凭证",
+                "保存 OA 补充凭证组",
                 "OA 补充凭证",
             ),
             (
@@ -57,6 +51,12 @@ class OperationHistorySemanticsTests(unittest.TestCase):
                 self.assertEqual(semantics.object_label, object_label)
                 self.assertNotIn("/api/", str(semantics))
                 self.assertNotIn("HTTP", str(semantics))
+
+    def test_supporting_document_save_describes_file_set_and_amount(self) -> None:
+        semantics = operation_semantics("POST", "/api/workbench/oa-invoice-supplements/documents")
+
+        self.assertEqual(semantics.action_code, "workbench.oa_invoice.document_save")
+        self.assertEqual(semantics.description, "保存指定 OA 子付款项的补充凭证文件集合与总金额。")
 
     def test_stored_semantics_are_the_projection_source_of_truth(self) -> None:
         semantics = semantics_from_audit_row(

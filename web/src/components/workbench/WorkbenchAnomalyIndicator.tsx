@@ -174,6 +174,11 @@ export default function WorkbenchAnomalyIndicator({
                       <Chip.Label>{anomaly.displayLabel}</Chip.Label>
                     </Chip>
                     {detail ? <span>{detail}</span> : null}
+                    {anomaly.expenseItemDifferences?.map((difference, index) => (
+                      <span key={difference.expenseItemIds.join(":")}>
+                        明细 {index + 1}：OA {difference.oaTotal} · 票据凭证 {difference.evidenceTotal} · 差额 {difference.amountDelta}
+                      </span>
+                    ))}
                   </li>
                 );
               })}
@@ -241,6 +246,9 @@ export default function WorkbenchAnomalyIndicator({
 }
 
 function anomalyDetail(anomaly: WorkbenchAnomalyItem) {
+  if (anomaly.code === "oa_supporting_document_amount_missing") {
+    return "已有补充凭证，请填写该付款项的凭证总金额。";
+  }
   if (anomaly.code === "oa_invoice_attachment_absent") {
     return "未发现可用发票附件";
   }
@@ -254,6 +262,7 @@ function anomalyDetail(anomaly: WorkbenchAnomalyItem) {
     anomaly.oaTotal ? `OA ${anomaly.oaTotal}` : "",
     anomaly.bankTotal ? `流水 ${anomaly.bankTotal}` : "",
     anomaly.invoiceTotal ? `发票 ${anomaly.invoiceTotal}` : "",
+    anomaly.evidenceTotal !== undefined ? `票据凭证 ${anomaly.evidenceTotal}` : "",
   ].filter(Boolean);
   return totals.join(" · ");
 }

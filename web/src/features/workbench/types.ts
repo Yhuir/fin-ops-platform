@@ -42,6 +42,8 @@ export type WorkbenchExpenseItem = {
   feeContent?: string;
   feeDescription?: string;
   attachmentFileCount?: number;
+  supportingDocumentAmount?: string | null;
+  supportingDocumentVersion?: number;
   supportingDocuments?: Array<{
     id: string;
     fileName: string;
@@ -61,6 +63,9 @@ export type WorkbenchAmountCheck = {
   oaTotal?: string;
   bankTotal?: string;
   invoiceTotal?: string;
+  supportingDocumentTotal?: string;
+  evidenceTotal?: string;
+  evidenceComplete?: boolean;
   amountDelta: string;
   requiresNote: boolean;
 };
@@ -73,6 +78,7 @@ export const WORKBENCH_AMOUNT_ANOMALY_CODES = [
   "bank_invoice_equal_oa_less",
   "bank_invoice_equal_oa_more",
   "all_amounts_different",
+  "expense_item_amount_mismatch",
 ] as const;
 
 export type WorkbenchAmountAnomalyCode = typeof WORKBENCH_AMOUNT_ANOMALY_CODES[number];
@@ -85,6 +91,7 @@ export const WORKBENCH_AMOUNT_ANOMALY_LABELS: Record<WorkbenchAmountAnomalyCode,
   bank_invoice_equal_oa_less: "发票流水一致，OA 提少了",
   bank_invoice_equal_oa_more: "发票流水一致，OA 提多了",
   all_amounts_different: "三项不一致",
+  expense_item_amount_mismatch: "明细金额不一致",
 };
 
 export function isWorkbenchAmountAnomalyCode(value: unknown): value is WorkbenchAmountAnomalyCode {
@@ -108,11 +115,14 @@ export type WorkbenchAnomalyItem = {
     | "oa_invoice_attachment_absent"
     | "oa_invoice_attachment_unparsed"
     | "oa_invoice_attachment_unassigned"
+    | "oa_supporting_document_amount_missing"
     | (string & {});
   label: string;
   displayLabel: string;
   fingerprint: string;
   comparisonUnitId: string;
+  evidenceTotal?: string;
+  expenseItemDifferences?: Array<{ expenseItemIds: string[]; oaTotal: string; evidenceTotal: string; amountDelta: string }>;
   sourceOaIds: string[];
   sourceExpenseItemIds: string[];
   oaTotal?: string;
@@ -158,6 +168,9 @@ export type WorkbenchBankCategoryResolutionStatus =
 
 export type WorkbenchRecord = {
   supportingDocuments?: WorkbenchExpenseItem["supportingDocuments"];
+  supportingDocumentAmount?: string | null;
+  supportingDocumentOaAmount?: string;
+  supportingDocumentCoveredByInvoice?: boolean;
   id: string;
   caseId?: string;
   exceptionCaseId?: string;
@@ -424,7 +437,6 @@ export type WorkbenchInvoiceExpenseItemAssignmentTarget = {
   amount: string;
   anomalyFingerprint: string;
   previousTargets?: WorkbenchInvoiceExpenseItemSelection[];
-  initialTargets?: WorkbenchInvoiceExpenseItemSelection[];
   idempotencyKey: string;
   candidates: WorkbenchInvoiceExpenseItemCandidate[];
 };
@@ -451,6 +463,12 @@ export type WorkbenchOaSupportingDocument = {
   createdAt: string;
   contentUrl: string;
   thumbnailUrl: string;
+};
+
+export type WorkbenchOaSupportingDocumentSet = {
+  documents: WorkbenchOaSupportingDocument[];
+  totalAmount: string | null;
+  version: number;
 };
 
 export type WorkbenchOaSupportingDocumentGalleryPage = {

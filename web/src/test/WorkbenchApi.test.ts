@@ -18,6 +18,7 @@ import {
   getManualOaImportAttachmentRefreshStatus,
   importManualOaRows,
   listWorkbenchOaSupportingDocumentGallery,
+  listWorkbenchOaSupportingDocuments,
   previewWorkbenchConfirmLink,
   previewWorkbenchManualInvoices,
   previewWorkbenchWithdrawLink,
@@ -26,7 +27,7 @@ import {
   removeManualOaImport,
   reviewWorkbenchAnomaly,
   resolveWorkbenchActionErrorMessage,
-  uploadWorkbenchOaSupportingDocuments,
+  saveWorkbenchOaSupportingDocuments,
   withdrawWorkbenchLink,
   WorkbenchApiError,
   WORKBENCH_GROUP_PAGE_SIZE,
@@ -412,9 +413,9 @@ test("maps supplemental evidence validation errors to an actionable message", as
 
   let captured: unknown;
   try {
-    await uploadWorkbenchOaSupportingDocuments(
+    await saveWorkbenchOaSupportingDocuments(
       { caseId: "CASE-1", oaRowId: "oa-1", expenseItemId: "oa-1:item:0" },
-      [new File(["invalid"], "voucher.jpg", { type: "image/jpeg" })],
+      { files: [new File(["invalid"], "voucher.jpg", { type: "image/jpeg" })], retainedDocumentIds: [], totalAmount: "0", expectedVersion: 0 },
     );
   } catch (error) {
     captured = error;
@@ -1606,6 +1607,8 @@ describe("workbench api bank amount mapping", () => {
         feeContent: "差旅费",
         feeDescription: "曲靖出差",
         attachmentFileCount: 0,
+        supportingDocumentAmount: null,
+        supportingDocumentVersion: 0,
       },
       {
         id: "oa-paired:item:1",
@@ -1621,6 +1624,8 @@ describe("workbench api bank amount mapping", () => {
         feeContent: "住宿费",
         feeDescription: "",
         attachmentFileCount: 1,
+        supportingDocumentAmount: null,
+        supportingDocumentVersion: 0,
       },
     ]);
     expect(group.rows.bank[0]).toMatchObject({
@@ -1716,6 +1721,7 @@ describe("workbench api bank amount mapping", () => {
               bank_invoice_equal_oa_less: 1,
               bank_invoice_equal_oa_more: 1,
               all_amounts_different: 0,
+              expense_item_amount_mismatch: 0,
             },
           },
           groups: [],
@@ -1774,6 +1780,7 @@ describe("workbench api bank amount mapping", () => {
         bank_invoice_equal_oa_less: 1,
         bank_invoice_equal_oa_more: 1,
         all_amounts_different: 0,
+              expense_item_amount_mismatch: 0,
       },
     });
     expect(JSON.parse(url.searchParams.get("column_filters") ?? "{}")).toEqual({
@@ -2535,4 +2542,50 @@ test("maps display subgroups without replacing formal selection identities", asy
     expect(group.rows.oa).toHaveLength(2);
     expect(group.rows.bank).toHaveLength(1);
   } finally { fetchMock.mockRestore(); }
+});
+
+
+test("reads and atomically saves one supporting-document set with zero, null, files and version", async () => {
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => new Response(JSON.stringify({
+    documents: [], total_amount: init?.method === "POST" ? null : "0.00", version: init?.method === "POST" ? 4 : 3,
+  }), { status: 200 }));
+  const target = { caseId: "CASE-1", oaRowId: "oa-1", expenseItemId: "item-1" };
+  expect(await listWorkbenchOaSupportingDocuments(target)).toEqual({ documents: [], totalAmount: "0.00", version: 3 });
+  const files = [new File(["png"], "voucher.png", { type: "image/png" }), new File(["pdf"], "note.pdf", { type: "application/pdf" })];
+  await saveWorkbenchOaSupportingDocuments(target, { retainedDocumentIds: ["doc-1"], files, totalAmount: "0", expectedVersion: 3 });
+  const body = fetchSpy.mock.calls[1][1]?.body as FormData;
+  expect(body.get("oa_row_id")).toBe("oa-1");
+  expect(body.get("expense_item_id")).toBe("item-1");
+  expect(body.get("case_id")).toBe("CASE-1");
+  expect(body.get("expected_version")).toBe("3");
+  expect(body.get("retained_document_ids")).toBe('["doc-1"]');
+  expect(body.get("total_amount")).toBe("0");
+  expect(body.getAll("files")).toEqual(files);
+  expect(await saveWorkbenchOaSupportingDocuments(target, { retainedDocumentIds: [], files: [], totalAmount: null, expectedVersion: 4 }))
+    .toEqual({ documents: [], totalAmount: null, version: 4 });
+  const clearedBody = fetchSpy.mock.calls[2][1]?.body as FormData;
+  expect(clearedBody.get("total_amount")).toBe("");
+  expect(clearedBody.get("retained_document_ids")).toBe("[]");
+});
+
+test("maps voucher amounts and component differences without replacing real invoice totals", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ month: "all", zone: "unpaired", groups: [{
+    group_id: "voucher-differences", group_type: "unpaired", oa_rows: [{ id: "oa-1", type: "oa", amount: "100.00", expense_items: [
+      { id: "i-1", amount: "40.00", supporting_document_amount: "0.00", supporting_document_version: 2 },
+      { id: "i-2", amount: "60.00", supporting_document_amount: null, supporting_document_version: 0 },
+    ] }], bank_rows: [], invoice_rows: [],
+    amount_check: { status: "mismatch", oa_total: "100.00", invoice_total: "0.00", supporting_document_total: "100.00", evidence_total: "100.00", evidence_complete: true },
+    workbench_anomaly: { fingerprint: "group-fp", items: [{ code: "expense_item_amount_mismatch", comparison_unit_id: "c-1", fingerprint: "item-fp", evidence_total: "100.00", expense_item_differences: [
+      { expense_item_ids: ["i-1"], oa_total: "40.00", evidence_total: "0.00", amount_delta: "40.00" },
+      { expense_item_ids: ["i-2"], oa_total: "60.00", evidence_total: "100.00", amount_delta: "-40.00" },
+    ] }] },
+  }] }), { status: 200 }));
+  const { groups } = await fetchWorkbenchGroupsPage("all", "unpaired");
+  expect(groups[0].rows.oa[0].expenseItems?.map(({ supportingDocumentAmount, supportingDocumentVersion }) => ({ supportingDocumentAmount, supportingDocumentVersion })))
+    .toEqual([{ supportingDocumentAmount: "0.00", supportingDocumentVersion: 2 }, { supportingDocumentAmount: null, supportingDocumentVersion: 0 }]);
+  expect(groups[0].amountCheck).toMatchObject({ invoiceTotal: "0.00", supportingDocumentTotal: "100.00", evidenceTotal: "100.00", evidenceComplete: true });
+  expect(groups[0].workbenchAnomaly?.items[0]).toMatchObject({ displayLabel: "明细金额不一致", evidenceTotal: "100.00", expenseItemDifferences: [
+    { expenseItemIds: ["i-1"], oaTotal: "40.00", evidenceTotal: "0.00", amountDelta: "40.00" },
+    { expenseItemIds: ["i-2"], oaTotal: "60.00", evidenceTotal: "100.00", amountDelta: "-40.00" },
+  ] });
 });

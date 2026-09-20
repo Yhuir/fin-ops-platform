@@ -901,7 +901,7 @@ function RelationGroupGrid({
                   <span>{pane.totalRows ?? pane.rows.length} 条</span>
                 </div>
                 <div className="pane-header-tools">
-                  {pane.id === "oa" || pane.id === "bank" || pane.id === "invoice" ? (
+                  {!readOnly ? (
                     (() => {
                       const sortPaneId: "oa" | "bank" | "invoice" = pane.id;
                       return (
@@ -939,7 +939,7 @@ function RelationGroupGrid({
                       role="columnheader"
                     >
                       <span className="candidate-columnheader-main">
-                        <button
+                        {!readOnly ? <button
                           aria-label={`拖动 ${column.label} 列`}
                           className="column-drag-handle"
                           disabled={!canOperateData}
@@ -954,7 +954,7 @@ function RelationGroupGrid({
                             <span />
                             <span />
                           </span>
-                        </button>
+                        </button> : null}
                         <span className={`candidate-columnheader-label${column.headerLines ? " candidate-columnheader-label-lines" : ""}`}>
                           {column.headerLines
                             ? column.headerLines.map((line) => (
@@ -965,7 +965,7 @@ function RelationGroupGrid({
                             : column.label}
                         </span>
                       </span>
-                      {column.filterable === false ? null : (
+                      {readOnly || column.filterable === false ? null : (
                         <WorkbenchColumnFilterMenu
                           columnKey={column.key}
                           label={column.label}

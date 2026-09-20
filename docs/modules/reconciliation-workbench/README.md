@@ -15,6 +15,8 @@
 
 ## 当前业务边界
 
+补充凭证现在按子付款项保存一个明确总金额，与多份文件原子编辑；正式发票优先、历史未知金额不推断。API、计额、异常、三栏和旧入口移除规则见 [凭证金额闭环](boundary-io.md#2026-09-21-子付款项凭证金额闭环)。
+
 银行折叠统一按已证明的 OA/发票对应区域（无 OA/发票时使用同一正式纯流水关系组）、同标签、同收支方向和币种、至少 4 条判断，与提交批次来源无关；详细 I/O 和搜索规则见 [模块边界](boundary-io.md#2026-09-12-按对应区域折叠银行流水)。
 
 关联台是 canonical OA、银行流水和发票事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：满足冻结 OA/发票要求的 active relation 进入 `paired`；未满足要求的 active relation 保持同 case 分组进入 `unpaired` 并显示缺失类型；无 active owner 的 canonical facts 各自作为单行进入 `unpaired`。人工确认允许至少 2 个不同 canonical 成员，不以跨栏、金额相等或材料完整为创建门槛；只有既有 `amount_check.requires_note=true` 时才要求 `note`，创建后仍按页面完成合同分区。银行分类不选择人工写入链：选择中的银行成员部分或全部为 `internal_transfer` 时，`confirm-link` 仍以 `manual_confirmed` 进入标准 relation command/UoW，不得转交 no-OA batch；独立 no-OA batch 功能及其业务入口保持不变。唯一窄例外是 OA 与完整 canonical 外部往来收支闭环同时确认：关联台复用既有 Turnover 校验器写 `turnover_manual_closure`，金额按 OA 同方向本金侧比较；结构化语义不完整时明确失败，不做文本或金额形态兜底。
@@ -68,11 +70,11 @@ ETC 批次在折叠态只显示 canonical `summaryRow`，不显示任何真实�
 
 ## 关联台异常合同
 
-- 系统只在 OA、流水、发票三栏金额完整且方向明确时自动输出七种互斥金额分类；方向未知、方向冲突、任一栏缺失或三栏总额完全一致时不得猜测。普通付款关系的银行侧使用同一 relation 内支出减退款收入的净额；`turnover_manual_closure` 继续只按 canonical mode 使用付款本金侧。日常报销的 OA—发票按 `source_expense_item_ids[]` 连通分量去重计算，局部差异只用于定位已成立的七分类，不创建第八种金额 Chip。附件状态只区分“发票附件缺失 / 发票附件未解析 / 发票待归属”；后一种按无有效 item edge 的 relation invoice 逐票、逐行生成，不按费用明细重复，也不按金额推断 owner。
+- 系统只在 OA、流水、发票三栏金额完整且方向明确时自动输出七种互斥金额分类；方向未知、方向冲突、任一栏缺失或三栏总额完全一致时不得猜测。普通付款关系的银行侧使用同一 relation 内支出减退款收入的净额；`turnover_manual_closure` 继续只按 canonical mode 使用付款本金侧。日常报销的 OA—发票按 `source_expense_item_ids[]` 连通分量去重计算，正式发票局部差异保留既有定位；凭证子项无整组分类但存在差额时使用“明细金额不一致”。附件状态只区分“发票附件缺失 / 发票附件未解析 / 发票待归属”；后一种按无有效 item edge 的 relation invoice 逐票、逐行生成，不按费用明细重复，也不按金额推断 owner。
 - 任何当前异常默认把完整 active relation 留在 `unpaired`。服务端从当前 canonical bundle 推导分类与 evidence fingerprints，客户端只提交 fingerprint 和 `accept_paired|keep_unpaired`，不提交 actor、人工分类或逐项审阅结果。只有无其他完整性 blocker 时 `accept_paired` 才允许进入 `paired`；接受后保留感叹号与原异常 Chip，审阅审计在 Popover 单独展示。“撤回到未配对”写入 `keep_unpaired` 并同步移动主表关系。
 - 决定复用既有 exception case repository 的独立 `workbench_anomaly_review` scenario，按 bundle fingerprint 失效。旧人工异常分类器、金额 ignore/restore API、人工分类/复选 UI 和前端请求字段均已删除；历史记录、WEX/row-ignore 仅保留审计。
 - 页面只保留统一 `WorkbenchExceptionDrawer`，两个 bucket 固定为“未配对异常 / 已配对异常”，并作为最外层切换放在抽屉标题右侧；每次只读取当前 bucket。入口文案固定为 `未配对异常 n | 已配对异常 m`。审阅动作完成后只让目标关系迁移，抽屉继续停留在用户当前 bucket，不自动跟随关系跳转。
-- 每个 bucket 内再提供“金额异常 / 仅资料异常”两个互斥视图。金额视图下才显示七个服务端分类，并按 `OA = 流水`、`OA = 发票`、`流水 = 发票`、`三项互异` 四个父组组织；这四组及其中七项都不属于“仅资料异常”。默认选中首个非零分类；仅资料视图只收纳没有金额分类的附件异常关系。金额与资料并存时关系只进入唯一金额分类，资料 Chip 仍在该关系 Popover 中显示；多个资料 item 不得把同一关系重复计数或重复返回。分类筛选只组织审阅队列，不自动触发付款、退款、补票或 OA 草稿。
+- 每个 bucket 内再提供“金额异常 / 仅资料异常”两个互斥视图。金额视图展示七个整组分类及“明细金额不一致”；整组分类按 `OA = 流水`、`OA = 发票`、`流水 = 发票`、`三项互异` 四个父组组织；整组和明细金额分类都不属于“仅资料异常”。默认选中首个非零分类；仅资料视图只收纳没有金额分类的附件异常关系。金额与资料并存时关系只进入唯一金额分类，资料 Chip 仍在该关系 Popover 中显示；多个资料 item 不得把同一关系重复计数或重复返回。分类筛选只组织审阅队列，不自动触发付款、退款、补票或 OA 草稿。
 - 异常抽屉宽度固定为 `min(1740px, 96vw)`。折叠态只显示 OA、流水、发票三栏金额/数量摘要，并在展开箭头前显示一个感叹号；hover/focus 临时打开 HeroUI Popover，显示时点击感叹号立即关闭且在当前鼠标停留期间禁止自动重开，再次点击改为持续打开，鼠标真正离开后下一次 hover 恢复。展开态直接复用只读 `RelationGroupGrid`，所以感叹号与主表定位和交互完全一致；动作区只保留决定按钮。不得新增关系汇总栏、第四栏、重复 Chip、逐项复选框、人工金额下拉或原生 HTML 表单控件。
 - 未配对选择工具栏不提供人工“异常处理”；删除该按钮不删除异常系统、主表异常 chip、右上统计入口、统一异常抽屉或自动异常计算。
 - “发票待归属”只允许在异常 Popover 中发起显式归属；提交重验 active case、invoice/OA 成员、费用明细、行级 anomaly fingerprint、幂等和 source-links CAS。既有不同或不完整的显式归属 fail closed，不允许静默覆盖。写成功后页面恰好一次 canonical 回读，不能本地删除异常、移动分区或拼装同行；关系成员与金额保持不变。

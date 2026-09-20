@@ -77,3 +77,7 @@ Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只
 ## 2026-09-20 付款匹配 scope 补齐
 
 原 workbench-matching worker 与 durable queue 合同不变。关系/凭证/发票归属 writer 通过 `mark_relation_matching_dirty` 在同一事务通知全部实际成员月份，不再只通知发票月份；规则 v16 复用已完成 scope 的版本重扫。自动匹配自身不回投相同业务任务，页面 GET 仍零入队。
+
+## 2026-09-21 凭证组保存通知
+
+凭证文件集合和子项总金额在一次事务提交后，只通过原 matching repository 通知目标 OA scope 一次；逐文件独立投递已移除。既有 worker 以批量 OA hydration 读取金额，不增加实例、事件类型、缓存或 read model。

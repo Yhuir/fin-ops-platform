@@ -183,6 +183,7 @@ EXPECTED_MIGRATION_FILES = [
     "0170_cost_statistics_project_cost_scope.sql",
     "0171_cost_statistics_manual_items.sql",
     "0172_oa_invoice_source_priority.sql",
+    "0173_workbench_oa_supporting_document_bundles.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (
@@ -201,6 +202,7 @@ TEST_TABLES = (
     "app.import_batches",
     "app.import_batch_rows",
     "app.workbench_oa_supporting_documents",
+    "app.workbench_oa_supporting_document_bundles",
     "app.file_objects",
     "app.import_files",
     "app.invoices",

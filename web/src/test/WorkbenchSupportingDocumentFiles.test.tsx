@@ -35,3 +35,32 @@ test("read-only rendering keeps previews and hides management", () => {
   expect(screen.getAllByRole("link")).toHaveLength(2);
   expect(screen.queryByRole("button", { name: "管理凭证" })).not.toBeInTheDocument();
 });
+
+
+test.each([
+  [null, "凭证金额 待填写", "差额（OA − 凭证）待核对"],
+  ["0.00", "凭证金额 0.00", "差额（OA − 凭证）100.00"],
+  ["80.00", "凭证金额 80.00", "差额（OA − 凭证）20.00"],
+  ["120.00", "凭证金额 120.00", "差额（OA − 凭证）-20.00"],
+])("shows voucher amount %s and a distinct delta", (amount, amountText, deltaText) => {
+  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: amount, supportingDocumentOaAmount: "100.00" }} paneId="invoice" zoneId="unpaired" rowState="idle"
+    canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
+  expect(screen.getByText(amountText)).toBeInTheDocument();
+  expect(screen.getByText(deltaText)).toBeInTheDocument();
+});
+
+test("official invoice coverage keeps management without counting the voucher a second time", () => {
+  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: "80.00", supportingDocumentOaAmount: "100.00", supportingDocumentCoveredByInvoice: true }} paneId="invoice" zoneId="unpaired" rowState="idle"
+    canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
+  expect(screen.getByText("凭证金额 80.00")).toBeInTheDocument();
+  expect(screen.getByText("按正式发票核对，凭证不重复计额")).toBeInTheDocument();
+  expect(screen.queryByText(/差额（OA/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "管理凭证" })).toBeInTheDocument();
+});
+
+
+test("keeps cent precision for the largest permitted voucher total", () => {
+  render(<WorkbenchRecordCard row={{ ...row, supportingDocumentAmount: "999999999999999999.98", supportingDocumentOaAmount: "999999999999999999.99" }} paneId="invoice" zoneId="unpaired" rowState="idle"
+    canOperateData showWorkflowActions onRowAction={vi.fn()} onSelectRow={vi.fn()} onOpenDetail={vi.fn()} />);
+  expect(screen.getByText("差额（OA − 凭证）0.01")).toBeInTheDocument();
+});

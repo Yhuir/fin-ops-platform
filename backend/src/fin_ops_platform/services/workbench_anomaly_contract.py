@@ -9,5 +9,6 @@ AMOUNT_EXCEPTION_CODES = (
     "bank_invoice_equal_oa_less",
     "bank_invoice_equal_oa_more",
     "all_amounts_different",
+    "expense_item_amount_mismatch",
 )
 EXCEPTION_VIEWS = ("amount", "document_only")

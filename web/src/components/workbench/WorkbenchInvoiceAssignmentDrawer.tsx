@@ -40,7 +40,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
     }
     setCompleted(false);
     setSelectedKeys(new Set((target?.candidates ?? []).filter((candidate) => (
-      target?.initialTargets ?? target?.previousTargets ?? []
+      target?.previousTargets ?? []
     ).some((item) => item.oaRowId === candidate.oaRowId && item.expenseItemId === candidate.expenseItemId)).map((candidate) => candidate.key)));
     setErrorMessage(null);
     setSubmitting(false);

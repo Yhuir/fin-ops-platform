@@ -1841,6 +1841,7 @@ const WORKBENCH_AMOUNT_EXCEPTION_CODES = [
   "bank_invoice_equal_oa_less",
   "bank_invoice_equal_oa_more",
   "all_amounts_different",
+  "expense_item_amount_mismatch",
 ] as const;
 
 function workbenchExceptionProjection<T extends Record<string, unknown>>(
@@ -9692,7 +9693,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       path === "/api/workbench/oa-invoice-supplements/documents"
       && request.method() === "GET"
     ) {
-      return json(route, { documents: [] });
+      return json(route, { documents: [], total_amount: null, version: 0 });
     }
 
     if (path === "/api/workbench") {

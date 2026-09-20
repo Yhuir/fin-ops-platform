@@ -53,6 +53,7 @@ import type {
   WorkbenchInvoiceExpenseItemAssignmentPayload,
   WorkbenchOaInvoiceSupplementTarget,
   WorkbenchOaSupportingDocument,
+  WorkbenchOaSupportingDocumentSet,
   WorkbenchOaSupportingDocumentGalleryPage,
   WorkbenchReceiptDraft,
   WorkbenchReceiptPrintPayload,
@@ -143,6 +144,8 @@ type ApiWorkbenchRow = {
     fee_content?: string | null;
     fee_description?: string | null;
     attachment_file_count?: string | number | null;
+    supporting_document_amount?: string | null;
+    supporting_document_version?: number;
     supporting_documents?: Array<{
       id?: string | null;
       file_name?: string | null;
@@ -213,6 +216,8 @@ type ApiWorkbenchAnomalyItem = {
   display_label?: string | null;
   fingerprint?: string | null;
   comparison_unit_id?: string | null;
+  evidence_total?: string | null;
+  expense_item_differences?: Array<{ expense_item_ids: string[]; oa_total: string; evidence_total: string; amount_delta: string }>;
   source_oa_ids?: unknown[] | null;
   source_expense_item_ids?: unknown[] | null;
   oa_total?: string | number | null;
@@ -519,6 +524,9 @@ type ApiWorkbenchRelationAmountCheck = {
   oaTotal?: string | number | null;
   invoice_total?: string | number | null;
   invoiceTotal?: string | number | null;
+  supporting_document_total?: string | null;
+  evidence_total?: string | null;
+  evidence_complete?: boolean;
   amount_delta?: string | number | null;
   amountDelta?: string | number | null;
   requires_note?: boolean | null;
@@ -1020,6 +1028,9 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
     oaTotal: firstNonPlaceholderDisplayValue(value.oa_total, value.oaTotal, value.oa_amount, value.oaAmount),
     bankTotal: firstNonPlaceholderDisplayValue(value.bank_total, value.bankTotal, value.bank_amount, value.bankAmount),
     invoiceTotal: firstNonPlaceholderDisplayValue(value.invoice_total, value.invoiceTotal),
+    supportingDocumentTotal: firstNonPlaceholderDisplayValue(value.supporting_document_total),
+    evidenceTotal: firstNonPlaceholderDisplayValue(value.evidence_total),
+    evidenceComplete: value.evidence_complete,
     amountDelta: toDisplayValue(value.amount_delta ?? value.amountDelta),
     requiresNote: value.requires_note === true || value.requiresNote === true,
   };
@@ -1062,6 +1073,11 @@ function mapWorkbenchAnomaly(
       displayLabel: toDisplayValue(item.display_label, label),
       fingerprint: itemFingerprint,
       comparisonUnitId,
+      evidenceTotal: item.evidence_total ?? undefined,
+      expenseItemDifferences: item.expense_item_differences?.map((difference) => ({
+        expenseItemIds: difference.expense_item_ids, oaTotal: difference.oa_total,
+        evidenceTotal: difference.evidence_total, amountDelta: difference.amount_delta,
+      })),
       sourceOaIds: toStringList(item.source_oa_ids),
       sourceExpenseItemIds: toStringList(item.source_expense_item_ids),
       oaTotal: toDisplayValue(item.oa_total, "") || undefined,
@@ -1559,6 +1575,8 @@ function mapExpenseItems(items: ApiWorkbenchRow["expense_items"]) {
       feeContent: toDisplayValue(item.fee_content, ""),
       feeDescription: toDisplayValue(item.fee_description, ""),
       attachmentFileCount: toCount(item.attachment_file_count),
+      supportingDocumentAmount: item.supporting_document_amount ?? null,
+      supportingDocumentVersion: item.supporting_document_version ?? 0,
       ...(supportingDocuments.length > 0 ? { supportingDocuments } : {}),
     }];
   });
@@ -1751,6 +1769,9 @@ function anomalyLabel(code: string) {
   if (isWorkbenchAmountAnomalyCode(code)) {
     return WORKBENCH_AMOUNT_ANOMALY_LABELS[code];
   }
+  if (code === "oa_supporting_document_amount_missing") {
+    return "待填写凭证金额";
+  }
   if (code === "oa_invoice_attachment_absent") {
     return "发票附件缺失";
   }
@@ -1828,39 +1849,45 @@ export async function listWorkbenchOaSupportingDocumentGallery({
   };
 }
 
-export async function listWorkbenchOaSupportingDocuments(
-  target: WorkbenchOaInvoiceSupplementTarget,
-): Promise<WorkbenchOaSupportingDocument[]> {
-  const query = new URLSearchParams({
-    oa_row_id: target.oaRowId,
-    expense_item_id: target.expenseItemId,
-  });
-  const payload = await requestJson<{ documents?: ApiWorkbenchOaSupportingDocument[] }>(
-    `/api/workbench/oa-invoice-supplements/documents?${query.toString()}`,
-  );
-  return (payload.documents ?? []).map(mapSupportingDocument);
+type ApiWorkbenchOaSupportingDocumentSet = {
+  documents: ApiWorkbenchOaSupportingDocument[];
+  total_amount: string | null;
+  version: number;
+};
+
+function mapSupportingDocumentSet(payload: ApiWorkbenchOaSupportingDocumentSet): WorkbenchOaSupportingDocumentSet {
+  if (!Array.isArray(payload.documents) || !Number.isInteger(payload.version) || payload.version < 0
+    || (payload.total_amount !== null && typeof payload.total_amount !== "string")) {
+    throw new Error("补充凭证数据不完整，请重新读取。");
+  }
+  return { documents: payload.documents.map(mapSupportingDocument), totalAmount: payload.total_amount, version: payload.version };
 }
 
-export async function uploadWorkbenchOaSupportingDocuments(
+export async function listWorkbenchOaSupportingDocuments(
   target: WorkbenchOaInvoiceSupplementTarget,
-  files: File[],
-): Promise<WorkbenchOaSupportingDocument[]> {
+): Promise<WorkbenchOaSupportingDocumentSet> {
+  const query = new URLSearchParams({ oa_row_id: target.oaRowId, expense_item_id: target.expenseItemId });
+  return mapSupportingDocumentSet(await requestJson<ApiWorkbenchOaSupportingDocumentSet>(
+    `/api/workbench/oa-invoice-supplements/documents?${query.toString()}`,
+  ));
+}
+
+export async function saveWorkbenchOaSupportingDocuments(
+  target: WorkbenchOaInvoiceSupplementTarget,
+  draft: { retainedDocumentIds: string[]; files: File[]; totalAmount: string | null; expectedVersion: number },
+): Promise<WorkbenchOaSupportingDocumentSet> {
   const formData = new FormData();
   formData.append("case_id", target.caseId);
   formData.append("oa_row_id", target.oaRowId);
   formData.append("expense_item_id", target.expenseItemId);
-  files.forEach((file) => formData.append("files", file));
-  const payload = await requestJson<{ documents?: ApiWorkbenchOaSupportingDocument[] }>(
+  formData.append("retained_document_ids", JSON.stringify(draft.retainedDocumentIds));
+  formData.append("total_amount", draft.totalAmount ?? "");
+  formData.append("expected_version", String(draft.expectedVersion));
+  draft.files.forEach((file) => formData.append("files", file));
+  return mapSupportingDocumentSet(await requestJson<ApiWorkbenchOaSupportingDocumentSet>(
     "/api/workbench/oa-invoice-supplements/documents",
     { method: "POST", body: formData },
-  );
-  return (payload.documents ?? []).map(mapSupportingDocument);
-}
-
-export async function deleteWorkbenchOaSupportingDocument(documentId: string): Promise<void> {
-  await requestJson(`/api/workbench/oa-invoice-supplements/documents/${encodeURIComponent(documentId)}`, {
-    method: "DELETE",
-  });
+  ));
 }
 
 export async function confirmWorkbenchManualInvoiceSupplement(
@@ -2327,6 +2354,10 @@ const WORKBENCH_API_ERROR_MESSAGES: Record<string, string> = {
   oa_password_verification_failed: "当前 OA 用户密码复核失败，未执行数据重置。",
   invalid_multipart_body: "上传请求无效，请重新选择文件后再试。",
   invalid_supporting_document_upload: "请选择文件，并确认当前 OA 子付款项仍然有效。",
+  supporting_document_amount_invalid: "请填写非负凭证总金额，最多保留两位小数；清空文件时金额也必须为空。",
+  supporting_document_version_invalid: "凭证版本无效，请关闭后重新打开管理凭证。",
+  supporting_document_version_conflict: "补充凭证已被其他操作更新，本次编辑未保存；请关闭后重新打开管理凭证。",
+  supporting_document_selection_invalid: "保留的凭证文件已变化或不属于当前 OA 明细，请重新读取。",
   supporting_document_format_not_allowed: "仅支持 JPG、JPEG、PNG 或 PDF 文件。",
   supporting_document_size_invalid: "文件不能为空且单个文件不能超过 25MB。",
   supporting_document_signature_invalid: "文件内容与扩展名不一致，请重新选择有效文件。",

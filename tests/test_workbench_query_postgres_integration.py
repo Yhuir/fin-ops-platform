@@ -1054,7 +1054,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(set(group["bank_folds"][0]["member_ids"]), set(ids))
         self.assertEqual(Decimal(group["bank_folds"][0]["summary_row"]["amount"]), Decimal('2.00'))
 
-    def _insert_supporting_document(self) -> None:
+    def _insert_supporting_document(self, amount: str | None = "100.00") -> None:
         self.raw_connection.execute("""
             insert into app.file_objects(id, storage_backend, storage_uri, object_key,
                 filename, sha256, size_bytes, content_type)
@@ -1068,6 +1068,13 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             values ('oa-direct-1', 'oa-direct-1:item:0', '00000000-0000-0000-0000-000000000103',
                 '凭证.png', 'image/png', repeat('a',64), 10, 'test-suite')
         """)
+
+        if amount is not None:
+            self.raw_connection.execute("""
+                insert into app.workbench_oa_supporting_document_bundles
+                    (oa_row_id, expense_item_id, total_amount, version, created_by, updated_by)
+                values ('oa-direct-1', 'oa-direct-1:item:0', %s, 1, 'test-suite', 'test-suite')
+            """, (amount,))
 
     def test_supporting_documents_refresh_completion_and_preserve_invoice_pool(self) -> None:
         self.raw_connection.execute("""
@@ -1104,7 +1111,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertFalse(any(group.get("detail_key") == "CASE-DIRECT-1" for group in tombstoned["paired"]["groups"]))
 
     def test_mixed_document_and_invoice_sql_python_amount_parity(self) -> None:
-        self._insert_supporting_document()
+        self._insert_supporting_document("20.00")
         self.raw_connection.execute("""
             update app.oa_applications set normalized_payload = jsonb_set(normalized_payload,
                 '{expense_items}', '[{"id":"oa-direct-1:item:0","amount":"20"},
@@ -1146,6 +1153,83 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         )
         accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
         self.assertTrue(any(group.get("detail_key") == "CASE-DIRECT-1" for group in accepted["paired"]["groups"]))
+
+    def test_voucher_amount_unknown_difference_and_review_parity(self) -> None:
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set row_ids = array['oa-direct-1','bank-direct-1'],
+                row_types = array['oa','bank'], special_metadata = '{"requires_invoice":true}'::jsonb
+            where case_id = 'CASE-DIRECT-1'
+        """)
+        self._insert_supporting_document(None)
+        unknown = self.repository.get_workbench_groups_page(
+            scope_key="2026-07", zone="unpaired", exception_bucket="unpaired", exception_view="document_only")
+        group = next(g for g in unknown["groups"] if g.get("detail_key") == "CASE-DIRECT-1")
+        self.assertEqual(group["workbench_anomaly"]["items"][0]["code"], "oa_supporting_document_amount_missing")
+        self.assertIsNone(group["amount_check"]["evidence_total"])
+        self.assertFalse(group["completion"]["is_complete"])
+        self.raw_connection.execute("""
+            insert into app.workbench_oa_supporting_document_bundles
+                (oa_row_id, expense_item_id, total_amount, version, created_by, updated_by)
+            values ('oa-direct-1','oa-direct-1:item:0',80,1,'test-suite','test-suite')
+        """)
+        page = self.repository.get_workbench_groups_page(scope_key="2026-07", zone="unpaired",
+            exception_bucket="unpaired", exception_view="amount", exception_code="oa_bank_equal_invoice_less")
+        group = next(g for g in page["groups"] if g.get("detail_key") == "CASE-DIRECT-1")
+        self.assertEqual(group["amount_check"]["evidence_total"], "80.00")
+        self.assertEqual(group["amount_check"]["amount_delta"], "20.00")
+        anomaly = group["workbench_anomaly"]
+        PostgresWorkbenchRepository(self.raw_connection).set_workbench_anomaly_review_decision(
+            fingerprint=anomaly["fingerprint"], group_id=group["group_id"], scope_key="2026-07",
+            actor_id="test-suite", actor_account="test-suite", actor_name="测试", decision="accept_paired",
+            note="确认当前凭证差额", detected_classification_codes=["oa_bank_equal_invoice_less"],
+            evidence_item_fingerprints=anomaly["evidence_item_fingerprints"],
+        )
+        accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        self.assertTrue(any(g.get("detail_key") == "CASE-DIRECT-1" for g in accepted["paired"]["groups"]))
+        self.raw_connection.execute("update app.workbench_oa_supporting_document_bundles set version=2")
+        changed = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        self.assertTrue(any(g.get("detail_key") == "CASE-DIRECT-1" for g in changed["unpaired"]["groups"]))
+
+    def test_voucher_offsetting_item_differences_have_one_sql_category(self) -> None:
+        self.raw_connection.execute("""
+            update app.workbench_pair_relations set row_ids = array['oa-direct-1','bank-direct-1'],
+                row_types = array['oa','bank'], special_metadata = '{"requires_invoice":true}'::jsonb
+            where case_id = 'CASE-DIRECT-1'
+        """)
+        self.raw_connection.execute("""
+            update app.oa_applications set normalized_payload = jsonb_set(normalized_payload,
+                '{expense_items}', '[{"id":"oa-direct-1:item:0","amount":"40"},
+                                    {"id":"oa-direct-1:item:1","amount":"60"}]'::jsonb)
+            where row_id='oa-direct-1'
+        """)
+        self._insert_supporting_document("30.00")
+        self.raw_connection.execute("""
+            insert into app.workbench_oa_supporting_documents
+                (oa_row_id,expense_item_id,file_object_id,original_filename,content_type,content_sha256,size_bytes,created_by)
+            select oa_row_id,'oa-direct-1:item:1',file_object_id,original_filename,content_type,content_sha256,size_bytes,created_by
+            from app.workbench_oa_supporting_documents
+        """)
+        self.raw_connection.execute("""
+            insert into app.workbench_oa_supporting_document_bundles
+                (oa_row_id,expense_item_id,total_amount,version,created_by,updated_by)
+            values ('oa-direct-1','oa-direct-1:item:1',70,1,'test-suite','test-suite')
+        """)
+        page = self.repository.get_workbench_groups_page(scope_key="2026-07", zone="unpaired",
+            exception_bucket="unpaired", exception_view="amount", exception_code="expense_item_amount_mismatch")
+        self.assertEqual(page["exception_counts"]["by_code"]["expense_item_amount_mismatch"], 1)
+        group = next(g for g in page["groups"] if g.get("detail_key") == "CASE-DIRECT-1")
+        anomaly = group["workbench_anomaly"]
+        self.assertEqual(group["amount_check"]["evidence_total"], "100.00")
+        self.assertEqual(anomaly["items"][0]["code"], "expense_item_amount_mismatch")
+        self.assertEqual(anomaly["items"][0]["amount_delta"], "10.00")
+        PostgresWorkbenchRepository(self.raw_connection).set_workbench_anomaly_review_decision(
+            fingerprint=anomaly["fingerprint"], group_id=group["group_id"], scope_key="2026-07",
+            actor_id="test-suite", actor_account="test-suite", actor_name="测试", decision="accept_paired",
+            note="明细差额审阅", detected_classification_codes=["expense_item_amount_mismatch"],
+            evidence_item_fingerprints=anomaly["evidence_item_fingerprints"],
+        )
+        accepted = self.repository.get_workbench_initial_page(scope_key="2026-07")
+        self.assertTrue(any(g.get("detail_key") == "CASE-DIRECT-1" for g in accepted["paired"]["groups"]))
 
     def test_direct_initial_and_groups_use_canonical_facts_without_read_model(self) -> None:
         initial = self.repository.get_workbench_initial_page(scope_key="2026-07")
@@ -2359,6 +2443,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 "bank_invoice_equal_oa_less": 1,
                 "bank_invoice_equal_oa_more": 1,
                 "all_amounts_different": 1,
+                "expense_item_amount_mismatch": 0,
             },
         })
         self.assertEqual(

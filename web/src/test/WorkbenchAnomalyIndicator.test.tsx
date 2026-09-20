@@ -130,3 +130,14 @@ describe("WorkbenchAnomalyIndicator", () => {
     expect(screen.queryByText(/\+08:00/)).not.toBeInTheDocument();
   });
 });
+
+
+it("shows opposing item differences even when the group total cancels out", async () => {
+  render(<WorkbenchAnomalyIndicator levelLabel="该关联组" anomalies={[{ ...anomaly, code: "expense_item_amount_mismatch", displayLabel: "明细金额不一致", amountDelta: "0.00", evidenceTotal: "100.00", expenseItemDifferences: [
+    { expenseItemIds: ["item-1"], oaTotal: "40.00", evidenceTotal: "0.00", amountDelta: "40.00" },
+    { expenseItemIds: ["item-2"], oaTotal: "60.00", evidenceTotal: "100.00", amountDelta: "-40.00" },
+  ] }]} />);
+  await userEvent.setup({ skipHover: true }).click(screen.getByRole("button", { name: "该关联组有 1 项异常，查看详情" }));
+  expect(screen.getByText("明细 1：OA 40.00 · 票据凭证 0.00 · 差额 40.00")).toBeVisible();
+  expect(screen.getByText("明细 2：OA 60.00 · 票据凭证 100.00 · 差额 -40.00")).toBeVisible();
+});

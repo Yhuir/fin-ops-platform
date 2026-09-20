@@ -163,3 +163,7 @@ ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同
 - 人工先到、OA 后到时保留 canonical ID、金额/核销/ETC 和原 source batch，替换当前人工来源与人工明细归属；导入页审计改由 terminal row 强身份证明 OA 接管后的历史引用。重复输入与 OA 值差异明示 warning，不改现存事实。
 - migration 0172 仅清理已有混合来源与标签，保留财务列、导入历史，逐票审计 before/after，定向登记现有 matching scopes；重跑无更新。
 - OA 来源审计在同一只读 SQL 内读取 completed `oa_applications/items/attachments` 与进行中 `oa_pending_payment_admissions.source_payload` 的结构化子项及附件；不能把进行中来源误报为无 OA。维护修复只按当前强身份、明确子项和真实附件 key 更新 OA 来源，并沿用 CAS、审计、同事务 matching dirty；不通过人工归属边补洞。
+
+## 2026-09-21 凭证金额隔离
+
+关联台凭证新增子项总金额，仍不创建或改写 canonical invoice，不计入发票张数、税额或抵扣。全局凭证 gallery 保持只读文件接口；外部“选择已有发票”按钮移除不改变关联台人工录入按强身份复用 canonical invoice 的合同。

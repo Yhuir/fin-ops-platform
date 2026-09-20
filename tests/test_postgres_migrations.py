@@ -184,6 +184,7 @@ EXPECTED_MIGRATIONS = [
     "0170_cost_statistics_project_cost_scope.sql",
     "0171_cost_statistics_manual_items.sql",
     "0172_oa_invoice_source_priority.sql",
+    "0173_workbench_oa_supporting_document_bundles.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -206,6 +207,7 @@ EXPECTED_TABLES = [
     "app.import_files",
     "app.file_objects",
     "app.workbench_oa_supporting_documents",
+    "app.workbench_oa_supporting_document_bundles",
     "app.invoices",
     "app.bank_transactions",
     "app.financial_fact_corrections",
@@ -347,7 +349,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 173)],
+            [f"{number:04d}" for number in range(1, 174)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -2101,6 +2103,11 @@ on conflict (settings_key) do nothing;"""
             match = re.search(pattern, sql, flags=re.S)
             self.assertIsNotNone(match, table)
             body = match.group(1)
+            if table == "app.workbench_oa_supporting_document_bundles":
+                self.assertIn("primary key (oa_row_id, expense_item_id)", body)
+                self.assertIn("total_amount numeric(20,2)", body)
+                self.assertIn("version integer not null default 0", body)
+                continue
             if table in {
                 "audit.external_control_evidence",
                 "audit.external_control_evidence_items",

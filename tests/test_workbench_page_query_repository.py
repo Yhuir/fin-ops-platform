@@ -56,7 +56,7 @@ def test_invoice_source_kinds_are_stable_deduplicated_evidence_not_ownership() -
     ]
 
 
-def test_invoice_source_kinds_keep_legacy_scalar_in_full_and_both_summary_dtos() -> None:
+def test_invoice_oa_priority_is_preserved_in_full_and_both_summary_dtos() -> None:
     source_links = [
         {"source_type": "oa_attachment_invoice", "source_expense_item_id": "item-1"},
         {"source_type": "manual_invoice_import", "source_id": "file-1"},
@@ -79,11 +79,7 @@ def test_invoice_source_kinds_keep_legacy_scalar_in_full_and_both_summary_dtos()
 
     assert full is not None
     assert full["source_kind"] == "oa_attachment_invoice"
-    assert full["source_kinds"] == [
-        "manual_invoice_import",
-        "oa_attachment_invoice",
-        "oa_expense_item_invoice",
-    ]
+    assert full["source_kinds"] == ["oa_attachment_invoice"]
     for _route in ("initial", "groups"):
         summary = PostgresWorkbenchPageHydrationRepository._compact_group({
             "group_id": "unpaired:invoice:invoice-1",
@@ -653,7 +649,7 @@ def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     assert "invoice.source_links as invoice_source_links" in canonical_invoice_sql
     assert "invoice.raw_payload->'source_links'" not in canonical_invoice_sql
     assert "source_flags.has_oa_ownership_link" in canonical_invoice_sql
-    assert "source_flags.has_explicit_oa_item_link" in canonical_invoice_sql
+    assert "source_flags.has_oa_attachment_link" in canonical_invoice_sql
     assert "source_flags.has_direct_oa_attachment" in canonical_invoice_sql
     assert "source_flags.has_manual_import" in canonical_invoice_sql
     assert "from canonical_invoice_facts invoice" in visible_invoice_sql
@@ -664,7 +660,7 @@ def test_canonical_spine_materializes_visible_invoice_facts_once() -> None:
     )[1].split("current_oa_item_facts as materialized (", 1)[0]
     assert "case when invoice.has_oa_ownership_link" in ownership_sql
     assert "where invoice.has_oa_ownership_link" in ownership_sql
-    assert "or not invoice.has_explicit_oa_item_link" in ownership_sql
+    assert "or not invoice.has_oa_attachment_link" in ownership_sql
     assert ownership_sql.count("jsonb_array_elements(") == 1
 
 
@@ -947,8 +943,8 @@ def test_source_owner_resolution_precedes_group_filters_counts_and_cursor_limit(
     group_index = spine_sql.index("canonical_groups as materialized")
     member_index = spine_sql.index("canonical_group_members as materialized")
     assert owner_index < placement_index < source_group_index < group_index < member_index
-    assert "or not invoice.has_explicit_oa_item_link" in spine_sql
-    assert "= 'oa_expense_item_invoice'" in spine_sql
+    assert "or not invoice.has_oa_attachment_link" in spine_sql
+    assert "= 'oa_attachment_invoice'" in spine_sql
     assert "having bool_and(resolution.resolved_oa_row_id is not null)" in spine_sql
     assert "count(distinct resolution.resolved_oa_row_id) = 1" in spine_sql
     assert "having count(distinct owner_relation.case_id) <= 1" in spine_sql

@@ -8,6 +8,7 @@ const AMOUNT_RULE_FAMILY_TITLES = [
   "OA = 发票",
   "流水 = 发票",
   "三项互异",
+  "费用明细",
 ] as const;
 
 test.describe("workbench exception browser flow", () => {
@@ -197,7 +198,7 @@ test.describe("workbench exception browser flow", () => {
     })).toBeVisible();
     await expect(drawer.getByText("OA附件", { exact: true })).toHaveCount(1);
     await expect(drawer.getByText("明细归属", { exact: true })).toHaveCount(1);
-    await expect(drawer.getByText("人工导入", { exact: true })).toHaveCount(0);
+    await expect(drawer.getByText("人工导入", { exact: true })).toHaveCount(1);
     await expect(drawer.getByText("导入记录", { exact: true })).toHaveCount(0);
     await expect(drawer.getByRole("button", { name: /人工金额判断/ })).toHaveCount(0);
     await expect(drawer.getByRole("checkbox")).toHaveCount(0);
@@ -298,7 +299,7 @@ test.describe("workbench exception browser flow", () => {
       for (const title of AMOUNT_RULE_FAMILY_TITLES) {
         await expect(amountFilters.getByText(title, { exact: true })).toBeVisible();
       }
-      await expect(amountFilters.getByRole("radio")).toHaveCount(7);
+      await expect(amountFilters.getByRole("radio")).toHaveCount(8);
       await expect.poll(async () => amountFilters.evaluate(
         (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
       )).toBe(4);

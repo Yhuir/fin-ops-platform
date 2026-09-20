@@ -18,6 +18,7 @@ AMOUNT_DISPLAY_LABELS = {
     "bank_invoice_equal_oa_less": "发票流水一致，OA 提少了",
     "bank_invoice_equal_oa_more": "发票流水一致，OA 提多了",
     "all_amounts_different": "三项不一致",
+    "expense_item_amount_mismatch": "明细金额不一致",
 }
 
 if tuple(AMOUNT_DISPLAY_LABELS) != AMOUNT_EXCEPTION_CODES:
@@ -27,6 +28,7 @@ ATTACHMENT_DISPLAY_LABELS = {
     "oa_invoice_attachment_absent": "发票附件缺失",
     "oa_invoice_attachment_unparsed": "发票附件未解析",
     "oa_invoice_attachment_unassigned": "发票待归属",
+    "oa_supporting_document_amount_missing": "待填写凭证金额",
 }
 
 
@@ -128,7 +130,8 @@ class WorkbenchAmountCheckService:
             if any(self._amount(row) is None for row in pane_rows):
                 totals[pane] = None
         actual_totals = totals
-        totals = self._document_comparison_totals(totals, rows_by_type)
+        totals = {**totals, "invoice": self._decimal(amount_check.get("evidence_total"))}
+        supporting_items = self._supporting_items(rows_by_type, relation_mode=relation_mode)
         has_three_way_comparison = (
             amount_check.get("status") != "unknown"
             and amount_check.get("direction") in {"payment", "receipt"}
@@ -172,6 +175,10 @@ class WorkbenchAmountCheckService:
             if has_three_way_comparison
             else None
         )
+        if classification is None and any(
+            item.get("code") == "oa_supporting_document_amount_mismatch" for item in evidence_items
+        ):
+            classification = ("expense_item_amount_mismatch", "oa")
         if classification is None:
             evidence_items = [
                 item
@@ -185,6 +192,7 @@ class WorkbenchAmountCheckService:
             for item in evidence_items
             if item.get("code") in ATTACHMENT_DISPLAY_LABELS
         )
+        review_item_fingerprints.extend(self._supporting_fingerprints(relation_id, supporting_items))
         if classification is not None:
             review_item_fingerprints.append(
                 self._amount_review_fingerprint(
@@ -195,6 +203,7 @@ class WorkbenchAmountCheckService:
                 )
             )
             review_item_fingerprints.sort()
+        review_item_fingerprints.sort()
         fingerprint_source = "\0".join(
             [
                 str(relation_id or "").strip(),
@@ -214,7 +223,7 @@ class WorkbenchAmountCheckService:
                 bank_rows=bank_rows,
                 invoice_rows=invoice_rows,
             ),
-            "evidence_item_fingerprints": review_item_fingerprints,
+            "evidence_item_fingerprints": sorted(review_item_fingerprints),
         }
 
     def _amount_review_fingerprint(
@@ -262,7 +271,7 @@ class WorkbenchAmountCheckService:
         component_amount_items = [
             item
             for item in evidence_items
-            if item.get("code") == "oa_invoice_amount_mismatch"
+            if item.get("code") in {"oa_invoice_amount_mismatch", "oa_supporting_document_amount_mismatch"}
             and list(item.get("source_expense_item_ids") or [])
         ]
         if classification is None:
@@ -303,11 +312,16 @@ class WorkbenchAmountCheckService:
                 "oa_total": self._format_amount(totals["oa"]),
                 "bank_total": self._format_amount(totals["bank"]),
                 "invoice_total": self._format_amount(totals["invoice"]),
-                "amount_delta": self._format_amount(self._amount_delta({
-                    pane: amount
-                    for pane, amount in comparison_totals.items()
-                    if amount is not None
-                })),
+                "evidence_total": self._format_amount(comparison_totals["invoice"]),
+                "amount_delta": self._format_amount(max([
+                    self._amount_delta({pane: amount for pane, amount in comparison_totals.items() if amount is not None}) or ZERO,
+                    *(self._decimal(item.get("amount_delta")) or ZERO for item in component_amount_items),
+                ])),
+                "expense_item_differences": [{
+                    "expense_item_ids": item["source_expense_item_ids"],
+                    "oa_total": item["oa_total"], "evidence_total": item["invoice_total"],
+                    "amount_delta": item["amount_delta"],
+                } for item in component_amount_items],
                 "mismatch_pair": None,
                 "invoice_row_ids": [
                     self._row_id(row) for row in invoice_rows if self._row_id(row)
@@ -498,13 +512,27 @@ class WorkbenchAmountCheckService:
             )
         ]
         for expense_item_id, (oa_row, expense_item) in expense_by_id.items():
-            if item_invoice_ids[expense_item_id] or expense_item.get("supporting_documents"):
+            if item_invoice_ids[expense_item_id]:
+                continue
+            documents = expense_item.get("supporting_documents") or []
+            supporting_amount = self._decimal(expense_item.get("supporting_document_amount"))
+            oa_amount = self._decimal(expense_item.get("amount"))
+            if documents and supporting_amount is not None:
+                if oa_amount is not None and oa_amount != supporting_amount:
+                    anomalies.append(self._anomaly_item(
+                        code="oa_supporting_document_amount_mismatch", relation_id=relation_id,
+                        comparison_unit_id=expense_item_id, source_oa_ids=[self._row_id(oa_row)],
+                        source_expense_item_ids=[expense_item_id], oa_total=oa_amount, bank_total=None,
+                        invoice_total=supporting_amount, invoice_rows=[], attachment_file_count=len(documents),
+                        mismatch_pair=("oa", "invoice"), display_scope="expense_item", display_pane="oa",
+                        display_row_id=expense_item_id,
+                    ))
                 continue
             attachment_count = self._non_negative_int(expense_item.get("attachment_file_count"))
             source_oa_id = self._row_id(oa_row)
             code = (
-                "oa_invoice_attachment_absent"
-                if attachment_count <= 0
+                "oa_supporting_document_amount_missing" if documents
+                else "oa_invoice_attachment_absent" if attachment_count <= 0
                 else "oa_invoice_attachment_unparsed"
             )
             anomalies.append(
@@ -635,6 +663,8 @@ class WorkbenchAmountCheckService:
             "oa_invoice_attachment_absent": "无OA附件",
             "oa_invoice_attachment_unparsed": "OA发票附件未解析",
             "oa_invoice_attachment_unassigned": "OA发票待归属",
+            "oa_supporting_document_amount_missing": "待填写凭证金额",
+            "oa_supporting_document_amount_mismatch": "凭证金额与OA明细不一致",
             "oa_bank_amount_mismatch": "OA流水金额不一致",
             "oa_invoice_amount_mismatch": "OA发票金额不一致",
             "bank_invoice_amount_mismatch": "流水发票金额不一致",
@@ -722,28 +752,33 @@ class WorkbenchAmountCheckService:
         except ValueError:
             return 0
 
-    def _document_comparison_totals(
-        self, totals: dict[str, Decimal | None],
-        rows_by_type: dict[str, list[dict[str, Any]]],
-    ) -> dict[str, Decimal | None]:
+    def _supporting_items(
+        self, rows_by_type: dict[str, list[dict[str, Any]]], *, relation_mode: str = "",
+    ) -> list[dict[str, Any]]:
+        if relation_mode == "batch_accounting" and any(
+            row.get("source_kind") == "etc_invoice_summary" for row in rows_by_type.get("invoice", [])
+        ):
+            return []
         linked_items = {
             item_id for row in rows_by_type.get("invoice", [])
             for item_id in self._source_expense_item_ids(row)
         }
-        amounts = [
-            self._decimal(item.get("amount"))
-            for row in rows_by_type.get("oa", [])
+        return [
+            item for row in rows_by_type.get("oa", [])
             for item in row.get("expense_items") or []
             if item.get("supporting_documents") and item.get("id") not in linked_items
         ]
-        if not amounts or any(amount is None for amount in amounts):
-            return totals
-        covered = sum((amount for amount in amounts if amount is not None), ZERO)
-        return {
-            "oa": totals["oa"] - covered if totals["oa"] is not None else None,
-            "bank": totals["bank"] - covered if totals["bank"] is not None else None,
-            "invoice": totals["invoice"] if rows_by_type.get("invoice") else ZERO,
-        }
+
+    def _supporting_fingerprints(
+        self, relation_id: str, items: list[dict[str, Any]],
+    ) -> list[str]:
+        return [sha256("\0".join([
+            relation_id, "supporting-document", str(item["id"]),
+            self._format_amount(self._decimal(item.get("amount"))) or "",
+            self._format_amount(self._decimal(item.get("supporting_document_amount"))) or "",
+            str(item.get("supporting_document_version", 0)),
+            ",".join(sorted(str(document["id"]) for document in item["supporting_documents"])),
+        ]).encode("utf-8")).hexdigest() for item in items]
 
     def check(
         self,
@@ -769,15 +804,36 @@ class WorkbenchAmountCheckService:
             ),
             "invoice_total": self._pane_total_for_direction(normalized_rows["invoice"], direction),
         }
+        if any(self._amount(row) is None for row in normalized_rows["invoice"]):
+            totals["invoice_total"] = None
         directions = self._directions(normalized_rows)
         has_direction_gap = any(
             self._row_direction(row) is None
             for rows in normalized_rows.values()
             for row in rows
         )
-        comparison = self._document_comparison_totals(
-            {key: totals[f"{key}_total"] for key in ("oa", "bank", "invoice")}, normalized_rows,
+        supporting_items = self._supporting_items(normalized_rows, relation_mode=relation_mode)
+        supporting_amounts = [self._decimal(item.get("supporting_document_amount")) for item in supporting_items]
+        supporting_total = (
+            None if any(amount is None for amount in supporting_amounts)
+            else sum(supporting_amounts, ZERO)
         )
+        evidence_total = totals["invoice_total"]
+        if supporting_items:
+            formal_total = totals["invoice_total"] if normalized_rows["invoice"] else ZERO
+            evidence_total = (
+                formal_total + supporting_total
+                if formal_total is not None and supporting_total is not None else None
+            )
+        comparison = {
+            "oa": totals["oa_total"], "bank": totals["bank_total"], "invoice": evidence_total,
+        }
+        supporting_deltas = [
+            abs(oa_amount - amount)
+            for item, amount in zip(supporting_items, supporting_amounts, strict=True)
+            if amount is not None and (oa_amount := self._decimal(item.get("amount"))) is not None
+            and oa_amount != amount
+        ]
         comparable = {f"{key}_total": value for key, value in comparison.items() if value is not None}
         mismatch_fields: list[str] = []
         status = "matched"
@@ -792,6 +848,15 @@ class WorkbenchAmountCheckService:
                 status = "mismatch"
                 requires_note = True
 
+        if status == "matched" and supporting_deltas:
+            status, requires_note = "mismatch", True
+            mismatch_fields.append("expense_item_amount_mismatch")
+        elif status == "matched" and (
+            supporting_total is None
+            or (normalized_rows["invoice"] and totals["invoice_total"] is None)
+        ):
+            status, requires_note = "unknown", True
+
         return {
             "status": status,
             "direction": direction,
@@ -801,9 +866,14 @@ class WorkbenchAmountCheckService:
             "bank_contra_total": self._format_amount(bank_totals["contra"]),
             "bank_net_total": self._format_amount(bank_totals["net"]),
             "invoice_total": self._format_amount(totals["invoice_total"]),
+            "supporting_document_total": self._format_amount(supporting_total),
+            "evidence_total": self._format_amount(evidence_total),
+            "evidence_complete": evidence_total is not None,
             "oa_amount": self._format_amount(totals["oa_total"]),
             "bank_amount": self._format_amount(totals["bank_total"]),
-            "amount_delta": self._format_amount(self._amount_delta(comparable)),
+            "amount_delta": self._format_amount(max(
+                [self._amount_delta(comparable) or ZERO, *supporting_deltas]
+            )),
             "mismatch_fields": mismatch_fields,
             "requires_note": requires_note,
         }

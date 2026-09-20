@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,6 +11,8 @@ import {
   type WorkbenchExceptionCounts,
   type WorkbenchExceptionView,
   type WorkbenchRelationGroup,
+  type WorkbenchRecord,
+  type WorkbenchColumnLayouts,
 } from "../features/workbench/types";
 
 const anomalyItems: WorkbenchAnomalyItem[] = [
@@ -46,6 +48,7 @@ const exceptionCounts: WorkbenchExceptionCounts = {
     bank_invoice_equal_oa_less: 0,
     bank_invoice_equal_oa_more: 0,
     all_amounts_different: 1,
+    expense_item_amount_mismatch: 0,
   },
 };
 
@@ -82,6 +85,9 @@ function renderDrawer(
   anomalyGroup = group(bucket),
   options: {
     view?: WorkbenchExceptionView;
+    columnLayouts?: WorkbenchColumnLayouts;
+    onEnsureGroupDetail?: (value: WorkbenchRelationGroup) => Promise<WorkbenchRelationGroup>;
+    onManageSupportingDocuments?: (row: WorkbenchRecord, group: WorkbenchRelationGroup) => void;
     selectedExceptionCode?: WorkbenchAmountAnomalyCode | null;
     counts?: WorkbenchExceptionCounts | null;
     onViewChange?: (view: WorkbenchExceptionView) => void;
@@ -96,6 +102,8 @@ function renderDrawer(
         paired: bucket === "paired" ? 1 : 0,
       }}
       canOperateData={canOperateData}
+      columnLayouts={options.columnLayouts}
+      onManageSupportingDocuments={options.onManageSupportingDocuments}
       contentGeneration={1}
       error={null}
       exceptionCounts={options.counts === undefined ? exceptionCounts : options.counts}
@@ -112,7 +120,7 @@ function renderDrawer(
       onBucketChange={vi.fn()}
       onClose={vi.fn()}
       onExceptionCodeChange={options.onExceptionCodeChange ?? vi.fn()}
-      onEnsureGroupDetail={async (value) => value}
+      onEnsureGroupDetail={options.onEnsureGroupDetail ?? (async (value) => value)}
       onInvoiceAssignment={vi.fn()}
       onInvoiceEntry={vi.fn()}
       onLoadMore={vi.fn()}
@@ -127,7 +135,7 @@ async function expandFirstGroup(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("WorkbenchExceptionDrawer", () => {
-  it("uses status tabs, view counts, and seven compact server-classification entries", () => {
+  it("uses status tabs, view counts, and eight compact server-classification entries", () => {
     renderDrawer("unpaired");
     expect(screen.getByRole("radio", { name: "未配对异常 1" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "已配对异常 0" })).toBeInTheDocument();
@@ -135,7 +143,7 @@ describe("WorkbenchExceptionDrawer", () => {
     expect(screen.getByRole("radio", { name: "仅资料异常 0" })).toBeInTheDocument();
     const amountFilters = screen.getByRole("radiogroup", { name: "金额异常分类" });
     const amountFilterOptions = within(amountFilters).getAllByRole("radio");
-    expect(amountFilterOptions).toHaveLength(7);
+    expect(amountFilterOptions).toHaveLength(8);
     expect(amountFilterOptions.map((option) => option.getAttribute("aria-label"))).toEqual(
       WORKBENCH_AMOUNT_ANOMALY_CODES.map((code) => (
         `${WORKBENCH_AMOUNT_ANOMALY_LABELS[code]} ${exceptionCounts.byCode[code]}`
@@ -145,7 +153,7 @@ describe("WorkbenchExceptionDrawer", () => {
       Array.from(amountFilters.querySelectorAll(".workbench-anomaly-drawer__amount-family-heading")).map(
         (label) => label.textContent,
       ),
-    ).toEqual(["OA = 流水", "OA = 发票", "流水 = 发票", "三项互异"]);
+    ).toEqual(["OA = 流水", "OA = 发票", "流水 = 发票", "三项互异", "费用明细"]);
     expect(document.querySelector(".workbench-anomaly-drawer__amount-filter-scroll")).not.toBeInTheDocument();
     expect(document.querySelector(".workbench-anomaly-drawer__count")).toHaveTextContent(
       "共 1 项",
@@ -286,4 +294,37 @@ describe("WorkbenchExceptionDrawer", () => {
       "accept_paired",
     );
   });
+});
+
+
+it("loads full details and shares custom columns, item alignment and voucher management", async () => {
+  const user = userEvent.setup();
+  const summary = group("unpaired");
+  const parent: WorkbenchRecord = {
+    id: "oa-voucher", caseId: "CASE-1", recordType: "oa", label: "日常报销", status: "待处理", statusCode: "pending", statusTone: "warning", exceptionHandled: false,
+    amount: "100.00", counterparty: "", tableValues: { applicant: "申请人", amount: "100.00" }, detailFields: [], actionVariant: "detail-only", availableActions: [],
+    expenseItems: [{ id: "voucher-item", rowIndex: "0", projectName: "完整明细项目", amount: "100.00", supportingDocumentAmount: "80.00", supportingDocumentVersion: 2,
+      supportingDocuments: [{ id: "doc-1", fileName: "附件.pdf", contentType: "application/pdf", sizeBytes: 20, createdAt: "", contentUrl: "/doc/content" }] }],
+  };
+  const full = { ...summary, rows: { ...summary.rows, oa: [parent] } };
+  const onManage = vi.fn();
+  let resolve!: (value: WorkbenchRelationGroup) => void;
+  const onEnsure = vi.fn().mockReturnValue(new Promise<WorkbenchRelationGroup>((done) => { resolve = done; }));
+  renderDrawer("unpaired", vi.fn(), true, summary, { onManageSupportingDocuments: onManage, onEnsureGroupDetail: onEnsure,
+    columnLayouts: { oa: ["amount", "applicant"], bank: [], invoice: [] },
+  });
+  await expandFirstGroup(user);
+  expect(screen.getByText("正在加载完整异常明细…")).toBeInTheDocument();
+  await act(async () => resolve(full));
+  const grid = screen.getByRole("grid", { name: "未配对三栏关联表" });
+  const columns = Array.from(grid.querySelectorAll('[data-pane-id="oa"][role="columnheader"]'));
+  expect(columns[0]).toHaveAttribute("data-column-key", "amount");
+  expect(columns[1]).toHaveAttribute("data-column-key", "applicant");
+  expect(within(grid).queryByRole("button", { name: /筛选|拖动|排序/ })).not.toBeInTheDocument();
+  expect(within(grid).getByText("完整明细项目")).toBeInTheDocument();
+  expect(within(grid).getByText("凭证金额 80.00")).toBeInTheDocument();
+  expect(within(grid).getByText("差额（OA − 凭证）20.00")).toBeInTheDocument();
+  await user.click(within(grid).getByRole("button", { name: "管理凭证" }));
+  expect(onManage).toHaveBeenCalledWith(expect.objectContaining({ sourceOaId: "oa-voucher", sourceExpenseItemIds: ["voucher-item"] }), full);
+  expect(onEnsure).toHaveBeenCalledOnce();
 });

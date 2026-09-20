@@ -809,7 +809,7 @@ describe("groupDisplayModel time filter", () => {
     const updated = {
       ...group,
       rows: { ...group.rows, oa: [{ ...parent, expenseItems: parent.expenseItems!.map(
-        (item) => item.id === "item-support" ? { ...item, supportingDocuments: documents } : item,
+        (item) => item.id === "item-support" ? { ...item, supportingDocuments: documents, supportingDocumentAmount: "30.00", supportingDocumentVersion: 1 } : item,
       ) }] },
     };
     const invoiceRows = buildWorkbenchGroupDisplayLayout(updated)?.segments
@@ -823,6 +823,11 @@ describe("groupDisplayModel time filter", () => {
         id: `supporting-documents:${parent.id}:item-support`,
         sourceKind: "oa_supporting_document",
         supportingDocuments: documents,
+        supportingDocumentAmount: "30.00",
+        supportingDocumentOaAmount: "38.00",
+        supportingDocumentCoveredByInvoice: false,
+        amount: "",
+        displayOnly: true,
         tableValues: {},
       }),
     ]);

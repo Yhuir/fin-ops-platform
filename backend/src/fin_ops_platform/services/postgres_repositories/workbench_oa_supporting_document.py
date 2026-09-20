@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
+from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
 from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
     PostgresWorkbenchMatchingQueueRepository,
 )
+from fin_ops_platform.services.workbench_oa_supporting_document_service import WorkbenchOaSupportingDocumentError
 
 
 class PostgresWorkbenchOaSupportingDocumentRepository:
@@ -18,100 +20,162 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
             return
         documents = self._connection.fetch_all(
             """
-            select document.oa_row_id, document.expense_item_id,
-                   document.id::text as id, document.original_filename as file_name,
-                   document.content_type, document.size_bytes,
-                   document.created_at::text as created_at,
-                   '/api/workbench/oa-invoice-supplements/documents/' ||
-                       document.id::text || '/content' as content_url
-            from app.workbench_oa_supporting_documents document
-            join app.file_objects file on file.id = document.file_object_id
-            where document.oa_row_id = any(%s::text[])
-              and document.status = 'active' and file.tombstoned_at is null
-            order by document.created_at, document.id
+            with documents as (
+                select document.oa_row_id, document.expense_item_id,
+                       document.id::text as id, document.original_filename as file_name,
+                       document.content_type, document.size_bytes,
+                       document.created_at::text as created_at,
+                       '/api/workbench/oa-invoice-supplements/documents/' ||
+                           document.id::text || '/content' as content_url
+                from app.workbench_oa_supporting_documents document
+                join app.file_objects file on file.id = document.file_object_id
+                where document.oa_row_id = any(%s::text[])
+                  and document.status = 'active' and file.tombstoned_at is null
+            ), bundles as (
+                select oa_row_id, expense_item_id, total_amount::text as total_amount, version
+                from app.workbench_oa_supporting_document_bundles
+                where oa_row_id = any(%s::text[])
+            )
+            select coalesce(documents.oa_row_id, bundles.oa_row_id) as oa_row_id,
+                   coalesce(documents.expense_item_id, bundles.expense_item_id) as expense_item_id,
+                   documents.id, documents.file_name, documents.content_type,
+                   documents.size_bytes, documents.created_at, documents.content_url,
+                   bundles.total_amount, coalesce(bundles.version, 0) as version
+            from documents full outer join bundles using (oa_row_id, expense_item_id)
+            order by documents.created_at, documents.id
             """,
-            ([str(row["id"]) for row in rows],),
+            ([str(row["id"]) for row in rows], [str(row["id"]) for row in rows]),
         )
         by_item: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        by_bundle: dict[tuple[str, str], dict[str, Any]] = {}
         for document in documents:
             key = (document["oa_row_id"], document["expense_item_id"])
-            by_item.setdefault(key, []).append({
-                name: value for name, value in document.items()
-                if name not in {"oa_row_id", "expense_item_id"}
-            })
+            by_bundle[key] = {"total_amount": document["total_amount"], "version": document["version"]}
+            if document["id"] is not None:
+                by_item.setdefault(key, []).append({
+                    name: value for name, value in document.items()
+                    if name not in {"oa_row_id", "expense_item_id", "total_amount", "version"}
+                })
         for row in rows:
             for item in row.get("expense_items") or []:
-                item["supporting_documents"] = by_item.get((str(row["id"]), str(item["id"])), [])
+                key = (str(row["id"]), str(item["id"]))
+                item["supporting_documents"] = by_item.get(key, [])
+                item["supporting_document_amount"] = by_bundle.get(key, {}).get("total_amount")
+                item["supporting_document_version"] = by_bundle.get(key, {}).get("version", 0)
 
-    def create(
-        self,
-        *,
-        relation_case_id: str,
-        oa_row_id: str,
-        expense_item_id: str,
-        file_object_id: str,
-        original_filename: str,
-        content_type: str,
-        content_sha256: str,
-        size_bytes: int,
-        created_by: str,
-    ) -> dict[str, Any] | None:
-        def write(connection: Any) -> dict[str, Any] | None:
-            row = connection.fetch_one(
-                """
-                insert into app.workbench_oa_supporting_documents(
-                    relation_case_id, oa_row_id, expense_item_id, file_object_id,
-                    original_filename, content_type, content_sha256, size_bytes, created_by
-                )
-                values (%s, %s, %s, %s::uuid, %s, %s, %s, %s, %s)
-                on conflict (oa_row_id, expense_item_id, content_sha256)
-                    where status = 'active'
-                    do nothing
-                returning id::text as id, relation_case_id, oa_row_id, expense_item_id,
-                          file_object_id::text as file_object_id, original_filename,
-                          content_type, content_sha256, size_bytes, status, created_by,
-                          created_at::text
-                """,
-                (
-                    relation_case_id or None, oa_row_id, expense_item_id, file_object_id,
-                    original_filename, content_type, content_sha256, size_bytes, created_by,
-                ),
+    def get_bundle(self, *, oa_row_id: str, expense_item_id: str) -> dict[str, Any]:
+        def read(connection: Any) -> dict[str, Any]:
+            connection.execute("set transaction isolation level repeatable read, read only")
+            return self._read_bundle(connection, oa_row_id, expense_item_id)
+        return run_in_transaction(self._connection, read)
+
+    @staticmethod
+    def _read_bundle(connection: Any, oa_row_id: str, expense_item_id: str) -> dict[str, Any]:
+        bundle = connection.fetch_one(
+            """select total_amount::text as total_amount, version
+               from app.workbench_oa_supporting_document_bundles
+               where oa_row_id = %s and expense_item_id = %s""",
+            (oa_row_id, expense_item_id),
+        ) or {"total_amount": None, "version": 0}
+        return {**bundle, "documents": PostgresWorkbenchOaSupportingDocumentRepository(connection).list_active(
+            oa_row_id=oa_row_id, expense_item_id=expense_item_id,
+        )}
+
+    def save_bundle(
+        self, *, relation_case_id: str, oa_row_id: str, expense_item_id: str,
+        actor_id: str, retained_document_ids: list[str], total_amount: str | None,
+        expected_version: int, documents: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        def write(connection: Any) -> dict[str, Any]:
+            connection.execute(
+                """insert into app.workbench_oa_supporting_document_bundles
+                   (oa_row_id, expense_item_id, created_by, updated_by)
+                   values (%s, %s, %s, %s) on conflict do nothing""",
+                (oa_row_id, expense_item_id, actor_id, actor_id),
             )
-            if row:
-                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_matching_dirty(
-                    case_ids=[], oa_row_ids=[row["oa_row_id"]], reason="oa_supporting_document_changed",
+            bundle = connection.fetch_one(
+                """select total_amount::text as total_amount, version
+                   from app.workbench_oa_supporting_document_bundles
+                   where oa_row_id = %s and expense_item_id = %s for update""",
+                (oa_row_id, expense_item_id),
+            )
+            current = PostgresWorkbenchOaSupportingDocumentRepository(connection).list_active(
+                oa_row_id=oa_row_id, expense_item_id=expense_item_id,
+            )
+            by_id = {row["id"]: row for row in current}
+            if not set(retained_document_ids).issubset(by_id):
+                if bundle["version"] != expected_version:
+                    raise WorkbenchOaSupportingDocumentError(
+                        "supporting_document_version_conflict", "补充凭证已被其他操作更新，请刷新后重试。",
+                        current_version=bundle["version"],
+                    )
+                raise WorkbenchOaSupportingDocumentError(
+                    "supporting_document_selection_invalid", "保留的凭证已删除或不属于当前子付款项。",
                 )
-            return dict(row) if row else None
-
-
+            target_hashes = {by_id[key]["content_sha256"] for key in retained_document_ids}
+            target_hashes.update(row["content_sha256"] for row in documents)
+            if bundle["total_amount"] == total_amount and target_hashes == {
+                row["content_sha256"] for row in current
+            }:
+                return {**bundle, "documents": current, "removed_storage_uris": []}
+            if bundle["version"] != expected_version:
+                raise WorkbenchOaSupportingDocumentError(
+                    "supporting_document_version_conflict", "补充凭证已被其他操作更新，请刷新后重试。",
+                    current_version=bundle["version"],
+                )
+            removed = [row for row in current if row["content_sha256"] not in target_hashes]
+            if removed:
+                connection.execute(
+                    """update app.workbench_oa_supporting_documents
+                       set status = 'deleted', deleted_by = %s, deleted_at = now()
+                       where id = any(%s::uuid[])""",
+                    (actor_id, [row["id"] for row in removed]),
+                )
+                connection.execute(
+                    """update app.file_objects set tombstoned_at = now(), updated_at = now()
+                       where id = any(%s::uuid[])""",
+                    ([row["file_object_id"] for row in removed],),
+                )
+            active_hashes = {row["content_sha256"] for row in current}
+            for document in documents:
+                if document["content_sha256"] in active_hashes:
+                    continue
+                connection.execute(
+                    """insert into app.workbench_oa_supporting_documents
+                       (relation_case_id, oa_row_id, expense_item_id, file_object_id,
+                        original_filename, content_type, content_sha256, size_bytes, created_by)
+                       values (%s, %s, %s, %s::uuid, %s, %s, %s, %s, %s)""",
+                    (relation_case_id or None, oa_row_id, expense_item_id,
+                     document["file_object_id"], document["original_filename"],
+                     document["content_type"], document["content_sha256"], document["size_bytes"], actor_id),
+                )
+                active_hashes.add(document["content_sha256"])
+            connection.execute(
+                """update app.workbench_oa_supporting_document_bundles
+                   set total_amount = %s::numeric, version = version + 1,
+                       updated_by = %s, updated_at = now()
+                   where oa_row_id = %s and expense_item_id = %s""",
+                (total_amount, actor_id, oa_row_id, expense_item_id),
+            )
+            result = self._read_bundle(connection, oa_row_id, expense_item_id)
+            PostgresOperationsAuditRepository(connection).append_operation_event({
+                "event_type": "workbench.oa_supporting_document_bundle.saved",
+                "object_type": "oa_supporting_document_bundle", "object_id": expense_item_id,
+                "actor_id": actor_id, "action": "workbench.oa_invoice.document_save",
+                "page_key": "reconciliation-workbench", "outcome": "success",
+                "payload": {
+                    "oa_row_id": oa_row_id, "expense_item_id": expense_item_id,
+                    "relation_case_id": relation_case_id,
+                    "before": {**bundle, "document_ids": [row["id"] for row in current]},
+                    "after": {"total_amount": result["total_amount"], "version": result["version"],
+                              "document_ids": [row["id"] for row in result["documents"]]},
+                },
+            })
+            PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_matching_dirty(
+                case_ids=[], oa_row_ids=[oa_row_id], reason="oa_supporting_document_changed",
+            )
+            return {**result, "removed_storage_uris": [row["storage_uri"] for row in removed]}
         return run_in_transaction(self._connection, write)
-
-    def find_active_by_content(
-        self,
-        *,
-        oa_row_id: str,
-        expense_item_id: str,
-        content_sha256: str,
-    ) -> dict[str, Any] | None:
-        row = self._connection.fetch_one(
-            """
-            select document.id::text as id, document.relation_case_id, document.oa_row_id,
-                   document.expense_item_id, document.file_object_id::text as file_object_id,
-                   document.original_filename, document.content_type,
-                   document.content_sha256, document.size_bytes, document.status,
-                   document.created_by, document.created_at::text, file.storage_uri
-            from app.workbench_oa_supporting_documents document
-            join app.file_objects file on file.id = document.file_object_id
-            where document.oa_row_id = %s
-              and document.expense_item_id = %s
-              and document.content_sha256 = %s
-              and document.status = 'active'
-              and file.tombstoned_at is null
-            limit 1
-            """,
-            (oa_row_id, expense_item_id, content_sha256),
-        )
-        return dict(row) if row else None
 
     def list_active(self, *, oa_row_id: str, expense_item_id: str) -> list[dict[str, Any]]:
         return [dict(row) for row in self._connection.fetch_all(
@@ -181,22 +245,3 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
             (document_id,),
         )
         return dict(row) if row else None
-
-    def soft_delete(self, document_id: str, *, deleted_by: str) -> dict[str, Any] | None:
-        def write(connection: Any) -> dict[str, Any] | None:
-            row = connection.fetch_one(
-                """
-                update app.workbench_oa_supporting_documents
-                   set status = 'deleted', deleted_by = %s, deleted_at = now()
-                 where id = %s::uuid and status = 'active'
-                returning id::text as id, file_object_id::text as file_object_id, oa_row_id
-                """,
-                (deleted_by, document_id),
-            )
-            if row:
-                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_matching_dirty(
-                    case_ids=[], oa_row_ids=[row["oa_row_id"]], reason="oa_supporting_document_changed",
-                )
-            return dict(row) if row else None
-
-        return run_in_transaction(self._connection, write)
