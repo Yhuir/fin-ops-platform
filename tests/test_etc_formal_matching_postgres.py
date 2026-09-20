@@ -70,7 +70,7 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
     def run_match(self, request_id='test-etc'):
         return self.orchestrator.run(changed_scope_months=['2026-09'], reason='test', request_id=request_id)
 
-    def test_attachment_source_creates_case_then_bank_extends_same_case_and_get_is_paired(self):
+    def test_attachment_source_and_late_bank_keep_same_case_unpaired_until_oa_completes(self):
         candidates = self.facts.load_etc_batch_link_candidates(['2026-09'])
         self.assertEqual(len(candidates), 1)
         result = self.run_match()
@@ -84,10 +84,13 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
         self.assertEqual(initial['case_id'], current['case_id'])
         self.assertEqual(set(current['row_ids']), {'oa-etc-source','txn-etc-source','etc-summary-etc-source'})
         page = PostgresWorkbenchPageQueryRepository(self.connection, tenant_id='default').get_workbench_initial_page(scope_key='2026-09')
-        self.assertEqual(page['paired']['total'], 1)
-        self.assertEqual(page['unpaired']['total'], 0)
-        group = page['paired']['groups'][0]
+        self.assertEqual(page['paired']['total'], 0)
+        self.assertEqual(page['unpaired']['total'], 1)
+        group = page['unpaired']['groups'][0]
         self.assertEqual(group['oa_rows'][0]['workflow_status'], 'in_progress')
+        self.assertEqual(group['completion']['blocking_reasons'], ['oa_in_progress'])
+        self.assertEqual(len(group['bank_rows']), 1)
+        self.assertEqual(len(group['invoice_rows']), 1)
         batch = self.connection.fetch_one("select raw_payload from app.etc_business_batches where business_batch_id='batch-source'")
         self.assertEqual(batch['raw_payload']['normalized_payload']['oa_row_id'], 'oa-etc-source')
         replay = self.run_match('replay')
@@ -96,6 +99,20 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
         unchanged = self.connection.fetch_one("select version from app.workbench_pair_relations where status='active'")
         self.assertEqual(unchanged['version'], current['version'])
         self.assertEqual(self.connection.fetch_one('select count(*) n from app.invoices')['n'], 0)
+
+        self.connection.execute("""insert into app.oa_applications
+            (oa_source_id, form_id, form_type, row_id, status, workflow_status, applicant,
+             application_date, scope_month, amount, normalized_payload, raw_payload)
+            select oa_id, 'payment_request', '付款申请', oa_id, 'active', 'completed', applicant,
+                   '2026-09-15'::date, '2026-09-01'::date, amount,
+                   source_payload || '{"workflow_status":"completed"}'::jsonb, '{}'
+            from app.oa_pending_payment_admissions where oa_id='oa-etc-source'""")
+        self.connection.execute("update app.oa_pending_payment_admissions set workflow_status='completed' where oa_id='oa-etc-source'")
+        completed = PostgresWorkbenchPageQueryRepository(self.connection, tenant_id='default').get_workbench_initial_page(scope_key='2026-09')
+        self.assertEqual(completed['paired']['total'], 1)
+        self.assertEqual(completed['unpaired']['total'], 0)
+        self.assertEqual(completed['paired']['groups'][0]['case_id'], initial['case_id'])
+        self.assertEqual(self.connection.fetch_one("select case_id,row_ids,row_types,version from app.workbench_pair_relations where status='active'"), current)
 
     def test_pending_oa_main_and_historical_reads_have_identical_fact_contract(self):
         self.connection.execute("""update app.oa_pending_payment_admissions

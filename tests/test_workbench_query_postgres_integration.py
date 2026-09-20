@@ -236,19 +236,64 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(replay['extended_relation_count'], 0)
         self.assertEqual(self.raw_connection.fetch_one("select workflow_status from app.oa_pending_payment_admissions where oa_id='installment-final'")['workflow_status'], 'in_progress')
         for detail_level in ('full', 'summary'):
-            page = self.repository.get_workbench_groups_page(scope_key='all', zone='paired', page_size=100, detail_level=detail_level)
+            page = self.repository.get_workbench_groups_page(scope_key='all', zone='unpaired', page_size=100, detail_level=detail_level)
             matched = next(g for g in page['groups'] if g['case_id'] == 'CASE-INSTALLMENT')
             self.assertEqual({tuple(s['oa_row_ids']): s['bank_row_ids'] for s in matched['display_subgroups']}, {
                 ('installment-pre',): ['installment-bank-pre'], ('installment-final',): ['installment-bank-final']})
             self.assertEqual(len(matched['invoice_rows']), 1)
             self.assertTrue(all(s['resolved'] for s in matched['display_subgroups']))
+            self.assertEqual(matched['completion']['blocking_reasons'], ['oa_in_progress'])
+            paired = self.repository.get_workbench_groups_page(scope_key='all', zone='paired', search=payee, detail_level=detail_level)
+            self.assertEqual(paired['total'], 0)
+
+        # The initial page, search, detail and facet queries must agree before pagination.
+        initial = self.repository.get_workbench_initial_page(scope_key='all', unpaired_query={'search': payee}, paired_query={'search': payee})
+        self.assertEqual(initial['unpaired']['total'], 1)
+        self.assertEqual(initial['paired']['total'], 0)
+        detail = self.repository.get_workbench_group_detail(scope_key='all', zone='unpaired', group_id='case:CASE-INSTALLMENT', detail_key='CASE-INSTALLMENT')['group']
+        self.assertEqual(detail['completion']['blocking_reasons'], ['oa_in_progress'])
+        self.assertEqual(len(detail['oa_rows']), 2)
+        self.assertEqual(len(detail['bank_rows']), 2)
+        for zone in ('paired', 'unpaired'):
+            options = self.repository.get_workbench_filter_options(scope_key='all', zone=zone, pane='oa', facet='column', column='applicant', search=payee)
+            values = {option['value'] for option in options['options']}
+            # Workflow choices are fixed; data-derived applicants follow the zone.
+            self.assertIn('workflow:in_progress', values)
+            self.assertEqual('applicant:测试申请人' in values, zone == 'unpaired')
+            filtered = self.repository.get_workbench_groups_page(
+                scope_key='all', zone=zone, search=payee,
+                column_filters={'oa': {'applicant': ['workflow:in_progress']}},
+            )
+            self.assertEqual(filtered['total'], 1 if zone == 'unpaired' else 0)
+
         self.raw_connection.execute("""update app.bank_transactions
             set raw_payload='{"counterparty_account_no":"4444"}'::jsonb
             where legacy_mongo_id='installment-bank-final'""")
         for detail_level in ('full', 'summary'):
-            page = self.repository.get_workbench_groups_page(scope_key='all', zone='paired', page_size=100, detail_level=detail_level)
+            page = self.repository.get_workbench_groups_page(scope_key='all', zone='unpaired', page_size=100, detail_level=detail_level)
             matched = next(g for g in page['groups'] if g['case_id'] == 'CASE-INSTALLMENT')
             self.assertFalse(any(s['resolved'] and 'installment-bank-final' in s['bank_row_ids'] for s in matched['display_subgroups']))
+
+        # OA owner transition changes the zone on canonical reads, without a matcher run or relation rewrite.
+        self.raw_connection.execute("""update app.bank_transactions
+            set raw_payload='{"counterparty_account_no":"3333"}'::jsonb
+            where legacy_mongo_id='installment-bank-final'""")
+        self.raw_connection.execute("""insert into app.oa_applications
+            (oa_source_id, form_id, form_type, row_id, status, workflow_status, applicant,
+             application_date, scope_month, amount, normalized_payload, raw_payload)
+            values ('installment-final', 'payment_request', '付款申请', 'installment-final', 'active',
+                    'completed', '测试申请人', '2026-08-24', '2026-08-01', 8000, %s::jsonb, '{}'::jsonb)""",
+            (json.dumps({**pending, 'workflow_status': 'completed'}),))
+        self.raw_connection.execute("update app.oa_pending_payment_admissions set workflow_status='completed' where oa_id='installment-final'")
+        for detail_level in ('full', 'summary'):
+            completed = self.repository.get_workbench_groups_page(scope_key='all', zone='paired', search=payee, detail_level=detail_level)
+            self.assertEqual(completed['total'], 1)
+            self.assertEqual(completed['groups'][0]['case_id'], 'CASE-INSTALLMENT')
+            self.assertTrue(completed['groups'][0]['completion']['is_complete'])
+            self.assertEqual({tuple(s['oa_row_ids']): s['bank_row_ids'] for s in completed['groups'][0]['display_subgroups']}, {
+                ('installment-pre',): ['installment-bank-pre'], ('installment-final',): ['installment-bank-final']})
+        self.assertEqual(self.repository.get_workbench_groups_page(scope_key='all', zone='unpaired', search=payee)['total'], 0)
+        self.assertEqual(after, self.raw_connection.fetch_one("select version, row_ids from app.workbench_pair_relations where case_id='CASE-INSTALLMENT'"))
 
     def test_late_invoice_auto_assignment_is_atomic_cross_month_and_idempotent(self):
         from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (

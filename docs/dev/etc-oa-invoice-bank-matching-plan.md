@@ -8,7 +8,7 @@
 
 1. ETC 批次已提交且对应 OA 身份已经确认时，持久化 OA＋ETC 汇总发票的正式关系，关联台同组展示；无需等待流水或 OA 审批完成。
 2. 对应流水在提交前已经存在，或提交后才导入，均进入同一自动匹配链，补入原关系；不得生成重复关系或丢失批次成员。
-3. OA 进行中不阻止三项配对，不单独成为未配对原因。关系成员和其他既有完成条件满足时进入已配对区域，OA 标签继续显示进行中。
+3. OA 进行中不阻止三项建立正式关联，但整组必须留在未配对；全部 OA 完成且其他既有完成条件满足后才进入已配对区域。
 4. 审批、支付、关联分别表达。配对不得修改 OA 审批状态，也不得让进行中 OA 提前取得成本确认资格。
 5. 来源身份能够证明的 OA＋ETC 关联不以金额相等为前提。OA 应付额、ETC 发票合计、补充凭证金额分别保留；银行自动核对以 OA 应付额为目标，发票差额按原有异常规则显示。
 6. 金额相同不是业务身份。自动加入银行必须有有效收款证据、正确方向/币种、适用日期和唯一归属。明确的部分付款可保留关系，自动推断仅处理唯一可证明的候选，不按任意子集凑数。
@@ -33,7 +33,7 @@
 | ETC 只能补入已有 case，没有 case 就跳过 | `workbench_matching_orchestrator.py::_resolve_etc_batch_links` | 明确来源关系可直接生成初始 OA＋ETC 正式计划 |
 | ETC summary 没有完整进入 matcher facts | 同上 repository 的 `load_batch` | 初始匹配与关系扩展都得到完整 typed summary facts |
 | 支付申请的三字个人收款方没有有效共同证据 | repository 的 `_oa_fact` / `_evidence_keys` | 定义支付申请收款人的明确证据，不改成通用短名称碰撞 |
-| 进行中 OA 强制未配对 | `workbench_relation_requirements.py`、`postgres_repositories/workbench_page_query.py` | Python 完成判断与 SQL 分区同步去除该限制 |
+| 进行中 OA 完成分区 | `workbench_relation_requirements.py`、`postgres_repositories/workbench_page_query.py` | 保留 Python 完成判断与 SQL 分区中的审批限制，允许独立建立正式关联 |
 
 已核实：OA 表单编辑器提交时仅保存已注册字段，正式单据不存在 `etcBatchId/businessBatchId`。正式 `field101` 保存全部上传附件路径；新批次记录相同路径作为准确来源身份，OA sync 只提取路径、不执行支付申请 OCR。历史样本本地没有保留路径，使用用户确认的精确 OA owner 经已有 manual-status command 补齐，禁止假设草稿 ID 等于正式 ID。
 
@@ -109,7 +109,7 @@
 
 ### E. 修复分区并保护其他页面
 
-1. 同时修改 `evaluate_bank_relation_completion` 与 direct page SQL 的 in-progress 阻断；保留未知/无效 OA 身份检查、材料要求、金额异常及既有人工审阅语义。
+1. `evaluate_bank_relation_completion` 与 direct page SQL 必须同时保留 in-progress 阻断；正式关系建立不受此分区规则阻止。未知/无效 OA 身份检查、材料要求、金额异常及既有人工审阅语义继续生效。
 2. 删除只用于强制未配对的 SQL CTE/join 和前端分支；保留所有真实流程状态字段、标签和筛选。列表、分页计数、搜索、详情、异常入口必须同口径。
 3. 本次审批与配对分离适用于普通及 ETC 合法 OA 关系，不做 ETC 专属“假 completed”例外。无银行的 OA＋发票继续同组待补全。
 4. 不改成本审批准入：进行中 OA 仍不能提前确认为成本；已完成兄弟单元仍可独立处理。
@@ -117,7 +117,7 @@
 6. 银行明细、待找发票、进项使用、税金、导入、批量账务继续由各自 query owner 解释关系。ETC 内部 47 张成员与统一发票池 canonical 数量是不同统计口径，不为了配对补造缺少的 canonical 发票。
 7. 自动配对由 worker 完成，不以用户打开页面为条件；关联台下一次普通 GET 直接读取结果。已提交而匹配尚未落库时不能把提交成功显示为配对成功。保留当前页正常进入/重进/刷新机制，不新增隐藏页面全量刷新或持续轮询；端到端测试分别验证后台已经收敛和页面读取结果。
 
-交付：样本三项同组且在已配对区域，OA 仍标记进行中；其他页面的业务资格与金额不被 paired 标签污染。
+交付：样本三项同组且在未配对区域，OA 仍标记进行中；全部 OA 完成后原 case 才可进入已配对。其他页面的业务资格与金额不被 paired 标签污染。
 
 ### F. 历史数据收敛、文档及发布验证
 
@@ -138,7 +138,7 @@
 | 无已有 case 就丢弃 ETC 来源候选 | 由明确来源初始计划替换，不保留旧无 owner 分支作为第二路径 |
 | 普通匹配完再单独补 ETC 成员的时序依赖 | 完整成员进入单轮正式计划；复用仍必要的校验/metadata helper |
 | 已有关系 loader 缺 summary / 跨月成员的盲区 | 同一事实读取入口补齐，不用扩展失败后全库重试兜底 |
-| Workbench `oa_in_progress` 强制未配对分支及专用 SQL join | 同时替换领域规则、查询和旧测试预期；成本模块同名审批规则不删 |
+| Workbench `oa_in_progress` 分支及集合 SQL join | 保留并测试审批完成条件；不得因为新增自动关联而删除；成本模块同名审批规则不变 |
 | ETC 提交后回调作为唯一匹配触发 | 以同事务 durable 标记替换，去掉重复 enqueue/多路 writer |
 | 依赖“oaRowId 空即安全”的错误删除判定 | 使用同一已验证 identity/active binding 合同，防止新旧删除语义不一致 |
 
@@ -172,7 +172,7 @@
 必要场景：
 
 - OA、批次、银行的不同到达顺序，均收敛到唯一关系。
-- 进行中→完成保持 case；进行中和已完成 OA 混合组按相同配对规则处理。
+- 进行中→完成保持 case；混合组任一 OA 进行中即整组未配对；全部完成后按其余条件进入已配对。
 - 身份缺失明确可解释；两个 OA 指向同批次、同额同名两个流水不被任意抢配。
 - 银行姓名与 OA 申请人不同但与收款人一致；账号明确不一致时不自动加入。
 - 跨7/8/9月、重复同步、重复提交、并发两个 worker、事务中途失败。
@@ -215,7 +215,7 @@ bash scripts/verify.sh docs
 
 ## 9. 实施与验证记录
 
-已落地：正式 `field101` 附件路径往返、来源先建组、后到银行扩展、进行中配对分区、来源撤回保护、多批次 metadata/列表/详情、提交事实与 matching dirty 同事务、事实版本与批次快照并发校验。删除未注册 OA 表单扩展字段、completed-only ETC 候选、事后追加 summary、submitted 后重复回调，以及把主批次身份套到全部 summary 的读取逻辑。没有新增依赖、表、worker、read model、页面轮询或兜底。
+已落地：正式 `field101` 附件路径往返、来源先建组、后到银行扩展、进行中正式关联、来源撤回保护、多批次 metadata/列表/详情、提交事实与 matching dirty 同事务、事实版本与批次快照并发校验。删除未注册 OA 表单扩展字段、completed-only ETC 候选、事后追加 summary、submitted 后重复回调，以及把主批次身份套到全部 summary 的读取逻辑。没有新增依赖、表、worker、read model、页面轮询或兜底。
 
 生产只读核对：批次 `etc_business_batch_241146` 的 47 个正式发票号与 OA 文档 `6aa8ff4969252c470e7d59d5` 的全部附件名完全一致，正式 `processId` 对应计划中的 OA。历史补齐使用已有 `manual-oa-status` command，记录此核对依据，不向外部 OA 写假字段。
 
@@ -225,7 +225,7 @@ bash scripts/verify.sh docs
 
 生产发布前串行各 100 次 GET 基线：关联台 p50/p95/p99=704.522/865.567/959.080ms；批次详情=139.239/215.325/292.872ms；两者零错误。发布后使用相同探针复测，最终 release、业务同组与测量结果由本任务生产验证报告记录。
 
-最终自审：模块边界保持，全部新关系通过同一正式 UoW，来源数据留在各 owner；有歧义不按金额抢配；进行中配对不改审批/成本资格；新旧链路不并行；GET 不写任务。无数据库备份需求，结束时仅删除本次自建隔离测试数据库与临时测试文件，不操作主数据库。
+最终自审：模块边界保持，全部新关系通过同一正式 UoW，来源数据留在各 owner；有歧义不按金额抢配；进行中正式关联不改变未配对分区、审批或成本资格；新旧链路不并行；GET 不写任务。无数据库备份需求，结束时仅删除本次自建隔离测试数据库与临时测试文件，不操作主数据库。
 
 全量后端入口 `FIN_OPS_TEST_DATABASE_URL=<本次隔离库> bash scripts/verify.sh backend`：4302 项、0 失败，52 项因现金模块专用测试 DSN 未设置而跳过；随后把 `FIN_OPS_CASH_TEST_DATABASE_URL` 指向本次隔离库，现金核心、运行时及 HTTP 集成 59 项全部通过。新增匹配 PostgreSQL 测试单独真实执行。补充 canonical 银行账户 envelope 回归，防止公共解析函数展开后再次展开而丢失账户冲突证据。`verify.sh lint/docs` 与 `git diff --check` 通过。
 

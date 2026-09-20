@@ -144,7 +144,7 @@ cd web && npm test -- --run \
 
 - `tests/test_etc_formal_matching.py`：来源先建组、流水顺序/歧义/差额/账户/日期、撤回保护、正式上传字段。
 - `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
-- 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
+- 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖未配对区真实进行中标签；进行中正式关系不能进入已配对。
 - 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。
 
 - 进行中 OA 的常规窗口读取与跨月来源补查必须生成完全相同的事实。真实 PostgreSQL 用例同时携带 `workflow_no`、`project_id` 和空币种，验证两个入口共享字段投影，防止同一 OA 被误判为冲突并回滚整个月份。
@@ -152,3 +152,11 @@ cd web && npm test -- --run \
 ## 2026-09-20 逐笔付款回归
 
 `test_workbench_free_matching_engine.py` 覆盖两笔等额分期的自由匹配、后到 OA/银行扩展、输入置换、重放、撤回、歧义、账号冲突与特殊关系隔离；`test_workbench_formal_relation_repository.py` 覆盖原始账号/阶段映射。`test_workbench_query_postgres_integration.py` 用一次性 PostgreSQL 验证进行中 OA 补入原 case、失败回滚、并发仅一次版本/历史写、full/summary 同行与跨月 dirty scope。
+
+
+## 2026-09-20 进行中 OA 完成分区恢复
+
+- 业务：`test_workbench_relation_grouping.py` 保护单 OA、多 OA、审批完成/退回、材料豁免和异常接受均不绕过审批。
+- 查询/服务/集成：`test_workbench_query_postgres_integration.py` 验证 2 OA + 2 银行 + 1 共享发票在未配对保持逐笔展示，initial/full/summary/detail、搜索、筛选一致，OA 完成后原 case 换区且关系成员/version 不改写。
+- ETC：`test_etc_formal_matching_postgres.py` 验证先建来源关联、后到流水扩展、进行中保持未配对、审批完成后原 case 进入已配对。
+- API shape/权限、成本准入、银行与发票 ownership 不变，复跑现有 API、组件和跨页回归。无新 read model/cache/job；SQL 查询预算由既有回归保护。

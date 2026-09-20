@@ -7,7 +7,7 @@
 关联台只存在两种关系状态：
 
 1. `paired`：对象属于一条 `app.workbench_pair_relations.status='active'` 的正式关系，该关系当前持久化的 OA/发票要求已经满足，且关系内全部 OA 的流程状态均为 `completed`；同一关系的全部成员显示在同一组。
-2. `unpaired`：不属于 active relation 的 canonical fact 独立显示；尚未满足材料完整性要求的 active relation 保持同一 case 分组。材料缺失明确显示缺少的 OA、银行流水或发票。OA `in_progress` 不阻止配对，页面继续显示实际审批状态；配对不授予成本审批资格。
+2. `unpaired`：不属于 active relation 的 canonical fact 独立显示；尚未满足材料完整性要求的 active relation 保持同一 case 分组。材料缺失明确显示缺少的 OA、银行流水或发票。OA `in_progress` 允许建立正式关联，但阻止整组进入 `paired`；页面继续显示实际审批状态，关联不授予成本审批资格。
 
 不存在第三种“自动候选”“待确认配对”“假配对”或“隐藏但仍存在”的用户关系状态。系统未能安全正式化的计算结果不持久化、不合并行、不隐藏事实，也不进入下游已关联口径。
 
@@ -17,7 +17,7 @@
 - `paired` 与 `unpaired` 不相交，二者并集必须精确等于 `C`；任何事实不得遗漏、重复显示或同时属于两个 active case。
 - 发票数量以统一发票池 canonical row ID 为唯一统计身份。ETC 批次即使折叠为一个 summary 展示对象，也必须按明确 canonical row id / `etc_invoice_id` 展开到批次内每张 canonical 发票后再计数；不得把 summary 当成一张发票，也不得按金额、名称或顺序推断成员。同一 canonical 发票若存在 paired owner 只计入 paired，否则只计入 unpaired，因此 `已配对 canonical 发票数 + 未配对 canonical 发票数 = 当前 scope 统一发票池 canonical 发票总数`。
 - 历史 `case_id`、row 上残留的 `case_id`、来源标签和旧 case 前缀都不能决定分组。含银行流水的普通关系只读取 canonical relation 当前持久化的 `requires_oa` / `requires_invoice`；缺失证明 fail closed，不得在读路径临时回查当前规则或按旧 case 前缀放行。规则保存后的增量任务必须先通过正式 relation command 更新 metadata/history，再刷新精确 Workbench 月份。
-- 普通 OA 付款关系必须包含银行流水才算完整；OA 与附件发票的 immutable binding 只表达不可拆分 ownership，缺银行时整组保留 active case 但位于 `unpaired`。显式 batch-accounting 与 ETC batch relation 继续按登记豁免处理。
+- 普通 OA 付款关系必须包含银行流水才算完整；OA 与附件发票的 immutable binding 只表达不可拆分 ownership，缺银行时整组保留 active case 但位于 `unpaired`。显式 batch-accounting 与 ETC batch relation 继续按登记的材料豁免处理；材料豁免不能覆盖 OA 进行中阻断。
 - 进行中 OA 可以与银行流水和发票写入同一正式关系，也可以扩展唯一已存在的银行-发票 active case；不得为进行中 OA 建立第二套 pending relation 或隐藏银行流水。关系满足全部材料要求后仍停留在 `unpaired`，直到所有 OA 完成；OA sync 将同一 OA 迁入 completed canonical projection 后，原 case 不变并在下一次 Workbench normal GET 进入 `paired`。多 OA 关系中任一 OA 进行中即阻断整组。
 - `app.oa_pending_payment_admissions` 是进行中 OA 的唯一 canonical 读取源；`app.workbench_pair_relations` 是 completed/in-progress 共用的唯一 active relation owner。历史 `app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件只读审计，不参与运行时分组、占用、source proof 或 promotion。
 - 一条 active relation 可以是任意非空的 OA/银行流水/发票成员组合，包括一对一、一对多、多对一以及 `N:M:K`。关系来源不形成用户可见的业务状态区分。

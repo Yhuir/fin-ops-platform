@@ -916,7 +916,8 @@ def test_canonical_spine_rolls_relation_members_once_for_zone_evaluation() -> No
 
     assert "all_active_relation_member_rollups as materialized" in sql
     assert "array_agg(member.row_type order by member.ordinality)" in sql
-    assert "in_progress_oa_relation_ids" not in sql
+    assert "in_progress_oa_relation_ids as materialized" in sql
+    assert "when in_progress_oa.relation_id is not null then 'unpaired'" in sql
 
 
 def test_canonical_spine_rolls_source_owned_relation_placements_once() -> None:
@@ -1707,7 +1708,9 @@ def test_page_grouping_preserves_cross_pane_same_textual_id() -> None:
         (["invoice"], [], {}, "paired", []),
         (["bank"], [], {"requires_oa": False, "requires_invoice": False}, "paired", []),
         (["bank"], [], {}, "unpaired", ["oa", "invoice"]),
-        (["oa", "bank", "invoice"], ["in_progress"], {}, "paired", []),
+        (["oa", "bank", "invoice"], ["in_progress"], {}, "unpaired", []),
+        (["oa", "oa", "bank", "invoice"], ["completed", "in_progress"], {}, "unpaired", []),
+        (["oa"], ["in_progress"], {"source": "batch_accounting"}, "unpaired", []),
         (["oa"], ["completed"], {"source": "batch_accounting"}, "paired", []),
     ],
 )

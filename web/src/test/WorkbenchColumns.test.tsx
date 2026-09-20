@@ -150,7 +150,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(oaRow as HTMLElement).getByText("11:05")).toBeInTheDocument();
   });
 
-  test.each(["paired", "unpaired"] as const)("keeps the real in-progress OA status in the %s zone", (zoneId) => {
+  test("keeps the real in-progress OA status in the unpaired zone", () => {
     render(
       <WorkbenchRecordCard
         canOperateData
@@ -180,7 +180,7 @@ describe("Workbench columns and inline actions", () => {
         }}
         rowState="idle"
         showWorkflowActions
-        zoneId={zoneId}
+        zoneId="unpaired"
       />,
     );
 

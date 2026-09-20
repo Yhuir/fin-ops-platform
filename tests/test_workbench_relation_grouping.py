@@ -837,7 +837,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(group["amount_check"]["bank_total"], "240000.00")
         self.assertEqual(group["amount_check"]["bank_net_total"], "0.00")
 
-    def test_in_progress_oa_pairs_without_changing_approval_or_case_identity(self) -> None:
+    def test_in_progress_oa_stays_unpaired_until_completed_with_same_case(self) -> None:
         rows = {
             "oa-progress": {
                 "id": "oa-progress",
@@ -859,11 +859,11 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
 
         in_progress = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
 
-        self.assertEqual(in_progress["summary"]["paired_count"], 1)
-        group = in_progress["paired"]["groups"][0]
+        self.assertEqual(in_progress["summary"]["paired_count"], 0)
+        group = in_progress["unpaired"]["groups"][0]
         self.assertEqual(group["case_id"], "case:stable")
         self.assertEqual(group["completion"]["missing_row_types"], [])
-        self.assertNotIn("blocking_reasons", group["completion"])
+        self.assertEqual(group["completion"]["blocking_reasons"], ["oa_in_progress"])
         self.assertEqual(rows["oa-progress"]["workflow_status"], "in_progress")
 
         rows["oa-progress"]["workflow_status"] = "completed"
@@ -872,7 +872,12 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(completed["summary"]["paired_count"], 1)
         self.assertEqual(completed["paired"]["groups"][0]["case_id"], "case:stable")
 
-    def test_in_progress_oa_does_not_block_multi_oa_case(self) -> None:
+        rows["oa-progress"]["workflow_status"] = "in_progress"
+        reopened = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+        self.assertEqual(reopened["summary"]["paired_count"], 0)
+        self.assertEqual(reopened["unpaired"]["groups"][0]["case_id"], "case:stable")
+
+    def test_any_in_progress_oa_blocks_completion_of_multi_oa_case(self) -> None:
         completion = evaluate_bank_relation_completion(
             row_types=["oa", "oa", "bank"],
             oa_workflow_statuses=["completed", "in_progress"],
@@ -880,8 +885,24 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(completion["missing_row_types"], [])
-        self.assertNotIn("blocking_reasons", completion)
-        self.assertTrue(completion["is_complete"])
+        self.assertEqual(completion["blocking_reasons"], ["oa_in_progress"])
+        self.assertFalse(completion["is_complete"])
+
+    def test_material_exemptions_never_override_in_progress_oa(self) -> None:
+        for metadata in (
+            {"source": "batch_accounting"},
+            {"requires_oa": False, "requires_invoice": False},
+        ):
+            with self.subTest(metadata=metadata):
+                completion = evaluate_bank_relation_completion(
+                    row_types=["oa", "bank"],
+                    oa_workflow_statuses=["in_progress"],
+                    special_metadata=metadata,
+                    supporting_documents_complete=True,
+                )
+                self.assertFalse(completion["is_complete"])
+                self.assertEqual(completion["missing_row_types"], [])
+                self.assertEqual(completion["blocking_reasons"], ["oa_in_progress"])
 
     def test_bank_policy_requirement_matrix_and_required_type_completion(self) -> None:
         cases = [
@@ -1353,6 +1374,18 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             accepted_group["workbench_anomaly"]["confirmation"],
             {"note": "票面金额少 0.01 元，经确认保留关联"},
         )
+
+        rows["oa-1"]["workflow_status"] = "in_progress"
+        pending = self.service.group_payload("2026-05", rows_by_id=rows, active_relations=[relation])
+        pending_fingerprint = pending["unpaired"]["groups"][0]["workbench_anomaly"]["fingerprint"]
+        pending_accepted = self.service.group_payload(
+            "2026-05", rows_by_id=rows, active_relations=[relation],
+            anomaly_review_decisions={pending_fingerprint: {"decision": "accept_paired"}},
+        )
+        self.assertEqual(pending_accepted["summary"]["paired_count"], 0)
+        pending_group = pending_accepted["unpaired"]["groups"][0]
+        self.assertEqual(pending_group["case_id"], relation["case_id"])
+        self.assertEqual(pending_group["completion"]["blocking_reasons"], ["oa_in_progress"])
 
     def test_uploaded_expense_item_without_parsed_invoice_is_an_active_group_exception(self) -> None:
         rows = {

@@ -76,6 +76,8 @@ def evaluate_bank_relation_completion(
             if oa_workflow_statuses is None
             else [str(value or "").strip().lower() for value in oa_workflow_statuses]
         )
+        if "in_progress" in statuses:
+            blocking_reasons.append("oa_in_progress")
         if len(statuses) != normalized_types.count("oa") or any(
             status not in {"completed", "in_progress"} for status in statuses
         ):
