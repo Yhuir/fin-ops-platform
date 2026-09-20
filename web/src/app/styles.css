@@ -14904,10 +14904,31 @@ body.column-layout-dragging {
   flex-wrap: nowrap;
 }
 
+/* OA metadata and actions use separate rows: icons cannot shrink the text stack. */
+.record-card-oa .workbench-oa-applicant-content {
+  flex-direction: column;
+  gap: 6px;
+}
+
 .workbench-oa-applicant-line {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.workbench-oa-applicant-content .compound-cell-secondary {
+  width: 100%;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workbench-oa-applicant-content .inline-meta-tag {
+  white-space: nowrap;
+}
+
+.workbench-oa-applicant-actions {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 4px;
 }
@@ -16068,7 +16089,7 @@ body.column-layout-dragging {
   overflow-x: hidden;
 }
 
-.candidate-pane-footer-scroll {
+.candidate-pane-footer-scroll:not([data-scroll-pane="oa"]) {
   overflow-x: hidden;
 }
 

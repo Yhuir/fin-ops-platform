@@ -804,7 +804,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(detailSignal?.aborted).toBe(true);
   });
 
-  test("OA applicant column keeps the detail icon on the first line and time chip on the second line", async () => {
+  test("OA applicant column separates detail actions from applicant metadata", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -816,6 +816,7 @@ describe("Workbench row selection and detail drawer", () => {
     const applicantCell = detailButton.closest("[role='cell']") as HTMLElement;
 
     expect(detailButton).toHaveClass("workbench-detail-trigger");
+    expect(detailButton.closest(".workbench-oa-applicant-actions")).not.toBeNull();
     expect(detailButton).not.toHaveClass("row-action-btn");
     expect(detailButton).not.toHaveAttribute("title");
     expect(within(oaRow).queryByRole("button", { name: "详情" })).not.toBeInTheDocument();

@@ -2413,6 +2413,24 @@ describe("Workbench candidate grouping layout", () => {
     expect(groupScroll.scrollLeft).toBe(80);
   });
 
+  test("keeps OA column offsets equal despite container border width differences", async () => {
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const header = await screen.findByTestId("pane-scroll-head-unpaired-oa");
+    const footer = await screen.findByTestId("pane-scrollbar-unpaired-oa");
+    const row = await screen.findByTestId("candidate-scroll-unpaired-row:oa-o-202603-002-oa");
+    for (const [element, width] of [[footer, 300], [header, 298], [row, 296]] as const) {
+      Object.defineProperties(element, {
+        clientWidth: { configurable: true, value: 100 },
+        scrollWidth: { configurable: true, value: width },
+      });
+    }
+    fireEvent.scroll(footer, { target: { scrollLeft: 100 } });
+    expect(header.scrollLeft).toBe(100);
+    expect(row.scrollLeft).toBe(100);
+  });
+
   test("keeps the synchronized bottom scrollbar thin instead of rendering a large visual band", () => {
     const footerRule = appStyles.match(/\.candidate-grid-footer\s*\{[^}]*\}/s)?.[0] ?? "";
     const footerScrollRule = appStyles.match(/\.candidate-pane-footer-scroll\s*\{[^}]*\}/s)?.[0] ?? "";

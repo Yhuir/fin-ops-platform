@@ -282,7 +282,8 @@ function RelationGroupGrid({
 
   const handleSyncScroll = (paneId: WorkbenchRecordType, element: HTMLDivElement) => {
     const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
-    const ratio = maxScrollLeft > 0 ? element.scrollLeft / maxScrollLeft : null;
+    // OA uses shared fixed minimum tracks; equal pixel offsets keep its column lines aligned.
+    const ratio = paneId !== "oa" && maxScrollLeft > 0 ? element.scrollLeft / maxScrollLeft : null;
     scrollPositionsRef.current[paneId] = { left: element.scrollLeft, ratio };
     if (syncInFlightRef.current[paneId]) {
       return;

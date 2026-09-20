@@ -7,6 +7,12 @@ import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
 
 describe("Workbench column layout", () => {
+  test("preserves readable OA minimum widths after reordering", () => {
+    const style = getWorkbenchPaneGridStyle("oa", { oa: ["reason", "applicant", "projectName", "amount", "counterparty"] });
+    expect(style.minWidth).toBe("560px");
+    expect(style.gridTemplateColumns).toBe("minmax(128px, 1.1fr) minmax(112px, 0.8fr) minmax(128px, 1.25fr) minmax(80px, 0.72fr) minmax(112px, 1fr)");
+  });
+
   test("reorders a pane layout before the target column", () => {
     const nextLayouts = reorderWorkbenchColumnLayout(
       {

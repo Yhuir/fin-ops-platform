@@ -291,3 +291,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+## 2026-09-20 OA 申请人可读布局
+
+- OA 申请人列由姓名、类型/状态、日期和独立操作行组成；详情、异常按钮不再占用文字块右侧空间。异常入口按 applicant 字段定位，列重排不改变归属；只读和报销子项继续沿用原显隐规则。
+- `tableConfig` 的 track/minWidth 是实际布局唯一来源，移除 compactTracks 的零下限覆盖。OA 最小列宽合计 560px，表头、正文和底部滚动条共用配置；宽度不足时复用既有 OA 横向滚动同步，按相同像素偏移同步列线而非按不同容器的滚动比例。银行、发票的实际轨道比例和滚动行为不变。
+- 修改仅涉及前端展示和回归测试；canonical OA、费用子项、关系、金额、API、权限、持久化和跨页面查询 I/O 不变。无新增依赖、运行时测宽、轮询或备份。
+- 验证入口：`WorkbenchApplicantLayout.test.tsx`、`WorkbenchColumnLayout.test.tsx`、`workbench-applicant-layout.spec.ts`。覆盖异常/详情操作不误选、列重排、只读/子项以及窄窗几何边界、表头同步。

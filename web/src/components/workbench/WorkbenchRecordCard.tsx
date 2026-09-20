@@ -125,31 +125,47 @@ function WorkbenchRecordCard({
         </div>
       ) : columns.map((column, columnIndex) => {
         const value = row.tableValues[column.key] ?? "--";
+        const isApplicant = paneId === "oa" && column.key === "applicant";
         const showLeadingControl = columnIndex === 0 && leadingControl;
+        const showApplicantDetail = isApplicant && showInlineDetail && row.displayRole !== "expense-claim-item";
+        const anomalyIndicator = (paneId === "oa" ? isApplicant : columnIndex === 0) && row.workbenchAnomalies?.length ? (
+          <WorkbenchAnomalyIndicator
+            anomalies={row.workbenchAnomalies}
+            action={unassignedInvoiceAnomaly ? {
+              label: "选择 OA 明细",
+              disabled: invoiceResolutionDisabled,
+              disabledReason: "当前账号无归属权限",
+              onPress: () => onRowAction(row, "assign-invoice-expense-items"),
+            } : undefined}
+            externalUrl={row.workbenchAnomalies.some((anomaly) => isOaAttachmentStatus(anomaly.code))
+              ? row.externalUrl
+              : undefined}
+            levelLabel={`该${paneId === "oa" ? "OA" : paneId === "bank" ? "流水" : "发票"}`}
+          />
+        ) : null;
         return (
           <div
             key={column.key}
             className={`record-card-cell cell-${column.kind ?? "text"}${column.className ? ` ${column.className}` : ""}`}
             role="cell"
           >
-            <div className={`record-card-cell-content${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
+            <div className={`record-card-cell-content${isApplicant ? " workbench-oa-applicant-content" : ""}${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
-              {columnIndex === 0 && row.workbenchAnomalies?.length ? (
-                <WorkbenchAnomalyIndicator
-                  anomalies={row.workbenchAnomalies}
-                  action={unassignedInvoiceAnomaly ? {
-                    label: "选择 OA 明细",
-                    disabled: invoiceResolutionDisabled,
-                    disabledReason: "当前账号无归属权限",
-                    onPress: () => onRowAction(row, "assign-invoice-expense-items"),
-                  } : undefined}
-                  externalUrl={row.workbenchAnomalies.some((anomaly) => isOaAttachmentStatus(anomaly.code))
-                    ? row.externalUrl
-                    : undefined}
-                  levelLabel={`该${paneId === "oa" ? "OA" : paneId === "bank" ? "流水" : "发票"}`}
-                />
-              ) : null}
+              {isApplicant ? (
+                showApplicantDetail || anomalyIndicator ? (
+                  <span className="workbench-oa-applicant-actions">
+                    {showApplicantDetail ? (
+                      <RecordDetailTrigger
+                        ariaLabel={`查看OA ${value} 详情`}
+                        onOpenDetail={() => onOpenDetail(row)}
+                        tooltipLabel="查看OA详情"
+                      />
+                    ) : null}
+                    {anomalyIndicator}
+                  </span>
+                ) : null
+              ) : anomalyIndicator}
             </div>
           </div>
         );
@@ -376,8 +392,6 @@ function renderCellValue(
       row.tableValues.applicationTime ?? "",
       row.tableValues.applicationType ?? "",
       row.tableValues.workflowStatus ?? "completed",
-      showInlineDetail,
-      onOpenDetail,
       searchQuery,
     );
   }
@@ -471,8 +485,6 @@ function renderOaApplicantValue(
   applicationTime: string,
   applicationType: string,
   workflowStatus: string,
-  showInlineDetail: boolean,
-  onOpenDetail: () => void,
   searchQuery: string,
 ) {
   const hasApplicationTime = applicationTime !== "--" && applicationTime !== "—" && applicationTime !== "";
@@ -482,13 +494,6 @@ function renderOaApplicantValue(
     <span className="compound-cell-value">
       <span className="compound-cell-primary workbench-oa-applicant-line">
         <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
-        {showInlineDetail ? (
-          <RecordDetailTrigger
-            ariaLabel={`查看OA ${value} 详情`}
-            onOpenDetail={onOpenDetail}
-            tooltipLabel="查看OA详情"
-          />
-        ) : null}
       </span>
       <span className="compound-cell-secondary">
         {hasApplicationType ? <FinanceStatusTag>{highlightSearchText(applicationType, searchQuery)}</FinanceStatusTag> : null}

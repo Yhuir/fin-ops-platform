@@ -127,6 +127,7 @@ type ApiMockOptions = {
   workbenchCashSpecialActions?: boolean;
   workbenchExceptionDatasetSize?: number;
   workbenchAmountMismatchScenario?: boolean;
+  workbenchApplicantLayoutScenario?: boolean;
   workbenchMultiSourceScenario?: boolean;
   workbenchInitialIncompleteRelation?: boolean;
   workbenchInitialRelationConfirmed?: boolean;
@@ -9895,6 +9896,17 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         options.workbenchAmountMismatchScenario === true,
         workbenchAmountMismatchDecision,
       );
+      if (options.workbenchApplicantLayoutScenario) {
+        const group = buildAmountMismatchWorkbenchGroup(null);
+        group.oa_rows[0] = { ...group.oa_rows[0], applicant: "樊祖芳", application_time: "2026-08-14", application_type: "支付申请" };
+        group.workbench_anomaly.items[0].display_pane = "oa";
+        group.workbench_anomaly.items[0].display_row_id = group.oa_rows[0].id;
+        return json(route, {
+          ...payload,
+          paired: { ...payload.paired, groups: [], total: 0 },
+          unpaired: { ...payload.unpaired, groups: [withWorkbenchDetailKey(group)], total: 1 },
+        });
+      }
       const resolvedPayload = options.workbenchInitialIncompleteRelation && relationConfirmed
         ? withIncompleteUnpairedRelation(payload)
         : payload;
