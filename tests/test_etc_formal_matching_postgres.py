@@ -97,6 +97,22 @@ class EtcFormalMatchingPostgresTests(unittest.TestCase):
         self.assertEqual(unchanged['version'], current['version'])
         self.assertEqual(self.connection.fetch_one('select count(*) n from app.invoices')['n'], 0)
 
+    def test_pending_oa_main_and_historical_reads_have_identical_fact_contract(self):
+        self.connection.execute("""update app.oa_pending_payment_admissions
+            set source_payload = source_payload || %s::jsonb""", (json.dumps({
+                'workflow_no': 'OA-PAY-SOURCE-20260915', 'project_id': 'PROJECT-ETC', 'currency': '',
+            }),))
+        candidates = self.facts.load_etc_batch_link_candidates(['2026-09'])
+        current = self.facts.load_batch(['2026-09'], etc_batch_link_candidates=candidates)
+        historical = self.facts.load_batch(['2026-07'], etc_batch_link_candidates=candidates)
+        oa = next(fact for fact in current.facts if fact.row_type == 'oa')
+        self.assertEqual(oa, next(fact for fact in historical.facts if fact.row_type == 'oa'))
+        self.assertEqual(oa.currency, 'CNY')
+        self.assertIn(('business_reference', 'oapaysource20260915'), oa.evidence_keys)
+        self.assertIn(('project_reference', 'projectetc'), oa.evidence_keys)
+        self.add_bank()
+        self.assertEqual(self.run_match()['created_relation_count'], 1)
+
     def test_audit_failure_rolls_back_relation_and_source_binding(self):
         self.add_bank()
         original = PostgresOpsTaxEtcRepository.bind_etc_oa_sources

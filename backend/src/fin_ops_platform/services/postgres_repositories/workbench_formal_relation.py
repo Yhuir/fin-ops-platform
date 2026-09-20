@@ -75,6 +75,26 @@ _PENDING_OA_SOURCE_ALIASES_SQL = """array(
 )"""
 
 
+_PENDING_OA_FACT_COLUMNS_SQL = f"""
+    admission.oa_id as canonical_object_identity,
+    admission.oa_id as row_id,
+    admission.amount,
+    coalesce(nullif(admission.source_payload->>'currency', ''), 'CNY') as currency,
+    coalesce({_PENDING_OA_APPLICATION_DATE_SQL}, (admission.scope_key || '-01')::date) as fact_date,
+    null::timestamptz as approved_at,
+    coalesce(nullif(admission.source_payload->>'workflow_no', ''),
+             nullif(admission.source_payload->>'relation_code', '')) as workflow_no,
+    nullif(admission.source_payload->>'project_id', '') as project_id,
+    coalesce(admission.project_name_display, admission.project_name) as project_name,
+    admission.applicant,
+    'active'::text as status,
+    'in_progress'::text as workflow_status,
+    admission.source_payload as normalized_payload,
+    {_PENDING_OA_SOURCE_ALIASES_SQL} as source_aliases,
+    admission.updated_at as source_version
+"""
+
+
 _MATCHABLE_ETC_OA_SQL = f"""
     select oa.row_id, oa.application_date, oa.scope_month, oa.normalized_payload
     from app.oa_applications oa
@@ -143,32 +163,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
             + COMPLETED_WORKFLOW_STATUS_SQL
             + """
             union all
-            select
-                admission.oa_id as canonical_object_identity,
-                admission.oa_id as row_id,
-                admission.amount,
-                coalesce(nullif(admission.source_payload->>'currency', ''), 'CNY') as currency,
-                coalesce(
-                    """
-            + _PENDING_OA_APPLICATION_DATE_SQL
-            + """,
-                    (admission.scope_key || '-01')::date
-                ) as fact_date,
-                null::timestamptz as approved_at,
-                coalesce(
-                    nullif(admission.source_payload->>'workflow_no', ''),
-                    nullif(admission.source_payload->>'relation_code', '')
-                ) as workflow_no,
-                nullif(admission.source_payload->>'project_id', '') as project_id,
-                coalesce(admission.project_name_display, admission.project_name) as project_name,
-                admission.applicant,
-                'active'::text as status,
-                'in_progress'::text as workflow_status,
-                admission.source_payload as normalized_payload,
-                """
-            + _PENDING_OA_SOURCE_ALIASES_SQL
-            + """ as source_aliases,
-                admission.updated_at as source_version
+            select """ + _PENDING_OA_FACT_COLUMNS_SQL + """
             from app.oa_pending_payment_admissions admission
             where admission.tenant_id = 'default'
               and admission.workflow_status = 'in_progress'
@@ -656,13 +651,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
         if oa_ids:
             oa_rows.extend(self._connection.fetch_all(
                 f"""
-                select admission.oa_id as canonical_object_identity, admission.oa_id as row_id,
-                    admission.amount, coalesce(admission.source_payload->>'currency', 'CNY') as currency,
-                    {_PENDING_OA_APPLICATION_DATE_SQL} as fact_date,
-                    admission.applicant, 'active'::text as status, 'in_progress'::text as workflow_status,
-                    admission.source_payload as normalized_payload,
-                    {_PENDING_OA_SOURCE_ALIASES_SQL} as source_aliases,
-                    admission.updated_at as source_version
+                select {_PENDING_OA_FACT_COLUMNS_SQL}
                 from app.oa_pending_payment_admissions admission
                 where admission.tenant_id = 'default' and admission.workflow_status = 'in_progress'
                   and (admission.oa_id = any(%s::text[])

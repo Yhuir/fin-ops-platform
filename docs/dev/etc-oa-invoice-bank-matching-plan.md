@@ -228,3 +228,5 @@ bash scripts/verify.sh docs
 最终自审：模块边界保持，全部新关系通过同一正式 UoW，来源数据留在各 owner；有歧义不按金额抢配；进行中配对不改审批/成本资格；新旧链路不并行；GET 不写任务。无数据库备份需求，结束时仅删除本次自建隔离测试数据库与临时测试文件，不操作主数据库。
 
 全量后端入口 `FIN_OPS_TEST_DATABASE_URL=<本次隔离库> bash scripts/verify.sh backend`：4302 项、0 失败，52 项因现金模块专用测试 DSN 未设置而跳过；随后把 `FIN_OPS_CASH_TEST_DATABASE_URL` 指向本次隔离库，现金核心、运行时及 HTTP 集成 59 项全部通过。新增匹配 PostgreSQL 测试单独真实执行。补充 canonical 银行账户 envelope 回归，防止公共解析函数展开后再次展开而丢失账户冲突证据。`verify.sh lint/docs` 与 `git diff --check` 通过。
+
+生产首轮验证发现：进行中 OA 的跨月补查缺少常规读取中的工作流号、项目和日期/币种规则，导致相同 OA 在两个入口的事实不一致。已删除补查中的独立简化投影，改为同一 repository 内共享字段定义；新增真实 PostgreSQL 失败复现及修复回归。规则版本更新后，失败月份通过现有运维重试入口恢复，不删除失败记录或跳过事实冲突校验。

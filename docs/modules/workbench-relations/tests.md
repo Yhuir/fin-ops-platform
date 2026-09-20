@@ -146,3 +146,5 @@ cd web && npm test -- --run \
 - `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
 - 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
 - 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。
+
+- 进行中 OA 的常规窗口读取与跨月来源补查必须生成完全相同的事实。真实 PostgreSQL 用例同时携带 `workflow_no`、`project_id` 和空币种，验证两个入口共享字段投影，防止同一 OA 被误判为冲突并回滚整个月份。
