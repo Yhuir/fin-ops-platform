@@ -5,8 +5,14 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from fin_ops_platform.services.oa_attachment_invoice_linking import oa_row_source_alias_map
 from fin_ops_platform.services.workbench_pair_relation_service import WITHDRAW_RESTORABLE_CONFIRM_OPERATION_TYPES
-from fin_ops_platform.services.workbench_relation_alignment_service import WorkbenchRelationAlignmentService
+from fin_ops_platform.services.workbench_relation_alignment_service import (
+    WorkbenchRelationAlignmentService,
+    evidenced_payment_pairs,
+    payment_conflicts,
+    row_payment_evidence,
+)
 
 
 def members(relation: dict[str, Any]) -> frozenset[tuple[str, str]]:
@@ -63,10 +69,28 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
         oa_by_id = {r["id"]: r for r in oa_rows}
         bank_by_id = {r["id"]: r for r in bank_rows}
         available = {("oa", k) for k in oa_by_id} | {("bank", k) for k in bank_by_id}
+        oa_evidence = {k: row_payment_evidence(r) for k, r in oa_by_id.items()}
+        bank_evidence = {k: row_payment_evidence(r) for k, r in bank_by_id.items()}
+        proven_pairs = evidenced_payment_pairs(list(oa_evidence.values()), list(bank_evidence.values())).pairs
+        aliases = oa_row_source_alias_map(oa_rows)
+        explicit_pairs = {
+            bid: source for bid, row in bank_by_id.items()
+            if (source := service.bank_source_oa_id(row, aliases))
+        }
         resolved: list[frozenset[tuple[str, str]]] = []
         for part in parts:
             part = part & available
-            if any(t == "oa" for t, _ in part) and any(t == "bank" for t, _ in part) and part != available:
+            po = [oa_evidence[k] for t, k in part if t == "oa"]
+            pb = [bank_evidence[k] for t, k in part if t == "bank"]
+            crossing_pair = any((("oa", oid) in part) != (("bank", bid) in part) for oid, bid in proven_pairs.items())
+            crossing_pair = crossing_pair or any((("oa", oid) in part) != (("bank", bid) in part) for bid, oid in explicit_pairs.items())
+            if (
+                po and pb and part != available and not crossing_pair
+                and all(item.amount > 0 for item in [*po, *pb])
+                and sum(item.amount for item in po) == sum(item.amount for item in pb)
+                and all(any(not payment_conflicts(o, b) for o in po) for b in pb)
+                and all(any(not payment_conflicts(o, b) for b in pb) for o in po)
+            ):
                 resolved.append(part)
         used = set().union(*resolved) if resolved else set()
         remaining = available - used
@@ -76,7 +100,8 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
         remaining_bank = [bank_by_id[k] for t, k in remaining if t == "bank"]
         if remaining_oa and remaining_bank:
             rows = {
-                f"{r['type']}:{r['id']}": {**r, "id": f"{r['type']}:{r['id']}"}
+                f"{r['type']}:{r['id']}": {**r, "id": f"{r['type']}:{r['id']}",
+                    "source_aliases": [*r.get("source_aliases", []), r["id"]]}
                 for r in [*remaining_oa, *remaining_bank]
             }
             alignment = service.align_relation(rows_by_id=rows, relation={"row_ids": list(rows)})
@@ -97,6 +122,8 @@ def apply_display_subgroups(groups: list[dict[str, Any]], history: list[dict[str
                 and all(a is not None and a > 0 for a in [*oa_amounts, *bank_amounts])
                 and len(directions) == 1
                 and sum(oa_amounts) == sum(bank_amounts)
+                and all(any(not payment_conflicts(oa_evidence[o["id"]], bank_evidence[b["id"]]) for o in ro) for b in rb)
+                and all(any(not payment_conflicts(oa_evidence[o["id"]], bank_evidence[b["id"]]) for b in rb) for o in ro)
             ):
                 resolved.append(frozenset(remaining))
                 remaining = set()

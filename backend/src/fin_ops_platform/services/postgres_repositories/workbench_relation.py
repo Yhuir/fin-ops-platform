@@ -759,7 +759,7 @@ class PostgresWorkbenchRelationRepository:
                 if changed_ids is None or case_id in changed_ids
             }
             if manual_case_ids:
-                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_matching_dirty(
                     case_ids=sorted(manual_case_ids), oa_row_ids=[], reason="workbench_relation_changed",
                 )
             queue = RuntimeQueueRepository(connection)

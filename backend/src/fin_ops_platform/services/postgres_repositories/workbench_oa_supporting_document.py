@@ -78,7 +78,7 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 ),
             )
             if row:
-                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_matching_dirty(
                     case_ids=[], oa_row_ids=[row["oa_row_id"]], reason="oa_supporting_document_changed",
                 )
             return dict(row) if row else None
@@ -194,7 +194,7 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
                 (deleted_by, document_id),
             )
             if row:
-                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_matching_dirty(
                     case_ids=[], oa_row_ids=[row["oa_row_id"]], reason="oa_supporting_document_changed",
                 )
             return dict(row) if row else None

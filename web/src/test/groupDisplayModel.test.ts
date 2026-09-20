@@ -1062,6 +1062,30 @@ describe("groupDisplayModel time filter", () => {
 });
 
 describe("historical display partitions", () => {
+  test("renders server-resolved installments as two OA-bank rows with one shared invoice", () => {
+    const group = buildGroup("installments", "2026-08-24");
+    group.rows = {
+      oa: [buildOaRow("final", "8000"), buildOaRow("pre", "8000")],
+      bank: [
+        { ...buildBankRow("bank-pre", "2026-08-14"), amount: "8000" },
+        { ...buildBankRow("bank-final", "2026-08-24"), amount: "8000" },
+      ],
+      invoice: [buildInvoiceRow("shared", "16000")],
+    };
+    group.displaySubgroups = [
+      { oaRowIds: ["final"], bankRowIds: ["bank-final"], resolved: true },
+      { oaRowIds: ["pre"], bankRowIds: ["bank-pre"], resolved: true },
+    ];
+    const original = structuredClone(group);
+    const layout = buildWorkbenchGroupDisplayLayout(group)!;
+    expect(layout.segmentedPaneIds).toEqual(["oa", "bank"]);
+    expect(layout.segments.map((s) => [s.rows.oa[0].id, s.rows.bank[0].id]))
+      .toEqual([["final", "bank-final"], ["pre", "bank-pre"]]);
+    expect(layout.segments.every((s) => s.rows.invoice.length === 0)).toBe(true);
+    expect(group.rows.invoice.map((r) => r.id)).toEqual(["shared"]);
+    expect(group).toEqual(original);
+  });
+
   test("keeps repeated amounts in their original bank blocks and invoices shared", () => {
     const group = buildGroup("merged", "2026-07-01");
     group.rows = { oa: [buildOaRow("a"), buildOaRow("b"), buildOaRow("c")],

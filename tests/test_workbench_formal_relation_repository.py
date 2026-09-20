@@ -219,6 +219,15 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertEqual(facts["oa-1"].counterparty_account, "622200001")
         self.assertEqual(WorkbenchFreeMatchingEngine().plan_relations(batch).plans, ())
 
+    def test_payment_phase_and_imported_account_fields_are_canonical_matching_evidence(self) -> None:
+        oa = oa_row(payload={"apply_type": "支付申请", "counterparty_name": "测试设备有限公司", "reason": "50%尾款", "detail_fields": {"收款账号": "6222 00001"}})
+        bank = bank_row(counterparty="测试设备有限公司")
+        bank["remark"] = "货款（50%尾款）"
+        bank["raw_payload"] = {"normalized_payload": {"counterparty_account_no": "622200001"}}
+        loaded = PostgresWorkbenchFormalRelationFactRepository(FakeConnection(oa_rows=[oa], bank_rows=[bank])).load_batch(["2026-05"])
+        self.assertEqual({f.payment_phase for f in loaded.facts}, {"final"})
+        self.assertEqual({f.counterparty_account for f in loaded.facts}, {"622200001"})
+
     def test_output_reversal_identity_uses_exact_remark_target_not_equal_amounts(self) -> None:
         target_invoice_no = "26532000000809302711"
         blue = invoice_row("output-blue", total_with_tax=Decimal("182400.00"))

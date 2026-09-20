@@ -674,6 +674,16 @@ def _postgres_bank_rows(
             remark,
             project_id,
             bank_text_fields
+            , currency
+            , jsonb_strip_nulls(jsonb_build_object(
+                'txn_date', txn_date::text,
+                'counterparty_account_no', coalesce(raw_payload->'normalized_payload', raw_payload)->>'counterparty_account_no',
+                'counterparty_account', coalesce(raw_payload->'normalized_payload', raw_payload)->>'counterparty_account',
+                'source_oa_row_id', coalesce(raw_payload->'normalized_payload', raw_payload)->>'source_oa_row_id',
+                'oa_row_id', coalesce(raw_payload->'normalized_payload', raw_payload)->>'oa_row_id',
+                'derived_from_oa_id', coalesce(raw_payload->'normalized_payload', raw_payload)->>'derived_from_oa_id',
+                'source_workbench_row_id', coalesce(raw_payload->'normalized_payload', raw_payload)->>'source_workbench_row_id'
+            )) as detail_fields
             {source_projection}
         from app.bank_transactions
         where status <> 'deleted'
@@ -872,6 +882,7 @@ def _cost_oa_payload(
         "apply_type": apply_type or raw.get("apply_type"),
         "workflow_status": workflow_status or raw.get("workflow_status"),
         "completed_at": completed_at or raw.get("completed_at"),
+        "application_date": detail_fields.get("申请时间") or detail_fields.get("申请日期") or raw.get("application_date"),
         **{
             key: raw.get(key)
             for key in (
@@ -884,6 +895,7 @@ def _cost_oa_payload(
                 "amount",
                 "reconciliation_amount",
                 "reason",
+                "currency",
             )
             if raw.get(key) is not None
         },
@@ -895,6 +907,7 @@ def _cost_oa_payload(
                 "费用类型",
                 "费用内容",
                 "申请人",
+                "收款账号",
             )
             if detail_fields.get(key) is not None
         },

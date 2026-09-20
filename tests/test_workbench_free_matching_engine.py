@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
 import random
-from typing import Literal
 import unittest
+from dataclasses import replace
+from datetime import date
+from typing import Literal
 
 from fin_ops_platform.services.workbench_free_matching_engine import (
     ActiveFormalRelationAnchor,
@@ -14,6 +15,7 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
     WorkbenchFreeMatchingEngine,
     relation_fingerprint,
 )
+
 from tests.workbench_deterministic_relation_fixtures import (
     YUNNAN_LIFU_CASE_ID,
     YUNNAN_LIFU_INVOICE_NO,
@@ -946,3 +948,63 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def installment_facts():
+    return (
+        replace(fact("oa", "prepay", 800000, fact_date=date(2026, 8, 14)), payment_phase="advance"),
+        replace(fact("oa", "final", 800000, fact_date=date(2026, 8, 24)), payment_phase="final"),
+        fact("bank", "bank-prepay", 800000, fact_date=date(2026, 8, 14)),
+        replace(fact("bank", "bank-final", 800000, fact_date=date(2026, 8, 24)), payment_phase="final"),
+        fact("invoice", "shared", 1600000, fact_date=date(2026, 9, 2)),
+    )
+
+
+def test_later_same_pane_installment_extends_original_case_and_is_idempotent():
+    engine = WorkbenchFreeMatchingEngine()
+    facts = installment_facts()
+    for late in (1, 3):
+        anchor = ActiveFormalRelationAnchor("old", tuple(f.member_key for i, f in enumerate(facts) if i != late))
+        for ordered in (facts, tuple(reversed(facts))):
+            result = engine.plan_relations(FormalRelationFactBatch(facts=ordered, active_relations=(anchor,)))
+            assert len(result.plans) == 1
+            plan = result.plans[0]
+            assert plan.case_id == plan.target_case_id == "old"
+            assert set(plan.member_keys) == {f.member_key for f in facts}
+            assert plan.amount_minor == 1600000
+            assert plan.scope_keys == ("2026-08", "2026-09")
+            replay = engine.plan_relations(FormalRelationFactBatch(facts=ordered, active_relations=(ActiveFormalRelationAnchor("old", plan.member_keys),)))
+            assert replay.plans == ()
+            withdrawn = engine.plan_relations(FormalRelationFactBatch(facts=ordered, active_relations=(anchor,), withdrawal_fingerprints=frozenset({plan.relation_fingerprint})))
+            assert withdrawn.plans == ()
+
+
+def test_installment_extension_does_not_guess_or_modify_special_owner():
+    engine = WorkbenchFreeMatchingEngine()
+    facts = installment_facts()
+    anchor = ActiveFormalRelationAnchor("old", tuple(f.member_key for i, f in enumerate(facts) if i != 1))
+    ambiguous = replace(facts[1], canonical_object_identity="competing", row_id="competing")
+    assert engine.plan_relations(FormalRelationFactBatch(facts=(*facts, ambiguous), active_relations=(anchor,))).plans == ()
+    assert engine.plan_relations(FormalRelationFactBatch(facts=facts, active_relations=(replace(anchor, relation_mode="turnover_manual_closure"),))).plans == ()
+    conflicting = replace(facts[1], counterparty_account="different")
+    bank = replace(facts[3], counterparty_account="known")
+    assert engine.plan_relations(FormalRelationFactBatch(facts=(facts[0], conflicting, facts[2], bank, facts[4]), active_relations=(anchor,))).plans == ()
+
+
+def test_free_installments_pair_by_payment_evidence_with_or_without_shared_invoice():
+    engine = WorkbenchFreeMatchingEngine()
+    facts = installment_facts()
+    assert len(engine.plan_relations(FormalRelationFactBatch(facts=facts)).plans) == 1
+    result = engine.plan_relations(FormalRelationFactBatch(facts=facts[:4]))
+    assert {frozenset(p.row_ids) for p in result.plans} == {
+        frozenset({"prepay", "bank-prepay"}), frozenset({"final", "bank-final"}),
+    }
+
+
+def test_known_payment_phase_conflict_cannot_close_through_shared_invoice():
+    prepay, _final, _bank_pre, bank_final, invoice = installment_facts()
+    invoice = replace(invoice, amount_minor=800000)
+    engine = WorkbenchFreeMatchingEngine()
+    for anchors in ((), (ActiveFormalRelationAnchor("old", (prepay.member_key, invoice.member_key)),)):
+        result = engine.plan_relations(FormalRelationFactBatch(facts=(prepay, bank_final, invoice), active_relations=anchors))
+        assert not any(prepay.member_key in p.member_keys and bank_final.member_key in p.member_keys for p in result.plans)

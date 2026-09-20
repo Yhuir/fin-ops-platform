@@ -1455,7 +1455,7 @@ class PostgresCoreRepository:
             from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
                 PostgresWorkbenchMatchingQueueRepository,
             )
-            PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+            PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_matching_dirty(
                 case_ids=[], oa_row_ids=[str(update["invoice_id"]) for update in updates],
                 reason="invoice_source_links_changed",
             )

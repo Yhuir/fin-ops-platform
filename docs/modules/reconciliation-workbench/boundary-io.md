@@ -272,7 +272,7 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 
 - 页面 hydration 在同一只读快照内，对当前页普通多 OA 关系一次集合读取 `app.workbench_pair_relation_history`。精确 `case_id + typed members` 的确认前后快照提供历史分组证据；复用 case ID、连续合并和撤回均不能套用较大或不同成员的快照。
 - 新增可选输出 `display_subgroups: [{oa_row_ids: string[], bank_row_ids: string[], resolved: boolean}]`，由纯函数模块 `services/workbench_display_subgroups.py` 生成。它只用于 OA/银行列共享行轨；不写 relation/source ownership，不修改金额、成员、版本、审批、配对区或成本口径。发票没有逐项归属证据时继续占整组共享栏。已有费用子项/补充凭证展示链保留。
-- 优先保留历史 OA+银行小组；剩余记录仅按无歧义金额匹配，一侧单项且总额闭合时共享一个区块；无法唯一判断的多对多保留共享区块，不猜测重复金额归属。不同 pane 的相同文本 ID 按 typed identity 区分。
+- 历史 OA+银行小组须经当前金额和付款证据核实（见 2026-09-20 修正）；剩余记录使用统一无歧义付款规则，一侧单项且总额闭合且无已知冲突时共享一个区块；无法唯一判断的多对多保留共享区块。不同 pane 的相同文本 ID 按 typed identity 区分。
 - 前端 API mapper 仅转为 `displaySubgroups`；主表消费该分段，不再为这些普通多 OA 组调用原金额推断/残余行分支。旧报销明细与显式发票来源逻辑仍服务原业务，不做并行替代实现。
 
 ## 2026-09-14 确认与撤回的月份 I/O
@@ -312,3 +312,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - ETC 来源 summary 是真实正式成员，47 张 ETC 内部成员不等于 canonical 发票池数量，不生成补造 canonical 发票。GET 不匹配、不投任务、不读外部 OA；展开、详情、筛选和统计继续消费 direct canonical query。
 
 - 多 ETC 批次关系：compact hydration 在原集合 SQL 内读取 `etc_batch_links` 的全部准确批次；full/detail 按正式来源 metadata 构造 summary→external identity 映射，删除把一个 descriptor 的主批次强加给全部 summary 的旧假设。保持原查询预算，不按成员追加查询。单 summary 的显式 descriptor identity 合同不变。
+
+## 2026-09-20 OA 与流水逐笔展示纠正
+
+- 历史分区只有金额闭合、业务证据不冲突且不切断明确对应时才保留为 resolved；否则由统一付款对齐服务重算。移除历史 OA+银行分组无条件占用成员的逻辑。
+- 明确银行绑定只读取 canonical 原始 payload 中既有四类来源字段；页面派生的顶层 `source_oa_id` 不可再次成为来源证据。明确部分付款仍可显示对应，金额差异保持真实。
+- compact hydration 在原批量 SQL 内读取日期、币种及最小账号/来源证据，计算后仍由既有 compact serializer 删除 detail_fields，公共列表 DTO 不扩散原始字段。full 与 summary 共用同一纯规则，查询预算不增加。
+- 发票无逐项归属时维持组级共享、只计一次；审批状态、正式关系成员和费用归属不因展示重排改变。费用子项、折叠、排序、搜索和操作选择沿用原合同。

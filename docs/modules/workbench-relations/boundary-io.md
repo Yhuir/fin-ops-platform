@@ -172,3 +172,10 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - UoW 对计划 canonical facts 批量锁定并校验源版本，重验批次身份/数量/金额/占用；关系、ETC owner、审计同事务。数据库/审计失败整笔回滚，禁止吞错或降级。
 - 支付申请收款证据使用真实 beneficiary；银行匹配按 OA 应付额，ETC summary 保留真实发票额。账户明确冲突拒绝。个人姓名组合证据使用 30 天窗口，普通公司规则不整体放宽。
 - 来源保护统一覆盖 OA 附件与 ETC。撤回银行保留来源组，纯来源组普通撤回拒绝；人工拒绝原银行的 fingerprint 沿用现有保护。进行中不再是 Workbench 配对阻断，未知/无效状态与资料缺失仍按原合同处理，成本规则不变。
+
+## 2026-09-20 普通付款逐笔消歧与后到补全
+
+- `workbench_relation_alignment_service` 的纯 `PaymentEvidence` 计算统一使用金额、币种、方向、收款主体、已知账号、业务日期与明确付款阶段。重复等额付款按双向唯一的阶段/同日证据对应；不按遍历顺序或最近日期猜测。已知冲突拒绝，无证据歧义保留，候选搜索有界且超限不返回部分强配结果。
+- matcher 的普通 active 扩展不再因 OA、银行、发票三类已存在就跳过。仅 `manual_confirmed` 正向普通付款中存在未闭合 OA/银行金额，并且后到自由成员对应已有付款、加入后严格闭合时扩展原 case；特殊关系、ETC、active owner、撤回保护和事务内重验沿用原合同。
+- `PostgresWorkbenchFormalRelationFactRepository` 增加内部付款阶段与 active relation mode 输入，不改变公共 API。规则版本为 `2026-09-20-payment-alignment-v16`，既有 worker stale-scope 机制负责历史重算。
+- 事务队列入口统一为 `mark_relation_matching_dirty`，按 typed members 批量读 OA、银行、发票所在月份。移除只通知发票月份的旧入口，自动写仍不自激重排；不新增表、worker、缓存、read model 或依赖。

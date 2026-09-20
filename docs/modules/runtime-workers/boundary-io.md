@@ -73,3 +73,7 @@ Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只
 
 - ETC manual submitted 通过 owner 的同事务 CAS writer 标记 `job.workbench_matching_dirty_scopes`；无变化重复提交不投递。OA sync/银行导入继续使用原 producer，现有 `workbench-matching` 完成来源初建及后到流水补入，自动 relation 写不重复投递自己。
 - 无新增 worker/read model/cache/event type。队列失败、版本漂移与事务失败沿用明确失败/重试，不删除任务掩盖错误。
+
+## 2026-09-20 付款匹配 scope 补齐
+
+原 workbench-matching worker 与 durable queue 合同不变。关系/凭证/发票归属 writer 通过 `mark_relation_matching_dirty` 在同一事务通知全部实际成员月份，不再只通知发票月份；规则 v16 复用已完成 scope 的版本重扫。自动匹配自身不回投相同业务任务，页面 GET 仍零入队。

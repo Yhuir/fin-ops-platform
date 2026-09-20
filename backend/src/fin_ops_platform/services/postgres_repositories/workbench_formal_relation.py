@@ -37,6 +37,7 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
 )
 from fin_ops_platform.services.workbench_invoice_direction import invoice_workbench_direction_from_row
 from fin_ops_platform.services.workbench_invoice_expense_item_matching import invoice_needs_expense_assignment
+from fin_ops_platform.services.workbench_relation_alignment_service import payment_phase
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_text_normalization import normalize_match_text
 
@@ -816,6 +817,7 @@ def _oa_fact(
         references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
         counterparty_account=normalize_match_text(detail.get("收款账号")),
+        payment_phase=payment_phase(payload.get("reason") or payload.get("expense_content") or detail.get("费用内容")),
     )
 
 
@@ -860,7 +862,8 @@ def _bank_fact(
         evidence_keys=evidence,
         references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
-        counterparty_account=normalize_match_text(payload.get("counterparty_account")),
+        counterparty_account=normalize_match_text(payload.get("counterparty_account_no") or payload.get("counterparty_account")),
+        payment_phase=payment_phase(row.get("remark")),
     )
 
 
@@ -1066,7 +1069,7 @@ def _active_anchor(row: dict[str, Any]) -> ActiveFormalRelationAnchor:
     for index, row_id in enumerate(row_ids):
         row_type = row_types[index] if index < len(row_types) and row_types[index] else row_type_for_workbench_row_id(row_id)
         members.append(canonical_member_key(row_type, row_id))
-    return ActiveFormalRelationAnchor(case_id=case_id, member_keys=tuple(members))
+    return ActiveFormalRelationAnchor(case_id=case_id, member_keys=tuple(members), relation_mode=text(row.get("relation_mode")) or "")
 
 
 def _single_member_claim(row: dict[str, Any]) -> tuple[str, str] | None:

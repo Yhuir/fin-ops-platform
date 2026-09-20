@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field, replace
 from datetime import date
+from decimal import Decimal
 from hashlib import sha256
 from typing import Iterable, Literal
 
-RULE_VERSION = "2026-09-20-etc-source-payee-v15"
+from fin_ops_platform.services.workbench_relation_alignment_service import PaymentEvidence, evidenced_payment_pairs
+
+RULE_VERSION = "2026-09-20-payment-alignment-v16"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -107,6 +110,7 @@ class FormalRelationFact:
     reversal_polarity: Literal["blue", "red"] | None = None
     needs_expense_assignment: bool = False
     counterparty_account: str = ""
+    payment_phase: str = ""
 
     def __post_init__(self) -> None:
         row_type, identity = canonical_member_key(self.row_type, self.canonical_object_identity)
@@ -162,6 +166,7 @@ class FormalRelationFact:
 class ActiveFormalRelationAnchor:
     case_id: str
     member_keys: tuple[MemberKey, ...]
+    relation_mode: str = "manual_confirmed"
 
     def __post_init__(self) -> None:
         case_id = str(self.case_id or "").strip()
@@ -523,6 +528,8 @@ class WorkbenchFreeMatchingEngine:
 
     def _build_edges(self, facts: tuple[FormalRelationFact, ...], budget: _Budget) -> list[_Edge]:
         facts_by_key = {fact.member_key: fact for fact in facts}
+        payment_pairs = _evidenced_pairs(facts)
+        payment_owners = {bank: oa for oa, bank in payment_pairs.items()}
         edges: dict[tuple[MemberKey, MemberKey, str], _Edge] = {}
         shared_references: dict[tuple[str, str], list[FormalRelationFact]] = {}
         for fact in facts:
@@ -598,6 +605,15 @@ class WorkbenchFreeMatchingEngine:
                         for right in right_facts:
                             if _accounts_conflict(left, right):
                                 continue
+                            if {left.row_type, right.row_type} == {"oa", "bank"} and (
+                                left.payment_phase and right.payment_phase and left.payment_phase != right.payment_phase
+                            ):
+                                continue
+                            if left.row_type == "oa" and right.row_type == "bank" and left.amount_minor == right.amount_minor:
+                                if payment_pairs.get(left.member_key, right.member_key) != right.member_key:
+                                    continue
+                                if payment_owners.get(right.member_key, left.member_key) != left.member_key:
+                                    continue
                             date_delta = (right.fact_date - left.fact_date).days
                             if date_delta < -window_days:
                                 continue
@@ -712,16 +728,46 @@ class WorkbenchFreeMatchingEngine:
             if (
                 case_id in preplanned_case_ids
                 or case_id in new_members_by_case
-                or {row_type for row_type, _identity in anchor_members} == MATCHABLE_ROW_TYPES
             ):
                 continue
             if not anchor_members.issubset(facts_by_key):
                 continue
 
             missing_row_types = MATCHABLE_ROW_TYPES - {row_type for row_type, _identity in anchor_members}
+            anchor_facts = [facts_by_key[member] for member in anchor_members]
+            totals: dict[str, int] = {}
+            for fact in anchor_facts:
+                totals[fact.row_type] = totals.get(fact.row_type, 0) + fact.amount_minor
+            # Existing panes can still lack a later installment. Only a proven
+            # OA/bank counterpart can extend such a pane; totals alone cannot.
+            deficit_types = {
+                kind for kind in ("oa", "bank") if kind in totals
+                and totals[kind] < max(totals.values())
+            } if (
+                anchor.relation_mode == "manual_confirmed"
+                and all(f.direction == "expenditure" and f.amount_minor > 0 for f in anchor_facts)
+                and not _has_etc_source(anchor_facts)
+            ) else set()
+            adjacent = set().union(*(composite_adjacency.get(key, set()) for key in anchor_members))
+            deficit_candidates = {
+                key for key in eligible & adjacent if key[0] in deficit_types
+                and facts_by_key[key].amount_minor <= max(totals.values()) - totals[key[0]]
+            }
+            try:
+                counterpart_pairs = _evidenced_pairs([
+                    *anchor_facts, *(facts_by_key[key] for key in deficit_candidates),
+                ]) if deficit_candidates else {}
+            except _ResourceLimited:
+                resource_limited_cases += 1
+                resource_limited_members.update(deficit_candidates)
+                continue
+            proven_new = {
+                key for oa, bank in counterpart_pairs.items() for key in (oa, bank)
+                if key in deficit_candidates and (oa in anchor_members or bank in anchor_members)
+            }
             allowed_members = anchor_members | {
                 member for member in eligible if member[0] in missing_row_types
-            }
+            } | proven_new
             reachable = set(anchor_members)
             pending = list(anchor_members)
             while pending:
@@ -750,7 +796,7 @@ class WorkbenchFreeMatchingEngine:
                         for index in range(len(ordered_new))
                         if mask & (1 << index)
                     )
-                    if not ({row_type for row_type, _identity in new_members} & missing_row_types):
+                    if not ({row_type for row_type, _identity in new_members} & missing_row_types or new_members & proven_new):
                         continue
                     full_members = anchor_members | set(new_members)
                     selected_edges = [
@@ -759,6 +805,10 @@ class WorkbenchFreeMatchingEngine:
                         if edge.left in full_members and edge.right in full_members
                     ]
                     if not self._is_connected(full_members, selected_edges):
+                        continue
+                    if new_members & proven_new and not self._safe_exact_closure(
+                        [facts_by_key[key] for key in full_members], selected_edges,
+                    ):
                         continue
                     if not self._safe_active_extension_closure(
                         anchor_facts=[facts_by_key[member] for member in anchor_members],
@@ -902,6 +952,8 @@ class WorkbenchFreeMatchingEngine:
         candidate: FormalRelationFact,
         anchor_facts: list[FormalRelationFact],
     ) -> set[str]:
+        if _incompatible_payment_phases([candidate, *anchor_facts]):
+            return set()
         candidate_evidence = set(candidate.evidence_keys)
         evidence_kinds: set[str] = set()
         for anchor_fact in anchor_facts:
@@ -1016,6 +1068,8 @@ class WorkbenchFreeMatchingEngine:
             return False
         if any(_accounts_conflict(left, right) for left in facts for right in facts):
             return False
+        if _incompatible_payment_phases(facts):
+            return False
         if any(fact.amount_minor <= 0 for fact in facts):
             return False
         totals: dict[str, int] = {}
@@ -1038,6 +1092,8 @@ class WorkbenchFreeMatchingEngine:
         edges: list[_Edge],
     ) -> bool:
         facts = [*anchor_facts, *new_facts]
+        if _incompatible_payment_phases(facts):
+            return False
         if any(_accounts_conflict(left, right) for left in anchor_facts for right in new_facts):
             return False
         if _has_etc_source(anchor_facts) and all(fact.row_type == "bank" for fact in new_facts):
@@ -1201,6 +1257,35 @@ def _accounts_conflict(left: FormalRelationFact, right: FormalRelationFact) -> b
     )
 
 
+def _incompatible_payment_phases(facts: Iterable[FormalRelationFact]) -> bool:
+    phases: dict[str, set[str]] = {"oa": set(), "bank": set()}
+    for fact in facts:
+        if fact.row_type in phases:
+            phases[fact.row_type].add(fact.payment_phase)
+    return any(
+        left and right and "" not in right and bool((left - {""}) - right)
+        for left, right in ((phases["oa"], phases["bank"]), (phases["bank"], phases["oa"]))
+    )
+
+
+def _evidenced_pairs(facts: Iterable[FormalRelationFact]) -> dict[MemberKey, MemberKey]:
+    by_type: dict[str, list[PaymentEvidence]] = {"oa": [], "bank": []}
+    for fact in facts:
+        if fact.row_type not in by_type:
+            continue
+        evidence = dict(fact.evidence_keys)
+        by_type[fact.row_type].append(PaymentEvidence(
+            identity=fact.canonical_object_identity, amount=Decimal(fact.amount_minor) / 100,
+            payee=evidence.get("payment_request_payee") or evidence.get("counterparty", ""),
+            account=fact.counterparty_account, currency=fact.currency, direction=fact.direction,
+            day=fact.fact_date, phase=fact.payment_phase,
+        ))
+    result = evidenced_payment_pairs(by_type["oa"], by_type["bank"])
+    if result.resource_limited:
+        raise _ResourceLimited
+    return {("oa", oid): ("bank", bid) for oid, bid in result.pairs.items()}
+
+
 def _member_sort_key(member_key: MemberKey) -> tuple[int, str]:
     return ROW_TYPE_ORDER[member_key[0]], member_key[1]
 
@@ -1233,10 +1318,11 @@ def _fact_batch_hash(
                 ],
                 "source_version": fact.source_version,
                 "counterparty_account": fact.counterparty_account,
+                "payment_phase": fact.payment_phase,
             }
             for fact in facts
         ],
-        "active": [(anchor.case_id, anchor.member_keys) for anchor in active_relations],
+        "active": [(anchor.case_id, anchor.member_keys, anchor.relation_mode) for anchor in active_relations],
         "withdrawals": sorted(withdrawals),
         "versions": versions,
     }

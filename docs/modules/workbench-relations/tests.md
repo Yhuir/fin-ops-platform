@@ -148,3 +148,7 @@ cd web && npm test -- --run \
 - 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。
 
 - 进行中 OA 的常规窗口读取与跨月来源补查必须生成完全相同的事实。真实 PostgreSQL 用例同时携带 `workflow_no`、`project_id` 和空币种，验证两个入口共享字段投影，防止同一 OA 被误判为冲突并回滚整个月份。
+
+## 2026-09-20 逐笔付款回归
+
+`test_workbench_free_matching_engine.py` 覆盖两笔等额分期的自由匹配、后到 OA/银行扩展、输入置换、重放、撤回、歧义、账号冲突与特殊关系隔离；`test_workbench_formal_relation_repository.py` 覆盖原始账号/阶段映射。`test_workbench_query_postgres_integration.py` 用一次性 PostgreSQL 验证进行中 OA 补入原 case、失败回滚、并发仅一次版本/历史写、full/summary 同行与跨月 dirty scope。

@@ -1,18 +1,127 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from dataclasses import dataclass
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_attachment_parent_oa_id,
     oa_row_source_alias_map,
 )
-
+from fin_ops_platform.services.workbench_text_normalization import normalize_match_text
 
 MAX_BANK_SUM_ROWS = 6
 MAX_BANK_SUM_STATES = 20000
 AMBIGUOUS_SUBSET_MATCH: tuple[str, ...] = ("__ambiguous__",)
+
+
+def payment_phase(value: object) -> str:
+    """Only unambiguous descriptions of this payment supply phase evidence."""
+    text = str(value or "")
+    matches = list(re.finditer(r"预付款?|首付款?|尾款", text))
+    if any(re.search(r"(?:未|不|无|待|非)[^，。；,;]{0,4}$", text[:m.start()]) for m in matches):
+        return ""
+    phases = {"final" if m.group() == "尾款" else "advance" for m in matches}
+    return next(iter(phases)) if len(phases) == 1 else ""
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentEvidence:
+    identity: str
+    amount: Decimal
+    payee: str = ""
+    account: str = ""
+    currency: str = "CNY"
+    direction: str = "expenditure"
+    day: date | None = None
+    phase: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentPairing:
+    pairs: dict[str, str]
+    resource_limited: bool = False
+
+
+def payment_conflicts(left: PaymentEvidence, right: PaymentEvidence) -> bool:
+    return any(a and b and a != b for a, b in (
+        (left.currency, right.currency), (left.direction, right.direction),
+        (left.payee, right.payee), (left.account, right.account), (left.phase, right.phase),
+    ))
+
+
+def evidenced_payment_pairs(
+    oa: list[PaymentEvidence], banks: list[PaymentEvidence],
+) -> PaymentPairing:
+    """Mutually unique business-evidence choices; no ordering or nearest-date guesses."""
+    days: dict[tuple[Decimal, str, date], list[PaymentEvidence]] = {}
+    phases: dict[tuple[Decimal, str, str], list[PaymentEvidence]] = {}
+    for bank in banks:
+        if bank.amount > 0 and bank.payee and bank.day is not None:
+            days.setdefault((bank.amount, bank.payee, bank.day), []).append(bank)
+            if bank.phase:
+                phases.setdefault((bank.amount, bank.payee, bank.phase), []).append(bank)
+    candidates: list[tuple[str, str, tuple[bool, bool]]] = []
+    inspected = 0
+    for item in oa:
+        if item.day is None:
+            continue
+        same_day_banks = days.get((item.amount, item.payee, item.day), ())
+        same_phase_banks = phases.get((item.amount, item.payee, item.phase), ())
+        inspected += len(same_day_banks) + len(same_phase_banks)
+        if inspected > MAX_BANK_SUM_STATES:
+            return PaymentPairing({}, resource_limited=True)
+        eligible = {b.identity: b for b in [*same_day_banks, *same_phase_banks]}
+        for bank in eligible.values():
+            if payment_conflicts(item, bank) or item.day is None or bank.day is None:
+                continue
+            same_day = item.day == bank.day
+            same_phase = bool(item.phase and item.phase == bank.phase)
+            if not (same_day or same_phase and abs((item.day - bank.day).days) <= 30):
+                continue
+            candidates.append((item.identity, bank.identity, (same_phase, same_day)))
+    best_oa: dict[str, tuple[bool, bool]] = {}
+    best_bank: dict[str, tuple[bool, bool]] = {}
+    for oid, bid, rank in candidates:
+        best_oa[oid] = max(best_oa.get(oid, rank), rank)
+        best_bank[bid] = max(best_bank.get(bid, rank), rank)
+    oa_counts = Counter(oid for oid, _bid, rank in candidates if rank == best_oa[oid])
+    bank_counts = Counter(bid for _oid, bid, rank in candidates if rank == best_bank[bid])
+    return PaymentPairing({
+        oid: bid for oid, bid, rank in candidates
+        if rank == best_oa[oid] == best_bank[bid] and oa_counts[oid] == bank_counts[bid] == 1
+    })
+
+
+def row_payment_evidence(row: dict[str, Any]) -> PaymentEvidence:
+    """Adapt canonical Workbench rows, also used by Cost's relation display."""
+    is_oa = row.get("type") == "oa"
+    detail = row.get("detail_fields") or {}
+    day_value = row.get("application_date") if is_oa else detail.get("txn_date") or row.get("trade_time")
+    day = date.fromisoformat(str(day_value)[:10]) if day_value else None
+    currency = str(row.get("currency") or "CNY").upper()
+    if currency in {"RMB", "人民币", "人民币元", "元"}:
+        currency = "CNY"
+    direction = str(row.get("txn_direction") or "")
+    if is_oa:
+        apply_type = str(row.get("apply_type") or "")
+        direction = "income" if "收" in apply_type and "付" not in apply_type else "expenditure"
+    elif direction in {"out", "outflow", "expenditure", "debit", "expense", "支出", "付款"}:
+        direction = "expenditure"
+    elif direction in {"in", "inflow", "income", "credit", "收入", "收款"}:
+        direction = "income"
+    amount = (WorkbenchRelationAlignmentService._money(row.get("amount")) if is_oa
+              else WorkbenchRelationAlignmentService._bank_amount(row))
+    return PaymentEvidence(
+        identity=row["id"], amount=amount if amount is not None else Decimal(0),
+        payee=normalize_match_text(row.get("counterparty_name")),
+        account=normalize_match_text(detail.get("收款账号") if is_oa else detail.get("counterparty_account_no") or detail.get("counterparty_account")),
+        currency=currency, direction=direction, day=day,
+        phase=payment_phase(row.get("reason") if is_oa else row.get("remark")),
+    )
 
 
 class WorkbenchRelationAlignmentService:
@@ -50,17 +159,39 @@ class WorkbenchRelationAlignmentService:
 
         oa_amounts = {self._row_id(row): self._money(row.get("amount")) for row in oa_rows}
         bank_amounts = {self._row_id(row): self._bank_amount(row) for row in bank_rows}
+        oa_evidence = {row["id"]: row_payment_evidence(row) for row in oa_rows}
+        bank_evidence = {row["id"]: row_payment_evidence(row) for row in bank_rows}
+        for bank_row in bank_rows:
+            source_oa_id = self.bank_source_oa_id(bank_row, oa_aliases)
+            if source_oa_id:
+                link = self._link_for_oa(links_by_oa, source_oa_id)
+                link["bank_row_ids"].append(bank_row["id"])
+                self._append_evidence(link, "bank_source_oa")
+                used_bank_ids.add(bank_row["id"])
+        pairing = evidenced_payment_pairs(
+            [e for oid, e in oa_evidence.items() if not links_by_oa.get(oid, {}).get("bank_row_ids")],
+            [e for bid, e in bank_evidence.items() if bid not in used_bank_ids],
+        )
+        if pairing.resource_limited:
+            diagnostics.append({"code": "payment_evidence_resource_limited"})
+        for oa_id, bank_id in pairing.pairs.items():
+            link = self._link_for_oa(links_by_oa, oa_id)
+            link["bank_row_ids"].append(bank_id)
+            self._append_evidence(link, "payment_business_evidence")
+            used_bank_ids.add(bank_id)
 
-        bank_amount_counts = Counter(bank_amounts.values())
+        bank_amount_counts = Counter(amount for bid, amount in bank_amounts.items() if bid not in used_bank_ids)
         for bank_row in bank_rows:
             bank_id = self._row_id(bank_row)
             bank_amount = bank_amounts.get(bank_id)
-            if not bank_id or bank_amount is None:
+            if not bank_id or bank_amount is None or bank_id in used_bank_ids:
                 continue
             candidate_oa_ids = [
                 oa_id
                 for oa_id in oa_ids
                 if oa_amounts.get(oa_id) is not None and oa_amounts.get(oa_id) == bank_amount
+                and not links_by_oa.get(oa_id, {}).get("bank_row_ids")
+                and not payment_conflicts(oa_evidence[oa_id], bank_evidence[bank_id])
             ]
             if len(candidate_oa_ids) == 1 and bank_amount_counts[bank_amount] == 1:
                 link = self._link_for_oa(links_by_oa, candidate_oa_ids[0])
@@ -101,6 +232,8 @@ class WorkbenchRelationAlignmentService:
             bank_ids = list(matches[0])
             if any(subset_usage[bank_id] > 1 for bank_id in bank_ids):
                 continue
+            if any(payment_conflicts(oa_evidence[oa_id], bank_evidence[bid]) for bid in bank_ids):
+                continue
             link = self._link_for_oa(links_by_oa, oa_id)
             link["bank_row_ids"].extend(bank_ids)
             self._append_evidence(link, "unique_bank_sum")
@@ -133,6 +266,17 @@ class WorkbenchRelationAlignmentService:
     @staticmethod
     def _row_id(row: dict[str, Any]) -> str:
         return str(row.get("id") or row.get("row_id") or "").strip()
+
+    @classmethod
+    def bank_source_oa_id(cls, row: dict[str, Any], oa_aliases: dict[str, str]) -> str:
+        # Bank top-level source_oa_* is also populated by display alignment.
+        # Only persisted payload references can establish an explicit binding.
+        detail = row.get("detail_fields") or {}
+        for key in ("source_oa_row_id", "oa_row_id", "derived_from_oa_id", "source_workbench_row_id"):
+            value = oa_attachment_parent_oa_id(detail.get(key))
+            if value in oa_aliases:
+                return oa_aliases[value]
+        return ""
 
     @classmethod
     def _source_oa_id(cls, row: dict[str, Any], oa_aliases: dict[str, str]) -> str:

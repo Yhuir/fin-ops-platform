@@ -400,7 +400,11 @@ class PostgresWorkbenchPageHydrationRepository:
                         'workflow_status', coalesce(nullif(oa.workflow_status, ''), 'completed'),
                         'applicant', oa.applicant,
                         'apply_time', __COMPLETED_OA_APPLICATION_TIME_SQL__,
-                        'application_date', oa.application_date::text,
+                        'application_date', substring((__COMPLETED_OA_APPLICATION_TIME_SQL__) from 1 for 10),
+                        'currency', coalesce(oa.currency, 'CNY'),
+                        'detail_fields', jsonb_strip_nulls(jsonb_build_object(
+                            '收款账号', oa.normalized_payload#>>'{detail_fields,收款账号}'
+                        )),
                         'completed_at', coalesce(
                             oa.normalized_payload->>'completed_at',
                             oa.normalized_payload#>>'{detail_fields,审批完成时间}',
@@ -498,6 +502,10 @@ class PostgresWorkbenchPageHydrationRepository:
                         ),
                         'apply_time', __PENDING_OA_APPLICATION_TIME_SQL__,
                         'application_date', __PENDING_OA_APPLICATION_DATE_SQL__::text,
+                        'currency', coalesce(admission.source_payload->>'currency', 'CNY'),
+                        'detail_fields', jsonb_strip_nulls(jsonb_build_object(
+                            '收款账号', admission.source_payload#>>'{detail_fields,收款账号}'
+                        )),
                         'date', __PENDING_OA_APPLICATION_DATE_SQL__::text,
                         'project_name', coalesce(
                             admission.project_name_display,
@@ -605,6 +613,15 @@ class PostgresWorkbenchPageHydrationRepository:
                         'source_kind', 'bank_transaction',
                         'status', 'unpaired',
                         'trade_time', coalesce(bank.trade_time, bank.txn_date::timestamptz)::text,
+                        'detail_fields', jsonb_strip_nulls(jsonb_build_object(
+                            'txn_date', bank.txn_date::text,
+                            'counterparty_account_no', coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload)->>'counterparty_account_no',
+                            'counterparty_account', coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload)->>'counterparty_account',
+                            'source_oa_row_id', coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload)->>'source_oa_row_id',
+                            'oa_row_id', coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload)->>'oa_row_id',
+                            'derived_from_oa_id', coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload)->>'derived_from_oa_id',
+                            'source_workbench_row_id', coalesce(bank.raw_payload->'normalized_payload', bank.raw_payload)->>'source_workbench_row_id'
+                        )),
                         'txn_direction', bank.txn_direction,
                         'amount', bank.amount::text,
                         'currency', coalesce(nullif(bank.currency, ''), 'CNY'),

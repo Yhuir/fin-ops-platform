@@ -170,9 +170,93 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.raw_connection.close()
         truncate_test_database(self.database_url)
 
-    def test_late_invoice_auto_assignment_is_atomic_cross_month_and_idempotent(self):
+    def test_installment_late_pending_oa_extends_original_case_and_aligns_both_reads(self):
+        from concurrent.futures import ThreadPoolExecutor
+
         from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import PostgresWorkbenchFormalRelationFactRepository
-        from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import PostgresWorkbenchMatchingQueueRepository
+        from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
+        from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
+        from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
+
+        payee = '逐笔付款集成测试公司'
+        payload = {'id': 'installment-pre', 'amount': '8000', 'apply_type': '支付申请',
+                   'counterparty_name': payee, 'reason': '合同16000元，预付款50%', 'workflow_status': 'completed',
+                   'detail_fields': {'申请日期': '2026-08-14', '收款账号': '3333'}}
+        self.raw_connection.execute("""insert into app.oa_applications
+            (oa_source_id, form_id, form_type, row_id, status, workflow_status, applicant,
+             application_date, scope_month, amount, normalized_payload, raw_payload)
+            values ('installment-pre', 'payment_request', '付款申请', 'installment-pre', 'active',
+                    'completed', '测试申请人', '2026-08-14', '2026-08-01', 8000, %s::jsonb, '{}'::jsonb)""",
+            (json.dumps(payload),))
+        pending = {**payload, 'id': 'installment-final', 'reason': '50%尾款',
+                   'workflow_status': 'in_progress', 'detail_fields': {'申请日期': '2026-08-24', '收款账号': '3333'}}
+        self.raw_connection.execute("""insert into app.oa_pending_payment_admissions
+            (tenant_id, scope_key, oa_id, workflow_status, applicant, amount, source_signature, source_payload, raw_payload)
+            values ('default', '2026-08', 'installment-final', 'in_progress', '测试申请人', 8000,
+                    'installment-pending-v1', %s::jsonb, '{}'::jsonb)""", (json.dumps(pending),))
+        for suffix, day, remark in [('pre', '14', '货款'), ('final', '24', '货款（50%尾款）')]:
+            self.raw_connection.execute("""insert into app.bank_transactions
+                (legacy_mongo_id, account_no, txn_direction, counterparty_name_raw, amount,
+                 signed_amount, txn_date, txn_month, trade_time, remark, raw_payload, status)
+                values (%s, 'test-installment-account', 'outflow', %s, 8000, -8000,
+                        %s::date, '2026-08-01', %s::timestamptz, %s, '{"counterparty_account_no":"3333"}'::jsonb, 'active')""",
+                (f'installment-bank-{suffix}', payee, f'2026-08-{day}', f'2026-08-{day} 11:00:00+08', remark))
+        self.raw_connection.execute("""insert into app.invoices
+            (legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month, seller_name,
+             amount, signed_amount, total_with_tax, status, workbench_visibility, raw_payload)
+            values ('installment-invoice', 'input', 'TEST-INSTALLMENT-16000', '2026-09-02', '2026-09-01',
+                    %s, 16000, 16000, 16000, 'active', 'visible', '{}'::jsonb)""", (payee,))
+        self.raw_connection.execute("""insert into app.workbench_pair_relations
+            (case_id, relation_mode, status, row_ids, row_types, special_metadata, raw_payload)
+            values ('CASE-INSTALLMENT', 'manual_confirmed', 'active',
+                    array['installment-pre','installment-bank-pre','installment-bank-final','installment-invoice'],
+                    array['oa','bank','bank','invoice'], '{"requires_oa":true,"requires_invoice":true}'::jsonb, '{}'::jsonb)""")
+        orchestrator = WorkbenchMatchingOrchestrator(
+            fact_repository=PostgresWorkbenchFormalRelationFactRepository(self.raw_connection), matcher=WorkbenchFreeMatchingEngine(),
+            relation_uow=WorkbenchWriteUnitOfWork(connection=self.raw_connection,
+                repository_factory=WorkbenchMatchingWorkerFactory._workbench_uow_repository_factory,
+                idempotency_store=PostgresWorkbenchIdempotencyRepository(self.raw_connection)),
+            bank_flow_rule_tag_rules_payload=lambda: {'rules': []})
+        before = self.raw_connection.fetch_one("select version, row_ids from app.workbench_pair_relations where case_id='CASE-INSTALLMENT'")
+        with patch.object(PostgresWorkbenchRelationRepository, '_append_workbench_pair_relation_history', side_effect=RuntimeError('audit unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'audit unavailable'):
+                orchestrator.run(changed_scope_months=['2026-08'], reason='test', request_id='installment-rollback')
+        self.assertEqual(before, self.raw_connection.fetch_one("select version, row_ids from app.workbench_pair_relations where case_id='CASE-INSTALLMENT'"))
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda request: orchestrator.run(
+                changed_scope_months=['2026-08'], reason='test', request_id=request), ['installment-a', 'installment-b']))
+        # Concurrent callers may receive the same committed idempotent response;
+        # persisted version/history below prove there was exactly one mutation.
+        self.assertTrue(any(r['extended_relation_count'] == 1 for r in results))
+        after = self.raw_connection.fetch_one("select version, row_ids from app.workbench_pair_relations where case_id='CASE-INSTALLMENT'")
+        self.assertEqual(set(after['row_ids']), {*before['row_ids'], 'installment-final'})
+        self.assertEqual(after['version'], before['version'] + 1)
+        self.assertEqual(self.raw_connection.fetch_one("select count(*) n from app.workbench_pair_relation_history where case_id='CASE-INSTALLMENT'")['n'], 1)
+        replay = orchestrator.run(changed_scope_months=['2026-08'], reason='test', request_id='installment-repeat')
+        self.assertEqual(replay['extended_relation_count'], 0)
+        self.assertEqual(self.raw_connection.fetch_one("select workflow_status from app.oa_pending_payment_admissions where oa_id='installment-final'")['workflow_status'], 'in_progress')
+        for detail_level in ('full', 'summary'):
+            page = self.repository.get_workbench_groups_page(scope_key='all', zone='paired', page_size=100, detail_level=detail_level)
+            matched = next(g for g in page['groups'] if g['case_id'] == 'CASE-INSTALLMENT')
+            self.assertEqual({tuple(s['oa_row_ids']): s['bank_row_ids'] for s in matched['display_subgroups']}, {
+                ('installment-pre',): ['installment-bank-pre'], ('installment-final',): ['installment-bank-final']})
+            self.assertEqual(len(matched['invoice_rows']), 1)
+            self.assertTrue(all(s['resolved'] for s in matched['display_subgroups']))
+        self.raw_connection.execute("""update app.bank_transactions
+            set raw_payload='{"counterparty_account_no":"4444"}'::jsonb
+            where legacy_mongo_id='installment-bank-final'""")
+        for detail_level in ('full', 'summary'):
+            page = self.repository.get_workbench_groups_page(scope_key='all', zone='paired', page_size=100, detail_level=detail_level)
+            matched = next(g for g in page['groups'] if g['case_id'] == 'CASE-INSTALLMENT')
+            self.assertFalse(any(s['resolved'] and 'installment-bank-final' in s['bank_row_ids'] for s in matched['display_subgroups']))
+
+    def test_late_invoice_auto_assignment_is_atomic_cross_month_and_idempotent(self):
+        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+            PostgresWorkbenchFormalRelationFactRepository,
+        )
+        from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+            PostgresWorkbenchMatchingQueueRepository,
+        )
         from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
         from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
         from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
@@ -213,6 +297,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         row = self.raw_connection.fetch_one("select source_links from app.invoices where legacy_mongo_id='invoice-late-0'")
         self.assertEqual(len(row['source_links']), 1)
         from concurrent.futures import ThreadPoolExecutor
+
         from fin_ops_platform.tools.workbench_matching_scope_retry_ops import preview_scope
         preview = preview_scope(self.raw_connection, '2026-07')
         self.assertEqual(preview['existing_group_assignments']['planned_invoice_count'], 1)
@@ -232,15 +317,15 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         # The automatic source write must not enqueue its own loop.
         self.assertEqual(self.raw_connection.fetch_one('select count(*) n from job.workbench_matching_dirty_scopes')['n'], 0)
         with self.raw_connection.transaction() as transaction:
-            scopes = PostgresWorkbenchMatchingQueueRepository(transaction).mark_relation_invoice_assignment_dirty(
+            scopes = PostgresWorkbenchMatchingQueueRepository(transaction).mark_relation_matching_dirty(
                 case_ids=[], oa_row_ids=['oa-late-34'], reason='supporting_document_deleted')
-        self.assertEqual(scopes, ['2026-07'])
-        job = self.raw_connection.fetch_one('select status, raw_payload from job.workbench_matching_dirty_scopes')
+        self.assertEqual(scopes, ['2026-05', '2026-06', '2026-07'])
+        job = self.raw_connection.fetch_one("select status, raw_payload from job.workbench_matching_dirty_scopes where scope_month='2026-07-01'")
         self.assertEqual(job['status'], 'dirty')
         self.assertTrue(job['raw_payload']['expedite'])
         self.raw_connection.execute("update job.workbench_matching_dirty_scopes set status='completed', request_id='late-complete'")
         queue = PostgresWorkbenchMatchingQueueRepository(self.raw_connection)
-        scope = queue.list_workbench_matching_dirty_scopes(tenant_id='default')[0]
+        scope = next(s for s in queue.list_workbench_matching_dirty_scopes(tenant_id='default') if str(s['scope_month'])[:7] == '2026-07')
         self.assertTrue(queue.retry_completed_workbench_matching_scope(
             tenant_id='default', scope_month='2026-07', reason='historical-rescan',
             expected_attempt_count=scope['attempt_count'], expected_request_id='late-complete',
@@ -249,7 +334,9 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
 
 
     def test_late_invoice_new_formal_relation_and_assignment_commit_together(self):
-        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import PostgresWorkbenchFormalRelationFactRepository
+        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+            PostgresWorkbenchFormalRelationFactRepository,
+        )
         from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
         from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
         from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator

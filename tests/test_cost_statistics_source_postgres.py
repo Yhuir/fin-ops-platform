@@ -134,15 +134,16 @@ class CostSourcePostgresTests(unittest.TestCase):
             self.save(payload)
         self.assertEqual(self.connection.fetch_one('select count(*) as n from app.cost_statistics_manual_allocations')['n'], 0)
 
-    def test_formal_history_display_is_current_and_independent_of_cost_save(self):
+    def test_unbalanced_history_is_shared_and_independent_of_cost_save(self):
         current = {"case_id":"cost-source-case", "row_ids":["oa-a","oa-b","bank-1","bank-2"], "row_types":["oa","oa","bank","bank"]}
         prior = [{"case_id":"old-a", "row_ids":["oa-a","bank-2"], "row_types":["oa","bank"]},
                  {"case_id":"old-b", "row_ids":["oa-b","bank-1"], "row_types":["oa","bank"]}]
         history = {"operation_type":"confirm_link", "after_relations":[current], "before_relations":prior}
         self.connection.execute("insert into app.workbench_pair_relation_history(case_id,event_type,raw_payload) values (%s,'confirm_link',%s::jsonb)", ("cost-source-case",json.dumps(history)))
         task = self.service.get_task("cost-source-case",can_save=True)
-        expected = [{"unit_ids":["oa:oa-a"],"bank_transaction_ids":["bank-2"],"sources_excluded":False},
-                    {"unit_ids":["oa:oa-b"],"bank_transaction_ids":["bank-1"],"sources_excluded":False}]
+        # A historical merge is not proof that 600 maps to 300 or 400 to 700.
+        expected = [{"unit_ids":["oa:oa-a", "oa:oa-b"],
+                     "bank_transaction_ids":["bank-1", "bank-2"],"sources_excluded":False}]
         self.assertEqual(task["relation_display_groups"],expected)
         self.assertIsNone(task["source_allocations"])
         self.assertEqual(self.save(self.payload())["relation_display_groups"],expected)

@@ -766,3 +766,7 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
 - 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
 - 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。
+
+## 2026-09-20 逐笔展示回归
+
+`test_workbench_display_subgroups.py` 覆盖历史错误组重排、重复同日歧义、明确部分付款、派生来源不冒充绑定、金额争用与资源上限。`groupDisplayModel.test.ts` 验证两个 8000 元 OA/银行同行与 16000 元共享票只出现一次。既有 RelationGroupGrid、关系确认/撤回、发票补录、ETC、权限浏览器测试继续保护交互。

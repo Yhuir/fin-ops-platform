@@ -20,21 +20,39 @@ class PostgresWorkbenchMatchingQueueRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def mark_relation_invoice_assignment_dirty(
+    def mark_relation_matching_dirty(
         self, *, case_ids: list[str], oa_row_ids: list[str], reason: str,
     ) -> list[str]:
-        """Schedule full relation hydration using its actual invoice months, in the writer transaction."""
+        """Schedule relation/assignment matching from all member months in the writer transaction."""
         rows = self._connection.fetch_all(
             """
-            select distinct to_char(invoice.invoice_date, 'YYYY-MM') as scope_month
+            with members as (
+            select distinct member.row_id, member.row_type
             from app.workbench_pair_relations relation
             cross join lateral unnest(relation.row_ids, relation.row_types) member(row_id, row_type)
-            join app.invoices invoice
-              on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
-             and member.row_type = 'invoice'
             where relation.status = 'active' and relation.relation_mode = 'manual_confirmed'
               and (relation.case_id = any(%s::text[]) or relation.row_ids && %s::text[])
-              and invoice.status <> 'deleted' and invoice.invoice_date is not null
+            ), dates as (
+                select invoice.invoice_date as fact_date from members
+                join app.invoices invoice on members.row_type = 'invoice'
+                  and coalesce(invoice.legacy_mongo_id, invoice.id::text) = members.row_id
+                where invoice.status <> 'deleted'
+                union all
+                select coalesce(bank.txn_date, bank.trade_time::date, bank.pay_receive_time::date)
+                from members join app.bank_transactions bank on members.row_type = 'bank'
+                  and coalesce(bank.legacy_mongo_id, bank.id::text) = members.row_id
+                where bank.status <> 'deleted'
+                union all
+                select coalesce(oa.application_date, oa.scope_month)
+                from members join app.oa_applications oa on members.row_type = 'oa' and oa.row_id = members.row_id
+                where oa.status <> 'deleted'
+                union all
+                select (admission.scope_key || '-01')::date
+                from members join app.oa_pending_payment_admissions admission
+                  on members.row_type = 'oa' and admission.oa_id = members.row_id
+                where admission.tenant_id = 'default' and admission.workflow_status = 'in_progress'
+            )
+            select distinct to_char(fact_date, 'YYYY-MM') as scope_month from dates where fact_date is not null
             """,
             (case_ids, oa_row_ids),
         )

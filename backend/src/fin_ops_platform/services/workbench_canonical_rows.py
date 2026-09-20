@@ -878,6 +878,7 @@ class WorkbenchCanonicalRowsBuilder:
         payment_account_label = self._bank_account_resolver.resolve_label(account_no, account_name)
         detail_fields = row_payload(row, "raw_payload")
         detail_fields = detail_fields if isinstance(detail_fields, dict) else {}
+        detail_fields = {**detail_fields, "txn_date": _date_text(row.get("txn_date"))}
         return {
             "id": row_id,
             "type": "bank",

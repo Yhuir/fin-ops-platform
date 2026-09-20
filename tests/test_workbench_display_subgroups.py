@@ -26,6 +26,43 @@ def event(after, before):
     return {"operation_type": "confirm_link", "after_relations": [after], "before_relations": before}
 
 
+def installment_rows():
+    return [
+        {**row("oa", "prepay", 8000), "application_date": "2026-08-14", "reason": "合同16000元，预付款50%", "counterparty_name": "测试设备有限公司"},
+        {**row("oa", "final", 8000), "application_date": "2026-08-24", "reason": "设备配件，50%尾款", "counterparty_name": "测试设备有限公司"},
+        {**row("bank", "bank-prepay", 8000), "trade_time": "2026-08-14 10:17:33", "remark": "货款", "counterparty_name": "测试设备有限公司"},
+        {**row("bank", "bank-final", 8000), "trade_time": "2026-08-24 11:25:34", "remark": "货款（50%尾款）", "counterparty_name": "测试设备有限公司"},
+        row("invoice", "shared-invoice", 16000),
+    ]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_installments_realign_overallocated_history_and_keep_shared_invoice(reverse):
+    rows = installment_rows()
+    old = relation("old", [rows[0], *rows[2:]])
+    if reverse:
+        rows.reverse()
+    g = group(rows)
+    before = deepcopy(g)
+    history = [event(relation("merged", rows), [old])]
+    apply_display_subgroups([g], history)
+    assert {tuple(part["oa_row_ids"]): part["bank_row_ids"] for part in g.pop("display_subgroups")} == {
+        ("prepay",): ["bank-prepay"], ("final",): ["bank-final"],
+    }
+    assert g == before
+
+
+def test_installments_without_history_use_the_same_alignment():
+    rows = installment_rows()
+    result = WorkbenchRelationAlignmentService().align_relation(
+        rows_by_id={r["id"]: r for r in rows}, relation=relation("c", rows),
+    )
+    assert {r["oa_row_id"]: r["bank_row_ids"] for r in result["links"]} == {
+        "prepay": ["bank-prepay"], "final": ["bank-final"],
+    }
+    assert result["unresolved_row_ids"] == []
+
+
 def test_repeated_amounts_follow_historical_subgroups_without_changing_facts():
     oa = [row("oa", f"o{i}", 199) for i in range(3)]
     banks = [row("bank", f"b{i}", amount) for i, amount in enumerate([164, 35] * 3)]
@@ -69,7 +106,8 @@ def test_ambiguous_many_to_many_stays_shared_and_batch_cannot_override_alignment
     g["bank_batches"] = [{"member_ids": ["x", "y"]}]
     history = [event(relation("merged", rows), [relation("a", [rows[0], rows[2]]), relation("b", [rows[1], rows[3]])])]
     apply_display_subgroups([g], history)
-    assert len(g["display_subgroups"]) == 2
+    # Historical membership alone does not prove two partial-payment owners.
+    assert g["display_subgroups"] == [{"resolved": False, "oa_row_ids": ["a", "b"], "bank_row_ids": ["x", "y"]}]
 
 
 def test_typed_identity_does_not_drop_bank_with_same_id_as_oa():
@@ -107,3 +145,61 @@ def test_empty_and_expense_item_groups_are_not_repartitioned():
     apply_display_subgroups([], [])
     apply_display_subgroups([g], [])
     assert g == original
+
+
+@pytest.mark.parametrize("value,expected", [("预付款50%", "advance"), ("50%尾款", "final"), ("预付款50%，尾款50%", ""), ("尚未支付尾款", ""), ("货款", "")])
+def test_only_unambiguous_payment_phase_is_evidence(value, expected):
+    from fin_ops_platform.services.workbench_relation_alignment_service import payment_phase
+    assert payment_phase(value) == expected
+
+
+def test_duplicate_same_day_without_phase_stays_unresolved():
+    rows = installment_rows()[:4]
+    for r in rows:
+        r.update(application_date="2026-08-24", trade_time="2026-08-24 11:25:34", reason="货款", remark="货款")
+    g = group(rows)
+    apply_display_subgroups([g], [])
+    assert g["display_subgroups"] == [{"resolved": False, "oa_row_ids": ["prepay", "final"], "bank_row_ids": ["bank-prepay", "bank-final"]}]
+
+
+def test_balanced_but_contradicted_historical_pair_is_rechecked():
+    rows = installment_rows()
+    history = [event(relation("merged", rows), [relation("wrong", [rows[0], rows[3]])])]
+    g = group(rows)
+    apply_display_subgroups([g], history)
+    assert g["display_subgroups"] == [
+        {"resolved": True, "oa_row_ids": ["prepay"], "bank_row_ids": ["bank-prepay"]},
+        {"resolved": True, "oa_row_ids": ["final"], "bank_row_ids": ["bank-final"]},
+    ]
+
+
+
+def test_explicit_partial_bank_source_is_not_replaced_by_equal_amount_guess():
+    rows = [row("oa", "a", 100), row("oa", "b", 40), {**row("bank", "x", 40), "detail_fields": {"source_oa_row_id": "a"}}]
+    g = group(rows)
+    apply_display_subgroups([g], [])
+    assert g["display_subgroups"] == [
+        {"resolved": True, "oa_row_ids": ["a"], "bank_row_ids": ["x"]},
+        {"resolved": False, "oa_row_ids": ["b"], "bank_row_ids": []},
+    ]
+
+
+def test_derived_display_source_is_not_promoted_to_explicit_bank_binding():
+    rows = installment_rows()
+    for bank in rows[2:4]:
+        bank["source_oa_id"] = "prepay"
+        bank["source_oa_row_id"] = "prepay"
+    g = group(rows)
+    apply_display_subgroups([g], [])
+    assert [s["bank_row_ids"] for s in g["display_subgroups"]] == [["bank-prepay"], ["bank-final"]]
+
+
+def test_payment_evidence_search_is_bounded_and_never_returns_partial_choices():
+    from datetime import date
+    from decimal import Decimal
+
+    from fin_ops_platform.services.workbench_relation_alignment_service import PaymentEvidence, evidenced_payment_pairs
+    oa = [PaymentEvidence(str(i), Decimal(1), payee="相同收款方", day=date(2026, 8, 1)) for i in range(150)]
+    banks = [PaymentEvidence(str(i), Decimal(1), payee="相同收款方", day=date(2026, 8, 1)) for i in range(150)]
+    result = evidenced_payment_pairs(oa, banks)
+    assert result.resource_limited and result.pairs == {}

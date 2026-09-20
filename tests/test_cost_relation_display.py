@@ -1,7 +1,10 @@
 from copy import deepcopy
 
 import pytest
-from fin_ops_platform.services.cost_statistics_canonical_repository import _attach_relation_display, _attach_source_relations
+from fin_ops_platform.services.cost_statistics_canonical_repository import (
+    _attach_relation_display,
+    _attach_source_relations,
+)
 from fin_ops_platform.services.cost_statistics_manual_allocation_service import _relation_display_groups
 from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
 
@@ -51,7 +54,10 @@ def test_itemized_oa_keeps_shared_parent_without_inventing_cost_splits():
 def test_formal_partitions_prefill_every_source_without_changing_task(amounts, parts):
     from decimal import Decimal
 
-    from fin_ops_platform.services.cost_statistics_source_allocation import suggest_source_allocations, validate_source_allocations
+    from fin_ops_platform.services.cost_statistics_source_allocation import (
+        suggest_source_allocations,
+        validate_source_allocations,
+    )
 
     from tests.test_cost_statistics_source_allocation import SourceSuggestionTests
     task = SourceSuggestionTests().amount_case(amounts, [a for part in parts for a in part])
@@ -113,3 +119,23 @@ def test_itemized_parent_does_not_imply_arbitrary_cost_split():
     for u in task['units']:
         u['oa_id'] = 'parent'
     assert suggest_source_allocations(task, [], [{'oa_row_ids':['parent'],'bank_row_ids':['0','1']}]) is None
+
+
+
+def test_installment_display_does_not_change_cost_source_history_or_facts():
+    from fin_ops_platform.services.cost_statistics_canonical_repository import _cost_oa_payload
+    from tests.test_workbench_display_subgroups import installment_rows
+    rows = installment_rows()
+    # Exercise the Cost projection instead of giving display a Workbench DTO.
+    rows[:2] = [{**_cost_oa_payload({**r, 'detail_fields': {'申请日期': r['application_date']}}, row_id=r['id']), 'type': 'oa'} for r in rows[:2]]
+    old = relation("old", [rows[0], *rows[2:]])
+    history = [event(relation("merged", rows), [old])]
+    cost = {"group_id": "merged", "row_ids": [r["id"] for r in rows], "row_types": [r["type"] for r in rows], "oa_rows": rows[:2], "bank_rows": rows[2:4]}
+    _attach_source_relations([cost], history)
+    before = deepcopy(cost)
+    _attach_relation_display(cost, history)
+    assert cost.pop("relation_display_groups") == [
+        {"resolved": True, "oa_row_ids": ["prepay"], "bank_row_ids": ["bank-prepay"]},
+        {"resolved": True, "oa_row_ids": ["final"], "bank_row_ids": ["bank-final"]},
+    ]
+    assert cost == before
