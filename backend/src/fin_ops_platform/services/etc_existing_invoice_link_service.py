@@ -4,7 +4,6 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
@@ -28,22 +27,28 @@ class EtcExistingInvoiceLinkService:
     def link_etc_invoices_to_existing_invoices(self, etc_invoices: list[Any]) -> list[str]:
         changed_months: set[str] = set()
         linked_invoices: list[Any] = []
-        for etc_invoice in list(etc_invoices or []):
-            result = self._import_service.upsert_etc_invoice(etc_invoice)
-            if not result.changed or result.invoice is None:
-                continue
-            invoice = result.invoice
-            linked_invoices.append(invoice)
-            for date_value in (
-                getattr(invoice, "invoice_date", None),
-                getattr(etc_invoice, "issue_date", None),
-                getattr(etc_invoice, "passage_start_date", None),
-                getattr(etc_invoice, "passage_end_date", None),
-            ):
-                if isinstance(date_value, str) and MONTH_RE.match(date_value[:7]):
-                    changed_months.add(date_value[:7])
-        if linked_invoices and self._persist_linked_invoices is not None:
-            self._persist_linked_invoices(linked_invoices)
+        results = []
+        try:
+            for etc_invoice in list(etc_invoices or []):
+                result = self._import_service.upsert_etc_invoice(etc_invoice)
+                results.append(result)
+                if not result.changed or result.invoice is None:
+                    continue
+                invoice = result.invoice
+                linked_invoices.append(invoice)
+                for date_value in (
+                    getattr(invoice, "invoice_date", None),
+                    getattr(etc_invoice, "issue_date", None),
+                    getattr(etc_invoice, "passage_start_date", None),
+                    getattr(etc_invoice, "passage_end_date", None),
+                ):
+                    if isinstance(date_value, str) and MONTH_RE.match(date_value[:7]):
+                        changed_months.add(date_value[:7])
+            if linked_invoices and self._persist_linked_invoices is not None:
+                self._persist_linked_invoices(linked_invoices)
+        except Exception:
+            self._import_service.restore_etc_invoice_metadata(results)
+            raise
         return sorted(changed_months)
 
     def _etc_invoices_from_import_result(self, result: Any) -> list[Any]:

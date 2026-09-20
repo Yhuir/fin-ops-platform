@@ -1155,3 +1155,23 @@ where session.session_id = %s
         and event.status in ('pending', 'processing', 'publishing', 'failed', 'dead_lettered')
   )
 """
+
+
+def load_etc_invoice_payload_repair_snapshot(connection: Any, invoice_ids: list[str]) -> list[dict[str, Any]]:
+    """An empty explicit scope discovers ETC-linked invoices without touching bank history."""
+    return connection.fetch_all(
+        """select coalesce(i.legacy_mongo_id, i.id::text) as invoice_id,
+                  i.invoice_no, i.tax_rate, i.raw_payload,
+                  e.raw_payload->'normalized_payload'->>'tax_rate' as etc_tax_rate,
+                  coalesce((select jsonb_agg(r.raw_payload order by r.row_no)
+                     from app.import_batch_rows r
+                     where r.linked_object_id = coalesce(i.legacy_mongo_id, i.id::text)
+                       and r.source_record_type = 'invoice'
+                       and r.legacy_batch_id = i.legacy_source_batch_id
+                       and r.decision in ('created', 'status_updated', 'duplicate_skipped')
+                  ), '[]'::jsonb) as import_rows
+           from app.invoices i
+           join app.etc_invoices e on e.legacy_mongo_id = i.etc_invoice_id or e.id::text = i.etc_invoice_id
+           where (%s::text[] = '{}'::text[] or i.legacy_mongo_id = any(%s::text[]) or i.id::text = any(%s::text[]))
+           order by i.id""", (invoice_ids, invoice_ids, invoice_ids),
+    )

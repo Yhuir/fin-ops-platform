@@ -1,15 +1,41 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+from collections import Counter, defaultdict
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fin_ops_platform.services.import_file_service import aggregate_invoice_line_rows
 
-
 FAILED_IMPORT_RECOVERY_ERROR_SIGNATURE = "background_jobs_idempotency_uidx"
+
+
+def build_etc_invoice_payload_repair_plan(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Restore only proven ETC-enriched tax-rate mirrors; never change formal facts."""
+    updates = []
+    unresolved = []
+    for row in rows:
+        payload = _payload(row["raw_payload"])
+        if _text(payload.get("tax_rate")) == _text(row["tax_rate"]):
+            continue
+        sources = [_normalized_row(value) for value in row["import_rows"]]
+        # An empty header rate is a fact, not permission to enrich it from ETC.
+        if (row["tax_rate"] is not None or not sources
+                or any(not source or "tax_rate" not in source or _text(source["tax_rate"]) for source in sources)
+                or _text(payload.get("tax_rate")) != _text(row["etc_tax_rate"])):
+            unresolved.append(row["invoice_id"])
+            continue
+        updates.append({
+            "invoice_id": row["invoice_id"], "invoice_no": row["invoice_no"],
+            "before_tax_rate": payload.get("tax_rate"), "after_tax_rate": None,
+            "before_payload": row["raw_payload"],
+        })
+    return {
+        "source_fingerprint": _fingerprint({"rows": rows}),
+        "audited_invoice_count": len(rows), "updates": updates,
+        "unresolved_invoice_ids": unresolved,
+    }
 
 
 def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
@@ -209,12 +235,12 @@ def execute_failed_import_job_recovery(connection: Any, plan: dict[str, Any]) ->
     from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
         load_failed_import_job_recovery_snapshot,
     )
+    from fin_ops_platform.services.runtime_paths import default_data_dir
     from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
     from fin_ops_platform.services.runtime_worker_handlers import (
         ImportRuntimeProcessorFactory,
         build_import_job_handler_bundle,
     )
-    from fin_ops_platform.services.runtime_paths import default_data_dir
 
     target = dict(plan["target"])
     job_row = dict(plan["import_job"])

@@ -2,6 +2,12 @@
 
 日期：2026-08-23
 
+## 2026-09-20 ETC 来源隔离
+
+- 正式发票读取以结构化 `tax_rate` 为准，包括合法空值；不再从 ETC 污染的 normalized payload 补值。ETC 原始税率仍保存在 ETC 自有事实中。
+- ETC 关联只经 canonical invoice metadata port 写入其自有字段；人工/OA 来源、正式导入 owner 与财务字段保持原值。正式发票先到、ETC 先到两个顺序遵循同一边界。
+- 旧 ETC 财务补值分支、逐行 metadata writer 与 payload 税率优先读取已删除。历史副本修复使用 `import_audit_repair_ops --repair-etc-invoice-payload`：先读取正式列、原导入行与 ETC 来源证据，只在原正式税率为空且副本值来自 ETC 时清除副本值；不修改正式税额/金额或 ETC 事实，不增加普通 API。
+
 ## 模块化状态
 
 - 状态：implemented-and-auditable

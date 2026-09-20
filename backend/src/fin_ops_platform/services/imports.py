@@ -87,6 +87,7 @@ class ImportPreview:
 class EtcInvoiceUpsertResult:
     invoice: Invoice | None
     changed: bool
+    previous_metadata: dict[str, Any] | None = None
 
 
 class _ImportObjectIdentityRepository:
@@ -1188,13 +1189,27 @@ class ImportNormalizationService:
             if invoice is None:
                 raise KeyError(linked_invoice_id)
             previous_state = self._etc_invoice_merge_state(invoice)
+            previous_metadata = deepcopy({
+                name: getattr(invoice, name) for name in (
+                    "tags", "source_links", "etc_invoice_id", "etc_import_batch_id",
+                    "etc_submission_batch_id", "etc_submission_status", "workbench_visibility",
+                )
+            })
             self._merge_invoice_from_etc_normalized(invoice, normalized)
             return EtcInvoiceUpsertResult(
                 invoice=invoice,
                 changed=self._etc_invoice_merge_state(invoice) != previous_state,
+                previous_metadata=previous_metadata,
             )
 
         return EtcInvoiceUpsertResult(invoice=None, changed=False)
+
+    @staticmethod
+    def restore_etc_invoice_metadata(results: list[EtcInvoiceUpsertResult]) -> None:
+        """Undo this batch's in-memory metadata when persistence fails."""
+        for result in reversed(results):
+            for name, value in (result.previous_metadata or {}).items():
+                setattr(result.invoice, name, value)
 
     def upsert_oa_attachment_invoice(
         self,
@@ -2013,32 +2028,6 @@ class ImportNormalizationService:
         invoice.etc_submission_batch_id = normalized.get("etc_submission_batch_id") or invoice.etc_submission_batch_id
         invoice.etc_submission_status = normalized.get("etc_submission_status") or invoice.etc_submission_status
         invoice.workbench_visibility = normalized.get("workbench_visibility") or invoice.workbench_visibility or "visible"
-        # ETC is an additional metadata/source-link owner. It must not replace
-        # the canonical invoice's formal import owner when one already exists.
-        invoice.source_batch_id = invoice.source_batch_id or normalized.get("source_batch_id")
-        for field_name in (
-            "digital_invoice_no",
-            "invoice_date",
-            "seller_tax_no",
-            "seller_name",
-            "buyer_tax_no",
-            "buyer_name",
-            "tax_rate",
-            "invoice_source",
-            "invoice_kind",
-        ):
-            incoming = normalized.get(field_name)
-            if incoming and not getattr(invoice, field_name):
-                setattr(invoice, field_name, incoming)
-        for field_name in ("tax_amount", "total_with_tax"):
-            incoming = normalized.get(field_name)
-            if incoming and getattr(invoice, field_name) is None:
-                setattr(invoice, field_name, Decimal(incoming))
-        if not invoice.source_unique_key:
-            invoice.source_unique_key = normalized.get("source_unique_key")
-            if invoice.source_unique_key:
-                self._invoice_unique_index[invoice.source_unique_key] = invoice.id
-        self._clear_weak_invoice_fingerprint_when_canonical(invoice)
 
     @staticmethod
     def _etc_invoice_merge_state(invoice: Invoice) -> tuple[object, ...]:
@@ -2056,20 +2045,6 @@ class ImportNormalizationService:
             getattr(invoice, "etc_submission_batch_id", None),
             getattr(invoice, "etc_submission_status", None),
             getattr(invoice, "workbench_visibility", None),
-            getattr(invoice, "source_batch_id", None),
-            getattr(invoice, "digital_invoice_no", None),
-            getattr(invoice, "invoice_date", None),
-            getattr(invoice, "seller_tax_no", None),
-            getattr(invoice, "seller_name", None),
-            getattr(invoice, "buyer_tax_no", None),
-            getattr(invoice, "buyer_name", None),
-            getattr(invoice, "tax_rate", None),
-            getattr(invoice, "invoice_source", None),
-            getattr(invoice, "invoice_kind", None),
-            getattr(invoice, "tax_amount", None),
-            getattr(invoice, "total_with_tax", None),
-            getattr(invoice, "source_unique_key", None),
-            getattr(invoice, "data_fingerprint", None),
         )
 
     def _link_submitted_etc_metadata_if_present(self, invoice: Invoice, normalized: dict[str, Any]) -> None:

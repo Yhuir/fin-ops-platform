@@ -194,3 +194,10 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - `tests/test_import_lifecycle_service.py` 覆盖 batch/file/session/job 状态聚合、分页和 PostgreSQL 事务化 discard；页面不再暴露“取最新活跃 session”读接口。
 - `tests/test_import_file_service.py` 与 `tests/test_import_file_api.py` 覆盖 owner 隔离、幂等 discard 及 discard 后禁止 confirm。
 - `web/src/test/ImportCenterPage.test.tsx` 覆盖每次进入 fresh、不读历史 sessionStorage、不请求活跃 session 列表、只刷新当前页面创建的 session，以及 discard 成功后才清本地预览。
+
+## 2026-09-20 ETC 来源隔离回归
+
+- `tests/test_etc_invoice_metadata.py`：财务字段与来源 owner 不变、幂等重放、失败后内存恢复、历史修复证据和 CLI 的只读预览/执行/漂移拒绝。
+- `tests/test_etc_invoice_metadata_postgres.py`：真实 PostgreSQL 并发来源保留、整批回滚、原导入证据查询及税率副本局部修复。必须在显式的 disposable test database 上运行。
+- `tests/test_import_service.py`：ETC 先到、正式发票后到时保留正式空税率，并复用原身份关联。
+- `tests/test_postgres_core_repository.py`：正式空税率读取不被 payload 补写；原 API、ETC/发票导入与关联台测试继续保护跨页面合同。

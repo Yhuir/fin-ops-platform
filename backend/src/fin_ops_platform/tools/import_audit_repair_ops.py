@@ -12,6 +12,10 @@ from contextlib import contextmanager
 from typing import Any, TextIO
 
 from fin_ops_platform.services.audit import AuditTrailService
+from fin_ops_platform.services.bank_import_audit_contract_repair_service import (
+    build_bank_import_audit_contract_repair_plan,
+    public_bank_import_audit_contract_repair_report,
+)
 from fin_ops_platform.services.bank_import_dedup_repair_service import (
     BankImportDedupRelationEvidenceError,
     build_bank_import_dedup_repair_plan,
@@ -19,11 +23,8 @@ from fin_ops_platform.services.bank_import_dedup_repair_service import (
     verify_bank_import_repair_source_files,
     withdraw_bank_import_dedup_workbench_relations,
 )
-from fin_ops_platform.services.bank_import_audit_contract_repair_service import (
-    build_bank_import_audit_contract_repair_plan,
-    public_bank_import_audit_contract_repair_report,
-)
 from fin_ops_platform.services.import_audit_repair_service import (
+    build_etc_invoice_payload_repair_plan,
     build_failed_import_job_recovery_plan,
     build_import_audit_repair_plan,
     execute_failed_import_job_recovery,
@@ -50,18 +51,19 @@ from fin_ops_platform.services.postgres_connection import (
     PostgresSettings,
     PostgresTransaction,
 )
-from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
-    apply_bank_import_dedup_repair,
-    load_bank_import_dedup_repair_snapshot,
-)
 from fin_ops_platform.services.postgres_repositories.bank_import_audit_contract_repair import (
     apply_bank_import_audit_contract_repair,
     load_bank_import_audit_contract_repair_snapshot,
+)
+from fin_ops_platform.services.postgres_repositories.bank_import_dedup_repair import (
+    apply_bank_import_dedup_repair,
+    load_bank_import_dedup_repair_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     apply_import_audit_repair,
     discover_failed_import_job_recovery_snapshot,
+    load_etc_invoice_payload_repair_snapshot,
     load_failed_import_job_recovery_snapshot,
     load_import_audit_repair_snapshot,
     load_invoice_expense_item_link_repair_snapshot,
@@ -73,7 +75,6 @@ from fin_ops_platform.services.postgres_repositories.operations_audit import (
 )
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.runtime_paths import default_data_dir
-
 
 _PRODUCTION_IMPORT_AUDIT_REPAIR_ARTIFACT_ROOT = (
     "/opt/fin-ops/runtime-smoke/import-audit-repair-artifacts"
@@ -394,8 +395,66 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-audit-payload-update-count", type=int)
     parser.add_argument("--expected-bank-audit-row-relink-count", type=int)
     parser.add_argument("--expected-bank-audit-row-unlink-count", type=int)
+    parser.add_argument("--repair-etc-invoice-payload", action="store_true")
+    parser.add_argument("--invoice-id", action="append", default=[])
     parser.add_argument("--operator-id")
     return parser
+
+
+def _run_etc_invoice_payload_repair(args: Any, *, stdout: TextIO) -> int:
+    allowed = {
+        "repair_etc_invoice_payload", "invoice_id", "dry_run", "execute",
+        "expected_fingerprint", "rollback_manifest_path", "operator_id", "reason",
+    }
+    if any(_argument_is_set(value) for name, value in vars(args).items() if name not in allowed):
+        raise SystemExit("ETC payload repair cannot be combined with another repair mode.")
+    if args.execute and not all((args.invoice_id, args.expected_fingerprint,
+                                args.rollback_manifest_path, args.operator_id, args.reason)):
+        raise SystemExit("Execute requires explicit invoice IDs, dry-run fingerprint, artifact, operator and reason.")
+    connection = PostgresConnection(PostgresSettings.from_env())
+    try:
+        with connection.transaction() as tx:
+            tx.execute("set transaction isolation level repeatable read read only")
+            rows = load_etc_invoice_payload_repair_snapshot(tx, sorted(set(args.invoice_id)))
+            plan = build_etc_invoice_payload_repair_plan(rows)
+        if args.invoice_id and {row["invoice_id"] for row in rows} != set(args.invoice_id):
+            raise RuntimeError("An explicit ETC invoice target is missing.")
+        plan["rollback_manifest"] = {
+            "source_fingerprint": plan["source_fingerprint"], "restore_invoice_payloads": plan["updates"],
+        }
+        plan["rollback_manifest_fingerprint"] = _rollback_manifest_fingerprint(plan["rollback_manifest"])
+        written = 0
+        if args.dry_run and args.rollback_manifest_path:
+            _write_private_rollback_manifest(args.rollback_manifest_path, plan)
+        if args.execute:
+            if plan["unresolved_invoice_ids"] or plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError("ETC payload evidence is unresolved or changed after preview.")
+            _verify_private_rollback_manifest(args.rollback_manifest_path, plan)
+            with connection.transaction() as tx:
+                tx.execute("set transaction isolation level serializable")
+                current = build_etc_invoice_payload_repair_plan(
+                    load_etc_invoice_payload_repair_snapshot(tx, sorted(set(args.invoice_id)))
+                )
+                if current["source_fingerprint"] != args.expected_fingerprint:
+                    raise RuntimeError("ETC payload evidence changed before execution.")
+                written = PostgresCoreRepository(tx).repair_etc_invoice_payload(tx, current["updates"])
+                if written:
+                    AuditTrailService(PostgresOperationsAuditRepository(tx)).record_action(
+                        actor_id=args.operator_id, action="etc_invoice_payload_repair",
+                        entity_type="invoice", entity_id=plan["source_fingerprint"],
+                        metadata={"event_type": "operation.completed", "page_key": "imports_invoices",
+                                  "reason": args.reason, "invoice_count": written,
+                                  "invoice_ids": args.invoice_id, "outcome": "success"},
+                    )
+        report = {key: value for key, value in plan.items() if key not in ("updates", "rollback_manifest")}
+        report.update(mode="execute" if args.execute else "dry_run", written=bool(written),
+                      updated_invoice_count=written, planned_invoice_count=len(plan["updates"]),
+                      updates=[{key: value for key, value in item.items() if key != "before_payload"}
+                               for item in plan["updates"]])
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str), file=stdout)
+        return 0
+    finally:
+        connection.close()
 
 
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
@@ -430,6 +489,10 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
             file=stdout,
         )
         return 0
+    if args.repair_etc_invoice_payload:
+        return _run_etc_invoice_payload_repair(args, stdout=stdout)
+    if args.invoice_id:
+        raise SystemExit("--invoice-id requires --repair-etc-invoice-payload")
     if args.expected_rollback_manifest_fingerprint:
         raise SystemExit(
             "--expected-rollback-manifest-fingerprint requires "

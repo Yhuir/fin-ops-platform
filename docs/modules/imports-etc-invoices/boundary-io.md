@@ -108,6 +108,7 @@ ETC preview、confirm 与 discard 都是写入操作，必须在 multipart/JSON 
 - Owned facts: `app.etc_invoices`、ETC 导入 session/batch facts、与 ETC 发票导入直接相关的 `app.import_*` facts。
 - Shared facts: `app.invoices` 仍由 canonical invoice pool owner 管理；ETC 只能通过受控 existing-link/promotion port 关联，不创建第二发票池。
 - ETC metadata link 是附加 provenance，不得覆盖 canonical invoice 已有的正式 input/output invoice import `source_batch_id` owner。历史上已经被写成 ETC import batch 的 owner，只有当同一 canonical invoice 存在精确一致的 `etc_invoice_import(batch_id)` source-link 时才允许继续读取；未知 owner 仍 fail closed。
+- Existing-link 只更新 ETC 标签、来源、ETC ID/批次/提交状态与可见性；不得补写正式发票的税率、名称、日期、金额或 identity。`save_invoice_etc_metadata` 在一个事务内批量锁定目标，从最新持久化来源集合合并 ETC link，再一次批量更新；无变化重放不写库。保存失败恢复本批次内存 metadata 后抛错，允许正常任务重试；不把失败伪装成成功。
 - Allowed writes: ETC import preview/confirm/job、ETC import processing service、受控 batch invoice link adapter。
 - Allowed reads: ETC import/query ports、canonical invoice existing-link ports。
 - Downstream outputs: ETC tickets canonical facts，以及 workbench、tax/cost 可比较的 canonical source-version 变化；所有页面直接读取已提交 facts，不创建 projection scope。

@@ -1178,18 +1178,82 @@ class PostgresCoreRepository:
                 self._save_invoice(connection, invoice)
 
     def save_invoice_etc_metadata(self, invoices: list[Any]) -> None:
-        serialized_invoices = self._iter_items(invoices)
-        if not serialized_invoices:
+        serialized = self._iter_items(invoices)
+        if not serialized:
             return
-        connection = self._connection
-        transaction_factory = getattr(connection, "transaction", None)
-        if callable(transaction_factory):
-            with transaction_factory() as tx:
-                for invoice in serialized_invoices:
-                    self._update_invoice_etc_metadata(tx, invoice)
-        else:
-            for invoice in serialized_invoices:
-                self._update_invoice_etc_metadata(connection, invoice)
+        incoming = {self._text(item.get("id")): item for item in serialized}
+        if not all(incoming) or len(incoming) != len(serialized):
+            raise ValueError("ETC metadata requires distinct canonical invoice IDs.")
+        ids = sorted(incoming)
+        with self._connection.transaction() as tx:
+            rows = tx.fetch_all(
+                """select id, coalesce(legacy_mongo_id, id::text) as invoice_id,
+                          etc_invoice_id, workbench_visibility, tags, source_links, raw_payload
+                   from app.invoices
+                   where legacy_mongo_id = any(%s::text[]) or id::text = any(%s::text[])
+                   order by id for update""", (ids, ids),
+            )
+            if len(rows) != len(ids):
+                raise ValueError("ETC metadata target invoice no longer exists.")
+            updates = []
+            for row in rows:
+                key = row["invoice_id"] if row["invoice_id"] in incoming else str(row["id"])
+                item = incoming[key]
+                etc_id = self._text(item.get("etc_invoice_id"))
+                if not etc_id or row["etc_invoice_id"] not in (None, etc_id):
+                    raise ValueError("ETC metadata has a conflicting invoice owner.")
+                links = list(row["source_links"])
+                identities = {(link.get("source_type"), link.get("source_id"), link.get("batch_id")) for link in links}
+                for link in item.get("source_links", []):
+                    if link.get("source_type") != "etc_invoice_import":
+                        continue
+                    key = (link["source_type"], link.get("source_id"), link.get("batch_id"))
+                    if key not in identities:
+                        links.append(link)
+                        identities.add(key)
+                tags = list(row["tags"])
+                if "ETC" not in tags:
+                    tags.append("ETC")
+                payload = dict(self._row_payload(row))
+                metadata = {name: item.get(name) for name in (
+                    "etc_invoice_id", "etc_import_batch_id", "etc_submission_batch_id",
+                    "etc_submission_status", "workbench_visibility",
+                )}
+                metadata.update(tags=tags, source_links=links)
+                updated_payload = {**payload, **metadata}
+                if (updated_payload == payload and tags == row["tags"] and links == row["source_links"]
+                        and etc_id == row["etc_invoice_id"]
+                        and metadata["workbench_visibility"] == row["workbench_visibility"]):
+                    continue
+                updates.append({"id": str(row["id"]), "payload": updated_payload, **metadata})
+            if updates:
+                tx.execute(
+                    """update app.invoices invoice
+                       set etc_invoice_id = delta.etc_invoice_id,
+                           workbench_visibility = delta.workbench_visibility,
+                           tags = delta.tags, source_links = delta.source_links,
+                           raw_payload = jsonb_set(invoice.raw_payload, '{normalized_payload}', delta.payload, true),
+                           updated_at = now()
+                       from jsonb_to_recordset(%s::jsonb) as delta(
+                           id uuid, etc_invoice_id text, workbench_visibility text,
+                           tags text[], source_links jsonb, payload jsonb)
+                       where invoice.id = delta.id""", (_jsonb(updates),),
+                )
+
+    def repair_etc_invoice_payload(self, connection: Any, updates: list[dict[str, Any]]) -> int:
+        if not updates:
+            return 0
+        changed = connection.execute(
+            """update app.invoices i
+               set raw_payload = jsonb_set(i.raw_payload, '{normalized_payload,tax_rate}', 'null'::jsonb),
+                   updated_at = now()
+               from jsonb_to_recordset(%s::jsonb) as delta(invoice_id text, before_payload jsonb)
+               where coalesce(i.legacy_mongo_id, i.id::text) = delta.invoice_id
+                 and i.tax_rate is null and i.raw_payload = delta.before_payload""", (_jsonb(updates),),
+        )
+        if changed != len(updates):
+            raise RuntimeError("ETC invoice payload changed after preview; transaction must roll back.")
+        return changed
 
     def repair_imported_invoice_totals(self, connection: Any, updates: list[dict[str, Any]]) -> None:
         if updates:
@@ -1800,45 +1864,6 @@ class PostgresCoreRepository:
             ),
         )
 
-    def _update_invoice_etc_metadata(self, connection: Any, invoice: dict[str, Any]) -> None:
-        invoice_id = self._text(invoice.get("id"))
-        if not invoice_id:
-            return
-        source_unique_key, data_fingerprint = self._invoice_identity_values(invoice)
-        normalized_payload = self._invoice_payload_with_identity_values(
-            invoice,
-            source_unique_key=source_unique_key,
-            data_fingerprint=data_fingerprint,
-        )
-        connection.execute(
-            """
-            update app.invoices
-            set etc_invoice_id = %s,
-                workbench_visibility = %s,
-                status = %s,
-                tags = %s,
-                source_links = %s,
-                raw_payload = jsonb_set(
-                    coalesce(raw_payload, '{}'::jsonb),
-                    '{normalized_payload}',
-                    %s,
-                    true
-                ),
-                updated_at = now()
-            where legacy_mongo_id = %s or id::text = %s
-            """,
-            (
-                self._text(invoice.get("etc_invoice_id")),
-                self._text(invoice.get("workbench_visibility")) or "visible",
-                self._text(invoice.get("status")) or InvoiceStatus.PENDING.value,
-                self._text_list(invoice.get("tags")),
-                _jsonb(invoice.get("source_links") if isinstance(invoice.get("source_links"), list) else []),
-                _jsonb(normalized_payload),
-                invoice_id,
-                invoice_id,
-            ),
-        )
-
     def _invoice_identity_values(self, invoice: dict[str, Any]) -> tuple[str | None, str | None]:
         source_unique_key = self._text(invoice.get("source_unique_key"))
         data_fingerprint = None if source_unique_key else self._text(invoice.get("data_fingerprint"))
@@ -2116,7 +2141,7 @@ class PostgresCoreRepository:
             seller_name=self._text(payload.get("seller_name") or row.get("seller_name")),
             buyer_tax_no=self._text(payload.get("buyer_tax_no") or row.get("buyer_tax_no")),
             buyer_name=self._text(payload.get("buyer_name") or row.get("buyer_name")),
-            tax_rate=self._text(payload.get("tax_rate") or row.get("tax_rate")),
+            tax_rate=self._text(row.get("tax_rate")),
             tax_amount=self._decimal_or_none(payload.get("tax_amount") or row.get("tax_amount")),
             total_with_tax=self._decimal_or_none(payload.get("total_with_tax") or row.get("total_with_tax")),
             tax_classification_code=self._text(payload.get("tax_classification_code")),

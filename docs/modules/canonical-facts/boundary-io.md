@@ -2,6 +2,10 @@
 
 日期：2026-08-04
 
+## 2026-09-20 ETC metadata 写入边界
+
+`PostgresCoreRepository.save_invoice_etc_metadata` 是 ETC 附加来源的唯一 canonical invoice 写入口。事务内从当前行合并标签和来源，批量局部更新 metadata；不得序列化旧内存对象覆盖正式财务字段或其他来源。`repair_etc_invoice_payload` 是历史税率副本纠正的 owner port，以精确目标及 before payload 比较执行；证据读取归 import audit repository，修复决策归 repair service，CLI 负责现有私有恢复工件和审计。常规业务不调用历史修复入口。
+
 ## 模块化状态
 
 - 状态：closed

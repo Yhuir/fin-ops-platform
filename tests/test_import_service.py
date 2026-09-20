@@ -1387,6 +1387,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(len(invoices), 1)
         imported = invoices[0]
         self.assertEqual(imported.etc_invoice_id, "etc_invoice_0028")
+        self.assertIsNone(imported.tax_rate)
         self.assertEqual(imported.workbench_visibility, "hidden_after_etc_submission")
         self.assertIn("ETC", imported.tags)
         self.assertEqual(len(repository.link_calls), 1)
