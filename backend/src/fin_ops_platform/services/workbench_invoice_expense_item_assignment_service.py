@@ -81,7 +81,7 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
         context.pair_relations.acquire_relation_member_locks(
             [row_id for _, row_id in members], row_types=[kind for kind, _ in members], case_ids=[],
         )
-        items = context.canonical_query.get_oa_expense_items_by_row_ids_in_current_transaction(oa_ids)
+        context.canonical_query.get_oa_expense_items_by_row_ids_in_current_transaction(oa_ids)
         rows = context.canonical_query.get_canonical_rows_by_ids_in_current_transaction(
             [row_id for _, row_id in members], row_types=[kind for kind, _ in members],
         )
@@ -94,8 +94,6 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
         )
         if set(snapshots) != set(ordinary_invoice_ids):
             raise ValueError("Canonical assignment invoice set changed.")
-        for row_id in oa_ids:
-            rows[row_id] = {**rows[row_id], "expense_items": items[row_id]}
         for row_id, snapshot in snapshots.items():
             rows[row_id] = {**rows[row_id], "source_links": snapshot["source_links"],
                            "total_with_tax": snapshot["invoice_total"], "currency": snapshot["currency"],

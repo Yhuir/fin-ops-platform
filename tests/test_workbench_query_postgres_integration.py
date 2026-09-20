@@ -180,7 +180,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         oa_ids = ["oa-late-34", "oa-late-351", "oa-late-52"]
         for owner, amount, month in zip(oa_ids, [34, 351, 52], ["07", "06", "05"], strict=True):
             payload = {"id": owner, "amount": str(amount), "workflow_status": "completed", "applicant": "late-test",
-                       "expense_items": [{"id": owner + ":item:0", "row_index": "0", "amount": str(amount)}]}
+                       "expense_items": [{"expense_item_id": owner + ":item:0", "row_index": "0", "amount": str(amount)}]}
             self.raw_connection.execute("""insert into app.oa_applications
                 (oa_source_id, form_id, form_type, row_id, status, workflow_status, applicant, application_date, scope_month, amount, normalized_payload, raw_payload)
                 values (%s, 'payment_request', '付款申请', %s, 'active', 'completed', 'late-test', %s::date, %s::date, %s, %s::jsonb, '{}'::jsonb)""",
