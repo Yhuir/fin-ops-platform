@@ -63,6 +63,41 @@ async function waitUntilReady() {
 }
 
 describe("Cost statistics page", () => {
+  test("preserves adjacent external turnover facets and drills into each direction independently", async () => {
+    installMockApiFetch();
+    const originalFetch = globalThis.fetch;
+    const labels = ["货款", "外部往来款付款", "外部往来款收款", "费用"];
+    const requests: URL[] = [];
+    globalThis.fetch = vi.fn(async (input, init) => {
+      const response = await originalFetch(input, init);
+      const url = new URL(String(input), "http://localhost");
+      if (!url.pathname.endsWith("/cost-statistics/explorer") || url.searchParams.get("view") !== "bank_tag") return response;
+      requests.push(url);
+      const body = await response.json();
+      const primary = url.searchParams.get("bank_tag_primary_label");
+      const facet = body.facets.bank_tag_primary[0];
+      body.facets.bank_tag_primary = labels.map(primary_label => ({ ...facet, primary_label }));
+      body.facets.bank_tag_sub = primary ? [{ ...facet, primary_label: primary,
+        sub_label: primary === labels[1] ? "借出款" : "借入款" }] : [];
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitUntilReady();
+    await user.click(screen.getByRole("radio", { name: "按标签" }));
+    await screen.findByRole("option", { name: `选择主标签 ${labels[1]}` });
+    expect(screen.getAllByRole("option", { name: /^选择主标签 / }).map(row => row.getAttribute("aria-label")))
+      .toEqual(labels.map(label => `选择主标签 ${label}`));
+    for (const [primary, child] of [[labels[1], "借出款"], [labels[2], "借入款"]]) {
+      const option = screen.getByRole("option", { name: `选择主标签 ${primary}` });
+      await user.click(option);
+      await user.click(await screen.findByRole("option", { name: `选择子标签 ${child}` }));
+      await waitFor(() => expect(requests.some(url => url.searchParams.get("bank_tag_primary_label") === primary
+        && url.searchParams.get("bank_tag_sub_label") === child)).toBe(true));
+      expect(option).toHaveAttribute("aria-selected", "true");
+    }
+  });
+
   test("scope lost response is verified by GET without a repeated PUT", async () => {
     installMockApiFetch();
     const otherFetch = globalThis.fetch;

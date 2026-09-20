@@ -86,6 +86,41 @@ class CostStatisticsApiTests(unittest.TestCase):
         response = self._get(path)
         return response.status_code, json.loads(response.body)
 
+    def test_bank_tag_primary_order_preserves_amounts_filters_and_drilldown(self) -> None:
+        repository = self.app._cost_statistics_canonical_repository  # noqa: SLF001
+        snapshot = repository.load_snapshot()
+        source = snapshot["bank_rows"][0]
+        specs = [("货款", "900", "outflow"), ("外部往来款付款", "600", "outflow"),
+                 ("费用", "100", "outflow"), ("外部往来款收款", "800", "inflow")]
+        rows = [{**source, "id": f"bank-order-{index}", "transaction_id": f"bank-order-{index}",
+                 "amount": amount, "txn_direction": direction,
+                 "direction": "收入" if direction == "inflow" else "支出",
+                 "bank_tag_code": f"tag-{index}", "bank_tag_label": label,
+                 "bank_tag_primary_label": label, "bank_tag_sub_label": f"子项-{index}",
+                 "bank_tag_label_path": [label, f"子项-{index}"]}
+                for index, (label, amount, direction) in enumerate(specs)]
+        repository.load_snapshot = lambda **_kwargs: {**snapshot, "bank_rows": rows}
+        base = "/api/cost-statistics/explorer?scope=2026-03&view=bank_tag"
+        status, root = self._json(base)
+        self.assertEqual(status, 200)
+        self.assertEqual([item["primary_label"] for item in root["facets"]["bank_tag_primary"]],
+                         ["货款", "外部往来款付款", "外部往来款收款", "费用"])
+        self.assertEqual(root["summary"]["expense_amount"], "1600.00")
+        self.assertEqual(root["summary"]["income_amount"], "800.00")
+        _, time = self._json(base.replace("view=bank_tag", "view=time"))
+        self.assertEqual(root["summary"], time["summary"])
+        for index in (1, 3):
+            label, amount, _direction = specs[index]
+            status, detail = self._json(base + f"&bank_tag_primary_label={label}&bank_tag_sub_label=子项-{index}")
+            self.assertEqual(status, 200)
+            self.assertEqual(detail["row_count"], 1)
+            self.assertEqual(detail["rows"][0]["transaction_id"], f"bank-order-{index}")
+            self.assertEqual(detail["rows"][0]["amount"], f"{int(amount):.2f}")
+            self.assertEqual(detail["summary"], root["summary"])
+        _, filtered = self._json(base + "&query=外部往来款")
+        self.assertEqual([item["primary_label"] for item in filtered["facets"]["bank_tag_primary"]],
+                         ["外部往来款付款", "外部往来款收款"])
+
     def test_all_explorer_views_read_current_canonical_facts(self) -> None:
         status, project_payload = self._json(
             "/api/cost-statistics/explorer?scope=2026-03&view=project"

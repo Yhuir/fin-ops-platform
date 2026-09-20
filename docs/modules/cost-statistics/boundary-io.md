@@ -78,6 +78,7 @@ PUT manual allocation
 - 三个成本 view 的路径分别为：项目→主标签→子标签→明细；主标签→子标签→明细；账户→项目→主标签→子标签→明细。
 - 成本标签筛选使用后端返回的 `bank_tag_primary_key`、`bank_tag_sub_key`；主、子标签身份包含层级，客户端不自行生成。其他上级参数为 `project_name`、`bank_account_label`。
 - `time` 直接分页银行流水；`bank_tag` 沿用原 `bank_tag_primary_label/bank_tag_sub_label` 和原始收支口径。
+- `bank_tag` 主标签顺序由 Policy 唯一生成：原排序后，若外部往来款付款、收款都存在，则只将收款移动到付款后；其余主标签相对顺序、子标签排序、字段和金额不变。前端按返回顺序展示，不维护第二套排序；无新增数据库或跨页面 I/O。
 - 共用 scope/query/cursor/page_size/include_statistics。成本 cursor 版本为 2，并绑定当前项目成本范围 version，原银行 cursor 不变；非法或旧 cursor 返回明确错误。
 - 每栏只按上级过滤，同级和祖先可继续切换。summary 保持当前期间/搜索根范围，不随末级选择缩水；row_count 是当前路径分页前行数。
 - 成本 facets 使用 projects、bank_accounts、cost_tag_primary、cost_tag_sub；项目/统计使用 primary_tag_count。标签分面返回 key/label/total_amount/row_count/project_count。

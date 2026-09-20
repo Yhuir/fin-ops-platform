@@ -13,6 +13,37 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
+    def test_external_turnover_primary_tags_stay_adjacent_without_changing_facts(self) -> None:
+        payment, receipt = "外部往来款付款", "外部往来款收款"
+        scenarios = [
+            ([("货款", "900", "outflow"), (payment, "600", "outflow"), ("费用", "100", "outflow"), (receipt, "800", "inflow")], ["货款", payment, receipt, "费用"]),
+            ([(receipt, "900", "outflow"), ("费用", "700", "outflow"), (payment, "600", "outflow")], ["费用", payment, receipt]),
+            ([(payment, "600", "outflow"), (receipt, "800", "inflow")], [payment, receipt]),
+            ([(payment, "600", "outflow"), ("费用", "100", "outflow")], [payment, "费用"]),
+            ([(receipt, "800", "inflow"), ("费用", "100", "outflow")], ["费用", receipt]),
+            ([("货款", "900", "outflow"), ("费用", "100", "outflow")], ["货款", "费用"]),
+            ([], []),
+        ]
+        for specs, expected in scenarios:
+            with self.subTest(expected=expected):
+                rows = [self._bank(f"bank-{index}", amount, tag_label=label, direction=direction)
+                        for index, (label, amount, direction) in enumerate(specs)]
+                before = json.dumps(rows, sort_keys=True)
+                policy = self._policy([], bank_rows=rows)
+                request = dict(scope_kind="all", scope_value="all", view="bank_tag",
+                               filters={}, cursor_values=None, page_size=50)
+                page = policy.explorer_page(**request)
+                self.assertEqual([item["primary_label"] for item in page["primary_facets"]], expected)
+                self.assertEqual(policy.explorer_page(**request), page)
+                self.assertEqual(json.dumps(rows, sort_keys=True), before)
+                for label, amount, direction in specs:
+                    facet = next(item for item in page["primary_facets"] if item["primary_label"] == label)
+                    self.assertEqual(facet["transaction_count"], 1)
+                    self.assertEqual(facet["sub_tag_count"], 1)
+                    self.assertEqual(facet["income_amount" if direction == "inflow" else "expense_amount"], f"{Decimal(amount):.2f}")
+                time_page = policy.explorer_page(**{**request, "view": "time"})
+                self.assertEqual(page["summary"], time_page["summary"])
+
     def test_equal_daily_reimbursement_uses_one_cost_entry_per_unit(self) -> None:
         group = self._group(
                     oa_rows=[
