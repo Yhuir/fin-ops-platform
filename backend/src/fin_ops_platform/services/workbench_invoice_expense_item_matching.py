@@ -4,7 +4,7 @@ from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fin_ops_platform.services.invoice_expense_item_links import source_links
+from fin_ops_platform.services.invoice_expense_item_links import effective_invoice_source_links, source_links
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     canonical_oa_expense_item_ids,
     invoice_ownership_parent_oa_id,
@@ -13,10 +13,10 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
 
 
 def invoice_needs_expense_assignment(links: Any) -> bool:
-    """Manual ownership is authoritative, including conflicts requiring a human."""
+    """Neither attachment sources nor existing explicit assignments are inferred."""
     return not any(
         link.get("source_type") == "oa_expense_item_invoice"
-        or (link.get("source_type") == "oa_attachment_invoice" and link.get("source_expense_item_id"))
+        or link.get("source_type") == "oa_attachment_invoice"
         for link in source_links(links)
     )
 
@@ -45,7 +45,7 @@ def plan_invoice_expense_assignments(
             if item.get("id") and amount is not None:
                 items[(owner, str(item["id"]))] = (currency, amount)
     for invoice in invoice_rows:
-        links = source_links(invoice.get("source_links"))
+        links = effective_invoice_source_links(invoice.get("source_links"))
         explicit = [link for link in links if link.get("source_type") == "oa_expense_item_invoice"]
         ownership = explicit or [link for link in links if link.get("source_type") == "oa_attachment_invoice"]
         for link in ownership:

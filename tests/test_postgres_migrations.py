@@ -183,6 +183,7 @@ EXPECTED_MIGRATIONS = [
     "0169_cost_statistics_source_allocations.sql",
     "0170_cost_statistics_project_cost_scope.sql",
     "0171_cost_statistics_manual_items.sql",
+    "0172_oa_invoice_source_priority.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -346,7 +347,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
         self.assertEqual(
             [item.version for item in migrations],
-            [f"{number:04d}" for number in range(1, 172)],
+            [f"{number:04d}" for number in range(1, 173)],
         )
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
@@ -1938,6 +1939,16 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             formal_bank_relation_convergence_sql,
             "approved_formal_bank_relation_requirement_convergence;",
         )
+        oa_source_priority_sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0172_oa_invoice_source_priority.sql").read_text(encoding="utf-8")
+        ).lower()
+        self.assertIn(oa_source_priority_sql, checked_sql)
+        # This bounded data migration preserves financial facts and records each
+        # changed invoice; its idempotence is exercised against PostgreSQL.
+        self.assertIn("invoice.status <> 'deleted'", oa_source_priority_sql)
+        self.assertIn("'invoice.oa_source_priority_applied'", oa_source_priority_sql)
+        self.assertNotRegex(oa_source_priority_sql, r"\b(delete|truncate|drop)\b")
+        checked_sql = checked_sql.replace(oa_source_priority_sql, "approved_oa_source_priority_convergence;")
         approved_legacy_drops = (
             "drop table if exists read_model.cost_statistics_bank_flow_rows;",
             "drop table if exists read_model.cost_statistics_rows;",

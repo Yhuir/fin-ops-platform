@@ -7,6 +7,7 @@ from typing import Any
 from fin_ops_platform.services.invoice_expense_item_links import (
     InvoiceSourceLinksCasConflict,
     explicit_expense_item_links,
+    has_oa_attachment_source,
     replace_explicit_expense_item_links,
     source_links,
 )
@@ -360,6 +361,11 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
                 "所选发票不存在或已不可用，请刷新后重试。",
             )
         current_source_links = source_links(invoice_snapshot.get("source_links"))
+        if has_oa_attachment_source(current_source_links):
+            raise WorkbenchInvoiceExpenseItemAssignmentError(
+                "invoice_oa_source_immutable",
+                "OA附件发票由原始子付款项确定归属，不能人工更改。",
+            )
         invoice_for_linking = {**dict(canonical_rows[command.invoice_row_id]), "source_links": current_source_links}
         if command.previous_targets is not None:
             explicit = explicit_expense_item_links(current_source_links)

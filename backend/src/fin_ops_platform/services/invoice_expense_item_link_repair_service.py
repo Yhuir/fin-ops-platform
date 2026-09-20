@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-from decimal import Decimal
 import hashlib
 import json
+from decimal import Decimal
 from typing import Any
 
 from fin_ops_platform.services.invoice_expense_item_links import (
+    effective_invoice_source_links,
     explicit_expense_item_links,
     replace_explicit_expense_item_links,
     source_links,
 )
 
-
 OA_ATTACHMENT_LINK_CLASSIFICATIONS = (
-    "valid_explicit",
     "valid_attachment_owner",
     "repairable",
     "unresolved",
@@ -154,7 +153,7 @@ def public_invoice_expense_item_link_repair_report(
 def build_oa_attachment_invoice_link_audit_plan(
     snapshot: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Audit every OA-attachment canonical invoice and repair only proven ownership gaps."""
+    """Audit source ownership and remove competing manual edges; never invent OA child provenance."""
 
     rows_by_id: dict[str, dict[str, Any]] = {}
     for raw_row in snapshot:
@@ -183,7 +182,6 @@ def build_oa_attachment_invoice_link_audit_plan(
             raise ValueError("OA attachment invoice audit snapshot contains a non-attachment invoice.")
 
         attachment_edges = _dict_list(row.get("attachment_edges"))
-        explicit_edges = _dict_list(row.get("explicit_edges"))
         strong_candidates = _dict_list(row.get("strong_candidates"))
         if len(attachment_edges) != len(attachment_links):
             raise ValueError("OA attachment invoice audit edge count changed while loading evidence.")
@@ -201,35 +199,11 @@ def build_oa_attachment_invoice_link_audit_plan(
         candidates_have_unique_oa = (
             bool(candidate_targets) and len(candidate_canonical_oa_ids) == 1
         )
-        valid_explicit_targets = _current_owner_targets(explicit_edges)
-        valid_explicit_canonical_oa_ids = _current_owner_canonical_oa_ids(explicit_edges)
         direct_canonical_oa_ids = _current_owner_canonical_oa_ids(attachment_edges)
-        explicit_edge_targets = {
-            (_text(edge.get("oa_row_id")), _text(edge.get("expense_item_id")))
-            for edge in explicit_edges
-        }
 
         is_visible_canonical = _text(row.get("workbench_visibility")) == "visible"
         if not is_visible_canonical:
             classification = "protected_noncanonical"
-        elif explicit_links:
-            if (
-                len(explicit_edges) != len(explicit_links)
-                or len(explicit_edge_targets) != len(explicit_edges)
-                or valid_explicit_targets != explicit_edge_targets
-            ):
-                classification = "conflict"
-            elif not candidate_targets or candidate_targets.issubset(explicit_edge_targets):
-                classification = "valid_explicit"
-            elif (
-                candidates_have_unique_oa
-                and explicit_edge_targets < candidate_targets
-                and {oa_row_id for oa_row_id, _item_id in explicit_edge_targets}
-                == candidate_oa_ids
-            ):
-                classification = "repairable"
-            else:
-                classification = "conflict"
         elif direct_targets:
             if not candidate_targets or candidate_targets.issubset(direct_targets):
                 classification = "valid_attachment_owner"
@@ -252,8 +226,7 @@ def build_oa_attachment_invoice_link_audit_plan(
             classification = "ambiguous"
 
         strongest_owner_canonical_oa_ids = (
-            valid_explicit_canonical_oa_ids
-            or direct_canonical_oa_ids
+            direct_canonical_oa_ids
             or candidate_canonical_oa_ids
         )
         if (
@@ -265,6 +238,11 @@ def build_oa_attachment_invoice_link_audit_plan(
         ):
             classification = "conflict"
 
+        # Proven current attachment evidence owns the invoice. Never create an
+        # explicit/manual edge to mask missing or stale OA child provenance.
+        cleaned_links = effective_invoice_source_links(current_source_links)
+        if classification == "valid_attachment_owner" and cleaned_links != current_source_links:
+            classification = "repairable"
         counts[classification] += 1
         lineage = {
             "invoice_id_hash": _fingerprint(invoice_id),
@@ -332,36 +310,33 @@ def build_oa_attachment_invoice_link_audit_plan(
 
         if classification != "repairable":
             continue
-        if explicit_links:
-            missing_targets = candidate_targets - explicit_edge_targets
-            repaired_source_links = [
-                *current_source_links,
-                *replace_explicit_expense_item_links(
-                    [],
-                    case_id=None,
-                    targets=sorted(missing_targets),
-                    entry_method="verified_attachment_identity_repair",
-                ),
-            ]
-        else:
-            repaired_source_links = replace_explicit_expense_item_links(
-                current_source_links,
-                case_id=None,
-                targets=sorted(candidate_targets),
-                entry_method="verified_attachment_identity_repair",
-            )
+        if candidate_targets and candidate_targets != direct_targets:
+            repaired_attachment_links = []
+            for candidate in strong_candidates:
+                keys = _text_list(candidate.get("source_attachment_keys"))
+                if not keys:
+                    raise ValueError("Verified current attachment keys are required for OA source repair.")
+                for key in keys:
+                    repaired_attachment_links.append({
+                        "source_type": "oa_attachment_invoice",
+                        "derived_from_oa_id": _text(candidate["oa_row_id"]),
+                        "source_expense_item_id": _text(candidate["expense_item_id"]),
+                        "source_attachment_key": key,
+                        "source_id": key,
+                    })
+            cleaned_links = [link for link in cleaned_links if link.get("source_type") != "oa_attachment_invoice"] + repaired_attachment_links
         updates.append(
             {
                 "invoice_id": invoice_id,
                 "before_source_links": current_source_links,
-                "source_links": repaired_source_links,
+                "source_links": cleaned_links,
             }
         )
 
     healthy_rows = [
         row
         for row in source_snapshot
-        if row["lineage"]["classification"] in {"valid_explicit", "valid_attachment_owner"}
+        if row["lineage"]["classification"] == "valid_attachment_owner"
     ]
     source_fingerprint = _fingerprint(source_snapshot)
     rollback_manifest = {
@@ -411,7 +386,7 @@ def public_oa_attachment_invoice_link_audit_report(
         "findings": [
             row
             for row in plan["audit_rows"]
-            if row["classification"] not in {"valid_explicit", "valid_attachment_owner"}
+            if row["classification"] != "valid_attachment_owner"
         ],
         "completion": completion,
         "rollback_manifest_fingerprint": plan["rollback_manifest_fingerprint"],

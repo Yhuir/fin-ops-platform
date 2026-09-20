@@ -42,7 +42,7 @@
 | --- | --- | --- |
 | 上传文件/模板选择 | `ImportInvoicesPage.tsx` | 文件先进入 import file service |
 | 可选单张附件识别 | `POST /imports/invoices/manual/recognize` | 每次只接收当前发票的一份 JPG/JPEG/PNG/PDF；图片走统一图片规范化和 OCR，PDF 先读原生文本，无可识别发票时逐页 OCR 并在首张发票命中后停止。只返回允许预填的发票字段，不写业务事实，也不保留上传文件。 |
-| 多张人工预览 | `POST /imports/invoices/manual/preview` | 请求体固定为 `invoices[]`。每张票据方向、红蓝字、购销双方、票号/条件式代码、日期和金额税率由服务端校验；红字表单收正数、canonical 金额统一转负数。同批重复或任一现存/疑似重复整批返回 `409` 并终结预览，不允许部分进入发票池；成功后生成当前用户的一个 `FileImportSession` 和与发票一一对应的 `file_ids[]`。 |
+| 多张人工预览 | `POST /imports/invoices/manual/preview` | 请求体固定为 `invoices[]`。每张票据方向、红蓝字、购销双方、票号/条件式代码、日期和金额税率由服务端校验；红字表单收正数、canonical 金额统一转负数。同批重复、非 OA 来源的现存发票或疑似重复整批返回 `409` 并终结预览；已由 OA 来源持有的相同强身份允许 `duplicate_skipped`，只记导入历史，不允许部分进入发票池；成功后生成当前用户的一个 `FileImportSession` 和与发票一一对应的 `file_ids[]`。 |
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
 | 预览陈旧校验 | `FileImportService.assert_session_preview_current` | 除汇总 audit counts 外逐行比较 decision、linked object type/id；数量不变但 canonical invoice owner 调换仍返回 `preview_stale`，不得确认旧预览。错误只报告字段名和变化数量。 |
 | 当前预览读取/放弃 | `GET /imports/files/sessions/{session_id}`、`POST /imports/files/discard` | 页面只读取本次访问创建并持有 id 的 session；不提供活跃 session 列表或自动恢复。放弃校验 owner 并事务化终结 file/session/pending batch；已确认或已创建活跃/成功 job 时拒绝。 |
@@ -56,7 +56,7 @@ preview/confirm/retry 都属于 canonical 导入写链，必须在 multipart/JSO
 
 preview 首次登记 `app.import_files` 时必须同时写入认证 username 到 `uploaded_by` 与 `raw_payload.normalized_payload.imported_by`，最终 session delta 必须保持同值；当前 session 读取和放弃只使用该服务端 owner 事实。session/file/batch/canonical candidate ID 使用带业务前缀的 UUID，不使用进程内顺序号或“先查询再递增”的多 worker 竞态分配。
 
-file/session preview/retry 只允许通过当前 `session_id` 持久化该 session、files 与其 `preview_batch_id` 的精确 delta，且不得携带 canonical `invoices` / `transactions`；不得把进程内其它历史 session/batch 的 snapshot 写回 PostgreSQL。preview 的 `suspected_duplicate` 可保留候选 invoice 引用作为复核证据，confirm 后 terminal row 必须清空该非权威引用；`created`、`status_updated`、`duplicate_skipped` 的正式引用保持不变。发票 confirm 必须在同一事务内锁定本批强身份命中的 canonical 发票、持久化所选 session / batch / invoice delta，并只对本批身份集合式读取当前 OA attachment cache；命中强身份和明确 OA 子付款项时合并 OA 来源边，保留既有 OA / 明细归属 / 导入 provenance，再在同一事务标记必要的 Workbench matching scope。`disabled` promotion mode 不合并 OA 来源；其它模式在本批 canonical 已存在后只允许 link-existing，不得借此创建 cache 中其它发票。持久化或来源合并失败时 batch、file/session、canonical invoice、来源边和 matching dirty 必须整体回滚，领域任务不得半发布。普通 confirm 不发布 tax/read-model refresh。
+file/session preview/retry 只允许通过当前 `session_id` 持久化该 session、files 与其 `preview_batch_id` 的精确 delta，且不得携带 canonical `invoices` / `transactions`；不得把进程内其它历史 session/batch 的 snapshot 写回 PostgreSQL。preview 的 `suspected_duplicate` 可保留候选 invoice 引用作为复核证据，confirm 后 terminal row 必须清空该非权威引用；`created`、`status_updated`、`duplicate_skipped` 的正式引用保持不变。发票 confirm 必须在同一事务内锁定本批强身份命中的 canonical 发票、持久化所选 session / batch / invoice delta，并只对本批身份集合式读取当前 OA attachment cache；命中强身份和明确 OA 子付款项时合并 OA 来源边，以 OA 来源替换当前人工来源/人工明细归属，保留独立 ETC 来源及原导入 batch / row 历史，再在同一事务标记必要的 Workbench matching scope。`disabled` promotion mode 不合并 OA 来源；其它模式在本批 canonical 已存在后只允许 link-existing，不得借此创建 cache 中其它发票。持久化或来源合并失败时 batch、file/session、canonical invoice、来源边和 matching dirty 必须整体回滚，领域任务不得半发布。普通 confirm 不发布 tax/read-model refresh。
 
 ## 输出 I/O
 
@@ -156,3 +156,9 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 ## 2026-09-20 导入后的即时匹配
 
 ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同一 matching dirty scope；本入口 `debounce_seconds=0`，删除固定 60 秒等待。使用既有 expedite/processing 再变更去重语义；导入接口不运行归属算法，不写页面状态。后到的人工导入发票维持原 provenance，归属由 workbench owner 提交。
+
+## 2026-09-20 OA 发票来源优先闭环
+
+- 已有 OA 来源的后续人工/Excel 重复票只持久化导入历史，确认事务再次检查锁定后的 canonical 来源，禁止覆盖或追加人工边；纯重复不发布 matching dirty。
+- 人工先到、OA 后到时保留 canonical ID、金额/核销/ETC 和原 source batch，替换当前人工来源与人工明细归属；导入页审计改由 terminal row 强身份证明 OA 接管后的历史引用。重复输入与 OA 值差异明示 warning，不改现存事实。
+- migration 0172 仅清理已有混合来源与标签，保留财务列、导入历史，逐票审计 before/after，定向登记现有 matching scopes；重跑无更新。

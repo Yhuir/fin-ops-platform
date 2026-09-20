@@ -104,6 +104,21 @@ class WorkbenchInvoiceExpenseItemAssignmentApiTests(unittest.TestCase):
                 self.assertEqual(status, HTTPStatus.CONFLICT)
                 self.assertEqual(result["error"], code)
 
+    def test_actual_oa_source_rejection_is_structured_conflict(self) -> None:
+        from tests.test_workbench_invoice_expense_item_assignment_service import WorkbenchInvoiceExpenseItemAssignmentServiceTests
+        fixture = WorkbenchInvoiceExpenseItemAssignmentServiceTests()
+        service, invoices, _, audit = fixture._fixture(source_links=[{
+            "source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-1", "source_expense_item_id": "oa-1:item:0",
+        }])
+        status, result = self._routes(service).assign_invoice_expense_items(
+            fixture._payload(), actor_id="finance-user", tenant_id="default", request_id="source-rejection",
+        )
+        self.assertEqual(status, HTTPStatus.CONFLICT)
+        self.assertEqual(result['error'], 'invoice_oa_source_immutable')
+        self.assertIn('OA', result['message'])
+        self.assertEqual(invoices.updates, [])
+        self.assertEqual(audit.events, [])
+
     def test_action_fails_closed_when_service_is_unavailable(self) -> None:
         status, result = self._routes(None).assign_invoice_expense_items(
             {},

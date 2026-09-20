@@ -6,18 +6,18 @@ from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from fin_ops_platform.services.import_file_service import aggregate_invoice_line_rows
 from fin_ops_platform.services.import_preview_audit import (
     ImportPreviewAuditRow,
     build_import_preview_session_audit,
 )
-from fin_ops_platform.services.import_file_service import aggregate_invoice_line_rows
+from fin_ops_platform.services.invoice_expense_item_links import has_oa_attachment_source
 from fin_ops_platform.services.postgres_repositories.audit_report import (
     AuditIssue,
     AuditSnapshot,
     evaluate_audit_issues,
     use_audit_snapshot,
 )
-
 
 INVOICE_BATCH_TYPES = frozenset({"input_invoice", "output_invoice"})
 ACTIVE_JOB_STATUSES = frozenset({"pending", "processing"})
@@ -90,10 +90,16 @@ def _audit_snapshot(
     }
     formal_batches = [row for row in batches if _text(row.get("batch_id")) in formal_batch_ids]
     formal_rows = [row for row in rows if _text(row.get("batch_id")) in formal_batch_ids]
+    referenced_invoice_ids = {
+        _text(row.get("linked_object_id")) for row in formal_rows
+        if _text(row.get("linked_object_type")) == "invoice"
+        and _text(row.get("decision")) in LINKED_TERMINAL_DECISIONS
+    }
     formal_invoices = [
         row
         for row in invoices
         if _text(row.get("source_batch_id")) in formal_batch_ids
+        or _text(row.get("invoice_id")) in referenced_invoice_ids
         or any(
             _text(_dict(link).get("source_type")) == "manual_invoice_import"
             and _text(_dict(link).get("batch_id")) in formal_batch_ids
@@ -172,7 +178,7 @@ def _audit_snapshot(
             "derived_tables": [],
             "canonical_expected_set": (
                 "all version-registered input/output invoice file sessions, their preview/confirmed batches and rows, "
-                "and the exact canonical invoice/manual_invoice_import source-link closure of terminal row decisions"
+                "and terminal row identity closure, with manual source edges only for non-OA invoices"
             ),
             "key_display_fields": [
                 "session/file identity, filename, template, direction, status and registered object hash",
@@ -190,7 +196,7 @@ def _audit_snapshot(
                 "file_object_hash_registration_and_formal_payload_equality",
                 "session_file_and_file_batch_bidirectional_membership",
                 "preview_audit_and_batch_decision_count_recalculation",
-                "terminal_row_invoice_manual_source_link_set_equality",
+                "terminal_row_invoice_identity_and_effective_source_equality",
                 "canonical_invoice_identity_and_critical_field_equality",
                 "page_owned_file_import_job_and_outbox_queue_gate",
             ],
@@ -477,7 +483,11 @@ def _canonical_invoice_issues(
             source_id = _text(row.get("source_unique_key")) or _text(row.get("data_fingerprint"))
             if not source_id:
                 issues.append(_issue("invoice_import_row_identity_missing", row_id, None))
-            expected_edges.add((linked_id, batch_id, source_id))
+            if has_oa_attachment_source(invoice.get("source_links")):
+                if source_id != (_text(invoice.get("source_unique_key")) or _text(invoice.get("data_fingerprint"))):
+                    issues.append(_issue("invoice_import_row_identity_mismatch", row_id, {"invoice_id": linked_id}))
+            else:
+                expected_edges.add((linked_id, batch_id, source_id))
             expected_invoice_ids.add(linked_id)
             linked_rows[(batch_id, linked_id)].append(row)
         elif linked_id or _text(row.get("linked_object_type")):
@@ -593,6 +603,20 @@ def _invoice_field_issues(row: dict[str, Any], invoice: dict[str, Any], *, batch
     }
     if _text(row.get("source_unique_key")) and _text(invoice.get("data_fingerprint")):
         mismatches["data_fingerprint"] = {"row": "canonical_identity_present", "invoice": invoice.get("data_fingerprint")}
+    if has_oa_attachment_source(invoice.get("source_links")) and _text(row.get("decision")) == "duplicate_skipped":
+        # A skipped upload is evidence of an attempt, not a writer of financial
+        # facts. Identity remains strict; report differing input without rewriting.
+        input_differences = {key: value for key, value in mismatches.items() if key not in {
+            "source_unique_key", "data_fingerprint", "invoice_no", "invoice_code", "digital_invoice_no",
+        }}
+        identity_differences = {key: value for key, value in mismatches.items() if key not in input_differences}
+        return ([
+            _issue("invoice_import_invoice_field_mismatch", _text(row.get("row_id")), {"fields": identity_differences})
+        ] if identity_differences else []) + ([AuditIssue(
+            "warning", "invoice_import_oa_duplicate_difference",
+            "已有OA附件发票，重复导入已跳过；输入差异保留在导入历史。",
+            _text(row.get("row_id")), "invoice_import", {"fields": input_differences},
+        )] if input_differences else [])
     # Repeated formal imports retain existing names; their input remains provenance.
     # Only classify name differences when identity, both tax IDs and the original
     # formal owner are proven. All other field/edge/payload checks stay strict.
@@ -983,6 +1007,14 @@ where b.batch_type in ('input_invoice', 'output_invoice')
        select 1
        from jsonb_array_elements(coalesce(i.source_links, '[]'::jsonb)) link
        where link->>'source_type' = 'manual_invoice_import'
+   )
+   or exists (
+       select 1 from app.import_batch_rows r
+       join app.import_batches rb on rb.id = r.import_batch_id
+       where r.linked_object_type = 'invoice'
+         and r.linked_object_id = coalesce(i.legacy_mongo_id, i.id::text)
+         and r.decision in ('created', 'status_updated', 'duplicate_skipped')
+         and rb.batch_type in ('input_invoice', 'output_invoice')
    )
 order by invoice_id
 """

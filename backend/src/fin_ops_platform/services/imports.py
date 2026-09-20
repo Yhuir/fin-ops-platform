@@ -25,6 +25,11 @@ from fin_ops_platform.services.etc_batch_invoice_link_service import EtcBatchInv
 from fin_ops_platform.services.import_preview_audit import (
     BANK_TRANSACTION_CONFIRM_DUPLICATE_REASON,
 )
+from fin_ops_platform.services.invoice_expense_item_links import (
+    effective_invoice_source_links,
+    effective_invoice_source_tags,
+    has_oa_attachment_source,
+)
 from fin_ops_platform.services.object_dedup_decision_service import ObjectDedupDecisionService
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy
 
@@ -270,7 +275,10 @@ class ImportNormalizationService:
                 if not linked_id:
                     continue
                 if row.linked_object_type == "invoice":
-                    invoice_ids.add(linked_id)
+                    invoice = self._invoices_by_id[linked_id]
+                    if not (row.decision == ImportDecision.DUPLICATE_SKIPPED
+                            and has_oa_attachment_source(invoice.source_links)):
+                        invoice_ids.add(linked_id)
                 elif (
                     row.linked_object_type == "bank_transaction"
                     and row.decision in {ImportDecision.CREATED, ImportDecision.STATUS_UPDATED}
@@ -299,8 +307,19 @@ class ImportNormalizationService:
             invoice = self._invoices_by_id.get(str(invoice_id or "").strip())
             if invoice is None:
                 raise KeyError(f"Unknown invoice id: {invoice_id}")
+            links_to_add = normalized_links
+            if has_oa_attachment_source(invoice.source_links):
+                source_targets = {(link.get("derived_from_oa_id"), link.get("source_expense_item_id"))
+                                  for link in invoice.source_links if link.get("source_type") == "oa_attachment_invoice"}
+                requested_targets = {(link.get("derived_from_oa_id"), link.get("source_expense_item_id"))
+                                     for link in normalized_links if link.get("source_type") == "oa_expense_item_invoice"}
+                if not requested_targets.issubset(source_targets):
+                    raise ValueError("OA附件发票归属由原始子付款项确定，不能人工更改。")
+                links_to_add = [link for link in normalized_links if link.get("source_type") != "oa_expense_item_invoice"]
+                if not links_to_add:
+                    continue
             existing = {tuple(sorted(link.items())) for link in invoice.source_links}
-            for link in normalized_links:
+            for link in links_to_add:
                 fingerprint = tuple(sorted(link.items()))
                 if fingerprint not in existing:
                     invoice.source_links.append(link)
@@ -549,6 +568,9 @@ class ImportNormalizationService:
             if isinstance(invoice, Invoice):
                 return invoice
         raise KeyError(invoice_id)
+
+    def invoice_has_oa_attachment_source(self, invoice_id: str) -> bool:
+        return has_oa_attachment_source(self.get_invoice(invoice_id).source_links)
 
     def invoice_matches_canonical_key(self, *, invoice_id: str, canonical_key: str) -> bool:
         normalized_invoice_id = str(invoice_id or "").strip()
@@ -1586,6 +1608,8 @@ class ImportNormalizationService:
         invoice = self._ensure_invoice_loaded(row_result.linked_object_id)
         if invoice is None:
             return
+        if has_oa_attachment_source(invoice.source_links):
+            return
         self._merge_invoice_from_normalized(invoice, row_result.batch_id, normalized)
         self._link_submitted_etc_metadata_if_present(invoice, normalized)
 
@@ -1940,7 +1964,9 @@ class ImportNormalizationService:
         for tag in normalized.get("tags") or []:
             self._append_unique_tag(invoice.tags, str(tag))
         self._append_invoice_source_link(invoice, self._build_oa_attachment_invoice_source_link(normalized))
-        if not invoice.oa_form_id:
+        invoice.source_links = effective_invoice_source_links(invoice.source_links)
+        invoice.tags = effective_invoice_source_tags(invoice.tags, invoice.source_links)
+        if normalized.get("oa_form_id"):
             invoice.oa_form_id = normalized.get("oa_form_id")
         for field_name in (
             "invoice_code",
@@ -2155,6 +2181,8 @@ class ImportNormalizationService:
 
     def _merge_invoice_from_normalized(self, invoice: Invoice, batch_id: str, normalized: dict[str, Any]) -> None:
         self._ensure_invoice_metadata_fields(invoice)
+        if has_oa_attachment_source(invoice.source_links):
+            return
         had_formal_import = any(
             str(source_link.get("source_type") or "").strip() == "manual_invoice_import"
             for source_link in invoice.source_links

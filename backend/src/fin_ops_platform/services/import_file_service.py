@@ -20,8 +20,8 @@ from openpyxl import load_workbook
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.domain.models import ImportedBatchRowResult
 from fin_ops_platform.services.import_preview_audit import (
-    BankTransactionIdentityStrategy,
     CONTROLLED_REPLAY_DUPLICATE_REASON_BY_EVIDENCE_KIND,
+    BankTransactionIdentityStrategy,
     ImportPreviewAuditCounts,
     ImportPreviewAuditRow,
     ImportPreviewDuplicateGroup,
@@ -308,6 +308,9 @@ class FileImportService:
             source_links=source_links,
             oa_form_id=oa_form_id,
         )
+
+    def invoice_has_oa_attachment_source(self, invoice_id: str) -> bool:
+        return self._import_service.invoice_has_oa_attachment_source(invoice_id)
 
     def invoice_matches_canonical_key(self, *, invoice_id: str, canonical_key: str) -> bool:
         return self._import_service.invoice_matches_canonical_key(

@@ -1573,7 +1573,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(invoice.source_links[0]["source_workbench_row_id"], "oa-att-inv-oa-exp-001-stable")
         self.assertEqual(invoice.source_links[0]["derived_from_oa_id"], "oa-exp-001")
 
-    def test_formal_import_overrides_oa_parsed_fields_once_and_preserves_oa_provenance(self) -> None:
+    def test_formal_import_never_overwrites_oa_owned_invoice(self) -> None:
         created = self.service.upsert_oa_attachment_invoice(
             {
                 "evidence_type": "tax_invoice",
@@ -1617,13 +1617,13 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.service.confirm_import(preview.id)
 
         merged = self.service.get_invoice(created.id)
-        self.assertEqual(merged.invoice_type, InvoiceType.INPUT)
-        self.assertEqual(merged.amount, Decimal("193.92"))
-        self.assertEqual(merged.invoice_date, "2026-08-04")
-        self.assertEqual(merged.seller_name, "正式供应商")
+        self.assertEqual(merged.invoice_type, InvoiceType.OUTPUT)
+        self.assertEqual(merged.amount, Decimal("171.61"))
+        self.assertEqual(merged.invoice_date, "2026-08-03")
+        self.assertEqual(merged.seller_name, "OCR供应商")
         self.assertEqual(
             [link["source_type"] for link in merged.source_links],
-            ["oa_attachment_invoice", "manual_invoice_import"],
+            ["oa_attachment_invoice"],
         )
 
         duplicate = self.service.preview_import(
@@ -1645,10 +1645,10 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         )
         self.service.confirm_import(duplicate.id)
 
-        self.assertEqual(merged.amount, Decimal("193.92"))
-        self.assertEqual(merged.seller_name, "正式供应商")
-        self.assertEqual(merged.invoice_type, InvoiceType.INPUT)
-        self.assertEqual(len(merged.source_links), 3)
+        self.assertEqual(merged.amount, Decimal("171.61"))
+        self.assertEqual(merged.seller_name, "OCR供应商")
+        self.assertEqual(merged.invoice_type, InvoiceType.OUTPUT)
+        self.assertEqual(len(merged.source_links), 1)
 
     def test_oa_attachment_invoice_upsert_merges_existing_canonical_invoice(self) -> None:
         first = self.service.upsert_oa_attachment_invoice(

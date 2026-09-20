@@ -2,6 +2,18 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-09-20 OA 来源优先回归
+
+| 测试类别 | 入口与业务断言 |
+| --- | --- |
+| 业务单元 | `test_invoice_oa_source_priority.py`：来源接管、幂等、一对多、错误组迁移、OA 来源禁止人工/金额推断归属；非 OA 人工选择保留 |
+| Service / repository | `test_oa_attachment_invoice_promotion_service.py`：真实 PG 同一 canonical ID 接管，财务字段保留、并发旧预览回滚、OA 后人工导入零发票写；0172 清理竞争边、审计与幂等 |
+| API | `test_workbench_invoice_expense_item_assignment_api.py`：OA 来源改归属返回 409 与明确 error/message，不写来源或审计；原权限路径沿用 |
+| 后台任务 | `test_confirmed_invoice_import_uow.py`、`test_workbench_query_postgres_integration.py`：批量 dirty scope、原子 relation 迁移、失败回滚、重放幂等、列表/详情同源；当前页面没有 read model/cache，不新增 freshness 状态 |
+| 前端 | `RelationGroupGrid.test.tsx`：OA 不显示归属动作、普通人工发票保留动作；原筛选/抽屉/权限测试继续回归 |
+| 跨模块业务流 | PG workbench integration 与 Playwright `imports-invoices-flow`、`workbench-relation-fanout`、`input-invoice-relation-fanout`：导入到 canonical 与下游页面，补充凭证增删与刷新 |
+| 既有功能 | 进行中 OA 仍未配对、ETC 来源、8000 分期逐笔对齐、人工后到发票、撤销关系、发票金额/核销状态、银行/ETC/税金/成本/待付款页面合同 |
+
 ## 影响面清单
 
 | 层级 | 当前入口 | 回归风险 |

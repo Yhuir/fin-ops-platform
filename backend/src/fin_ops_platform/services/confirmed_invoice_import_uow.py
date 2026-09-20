@@ -80,7 +80,7 @@ class ConfirmedInvoiceImportUnitOfWork:
                     source_versions=dict(source_versions or {}),
                     debounce_seconds=0,
                 )
-                if expanded_months
+                if expanded_months and imports_snapshot.get("invoices")
                 else []
             )
         return {

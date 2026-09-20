@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-
 from fin_ops_platform.services.invoice_expense_item_link_repair_service import (
     build_invoice_expense_item_link_repair_plan,
     build_oa_attachment_invoice_link_audit_plan,
@@ -17,6 +16,7 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     load_oa_attachment_invoice_link_audit_snapshot,
 )
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -186,6 +186,7 @@ def _oa_attachment_audit_row(
                 "canonical_oa_row_id": oa_row_id,
                 "expense_item_id": expense_item_id,
                 "attachment_key_hashes": [f"current-{index}"],
+                "source_attachment_keys": [f"current-key-{index}"],
             }
             for index, (oa_row_id, expense_item_id) in enumerate(candidates or [])
         ],
@@ -218,12 +219,12 @@ def test_full_oa_attachment_audit_repairs_unique_oa_target_set_without_case_fact
     assert plan["classification_counts"]["valid_attachment_owner"] == 1
     assert plan["update_count"] == 1
     repaired_links = plan["updates"][0]["source_links"]
-    assert repaired_links[0] == snapshot[0]["source_links"][0]
-    assert [link["source_expense_item_id"] for link in repaired_links[1:]] == [
+    assert all(link["source_type"] == "oa_attachment_invoice" for link in repaired_links)
+    assert [link["source_expense_item_id"] for link in repaired_links] == [
         "oa-exp-current:item:0:a",
         "oa-exp-current:item:1:b",
     ]
-    assert all("source_relation_case_id" not in link for link in repaired_links[1:])
+    assert all("source_relation_case_id" not in link for link in repaired_links)
     assert canonical_oa_expense_item_ids(
         oa_row={
             "id": "oa-exp-current",
@@ -240,20 +241,20 @@ def test_full_oa_attachment_audit_repairs_unique_oa_target_set_without_case_fact
 
     repaired_snapshot = [dict(snapshot[0])]
     repaired_snapshot[0]["source_links"] = repaired_links
-    repaired_snapshot[0]["explicit_edges"] = [
+    repaired_snapshot[0]["attachment_edges"] = [
         {
             "oa_row_id": link["derived_from_oa_id"],
             "expense_item_id": link["source_expense_item_id"],
             "is_current_owner": True,
         }
-        for link in repaired_links[1:]
+        for link in repaired_links
     ]
     repaired_plan = build_oa_attachment_invoice_link_audit_plan(repaired_snapshot)
-    assert repaired_plan["classification_counts"]["valid_explicit"] == 1
+    assert repaired_plan["classification_counts"]["valid_attachment_owner"] == 1
     assert repaired_plan["update_count"] == 0
 
 
-def test_full_oa_attachment_audit_does_not_write_ambiguous_or_conflicting_owners() -> None:
+def test_full_oa_attachment_audit_rejects_ambiguous_oa_but_overrides_manual_owner() -> None:
     ambiguous = _oa_attachment_audit_row(
         invoice_id="invoice-ambiguous",
         candidates=[
@@ -270,12 +271,12 @@ def test_full_oa_attachment_audit_does_not_write_ambiguous_or_conflicting_owners
     plan = build_oa_attachment_invoice_link_audit_plan([ambiguous, conflicting])
 
     assert plan["classification_counts"]["ambiguous"] == 1
-    assert plan["classification_counts"]["conflict"] == 1
-    assert plan["update_count"] == 0
-    assert plan["rollback_manifest"]["restore_invoice_source_links"] == []
+    assert plan["classification_counts"]["repairable"] == 1
+    assert plan["update_count"] == 1
+    assert all(link["source_type"] == "oa_attachment_invoice" for link in plan["updates"][0]["source_links"])
 
 
-def test_full_oa_attachment_audit_completes_same_oa_explicit_candidate_subset() -> None:
+def test_full_oa_attachment_audit_replaces_explicit_subset_with_all_proven_sources() -> None:
     snapshot = [
         _oa_attachment_audit_row(
             invoice_id="invoice-partial-explicit",
@@ -294,59 +295,22 @@ def test_full_oa_attachment_audit_completes_same_oa_explicit_candidate_subset() 
     assert {
         link["source_expense_item_id"]
         for link in plan["updates"][0]["source_links"]
-        if link["source_type"] == "oa_expense_item_invoice"
+        if link["source_type"] == "oa_attachment_invoice"
     } == {"oa-exp-a:item:0", "oa-exp-a:item:1"}
 
 
-def test_full_oa_attachment_audit_appends_missing_target_without_rewriting_existing_edge() -> None:
-    row = _oa_attachment_audit_row(
-        invoice_id="invoice-partial-provenance",
-        candidates=[
-            ("oa-exp-a", "oa-exp-a:item:0"),
-            ("oa-exp-a", "oa-exp-a:item:1"),
-        ],
-        explicit_targets=[("oa-exp-a", "oa-exp-a:item:0")],
-    )
-    existing_link = row["source_links"][1]
-    existing_link["source_relation_case_id"] = "CASE-MANUAL-001"
-    existing_link["entry_method"] = "manual_confirm"
-    existing_link["audit_context"] = {
-        "operator_id": "operator-1",
-        "confirmed_at": "2026-08-24T12:00:00+08:00",
-    }
-    before_source_links = deepcopy(row["source_links"])
-
-    first = build_oa_attachment_invoice_link_audit_plan([row])
-
-    repaired_links = first["updates"][0]["source_links"]
-    assert repaired_links[: len(before_source_links)] == before_source_links
-    appended_link = repaired_links[-1]
-    assert appended_link == {
-        "source_type": "oa_expense_item_invoice",
-        "source_workbench_row_id": "oa-exp-a",
-        "derived_from_oa_id": "oa-exp-a",
-        "source_expense_item_id": "oa-exp-a:item:1",
-        "entry_method": "verified_attachment_identity_repair",
-    }
-
-    rerun_row = dict(row)
-    rerun_row["source_links"] = repaired_links
-    rerun_row["explicit_edges"] = [
-        {
-            "oa_row_id": "oa-exp-a",
-            "expense_item_id": "oa-exp-a:item:0",
-            "is_current_owner": True,
-        },
-        {
-            "oa_row_id": "oa-exp-a",
-            "expense_item_id": "oa-exp-a:item:1",
-            "is_current_owner": True,
-        },
-    ]
-    second = build_oa_attachment_invoice_link_audit_plan([rerun_row])
-
-    assert second["classification_counts"]["valid_explicit"] == 1
-    assert second["update_count"] == 0
+def test_full_oa_attachment_audit_replaces_manual_edge_with_verified_oa_sources() -> None:
+    row = _oa_attachment_audit_row(invoice_id="invoice-partial", candidates=[
+        ("oa-exp-a", "oa-exp-a:item:0"), ("oa-exp-a", "oa-exp-a:item:1"),
+    ], explicit_targets=[("oa-exp-a", "oa-exp-a:item:0")])
+    before = deepcopy(row["source_links"])
+    plan = build_oa_attachment_invoice_link_audit_plan([row])
+    links = plan["updates"][0]["source_links"]
+    assert len(links) == 2
+    assert {link["source_type"] for link in links} == {"oa_attachment_invoice"}
+    assert {link["source_attachment_key"] for link in links} == {"current-key-0", "current-key-1"}
+    assert row["source_links"] == before
+    assert plan["rollback_manifest"]["restore_invoice_source_links"][0]["source_links"] == before
 
 
 def test_full_oa_attachment_audit_requires_set_overlap_even_within_same_oa() -> None:
@@ -423,7 +387,7 @@ def test_full_oa_attachment_audit_marks_explicit_owner_against_active_parent_as_
     plan = build_oa_attachment_invoice_link_audit_plan([row])
 
     assert plan["classification_counts"]["conflict"] == 1
-    assert plan["classification_counts"]["valid_explicit"] == 0
+    assert "valid_explicit" not in plan["classification_counts"]
     assert plan["update_count"] == 0
 
 
@@ -476,7 +440,7 @@ def test_full_oa_attachment_audit_is_idempotent_and_preserves_attachment_provena
     first = build_oa_attachment_invoice_link_audit_plan(snapshot)
     next_snapshot = [dict(snapshot[0])]
     next_snapshot[0]["source_links"] = first["updates"][0]["source_links"]
-    next_snapshot[0]["explicit_edges"] = [
+    next_snapshot[0]["attachment_edges"] = [
         {
             "oa_row_id": "oa-exp-current",
             "expense_item_id": "oa-exp-current:item:0",
@@ -486,7 +450,7 @@ def test_full_oa_attachment_audit_is_idempotent_and_preserves_attachment_provena
 
     second = build_oa_attachment_invoice_link_audit_plan(next_snapshot)
 
-    assert second["classification_counts"]["valid_explicit"] == 1
+    assert second["classification_counts"]["valid_attachment_owner"] == 1
     assert second["update_count"] == 0
     assert next_snapshot[0]["source_links"][0]["source_type"] == "oa_attachment_invoice"
 

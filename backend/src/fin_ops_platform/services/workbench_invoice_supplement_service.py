@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from dataclasses import dataclass
-import logging
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import ImportDecision
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -178,11 +177,14 @@ class WorkbenchInvoiceSupplementService:
                     "source_relation_case_id": case_id,
                     "entry_method": "manual",
                 }]
-                self._file_import_service.attach_source_links_to_invoices(
-                    invoice_ids,
-                    source_links=source_links,
-                    oa_form_id=oa_row_id,
-                )
+                try:
+                    self._file_import_service.attach_source_links_to_invoices(
+                        invoice_ids, source_links=source_links, oa_form_id=oa_row_id,
+                    )
+                except ValueError as exc:
+                    raise WorkbenchInvoiceSupplementError(
+                        "invoice_oa_source_immutable", str(exc),
+                    ) from exc
                 import_payload = self._file_import_service.confirmed_session_persistence_payload(
                     session_id=session_id,
                     selected_file_ids=file_ids,

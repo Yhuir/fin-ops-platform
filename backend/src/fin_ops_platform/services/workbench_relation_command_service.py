@@ -1342,6 +1342,7 @@ class WorkbenchRelationCommandService:
         replace_history_operation_type: str = "remove_unavailable_oa_fact",
         cancel_history_operation_type: str = "cancel_relation_for_unavailable_oa_fact",
         emit_payment_status_reconcile: bool = True,
+        expected_case_by_row_id: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Remove unavailable canonical facts without leaving a half-valid active relation."""
 
@@ -1355,6 +1356,11 @@ class WorkbenchRelationCommandService:
         self._acquire_relation_member_locks(sorted(removed_row_ids))
         pair_service = self._pair_service_for_row_ids(sorted(removed_row_ids))
         before_relations = pair_service.active_relations_for_row_ids(sorted(removed_row_ids))
+        if expected_case_by_row_id is not None:
+            actual = {str(row_id): str(relation["case_id"]) for relation in before_relations
+                      for row_id in relation.get("row_ids", []) if row_id in removed_row_ids}
+            if actual != expected_case_by_row_id:
+                raise WorkbenchRelationCommandError("relation_changed", "发票配对关系已变化，请重新计算。")
         histories: list[dict[str, Any]] = []
         changed_case_ids: list[str] = []
         for before in before_relations:
@@ -1375,6 +1381,22 @@ class WorkbenchRelationCommandService:
                 if str(row_id).strip() and str(row_id).strip() not in removed_row_ids
             ]
             if len(members) >= 2 and not binding_parents.intersection(removed_row_ids):
+                remaining_metadata = dict(metadata or {})
+                for key in ("oa_attachment_bindings", "contains_immutable_oa_attachment_binding",
+                            "immutable_oa_attachment_binding", "parent_oa_row_id"):
+                    remaining_metadata.pop(key, None)
+                if remaining_metadata.get("source") == "oa_attachment_invoice":
+                    remaining_metadata.pop("source")
+                remaining_metadata.update(_formal_oa_attachment_metadata(
+                    row_ids=[row_id for row_id, _ in members],
+                    row_types=[row_type for _, row_type in members],
+                    bindings={(oa, invoice) for oa, invoice in _oa_attachment_binding_pairs(metadata)
+                              if invoice not in removed_row_ids},
+                ))
+                if expected_case_by_row_id is not None:
+                    # The caller proved a newer canonical OA source. Old binding
+                    # metadata must not reattach the member being transferred.
+                    pair_service.cancel_relation(case_id)
                 _, history = pair_service.replace_with_confirmed_relation(
                     case_id=case_id,
                     row_ids=[row_id for row_id, _ in members],
@@ -1388,7 +1410,7 @@ class WorkbenchRelationCommandService:
                         if isinstance(before.get("amount_check"), dict)
                         else None
                     ),
-                    special_metadata=(dict(metadata) if isinstance(metadata, dict) else None),
+                    special_metadata=remaining_metadata or None,
                     before_relations=[before],
                     operation_type=replace_history_operation_type,
                     history_created_by=actor_id,

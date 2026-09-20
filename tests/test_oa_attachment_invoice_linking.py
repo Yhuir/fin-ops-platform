@@ -150,7 +150,7 @@ def test_normalizes_historical_parent_aliases_for_multiple_current_expense_items
     }
 
 
-def test_explicit_expense_item_binding_overrides_historical_attachment_source() -> None:
+def test_attachment_source_overrides_explicit_expense_item_binding() -> None:
     oa_row = {
         "id": "oa-exp-2201",
         "type": "oa",
@@ -179,7 +179,7 @@ def test_explicit_expense_item_binding_overrides_historical_attachment_source() 
 
     normalize_oa_attachment_expense_item_ids([oa_row, invoice])
 
-    assert invoice["source_expense_item_ids"] == ["oa-exp-2201:item:4:current"]
+    assert invoice["source_expense_item_ids"] == ["oa-exp-2201:item:3:current"]
     assert len(invoice["source_links"]) == 2
     assert invoice["source_links"][0]["source_expense_item_id"] == "oa-exp-2201:item:3:old"
 
@@ -206,7 +206,7 @@ def test_explicit_current_item_id_does_not_require_a_row_index() -> None:
     assert invoice["source_oa_row_id"] == "oa-1"
 
 
-def test_malformed_explicit_binding_does_not_fall_back_to_attachment_source() -> None:
+def test_malformed_explicit_binding_cannot_hide_attachment_source() -> None:
     oa_row = {
         "id": "oa-exp-2201",
         "type": "oa",
@@ -234,7 +234,7 @@ def test_malformed_explicit_binding_does_not_fall_back_to_attachment_source() ->
 
     normalize_oa_attachment_expense_item_ids([oa_row, invoice])
 
-    assert invoice["source_expense_item_ids"] == []
+    assert invoice["source_expense_item_ids"] == ["oa-exp-2201:item:3:current"]
 
 
 def test_leaves_ambiguous_or_foreign_attachment_sources_unassigned() -> None:
@@ -264,7 +264,7 @@ def test_leaves_ambiguous_or_foreign_attachment_sources_unassigned() -> None:
 
     normalize_oa_attachment_expense_item_ids(rows)
 
-    assert rows[1]["source_expense_item_ids"] == ["oa-exp-other:item:0:old"]
+    assert rows[1]["source_expense_item_ids"] == []
     assert "source_oa_id" not in rows[1]
 
 
@@ -299,4 +299,4 @@ def test_shared_parent_alias_remains_ambiguous() -> None:
     normalize_oa_attachment_expense_item_ids(rows)
 
     assert "source_oa_id" not in rows[2]
-    assert "source_expense_item_ids" not in rows[2]
+    assert rows[2]["source_expense_item_ids"] == []

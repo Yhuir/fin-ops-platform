@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.invoice_expense_item_links import effective_invoice_source_links
+
 OA_SOURCE_ALIAS_FIELD_NAMES = (
     "id",
     "row_id",
@@ -198,11 +200,7 @@ def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None
         for source_id in oa_row_source_ids(oa_row):
             oa_rows_by_source_id.setdefault(source_id, []).append(oa_row)
     for invoice_row in (row for row in rows if str(row.get("type") or "").strip() == "invoice"):
-        source_links = [
-            source_link
-            for source_link in list(invoice_row.get("source_links") or [])
-            if isinstance(source_link, dict)
-        ]
+        source_links = effective_invoice_source_links(invoice_row.get("source_links"))
         has_explicit_source = any(
             str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
             for source_link in source_links
@@ -229,7 +227,7 @@ def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None
             if str(source_link.get("source_type") or "").strip()
             == "oa_attachment_invoice"
         ]
-        source_rows = explicit_source_rows or attachment_source_rows or [invoice_row]
+        source_rows = attachment_source_rows or explicit_source_rows or [invoice_row]
         candidate_oa_rows = {
             str(oa_row.get("id") or "").strip(): oa_row
             for source_row in source_rows
@@ -253,7 +251,7 @@ def normalize_oa_attachment_expense_item_ids(rows: list[dict[str, Any]]) -> None
             if canonical_item_ids:
                 matches.add((str(oa_row.get("id") or "").strip(), tuple(canonical_item_ids)))
         if len(matches) != 1:
-            if has_explicit_source:
+            if has_explicit_source or has_attachment_source:
                 invoice_row["source_expense_item_ids"] = []
                 invoice_row.pop("source_expense_item_id", None)
             continue
@@ -281,7 +279,7 @@ def canonical_oa_expense_item_ids(
         if isinstance(source_link, dict)
         and str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
     ]
-    source_rows = explicit_source_rows or attachment_source_rows
+    source_rows = attachment_source_rows or explicit_source_rows
     if not source_rows:
         source_rows = [invoice_row]
 

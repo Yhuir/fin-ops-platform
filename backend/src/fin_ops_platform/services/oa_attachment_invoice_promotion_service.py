@@ -580,6 +580,8 @@ class OAAttachmentInvoicePromotionService:
         canonical_incoming_oa_id = _clean_text(oa_source_aliases.get(incoming_oa_id or ""))
         canonical_incoming_oa_id = canonical_incoming_oa_id or incoming_oa_id
         for source_link in list(invoice.source_links or []):
+            if source_link.get("source_type") != "oa_attachment_invoice":
+                continue
             existing_oa_id = _clean_text(invoice_ownership_parent_oa_id(source_link))
             canonical_existing_oa_id = _clean_text(oa_source_aliases.get(existing_oa_id or ""))
             canonical_existing_oa_id = canonical_existing_oa_id or existing_oa_id

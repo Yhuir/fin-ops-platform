@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-
 EXPLICIT_EXPENSE_ITEM_SOURCE_TYPE = "oa_expense_item_invoice"
 
 
@@ -14,6 +13,32 @@ class InvoiceSourceLinksCasConflict(RuntimeError):
 
 def source_links(value: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in list(value or []) if isinstance(item, dict)]
+
+
+def has_oa_attachment_source(value: Any) -> bool:
+    """OA provenance cannot be changed by import or inferred assignment.
+
+    An unresolved historical item is still OA provenance: repair its identity,
+    rather than guessing a different item or replacing it with a manual source.
+    """
+    return any(link.get("source_type") == "oa_attachment_invoice" for link in source_links(value))
+
+
+def effective_invoice_source_links(value: Any) -> list[dict[str, Any]]:
+    """Keep OA ownership and independent sources; import history lives in batches."""
+    links = source_links(value)
+    if not has_oa_attachment_source(links):
+        return links
+    return [link for link in links if link.get("source_type") not in {
+        "manual_invoice_import", EXPLICIT_EXPENSE_ITEM_SOURCE_TYPE,
+    }]
+
+
+def effective_invoice_source_tags(tags: Iterable[str], links: Any) -> list[str]:
+    oa_owned = has_oa_attachment_source(links)
+    return [tag for tag in tags if not (
+        oa_owned and tag in {"人工导入", "明细归属"}
+    )]
 
 
 def explicit_expense_item_links(value: Any) -> list[dict[str, Any]]:
@@ -38,6 +63,8 @@ def replace_explicit_expense_item_links(
     """
 
     normalized_case_id = _text(case_id)
+    if has_oa_attachment_source(value):
+        raise ValueError("OA附件发票归属由原始子付款项确定，不能人工更改。")
     normalized_entry_method = _required_text(entry_method, "entry_method")
     normalized_targets = sorted(
         {

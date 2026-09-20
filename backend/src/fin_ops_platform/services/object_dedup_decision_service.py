@@ -10,6 +10,7 @@ from fin_ops_platform.services.bank_transaction_identity_service import (
     BankTransactionIdentityService,
     BankTransactionStatementPosition,
 )
+from fin_ops_platform.services.invoice_expense_item_links import has_oa_attachment_source
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
 
 
@@ -98,6 +99,15 @@ class ObjectDedupDecisionService:
         )
         existing = self._find_invoice(identity)
         if identity.canonical_key and existing is not None:
+            if not self._is_etc_invoice(normalized) and has_oa_attachment_source(existing.source_links):
+                return ObjectDedupDecision(
+                    decision=ImportDecision.DUPLICATE_SKIPPED,
+                    decision_reason="OA attachment source already owns this invoice; import skipped.",
+                    identity=identity,
+                    linked_object_type="invoice",
+                    linked_object_id=existing.id,
+                    matched_object=existing,
+                )
             incoming_status = _text(normalized.get("invoice_status_from_source"))
             existing_status = _text(getattr(existing, "invoice_status_from_source", None))
             if incoming_status and incoming_status != existing_status:

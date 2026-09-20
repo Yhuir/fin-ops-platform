@@ -29,7 +29,12 @@ from fin_ops_platform.services.import_file_service import (
 )
 from fin_ops_platform.services.import_preview_audit import ImportPreviewAuditCounts, ImportPreviewDuplicateGroup
 from fin_ops_platform.services.imports import ImportPreview
-from fin_ops_platform.services.invoice_expense_item_links import InvoiceSourceLinksCasConflict
+from fin_ops_platform.services.invoice_expense_item_links import (
+    InvoiceSourceLinksCasConflict,
+    effective_invoice_source_links,
+    effective_invoice_source_tags,
+    has_oa_attachment_source,
+)
 from fin_ops_platform.services.invoice_identity_service import InvoiceIdentityService
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     invoice_ownership_parent_oa_id,
@@ -910,6 +915,7 @@ class PostgresCoreRepository:
             key = self._strong_invoice_identity_key(row)
             if key:
                 current_by_key.setdefault(key, []).append(row)
+        skipped_invoice_ids: set[str] = set()
         for invoice, identity_key in keyed_invoices:
             matches = current_by_key.get(identity_key, [])
             if len(matches) > 1:
@@ -927,6 +933,20 @@ class PostgresCoreRepository:
                     "Canonical invoice identity changed during import confirmation.",
                     invoice_id=incoming_id,
                 )
+            if has_oa_attachment_source(current.get("source_links")):
+                # A concurrent OA takeover changes an import/update decision.
+                # Roll back so the normal import retry reloads its batch counts,
+                # file summaries and source snapshot together.
+                previews = imports_snapshot.get("batches") or {}
+                preview_rows = previews.values() if isinstance(previews, dict) else previews
+                if any(row.get("linked_object_id") == incoming_id and row.get("decision") != "duplicate_skipped"
+                       for preview in preview_rows for row in preview.get("row_results", [])):
+                    raise InvoiceSourceLinksCasConflict(
+                        "OA source changed during import confirmation; reload the import decision.",
+                        invoice_id=incoming_id,
+                    )
+                skipped_invoice_ids.add(incoming_id or "")
+                continue
             current_raw_payload = current.get("raw_payload")
             current_normalized = (
                 current_raw_payload.get("normalized_payload")
@@ -1024,6 +1044,17 @@ class PostgresCoreRepository:
                 current.get("source_links"),
                 invoice.get("source_links"),
             )
+        if skipped_invoice_ids:
+            if isinstance(raw_invoices, dict):
+                imports_snapshot["invoices"] = {
+                    key: invoice for key, invoice in raw_invoices.items()
+                    if self._text(invoice.get("id")) not in skipped_invoice_ids
+                }
+            else:
+                imports_snapshot["invoices"] = [
+                    invoice for invoice in invoices
+                    if self._text(invoice.get("id")) not in skipped_invoice_ids
+                ]
         return set(identity_keys)
 
     @staticmethod
@@ -1115,7 +1146,8 @@ class PostgresCoreRepository:
                 current.source_links,
                 incoming_invoice.get("source_links"),
             )
-            if not current.oa_form_id:
+            current.tags = effective_invoice_source_tags(current.tags, current.source_links)
+            if incoming_invoice.get("oa_form_id"):
                 current.oa_form_id = self._text(incoming_invoice.get("oa_form_id"))
             for field_name in (
                 "invoice_code",
@@ -1363,6 +1395,7 @@ class PostgresCoreRepository:
                 updates,
                 actor_id=operator_id,
                 reason=reason,
+                allow_oa_source_repair=True,
             )
         except InvoiceSourceLinksCasConflict as exc:
             invoice_id = exc.invoice_id
@@ -1408,6 +1441,7 @@ class PostgresCoreRepository:
         *,
         actor_id: str,
         reason: str,
+        allow_oa_source_repair: bool = False,
     ) -> dict[str, Any]:
         """Compare-and-swap canonical invoice provenance inside the caller transaction."""
 
@@ -1420,6 +1454,15 @@ class PostgresCoreRepository:
                 "select set_config('fin_ops.actor_id', %s, true)",
                 (actor_id,),
             )
+        updates = [dict(update) for update in updates]
+        for update in updates:
+            before_oa = [link for link in update["before_source_links"]
+                         if link.get("source_type") == "oa_attachment_invoice"]
+            after_oa = [link for link in update["source_links"]
+                        if link.get("source_type") == "oa_attachment_invoice"]
+            if before_oa != after_oa and not allow_oa_source_repair:
+                raise ValueError("OA attachment provenance can only be changed by the OA source writer.")
+            update["source_links"] = effective_invoice_source_links(update["source_links"])
         invoice_ids = [str(update["invoice_id"]) for update in updates]
         if len(invoice_ids) != len(set(invoice_ids)):
             raise ValueError("Duplicate invoice identities in source-link update batch.")
@@ -1428,13 +1471,17 @@ class PostgresCoreRepository:
                 """
                 update app.invoices invoice
                 set source_links = change.source_links,
+                    tags = case when change.source_links @> '[{"source_type":"oa_attachment_invoice"}]'::jsonb
+                        then array_remove(array_remove(invoice.tags, '人工导入'), '明细归属') else invoice.tags end,
                     raw_payload = jsonb_set(
                         case when jsonb_typeof(invoice.raw_payload) = 'object'
                             then invoice.raw_payload else '{}'::jsonb end,
                         '{normalized_payload}',
                         (case when jsonb_typeof(invoice.raw_payload->'normalized_payload') = 'object'
                             then invoice.raw_payload->'normalized_payload' else '{}'::jsonb end)
-                            || jsonb_build_object('source_links', change.source_links),
+                            || jsonb_build_object('source_links', change.source_links, 'tags',
+                                to_jsonb(case when change.source_links @> '[{"source_type":"oa_attachment_invoice"}]'::jsonb
+                                    then array_remove(array_remove(invoice.tags, '人工导入'), '明细归属') else invoice.tags end)),
                         true
                     ), updated_at = now()
                 from jsonb_to_recordset(%s::jsonb)
@@ -1894,6 +1941,7 @@ class PostgresCoreRepository:
             for value in source_link_values
             for link in (value if isinstance(value, list) else [])
             if isinstance(link, dict)
+            if link.get("source_type") == "oa_attachment_invoice"
             if (oa_id := cls._text(invoice_ownership_parent_oa_id(link)))
         }
         if len(oa_ids) <= 1:
@@ -1956,7 +2004,7 @@ class PostgresCoreRepository:
                     continue
                 seen.add(identity)
                 result.append(link)
-        return result
+        return effective_invoice_source_links(result)
 
     def _invoice_payload_with_identity_values(
         self,

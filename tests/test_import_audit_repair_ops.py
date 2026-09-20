@@ -21,12 +21,12 @@ from fin_ops_platform.services.import_audit_repair_service import (
     execute_failed_import_job_recovery,
     public_repair_report,
 )
+from fin_ops_platform.services.invoice_expense_item_link_repair_service import (
+    build_oa_attachment_invoice_link_audit_plan,
+)
 from fin_ops_platform.services.invoice_header_fact_repair_service import (
     INVOICE_HEADER_REPAIR_FACTS,
     INVOICE_HEADER_REPAIR_SOURCE_SHA256,
-)
-from fin_ops_platform.services.invoice_expense_item_link_repair_service import (
-    build_oa_attachment_invoice_link_audit_plan,
 )
 from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
     _FAILED_IMPORT_FILE_SQL,
@@ -196,6 +196,7 @@ def _oa_attachment_invoice_link_audit_snapshot() -> list[dict[str, object]]:
                     "oa_row_id": "oa-exp-current",
                     "expense_item_id": "oa-exp-current:item:0:current",
                     "attachment_key_hashes": ["current-attachment-hash"],
+                    "source_attachment_keys": ["current-attachment-key"],
                 }
             ],
         }
@@ -1814,10 +1815,9 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         transaction_connection = runtime_factory.call_args.kwargs["connection"]
         with transaction_connection.transaction() as nested_transaction:
             self.assertIs(nested_transaction, write_transaction)
-        from psycopg.types.json import Jsonb
-
         from fin_ops_platform.services.postgres_connection import PostgresTransaction
         from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+        from psycopg.types.json import Jsonb
 
         self.assertIsInstance(transaction_connection, PostgresTransaction)
         self.assertIsInstance(
@@ -2642,7 +2642,7 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         apply_repair.assert_called_once()
         repaired_update = apply_repair.call_args.args[1][0]
         self.assertEqual(repaired_update["source_links"][0]["source_type"], "oa_attachment_invoice")
-        self.assertNotIn("source_relation_case_id", repaired_update["source_links"][1])
+        self.assertNotIn("source_relation_case_id", repaired_update["source_links"][0])
         audit_service.record_action.assert_called_once()
         self.assertEqual(
             connection.statements,

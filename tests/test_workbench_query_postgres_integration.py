@@ -173,7 +173,9 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
     def test_installment_late_pending_oa_extends_original_case_and_aligns_both_reads(self):
         from concurrent.futures import ThreadPoolExecutor
 
-        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import PostgresWorkbenchFormalRelationFactRepository
+        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+            PostgresWorkbenchFormalRelationFactRepository,
+        )
         from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
         from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
         from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
@@ -378,7 +380,62 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(self.raw_connection.fetch_one("select count(*) n from audit.events where event_type='workbench.invoice_expense_items.auto_assigned'")['n'], 1)
 
 
-    def test_late_invoice_new_formal_relation_and_assignment_commit_together(self):
+    def test_oa_source_reassignment_moves_only_invoice_and_rolls_back_as_one_transaction(self):
+        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+            PostgresWorkbenchFormalRelationFactRepository,
+        )
+        from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
+        from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
+        from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
+        from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
+        self.raw_connection.execute("""insert into app.oa_applications
+            (oa_source_id, form_id, row_id, status, workflow_status, scope_month, application_date, amount, normalized_payload, raw_payload)
+            values ('oa-source-new','32','oa-source-new','active','completed','2026-07-01','2026-07-03',100,
+            '{"id":"oa-source-new","expense_items":[{"id":"oa-source-new:item:0","row_index":"0","amount":"100"}]}', '{}')""")
+        source = [{'source_type': 'oa_attachment_invoice', 'derived_from_oa_id': 'oa-source-new',
+                   'source_expense_item_id': 'oa-source-new:item:0'}]
+        self.raw_connection.execute("""insert into app.invoices
+            (legacy_mongo_id, invoice_type, invoice_no, invoice_date, invoice_month, amount, signed_amount, total_with_tax,
+             status, workbench_visibility, source_links, raw_payload)
+            values ('invoice-source-new','input','SOURCE-NEW','2026-07-03','2026-07-01',100,100,100,'active','visible',%s::jsonb,
+                    '{"normalized_payload":{"derived_from_oa_id":"oa-direct-1"}}')""", (json.dumps(source),))
+        self.raw_connection.execute("""update app.workbench_pair_relations
+            set row_ids=array['oa-direct-1','bank-direct-1','invoice-source-new'], row_types=array['oa','bank','invoice'],
+                special_metadata='{"oa_attachment_bindings":[{"parent_oa_row_id":"oa-direct-1","invoice_row_ids":["invoice-source-new"]}],"contains_immutable_oa_attachment_binding":true}'::jsonb
+            where case_id='CASE-DIRECT-1'""")
+        self.raw_connection.execute("""update app.workbench_pair_relations set raw_payload=jsonb_build_object('normalized_payload',
+            jsonb_build_object('case_id',case_id,'status',status,'row_ids',row_ids,'row_types',row_types,
+                              'relation_mode',relation_mode,'special_metadata',special_metadata,'version',version))
+            where case_id='CASE-DIRECT-1'""")
+        orchestrator = WorkbenchMatchingOrchestrator(
+            fact_repository=PostgresWorkbenchFormalRelationFactRepository(self.raw_connection), matcher=WorkbenchFreeMatchingEngine(),
+            relation_uow=WorkbenchWriteUnitOfWork(connection=self.raw_connection,
+                repository_factory=WorkbenchMatchingWorkerFactory._workbench_uow_repository_factory,
+                idempotency_store=PostgresWorkbenchIdempotencyRepository(self.raw_connection)),
+            bank_flow_rule_tag_rules_payload=lambda: {'rules': []})
+        def relation():
+            return self.raw_connection.fetch_one("select row_ids, version, special_metadata from app.workbench_pair_relations where case_id='CASE-DIRECT-1'")
+        before = relation()
+        with patch.object(WorkbenchRelationCommandService, 'confirm_formal_relation_plans', side_effect=RuntimeError('attach failed')):
+            with self.assertRaisesRegex(RuntimeError, 'attach failed'):
+                orchestrator.run(changed_scope_months=['2026-07'], reason='test', request_id='source-rollback')
+        self.assertEqual(relation(), before)
+        result = orchestrator.run(changed_scope_months=['2026-07'], reason='test', request_id='source-success')
+        self.assertEqual(result['reassigned_invoice_count'], 1)
+        after = relation()
+        self.assertEqual(set(after['row_ids']), {'oa-direct-1','bank-direct-1'})
+        self.assertNotIn('oa_attachment_bindings', after['special_metadata'])
+        new = self.raw_connection.fetch_one("select row_ids from app.workbench_pair_relations where status='active' and 'invoice-source-new'=any(row_ids)")
+        self.assertEqual(set(new['row_ids']), {'oa-source-new', 'invoice-source-new'})
+        for level in ('full', 'summary'):
+            page = self.repository.get_workbench_groups_page(scope_key='all', zone='unpaired', search='SOURCE-NEW', detail_level=level)
+            self.assertEqual(page['total'], 1)
+            self.assertEqual({r['id'] for r in page['groups'][0]['oa_rows'] + page['groups'][0]['invoice_rows']}, {'oa-source-new','invoice-source-new'})
+        repeated = orchestrator.run(changed_scope_months=['2026-07'], reason='test', request_id='source-repeat')
+        self.assertEqual(repeated['reassigned_invoice_count'], 0)
+        self.assertEqual(relation(), after)
+
+    def test_parent_only_attachment_forms_relation_without_guessing_child(self):
         from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
             PostgresWorkbenchFormalRelationFactRepository,
         )
@@ -399,16 +456,13 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
                 repository_factory=WorkbenchMatchingWorkerFactory._workbench_uow_repository_factory,
                 idempotency_store=PostgresWorkbenchIdempotencyRepository(self.raw_connection)),
             bank_flow_rule_tag_rules_payload=lambda: {'rules': []})
-        with patch.object(PostgresOperationsAuditRepository, 'append_operation_event', side_effect=RuntimeError('audit unavailable')):
-            with self.assertRaisesRegex(RuntimeError, 'audit unavailable'):
-                orchestrator.run(changed_scope_months=['2026-07'], reason='test', request_id='new-rollback')
-        self.assertEqual(self.raw_connection.fetch_one("select count(*) n from app.workbench_pair_relations where 'invoice-new-34'=any(row_ids)")['n'], 0)
         result = orchestrator.run(changed_scope_months=['2026-07'], reason='test', request_id='new-success')
-        self.assertEqual(result['assigned_invoice_count'], 1)
+        self.assertEqual(result['assigned_invoice_count'], 0)
         self.assertGreaterEqual(result['created_relation_count'], 1)
         link = self.raw_connection.fetch_one("select source_links from app.invoices where legacy_mongo_id='invoice-new-34'")['source_links'][-1]
         relation = self.raw_connection.fetch_one("select case_id from app.workbench_pair_relations where status='active' and 'invoice-new-34'=any(row_ids)")
-        self.assertEqual(link['source_relation_case_id'], relation['case_id'])
+        self.assertEqual(link, {'source_type': 'oa_attachment_invoice', 'derived_from_oa_id': 'oa-new-34'})
+        self.assertIsNotNone(relation)
 
     def test_late_invoice_bulk_assignment_uses_one_write_per_batch(self):
         from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
@@ -1748,6 +1802,13 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             "update app.invoices set source_links = %s::jsonb where legacy_mongo_id = 'invoice-narrow-doc'",
             (json.dumps([*historical_link, explicit_link], ensure_ascii=False),),
         )
+        self.assertEqual(anomaly_codes(), {"oa_invoice_attachment_unassigned", "oa_invoice_attachment_unparsed"})
+        # Only corrected source evidence, never a competing manual assignment, clears it.
+        source_link = {**historical_link[0], "source_expense_item_id": "oa-direct-1:item:0", "source_expense_row_index": "0"}
+        self.raw_connection.execute(
+            "update app.invoices set source_links = %s::jsonb where legacy_mongo_id = 'invoice-narrow-doc'",
+            (json.dumps([source_link]),),
+        )
         exception_page = self.repository.get_workbench_groups_page(
             scope_key="2026-07", zone="unpaired", exception_bucket="unpaired",
         )
@@ -2624,13 +2685,6 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             """
         )
         source_links = [
-            {
-                "source_type": "oa_attachment_invoice",
-                "derived_from_oa_id": "oa-manual-2308",
-                "source_expense_item_id": "oa-manual-2308:item:9:historical",
-                "source_expense_row_index": "9",
-                "source_attachment_key": "historical-attachment.pdf",
-            },
             {
                 "source_type": "oa_expense_item_invoice",
                 "entry_method": "manual_invoice_import",

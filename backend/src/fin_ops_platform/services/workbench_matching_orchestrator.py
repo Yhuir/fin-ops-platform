@@ -40,6 +40,7 @@ class WorkbenchFormalRelationCommand:
     payload: dict[str, Any]
     refresh_metadata: dict[str, object]
     paired_requirements_by_case_id: dict[str, dict[str, object]]
+    source_reassignments: tuple[tuple[str, str], ...] = ()
     invoice_assignment_case_ids: tuple[str, ...] = ()
     tenant_id: str = "default"
     actor_id: str = AUTO_RELATION_ACTOR
@@ -58,7 +59,7 @@ class WorkbenchFormalRelationCommand:
     ) -> "WorkbenchFormalRelationCommand":
         plans = tuple(sorted(result.plans, key=lambda plan: plan.relation_fingerprint))
         links = tuple(sorted((deepcopy(link) for link in etc_batch_links), key=lambda link: str(link["case_id"])))
-        if not plans and not links and not invoice_assignment_case_ids:
+        if not plans and not links and not invoice_assignment_case_ids and not result.source_reassignments:
             raise ValueError("A formal relation command requires at least one plan or ETC batch link.")
         scope_keys = tuple(
             sorted(
@@ -81,6 +82,7 @@ class WorkbenchFormalRelationCommand:
             raise ValueError("Paired requirements must belong to the formal relation plan batch.")
         fingerprint_payload = {
             "batch_hash": batch_hash,
+            "source_reassignments": result.source_reassignments,
             "invoice_assignment_case_ids": invoice_assignment_case_ids,
             "relation_fingerprints": fingerprints,
             "rule_versions": sorted({plan.rule_version for plan in plans}),
@@ -105,6 +107,7 @@ class WorkbenchFormalRelationCommand:
             )
         payload = {
             "batch_hash": batch_hash,
+            "source_reassignments": result.source_reassignments,
             "invoice_assignment_case_ids": invoice_assignment_case_ids,
             "relation_fingerprints": fingerprints,
             "request_id": str(request_id or "").strip(),
@@ -127,6 +130,7 @@ class WorkbenchFormalRelationCommand:
             },
             paired_requirements_by_case_id=requirements,
             invoice_assignment_case_ids=invoice_assignment_case_ids,
+            source_reassignments=result.source_reassignments,
             action_name="confirm_link" if plans else "enrich_etc_relation" if links else "assign_invoice_expense_items",
         )
 
@@ -229,8 +233,9 @@ class WorkbenchMatchingOrchestrator:
             if any(key in unassigned_members for key in plan.member_keys)
             and "oa" in plan.row_types
         }))
+        summary["reassigned_invoice_count"] = len(match_result.source_reassignments)
         summary["assigned_invoice_count"] = 0
-        if match_result.plans or etc_batch_links or assignment_case_ids:
+        if match_result.plans or etc_batch_links or assignment_case_ids or match_result.source_reassignments:
             paired_requirements_by_case_id = self._paired_requirements_by_case_id(
                 match_result,
                 etc_batch_links=etc_batch_links,
@@ -251,6 +256,14 @@ class WorkbenchMatchingOrchestrator:
                         fact for fact in batch.facts if fact.member_key in planned_members
                     )
                 service = self._relation_command_factory(context)
+                removal = service.remove_rows_from_active_relations(
+                    row_ids=[row_id for row_id, _ in command.source_reassignments],
+                    expected_case_by_row_id=dict(command.source_reassignments),
+                    actor_id=AUTO_RELATION_ACTOR, reason="OA附件来源接管发票归属",
+                    replace_history_operation_type="oa_source_reassign_invoice",
+                    cancel_history_operation_type="oa_source_replace_relation",
+                    emit_payment_status_reconcile=False,
+                ) if command.source_reassignments else {"changed_case_ids": [], "affected_months": []}
                 plan_case_ids = {str(plan.case_id) for plan in command.plans}
                 plan_links = [
                     link for link in command.etc_batch_links if str(link["case_id"]) in plan_case_ids
@@ -286,12 +299,14 @@ class WorkbenchMatchingOrchestrator:
                     ],
                     "changed_case_ids": sorted(
                         {
+                            *list(removal.get("changed_case_ids") or []),
                             *list(formal_result.get("changed_case_ids") or []),
                             *list(enrichment_result.get("changed_case_ids") or []),
                         }
                     ),
                     "affected_months": sorted(
                         {
+                            *list(removal.get("affected_months") or []),
                             *list(formal_result.get("affected_months") or []),
                             *list(enrichment_result.get("affected_months") or []),
                         }

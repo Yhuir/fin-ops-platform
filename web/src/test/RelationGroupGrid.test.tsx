@@ -2081,6 +2081,26 @@ describe("Workbench candidate grouping layout", () => {
     );
   });
 
+  test.each(["paired", "unpaired"] as const)("OA source hides ownership editing in %s", (zoneId) => {
+    const row = { ...createInvoiceRecord("invoice-source", "123"), sourceKind: "manual_invoice_import",
+      sourceKinds: ["manual_invoice_import", "oa_attachment_invoice"], sourceExpenseItemIds: ["oa-1:item:0"] };
+    render(<WorkbenchRecordCard canOperateData columnGridStyle={invoiceGridStyle} columns={invoiceColumns}
+      paneId="invoice" row={row} rowState="idle" zoneId={zoneId} showWorkflowActions={false}
+      onOpenDetail={() => undefined} onRowAction={() => undefined} onSelectRow={() => undefined} />);
+    expect(screen.queryByRole("button", { name: "更改归属" })).not.toBeInTheDocument();
+  });
+
+  test("manual-only invoice retains ownership correction", () => {
+    const onAction = vi.fn();
+    const row = { ...createInvoiceRecord("invoice-manual", "123"), sourceKind: "manual_invoice_import",
+      sourceExpenseItemIds: ["oa-1:item:0"] };
+    render(<WorkbenchRecordCard canOperateData columnGridStyle={invoiceGridStyle} columns={invoiceColumns}
+      paneId="invoice" row={row} rowState="idle" zoneId="unpaired" showWorkflowActions={false}
+      onOpenDetail={() => undefined} onRowAction={onAction} onSelectRow={() => undefined} />);
+    fireEvent.click(screen.getByRole("button", { name: "更改归属" }));
+    expect(onAction).toHaveBeenCalledWith(row, "assign-invoice-expense-items");
+  });
+
   test("renders bank note column from structured bank text fields", () => {
     const bankColumns = getWorkbenchColumns("bank");
     const bankGridStyle = getWorkbenchPaneGridStyle("bank");

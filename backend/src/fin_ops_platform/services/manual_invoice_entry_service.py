@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
-import re
 from typing import Any, Protocol
 
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.services.import_file_service import FileImportSession
-
 
 CENT = Decimal("0.01")
 HUNDRED = Decimal("100")
@@ -36,6 +35,8 @@ class ManualInvoiceImportPort(Protocol):
     def discard_session(self, *, session_id: str, imported_by: str) -> FileImportSession: ...
 
     def invoice_matches_canonical_key(self, *, invoice_id: str, canonical_key: str) -> bool: ...
+
+    def invoice_has_oa_attachment_source(self, invoice_id: str) -> bool: ...
 
 
 class InvoiceDocumentRecognizerPort(Protocol):
@@ -152,10 +153,12 @@ class ManualInvoiceEntryService:
                 for row_result in file_item.row_results
                 if row_result.decision != ImportDecision.CREATED
                 and not (
-                    allow_existing_invoices
-                    and row_result.decision == ImportDecision.DUPLICATE_SKIPPED
+                    row_result.decision == ImportDecision.DUPLICATE_SKIPPED
                     and str(row_result.linked_object_type or "") == "invoice"
                     and bool(str(row_result.linked_object_id or "").strip())
+                    and (allow_existing_invoices or self._file_import_service.invoice_has_oa_attachment_source(
+                        str(row_result.linked_object_id)
+                    ))
                     and self._file_import_service.invoice_matches_canonical_key(
                         invoice_id=str(row_result.linked_object_id or ""),
                         canonical_key=str(row_result.source_unique_key or ""),

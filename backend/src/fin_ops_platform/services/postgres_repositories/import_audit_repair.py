@@ -107,6 +107,7 @@ current_owned_evidence as materialized (
                 )
             else null
         end as invoice_identity,
+        evidence.value->>'source_attachment_key' as source_attachment_key,
         encode(digest(evidence.value->>'source_attachment_key', 'sha256'), 'hex')
             as source_attachment_key_hash
     from app.oa_application_items item
@@ -316,7 +317,8 @@ audit_rows as materialized (
                     'oa_row_id', candidate.oa_row_id,
                     'canonical_oa_row_id', candidate.canonical_oa_row_id,
                     'expense_item_id', candidate.expense_item_id,
-                    'attachment_key_hashes', candidate.attachment_key_hashes
+                    'attachment_key_hashes', candidate.attachment_key_hashes,
+                    'source_attachment_keys', candidate.source_attachment_keys
                 )
                 order by candidate.oa_row_id, candidate.expense_item_id
             ),
@@ -328,7 +330,9 @@ audit_rows as materialized (
                 evidence.canonical_oa_row_id,
                 evidence.expense_item_id,
                 array_agg(distinct evidence.source_attachment_key_hash order by evidence.source_attachment_key_hash)
-                    as attachment_key_hashes
+                    as attachment_key_hashes,
+                array_agg(distinct evidence.source_attachment_key order by evidence.source_attachment_key)
+                    as source_attachment_keys
             from current_owned_evidence evidence
             where invoice.invoice_identity is not null
               and evidence.invoice_identity = invoice.invoice_identity

@@ -793,10 +793,10 @@ class PostgresWorkbenchPageHydrationRepository:
                         coalesce(jsonb_agg(to_jsonb(link.compact_link->>'source_expense_item_id') order by link.ordinality)
                             filter (
                                 where (
-                                    link.source_type = 'oa_expense_item_invoice'
+                                    link.source_type = 'oa_attachment_invoice'
                                     or (
-                                        not link.has_explicit_expense_link
-                                        and link.source_type = 'oa_attachment_invoice'
+                                        not link.has_attachment_link
+                                        and link.source_type = 'oa_expense_item_invoice'
                                     )
                                 )
                                   and nullif(link.compact_link->>'source_expense_item_id', '') is not null
@@ -804,7 +804,7 @@ class PostgresWorkbenchPageHydrationRepository:
                         (array_agg(
                             link.compact_link
                             order by
-                                case when link.source_type = 'oa_expense_item_invoice' then 0 else 1 end,
+                                case when link.source_type = 'oa_attachment_invoice' then 0 else 1 end,
                                 link.ordinality
                         )
                             filter (where link.source_type in (
@@ -824,8 +824,8 @@ class PostgresWorkbenchPageHydrationRepository:
                                 source.value->>'source_type',
                                 source.value->>'type',
                                 source.value->>'source'
-                            ) = 'oa_expense_item_invoice') over ()
-                                as has_explicit_expense_link,
+                            ) = 'oa_attachment_invoice') over ()
+                                as has_attachment_link,
                             jsonb_strip_nulls(jsonb_build_object(
                                 'source_type', coalesce(
                                     source.value->>'source_type',

@@ -188,7 +188,7 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         self.assertEqual(relation_call["row_ids"][2:], result["invoice_row_ids"])
         self.assertTrue(relation_call["replace_existing"])
 
-    def test_links_strict_existing_invoice_and_preserves_attachment_provenance(self) -> None:
+    def test_manual_supplement_cannot_move_existing_oa_attachment_invoice(self) -> None:
         existing_preview = ManualInvoiceEntryService(
             file_import_service=self.files,
             document_recognizer=_Recognizer(),
@@ -219,28 +219,15 @@ class WorkbenchInvoiceSupplementServiceTests(unittest.TestCase):
         self.session_id = link_preview.session.id
         self.file_ids = tuple(link_preview.file_ids)
 
-        result = self._service().attach_manual_invoices(self._command())
-
-        self.assertEqual(result["invoice_row_ids"], [existing_invoice.id])
-        self.assertEqual(len(self.imports.list_invoices()), 1)
+        before = deepcopy(existing_invoice.source_links)
+        self.import_snapshot = deepcopy(self.imports.snapshot())
+        self.file_snapshot = deepcopy(self.files.snapshot())
+        with self.assertRaises(WorkbenchInvoiceSupplementError) as caught:
+            self._service().attach_manual_invoices(self._command())
+        self.assertEqual(caught.exception.error, "invoice_oa_source_immutable")
+        self.assertEqual(self.imports.list_invoices()[0].source_links, before)
         self.assertEqual((existing_invoice.buyer_name, existing_invoice.seller_name, existing_invoice.counterparty.name), original_names)
-        imported = self.imports.get_batch(link_preview.session.files[0].preview_batch_id)
-        self.assertEqual(imported.normalized_rows[0]["buyer_name"], "购方识别错字")
-        self.assertEqual(imported.row_results[0].decision.value, "duplicate_skipped")
-        source_links = existing_invoice.source_links
-        self.assertTrue(any(
-            link.get("source_type") == "oa_attachment_invoice"
-            and link.get("source_expense_item_id") == "oa-405:item:3:old"
-            for link in source_links
-        ))
-        explicit_link = next(
-            link for link in source_links
-            if link.get("source_type") == "oa_expense_item_invoice"
-        )
-        self.assertEqual(explicit_link["source_expense_item_id"], "oa-405:item:1")
-        self.assertEqual(explicit_link["source_relation_case_id"], "CASE-405")
-        self.assertEqual(self.connection.transaction_count, 1)
-        self.assertEqual(len(self.persisted), 1)
+        self.assertEqual(self.persisted, [])
 
     def test_revalidates_strict_existing_invoice_identity_before_relation_write(self) -> None:
         existing_preview = ManualInvoiceEntryService(

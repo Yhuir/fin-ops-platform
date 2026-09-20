@@ -15,6 +15,10 @@ from fin_ops_platform.services.bank_settings import (
     bank_account_mappings_fingerprint_from_settings_payload,
     bank_auto_tag_rules_version_from_settings_payload,
 )
+from fin_ops_platform.services.invoice_expense_item_links import (
+    effective_invoice_source_links,
+    effective_invoice_source_tags,
+)
 from fin_ops_platform.services.no_oa_bank_batch_service import NO_OA_BANK_BATCH_RELATION_MODE
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
@@ -1005,18 +1009,19 @@ class WorkbenchCanonicalRowsBuilder:
         detail_fields = detail_fields if isinstance(detail_fields, dict) else {}
         if self._invoice_hidden_after_etc_submission(row, detail_fields):
             return None
-        source_links = _list_of_dicts(row.get("source_links") if isinstance(row.get("source_links"), list) else detail_fields.get("source_links"))
+        source_links = effective_invoice_source_links(row.get("source_links"))
         oa_attachment_source_link = _first_source_link(source_links, "oa_attachment_invoice")
         explicit_expense_links = [
             source_link
             for source_link in source_links
             if str(source_link.get("source_type") or "").strip() == "oa_expense_item_invoice"
         ]
-        effective_expense_links = explicit_expense_links or [
+        attachment_links = [
             source_link
             for source_link in source_links
             if str(source_link.get("source_type") or "").strip() == "oa_attachment_invoice"
         ]
+        effective_expense_links = attachment_links or explicit_expense_links
         effective_oa_source_link = effective_expense_links[0] if effective_expense_links else None
         source_expense_item_ids = list(dict.fromkeys(
             value
@@ -1024,7 +1029,7 @@ class WorkbenchCanonicalRowsBuilder:
             if (value := str(source_link.get("source_expense_item_id") or "").strip())
         ))
         source_kind = OA_ATTACHMENT_INVOICE_SOURCE_KIND if oa_attachment_source_link is not None else "invoice"
-        tags = _text_list(row.get("tags"))
+        tags = effective_invoice_source_tags(_text_list(row.get("tags")), source_links)
         if _first_source_link(source_links, "manual_invoice_import") is not None and "人工导入" not in tags:
             tags.append("人工导入")
         if source_kind == OA_ATTACHMENT_INVOICE_SOURCE_KIND and "OA附件" not in tags:

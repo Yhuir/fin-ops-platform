@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from copy import deepcopy
 import json
 import unittest
+from contextlib import contextmanager
+from copy import deepcopy
 
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories import invoice_import_page_audit
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
-from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 
 
@@ -243,7 +243,7 @@ class FakeConnection:
             return deepcopy(self.files)
         if "from app.import_batches" in sql and "app.import_batch_rows" not in sql:
             return deepcopy(self.batches)
-        if "from app.import_batch_rows" in sql:
+        if "from app.import_batch_rows" in sql and "from app.invoices" not in sql:
             return deepcopy(self.rows)
         if "from app.invoices" in sql:
             return deepcopy(self.invoices)
@@ -438,7 +438,7 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
         self.assertTrue(report["audit_contract"]["database_snapshot"])
         self.assertEqual(report["summary"]["invoice_import_job_count"], 1)
 
-    def test_downstream_oa_and_expense_item_links_do_not_corrupt_import_provenance_audit(self) -> None:
+    def test_oa_takeover_keeps_history_without_manual_source_edge(self) -> None:
         connection = FakeConnection()
         connection.invoices[0]["source_links"].extend(
             [
@@ -454,6 +454,10 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
                 },
             ]
         )
+
+        invoice = connection.invoices[0]
+        invoice["source_links"] = [link for link in invoice["source_links"] if link["source_type"] == "oa_attachment_invoice"]
+        invoice["raw_payload"]["normalized_payload"]["source_links"] = deepcopy(invoice["source_links"])
 
         report = invoice_import_page_audit.audit_invoice_import_page(connection)
 

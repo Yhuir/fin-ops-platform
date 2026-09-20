@@ -13,17 +13,18 @@ from fin_ops_platform.services.app_settings_service import (
     OA_ATTACHMENT_INVOICE_PROMOTION_DISABLED,
     OA_ATTACHMENT_INVOICE_PROMOTION_LINK_EXISTING_ONLY,
 )
+from fin_ops_platform.services.invoice_expense_item_links import InvoiceSourceLinksCasConflict
 from fin_ops_platform.services.oa_attachment_invoice_promotion_service import (
     OAAttachmentInvoiceCandidate,
     OAAttachmentInvoicePromotionService,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
-    PostgresOAAttachmentInvoiceRepository,
-)
 from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_bridge import (
     reconcile_oa_attachment_cache_identity_sources,
+)
+from fin_ops_platform.services.postgres_repositories.oa_attachment_invoice import (
+    PostgresOAAttachmentInvoiceRepository,
 )
 
 from tests.postgres_test_utils import (
@@ -306,7 +307,7 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
         self.assertEqual(report["summary"]["affected_invoice_count"], 0)
         self.assertEqual(repository.save_calls, [])
 
-    def test_rejects_attachment_when_invoice_is_explicitly_owned_by_another_oa(self) -> None:
+    def test_attachment_replaces_manual_owner_from_another_oa(self) -> None:
         payload = _attachment("26532000000000000701", "701.00", "item-new", "invoice.pdf")
         invoice = _invoice(payload)
         invoice.source_links = [
@@ -331,9 +332,11 @@ class OAAttachmentInvoicePromotionServiceTests(unittest.TestCase):
             )
         ])
 
-        self.assertEqual(report["reason_counts"], {"source_context_conflict": 1})
-        self.assertEqual(report["summary"]["affected_invoice_count"], 0)
-        self.assertEqual(repository.save_calls, [])
+        self.assertEqual(report["summary"]["affected_invoice_count"], 1)
+        self.assertEqual(len(repository.save_calls), 1)
+        saved = repository.save_calls[0][0]
+        self.assertEqual({link["source_type"] for link in saved.source_links}, {"oa_attachment_invoice"})
+        self.assertEqual(saved.source_links[0]["derived_from_oa_id"], "oa-exp-new")
 
     def test_active_alias_allows_explicit_owner_and_attachment_context(self) -> None:
         payload = _attachment("26532000000000000702", "702.00", "item-new", "invoice.pdf")
@@ -1120,7 +1123,7 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
             "source_id": "file-current",
         }
         explicit_link = {
-            "source_type": "oa_expense_item_invoice",
+            "source_type": "oa_attachment_invoice",
             "source_expense_item_id": "oa-owner-1:item:0:explicit",
             "derived_from_oa_id": "oa-owner-1",
         }
@@ -1226,8 +1229,8 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
             where legacy_mongo_id = 'invoice-structured-owner'
             """
         )
-        self.assertEqual(after_cas["source_links"], structured_links)
-        self.assertEqual(after_cas["raw_source_links"], structured_links)
+        self.assertEqual(after_cas["source_links"], [explicit_link])
+        self.assertEqual(after_cas["raw_source_links"], [explicit_link])
         self.assertEqual(after_cas["keep_me"], "normalized-value")
         self.assertEqual(after_cas["top_level_keep"], "top-level-value")
 
@@ -1265,7 +1268,7 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         ))
         self.assertEqual(persisted["raw_source_links"], persisted["source_links"])
 
-    def test_first_formal_import_preserves_fresh_downstream_state(self) -> None:
+    def test_oa_owned_duplicate_import_preserves_all_current_state(self) -> None:
         invoice_no = "26532000000000000912"
         oa_link = {
             "source_type": "oa_attachment_invoice",
@@ -1362,15 +1365,38 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
             "source_links": [manual_link],
         }
 
+        for stale_decision in ("created", "status_updated"):
+            raced_snapshot = {
+                "invoices": {"invoice-oa-first": dict(incoming)},
+                "batches": {"batch-formal-first": {"row_results": [{
+                    "linked_object_id": "invoice-oa-first", "decision": stale_decision,
+                }]}},
+            }
+            with self.assertRaises(InvoiceSourceLinksCasConflict):
+                with self.connection.transaction() as transaction:
+                    PostgresCoreRepository(transaction).prepare_confirmed_invoice_upserts_in_transaction(
+                        transaction, imports_snapshot=raced_snapshot,
+                    )
+
+        snapshot = {
+            "invoices": {"invoice-oa-first": incoming},
+            "batches": {"batch-formal-first": {"row_results": [{
+                "linked_object_id": "invoice-oa-first", "decision": "duplicate_skipped",
+            }]}},
+        }
         with self.connection.transaction() as transaction:
             core = PostgresCoreRepository(transaction)
             core.prepare_confirmed_invoice_upserts_in_transaction(
                 transaction,
-                imports_snapshot={"invoices": {"invoice-oa-first": incoming}},
+                imports_snapshot=snapshot,
             )
+            self.assertEqual(snapshot["invoices"], {})
+            # The batch fixture above exercises decision validation. Persistence
+            # of actual batch/file history has separate import UoW coverage.
+            snapshot.pop("batches")
             core.save_import_delta_in_transaction(
                 transaction,
-                imports_snapshot={"invoices": {"invoice-oa-first": incoming}},
+                imports_snapshot=snapshot,
                 file_imports_snapshot={},
             )
 
@@ -1386,12 +1412,12 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         )
         normalized = persisted["normalized"]
 
-        self.assertEqual(persisted["seller_name"], "Excel权威销方")
-        self.assertEqual(persisted["buyer_name"], "Excel权威购方")
-        self.assertEqual(persisted["amount"], Decimal("1000.00"))
-        self.assertEqual(persisted["tax_amount"], Decimal("130.00"))
-        self.assertEqual(persisted["total_with_tax"], Decimal("1130.00"))
-        self.assertEqual(persisted["legacy_source_batch_id"], "batch-formal-first")
+        self.assertEqual(persisted["seller_name"], "OA识别销方")
+        self.assertEqual(persisted["buyer_name"], "OA识别购方")
+        self.assertEqual(persisted["amount"], Decimal("912.00"))
+        self.assertEqual(persisted["tax_amount"], Decimal("12.00"))
+        self.assertEqual(persisted["total_with_tax"], Decimal("912.00"))
+        self.assertEqual(persisted["legacy_source_batch_id"], "oa-source-batch")
         self.assertEqual(persisted["written_off_amount"], Decimal("312.00"))
         self.assertEqual(persisted["oa_form_id"], "oa-owner-1")
         self.assertEqual(persisted["etc_invoice_id"], "etc-invoice-1")
@@ -1400,13 +1426,13 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
             "hidden_after_etc_submission",
         )
         self.assertEqual(persisted["status"], "partially_reconciled")
-        self.assertEqual(persisted["tags"], ["OA附件", "ETC", "人工导入"])
+        self.assertEqual(persisted["tags"], ["OA附件", "ETC"])
         self.assertEqual(
             [link["source_type"] for link in persisted["source_links"]],
-            ["oa_attachment_invoice", "etc_invoice_import", "manual_invoice_import"],
+            ["oa_attachment_invoice", "etc_invoice_import"],
         )
-        self.assertEqual(normalized["seller_name"], "Excel权威销方")
-        self.assertEqual(normalized["amount"], "1000.00")
+        self.assertEqual(normalized["seller_name"], "OA识别销方")
+        self.assertEqual(normalized["amount"], "912.00")
         self.assertEqual(Decimal(normalized["written_off_amount"]), Decimal("312.00"))
         self.assertEqual(normalized["oa_form_id"], "oa-owner-1")
         self.assertEqual(normalized["source_expense_item_id"], "oa-owner-1:item:0")
@@ -1416,8 +1442,51 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         self.assertEqual(normalized["etc_submission_status"], "submitted")
         self.assertEqual(normalized["workbench_visibility"], "hidden_after_etc_submission")
         self.assertEqual(normalized["status"], "partially_reconciled")
-        self.assertEqual(normalized["invoice_status_from_source"], "cancelled")
+        self.assertEqual(normalized["invoice_status_from_source"], "valid")
         self.assertEqual(normalized["source_links"], persisted["source_links"])
+
+    def test_source_priority_migration_keeps_money_history_and_is_idempotent(self):
+        from pathlib import Path
+        links = [
+            {"source_type": "manual_invoice_import", "batch_id": "batch-history"},
+            {"source_type": "oa_expense_item_invoice", "derived_from_oa_id": "oa-wrong"},
+            {"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-owner", "source_expense_item_id": "oa-owner:item:0"},
+            {"source_type": "etc_invoice_import", "source_id": "etc-1"},
+        ]
+        self.connection.execute("""insert into app.invoices
+            (legacy_mongo_id, invoice_type, invoice_no, amount, signed_amount, written_off_amount,
+             invoice_date, invoice_month, legacy_source_batch_id, status, tags, source_links, raw_payload)
+            values ('migration-owner', 'input', '12345678901234567890', 145, 145, 20,
+                    '2026-08-01', '2026-08-01', 'batch-history', 'active', array['人工导入','明细归属','OA附件','ETC'],
+                    %s::jsonb, '{"normalized_payload":{"keep":"value"}}'::jsonb)""", (json.dumps(links),))
+        migration = Path("backend/src/fin_ops_platform/postgres/migrations/0172_oa_invoice_source_priority.sql").read_text()
+        with self.connection.transaction() as transaction:
+            transaction.execute(migration)
+        def snapshot():
+            return self.connection.fetch_one("""select source_links, tags, amount, written_off_amount,
+                legacy_source_batch_id, raw_payload, updated_at from app.invoices where legacy_mongo_id='migration-owner'""")
+        after = snapshot()
+        self.assertEqual(after['source_links'], links[2:])
+        self.assertEqual(after['tags'], ['OA附件', 'ETC'])
+        self.assertEqual(after['amount'], Decimal('145'))
+        self.assertEqual(after['written_off_amount'], Decimal('20'))
+        self.assertEqual(after['legacy_source_batch_id'], 'batch-history')
+        self.assertEqual(after['raw_payload']['normalized_payload']['source_links'], links[2:])
+        self.assertEqual(after['raw_payload']['normalized_payload']['keep'], 'value')
+        self.assertEqual(self.connection.fetch_one("select count(*) n from job.workbench_matching_dirty_scopes")['n'], 5)
+        self.assertEqual(self.connection.fetch_one("select payload from audit.events where event_type='invoice.oa_source_priority_applied'")['payload']['before_source_links'], links)
+        with self.connection.transaction() as transaction:
+            transaction.execute(migration)
+        self.assertEqual(snapshot(), after)
+        self.assertEqual(self.connection.fetch_one("select count(*) n from audit.events where event_type='invoice.oa_source_priority_applied'")['n'], 1)
+        with self.connection.transaction() as transaction:
+            core = PostgresCoreRepository(transaction)
+            with self.assertRaisesRegex(ValueError, 'OA attachment provenance'):
+                core.update_invoice_source_links_cas(transaction, [{
+                    'invoice_id': 'migration-owner', 'before_source_links': links[2:],
+                    'source_links': links[:2],
+                }], actor_id='tester', reason='forbidden overwrite')
+        self.assertEqual(snapshot(), after)
 
 
 class _FakeTransactionalConnection:

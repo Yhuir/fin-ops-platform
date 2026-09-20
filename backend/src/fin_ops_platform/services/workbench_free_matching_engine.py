@@ -9,7 +9,7 @@ from typing import Iterable, Literal
 
 from fin_ops_platform.services.workbench_relation_alignment_service import PaymentEvidence, evidenced_payment_pairs
 
-RULE_VERSION = "2026-09-20-payment-alignment-v16"
+RULE_VERSION = "2026-09-20-oa-source-priority-v17"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -108,6 +108,7 @@ class FormalRelationFact:
     source_version: str = ""
     reversal_key: tuple[str, ...] | None = None
     reversal_polarity: Literal["blue", "red"] | None = None
+    has_oa_attachment_source: bool = False
     needs_expense_assignment: bool = False
     counterparty_account: str = ""
     payment_phase: str = ""
@@ -251,6 +252,7 @@ class FormalRelationPlan:
 
 @dataclass(frozen=True, slots=True)
 class FormalRelationMatchResult:
+    source_reassignments: tuple[tuple[str, str], ...] = ()
     plans: tuple[FormalRelationPlan, ...] = ()
     ambiguous_component_count: int = 0
     resource_limited_component_count: int = 0
@@ -297,17 +299,43 @@ class WorkbenchFreeMatchingEngine:
         batch: FormalRelationFactBatch,
         limits: FormalRelationSearchLimits | None = None,
     ) -> FormalRelationMatchResult:
-        """Settle proven ETC sources before bounded, potentially ambiguous bank search."""
+        """Settle proven OA/ETC sources before bounded bank search."""
         if not isinstance(batch, FormalRelationFactBatch):
             raise TypeError("batch must be a FormalRelationFactBatch.")
         facts = {fact.member_key: fact for fact in batch.facts}
         anchors = {anchor.case_id: anchor for anchor in batch.active_relations}
         owners = {key: anchor.case_id for anchor in anchors.values() for key in anchor.member_keys}
+        # Actual OA provenance supersedes an earlier manual/inferred group.
+        # Plan against the reduced groups; the command applies detach + attach atomically.
+        reassignments: list[tuple[str, str]] = []
+        for fact in batch.facts:
+            if not fact.has_oa_attachment_source or fact.member_key not in owners:
+                continue
+            targets = {ref.target_member_key for ref in fact.references
+                       if ref.kind == "attachment_source" and ref.target_member_key in facts}
+            if len(targets) != 1:
+                continue
+            case_id = owners[fact.member_key]
+            anchor = anchors[case_id]
+            if next(iter(targets)) in anchor.member_keys:
+                continue
+            reassignments.append((fact.row_id, case_id))
+            remaining = tuple(key for key in anchor.member_keys if key != fact.member_key)
+            del owners[fact.member_key]
+            if len(remaining) >= 2:
+                anchors[case_id] = replace(anchor, member_keys=remaining)
+            else:
+                del anchors[case_id]
+                for key in remaining:
+                    owners.pop(key, None)
+        batch = replace(batch, active_relations=tuple(anchors.values()))
         source_members: dict[MemberKey, set[MemberKey]] = {}
         for fact in batch.facts:
             targets = {
                 ref.target_member_key for ref in fact.references
-                if ref.kind == "etc_batch_source" and ref.target_member_key in facts
+                if (ref.kind == "etc_batch_source" or
+                    fact.has_oa_attachment_source and ref.kind == "attachment_source")
+                and ref.target_member_key in facts
             }
             if fact.row_type == "invoice" and len(targets) == 1:
                 target = next(iter(targets))
@@ -327,14 +355,19 @@ class WorkbenchFreeMatchingEngine:
             seed = self._plan(
                 batch=replace(batch, active_relations=tuple(anchors.values())),
                 member_keys=tuple(members), facts_by_key=facts,
-                rule_code="etc_batch_source", evidence_kinds={"etc_batch_source"},
+                rule_code="source_binding", evidence_kinds={
+                    ref.kind for key in members for ref in facts[key].references
+                    if ref.kind in {"etc_batch_source", "attachment_source"}
+                    and ref.target_member_key in members
+                },
                 target_case_id=target_case_id,
             )
             seeds[seed.case_id] = seed
             anchors[seed.case_id] = ActiveFormalRelationAnchor(seed.case_id, seed.member_keys)
             owners.update({key: seed.case_id for key in seed.member_keys})
         if not seeds:
-            return self._plan_remaining_relations(batch, limits)
+            return replace(self._plan_remaining_relations(batch, limits),
+                           source_reassignments=tuple(reassignments))
         result = self._plan_remaining_relations(
             replace(batch, active_relations=tuple(anchors.values())), limits,
         )
@@ -345,6 +378,7 @@ class WorkbenchFreeMatchingEngine:
         return replace(
             result, plans=tuple(sorted(plans.values(), key=lambda plan: plan.relation_fingerprint)),
             preserved_active_count=len(batch.active_relations),
+            source_reassignments=tuple(reassignments),
         )
 
     def _plan_remaining_relations(
@@ -1319,6 +1353,7 @@ def _fact_batch_hash(
                 "source_version": fact.source_version,
                 "counterparty_account": fact.counterparty_account,
                 "payment_phase": fact.payment_phase,
+                "has_oa_attachment_source": fact.has_oa_attachment_source,
             }
             for fact in facts
         ],

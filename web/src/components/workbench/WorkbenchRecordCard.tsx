@@ -80,6 +80,7 @@ function WorkbenchRecordCard({
   const unassignedInvoiceAnomaly = paneId === "invoice" && !row.displayOnly
     ? row.workbenchAnomalies?.find((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")
     : undefined;
+  const hasOaAttachmentSource = row.sourceKinds?.includes("oa_attachment_invoice") || row.sourceKind === "oa_attachment_invoice";
   const invoiceResolutionDisabled = readOnly ? !allowInvoiceEntryInReadOnly : !canOperateData;
   const showInlineDetail = !row.displayOnly && !isSummaryRow && !readOnly && (paneId === "oa" || paneId === "bank" || paneId === "invoice");
   const sheetStateClass =
@@ -132,7 +133,7 @@ function WorkbenchRecordCard({
         const anomalyIndicator = (paneId === "oa" ? isApplicant : columnIndex === 0) && row.workbenchAnomalies?.length ? (
           <WorkbenchAnomalyIndicator
             anomalies={row.workbenchAnomalies}
-            action={unassignedInvoiceAnomaly ? {
+            action={unassignedInvoiceAnomaly && !hasOaAttachmentSource ? {
               label: "选择 OA 明细",
               disabled: invoiceResolutionDisabled,
               disabledReason: "当前账号无归属权限",
@@ -153,7 +154,7 @@ function WorkbenchRecordCard({
             <div className={`record-card-cell-content${isApplicant ? " workbench-oa-applicant-content" : ""}${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
-              {paneId === "invoice" && columnIndex === 0 && !row.displayOnly && (row.sourceExpenseItemIds?.length ?? 0) > 0 ? (
+              {paneId === "invoice" && columnIndex === 0 && !row.displayOnly && !hasOaAttachmentSource && (row.sourceExpenseItemIds?.length ?? 0) > 0 ? (
                 <Button size="sm" variant="tertiary" isDisabled={invoiceResolutionDisabled}
                   onPress={() => onRowAction(row, "assign-invoice-expense-items")}>更改归属</Button>
               ) : null}

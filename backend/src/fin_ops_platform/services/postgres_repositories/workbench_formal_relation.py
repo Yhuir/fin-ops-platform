@@ -8,6 +8,10 @@ from typing import Any, Iterable, Literal
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
 )
+from fin_ops_platform.services.invoice_expense_item_links import (
+    effective_invoice_source_links,
+    has_oa_attachment_source,
+)
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_SOURCE_ALIAS_FIELD_NAMES,
     oa_row_source_alias_map,
@@ -895,9 +899,14 @@ def _invoice_fact(
         project_references=(normalized.get("project_no"), normalized.get("project_id")),
         invoice_numbers=(row.get("invoice_no"), row.get("digital_invoice_no")),
     )
+    source_links = effective_invoice_source_links(row.get("source_links"))
+    oa_owned = has_oa_attachment_source(source_links)
+    # Raw import fields may predate the authoritative OA source. Keep only
+    # independent invoice/bank references from that historical payload.
     references = [
-        *_references_from_payload(normalized, oa_aliases=oa_aliases),
-        *_references_from_source_links(row.get("source_links"), oa_aliases=oa_aliases),
+        *[ref for ref in _references_from_payload(normalized, oa_aliases=oa_aliases)
+          if not oa_owned or ref.target_row_type != "oa"],
+        *_references_from_source_links(source_links, oa_aliases=oa_aliases),
     ]
     reversal_key, reversal_polarity = _output_invoice_reversal_identity(row)
     return FormalRelationFact(
@@ -913,6 +922,7 @@ def _invoice_fact(
         source_version=_source_version(row),
         reversal_key=reversal_key,
         reversal_polarity=reversal_polarity,
+        has_oa_attachment_source=oa_owned,
         needs_expense_assignment=(str(row.get("invoice_type")) == "input"
                                   and invoice_needs_expense_assignment(row.get("source_links"))),
     )

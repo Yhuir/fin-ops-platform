@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from io import BytesIO
 import unittest
+from io import BytesIO
 
 import fitz
-from PIL import Image
-
 from fin_ops_platform.domain.enums import BatchType, ImportDecision
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -15,6 +13,7 @@ from fin_ops_platform.services.manual_invoice_entry_service import (
 )
 from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
 from fin_ops_platform.services.pending_invoice_service import PendingInvoiceApplicationService
+from PIL import Image
 
 
 class FakeDocumentRecognizer:
@@ -159,6 +158,23 @@ class ManualInvoiceEntryServiceTests(unittest.TestCase):
             self.file_import_service.list_active_sessions(imported_by="finance-user", mode="manual_invoice"),
             [],
         )
+
+    def test_oa_owned_duplicate_in_manual_import_is_history_only(self):
+        from copy import deepcopy
+        first = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
+        self.file_import_service.confirm_session(session_id=first.session.id, selected_file_ids=first.file_ids)
+        invoice = self.import_service.list_invoices()[0]
+        invoice.source_links = [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": "oa-1",
+                                 "source_expense_item_id": "oa-1:item:0"}]
+        invoice.tags = ["OA附件"]
+        before = deepcopy(invoice)
+        duplicate = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")
+        self.assertEqual(duplicate.session.files[0].row_results[0].decision.value, "duplicate_skipped")
+        self.file_import_service.confirm_session(session_id=duplicate.session.id, selected_file_ids=duplicate.file_ids)
+        self.assertEqual(self.import_service.list_invoices(), [before])
+        snapshot = self.import_service.persistence_snapshot_for_batches([duplicate.session.files[0].preview_batch_id])
+        self.assertEqual(snapshot['invoices'], [])
+        self.assertEqual(snapshot['batches'][duplicate.session.files[0].preview_batch_id].row_results[0].decision.value, 'duplicate_skipped')
 
     def test_workbench_preview_accepts_only_a_strict_existing_invoice_identity(self) -> None:
         first = self.service.preview_batch(payloads=[payload()], imported_by="finance-user")

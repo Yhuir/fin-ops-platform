@@ -570,8 +570,8 @@ canonical_invoice_facts as materialized (
         invoice.source_links as invoice_source_links,
         coalesce(source_flags.has_oa_ownership_link, false)
             as has_oa_ownership_link,
-        coalesce(source_flags.has_explicit_oa_item_link, false)
-            as has_explicit_oa_item_link,
+        coalesce(source_flags.has_oa_attachment_link, false)
+            as has_oa_attachment_link,
         case
             when nullif(invoice.digital_invoice_no, '') is not null
                 then 'digital:' || invoice.digital_invoice_no
@@ -591,8 +591,8 @@ canonical_invoice_facts as materialized (
                 'oa_attachment_invoice',
                 'oa_expense_item_invoice'
             )) as has_oa_ownership_link,
-            bool_or(source_link.source_type = 'oa_expense_item_invoice')
-                as has_explicit_oa_item_link
+            bool_or(source_link.source_type = 'oa_attachment_invoice')
+                as has_oa_attachment_link
         from (
             select coalesce(
                 source_link.value->>'source_type',
@@ -677,8 +677,8 @@ scoped_invoice_ownership_links as materialized (
               source_link.value->>'source_type',
               source_link.value->>'type',
               source_link.value->>'source'
-          ) = 'oa_expense_item_invoice'
-          or not invoice.has_explicit_oa_item_link
+          ) = 'oa_attachment_invoice'
+          or not invoice.has_oa_attachment_link
       )
 ),
 current_oa_item_facts as materialized (
@@ -1912,19 +1912,19 @@ invoice_anomaly_facts as materialized (
                   link.value->>'source_type',
                   link.value->>'type',
                   link.value->>'source'
-              ) = 'oa_expense_item_invoice'
+              ) = 'oa_attachment_invoice'
               or not exists (
                   select 1
                   from jsonb_array_elements(
                       case when jsonb_typeof(member.invoice_source_links) = 'array'
                            then member.invoice_source_links
                            else '[]'::jsonb end
-                  ) explicit_link(value)
+                  ) attachment_link(value)
                   where coalesce(
-                      explicit_link.value->>'source_type',
-                      explicit_link.value->>'type',
-                      explicit_link.value->>'source'
-                  ) = 'oa_expense_item_invoice'
+                      attachment_link.value->>'source_type',
+                      attachment_link.value->>'type',
+                      attachment_link.value->>'source'
+                  ) = 'oa_attachment_invoice'
               )
           )
     ) source_link on true
@@ -3891,17 +3891,17 @@ class PostgresWorkbenchPageQueryRepository:
                           source_link.value->>'source_type',
                           source_link.value->>'type',
                           source_link.value->>'source'
-                      ) = 'oa_expense_item_invoice'
+                      ) = 'oa_attachment_invoice'
                       or not exists (
                           select 1
                           from jsonb_array_elements(
                               invoice.source_links
-                          ) explicit_link(value)
+                          ) attachment_link(value)
                           where coalesce(
-                              explicit_link.value->>'source_type',
-                              explicit_link.value->>'type',
-                              explicit_link.value->>'source'
-                          ) = 'oa_expense_item_invoice'
+                              attachment_link.value->>'source_type',
+                              attachment_link.value->>'type',
+                              attachment_link.value->>'source'
+                          ) = 'oa_attachment_invoice'
                       )
                   )
             ),
@@ -3955,17 +3955,17 @@ class PostgresWorkbenchPageQueryRepository:
                           source_link.value->>'source_type',
                           source_link.value->>'type',
                           source_link.value->>'source'
-                      ) = 'oa_expense_item_invoice'
+                      ) = 'oa_attachment_invoice'
                       or not exists (
                           select 1
                           from jsonb_array_elements(
                               invoice.invoice_source_links
-                          ) explicit_link(value)
+                          ) attachment_link(value)
                           where coalesce(
-                              explicit_link.value->>'source_type',
-                              explicit_link.value->>'type',
-                              explicit_link.value->>'source'
-                          ) = 'oa_expense_item_invoice'
+                              attachment_link.value->>'source_type',
+                              attachment_link.value->>'type',
+                              attachment_link.value->>'source'
+                          ) = 'oa_attachment_invoice'
                       )
                   )
             ),

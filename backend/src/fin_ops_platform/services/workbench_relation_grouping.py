@@ -510,7 +510,7 @@ class WorkbenchRelationGroupingService:
             if str(link.get("source_type") or "").strip()
             == "oa_attachment_invoice"
         ]
-        effective_links: list[dict[str, Any]] = explicit_links or attachment_links
+        effective_links: list[dict[str, Any]] = attachment_links or explicit_links
         if not effective_links:
             return ""
 
