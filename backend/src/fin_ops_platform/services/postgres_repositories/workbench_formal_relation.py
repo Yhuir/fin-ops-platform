@@ -23,7 +23,10 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLE
 from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
     oa_source_aliases_sql,
 )
-from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_ids
+from fin_ops_platform.services.workbench_etc_batch_link import (
+    relation_external_etc_batch_ids,
+    workbench_etc_summary_row_id,
+)
 from fin_ops_platform.services.workbench_free_matching_engine import (
     ActiveFormalRelationAnchor,
     FormalRelationFact,
@@ -72,6 +75,33 @@ _PENDING_OA_SOURCE_ALIASES_SQL = """array(
 )"""
 
 
+_MATCHABLE_ETC_OA_SQL = f"""
+    select oa.row_id, oa.application_date, oa.scope_month, oa.normalized_payload
+    from app.oa_applications oa
+    where oa.status <> 'deleted' and {COMPLETED_WORKFLOW_STATUS_SQL}
+    union all
+    select admission.oa_id as row_id,
+           {_PENDING_OA_APPLICATION_DATE_SQL} as application_date,
+           (admission.scope_key || '-01')::date as scope_month,
+           admission.source_payload as normalized_payload
+    from app.oa_pending_payment_admissions admission
+    where admission.tenant_id = 'default' and admission.workflow_status = 'in_progress'
+"""
+
+
+def _etc_oa_identity_sql(batch_alias: str, external_id_sql: str) -> str:
+    payload = f"{batch_alias}.raw_payload->'normalized_payload'"
+    return f"""(
+        oa.normalized_payload->>'etc_batch_id' = {external_id_sql}
+        or oa.row_id = nullif({payload}->>'oa_row_id', '')
+        or (
+            jsonb_typeof({payload}->'oa_attachment_paths') = 'array'
+            and {payload}->'oa_attachment_paths' <> '[]'::jsonb
+            and (oa.normalized_payload->'source_attachment_paths') @> ({payload}->'oa_attachment_paths')
+        )
+    )"""
+
+
 class PostgresWorkbenchFormalRelationFactRepository:
     """The only SQL owner for deterministic Workbench matching inputs."""
 
@@ -83,6 +113,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
         scope_months: list[str],
         *,
         source_versions: dict[str, object] | None = None,
+        etc_batch_link_candidates: Iterable[dict[str, Any]] = (),
     ) -> FormalRelationFactBatch:
         normalized_scopes = _normalize_scope_months(scope_months)
         start_date, end_date = _composite_window(normalized_scopes)
@@ -226,7 +257,26 @@ class PostgresWorkbenchFormalRelationFactRepository:
             invoice_rows=invoice_rows,
             oa_aliases=current_oa_aliases,
         )
-        target_ids = _explicit_target_ids(initial_facts)
+        etc_candidates = list(etc_batch_link_candidates)
+        summary_facts = _etc_summary_facts(etc_candidates)
+        active_rows = self._connection.fetch_all(
+            """
+            select case_id, relation_mode, row_ids, row_types
+            from app.workbench_pair_relations
+            where status = 'active'
+            order by case_id
+            """
+        )
+        target_ids = _explicit_target_ids((*initial_facts, *summary_facts))
+        present = {fact.member_key for fact in (*initial_facts, *summary_facts)}
+        for row in active_rows:
+            if _single_member_claim(row) is not None:
+                continue
+            anchor = _active_anchor(row)
+            if present.intersection(anchor.member_keys):
+                for row_type, identity in anchor.member_keys:
+                    if (row_type, identity) not in present:
+                        target_ids[row_type].add(identity)
         historical_rows = self._load_historical_targets(target_ids)
         all_oa_aliases = oa_row_source_alias_map([*oa_rows, *historical_rows["oa"]])
         facts = _merge_facts(
@@ -244,14 +294,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
             ),
         )
 
-        active_rows = self._connection.fetch_all(
-            """
-            select case_id, relation_mode, row_ids, row_types
-            from app.workbench_pair_relations
-            where status = 'active'
-            order by case_id
-            """
-        )
+        facts = _merge_facts(facts, summary_facts)
         history_rows = self._connection.fetch_all(
             """
             select event_type, actor_id, before_payload
@@ -326,6 +369,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
             with submitted_batches as (
                 select
                     batch.business_batch_id,
+                    batch.raw_payload,
                     batch.scope_month,
                     batch.invoice_count,
                     batch.total_amount,
@@ -351,7 +395,6 @@ class PostgresWorkbenchFormalRelationFactRepository:
                     ) as external_batch_owner_count
                 from app.etc_business_batches batch
                 where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-                  and batch.scope_month between %s::date and %s::date
             )
             select
                 oa.row_id as oa_row_id,
@@ -363,16 +406,14 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 submitted.external_batch_owner_count,
                 to_char(coalesce(oa.application_date, oa.scope_month), 'YYYY-MM') as oa_scope_month,
                 to_char(submitted.scope_month, 'YYYY-MM') as batch_scope_month
-            from app.oa_applications oa
+            from (""" + _MATCHABLE_ETC_OA_SQL + """) oa
             join submitted_batches submitted
-              on submitted.external_etc_batch_id = nullif(oa.normalized_payload->>'etc_batch_id', '')
-            where oa.status <> 'deleted'
-              and """
-            + COMPLETED_WORKFLOW_STATUS_SQL
-            + """
+              on """ + _etc_oa_identity_sql("submitted", "submitted.external_etc_batch_id") + """
+            where submitted.scope_month between %s::date and %s::date
+               or coalesce(oa.application_date, oa.scope_month) between %s::date and %s::date
             order by submitted.external_etc_batch_id, oa.row_id
             """,
-            (start_date, end_date),
+            (start_date, end_date, start_date, end_date),
         )
         return [
             {
@@ -401,6 +442,39 @@ class PostgresWorkbenchFormalRelationFactRepository:
             and text(row.get("business_batch_id"))
             and text(row.get("external_etc_batch_id"))
         ]
+
+    def assert_fact_versions(self, facts: Iterable[FormalRelationFact]) -> None:
+        """Lock only planned canonical members and reject inference from stale facts."""
+        expected = {fact.member_key: fact.source_version for fact in facts
+                    if not fact.row_id.startswith("etc-summary-")}
+        ids = {kind: sorted(identity for row_kind, identity in expected if row_kind == kind)
+               for kind in ("oa", "bank", "invoice")}
+        queries = (
+            ("""select 'oa' as row_type, row_id, greatest(updated_at, synced_at) as source_version
+                from app.oa_applications where row_id = any(%s::text[]) and status <> 'deleted'
+                order by row_id for share""", ids["oa"]),
+            ("""select 'oa' as row_type, oa_id as row_id, updated_at as source_version
+                from app.oa_pending_payment_admissions
+                where tenant_id = 'default' and workflow_status = 'in_progress' and oa_id = any(%s::text[])
+                order by oa_id for share""", ids["oa"]),
+            ("""select 'bank' as row_type, coalesce(legacy_mongo_id, id::text) as row_id, updated_at as source_version
+                from app.bank_transactions
+                where coalesce(legacy_mongo_id, id::text) = any(%s::text[]) and status <> 'deleted'
+                order by id for share""", ids["bank"]),
+            ("""select 'invoice' as row_type, coalesce(legacy_mongo_id, id::text) as row_id, updated_at as source_version
+                from app.invoices
+                where coalesce(legacy_mongo_id, id::text) = any(%s::text[]) and status <> 'deleted'
+                order by id for share""", ids["invoice"]),
+        )
+        rows = [row for query, member_ids in queries if member_ids
+                for row in self._connection.fetch_all(query, (member_ids,))]
+        actual = {(row["row_type"], row["row_id"]): _source_version(row) for row in rows}
+        if len(rows) != len(actual) or actual != expected:
+            raise ValueError("Formal matching facts changed before commit; retry from current facts.")
+
+    def bind_oa_sources(self, links: list[dict[str, Any]], *, actor_id: str) -> None:
+        from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
+        PostgresOpsTaxEtcRepository(self._connection).bind_etc_oa_sources(links, actor_id=actor_id)
 
     def validate_etc_batch_links(self, links: list[dict[str, Any]]) -> dict[str, Any]:
         """Revalidate and lock exact canonical ETC ownership inside the write UoW."""
@@ -440,14 +514,14 @@ class PostgresWorkbenchFormalRelationFactRepository:
                     batch.business_batch_id
                 ) as external_etc_batch_id
             from app.etc_business_batches batch
-            join app.oa_applications oa
-              on oa.normalized_payload->>'etc_batch_id' = coalesce(
+            join (""" + _MATCHABLE_ETC_OA_SQL + """) oa
+              on """ + _etc_oa_identity_sql("batch", """coalesce(
                     nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
                     nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
                     nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
                     nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
                     batch.business_batch_id
-                 )
+                 )""") + """
             where coalesce(
                     nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
                     nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
@@ -456,12 +530,8 @@ class PostgresWorkbenchFormalRelationFactRepository:
                     batch.business_batch_id
                   ) = any(%s::text[])
               and batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-              and oa.status <> 'deleted'
-              and """
-            + COMPLETED_WORKFLOW_STATUS_SQL
-            + """
             order by external_etc_batch_id, batch.business_batch_id, oa.row_id
-            for update of batch, oa
+            for update of batch
             """,
             (external_ids,),
         )
@@ -479,11 +549,15 @@ class PostgresWorkbenchFormalRelationFactRepository:
                  or nullif(special_metadata->'etc_batch_link'->>'etc_batch_id', '') = any(%s::text[])
                  or nullif(special_metadata->'historical_etc_business_batch_migration'->>'external_etc_batch_id', '') = any(%s::text[])
                  or nullif(special_metadata->'historical_etc_business_batch_migration'->>'etc_batch_id', '') = any(%s::text[])
+                 or exists (
+                     select 1 from unnest(row_ids, row_types) member(row_id, row_type)
+                     where member.row_type = 'invoice' and member.row_id = any(%s::text[])
+                 )
               )
             order by case_id
             for update
             """,
-            tuple(external_ids for _ in range(8)),
+            (*tuple(external_ids for _ in range(8)), [workbench_etc_summary_row_id(value) for value in external_ids]),
         )
 
         rows_by_external: dict[str, list[dict[str, Any]]] = {}
@@ -579,6 +653,22 @@ class PostgresWorkbenchFormalRelationFactRepository:
             """,
             (oa_ids, list(OA_SOURCE_ALIAS_FIELD_NAMES), oa_alias_values, oa_alias_values),
         ) if oa_ids else []
+        if oa_ids:
+            oa_rows.extend(self._connection.fetch_all(
+                f"""
+                select admission.oa_id as canonical_object_identity, admission.oa_id as row_id,
+                    admission.amount, coalesce(admission.source_payload->>'currency', 'CNY') as currency,
+                    {_PENDING_OA_APPLICATION_DATE_SQL} as fact_date,
+                    admission.applicant, 'active'::text as status, 'in_progress'::text as workflow_status,
+                    admission.source_payload as normalized_payload,
+                    {_PENDING_OA_SOURCE_ALIASES_SQL} as source_aliases,
+                    admission.updated_at as source_version
+                from app.oa_pending_payment_admissions admission
+                where admission.tenant_id = 'default' and admission.workflow_status = 'in_progress'
+                  and (admission.oa_id = any(%s::text[])
+                       or {_PENDING_OA_SOURCE_ALIASES_SQL} && %s::text[])
+                """, (oa_ids, oa_alias_values),
+            ))
         bank_rows = self._connection.fetch_all(
             """
             select
@@ -660,6 +750,30 @@ def _facts_from_rows(
     return tuple(facts)
 
 
+def _etc_summary_facts(candidates: Iterable[dict[str, Any]]) -> tuple[FormalRelationFact, ...]:
+    by_external: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        by_external.setdefault(str(candidate["external_etc_batch_id"]), []).append(candidate)
+    facts = []
+    for external_id, owners in by_external.items():
+        if len(owners) != 1 or int(owners[0].get("external_batch_owner_count") or 1) != 1:
+            continue
+        owner = owners[0]
+        row_id = workbench_etc_summary_row_id(external_id)
+        scopes = [scope for scope in owner["scope_keys"] if scope != "all"]
+        facts.append(FormalRelationFact(
+            row_type="invoice", canonical_object_identity=row_id, row_id=row_id,
+            amount_minor=_minor_units(owner["total_amount"]), currency="CNY", direction="expenditure",
+            fact_date=date.fromisoformat(min(scopes) + "-01") if scopes else None,
+            references=(FormalRelationReference(
+                kind="etc_batch_source", value=external_id,
+                target_row_type="oa", target_identity=str(owner["oa_row_id"]),
+            ),),
+            source_version=str(owner.get("source_version") or ""),
+        ))
+    return tuple(facts)
+
+
 def _oa_fact(
     row: dict[str, Any],
     *,
@@ -697,6 +811,10 @@ def _oa_fact(
             fact_date = _authoritative_oa_fact_date(row)
     else:
         fact_date = _authoritative_oa_fact_date(row)
+        if "支付申请" in apply_type:
+            payee = normalize_match_text(payload.get("counterparty_name") or payload.get("counterparty"))
+            if len(payee) >= 2 and payee not in _WEAK_SUBJECT_VALUES:
+                evidence = tuple(sorted({*evidence, ("payment_request_payee", payee)}))
     return FormalRelationFact(
         row_type="oa",
         canonical_object_identity=_required_identity(row),
@@ -708,6 +826,7 @@ def _oa_fact(
         evidence_keys=evidence,
         references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
+        counterparty_account=normalize_match_text(detail.get("收款账号")),
     )
 
 
@@ -738,6 +857,9 @@ def _bank_fact(
             }
         )
     )
+    payee = normalize_match_text(row.get("normalized_counterparty_name") or row.get("counterparty_name_raw"))
+    if len(payee) >= 2 and payee not in _WEAK_SUBJECT_VALUES:
+        evidence = tuple(sorted({*evidence, ("payment_request_payee", payee)}))
     return FormalRelationFact(
         row_type="bank",
         canonical_object_identity=_required_identity(row),
@@ -749,6 +871,7 @@ def _bank_fact(
         evidence_keys=evidence,
         references=_references_from_payload(payload, oa_aliases=oa_aliases),
         source_version=_source_version(row),
+        counterparty_account=normalize_match_text(payload.get("counterparty_account")),
     )
 
 

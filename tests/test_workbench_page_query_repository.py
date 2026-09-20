@@ -4,29 +4,28 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
-)
-from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
-    _ANOMALY_STATE_CTES,
-    _SCOPED_CANONICAL_GROUPS_CTE,
-    _VISIBLE_INVOICE_SQL,
-    _anomaly_state_ctes,
-    _canonical_invoice_count_for_keyed_groups_sql,
-    _scoped_canonical_groups_cte,
-    PostgresWorkbenchPageQueryRepository,
-    WORKBENCH_GROUP_PAGE_SIZE,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_page_hydration import (
     WORKBENCH_PAGE_HYDRATION_STATEMENT_BUDGET,
     PostgresWorkbenchPageHydrationRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_page_query import (
+    _ANOMALY_STATE_CTES,
+    _SCOPED_CANONICAL_GROUPS_CTE,
+    _VISIBLE_INVOICE_SQL,
+    WORKBENCH_GROUP_PAGE_SIZE,
+    PostgresWorkbenchPageQueryRepository,
+    _anomaly_state_ctes,
+    _canonical_invoice_count_for_keyed_groups_sql,
+    _scoped_canonical_groups_cte,
+)
+from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_canonical_rows import (
     WorkbenchCanonicalRowsBuilder,
     invoice_source_kinds,
 )
-from fin_ops_platform.services.workbench_anomaly_contract import AMOUNT_EXCEPTION_CODES
 from fin_ops_platform.services.workbench_filter_options import (
     WORKBENCH_FILTER_MISSING_VALUE,
     normalize_workbench_column_filters,
@@ -917,8 +916,7 @@ def test_canonical_spine_rolls_relation_members_once_for_zone_evaluation() -> No
 
     assert "all_active_relation_member_rollups as materialized" in sql
     assert "array_agg(member.row_type order by member.ordinality)" in sql
-    assert "in_progress_oa_relation_ids as materialized" in sql
-    assert "when in_progress_oa.relation_id is not null then 'unpaired'" in sql
+    assert "in_progress_oa_relation_ids" not in sql
 
 
 def test_canonical_spine_rolls_source_owned_relation_placements_once() -> None:
@@ -1709,7 +1707,7 @@ def test_page_grouping_preserves_cross_pane_same_textual_id() -> None:
         (["invoice"], [], {}, "paired", []),
         (["bank"], [], {"requires_oa": False, "requires_invoice": False}, "paired", []),
         (["bank"], [], {}, "unpaired", ["oa", "invoice"]),
-        (["oa", "bank", "invoice"], ["in_progress"], {}, "unpaired", []),
+        (["oa", "bank", "invoice"], ["in_progress"], {}, "paired", []),
         (["oa"], ["completed"], {"source": "batch_accounting"}, "paired", []),
     ],
 )

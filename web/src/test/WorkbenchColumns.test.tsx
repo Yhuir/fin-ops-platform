@@ -150,7 +150,7 @@ describe("Workbench columns and inline actions", () => {
     expect(within(oaRow as HTMLElement).getByText("11:05")).toBeInTheDocument();
   });
 
-  test("keeps OA applicant name on the first line and renders only a date chip on the second line", () => {
+  test.each(["paired", "unpaired"] as const)("keeps the real in-progress OA status in the %s zone", (zoneId) => {
     render(
       <WorkbenchRecordCard
         canOperateData
@@ -180,7 +180,7 @@ describe("Workbench columns and inline actions", () => {
         }}
         rowState="idle"
         showWorkflowActions
-        zoneId="unpaired"
+        zoneId={zoneId}
       />,
     );
 

@@ -837,7 +837,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(group["amount_check"]["bank_total"], "240000.00")
         self.assertEqual(group["amount_check"]["bank_net_total"], "0.00")
 
-    def test_in_progress_oa_keeps_materially_complete_case_unpaired_until_same_oa_completes(self) -> None:
+    def test_in_progress_oa_pairs_without_changing_approval_or_case_identity(self) -> None:
         rows = {
             "oa-progress": {
                 "id": "oa-progress",
@@ -859,11 +859,12 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
 
         in_progress = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
 
-        self.assertEqual(in_progress["summary"]["paired_count"], 0)
-        group = in_progress["unpaired"]["groups"][0]
+        self.assertEqual(in_progress["summary"]["paired_count"], 1)
+        group = in_progress["paired"]["groups"][0]
         self.assertEqual(group["case_id"], "case:stable")
         self.assertEqual(group["completion"]["missing_row_types"], [])
-        self.assertEqual(group["completion"]["blocking_reasons"], ["oa_in_progress"])
+        self.assertNotIn("blocking_reasons", group["completion"])
+        self.assertEqual(rows["oa-progress"]["workflow_status"], "in_progress")
 
         rows["oa-progress"]["workflow_status"] = "completed"
         completed = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
@@ -871,7 +872,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(completed["summary"]["paired_count"], 1)
         self.assertEqual(completed["paired"]["groups"][0]["case_id"], "case:stable")
 
-    def test_any_in_progress_oa_blocks_multi_oa_case(self) -> None:
+    def test_in_progress_oa_does_not_block_multi_oa_case(self) -> None:
         completion = evaluate_bank_relation_completion(
             row_types=["oa", "oa", "bank"],
             oa_workflow_statuses=["completed", "in_progress"],
@@ -879,8 +880,8 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(completion["missing_row_types"], [])
-        self.assertEqual(completion["blocking_reasons"], ["oa_in_progress"])
-        self.assertFalse(completion["is_complete"])
+        self.assertNotIn("blocking_reasons", completion)
+        self.assertTrue(completion["is_complete"])
 
     def test_bank_policy_requirement_matrix_and_required_type_completion(self) -> None:
         cases = [

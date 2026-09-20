@@ -22,7 +22,7 @@ from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import 
     oa_source_aliases_sql,
 )
 
-OA_PROJECTION_SYNC_VERSION = "2026-08-18-workflow-number-v9"
+OA_PROJECTION_SYNC_VERSION = "2026-09-20-source-attachments-v10"
 COMPLETED_WORKFLOW_STATUS_ALIASES = frozenset(
     {
         "completed",

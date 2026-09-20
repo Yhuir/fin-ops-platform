@@ -759,3 +759,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - 服务/API：归属 service/API、matching orchestrator、import UoW、queue worker 和 durable idempotency 测试；明确纠正、来源漂移与错误映射。
 - 前端/浏览器：`WorkbenchInvoiceAssignmentDrawer.test.tsx`、`WorkbenchSelection.test.tsx`、`workbench-relation-fanout.spec.ts`、`workbench-supporting-documents-flow.spec.ts`；已有票入口、纠正预选、同行显示、成功回读、失败与只读控制。
 - 既有下游页面继续运行标准 backend/frontend/E2E 回归；无新增 read model/cache，领域 matching queue 的重复、并发到达和失败重试继续受 worker 测试保护。
+
+## 2026-09-20 ETC 来源闭环回归
+
+- `tests/test_etc_formal_matching.py`：来源先建组、流水顺序/歧义/差额/账户/日期、撤回保护、正式上传字段。
+- `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
+- 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
+- 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。

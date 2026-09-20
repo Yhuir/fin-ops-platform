@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Iterator
+from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import PostgresTransaction
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -22,6 +24,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 from fin_ops_platform.services.postgres_repositories.oa_attachment_identity_bridge import (
     reconcile_oa_attachment_cache_identity_sources,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
 )
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_app_health_alerts
 from fin_ops_platform.services.state_store_protocol import (
@@ -1379,6 +1384,27 @@ class PostgresOpsTaxEtcRepository:
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:
             normalized = serialize_value(snapshot)
+            business_versions = [
+                {"id": key, "version": int_value(payload.get("version"), 1), "binding": payload.get("oa_source_binding")}
+                for key, payload in iter_mapping(normalized.get("business_batches"))
+            ]
+            if business_versions:
+                stale = connection.fetch_all(
+                    """
+                    select batch.business_batch_id,
+                        batch.version > incoming.version or (
+                            batch.raw_payload->'normalized_payload' ? 'oa_source_binding'
+                            and batch.raw_payload->'normalized_payload'->'oa_source_binding' is distinct from incoming.binding
+                        ) as is_stale
+                    from app.etc_business_batches batch
+                    join jsonb_to_recordset(%s::jsonb) incoming(id text, version integer, binding jsonb)
+                      on incoming.id = batch.business_batch_id
+                    order by batch.business_batch_id
+                    for update of batch
+                    """, (jsonb(business_versions),),
+                )
+                if any(row["is_stale"] for row in stale):
+                    raise ValueError("ETC business batch snapshot is stale; reload before writing.")
             invoices = normalized.get("invoices") if isinstance(normalized, dict) else None
             for invoice_id, payload in iter_mapping(invoices):
                 connection.execute(
@@ -1470,7 +1496,13 @@ class PostgresOpsTaxEtcRepository:
                         submitted_by = excluded.submitted_by,
                         submitted_at = excluded.submitted_at,
                         version = excluded.version,
-                        raw_payload = excluded.raw_payload,
+                        raw_payload = case
+                            when app.etc_submission_batches.raw_payload->'normalized_payload' ? 'oa_source_binding'
+                            then jsonb_set(excluded.raw_payload, '{normalized_payload}',
+                                excluded.raw_payload->'normalized_payload' || jsonb_build_object(
+                                    'oa_source_binding', app.etc_submission_batches.raw_payload->'normalized_payload'->'oa_source_binding',
+                                    'linked_oa_row_id', app.etc_submission_batches.raw_payload->'normalized_payload'->'linked_oa_row_id'))
+                            else excluded.raw_payload end,
                         updated_at = now()
                     """,
                     (
@@ -1533,6 +1565,45 @@ class PostgresOpsTaxEtcRepository:
 
         run_in_transaction(self._connection, write)
 
+    def bind_etc_oa_sources(self, links: list[dict[str, Any]], *, actor_id: str) -> None:
+        """Own the narrow verified source write inside the formal relation transaction."""
+        for link in links:
+            proof = {"oa_row_id": link["oa_row_id"], "external_etc_batch_id": link["external_etc_batch_id"]}
+            event = {
+                "event_id": f"etc_business_audit_{uuid4().hex[:12]}",
+                "event_type": "oa_source_bound", "source": "workbench_matching",
+                "actor_id": actor_id, "business_batch_id": link["business_batch_id"],
+                "submission_batch_id": link.get("submission_batch_id"),
+                "created_at": datetime.now(UTC).isoformat(),
+                "reason": "正式关系事务按已验证来源同步 OA 归属。", **proof,
+            }
+            self._connection.execute(
+                """
+                update app.etc_business_batches batch
+                set raw_payload = jsonb_set(batch.raw_payload, '{normalized_payload}',
+                    batch.raw_payload->'normalized_payload' || jsonb_build_object(
+                        'oa_row_id', %s::text, 'oa_source_binding', %s::jsonb,
+                        'version', batch.version + 1, 'updated_at', now(),
+                        'audit_events', batch.audit_events || %s::jsonb)),
+                    audit_events = batch.audit_events || %s::jsonb,
+                    version = batch.version + 1, updated_at = now()
+                where batch.business_batch_id = %s
+                  and batch.raw_payload->'normalized_payload'->'oa_source_binding' is distinct from %s::jsonb
+                """, (link["oa_row_id"], jsonb(proof), jsonb([event]), jsonb([event]), link["business_batch_id"], jsonb(proof)),
+            )
+            if link.get("submission_batch_id"):
+                self._connection.execute(
+                    """
+                    update app.etc_submission_batches
+                    set raw_payload = jsonb_set(raw_payload, '{normalized_payload}',
+                        raw_payload->'normalized_payload' || jsonb_build_object(
+                            'linked_oa_row_id', %s::text, 'oa_source_binding', %s::jsonb)),
+                        updated_at = now()
+                    where submission_batch_id = %s
+                      and raw_payload->'normalized_payload'->'oa_source_binding' is distinct from %s::jsonb
+                    """, (link["oa_row_id"], jsonb(proof), link["submission_batch_id"], jsonb(proof)),
+                )
+
     def save_etc_oa_draft_attempt(
         self,
         snapshot: dict[str, Any],
@@ -1548,6 +1619,20 @@ class PostgresOpsTaxEtcRepository:
             if int_value(row.get("version") if isinstance(row, dict) else None, 0) != int(expected_version):
                 return False
             PostgresOpsTaxEtcRepository(connection).save_etc_state(snapshot)
+            payload = serialize_value(snapshot)["business_batches"][business_batch_id]
+            if payload.get("status") in {"oa_submitted", "manually_marked_submitted", "closed"}:
+                scopes = set()
+                for invoice in serialize_value(snapshot).get("invoices", {}).values():
+                    for key in ("issue_date", "passage_start_date", "passage_end_date"):
+                        if invoice.get(key):
+                            scopes.add(str(invoice[key])[:7])
+                scope = self._etc_business_batch_scope_month(payload, None)
+                if scope:
+                    scopes.add(str(scope)[:7])
+                PostgresWorkbenchMatchingQueueRepository.mark_workbench_matching_dirty_scopes_in_transaction(
+                    transaction=connection, tenant_id="default", scope_months=sorted(scopes),
+                    reason="etc_submitted_source_changed", source_versions={}, debounce_seconds=0,
+                )
             return True
 
         return run_in_transaction(self._connection, write)

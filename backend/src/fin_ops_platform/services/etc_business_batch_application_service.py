@@ -6,12 +6,12 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Callable, Iterable
 
-from fin_ops_platform.services.etc_reconciliation_models import ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     EtcInvoicePdfBundle,
     EtcInvoicePdfBundleError,
     EtcInvoicePdfBundleService,
 )
+from fin_ops_platform.services.etc_reconciliation_models import ParseIssueSeverity, SourceFileKind
 from fin_ops_platform.services.etc_service import (
     ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES,
     ETC_BUSINESS_BATCH_SUBMITTED_STATUSES,
@@ -462,12 +462,9 @@ class EtcBusinessBatchApplicationService:
                     "submitted ETC business batch is linked to another OA row.",
                     code="business_batch_oa_row_conflict",
                 )
-            self._refresh_business_batch_status_change(
-                current,
-                reason="etc_business_manual_oa_status_replayed",
-            )
-            return {"businessBatch": self.business_batch_payload(current)}
-        if str(getattr(current, "status", "")) not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
+            if not requested_oa_row_id or current_oa_row_id:
+                return {"businessBatch": self.business_batch_payload(current)}
+        if current_status not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES | ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
             raise EtcBusinessBatchInvalidTransitionError(
                 "manual OA status is allowed only after OA draft creation has started.",
                 code="invalid_manual_status",
@@ -481,7 +478,8 @@ class EtcBusinessBatchApplicationService:
         )
         if normalized_decision == "submitted":
             self._record_reconciliation_task_submitted(batch, actor=actor)
-        self._refresh_business_batch_status_change(batch, reason="etc_business_manual_oa_status")
+        else:
+            self._refresh_business_batch_status_change(batch, reason="etc_business_manual_oa_status")
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def source_files_payload(

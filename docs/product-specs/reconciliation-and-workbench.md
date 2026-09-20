@@ -7,7 +7,7 @@
 关联台只存在两种关系状态：
 
 1. `paired`：对象属于一条 `app.workbench_pair_relations.status='active'` 的正式关系，该关系当前持久化的 OA/发票要求已经满足，且关系内全部 OA 的流程状态均为 `completed`；同一关系的全部成员显示在同一组。
-2. `unpaired`：不属于 active relation 的 canonical fact 独立显示；尚未满足材料完整性要求或仍包含 `in_progress` OA 的 active relation 保持同一 case 分组。材料缺失明确显示缺少的 OA、银行流水或发票，流程阻断返回 `blocking_reasons=['oa_in_progress']`。
+2. `unpaired`：不属于 active relation 的 canonical fact 独立显示；尚未满足材料完整性要求的 active relation 保持同一 case 分组。材料缺失明确显示缺少的 OA、银行流水或发票。OA `in_progress` 不阻止配对，页面继续显示实际审批状态；配对不授予成本审批资格。
 
 不存在第三种“自动候选”“待确认配对”“假配对”或“隐藏但仍存在”的用户关系状态。系统未能安全正式化的计算结果不持久化、不合并行、不隐藏事实，也不进入下游已关联口径。
 
@@ -90,3 +90,7 @@
 
 - 云南立孚科技 520 元：发票 `inv_imported_0369`（发票号 `26532000000716859331`）与 OA `oa-pay-2169` 必须存在于 canonical facts；历史 case `case:decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369` 只作为 identity 保留。缺银行流水时 active case 必须完整保留但显示在 `unpaired`；补齐银行并满足冻结要求后才进入 `paired`。
 - 13 张合计 1709.49 元的省略发票样例在没有唯一强证据闭合时必须是 13 个 `unpaired` 单行，不能因合计金额形成伪关系，也不能被隐藏。
+
+## ETC 提交来源与流水补入（2026-09-20）
+
+ETC 批次已提交且 OA 来源唯一确认后，OA 与 ETC 汇总发票先形成正式关系，无需等待银行或审批完成。来源依据是显式 OA owner、既存结构化批次标识，或本批上传附件的完整精确路径集合；不能用同金额/备注猜来源。无银行时同组待补全，银行先到/后到均复用同一关系。OA 应付金额用于核对流水，发票保留真实金额及差额。支付申请使用收款人而非申请人，缺明确银行业务引用时要求同币种/支出方向、正确账户（双方有值时）、30 天内同收款人和唯一金额闭环。重复候选留待人工确认。撤回银行保留 OA＋ETC 来源，人工拒绝不被自动重建；审批进行中三项齐全可配对，成本仍按原审批规则处理。

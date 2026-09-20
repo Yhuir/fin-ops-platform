@@ -6,6 +6,11 @@ from typing import Any
 from uuid import uuid4
 
 from fin_ops_platform.services.oa_attachment_invoice_linking import oa_attachment_row_id_matches_oa
+from fin_ops_platform.services.workbench_etc_batch_link import (
+    etc_source_links,
+    etc_source_metadata,
+    workbench_etc_summary_row_id,
+)
 from fin_ops_platform.services.workbench_relation_modes import (
     DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
     is_workbench_relation_snapshot_restorable,
@@ -17,7 +22,6 @@ from fin_ops_platform.services.workbench_row_identity import (
     canonical_workbench_row_type,
     row_type_for_workbench_row_id,
 )
-
 
 ACTIVE_PAIR_RELATION_STATUS = "active"
 CANCELLED_PAIR_RELATION_STATUS = "cancelled"
@@ -347,13 +351,14 @@ class WorkbenchPairRelationService:
         }
         replacement_members = self._relation_member_entries(replacement_relation)
         inherited_attachment_metadata: dict[str, Any] = {}
+        inherited_etc_links: list[dict[str, Any]] = []
         attachment_invoice_ids_by_parent: dict[str, list[str]] = {}
         attachment_member_entries: set[tuple[str, str]] = set()
         for active_relation in active_before_relations:
-            binding_relations = self._oa_attachment_binding_relations(active_relation)
+            binding_relations = self._oa_source_binding_relations(active_relation)
             if not binding_relations:
                 continue
-            preserved_replacement = self._preserve_oa_attachment_bindings(
+            preserved_replacement = self._preserve_oa_source_bindings(
                 [replacement_relation],
                 active_relation=active_relation,
             )
@@ -366,6 +371,7 @@ class WorkbenchPairRelationService:
             active_metadata = active_relation.get("special_metadata")
             if isinstance(active_metadata, dict):
                 inherited_attachment_metadata.update(deepcopy(active_metadata))
+                inherited_etc_links.extend(etc_source_links(active_metadata))
             for binding_relation in binding_relations:
                 binding_metadata = binding_relation.get("special_metadata")
                 binding_metadata = binding_metadata if isinstance(binding_metadata, dict) else {}
@@ -394,6 +400,9 @@ class WorkbenchPairRelationService:
             **inherited_attachment_metadata,
             **(deepcopy(special_metadata) if isinstance(special_metadata, dict) else {}),
         }
+        resolved_special_metadata.update(etc_source_metadata([
+            *inherited_etc_links, *etc_source_links(resolved_special_metadata),
+        ]))
         if attachment_invoice_ids_by_parent:
             resolved_special_metadata["contains_immutable_oa_attachment_binding"] = True
             resolved_special_metadata["oa_attachment_bindings"] = [
@@ -696,7 +705,7 @@ class WorkbenchPairRelationService:
             if isinstance(confirm_history, dict)
             else []
         )
-        after_relations = self._preserve_oa_attachment_bindings(
+        after_relations = self._preserve_oa_source_bindings(
             historical_relations,
             active_relation=active_relation,
             row_id_aliases=row_id_aliases,
@@ -1011,7 +1020,7 @@ class WorkbenchPairRelationService:
             if row_types and row_types <= {"oa", "invoice"}:
                 return True
         binding_row_ids: set[str] = set()
-        for binding_relation in cls._oa_attachment_binding_relations(
+        for binding_relation in cls._oa_source_binding_relations(
             relation,
             row_id_aliases=row_id_aliases,
         ):
@@ -1146,7 +1155,7 @@ class WorkbenchPairRelationService:
         return row_type_for_workbench_row_id(row_id)
 
     @classmethod
-    def _preserve_oa_attachment_bindings(
+    def _preserve_oa_source_bindings(
         cls,
         relations: list[dict[str, Any]] | None,
         *,
@@ -1154,7 +1163,7 @@ class WorkbenchPairRelationService:
         row_id_aliases: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         preserved = [deepcopy(relation) for relation in list(relations or []) if isinstance(relation, dict)]
-        for binding_relation in cls._oa_attachment_binding_relations(
+        for binding_relation in cls._oa_source_binding_relations(
             active_relation,
             row_id_aliases=row_id_aliases,
         ):
@@ -1175,19 +1184,25 @@ class WorkbenchPairRelationService:
             for index in target_indexes[1:]:
                 merged = cls._append_relation_rows(merged, preserved[index])
             merged = cls._append_relation_rows(merged, binding_relation)
-            parent_oa_row_id = str(binding_relation.get("special_metadata", {}).get("parent_oa_row_id") or "")
-            special_metadata = merged.get("special_metadata")
-            merged["special_metadata"] = {
-                **(deepcopy(special_metadata) if isinstance(special_metadata, dict) else {}),
-                "contains_immutable_oa_attachment_binding": True,
-                "parent_oa_row_id": parent_oa_row_id,
-            }
-            if cls._relation_row_id_set(merged, row_id_aliases=row_id_aliases) == binding_row_ids:
+            binding_metadata = binding_relation.get("special_metadata", {})
+            if etc_source_links(binding_metadata):
+                metadata = merged.get("special_metadata") or {}
                 merged["special_metadata"] = {
-                    **deepcopy(merged["special_metadata"]),
-                    "source": "oa_attachment_invoice",
-                    "immutable_oa_attachment_binding": True,
+                    **metadata,
+                    **etc_source_metadata([*etc_source_links(metadata), *etc_source_links(binding_metadata)]),
                 }
+            else:
+                parent_oa_row_id = str(binding_metadata.get("parent_oa_row_id") or "")
+                special_metadata = merged.get("special_metadata")
+                merged["special_metadata"] = {
+                    **(deepcopy(special_metadata) if isinstance(special_metadata, dict) else {}),
+                    "contains_immutable_oa_attachment_binding": True,
+                    "parent_oa_row_id": parent_oa_row_id,
+                }
+                if cls._relation_row_id_set(merged, row_id_aliases=row_id_aliases) == binding_row_ids:
+                    merged["special_metadata"].update({
+                        "source": "oa_attachment_invoice", "immutable_oa_attachment_binding": True,
+                    })
 
             target_index_set = set(target_indexes)
             preserved = [
@@ -1198,7 +1213,7 @@ class WorkbenchPairRelationService:
         return preserved
 
     @classmethod
-    def _oa_attachment_binding_relations(
+    def _oa_source_binding_relations(
         cls,
         relation: dict[str, Any],
         *,
@@ -1283,6 +1298,21 @@ class WorkbenchPairRelationService:
                     fallback_case_id=f"CASE-OA-ATT-{oa_row_id}",
                 )
             )
+        for link in etc_source_links(metadata):
+            oa_id = str(link.get("oa_row_id") or "")
+            summary_id = workbench_etc_summary_row_id(link["external_etc_batch_id"])
+            if oa_id not in oa_row_ids or summary_id not in invoice_row_ids:
+                continue
+            binding_case = f"CASE-ETC-SOURCE-{link['external_etc_batch_id']}"
+            bindings.append(cls._normalize_relation({
+                "case_id": binding_case, "row_ids": [oa_id, summary_id], "row_types": ["oa", "invoice"],
+                "status": ACTIVE_PAIR_RELATION_STATUS, "relation_mode": "manual_confirmed",
+                "month_scope": str(relation.get("month_scope") or "all"),
+                "created_by": str(relation.get("created_by") or ""),
+                "note": "ETC 批次来源关联", "amount_check": {},
+                "special_metadata": etc_source_metadata([link]),
+                "created_at": relation.get("created_at"), "updated_at": relation.get("updated_at"),
+            }, fallback_case_id=binding_case))
         return bindings
 
     @classmethod

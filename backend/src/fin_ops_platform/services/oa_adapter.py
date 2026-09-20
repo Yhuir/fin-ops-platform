@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from fin_ops_platform.services.imports import clean_string
-
 
 ETC_BATCH_SOURCE = "etc_batch"
 ETC_BATCH_TAG = "ETC批量提交"
@@ -46,6 +45,7 @@ class OAApplicationRecord:
     project_name_display: str | None = None
     project_names: list[str] = field(default_factory=list)
     source_aliases: list[str] = field(default_factory=list)
+    source_attachment_paths: list[str] = field(default_factory=list)
 
 
 def is_in_progress_expense_claim(record: OAApplicationRecord) -> bool:

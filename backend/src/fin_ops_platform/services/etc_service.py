@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import mimetypes
+import os
+import pickle
+import re
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import MISSING, dataclass, field, fields, replace
@@ -8,16 +15,9 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
-import hashlib
-import json
-import mimetypes
-import os
-import pickle
-import re
-from threading import RLock
 from tempfile import TemporaryDirectory
+from threading import RLock
 from typing import Any, Callable, Protocol
-import xml.etree.ElementTree as ET
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import Request, urlopen
@@ -34,13 +34,13 @@ from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
     EtcInvoicePdfBundleError,
     open_single_page_etc_invoice_pdf,
 )
-from fin_ops_platform.services.search_query import normalize_money_search_query
 from fin_ops_platform.services.oa_draft_prefill import (
     ETC_OA_DRAFT_PREFILL_FAMILY,
     default_oa_draft_prefill,
     normalize_oa_draft_prefill,
     render_oa_draft_reason,
 )
+from fin_ops_platform.services.search_query import normalize_money_search_query
 
 
 class EtcInvoiceStatus(str, Enum):
@@ -539,6 +539,8 @@ class EtcBusinessBatch:
     oa_draft_url: str | None = None
     oa_row_id: str | None = None
     oa_process_status: str = "unknown"
+    oa_attachment_paths: list[str] = field(default_factory=list)
+    oa_source_binding: dict[str, object] = field(default_factory=dict)
     invoice_ids: list[str] = field(default_factory=list)
     amount_breakdown: dict[str, object] = field(default_factory=dict)
     import_attempts: list[dict[str, object]] = field(default_factory=list)
@@ -682,6 +684,7 @@ class EtcDraftResult:
     etc_batch_id: str
     oa_draft_id: str
     oa_draft_url: str
+    attachment_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1340,7 +1343,6 @@ class EtcService:
             payload = self._build_oa_draft_payload(
                 attempt.submission_batch,
                 attachments,
-                business_batch_id=attempt.business_batch_id,
                 applicant_name=attempt.applicant_name,
                 prefill=attempt.prefill,
             )
@@ -1354,6 +1356,7 @@ class EtcService:
             etc_batch_id=attempt.submission_batch.etc_batch_id,
             oa_draft_id=oa_draft_id,
             oa_draft_url=oa_draft_url,
+            attachment_paths=tuple(sorted({attachment.url for attachment in attachments})),
         )
 
     def complete_business_batch_oa_draft(
@@ -1378,6 +1381,7 @@ class EtcService:
                 invoice.updated_at = now
             batch.oa_draft_id = draft.oa_draft_id
             batch.oa_draft_url = draft.oa_draft_url
+            batch.oa_attachment_paths = list(draft.attachment_paths)
             batch.status = EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value
             self._bump_business_batch_version(
                 batch,
@@ -1586,6 +1590,7 @@ class EtcService:
             batch.external_etc_batch_id = None
             batch.oa_draft_id = None
             batch.oa_draft_url = None
+            batch.oa_attachment_paths = []
             batch.oa_draft_idempotency_key = None
             batch.status = EtcBusinessBatchStatus.NOT_SUBMITTED.value
             self._bump_business_batch_version(
@@ -1619,13 +1624,20 @@ class EtcService:
             self._assert_business_batch_version(batch, expected_version)
             if normalized_decision == "submitted":
                 before_status = batch.status
-                if before_status not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
+                if before_status in ETC_BUSINESS_BATCH_SUBMITTED_STATUSES:
+                    requested_oa = str(candidate_oa_row_id or "").strip()
+                    if not requested_oa or batch.oa_row_id == requested_oa:
+                        return self._copy_business_batch(batch)
+                    if batch.oa_row_id:
+                        raise EtcBusinessBatchInvalidTransitionError("Submitted ETC batch already has another OA owner.", code="business_batch_oa_row_conflict")
+                elif before_status not in ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES:
                     raise EtcBusinessBatchInvalidTransitionError(
                         "manual submitted decision is allowed only after OA draft creation has started.",
                         code="invalid_manual_status",
                     )
                 now = datetime.now(UTC)
-                if batch.submission_batch_id and (submission_batch := self._batches.get(batch.submission_batch_id)) is not None:
+                submission_batch = self._batches.get(batch.submission_batch_id or "")
+                if submission_batch is not None:
                     submission_batch.status = EtcBatchStatus.SUBMITTED_CONFIRMED.value
                     submission_batch.confirmed_at = submission_batch.confirmed_at or now
                 for invoice_id in list(batch.invoice_ids):
@@ -1649,7 +1661,9 @@ class EtcService:
                     reason=normalized_reason,
                     oa_row_id=batch.oa_row_id,
                 )
-                self._persist()
+                self._persist_oa_draft_attempt(
+                    batch, submission_batch, expected_version=batch.version - 1, include_invoices=True,
+                )
                 return self._copy_business_batch(batch)
             return self.revoke_business_batch_oa_draft(
                 business_batch_id,
@@ -4257,7 +4271,6 @@ class EtcService:
         batch: EtcBatch,
         attachments: list[EtcUploadedAttachment],
         *,
-        business_batch_id: str = "",
         applicant_name: str = "",
         prefill: dict[str, object] | None = None,
     ) -> dict[str, object]:
@@ -4289,13 +4302,8 @@ class EtcService:
             self._form_mapping.beneficiary: profile["payee"],
             self._form_mapping.bank: profile["bank"],
             self._form_mapping.bank_account: profile["bank_account"],
-            "invoiceCount": batch.invoice_count,
-            "invoice_count": batch.invoice_count,
-            "etcInvoiceCount": batch.invoice_count,
             self._form_mapping.cause: cause,
             self._form_mapping.attachments: self._build_oa_upload_custom_value(attachments),
-            "etcBatchId": batch.etc_batch_id,
-            "businessBatchId": str(business_batch_id or "").strip(),
         }
         return {
             "formId": 2,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import unittest
 from datetime import date, datetime, timezone
 from decimal import Decimal
-import unittest
 
 from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
     PostgresWorkbenchFormalRelationFactRepository,
@@ -62,7 +62,7 @@ class FakeConnection:
         self.queries.append((normalized, tuple(params)))
         if "pg_advisory_xact_lock" in normalized:
             return []
-        if "for update of batch, oa" in normalized:
+        if "for update of batch" in normalized:
             return list(self.etc_validation_rows)
         if "select case_id, amount_check, special_metadata" in normalized:
             return list(self.etc_owner_rows)
@@ -79,6 +79,8 @@ class FakeConnection:
             return [*self.oa_rows, *self.pending_oa_rows]
         if "from app.oa_applications" in normalized:
             return list(self.historical_oa_rows if historical else self.oa_rows)
+        if "from app.oa_pending_payment_admissions" in normalized:
+            return []
         if "from app.bank_transactions" in normalized:
             return list(self.historical_bank_rows if historical else self.bank_rows)
         if "from app.invoices" in normalized:
@@ -201,6 +203,22 @@ def invoice_row(
 
 
 class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
+    def test_bank_account_from_canonical_envelope_prevents_conflicting_payee_match(self) -> None:
+        oa = oa_row(payload={
+            "apply_type": "支付申请",
+            "counterparty_name": "刘树刚",
+            "detail_fields": {"收款账号": "622200001"},
+        })
+        bank = bank_row(counterparty="刘树刚")
+        bank["raw_payload"] = {"normalized_payload": {"counterparty_account": "622200002"}}
+        batch = PostgresWorkbenchFormalRelationFactRepository(
+            FakeConnection(oa_rows=[oa], bank_rows=[bank])
+        ).load_batch(["2026-05"])
+        facts = {fact.row_id: fact for fact in batch.facts}
+        self.assertEqual(facts["txn-1"].counterparty_account, "622200002")
+        self.assertEqual(facts["oa-1"].counterparty_account, "622200001")
+        self.assertEqual(WorkbenchFreeMatchingEngine().plan_relations(batch).plans, ())
+
     def test_output_reversal_identity_uses_exact_remark_target_not_equal_amounts(self) -> None:
         target_invoice_no = "26532000000809302711"
         blue = invoice_row("output-blue", total_with_tax=Decimal("182400.00"))
@@ -306,12 +324,12 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertEqual(candidates[0]["external_batch_owner_count"], 2)
         self.assertEqual(candidates[0]["scope_keys"], ["2026-06", "2026-08"])
         sql, params = connection.queries[0]
-        self.assertIn("batch.scope_month between %s::date and %s::date", sql)
+        self.assertIn("submitted.scope_month between %s::date and %s::date", sql)
         self.assertIn("oa.normalized_payload->>'etc_batch_id'", sql)
         self.assertIn("to_char(coalesce(oa.application_date, oa.scope_month)", sql)
-        self.assertNotIn("coalesce(oa.application_date, oa.scope_month) between", sql)
+        self.assertIn("coalesce(oa.application_date, oa.scope_month) between", sql)
         self.assertNotIn("like", sql.lower())
-        self.assertEqual(len(params), 2)
+        self.assertEqual(len(params), 4)
 
     def test_transactional_etc_validation_rejects_changed_totals_and_other_relation_owner(self) -> None:
         connection = FakeConnection(
@@ -351,9 +369,9 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
             {"canonical_batch_totals_changed", "active_relation_owner_conflict"},
         )
         self.assertIn("pg_advisory_xact_lock", connection.queries[0][0])
-        self.assertIn("for update of batch, oa", connection.queries[1][0])
+        self.assertIn("for update of batch", connection.queries[1][0])
         self.assertIn("for update", connection.queries[2][0])
-        self.assertEqual(len(connection.queries[2][1]), 8)
+        self.assertEqual(len(connection.queries[2][1]), 9)
 
     def test_transactional_etc_validation_rejects_second_completed_oa_claim(self) -> None:
         connection = FakeConnection(
@@ -501,7 +519,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
 
         self.assertEqual({fact.member_key for fact in result.facts}, {("invoice", "inv-1"), ("oa", "oa-history")})
-        self.assertEqual(len(connection.queries), 6)
+        self.assertEqual(len(connection.queries), 7)
         history_query = [
             query
             for query, params in connection.queries

@@ -305,3 +305,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - `POST /api/workbench/actions/assign-invoice-expense-items` 保留初次归属 fingerprint 合同；纠正模式提供非空 `previous_targets`（同 targets 结构），锁内比较当前完整归属集合，再替换为用户 targets，冲突返回 409。非显式 provenance 保留，记录 before/after，后续自动任务不改回。现有认证、页面写权限和幂等键不变。
 - 补充凭证仅为资料证明，不排除正式发票归属。新增/软删除由凭证 repository 在其事务登记 matching scope；文件对象仍由既有 storage owner 管理。已有正式归属时删除凭证不会删除它。
 - 页面复用 App Health 的 matching 完成时间，时间变化后合并触发一次 canonical 回读；活动抽屉/选择期间复用现有延期机制，不轮询整个列表。
+
+## 2026-09-20 ETC 来源与进行中配对
+
+- SQL 分区与领域完成判断同步取消 `in_progress` 阻断及专用 CTE/join；OA＋ETC＋银行完整关系可在 paired 显示，OA 标签保留进行中。OA＋ETC 缺银行仍为同一个 unpaired case。
+- ETC 来源 summary 是真实正式成员，47 张 ETC 内部成员不等于 canonical 发票池数量，不生成补造 canonical 发票。GET 不匹配、不投任务、不读外部 OA；展开、详情、筛选和统计继续消费 direct canonical query。
+
+- 多 ETC 批次关系：compact hydration 在原集合 SQL 内读取 `etc_batch_links` 的全部准确批次；full/detail 按正式来源 metadata 构造 summary→external identity 映射，删除把一个 descriptor 的主批次强加给全部 summary 的旧假设。保持原查询预算，不按成员追加查询。单 summary 的显式 descriptor identity 合同不变。

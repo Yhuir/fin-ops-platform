@@ -148,3 +148,8 @@ Mongo 日常报销 schedule 新保留 detailPaymentMethod、detailTypeOfInvoice�
 
 成员写入只执行差集 DELETE/INSERT，保留未变化的行；在锁定两个角色和菜单绑定后读取实际成员。失败恢复先核对角色 ID 与目标成员仍相同，禁止覆盖其他操作。运行时只更新成员，不迁移菜单。
 专项一次性迁移仅允许旧 App 角色绑定本入口及其直接父菜单；保留旧只读角色成员和父菜单关系，只移除其 App 入口绑定。其他业务菜单引用明确拒绝自动迁移。标准发布的既有权限检查增加 OA 两角色实际结构验证，不自动执行迁移。
+
+## 2026-09-20 ETC 来源与进行中配对
+
+- 支付申请从正式注册的上传字段（默认 `field101`，与 ETC mapping 同一环境配置）提取 `source_attachment_paths`，随 completed/admitted in-progress OA snapshot 保存。此输入仅作精确来源身份，不下载文件、不执行 OCR、不 promotion 新发票。
+- projection version `2026-09-20-source-attachments-v10` 让既有 sync 更新本地事实。表单编辑器不保留未注册 `etcBatchId`，禁止再假设草稿扩展字段或草稿 Mongo ID会传给正式单据。历史明确 owner 和既存结构化来源继续属于合法输入合同。

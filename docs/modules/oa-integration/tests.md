@@ -163,3 +163,10 @@ Nightly CI 应至少覆盖：
 - API contract、frontend interaction：不适用；HTTP response shape、页面交互和权限均未变化。
 - End-to-end business flow：由 production 精确附件刷新/全量 durable OA sync、既有 promotion 和 Workbench 同行展示验证；本地测试不伪造生产附件或直接写 canonical 关系。
 - Existing feature regression：PNG/JPEG、DOCX、多页铁路客票、付款凭证、正式证据准入、promotion 与 Workbench direct query 测试继续覆盖，确保统一 PDF 链路不污染其它附件类型和页面。
+
+## 2026-09-20 ETC 来源闭环回归
+
+- `tests/test_etc_formal_matching.py`：来源先建组、流水顺序/歧义/差额/账户/日期、撤回保护、正式上传字段。
+- `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
+- 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
+- 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。

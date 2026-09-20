@@ -7,7 +7,8 @@ from hashlib import sha256
 from typing import Any
 
 from fin_ops_platform.services.workbench_etc_batch_link import (
-    relation_external_etc_batch_id,
+    etc_source_links,
+    etc_source_metadata,
     relation_external_etc_batch_ids,
     workbench_etc_summary_row_id,
 )
@@ -15,7 +16,7 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
 from fin_ops_platform.services.workbench_relation_scope import affected_months, relation_scope
 
-IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE = "无法撤回：OA 附件发票必须和来源 OA 保持绑定。"
+IMMUTABLE_OA_ATTACHMENT_BINDING_MESSAGE = "无法撤回：发票必须和来源 OA 保持绑定；ETC 来源请在批次业务中处理。"
 
 
 class WorkbenchRelationCommandError(Exception):
@@ -652,11 +653,13 @@ class WorkbenchRelationCommandService:
                 "enriched_relation_count": 0,
             }
         case_ids = [str(getattr(plan, "case_id", "") or "") for plan in normalized_plans]
-        links_by_case = {str(link["case_id"]): link for link in normalized_links}
+        links_by_case: dict[str, list[dict[str, Any]]] = {}
+        for link in normalized_links:
+            links_by_case.setdefault(str(link["case_id"]), []).append(link)
         typed_members_by_case = {
             str(getattr(plan, "case_id", "") or ""): self._formal_plan_typed_members(
                 plan,
-                links_by_case.get(str(getattr(plan, "case_id", "") or "")),
+                links_by_case.get(str(getattr(plan, "case_id", "") or ""), []),
             )
             for plan in normalized_plans
         }
@@ -776,8 +779,8 @@ class WorkbenchRelationCommandService:
                 )
             )
             special_metadata.update(requirements_by_case.get(case_id, {}))
-            etc_batch_link = links_by_case.get(case_id)
-            if etc_batch_link is not None:
+            case_links = links_by_case.get(case_id, [])
+            for etc_batch_link in case_links:
                 if (str(etc_batch_link["oa_row_id"]), "oa") not in set(
                     zip(plan_row_ids, plan_row_types, strict=False)
                 ):
@@ -786,7 +789,7 @@ class WorkbenchRelationCommandService:
                         "The exact ETC OA row is not a typed OA member of the formal relation plan.",
                         payload={"case_id": case_id, "oa_row_id": etc_batch_link["oa_row_id"]},
                     )
-                special_metadata["etc_batch_link"] = self._desired_etc_batch_link(etc_batch_link)
+            special_metadata.update(etc_source_metadata([self._desired_etc_batch_link(link) for link in case_links]))
             relation_note = "系统确定性配对扩展" if target_case_id else "系统确定性配对"
             if target_case_id:
                 before_relation = pair_service.get_active_relation_by_case_id(target_case_id)
@@ -807,6 +810,8 @@ class WorkbenchRelationCommandService:
                     if isinstance(before_relation.get("special_metadata"), dict)
                     else {}
                 )
+                source_links = [*etc_source_links(before_metadata), *etc_source_links(special_metadata)]
+                special_metadata = {**deepcopy(before_metadata), **special_metadata, **etc_source_metadata(source_links)}
                 attachment_bindings.update(
                     _oa_attachment_binding_pairs(before_metadata)
                 )
@@ -890,13 +895,14 @@ class WorkbenchRelationCommandService:
             histories.append(history)
             changed_case_ids.add(case_id)
             affected_months.update(scope_keys)
-            if etc_batch_link is not None:
-                applied_etc_link_count += 1
+            applied_etc_link_count += len(case_links)
         self._save_changed_cases(
             pair_service,
             sorted(changed_case_ids),
             history_events=histories,
         )
+        if normalized_links:
+            self._etc_batch_link_repository.bind_oa_sources(normalized_links, actor_id=actor_id)
         return {
             "status": "confirmed" if changed_case_ids else "noop",
             "relations": relations,
@@ -993,89 +999,27 @@ class WorkbenchRelationCommandService:
                     payload={"case_id": case_id, "row_id": summary_row_id},
                 )
             summary_is_member = member_type_by_id.get(summary_row_id) == "invoice"
-            current_external_batch_id = relation_external_etc_batch_id(active_relation)
-            current_external_batch_ids = relation_external_etc_batch_ids(active_relation)
-            if len(current_external_batch_ids) > 1:
-                raise WorkbenchRelationCommandError(
-                    "etc_batch_link_marker_conflict",
-                    "The Workbench relation contains conflicting ETC batch owner markers.",
-                    payload={"case_id": case_id, "external_etc_batch_ids": sorted(current_external_batch_ids)},
-                )
-            if current_external_batch_id and current_external_batch_id != item["external_etc_batch_id"]:
-                raise WorkbenchRelationCommandError(
-                    "etc_batch_link_owner_conflict",
-                    "The Workbench relation already belongs to another ETC batch.",
-                    payload={
-                        "case_id": case_id,
-                        "current_external_etc_batch_id": current_external_batch_id,
-                        "requested_external_etc_batch_id": item["external_etc_batch_id"],
-                    },
-                )
             desired_link = self._desired_etc_batch_link(item)
             current_metadata = active_relation.get("special_metadata")
-            current_link = (
-                current_metadata.get("etc_batch_link")
-                if isinstance(current_metadata, dict)
-                else None
-            )
+            current_links = etc_source_links(current_metadata or {})
+            current_link = next((link for link in current_links if link["external_etc_batch_id"] == item["external_etc_batch_id"]), None)
+            desired_metadata = etc_source_metadata([*current_links, desired_link])
             if current_link == desired_link and summary_is_member:
                 continue
-            if summary_is_member:
-                relation, history = pair_service.update_relation_metadata_for_case_id(
-                    case_id,
-                    special_metadata={"etc_batch_link": desired_link},
-                    display_tags=["ETC发票已关联"],
-                    updated_by=actor_id,
-                    note="系统按 OA 精确 ETC 批次标识补全正式关系归属。",
-                    operation_type="link_etc_business_batch",
+            if not summary_is_member:
+                raise WorkbenchRelationCommandError(
+                    "etc_batch_summary_member_missing",
+                    "ETC metadata requires a source plan with the summary already in the relation.",
+                    payload={"case_id": case_id, "row_id": summary_row_id},
                 )
-            else:
-                current_metadata = (
-                    active_relation.get("special_metadata")
-                    if isinstance(active_relation.get("special_metadata"), dict)
-                    else {}
-                )
-                display_tags = list(
-                    dict.fromkeys(
-                        [
-                            *[
-                                str(tag).strip()
-                                for tag in list(active_relation.get("display_tags") or [])
-                                if str(tag).strip()
-                            ],
-                            "ETC发票已关联",
-                        ]
-                    )
-                )
-                relation, history = pair_service.replace_with_confirmed_relation(
-                    case_id=case_id,
-                    row_ids=[
-                        *[str(row_id) for row_id in list(active_relation.get("row_ids") or [])],
-                        summary_row_id,
-                    ],
-                    row_types=[
-                        *[str(row_type) for row_type in list(active_relation.get("row_types") or [])],
-                        "invoice",
-                    ],
-                    relation_mode=str(active_relation.get("relation_mode") or "manual_confirmed"),
-                    created_by=actor_id,
-                    month_scope=str(active_relation.get("month_scope") or "all"),
-                    note="系统按 OA 精确 ETC 批次标识补全正式关系及发票成员。",
-                    amount_check=dict(active_relation.get("amount_check") or {}),
-                    special_metadata={
-                        **deepcopy(current_metadata),
-                        "etc_batch_link": desired_link,
-                    },
-                    before_relations=[active_relation],
-                    operation_type="link_etc_business_batch",
-                    history_created_by=actor_id,
-                    history_note="系统按 OA 精确 ETC 批次标识补全正式关系及发票成员。",
-                    exception_case_id=str(active_relation.get("exception_case_id") or "") or None,
-                    rule_version=str(active_relation.get("rule_version") or "") or None,
-                    evidence=dict(active_relation.get("evidence") or {}),
-                    oa_exemption=dict(active_relation.get("oa_exemption") or {}),
-                    display_tags=display_tags,
-                )
+            relation, history = pair_service.update_relation_metadata_for_case_id(
+                case_id,
+                special_metadata=desired_metadata,
+                display_tags=["ETC发票已关联"],
+                updated_by=actor_id,
+                note="系统按 OA 精确 ETC 来源补全正式关系归属。",
+                operation_type="link_etc_business_batch",
+            )
             relations.append(relation)
             histories.append(history)
             affected_months.update(
@@ -1090,6 +1034,7 @@ class WorkbenchRelationCommandService:
                 changed_case_ids,
                 history_events=histories,
             )
+        self._etc_batch_link_repository.bind_oa_sources(normalized, actor_id=actor_id)
         return {
             "status": "updated" if relations else "noop",
             "relations": relations,
@@ -1102,7 +1047,6 @@ class WorkbenchRelationCommandService:
     @staticmethod
     def _normalize_etc_batch_links(links: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []
-        case_ids: set[str] = set()
         external_batch_ids: set[str] = set()
         for raw in list(links or []):
             if not isinstance(raw, dict):
@@ -1119,13 +1063,12 @@ class WorkbenchRelationCommandService:
                     "invalid_etc_batch_link",
                     "ETC batch link enrichment requires case, OA row, business batch and external batch ids.",
                 )
-            if case_id in case_ids or external_batch_id in external_batch_ids:
+            if external_batch_id in external_batch_ids:
                 raise WorkbenchRelationCommandError(
                     "ambiguous_etc_batch_link",
                     "One ETC batch and one Workbench relation must have exactly one enrichment owner.",
                     payload={"case_id": case_id, "external_etc_batch_id": external_batch_id},
                 )
-            case_ids.add(case_id)
             external_batch_ids.add(external_batch_id)
             normalized.append(
                 {
@@ -1178,29 +1121,26 @@ class WorkbenchRelationCommandService:
     @staticmethod
     def _formal_plan_typed_members(
         plan: Any,
-        etc_batch_link: dict[str, Any] | None,
+        etc_batch_links: list[dict[str, Any]],
     ) -> tuple[list[str], list[str]]:
         row_ids = [str(item) for item in tuple(getattr(plan, "row_ids", ()) or ())]
         row_types = [str(item) for item in tuple(getattr(plan, "row_types", ()) or ())]
         if len(row_ids) != len(row_types):
             return row_ids, row_types
-        if etc_batch_link is None:
-            return row_ids, row_types
-        summary_row_id = str(etc_batch_link["summary_row_id"])
-        matching_types = [
-            row_types[index]
-            for index, row_id in enumerate(row_ids)
-            if row_id == summary_row_id
-        ]
-        if matching_types and matching_types != ["invoice"]:
-            raise WorkbenchRelationCommandError(
-                "etc_batch_summary_member_type_conflict",
-                "The ETC batch summary is present with an invalid formal relation member type.",
-                payload={"row_id": summary_row_id, "row_types": matching_types},
-            )
-        if not matching_types:
-            row_ids.append(summary_row_id)
-            row_types.append("invoice")
+
+        for etc_batch_link in etc_batch_links:
+            summary_row_id = str(etc_batch_link["summary_row_id"])
+            matching_types = [
+                row_types[index]
+                for index, row_id in enumerate(row_ids)
+                if row_id == summary_row_id
+            ]
+            if matching_types != ["invoice"]:
+                raise WorkbenchRelationCommandError(
+                    "etc_batch_summary_member_type_conflict",
+                    "Formal plans must contain the exact typed ETC summary member before commit.",
+                    payload={"row_id": summary_row_id, "row_types": matching_types},
+                )
         return row_ids, row_types
 
     def cancel_relation(

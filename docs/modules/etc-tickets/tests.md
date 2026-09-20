@@ -198,3 +198,10 @@ bash scripts/verify.sh docs
 - ETC import、OA manual status、批次状态等普通写只提交 owner facts/version/audit 与精确 affected scope，不发布 Workbench/tax/cost 页面 refresh。
 - `web/src/test/EtcTicketManagementPage.test.tsx` 与 `PageRouteHost.test.tsx` 覆盖：当前 ETC 页可在任务完成后重读；focus/visibility/BFCache 与旧业务事件不触发其它页面 load，route 重进/手动刷新走页面访问收敛。
 - 显式 repair/reset/authoritative integration 仍按各自运维合同执行，不得被普通写零 fan-out 测试误删或降格。
+
+## 2026-09-20 ETC 来源闭环回归
+
+- `tests/test_etc_formal_matching.py`：来源先建组、流水顺序/歧义/差额/账户/日期、撤回保护、正式上传字段。
+- `tests/test_etc_formal_matching_postgres.py`：47 张 ETC、进行中 OA、后到银行同 case、幂等、事务回滚、旧事实拒绝、提交与 dirty scopes 原子性、多批来源不覆盖。
+- 既有 ETC API/删除、OA adapter、matching/UoW、Workbench query/grouping/command、成本和待付款回归；`WorkbenchColumns.test.tsx` 覆盖 paired/unpaired 两区真实进行中标签。
+- 不新增 read model/cache，freshness 专属测试不适用。部署和生产证据记录在 [实施计划](../../dev/etc-oa-invoice-bank-matching-plan.md)。

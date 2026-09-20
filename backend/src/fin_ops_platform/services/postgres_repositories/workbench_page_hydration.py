@@ -36,6 +36,7 @@ from fin_ops_platform.services.workbench_canonical_rows import (
     invoice_source_kinds,
 )
 from fin_ops_platform.services.workbench_display_subgroups import apply_display_subgroups
+from fin_ops_platform.services.workbench_etc_batch_link import etc_source_links, workbench_etc_summary_row_id
 
 # One relation lookup, one batch read per present canonical pane, one settings
 # lookup, set-based ETC/history reads, overrides, and anomaly decisions.
@@ -194,18 +195,19 @@ class PostgresWorkbenchPageHydrationRepository:
                 )
 
         etc_summary_external_ids: dict[str, str] = {}
+        for relation in relations:
+            for link in etc_source_links(relation.get("special_metadata") or {}):
+                external_id = str(link["external_etc_batch_id"])
+                etc_summary_external_ids[workbench_etc_summary_row_id(external_id)] = external_id
         for descriptor in descriptors:
             external_batch_id = str(descriptor.get("external_etc_batch_id") or "").strip()
-            if not external_batch_id:
-                continue
-            for row_id, row_type in zip(
-                text_list(descriptor.get("member_ids")),
-                text_list(descriptor.get("member_types")),
-                strict=True,
-            ):
-                if row_type != "invoice" or not row_id.startswith("etc-summary-"):
-                    continue
-                previous = etc_summary_external_ids.setdefault(row_id, external_batch_id)
+            summary_ids = [row_id for row_id, row_type in zip(
+                text_list(descriptor.get("member_ids")), text_list(descriptor.get("member_types")), strict=True,
+            ) if row_type == "invoice" and row_id.startswith("etc-summary-")]
+            # The existing scalar descriptor identifies its sole summary; multi-batch
+            # relations carry a precise identity for every summary in source links.
+            if external_batch_id and len(summary_ids) == 1:
+                previous = etc_summary_external_ids.setdefault(summary_ids[0], external_batch_id)
                 if previous != external_batch_id:
                     raise ValueError("ETC summary row identity maps to multiple external batches.")
 
@@ -345,23 +347,13 @@ class PostgresWorkbenchPageHydrationRepository:
             ).strip()
             if external_batch_id:
                 external_batch_ids.add(external_batch_id)
-                for row_id, row_type in zip(
-                    descriptor_ids,
-                    descriptor_types,
-                    strict=True,
-                ):
-                    if (
-                        self._normalize_row_type(row_type) == "invoice"
-                        and row_id.startswith("etc-summary-")
-                    ):
-                        previous = etc_row_ids_by_external_batch_id.setdefault(
-                            external_batch_id,
-                            row_id,
-                        )
-                        if previous != row_id:
-                            raise ValueError(
-                                "ETC summary external identity maps to multiple page rows."
-                            )
+                summary_ids = [row_id for row_id, row_type in zip(
+                    descriptor_ids, descriptor_types, strict=True,
+                ) if self._normalize_row_type(row_type) == "invoice" and row_id.startswith("etc-summary-")]
+                if len(summary_ids) == 1:
+                    previous = etc_row_ids_by_external_batch_id.setdefault(external_batch_id, summary_ids[0])
+                    if previous != summary_ids[0]:
+                        raise ValueError("ETC summary external identity maps to multiple page rows.")
 
         connection = _BudgetedReadConnection(
             self._connection,
@@ -383,6 +375,15 @@ class PostgresWorkbenchPageHydrationRepository:
                 select distinct btrim(requested.external_batch_id)
                 from unnest(%s::text[]) requested(external_batch_id)
                 where nullif(btrim(requested.external_batch_id), '') is not null
+                union
+                select link.value->>'external_etc_batch_id'
+                from app.workbench_pair_relations relation
+                join requested_relations requested on requested.case_id = relation.case_id
+                cross join lateral jsonb_array_elements(
+                    coalesce(relation.special_metadata->'etc_batch_links', '[]'::jsonb)
+                ) link(value)
+                where relation.status = 'active'
+                  and nullif(link.value->>'external_etc_batch_id', '') is not null
             ),
             completed_oa_rows as materialized (
                 select

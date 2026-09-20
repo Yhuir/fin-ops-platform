@@ -1354,15 +1354,6 @@ canonical_rows as materialized (
            invoice_source_links
     from etc_summary_candidates
 ),
-in_progress_oa_relation_ids as materialized (
-    select distinct membership.relation_id
-    from all_active_relation_members membership
-    join canonical_rows member
-      on member.pane = membership.row_type
-     and member.row_id = membership.row_id
-    where membership.row_type = 'oa'
-      and member.workflow_status = 'in_progress'
-),
 missing_relation_members as materialized (
     select member.relation_id, member.row_type, member.row_id
     from all_active_relation_members member
@@ -1458,7 +1449,6 @@ relation_groups as materialized (
         relation.case_id as detail_key,
         'relation'::text as group_kind,
         case
-            when in_progress_oa.relation_id is not null then 'unpaired'
             when coalesce(relation.special_metadata->>'source', '') = 'batch_accounting'
                 then 'paired'
             when 'oa' = any(relation.normalized_row_types)
@@ -1514,8 +1504,6 @@ relation_groups as materialized (
                  then 'invoice' end
         ], null)::text[] as missing_row_types
     from scoped_relations relation
-    left join in_progress_oa_relation_ids in_progress_oa
-      on in_progress_oa.relation_id = relation.id
     left join source_owned_relation_placement_rollups placement_rollup
       on placement_rollup.owner_relation_case_id = relation.case_id
     left join fully_supported_relations supported on supported.case_id = relation.case_id

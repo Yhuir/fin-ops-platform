@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import unittest
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
-import unittest
 
+from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import _etc_summary_facts
 from fin_ops_platform.services.workbench_free_matching_engine import (
     ActiveFormalRelationAnchor,
     FormalRelationFact,
@@ -20,6 +22,7 @@ from fin_ops_platform.services.workbench_relation_command_service import (
     CallbackWorkbenchRelationRepository,
     WorkbenchRelationCommandError,
 )
+
 from tests.workbench_deterministic_relation_fixtures import yunnan_lifu_520_fixture
 
 
@@ -60,9 +63,11 @@ class RecordingFactRepository:
         self.omitted_category_ids = set(omitted_category_ids or set())
         self.calls: list[dict[str, object]] = []
 
-    def load_batch(self, scope_months: list[str], *, source_versions: dict[str, object]) -> FormalRelationFactBatch:
+    def load_batch(self, scope_months: list[str], *, source_versions: dict[str, object], etc_batch_link_candidates=()) -> FormalRelationFactBatch:
         self.calls.append({"scope_months": list(scope_months), "source_versions": dict(source_versions)})
-        return self.fact_batch
+        facts = {fact.member_key: fact for fact in self.fact_batch.facts}
+        facts.update({fact.member_key: fact for fact in _etc_summary_facts(etc_batch_link_candidates)})
+        return replace(self.fact_batch, facts=tuple(facts.values()))
 
     def load_etc_batch_link_candidates(self, scope_months: list[str]) -> list[dict[str, object]]:
         self.calls.append({"etc_scope_months": list(scope_months)})
@@ -86,6 +91,12 @@ class RecordingFactRepository:
 
 
 class RecordingEtcBatchLinkRepository:
+    def assert_fact_versions(self, facts):
+        pass
+
+    def bind_oa_sources(self, links, *, actor_id):
+        pass
+
     def validate_etc_batch_links(self, links: list[dict[str, object]]) -> dict[str, object]:
         return {"valid": bool(links), "issues": []}
 
@@ -515,7 +526,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             request_id="request-existing-etc",
         )
 
-        self.assertEqual(summary["planned_relation_count"], 0)
+        self.assertEqual(summary["planned_relation_count"], 1)
         self.assertEqual(summary["enriched_relation_count"], 1)
         self.assertEqual(uow.calls[0].scope_keys, ("2026-05",))
         self.assertEqual(uow.save_count, 1)
@@ -526,7 +537,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         )
         self.assertEqual(
             uow.snapshot["pair_relations"][case_id]["amount_check"],
-            {"status": "matched", "invoice_total": None},
+            {"status": "explicit_reference", "amount_minor": 0, "currency": "CNY"},
         )
         self.assertEqual(
             uow.snapshot["pair_relations"][case_id]["special_metadata"]
@@ -617,7 +628,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             WorkbenchRelationCommandError,
-            "already belongs to another active Workbench relation",
+            "already active in another Workbench relation",
         ):
             orchestrator.run(
                 changed_scope_months=["2026-05"],

@@ -798,8 +798,9 @@ class EtcServiceTests(unittest.TestCase):
             cause = str(payload["data"]["cause"])
             self.assertNotIn("business_batch_id=", cause)
             self.assertNotIn("etc_batch_id=", cause)
-            self.assertEqual(payload["data"]["etcBatchId"], first.external_etc_batch_id)
-            self.assertEqual(payload["data"]["businessBatchId"], batch.business_batch_id)
+            self.assertNotIn("etcBatchId", payload["data"])
+            self.assertNotIn("businessBatchId", payload["data"])
+            self.assertEqual(first.oa_attachment_paths, ["oa-file-1"])
 
     def test_oa_draft_finalize_only_updates_its_target_batch(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2135,10 +2136,10 @@ class EtcServiceTests(unittest.TestCase):
         self.assertEqual(data["payeeAccount"], "6217003860012460901")
         self.assertIn("支付 ETC批里提交", data["cause"])
         self.assertNotIn("etc_batch_id=", data["cause"])
-        self.assertEqual(data["etcBatchId"], draft.etc_batch_id)
-        self.assertEqual(data["invoiceCount"], 2)
-        self.assertEqual(data["invoice_count"], 2)
-        self.assertEqual(data["etcInvoiceCount"], 2)
+        self.assertNotIn("etcBatchId", data)
+        self.assertNotIn("invoiceCount", data)
+        self.assertNotIn("invoice_count", data)
+        self.assertNotIn("etcInvoiceCount", data)
         self.assertEqual(payload["invoiceCount"], 2)
         uploaded_invoices = data["field101"]["list"]
         self.assertEqual(
@@ -4368,20 +4369,33 @@ class EtcApiTests(unittest.TestCase):
                     }),
                 )
                 replay_payload = json.loads(replay_response.body)["data"]["businessBatch"]
+                owner_response = app.handle_request(
+                    "POST", f"/api/etc/business-batches/{drafted.business_batch_id}/manual-oa-status",
+                    json.dumps({"decision": "submitted", "reason": "核对历史批次全部发票后明确 OA 来源。",
+                                "expectedVersion": payload["version"], "candidateOaRowId": "oa-history-source"}),
+                )
+                owner_payload = json.loads(owner_response.body)["data"]["businessBatch"]
+                conflict_response = app.handle_request(
+                    "POST", f"/api/etc/business-batches/{drafted.business_batch_id}/manual-oa-status",
+                    json.dumps({"decision": "submitted", "reason": "错误归属应拒绝。",
+                                "expectedVersion": owner_payload["version"], "candidateOaRowId": "oa-other"}),
+                )
             finally:
                 app.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(replay_response.status_code, 200)
+        self.assertEqual(owner_response.status_code, 200)
+        self.assertEqual(owner_payload["oaRowId"], "oa-history-source")
+        self.assertEqual(owner_payload["version"], payload["version"] + 1)
+        self.assertEqual(conflict_response.status_code, 422)
+        self.assertEqual(json.loads(conflict_response.body)["error"]["code"], "business_batch_oa_row_conflict")
         self.assertEqual(payload["status"], "manually_marked_submitted")
         self.assertEqual(payload["oaProcessStatus"], "manual_without_oa_row")
         self.assertEqual(replay_payload["version"], payload["version"])
         self.assertEqual(
             status_refreshes,
-            [
-                (["2026-02"], "etc_business_manual_oa_status"),
-                (["2026-02"], "etc_business_manual_oa_status_replayed"),
-            ],
+            [],
         )
 
     def test_etc_business_manual_submitted_closes_the_linked_reconciliation_task(self) -> None:

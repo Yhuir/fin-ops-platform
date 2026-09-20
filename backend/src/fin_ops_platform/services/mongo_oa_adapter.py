@@ -106,6 +106,7 @@ class MongoOASettings:
     collection: str = "form_data"
     payment_request_form_id: str = "2"
     payment_expense_type_field: str = "category"
+    payment_invoice_attachment_field: str = "field101"
     expense_claim_form_id: str = "32"
     project_form_id: str = "17"
     request_timeout_ms: int = 5000
@@ -167,6 +168,9 @@ def load_mongo_oa_settings(data_dir: Path | None = None) -> MongoOASettings | No
         auth_source=str(pick("FIN_OPS_OA_MONGO_AUTH_SOURCE", "auth_source", "admin")),
         collection=str(pick("FIN_OPS_OA_MONGO_COLLECTION", "collection", "form_data")),
         payment_request_form_id=str(pick("FIN_OPS_OA_PAYMENT_FORM_ID", "payment_request_form_id", "2")),
+        payment_invoice_attachment_field=str(pick(
+            "FIN_OPS_ETC_OA_FIELD_ATTACHMENTS", "payment_invoice_attachment_field", "field101",
+        )),
         payment_expense_type_field=str(
             pick(
                 "FIN_OPS_OA_PAYMENT_EXPENSE_TYPE_FIELD",
@@ -1012,6 +1016,12 @@ class MongoOAAdapter(OAAdapter):
         etc_metadata = detect_etc_batch_metadata(data)
         workflow_status = self.canonical_process_status(data)
         completed_at = self._completed_document_time(data, document)
+        invoice_upload = data.get(self._settings.payment_invoice_attachment_field)
+        source_attachment_paths = sorted({
+            str(file["filePath"]).strip()
+            for file in self._attachment_files({"detailReimbursementAttachment": invoice_upload})
+            if file.get("filePath")
+        })
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
             month=self._derive_month(data, document),
@@ -1033,6 +1043,7 @@ class MongoOAAdapter(OAAdapter):
             source=etc_metadata.get("source"),
             etc_batch_id=etc_metadata.get("etc_batch_id"),
             tags=list(etc_metadata.get("tags") or []),
+            source_attachment_paths=source_attachment_paths,
             project_name_display=project_name,
             project_names=real_project_names,
             detail_fields={

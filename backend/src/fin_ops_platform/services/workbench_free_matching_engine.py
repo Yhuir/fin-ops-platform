@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from hashlib import sha256
 from typing import Iterable, Literal
 
-RULE_VERSION = "2026-08-24-in-progress-oa-facts-v13"
+RULE_VERSION = "2026-09-20-etc-source-payee-v14"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
 ROW_TYPE_ORDER = {"oa": 0, "bank": 1, "invoice": 2}
 STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
@@ -14,6 +14,7 @@ STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
         "business_reference",
         "counterparty",
         "employee_reimbursement_payee",
+        "payment_request_payee",
         "invoice_number",
         "project_reference",
         "tax_no",
@@ -22,6 +23,7 @@ STRONG_COMPOSITE_EVIDENCE_KINDS = frozenset(
 EXPLICIT_REFERENCE_KINDS = frozenset(
     {
         "attachment_source",
+        "etc_batch_source",
         "canonical_source",
         "contract_reference",
         "invoice_reference",
@@ -104,6 +106,7 @@ class FormalRelationFact:
     reversal_key: tuple[str, ...] | None = None
     reversal_polarity: Literal["blue", "red"] | None = None
     needs_expense_assignment: bool = False
+    counterparty_account: str = ""
 
     def __post_init__(self) -> None:
         row_type, identity = canonical_member_key(self.row_type, self.canonical_object_identity)
@@ -285,6 +288,61 @@ class WorkbenchFreeMatchingEngine:
     """Pure deterministic matcher. It never reads or writes I/O and emits only formal plans."""
 
     def plan_relations(
+        self,
+        batch: FormalRelationFactBatch,
+        limits: FormalRelationSearchLimits | None = None,
+    ) -> FormalRelationMatchResult:
+        """Settle proven ETC sources before bounded, potentially ambiguous bank search."""
+        if not isinstance(batch, FormalRelationFactBatch):
+            raise TypeError("batch must be a FormalRelationFactBatch.")
+        facts = {fact.member_key: fact for fact in batch.facts}
+        anchors = {anchor.case_id: anchor for anchor in batch.active_relations}
+        owners = {key: anchor.case_id for anchor in anchors.values() for key in anchor.member_keys}
+        source_members: dict[MemberKey, set[MemberKey]] = {}
+        for fact in batch.facts:
+            targets = {
+                ref.target_member_key for ref in fact.references
+                if ref.kind == "etc_batch_source" and ref.target_member_key in facts
+            }
+            if fact.row_type == "invoice" and len(targets) == 1:
+                target = next(iter(targets))
+                source_members.setdefault(target, {target}).add(fact.member_key)
+        seeds: dict[str, FormalRelationPlan] = {}
+        for members in source_members.values():
+            case_ids = {owners[key] for key in members if key in owners}
+            if len(case_ids) > 1:
+                continue
+            target_case_id = next(iter(case_ids)) if case_ids else None
+            if target_case_id:
+                members = members | set(anchors[target_case_id].member_keys)
+                if members == set(anchors[target_case_id].member_keys):
+                    continue
+            if not members.issubset(facts):
+                continue
+            seed = self._plan(
+                batch=replace(batch, active_relations=tuple(anchors.values())),
+                member_keys=tuple(members), facts_by_key=facts,
+                rule_code="etc_batch_source", evidence_kinds={"etc_batch_source"},
+                target_case_id=target_case_id,
+            )
+            seeds[seed.case_id] = seed
+            anchors[seed.case_id] = ActiveFormalRelationAnchor(seed.case_id, seed.member_keys)
+            owners.update({key: seed.case_id for key in seed.member_keys})
+        if not seeds:
+            return self._plan_remaining_relations(batch, limits)
+        result = self._plan_remaining_relations(
+            replace(batch, active_relations=tuple(anchors.values())), limits,
+        )
+        plans = dict(seeds)
+        for plan in result.plans:
+            seed = seeds.get(plan.case_id)
+            plans[plan.case_id] = replace(plan, target_case_id=seed.target_case_id) if seed else plan
+        return replace(
+            result, plans=tuple(sorted(plans.values(), key=lambda plan: plan.relation_fingerprint)),
+            preserved_active_count=len(batch.active_relations),
+        )
+
+    def _plan_remaining_relations(
         self,
         batch: FormalRelationFactBatch,
         limits: FormalRelationSearchLimits | None = None,
@@ -472,6 +530,8 @@ class WorkbenchFreeMatchingEngine:
                 budget.consume()
                 target = reference.target_member_key
                 if target is not None and target in facts_by_key and target != fact.member_key:
+                    if _accounts_conflict(fact, facts_by_key[target]):
+                        continue
                     self._add_edge(
                         edges,
                         fact.member_key,
@@ -493,6 +553,8 @@ class WorkbenchFreeMatchingEngine:
             for index, left in enumerate(unique_facts):
                 for right in unique_facts[index + 1 :]:
                     budget.consume()
+                    if _accounts_conflict(left, right):
+                        continue
                     self._add_edge(
                         edges,
                         left.member_key,
@@ -521,7 +583,7 @@ class WorkbenchFreeMatchingEngine:
                 if fact.fact_date is not None and fact.amount_minor > 0:
                     by_row_type.setdefault(fact.row_type, []).append(fact)
             ordered_row_types = sorted(by_row_type, key=ROW_TYPE_ORDER.__getitem__)
-            window_days = 30 if evidence_kind == "employee_reimbursement_payee" else 365
+            window_days = 30 if evidence_kind in {"employee_reimbursement_payee", "payment_request_payee"} else 365
             for type_index, left_type in enumerate(ordered_row_types):
                 left_facts = sorted(
                     by_row_type[left_type],
@@ -534,6 +596,8 @@ class WorkbenchFreeMatchingEngine:
                     )
                     for left in left_facts:
                         for right in right_facts:
+                            if _accounts_conflict(left, right):
+                                continue
                             date_delta = (right.fact_date - left.fact_date).days
                             if date_delta < -window_days:
                                 continue
@@ -790,6 +854,8 @@ class WorkbenchFreeMatchingEngine:
             amount_totals: dict[str, int] = {}
             for fact in anchor_facts:
                 amount_totals[fact.row_type] = amount_totals.get(fact.row_type, 0) + fact.amount_minor
+            if missing_row_type == "bank" and _has_etc_source(anchor_facts):
+                amount_totals = {"oa": amount_totals["oa"]}
             matching: dict[MemberKey, tuple[FormalRelationFact, set[str]]] = {}
             for amount_minor in set(amount_totals.values()):
                 for candidate in candidates_by_amount.get(
@@ -839,12 +905,14 @@ class WorkbenchFreeMatchingEngine:
         candidate_evidence = set(candidate.evidence_keys)
         evidence_kinds: set[str] = set()
         for anchor_fact in anchor_facts:
+            if _accounts_conflict(candidate, anchor_fact):
+                return set()
             if candidate.fact_date is None or anchor_fact.fact_date is None:
                 continue
             for evidence_kind, _evidence_value in candidate_evidence.intersection(
                 anchor_fact.evidence_keys
             ):
-                window_days = 30 if evidence_kind == "employee_reimbursement_payee" else 365
+                window_days = 30 if evidence_kind in {"employee_reimbursement_payee", "payment_request_payee"} else 365
                 if abs((candidate.fact_date - anchor_fact.fact_date).days) <= window_days:
                     evidence_kinds.add(evidence_kind)
         return evidence_kinds
@@ -946,6 +1014,8 @@ class WorkbenchFreeMatchingEngine:
     def _safe_exact_closure(facts: list[FormalRelationFact], edges: list[_Edge]) -> bool:
         if not facts or len({fact.currency for fact in facts}) != 1 or len({fact.direction for fact in facts}) != 1:
             return False
+        if any(_accounts_conflict(left, right) for left in facts for right in facts):
+            return False
         if any(fact.amount_minor <= 0 for fact in facts):
             return False
         totals: dict[str, int] = {}
@@ -968,6 +1038,16 @@ class WorkbenchFreeMatchingEngine:
         edges: list[_Edge],
     ) -> bool:
         facts = [*anchor_facts, *new_facts]
+        if any(_accounts_conflict(left, right) for left in anchor_facts for right in new_facts):
+            return False
+        if _has_etc_source(anchor_facts) and all(fact.row_type == "bank" for fact in new_facts):
+            return (
+                len({fact.currency for fact in facts}) == 1
+                and len({fact.direction for fact in facts}) == 1
+                and all(fact.amount_minor > 0 for fact in facts)
+                and sum(fact.amount_minor for fact in new_facts)
+                == sum(fact.amount_minor for fact in anchor_facts if fact.row_type == "oa")
+            )
         if cls._safe_exact_closure(facts, edges):
             return True
         if (
@@ -1109,6 +1189,18 @@ def _is_immutable_oa_attachment_relation(
     return row_types == {"oa", "invoice"} and evidence_kinds == {"attachment_source"}
 
 
+def _has_etc_source(facts: Iterable[FormalRelationFact]) -> bool:
+    return any(ref.kind == "etc_batch_source" for fact in facts for ref in fact.references)
+
+
+def _accounts_conflict(left: FormalRelationFact, right: FormalRelationFact) -> bool:
+    return (
+        {left.row_type, right.row_type} == {"oa", "bank"}
+        and bool(left.counterparty_account and right.counterparty_account)
+        and left.counterparty_account != right.counterparty_account
+    )
+
+
 def _member_sort_key(member_key: MemberKey) -> tuple[int, str]:
     return ROW_TYPE_ORDER[member_key[0]], member_key[1]
 
@@ -1140,6 +1232,7 @@ def _fact_batch_hash(
                     for reference in fact.references
                 ],
                 "source_version": fact.source_version,
+                "counterparty_account": fact.counterparty_account,
             }
             for fact in facts
         ],

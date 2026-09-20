@@ -9,6 +9,7 @@ from hashlib import sha256
 from time import perf_counter
 from typing import Any, Callable
 
+from fin_ops_platform.services.workbench_etc_batch_link import workbench_etc_summary_row_id
 from fin_ops_platform.services.workbench_free_matching_engine import (
     FormalRelationMatchResult,
     FormalRelationPlan,
@@ -186,7 +187,10 @@ class WorkbenchMatchingOrchestrator:
             requested_scope_months,
             etc_batch_link_candidates,
         )
-        batch = self._fact_repository.load_batch(scope_months, source_versions=source_versions)
+        batch = self._fact_repository.load_batch(
+            scope_months, source_versions=source_versions,
+            etc_batch_link_candidates=etc_batch_link_candidates,
+        )
         match_result = self._matcher.plan_relations(batch, self._search_limits)
         etc_batch_links, ambiguous_etc_batch_link_count, unowned_etc_batch_link_count = self._resolve_etc_batch_links(
             batch,
@@ -241,6 +245,11 @@ class WorkbenchMatchingOrchestrator:
             )
 
             def apply_formal_relations(context: Any) -> dict[str, Any]:
+                planned_members = {key for plan in command.plans for key in plan.member_keys}
+                if planned_members:
+                    context.etc_batch_links.assert_fact_versions(
+                        fact for fact in batch.facts if fact.member_key in planned_members
+                    )
                 service = self._relation_command_factory(context)
                 plan_case_ids = {str(plan.case_id) for plan in command.plans}
                 plan_links = [
@@ -425,6 +434,14 @@ class WorkbenchMatchingOrchestrator:
             if not case_id:
                 unowned_count += 1
                 continue
+            summary_key = ("invoice", workbench_etc_summary_row_id(external_batch_id))
+            summary_owner = active_by_member.get(summary_key) or plan_by_member.get(summary_key)
+            if summary_owner and summary_owner != case_id:
+                ambiguous_external_ids.add(external_batch_id)
+                continue
+            if not summary_owner:
+                unowned_count += 1
+                continue
             resolved.append(
                 {
                     "case_id": case_id,
@@ -444,20 +461,8 @@ class WorkbenchMatchingOrchestrator:
                 }
             )
 
-        by_external: dict[str, list[dict[str, Any]]] = {}
-        for item in resolved:
-            by_external.setdefault(str(item["external_etc_batch_id"]), []).append(item)
-        unique_external = [items[0] for items in by_external.values() if len(items) == 1]
-        by_case: dict[str, list[dict[str, Any]]] = {}
-        for item in unique_external:
-            by_case.setdefault(str(item["case_id"]), []).append(item)
-        links = tuple(
-            sorted(
-                (items[0] for items in by_case.values() if len(items) == 1),
-                key=lambda item: str(item["case_id"]),
-            )
-        )
-        ambiguous_count = len(ambiguous_external_ids) + len(resolved) - len(links)
+        links = tuple(sorted(resolved, key=lambda item: (str(item["case_id"]), str(item["external_etc_batch_id"]))))
+        ambiguous_count = len(ambiguous_external_ids)
         return links, ambiguous_count, unowned_count
 
     @classmethod

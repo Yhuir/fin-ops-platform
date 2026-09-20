@@ -35,7 +35,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | requirement recalculation event | settings-maintenance worker | 规则保存事务产生的 job id、owner、目标版本和真实变化 tag codes；只读取 tag proof 命中的 active 正式 relation，并以完整 tag set 和当前规则重算。正式性由 active `status` 与 `relation_mode` 白名单共同判定，不能用历史 `case_id` 前缀判定；已正式确认但沿用 `decision:` identity 的关系必须参与。repository 在同一集合查询中按关系成员批量返回 canonical 银行流水月份，旧关系主记录缺少 `month_scope` 时也不得猜测或降级为 `all`。上线收敛重试可携带一个失败旧 job id，只有替代任务完成关系写入和精确 refresh enqueue 后才把旧任务标记 superseded。 |
 | canonical relation members | requirement repair tool runtime port | 按 relation 原始 typed member ids 一次批量读取 canonical OA/流水/发票行；用于重算金额和证明成员未漂移，缺行/错类型立即失败。 |
 | repair refresh output | durable runtime queue | 仅 enqueue 受影响月份的 `workbench_relation` scope，并把相同月份标记 matching dirty；关联台下一次 direct GET 自然读取提交结果，禁止 page Workbench event 与 `all` fan-out。 |
-| completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
+| ETC OA source | completed/admitted OA + submitted ETC batch | 精确 owner、既存批次标识或完整上传路径证明唯一来源；UoW 重验身份、状态、数量、金额、占用。禁止金额/文本/OCR 推测来源。 |
 
 ## 输出 I/O
 
@@ -164,3 +164,11 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 已移除旧“没有新关系就不写归属”的入口限制，以及逐票 source-link UPDATE；CAS 使用一次集合 UPDATE 并保持旧来源对比与 raw mirror 同步。
 
 并发幂等预留在同一 caller transaction 内先取得按 tenant/actor/idempotency-key 的 advisory lock，再执行原 INSERT/过期接管语句，消除 Read Committed 中 ON CONFLICT 看见并发行但同语句 CTE 读不到行的窗口；不增加重试兜底或进程内锁。
+
+## 2026-09-20 ETC 来源与进行中配对
+
+- Fact repository 统一读取 completed/admitted in-progress OA 与已提交 ETC，精确 owner/结构化标识/完整上传路径唯一证明来源。ETC summary 带 `etc_batch_source` typed OA 引用，从第一轮就进入 matcher；纯引擎先生成来源计划，再做有界银行候选搜索。银行歧义不取消来源计划；多个现有 case 不自动合并。
+- Command 输入已含完整 summary 成员，删除事后补成员分支。`etc_batch_link` 保持现有单批公开合同；多批关系同时记录 `etc_batch_links`，扩展、合并及撤回保留每个来源。缺成员不能靠补 metadata 伪成功。
+- UoW 对计划 canonical facts 批量锁定并校验源版本，重验批次身份/数量/金额/占用；关系、ETC owner、审计同事务。数据库/审计失败整笔回滚，禁止吞错或降级。
+- 支付申请收款证据使用真实 beneficiary；银行匹配按 OA 应付额，ETC summary 保留真实发票额。账户明确冲突拒绝。个人姓名组合证据使用 30 天窗口，普通公司规则不整体放宽。
+- 来源保护统一覆盖 OA 附件与 ETC。撤回银行保留来源组，纯来源组普通撤回拒绝；人工拒绝原银行的 fingerprint 沿用现有保护。进行中不再是 Workbench 配对阻断，未知/无效状态与资料缺失仍按原合同处理，成本规则不变。
