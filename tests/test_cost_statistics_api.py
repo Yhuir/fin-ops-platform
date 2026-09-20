@@ -104,7 +104,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         status, root = self._json(base)
         self.assertEqual(status, 200)
         self.assertEqual([item["primary_label"] for item in root["facets"]["bank_tag_primary"]],
-                         ["货款", "外部往来款付款", "外部往来款收款", "费用"])
+                         ["货款", "费用", "外部往来款付款", "外部往来款收款"])
         self.assertEqual(root["summary"]["expense_amount"], "1600.00")
         self.assertEqual(root["summary"]["income_amount"], "800.00")
         _, time = self._json(base.replace("view=bank_tag", "view=time"))

@@ -13,14 +13,14 @@ from fin_ops_platform.services.cost_statistics_policy import (
 
 
 class CostStatisticsPolicyTests(unittest.TestCase):
-    def test_external_turnover_primary_tags_stay_adjacent_without_changing_facts(self) -> None:
+    def test_external_turnover_primary_tags_stay_last_without_changing_facts(self) -> None:
         payment, receipt = "外部往来款付款", "外部往来款收款"
         scenarios = [
-            ([("货款", "900", "outflow"), (payment, "600", "outflow"), ("费用", "100", "outflow"), (receipt, "800", "inflow")], ["货款", payment, receipt, "费用"]),
+            ([("货款", "900", "outflow"), (payment, "600", "outflow"), ("费用", "100", "outflow"), (receipt, "800", "inflow")], ["货款", "费用", payment, receipt]),
             ([(receipt, "900", "outflow"), ("费用", "700", "outflow"), (payment, "600", "outflow")], ["费用", payment, receipt]),
             ([(payment, "600", "outflow"), (receipt, "800", "inflow")], [payment, receipt]),
-            ([(payment, "600", "outflow"), ("费用", "100", "outflow")], [payment, "费用"]),
-            ([(receipt, "800", "inflow"), ("费用", "100", "outflow")], ["费用", receipt]),
+            ([(payment, "600", "outflow"), ("费用", "100", "outflow")], ["费用", payment]),
+            ([(receipt, "800", "inflow"), ("其他收入", "50", "inflow"), ("费用", "100", "outflow")], ["费用", "其他收入", receipt]),
             ([("货款", "900", "outflow"), ("费用", "100", "outflow")], ["货款", "费用"]),
             ([], []),
         ]

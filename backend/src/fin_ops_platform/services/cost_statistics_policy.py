@@ -1746,11 +1746,11 @@ def _bank_tag_primary_facets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
         buckets.values(),
         key=lambda item: _bank_tag_facet_sort_key(item, label_key="primary_label"),
     )
-    if "外部往来款付款" in buckets and "外部往来款收款" in buckets:
-        # Keep the two external-turnover directions together in the primary lane only.
-        receipt = buckets["外部往来款收款"]
-        ordered_buckets.remove(receipt)
-        ordered_buckets.insert(ordered_buckets.index(buckets["外部往来款付款"]) + 1, receipt)
+    # Place the external-turnover directions last in the primary lane only.
+    for label in ("外部往来款付款", "外部往来款收款"):
+        if label in buckets:
+            ordered_buckets.remove(buckets[label])
+            ordered_buckets.append(buckets[label])
     return [
         {
             "primary_label": bucket["primary_label"],
