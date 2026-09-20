@@ -298,3 +298,10 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - `tableConfig` 的 track/minWidth 是实际布局唯一来源，移除 compactTracks 的零下限覆盖。OA 最小列宽合计 560px，表头、正文和底部滚动条共用配置；宽度不足时复用既有 OA 横向滚动同步，按相同像素偏移同步列线而非按不同容器的滚动比例。银行、发票的实际轨道比例和滚动行为不变。
 - 修改仅涉及前端展示和回归测试；canonical OA、费用子项、关系、金额、API、权限、持久化和跨页面查询 I/O 不变。无新增依赖、运行时测宽、轮询或备份。
 - 验证入口：`WorkbenchApplicantLayout.test.tsx`、`WorkbenchColumnLayout.test.tsx`、`workbench-applicant-layout.spec.ts`。覆盖异常/详情操作不误选、列重排、只读/子项以及窄窗几何边界、表头同步。
+
+## 2026-09-20 后到发票与归属纠正
+
+- 缺票明细可“选择已有发票”：同组未归属票直接进入现有归属抽屉；组外票先使用正式关联流程。已有归属提供“更改归属”，预选当前 targets。
+- `POST /api/workbench/actions/assign-invoice-expense-items` 保留初次归属 fingerprint 合同；纠正模式提供非空 `previous_targets`（同 targets 结构），锁内比较当前完整归属集合，再替换为用户 targets，冲突返回 409。非显式 provenance 保留，记录 before/after，后续自动任务不改回。现有认证、页面写权限和幂等键不变。
+- 补充凭证仅为资料证明，不排除正式发票归属。新增/软删除由凭证 repository 在其事务登记 matching scope；文件对象仍由既有 storage owner 管理。已有正式归属时删除凭证不会删除它。
+- 页面复用 App Health 的 matching 完成时间，时间变化后合并触发一次 canonical 回读；活动抽屉/选择期间复用现有延期机制，不轮询整个列表。

@@ -16,8 +16,8 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
 from fin_ops_platform.services.workbench_amount_check_service import (
     unassigned_invoice_anomaly_fingerprint,
 )
+from fin_ops_platform.services.workbench_invoice_expense_item_matching import plan_invoice_expense_assignments
 from fin_ops_platform.services.workbench_row_identity import canonical_workbench_row_type
-
 
 ACTION_NAME = "assign_invoice_expense_items"
 ACTION_PATH = "/api/workbench/actions/assign-invoice-expense-items"
@@ -49,6 +49,7 @@ class _AssignInvoiceExpenseItemsCommand:
     tenant_id: str
     request_id: str
     payload: dict[str, Any]
+    previous_targets: tuple[tuple[str, str], ...] | None = None
     action_name: str = ACTION_NAME
     expected_versions: dict[str, Any] | None = None
 
@@ -58,6 +59,80 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
 
     def __init__(self, *, unit_of_work: Any) -> None:
         self._unit_of_work = unit_of_work
+
+    @staticmethod
+    def assign_automatically(context: Any, *, case_ids: list[str], request_id: str, dry_run: bool = False) -> dict[str, Any]:
+        """Use the caller's relation transaction; never forge a manual action."""
+        relations = []
+        context.pair_relations.acquire_relation_member_locks([], row_types=[], case_ids=sorted(set(case_ids)))
+        for case_id in sorted(set(case_ids)):
+            relation = context.pair_relations.load_active_workbench_pair_relation_by_case_id_for_update(case_id)
+            if relation is not None and relation.get("relation_mode") == "manual_confirmed":
+                relations.append(relation)
+        members = sorted({
+            (kind, row_id) for relation in relations
+            for row_id, kind in zip(relation["row_ids"], relation["row_types"], strict=True)
+            if kind in {"oa", "invoice"}
+        })
+        oa_ids = [row_id for kind, row_id in members if kind == "oa"]
+        invoice_ids = [row_id for kind, row_id in members if kind == "invoice"]
+        if not oa_ids or not invoice_ids:
+            return {"assigned_invoice_count": 0, "assignments": []}
+        context.pair_relations.acquire_relation_member_locks(
+            [row_id for _, row_id in members], row_types=[kind for kind, _ in members], case_ids=[],
+        )
+        items = context.canonical_query.get_oa_expense_items_by_row_ids_in_current_transaction(oa_ids)
+        rows = context.canonical_query.get_canonical_rows_by_ids_in_current_transaction(
+            [row_id for _, row_id in members], row_types=[kind for kind, _ in members],
+        )
+        ordinary_invoice_ids = [row_id for row_id in invoice_ids
+            if rows[row_id].get("invoice_type") == "input"
+            and rows[row_id].get("source_kind") != "etc_invoice_summary"
+            and not rows[row_id].get("etc_invoice_id") and not rows[row_id].get("etc_submission_batch_id")]
+        snapshots = context.invoice_source_links.load_invoice_source_links_batch_for_update(
+            context.transaction, invoice_ids=ordinary_invoice_ids,
+        )
+        if set(snapshots) != set(ordinary_invoice_ids):
+            raise ValueError("Canonical assignment invoice set changed.")
+        for row_id in oa_ids:
+            rows[row_id] = {**rows[row_id], "expense_items": items[row_id]}
+        for row_id, snapshot in snapshots.items():
+            rows[row_id] = {**rows[row_id], "source_links": snapshot["source_links"],
+                           "total_with_tax": snapshot["invoice_total"], "currency": snapshot["currency"],
+                           "invoice_type": snapshot["invoice_type"]}
+        updates = []
+        assignments = []
+        for relation in relations:
+            grouped = {kind: [rows[row_id] for row_id, member_kind in zip(
+                relation["row_ids"], relation["row_types"], strict=True,
+            ) if member_kind == kind] for kind in ("oa", "invoice")}
+            plan = plan_invoice_expense_assignments(grouped["oa"], grouped["invoice"])
+            for invoice_id, targets in plan.items():
+                updates.append({
+                    "invoice_id": invoice_id,
+                    "before_source_links": snapshots[invoice_id]["stored_source_links"],
+                    "source_links": replace_explicit_expense_item_links(
+                        snapshots[invoice_id]["source_links"], case_id=relation["case_id"],
+                        targets=targets, entry_method="workbench_auto_unique_amount",
+                    ),
+                })
+                assignments.append({"case_id": relation["case_id"], "invoice_row_id": invoice_id,
+                                    "targets": [{"oa_row_id": owner, "expense_item_id": item} for owner, item in targets]})
+        if updates and not dry_run:
+            context.invoice_source_links.update_invoice_source_links_cas(
+                context.transaction, updates, actor_id="system:workbench-deterministic-relation",
+                reason="Assign unowned relation invoices by unique whole-item amount",
+            )
+            context.operation_audit.append_operation_event({
+                "event_type": "workbench.invoice_expense_items.auto_assigned",
+                "object_type": "invoice_expense_item_assignment", "object_id": request_id,
+                "actor_id": "system:workbench-deterministic-relation", "scope": "default",
+                "trace_id": request_id, "request_id": request_id,
+                "action": "workbench.invoice_expense_items.assign", "page_key": "reconciliation-workbench",
+                "operation_location": "workbench-matching", "outcome": "success",
+                "payload": {"assignments": assignments, "rule": "unique_whole_item_amount"},
+            })
+        return {"assigned_invoice_count": 0 if dry_run else len(updates), "planned_invoice_count": len(updates), "assignments": assignments}
 
     def assign(
         self,
@@ -92,10 +167,21 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
             )
         case_id = cls._required_text(payload.get("case_id"), "case_id")
         invoice_row_id = cls._required_text(payload.get("invoice_row_id"), "invoice_row_id")
-        anomaly_fingerprint = cls._required_text(
-            payload.get("anomaly_fingerprint"),
-            "anomaly_fingerprint",
-        )
+        previous_targets = None
+        if "previous_targets" in payload:
+            previous = payload["previous_targets"]
+            if not isinstance(previous, list) or not previous or len(previous) > MAX_TARGETS or any(not isinstance(item, dict) for item in previous):
+                raise WorkbenchInvoiceExpenseItemAssignmentError(
+                    "invalid_invoice_expense_item_assignment", "previous_targets 必须是当前归属目标列表。", status_code=400,
+                )
+            previous_targets = tuple(sorted({
+                (cls._required_text(item.get("oa_row_id"), "previous_targets.oa_row_id"),
+                 cls._required_text(item.get("expense_item_id"), "previous_targets.expense_item_id"))
+                for item in previous
+            }))
+        anomaly_fingerprint = str(payload.get("anomaly_fingerprint") or "").strip()
+        if previous_targets is None:
+            anomaly_fingerprint = cls._required_text(anomaly_fingerprint, "anomaly_fingerprint")
         idempotency_key = cls._required_text(payload.get("idempotency_key"), "idempotency_key")
         raw_targets = payload.get("targets")
         if not isinstance(raw_targets, list) or not raw_targets:
@@ -151,7 +237,12 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
             "anomaly_fingerprint": anomaly_fingerprint,
             "idempotency_key": idempotency_key,
         }
+        if previous_targets is not None:
+            normalized_payload["previous_targets"] = [
+                {"oa_row_id": owner, "expense_item_id": item} for owner, item in previous_targets
+            ]
         return _AssignInvoiceExpenseItemsCommand(
+            previous_targets=previous_targets,
             case_id=case_id,
             invoice_row_id=invoice_row_id,
             targets=normalized_targets,
@@ -271,55 +362,70 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
                 "所选发票不存在或已不可用，请刷新后重试。",
             )
         current_source_links = source_links(invoice_snapshot.get("source_links"))
-        explicit_links = explicit_expense_item_links(current_source_links)
-        if explicit_links:
-            explicit_targets: list[tuple[str, str]] = []
-            for link in explicit_links:
-                source_oa_id = str(
-                    link.get("derived_from_oa_id")
-                    or link.get("source_workbench_row_id")
-                    or ""
-                ).strip()
-                source_expense_item_id = str(
-                    link.get("source_expense_item_id") or ""
-                ).strip()
-                if not source_oa_id or not source_expense_item_id:
+        invoice_for_linking = {**dict(canonical_rows[command.invoice_row_id]), "source_links": current_source_links}
+        if command.previous_targets is not None:
+            explicit = explicit_expense_item_links(current_source_links)
+            current_targets = {
+                (str(link.get("derived_from_oa_id") or link.get("source_workbench_row_id") or ""),
+                 str(link.get("source_expense_item_id") or "")) for link in explicit
+            } if explicit else {
+                (str(oa["id"]), item_id) for oa in oa_rows
+                for item_id in canonical_oa_expense_item_ids(oa_row=oa, invoice_row=invoice_for_linking)
+            }
+            if current_targets != set(command.previous_targets):
+                raise WorkbenchInvoiceExpenseItemAssignmentError(
+                    "invoice_source_links_changed", "发票归属已变化，请刷新后重新选择。",
+                )
+        else:
+            explicit_links = explicit_expense_item_links(current_source_links)
+            if explicit_links:
+                explicit_targets: list[tuple[str, str]] = []
+                for link in explicit_links:
+                    source_oa_id = str(
+                        link.get("derived_from_oa_id")
+                        or link.get("source_workbench_row_id")
+                        or ""
+                    ).strip()
+                    source_expense_item_id = str(
+                        link.get("source_expense_item_id") or ""
+                    ).strip()
+                    if not source_oa_id or not source_expense_item_id:
+                        raise WorkbenchInvoiceExpenseItemAssignmentError(
+                            "invoice_expense_item_assignment_conflict",
+                            "发票已有不完整的 OA 明细归属，未覆盖原归属。",
+                        )
+                    explicit_targets.append((source_oa_id, source_expense_item_id))
+                if set(explicit_targets) != requested_targets:
                     raise WorkbenchInvoiceExpenseItemAssignmentError(
                         "invoice_expense_item_assignment_conflict",
-                        "发票已有不完整的 OA 明细归属，未覆盖原归属。",
+                        "发票已有不同的 OA 明细归属，未覆盖原归属。",
                     )
-                explicit_targets.append((source_oa_id, source_expense_item_id))
-            if set(explicit_targets) != requested_targets:
-                raise WorkbenchInvoiceExpenseItemAssignmentError(
-                    "invoice_expense_item_assignment_conflict",
-                    "发票已有不同的 OA 明细归属，未覆盖原归属。",
-                )
-            return {
-                "success": True,
-                "changed": False,
-                "case_id": command.case_id,
-                "invoice_row_id": command.invoice_row_id,
-                "targets": [
-                    {
-                        "oa_row_id": target.oa_row_id,
-                        "expense_item_id": target.expense_item_id,
-                    }
-                    for target in command.targets
-                ],
+                return {
+                    "success": True,
+                    "changed": False,
+                    "case_id": command.case_id,
+                    "invoice_row_id": command.invoice_row_id,
+                    "targets": [
+                        {
+                            "oa_row_id": target.oa_row_id,
+                            "expense_item_id": target.expense_item_id,
+                        }
+                        for target in command.targets
+                    ],
+                }
+            invoice_for_linking = {
+                **dict(canonical_rows[command.invoice_row_id]),
+                "source_links": current_source_links,
             }
-        invoice_for_linking = {
-            **dict(canonical_rows[command.invoice_row_id]),
-            "source_links": current_source_links,
-        }
-        if cls._has_valid_expense_item_edge(
-            invoice_for_linking,
-            oa_rows=oa_rows,
-            available_targets=available_targets,
-        ):
-            raise WorkbenchInvoiceExpenseItemAssignmentError(
-                "invoice_expense_item_already_assigned",
-                "所选发票已存在有效的 OA 明细归属，请刷新后重试。",
-            )
+            if cls._has_valid_expense_item_edge(
+                invoice_for_linking,
+                oa_rows=oa_rows,
+                available_targets=available_targets,
+            ):
+                raise WorkbenchInvoiceExpenseItemAssignmentError(
+                    "invoice_expense_item_already_assigned",
+                    "所选发票已存在有效的 OA 明细归属，请刷新后重试。",
+                )
 
         invoice_total = cls._format_money(invoice_snapshot.get("invoice_total"))
         current_fingerprint = unassigned_invoice_anomaly_fingerprint(
@@ -327,7 +433,7 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
             invoice_row_id=command.invoice_row_id,
             invoice_total=invoice_total,
         )
-        if command.anomaly_fingerprint != current_fingerprint:
+        if command.previous_targets is None and command.anomaly_fingerprint != current_fingerprint:
             raise WorkbenchInvoiceExpenseItemAssignmentError(
                 "workbench_anomaly_changed",
                 "异常证据已变化，请刷新后重试。",
@@ -373,6 +479,7 @@ class WorkbenchInvoiceExpenseItemAssignmentService:
                 for target in command.targets
             ],
             "previous_anomaly_fingerprint": current_fingerprint,
+            "previous_targets": command.payload.get("previous_targets", []),
         }
         audit.append_operation_event({
             "event_type": "workbench.invoice_expense_items.assigned",

@@ -457,7 +457,10 @@ export function AppHealthStatusProvider({ children }: { children: ReactNode }) {
       workbench,
     };
     const detailReason = detailFromPayload(apiPayload, fallbackOaSync, workbenchStatus?.reason, jobs);
-    const resolved = resolveAppHealthStatus(sources, detailReason);
+    const resolved = {
+      ...resolveAppHealthStatus(sources, detailReason),
+      matchingLastCompletedAt: apiPayload ? apiPayload.workbench_matching?.last_completed_at ?? null : undefined,
+    };
     return canOperateData ? resolved : { ...resolved, blocksMutations: true };
   }, [
     apiPayload,

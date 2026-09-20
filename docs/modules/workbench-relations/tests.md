@@ -131,3 +131,11 @@ cd web && npm test -- --run \
 - PostgreSQL：`test_workbench_query_postgres_integration.py` 的 `test_random_id_month_confirm_replay_withdraw_and_rollback` 覆盖 3 OA/1 bank/7 invoice、437 元跨月、真实 UoW/SQL/幂等/撤回及写后故障回滚。`test_scope_only_repair_is_atomic_audited_idempotent_and_reversible` 覆盖定点修复、竞争、重复执行、回滚、审计以及无额外 history/outbox。
 - 前端：WorkbenchApi 错误映射和 WorkbenchSelection 备注保留/不可盲目重试。原关联、撤回、权限浏览器流程继续回归。
 - read model/cache 本次不适用；现有 OA 事件零额外副作用属于适用的任务回归。生产执行与清理见月份修复 runbook。
+
+## 2026-09-20 后到发票回归
+
+- 纯规则：`tests/test_workbench_invoice_expense_item_matching.py`；同额歧义、完整剩余多票、币种/方向/ETC 排除、已有部分覆盖及补充凭证共存。
+- PostgreSQL：`tests/test_workbench_query_postgres_integration.py`；34+351+52 跨月组、assignment-only、新建关系和归属原子提交、审计失败回滚、并发幂等、历史重扫 CAS、100/1,000 发票批量写入 SQL 数量恒定。
+- 服务/API：归属 service/API、matching orchestrator、import UoW、queue worker 和 durable idempotency 测试；明确纠正、来源漂移与错误映射。
+- 前端/浏览器：`WorkbenchInvoiceAssignmentDrawer.test.tsx`、`WorkbenchSelection.test.tsx`、`workbench-relation-fanout.spec.ts`、`workbench-supporting-documents-flow.spec.ts`；已有票入口、纠正预选、同行显示、成功回读、失败与只读控制。
+- 既有下游页面继续运行标准 backend/frontend/E2E 回归；无新增 read model/cache，领域 matching queue 的重复、并发到达和失败重试继续受 worker 测试保护。

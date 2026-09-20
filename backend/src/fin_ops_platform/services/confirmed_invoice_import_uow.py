@@ -78,7 +78,7 @@ class ConfirmedInvoiceImportUnitOfWork:
                     scope_months=expanded_months,
                     reason="import_file_confirm",
                     source_versions=dict(source_versions or {}),
-                    debounce_seconds=60,
+                    debounce_seconds=0,
                 )
                 if expanded_months
                 else []

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date
 from hashlib import sha256
-import json
 from typing import Iterable, Literal
-
 
 RULE_VERSION = "2026-08-24-in-progress-oa-facts-v13"
 MATCHABLE_ROW_TYPES = frozenset({"oa", "bank", "invoice"})
@@ -104,6 +103,7 @@ class FormalRelationFact:
     source_version: str = ""
     reversal_key: tuple[str, ...] | None = None
     reversal_polarity: Literal["blue", "red"] | None = None
+    needs_expense_assignment: bool = False
 
     def __post_init__(self) -> None:
         row_type, identity = canonical_member_key(self.row_type, self.canonical_object_identity)

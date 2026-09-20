@@ -66,6 +66,13 @@ class PostgresWorkbenchIdempotencyRepository:
         request_payload: dict[str, Any] | None = None,
         expires_at: datetime | None = None,
     ) -> WorkbenchIdempotencyReservation:
+        # Serialize reservations before the INSERT statement snapshot is taken.
+        # ON CONFLICT can see a concurrent insert that its CTE SELECT cannot yet see.
+        self._executor.execute(
+            "select pg_advisory_xact_lock(hashtextextended("
+            "'workbench_idempotency:' || jsonb_build_array(%s::text, %s::text, %s::text)::text, 0))",
+            (tenant_id, actor_id, idempotency_key),
+        )
         created_at = _utcnow()
         storage = WorkbenchIdempotencyRecord(
             tenant_id=tenant_id,

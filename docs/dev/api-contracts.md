@@ -1525,3 +1525,9 @@ System Audit 的 `overall_status=pass` 只证明该 immutable snapshot 内 18 �
 ### 人工成本标签目录
 
 `GET /api/cost-statistics/manual-tags` 沿用成本统计读取权限。返回 `tags` 数组，每项含 `code,label,primary_label,sub_label`，其中 sub_label 可为空，表示单层标签。目录与银行明细人工分类同源；不含规则匹配条件或设置凭据。菜单打开时读取，写入仍走原 manual-allocations PUT 并校验当前有效目录，保留现有权限、事务、审计和历史明细规则。
+
+## 发票归属纠正与 matching 完成状态（2026-09-20）
+
+`POST /api/workbench/actions/assign-invoice-expense-items` 可选 `previous_targets: [{oa_row_id, expense_item_id}]` 表示明确更改已归属发票；该模式不要求未归属异常 fingerprint，但要求当前归属集合与 previous_targets 相同，且新 targets 在当前 active relation 内。漂移返回 `invoice_source_links_changed`（409），响应保留 success/changed/case_id/invoice_row_id/targets，并在纠正审计中记录 previous_targets。初次归属的旧请求仍要求 anomaly_fingerprint/idempotency_key。
+
+`GET /api/app-health` 的 workbench_matching 增加可空 last_completed_at；它只通知业务完成后的回读，不作为业务事实或写前置版本。

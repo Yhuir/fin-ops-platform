@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
+)
+
 
 class PostgresWorkbenchOaSupportingDocumentRepository:
     def __init__(self, connection: Any) -> None:
@@ -51,27 +56,35 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
         size_bytes: int,
         created_by: str,
     ) -> dict[str, Any] | None:
-        row = self._connection.fetch_one(
-            """
-            insert into app.workbench_oa_supporting_documents(
-                relation_case_id, oa_row_id, expense_item_id, file_object_id,
-                original_filename, content_type, content_sha256, size_bytes, created_by
+        def write(connection: Any) -> dict[str, Any] | None:
+            row = connection.fetch_one(
+                """
+                insert into app.workbench_oa_supporting_documents(
+                    relation_case_id, oa_row_id, expense_item_id, file_object_id,
+                    original_filename, content_type, content_sha256, size_bytes, created_by
+                )
+                values (%s, %s, %s, %s::uuid, %s, %s, %s, %s, %s)
+                on conflict (oa_row_id, expense_item_id, content_sha256)
+                    where status = 'active'
+                    do nothing
+                returning id::text as id, relation_case_id, oa_row_id, expense_item_id,
+                          file_object_id::text as file_object_id, original_filename,
+                          content_type, content_sha256, size_bytes, status, created_by,
+                          created_at::text
+                """,
+                (
+                    relation_case_id or None, oa_row_id, expense_item_id, file_object_id,
+                    original_filename, content_type, content_sha256, size_bytes, created_by,
+                ),
             )
-            values (%s, %s, %s, %s::uuid, %s, %s, %s, %s, %s)
-            on conflict (oa_row_id, expense_item_id, content_sha256)
-                where status = 'active'
-                do nothing
-            returning id::text as id, relation_case_id, oa_row_id, expense_item_id,
-                      file_object_id::text as file_object_id, original_filename,
-                      content_type, content_sha256, size_bytes, status, created_by,
-                      created_at::text
-            """,
-            (
-                relation_case_id or None, oa_row_id, expense_item_id, file_object_id,
-                original_filename, content_type, content_sha256, size_bytes, created_by,
-            ),
-        )
-        return dict(row) if row else None
+            if row:
+                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+                    case_ids=[], oa_row_ids=[row["oa_row_id"]], reason="oa_supporting_document_changed",
+                )
+            return dict(row) if row else None
+
+
+        return run_in_transaction(self._connection, write)
 
     def find_active_by_content(
         self,
@@ -170,13 +183,20 @@ class PostgresWorkbenchOaSupportingDocumentRepository:
         return dict(row) if row else None
 
     def soft_delete(self, document_id: str, *, deleted_by: str) -> dict[str, Any] | None:
-        row = self._connection.fetch_one(
-            """
-            update app.workbench_oa_supporting_documents
-               set status = 'deleted', deleted_by = %s, deleted_at = now()
-             where id = %s::uuid and status = 'active'
-            returning id::text as id, file_object_id::text as file_object_id
-            """,
-            (deleted_by, document_id),
-        )
-        return dict(row) if row else None
+        def write(connection: Any) -> dict[str, Any] | None:
+            row = connection.fetch_one(
+                """
+                update app.workbench_oa_supporting_documents
+                   set status = 'deleted', deleted_by = %s, deleted_at = now()
+                 where id = %s::uuid and status = 'active'
+                returning id::text as id, file_object_id::text as file_object_id, oa_row_id
+                """,
+                (deleted_by, document_id),
+            )
+            if row:
+                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+                    case_ids=[], oa_row_ids=[row["oa_row_id"]], reason="oa_supporting_document_changed",
+                )
+            return dict(row) if row else None
+
+        return run_in_transaction(self._connection, write)

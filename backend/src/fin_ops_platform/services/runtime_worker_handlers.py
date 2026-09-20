@@ -33,8 +33,14 @@ from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
-from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
-from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+from fin_ops_platform.services.postgres_bank_relation_requirement_updater import (
+    PostgresBankRelationRequirementUpdater,
+)
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    OA_PROJECTION_SYNC_VERSION,
+    PostgresOAProjectionRepository,
+)
 from fin_ops_platform.services.postgres_repositories.operations_audit import (
     PostgresOperationsAuditRepository,
 )
@@ -45,10 +51,10 @@ from fin_ops_platform.services.postgres_repositories.workbench_formal_relation i
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
     PostgresWorkbenchIdempotencyRepository,
 )
-from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-from fin_ops_platform.services.postgres_bank_relation_requirement_updater import (
-    PostgresBankRelationRequirementUpdater,
+from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
+    PostgresWorkbenchPageSelectionRepository,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.settings_data_reset_job import SettingsDataResetJobHandler
@@ -57,6 +63,8 @@ from fin_ops_platform.services.settings_data_reset_service import (
     SettingsDataResetService,
 )
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
+from fin_ops_platform.services.workbench_canonical_rows import WorkbenchCanonicalRowsBuilder
+from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
 from fin_ops_platform.services.workbench_free_matching_engine import (
@@ -65,14 +73,12 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
 from fin_ops_platform.services.workbench_free_matching_engine import (
     WorkbenchFreeMatchingEngine,
 )
-from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
     WorkbenchMatchingDirtyScopeWorkerConfig,
 )
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
-from fin_ops_platform.services.workbench_canonical_rows import WorkbenchCanonicalRowsBuilder
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 
 IMPORT_JOB_PROCESSOR_TYPES = (
@@ -372,6 +378,9 @@ class WorkbenchMatchingWorkerFactory:
             etc_batch_links=PostgresWorkbenchFormalRelationFactRepository(transaction),
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,
+            canonical_query=PostgresWorkbenchPageSelectionRepository(transaction, tenant_id="default"),
+            invoice_source_links=PostgresCoreRepository(transaction),
+            operation_audit=PostgresOperationsAuditRepository(transaction),
         )
 
 

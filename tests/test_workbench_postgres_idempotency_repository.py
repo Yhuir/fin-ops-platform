@@ -76,6 +76,16 @@ class _PostgresStateStore:
 
 
 class WorkbenchPostgresIdempotencyRepositoryTests(unittest.TestCase):
+    def test_reservation_serializes_before_read_committed_statement_snapshot(self):
+        executor = _RecordingSqlExecutor(rows=[_record_row(status="reserved", inserted=True)])
+        PostgresWorkbenchIdempotencyRepository(executor).reserve(
+            tenant_id="default", actor_id="finance-1", action_name="assign_invoice_expense_items",
+            idempotency_key="scope:1", request_fingerprint="fp:1",
+        )
+        self.assertIn("pg_advisory_xact_lock", executor.execute_calls[0][0])
+        self.assertEqual(executor.execute_calls[0][1], ("default", "finance-1", "scope:1"))
+        self.assertFalse(executor.transaction_opened)
+
     def test_get_committed_or_reserved_maps_postgres_row_to_record(self) -> None:
         from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
             PostgresWorkbenchIdempotencyRepository,

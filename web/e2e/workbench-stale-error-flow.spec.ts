@@ -118,7 +118,7 @@ test.describe("workbench direct error browser flow", () => {
     await expect(openZone.getByText("已选 3")).toBeVisible();
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync);
 
-    await previewDialog.getByRole("button", { name: "取消" }).click();
+    await previewDialog.getByRole("button", { name: "关闭关联预览" }).click();
     await expect(previewDialog).toHaveCount(0);
     await expect(openZone.getByText("已选 3")).toBeVisible();
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSync);
@@ -236,7 +236,7 @@ test.describe("workbench direct error browser flow", () => {
 
     await expect(previewDialog.getByRole("alert")).toContainText("关系已写入，页面重新读取失败");
     await expect(previewDialog.getByRole("alert")).toContainText("请勿重复提交");
-    await expect(previewDialog.getByRole("button", { name: "关闭", exact: true })).toBeEnabled();
+    await expect(previewDialog.getByRole("button", { name: "关闭关联预览" })).toBeEnabled();
     await expect(previewDialog.getByRole("button", { name: /重试确认|确认关联/ })).toHaveCount(0);
     await expect(openGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);

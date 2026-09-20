@@ -55,7 +55,7 @@ class WorkbenchInvoiceExpenseItemAssignmentApiTests(unittest.TestCase):
             "invoice_row_id": "invoice-1",
         })
         status, result = self._routes(service).assign_invoice_expense_items(
-            {"case_id": "CASE-1"},
+            {"case_id": "CASE-1", "previous_targets": [{"oa_row_id": "oa-1", "expense_item_id": "oa-1:item:0"}]},
             actor_id="finance-user",
             tenant_id="default",
             request_id="request-1",
@@ -65,6 +65,7 @@ class WorkbenchInvoiceExpenseItemAssignmentApiTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(service.calls[0]["actor_id"], "finance-user")
         self.assertEqual(service.calls[0]["request_id"], "request-1")
+        self.assertEqual(service.calls[0]["payload"]["previous_targets"], [{"oa_row_id": "oa-1", "expense_item_id": "oa-1:item:0"}])
 
     def test_action_maps_domain_and_idempotency_conflicts(self) -> None:
         cases = (

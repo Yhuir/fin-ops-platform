@@ -412,7 +412,8 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertEqual(connection.transaction_enters, 1)
         self.assertEqual(connection.transaction_exits, 1)
         sql, params = connection.fetch_one_calls[-1]
-        self.assertIn("status = 'failed'", sql)
+        self.assertIn("and status = %s", sql)
+        self.assertEqual(params[4], "failed")
         self.assertIn("attempt_count = %s", sql)
         self.assertIn("coalesce(request_id, '') = %s", sql)
         self.assertIn("coalesce(last_error, '') = %s", sql)

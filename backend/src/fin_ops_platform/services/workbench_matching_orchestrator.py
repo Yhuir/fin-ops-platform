@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import dataclass
-from hashlib import sha256
 import json
 import logging
 import re
+from copy import deepcopy
+from dataclasses import dataclass
+from hashlib import sha256
 from time import perf_counter
 from typing import Any, Callable
 
@@ -15,11 +15,13 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
     FormalRelationSearchLimits,
     WorkbenchFreeMatchingEngine,
 )
+from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
+    WorkbenchInvoiceExpenseItemAssignmentService,
+)
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
 )
-
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ class WorkbenchFormalRelationCommand:
     payload: dict[str, Any]
     refresh_metadata: dict[str, object]
     paired_requirements_by_case_id: dict[str, dict[str, object]]
+    invoice_assignment_case_ids: tuple[str, ...] = ()
     tenant_id: str = "default"
     actor_id: str = AUTO_RELATION_ACTOR
     action_name: str = "confirm_link"
@@ -50,10 +53,11 @@ class WorkbenchFormalRelationCommand:
         request_id: str,
         etc_batch_links: tuple[dict[str, Any], ...] = (),
         paired_requirements_by_case_id: dict[str, dict[str, object]] | None = None,
+        invoice_assignment_case_ids: tuple[str, ...] = (),
     ) -> "WorkbenchFormalRelationCommand":
         plans = tuple(sorted(result.plans, key=lambda plan: plan.relation_fingerprint))
         links = tuple(sorted((deepcopy(link) for link in etc_batch_links), key=lambda link: str(link["case_id"])))
-        if not plans and not links:
+        if not plans and not links and not invoice_assignment_case_ids:
             raise ValueError("A formal relation command requires at least one plan or ETC batch link.")
         scope_keys = tuple(
             sorted(
@@ -76,6 +80,7 @@ class WorkbenchFormalRelationCommand:
             raise ValueError("Paired requirements must belong to the formal relation plan batch.")
         fingerprint_payload = {
             "batch_hash": batch_hash,
+            "invoice_assignment_case_ids": invoice_assignment_case_ids,
             "relation_fingerprints": fingerprints,
             "rule_versions": sorted({plan.rule_version for plan in plans}),
             "etc_batch_links": links,
@@ -99,6 +104,7 @@ class WorkbenchFormalRelationCommand:
             )
         payload = {
             "batch_hash": batch_hash,
+            "invoice_assignment_case_ids": invoice_assignment_case_ids,
             "relation_fingerprints": fingerprints,
             "request_id": str(request_id or "").strip(),
             "etc_batch_ids": [str(link["external_etc_batch_id"]) for link in links],
@@ -119,7 +125,8 @@ class WorkbenchFormalRelationCommand:
                 "case_ids": sorted({plan.case_id for plan in plans} | {str(link["case_id"]) for link in links}),
             },
             paired_requirements_by_case_id=requirements,
-            action_name="confirm_link" if plans else "enrich_etc_relation",
+            invoice_assignment_case_ids=invoice_assignment_case_ids,
+            action_name="confirm_link" if plans else "enrich_etc_relation" if links else "assign_invoice_expense_items",
         )
 
 
@@ -208,7 +215,18 @@ class WorkbenchMatchingOrchestrator:
             "idempotent_replay": False,
             "duration_ms": 0,
         }
-        if match_result.plans or etc_batch_links:
+        unassigned_members = {fact.member_key for fact in batch.facts if fact.needs_expense_assignment}
+        assignment_case_ids = tuple(sorted({
+            anchor.case_id for anchor in batch.active_relations
+            if any(key in unassigned_members for key in anchor.member_keys)
+            and any(kind == "oa" for kind, _ in anchor.member_keys)
+        } | {
+            plan.case_id for plan in match_result.plans
+            if any(key in unassigned_members for key in plan.member_keys)
+            and "oa" in plan.row_types
+        }))
+        summary["assigned_invoice_count"] = 0
+        if match_result.plans or etc_batch_links or assignment_case_ids:
             paired_requirements_by_case_id = self._paired_requirements_by_case_id(
                 match_result,
                 etc_batch_links=etc_batch_links,
@@ -219,6 +237,7 @@ class WorkbenchMatchingOrchestrator:
                 request_id=normalized_request_id,
                 etc_batch_links=etc_batch_links,
                 paired_requirements_by_case_id=paired_requirements_by_case_id,
+                invoice_assignment_case_ids=assignment_case_ids,
             )
 
             def apply_formal_relations(context: Any) -> dict[str, Any]:
@@ -240,7 +259,13 @@ class WorkbenchMatchingOrchestrator:
                 enrichment_result = service.enrich_etc_batch_links(
                     existing_links, actor_id=AUTO_RELATION_ACTOR
                 )
+                assignment_result = (
+                    WorkbenchInvoiceExpenseItemAssignmentService.assign_automatically(
+                        context, case_ids=list(command.invoice_assignment_case_ids), request_id=normalized_request_id,
+                    ) if command.invoice_assignment_case_ids else {"assigned_invoice_count": 0}
+                )
                 return {
+                    **assignment_result,
                     "status": "updated",
                     "relations": [
                         *list(formal_result.get("relations") or []),
@@ -283,6 +308,7 @@ class WorkbenchMatchingOrchestrator:
                 for plan in command.plans
                 if plan.target_case_id and plan.case_id in changed_case_ids
             )
+            summary["assigned_invoice_count"] = int(write_result.get("assigned_invoice_count") or 0)
             summary["enriched_relation_count"] = int(write_result.get("enriched_relation_count") or 0)
             summary["relation_ids"] = [
                 str(relation.get("case_id") or "")

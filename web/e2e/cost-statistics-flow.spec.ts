@@ -277,6 +277,9 @@ test.describe("cost statistics browser flow", () => {
     await drawer.getByText("材料费", { exact: true }).click();
     await drawer.getByRole("button", { name: "保存" }).click();
 
+    await expect.poll(() => api.count("PUT /api/cost-statistics/no-oa-rules")).toBe(1);
+    await expect(drawer.getByRole("button", { name: "云南溯源无 OA 分类 1 个标签" })).toBeVisible();
+    await drawer.getByRole("button", { name: "关闭抽屉" }).click();
     await expect(drawer).toBeHidden();
     expect(api.count("PUT /api/cost-statistics/no-oa-rules")).toBe(1);
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThan(explorerCallsBeforeSave);

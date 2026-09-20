@@ -150,6 +150,7 @@ class AppHealthService:
                 "matching_dirty_scopes": matching_dirty_scope_entries,
                 "matching_running_scopes": matching_running_scopes,
                 "last_matching_error": self.last_matching_error(matching_dirty_scope_entries),
+                "last_completed_at": oa_sync_payload.get("workbench_matching_last_completed_at"),
                 "rebuild_job_ids": [str(getattr(job, "job_id", "")) for job in rebuild_jobs],
             },
             "background_jobs": {

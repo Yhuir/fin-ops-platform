@@ -51,3 +51,7 @@
 流水批次成员审计直接读取 submitted 批次与 active canonical relation。原始独立批次关系要求成员集合严格相等；批次并入普通 OA/发票关系后，要求全部银行成员包含于同一个 active 关系，允许该关系包含其它成员。缺失成员、非 submitted 批次仍占用原始批次关系、孤立批次关系仍报错。只读 SQL 边界及审计 API 不变，不修写业务事实。真实 PostgreSQL 回归覆盖完整合并、缺失成员、额外原始成员和已撤回批次残留。
 
 候选审计使用包含正式历史的同一 canonical source 重建批次，成员覆盖与重复检查仅针对 draft/unsubmitted/conflict 当前候选。submitted/withdrawn/stale 正式历史仍由原正式批次关系审计负责，不得将撤回历史当作第二个候选，也不得用历史成员掩盖当前候选缺失。共享 source query 的历史版本不能在审计调用方清空。
+
+## 2026-09-20 Matching 完成通知
+
+`/api/app-health.workbench_matching.last_completed_at` 是现有 matching scope 列表中最新 completed_at，可为 null。复用已有队列读取，不增加每次轮询 SQL；前端状态 context 向关联台透出时间变化以触发一次回读。仍不写业务事实、不增加页面门禁或轮询列表。

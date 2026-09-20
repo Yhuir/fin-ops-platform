@@ -52,7 +52,7 @@ def main(
     active_repository = repository or PostgresWorkbenchMatchingQueueRepository(
         PostgresConnection(PostgresSettings.from_env())
     )
-    scope = _failed_scope(
+    scope = _retryable_scope(
         active_repository.list_workbench_matching_dirty_scopes(tenant_id=tenant_id),
         scope_month=scope_month,
     )
@@ -65,10 +65,12 @@ def main(
 
     written = False
     if args.execute:
-        written = bool(active_repository.retry_failed_workbench_matching_scope(
+        retry = (active_repository.retry_completed_workbench_matching_scope
+                 if scope["status"] == "completed" else active_repository.retry_failed_workbench_matching_scope)
+        written = bool(retry(
             tenant_id=tenant_id,
             scope_month=scope_month,
-            reason=RETRY_REASON,
+            reason="operator_rescan_completed_scope" if scope["status"] == "completed" else RETRY_REASON,
             expected_attempt_count=int(scope.get("attempt_count") or 0),
             expected_request_id=str(scope.get("request_id") or ""),
             expected_last_error=str(scope.get("last_error") or ""),
@@ -84,23 +86,52 @@ def main(
         "mode": "execute" if args.execute else "dry_run",
         "tenant_id": tenant_id,
         "scope_month": scope_month,
-        "status_before": FAILED_STATUS,
+        "status_before": scope["status"],
         "attempt_count": int(scope.get("attempt_count") or 0),
         "last_error_sha256": _text_sha256(scope.get("last_error")),
         "fingerprint": fingerprint,
         "written": written,
     }
+    if args.dry_run and scope["status"] == "completed":
+        connection = PostgresConnection(PostgresSettings.from_env())
+        try:
+            report["preview"] = preview_scope(connection, scope_month)
+        finally:
+            connection.close()
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
     return 0
 
 
-def _failed_scope(rows: list[dict[str, Any]], *, scope_month: str) -> dict[str, Any]:
+def preview_scope(connection: Any, scope_month: str) -> dict[str, Any]:
+    from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import PostgresWorkbenchFormalRelationFactRepository
+    from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
+    from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine, FormalRelationSearchLimits
+    from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import WorkbenchInvoiceExpenseItemAssignmentService
+
+    with connection.transaction() as transaction:
+        repository = PostgresWorkbenchFormalRelationFactRepository(transaction)
+        batch = repository.load_batch([scope_month], source_versions={})
+        result = WorkbenchFreeMatchingEngine().plan_relations(batch, FormalRelationSearchLimits())
+        unassigned = {fact.member_key for fact in batch.facts if fact.needs_expense_assignment}
+        case_ids = [anchor.case_id for anchor in batch.active_relations if any(member in unassigned for member in anchor.member_keys)]
+        context = WorkbenchMatchingWorkerFactory._workbench_uow_repository_factory(transaction)
+        context.transaction = transaction
+        assignments = WorkbenchInvoiceExpenseItemAssignmentService.assign_automatically(
+            context,
+            case_ids=case_ids, request_id="matching-rescan-preview", dry_run=True,
+        )
+        return {"existing_group_assignments": assignments,
+                "planned_relation_count": len(result.plans),
+                "planned_relation_ids": [plan.case_id for plan in result.plans]}
+
+
+def _retryable_scope(rows: list[dict[str, Any]], *, scope_month: str) -> dict[str, Any]:
     matches = [row for row in rows if str(row.get("scope_month") or "").strip() == scope_month]
     if len(matches) != 1:
         raise RuntimeError("Workbench matching scope was not found exactly once.")
     scope = matches[0]
-    if str(scope.get("status") or "").strip() != FAILED_STATUS:
-        raise RuntimeError("Workbench matching scope is not failed; refusing to requeue it.")
+    if str(scope.get("status") or "").strip() not in {FAILED_STATUS, "completed"}:
+        raise RuntimeError("Workbench matching scope is not failed or completed; refusing to requeue it.")
     return scope
 
 

@@ -4844,3 +4844,16 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 旧链删除：删除 `_withdraw_selected_row_alias_map(...)`、事务外 submit alias 扫描、异常后的 ID 自映射以及 alias first-wins；preview 和非 UoW 测试适配路径也只消费 bounded canonical selection，不恢复全页面或 live-row 扫描。
 - 冲突合同：一个 source alias 指向多个 canonical OA 时返回 `409 workbench_write_conflict / canonical_selection_ambiguous`，整笔零写；前端按结构化 reason 输出安全中文原因和 request id，不展示原始后端异常。
 - 性能：confirm 继续使用只返回 identity/source descriptor 的窄事务校验；只有 withdraw submit 使用完整行水合，因此不为 confirm 热链增加查询。withdraw 移除事务外第二次 OA 扫描，alias 解析为已选行上的线性内存操作。
+
+## 2026-09-20 后到发票自动归属
+
+34 元案例的根因是 active relation 已存在，但票只有人工导入 provenance；旧 matcher 没有新拓扑计划就退出，删除补充凭证后资料异常重新暴露。此次新增小型纯规则并接入原 UoW，支持 assignment-only、新建关系同事务、人工纠正、补充凭证触发、导入 expedite 和完成回读。
+
+实施计划见 [后到发票自动归属](late-invoice-auto-assignment-plan.md)。完整关系不等于资料完整；重算只处理事实变化范围，不在所有点击后全库重配，也不覆盖用户明确归属。
+
+- 写入边界：来源 batch loader 锁定整组普通进项票，以单条批量 CAS 更新 canonical source links；保留原始 provenance，审计与新 relation 同事务。移除单票 loader 的 raw-payload 来源 fallback 和重复 SQL。并发实测发现同一幂等 key 的 CTE snapshot 竞争，改为在 INSERT 前取得事务 advisory lock；真实双事务只产生一次归属审计。
+- 触发与前端：导入复用 debounce=0；正式关系、人工来源变更、补充凭证增删按 canonical 发票日期登记 exact scopes。自动 actor 不反向登记。App Health 提供完成时间，首次快照不额外刷新，后续完成仅回读一次，选择/抽屉期间延后；已有票选择和归属纠正复用既有命令。
+- 历史：扩展原 scope retry 运维入口支持 completed scope 的只读计划和正常 worker 重跑，未增加 SQL 修票脚本、规则版本全量重放、表、依赖或 worker。生产 poll 已为 0.25 秒，无须改慢到计划中的 1 秒。
+- 验证：后端标准入口全量运行 4,276 项，唯一失败为 retry 状态参数化后的旧 SQL 字面量断言，修正后队列模块 15 项通过；52 项现金独立数据库用例随后随对应模块 59 项全部通过。纯归属规则 pytest 22 项通过。前端全量 1,367 项通过，新增完成刷新用例及最后改动相关 105 项再次通过；类型检查与生产构建通过。浏览器全量 248 项已覆盖，旧抽屉关闭语义断言已修正并定向复测。OA 详情 100ms 性能断言在未修改 main 对照中也有边界波动，保留原阈值，不以放宽测试掩盖。
+- 性能：本地真实 PostgreSQL 单批 100/1,000 张票分别约 89ms/1.51s，均为 14 次 SQL、一次批量 UPDATE（单次样本，不宣称 p95）；一万条纯规则 10 次 p50 96.16ms、p95 104.43ms。生产工作台 GET、组详情和 App Health 已记录发布前 10 次基线，发布后同口径比较。
+- 生产验证边界：使用现有真实 34 元记录验证 normal worker、资料异常、配对分区与同行展示；不通过伪造发票污染生产。新导入、反向到达、失败回滚和并发由合成数据/真实独立 PostgreSQL 集成测试保护。未创建数据库备份，不删除主数据库。

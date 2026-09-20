@@ -93,6 +93,8 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     const workbenchLoadsBeforeRetry = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "重试" }).click();
 
+    await expect(previewDialog.getByRole("status")).toHaveText("关联操作已完成");
+    await previewDialog.getByRole("button", { name: "关闭关联预览" }).click();
     await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
@@ -117,7 +119,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(previewDialog.getByRole("button", { name: "重试" })).toHaveCount(0);
     await expect(previewDialog.getByRole("button", { name: "确认关联" })).toHaveCount(0);
     await expect(previewDialog.getByRole("button", { name: "取消" })).toHaveCount(0);
-    await expect(previewDialog.getByRole("button", { name: "关闭", exact: true })).toBeEnabled();
+    await expect(previewDialog.getByRole("button", { name: "关闭关联预览", exact: true })).toBeEnabled();
     await expect(previewDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
     await expect(openGroup).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
@@ -139,7 +141,9 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
 
     await expect(previewDialog).toHaveAttribute("aria-busy", "true");
     await expect(submitButton).toBeDisabled();
-    await expect(previewDialog.getByRole("button", { name: "取消" })).toBeDisabled();
+    await expect(previewDialog.getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
+    await expect(previewDialog.getByRole("status")).toHaveText("关联操作已完成");
+    await previewDialog.getByRole("button", { name: "关闭关联预览" }).click();
     await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     const submitBody = api.lastBody("POST /api/workbench/actions/confirm-link");
@@ -165,6 +169,8 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(previewDialog).toHaveAttribute("aria-busy", "true");
     await expect(submitButton).toBeDisabled();
     await expect(pairedGroup).toBeVisible();
+    await expect(previewDialog.getByRole("status")).toHaveText("关联操作已完成");
+    await previewDialog.getByRole("button", { name: "关闭关联预览" }).click();
     await expect(previewDialog).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();

@@ -2774,6 +2774,33 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
   });
 
+  test("matching completion refreshes once after selection clears and ignores the first snapshot", async () => {
+    const user = userEvent.setup();
+    const health = {
+      status: "ok", session: { status: "authenticated" },
+      oa_sync: { status: "synced", dirty_scopes: [] },
+      workbench_matching: { status: "ready", dirty_scopes: [], last_completed_at: "2026-09-20T01:00:00Z" },
+      background_jobs: { active: 0, queued: 0, running: 0, attention: 0 },
+    };
+    const fetchMock = installMockApiFetch({ appHealth: health });
+    renderAppAt("/");
+    const zone = await screen.findByTestId("zone-unpaired");
+    await user.click(await within(zone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    const loads = () => fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input)).length;
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    expect(loads()).toBe(1);
+    health.workbench_matching.last_completed_at = "2026-09-20T01:01:00Z";
+    fireEvent.focus(window);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    expect(loads()).toBe(1);
+    expect(within(zone).getByText("已选 1")).toBeInTheDocument();
+    await user.click(within(zone).getByRole("button", { name: "清空选择" }));
+    await waitFor(() => expect(loads()).toBe(2));
+    fireEvent.focus(window);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    expect(loads()).toBe(2);
+  });
+
   test("OA completion defers one canonical reread until the active selection is cleared", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({

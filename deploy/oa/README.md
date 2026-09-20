@@ -213,3 +213,7 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 既有 `assert_settings_access_control_database_guard` 通过 `--verify-oa-topology` 同时验证 OA 实际两角色结构；frontend profile 激活前也执行这一检查。数据库 guard 正常不能代替 OA 配置正确。检查只读，标准发布不会自动迁移 OA 菜单。
 
 旧三角色迁移使用专项工具并核对真实引用。只允许本 App 入口及直接父菜单；保留父菜单关系与旧只读角色成员，只摘除旧只读角色的 App 入口绑定。运行时不保留旧角色兼容路径。
+
+## 后到发票历史 scope 重扫
+
+`finops-deploy-control workbench-matching-retry <release> --scope-month YYYY-MM --dry-run` 也可检查 completed scope，并输出当前同组可补齐归属及正式关系计划数。执行仍沿用 `--execute --expected-fingerprint`，只登记正常 worker 任务，不由 CLI 写发票来源。processing/dirty 不重复运行。

@@ -146,3 +146,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+## 2026-09-20 导入后的即时匹配
+
+ConfirmedInvoiceImportUnitOfWork 在导入事务内继续提交 promotion 与同一 matching dirty scope；本入口 `debounce_seconds=0`，删除固定 60 秒等待。使用既有 expedite/processing 再变更去重语义；导入接口不运行归属算法，不写页面状态。后到的人工导入发票维持原 provenance，归属由 workbench owner 提交。

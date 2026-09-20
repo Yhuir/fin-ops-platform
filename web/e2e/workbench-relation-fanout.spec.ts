@@ -6,6 +6,17 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 import { confirmWorkbenchRelation } from "./fixtures/workbenchFlow";
 
 test.describe("workbench relation browser flow", () => {
+  test("missing invoice item can select existing invoices without creating another invoice", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: "user", workbenchOaInvoiceUnparsedScenario: true });
+    await page.goto("/");
+    await page.getByRole("button", { name: "选择已有发票" }).click();
+    const drawer = page.getByRole("dialog", { name: "选择已有发票" });
+    await expect(drawer.getByText("当前组没有待归属发票。")).toBeVisible();
+    await expect(drawer.getByText(/其他组或尚未关联/)).toBeVisible();
+    await drawer.getByRole("button", { name: "关闭选择已有发票" }).click();
+    await expect(drawer).toBeHidden();
+  });
+
   test("opens one OA invoice supplement drawer with invoice entry as the primary mode", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "user",
@@ -250,6 +261,11 @@ test.describe("workbench relation browser flow", () => {
     await expect(assignedSegment.getByText("531.92", { exact: true })).toBeVisible();
     await expect(assignedInvoicePane.getByText("193.92", { exact: true })).toHaveCount(1);
     await expect(assignedInvoicePane.getByText("338.00", { exact: true })).toHaveCount(1);
+    await assignedManualInvoice.getByRole("button", { name: "更改归属" }).click();
+    const correction = page.getByRole("dialog", { name: "更改发票归属" });
+    await expect(correction.getByRole("checkbox", { name: /^昭通卷烟厂能源集中监控平台系统维护采购项目，531\.92，/ })).toBeChecked();
+    await correction.getByRole("button", { name: "关闭选择 OA 明细" }).click();
+
     await expect(assignedAttachmentInvoice.getByText("OA附件", { exact: true })).toHaveCount(1);
     await expect(assignedAttachmentInvoice.getByText("人工导入", { exact: true })).toHaveCount(0);
     await expect(assignedAttachmentInvoice.getByText("导入记录", { exact: true })).toHaveCount(0);
@@ -305,10 +321,6 @@ test.describe("workbench relation browser flow", () => {
     });
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/workbench")).toBe(workbenchLoadsBeforeSubmit + 1);
-
-    const completedPreview = page.getByRole("dialog", { name: "确认关联" });
-    await expect(completedPreview.getByRole("status")).toHaveText("关联操作已完成");
-    await completedPreview.getByRole("button", { name: "关闭关联预览" }).click();
 
     await recordLatency({
       route: "/bank-details",

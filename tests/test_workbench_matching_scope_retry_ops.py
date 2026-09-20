@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import StringIO
 import json
 import unittest
+from unittest.mock import patch
 
 from fin_ops_platform.tools import workbench_matching_scope_retry_ops
 
@@ -111,8 +112,22 @@ class WorkbenchMatchingScopeRetryOpsTests(unittest.TestCase):
 
         self.assertEqual(repository.mark_calls, [])
 
+    def test_completed_scope_preview_and_execute_use_normal_matching_queue(self):
+        repository = FakeRepository({**_failed_row(), "status": "completed", "last_error": ""})
+        repository.retry_completed_workbench_matching_scope = repository.retry_failed_workbench_matching_scope
+        output = StringIO()
+        with patch.object(workbench_matching_scope_retry_ops.PostgresSettings, 'from_env'), patch.object(workbench_matching_scope_retry_ops, 'PostgresConnection'), patch.object(workbench_matching_scope_retry_ops, 'preview_scope', return_value={'planned_relation_count': 0, 'existing_group_assignments': {'planned_invoice_count': 1}}):
+            workbench_matching_scope_retry_ops.main(['--scope-month', '2025-10', '--dry-run'], repository=repository, stdout=output)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report['preview']['existing_group_assignments']['planned_invoice_count'], 1)
+        self.assertFalse(report['written'])
+        result = StringIO()
+        workbench_matching_scope_retry_ops.main(['--scope-month', '2025-10', '--execute', '--expected-fingerprint', report['fingerprint']], repository=repository, stdout=result)
+        self.assertTrue(json.loads(result.getvalue())['written'])
+        self.assertEqual(len(repository.mark_calls), 1)
+
     def test_non_failed_scope_is_not_requeued(self) -> None:
-        repository = FakeRepository({**_failed_row(), "status": "completed"})
+        repository = FakeRepository({**_failed_row(), "status": "processing"})
 
         with self.assertRaisesRegex(RuntimeError, "is not failed"):
             workbench_matching_scope_retry_ops.main(

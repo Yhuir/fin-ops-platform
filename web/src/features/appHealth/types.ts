@@ -19,6 +19,7 @@ export type AppHealthStatus = {
   reason: string;
   details: string[];
   blocksMutations: boolean;
+  matchingLastCompletedAt?: string | null;
   sources: AppHealthSources;
 };
 
@@ -59,6 +60,7 @@ export type ApiAppHealthPayload = {
     matching_dirty_scopes?: Array<Record<string, unknown>>;
     matching_running_scopes?: string[];
     last_matching_error?: string | null;
+    last_completed_at?: string | null;
   };
   background_jobs?: {
     active?: number;

@@ -39,7 +39,9 @@ export default function WorkbenchInvoiceAssignmentDrawer({
       return;
     }
     setCompleted(false);
-    setSelectedKeys(new Set());
+    setSelectedKeys(new Set((target?.candidates ?? []).filter((candidate) => (
+      target?.initialTargets ?? target?.previousTargets ?? []
+    ).some((item) => item.oaRowId === candidate.oaRowId && item.expenseItemId === candidate.expenseItemId)).map((candidate) => candidate.key)));
     setErrorMessage(null);
     setSubmitting(false);
     setCommittedSignature(null);
@@ -69,6 +71,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
           invoiceRowId: target.invoiceRowId,
           targets,
           anomalyFingerprint: target.anomalyFingerprint,
+          ...(target.previousTargets ? { previousTargets: target.previousTargets } : {}),
           idempotencyKey,
         });
         postSucceeded = true;
@@ -121,7 +124,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
       )}
       onClose={onClose}
       open={open}
-      title="选择 OA 明细"
+      title={target?.previousTargets ? "更改发票归属" : "选择 OA 明细"}
       width="min(640px, 100vw)"
     >
       {target ? (
@@ -142,7 +145,7 @@ export default function WorkbenchInvoiceAssignmentDrawer({
           </section>
 
           <p className="workbench-invoice-assignment-drawer__guidance">
-            请选择这张发票实际对应的 OA 付款明细。系统不会按金额自动推荐，可同时选择多个明细。
+            请选择这张发票实际对应的 OA 付款明细。同组内有唯一金额依据的发票会自动归属；这里可人工指定或纠正，可同时选择多个明细。
           </p>
 
           {errorMessage ? (

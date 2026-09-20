@@ -8,14 +8,6 @@ from typing import Any, Iterable, Literal
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
 )
-from fin_ops_platform.services.postgres_repositories.common import row_payload, text
-from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
-from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
-    oa_source_aliases_sql,
-)
-from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
-    pending_oa_application_date_sql,
-)
 from fin_ops_platform.services.oa_attachment_invoice_linking import (
     OA_SOURCE_ALIAS_FIELD_NAMES,
     oa_row_source_alias_map,
@@ -23,6 +15,15 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
 from fin_ops_platform.services.output_invoice_reversal import (
     unique_reversal_target_invoice_no,
 )
+from fin_ops_platform.services.postgres_repositories.common import row_payload, text
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_sql import (
+    pending_oa_application_date_sql,
+)
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
+from fin_ops_platform.services.postgres_repositories.oa_source_alias_sql import (
+    oa_source_aliases_sql,
+)
+from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_ids
 from fin_ops_platform.services.workbench_free_matching_engine import (
     ActiveFormalRelationAnchor,
     FormalRelationFact,
@@ -31,11 +32,10 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
     canonical_member_key,
     relation_fingerprint,
 )
-from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_ids
 from fin_ops_platform.services.workbench_invoice_direction import invoice_workbench_direction_from_row
+from fin_ops_platform.services.workbench_invoice_expense_item_matching import invoice_needs_expense_assignment
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_text_normalization import normalize_match_text
-
 
 _MATCHABLE_DIRECTIONS = {"expenditure", "income"}
 _CNY_ALIASES = frozenset({"CNY", "RMB", "人民币", "人民币元", "元"})
@@ -798,6 +798,8 @@ def _invoice_fact(
         source_version=_source_version(row),
         reversal_key=reversal_key,
         reversal_polarity=reversal_polarity,
+        needs_expense_assignment=(str(row.get("invoice_type")) == "input"
+                                  and invoice_needs_expense_assignment(row.get("source_links"))),
     )
 
 
@@ -836,7 +838,7 @@ def _output_invoice_reversal_identity(
 
 
 def _canonical_currency(value: Any) -> str:
-    currency = text(value).upper() or "CNY"
+    currency = (text(value) or "CNY").upper()
     return "CNY" if currency in _CNY_ALIASES else currency
 
 

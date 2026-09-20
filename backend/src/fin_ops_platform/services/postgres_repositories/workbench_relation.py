@@ -17,6 +17,9 @@ from fin_ops_platform.services.postgres_repositories.common import (
     text,
     text_list,
 )
+from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+    PostgresWorkbenchMatchingQueueRepository,
+)
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_workbench_pair_relations
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_relation_modes import VALID_WORKBENCH_RELATION_MODES
@@ -475,7 +478,9 @@ class PostgresWorkbenchRelationRepository:
         return ordered_keys
 
     def canonical_relation_scope_months(self, row_ids, *, row_types, tenant_id):
-        from fin_ops_platform.services.postgres_repositories.workbench_page_selection import PostgresWorkbenchPageSelectionRepository
+        from fin_ops_platform.services.postgres_repositories.workbench_page_selection import (
+            PostgresWorkbenchPageSelectionRepository,
+        )
         rows = PostgresWorkbenchPageSelectionRepository(self._connection, tenant_id=tenant_id).validate_workbench_relation_selection_in_current_transaction(
             action="withdraw_link", scope_key="all", row_ids=row_ids, row_types=row_types,
         )
@@ -747,6 +752,16 @@ class PostgresWorkbenchRelationRepository:
                 history,
                 changed_case_ids=changed_ids,
             )
+            manual_case_ids = {
+                case_id for event in (history or [])
+                if (event.get("created_by") or event.get("actor_id")) != "system:workbench-deterministic-relation"
+                for case_id in self._history_case_ids(event)
+                if changed_ids is None or case_id in changed_ids
+            }
+            if manual_case_ids:
+                PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+                    case_ids=sorted(manual_case_ids), oa_row_ids=[], reason="workbench_relation_changed",
+                )
             queue = RuntimeQueueRepository(connection)
             for case_id, event_payload in reconcile_events:
                 fingerprint = sha1(

@@ -62,3 +62,7 @@ preview(paired or unpaired active case, exact full active member set, expected v
 - 相同 key 不同 fingerprint fail fast。
 - UoW 任一步失败全部回滚。
 - worker replay 不创建重复 active relation/history/outbox。
+
+## 2026-09-20 明细归属状态
+
+未归属票进入同一 active 普通关联组后，matching 可独立提交唯一金额归属，即使关系拓扑已完整或补充凭证存在。已明确归属不因凭证删除而丢失，也不被后来的弱同额候选抢占。金额、资料异常和 paired/unpaired 每次按当前 canonical facts 计算；归属成功并不豁免银行缺失、金额差额或其他异常。人工纠正以 previous_targets 比较后替换，原始 provenance 和审计保留。

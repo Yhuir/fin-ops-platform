@@ -116,10 +116,11 @@ function WorkbenchRecordCard({
               levelLabel="该付款项"
             />
             {hasUnparsedAttachment && row.availableActions.includes("enter_invoice") ? (
-                <InvoiceEntryAction
-                  disabled={readOnly ? !allowInvoiceEntryInReadOnly : !canOperateData}
-                  onPress={() => onRowAction(row, "enter-invoice")}
-                />
+                <>
+                  <InvoiceEntryAction disabled={invoiceResolutionDisabled} onPress={() => onRowAction(row, "enter-invoice")} />
+                  <Button size="sm" variant="tertiary" isDisabled={invoiceResolutionDisabled}
+                    onPress={() => onRowAction(row, "select-existing-invoice")}>选择已有发票</Button>
+                </>
               ) : null}
           </div>
         </div>
@@ -152,6 +153,10 @@ function WorkbenchRecordCard({
             <div className={`record-card-cell-content${isApplicant ? " workbench-oa-applicant-content" : ""}${showLeadingControl ? " record-card-cell-content-with-inline-control" : ""}`}>
               {showLeadingControl ? <span className="record-card-inline-prefix-control">{leadingControl}</span> : null}
               {renderCellValue(column, value, row, paneId, zoneId, showInlineDetail, () => onOpenDetail(row), searchQuery)}
+              {paneId === "invoice" && columnIndex === 0 && !row.displayOnly && (row.sourceExpenseItemIds?.length ?? 0) > 0 ? (
+                <Button size="sm" variant="tertiary" isDisabled={invoiceResolutionDisabled}
+                  onPress={() => onRowAction(row, "assign-invoice-expense-items")}>更改归属</Button>
+              ) : null}
               {isApplicant ? (
                 showApplicantDetail || anomalyIndicator ? (
                   <span className="workbench-oa-applicant-actions">

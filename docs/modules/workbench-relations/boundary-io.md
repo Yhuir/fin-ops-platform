@@ -153,3 +153,14 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 人工确认在现有事务 selection 中计算最终范围，通常无额外日期查询；替换或撤回涉及未选中的旧关系成员时，只对缺少的 typed identities 批量补读一次，受影响月份覆盖操作前后完整成员。人工撤回将同事务来源月份传给 command；新恢复关系及本次撤回事件使用正确范围，原始 predecessor history 不改写。其他业务生产者继续拥有自身 scope 规则。
 - `postgres_repositories/workbench_scope_repair.py` 是明确的离线月份元数据修复 adapter；工具入口 `tools/workbench_scope_repair.py`。只按经调查的计划修正关系范围和已提交响应的 affected months，现有锁和旧值比较保护竞争，事务内追加 `audit.events`。不推进拓扑版本、不发 OA 支付事件、不改原始 relation history，不进入 API/worker/replay 热路径。
 - 已删除 `ROW_ID_MONTH_RE`、ID 月份 helper、相关注入、弱日期解析和伪 scope 合并分支。无新增 schema、缓存、worker、hash 或 gate。
+
+## 2026-09-20 后到发票归属闭环
+
+- `workbench_invoice_expense_item_matching.py` 是同组金额归属纯函数：输入完整 canonical OA 明细、正式进项发票及来源，输出 invoice→OA/item targets；无 HTTP/SQL/队列。固定已有明确归属，仅处理双向唯一同币种同额完整明细，或唯一剩余明细与全部剩余票合计一致；不做跨组金额碰撞、任意子集凑数、部分分摊或模糊兜底。
+- 正式 matcher 创建/扩展关系后，在同一个 UoW 中执行归属；已经完整的普通 active relation 也可只补归属，不改 relation version、成员和金额事实。锁定全部相关成员、OA items 和 invoice source links，重读候选后批量 CAS。审计失败回滚整个事务。
+- 发票 owner 仍为 `app.invoices.source_links`。新增 `oa_expense_item_invoice.entry_method=workbench_auto_unique_amount`；保留真实人工导入/OA 来源，不伪造解析结果。单票及批量来源读取共用 canonical source-links loader，不再从 raw payload 猜归属。
+- 人工 relation delta 与来源更改在同一事务按关系内发票真实月份登记现有 matching scope（expedite）；自动 actor 不反向登记自己。跨月 relation hydrate 按全体成员 ID 读取。
+- matching UoW factory 显式注入 canonical query、invoice repository、audit repository；不注入 Application，不建立新表、worker、cache/read model。GET 继续直接读取 canonical facts。
+- 已移除旧“没有新关系就不写归属”的入口限制，以及逐票 source-link UPDATE；CAS 使用一次集合 UPDATE 并保持旧来源对比与 raw mirror 同步。
+
+并发幂等预留在同一 caller transaction 内先取得按 tenant/actor/idempotency-key 的 advisory lock，再执行原 INSERT/过期接管语句，消除 Read Committed 中 ON CONFLICT 看见并发行但同语句 CTE 读不到行的窗口；不增加重试兜底或进程内锁。

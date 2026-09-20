@@ -11,6 +11,7 @@ export type WorkbenchInlineAction =
   | "confirm-cash-pass-through"
   | "confirm-cash-ticket-purchase"
   | "cancel-cash-special"
+  | "select-existing-invoice"
   | "enter-invoice"
   | "manage-supporting-documents"
   | "assign-invoice-expense-items";

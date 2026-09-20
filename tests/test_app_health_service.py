@@ -51,7 +51,7 @@ class AppHealthServiceTests(unittest.TestCase):
         snapshot = service.build_snapshot(
             session=FakeSession(identity=FakeIdentity()),
             active_jobs=[],
-            oa_sync_payload={"status": "synced", "message": "OA 已同步", "dirty_scopes": []},
+            oa_sync_payload={"status": "synced", "message": "OA 已同步", "dirty_scopes": [], "workbench_matching_last_completed_at": "2026-09-20T03:00:00+00:00"},
             state_store_info={"storage_mode": "auto", "backend": "local_pickle"},
             rebuild_scheduled=False,
             duration_ms=12.345,
@@ -61,6 +61,7 @@ class AppHealthServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["version"], APP_HEALTH_SCHEMA_VERSION)
         self.assertEqual(snapshot["status"], "ok")
         self.assertEqual(snapshot["workbench_matching"]["status"], "ready")
+        self.assertEqual(snapshot["workbench_matching"]["last_completed_at"], "2026-09-20T03:00:00+00:00")
         self.assertEqual(snapshot["metrics"]["app_health_duration_ms"], 12.35)
         self.assertEqual(snapshot["alerts"]["active"], [])
 

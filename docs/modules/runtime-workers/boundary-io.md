@@ -64,3 +64,7 @@ per-worker env：`FIN_OPS_QUEUE_BACKEND` 固定为 `postgres`，删除该实例�
 
 Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只读授权，确保 dirty scope 重试可通过
 正式关系命令的持久化幂等边界完成；禁止通过直写 relation 或删除失败 scope 绕过该合同。
+
+## 2026-09-20 匹配 worker 的明细归属
+
+同一 workbench-matching worker 现在同时补普通关系内缺失的 OA 明细归属；心跳/运行汇总增加 `assigned_invoice_count`。提交入口复用 relation UoW、source-link CAS 和 operation audit。自动写入不自我 enqueue；没有新增事件/worker/read model。保留当前实例 poll 设置（仓库实例模板为 0.25 秒），不以 Python 默认值覆盖生产调优。

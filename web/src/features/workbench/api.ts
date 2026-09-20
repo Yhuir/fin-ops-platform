@@ -3710,6 +3710,9 @@ export async function assignWorkbenchInvoiceExpenseItems(
         expense_item_id: target.expenseItemId,
       })),
       anomaly_fingerprint: payload.anomalyFingerprint,
+      ...(payload.previousTargets ? { previous_targets: payload.previousTargets.map((target) => ({
+        oa_row_id: target.oaRowId, expense_item_id: target.expenseItemId,
+      })) } : {}),
       idempotency_key: payload.idempotencyKey,
     }),
   });

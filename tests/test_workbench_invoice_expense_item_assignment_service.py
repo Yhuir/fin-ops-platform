@@ -253,6 +253,24 @@ class WorkbenchInvoiceExpenseItemAssignmentServiceTests(unittest.TestCase):
         payload.update(overrides)
         return payload
 
+    def test_explicit_correction_preserves_provenance_and_checks_previous_targets(self):
+        original = [{"source_type": "manual_invoice_import", "source_id": "import"},
+                    {"source_type": "oa_expense_item_invoice", "derived_from_oa_id": "oa-1",
+                     "source_expense_item_id": "item-a", "entry_method": "workbench_auto_unique_amount"}]
+        service, invoices, _relations, audit = self._fixture(source_links=original)
+        request = self._payload(anomaly_fingerprint="", previous_targets=[{"oa_row_id": "oa-1", "expense_item_id": "item-a"}],
+                                targets=[{"oa_row_id": "oa-1", "expense_item_id": "item-b"}])
+        result = service.assign(request, actor_id="user", tenant_id="default", request_id="correction")
+        self.assertTrue(result['changed'])
+        self.assertEqual(invoices.updates[0]['source_links'][0], original[0])
+        self.assertEqual(invoices.updates[0]['source_links'][1]['entry_method'], 'workbench_manual_assignment')
+        self.assertEqual(audit.events[0]['payload']['previous_targets'], request['previous_targets'])
+        service, invoices, _, _ = self._fixture(source_links=original)
+        with self.assertRaises(WorkbenchInvoiceExpenseItemAssignmentError) as caught:
+            service.assign({**request, 'previous_targets': request['targets']}, actor_id="user", tenant_id="default", request_id="stale")
+        self.assertEqual(caught.exception.code, 'invoice_source_links_changed')
+        self.assertEqual(invoices.updates, [])
+
     def test_assigns_one_invoice_to_multiple_explicit_targets_without_amount_inference(self) -> None:
         service, invoices, relations, audit = self._fixture(
             source_links=[{"source_type": "manual_invoice_import", "source_id": "manual-1"}]

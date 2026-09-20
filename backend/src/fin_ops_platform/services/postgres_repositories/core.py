@@ -1313,33 +1313,29 @@ class PostgresCoreRepository:
         *,
         invoice_id: str,
     ) -> dict[str, Any] | None:
+        return self.load_invoice_source_links_batch_for_update(connection, invoice_ids=[invoice_id]).get(invoice_id)
+
+    def load_invoice_source_links_batch_for_update(
+        self, connection: Any, *, invoice_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        if not invoice_ids:
+            return {}
         rows = connection.fetch_all(
             """
-            select
-                coalesce(legacy_mongo_id, id::text) as invoice_id,
-                coalesce(total_with_tax, amount) as invoice_total,
-                coalesce(source_links, '[]'::jsonb) as stored_source_links,
-                case
-                    when jsonb_typeof(source_links) = 'array' then source_links
-                    when jsonb_typeof(raw_payload->'source_links') = 'array'
-                        then raw_payload->'source_links'
-                    when jsonb_typeof(raw_payload->'normalized_payload'->'source_links') = 'array'
-                        then raw_payload->'normalized_payload'->'source_links'
-                    else '[]'::jsonb
-                end as source_links
+            select coalesce(legacy_mongo_id, id::text) as invoice_id,
+                   coalesce(total_with_tax, amount) as invoice_total, currency, invoice_type,
+                   coalesce(source_links, '[]'::jsonb) as stored_source_links,
+                   coalesce(source_links, '[]'::jsonb) as source_links
             from app.invoices
-            where coalesce(legacy_mongo_id, id::text) = %s
+            where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
               and status <> 'deleted'
-            order by id
-            for update
-            """,
-            (str(invoice_id or "").strip(),),
+            order by id for update
+            """, (sorted(set(invoice_ids)),),
         )
-        if not rows:
-            return None
-        if len(rows) != 1:
-            raise RuntimeError(f"Invoice identity is ambiguous: {invoice_id}")
-        return dict(rows[0])
+        result = {str(row["invoice_id"]): dict(row) for row in rows}
+        if len(result) != len(rows):
+            raise ValueError("Canonical assignment invoice set changed.")
+        return result
 
     def update_invoice_source_links_cas(
         self,
@@ -1360,43 +1356,45 @@ class PostgresCoreRepository:
                 "select set_config('fin_ops.actor_id', %s, true)",
                 (actor_id,),
             )
-        for update in updates:
-            affected = connection.execute(
+        invoice_ids = [str(update["invoice_id"]) for update in updates]
+        if len(invoice_ids) != len(set(invoice_ids)):
+            raise ValueError("Duplicate invoice identities in source-link update batch.")
+        if updates:
+            written = connection.fetch_all(
                 """
-                update app.invoices
-                set source_links = %s,
+                update app.invoices invoice
+                set source_links = change.source_links,
                     raw_payload = jsonb_set(
-                        case
-                            when jsonb_typeof(raw_payload) = 'object' then raw_payload
-                            else '{}'::jsonb
-                        end,
+                        case when jsonb_typeof(invoice.raw_payload) = 'object'
+                            then invoice.raw_payload else '{}'::jsonb end,
                         '{normalized_payload}',
-                        (
-                            case
-                                when jsonb_typeof(raw_payload->'normalized_payload') = 'object'
-                                    then raw_payload->'normalized_payload'
-                                else '{}'::jsonb
-                            end
-                        ) || jsonb_build_object('source_links', %s::jsonb),
+                        (case when jsonb_typeof(invoice.raw_payload->'normalized_payload') = 'object'
+                            then invoice.raw_payload->'normalized_payload' else '{}'::jsonb end)
+                            || jsonb_build_object('source_links', change.source_links),
                         true
-                    ),
-                    updated_at = now()
-                where coalesce(legacy_mongo_id, id::text) = %s
-                  and coalesce(source_links, '[]'::jsonb) = %s::jsonb
+                    ), updated_at = now()
+                from jsonb_to_recordset(%s::jsonb)
+                    as change(invoice_id text, before_source_links jsonb, source_links jsonb)
+                where coalesce(invoice.legacy_mongo_id, invoice.id::text) = change.invoice_id
+                  and coalesce(invoice.source_links, '[]'::jsonb) = change.before_source_links
+                returning coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id
                 """,
-                (
-                    _jsonb(update["source_links"]),
-                    _jsonb(update["source_links"]),
-                    update["invoice_id"],
-                    _jsonb(update["before_source_links"]),
-                ),
+                (_jsonb(updates),),
             )
-            if affected != 1:
-                invoice_id = str(update["invoice_id"])
+            missing = set(invoice_ids) - {str(row["invoice_id"]) for row in written}
+            if missing or len(written) != len(invoice_ids):
+                invoice_id = sorted(missing or set(invoice_ids))[0]
                 raise InvoiceSourceLinksCasConflict(
-                    f"Invoice {invoice_id} source links changed before the write completed.",
-                    invoice_id=invoice_id,
+                    f"Invoice {invoice_id} source links changed before the write completed.", invoice_id=invoice_id,
                 )
+        if updates and actor_id != "system:workbench-deterministic-relation":
+            from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+                PostgresWorkbenchMatchingQueueRepository,
+            )
+            PostgresWorkbenchMatchingQueueRepository(connection).mark_relation_invoice_assignment_dirty(
+                case_ids=[], oa_row_ids=[str(update["invoice_id"]) for update in updates],
+                reason="invoice_source_links_changed",
+            )
         return {"written_invoice_count": len(updates)}
 
     def repair_submitted_etc_invoice_overlap(

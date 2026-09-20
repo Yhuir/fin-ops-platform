@@ -3901,17 +3901,15 @@ class Application:
         if not isinstance(payload, dict):
             payload = {}
         matching_queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
-        matching_dirty_scopes = (
-            [
-                entry
-                for entry in matching_queue.list_dirty_scopes()
-                if isinstance(entry, dict)
-                and str(entry.get("status") or "dirty").strip().lower()
-                in {"dirty", "retry", "processing", "failed"}
-            ]
-            if matching_queue is not None
-            else []
+        matching_scopes = matching_queue.list_dirty_scopes() if matching_queue is not None else []
+        payload["workbench_matching_last_completed_at"] = max(
+            (str(entry["completed_at"]) for entry in matching_scopes
+             if isinstance(entry, dict) and entry.get("completed_at")), default=None,
         )
+        matching_dirty_scopes = [
+            entry for entry in matching_scopes if isinstance(entry, dict)
+            and str(entry.get("status") or "dirty").strip().lower() in {"dirty", "retry", "processing", "failed"}
+        ]
         if not matching_dirty_scopes:
             return payload
         payload["workbench_matching_dirty_scopes"] = matching_dirty_scopes

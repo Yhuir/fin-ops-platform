@@ -20,6 +20,30 @@ class PostgresWorkbenchMatchingQueueRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def mark_relation_invoice_assignment_dirty(
+        self, *, case_ids: list[str], oa_row_ids: list[str], reason: str,
+    ) -> list[str]:
+        """Schedule full relation hydration using its actual invoice months, in the writer transaction."""
+        rows = self._connection.fetch_all(
+            """
+            select distinct to_char(invoice.invoice_date, 'YYYY-MM') as scope_month
+            from app.workbench_pair_relations relation
+            cross join lateral unnest(relation.row_ids, relation.row_types) member(row_id, row_type)
+            join app.invoices invoice
+              on coalesce(invoice.legacy_mongo_id, invoice.id::text) = member.row_id
+             and member.row_type = 'invoice'
+            where relation.status = 'active' and relation.relation_mode = 'manual_confirmed'
+              and (relation.case_id = any(%s::text[]) or relation.row_ids && %s::text[])
+              and invoice.status <> 'deleted' and invoice.invoice_date is not null
+            """,
+            (case_ids, oa_row_ids),
+        )
+        return self.mark_workbench_matching_dirty_scopes_in_transaction(
+            transaction=self._connection, tenant_id="default",
+            scope_months=[row["scope_month"] for row in rows], reason=reason,
+            source_versions={}, debounce_seconds=0,
+        )
+
     def mark_workbench_matching_dirty_scopes(
         self,
         *,
@@ -177,6 +201,43 @@ class PostgresWorkbenchMatchingQueueRepository:
         expected_last_error: str,
         expected_source_versions: dict[str, object],
     ) -> bool:
+        return self._retry_workbench_matching_scope(
+            tenant_id=tenant_id, scope_month=scope_month, reason=reason,
+            expected_attempt_count=expected_attempt_count, expected_request_id=expected_request_id,
+            expected_last_error=expected_last_error, expected_source_versions=expected_source_versions,
+            expected_status="failed",
+        )
+
+    def retry_completed_workbench_matching_scope(
+        self,
+        *,
+        tenant_id: str,
+        scope_month: str,
+        reason: str,
+        expected_attempt_count: int,
+        expected_request_id: str,
+        expected_last_error: str,
+        expected_source_versions: dict[str, object],
+    ) -> bool:
+        return self._retry_workbench_matching_scope(
+            tenant_id=tenant_id, scope_month=scope_month, reason=reason,
+            expected_attempt_count=expected_attempt_count, expected_request_id=expected_request_id,
+            expected_last_error=expected_last_error, expected_source_versions=expected_source_versions,
+            expected_status="completed",
+        )
+
+    def _retry_workbench_matching_scope(
+        self,
+        *,
+        expected_status: str,
+        tenant_id: str,
+        scope_month: str,
+        reason: str,
+        expected_attempt_count: int,
+        expected_request_id: str,
+        expected_last_error: str,
+        expected_source_versions: dict[str, object],
+    ) -> bool:
         def write(connection: Any) -> bool:
             row = connection.fetch_one(
                 """
@@ -191,7 +252,7 @@ class PostgresWorkbenchMatchingQueueRepository:
                     updated_at = now()
                 where tenant_id = %s
                   and scope_month = %s::date
-                  and status = 'failed'
+                  and status = %s
                   and attempt_count = %s
                   and coalesce(request_id, '') = %s
                   and coalesce(last_error, '') = %s
@@ -203,6 +264,7 @@ class PostgresWorkbenchMatchingQueueRepository:
                     text(reason),
                     text(tenant_id) or "default",
                     month_start(scope_month),
+                    expected_status,
                     max(0, int_value(expected_attempt_count, 0)),
                     text(expected_request_id) or "",
                     text(expected_last_error) or "",

@@ -285,6 +285,7 @@ function actionResultMessage(result: string | WorkbenchActionResult) {
 export default function ReconciliationWorkbenchPage() {
   const { setWorkbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
+  const previousMatchingCompletedAtRef = useRef<string | null | undefined>(undefined);
   const { runOperation } = useGlobalOperationOverlay();
   const { active, activationGeneration } = useOptionalPageActivation("reconciliation-workbench");
   const {
@@ -424,6 +425,7 @@ export default function ReconciliationWorkbenchPage() {
   const [cashTicketPurchaseDialog, setCashTicketPurchaseDialog] = useState<CashTicketPurchaseDialogState | null>(null);
   const [invoiceEntryTarget, setInvoiceEntryTarget] = useState<(WorkbenchOaInvoiceSupplementTarget & { initialMode?: "upload" | "manual" }) | null>(null);
   const [invoiceAssignmentTarget, setInvoiceAssignmentTarget] = useState<WorkbenchInvoiceExpenseItemAssignmentTarget | null>(null);
+  const [existingInvoicePicker, setExistingInvoicePicker] = useState<{ group: WorkbenchRelationGroup; oaRowId: string; expenseItemId: string } | null>(null);
   const hasOaSyncRefreshBlockingInteraction = detailRow !== null
     || isDetailLoading
     || explicitSelectedPairedRows.length > 0
@@ -435,7 +437,8 @@ export default function ReconciliationWorkbenchPage() {
     || exceptionDrawerOpen
     || cashTicketPurchaseDialog !== null
     || invoiceEntryTarget !== null
-    || invoiceAssignmentTarget !== null;
+    || invoiceAssignmentTarget !== null
+    || existingInvoicePicker !== null;
   const hasOaSyncRefreshBlockingInteractionRef = useRef(hasOaSyncRefreshBlockingInteraction);
   useLayoutEffect(() => {
     hasOaSyncRefreshBlockingInteractionRef.current = hasOaSyncRefreshBlockingInteraction;
@@ -705,6 +708,16 @@ export default function ReconciliationWorkbenchPage() {
       refreshWorkbenchDataInBackground(WORKBENCH_VIEW_MONTH);
     }, OA_SYNC_REFRESH_DEBOUNCE_MS);
   }, [refreshWorkbenchDataInBackground]);
+
+  useEffect(() => {
+    if (!active || healthStatus.matchingLastCompletedAt === undefined) return;
+    const completedAt = healthStatus.matchingLastCompletedAt;
+    const previous = previousMatchingCompletedAtRef.current;
+    previousMatchingCompletedAtRef.current = completedAt;
+    if (previous !== undefined && completedAt && completedAt !== previous) {
+      scheduleOaSyncWorkbenchRefresh();
+    }
+  }, [active, healthStatus.matchingLastCompletedAt, scheduleOaSyncWorkbenchRefresh]);
 
   const applyOaSyncStatus = useCallback((status: WorkbenchOaSyncStatus) => {
     const previousStatus = previousOaSyncStatusRef.current;
@@ -1916,6 +1929,13 @@ export default function ReconciliationWorkbenchPage() {
       return;
     }
 
+    if (action === "select-existing-invoice") {
+      if (row.sourceOaId && row.sourceExpenseItemIds?.[0]) {
+        setExistingInvoicePicker({ group, oaRowId: row.sourceOaId, expenseItemId: row.sourceExpenseItemIds[0] });
+      }
+      return;
+    }
+
     if (action === "assign-invoice-expense-items") {
       const anomaly = row.workbenchAnomalies?.find(
         (candidate) => candidate.code === "oa_invoice_attachment_unassigned",
@@ -1925,7 +1945,7 @@ export default function ReconciliationWorkbenchPage() {
         ?? group.rows.oa.find((candidate) => candidate.caseId)?.caseId
         ?? group.rows.bank.find((candidate) => candidate.caseId)?.caseId
         ?? "";
-      if (row.recordType !== "invoice" || !anomaly || !caseId || candidates.length === 0) {
+      if (row.recordType !== "invoice" || (!anomaly && !row.sourceExpenseItemIds?.length) || !caseId || candidates.length === 0) {
         openActionResultDialog(
           "无法确定这张发票可归属的 OA 付款明细，请刷新页面后重试。",
           "无法选择 OA 明细",
@@ -1941,7 +1961,10 @@ export default function ReconciliationWorkbenchPage() {
         invoiceNo: row.tableValues.invoiceNo ?? row.label,
         sellerName: row.tableValues.sellerName ?? row.counterparty,
         amount: row.tableValues.grossAmount ?? row.amount,
-        anomalyFingerprint: anomaly.fingerprint,
+        anomalyFingerprint: anomaly?.fingerprint ?? "",
+        ...(!anomaly ? { previousTargets: candidates.filter((candidate) => (
+          row.sourceExpenseItemIds?.includes(candidate.expenseItemId)
+        )).map(({ oaRowId, expenseItemId }) => ({ oaRowId, expenseItemId })) } : {}),
         idempotencyKey: crypto.randomUUID(),
         candidates,
       });
@@ -2674,6 +2697,19 @@ export default function ReconciliationWorkbenchPage() {
           }
         }}
       />
+      {existingInvoicePicker ? <AppDrawer open onClose={() => setExistingInvoicePicker(null)}
+        title="选择已有发票" closeLabel="关闭选择已有发票" width="min(640px, 100vw)">
+        <p>选择当前关联组的待归属发票。其他组或尚未关联的发票，请先在关联台选择 OA 与发票建立关联。</p>
+        {existingInvoicePicker?.group.rows.invoice.filter((row) => !row.displayOnly && row.workbenchAnomalies?.some((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")).map((row) => (
+          <Button key={row.id} variant="tertiary" isDisabled={!canWriteWorkbench} onPress={() => {
+            const picker = existingInvoicePicker;
+            void handleRowAction(row, "assign-invoice-expense-items", picker.group);
+            setInvoiceAssignmentTarget((target) => target ? { ...target, initialTargets: [{ oaRowId: picker.oaRowId, expenseItemId: picker.expenseItemId }] } : null);
+            setExistingInvoicePicker(null);
+          }}>{row.tableValues.invoiceNo ?? row.label} · {row.tableValues.grossAmount ?? row.amount}</Button>
+        ))}
+        {existingInvoicePicker && !existingInvoicePicker.group.rows.invoice.some((row) => !row.displayOnly && row.workbenchAnomalies?.some((anomaly) => anomaly.code === "oa_invoice_attachment_unassigned")) ? <p>当前组没有待归属发票。</p> : null}
+      </AppDrawer> : null}
       <WorkbenchInvoiceAssignmentDrawer
         disabled={!canWriteWorkbench}
         open={invoiceAssignmentTarget !== null}

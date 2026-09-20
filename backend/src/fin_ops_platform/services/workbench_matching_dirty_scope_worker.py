@@ -72,6 +72,7 @@ class WorkbenchMatchingDirtyScopeWorker:
             "stale_completed_scope_months": stale_completed_scope_months,
             "processed_months": [],
             "failed_months": [],
+            "assigned_invoice_count": 0,
             "planned_relation_count": 0,
             "created_relation_count": 0,
             "extended_relation_count": 0,
@@ -183,6 +184,7 @@ class WorkbenchMatchingDirtyScopeWorker:
             processed_months.append(scope_month)
             summary["processed_months"] = processed_months
             for count_key in (
+                "assigned_invoice_count",
                 "planned_relation_count",
                 "created_relation_count",
                 "extended_relation_count",

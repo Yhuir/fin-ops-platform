@@ -1041,6 +1041,12 @@ def test_invoice_source_links_cas_updates_structured_and_raw_mirror_together() -
             self.calls.append((" ".join(sql.lower().split()), params))
             return 1
 
+        def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+            self.calls.append((" ".join(sql.lower().split()), params))
+            if "update app.invoices" in sql:
+                return [{"invoice_id": row["invoice_id"]} for row in params[0].obj]
+            return []
+
     source_links = [
         {"source_type": "manual_invoice_import", "source_id": "file-current"},
         {
@@ -1061,13 +1067,12 @@ def test_invoice_source_links_cas_updates_structured_and_raw_mirror_together() -
         reason="sync provenance mirror",
     )
 
-    sql, params = connection.calls[-1]
-    assert "set source_links = %s, raw_payload = jsonb_set(" in sql
-    assert "jsonb_build_object('source_links', %s::jsonb)" in sql
-    assert params[0].obj == source_links
-    assert params[1].obj == source_links
-    assert params[2] == "invoice-structured-provenance"
-    assert params[3].obj == source_links
+    sql, params = next(call for call in connection.calls if "update app.invoices" in call[0])
+    assert "set source_links = change.source_links" in sql
+    assert "jsonb_build_object('source_links', change.source_links)" in sql
+    assert params[0].obj[0]["invoice_id"] == "invoice-structured-provenance"
+    assert params[0].obj[0]["source_links"] == source_links
+    assert params[0].obj[0]["before_source_links"] == source_links
 
 
 class SubmittedEtcInvoiceIdentityConnection:
@@ -1536,6 +1541,9 @@ def test_invoice_expense_item_link_repair_requires_unchanged_source_links() -> N
         def execute(self, _sql: str, _params: tuple = ()) -> int:
             return 0
 
+        def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict]:
+            return []
+
     connection = ChangedLinksConnection()
     with pytest.raises(RuntimeError, match="changed after the repair plan"):
         PostgresCoreRepository(connection).repair_invoice_expense_item_links(
@@ -1559,14 +1567,11 @@ def test_invoice_expense_item_link_repair_requires_unchanged_source_links() -> N
 
 def test_invoice_expense_item_link_repair_reports_the_actual_conflicting_invoice() -> None:
     class SecondInvoiceChangedConnection:
-        def __init__(self) -> None:
-            self.invoice_update_count = 0
-
         def execute(self, sql: str, _params: tuple = ()) -> int:
-            if "update app.invoices" not in sql.lower():
-                return 1
-            self.invoice_update_count += 1
-            return 1 if self.invoice_update_count == 1 else 0
+            return 1
+
+        def fetch_all(self, _sql: str, _params: tuple = ()) -> list[dict]:
+            return [{"invoice_id": "invoice-1"}]
 
     connection = SecondInvoiceChangedConnection()
     updates = [

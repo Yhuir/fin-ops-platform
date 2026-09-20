@@ -97,3 +97,9 @@ production scenario 和审批输入下运行；它必须使用测试自有数据
 6. request ID 对应的结构化 error/timing trace。
 
 详细发布命令见 `deploy/oa/README.md`；数据库运行边界见 `docs/operations/postgresql-runtime.md`。
+
+## 后到发票归属与历史重扫（2026-09-20）
+
+既有 `workbench-matching-retry <release> --scope-month YYYY-MM --dry-run` 除 failed 外允许 completed scope：completed dry-run 使用线上同一纯规则/归属 service 预览同组补齐数及正式关系计划数，不写来源。`--execute --expected-fingerprint ...` 仅通过 scope repository 对原状态/attempt/request/source_versions 做 CAS 并登记 expedite；实际修复仍由正常 worker 完成。dirty/processing 状态禁止重复登记。无 rule-version 全历史重放、无直写发票脚本。
+
+人工来源/关系/补充凭证变更与 scope 登记同事务；自动 actor 不递归 enqueue。回退代码不会撤销已提交归属，需要通过正式纠正命令和审计修正。此次无新增 schema、无全库备份要求，不删除主数据库。
