@@ -142,6 +142,58 @@ class _InstrumentedConnection:
 
 
 class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
+    def test_oa_source_audit_includes_pending_child_provenance_and_multi_item_sources(self) -> None:
+        from fin_ops_platform.services.invoice_expense_item_link_repair_service import (
+            build_oa_attachment_invoice_link_audit_plan,
+        )
+        from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+            load_oa_attachment_invoice_link_audit_snapshot,
+        )
+
+        oa_id = "oa-pending-audit"
+        invoice_no = "26539150014000559991"
+        items = [{
+            "expense_item_id": f"{oa_id}:item:{index}", "row_index": str(index), "amount": "25",
+            "attachment_invoices": [{"digital_invoice_no": invoice_no,
+                                     "source_attachment_key": f"pending-attachment-{index}"}],
+        } for index in range(2)]
+        links = [{"source_type": "oa_attachment_invoice", "derived_from_oa_id": oa_id,
+                  "source_expense_item_id": item["expense_item_id"],
+                  "source_attachment_key": item["attachment_invoices"][0]["source_attachment_key"]}
+                 for item in items]
+        self.raw_connection.execute("""insert into app.oa_pending_payment_admissions
+            (tenant_id, scope_key, oa_id, workflow_status, amount, source_signature, source_payload)
+            values ('default', '2026-09', %s, 'in_progress', 50, 'pending-source-audit', %s::jsonb)""",
+            (oa_id, json.dumps({"id": oa_id, "expense_items": items})))
+        self.raw_connection.execute("""insert into app.invoices
+            (legacy_mongo_id, invoice_type, invoice_no, digital_invoice_no, amount, signed_amount,
+             total_with_tax, status, workbench_visibility, source_links)
+            values ('invoice-pending-audit', 'input', %s, %s, 50, 50, 50, 'active', 'visible', %s::jsonb)""",
+            (invoice_no, invoice_no, json.dumps(links)))
+
+        def plan():
+            rows = load_oa_attachment_invoice_link_audit_snapshot(self.raw_connection)
+            return build_oa_attachment_invoice_link_audit_plan(rows)
+
+        current = plan()
+        self.assertEqual(current["classification_counts"]["valid_attachment_owner"], 1)
+        self.assertEqual(current["update_count"], 0)
+        stale_links = [{**links[0], "source_expense_item_id": f"{oa_id}:stale"}]
+        self.raw_connection.execute("update app.invoices set source_links=%s::jsonb where legacy_mongo_id='invoice-pending-audit'",
+                                    (json.dumps(stale_links),))
+        repair = plan()
+        self.assertEqual(repair["update_count"], 1)
+        self.assertEqual({link["source_expense_item_id"] for link in repair["updates"][0]["source_links"]},
+                         {item["expense_item_id"] for item in items})
+        with self.raw_connection.transaction() as tx:
+            PostgresCoreRepository(tx).repair_invoice_expense_item_links(
+                tx, repair["updates"], operator_id="test", reason="Verified pending OA sources")
+        self.assertEqual(plan()["update_count"], 0)
+        self.assertEqual(plan()["classification_counts"]["valid_attachment_owner"], 1)
+        self.raw_connection.execute("delete from app.oa_pending_payment_admissions where oa_id=%s", (oa_id,))
+        self.assertEqual(plan()["classification_counts"]["unresolved"], 1)
+        self.assertEqual(plan()["update_count"], 0)
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.database_url = require_postgres_test_database_url()

@@ -7,7 +7,7 @@
 | 测试类别 | 入口与业务断言 |
 | --- | --- |
 | 业务单元 | `test_invoice_oa_source_priority.py`：来源接管、幂等、一对多、错误组迁移、OA 来源禁止人工/金额推断归属；非 OA 人工选择保留 |
-| Service / repository | `test_oa_attachment_invoice_promotion_service.py`：真实 PG 同一 canonical ID 接管，财务字段保留、并发旧预览回滚、OA 后人工导入零发票写；0172 清理竞争边、审计与幂等 |
+| Service / repository | `test_oa_attachment_invoice_promotion_service.py`：真实 PG 同一 canonical ID 接管，财务字段保留、并发旧预览回滚、OA 后人工导入零发票写；0172 清理竞争边、审计与幂等。`test_workbench_query_postgres_integration.py` 的来源审计样例保护进行中 OA 一票多子项、过期来源修复、源消失与重放幂等 |
 | API | `test_workbench_invoice_expense_item_assignment_api.py`：OA 来源改归属返回 409 与明确 error/message，不写来源或审计；原权限路径沿用 |
 | 后台任务 | `test_confirmed_invoice_import_uow.py`、`test_workbench_query_postgres_integration.py`：批量 dirty scope、原子 relation 迁移、失败回滚、重放幂等、列表/详情同源；当前页面没有 read model/cache，不新增 freshness 状态 |
 | 前端 | `RelationGroupGrid.test.tsx`：OA 不显示归属动作、普通人工发票保留动作；原筛选/抽屉/权限测试继续回归 |

@@ -50,7 +50,46 @@ def load_invoice_header_fact_repair_snapshot(
 
 
 _OA_ATTACHMENT_INVOICE_LINK_AUDIT_SQL = """
-with invoice_facts as materialized (
+with pending_oa as materialized (
+    select 'pending:' || oa_id as id, oa_id as row_id, source_payload
+    from app.oa_pending_payment_admissions
+    where tenant_id = 'default' and workflow_status = 'in_progress'
+),
+pending_items as materialized (
+    select item.value->>'expense_item_id' as id,
+           pending.id as oa_application_id,
+           item.value->>'expense_item_id' as row_id,
+           item.value as normalized_payload
+    from pending_oa pending
+    cross join lateral jsonb_array_elements(
+        coalesce(pending.source_payload->'expense_items', '[]'::jsonb)
+    ) item(value)
+    where nullif(btrim(item.value->>'expense_item_id'), '') is not null
+),
+audit_oa_applications as materialized (
+    select id::text, row_id, status from app.oa_applications
+    union all
+    select id, row_id, 'active'::text from pending_oa
+),
+audit_oa_items as materialized (
+    select id::text, oa_application_id::text, row_id, normalized_payload
+    from app.oa_application_items
+    union all
+    select id, oa_application_id, row_id, normalized_payload from pending_items
+),
+audit_oa_attachments as materialized (
+    select oa_application_id::text, source_attachment_key, normalized_payload
+    from app.oa_attachments
+    union all
+    select item.oa_application_id, evidence.value->>'source_attachment_key',
+           evidence.value || jsonb_build_object('source_expense_item_id', item.row_id)
+    from pending_items item
+    cross join lateral jsonb_array_elements(
+        coalesce(item.normalized_payload->'attachment_invoices', '[]'::jsonb)
+    ) evidence(value)
+    where nullif(btrim(evidence.value->>'source_attachment_key'), '') is not null
+),
+invoice_facts as materialized (
     select
         coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id,
         invoice.digital_invoice_no,
@@ -110,8 +149,8 @@ current_owned_evidence as materialized (
         evidence.value->>'source_attachment_key' as source_attachment_key,
         encode(digest(evidence.value->>'source_attachment_key', 'sha256'), 'hex')
             as source_attachment_key_hash
-    from app.oa_application_items item
-    join app.oa_applications application
+    from audit_oa_items item
+    join audit_oa_applications application
       on application.id = item.oa_application_id
      and application.status <> 'deleted'
     left join app.oa_source_aliases candidate_alias
@@ -124,7 +163,7 @@ current_owned_evidence as materialized (
             else '[]'::jsonb
         end
     ) evidence(value)
-    join app.oa_attachments attachment
+    join audit_oa_attachments attachment
       on attachment.oa_application_id = item.oa_application_id
      and attachment.source_attachment_key = evidence.value->>'source_attachment_key'
      and nullif(btrim(attachment.normalized_payload->>'source_expense_item_id'), '')
@@ -219,15 +258,15 @@ audit_rows as materialized (
             ) source_parent
             where source_link.value->>'source_type' = 'oa_attachment_invoice'
         ) edge
-        left join app.oa_application_items owner_item
+        left join audit_oa_items owner_item
           on owner_item.row_id = edge.source_expense_item_id
-        left join app.oa_applications owner_application
+        left join audit_oa_applications owner_application
           on owner_application.id = owner_item.oa_application_id
          and owner_application.status <> 'deleted'
         left join app.oa_source_aliases owner_alias
           on owner_alias.alias_row_id = owner_application.row_id
          and owner_alias.status = 'active'
-        left join app.oa_applications owner_canonical_application
+        left join audit_oa_applications owner_canonical_application
           on owner_canonical_application.row_id = coalesce(
               owner_alias.canonical_row_id,
               owner_application.row_id
@@ -236,7 +275,7 @@ audit_rows as materialized (
         left join app.oa_source_aliases source_parent_alias
           on source_parent_alias.alias_row_id = edge.source_oa_row_id
          and source_parent_alias.status = 'active'
-        left join app.oa_applications source_parent_application
+        left join audit_oa_applications source_parent_application
           on source_parent_application.row_id = coalesce(
               source_parent_alias.canonical_row_id,
               edge.source_oa_row_id
@@ -286,15 +325,15 @@ audit_rows as materialized (
             ) with ordinality source(value, ordinality)
             where source.value->>'source_type' = 'oa_expense_item_invoice'
         ) source_link
-        left join app.oa_application_items owner_item
+        left join audit_oa_items owner_item
           on owner_item.row_id = source_link.source_expense_item_id
-        left join app.oa_applications owner_application
+        left join audit_oa_applications owner_application
           on owner_application.id = owner_item.oa_application_id
          and owner_application.status <> 'deleted'
         left join app.oa_source_aliases owner_alias
           on owner_alias.alias_row_id = owner_application.row_id
          and owner_alias.status = 'active'
-        left join app.oa_applications owner_canonical_application
+        left join audit_oa_applications owner_canonical_application
           on owner_canonical_application.row_id = coalesce(
               owner_alias.canonical_row_id,
               owner_application.row_id
@@ -303,7 +342,7 @@ audit_rows as materialized (
         left join app.oa_source_aliases source_alias
           on source_alias.alias_row_id = source_link.source_oa_row_id
          and source_alias.status = 'active'
-        left join app.oa_applications source_canonical_application
+        left join audit_oa_applications source_canonical_application
           on source_canonical_application.row_id = coalesce(
               source_alias.canonical_row_id,
               source_link.source_oa_row_id

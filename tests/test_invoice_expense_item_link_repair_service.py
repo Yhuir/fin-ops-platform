@@ -497,8 +497,10 @@ def test_full_oa_attachment_audit_snapshot_is_one_set_based_query() -> None:
     sql, params = connection.calls[0]
     assert params == ()
     assert "from app.invoices invoice" in sql
-    assert "from app.oa_application_items item" in sql
-    assert "join app.oa_attachments attachment" in sql
+    assert "from app.oa_application_items" in sql
+    assert "from app.oa_pending_payment_admissions" in sql
+    assert "workflow_status = 'in_progress'" in sql
+    assert "join audit_oa_attachments attachment" in sql
     assert "current_owned_evidence as materialized" in sql
     assert "split_part(source_parent.raw_source_oa_row_id, ':item:', 1)" in sql
     assert "source_link.value->>'source_expense_item_id' like '%%:item:%%'" in sql

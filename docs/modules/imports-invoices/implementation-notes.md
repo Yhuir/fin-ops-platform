@@ -7,6 +7,7 @@
 - 复用 canonical 发票、import UoW、原 matching worker、relation UoW；不新增依赖、后台任务类型、缓存或全表查询热路径。
 - 验收覆盖来源顺序、重复导入零发票写、强关联不可人工改、旧关系原子迁移、异常审计、migration 幂等、列表/详情一致及既有功能回归。测试入口见 [测试矩阵](tests.md)。发布前 PG/迁移定向 248 项、最新来源与导入回归 79 项、关键浏览器流 20 项通过；100/1000 发票归属均 14 次 SQL。前端全量 1371 项通过，进项使用抽屉搜索一项失败已在未修改基线 d2e72b730 复现。
 - 0172 不改 schema/财务字段，上一 release 在迁移后合成 PG 数据库完成流水更新、审计原子回滚、导入 enrichment、发票更新、设置重置五项兼容写验证。生产性能与发布结果随发布证据交付；任务结束删除本次合成测试数据库，不创建主库备份。
+- 生产验证发现旧 OA 来源审计只读 completed projection，误把进行中 admissions 的 40 张票归为 unresolved。审计读取在同一批量 SQL 内纳入 pending `source_payload.expense_items[].attachment_invoices`，以包含该附件的结构化子项为 owner；不猜金额、不改变 OA 分区、不引入第二写链。PG 回归覆盖进行中一票多子项、过期子项来源修复、重放幂等与源 OA 消失时的明确 unresolved。
 
 ## 2026-09-11 - 重复导入名称与正式事实的审计职责
 
