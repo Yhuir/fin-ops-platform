@@ -12964,6 +12964,15 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   background: #ebf8f0;
 }
 
+.zone,
+.workbench-anomaly-drawer__detail-grid {
+  --ops-grid-header: #1e293b;
+  --ops-grid-header-hover: #334155;
+  --ops-grid-header-border: rgba(148, 163, 184, 0.42);
+  --ops-grid-header-icon: #cbd5e1;
+  --ops-grid-header-active: #60a5fa;
+}
+
 .zone {
   --ops-surface: #ffffff;
   --ops-page: #f8fafc;
@@ -12980,11 +12989,6 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   --ops-brand: #3b82f6;
   --ops-brand-dark: #2563eb;
   --ops-brand-soft: #eaf3ff;
-  --ops-grid-header: #1e293b;
-  --ops-grid-header-hover: #334155;
-  --ops-grid-header-border: rgba(148, 163, 184, 0.42);
-  --ops-grid-header-icon: #cbd5e1;
-  --ops-grid-header-active: #60a5fa;
   --ops-success: #27a644;
   --ops-warning: #d89b2b;
   border: 1px solid var(--ops-border);

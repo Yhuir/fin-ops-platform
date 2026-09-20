@@ -12,6 +12,50 @@ const AMOUNT_RULE_FAMILY_TITLES = [
 ] as const;
 
 test.describe("workbench exception browser flow", () => {
+  test("shares readable column-header colors between the main grid and exception drawer", async ({ page }, testInfo) => {
+    await installDeterministicApiMocks(page, {
+      sessionMode: "user",
+      workbenchAmountMismatchScenario: true,
+      workbenchInitialRelationConfirmed: true,
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+
+    const mainHeader = page.getByTestId("zone-unpaired").locator(".candidate-columnheader").first();
+    await expect(mainHeader).toBeVisible();
+    const mainColors = await mainHeader.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, color: style.color, border: style.borderBottomColor };
+    });
+    expect(mainColors.background).toBe("rgb(30, 41, 59)");
+    expect(mainColors.color).toBe("rgb(248, 250, 252)");
+    await mainHeader.hover();
+    const mainHoverBackground = await mainHeader.evaluate((element) => getComputedStyle(element).backgroundColor);
+    expect(mainHoverBackground).toBe("rgb(51, 65, 85)");
+    await page.getByTestId("zone-unpaired").getByRole("button", {
+      name: "未配对异常 1 | 已配对异常 0",
+    }).click();
+
+    const drawer = page.getByRole("dialog", { name: "异常处理" });
+    await drawer.getByRole("button", { name: "展开异常明细" }).first().click();
+    const headerRows = drawer.locator(".candidate-pane-columnheaders");
+    await expect(headerRows).toHaveCount(3);
+    for (const headerRow of await headerRows.all()) {
+      await expect(headerRow).toHaveCSS("background-color", mainColors.background);
+      for (const header of await headerRow.locator(".candidate-columnheader").all()) {
+        await expect(header).toHaveCSS("background-color", mainColors.background);
+        await expect(header).toHaveCSS("color", mainColors.color);
+        await expect(header).toHaveCSS("border-bottom-color", mainColors.border);
+      }
+    }
+    const firstDrawerHeader = drawer.locator(".candidate-columnheader").first();
+    await firstDrawerHeader.hover();
+    await expect(firstDrawerHeader).toHaveCSS("background-color", mainHoverBackground);
+    await drawer.getByRole("heading", { name: "异常处理" }).hover();
+    await expectNoUnexpectedSuccessUiErrors(page);
+    await drawer.screenshot({ path: testInfo.outputPath("exception-columnheaders.png") });
+  });
+
   test("loads bounded anomaly summaries and fetches detail only after expansion", async ({ page }) => {
     const groupRequestUrls: URL[] = [];
     page.on("request", (request) => {
