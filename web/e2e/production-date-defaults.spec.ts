@@ -20,7 +20,7 @@ test("ordinary date filters start in all time and preserve only same-visit selec
   });
   const results: { path: string; status: number; milliseconds: number }[] = [];
   const entries = [
-    ["/", "/api/workbench/groups", "month", "all"],
+    ["/", "/api/workbench", "month", "all"],
     ["/bank-details", "/api/bank-details/transactions", "date_from", ""],
     ["/oa-pending-payments", "/api/oa-pending-payments/rows", "month", ""],
     ["/input-invoice-usage", "/api/input-invoice-usage/rows", "month", ""],
@@ -34,7 +34,7 @@ test("ordinary date filters start in all time and preserve only same-visit selec
   for (const [path, endpoint, key, value] of entries) {
     const started = performance.now();
     const incoming = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(endpoint)
-      && response.request().method() === "GET");
+      && response.request().method() === "GET", { timeout: 30_000 });
     await page.goto(`/fin-ops${path}`, { waitUntil: "domcontentloaded" });
     const response = await incoming;
     expect(response.status(), path).toBe(200);
@@ -66,6 +66,7 @@ test("ordinary date filters start in all time and preserve only same-visit selec
   await page.getByRole("button", { name: "刷新银行明细" }).click(); await refresh;
   await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
   await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "成本统计", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "成本统计", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole("button", { name: "银行明细时间范围：年月" })).toBeVisible();
   await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
