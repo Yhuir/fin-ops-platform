@@ -1767,6 +1767,8 @@ textarea {
 }
 
 .input-invoice-usage-relation-count-button {
+  flex-shrink: 0;
+  white-space: nowrap;
   border-color: color-mix(in srgb, var(--fp-primary) 36%, var(--fp-border));
   background: var(--fp-primary-soft);
   color: var(--fp-primary);
