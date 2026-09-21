@@ -171,3 +171,11 @@ OA 附件解析的金额与税额优先读取明确字段或合计表头，不�
 ## 2026-09-21 附件准备分批
 
 普通 OA month/all 同步使用现有 adapter 解析上下文，每轮最多准备 20 个未缓存附件；已有进展且耗时达到 45 秒时在下一文件前返回准备未完成信号。已成功解析文件逐个持久化，后续领取复用相同 parser version 的缓存。service 输出 `status=deferred, reason=oa_attachments_preparing, parsed_attachment_count`，不写部分 OA/admission/payment snapshot，不执行权威删除或 promotion，不登记同步成功/失败。完整 source batch 准备好后才沿原事务完成提交。精确强制重解析和人工上传保持既有合同；真实 OCR 错误不缓存为空结果。
+
+## 2026-09-21：附件字段身份与页区约束
+
+- `OAAttachmentInvoiceService` 使用 PDF 页面位置顺序、OCR 同行坐标恢复字段，票号只接受“发票号码”标签直接对应的完整值；不再从全文任选 20 位数字，不再将长数字截成税号。无法确定身份返回既有 `no_evidence`/未识别结果，原生文本未识别才运行该页 OCR。
+- 内部 `AttachmentTextSegment(text, region)` 保留 PDF 页号；输出来源页区采用 `page:N/document:1`、`image:1/document:1`、`page:N/machine_invoice:M` 等形式。单页存在多个不同数字发票身份但未能分区时不自动正式化；既有多页、机打票多区及 DOCX 多媒体解析保留。
+- parser version 升级为 `2026-09-21-labelled-invoice-identity-v5`，仍使用既有缓存版本过滤；不读旧版本缓存作为替代结果。
+- `PostgresCoreRepository.assert_oa_attachment_region_owners_in_transaction` 在既有事务内批量读取页区归属并加事务锁，普通 OA 保存与反向导入关联入口共用，统一先取身份锁再取页区锁。一个明确的附件页区不能拥有两张不同 canonical 发票；同票重复写入幂等，不同页可拥有不同发票。历史 `document:1` 缺少页码证据，不参与页区唯一性推断；反向导入既有来源接管规则不变。
+- 无新表、索引、依赖、HTTP DTO 或 worker；OA 原始库只读。手动附件识别与 OA 同步共用此解析入口。

@@ -185,3 +185,10 @@ Nightly CI 应至少覆盖：
 - API/组件：`AppStatusApi.test.ts`、`AppStatusIndicator.test.tsx` 覆盖 error/rebuilding/mismatch、摘要缺失和状态弹层；既有 app health API/service 与 OA API 权限测试回归。
 - Read model/cache/job：复用附件缓存与 durable queue，无 read model 新增或刷新策略变化；已保存进展、失败不缓存、恢复后提交均需验证。
 - 生产：真实 OCR 只读识别、OA 同步状态/四 worker/队列、部署 T0/T30 和成本页面回归。
+
+## 附件身份回归（2026-09-21）
+
+- `test_oa_attachment_invoice_service.py`：合成 PDF 的标签/值存储顺序与页面位置相反，仍只识别正确票号及购销税号；银行账号不能变成票号；不同票号未分区时拒绝猜测；多页、机打多区、OCR 单页恢复和真实页区来源保留。
+- `test_oa_attachment_invoice_promotion_service.py`：真实 PostgreSQL 页区冲突不落库、重复写幂等、不同页可落不同发票，同批冲突整体失败。
+- `test_oa_bank_account_invoice_repair.py`：原件身份、金额日期、来源独占及下游引用校验；正确票不改；关联成员/绑定/历史与发票删除同事务，matching 写失败回滚，重复执行不删替代票。
+- `test_manual_invoice_entry_service.py` 与 `test_import_file_api.py`：保留人工识别和人工导入 API 既有边界。前端未改；使用既有前端与浏览器回归验证消费者。

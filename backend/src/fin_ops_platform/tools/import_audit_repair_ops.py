@@ -401,6 +401,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-bank-audit-row-relink-count", type=int)
     parser.add_argument("--expected-bank-audit-row-unlink-count", type=int)
     parser.add_argument("--repair-etc-invoice-payload", action="store_true")
+    parser.add_argument("--retire-oa-bank-account-invoice")
+    parser.add_argument("--replacement-invoice-id")
+    parser.add_argument("--source-attachment-key")
     parser.add_argument("--invoice-id", action="append", default=[])
     parser.add_argument("--inspect-invoice-source", action="store_true")
     parser.add_argument("--operator-id")
@@ -601,9 +604,82 @@ def _run_verified_financial_repair(args: Any, *, stdout: TextIO) -> int:
         connection.close()
 
 
+def _run_oa_bank_account_invoice_repair(args: Any, *, stdout: TextIO) -> int:
+    from fin_ops_platform.services.import_audit_repair_service import build_oa_bank_account_invoice_repair_plan
+    from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+    from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+        apply_oa_bank_account_invoice_repair,
+        load_oa_bank_account_invoice_repair_snapshot,
+    )
+    allowed = {"retire_oa_bank_account_invoice", "replacement_invoice_id", "source_attachment_key",
+               "dry_run", "execute", "expected_fingerprint", "rollback_manifest_path", "operator_id", "reason"}
+    if not all((args.replacement_invoice_id, args.source_attachment_key)) or any(
+        _argument_is_set(value) for name, value in vars(args).items() if name not in allowed
+    ):
+        raise SystemExit("Invoice retirement requires exact replacement/attachment IDs and cannot combine modes.")
+    if args.execute and not all((args.expected_fingerprint, args.rollback_manifest_path, args.operator_id, args.reason)):
+        raise SystemExit("Execute requires the dry-run fingerprint, private recovery artifact, operator and reason.")
+    connection = PostgresConnection(PostgresSettings.from_env())
+    kwargs = {"invoice_id": args.retire_oa_bank_account_invoice,
+              "replacement_id": args.replacement_invoice_id, "attachment_key": args.source_attachment_key}
+    try:
+        with connection.transaction() as tx:
+            tx.execute("set transaction isolation level repeatable read read only")
+            snapshot = load_oa_bank_account_invoice_repair_snapshot(tx, **kwargs)
+        if len(snapshot["attachments"]) != 1:
+            raise ValueError("Expected one exact source attachment.")
+        attachment = snapshot["attachments"][0]
+        if not attachment["filename"].lower().endswith(".pdf"):
+            raise ValueError("Bank-account identity repair requires the original PDF.")
+        parser = OAAttachmentInvoiceService()
+        content = parser._download_content(parser.build_download_url(attachment["normalized_payload"]["file_path"]))
+        if not content:
+            raise RuntimeError("Original PDF download failed.")
+        segments = parser._extract_text_segments(content, "pdf", attachment["filename"])
+        verified = [evidence for segment in segments for evidence in parser._parse_evidences_from_text(segment.text)
+                    if evidence.get("evidence_type") == "tax_invoice"]
+        accounts = set(re.findall(r"(?:银行账号|开户行及账号|开户账号)[:：]\s*([0-9]{15,25})(?![0-9])",
+                                  "\n".join(segment.text for segment in segments)))
+        facts = {"verified_invoices": verified, "bank_account_numbers": accounts,
+                 "source_sha256": hashlib.sha256(content).hexdigest()}
+        plan = build_oa_bank_account_invoice_repair_plan(snapshot, **kwargs, **facts)
+        plan["rollback_manifest_fingerprint"] = _rollback_manifest_fingerprint(plan["rollback_manifest"])
+        if args.dry_run and args.rollback_manifest_path:
+            _write_private_rollback_manifest(args.rollback_manifest_path, plan)
+        completion = None
+        if args.execute:
+            if args.expected_fingerprint != plan["source_fingerprint"]:
+                raise RuntimeError("Invoice facts changed after dry-run.")
+            _verify_private_rollback_manifest(args.rollback_manifest_path, plan)
+            with connection.transaction() as tx:
+                tx.execute("set transaction isolation level serializable")
+                current = build_oa_bank_account_invoice_repair_plan(
+                    load_oa_bank_account_invoice_repair_snapshot(tx, **kwargs), **kwargs, **facts)
+                if current["source_fingerprint"] != plan["source_fingerprint"]:
+                    raise RuntimeError("Invoice facts changed before execution.")
+                completion = apply_oa_bank_account_invoice_repair(tx, current, operator_id=args.operator_id, reason=args.reason)
+                AuditTrailService(PostgresOperationsAuditRepository(tx)).record_action(
+                    actor_id=args.operator_id, action="oa_bank_account_invoice_repair",
+                    entity_type="invoice", entity_id=args.retire_oa_bank_account_invoice,
+                    metadata={"event_type": "operation.completed", "page_key": "imports_invoices",
+                              "reason": args.reason, "outcome": "success", **completion,
+                              "replacement_id": args.replacement_invoice_id,
+                              "source_sha256": facts["source_sha256"], "attachment_key": args.source_attachment_key},
+                )
+        report = {key: value for key, value in plan.items() if key not in {"rollback_manifest", "relations"}}
+        report["relation_cases"] = [{"case_id": row["case_id"], "version": row["version"]} for row in plan["relations"]]
+        report.update(mode="execute" if args.execute else "dry_run", completion=completion)
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str), file=stdout)
+        return 0
+    finally:
+        connection.close()
+
+
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
     stdout = stdout or sys.stdout
     args = build_parser().parse_args(argv)
+    if args.retire_oa_bank_account_invoice:
+        return _run_oa_bank_account_invoice_repair(args, stdout=stdout)
     if args.export_source_file_id:
         return _export_source_file(args, stdout=stdout)
     if args.repair_invoice_financial_source:

@@ -729,6 +729,34 @@ class PostgresOAAttachmentInvoiceRepositoryIntegrationTests(unittest.TestCase):
         if connection is not None:
             connection.close()
 
+    def test_region_identity_conflict_is_atomic_and_other_pages_remain_valid(self) -> None:
+        def row(invoice_id, number, region):
+            return {"id": invoice_id, "invoice_type": "input", "invoice_no": number,
+                    "digital_invoice_no": number, "source_unique_key": number,
+                    "invoice_date": "2026-08-10", "amount": "175.47", "signed_amount": "175.47",
+                    "tax_amount": "10.53", "total_with_tax": "186.00", "status": "pending",
+                    "counterparty": {"id": "seller", "name": "Test Seller"},
+                    "source_links": [{"source_type": "oa_attachment_invoice", "source_attachment_key": "attachment",
+                                      "source_region_key": region, "derived_from_oa_id": "oa-1"}]}
+        first = row("invoice-good", "26317000002920092512", "page:1/document:1")
+        second = row("invoice-bad", "53001905038050548106", "page:1/document:1")
+        repository = PostgresOAAttachmentInvoiceRepository(self.connection)
+        repository.save_invoices([first])
+        repository.save_invoices([first])
+        with self.assertRaises(InvoiceSourceLinksCasConflict):
+            repository.save_invoices([second])
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.invoices")["n"], 1)
+        with self.assertRaises(InvoiceSourceLinksCasConflict), self.connection.transaction() as tx:
+            PostgresOAAttachmentInvoiceRepository(tx, identity_locks_held=True).save_invoices([second])
+        second["source_links"][0]["source_region_key"] = "page:2/document:1"
+        repository.save_invoices([second])
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.invoices")["n"], 2)
+        conflicting_batch = [row("a", "26317000002920092514", "image:1/document:1"),
+                             row("b", "26317000002920092515", "image:1/document:1")]
+        with self.assertRaises(InvoiceSourceLinksCasConflict):
+            repository.save_invoices(conflicting_batch)
+        self.assertEqual(self.connection.fetch_one("select count(*) as n from app.invoices")["n"], 2)
+
     def test_reverse_cache_maps_each_invoice_only_to_its_unique_proven_context(self) -> None:
         self.connection.execute(
             """

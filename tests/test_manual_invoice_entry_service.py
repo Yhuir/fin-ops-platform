@@ -59,7 +59,7 @@ def _digital_invoice_text(invoice_no: str) -> str:
     return f"""
 电子发票（普通发票）
 下载次数：1
-国家税务总局统一发票监制章 {invoice_no}
+发票号码：{invoice_no}
 开票日期：2026年08月14日
 名称：云南溯源科技有限公司
 统一社会信用代码/纳税人识别号：915300007194052520

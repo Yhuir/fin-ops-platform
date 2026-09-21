@@ -27,6 +27,7 @@ class PostgresOAAttachmentInvoiceRepository:
         if self._identity_locks_held:
             # ConfirmedInvoiceImportUnitOfWork already locked these identities,
             # saved the formal rows, then reloaded them for the promotion decision.
+            repository.assert_oa_attachment_region_owners_in_transaction(self._connection, invoices)
             repository.save_invoices(invoices)
             return
         transaction_factory = getattr(self._connection, "transaction", None)

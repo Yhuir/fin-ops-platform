@@ -339,6 +339,30 @@ class ImportFileApiTests(unittest.TestCase):
         self.assertEqual(json.loads(response.body)["values"]["invoice_number"], "FIRST")
         self.assertEqual(calls, [("first.jpg", b"first")])
 
+    def test_manual_recognition_never_prefills_bank_account_as_invoice_or_writes_facts(self) -> None:
+        from fin_ops_platform.services.oa_attachment_invoice_service import OAAttachmentInvoiceService
+        from tests.test_oa_attachment_invoice_service import VALID_PNG, _digital_invoice_text
+        app = build_application()
+        fixture = getattr(app, "_test_import_storage_tmp", None)
+        if fixture is not None:
+            self.addCleanup(fixture.cleanup)
+        parser = OAAttachmentInvoiceService()
+        app._manual_invoice_entry_service._document_recognizer = parser
+        before = len(app._import_service.list_invoices())
+        body, headers = build_multipart_payload(imported_by="finance-user", files=[MockImportFile("invoice.png", VALID_PNG)])
+        for labelled in (False, True):
+            text = _digital_invoice_text("26317000002920092512")
+            if not labelled:
+                text = text.replace("发票号码：26317000002920092512", "发票号码：\n开票日期：\n263170000029200925122026")
+            text += "\n银行账号：53001905038050548106"
+            with patch.object(parser, "_extract_image_text", return_value=text):
+                response = app.handle_request("POST", "/imports/invoices/manual/recognize", body=body, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            values = json.loads(response.body)["values"]
+            self.assertEqual(values["invoice_number"], "26317000002920092512" if labelled else "")
+            self.assertNotIn("source_region_key", values)
+            self.assertEqual(len(app._import_service.list_invoices()), before)
+
     def test_import_batch_error_csv_contains_review_rows_without_internal_ids(self) -> None:
         app = build_application()
         fixture = getattr(app, "_test_import_storage_tmp", None)

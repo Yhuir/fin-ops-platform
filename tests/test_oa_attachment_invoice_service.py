@@ -297,7 +297,7 @@ def _digital_invoice_text(invoice_no: str) -> str:
     return f"""
 电子发票（普通发票）
 下载次数：1
-国家税务总局统一发票监制章 {invoice_no}
+发票号码：{invoice_no}
 开票日期：2026年06月01日
 名称：云南溯源科技有限公司
 统一社会信用代码/纳税人识别号：915300007194052520
@@ -450,7 +450,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         }
         first_invoice_text = _digital_invoice_text("26322000000128086591")
         malformed_text = _digital_invoice_text("126412000001978430971").replace(
-            "国家税务总局统一发票监制章 ",
+            "发票号码：",
             "发票号码：",
         )
         recovered_invoice_text = _digital_invoice_text("26412000001978430971")
@@ -500,7 +500,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
     def test_parse_invoice_text_rejects_labeled_21_digit_invoice_number(self) -> None:
         service = OAAttachmentInvoiceService()
         extracted_text = _digital_invoice_text("126412000001978430971").replace(
-            "国家税务总局统一发票监制章 ",
+            "发票号码：",
             "发票号码：",
         )
 
@@ -630,23 +630,68 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(invoice["tax_rate"], "13%")
         self.assertEqual(invoice["amount"], "176.99")
 
-    def test_parse_invoice_text_accepts_digital_invoice_when_number_and_date_are_detached(self) -> None:
+    def test_pdf_layout_anchors_identity_and_keeps_bank_account_out_of_invoice_fields(self) -> None:
         service = OAAttachmentInvoiceService()
-
-        invoice = service._parse_invoice_text(DIGITAL_INVOICE_TEXT_WITH_DETACHED_NUMBER_AND_DATE)
-
-        self.assertIsNotNone(invoice)
-        assert invoice is not None
-        self.assertEqual(invoice["invoice_no"], "26322000000128086591")
-        self.assertEqual(invoice["buyer_name"], "云南溯源科技有限公司")
-        self.assertEqual(invoice["seller_name"], "中科视拓（南京）科技有限公司")
+        with fitz.open() as document:
+            page = document.new_page(width=620, height=800)
+            # Store every label before every value, as in real generated PDFs.
+            for point, text in [
+                ((20, 30), "电子发票（普通发票）"),
+                ((350, 60), "发票号码："), ((350, 90), "开票日期："),
+                ((20, 130), "名称："), ((320, 130), "名称："),
+                ((20, 160), "纳税人识别号："), ((320, 160), "纳税人识别号："),
+                ((20, 230), "合计 ¥175.47 ¥10.53"),
+                ((20, 260), "价税合计（小写）¥186.00"),
+                ((20, 300), "银行账号：53001905038050548106"),
+                ((420, 60), "26317000002920092512"), ((420, 90), "2026年08月10日"),
+                ((55, 130), "测试购买有限公司"), ((355, 130), "测试销售有限公司"),
+                ((110, 160), "915300007194052520"), ((410, 160), "91310110350849784X"),
+            ]:
+                page.insert_text(point, text, fontname="china-s", fontsize=10)
+            content = document.tobytes()
+        with patch.object(service, "_download_content", return_value=content), patch.object(service, "_run_image_ocr") as ocr:
+            result = service.parse_file_result({"fileName": "synthetic.pdf", "filePath": "/synthetic.pdf"})
+        self.assertEqual(result["parse_status"], "parsed")
+        self.assertEqual(len(result["evidences"]), 1)
+        invoice = result["evidences"][0]
+        self.assertEqual(invoice["invoice_no"], "26317000002920092512")
         self.assertEqual(invoice["buyer_tax_no"], "915300007194052520")
-        self.assertEqual(invoice["seller_tax_no"], "91320191MA1XM5TX71")
-        self.assertEqual(invoice["issue_date"], "2026-01-07")
-        self.assertEqual(invoice["net_amount"], "66.04")
-        self.assertEqual(invoice["tax_amount"], "3.96")
-        self.assertEqual(invoice["total_with_tax"], "70.00")
-        self.assertEqual(invoice["tax_rate"], "6%")
+        self.assertEqual(invoice["seller_tax_no"], "91310110350849784X")
+        self.assertEqual(invoice["total_with_tax"], "186.00")
+        self.assertEqual(invoice["source_region_key"], "page:1/document:1")
+        ocr.assert_not_called()
+
+    def test_ocr_joins_fields_by_coordinates_instead_of_detection_order(self) -> None:
+        service = OAAttachmentInvoiceService()
+        def item(x, y, text):
+            return [[[x, y], [x + 60, y], [x + 60, y + 10], [x, y + 10]], text, 0.99]
+        engine = Mock(return_value=([
+            item(10, 10, "发票号码："), item(10, 50, "银行账号："),
+            item(100, 50, "53001905038050548106"), item(100, 10, "26317000002920092512"),
+        ], None))
+        with patch.object(service, "_get_ocr_engine", return_value=engine):
+            self.assertEqual(service._run_image_ocr(b"image"), [
+                "发票号码： 26317000002920092512", "银行账号： 53001905038050548106"])
+
+    def test_unlabelled_accounts_and_multiple_invoice_identities_are_not_promoted(self) -> None:
+        service = OAAttachmentInvoiceService()
+        for text in [
+            _digital_invoice_text("26317000002920092512").replace("发票号码：", "银行账号："),
+            _digital_invoice_text("26317000002920092512") + "\n发票号码：26317000002920092513",
+        ]:
+            with self.subTest(text=text):
+                self.assertIsNone(service._parse_invoice_text(text))
+
+    def test_tax_ids_preserve_missing_fields_and_reject_truncation(self) -> None:
+        service = OAAttachmentInvoiceService()
+        self.assertEqual(service._extract_tax_ids(
+            "纳税人识别号：\n纳税人识别号:91310110350849784X".replace("：", ":")), ["", "91310110350849784X"])
+        self.assertEqual(service._extract_tax_ids("纳税人识别号:263170000029200925122026"), [""])
+        self.assertEqual(service._extract_tax_ids("银行账号:53001905038050548106"), [])
+
+    def test_detached_number_without_layout_is_not_guessed_from_prose(self) -> None:
+        self.assertIsNone(OAAttachmentInvoiceService()._parse_invoice_text(
+            DIGITAL_INVOICE_TEXT_WITH_DETACHED_NUMBER_AND_DATE))
 
     def test_parse_invoice_text_keeps_net_amount_separate_from_total_with_tax(self) -> None:
         service = OAAttachmentInvoiceService()
@@ -743,7 +788,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual(evidences[0]["document_kind"], "yunnan_machine_invoice")
         self.assertEqual(evidences[0]["invoice_no"], "00582299")
         self.assertEqual(evidences[0]["amount"], "15.00")
-        self.assertEqual(evidences[0]["source_region_key"], "machine_invoice:1")
+        self.assertEqual(evidences[0]["source_region_key"], "image:1/machine_invoice:1")
 
     def test_parse_evidences_extracts_multiple_machine_printed_invoices_from_one_ocr_text(self) -> None:
         service = OAAttachmentInvoiceService()
@@ -758,7 +803,7 @@ class OAAttachmentInvoiceServiceTests(unittest.TestCase):
         self.assertEqual([evidence["evidence_type"] for evidence in evidences], ["machine_invoice", "machine_invoice"])
         self.assertEqual([evidence["invoice_no"] for evidence in evidences], ["00827789", "00233178"])
         self.assertEqual([evidence["amount"] for evidence in evidences], ["25.00", "23.00"])
-        self.assertEqual([evidence["source_region_key"] for evidence in evidences], ["machine_invoice:1", "machine_invoice:2"])
+        self.assertEqual([evidence["source_region_key"] for evidence in evidences], ["image:1/machine_invoice:1", "image:1/machine_invoice:2"])
 
     def test_parse_evidences_extracts_wechat_etc_payment_receipt_25(self) -> None:
         service = OAAttachmentInvoiceService()

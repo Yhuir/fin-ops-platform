@@ -919,6 +919,32 @@ class WorkbenchPairRelationService:
         )
         return deepcopy(cancelled_relations), history
 
+    def retire_verified_false_invoice_member(
+        self, *, case_id: str, invoice_id: str, replacement_id: str, actor_id: str, reason: str,
+    ) -> dict[str, Any]:
+        """Offline source-evidence repair only; preserve all other relation members."""
+        before = self.get_active_relation_by_case_id(case_id)
+        if not before or before.get("special_metadata", {}).get("formal_relation", {}).get("origin") != "system_deterministic":
+            raise ValueError("False invoice repair only supports a system-derived active relation.")
+        members = list(zip(before["row_ids"], before["row_types"], strict=True))
+        if (invoice_id, "invoice") not in members or (replacement_id, "invoice") not in members:
+            raise ValueError("The relation must contain both the false invoice and its verified replacement.")
+        after = deepcopy(before)
+        retained = [(row_id, row_type) for row_id, row_type in members if (row_id, row_type) != (invoice_id, "invoice")]
+        after["row_ids"] = [row_id for row_id, _ in retained]
+        after["row_types"] = [row_type for _, row_type in retained]
+        after["version"] = int(before["version"]) + 1
+        after["updated_at"] = self._timestamp()
+        for binding in after.get("special_metadata", {}).get("oa_attachment_bindings", []):
+            binding["invoice_row_ids"] = [value for value in binding["invoice_row_ids"] if value != invoice_id]
+        if "member_count" in after.get("evidence", {}):
+            after["evidence"]["member_count"] = str(len(retained))
+        self._pair_relations[case_id] = after
+        self.record_history(operation_type="repair_false_invoice_member", before_relations=[before],
+                            after_relations=[after], affected_row_ids=[invoice_id, replacement_id],
+                            created_by=actor_id, note=reason)
+        return deepcopy(after)
+
     def record_history(
         self,
         *,

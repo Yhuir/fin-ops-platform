@@ -834,3 +834,54 @@ def _text(value: Any) -> str:
 def _fingerprint(snapshot: dict[str, Any]) -> str:
     encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def build_oa_bank_account_invoice_repair_plan(
+    snapshot: dict[str, Any], *, invoice_id: str, replacement_id: str,
+    attachment_key: str, verified_invoices: list[dict[str, str]],
+    bank_account_numbers: set[str], source_sha256: str,
+) -> dict[str, Any]:
+    """Retire an unused OA-only false invoice proven to be a bank account on the source PDF."""
+    rows = {row["invoice_id"]: row for row in snapshot["invoices"]}
+    if invoice_id == replacement_id or set(rows) != {invoice_id, replacement_id}:
+        raise ValueError("Both distinct canonical invoices must exist.")
+    target, replacement = rows[invoice_id], rows[replacement_id]
+    if target["invoice_no"] not in bank_account_numbers:
+        raise ValueError("The rejected invoice number is not a labelled bank account on the source PDF.")
+    verified = {row["invoice_no"]: row for row in verified_invoices}
+    if target["invoice_no"] in verified or replacement["invoice_no"] not in verified:
+        raise ValueError("The source PDF does not prove the proposed invoice replacement.")
+    evidence = verified[replacement["invoice_no"]]
+    if any(Decimal(str(replacement[field])) != Decimal(evidence[evidence_field]) for field, evidence_field in (
+        ("amount", "net_amount"), ("tax_amount", "tax_amount"), ("total_with_tax", "total_with_tax"),
+    )) or str(replacement["invoice_date"])[:10] != evidence["issue_date"]:
+        raise ValueError("Verified invoice amounts/date differ from the preserved canonical invoice.")
+    links = target["source_links"]
+    if (target["invoice_type"] != "input" or replacement["status"] == "deleted"
+            or target["status"] != "pending" or Decimal(str(target["written_off_amount"])) != 0
+            or target["source_batch_id"] or target["etc_invoice_id"] or not links
+            or any(link.get("source_type") != "oa_attachment_invoice"
+                   or link.get("source_attachment_key") != attachment_key for link in links)):
+        raise ValueError("Only an unused invoice owned exclusively by the exact OA attachment can be retired.")
+    if not any(link.get("source_type") == "oa_attachment_invoice"
+               and link.get("source_attachment_key") == attachment_key for link in replacement["source_links"]):
+        raise ValueError("The preserved invoice must own the same attachment.")
+    if any(snapshot["references"].values()):
+        raise ValueError("The false invoice has formal downstream references; resolve them through their owner first.")
+    for relation in snapshot["relations"]:
+        members = list(zip(relation["row_ids"], relation["row_types"], strict=True))
+        if (relation["status"] != "active"
+                or relation["special_metadata"].get("formal_relation", {}).get("origin") != "system_deterministic"
+                or (invoice_id, "invoice") not in members or (replacement_id, "invoice") not in members):
+            raise ValueError("Unsupported formal relation: only proven system-added invoice membership can be repaired.")
+    from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
+    return {
+        "source_fingerprint": _fingerprint({"snapshot": snapshot, "source_sha256": source_sha256}),
+        "target_uuid": str(target["id"]), "invoice_id": invoice_id, "replacement_id": replacement_id,
+        "source_sha256": source_sha256, "attachment_key": attachment_key,
+        "invalidate_cache_keys": [row["source_attachment_key"] for row in snapshot["caches"]],
+        "scope_months": expand_scope_month_window(str(target["invoice_date"])[:7]),
+        "relations": snapshot["relations"],
+        "rollback_manifest": {"source_fingerprint": _fingerprint({"snapshot": snapshot, "source_sha256": source_sha256}),
+                              "snapshot": snapshot},
+    }

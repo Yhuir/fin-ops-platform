@@ -634,6 +634,21 @@ class PostgresWorkbenchRelationRepository:
             )
         return sorted(f"{row_type}:{row_id}" for row_type, row_id in requested - found)
 
+    def retire_verified_false_invoice_member(
+        self, *, before: dict[str, Any], invoice_id: str, replacement_id: str, actor_id: str, reason: str,
+    ) -> None:
+        from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
+        self.acquire_relation_member_locks([], case_ids=[before["case_id"]])
+        current = self.load_active_workbench_pair_relation_by_case_id_for_update(before["case_id"])
+        if not current or current["version"] != before["version"] or current["row_ids"] != before["row_ids"]:
+            raise ValueError("The relation changed before false invoice repair.")
+        service = WorkbenchPairRelationService(pair_relations={before["case_id"]: current})
+        service.retire_verified_false_invoice_member(
+            case_id=before["case_id"], invoice_id=invoice_id, replacement_id=replacement_id,
+            actor_id=actor_id, reason=reason,
+        )
+        self.save_workbench_pair_relation_delta(service.snapshot(), changed_case_ids=[before["case_id"]])
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],

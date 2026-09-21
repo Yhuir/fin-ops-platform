@@ -107,3 +107,20 @@ Blocking issue 包含：
 ## 后续扩展条件
 
 对象身份展示继续复用 canonical query policy。即使多个页面需要 duplicate group、canonical object 或 source lineage，也应先扩展共享查询策略与必要索引；本 App 不恢复独立 identity projection/worker。
+
+## 银行账号误识别为 OA 发票的定向修复
+
+使用现有 `fin_ops_platform.tools.import_audit_repair_ops` 的
+`--retire-oa-bank-account-invoice <错误发票ID> --replacement-invoice-id <正确发票ID> --source-attachment-key <附件key>`。
+先 `--dry-run --rollback-manifest-path <受控私有目录中的JSON>`，再以返回的
+`--expected-fingerprint`、同一 manifest、`--operator-id`、`--reason` 执行 `--execute`。
+
+工具重新下载原始 PDF，要求错误号码能在银行账号标签处找到、正确号码能按新解析器识别且与保留发票的日期/金额一致。
+错误记录必须仅属于该 OA 附件且未核销；税局认证、抵扣计划、ETC、反提及人工导入等其它正式引用会阻止删除。
+同组中同时存在正确票的系统自动关联通过 Workbench owner 精确删除错误成员；其它人工关系不能自动改写。
+所有写入共用 serializable 事务和既有 financial correction/audit：不改 OA 源系统、不删主数据库、不修改正确发票。
+旧版本目标附件缓存及其映射被失效，之后调用现有附件刷新接口重读源系统，检查重复刷新不新建错误票。
+
+恢复文件只覆盖本次涉及的 invoice/关联/缓存及缓存映射快照；成功验证后必须通过现有
+`--delete-rollback-manifest-artifact <文件名> --expected-rollback-manifest-fingerprint <指纹>` 精确删除，不能遗留备份。
+这不是按金额或文件名批量去重；一个附件包含多张真实发票仍合法。

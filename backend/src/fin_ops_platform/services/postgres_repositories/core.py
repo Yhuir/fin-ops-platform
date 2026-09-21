@@ -1077,6 +1077,63 @@ class PostgresCoreRepository:
             (normalized_keys,),
         )
 
+    def retire_verified_oa_invoice(
+        self, transaction: Any, *, invoice_uuid: str, operator_id: str, reason: str,
+    ) -> int:
+        """Canonical deletion for an offline, source-verified repair in the caller's transaction."""
+        transaction.execute("select set_config('fin_ops.correction_reason',%s,true)", (reason,))
+        transaction.execute("select set_config('fin_ops.actor_id',%s,true)", (operator_id,))
+        removed = transaction.execute("delete from app.invoices where id=%s::uuid", (invoice_uuid,))
+        if removed != 1:
+            raise RuntimeError("The verified OA invoice target changed before retirement.")
+        return removed
+
+    def assert_oa_attachment_region_owners_in_transaction(self, transaction: Any, invoices: list[Any]) -> None:
+        """One proven page region cannot acquire two different canonical owners."""
+        owners: dict[tuple[str, str], str] = {}
+        for invoice in self._iter_items(invoices):
+            for link in invoice.get("source_links") or []:
+                attachment = str(link.get("source_attachment_key") or "")
+                region = str(link.get("source_region_key") or "")
+                if link.get("source_type") != "oa_attachment_invoice" or not attachment:
+                    continue
+                # Legacy document:1 has no page evidence and cannot enforce uniqueness.
+                if not region.startswith(("page:", "image:")) or "/" not in region:
+                    continue
+                key = (attachment, region)
+                owner = str(invoice["id"])
+                if key in owners and owners[key] != owner:
+                    raise InvoiceSourceLinksCasConflict("OA attachment region has conflicting invoice identities.", invoice_id=owner)
+                owners[key] = owner
+        if not owners:
+            return
+        transaction.fetch_all(
+            "select pg_advisory_xact_lock(hashtextextended(ordered.key, 0)) "
+            "from (select key from unnest(%s::text[]) locks(key) order by key) ordered",
+            ([f"oa-invoice-region:{attachment}:{region}" for attachment, region in sorted(owners)],),
+        )
+        rows = transaction.fetch_all(
+            """
+            select distinct coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id, invoice.source_links
+            from app.invoices invoice
+            cross join lateral jsonb_array_elements(invoice.source_links) link
+            join jsonb_to_recordset(%s::jsonb) requested(source_attachment_key text, source_region_key text)
+              on link->>'source_attachment_key' = requested.source_attachment_key
+             and link->>'source_region_key' = requested.source_region_key
+            where invoice.status <> 'deleted' and link->>'source_type' = 'oa_attachment_invoice'
+            """,
+            (_jsonb([{"source_attachment_key": attachment, "source_region_key": region}
+                     for attachment, region in owners]),),
+        )
+        for row in rows:
+            for link in row["source_links"]:
+                key = (link.get("source_attachment_key"), link.get("source_region_key"))
+                if link.get("source_type") == "oa_attachment_invoice" and key in owners and owners[key] != row["invoice_id"]:
+                    raise InvoiceSourceLinksCasConflict(
+                        "OA attachment region already belongs to another invoice; review the source before promotion.",
+                        invoice_id=owners[key],
+                    )
+
     def save_oa_attachment_invoices_in_transaction(
         self,
         transaction: Any,
@@ -1092,6 +1149,7 @@ class PostgresCoreRepository:
         ]
         keys = sorted({key for _invoice, key in keyed})
         self.lock_invoice_identity_keys_in_transaction(transaction, keys)
+        self.assert_oa_attachment_region_owners_in_transaction(transaction, incoming)
         current_rows = transaction.fetch_all(
             """
             select id::text as postgres_id,

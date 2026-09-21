@@ -359,3 +359,9 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - 凭证多文件一个金额，金额为凭证自身合计；正式发票、凭证允许同段并合计。共享发票按连通的来源子项合计且只计一次。SQL 分区、领域核对、主表和异常处理采用一致语义。
 - migration 0174 为凭证组新增 `invoice_basis` JSON；保存事务记录准确 invoice ID/金额。事实变化后有效凭证金额为空，列表提示待填写/确认，管理 API 返回 `amount_confirmation_required`，原金额仍可编辑并重新确认。未知不得按 OA 值补齐，原发票财务字段和税务统计不受影响。
 - 原有版本冲突、权限、文件校验、审计及 matching scope 合同不变；进行中 OA 仍不能进入已配对。旧“正式发票覆盖凭证则不计额”分支移除，无并行旧链。
+
+## 2026-09-21：已证实的错误附件发票成员修复
+
+离线 `import_audit_repair_ops --retire-oa-bank-account-invoice` 只处理原件证明为银行账号误识别的 OA 发票。关联成员修复由 `WorkbenchPairRelationService.retire_verified_false_invoice_member` 与 `PostgresWorkbenchRelationRepository` 负责，调用现有成员锁、版本检查、delta 持久化、历史事件和 matching 通知；不在发票 SQL 中改写关联表。
+
+仅允许修复同时包含错误票与正确替代票的 active system_deterministic 关系。保留 case ID、OA、银行、正确发票、模式和其余业务元数据；移除错误 invoice 成员和附件绑定中的同一 ID，递增版本并追加 `repair_false_invoice_member` 历史。普通人工撤销及 OA 附件不可变规则不变，不给页面增加绕过入口。关联修复、错误发票删除、旧附件缓存失效和审计在同一数据库事务内完成，任一步失败整体回滚。

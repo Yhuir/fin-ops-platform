@@ -1265,3 +1265,82 @@ def load_import_source_file(connection: Any, file_id: str) -> dict[str, Any] | N
            where (file.legacy_mongo_id = %s or file.id::text = %s) and object.tombstoned_at is null""",
         (file_id, file_id),
     )
+
+
+def load_oa_bank_account_invoice_repair_snapshot(
+    connection: Any, *, invoice_id: str, replacement_id: str, attachment_key: str,
+) -> dict[str, Any]:
+    rows = connection.fetch_all("""
+        select *, coalesce(legacy_mongo_id,id::text) as invoice_id from app.invoices
+        where coalesce(legacy_mongo_id,id::text)=any(%s::text[]) order by id
+    """, ([invoice_id, replacement_id],))
+    attachments = connection.fetch_all("""
+        select source_attachment_key, filename, normalized_payload
+        from app.oa_attachments where source_attachment_key=%s
+    """, (attachment_key,))
+    caches = connection.fetch_all("""
+        select * from app.oa_attachment_invoice_cache cache
+        where exists (select 1 from jsonb_array_elements(cache.invoices) item
+                      where item->>'source_attachment_key'=%s)
+        order by cache.source_attachment_key
+    """, (attachment_key,))
+    target = next((row for row in rows if row["invoice_id"] == invoice_id), None)
+    references: dict[str, int] = {}
+    if target:
+        ids = [invoice_id, str(target["id"])]
+        # Formal owners only. Matching candidates are derived and refreshed after repair.
+        for table, column, is_array in (
+            ("workbench_exception_cases", "row_ids", True),
+            ("input_invoice_usage_oa_reverse_batches", "invoice_ids", True),
+            ("etc_submission_batches", "invoice_ids", True),
+            ("tax_offset_plans", "selected_input_ids", True),
+            ("tax_offset_plans", "selected_output_ids", True),
+            ("import_batch_rows", "linked_object_id", False),
+            ("pending_invoice_manual_invoice_commands", "invoice_id", False),
+            ("etc_batch_invoice_links", "invoice_id", False),
+        ):
+            predicate = f"{column} && %s::text[]" if is_array else f"{column}::text = any(%s::text[])"
+            references[f"{table}.{column}"] = connection.fetch_one(
+                f"select count(*) as n from app.{table} where {predicate}", (ids,),
+            )["n"]
+        references["tax_certified_import_records"] = connection.fetch_one(
+            "select count(*) as n from app.tax_certified_import_records where invoice_no=%s or digital_invoice_no=%s",
+            (target["invoice_no"], target["invoice_no"]),
+        )["n"]
+    relations = connection.fetch_all(
+        "select * from app.workbench_pair_relations where row_ids && %s::text[] order by case_id",
+        ([invoice_id, str(target["id"])] if target else [invoice_id],),
+    )
+    cache_sources = connection.fetch_all(
+        "select * from app.oa_attachment_invoice_cache_sources where cache_source_attachment_key=any(%s::text[]) "
+        "order by cache_source_attachment_key,source_attachment_key,source_kind",
+        ([row["source_attachment_key"] for row in caches],),
+    )
+    return {"invoices": rows, "attachments": attachments, "caches": caches,
+            "cache_sources": cache_sources, "references": references, "relations": relations}
+
+
+def apply_oa_bank_account_invoice_repair(
+    connection: Any, plan: dict[str, Any], *, operator_id: str, reason: str,
+) -> dict[str, int]:
+    from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
+    for relation in plan["relations"]:
+        PostgresWorkbenchRelationRepository(connection).retire_verified_false_invoice_member(
+            before=relation, invoice_id=plan["invoice_id"], replacement_id=plan["replacement_id"],
+            actor_id=operator_id, reason=reason,
+        )
+    removed = PostgresCoreRepository(connection).retire_verified_oa_invoice(
+        connection, invoice_uuid=plan["target_uuid"], operator_id=operator_id, reason=reason,
+    )
+    caches = connection.execute(
+        "delete from app.oa_attachment_invoice_cache where source_attachment_key=any(%s::text[])",
+        (plan["invalidate_cache_keys"],),
+    )
+    from fin_ops_platform.services.postgres_repositories.workbench_matching_queue import (
+        PostgresWorkbenchMatchingQueueRepository,
+    )
+    PostgresWorkbenchMatchingQueueRepository.mark_workbench_matching_dirty_scopes_in_transaction(
+        transaction=connection, tenant_id="default", scope_months=plan["scope_months"],
+        reason="oa_bank_account_invoice_repair", source_versions={}, debounce_seconds=0,
+    )
+    return {"removed_invoice_count": removed, "invalidated_cache_count": caches, "repaired_relation_count": len(plan["relations"])}
