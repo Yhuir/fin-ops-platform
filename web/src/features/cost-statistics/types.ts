@@ -131,6 +131,8 @@ export type CostStatisticsManualAllocationUnit = {
   expenseContent: string;
   oaApplicant: string;
   oaOriginalAmount: string;
+  lockOaAmount: boolean;
+  outsideCostAmount: string;
   costEligible?: boolean;
 };
 
@@ -168,7 +170,6 @@ export type CostStatisticsManualAllocationTask = {
   scopeVersion: number;
   status: "pending" | "allocated";
   pendingReasons: string[];
-  amountsFixed: boolean;
   allowsPartial?: boolean;
   waitingOaIds?: string[];
   sourceAllocations: CostSourceAllocations | null;
@@ -217,6 +218,7 @@ export type CostStatisticsManualAllocationPageRequest = {
 };
 
 export type SaveCostStatisticsManualAllocationRequest = {
+  oaAmountLocks: Array<{ unitId: string; locked: boolean }>;
   manualItems: CostManualItem[];
   sourceAllocations: CostSourceAllocations;
   relationCaseId: string;

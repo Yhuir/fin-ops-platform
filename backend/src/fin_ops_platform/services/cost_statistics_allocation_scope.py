@@ -41,8 +41,8 @@ def covered_source_task(task: dict[str, Any], decision: dict[str, Any]) -> dict[
             events.append({**event, 'amount': f'{amount:.2f}'})
     allocations, non_cost = source_totals(allocation_targets(task), decision)
     result = {**task, 'bank_events': events, 'allocations': allocations,
-              'non_cost_amount': f'{non_cost:.2f}', 'amounts_fixed': False}
-    validate_source_allocations(result, allocations, non_cost, decision)
+              'non_cost_amount': f'{non_cost:.2f}'}
+    validate_source_allocations(result, allocations, non_cost, decision, check_oa_locks=False)
     return result
 
 
@@ -77,6 +77,12 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None, *
         outside_units = {line['unit_id'] for line in decision['cost_lines'] if line['bank_transaction_id'] not in selected}
         inside_units = {line['unit_id'] for line in scoped['cost_lines']}
         units = [unit for unit in units if unit['unit_id'] not in outside_units - inside_units]
+    outside_amounts: dict[str, Decimal] = {}
+    if decision:
+        for line in decision['cost_lines']:
+            if line['bank_transaction_id'] not in selected:
+                outside_amounts[line['unit_id']] = outside_amounts.get(line['unit_id'], ZERO) + Decimal(line['amount'])
+    units = [{**u, 'outside_cost_amount': f"{outside_amounts.get(u['unit_id'], ZERO):.2f}"} for u in units]
     manual_ids = {line['unit_id'] for line in scoped['cost_lines']} if scoped else set()
     manual_items = [item for item in task.get('manual_items', []) if item['unit_id'] in manual_ids]
     events = [e for e in sources if e['transaction_id'] in selected] + refund_events
@@ -86,18 +92,14 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None, *
     result = {**task, 'units': units, 'manual_items': manual_items, 'bank_events': events, 'oa_total': f'{oa_total:.2f}',
               'gross_outflow_total': f'{gross:.2f}', 'wrong_payment_refund_total': f'{refund_total:.2f}',
               'net_outflow_total': f'{gross - refund_total:.2f}', 'difference': f'{gross - refund_total - oa_total:.2f}',
-              'in_project_cost_scope': bool(selected), 'amounts_fixed': oa_total == gross - refund_total,
+              'in_project_cost_scope': bool(selected),
               'source_allocations': scoped, 'suggested_source_allocations': None}
     if scoped is not None:
         allocations, non_cost = source_totals(allocation_targets(result), scoped)
         result.update(allocations=allocations, non_cost_amount=f'{non_cost:.2f}',
                       non_cost_reason=task['non_cost_reason'] if non_cost else '')
-        # A source slice is an explicit amount decision, not the original full OA target.
-        result['amounts_fixed'] = result['amounts_fixed'] and (automatic or all(
-            next(line['amount'] for line in allocations if line['unit_id'] == unit['unit_id']) == unit['oa_original_amount'] for unit in units))
     elif selected != all_ids:
-        result.update(allocations=[{'unit_id': u['unit_id'], 'amount': u['oa_original_amount']} for u in units]
-                      if result['amounts_fixed'] else [], non_cost_amount='0.00', non_cost_reason='')
+        result.update(allocations=[], non_cost_amount='0.00', non_cost_reason='')
     if not selected or unresolved_refund:
         result.update(status='pending', pending_reasons=['scope_refund_required'] if unresolved_refund else [],
                       allocations=[], source_allocations=None)
@@ -107,17 +109,17 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None, *
         allocated = non_cost = ZERO
         if scoped is not None:
             checked = covered_source_task(result, scoped)
-            completed = complete_source_task(checked, scoped)
+            completed = complete_source_task(checked, scoped, check_oa_locks=False)
             reasons.extend(completed['pending_reasons'])
             allocated = sum((Decimal(line['amount']) for line in scoped['cost_lines']), ZERO)
             non_cost = Decimal(checked['non_cost_amount'])
         remaining = gross - refund_total - allocated - non_cost
         if remaining > ZERO:
             reasons.append('source_required' if task['allocations'] or scoped else 'amount_required')
+        if any(e.get('turnover_role') == 'external_turnover' for e in events if e['event_kind'] == 'outflow'):
+            reasons.append('external_turnover_requires_confirmation')
         if task.get('waiting_oa_ids'):
             reasons.append('oa_in_progress')
-        if result['amounts_fixed'] and not result.get('allows_partial'):
-            result['allocations'] = [{'unit_id': u['unit_id'], 'amount': u['oa_original_amount']} for u in units]
         result.update(status='pending' if reasons else 'allocated', pending_reasons=list(dict.fromkeys(reasons)),
                       unallocated_amount=f'{remaining:.2f}')
         return result
@@ -133,7 +135,7 @@ def project_source_task(task: dict[str, Any], decision: dict[str, Any] | None, *
         covered_source_task(result, scoped)
         covered = {line['bank_transaction_id'] for kind in KINDS for line in scoped[kind]}
         if covered != selected:
-            result.update(status='pending', pending_reasons=['source_required'], amounts_fixed=False)
+            result.update(status='pending', pending_reasons=['source_required'])
             return result
     return complete_source_task(result, scoped)
 

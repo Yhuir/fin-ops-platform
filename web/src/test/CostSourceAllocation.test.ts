@@ -5,9 +5,8 @@ import type { CostStatisticsManualAllocationTask } from '../features/cost-statis
 export function sourceTask(): CostStatisticsManualAllocationTask {
   return {
     relationCaseId: 'case-1', relationVersion: 1, sourceFingerprint: 'existing-version-fingerprint', scopeVersion: 1,
-    status: 'pending', pendingReasons: ['source_required'], amountsFixed: true,
-    oaTotal: '600.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
-    units: [{ unitId: 'oa-1:parent', oaId: 'oa-1', oaApplyType: '支付申请', expenseItemId: '', projectId: 'p-1', projectName: '项目 A', expenseType: '原 OA 分类', expenseContent: '材料采购', oaApplicant: '申请人', oaOriginalAmount: '600.00' }],
+    status: 'pending', pendingReasons: ['source_required'], oaTotal: '600.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
+    units: [{ unitId: 'oa-1:parent', oaId: 'oa-1', oaApplyType: '支付申请', expenseItemId: '', projectId: 'p-1', projectName: '项目 A', expenseType: '原 OA 分类', expenseContent: '材料采购', oaApplicant: '申请人', lockOaAmount: true, outsideCostAmount: "0.00", oaOriginalAmount: '600.00' }],
     bankEvents: [
       { transactionId: 'bank-a', eventKind: 'outflow', amount: '350.00', counterpartyName: '供应商', tradeTime: '2026-08-15', tags: ['采购', '材料款'], bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
       { transactionId: 'bank-b', eventKind: 'outflow', amount: '250.00', counterpartyName: '供应商', tradeTime: '2026-09-03', tags: ['采购', '材料款'], bankAccountLabel: '民生 9486', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款' },
@@ -64,7 +63,7 @@ describe('cost source amount closure', () => {
     expect(createSourceDraft(task).costLines).toEqual([expect.objectContaining({ bankTransactionId: 'bank-a', amount: '350.00' })]);
   });
   test('requires refund and non-cost sources with exact per-bank closure', () => {
-    const task = sourceTask(); task.amountsFixed = false;
+    const task = sourceTask(); task.units.forEach(unit => { unit.lockOaAmount = false; });
     task.bankEvents.push({ ...task.bankEvents[0], transactionId: 'refund', eventKind: 'wrong_payment_refund', amount: '50.00' });
     task.wrongPaymentRefundTotal = '50.00'; task.netOutflowTotal = '550.00';
     const draft = createSourceDraft(task); draft.nonCostAmount = '50'; draft.nonCostReason = '非成本往来';
@@ -76,7 +75,7 @@ describe('cost source amount closure', () => {
     expect(validateSourceDraft(task, draft)).toHaveProperty('refund.refund');
   });
   test('derives editable cost amounts from source rows without a second total input', () => {
-    const task = sourceTask(); task.amountsFixed = false; task.oaTotal = '700.00'; task.units[0].oaOriginalAmount = '700.00';
+    const task = sourceTask(); task.units.forEach(unit => { unit.lockOaAmount = false; }); task.oaTotal = '700.00'; task.units[0].oaOriginalAmount = '700.00';
     const draft = createSourceDraft(task);
     expect(sourceUnitAmounts(task, draft).get('oa-1:parent')).toBeNull();
     expect(() => sourceSaveRequest(task, draft)).toThrow();
@@ -94,7 +93,7 @@ describe('cost source amount closure', () => {
     const task = sourceTask(); const draft = createSourceDraft(task);
     draft.zeroUnitIds = ['oa-1:parent'];
     expect(validateSourceDraft(task, draft)['unit.oa-1:parent']).toBe('固定金额不能设为零成本');
-    task.amountsFixed = false;
+    draft.oaAmountLocks = Object.fromEntries(task.units.map(unit => [unit.unitId, false]));
     draft.nonCostAmount = '600'; draft.nonCostReason = '往来款';
     draft.nonCostLines = [
       { id: 1, ownerId: '', bankTransactionId: 'bank-a', amount: '350' },
@@ -108,7 +107,7 @@ describe('cost source amount closure', () => {
     expect(validateSourceDraft(task, draft)['unit.oa-1:parent']).toBe('请删除来源行后再设为零成本');
   });
   test('rehydrates valid zero decisions but does not reuse stale decisions', () => {
-    const task = sourceTask(); task.amountsFixed = false; task.allocations[0].amount = '0.00';
+    const task = sourceTask(); task.units.forEach(unit => { unit.lockOaAmount = false; }); task.allocations[0].amount = '0.00';
     expect(createSourceDraft(task).zeroUnitIds).toEqual(['oa-1:parent']);
     task.pendingReasons = ['allocation_stale'];
     task.sourceAllocations = { costLines: [{ unitId: 'oa-1:parent', bankTransactionId: 'bank-a', amount: '350.00' }], refundLinks: [], nonCostLines: [] };

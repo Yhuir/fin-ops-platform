@@ -186,6 +186,7 @@ EXPECTED_MIGRATION_FILES = [
     "0173_workbench_oa_supporting_document_bundles.sql",
     "0174_supporting_document_invoice_basis.sql",
     "0175_import_jobs_direct_claim.sql",
+    "0176_cost_statistics_oa_amount_locks.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "app", "staging", "cash")
 TEST_TABLES = (

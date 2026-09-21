@@ -8,11 +8,10 @@ import type { CostStatisticsManualAllocationTask } from '../features/cost-statis
 
 function fixture(): CostStatisticsManualAllocationTask {
   return {
-    relationCaseId: 'internal-case', relationVersion: 1, sourceFingerprint: 'fingerprint', scopeVersion: 1, status: 'pending', pendingReasons: ['source_required'], amountsFixed: false,
-    oaTotal: '700.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
+    relationCaseId: 'internal-case', relationVersion: 1, sourceFingerprint: 'fingerprint', scopeVersion: 1, status: 'pending', pendingReasons: ['source_required'], oaTotal: '700.00', grossOutflowTotal: '600.00', wrongPaymentRefundTotal: '0.00', netOutflowTotal: '600.00',
     units: [
-      { unitId: 'unit-a', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '材料', expenseContent: '材料采购', oaApplicant: '张先生', oaOriginalAmount: '500.00' },
-      { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', oaOriginalAmount: '200.00' },
+      { unitId: 'unit-a', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '材料', expenseContent: '材料采购', oaApplicant: '张先生', lockOaAmount: false, outsideCostAmount: "0.00", oaOriginalAmount: '500.00' },
+      { unitId: 'unit-b', oaId: 'internal-oa', oaApplyType: '支付申请', expenseItemId: '', projectId: 'project', projectName: '项目甲', expenseType: '运费', expenseContent: '设备运输', oaApplicant: '张先生', lockOaAmount: false, outsideCostAmount: "0.00", oaOriginalAmount: '200.00' },
     ],
     bankEvents: [{ transactionId: 'internal-bank', eventKind: 'outflow', inProjectCostScope: true, amount: '600.00', tradeTime: '2026-08-15', counterpartyName: '材料公司', bankAccountLabel: '建行 8106', bankTagCode: 'material', bankTagPrimaryLabel: '采购', bankTagSubLabel: '材料款', tags: ['采购', '材料款'] }],
     allocations: [], manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations: null, relationDisplayGroups: [], sourceAllocations: null, nonCostAmount: '0.00', nonCostReason: '', version: 0, updatedBy: '', updatedAt: '', canSave: true,
@@ -32,10 +31,10 @@ it('saves completed OA alone and shows pending approval without a false balanced
   task.sourceAllocations = {costLines: [{unitId: 'unit-a', bankTransactionId: 'internal-bank', amount: '500.00'}], refundLinks: [], nonCostLines: []};
   task.pendingReasons = ['oa_in_progress', 'source_required'];
   render(<Editor task={task} save={save} />);
-  expect(screen.getByText('等待 OA 完成，暂不计入成本')).toBeInTheDocument();
+  expect(screen.getByText('待审批')).toBeInTheDocument();
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
   expect(within(screen.getByRole('table', {name: '成本分配明细'})).getAllByRole('button', {name: '新增来源'})).toHaveLength(1);
-  await user.click(screen.getByRole('button', {name: '保存分配'}));
+  await user.click(screen.getByRole('button', {name: '保存'}));
   expect(save).toHaveBeenCalledTimes(1);
   const draft = createSourceDraft(task);
   const request = sourceSaveRequest(task, draft);
@@ -97,12 +96,12 @@ describe('compact source allocation editor', () => {
     expect(unit.getByRole('combobox')).toHaveFocus();
     await user.click(unit.getByRole('button', { name: '删除来源行 1' }));
     expect(unit.getByRole('button', { name: '新增来源' })).toHaveFocus();
-    await user.click(screen.getByRole('button', { name: '保存分配' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
     expect(within(screen.getByRole('dialog', { name: '分配校验' })).getByRole('alert')).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
   });
   it('does not offer zero for a fixed positive OA target', () => {
-    const task = fixture(); task.amountsFixed = true;
+    const task = fixture(); task.units.forEach(unit => { unit.lockOaAmount = true; });
     render(<Editor task={task} />);
     expect(screen.queryByRole('button', { name: '设为零成本' })).not.toBeInTheDocument();
   });
@@ -116,7 +115,7 @@ describe('compact source allocation editor', () => {
     await user.click(screen.getByRole('option', { name: /建行 8106/ }));
     await user.type(first.getByRole('textbox', { name: '分配金额 1' }), '600');
     await user.click(second.getByRole('button', { name: '设为零成本' }));
-    await user.click(screen.getByRole('button', { name: '保存分配' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
     expect(save).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -132,7 +131,7 @@ it('keeps source and amount issues in their own cells without showing instructio
   await user.click(source); await user.keyboard('{Escape}');
   expect(amount).toHaveAttribute('aria-invalid', 'false');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: '保存分配' }));
+  await user.click(screen.getByRole('button', { name: '保存' }));
   await user.keyboard('{Escape}');
   expect(source).toHaveAttribute('aria-invalid', 'true');
   expect(amount).toHaveAttribute('aria-invalid', 'true');
@@ -210,7 +209,7 @@ it('keeps refunds and non-cost sources editable through inline actions with full
     await user.click(screen.getByRole('option', { name: /建行 8106/ }));
     await user.type(table.getByRole('textbox'), '100');
   }
-  await user.click(screen.getByRole('button', { name: '保存分配' }));
+  await user.click(screen.getByRole('button', { name: '保存' }));
   expect(save).toHaveBeenCalledOnce();
 });
 
@@ -247,7 +246,7 @@ it('keeps source ordinals aligned with bank evidence when refunds appear first',
 
 it('shows balance only for complete allocations without changing formal correspondence', async () => {
   const task = fixture(); const user = userEvent.setup();
-  task.amountsFixed = true; task.oaTotal = '600.00'; task.units[0].oaOriginalAmount = '400.00';
+  task.units.forEach(unit => { unit.lockOaAmount = true; }); task.oaTotal = '600.00'; task.units[0].oaOriginalAmount = '400.00';
   task.bankEvents[0].amount = '400.00';
   task.bankEvents.push({...task.bankEvents[0],transactionId:'bank-b',amount:'200.00',bankAccountLabel:'民生银行 9486'});
   task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'400.00'},{unitId:'unit-b',bankTransactionId:'bank-b',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
@@ -269,7 +268,7 @@ it('shows balance only for complete allocations without changing formal correspo
   expect(screen.queryByText('分配金额一致')).not.toBeInTheDocument();
 });
 
-it.each([{saving:true}, {error:'保存结果待确认'}, {error:'关联事实已变化'}, {notice:'已保存，银行信息待完善'}])('prioritizes save feedback over balance: %j', state => {
+it.each([{saving:true}, {error:'保存结果待确认'}, {error:'关联事实已变化'}, {notice:'已保存'}])('prioritizes save feedback over balance: %j', state => {
   const task = fixture();
   task.sourceAllocations = {costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'400.00'},{unitId:'unit-b',bankTransactionId:'internal-bank',amount:'200.00'}],refundLinks:[],nonCostLines:[]};
   render(<CostSourceAllocationForm tagLoading={false} onLoadTags={() => {}} task={task} draft={createSourceDraft(task)} disabled={false} saving={false} {...state} onChange={vi.fn()} onSave={vi.fn()} />);
@@ -295,7 +294,7 @@ it('adds 192 manual cost to OA sources, validates metadata, then edits and remov
   await user.click(screen.getByRole('option',{name:/建行 8106/}));
   await user.type(manual.getByRole('textbox',{name:'分配金额 3'}),'192');
   expect(screen.getByText('分配金额一致')).toBeInTheDocument();
-  await user.click(screen.getByRole('button',{name:'保存分配'}));
+  await user.click(screen.getByRole('button',{name:'保存'}));
   expect(save).toHaveBeenCalledOnce();
   expect(container.querySelector('.cost-source-evidence')!.textContent).toBe(originalEvidence);
   await user.clear(manual.getByRole('textbox',{name:'分配金额 3'}));
@@ -304,4 +303,20 @@ it('adds 192 manual cost to OA sources, validates metadata, then edits and remov
   await user.click(manual.getByRole('button',{name:'删除来源行 3'}));
   expect(screen.queryByRole('textbox',{name:'人工成本项'})).not.toBeInTheDocument();
   expect(screen.getByText(/剩余 192.00/)).toBeInTheDocument();
+});
+
+it('unlocks a full loan OA for interest while preserving original amount and principal', async () => {
+  const task = fixture(); const user = userEvent.setup(); const save = vi.fn();
+  task.units = [{...task.units[0], oaOriginalAmount:'1001497.22', lockOaAmount:true}];
+  task.oaTotal = task.netOutflowTotal = task.grossOutflowTotal = task.bankEvents[0].amount = '1001497.22';
+  task.nonCostAmount='1000000.00'; task.nonCostReason='贷款本金';
+  task.sourceAllocations={costLines:[{unitId:'unit-a',bankTransactionId:'internal-bank',amount:'1497.22'}],refundLinks:[],nonCostLines:[{bankTransactionId:'internal-bank',amount:'1000000.00'}]};
+  render(<Editor task={task} save={save}/>);
+  const lock=screen.getByRole('checkbox',{name:'按 OA 原额'});
+  expect(lock).toBeChecked();
+  await user.click(screen.getByRole('button',{name:'保存'})); expect(save).not.toHaveBeenCalled();
+  await user.click(lock); expect(lock).not.toBeChecked();
+  await user.click(screen.getByRole('button',{name:'保存'})); expect(save).toHaveBeenCalledOnce();
+  expect(task.units[0].oaOriginalAmount).toBe('1001497.22');
+  await user.click(lock); await user.click(screen.getByRole('button',{name:'保存'})); expect(save).toHaveBeenCalledOnce();
 });

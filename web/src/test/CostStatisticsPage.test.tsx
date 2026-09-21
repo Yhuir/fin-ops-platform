@@ -289,7 +289,7 @@ describe("Cost statistics page", () => {
     expect(within(drawer).getByText("材料费")).toBeInTheDocument();
     expect(within(drawer).getByText("交通费")).toBeInTheDocument();
     expect(within(drawer).queryByRole("combobox")).not.toBeInTheDocument();
-    await user.click(within(drawer).getByRole("button", { name: "保存分配" }));
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
     expect(screen.getByRole("dialog", { name: "分配校验" })).toHaveTextContent("请分配来源，或明确设为零成本");
     await user.keyboard("{Escape}");
     expect(within(drawer).queryByLabelText("项目 A本项成本")).not.toBeInTheDocument();

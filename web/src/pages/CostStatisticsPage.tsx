@@ -377,6 +377,7 @@ export default function CostStatisticsPage() {
   const [loadedExplorer, setLoadedExplorer] = useState<LoadedCostStatisticsExplorer | null>(null);
   const [pageStatistics, setPageStatistics] = useState<CostStatisticsExplorerPage["statistics"]>(undefined);
   const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExportReferenceData | null>(null);
+  const [allocationCaseId, setAllocationCaseId] = useState<string>();
   const [entryDetail, setEntryDetail] = useState<CostEntryDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
   const [explorerPage, setExplorerPage] = useState(1);
@@ -1696,6 +1697,8 @@ export default function CostStatisticsPage() {
             <>
               <Button className="cost-page-action" size="sm" variant="secondary" onPress={() => setScopeOpen(true)}>项目成本范围</Button>
               <CostStatisticsManualAllocationDrawer
+                caseId={allocationCaseId}
+                onCloseCase={() => setAllocationCaseId(undefined)}
                 active={active}
                 refreshKey={`${activationGeneration}:${domainRefreshNonce}:${scopeRefresh}`}
                 pendingCount={explorerData?.allocationQuality ? explorerData.allocationQuality.pendingManualAllocationCount + explorerData.allocationQuality.staleManualAllocationCount : undefined}
@@ -1892,6 +1895,7 @@ export default function CostStatisticsPage() {
       </div>
 
       <CostEntryDetailDrawer
+        onAdjust={!isBankFlowView && canOperateData && !interactionLocked ? caseId => { resetDetailSelection(); setAllocationCaseId(caseId); } : undefined}
         detail={entryDetail}
         error={detailError}
         loading={isDetailLoading}

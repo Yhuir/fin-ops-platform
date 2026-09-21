@@ -2,6 +2,7 @@ import type { CostSourceAllocations, CostStatisticsManualAllocationTask, SaveCos
 
 export type SourceDraftLine = { id: number; ownerId: string; bankTransactionId: string; amount: string };
 export type SourceDraft = {
+  oaAmountLocks: Record<string, boolean>;
   manualItems: import("./types").CostManualItem[];
   zeroUnitIds: string[];
   costLines: SourceDraftLine[];
@@ -26,6 +27,7 @@ export function createSourceDraft(task: CostStatisticsManualAllocationTask): Sou
   const saved = stale ? null : task.sourceAllocations;
   const suggested = stale || task.version !== 0 ? null : task.suggestedSourceAllocations;
   return {
+    oaAmountLocks: Object.fromEntries(task.units.map(unit => [unit.unitId, unit.lockOaAmount])),
     manualItems: task.pendingReasons.includes("allocation_stale") ? [] : task.manualItems.map(item => ({ ...item })),
     zeroUnitIds: task.pendingReasons.includes('allocation_stale') ? [] : task.allocations.filter(line => cents(line.amount) === 0n).map(line => line.unitId),
     costLines: [...(saved?.costLines ?? []), ...(suggested?.costLines ?? [])].map(line => ({ ...line, ownerId: line.unitId, id: ++id })),
@@ -52,8 +54,8 @@ export function sourceUnitAmounts(task: CostStatisticsManualAllocationTask, draf
     sums.set(line.ownerId, previous === null || amount === null || amount <= 0n ? null : (previous ?? 0n) + amount);
   }
   const zero = new Set(draft.zeroUnitIds);
-  return new Map([...task.units.map(unit => [unit.unitId, task.allowsPartial ? (sums.get(unit.unitId) ?? 0n) : task.amountsFixed
-    ? cents(unit.oaOriginalAmount)
+  return new Map([...task.units.map(unit => [unit.unitId, task.allowsPartial ? (sums.get(unit.unitId) ?? 0n) : draft.oaAmountLocks[unit.unitId]
+    ? cents(unit.oaOriginalAmount)! - cents(unit.outsideCostAmount)!
     : zero.has(unit.unitId) ? 0n : sums.get(unit.unitId) ?? null] as const), ...draft.manualItems.map(item => [item.unitId, sums.get(item.unitId) ?? null] as const)]);
 }
 export function validateSourceDraft(task: CostStatisticsManualAllocationTask, draft: SourceDraft): Record<string, string> {
@@ -105,8 +107,8 @@ export function validateSourceDraft(task: CostStatisticsManualAllocationTask, dr
     if (target === null || target === undefined) errors[key] = '请分配来源，或明确设为零成本';
     else {
       total += target;
-      if (zero.has(unit.unitId) && (task.amountsFixed && target > 0n || draft.costLines.some(line => line.ownerId === unit.unitId))) {
-        errors[key] = task.amountsFixed && target > 0n ? '固定金额不能设为零成本' : '请删除来源行后再设为零成本';
+      if (zero.has(unit.unitId) && (draft.oaAmountLocks[unit.unitId] && target > 0n || draft.costLines.some(line => line.ownerId === unit.unitId))) {
+        errors[key] = draft.oaAmountLocks[unit.unitId] && target > 0n ? '固定金额不能设为零成本' : '请删除来源行后再设为零成本';
       } else if ((totals.get(unit.unitId) ?? 0n) !== target) errors[key] = `该成本项分配合计须为 ${money(target)}`;
     }
   }
@@ -146,6 +148,7 @@ export function sourceSaveRequest(task: CostStatisticsManualAllocationTask, draf
   };
   return {
     relationCaseId: task.relationCaseId, expectedVersion: task.version, sourceFingerprint: task.sourceFingerprint, scopeVersion: task.scopeVersion,
+    oaAmountLocks: task.units.map(unit => ({ unitId: unit.unitId, locked: draft.oaAmountLocks[unit.unitId] })),
     manualItems: draft.manualItems.map(item => ({ ...item, expenseContent: item.expenseContent.trim() })),
     allocations: [...task.units, ...draft.manualItems].map(unit => ({ unitId: unit.unitId, amount: money(targets.get(unit.unitId)!) })),
     sourceAllocations, nonCostAmount: normalized(draft.nonCostAmount), nonCostReason: draft.nonCostReason.trim(),
@@ -163,7 +166,8 @@ export function sourceDecisionMatches(request: SaveCostStatisticsManualAllocatio
     ordered(value.nonCostLines.map(line => [line.bankTransactionId, line.amount])),
   ].join('|');
   const manualMatrix = (items: import('./types').CostManualItem[]) => ordered(items.map(item => [item.unitId, item.projectName, item.expenseContent, item.costTagCode]));
-  return manualMatrix(request.manualItems) === manualMatrix(task.manualItems) && matrix(request.sourceAllocations) === matrix(task.sourceAllocations)
+  return ordered(request.oaAmountLocks.map(item => [item.unitId, String(item.locked)])) === ordered(task.units.map(unit => [unit.unitId, String(unit.lockOaAmount)]))
+    && manualMatrix(request.manualItems) === manualMatrix(task.manualItems) && matrix(request.sourceAllocations) === matrix(task.sourceAllocations)
     && ordered(request.allocations.map(line => [line.unitId, line.amount])) === ordered(task.allocations.map(line => [line.unitId, line.amount]))
     && request.nonCostAmount === task.nonCostAmount && request.nonCostReason === task.nonCostReason;
 }

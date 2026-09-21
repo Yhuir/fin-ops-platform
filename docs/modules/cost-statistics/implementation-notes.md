@@ -415,3 +415,7 @@ PYTHONPATH=backend/src python3 -m unittest discover -s tests -p 'test_cost_stati
 - 当前生产单并发成本根查询 p95 774–820ms，详情 171–185ms；4 并发项目 p95 1852ms，发布前为 1370ms。不能把单并发通过声称为全部性能通过。性能定位发现列表/explorer 对 35 个已有人工决定和单支付关系读取了不参与自动规则的历史；一次读取 389 条、45.1ms，后续解析也增加快照成本。
 - 收窄历史输入到未保存、多银行来源关系；单付款或单父 OA 且无显式引用时直接使用现有基础分配规则，无需建立来源组件。不是先失败再回退，也不新增缓存、索引、worker、API、hash 或门禁。详情展示保留完整相关历史。
 - 独立只读进程在相同生产事实下逐项比较全部 633 条成本和 319 个内部任务，结果完全相同。单次影子对照 snapshot 458.2 → 314.4ms、policy 111.1 → 106.7ms；这不是最终公网 p95 结论。后端来源、Policy、范围、API、repository、显示与 PostgreSQL 最终 166 项通过；前端代码未变。最终发布后的性能结果随交付报告提供。
+
+## 成本分配变更（2026-09-21）
+
+按[实施计划](../../dev/cost-allocation-turnover-and-oa-lock-plan.md)执行普通逐笔自动分配、外部往来人工确认、按单元锁定 OA 原额；使用现有 service/repository/Policy/表单，未使用 GSD。

@@ -12,9 +12,10 @@ type Props = {
   error: string | null;
   onClose: () => void;
   onRetry: () => void;
+  onAdjust?: (caseId: string) => void;
 };
 
-export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, error, onClose, onRetry }: Props) {
+export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, error, onClose, onRetry, onAdjust }: Props) {
   const allocationView = rowKind !== "bank_transaction";
   const title = rowKind === "manual_allocation" ? "人工成本明细" : allocationView ? "OA 成本归集明细" : "银行流水详情";
   return (
@@ -39,7 +40,10 @@ export default function CostEntryDetailDrawer({ open, rowKind, detail, loading, 
             <Button onPress={onRetry} size="sm" variant="secondary">重试</Button>
           </div>
         ) : null}
-        {!loading && !error && detail ? <CostEntryDetailPanel detail={detail} /> : null}
+        {!loading && !error && detail ? <>
+          <CostEntryDetailPanel detail={detail} />
+          {detail.kind !== "bank_transaction" && onAdjust ? <Button size="sm" variant="secondary" onPress={() => onAdjust(detail.reconciliation.relationCaseId)}>调整分配</Button> : null}
+        </> : null}
       </div>
     </AppDrawer>
   );

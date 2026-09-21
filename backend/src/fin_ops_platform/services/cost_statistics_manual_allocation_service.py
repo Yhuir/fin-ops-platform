@@ -13,7 +13,6 @@ from fin_ops_platform.services.cost_statistics_manual_items import allocation_ta
 from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
 from fin_ops_platform.services.cost_statistics_source_allocation import (
     SourceAllocationError,
-    complete_source_task,
     suggest_source_allocations,
     validate_source_allocations,
 )
@@ -131,7 +130,7 @@ class CostStatisticsManualAllocationService:
 
     def get_task(self, relation_case_id: str, *, can_save: bool) -> dict[str, Any]:
         snapshot = self._canonical_repository.load_relation_snapshot(relation_case_id)
-        task = next((task for task in CostStatisticsPolicy(snapshot).manual_allocation_tasks
+        task = next((task for task in CostStatisticsPolicy(snapshot).allocation_tasks
                      if task["relation_case_id"] == relation_case_id), None)
         if task is None:
             raise KeyError(relation_case_id)
@@ -209,6 +208,7 @@ class CostStatisticsManualAllocationService:
             "source_fingerprint",
             "allocations",
             "manual_items",
+            "oa_amount_locks",
             "source_allocations",
             "non_cost_amount",
             "non_cost_reason",
@@ -237,7 +237,7 @@ class CostStatisticsManualAllocationService:
             raise CostStatisticsManualAllocationConflictError(
                 "关联关系不存在或已撤回，请刷新后重试。"
             ) from exc
-        tasks = CostStatisticsPolicy(snapshot).manual_allocation_tasks
+        tasks = CostStatisticsPolicy(snapshot).allocation_tasks
         task = next(
             (
                 candidate
@@ -274,7 +274,15 @@ class CostStatisticsManualAllocationService:
             manual_items = validate_manual_items(payload.get("manual_items", []), options, task["manual_items"])
         except ValueError as exc:
             raise CostStatisticsManualAllocationValidationError(str(exc)) from exc
-        task = {**task, "manual_items": manual_items}
+        locks = payload.get("oa_amount_locks")
+        if not isinstance(locks, list) or any(not isinstance(row, dict) or set(row) != {"unit_id", "locked"}
+                or not isinstance(row["unit_id"], str) or type(row["locked"]) is not bool for row in locks):
+            raise CostStatisticsManualAllocationValidationError("请刷新页面后重试")
+        lock_map = {row["unit_id"]: row["locked"] for row in locks}
+        if len(lock_map) != len(locks) or set(lock_map) != {u["unit_id"] for u in task["units"]}:
+            raise CostStatisticsManualAllocationValidationError("OA 金额约束与当前单元不一致")
+        task = {**task, "manual_items": manual_items,
+                "units": [{**u, "lock_oa_amount": lock_map[u["unit_id"]]} for u in task["units"]]}
         allocations = _validate_allocations(
             payload.get("allocations"),
             units=allocation_targets(task),
@@ -343,6 +351,7 @@ class CostStatisticsManualAllocationService:
             allocations=merged["allocations"],
             source_allocations=merged["source_allocations"],
             manual_items=stored_manual,
+            oa_amount_locks={**(valid_previous["oa_amount_locks"] if valid_previous else {}), **lock_map},
             non_cost_amount=merged["non_cost_amount"],
             non_cost_reason=merged["non_cost_reason"],
             expected_version=expected_version,
@@ -374,6 +383,7 @@ class CostStatisticsManualAllocationService:
                         "net_outflow_total": str(task["net_outflow_total"]),
                         "allocations": allocations,
                         "manual_items": manual_items,
+                        "oa_amount_locks": locks,
                         "source_allocations": source_allocations,
                         "non_cost_amount": f"{non_cost_amount:.2f}",
                         "non_cost_reason": non_cost_reason,
@@ -381,19 +391,11 @@ class CostStatisticsManualAllocationService:
                 }
             )
         group = next(g for g in snapshot["cost_groups"] if g["group_id"] == relation_case_id)
-        return complete_source_task({
-            **task,
-            "status": "allocated",
-            "manual_options": options,
-            "relation_display_groups": _relation_display_groups(task, group),
-            "allocations": allocations,
-            "non_cost_amount": f"{non_cost_amount:.2f}",
-            "non_cost_reason": non_cost_reason,
-            "version": int(saved["version"]),
-            "updated_by": actor_id,
-            "updated_at": str(saved.get("updated_at") or ""),
-            "can_save": True,
-        }, source_allocations)
+        updated_snapshot = {**snapshot, "manual_allocations": {**snapshot["manual_allocations"], relation_case_id: saved}}
+        updated = next(t for t in CostStatisticsPolicy(updated_snapshot).allocation_tasks if t["relation_case_id"] == relation_case_id)
+        return {**updated, "manual_options": options, "can_save": True,
+                "relation_display_groups": _relation_display_groups(updated, group)}
+
 
 
 def _required_version(value: Any) -> int:

@@ -52,7 +52,7 @@ def test_unresolved_tasks_use_scoped_sources_without_changing_fact_identity():
         bank_rows=[fixtures.CostStatisticsPolicyTests._bank("x", "50.00"), fixtures.CostStatisticsPolicyTests._bank("y", "50.00", tag_code="internal_transfer")])
     included = fixtures.CostStatisticsPolicyTests._policy([group], settings=scope(["material"]))
     excluded = fixtures.CostStatisticsPolicyTests._policy([group], settings=scope([]))
-    a, b = included.manual_allocation_tasks[0], excluded.manual_allocation_tasks[0]
+    a, b = included.allocation_tasks[0], excluded.allocation_tasks[0]
     assert a["in_project_cost_scope"] and not b["in_project_cost_scope"]
     assert a["source_fingerprint"] == b["source_fingerprint"]
     assert [e["transaction_id"] for e in a["bank_events"]] == ["x"]
@@ -84,7 +84,7 @@ def test_excluded_loan_2100_leaves_only_hotel_without_auto_confirming():
         f._bank('loan', '2100.00', tag_code='external_turnover'),
         f._bank('hotel', '2100.00', tag_code='material')])
     policy = f._policy([group], settings=scope(['material']))
-    task = policy.manual_allocation_tasks[0]
+    task = policy.allocation_tasks[0]
     assert [e['transaction_id'] for e in task['bank_events']] == ['hotel']
     assert task['net_outflow_total'] == task['oa_total'] == '2100.00'
     assert task['difference'] == '0.00'
@@ -100,7 +100,7 @@ def test_unknown_refund_in_mixed_scope_is_not_guessed():
         f._bank('x', '500.00'), f._bank('y', '500.00', tag_code='internal_transfer'),
         f._bank('r', '200.00', direction='inflow', tag_code='refund', tag_label='付错退款')])
     policy = f._policy([group], settings=scope(['material']))
-    task = policy.manual_allocation_tasks[0]
+    task = policy.allocation_tasks[0]
     assert task['pending_reasons'] == ['scope_refund_required']
     assert total(policy) == '0.00'
 
@@ -110,6 +110,7 @@ def test_explicit_refund_split_follows_source_and_preserves_original_fact():
     from tests.test_cost_statistics_source_allocation import task_fixture
     task = task_fixture()
     task.update(version=1, non_cost_amount='0.00')
+    task['units'] = [{**u, 'lock_oa_amount': False} for u in task['units']]
     task['bank_events'][0]['in_project_cost_scope'] = True
     task['bank_events'][1]['in_project_cost_scope'] = False
     task['bank_events'].append({'transaction_id': 'r', 'event_kind': 'wrong_payment_refund', 'amount': '200.00'})
@@ -127,3 +128,33 @@ def test_explicit_refund_split_follows_source_and_preserves_original_fact():
     assert result['source_allocations']['refund_links'] == decision['refund_links'][:1]
     assert [u['unit_id'] for u in result['units']] == ['a']
     assert task == original
+
+
+def test_external_component_requires_confirmation_but_independent_ordinary_cost_survives():
+    f = fixtures.CostStatisticsPolicyTests
+    ordinary = f._bank('normal', '100.00')
+    external = {**f._bank('loan', '200.00'), 'turnover_role': 'external_turnover'}
+    group = f._group(oa_rows=[f._oa('a', amount='100.00'), f._oa('b', amount='200.00')], bank_rows=[ordinary, external])
+    assert total(f._policy([group])) == '0.00'
+    group['source_relation_groups'] = [{'oa_row_ids':['a'], 'bank_row_ids':['normal']}, {'oa_row_ids':['b'], 'bank_row_ids':['loan']}]
+    policy = f._policy([group])
+    assert total(policy) == '100.00'
+    assert policy.manual_allocation_tasks[0]['status'] == 'pending'
+    assert 'external_turnover_requires_confirmation' in policy.manual_allocation_tasks[0]['pending_reasons']
+
+
+def test_no_oa_external_turnover_never_becomes_full_cost_from_virtual_mapping():
+    f = fixtures.CostStatisticsPolicyTests
+    bank = {**f._bank('loan', '1001497.22', tag_code='loan-tag'), 'turnover_role':'external_turnover'}
+    settings = f._settings(tags=[('loan-tag','归还借款')], projects=[('virtual','无 OA',['loan-tag'])])
+    assert total(f._policy([], bank_rows=[bank], settings=settings)) == '0.00'
+
+
+def test_unique_one_to_one_allows_subset_sum_coincidence_without_manual_list():
+    f = fixtures.CostStatisticsPolicyTests
+    amounts = ['100.00','200.00','300.00']
+    group = f._group(oa_rows=[f._oa(f'oa-{i}',amount=a) for i,a in enumerate(amounts)],
+        bank_rows=[f._bank(f'bank-{i}',a) for i,a in enumerate(reversed(amounts))])
+    policy=f._policy([group])
+    assert total(policy) == '600.00'
+    assert policy.manual_allocation_tasks == []

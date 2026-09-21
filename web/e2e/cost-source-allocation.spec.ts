@@ -6,10 +6,9 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
   await installDeterministicApiMocks(page, { sessionMode: 'user' });
   const task = {
     relation_case_id: 'source-case', relation_version: 1, source_fingerprint: 'a'.repeat(64), scope_version: 7,
-    status: 'pending', pending_reasons: options.missingTag ? ['bank_tag_missing'] : ['source_required'], amounts_fixed: true,
-    allows_partial: !!options.partial, waiting_oa_ids: [] as string[],
+    status: 'pending', pending_reasons: options.missingTag ? ['bank_tag_missing'] : ['source_required'], allows_partial: !!options.partial, waiting_oa_ids: [] as string[],
     oa_total: '600.00', gross_outflow_total: '600.00', wrong_payment_refund_total: '0.00', net_outflow_total: '600.00',
-    units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', cost_eligible: true, oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', oa_original_amount: '600.00' }],
+    units: [{ unit_id: 'oa-1', oa_id: 'OA-202608-001', cost_eligible: true, oa_apply_type: '支付申请', expense_item_id: '', project_id: 'p-1', project_name: '云南溯源科技', expense_type: '原 OA 材料费用', expense_content: '设备安装项目材料采购', oa_applicant: '测试申请人', lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: '600.00' }],
     bank_events: [
       { transaction_id: 'bank-a', event_kind: 'outflow', in_project_cost_scope: true, amount: '350.00', trade_time: '2026-08-15T00:00:00Z', counterparty_name: '设备供应商', bank_account_label: '建设银行 8106', bank_tag_code: options.missingTag ? '' : 'material', bank_tag_primary_label: options.missingTag ? '' : '采购', bank_tag_sub_label: options.missingTag ? '' : '材料款', tags: options.missingTag ? [] : ['采购', '材料款'] },
       { transaction_id: 'bank-b', event_kind: 'outflow', in_project_cost_scope: true, amount: '250.00', trade_time: '2026-09-03', counterparty_name: '设备供应商', bank_account_label: '民生银行 9486', bank_tag_code: 'material', bank_tag_primary_label: '采购', bank_tag_sub_label: '材料款', tags: ['采购', '材料款'] },
@@ -20,34 +19,34 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
   if (options.partial) {
     task.oa_total = task.gross_outflow_total = task.net_outflow_total = '16000.00';
     task.units = [true, false].map((cost_eligible, i) => ({...task.units[0], unit_id: `oa-${i + 1}`, oa_id: `doc-${i + 1}`,
-      oa_original_amount: '8000.00', cost_eligible, project_name: '大理中水项目', expense_content: i ? '紫外线配件尾款' : '紫外线配件预付款'}));
+      lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: '8000.00', cost_eligible, project_name: '大理中水项目', expense_content: i ? '紫外线配件尾款' : '紫外线配件预付款'}));
     task.bank_events.forEach(event => {event.amount = '8000.00';});
     task.allocations = []; task.waiting_oa_ids = ['doc-2']; task.pending_reasons = ['oa_in_progress', 'source_required'];
     task.relation_display_groups = [{unit_ids: ['oa-1', 'oa-2'], bank_transaction_ids: ['bank-a', 'bank-b'], sources_excluded: false}];
   }
   if (options.manual) {
     task.units[0].project_id=""; task.manual_options.projects[0].id="";
-    task.amounts_fixed=false; task.pending_reasons=['amount_required'];
+    task.units.forEach(unit => { unit.lock_oa_amount = false; }); task.pending_reasons=['amount_required'];
     task.gross_outflow_total=task.net_outflow_total='792.00';
     task.bank_events=[{...task.bank_events[0],amount:'792.00'}];
     task.suggested_source_allocations={cost_lines:[{unit_id:'oa-1',bank_transaction_id:'bank-a',amount:'600.00'}],refund_links:[],non_cost_lines:[]};
   }
   if (options.scopedLoan) {
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '2100.00';
-    task.units = [{...task.units[0], oa_original_amount:'2100.00', expense_content:'住宿费'}];
+    task.units = [{...task.units[0], lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount:'2100.00', expense_content:'住宿费'}];
     task.allocations = [{unit_id:'oa-1',amount:'2100.00'}];
     task.bank_events = [{...task.bank_events[0],transaction_id:'hotel',amount:'2100.00',trade_time:'2026-08-03 15:43:00',counterparty_name:'张丽芬',bank_tag_primary_label:'项目开销',bank_tag_sub_label:'住宿费',tags:['项目开销','住宿费']}];
     task.suggested_source_allocations = {cost_lines:[{unit_id:'oa-1',bank_transaction_id:'hotel',amount:'2100.00'}],refund_links:[],non_cost_lines:[]};
   }
   if (options.large) {
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '1000.00';
-    task.units = Array.from({ length: 100 }, (_, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_id: `doc-${Math.floor(i / 2)}`, expense_content: `成本项目 ${i + 1}`, oa_original_amount: '10.00' }));
+    task.units = Array.from({ length: 100 }, (_, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_id: `doc-${Math.floor(i / 2)}`, expense_content: `成本项目 ${i + 1}`, lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: '10.00' }));
     task.bank_events = Array.from({ length: 10 }, (_, i) => ({ ...task.bank_events[0], transaction_id: `source-${i}`, bank_account_label: `测试银行 ${i + 1}`, amount: '100.00' }));
     task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: '10.00' }));
     task.source_allocations = { cost_lines: task.units.map((unit, i) => ({ unit_id: unit.unit_id, bank_transaction_id: task.bank_events[i % 10].transaction_id, amount: '10.00' })), refund_links: [], non_cost_lines: [] };
   }
   if (options.performance && !options.large) {
-    task.units = task.bank_events.map((bank, i) => ({ ...task.units[0], unit_id: `unit-${i}`, oa_original_amount: bank.amount }));
+    task.units = task.bank_events.map((bank, i) => ({ ...task.units[0], unit_id: `unit-${i}`, lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: bank.amount }));
     task.allocations = task.units.map(unit => ({ unit_id: unit.unit_id, amount: unit.oa_original_amount }));
     task.source_allocations = { cost_lines: task.units.map((unit, i) => ({ unit_id: unit.unit_id, bank_transaction_id: task.bank_events[i].transaction_id, amount: unit.oa_original_amount })), refund_links: [], non_cost_lines: [] };
   }
@@ -59,7 +58,7 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '587000.00';
     task.units = ['88050.00', '29350.00', '469600.00'].map((amount, i) => ({ ...task.units[0],
       unit_id: `oa-${i + 1}`, oa_id: `oa-pay-${i + 1}`, project_name: '大理卷烟厂余热综合利用项目',
-      oa_original_amount: amount, expense_content: ['设备预付款', '设备定金', '设备尾款'][i] }));
+      lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: amount, expense_content: ['设备预付款', '设备定金', '设备尾款'][i] }));
     task.bank_events = [
       ['bank-a', '64996.69', '交通银行 3847', '2026-04-23'],
       ['bank-b', '23053.31', '光大银行 8826', '2026-04-23'],
@@ -75,14 +74,14 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
   if (options.alignmentCase) {
     const amounts = ['210042.00','95000.00','14848.00','50376.00','117546.00','13735.00','5536.00'];
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '507083.00';
-    task.units = amounts.map((amount, i) => ({...task.units[0], unit_id:`unit-${i}`, oa_id:`oa-${i}`, oa_original_amount:amount, expense_content:`采购成本 ${i + 1}`}));
+    task.units = amounts.map((amount, i) => ({...task.units[0], unit_id:`unit-${i}`, oa_id:`oa-${i}`, lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount:amount, expense_content:`采购成本 ${i + 1}`}));
     const order = [4,5,6,1,0,2,3];
     task.bank_events = order.map((unit, i) => ({...task.bank_events[0], transaction_id:`bank-${i}`, amount:amounts[unit], bank_account_label:`${i >= 3 && i <= 5 ? '建设银行 8106' : '交通银行 3847'}`}));
     task.allocations = task.units.map(unit => ({unit_id:unit.unit_id,amount:unit.oa_original_amount}));
     task.suggested_source_allocations = {cost_lines:order.map((unit,i)=>({unit_id:task.units[unit].unit_id,bank_transaction_id:`bank-${i}`,amount:amounts[unit]})),refund_links:[],non_cost_lines:[]};
   }
   if (options.many) {
-    task.units = [0,1].map(i=>({...task.units[0],unit_id:`unit-${i}`,oa_original_amount:'300.00'}));
+    task.units = [0,1].map(i=>({...task.units[0],unit_id:`unit-${i}`,lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount:'300.00'}));
     task.allocations = task.units.map(unit=>({unit_id:unit.unit_id,amount:'300.00'}));
     task.suggested_source_allocations = {cost_lines:task.units.flatMap(unit=>task.bank_events.map(bank=>({unit_id:unit.unit_id,bank_transaction_id:bank.transaction_id,amount:bank.transaction_id==='bank-a'?'175.00':'125.00'}))),refund_links:[],non_cost_lines:[]};
   }
@@ -97,7 +96,7 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
     const parts = [['164.00','35.00'],['167.00','35.00'],['164.10','35.20'],['164.00','35.00'],['164.00','35.00'],['174.20','35.00'],['164.00','35.00']];
     const totals = ['199.00','202.00','199.30','199.00','199.00','209.20','199.00'];
     task.oa_total = task.net_outflow_total = task.gross_outflow_total = '1406.50';
-    task.units = totals.map((amount,i)=>({...task.units[0],unit_id:`unit-${i}`,oa_id:`oa-${i}`,oa_original_amount:amount,expense_content:`电话费 ${i+1}`}));
+    task.units = totals.map((amount,i)=>({...task.units[0],unit_id:`unit-${i}`,oa_id:`oa-${i}`,lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount:amount,expense_content:`电话费 ${i+1}`}));
     task.bank_events = parts.flatMap((part,i)=>part.map((amount,j)=>({...task.bank_events[0],transaction_id:`bank-${i}-${j}`,amount})));
     task.allocations = task.units.map(u=>({unit_id:u.unit_id,amount:u.oa_original_amount}));
     task.relation_display_groups = task.units.map((u,i)=>({unit_ids:[u.unit_id],bank_transaction_ids:parts[i].map((_,j)=>`bank-${i}-${j}`),sources_excluded:false}));
@@ -115,6 +114,7 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
       if (options.conflict) return route.fulfill({ status: 409, json: { error: 'cost_statistics_manual_allocation_conflict', message: '数据已变化，请重新核对；修改已保留' } });
       task.manual_items = savedBody!.manual_items.map((item: Record<string,string>) => ({...item,project_id:'',project_name:'云南溯源科技',cost_tag_primary_label:'费用',cost_tag_sub_label:'服务费'}));
       task.source_allocations = savedBody!.source_allocations;
+      task.units.forEach(u => { u.lock_oa_amount = savedBody!.oa_amount_locks.find((r: any) => r.unit_id === u.unit_id).locked; });
       task.suggested_source_allocations = null;
       task.allocations = savedBody!.allocations;
       task.version++; task.status = options.missingTag || options.partial ? 'pending' : 'allocated';
@@ -125,8 +125,8 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
     if (url.pathname.endsWith('/source-case')) { details++; if (options.detailDelayMs) await new Promise(resolve=>setTimeout(resolve,options.detailDelayMs)); if (options.detailFailure && details === 1) return route.fulfill({ status: 503, json: { message: 'unavailable' } }); return route.fulfill({ json: task }); }
     const { units, bank_events, allocations, source_allocations, suggested_source_allocations, ...summary } = task;
     return route.fulfill({ json: {
-      items: url.searchParams.get('status') === task.status ? [{ ...summary, project_names: [...new Set(task.units.map(unit => unit.project_name))], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
-      row_count: options.prefill ? 4 : 1, counts: { pending: task.status === 'pending' ? (options.prefill ? 4 : 1) : 0, allocated: task.status === 'allocated' ? (options.prefill ? 4 : 1) : 0 }, next_cursor: null,
+      items: (!options.automatic || writes > 0) && url.searchParams.get('status') === task.status ? [{ ...summary, project_names: [...new Set(task.units.map(unit => unit.project_name))], unit_count: task.units.length, bank_event_count: task.bank_events.length }, ...(options.prefill ? [2,3,4].map(i => ({...summary, relation_case_id: `color-block-${i}`, project_names: [`配色验证项目 ${i}`], unit_count: 1, bank_event_count: 2})) : [])] : [],
+      row_count: options.prefill ? 4 : 1, counts: { pending: task.status === 'pending' ? (options.prefill ? 4 : 1) : 0, allocated: task.status === 'allocated' && (!options.automatic || writes > 0) ? (options.prefill ? 4 : 1) : 0 }, next_cursor: null,
     } });
   });
   if (options.refreshFailure) await page.route('**/api/cost-statistics/explorer**', route => writes > 0 ? route.fulfill({ status: 503, json: { error: 'temporarily_unavailable', message: '统计刷新暂不可用' } }) : route.fallback());
@@ -143,9 +143,9 @@ async function sourceScenario(page: Page, options: { detailDelayMs?: number; aut
   const drawer = page.getByRole('dialog', { name: '成本人工分配' });
   if (options.automatic) {
     await expect(drawer.getByText('暂无待分配任务')).toBeVisible();
-    await drawer.getByRole('radio', {name: '已完成 1'}).click();
+    await drawer.getByRole('radio', {name: '已完成 0'}).click();
   }
-  if (!options.detailFailure) await expect(drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
+  if (!options.detailFailure && !options.automatic) await expect(drawer.getByRole('heading', { name: /银行流水/ })).toBeVisible();
   const unit = drawer.locator('.cost-source-table tbody').first();
   return { drawer, unit, task, writes: () => writes, body: () => savedBody, details: () => details };
 }
@@ -161,39 +161,31 @@ async function fillSources(page: Page, unit: ReturnType<Page['locator']>) {
   }
 }
 
-test('automatic allocation is visible without a write and supports explicit manual save', async ({page}) => {
+test('automatic allocations do not enter pending or completed manual lists', async ({page}) => {
   const scene = await sourceScenario(page, {automatic: true});
-  await expect(scene.drawer.getByText('自动分配', {exact: true})).toBeVisible();
-  await expect(scene.unit.getByRole('textbox', {name: '分配金额 1', exact: true})).toHaveValue('350.00');
-  await expect(scene.unit.getByRole('textbox', {name: '分配金额 2', exact: true})).toHaveValue('250.00');
-  expect(scene.writes()).toBe(0);
-  await scene.drawer.getByRole('button', {name: '保存分配', exact: true}).click();
-  await expect(scene.drawer.getByText('分配已保存')).toBeVisible();
-  expect(scene.writes()).toBe(1);
-  await expect(scene.drawer.getByText('自动分配', {exact: true})).toHaveCount(0);
-  expect(scene.body()?.expected_version).toBe(0);
-  await scene.drawer.getByRole('radio', {name: '已完成 1'}).click();
-  await expect(scene.drawer.getByText('自动分配', {exact: true})).toHaveCount(0);
+  await expect(scene.drawer.locator('.cost-source-table')).toHaveCount(0);
+  expect(scene.writes()).toBe(0); expect(scene.details()).toBe(0);
+  await expect(scene.drawer.getByRole('radio', {name: '已完成 0'})).toBeChecked();
   await expectNoUnexpectedSuccessUiErrors(page);
 });
 
 test('mixed approval saves only completed 8000 and keeps the other 8000 waiting after reopening', async ({page}) => {
   await page.setViewportSize({width: 1440, height: 1000});
   const scene = await sourceScenario(page, {partial: true});
-  await expect(scene.drawer.getByText('等待 OA 完成，暂不计入成本')).toBeVisible();
+  await expect(scene.drawer.getByText('待审批', {exact:true})).toBeVisible();
   await scene.unit.getByRole('button', {name: '新增来源', exact: true}).click();
   await scene.unit.getByRole('combobox', {name: '来源流水 1', exact: true}).click();
   await page.getByRole('option', {name: /建设银行 8106/}).click();
   await scene.unit.getByRole('textbox', {name: '分配金额 1', exact: true}).fill('8000');
   await expect(scene.drawer.getByText('分配金额一致', {exact: true})).toHaveCount(0);
-  await scene.drawer.getByRole('button', {name: '保存分配'}).click();
-  await expect(scene.drawer.getByText('已保存，剩余金额待分配或等待 OA 完成')).toBeVisible();
+  await scene.drawer.getByRole('button', {name: '保存', exact: true}).click();
+  await expect(scene.drawer.getByText('已保存')).toBeVisible();
   expect(scene.body()!.allocations).toEqual([{unit_id: 'oa-1', amount: '8000.00'}, {unit_id: 'oa-2', amount: '0.00'}]);
   expect(scene.body()!.non_cost_amount).toBe('0.00');
   await scene.drawer.getByRole('button', {name: /关闭/}).click();
   await page.getByRole('button', {name: '打开成本人工分配'}).click();
   await expect(scene.unit.getByRole('textbox', {name: '分配金额 1', exact: true})).toHaveValue('8000.00');
-  await expect(scene.drawer.getByText('等待 OA 完成，暂不计入成本')).toBeVisible();
+  await expect(scene.drawer.getByText('待审批', {exact:true})).toBeVisible();
   await page.screenshot({path: '/tmp/cost-mixed-partial-1440.png', animations: 'disabled'});
   await expectNoUnexpectedSuccessUiErrors(page);
 });
@@ -213,7 +205,7 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
   await expect(scene.drawer.locator('.cost-source-evidence').getByText('2026-08-15 08:00:00', { exact: true })).toBeVisible();
   await expect(scene.drawer.locator('.cost-source-evidence').getByText('2026-09-03', { exact: true })).toBeVisible();
   await page.screenshot({ path: '/tmp/cost-drawer-app-1440.png', fullPage: false, animations: "disabled" });
-  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
   await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
   expect(scene.writes()).toBe(1);
   expect(scene.body()!.source_allocations).toEqual({ cost_lines: [
@@ -229,8 +221,8 @@ test('splits 600 across real bank accounts, moves only completed tasks, and pres
 test('keeps a saved task pending when a bank tag is missing and rehydrates after reopening', async ({ page }) => {
   const scene = await sourceScenario(page, { missingTag: true });
   await fillSources(page, scene.unit);
-  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
-  await expect(scene.drawer.getByText('已保存，银行信息待完善')).toBeVisible();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(scene.drawer.getByText('已保存')).toBeVisible();
   await expect(scene.drawer.getByRole('radio', { name: '待分配 1' })).toBeVisible();
   await scene.drawer.getByRole('button', { name: /关闭/ }).click();
   await page.getByRole('button', { name: '打开成本人工分配' }).click();
@@ -240,11 +232,11 @@ test('keeps a saved task pending when a bank tag is missing and rehydrates after
 
 test('retains input after a stale-version conflict and blocks incomplete amounts locally', async ({ page }) => {
   const scene = await sourceScenario(page, { conflict: true });
-  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
   expect(scene.writes()).toBe(0);
   await page.keyboard.press('Escape');
   await fillSources(page, scene.unit);
-  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
   await expect(scene.drawer.getByText('数据已变化，请重新核对；修改已保留')).toBeVisible();
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 2', exact: true })).toHaveValue('250.00');
   await expect(scene.drawer.getByRole('button', { name: '重新加载' })).toBeVisible();
@@ -253,7 +245,7 @@ test('retains input after a stale-version conflict and blocks incomplete amounts
 test('preserves read-only controls and fits narrow screens without horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const scene = await sourceScenario(page, { canSave: false });
-  await expect(scene.drawer.getByRole('button', { name: '保存分配' })).toBeDisabled();
+  await expect(scene.drawer.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
   await expect(scene.unit.getByRole('button', { name: '新增来源', exact: true })).toBeDisabled();
   expect(await scene.drawer.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await page.screenshot({ path: '/tmp/cost-drawer-app-390.png', fullPage: false, animations: "disabled" });
@@ -276,9 +268,9 @@ test('reads a failed detail again without showing an empty task as fact', async 
 test('reconciles a committed write with a lost response using GET and never submits twice', async ({ page }) => {
   const scene = await sourceScenario(page, { interrupted: true });
   await fillSources(page, scene.unit);
-  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
   await expect(scene.drawer.getByText('保存结果待核实，修改已保留')).toBeVisible();
-  await expect(scene.drawer.getByRole('button', { name: '保存分配' })).toBeDisabled();
+  await expect(scene.drawer.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
   await scene.drawer.getByRole('button', { name: '核实保存结果' }).click();
   await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
   expect(scene.writes()).toBe(1);
@@ -298,7 +290,7 @@ test('keeps the current full source selectable and restores focus after row dele
   await expect(scene.unit.getByRole('textbox', { name: '分配金额 1', exact: true })).toHaveValue('250.00');
   await scene.unit.getByRole('button', { name: '删除来源行 1', exact: true }).click();
   await expect(scene.unit.getByRole('button', { name: '新增来源', exact: true })).toBeFocused();
-  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
   expect(scene.writes()).toBe(0);
 });
 
@@ -363,7 +355,7 @@ test('keeps a successful allocation committed when the statistics refresh fails'
   const scene = await sourceScenario(page, { refreshFailure: true });
   await fillSources(page, scene.unit);
   const failedRead = page.waitForResponse(response => response.url().includes('/cost-statistics/explorer') && response.status() === 503);
-  await scene.drawer.getByRole('button', { name: '保存分配' }).click();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
   await failedRead;
   await expect(scene.drawer.getByText('暂无待分配任务')).toBeVisible();
   await scene.drawer.getByRole('radio', { name: '已完成 1' }).click();
@@ -405,7 +397,7 @@ test('prefill is editable, merged, pending until save, with four distinct block 
   expect(colors).toEqual(['rgb(197, 212, 184)', 'rgb(232, 197, 165)', 'rgb(221, 185, 195)', 'rgb(185, 204, 223)']);
   await scene.drawer.evaluate(async element => { await Promise.all(element.getAnimations({subtree: true}).filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished)); });
   await page.screenshot({path: '/tmp/cost-prefill-four-colors.png', fullPage: false, animations: 'disabled'});
-  await scene.drawer.getByRole('button', {name: '保存分配', exact: true}).click();
+  await scene.drawer.getByRole('button', {name: '保存', exact: true}).click();
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.source_allocations.cost_lines).toHaveLength(2);
 });
@@ -434,7 +426,7 @@ test('COST-E2E-014 screenshot three OA four bank suggestions save as four source
   expect(scene.writes()).toBe(0);
   expect(scene.task.status).toBe('pending');
   await page.screenshot({ path: '/tmp/cost-prefill-repair-screenshot-case.png', fullPage: false, animations: 'disabled' });
-  await scene.drawer.getByRole('button', { name: '保存分配', exact: true }).click();
+  await scene.drawer.getByRole('button', { name: '保存', exact: true }).click();
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.allocations.map((line: {amount: string}) => line.amount)).toEqual(['88050.00', '29350.00', '469600.00']);
   expect(scene.body()!.source_allocations.cost_lines.map((line: {amount: string}) => line.amount)).toEqual(['64996.69', '23053.31', '29350.00', '469600.00']);
@@ -499,7 +491,7 @@ test('aligns seven chosen sources and keeps the balance hint legible on every ta
   }
   await expect(rows.first().locator('td').nth(3)).toContainText('5. 建设银行 8106');
   const hint = scene.drawer.getByText('分配金额一致',{exact:true});
-  const save = scene.drawer.getByRole('button',{name:'保存分配',exact:true});
+  const save = scene.drawer.getByRole('button',{name:'保存',exact:true});
   await expect(hint).toBeVisible();
   const ratios=[];
   for (const [index,color] of ['#c5d4b8','#e8c5a5','#ddb9c3','#b9ccdf'].entries()) {
@@ -550,7 +542,7 @@ test('shows many-to-many evidence as one group without duplicating bank facts',a
   await expect(evidence.getByText('¥250.00',{exact:true})).toHaveCount(1);
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
   await evidence.screenshot({path:testInfo.outputPath('many-to-many.png'),animations:'disabled'});
-  await scene.drawer.getByRole('button',{name:'保存分配'}).click();
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
   expect(scene.writes()).toBe(1);
 });
 
@@ -567,7 +559,7 @@ test('scoped hotel task omits excluded loan, saves only scoped source and keeps 
   await expect(menu).toContainText('住宿费');
   await page.keyboard.press('Escape');
   await scene.drawer.screenshot({path:testInfo.outputPath('scoped-hotel.png'),animations:'disabled'});
-  await scene.drawer.getByRole('button',{name:'保存分配',exact:true}).click();
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.scope_version).toBe(7);
   expect(scene.body()!.non_cost_amount).toBe('0.00');
@@ -576,7 +568,7 @@ test('scoped hotel task omits excluded loan, saves only scoped source and keeps 
   await expect(scene.unit.getByRole('textbox')).toHaveValue('2100.00');
   await page.setViewportSize({width:390,height:844});
   await expect(scene.drawer.getByText(/范围外|借出款/)).toHaveCount(0);
-  await scene.drawer.getByRole('button',{name:'保存分配',exact:true}).scrollIntoViewIfNeeded();
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).scrollIntoViewIfNeeded();
   await scene.drawer.screenshot({path:testInfo.outputPath('scoped-hotel-narrow.png'),animations:'disabled'});
   await expectNoUnexpectedSuccessUiErrors(page);
 });
@@ -598,7 +590,7 @@ test('seven historical OA groups prefill fourteen sources, stay editable and sur
   await amount.fill('164.00');
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
   await table.screenshot({path:testInfo.outputPath('telecom-fourteen-prefilled.png'),animations:'disabled'});
-  await scene.drawer.getByRole('button',{name:'保存分配',exact:true}).click();
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.source_allocations.cost_lines).toHaveLength(14);
   await scene.drawer.getByRole('radio',{name:'已完成 1'}).click();
@@ -624,7 +616,7 @@ test('manual supplemental cost closes residual, saves and reloads without creati
   await manual.getByRole('textbox',{name:'分配金额 2',exact:true}).fill('192');
   await expect(scene.drawer.getByText('分配金额一致',{exact:true})).toBeVisible();
   await page.screenshot({path:testInfo.outputPath('manual-cost-1440.png'),fullPage:false});
-  await scene.drawer.getByRole('button',{name:'保存分配'}).click();
+  await scene.drawer.getByRole('button',{name:'保存',exact:true}).click();
   await expect.poll(scene.writes).toBe(1);
   expect(scene.body()!.manual_items).toHaveLength(1);
   expect(scene.body()!.manual_items[0]).toEqual({unit_id:expect.stringMatching(/^manual:/),project_name:'云南溯源科技',expense_content:'补充服务费',cost_tag_code:'service'});

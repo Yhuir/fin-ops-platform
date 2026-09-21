@@ -272,7 +272,16 @@ class PostgresBankDetailsCanonicalQueryRepository:
                 effective_category_primary_label,
                 effective_category_sub_label,
                 effective_category_third_label,
-                effective_category_source
+                effective_category_source,
+                coalesce(
+                    nullif(case
+                        when effective_category_source = 'manual_confirmation'
+                            then confirmation_raw_payload->'normalized_payload'->>'turnover_role'
+                        when effective_category_source in ('manual', 'turnover_ledger')
+                            then manual_category_raw_payload->'normalized_payload'->>'turnover_role'
+                    end, ''),
+                    effective_definition->>'turnover_role', ''
+                ) as turnover_role
             from classified_with_semantics
             where row_id = any(%s::text[])
             """,

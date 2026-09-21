@@ -223,3 +223,7 @@ p50/p95/p99、canonical audit、health、worker、PostgreSQL outbox/dead-letter 
 ### ETC 税率副本污染修复（2026-09-20）
 
 复用固定 helper `import-audit-repair <release> --dry-run --repair-etc-invoice-payload` 发现目标；该独立模式不扫描无关银行历史。限定 `--invoice-id <canonical-id>`（可重复）并附 `--rollback-manifest-path` 生成既有受控私有恢复工件后，以相同目标、工件、`--expected-fingerprint`、`--operator-id`、`--reason` 执行 `--execute`。只允许原导入税率明确为空、正式税率为空、payload 税率等于对应 ETC 来源的记录；缺证据或并发变化明确拒绝，事务内写审计。修复后重跑必须零更新，发票页 Audit 不再有正式列/副本冲突，ETC 票数金额不变。完成验证后按上文 artifact-delete 精确删除本任务工件，不触碰主数据库或平台备份。
+
+## 成本分配变更（2026-09-21）
+
+Migration 0176 为成本分配增加必填的 OA 单元金额锁定元数据；旧 writer 不能跨版本继续写入，加入现有 forward-only migration 清单。迁移不修改 OA、流水或既有成本金额。

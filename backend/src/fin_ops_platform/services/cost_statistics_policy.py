@@ -108,8 +108,13 @@ class CostStatisticsPolicy:
         return dict(self._allocation_result[1])
 
     @cached_property
-    def manual_allocation_tasks(self) -> list[dict[str, Any]]:
+    def allocation_tasks(self) -> list[dict[str, Any]]:
         return [dict(task) for task in self._allocation_result[2]]
+
+    @cached_property
+    def manual_allocation_tasks(self) -> list[dict[str, Any]]:
+        return [task for task in self.allocation_tasks
+                if task["in_project_cost_scope"] and (task["status"] != "allocated" or task["relation_case_id"] in self._manual_allocations)]
 
     @cached_property
     def pending_manual_allocation_count(self) -> int:
@@ -704,6 +709,7 @@ def _cost_entries(
                 or transaction_id in protected_bank_ids
                 or amount is None
                 or project is None
+                or bank_row.get("turnover_role") == "external_turnover"
                 or not source_in_project_cost_scope(bank_row, selected_codes)
             ):
                 continue
@@ -913,7 +919,6 @@ def _manual_allocation_task(
         ],
         "net_outflow_total": reconciliation["net_outflow_total"],
         "difference": reconciliation["difference"],
-        "amounts_fixed": reconciliation["difference"] == "0.00",
         "units": units,
         "allows_partial": bool(group.get("waiting_oa_ids")) or partial_source,
         "waiting_oa_ids": group.get("waiting_oa_ids", []),
@@ -941,6 +946,11 @@ def _manual_allocation_task(
         reconciliation=reconciliation,
     )
     task["source_fingerprint"] = source_fingerprint
+    default_lock = (reconciliation["difference"] == "0.00" and not task["allows_partial"]) or any(
+        e.get("turnover_role") == "external_turnover" for e in bank_events if e["event_kind"] == "outflow")
+    for unit in units:
+        unit["lock_oa_amount"] = default_lock
+        unit["outside_cost_amount"] = "0.00"
     if manual_record is None:
         decision = automatic_relation_sources(task, [*outflows, *refunds], group.get("source_relation_groups", []))
         return project_source_task(task, decision, automatic=True)
@@ -963,6 +973,8 @@ def _manual_allocation_task(
         task["non_cost_reason"] = ""
         # A stale decision cannot choose a new source automatically.
         return project_source_task(task, None)
+    for unit in units:
+        unit["lock_oa_amount"] = manual_record["oa_amount_locks"][unit["unit_id"]]
     task["manual_items"] = list(manual_record.get("manual_items", []))
     raw_allocations = [
         dict(line)
@@ -1057,6 +1069,7 @@ def _manual_allocation_bank_event(
     return {
         "transaction_id": transaction_id,
         "event_kind": event_kind,
+        "turnover_role": _clean_text(row.get("turnover_role")),
         "amount": _money(amount),
         "trade_time": serialized["trade_time"],
         "counterparty_name": serialized["counterparty_name"],

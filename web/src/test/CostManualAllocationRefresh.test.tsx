@@ -10,8 +10,8 @@ beforeEach(()=>{
  vi.clearAllMocks();
  // jsdom has no layout; actual height transitions are verified in Playwright.
  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
- task={relationCaseId:'case',relationVersion:1,sourceFingerprint:'first',scopeVersion:1,status:'pending',pendingReasons:['source_required'],amountsFixed:true,oaTotal:'100.00',grossOutflowTotal:'100.00',wrongPaymentRefundTotal:'0.00',netOutflowTotal:'100.00',nonCostAmount:'0.00',nonCostReason:'',version:0,updatedBy:'',updatedAt:'',canSave:true,
- units:[{unitId:'u',oaId:'o',oaApplyType:'支付申请',expenseItemId:'',projectId:'p',projectName:'项目',expenseType:'材料',expenseContent:'原始费用',oaApplicant:'申请人',oaOriginalAmount:'100.00'}],
+ task={relationCaseId:'case',relationVersion:1,sourceFingerprint:'first',scopeVersion:1,status:'pending',pendingReasons:['source_required'],oaTotal:'100.00',grossOutflowTotal:'100.00',wrongPaymentRefundTotal:'0.00',netOutflowTotal:'100.00',nonCostAmount:'0.00',nonCostReason:'',version:0,updatedBy:'',updatedAt:'',canSave:true,
+ units:[{unitId:'u',oaId:'o',oaApplyType:'支付申请',expenseItemId:'',projectId:'p',projectName:'项目',expenseType:'材料',expenseContent:'原始费用',oaApplicant:'申请人',lockOaAmount: true, outsideCostAmount: "0.00", oaOriginalAmount:'100.00'}],
  bankEvents:[{transactionId:'b',eventKind:'outflow',inProjectCostScope:true,amount:'100.00',tradeTime:'2026-09-01',counterpartyName:'供应商',bankAccountLabel:'建行 8106',bankTagCode:'material',bankTagPrimaryLabel:'材料',bankTagSubLabel:'采购',tags:[]}],
  allocations:[{unitId:'u',amount:'100.00'}],sourceAllocations:null,manualItems: [], manualOptions: {projects: [], tags: []}, suggestedSourceAllocations:{costLines:[{unitId:'u',bankTransactionId:'b',amount:'100.00'}],refundLinks:[],nonCostLines:[]},relationDisplayGroups:[{unitIds:['u'],bankTransactionIds:['b'],sourcesExcluded:false}]};
  vi.mocked(fetchCostStatisticsManualAllocations).mockImplementation(async()=>({items:[{...task,projectNames:['项目'],unitCount:1,bankEventCount:1}],counts:{pending:1,allocated:0},rowCount:1}));
@@ -25,16 +25,16 @@ it('refreshes formal facts while preserving a conflicting dirty draft until expl
  task={...task,sourceFingerprint:'changed',relationVersion:2,units:task.units.map(u=>({...u,expenseContent:'更新的费用'}))};
  view.rerender(<Drawer {...props} refreshKey="2"/>);
  await screen.findByText('关联或分配已变化，草稿已保留；请重新加载后核对');
- expect(input).toHaveValue('80.00');expect(screen.getByRole('button',{name:'保存分配'})).toBeDisabled();
+ expect(input).toHaveValue('80.00');expect(screen.getByRole('button',{name:'保存'})).toBeDisabled();
  expect(within(screen.getByRole('table',{name:'OA 与流水对照'})).getByText('更新的费用')).toBeVisible();
  // Further refresh cannot clear the conflict or overwrite the draft.
  view.rerender(<Drawer {...props} refreshKey="3"/>);await waitFor(()=>expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(3));
- expect(screen.getByRole('button',{name:'保存分配'})).toBeDisabled();
+ expect(screen.getByRole('button',{name:'保存'})).toBeDisabled();
  vi.spyOn(window,'confirm').mockReturnValue(true);
  await user.click(screen.getByRole('button',{name:'重新加载'}));
  await waitFor(()=>expect(input).toHaveValue('100.00'));
  expect(screen.queryByText('关联或分配已变化，草稿已保留；请重新加载后核对')).not.toBeInTheDocument();
- expect(screen.getByRole('button',{name:'保存分配'})).not.toBeDisabled();expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
+ expect(screen.getByRole('button',{name:'保存'})).not.toBeDisabled();expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
 });
 it('ignores an obsolete detail response after a newer refresh',async()=>{
  let finish!:(t:CostStatisticsManualAllocationTask)=>void;
@@ -82,14 +82,14 @@ it('retains acknowledged save feedback when unchanged pending facts refresh', as
   const view=render(<Drawer {...props} refreshKey="1"/>);
   await user.click(screen.getByRole('button',{name:'打开成本人工分配'}));
   await screen.findByRole('textbox',{name:'分配金额 1'});
-  await user.click(screen.getByRole('button',{name:'保存分配'}));
-  await screen.findByText('已保存，银行信息待完善');
+  await user.click(screen.getByRole('button',{name:'保存'}));
+  await screen.findByText('已保存');
   view.rerender(<Drawer {...props} refreshKey="2"/>);
   await waitFor(()=>expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(2));
-  expect(screen.getByText('已保存，银行信息待完善')).toBeVisible();
+  expect(screen.getByText('已保存')).toBeVisible();
   task={...task,version:2};
   view.rerender(<Drawer {...props} refreshKey="3"/>);
-  await waitFor(()=>expect(screen.queryByText('已保存，银行信息待完善')).not.toBeInTheDocument());
+  await waitFor(()=>expect(screen.queryByText('已保存')).not.toBeInTheDocument());
 });
 
 it('discards an older tag catalogue response without resetting manual draft', async () => {
@@ -140,4 +140,20 @@ it('keeps one expanded task, preserves edits, and does not reopen on a late resp
   expect(await screen.findByRole('textbox',{name:'分配金额 1'})).toHaveValue('80.00');
   expect(fetchCostStatisticsManualAllocation).toHaveBeenCalledTimes(3);
   expect(saveCostStatisticsManualAllocation).not.toHaveBeenCalled();
+});
+
+it('opens automatic cost directly without reading manual lists and retains its saved lock', async () => {
+ const user=userEvent.setup(); const onSaved=vi.fn(); const onCloseCase=vi.fn();
+ task.status='allocated'; task.sourceAllocations=task.suggestedSourceAllocations; task.suggestedSourceAllocations=null;
+ vi.mocked(saveCostStatisticsManualAllocation).mockImplementation(async(payload)=>{
+  task={...task,version:1,units:task.units.map(u=>({...u,lockOaAmount:payload.oaAmountLocks.find(r=>r.unitId===u.unitId)!.locked}))};
+  return structuredClone(task);
+ });
+ render(<Drawer canSave caseId="case" onCloseCase={onCloseCase} onSaved={onSaved}/>);
+ const lock=await screen.findByRole('checkbox',{name:'按 OA 原额'});
+ expect(fetchCostStatisticsManualAllocations).not.toHaveBeenCalled();
+ await user.click(lock); await user.click(screen.getByRole('button',{name:'保存'}));
+ await screen.findByText('已保存'); expect(lock).not.toBeChecked(); expect(onSaved).toHaveBeenCalledOnce();
+ expect(vi.mocked(saveCostStatisticsManualAllocation).mock.calls[0][0].oaAmountLocks).toEqual([{unitId:'u',locked:false}]);
+ await user.click(screen.getByRole('button',{name:/关闭/})); expect(onCloseCase).toHaveBeenCalledOnce();
 });

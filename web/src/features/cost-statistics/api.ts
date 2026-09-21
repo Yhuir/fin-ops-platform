@@ -143,7 +143,6 @@ type ApiCostStatisticsManualAllocationTask = {
   scope_version: number;
   status: "pending" | "allocated";
   pending_reasons: string[];
-  amounts_fixed: boolean;
   allows_partial: boolean;
   waiting_oa_ids: string[];
   source_allocations: ApiCostSourceAllocations | null;
@@ -164,6 +163,8 @@ type ApiCostStatisticsManualAllocationTask = {
     expense_content: string;
     oa_applicant: string;
     oa_original_amount: string;
+    lock_oa_amount: boolean;
+    outside_cost_amount: string;
     cost_eligible: boolean;
   }>;
   bank_events: Array<{
@@ -430,7 +431,6 @@ function mapManualAllocationTask(
     sourceFingerprint: task.source_fingerprint, scopeVersion: task.scope_version,
     status: task.status,
     pendingReasons: task.pending_reasons,
-    amountsFixed: task.amounts_fixed,
     allowsPartial: task.allows_partial, waitingOaIds: task.waiting_oa_ids,
     manualItems: task.manual_items.map(item => ({ unitId: item.unit_id, projectId: item.project_id, expenseContent: item.expense_content,
       costTagCode: item.cost_tag_code, projectName: item.project_name, costTagPrimaryLabel: item.cost_tag_primary_label, costTagSubLabel: item.cost_tag_sub_label })),
@@ -453,6 +453,8 @@ function mapManualAllocationTask(
       expenseContent: unit.expense_content,
       oaApplicant: unit.oa_applicant,
       oaOriginalAmount: unit.oa_original_amount,
+      lockOaAmount: unit.lock_oa_amount,
+      outsideCostAmount: unit.outside_cost_amount,
       costEligible: unit.cost_eligible,
     })),
     bankEvents: task.bank_events.map((event) => ({
@@ -494,7 +496,7 @@ function mapManualSummary(task: ApiCostManualAllocationSummary): CostStatisticsM
   return {
     relationCaseId: task.relation_case_id, relationVersion: task.relation_version,
     sourceFingerprint: task.source_fingerprint, scopeVersion: task.scope_version, status: task.status, pendingReasons: task.pending_reasons,
-    amountsFixed: task.amounts_fixed, oaTotal: task.oa_total, grossOutflowTotal: task.gross_outflow_total,
+    oaTotal: task.oa_total, grossOutflowTotal: task.gross_outflow_total,
     wrongPaymentRefundTotal: task.wrong_payment_refund_total, netOutflowTotal: task.net_outflow_total,
     nonCostAmount: task.non_cost_amount, nonCostReason: task.non_cost_reason,
     version: task.version, updatedBy: task.updated_by, updatedAt: task.updated_at, canSave: task.can_save,
@@ -651,6 +653,7 @@ export async function saveCostStatisticsManualAllocation(
         expected_version: request.expectedVersion,
         source_fingerprint: request.sourceFingerprint,
         scope_version: request.scopeVersion,
+        oa_amount_locks: request.oaAmountLocks.map(item => ({ unit_id: item.unitId, locked: item.locked })),
         manual_items: request.manualItems.map(item => ({ unit_id: item.unitId, project_name: item.projectName, expense_content: item.expenseContent, cost_tag_code: item.costTagCode })),
         allocations: request.allocations.map((line) => ({
           unit_id: line.unitId,

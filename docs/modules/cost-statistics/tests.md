@@ -240,3 +240,7 @@ FIN_OPS_E2E_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:5189 npx playw
 ## 2026-09-20 逐笔展示隔离
 
 `test_cost_relation_display.py` 从 Cost 自身 OA projection 构造付款证据，断言两笔等额付款对应正确且不改变原始事实/source_relation_groups；既有成本来源分配、资格与金额测试保护业务口径。
+
+## 成本分配变更（2026-09-21）
+
+新增 PostgreSQL 本息拆分、金额锁定/解锁、零成本、重复提交、撤回、迁移保金额回归；UI 覆盖锁定切换和明细直接编辑。保留范围合并、审计回滚、并发 CAS、部分审批、权限和跨页回归。无新增 read model/cache/worker，七类中的第 4 类仅验证 canonical 写后读取和批量 I/O。

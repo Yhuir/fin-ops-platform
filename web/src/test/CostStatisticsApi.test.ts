@@ -25,7 +25,7 @@ describe("Cost statistics export API", () => {
       relation_version: 3,
       source_fingerprint: "b".repeat(64), scope_version: 1,
       status: "pending",
-      pending_reasons: ["source_required"], amounts_fixed: true, manual_items: [], manual_options: { projects: [], tags: [] }, suggested_source_allocations: null, relation_display_groups: [], source_allocations: null,
+      pending_reasons: ["source_required"], manual_items: [], manual_options: { projects: [], tags: [] }, suggested_source_allocations: null, relation_display_groups: [], source_allocations: null,
       project_names: ["云南溯源科技"], unit_count: 1, bank_event_count: 1,
       oa_total: "120.00",
       gross_outflow_total: "125.00",
@@ -41,7 +41,7 @@ describe("Cost statistics export API", () => {
         expense_type: "材料费",
         expense_content: "采购款",
         oa_applicant: "申请人",
-        oa_original_amount: "120.00",
+        lock_oa_amount: true, outside_cost_amount: "0.00", oa_original_amount: "120.00",
       }],
       bank_events: [{
         transaction_id: "bank-1",
@@ -93,7 +93,7 @@ describe("Cost statistics export API", () => {
 
     await saveCostStatisticsManualAllocation({
       relationCaseId: "relation-1",
-      manualItems: [], expectedVersion: 0,
+      manualItems: [], expectedVersion: 0, oaAmountLocks: [{unitId: "oa-1:parent", locked: true}],
       sourceFingerprint: "b".repeat(64), scopeVersion: 1,
       allocations: [{ unitId: "oa-1:parent", amount: "120.00" }],
       sourceAllocations: { costLines: [{unitId: "oa-1:parent", bankTransactionId: "bank-out", amount: "120.00"}], refundLinks: [], nonCostLines: [] },
@@ -103,7 +103,7 @@ describe("Cost statistics export API", () => {
     const putCall = vi.mocked(global.fetch).mock.calls.find(([, init]) => init?.method === "PUT");
     expect(JSON.parse(String(putCall?.[1]?.body))).toEqual({
       relation_case_id: "relation-1",
-      manual_items: [], expected_version: 0,
+      manual_items: [], expected_version: 0, oa_amount_locks: [{unit_id: "oa-1:parent", locked: true}],
       source_fingerprint: "b".repeat(64), scope_version: 1,
       allocations: [{ unit_id: "oa-1:parent", amount: "120.00" }],
       source_allocations: { cost_lines: [{unit_id: "oa-1:parent", bank_transaction_id: "bank-out", amount: "120.00"}], refund_links: [], non_cost_lines: [] },

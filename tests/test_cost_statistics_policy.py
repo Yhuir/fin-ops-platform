@@ -146,7 +146,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         policy = self._policy([group])
 
         self.assertEqual(policy.serialized_cost_rows, [])
-        task = policy.manual_allocation_tasks[0]
+        task = policy.allocation_tasks[0]
         self.assertIsNone(task["source_allocations"])
         self.assertEqual(len(task["bank_events"]), 3)
         self.assertEqual(task["net_outflow_total"], "540.00")
@@ -265,10 +265,10 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         self.assertEqual(policy.serialized_cost_rows, [])
         self.assertEqual(policy.allocation_quality["pending_manual_allocation_count"], 1)
         self.assertEqual(policy.allocation_quality["stale_manual_allocation_count"], 0)
-        self.assertEqual(policy.manual_allocation_tasks[0]["status"], "pending")
-        self.assertEqual(policy.manual_allocation_tasks[0]["net_outflow_total"], "1015.00")
+        self.assertEqual(policy.allocation_tasks[0]["status"], "pending")
+        self.assertEqual(policy.allocation_tasks[0]["net_outflow_total"], "1015.00")
         self.assertEqual(
-            [unit["unit_id"] for unit in policy.manual_allocation_tasks[0]["units"]],
+            [unit["unit_id"] for unit in policy.allocation_tasks[0]["units"]],
             ["oa:oa-exp-1:item:lodging", "oa:oa-exp-1:item:other"],
         )
 
@@ -292,9 +292,9 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(policy.serialized_cost_rows, [])
-        self.assertEqual(len(policy.manual_allocation_tasks), 1)
-        self.assertEqual(policy.manual_allocation_tasks[0]["net_outflow_total"], "100.00")
-        event = policy.manual_allocation_tasks[0]["bank_events"][0]
+        self.assertEqual(len(policy.allocation_tasks), 1)
+        self.assertEqual(policy.allocation_tasks[0]["net_outflow_total"], "100.00")
+        event = policy.allocation_tasks[0]["bank_events"][0]
         self.assertEqual(event["tags"], ["项目开销", "住宿费"])
         self.assertNotIn("summary", event)
 
@@ -313,7 +313,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             ],
             bank_rows=[self._bank("bank-out", "1015.00")],
         )
-        pending = self._policy([group]).manual_allocation_tasks[0]
+        pending = self._policy([group]).allocation_tasks[0]
         policy = self._policy(
             [group],
             manual_allocations={
@@ -321,6 +321,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
+                    "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
                     "allocations": [
                         self._line("oa:oa-exp-1:item:lodging", "1000.00"),
                         self._line("oa:oa-exp-1:item:other", "15.00"),
@@ -335,7 +336,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             {(row["expense_type"], row["amount"]) for row in policy.serialized_cost_rows},
             {("住宿费", "1000.00"), ("其他", "15.00")},
         )
-        self.assertEqual(policy.manual_allocation_tasks[0]["status"], "allocated")
+        self.assertEqual(policy.allocation_tasks[0]["status"], "allocated")
 
     def test_manual_allocation_keeps_unit_cost_separate_from_bank_evidence(self) -> None:
         group = self._group(
@@ -348,7 +349,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 self._bank("bank-2", "66.67"),
             ],
         )
-        pending = self._policy([group]).manual_allocation_tasks[0]
+        pending = self._policy([group]).allocation_tasks[0]
         policy = self._policy(
             [group],
             manual_allocations={
@@ -356,6 +357,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
+                    "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
                     "allocations": [
                         self._line("oa:oa-a", "50.01"),
                         self._line("oa:oa-b", "49.99"),
@@ -367,7 +369,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(policy.serialized_cost_rows, [])
-        task = policy.manual_allocation_tasks[0]
+        task = policy.allocation_tasks[0]
         self.assertEqual(task["allocations"], [self._line("oa:oa-a", "50.01"), self._line("oa:oa-b", "49.99")])
         self.assertIn("source_required", task["pending_reasons"])
         for view in ("project", "cost_tag", "bank_account"):
@@ -380,7 +382,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             oa_rows=[self._oa("oa-a", amount="60.00"), self._oa("oa-b", amount="60.00")],
             bank_rows=[self._bank("bank-1", "100.00")],
         )
-        pending = self._policy([group]).manual_allocation_tasks[0]
+        pending = self._policy([group]).allocation_tasks[0]
         changed = self._group(
             oa_rows=[self._oa("oa-a", amount="60.00"), self._oa("oa-b", amount="60.00")],
             bank_rows=[self._bank("bank-1", "90.00")],
@@ -392,6 +394,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                     "source_fingerprint": pending["source_fingerprint"],
                     "net_outflow_total": pending["net_outflow_total"],
                     "version": 1,
+                    "oa_amount_locks": {u["unit_id"]: False for u in pending["units"]},
                     "allocations": [
                         self._line("oa:oa-a", "50.00"),
                         self._line("oa:oa-b", "50.00"),
@@ -403,11 +406,11 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(policy.serialized_cost_rows, [])
-        self.assertEqual(policy.manual_allocation_tasks[0]["pending_reasons"], ["allocation_stale"])
+        self.assertEqual(policy.allocation_tasks[0]["pending_reasons"], ["allocation_stale"])
         self.assertEqual(policy.allocation_quality["stale_manual_allocation_count"], 1)
 
-        self.assertEqual(policy.manual_allocation_tasks[0]["non_cost_amount"], "0.00")
-        self.assertEqual(policy.manual_allocation_tasks[0]["non_cost_reason"], "")
+        self.assertEqual(policy.allocation_tasks[0]["non_cost_amount"], "0.00")
+        self.assertEqual(policy.allocation_tasks[0]["non_cost_reason"], "")
 
     def test_manual_allocation_fingerprint_preserves_pre_0162_identity(self) -> None:
         group = self._group(
@@ -415,7 +418,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
             bank_rows=[self._bank("bank-1", "100.00")],
         )
 
-        task = self._policy([group]).manual_allocation_tasks[0]
+        task = self._policy([group]).allocation_tasks[0]
         pre_0162_payload = {
             "relation_case_id": "case-1",
             "relation_version": 1,
@@ -424,7 +427,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 {
                     key: value
                     for key, value in dict(task["units"][0]).items()
-                    if key not in {"oa_apply_type", "cost_eligible"}
+                    if key not in {"oa_apply_type", "cost_eligible", "lock_oa_amount", "outside_cost_amount"}
                 }
             ],
             "sources": [
@@ -498,7 +501,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
                 policy = self._policy([self._group(oa_rows=[self._oa("oa-1", workflow_status=status)],
                     bank_rows=[self._bank("bank-1", "100.00")])])
                 self.assertEqual(policy.serialized_cost_rows, [])
-                self.assertEqual(policy.manual_allocation_tasks, [])
+                self.assertEqual(policy.allocation_tasks, [])
 
     def test_ongoing_oa_does_not_block_completed_part_of_shared_payment(self) -> None:
         policy = self._policy(
@@ -514,7 +517,7 @@ class CostStatisticsPolicyTests(unittest.TestCase):
         )
 
         self.assertEqual([(r["oa_id"], r["amount"]) for r in policy.serialized_cost_rows], [("oa-ok", "100.00")])
-        task = policy.manual_allocation_tasks[0]
+        task = policy.allocation_tasks[0]
         self.assertTrue(task["allows_partial"])
         self.assertEqual(task["unallocated_amount"], "300.00")
         self.assertIn("oa_in_progress", task["pending_reasons"])

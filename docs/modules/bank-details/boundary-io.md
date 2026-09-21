@@ -138,3 +138,7 @@
 每次进入银行明细（包括路由离开后返回、整页刷新）时，页面日期 session 的 `initialValue` 与 `restore` 都返回 `all`，首次 accounts/transactions/export 查询不附加起止日期。账户选择继续按既有 session 恢复；本次选择的年月在页面刷新、分类保存、搜索、分页和详情关闭后保留。分页、选择与详情为本次挂载状态，不从旧日期访问恢复。
 
 通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。
+
+## 成本分配变更（2026-09-21）
+
+成本有效分类批量 projection 新增 `turnover_role`，从当前有效确认/人工分类/定义输出已有结构化语义。银行明细自身金额、分类规则和列表 DTO 不变。

@@ -139,3 +139,6 @@
 .cost-manual-tag-empty { padding: 12px; color: #64748b; }
 .cost-manual-tag-popover [role="alert"], .cost-manual-tag-popover [role="status"] { padding: 12px; }
 .cost-manual-tag-popover [role="alert"] button { margin-left: 12px; color: #214cce; }
+
+.cost-source-oa-lock { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; font-weight: 400; white-space: nowrap; }
+.cost-source-oa-lock input[type="checkbox"] { width: 14px; height: 14px; flex: 0 0 14px; margin: 0; padding: 0; accent-color: var(--color-accent, #2454c6); }

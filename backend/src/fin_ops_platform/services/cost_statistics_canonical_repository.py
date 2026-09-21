@@ -1070,6 +1070,7 @@ def _apply_bank_category_projection(
         if transaction_id not in categories_by_transaction_id:
             raise CostStatisticsIntegrityError(f"Bank classification projection missing transaction {transaction_id}")
         category = categories_by_transaction_id[transaction_id]
+        row["turnover_role"] = str(category.get("turnover_role") or "")
         row.update(bank_tag_context_from_row({
             "bank_tag_code": category["effective_category_code"],
             "bank_tag_label": category["effective_category_label"],

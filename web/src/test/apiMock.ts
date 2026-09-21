@@ -4654,7 +4654,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     source_fingerprint: "a".repeat(64), scope_version: 1,
     status: allocations.length > 0 ? "allocated" : "pending",
     pending_reasons: allocations.length ? [] : ["amount_required"],
-    amounts_fixed: false,
     source_allocations: manualSourceAllocations,
     manual_items: [], manual_options: { projects: [], tags: [] }, suggested_source_allocations: null,
     relation_display_groups: [{unit_ids: ["oa-1:parent", "oa-2:expense-2"], bank_transaction_ids: ["bank-manual-001", "bank-manual-002"], sources_excluded: false}],
@@ -4674,6 +4673,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         expense_type: "材料费",
         expense_content: "设备采购",
         oa_applicant: "测试申请人",
+        lock_oa_amount: false, outside_cost_amount: "0.00",
         oa_original_amount: "1000.00",
       },
       {
@@ -4686,6 +4686,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         expense_type: "交通费",
         expense_content: "运输",
         oa_applicant: "测试申请人",
+        lock_oa_amount: false, outside_cost_amount: "0.00",
         oa_original_amount: "10.00",
       },
     ],

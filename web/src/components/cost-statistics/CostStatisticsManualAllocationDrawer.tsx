@@ -9,7 +9,7 @@ import { createSourceDraft, sourceDecisionMatches, sourceSaveRequest, type Sourc
 import type { CostStatisticsManualAllocationSummary, CostStatisticsManualAllocationTask, SaveCostStatisticsManualAllocationRequest } from '../../features/cost-statistics/types';
 import './costSourceAllocation.css';
 
-type Props = { refreshKey?: string; active?: boolean; canSave: boolean; pendingCount?: number; onSaved: () => void };
+type Props = { caseId?: string; onCloseCase?: () => void; refreshKey?: string; active?: boolean; canSave: boolean; pendingCount?: number; onSaved: () => void };
 type TaskState = { task?: CostStatisticsManualAllocationTask; draft?: SourceDraft; dirty?: boolean; conflict?: boolean; loading?: boolean; saving?: boolean; error?: string; notice?: string; unconfirmedRequest?: SaveCostStatisticsManualAllocationRequest };
 // Keep the form only until HeroUI finishes hiding the panel; drafts live in the drawer.
 function AllocationPanel({ expanded, children }: { expanded: boolean; children: ReactNode }) {
@@ -38,7 +38,7 @@ function AllocationPanel({ expanded, children }: { expanded: boolean; children: 
   </Accordion.Panel>;
 }
 
-export default function CostStatisticsManualAllocationDrawer({ canSave, pendingCount, onSaved, refreshKey = '', active = true }: Props) {
+export default function CostStatisticsManualAllocationDrawer({ caseId, onCloseCase, canSave, pendingCount, onSaved, refreshKey = '', active = true }: Props) {
   const [tagLoading, setTagLoading] = useState(false);
   const [tagError, setTagError] = useState<string>();
   const tagRequest = useRef<AbortController | null>(null);
@@ -97,6 +97,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
     } finally { if (details.current.get(id) === controller) details.current.delete(id); }
   };
   const load = async (targetStatus = status, targetQuery = query, cursor?: string) => {
+    if (caseId) { await loadDetail(caseId, true); return; }
     listRequest.current?.abort(); const controller = new AbortController(); listRequest.current = controller;
     setLoading(true); setError(undefined);
     try {
@@ -112,24 +113,29 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
     finally { if (listRequest.current === controller) setLoading(false); }
   };
   useEffect(() => {
+    if (caseId) setOpen(true);
+    // Targeted detail does not create a task or fetch the manual list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [caseId]);
+  useEffect(() => {
     listRequest.current?.abort(); details.current.forEach(controller => controller.abort());
-    if (open && active) void load();
+    if ((open || caseId) && active) void load();
     // Refresh the visible facts without discarding edits in this drawer session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, active]);
+  }, [refreshKey, active, caseId]);
   useEffect(() => {
     const refresh = () => { if (open && active && document.visibilityState === 'visible' && !saving) void load(); };
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => { window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, active, saving, status, query, expanded]);
+  }, [open, active, saving, status, query, expanded, caseId]);
   useEffect(() => () => { listRequest.current?.abort(); details.current.forEach(controller => controller.abort()); }, []);
   const acceptSaved = (id: string, saved: CostStatisticsManualAllocationTask) => {
-    const previous = currentStates.current[id].task;
-    setCase(id, { task: saved, draft: createSourceDraft(saved), dirty: false, conflict: false, saving: false, error: undefined, unconfirmedRequest: undefined, notice: saved.status === 'allocated' ? '分配已保存' : saved.allowsPartial ? '已保存，剩余金额待分配或等待 OA 完成' : '已保存，银行信息待完善' });
-    if (previous && saved.status !== previous.status) setCounts(value => value ? { pending: value.pending + (saved.status === 'pending' ? 1 : -1), allocated: value.allocated + (saved.status === 'allocated' ? 1 : -1) } : null);
-    if (saved.status !== status) {
+    setCase(id, { task: saved, draft: createSourceDraft(saved), dirty: false, conflict: false, saving: false, error: undefined, unconfirmedRequest: undefined, notice: '已保存' });
+    setCounts(null);
+    if (!caseId) void load();
+    if (!caseId && saved.status !== status) {
       setItems(list => list.filter(item => item.relationCaseId !== id)); setExpanded(null);
       requestAnimationFrame(() => {
         const nextHeading = document.querySelector<HTMLElement>('.cost-source-task-heading');
@@ -171,7 +177,16 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
     if (saving) return;
     if (Object.values(states).some(state => state.dirty) && !window.confirm('有未保存的分配，关闭将丢弃这些修改。是否关闭？')) return;
     listRequest.current?.abort(); details.current.forEach(controller => controller.abort());
-    setStates({}); setExpanded(null); setOpen(false);
+    setStates({}); setExpanded(null); setOpen(false); onCloseCase?.();
+  };
+  const renderEditor = (id: string) => {
+    const state = states[id];
+    return <>
+              {state?.loading ? <p role="status">加载中…</p> : null}
+              {state?.task && state.draft ? <CostSourceAllocationForm tagLoading={tagLoading} tagError={tagError} onLoadTags={() => void loadTags()} key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest || !!state.conflict} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
+              {state?.unconfirmedRequest ? <Button size="sm" isDisabled={!!state.saving} onPress={() => void verifySave(id)}>核实保存结果</Button> : null}
+              {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) { void loadDetail(id, true, true); } }}>重新加载</Button> : null}
+    </>;
   };
   return <>
     <Button aria-label="打开成本人工分配" className="cost-page-action cost-manual-allocation-trigger" size="sm" variant="secondary" onPress={() => { setOpen(true); void load(); }}>
@@ -179,6 +194,7 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
     </Button>
     <AppDrawer open={open} title="成本人工分配" width="min(1320px, 100vw)" className="cost-source-drawer" onClose={close} closeDisabled={saving}>
       <div className="cost-source-body">
+        {caseId ? renderEditor(caseId) : <>
         <div className="cost-source-toolbar">
           <div className="cost-source-tabs" role="radiogroup" aria-label="成本人工分配状态">
             {(['pending', 'allocated'] as const).map(value => <button type="button" role="radio" aria-checked={status === value} key={value} disabled={saving} onClick={() => { setStatus(value); void load(value); }}>
@@ -204,18 +220,16 @@ export default function CostStatisticsManualAllocationDrawer({ canSave, pendingC
           return <Accordion.Item className="cost-source-task" key={id} id={id}>
             <Accordion.Heading><Accordion.Trigger className="cost-source-task-heading">
               <Accordion.Indicator className="cost-source-indicator"><ChevronRight size={15} /></Accordion.Indicator><strong>{item.projectNames.join('、') || '项目未填写'}</strong>
-              <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : (state?.task?.version ?? item.version) === 0 ? '自动分配' : '已完成'}</span>{state?.dirty ? <span>未保存</span> : null}</span>
+              <span className="cost-source-task-meta"><span className={`cost-source-badge${item.status === 'allocated' ? ' is-complete' : ''}`}>{item.status === 'pending' ? '待分配' : '已完成'}</span>{state?.dirty ? <span>未保存</span> : null}</span>
             </Accordion.Trigger></Accordion.Heading>
             <AllocationPanel expanded={active}>
-              {state?.loading ? <p role="status">加载中…</p> : null}
-              {state?.task && state.draft ? <CostSourceAllocationForm tagLoading={tagLoading} tagError={tagError} onLoadTags={() => void loadTags()} key={id} task={state.task} draft={state.draft} disabled={!canSave || !state.task.canSave || !!state.saving || !!state.loading || !!state.unconfirmedRequest || !!state.conflict} saving={!!state.saving} error={state.error} notice={state.notice} onChange={draft => setCase(id, { draft, dirty: true, notice: undefined })} onSave={() => void save(id)} /> : state?.error ? <p className="cost-source-error" role="alert">{state.error}</p> : null}
-              {state?.unconfirmedRequest ? <Button size="sm" isDisabled={!!state.saving} onPress={() => void verifySave(id)}>核实保存结果</Button> : null}
-              {state?.error ? <Button size="sm" variant="secondary" isDisabled={!!state.saving} onPress={() => { if (!state.dirty || window.confirm('重新读取会替换当前草稿，是否继续？')) { void loadDetail(id, true, true); } }}>重新加载</Button> : null}
+              {renderEditor(id)}
             </AllocationPanel>
           </Accordion.Item>;
         })}
         </Accordion>
         {nextCursor ? <Button size="sm" isDisabled={loading || saving} onPress={() => void load(status, query, nextCursor)}>加载更多</Button> : null}
+        </>}
       </div>
     </AppDrawer>
   </>;

@@ -12,9 +12,9 @@ from fin_ops_platform.services.cost_statistics_source_allocation import (
 
 def task_fixture():
     return {
-        "status": "pending", "amounts_fixed": True, "oa_total": "1000.00", "net_outflow_total": "1000.00",
+        "status": "pending", "oa_total": "1000.00", "net_outflow_total": "1000.00",
         "non_cost_amount": "0.00", "non_cost_reason": "",
-        "units": [{"unit_id": "a", "oa_original_amount": "600.00"}, {"unit_id": "b", "oa_original_amount": "400.00"}],
+        "units": [{"unit_id": "a", "lock_oa_amount": True, "outside_cost_amount": "0.00", "oa_original_amount": "600.00"}, {"unit_id": "b", "lock_oa_amount": True, "outside_cost_amount": "0.00", "oa_original_amount": "400.00"}],
         "allocations": [{"unit_id": "a", "amount": "600.00"}, {"unit_id": "b", "amount": "400.00"}],
         "bank_events": [
             {"transaction_id": "bank1", "event_kind": "outflow", "amount": "500.00", "trade_time": "2026-08-01", "bank_account_label": "建行", "bank_tag_code": "material", "bank_tag_primary_label": "采购"},
@@ -102,7 +102,7 @@ class SourceAllocationTests(unittest.TestCase):
 
     def test_single_unit_split_retains_both_bank_sources(self):
         task = task_fixture()
-        task["units"] = [{"unit_id": "a", "oa_original_amount": "1000.00"}]
+        task["units"] = [{"unit_id": "a", "lock_oa_amount": True, "outside_cost_amount": "0.00", "oa_original_amount": "1000.00"}]
         task["allocations"] = [{"unit_id": "a", "amount": "1000.00"}]
         decision = automatic_source_allocations(task)
         self.assertEqual([line["bank_transaction_id"] for line in decision["cost_lines"]], ["bank1", "bank2"])
@@ -119,7 +119,7 @@ class SourceAllocationTests(unittest.TestCase):
     def test_refund_and_non_cost_close_original_source(self):
         task = task_fixture()
         task["oa_total"] = "1100.00"
-        task["amounts_fixed"] = False
+        task["units"] = [{**u, "lock_oa_amount": False} for u in task["units"]]
         task["net_outflow_total"] = "900.00"
         task["allocations"][1]["amount"] = "200.00"
         task["non_cost_amount"] = "100.00"
@@ -169,7 +169,7 @@ class SourceCostPolicyTests(unittest.TestCase):
         policy = f._policy([f._group(oa_rows=[f._oa("a", amount="600.00"), f._oa("b", amount="400.00")],
                                     bank_rows=[f._bank("bank-1", "500.00"), f._bank("bank-2", "500.00")])])
         self.assertEqual(policy.serialized_cost_rows, [])
-        self.assertIn("source_required", policy.manual_allocation_tasks[0]["pending_reasons"])
+        self.assertIn("source_required", policy.allocation_tasks[0]["pending_reasons"])
         page = policy.explorer_page(scope_kind="month", scope_value="2026-05", view="project", filters={}, cursor_values=None, page_size=20)
         self.assertEqual(page["summary"]["total_amount"], "0.00")
         self.assertEqual(page["allocation_quality"]["undated_amount"], "0.00")
@@ -232,7 +232,7 @@ class SourceSuggestionTests(unittest.TestCase):
     def test_one_source_multiple_cost_items_requires_known_parent_and_targets(self):
         task = self.fixture()
         task['units'][0]['oa_original_amount'] = '350.00'
-        task['units'].append({'unit_id': 'a-item-2', 'oa_id': 'a', 'oa_original_amount': '250.00'})
+        task['units'].append({'unit_id': 'a-item-2', 'oa_id': 'a', 'lock_oa_amount': True, 'outside_cost_amount': '0.00', 'oa_original_amount': '250.00'})
         result = self.suggest(task, {'bank1': ['a'], 'bank2': ['b']})
         self.assertEqual([line['amount'] for line in result['cost_lines']], ['350.00', '400.00', '250.00'])
         task['bank_events'][0]['amount'] = '300.00'
@@ -247,7 +247,7 @@ class SourceSuggestionTests(unittest.TestCase):
 
     def test_saved_stale_variable_targets_and_refunds_do_not_prefill(self):
         for patch in ({'version': 1}, {'pending_reasons': ['allocation_stale']},
-                      {'amounts_fixed': False}, {'non_cost_amount': '1.00'}, {'status': 'allocated'}):
+                      {'oa_total': '999.00'}, {'non_cost_amount': '1.00'}, {'status': 'allocated'}):
             with self.subTest(patch=patch):
                 task = self.fixture() | patch
                 self.assertIsNone(self.suggest(task, {'bank1': ['a'], 'bank2': ['b']}))
@@ -259,7 +259,7 @@ class SourceSuggestionTests(unittest.TestCase):
     def test_screenshot_three_oa_four_banks_prefills_four_rows_without_mutation(self):
         task = self.fixture()
         task['oa_total'] = task['net_outflow_total'] = '587000.00'
-        task['units'] = [{'unit_id': k, 'oa_id': k, 'oa_original_amount': a}
+        task['units'] = [{'unit_id': k, 'oa_id': k, 'lock_oa_amount': True, 'outside_cost_amount': '0.00', 'oa_original_amount': a}
                          for k, a in [('a', '88050.00'), ('b', '29350.00'), ('c', '469600.00')]]
         task['bank_events'] = [dict(task['bank_events'][0], transaction_id=k, amount=a)
                               for k, a in [('bank1', '469600.00'), ('bank2', '23053.31'),
@@ -273,7 +273,7 @@ class SourceSuggestionTests(unittest.TestCase):
 
     def amount_case(self, targets, sources):
         task = self.fixture()
-        task['units'] = [{'unit_id': str(i), 'oa_id': str(i), 'oa_original_amount': f'{a:.2f}'}
+        task['units'] = [{'unit_id': str(i), 'oa_id': str(i), 'lock_oa_amount': True, 'outside_cost_amount': '0.00', 'oa_original_amount': f'{a:.2f}'}
                          for i, a in enumerate(targets)]
         task['bank_events'] = [dict(task['bank_events'][0], transaction_id=str(i), amount=f'{a:.2f}')
                               for i, a in enumerate(sources)]
@@ -346,59 +346,59 @@ class AutomaticFormalSourceTests(unittest.TestCase):
             row['source_oa_ids'] = (refs or {}).get(row['id'], [])
         return f._policy([group]), group
 
-    def test_formal_pairs_auto_complete_but_amount_only_stays_pending(self):
+    def test_formal_pairs_and_unique_whole_amounts_auto_complete(self):
         groups = [{'oa_row_ids': [str(i)], 'bank_row_ids': [str(i)]} for i in range(2)]
         policy, group = self.policy(groups=groups)
         before = deepcopy(group)
-        task = policy.manual_allocation_tasks[0]
+        task = policy.allocation_tasks[0]
         self.assertEqual(task['status'], 'allocated')
         self.assertEqual(task['version'], 0)
         self.assertTrue(task['source_fingerprint'])
         self.assertCountEqual([(row['transaction_id'], row['amount']) for row in policy.serialized_cost_rows], [('0', '145.00'), ('1', '204.00')])
         self.assertEqual(group, before)
         ambiguous, _ = self.policy()
-        self.assertEqual(ambiguous.serialized_cost_rows, [])
-        self.assertEqual(ambiguous.manual_allocation_tasks[0]['status'], 'pending')
+        self.assertEqual(len(ambiguous.serialized_cost_rows), 2)
+        self.assertEqual(ambiguous.manual_allocation_tasks, [])
 
     def test_explicit_refs_and_duplicate_amounts_need_no_confirmation(self):
         policy, _ = self.policy((100, 100), (100, 100), refs={'0': ['0'], '1': ['1']})
-        self.assertEqual(policy.manual_allocation_tasks[0]['status'], 'allocated')
+        self.assertEqual(policy.allocation_tasks[0]['status'], 'allocated')
         self.assertEqual(len(policy.serialized_cost_rows), 2)
 
     def test_single_payment_current_members_supersede_incomplete_historical_subset(self):
         groups = [{'oa_row_ids': ['0'], 'bank_row_ids': ['0']}, {'oa_row_ids': ['1'], 'bank_row_ids': []}]
         policy, _ = self.policy(sources=(349,), groups=groups)
-        task = policy.manual_allocation_tasks[0]
+        task = policy.allocation_tasks[0]
         self.assertEqual(task['status'], 'allocated')
         self.assertEqual(task['unallocated_amount'], '0.00')
         self.assertCountEqual([r['amount'] for r in policy.serialized_cost_rows], ['145.00', '204.00'])
         constrained, _ = self.policy(sources=(349,), groups=groups, refs={'0': ['0']})
         self.assertEqual(constrained.serialized_cost_rows, [])
-        self.assertEqual(constrained.manual_allocation_tasks[0]['status'], 'pending')
+        self.assertEqual(constrained.allocation_tasks[0]['status'], 'pending')
 
     def test_conflicting_reference_cannot_steal_another_components_source(self):
         groups = [{'oa_row_ids': [str(i)], 'bank_row_ids': [str(i)]} for i in range(2)]
         policy, _ = self.policy(groups=groups, refs={'0': ['1']})
         self.assertEqual(policy.serialized_cost_rows, [])
-        self.assertEqual(policy.manual_allocation_tasks[0]['status'], 'pending')
+        self.assertEqual(policy.allocation_tasks[0]['status'], 'pending')
 
     def test_partial_auto_preserves_fixed_targets_remaining_and_suggested_sources(self):
         groups = [{'oa_row_ids': ['0'], 'bank_row_ids': ['0']},
                   {'oa_row_ids': ['1', '2'], 'bank_row_ids': ['1', '2']}]
-        policy, _ = self.policy((100, 145, 204), (100, 145, 204), groups=groups)
-        task = policy.manual_allocation_tasks[0]
+        policy, _ = self.policy((100, 145, 204), (100, 150, 199), groups=groups)
+        task = policy.allocation_tasks[0]
         self.assertEqual(task['status'], 'pending')
-        self.assertTrue(task['amounts_fixed'])
+        self.assertTrue(all(u['lock_oa_amount'] for u in task['units']))
         self.assertEqual(task['unallocated_amount'], '349.00')
         self.assertEqual([r['amount'] for r in policy.serialized_cost_rows], ['100.00'])
-        self.assertEqual([a['amount'] for a in task['allocations']], ['100.00', '145.00', '204.00'])
+        self.assertEqual([a['amount'] for a in task['allocations']], ['100.00', '0.00', '0.00'])
 
-    def test_parent_oa_with_multiple_items_does_not_prove_item_sources(self):
+    def test_parent_oa_unique_whole_item_amounts_resolve_sources(self):
         from fin_ops_platform.services.cost_statistics_source_allocation import automatic_relation_sources
         task = SourceSuggestionTests().fixture()
         for unit in task['units']:
             unit['oa_id'] = 'parent'
-        self.assertIsNone(automatic_relation_sources(task, [], []))
+        self.assertEqual(len(automatic_relation_sources(task, [], [])["cost_lines"]), 2)
 
     def test_mixed_approval_only_counts_independent_completed_part(self):
         from fin_ops_platform.services.cost_statistics_policy import CostStatisticsPolicy
@@ -407,7 +407,7 @@ class AutomaticFormalSourceTests(unittest.TestCase):
         snapshot = {'settings': policy._settings, 'cost_groups': [group], 'bank_rows': group['bank_rows'], 'bank_statistics': {}}
         result = CostStatisticsPolicy(snapshot)
         self.assertEqual([r['amount'] for r in result.serialized_cost_rows], ['145.00'])
-        self.assertIn('oa_in_progress', result.manual_allocation_tasks[0]['pending_reasons'])
+        self.assertIn('oa_in_progress', result.allocation_tasks[0]['pending_reasons'])
 
     def test_unknown_waiting_oa_does_not_unlock_an_automatic_payment(self):
         from fin_ops_platform.services.cost_statistics_source_allocation import automatic_relation_sources
