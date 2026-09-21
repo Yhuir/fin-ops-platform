@@ -91,5 +91,5 @@ Migration `0151_workbench_matching_worker_idempotency_grant.sql` 修复历史只
 - 取消也锁任务：取消先提交则旧 owner 无法写事实，业务事务先提交则取消返回已完成冲突。
 - 进程退出释放同一领取；强制进程终止后依靠过期 lease 恢复。最大尝试耗尽明确失败，用户显式重试；不存在第二事件 ACK。
 - 已认证发票和 OA 手动导入由 `SharedImportProcessor` 使用明确的事务 repository；OA 仅新增/重新接纳指定行，不把未选记录置 inactive。
-- import 失败数量、排队年龄单独观测；用户文件失败不使全局 API readiness 失败。旧导入 outbox 仅作为历史证据读取。
+- import 失败数量、排队年龄单独观测；用户文件失败保留在 `import_queue.failed`，不计入全局 `queue_backlog.failed` / `failed_jobs`，不使 API readiness 或发布 runtime closure 失败。pending/processing 导入仍参与发布排空，outbox 失败/死信仍阻断发布。旧导入 outbox 仅作为历史证据读取。
 - Migration `0175` 增加版本/确认状态并退役能对应权威 job 的旧事件；不删除事实和历史任务。

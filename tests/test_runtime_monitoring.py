@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository, readiness_blockers
+from fin_ops_platform.tools.runtime_sync_closure_gate import _runtime_blockers
 
 
 class FakeConnection:
@@ -115,9 +116,10 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         summary = repository.ready_health_summary(stale_after_seconds=300)
         executed_sql = "\n".join(sql for sql, _params in connection.calls).lower()
 
-        self.assertEqual(summary["queue_backlog"], {"pending": 5, "processing": 1, "failed": 4})
+        self.assertEqual(summary["queue_backlog"], {"pending": 5, "processing": 1, "failed": 1})
+        self.assertEqual(summary["import_queue"]["failed"], 3)
         self.assertEqual(summary["import_queue"]["awaiting_confirmation"], 4)
-        self.assertEqual(summary["failed_jobs"], 4)
+        self.assertEqual(summary["failed_jobs"], 1)
         self.assertEqual(summary["oldest_pending_event_age_seconds"], 42.0)
         self.assertEqual(summary["worker_heartbeat_lag_seconds"], 8.0)
         self.assertNotIn("rabbitmq_publish_status", summary)
@@ -138,6 +140,34 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("payload->>'operation'", executed_sql)
         self.assertIn("refresh_attachments", executed_sql)
         self.assertNotIn("read_model", executed_sql)
+
+    def test_import_failure_remains_visible_without_blocking_runtime_closure(self) -> None:
+        connection = FakeConnection()
+        original_fetch_one = connection.fetch_one
+
+        def fetch_one(sql, params=()):
+            if "from job.import_jobs" in sql:
+                return {"pending": 0, "processing": 0, "failed": 1, "awaiting_confirmation": 0}
+            return original_fetch_one(sql, params)
+
+        connection.fetch_one = fetch_one
+        repository = RuntimeMonitoringRepository(connection)
+        with patch.object(repository, "_ready_outbox_summary", return_value={
+            "queue_backlog": {}, "critical_failed_outbox_count": 0,
+            "max_pending_age_seconds": None, "pending_outbox_events_by_scope": [],
+            "outbox_events_by_type_status": [],
+        }):
+            summary = repository.ready_health_summary()
+        self.assertEqual(summary["import_queue"]["failed"], 1)
+        self.assertEqual(summary["failed_jobs"], 0)
+        self.assertEqual(_runtime_blockers(summary), {})
+
+    def test_import_running_and_outbox_failures_still_block_runtime_closure(self) -> None:
+        summary = RuntimeMonitoringRepository(FakeConnection()).ready_health_summary()
+        blockers = _runtime_blockers(summary)
+        self.assertEqual(blockers["queue_backlog"], {"pending": 5, "processing": 1, "failed": 1})
+        self.assertEqual(blockers["failed_jobs"], 1)
+        self.assertEqual(blockers["critical_failed_outbox_count"], 1)
 
     def test_readiness_blockers_only_reject_current_platform_failures(self) -> None:
         healthy_runtime = {

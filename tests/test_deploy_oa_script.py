@@ -1199,7 +1199,7 @@ class DeployOAScriptTest(unittest.TestCase):
                     "        with Path(os.environ['EXECUTION_LOG']).open('a') as log: log.write(owner + '\\n')\n"
                     f"        assert os.environ['TEST_SCHEMA_HEAD'] == {schema!r}, 'candidate SQL ran before migration'\n"
                     "        assert os.environ.get('UNHEALTHY_OWNER') != owner, 'runtime unhealthy'\n"
-                    "        return {'queue_backlog': {}, 'owner': owner}\n")
+                    "        return {'queue_backlog': {}, 'import_queue': {'failed': 1}, 'owner': owner}\n")
                 (package / "tools/domain_contract_audit.py").write_text(
                     "import json\n"
                     "from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository\n"

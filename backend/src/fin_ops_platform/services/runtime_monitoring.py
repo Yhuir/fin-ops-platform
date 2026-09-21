@@ -175,7 +175,9 @@ class RuntimeMonitoringRepository:
             from job.import_jobs where status in ('pending','processing','failed','awaiting_confirmation','needs_review')
         """) or {}
         queue_backlog = dict(outbox_summary["queue_backlog"])
-        for status in ('pending', 'processing', 'failed'):
+        # Import rejection is a user-visible job outcome, not an infrastructure
+        # failure. Active imports still participate in release queue draining.
+        for status in ('pending', 'processing'):
             queue_backlog[status] = int(queue_backlog.get(status, 0)) + int(import_summary.get(status) or 0)
         return {
             "queue_backlog": queue_backlog,
