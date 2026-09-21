@@ -61,7 +61,8 @@ class BatchAccountingService:
         oa_search: str | None = None,
         timing_observer: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]:
-        resolved_bank_year = self._validate_year(bank_year or year or "")
+        query_year = str(bank_year or year or "").strip()
+        resolved_bank_year = None if query_year == "all" else self._validate_year(query_year)
         if bucket not in {"unsubmitted", "submitted"}:
             raise BatchAccountingError("invalid_batch_accounting_bucket", "bucket must be unsubmitted or submitted.")
         bank_pagination = self._pagination_from_values(
@@ -562,6 +563,7 @@ class BatchAccountingService:
         bank_name, account_last4 = self._bank_account_parts(row)
         return {
             "id": str(row.get("id") or ""),
+            "bank_year": row.get("bank_year"),
             "trade_time": str(row.get("trade_time") or row.get("pay_receive_time") or row.get("txn_date") or ""),
             "counterparty_name": self._clean_text(row.get("counterparty_name")),
             "direction": "expense",
@@ -645,11 +647,7 @@ class BatchAccountingService:
             bool(row_id)
             and (str(row.get("type") or "bank") == "bank" or self._row_type_for_row_id(row_id) == "bank")
             and self._clean_text(row.get("counterparty_name")) == BATCH_ACCOUNTING_COUNTERPARTY_NAME
-            and self._row_year_matches(
-                row,
-                year,
-                keys=("trade_time", "pay_receive_time", "txn_date", "transaction_date", "date"),
-            )
+            and row.get("bank_year") == year
             and self._bank_expense_amount(row) > Decimal("0.00")
         )
 
@@ -809,10 +807,6 @@ class BatchAccountingService:
         )
 
     @classmethod
-    def _row_year_matches(cls, row: dict[str, Any], year: str, *, keys: tuple[str, ...]) -> bool:
-        return any(str(row.get(key) or "").strip().startswith(year) for key in keys)
-
-    @classmethod
     def _bank_expense_amount(cls, row: dict[str, Any]) -> Decimal:
         debit = cls._money(row.get("debit_amount"))
         if debit is not None and debit > Decimal("0.00"):
@@ -913,6 +907,7 @@ class BatchAccountingService:
     @classmethod
     def _row_month(cls, row: dict[str, Any]) -> str | None:
         for key in (
+            "canonical_bank_date",
             "trade_time",
             "pay_receive_time",
             "txn_date",

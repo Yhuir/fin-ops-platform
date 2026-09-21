@@ -6157,7 +6157,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     "/api/bank-details/accounts": ({ url }) => {
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
-      const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
+      const isFullYearDataset = (!dateFrom && !dateTo) || (dateFrom === "2026-01-01" && dateTo === "2026-12-31");
       const totalBalance = bankDetailAutoTagRulesSaved && options.bankDetailPostSaveAccountsTotalBalance
         ? options.bankDetailPostSaveAccountsTotalBalance
         : "130500.50";
@@ -6178,7 +6178,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               balance_status: "confirmed",
               currency: "CNY",
               has_balance: true,
-              transaction_count: isCurrentYear ? 299 : 1,
+              transaction_count: isFullYearDataset ? 299 : 1,
             },
             {
               account_key: "bocom:3847",
@@ -6459,7 +6459,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const categoryThirdLabel = url.searchParams.get("category_third_label");
       const page = Number(url.searchParams.get("page") ?? "1");
       const pageSize = Number(url.searchParams.get("page_size") ?? "100");
-      const isCurrentYear = dateFrom === "2026-01-01" && dateTo === "2026-12-31";
+      const isFullYearDataset = (!dateFrom && !dateTo) || (dateFrom === "2026-01-01" && dateTo === "2026-12-31");
       const visibleRow = {
         id: `bank-detail-${String(page).padStart(3, "0")}`,
         trade_time: "2026-05-01 10:30:00+08:00",
@@ -6783,7 +6783,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         internal_transfer: responseRows.length && (!accountKey || accountKey === "icbc:6386") ? 2 : 0,
         holiday_bonus: 0,
         bonus: 0,
-        uncategorized: responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 295 : responseRows.length,
+        uncategorized: responseRows.length && (!accountKey || accountKey === "icbc:6386") && isFullYearDataset ? 295 : responseRows.length,
       };
       const visibleCategoryCounts = {
         borrow_in_company_pending_repayment: 0,
@@ -6794,7 +6794,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         internal_transfer: responseRows.filter((row) => row.effective_category_code === "internal_transfer").length,
         holiday_bonus: 0,
         bonus: 0,
-        uncategorized: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isCurrentYear
+        uncategorized: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isFullYearDataset
           ? 295
           : responseRows.filter((row) => !row.effective_category_code).length,
       };
@@ -6808,11 +6808,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           pagination: {
             page,
             page_size: pageSize,
-            total: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isCurrentYear
+            total: categoryCode === "uncategorized" && (!accountKey || accountKey === "icbc:6386") && isFullYearDataset
               ? 295
               : keyword || hasCategoryFilter
               ? responseRows.length
-              : responseRows.length && (!accountKey || accountKey === "icbc:6386") && isCurrentYear ? 299 : responseRows.length,
+              : responseRows.length && (!accountKey || accountKey === "icbc:6386") && isFullYearDataset ? 299 : responseRows.length,
           },
           bank_transaction_tags: {
             version: 1,

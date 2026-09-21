@@ -88,11 +88,11 @@ test.describe("bank details export browser download", () => {
 
     const requestUrl = new URL((await exportRequest).url());
     expect(requestUrl.searchParams.get("mode")).toBe("all");
-    expect(requestUrl.searchParams.get("date_from")).toBe("2026-01-01");
-    expect(requestUrl.searchParams.get("date_to")).toBe("2026-12-31");
+    expect(requestUrl.searchParams.get("date_from")).toBeNull();
+    expect(requestUrl.searchParams.get("date_to")).toBeNull();
 
     const downloaded = await download;
-    expect(downloaded.suggestedFilename()).toBe("银行明细_全部银行_2026-01-01_2026-12-31.xlsx");
+    expect(downloaded.suggestedFilename()).toBe("银行明细_全部银行_全部_全部.xlsx");
     const downloadPath = testInfo.outputPath(downloaded.suggestedFilename());
     await downloaded.saveAs(downloadPath);
     const content = await readXlsxText(downloadPath);

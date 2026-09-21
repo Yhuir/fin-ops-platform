@@ -1,6 +1,6 @@
 # 批量账务模块边界与 I/O
 
-日期：2026-08-05
+日期：2026-09-21
 
 ## 模块化状态
 
@@ -32,18 +32,18 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| `bank_year` | 页面/API | 四位年份；决定银行候选和 submitted relation 中银行成员的年份 |
+| `bank_year` | 页面/API | GET 接受具体四位年份或 `all`，缺失/非法值仍拒绝；all 在 query 内为 null，不附加年份条件。POST 只接受具体年份 |
 | `bucket` | 页面/API | `unsubmitted` 或 `submitted` |
 | 银行分页 | `bank_page`、`bank_page_size` | 服务端执行；page/page size 必须为正数，page size 最大 200 |
 | OA 分页 | `oa_page`、`oa_page_size` | 仅未提交 bucket 使用；服务端执行，最大 200 |
 | OA 搜索 | `oa_search` | 最长 200 字符；纯金额输入归一为无千分位文本，在 canonical OA SQL 中匹配申请人、项目、金额、事由 |
-| 银行候选 | `app.bank_transactions` | 指定年份、未删除、对方户名“批量账务集中处理”、`txn_direction='outflow'`、金额大于 0、没有任何 active relation；银行名/尾号只取 normalized payload 的结构化银行字段，不得用账户户名冒充银行名 |
-| effective category | Bank Details canonical classifier | 对本次精确业务流水 ID 集合一次 set-based 分类；使用当前 active category/confirmation/自动标签设置，禁止复制第二套标签算法 |
+| 银行候选 | `app.bank_transactions` | 指定年份或全部历史、未删除、对方户名“批量账务集中处理”、`txn_direction='outflow'`、金额大于 0、没有任何 active relation；银行名/尾号只取 normalized payload 的结构化银行字段，不得用账户户名冒充银行名 |
+| effective category | Bank Details canonical classifier | 对 repository 内部候选 CTE 一次 set-based 分类，保留分类匹配所需的对手流水；提交仍用精确 ID 集合；使用当前 active category/confirmation/自动标签设置，禁止复制第二套标签算法 |
 | 标签选择规则 | `app.app_settings.batch_accounting_tag_selection` | stable tag codes + version；未持久化时默认当前 active definitions 全选，迁移后新增标签默认不选；归档标签从选择中原子移除 |
 | 标签规则 command | `expected_version + selected_tag_codes[]` | full/admin 可写，read-export 只读；CAS、semantic no-op、未知/非 active code 校验和 audit 由 Settings owner 承担 |
 | OA 候选 | `app.oa_applications` | 未删除、已完成状态别名、日常报销主单、不限年份、没有包含 canonical 银行成员的 active relation |
 | OA 附件发票 | `app.invoices.source_links` + `app.oa_attachments` | 只按当前可见或本次选中的 OA IDs 批量查询；不得扫描全量附件 |
-| submitted relations | `app.workbench_pair_relations` | 只读 `status='active' and relation_mode='batch_accounting'`，并要求关系包含指定年份的 canonical 银行成员 |
+| submitted relations | `app.workbench_pair_relations` | 只读 `status='active' and relation_mode='batch_accounting'`，并要求关系包含有效 canonical 银行成员；具体年份再约束该成员日期，all 保留缺日期成员 |
 | submitted members | `row_ids + row_types`、canonical OA/invoice tables | 对齐且去重的 typed member set 是唯一成员事实源；对当前页 member IDs 一次 union bulk query |
 | submit context | 页面/API | 指定 `bank_row_id + oa_row_ids`；在一个 read-only repeatable-read snapshot 中读取银行、OA、附件发票；submit/withdraw 必须携带页面按一次用户意图生成并在网络重试中保持不变的 `idempotency_key`，缺失时 fail closed。 |
 | relation 冲突/CAS | `WorkbenchRelationCommandService` | 基于 canonical active relations、owner、version、idempotency 和 command repository |
@@ -53,8 +53,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| `summary` | 页面 | `unsubmitted_count`、`submitted_count`、`bank_year` 与 rows 在同一 snapshot |
-| `bank_rows` | 页面 | 当前 bucket 的服务端分页银行行；`bank_name + account_last4` 是银行 chip，`trade_time` 是 canonical 时间文本，页面只做无时区换算的展示归一化 |
+| `summary` | 页面 | `unsubmitted_count`、`submitted_count`、`bank_year` 与 rows 在同一 snapshot；all 的 summary.bank_year 为 null |
+| `bank_rows` | 页面 | 当前 bucket 的服务端分页银行行；`bank_name + account_last4` 是银行 chip，`trade_time` 是 canonical 时间文本，页面只做无时区换算的展示归一化；每行 `bank_year: string|null` 严格由 `coalesce(txn_date,trade_time::date,pay_receive_time::date)` 得到，不从显示时间或历史 metadata 推算 |
 | bank tag fields | 页面左栏 | `tag_code/tag_label/tag_primary_label/tag_sub_label/tag_source` 来自当前 canonical classifier；页面只展示，不自行推断 |
 | `tag_selection_version` | 页面 submit | 当前列表采用的规则版本；submit 必须原样回传，后端在窄 snapshot 内重新分类并检查版本与选中状态 |
 | tag-rules payload | HeroUI drawer | `version`、`active_tags`、`selected_tag_codes`、`can_save`；active tags 仅限业务流水实际出现且当前 active 的标签，selected 保留其它当前 active stable codes，保存不可误删隐藏选择 |
@@ -81,7 +81,7 @@ set transaction isolation level repeatable read read only
 - rows、summary、count、pagination 和 relation member detail 使用同一个 snapshot。
 - 未提交、已提交和 submit context：固定最多 5 条语句（含 isolation 和一次 set-based classifier）。
 - tag-rules snapshot：固定最多 3 条语句（含 isolation）。
-- 标签筛选只在指定年份且对方户名精确命中的业务候选集合内完成，再做服务端分页；禁止读取全量银行流水、浏览器过滤、N+1、逐月或逐 scope 循环。
+- 标签筛选只在指定年份/全部历史且对方户名精确命中的业务候选集合内完成；count、标签过滤、分页全部在 SQL 完成，详情只加载当前页；禁止读取全量银行流水、浏览器过滤、N+1、逐月或逐 scope 循环。
 
 ## 依赖方向
 
@@ -147,3 +147,11 @@ BatchAccountingPage
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+## 全部年份与缺日期（2026-09-21）
+
+- 每次进入页面默认全部；本次访问选择的年份用于刷新、分页和写后回读。
+- 未提交 all 保留满足其余条件的缺日期行，计入可见 count，日期未知排末并以 ID 稳定排序；`bank_year=null` 禁止选择提交，提示补齐业务日期。具体年自然不包含这些行。
+- 提交仍是单银行＋多 OA，使用所选银行 DTO 的具体 canonical 年份并在后端窄查询复核；跨年 OA 及实际成员月份 dirty scope 不变。
+- 已提交缺日期关系在 all 可见，撤回不新增年份条件；历史 scope 推导不用于填充新 DTO 年份。
+- 标签规则目录仍按全部业务候选观察标签，保存保留隐藏选择；仅返回 distinct 标签，不将全历史 ID 数组或 payload 拉回 Python。

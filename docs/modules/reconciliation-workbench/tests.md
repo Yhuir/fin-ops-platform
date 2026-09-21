@@ -786,3 +786,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.http_sl
 - Canonical SQL：`test_workbench_query_postgres_integration.py` 在真实 PostgreSQL 验证金额/分类/指纹/审阅的 SQL/Python 一致性、分页前明细分类及原固定查询预算；`test_workbench_page_query_repository.py` 保持 scope-first 与 OA 来源优先约束。
 - 前端/E2E：凭证编辑、异常抽屉、三栏组件及 `workbench-supporting-documents-flow.spec.ts` 覆盖一次保存、双入口、取消/失败/刷新、旧按钮移除和只读权限。
 - 回归：既有进行中 OA、ETC、共享发票、确认/撤回、强身份补录、税金与成本隔离。无新增 read model/cache；现有 matching 通知属于任务验证范围。性能对照现有 HTTP SLO，不以 mock 响应代替生产证据。
+
+## 日期默认全部回归（2026-09-21）
+
+`WorkbenchPaneFilter.test.ts` 覆盖两个区域旧 session 的全部 pane 年月/隐藏日期列清理、首请求 all、非日期搜索/筛选/排序保留，以及本次选月后搜索保留、卸载重进恢复全部。`WorkbenchSelection.test.tsx` 的具体月份、详情、选择和请求隔离回归继续保护现有行为。
+
+本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。

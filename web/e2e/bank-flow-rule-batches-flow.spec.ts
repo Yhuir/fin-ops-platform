@@ -417,7 +417,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "未提交 1" })).toBeChecked();
     const monthReload = waitForBankFlowRuleBatches(page);
-    await page.getByRole("button", { name: /批次月份：\d{4}年\d{1,2}月/ }).click();
+    await page.getByRole("button", { name: "批次月份：年月" }).click();
     await page.getByRole("dialog", { name: "批次月份选择器" }).getByRole("button", { name: "五月" }).click();
     await monthReload;
 

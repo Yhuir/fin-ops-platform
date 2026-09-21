@@ -1612,6 +1612,13 @@ describe("Pending invoices page", () => {
     expect(within(candidateTable).queryByRole("columnheader", { name: "待支付" })).not.toBeInTheDocument();
     expect(await screen.findByText("DIG-CAND-001")).toBeInTheDocument();
     expect(within(candidateTable).getByText("未关联流水")).toBeInTheDocument();
+    expect(screen.getByLabelText("开票开始")).toHaveValue("");
+    expect(screen.getByLabelText("开票结束")).toHaveValue("");
+    const initialCandidateCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/pending-invoices/invoice-candidates/batch"));
+    const initialCandidateBody = JSON.parse(String(initialCandidateCall?.[1]?.body ?? "{}"));
+    expect(initialCandidateBody.issue_date_from).toBeUndefined();
+    expect(initialCandidateBody.issue_date_to).toBeUndefined();
+    expect(initialCandidateBody.transaction_ids).toEqual(["txn-paid-pending"]);
     await user.type(screen.getByLabelText("销方"), "云南开票供应商");
     await user.click(screen.getByRole("button", { name: "搜索" }));
     await waitFor(() => {

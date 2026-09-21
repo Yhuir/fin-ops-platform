@@ -86,6 +86,7 @@ class NightlyCITests(unittest.TestCase):
             "production-admin-app-health.spec.ts",
             "production-route-shell.spec.ts",
             "production-cash-readonly.spec.ts",
+            "production-date-defaults.spec.ts",
         }
         # Real cash writes require their explicit disposable PostgreSQL HTTP fixture.
         infrastructure_specs = {"cash-real-api-flow.spec.ts"}

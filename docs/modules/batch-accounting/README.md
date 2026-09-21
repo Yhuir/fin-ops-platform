@@ -46,11 +46,11 @@
 - 响应不返回 `read_model_status`、`source_versions`、`refresh_enqueued`、refresh targets 或 operation barrier targets；页面只保留 loading、empty 和 error 状态。
 - 银行和 OA 使用独立服务端分页，页大小上限 200；不得先读全量再在 Python 或浏览器分页。
 - `oa_search` 在 PostgreSQL 候选查询中执行，并与 OA count、分页使用同一筛选。
-- `unsubmitted` 查询指定年份、对方户名为“批量账务集中处理”、支出的 canonical 银行流水，按当前 effective tag 和已选规则过滤，并排除已有 active relation；无标签、待确认/待分类和未勾选标签不进入左栏。OA 直接查询已完成的日常报销主单，不按年份过滤，且没有包含银行流水的 active relation。
+- `unsubmitted` 查询指定年份或全部历史、对方户名为“批量账务集中处理”、支出的 canonical 银行流水，按当前 effective tag 和已选规则过滤，并排除已有 active relation；无标签、待确认/待分类和未勾选标签不进入左栏。OA 直接查询已完成的日常报销主单，不按年份过滤，且没有包含银行流水的 active relation。
 - OA 已有发票关系或其它不含银行流水的关系时仍可成为候选；附件发票只按当前可见/选中的 OA IDs 查询。
-- `submitted` 直接分页查询带指定年份 canonical 银行成员的 active batch-accounting relations，再用一次批量成员查询补齐 OA/发票详情。
+- `submitted` 直接分页查询带当前范围 canonical 银行成员的 active batch-accounting relations，再用一次批量成员查询补齐 OA/发票详情。
 - 已提交 bucket 不受标签规则过滤，但仍显示银行流水当前 effective tag；银行明细分类事实变化后，页面下一次 GET 即读取新标签。
-- `summary.submitted_count` 按 relation 中 canonical 银行成员的年份统计，支持跨月关系。
+- `summary.submitted_count` 按 relation 中 canonical 银行成员的当前时间范围统计，支持跨月关系。
 - `GET/PUT /api/batch-accounting/tag-rules` 提供当前业务流水实际出现的标签、stable code 选择、CAS version 和 `can_save`；full/admin 可保存，read-export 只读。
 
 ## 写合同
@@ -65,7 +65,7 @@
 ## 查询与性能边界
 
 - 未提交、已提交和 submit context 均最多 5 条数据库语句（包括 transaction isolation 设置与一次 set-based canonical classifier）。
-- 标签规则 GET 最多 3 条数据库语句（包括 isolation 设置）：settings + 精确业务流水 IDs、set-based classifier。
+- 标签规则 GET 最多 3 条数据库语句（包括 isolation 设置）：settings、候选 CTE + set-based classifier 的 distinct 标签。
 - 禁止 12 月循环、逐 scope proof、全 Workbench payload、全量附件扫描、逐 row relation lookup、N+1 和递归大 JSON copy。
 - 只有真实 PostgreSQL `EXPLAIN` 或端点测量证明需要时才新增索引；本模块不新增缓存、worker、queue、materialized view 或依赖。
 
@@ -93,3 +93,7 @@
 - `e2e-spec.md`：浏览器业务验收合同。
 - `e2e-coverage.md`：Spec ID 到证据映射。
 - `implementation-notes.md`：提炼后的决策、验证和 HANDOFF。
+
+### 全部年份（2026-09-21）
+
+页面首次及重新进入默认 `bank_year=all`；GET all 的 summary 年份为 null。每行 bank_year 由 canonical 日期独立返回，提交使用该年份，不截取显示时间。缺日期行可见但不可提交，已提交缺日期关系仍可撤回。分类和 count/分页在 SQL 内完成；原全候选 JSON/ID 集合回传 Python 分页路径已移除。详细 I/O 见 [boundary](boundary-io.md)。

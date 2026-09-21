@@ -1,5 +1,9 @@
 # 状态与事务
 
+普通日期范围（2026-09-21）：进入 flows/accounts section → section owner lazy 初始化所有普通历史视图为全部 → 第一请求发送 `time_scope=all`。自定义期间经查询应用 → 同页刷新/写后重读/分页排序/抽屉关闭保持 → section 内 Tab 切回恢复本次期间 → 离开 section 再进清日期、仅日期改变时清页码，保留其他筛选及视图。CashBooks 一次清隐藏的 turnover events/tickets period；unsettled/pending 截止和 personal 年份不参与清理。父对象关联 CashFlowTable 无日期仍为该父对象全历史，不在通用组件挂载时归一化。
+
+全部历史按上海今天截止；项目候选沿用独立的 date_to 截止合同。HTTP/SQL 日期口径、余额与筛选合计分离见[边界](boundary-io.md#普通历史范围默认全部2026-09-21)。
+
 唯一详细定义见[技术设计](../../dev/cash-module-technical-design.md)的事务、删除、任务与查询章节。
 
 已接受但未实施的Excel闭环修订见技术§14及实施§15：个人归属未配/冲突只影响个人依赖操作；事件、截至日未结、当前可办理额分开；票据使用与实际现金回款独立，非现金结清不伪装现金已回款。分类/来源/归属修改继续同事务校验所有受影响关系，不在GET补数据或迁移状态。下文为当前已实现机制，不代表新规则已运行。

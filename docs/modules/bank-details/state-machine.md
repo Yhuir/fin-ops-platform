@@ -67,3 +67,7 @@
 | 2026-09-08 | 增加行级顺序/账户余额证据状态及局部请求失败、过期响应保护；未发布 | 本地测试和验收进度见同时间修复计划；不以本行代替执行结果 |
 | 2026-07-27 | 页面迁移为 direct canonical PostgreSQL query，删除 read-model freshness/polling 状态，写后只做一次 GET | `tests/test_bank_details_canonical_query.py`、`tests/test_bank_details_routes.py`、`web/src/test/BankDetailsPage.test.tsx`、`web/e2e/bank-details-stale-refreshing.spec.ts` |
 | 2026-08-08 | 人工分类可原子覆盖自动/候选分类；待分类、待确认和自动标签重新分类菜单加入“内部往来款”，人工事实成为统一 effective 优先级 | `tests/test_bank_transaction_auto_category_service.py`、`tests/test_bank_transaction_category_postgres_mutation.py`、`tests/test_bank_auto_tag_rules_api.py`、`web/src/test/BankDetailsPage.test.tsx` |
+
+## 日期筛选生命周期（2026-09-21）
+
+每次进入银行明细（包括路由离开后返回、整页刷新）时，页面日期 session 的 `initialValue` 与 `restore` 都返回 `all`，首次 accounts/transactions/export 查询不附加起止日期。账户选择继续按既有 session 恢复；本次选择的年月在页面刷新、分类保存、搜索、分页和详情关闭后保留。分页、选择与详情为本次挂载状态，不从旧日期访问恢复。

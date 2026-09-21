@@ -66,3 +66,9 @@ git diff --check
 ```
 
 真实 PostgreSQL integration 需要本机独占 `FIN_OPS_TEST_DATABASE_URL`，运行前核对隔离测试库并 unset 生产/runtime DSN；不能把 truncate/migration 测试指向正式库。无测试库时明确记为未运行，生产只读 smoke 不代替业务集成测试。发布与性能验收尚未完成时必须保留该限制；导出 smoke 会写下载审计，不能称为零写入。
+
+## 日期默认全部回归（2026-09-21）
+
+`BankDetailsPage.test.tsx` 覆盖全历史首请求、旧日期 session 清理、账户选择保留、选择月份后同页刷新保留及卸载重进恢复全部。原有取消/过期响应、分类、分页、导出与权限回归继续执行。银行 initial-state、export-download、filtered-export-permissions E2E 的默认无日期断言同步更新。
+
+本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。

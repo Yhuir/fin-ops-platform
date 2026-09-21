@@ -65,6 +65,9 @@ describe("cash flow source corrections", () => {
     fireEvent.click(screen.getByRole("button", { name: "采用来源纠错" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("选择正确来源");
     fireEvent.click(screen.getByRole("button", { name: "选择正确流水" }));
+    await screen.findByRole("button", { name: /正确现金来源/ });
+    const params = new URL(request.mock.calls.find(([path]) => path.startsWith("/flows?"))![0], "http://test").searchParams;
+    expect(params.get("time_scope")).toBe("all"); expect(params.has("date_from")).toBe(false); expect(params.has("date_to")).toBe(false);
     fireEvent.click(await screen.findByRole("button", { name: /正确现金来源/ }));
     fireEvent.click(screen.getByRole("button", { name: "采用来源纠错" }));
     await waitFor(() => expect(result.latest().source_corrections).toEqual([{ action: "rebind_flow", item_id: loan.id, expected_version: 3, new_flow_id: "flow-2", expected_new_flow_version: 8 }]));

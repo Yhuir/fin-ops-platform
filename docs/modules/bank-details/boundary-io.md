@@ -35,7 +35,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 账户日期范围 | `GET /api/bank-details/accounts` | ISO 日期；`date_from <= date_to`。只影响账户 `transaction_count`，不改变账户最新余额。 |
-| 页面默认年份 | `BankDetailsPage` | 首次且没有有效 session 选择时使用 `Asia/Shanghai` 当前业务年；用户已有选择继续按既有 session 合同恢复。 |
+| 页面普通日期范围 | `BankDetailsPage` | 每次页面挂载默认全部，恢复旧 session 时只清日期；无日期限制时省略 date_from/date_to。同页刷新保留本次选择。 |
 | 流水查询 | `GET /api/bank-details/transactions` | `account_key`、日期、keyword、分类层级、page、page_size；page 从 1 开始，page_size 为 1..500。所有过滤、排序和分页在 SQL 完成。 |
 | 导出查询 | `GET /api/bank-details/transactions/export` | `mode=all|account` 与同一筛选合同；复用 canonical query，读取上限为 `BANK_DETAIL_EXPORT_ROW_LIMIT + 1`，超限返回业务错误。 |
 | canonical 银行事实 | `app.bank_transactions` | 只读取 active/有效流水；保留 legacy/canonical identity、账户 identity、方向、numeric 金额/余额、银行文本和实际 `trade_time`/`txn_date`。排序证据由完整同账户、同币种候选日提供，不能先被 keyword、分类或分页截断。 |
@@ -128,3 +128,13 @@
 ## 系统单层标签投影（2026-09-11）
 
 批量 effective category projection 与银行分类 owner 使用同一系统语义：`internal_transfer` 输出“内部往来款”主标签与单层路径，子标签可空。保留有效人工分配/确认优先级。成本消费标准化 bank_tag 字段，不通过标签名称重跑分类，不复制一笔完整银行明细补值。
+
+## 分类候选 CTE 输入（2026-09-21）
+
+`bank_category_classification_cte` 增加 repository 内部 `candidate_transaction_relation` 输入；只接受受控 CTE 标识符及其 `row_id` 列，与已有 ID 集合输入互斥，不接收 HTTP SQL。批量账务用它在 SQL 内选候选、分类、计数及分页，避免全历史 ID/payload 进入 Python。分类规则优先级、人工/确认事实、账户和内部转账对手匹配口径不变，候选范围之外的必要对手仍加入计算。既有 ID/日期/分类参数调用保持原意；共享分类实库等价和原 consumer 回归由批量账务增量测试覆盖。
+
+## 页面进入与时间范围（2026-09-21）
+
+每次进入银行明细（包括路由离开后返回、整页刷新）时，页面日期 session 的 `initialValue` 与 `restore` 都返回 `all`，首次 accounts/transactions/export 查询不附加起止日期。账户选择继续按既有 session 恢复；本次选择的年月在页面刷新、分类保存、搜索、分页和详情关闭后保留。分页、选择与详情为本次挂载状态，不从旧日期访问恢复。
+
+通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。

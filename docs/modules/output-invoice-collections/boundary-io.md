@@ -127,3 +127,9 @@ Workbench matcher 只复用同一号码 key 尝试正式化，不是页面展示
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+## 页面进入与时间范围（2026-09-21）
+
+页面每次挂载在现有 query session 的 `restoreQuery` 清除 `month`、`invoiceDateFrom/To`、`invoice_date` 与 `bank_trade_time` 日期列条件，首次 rows 和后续导出使用同一实际范围。保留 keyword、非日期 filters、sort 和 pageSize。旧范围含日期时同时重置 page=1 并关闭旧 activeWorkflow/detailTarget；原为全部时保留合法非日期状态。本次主动选月在刷新、分页、排序与抽屉关闭后保留，离开重进或真正整页刷新再恢复全部。
+
+通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。

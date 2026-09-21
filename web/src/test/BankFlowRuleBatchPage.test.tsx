@@ -768,12 +768,38 @@ describe("BankFlowRuleBatchPage", () => {
     expect(screen.queryByText(/已选 \d+ 条/)).not.toBeInTheDocument();
   });
 
+  test("starts each visit at all while same-page refresh keeps its selected month", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    const requests = () => fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"))
+      .filter((url) => url.pathname === "/api/bank-flow-rule-batches");
+    const mounted = renderPage();
+    await screen.findByRole("heading", { name: "流水规则批量处理" });
+    await waitFor(() => expect(requests().length).toBeGreaterThan(0));
+    expect(requests().every((url) => !url.searchParams.has("month"))).toBe(true);
+    await user.click(screen.getByRole("button", { name: "批次月份：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "批次月份选择器" })).getByRole("button", { name: "四月" }));
+    await waitFor(() => expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04"));
+    const beforeRefresh = requests().length;
+    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    await waitFor(() => expect(requests().length).toBeGreaterThan(beforeRefresh));
+    expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04");
+    const beforeReentry = requests().length;
+    mounted.unmount();
+    renderPage();
+    await waitFor(() => expect(requests().length).toBeGreaterThan(beforeReentry));
+    expect(requests().slice(beforeReentry).every((url) => !url.searchParams.has("month"))).toBe(true);
+  });
+
   test("requests the complete batch scope when the user switches from a month to all", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "批次月份：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "批次月份选择器" })).getByRole("button", { name: "四月" }));
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input, init]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");

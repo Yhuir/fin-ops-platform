@@ -249,26 +249,25 @@ function normalizeDateRange(startDate: string, endDate: string) {
   return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate };
 }
 
-function getScopeDateRange(
+function getExportRangeFromScope(
   mode: ExplorerScopeMode,
   year: string,
   month: string,
-  availableYears: string[],
-) {
+): { mode: ExportRangeMode; startDate: string; endDate: string } {
+  if (mode === "all") {
+    return { mode: "all", startDate: "", endDate: "" };
+  }
   if (mode === "month") {
-    return buildMonthDateBounds(month);
+    return { mode: "month", ...buildMonthDateBounds(month) };
   }
-  if (mode === "year") {
-    return {
-      startDate: `${year}-01-01`,
-      endDate: `${year}-12-31`,
-    };
-  }
-  const years = availableYears.filter((value) => /^\d{4}$/.test(value)).sort();
-  if (years.length === 0) {
-    return buildMonthDateBounds(DEFAULT_MONTH);
-  }
-  return { startDate: `${years[0]}-01-01`, endDate: `${years[years.length - 1]}-12-31` };
+  return { mode: "custom", startDate: `${year}-01-01`, endDate: `${year}-12-31` };
+}
+
+function exportDateParams(mode: ExportRangeMode, month: string, startDate: string, endDate: string) {
+  if (mode === "all") return { month: "all" };
+  if (mode === "month") return { month };
+  if (!startDate || !endDate) return null;
+  return { month: "all", ...normalizeDateRange(startDate, endDate) };
 }
 
 function getCostStatisticsLoadErrorMessage(error: unknown) {
@@ -319,6 +318,17 @@ function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPag
   ].every((key) => typeof session[key] === "string");
 }
 
+function restoreCostStatisticsSession(value: unknown): CostStatisticsPageSession {
+  if (!isCostStatisticsPageSession(value)) throw new Error("Invalid cost statistics session");
+  return {
+    ...value,
+    projectScopeMode: "all",
+    bankAccountScopeMode: "all",
+    costTagScopeMode: "all",
+    bankFlowScopeMode: "all",
+  };
+}
+
 export default function CostStatisticsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("cost-statistics");
   const navigate = useNavigate();
@@ -337,16 +347,17 @@ export default function CostStatisticsPage() {
       bankAccountScopeMode: "all",
       bankAccountScopeYear: DEFAULT_MONTH.slice(0, 4),
       bankAccountScopeMonth: DEFAULT_MONTH,
-      costTagScopeMode: "month",
+      costTagScopeMode: "all",
       costTagScopeYear: DEFAULT_MONTH.slice(0, 4),
       costTagScopeMonth: DEFAULT_MONTH,
-      bankFlowScopeMode: "month",
+      bankFlowScopeMode: "all",
       bankFlowScopeYear: DEFAULT_MONTH.slice(0, 4),
       bankFlowScopeMonth: DEFAULT_MONTH,
     },
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
     validate: isCostStatisticsPageSession,
+    restore: restoreCostStatisticsSession,
   });
   const setCostSessionField = useCallback(<Key extends keyof CostStatisticsPageSession>(
     key: Key,
@@ -403,7 +414,7 @@ export default function CostStatisticsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchComposing, setIsSearchComposing] = useState(false);
 
-  const [bankAccountRangeMode, setBankAccountRangeMode] = useState<ExportRangeMode>("month");
+  const [bankAccountRangeMode, setBankAccountRangeMode] = useState<ExportRangeMode>("all");
   const [bankAccountMonth, setBankAccountMonth] = useState(DEFAULT_MONTH);
   const [bankAccountStartDate, setBankAccountStartDate] = useState(defaultMonthBounds.startDate);
   const [bankAccountEndDate, setBankAccountEndDate] = useState(defaultMonthBounds.endDate);
@@ -426,12 +437,12 @@ export default function CostStatisticsPage() {
   const bankFlowScopeMode = costSession.bankFlowScopeMode;
   const bankFlowScopeYear = costSession.bankFlowScopeYear;
   const bankFlowScopeMonth = costSession.bankFlowScopeMonth;
-  const [costTagRangeMode, setCostTagRangeMode] = useState<ExportRangeMode>("month");
+  const [costTagRangeMode, setCostTagRangeMode] = useState<ExportRangeMode>("all");
   const [costTagMonth, setCostTagMonth] = useState(DEFAULT_MONTH);
   const [costTagStartDate, setCostTagStartDate] = useState(defaultMonthBounds.startDate);
   const [costTagEndDate, setCostTagEndDate] = useState(defaultMonthBounds.endDate);
   const [costTagSelections, setCostTagSelections] = useState<string[]>([]);
-  const [bankFlowRangeMode, setBankFlowRangeMode] = useState<ExportRangeMode>("month");
+  const [bankFlowRangeMode, setBankFlowRangeMode] = useState<ExportRangeMode>("all");
   const [bankFlowMonth, setBankFlowMonth] = useState(DEFAULT_MONTH);
   const [bankFlowStartDate, setBankFlowStartDate] = useState(defaultMonthBounds.startDate);
   const [bankFlowEndDate, setBankFlowEndDate] = useState(defaultMonthBounds.endDate);
@@ -1225,19 +1236,23 @@ export default function CostStatisticsPage() {
   async function openExportCenter() {
     setExportFeedback(null);
     setExportPreview(null);
+    const bankFlowRange = getExportRangeFromScope(bankFlowScopeMode, bankFlowScopeYear, bankFlowScopeMonth);
+    setBankFlowRangeMode(bankFlowRange.mode);
+    setBankFlowMonth(bankFlowScopeMonth);
+    setBankFlowStartDate(bankFlowRange.startDate);
+    setBankFlowEndDate(bankFlowRange.endDate);
+    const costTagRange = getExportRangeFromScope(costTagScopeMode, costTagScopeYear, costTagScopeMonth);
+    setCostTagRangeMode(costTagRange.mode);
+    setCostTagMonth(costTagScopeMonth);
+    setCostTagStartDate(costTagRange.startDate);
+    setCostTagEndDate(costTagRange.endDate);
+    const bankAccountRange = getExportRangeFromScope(bankAccountScopeMode, bankAccountScopeYear, bankAccountScopeMonth);
+    setBankAccountRangeMode(bankAccountRange.mode);
+    setBankAccountMonth(bankAccountScopeMonth);
+    setBankAccountStartDate(bankAccountRange.startDate);
+    setBankAccountEndDate(bankAccountRange.endDate);
     if (viewMode === "time" || viewMode === "bankTag") {
       setExportCenterMode(viewMode === "time" ? "time" : "bank_tag");
-      const rangeMode = bankFlowScopeMode === "month" ? "month" : "custom";
-      const bounds = getScopeDateRange(
-        bankFlowScopeMode,
-        bankFlowScopeYear,
-        bankFlowScopeMonth,
-        availableScopeYears,
-      );
-      setBankFlowRangeMode(rangeMode);
-      setBankFlowMonth(bankFlowScopeMonth);
-      setBankFlowStartDate(bounds.startDate);
-      setBankFlowEndDate(bounds.endDate);
       setIsExportCenterOpen(true);
       return;
     }
@@ -1257,31 +1272,9 @@ export default function CostStatisticsPage() {
       updateProjectExportSelection(nextProjectNames, referenceData);
     } else if (viewMode === "costTag") {
       setExportCenterMode("cost_tag");
-      const rangeMode = costTagScopeMode === "month" ? "month" : "custom";
-      const bounds = getScopeDateRange(
-        costTagScopeMode,
-        costTagScopeYear,
-        costTagScopeMonth,
-        availableScopeYears,
-      );
-      setCostTagRangeMode(rangeMode);
-      setCostTagMonth(costTagScopeMonth);
-      setCostTagStartDate(bounds.startDate);
-      setCostTagEndDate(bounds.endDate);
       setCostTagSelections(selectedCostPrimary ? [selectedCostPrimary] : []);
     } else {
       setExportCenterMode("bank_account");
-      const rangeMode = bankAccountScopeMode === "month" ? "month" : "custom";
-      const bounds = getScopeDateRange(
-        bankAccountScopeMode,
-        bankAccountScopeYear,
-        bankAccountScopeMonth,
-        availableScopeYears,
-      );
-      setBankAccountRangeMode(rangeMode);
-      setBankAccountMonth(bankAccountScopeMonth);
-      setBankAccountStartDate(bounds.startDate);
-      setBankAccountEndDate(bounds.endDate);
       setBankAccountSelections(
         selectedBankAccountLabel
           ? [selectedBankAccountLabel]
@@ -1329,48 +1322,31 @@ export default function CostStatisticsPage() {
 
   function buildExportParamsFromState(): CostExportParams | null {
     if (exportCenterMode === "time" || exportCenterMode === "bank_tag") {
-      if (bankFlowRangeMode === "month") {
-        return {
-          month: bankFlowMonth,
-          view: exportCenterMode,
-        };
-      }
-      const range = normalizeDateRange(bankFlowStartDate, bankFlowEndDate);
-      return {
-        month: "all",
-        view: exportCenterMode,
-        startDate: range.startDate,
-        endDate: range.endDate,
-      };
+      const range = exportDateParams(bankFlowRangeMode, bankFlowMonth, bankFlowStartDate, bankFlowEndDate);
+      return range ? { ...range, view: exportCenterMode } : null;
     }
     if (exportCenterMode === "bank_account") {
       if (bankAccountSelections.length === 0) {
         return null;
       }
-      if (bankAccountRangeMode === "month") {
-        return {
-          month: bankAccountMonth,
-          view: "bank_account",
-          bankAccountLabels: bankAccountSelections,
-          projectNames: bankAccountProjectNames,
-        };
-      }
-      return {
-        month: "all",
+      const range = exportDateParams(bankAccountRangeMode, bankAccountMonth, bankAccountStartDate, bankAccountEndDate);
+      return range ? {
+        ...range,
         view: "bank_account",
         bankAccountLabels: bankAccountSelections,
         projectNames: bankAccountProjectNames,
-        startDate: bankAccountStartDate <= bankAccountEndDate ? bankAccountStartDate : bankAccountEndDate,
-        endDate: bankAccountStartDate <= bankAccountEndDate ? bankAccountEndDate : bankAccountStartDate,
-      };
+      } : null;
     }
 
     if (exportCenterMode === "project") {
       if (projectExportNames.length === 0 || projectCostTags.length === 0) {
         return null;
       }
+      const range = getExportRangeFromScope(projectScopeMode, projectScopeYear, projectScopeMonth);
+      const dates = exportDateParams(range.mode, projectScopeMonth, range.startDate, range.endDate);
+      if (!dates) return null;
       return {
-        month: "all",
+        ...dates,
         view: "project",
         projectNames: projectExportNames,
         aggregateBy: projectAggregateBy,
@@ -1381,20 +1357,12 @@ export default function CostStatisticsPage() {
     if (costTagSelections.length === 0) {
       return null;
     }
-    if (costTagRangeMode === "month") {
-      return {
-        month: costTagMonth,
-        view: "cost_tag",
-        bankTagPrimaryKeys: costTagSelections,
-      };
-    }
-    return {
-      month: "all",
+    const range = exportDateParams(costTagRangeMode, costTagMonth, costTagStartDate, costTagEndDate);
+    return range ? {
+      ...range,
       view: "cost_tag",
       bankTagPrimaryKeys: costTagSelections,
-      startDate: costTagStartDate <= costTagEndDate ? costTagStartDate : costTagEndDate,
-      endDate: costTagStartDate <= costTagEndDate ? costTagEndDate : costTagStartDate,
-    };
+    } : null;
   }
 
   function buildPreviewParamsFromState(): PreviewCostExportParams | null {
@@ -1971,6 +1939,7 @@ export default function CostStatisticsPage() {
           bankAccountProjectNames={bankAccountProjectNames}
           projectNames={projectExportNames}
           projectAggregateBy={projectAggregateBy}
+          projectPeriodLabel={projectScopeMode === "all" ? "全部" : projectScopeMode === "year" ? `${projectScopeYear}年` : projectScopeMonth}
           projectCostTags={projectCostTags}
           costTagRangeMode={costTagRangeMode}
           costTagMonth={costTagMonth}

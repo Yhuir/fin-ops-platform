@@ -948,7 +948,7 @@ describe("Input invoice usage page", () => {
       ttlMs: 24 * 60 * 60 * 1000,
       now: Date.now(),
       value: {
-        page: 1,
+        page: 3,
         pageSize: 20,
         keyword: "",
         invoiceDateFrom: "",
@@ -969,11 +969,43 @@ describe("Input invoice usage page", () => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(0);
     });
     const request = rowsRequests(fetchMock)[0];
+    expect(request.searchParams.get("page")).toBe("3");
     expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([
       { field: "payment_status", operator: "in", values: ["pending"] },
     ]);
     expect(request.searchParams.get("sort_field")).toBe("invoice_no");
     expect(request.searchParams.get("sort_direction")).toBe("asc");
+  });
+
+  test.each(["bounds", "column"])("restores all dates before the first request from stored %s filters", async (kind) => {
+    const fetchMock = installInputInvoiceUsageFetch();
+    const stored = {
+      page: 4, pageSize: 50, keyword: "供应商", month: kind === "bounds" ? "2025-12" : "",
+      invoiceDateFrom: kind === "bounds" ? "2025-12-01" : "", invoiceDateTo: kind === "bounds" ? "2025-12-31" : "",
+      filters: [
+        { field: "payment_status", operator: "in", values: ["pending"] },
+        ...(kind === "column" ? [
+          { field: "invoice_date", operator: "equals", value: "2025-12-01" },
+          { field: "bank_trade_time", operator: "between", from: "2025-01-01", to: "2025-12-31" },
+        ] : []),
+      ],
+      sortField: "invoice_no", sortDirection: "asc", activeWorkflow: "export",
+      detailTarget: { kind: "invoice", id: "old-invoice" },
+    };
+    window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "input-invoice-usage", stateKey: "query" }),
+      JSON.stringify(createStoredPayload({ version: 1, ttlMs: 60_000, value: stored })));
+    renderAuthenticatedAppAt("/input-invoice-usage");
+    await screen.findByTestId("input-invoice-usage-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    for (const request of rowsRequests(fetchMock)) {
+      for (const field of ["month", "invoice_date_from", "invoice_date_to"]) expect(request.searchParams.has(field)).toBe(false);
+      expect(request.searchParams.get("page")).toBe("1");
+      expect(request.searchParams.get("page_size")).toBe("50");
+      expect(request.searchParams.get("keyword")).toBe("供应商");
+      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([stored.filters[0]]);
+      expect(request.searchParams.get("sort_direction")).toBe("asc");
+    }
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   test("loads export preview and downloads the current filtered result set", async () => {

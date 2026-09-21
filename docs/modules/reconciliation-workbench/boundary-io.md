@@ -337,3 +337,9 @@ Migration `0149_remove_read_model_runtime.sql` 在确认遗留 schema 只含 all
 - OA 附件发票不显示“更改归属”或异常中的“选择 OA 明细”；无 OA 来源的人工发票保留原操作及权限约束。后端同样拒绝人工改写，不能只靠隐藏按钮。
 - SQL 列表/详情与 Python canonical/grouping 投影统一 OA 优先；付款项数组保持一对多。缺失原始子项证据仍报告异常，不猜测归属。
 - 进行中 OA 的关联组保持未配对，既有分期 8000/8000 对齐与 ETC 来源链路进入回归范围。
+
+## 页面进入与时间范围（2026-09-21）
+
+页面挂载时，已配对/未配对两区各自通过现有 display session restore 将 OA、银行和发票 `timeFilterByPane` 归零，并移除银行 `loanRepaymentDate` 与发票 `issueDate` 日期列条件（包括已隐藏控件的旧条件）。首次 initial/groups 请求不携带旧 time_filters，仍使用现有 month=all 查询 owner。区域搜索、非日期列筛选、排序和栏显示偏好继续恢复；分页游标、选择、展开详情是本次挂载状态。页面内搜索、刷新、业务回读和抽屉关闭保留本次选择的年月，不另建全局日期状态或 effect 二次重置。
+
+通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。

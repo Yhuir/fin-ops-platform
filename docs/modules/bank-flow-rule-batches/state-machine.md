@@ -66,3 +66,7 @@
 列表响应只包含 `summary`、`batches`、`pagination`。一次请求中的 rows、total 和 summary 必须处于同一显式 `REPEATABLE READ / READ ONLY` snapshot；repository 以固定数量集合查询读取请求月份窗口，application service 对同一 live candidate 集合执行过滤、排序和分页。
 
 页面自动选择 live candidate 后，详情请求必须携带该列表项的 `scope_month`；搜索、切换 bucket 或分页后不得用旧月份读取新 batch。live candidate 已被占用、分类变化或不再合格时，详情返回明确错误并由页面刷新列表，禁止读取或恢复旧 persisted draft。
+
+## 日期筛选生命周期（2026-09-21）
+
+每次进入页面时，普通批次月份初始化为空（全部），列表 GET 省略 `month`；日历光标仍可定位当前月。当前访问选择年月后，刷新、查看详情及写后回读继续使用该范围；离开页面再进入回到全部。日期范围切换沿用既有页码/选择清理，具体 candidate 的 `scope_month` 和提交身份不变。

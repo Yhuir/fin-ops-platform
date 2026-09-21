@@ -150,7 +150,7 @@ export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
   const { active, activationGeneration } = useOptionalPageActivation("bank-flow-rule-batches");
   const { canOperateData } = useSessionPermissions();
-  const [month, setMonth] = useState(currentMonth);
+  const [month, setMonth] = useState("");
   const [bucket, setBucket] = useState<BankFlowRuleBatchStatusBucket>("unsubmitted");
   const [payload, setPayload] = useState<BankFlowRuleBatchesResponse>(EMPTY_BATCHES);
   const [tagSelection, setTagSelection] = useState<BankFlowRuleBatchTagSelection>(EMPTY_TAG_SELECTION);

@@ -39,6 +39,35 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("cost statistics browser flow", () => {
+  test("opens every view in all time and resets a chosen month after reload", async ({ page }) => {
+    await installDeterministicApiMocks(page, { sessionMode: "user" });
+    const first = waitForExplorer(page, url => url.searchParams.get("scope") === "all");
+    await page.goto("/cost-statistics");
+    await first;
+    for (const name of ["按项目", "按银行账户", "按成本标签", "按标签", "按时间"]) {
+      await page.getByRole("radio", { name, exact: true }).click();
+      await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    }
+    await page.getByRole("button", { name: "银行流水时间范围：年月" }).click();
+    const picker = page.getByRole("dialog", { name: "银行流水时间范围选择器" });
+    await picker.getByRole("button", { name: "按月", exact: true }).click();
+    const month = waitForExplorer(page, url => url.searchParams.get("scope") === "2026-03");
+    await picker.getByRole("button", { name: "三月", exact: true }).click();
+    await month;
+    const refreshed = waitForExplorer(page, url => url.searchParams.get("scope") === "2026-03");
+    await page.getByRole("button", { name: "刷新成本统计" }).click();
+    await refreshed;
+    await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("button", { name: "导出中心" }).click();
+    const dialog = page.getByRole("dialog", { name: "导出中心" });
+    await expect(dialog.getByRole("radio", { name: "自定义月份" })).toBeChecked();
+    await dialog.getByRole("button", { name: "关闭导出中心" }).click();
+    const reset = waitForExplorer(page, url => url.searchParams.get("scope") === "all");
+    await page.reload(); await reset;
+    await expect(page.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
   test("exposes three project-cost views and two bank-flow views", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "user" });
 

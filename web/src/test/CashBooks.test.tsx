@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import CashBooks, { initialCashBooksCriteria } from "../components/cash/CashBooks";
+import { cashToday } from "../components/cash/CashItems.types";
 import { cashQueryString } from "../features/cash/api";
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), reload: vi.fn() }));
@@ -25,6 +26,73 @@ beforeEach(() => {
 });
 
 describe("cash books", () => {
+  test("top date and keyword query does not restore obsolete column filters from entry criteria", async () => {
+    const user = userEvent.setup(); const initial = initialCashBooksCriteria();
+    initial.turnover.filters.states = ["open"];
+    initial.turnover.filters.project_ids = ["project-a"];
+    render(<CashBooks initialCriteria={initial} />);
+    await user.click(screen.getByRole("button", { name: "筛选处理状态" }));
+    let popup = await screen.findByRole("dialog", { name: "筛选处理状态" });
+    await user.click(within(popup).getByRole("checkbox", { name: "未结", exact: true }));
+    await user.click(within(popup).getByRole("checkbox", { name: "结清", exact: true }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await user.click(screen.getByRole("button", { name: "筛选项目" }));
+    popup = await screen.findByRole("dialog", { name: "筛选项目" });
+    await user.click(within(popup).getByRole("checkbox", { name: "历史项目甲" }));
+    await user.click(within(popup).getByRole("checkbox", { name: "历史项目乙" }));
+    await user.click(within(popup).getByRole("button", { name: "应用" }));
+    await user.type(screen.getByRole("textbox", { name: "关键词" }), "current");
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    expect(lastParams("/reports/turnover")).toMatchObject({ time_scope: "all", states: ["settled"], project_ids: ["project-b"], keyword: "current" });
+  });
+  test("already-all book views keep their saved pages on section entry", () => {
+    const initial = initialCashBooksCriteria(); initial.turnover.page = 3; initial.tickets.page = 4;
+    const onCriteriaChange = vi.fn();
+    render(<CashBooks initialCriteria={initial} onCriteriaChange={onCriteriaChange} />);
+    expect(lastParams("/reports/turnover")).toMatchObject({ time_scope: "all", page: 3 });
+    expect(onCriteriaChange.mock.calls[0][0].tickets.page).toBe(4);
+  });
+  test("section entry normalizes hidden ordinary views before their first read, while tabs retain this visit and business periods", async () => {
+    const user = userEvent.setup(); const onCriteriaChange = vi.fn();
+    const initial = initialCashBooksCriteria(); initial.tab = "personal";
+    initial.personal.year = "2023";
+    initial.unsettled.date_to = "2024-08-31";
+    initial.pendingTickets.filters.date_to = "2024-08-31";
+    for (const book of [initial.turnover, initial.tickets]) {
+      book.filters = { time_scope: undefined, date_from: "2020-01-01", date_to: "2020-01-31", keyword: "history", project_ids: ["project-a"] };
+      book.page = 7; book.order = "asc";
+    }
+    const view = render(<CashBooks initialCriteria={initial} onCriteriaChange={onCriteriaChange} />);
+    expect(lastParams("/reports/personal").year).toBe("2023");
+    const first = onCriteriaChange.mock.calls[0][0];
+    for (const book of [first.turnover, first.tickets]) expect(book).toMatchObject({ page: 1, order: "asc", filters: { time_scope: "all", date_from: "", date_to: "", keyword: "history", project_ids: ["project-a"] } });
+    expect(first.unsettled.date_to).toBe("2024-08-31"); expect(first.pendingTickets.filters.date_to).toBe("2024-08-31");
+    await user.click(screen.getByRole("tab", { name: "往来账总表" }));
+    const firstTurnover = mocks.query.mock.calls.find(([path]) => path === "/reports/turnover")![1];
+    expect(firstTurnover).toMatchObject({ time_scope: "all", date_from: "", date_to: "", keyword: "history", page: 1 });
+    await user.click(screen.getByRole("button", { name: "筛选项目" }));
+    expect(lastParams("/reports/project-options")).toMatchObject({ date_to: cashToday() });
+    expect(cashQueryString(lastParams("/reports/project-options") as Parameters<typeof cashQueryString>[0])).not.toContain("time_scope");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByLabelText("时间范围", { selector: "button" }));
+    await user.click(screen.getByRole("option", { name: "自定义", exact: true }));
+    fireEvent.change(screen.getByLabelText("开始日期"), { target: { value: "2020-02-01" } });
+    fireEvent.change(screen.getByLabelText("结束日期"), { target: { value: "2020-02-29" } });
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    expect(lastParams("/reports/turnover")).toMatchObject({ time_scope: undefined, date_from: "2020-02-01", date_to: "2020-02-29" });
+    await user.click(screen.getByRole("tab", { name: "有票支付" }));
+    expect(mocks.query.mock.calls.find(([path]) => path === "/reports/ticket-payments")![1]).toMatchObject({ time_scope: "all", date_from: "", date_to: "", keyword: "history", page: 1 });
+    await user.click(screen.getByRole("tab", { name: "往来账总表" }));
+    expect(lastParams("/reports/turnover")).toMatchObject({ date_from: "2020-02-01", date_to: "2020-02-29" });
+    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    expect(mocks.reload).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("开始日期")).toHaveValue("2020-02-01");
+    const saved = onCriteriaChange.mock.calls.at(-1)![0]; view.unmount(); mocks.query.mockClear(); onCriteriaChange.mockClear();
+    render(<CashBooks initialCriteria={saved} onCriteriaChange={onCriteriaChange} />);
+    expect(mocks.query.mock.calls.find(([path]) => path === "/reports/turnover")![1]).toMatchObject({ time_scope: "all", date_from: "", date_to: "", keyword: "history", order: "asc" });
+    expect(onCriteriaChange.mock.calls.every(([value]) => value.turnover.filters.time_scope === "all")).toBe(true);
+  });
+
   test("personal entry retains its initialized context when surrounding queries refresh", async () => {
     const initial = initialCashBooksCriteria(); initial.tab = "personal";
     const originalQuery = mocks.query.getMockImplementation()!;
@@ -53,7 +121,7 @@ describe("cash books", () => {
     for (const key of ["date_from", "category_ids", "states", "personal_variant"]) expect(lastParams("/reports/turnover")).not.toHaveProperty(key);
     expect(screen.queryByRole("button", { name: "筛选费用类型" })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /往来账视图$/ })); await userEvent.click(screen.getByRole("option", { name: "本期处理记录" }));
-    expect(lastParams("/reports/turnover").date_from).toMatch(/-01-01$/);
+    expect(lastParams("/reports/turnover")).toMatchObject({ time_scope: "all", date_from: "", date_to: "" });
     expect(mocks.query.mock.calls.some(([path]) => path === "/reports/personal" || path === "/reports/ticket-payments")).toBe(false);
   });
   test("personal expense events stay neutral instead of claiming debt repayment", () => {
@@ -114,7 +182,7 @@ describe("cash books", () => {
   test.each(["tickets", "personal"] as const)("%s keeps applied query and project draft when encoded criteria reach 3501 bytes", async tab => {
     const user = userEvent.setup(); const initial = initialCashBooksCriteria(); initial.tab = tab;
     const ids = Array.from({ length: 17 }, (_, i) => "p".repeat(183) + i);
-    const extraId = "z".repeat(tab === "tickets" ? 82 : 122);
+    const extraId = "z".repeat(tab === "tickets" ? 107 : 122);
     if (tab === "tickets") initial.tickets.filters.project_ids = ids;
     else initial.personal.projects = ids;
     const originalQuery = mocks.query.getMockImplementation()!;
@@ -191,6 +259,8 @@ describe("cash books", () => {
   test("project and category filters keep top drafts separate and preserve native sorting", async () => {
     const user = userEvent.setup(); render(<CashBooks />);
     const original = lastParams("/reports/turnover");
+    await user.click(screen.getByLabelText("时间范围", { selector: "button" }));
+    await user.click(screen.getByRole("option", { name: "自定义", exact: true }));
     fireEvent.change(screen.getByLabelText("开始日期"), { target: { value: "2026-06-01" } });
     await user.type(screen.getByRole("textbox", { name: "关键词" }), "不应提交");
     await user.click(screen.getByRole("button", { name: "筛选项目" }));

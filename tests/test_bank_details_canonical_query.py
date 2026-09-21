@@ -149,6 +149,15 @@ class _SnapshotRepository:
 
 
 class BankDetailsCanonicalQueryTests(unittest.TestCase):
+    def test_internal_candidate_relation_validates_name_and_excludes_id_mode(self):
+        for relation,ids in (("candidate;drop table app.bank_transactions",None),("rows",["bank-1"])):
+            with self.assertRaises(ValueError):
+                bank_category_classification_cte(definitions=[],date_from=None,date_to=None,
+                    candidate_transaction_relation=relation,candidate_transaction_ids=ids)
+        for kwargs in ({"candidate_transaction_ids":["bank-1"]},{"candidate_transaction_relation":"batch_candidates"},{}):
+            sql,params = bank_category_classification_cte(definitions=[],date_from=None,date_to=None,**kwargs)
+            self.assertEqual(sql.count("%s"),len(params))
+
     def test_transaction_snapshot_uses_one_fixed_repeatable_read_query_set(self) -> None:
         connection = _Connection()
         repository = PostgresBankDetailsCanonicalQueryRepository(connection)

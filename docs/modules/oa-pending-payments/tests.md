@@ -230,3 +230,7 @@ cd web && npm run build
 ## 2026-08-10 移动端宽表回归
 
 - `web/src/test/OaPendingPaymentsPage.test.tsx` 锁定分组表最小宽度并复用既有内部横向滚动，避免 OA、流水、发票和支付状态在窄屏逐字挤压；桌面结构与 direct API 查询链不变。
+
+## 原有全部范围回归（2026-09-21）
+
+`OaPendingPaymentsPage.test.tsx` 新增首请求无 month、当前访问选月后显式刷新保留、卸载重进无 month 回归；既有切回全部和旧响应迟到用例继续执行。日期仍由页面本地 query 初始化，无需新增 session 或修改导出来源资格。

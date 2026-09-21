@@ -32,11 +32,11 @@ from tests.test_cash_queries import CashPostgresCase
 def seed(case: CashPostgresCase, rows: int) -> dict:
     case.setUp()
     tx = case.connection
-    tx.execute("update cash.settings set personal_opening_date='2025-01-01',personal_counterparty='Synthetic party' where id=1")
-    tx.execute("update cash.accounts set opening_date='2025-01-01'")
+    tx.execute("update cash.settings set personal_opening_date='2020-01-01',personal_counterparty='Synthetic party' where id=1")
+    tx.execute("update cash.accounts set opening_date='2020-01-01'")
     accounts = [case.account["id"]] + [case.cash.create_account({
         "id": case.uid(), "name": f"Synthetic account {n}", "kind": "savings",
-        "opening_date": "2025-01-01", "opening_amount": "1000.00",
+        "opening_date": "2020-01-01", "opening_amount": "1000.00",
     })["account"]["id"] for n in range(1, 4)]
     categories = [case.category["id"]] + [case.cash.create_category({
         "id": case.uid(), "name": f"Synthetic category {n}", "group": "turnover",
@@ -45,7 +45,7 @@ def seed(case: CashPostgresCase, rows: int) -> dict:
         select gen_random_uuid(),'Synthetic bank','Label '||n from generate_series(1,20)n""")
     bill_labels = [row["id"] for row in tx.fetch_all("select id from cash.bill_labels order by id")]
     tx.execute("""insert into cash.flows(id,occurred_on,kind,amount,from_account_id,to_account_id,category_id,content,source_kind,created_by_account,oa_project_id,project_name_snapshot)
-        select gen_random_uuid(),date '2025-12-01'+(n%%304),
+        select gen_random_uuid(),date '2020-01-01'+(n%%(date '2026-09-30'-date '2020-01-01'+1)),
           case when n%%10=0 then 'transfer' when n%%10 in (1,2) then 'receipt' else 'payment' end,100,
           case when n%%10 not in (1,2) then (%s::uuid[])[1+n%%4] end,
           case when n%%10=0 then (%s::uuid[])[1+(n+1)%%4] when n%%10 in (1,2) then (%s::uuid[])[1+n%%4] end,
@@ -66,7 +66,7 @@ def seed(case: CashPostgresCase, rows: int) -> dict:
           case when ledger_group='personal' then 'Synthetic source project' else project_name_snapshot end,%s
           from cash.items where type='loan'""", (case.payment_category["id"],))
     tx.execute("""insert into cash.items(id,type,origin_date,original_amount,content,ticket_provider,ticket_provided_on,ticket_description,oa_project_id,project_name_snapshot,category_id)
-        select gen_random_uuid(),'ticket_source',date '2025-12-01'+(n%%304),100,'Synthetic ticket','Synthetic party',date '2025-12-01'+(n%%304),'Synthetic provided ticket',
+        select gen_random_uuid(),'ticket_source',date '2020-01-01'+((n*53)%%(date '2026-09-30'-date '2020-01-01'+1)),100,'Synthetic ticket','Synthetic party',date '2020-01-01'+((n*53)%%(date '2026-09-30'-date '2020-01-01'+1)),'Synthetic provided ticket',
           case when n%%5<>0 then 'project-'||(n%%8) end,case when n%%5<>0 then 'Synthetic project '||(n%%8) end
           ,%s from generate_series(1,%s)n""", (case.payment_category["id"], rows // 20))
     tx.execute("""insert into cash.settlements(id,kind,amount,occurred_on,source_item_id,remark)
@@ -107,7 +107,8 @@ def seed(case: CashPostgresCase, rows: int) -> dict:
         count(*) filter(where oa_project_id is null) as null_projects,
         count(*) filter(where category_id is null) as null_categories,
         count(*) filter(where kind='transfer') as transfers,
-        count(*) filter(where occurred_on<'2026-01-01') as prior_year_flows from cash.flows""")
+        count(*) filter(where occurred_on<'2026-01-01') as prior_year_flows,
+        count(distinct extract(year from occurred_on)) as history_years from cash.flows""")
     dimensions.update(tx.fetch_one("""select count(*) as item_count,
         count(*) filter(where type='loan' and origin_date<'2026-01-01') as prior_year_obligations,
         count(*) filter(where type='company_receivable') as ticket_receivables,
@@ -115,6 +116,8 @@ def seed(case: CashPostgresCase, rows: int) -> dict:
         count(*) filter(where type='expense' and oa_project_id='source-project') as cross_project_expenses from cash.items"""))
     if dimensions["flow_count"] != rows or any(dimensions[key] < 1 for key in ("null_projects", "null_categories", "transfers", "prior_year_flows")) or dimensions["accounts"] != 4 or dimensions["categories"] != 3 or dimensions["projects"] != 8:
         raise AssertionError("Synthetic seed did not cover the required multi-value and cross-year dimensions")
+    if rows >= 10000 and dimensions["history_years"] != 7:
+        raise AssertionError("All-history measurements require seven years of registered flows")
     return {"accounts": accounts, "categories": categories, "dimensions": dimensions}
 
 
@@ -125,6 +128,7 @@ class QueryCounter:
         self.connection = connection
         self.count = 0
         self.enabled = False
+        self.plans = []
 
     @contextmanager
     def transaction(self):
@@ -133,21 +137,37 @@ class QueryCounter:
                 yield tx
                 return
             counter = self
+            def explain(sql, params=()):
+                plan = tx.fetch_one("explain (analyze, buffers, format json) " + sql, params)["QUERY PLAN"][0]
+                nodes = []
+                def collect(node):
+                    nodes.append(node)
+                    for child in node.get("Plans", []):
+                        collect(child)
+                collect(plan["Plan"])
+                counter.plans.append({"execution_ms": plan["Execution Time"],
+                    "node_types": dict(Counter(node["Node Type"] for node in nodes)),
+                    "shared_hit_blocks": plan["Plan"].get("Shared Hit Blocks", 0),
+                    "shared_read_blocks": plan["Plan"].get("Shared Read Blocks", 0),
+                    "temp_read_blocks": plan["Plan"].get("Temp Read Blocks", 0),
+                    "temp_written_blocks": plan["Plan"].get("Temp Written Blocks", 0)})
             class Transaction:
                 def execute(self, *args):
                     counter.count += 1
                     return tx.execute(*args)
                 def fetch_one(self, *args):
                     counter.count += 1
+                    explain(*args)
                     return tx.fetch_one(*args)
                 def fetch_all(self, *args):
                     counter.count += 1
+                    explain(*args)
                     return tx.fetch_all(*args)
             yield Transaction()
 
 
 def measure(name, call, samples, concurrency, counter):
-    counter.count, counter.enabled = 0, True
+    counter.count, counter.enabled, counter.plans = 0, True, []
     response = call()
     query_count, counter.enabled = counter.count, False
     def run(_):
@@ -169,6 +189,7 @@ def measure(name, call, samples, concurrency, counter):
         return round(times[math.ceil(len(times) * p) - 1], 2) if times else None
     return {"query": name, "scope": "service_and_postgres_including_pool_wait_not_http", "concurrency": concurrency,
             "statement_count_including_snapshot": query_count,
+            "untimed_explain_analyze": counter.plans,
             "attempts": samples, "samples": len(times), "failures": dict(failures), "failure_rate": round((samples - len(times)) / samples, 4),
             "p50_ms": percentile(.50), "p95_ms": percentile(.95), "p99_ms": percentile(.99),
             "max_ms": max(times) if times else None, "slowest_5_ms": [round(value, 2) for value in times[-5:]],
@@ -204,6 +225,12 @@ def main():
                 multi_accounts = json.dumps(seeded["accounts"][:2])
                 multi_categories = json.dumps(seeded["categories"][:2])
                 calls = {"flows": lambda: query.list_flows(period),
+                         "all_flows": lambda: query.list_flows({"time_scope": "all"}),
+                         "all_account_flows": lambda: query.list_flows({"time_scope": "all", "account_id": case.account["id"]}),
+                         "all_multi_project_category": lambda: query.list_flows({"time_scope": "all", "project_ids": '["project-1","project-2"]', "category_ids": multi_categories}),
+                         "all_deep_page": lambda: query.list_flows({"time_scope": "all", "page": str(max(2, size // 100))}),
+                         "all_turnover": lambda: query.query_turnover({"time_scope": "all"}),
+                         "all_tickets": lambda: query.query_tickets({"time_scope": "all"}),
                          "account_flows": lambda: query.list_flows({**period, "account_id": case.account["id"]}),
                          "multiple_accounts": lambda: query.list_flows({**period, "account_ids": multi_accounts}),
                          "multi_project_category": lambda: query.list_flows({**full_period, "project_ids": '["project-1","project-2"]', "category_ids": multi_categories}),

@@ -116,3 +116,9 @@ OA 详情 expenseItems 使用公共费用字段白名单（项目、金额、费
 ## 右侧抽屉交互（2026-09-15）
 
 本模块复用的右侧抽屉遵循[统一关闭行为](../../dev/right-drawer-dismissal.md)：外部点击/Esc 不关闭，X 继续执行已有关闭保护。业务 owner 持有保存/确认完成状态，公共 AppDrawer 仅展示 `completion`；不改变本模块后端 API、权限、事实写入及查询 I/O。旧的重复退出按钮和成功自动关闭路径已移除，内部编辑取消仍按局部职责处理。
+
+## 页面进入与时间范围（2026-09-21）
+
+页面每次挂载在现有 query session 的 `restoreQuery` 清除 `month`、`invoiceDateFrom/To`、`invoice_date` 与 `bank_trade_time` 日期列条件，首个 rows/导出请求使用清理后的范围；不新增日期控件。保留 keyword、非日期 filters、sort 和 pageSize。旧范围确实含日期时，page 重置为 1，activeWorkflow/detailTarget 清空；原为全部时不无条件重置合法页码与流程。普通刷新、排序、分页、保存回读及抽屉关闭不执行 restore。
+
+通用进入边界见 [时间范围实施约定](../../dev/date-range-default-all-plan.md)。HTTP schema、权限、业务资格与事实写入边界不因此改变。

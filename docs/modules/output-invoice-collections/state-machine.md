@@ -46,3 +46,7 @@
 - 手工红蓝票确认/撤销。
 - OA 或收据关系详情。
 - 页面 read model freshness、worker、operation barrier 或 fallback。
+
+## 日期筛选生命周期（2026-09-21）
+
+页面每次挂载在现有 query session 的 `restoreQuery` 清除 `month`、`invoiceDateFrom/To`、`invoice_date` 与 `bank_trade_time` 日期列条件，首次 rows 和后续导出使用同一实际范围。保留 keyword、非日期 filters、sort 和 pageSize。旧范围含日期时同时重置 page=1 并关闭旧 activeWorkflow/detailTarget；原为全部时保留合法非日期状态。本次主动选月在刷新、分页、排序与抽屉关闭后保留，离开重进或真正整页刷新再恢复全部。

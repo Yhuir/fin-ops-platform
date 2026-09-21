@@ -164,6 +164,17 @@ function isWorkbenchZoneDisplayState(value: unknown): value is WorkbenchZoneDisp
   );
 }
 
+function restoreWorkbenchZoneDisplayState(raw: unknown): WorkbenchZoneDisplayState {
+  if (!isWorkbenchZoneDisplayState(raw)) return createEmptyWorkbenchZoneDisplayState();
+  const { loanRepaymentDate: _loanRepaymentDate, ...bankFilters } = raw.filtersByPaneAndColumn.bank;
+  const { issueDate: _issueDate, ...invoiceFilters } = raw.filtersByPaneAndColumn.invoice;
+  return {
+    ...raw,
+    timeFilterByPane: createEmptyWorkbenchZoneDisplayState().timeFilterByPane,
+    filtersByPaneAndColumn: { ...raw.filtersByPaneAndColumn, bank: bankFilters, invoice: invoiceFilters },
+  };
+}
+
 function actionErrorMessage(error: unknown) {
   if (error instanceof WorkbenchApiError) {
     return resolveWorkbenchActionErrorMessage(error, "操作失败，请稍后重试。");
@@ -448,6 +459,7 @@ export default function ReconciliationWorkbenchPage() {
     initialValue: createEmptyWorkbenchZoneDisplayState(),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
+    restore: restoreWorkbenchZoneDisplayState,
     validate: isWorkbenchZoneDisplayState,
     debounceMs: 100,
   });
@@ -458,6 +470,7 @@ export default function ReconciliationWorkbenchPage() {
     initialValue: createEmptyWorkbenchZoneDisplayState(),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
+    restore: restoreWorkbenchZoneDisplayState,
     validate: isWorkbenchZoneDisplayState,
     debounceMs: 100,
   });

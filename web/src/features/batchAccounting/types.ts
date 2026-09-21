@@ -1,11 +1,13 @@
 export type BatchAccountingBucket = "unsubmitted" | "submitted";
 
 export type BatchAccountingSummary = {
+  bankYear: string | null;
   unsubmittedCount: number;
   submittedCount: number;
 };
 
 export type BatchAccountingBankRow = {
+  bankYear: string | null;
   id: string;
   tradeTime: string;
   counterpartyName: string;

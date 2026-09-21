@@ -1,16 +1,22 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
+import unittest
+from contextlib import contextmanager
 from time import perf_counter
 from typing import Any, Iterator
-import unittest
 
-from fin_ops_platform.services.batch_accounting_service import BatchAccountingService
+from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.bank_details_canonical_query import (
+    PostgresBankDetailsCanonicalQueryRepository,
+    bank_category_classification_cte,
+)
+from fin_ops_platform.services.batch_accounting_service import BatchAccountingError, BatchAccountingService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.batch_accounting import (
     PostgresBatchAccountingQueryRepository,
 )
+
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -107,9 +113,7 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         truncate_test_database(self.database_url)
-        self.connection = PostgresConnection(
-            PostgresSettings(database_url=self.database_url, pool_enabled=False)
-        )
+        self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
         self.repository = PostgresBatchAccountingQueryRepository(self.connection)
         self._seed_canonical_facts()
 
@@ -289,6 +293,142 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
                 )
             """
         )
+
+    def _correct_bank(self, sql):
+        with self.connection.transaction() as tx:
+            tx.execute("select set_config('fin_ops.correction_reason','synthetic date range regression',true)")
+            tx.execute(sql)
+
+    def _bank_with_date(self, row_id, canonical_date, display_time):
+        self.connection.execute(
+            """insert into app.bank_transactions(
+            legacy_mongo_id,account_no,account_name,txn_direction,counterparty_name_raw,
+            amount,signed_amount,txn_date,txn_month,trade_time,status,raw_payload)
+            select %s,account_no,account_name,txn_direction,counterparty_name_raw,
+                amount,signed_amount,%s::date,date_trunc('month',%s::date)::date,%s::timestamptz,status,raw_payload
+            from app.bank_transactions where legacy_mongo_id='txn-batch-unsubmitted'
+            """,
+            (row_id, canonical_date, canonical_date, display_time),
+        )
+        self.connection.execute(
+            """insert into app.bank_transaction_category_confirmations(
+            legacy_transaction_id,category_code,status,confirmed_by) values(%s,'fee','active','test')""",
+            (row_id,),
+        )
+
+    def _page(self, year=None, bucket="unsubmitted", page=1, size=200):
+        return self.repository.list_snapshot(
+            bank_year=year, bucket=bucket, bank_page=page, bank_page_size=size, oa_page=1, oa_page_size=20
+        )
+
+    def test_all_years_sql_pages_unknown_dates_and_canonical_year(self):
+        self._bank_with_date("old", "2024-01-01", "2024-01-01T00:00:00+08")
+        self._bank_with_date("date-conflict", "2025-12-31", "2026-01-01T00:00:00+08")
+        self._bank_with_date("unknown", None, None)
+        first, second = self._page(size=2), self._page(page=2, size=2)
+        self.assertEqual(first["summary"]["unsubmitted_count"], 4)
+        self.assertEqual(second["summary"], first["summary"])
+        self.assertEqual(
+            [r["id"] for r in first["bank_rows"] + second["bank_rows"]],
+            ["txn-batch-unsubmitted", "date-conflict", "old", "unknown"],
+        )
+        self.assertIsNone(second["bank_rows"][-1]["bank_year"])
+        self.assertEqual(first["bank_rows"][1]["bank_year"], "2025")
+        self.assertEqual(self._page("2026")["summary"]["unsubmitted_count"], 1)
+        context = self.repository.load_submission_context(bank_year="2025", bank_row_id="date-conflict", oa_row_ids=[])
+        self.assertEqual(context["bank_rows"][0]["bank_year"], "2025")
+        self.assertEqual(BatchAccountingService._row_month(context["bank_rows"][0]), "2025-12")
+        service = BatchAccountingService(query_repository=self.repository)
+        with self.assertRaises(BatchAccountingError) as caught:
+            service.submit(bank_year="2026", bank_row_id="unknown", oa_row_ids=["oa-batch-eligible"], actor="test")
+        self.assertEqual(caught.exception.code, "invalid_batch_accounting_bank_row")
+
+    def test_submitted_unknown_dates_remain_visible_in_all_without_guessed_year(self):
+        self._correct_bank("""update app.bank_transactions set txn_date=null,txn_month=null,
+            trade_time=null,pay_receive_time=null where legacy_mongo_id='txn-batch-submitted'""")
+        payload = BatchAccountingService(query_repository=self.repository).build_payload(
+            bank_year="all", bucket="submitted"
+        )
+        self.assertIsNone(payload["summary"]["bank_year"])
+        self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertIsNone(payload["bank_rows"][0]["bank_year"])
+        self.assertTrue(payload["bank_rows"][0]["relation_id"])
+        self.assertEqual(self._page("2026", "submitted")["summary"]["submitted_count"], 0)
+
+    def test_candidate_relation_classifier_equals_existing_ids_and_preserves_peer_context(self):
+        self._bank_with_date("unknown", None, None)
+        # The shared classifier must retain counterpart rows outside the page-owned candidate CTE.
+        self._correct_bank("""update app.bank_transactions set counterparty_name_raw='云南溯源科技有限公司',summary='本公司账户',amount=300,
+            signed_amount=-300,txn_date='2026-04-07',txn_month='2026-04-01',trade_time='2026-04-07 15:54:00+08'
+            where legacy_mongo_id='txn-batch-unsubmitted'""")
+        self.connection.execute(
+            "delete from app.bank_transaction_category_confirmations where legacy_transaction_id='txn-batch-unsubmitted'"
+        )
+        self._correct_bank("""update app.bank_transactions set counterparty_name_raw='云南溯源科技有限公司',
+            account_no='different-account',summary='本公司账户' where legacy_mongo_id='txn-batch-income'""")
+        settings = AppSettingsService.normalize_settings_payload({})
+        with self.repository._snapshot_transaction() as tx:
+            candidates = "comparison_candidates as (select coalesce(legacy_mongo_id,id::text) as row_id from app.bank_transactions where legacy_mongo_id=any(%s::text[]))"
+            params = (["txn-batch-unsubmitted", "txn-batch-submitted", "txn-batch-linked-other", "unknown"],)
+            ids = [
+                row["row_id"]
+                for row in tx.fetch_all(f"with {candidates} select row_id from comparison_candidates", params)
+            ]
+            expected = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
+                tx, settings=settings, transaction_ids=ids
+            )
+            sql, sql_params = bank_category_classification_cte(
+                definitions=settings["bank_transaction_tags"]["definitions"],
+                date_from=None,
+                date_to=None,
+                candidate_transaction_relation="comparison_candidates",
+                defer_full_payload=True,
+            )
+            rows = tx.fetch_all(
+                f"""with {candidates},{sql} select c.* from classified_with_semantics c
+                join comparison_candidates b on b.row_id=c.row_id""",
+                (*params, *sql_params),
+            )
+        self.assertEqual(set(expected), {row["row_id"] for row in rows})
+        for row in rows:
+            for key, value in expected[row["row_id"]].items():
+                if key != "effective_category_label_path":
+                    self.assertEqual(row[key], value, (row["row_id"], key))
+        self.assertEqual(expected["txn-batch-unsubmitted"]["effective_category_code"], "internal_transfer")
+        self.assertIn("fee", self.repository.tag_rules_snapshot()["observed_tag_codes"])
+
+    def test_all_years_scale_keeps_payload_bounded_after_sql_classification(self) -> None:
+        self.connection.execute("""
+            insert into app.bank_transactions(
+                legacy_mongo_id,account_no,account_name,txn_direction,counterparty_name_raw,
+                amount,signed_amount,txn_date,txn_month,trade_time,status,raw_payload)
+            select 'scale-'||n,'scale-account','合成测试','outflow',
+                case when n<=10000 then '批量账务集中处理' else '其他' end,
+                n+100000,-n-100000,date '2020-01-01'+n%%2300,
+                date_trunc('month',date '2020-01-01'+n%%2300)::date,
+                (date '2020-01-01'+n%%2300)::timestamptz,'active','{}'::jsonb
+            from generate_series(1,20000)n
+        """)
+        self.connection.execute("""
+            insert into app.bank_transaction_category_confirmations(
+                legacy_transaction_id,category_code,status,confirmed_by)
+            select 'scale-'||n,case when n%%2=0 then 'fee' else 'travel' end,
+                'active','synthetic' from generate_series(1,10000)n
+        """)
+        self.connection.execute('analyze app.bank_transactions')
+        self.connection.execute('analyze app.bank_transaction_category_confirmations')
+        first, deep, empty = self._page(), self._page(page=20), self._page(page=40)
+        for payload in (first, deep, empty):
+            self.assertEqual(payload["summary"]["unsubmitted_count"], 5001)
+            self.assertEqual(payload["pagination"]["bank_rows"]["total"], 5001)
+            self.assertLess(len(json.dumps(payload).encode()), 200_000)
+        self.assertEqual(len(first["bank_rows"]), 200)
+        self.assertEqual(len(deep["bank_rows"]), 200)
+        self.assertEqual(empty["bank_rows"], [])
+        self.assertTrue({row["id"] for row in first["bank_rows"]}.isdisjoint(
+            row["id"] for row in deep["bank_rows"]
+        ))
+        self.assertTrue(all(row["tag_code"] == "fee" for row in deep["bank_rows"]))
 
     def test_unsubmitted_snapshot_filters_pages_and_links_canonical_attachment_invoice(self) -> None:
         started_at = perf_counter()

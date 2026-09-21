@@ -93,3 +93,9 @@ cd web && npm run build
 ## 2026-08-25 支付状态 chip 颜色回归
 
 - `web/src/test/InputInvoiceUsagePage.test.tsx` 锁定“已付款/待处理/待付款”分别使用 success/neutral/warning，防止再次回退为统一 warning 色。
+
+## 日期默认全部回归（2026-09-21）
+
+`InputInvoiceUsagePage.test.tsx` 分别注入旧年月/起止与仅日期列过滤缓存，检查所有首请求没有隐藏日期，page=1 且旧详情/导出关闭，非日期偏好保留；已有全部范围 session 保留第 3 页。支付规则、OA 反提、导出与空态回归继续执行。
+
+本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。

@@ -2,19 +2,16 @@ import { expect, test } from "./fixtures/strictTest";
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
-const DEFAULT_DATE_FROM = "2026-01-01";
-const DEFAULT_DATE_TO = "2026-12-31";
-
 function defaultAccountsRequest(url: URL) {
   return url.pathname.endsWith("/api/bank-details/accounts")
-    && url.searchParams.get("date_from") === DEFAULT_DATE_FROM
-    && url.searchParams.get("date_to") === DEFAULT_DATE_TO;
+    && url.searchParams.get("date_from") === null
+    && url.searchParams.get("date_to") === null;
 }
 
 function defaultTransactionsRequest(url: URL) {
   return url.pathname.endsWith("/api/bank-details/transactions")
-    && url.searchParams.get("date_from") === DEFAULT_DATE_FROM
-    && url.searchParams.get("date_to") === DEFAULT_DATE_TO
+    && url.searchParams.get("date_from") === null
+    && url.searchParams.get("date_to") === null
     && url.searchParams.get("account_key") === null
     && url.searchParams.get("page") === "1"
     && url.searchParams.get("page_size") === "100";
@@ -23,7 +20,7 @@ function defaultTransactionsRequest(url: URL) {
 test.describe("bank details initial browser state", () => {
   test("shows confirmed bank order, historical balances and unresolved evidence without a false total", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "user" });
-    await page.route("**/api/bank-details/accounts?*", (route) => route.fulfill({ json: {
+    await page.route("**/api/bank-details/accounts*", (route) => route.fulfill({ json: {
       accounts: [
         { account_key: "ccb", bank_name: "建设银行", account_last4: "8106", display_name: "建设银行 8106", currency: "CNY",
           latest_balance: "40512.82", latest_balance_at: "2026-09-08 15:36:50", has_balance: true, balance_status: "confirmed", transaction_count: 2 },
@@ -67,7 +64,7 @@ test.describe("bank details initial browser state", () => {
     await expect(page.getByRole("alert")).toHaveCount(0);
   });
 
-  test("loads the current-year all-account view with balances, default columns, and relation fields", async ({ page }) => {
+  test("loads the all-history all-account view with balances, default columns, and relation fields", async ({ page }) => {
     await installDeterministicApiMocks(page, { sessionMode: "user" });
 
     const accountsRequest = page.waitForRequest((request) => (
@@ -83,7 +80,7 @@ test.describe("bank details initial browser state", () => {
 
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "全部流水" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "银行明细时间范围：2026年" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "银行明细时间范围：年月" })).toBeVisible();
 
     await expect(page.getByText("总余额")).toBeVisible();
     await expect(page.getByText("130500.50").first()).toBeVisible();

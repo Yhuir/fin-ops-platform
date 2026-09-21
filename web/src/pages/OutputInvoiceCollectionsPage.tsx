@@ -89,10 +89,19 @@ function validateQuery(value: unknown): value is OutputInvoiceCollectionQuery {
 
 function restoreQuery(raw: unknown): OutputInvoiceCollectionQuery {
   if (!validateQuery(raw)) return initialQuery;
+  const filters = raw.filters.filter((filter) => !["invoice_date", "bank_trade_time"].includes(filter.field));
+  const dateScopeChanged = Boolean(raw.month || raw.invoiceDateFrom || raw.invoiceDateTo)
+    || filters.length !== raw.filters.length;
   return {
     ...initialQuery,
     ...raw,
-    page: Math.max(1, raw.page),
+    month: "",
+    invoiceDateFrom: "",
+    invoiceDateTo: "",
+    filters,
+    page: dateScopeChanged ? 1 : Math.max(1, raw.page),
+    activeWorkflow: dateScopeChanged ? null : raw.activeWorkflow,
+    detailTarget: dateScopeChanged ? null : raw.detailTarget,
     pageSize: [20, 50, 100].includes(raw.pageSize) ? raw.pageSize : initialQuery.pageSize,
   };
 }

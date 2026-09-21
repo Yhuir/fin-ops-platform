@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
@@ -1119,6 +1120,7 @@ def bank_category_classification_cte(
     date_to: str | None,
     candidate_category_codes: list[str] | None = None,
     candidate_transaction_ids: list[str] | None = None,
+    candidate_transaction_relation: str | None = None,
     account_key: str | None = None,
     keyword: str | None = None,
     defer_full_payload: bool = False,
@@ -1135,6 +1137,41 @@ def bank_category_classification_cte(
     )
     candidate_codes = text_list(candidate_category_codes) or None
     target_ids = text_list(candidate_transaction_ids) or None
+    peer_match_sql = """
+        round(abs(target.amount), 2) = round(abs(bank.amount), 2)
+        and bank.txn_date between target.trade_time_sort::date - 4
+                              and target.trade_time_sort::date + 4
+        and abs(extract(epoch from (
+          coalesce(bank.trade_time, bank.txn_date::timestamptz)
+          - target.trade_time_sort
+        ))) <= 345600
+    """
+    peer_cte_sql = ""
+    peer_filter_sql = f"exists (select 1 from target_bank_rows target where {peer_match_sql})"
+    # Internal repository CTE only; never accept an HTTP-supplied SQL expression.
+    if candidate_transaction_relation is not None:
+        if target_ids is not None or not re.fullmatch(r"[a-z][a-z0-9_]*", candidate_transaction_relation):
+            raise ValueError("Candidate relation must be an internal CTE name, exclusive with IDs.")
+        target_filter_sql = (
+            f"bank.id::text in (select row_id from {candidate_transaction_relation}) "
+            f"or bank.legacy_mongo_id in (select row_id from {candidate_transaction_relation})"
+        )
+        peer_cte_sql = f"""
+        classification_peer_bank_ids as materialized (
+          select distinct bank.id
+          from app.bank_transactions bank
+          join target_bank_rows target on {peer_match_sql}
+        ),
+        """
+        peer_filter_sql = "bank.id in (select id from classification_peer_bank_ids)"
+        source_target_filter_sql = target_filter_sql
+        target_params: list[Any] = []
+        source_target_params: list[Any] = []
+    else:
+        target_filter_sql = "%s::text[] is not null and (bank.id::text = any(%s::text[]) or bank.legacy_mongo_id = any(%s::text[]))"
+        source_target_filter_sql = "%s::text[] is null or bank.id::text = any(%s::text[]) or bank.legacy_mongo_id = any(%s::text[])"
+        target_params = [target_ids, target_ids, target_ids]
+        source_target_params = [target_ids, target_ids, target_ids]
     prefilter_sql, prefilter_params = _transaction_prefilter_sql(
         definitions=definitions,
         account_key=account_key,
@@ -1198,9 +1235,7 @@ def bank_category_classification_cte(
     )
     params: list[Any] = [
         tag_definitions_json,
-        target_ids,
-        target_ids,
-        target_ids,
+        *target_params,
         str(tenant_id or "").strip() or "default",
         list(INVALID_BANK_TRANSACTION_STATUSES),
         date_from,
@@ -1210,9 +1245,7 @@ def bank_category_classification_cte(
         candidate_codes,
         candidate_codes,
         candidate_codes,
-        target_ids,
-        target_ids,
-        target_ids,
+        *source_target_params,
         *prefilter_params,
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
         [f"%{marker}%" for marker in INTERNAL_TRANSFER_MARKERS],
@@ -1231,12 +1264,9 @@ def bank_category_classification_cte(
             bank.amount,
             coalesce(bank.trade_time, bank.txn_date::timestamptz) as trade_time_sort
           from app.bank_transactions bank
-          where %s::text[] is not null
-            and (
-              bank.id::text = any(%s::text[])
-              or bank.legacy_mongo_id = any(%s::text[])
-            )
+          where {target_filter_sql}
         ),
+        {peer_cte_sql}
         source_rows as materialized (
           select
             coalesce(bank.legacy_mongo_id, bank.id::text) as row_id,
@@ -1340,20 +1370,8 @@ def bank_category_classification_cte(
               or manual.category = any(%s::text[])
             )
             and (
-              %s::text[] is null
-              or bank.id::text = any(%s::text[])
-              or bank.legacy_mongo_id = any(%s::text[])
-              or exists (
-                select 1
-                from target_bank_rows target
-                where round(abs(target.amount), 2) = round(abs(bank.amount), 2)
-                  and bank.txn_date between target.trade_time_sort::date - 4
-                                        and target.trade_time_sort::date + 4
-                  and abs(extract(epoch from (
-                    coalesce(bank.trade_time, bank.txn_date::timestamptz)
-                    - target.trade_time_sort
-                  ))) <= 345600
-              )
+              {source_target_filter_sql}
+              or {peer_filter_sql}
             )
         ),
         display_rows as materialized (

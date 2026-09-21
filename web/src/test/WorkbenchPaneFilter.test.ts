@@ -4,10 +4,12 @@ import {
   createEmptyWorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
+import userEvent from "@testing-library/user-event";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import { installMockApiFetch } from "./apiMock";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
+import { buildPageSessionStorageKey, createStoredPayload } from "../contexts/pageSessionStorage";
 
 function buildRow(id: string, recordType: WorkbenchRecordType, tableValues: Record<string, string>): WorkbenchRecord {
   return {
@@ -29,6 +31,61 @@ function buildRow(id: string, recordType: WorkbenchRecordType, tableValues: Reco
 }
 
 describe("Workbench pane display model", () => {
+  test("clears every stored pane date before both zone requests while preserving search, filters and sort", async () => {
+    const fetchMock = installMockApiFetch();
+    for (const stateKey of ["pairedDisplayState", "openDisplayState"]) {
+      const value = createEmptyWorkbenchZoneDisplayState();
+      value.searchQuery = "供应商";
+      value.activePaneId = "bank";
+      value.sortByPane.bank = "asc";
+      value.filtersByPaneAndColumn.bank = { loanRepaymentDate: ["2025-12-31"], counterparty: ["智能工厂设备商"] };
+      value.timeFilterByPane = { oa: { mode: "year", year: "2025" }, bank: { mode: "month", month: "2025-12" }, invoice: { mode: "year", year: "2024" } };
+      window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "1", pageKey: "reconciliation-workbench", stateKey }),
+        JSON.stringify(createStoredPayload({ version: 3, ttlMs: 60_000, value })));
+    }
+    renderWorkbenchPage();
+    await screen.findByTestId("zone-unpaired");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(true));
+    const initialRequests = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"))
+      .filter((url) => url.pathname === "/api/workbench");
+    for (const url of initialRequests) {
+      expect(url.searchParams.get("month")).toBe("all");
+      for (const key of ["paired_query", "unpaired_query"]) {
+        const query = JSON.parse(url.searchParams.get(key) ?? "{}");
+        expect(query).not.toHaveProperty("time_filters");
+        expect(query.search).toBe("供应商");
+        expect(query.column_filters.bank).toEqual({ counterparty: ["智能工厂设备商"] });
+        expect(query.sort).toBe("bank:asc");
+      }
+    }
+    for (const zone of ["zone-paired", "zone-unpaired"]) {
+      expect(within(screen.getByTestId(zone)).getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    }
+  });
+
+  test("keeps this visit's bank month during searches and resets it on re-entry", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const mounted = renderWorkbenchPage();
+    const zone = await screen.findByTestId("zone-unpaired");
+    await user.click(within(zone).getByRole("button", { name: "银行流水时间筛选：年月" }));
+    const picker = await screen.findByRole("dialog", { name: "银行流水时间筛选选择器" });
+    await user.click(within(picker).getByRole("button", { name: "按月" }));
+    await user.click(within(picker).getByRole("button", { name: "四月" }));
+    const monthButton = within(zone).getByRole("button", { name: "银行流水时间筛选：2026年4月" });
+    expect(monthButton).toBeInTheDocument();
+    fireEvent.change(within(zone).getByRole("searchbox"), { target: { value: "杭州" } });
+    expect(monthButton).toBeInTheDocument();
+    const key = buildPageSessionStorageKey({ userScope: "1", pageKey: "reconciliation-workbench", stateKey: "openDisplayState" });
+    await waitFor(() => expect(window.sessionStorage.getItem(key)).toContain('"month":"2026-04"'));
+    mounted.unmount();
+    renderWorkbenchPage();
+    const reentered = await screen.findByTestId("zone-unpaired");
+    expect(within(reentered).getByRole("button", { name: "银行流水时间筛选：年月" })).toBeInTheDocument();
+    expect(within(reentered).getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(within(reentered).getByRole("searchbox")).toHaveValue("杭州");
+  });
+
   test("keeps original groups when no pane search or filter is active", () => {
     const groups: WorkbenchRelationGroup[] = [
       {

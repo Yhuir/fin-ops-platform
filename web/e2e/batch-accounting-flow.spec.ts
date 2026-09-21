@@ -73,7 +73,7 @@ test.describe("batch accounting browser flow", () => {
       await mark("finalSettledLatencyMs", expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible());
     });
     await expect(page.getByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeVisible();
-    await expect(page.getByText("当前年份暂无批量账务流水")).toHaveCount(0);
+    await expect(page.getByText("当前范围暂无批量账务流水")).toHaveCount(0);
     expect(api.count("GET /api/batch-accounting")).toBeGreaterThanOrEqual(1);
 
     let recovered = false;
@@ -127,7 +127,7 @@ test.describe("batch accounting browser flow", () => {
     const bankHeader = bankPanel.locator(".batch-accounting-bank-panel__header");
     const title = bankPanel.locator(".batch-accounting-bank-panel__title");
     const subtitle = bankPanel.locator(".batch-accounting-bank-panel__subtitle");
-    const yearInput = page.getByRole("button", { name: "流水年份：2026年" });
+    const yearInput = page.getByRole("button", { name: "流水年份：年月" });
     const pagination = page.getByRole("group", { name: "批量账务流水分页" });
     const tagRulesButton = page.getByRole("button", { name: "批量账务标签规则" });
     const refreshButton = page.getByRole("button", { name: "刷新" });
@@ -218,12 +218,12 @@ test.describe("batch accounting browser flow", () => {
       selected_tag_codes: ["travel"],
     });
     await expect(page.getByText("批量账务标签规则已更新。")).toBeVisible();
-    await expect(page.getByText("当前年份暂无批量账务流水")).toBeVisible();
+    await expect(page.getByText("当前范围暂无批量账务流水")).toBeVisible();
     expect(api.count("PUT /api/batch-accounting/tag-rules")).toBe(1);
     expect(browserErrors).toEqual([]);
   });
 
-  test("submits and withdraws daily reimbursement rows through page-access convergence", async ({ page }, testInfo) => {
+  test("submits an older canonical bank year from all and withdraws the relation", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "user" });
     const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
@@ -280,6 +280,7 @@ test.describe("batch accounting browser flow", () => {
 
     await expect(page.getByText("已关联批量账务流水与 2 项 OA。")).toBeVisible();
     expect(api.count("POST /api/batch-accounting/submit")).toBe(1);
+    expect(api.lastBody("POST /api/batch-accounting/submit")).toMatchObject({ bank_year: "2025" });
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeSubmit + 1);
     await expect(page.getByRole("radio", { name: "已提交 1" })).toBeVisible();
@@ -345,7 +346,7 @@ test.describe("batch accounting browser flow", () => {
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/batch-accounting")).toBe(batchAccountingGetsBeforeWithdraw + 1);
     await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
-    await expect(page.getByText("当前年份暂无批量账务流水")).toBeVisible();
+    await expect(page.getByText("当前范围暂无批量账务流水")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await recordLatency({

@@ -1,5 +1,13 @@
 # 现金账边界与 I/O
 
+## 普通历史范围默认全部（2026-09-21）
+
+`GET /flows`、周转 `view=events` 和有票支付 `view=period` 接受 `time_scope=all`，与任何 `date_from/date_to` 互斥。服务按上海业务日注入今天作为截止，无起点；未提供 all 时，原成对日期及最多 366 天校验保留。独立普通列表缺少两种时间表达仍为 400；明确事项/任务父对象的无日期历史合同不变。纠错候选复用 flows 的 all，任务关联仍传任务月身份；个人年、未结/待回款截止日及所有写命令日期不变。
+
+现金 rows/count/summary 继续来自同一只读快照并由 SQL 分页。all 的 `flows.summary.period={date_from:null,date_to:上海今天}`；账户余额按各账户真实 opening_date 至今天的完整账序，关键词/项目过滤只影响 filtered_totals，不改变余额期间，空筛选结果也保留账户余额。未起算覆盖仍为未知；不新增报表字段、表、worker、缓存或普通财务 I/O。
+
+CashFlows section wrapper 与 CashBooks lazy initializer 在首请求前清普通日期，仅实际改变日期时清页码，保留非日期筛选/排序/视图；CashBooks 同时清隐藏的 events/period 条件。section 内 Tab、本页刷新/保存/抽屉关闭保留本次日期；切走 section 再进入恢复全部。复用 CashFlowTable 不在每次挂载时清父对象条件；不增加全局 store、sessionStorage、URL 日期或 CashContent key/effect 重置。全部/自定义互斥显示；历史项目候选不接受新 scope，all 仍调用既有 project-options 并传 `date_to=上海今天`，父对象候选继续携带父 ID。
+
 ## 待实施增量：Excel迁移闭环
 
 本轮闭环实现按技术§14执行，实际验证和发布见实施§16。cash内部新增三列（专账人员、事项分类、无来源调整分类），新增未结/待回款读取视图及个人来源项目/分类筛选；不新建服务/表/账号/worker或缓存，不改普通金融DTO/全局历史/OA写边界。UI显式组装既有命令，repository只读写cash；个人跨项目只限明确同人归属的非现金，现金项目约束保留。配置共享读锁先于稳定主键行锁，不把现金写串行化为全局排他锁；修改来源会验证其费用引用及后续冲抵并整体回滚。历史已结束项目未处理票据/费用开账未获窄方案前不放宽资格。
@@ -34,7 +42,7 @@
 
 CashFlows只组合既有表格/录入，不复制业务；CashBooks已移除通用flows Tab/新增但保留上下文实际收付。CashFlowTable的itemId/taskOccurrenceId嵌入明细保留；CashConfigurationSelect仅负责启用项录入，CashConfigurationFilter负责全部历史候选。单值API/同库同账号/唯一cash权限/无全局历史边界不变，CSS仅现金及现金Portal；新增GET集合参数见技术§13，执行证据见实施§14。
 
-实施细节复审：CashConfigurationSelect已删除无消费者的mode/filter分支，不保留并行旧筛选路径；父对象嵌入流水默认全历史分页，独立流水必须带期间。已应用筛选/排序/页码仅存于CashProvider可卸载子树，切回重新GET；撤权/退页条件和rows均清空，不把条件留在Provider之外。删除末页用查询返回的total调整页码，不重复删除命令；多表页只设一个内容滚动区。上述仍是cash内的UI/查询责任，不改变Shell合同。
+实施细节复审：CashConfigurationSelect已删除无消费者的mode/filter分支，不保留并行旧筛选路径；父对象嵌入流水默认全历史分页，独立流水必须带显式 all 或期间。已应用筛选/排序/页码仅存于CashProvider可卸载子树，切回重新GET；撤权/退页条件和rows均清空，不把条件留在Provider之外。删除末页用查询返回的total调整页码，不重复删除命令；多表页只设一个内容滚动区。上述仍是cash内的UI/查询责任，不改变Shell合同。
 
 前端请求owner为features/cash/api.ts：复用底层apiFetch，现金路径单地址严格JSON/HTTP，15秒超时，不调用自动换地址重发的apiRequestJson；不从普通业务client查分类/项目/金额。hooks.tsx只在CashProvider内维护请求取消和局部revision，写成功重新GET，401/403卸载敏感子树；无storage、全局事件或全局overlay写入。复用FinanceTable/AppDrawer纯UI，不复用useFinanceTableSession；关闭的现金抽屉条件卸载，Portal样式仅.cash-drawer范围。
 
@@ -62,7 +70,7 @@ CashFlows只组合既有表格/录入，不复制业务；CashBooks已移除通�
 
 ## 2026-09-10 新增流水入口
 
-CashFlows 仅管理抽屉开关；CashFlowEditor 在普通新增内管理 receipt/payment/transfer 单选与草稿，任务/事项固定方向，已有流水保留方向选择及更正流程。类型切换保留日期、金额、用途、人员、备注、项目和各角色账户，清除分类；有相关事项先显式确认再清除。确认期间不能保存，不复制草稿或猜账户。转账使用转出/转入账户标签，不提交分类与关联事项。删除旧新增 Dropdown 和普通新增方向 Select，列表方向筛选不变。现金 DTO、HTTP、service/repository、权限及读写事实边界不变，未新增公共组件、依赖或迁移。样式限定 .cash-drawer。
+CashFlows 管理 section 入口日期初始化及抽屉开关；CashFlowEditor 在普通新增内管理 receipt/payment/transfer 单选与草稿，任务/事项固定方向，已有流水保留方向选择及更正流程。类型切换保留日期、金额、用途、人员、备注、项目和各角色账户，清除分类；有相关事项先显式确认再清除。确认期间不能保存，不复制草稿或猜账户。转账使用转出/转入账户标签，不提交分类与关联事项。删除旧新增 Dropdown 和普通新增方向 Select，列表方向筛选不变。现金 DTO、HTTP、service/repository、权限及读写事实边界不变，未新增公共组件、依赖或迁移。样式限定 .cash-drawer。
 
 ## 右侧抽屉交互（2026-09-15）
 

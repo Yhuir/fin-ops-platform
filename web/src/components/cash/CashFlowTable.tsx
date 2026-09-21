@@ -6,7 +6,7 @@ import {
   FinanceTable, FinanceTableBody, FinanceTableCell, FinanceTableColumn, FinanceTableHeader,
   FinanceTablePagination, FinanceTableRow,
 } from "../common/FinanceTable";
-import { CashInput, CashNotice } from "./CashUi";
+import { CashInput, CashNotice, CashSelect } from "./CashUi";
 import { cashAmount, cashToday, type CashPageRows } from "./CashItems.types";
 import { cashFlowLabels, type CashFlow, type CashFlowSummary } from "./CashFlows.types";
 import { CashFlowDrawer } from "./CashFlowDrawer";
@@ -15,14 +15,14 @@ import { CashColumnHeader, CashFilterPopover, CashSortMenu, CashTextFilter, type
 import AppDrawer from "../common/AppDrawer";
 
 export type CashFlowCriteria = {
-  keyword: string; date_from: string; date_to: string; person: string;
+  keyword: string; time_scope?: "all"; date_from: string; date_to: string; person: string;
   account_ids: CashFilterValue[]; project_ids: CashFilterValue[]; category_ids: CashFilterValue[];
   selected: Record<string, CashFilterOption[]>;
   kinds: string[]; sources: string[]; order: string; sort: string; page: number;
 };
 export function initialCashFlowCriteria(scoped = false): CashFlowCriteria {
-  return { keyword: "", date_from: scoped ? "" : `${cashToday().slice(0, 4)}-01-01`,
-    date_to: scoped ? "" : cashToday(), person: "", account_ids: [], project_ids: [], category_ids: [], selected: {}, kinds: [], sources: [],
+  return { keyword: "", time_scope: scoped ? undefined : "all", date_from: "",
+    date_to: "", person: "", account_ids: [], project_ids: [], category_ids: [], selected: {}, kinds: [], sources: [],
     order: "desc", sort: "occurred_on", page: 1 };
 }
 export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteria, onCriteriaChange, actions }: {
@@ -33,6 +33,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
   const [criteria, setCriteria] = useState(() => initialCriteria ?? initialCashFlowCriteria(scoped));
   const [dateFrom, setDateFrom] = useState(criteria.date_from);
   const [dateTo, setDateTo] = useState(criteria.date_to);
+  const [rangeMode, setRangeMode] = useState(criteria.date_from || criteria.date_to ? "custom" : "all");
   const [search, setSearch] = useState(criteria.keyword);
   const [detail, setDetail] = useState<string | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
@@ -63,23 +64,25 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
   }, [data, page]);
   const reset = () => {
     const value = initialCashFlowCriteria(scoped);
-    setDateFrom(value.date_from); setDateTo(value.date_to); setSearch(""); setValidation(null); setCriteria(value);
+    setDateFrom(value.date_from); setDateTo(value.date_to); setRangeMode("all"); setSearch(""); setValidation(null); setCriteria(value);
   };
   const quickPeriod = (from: string) => {
     const today = cashToday();
-    const error = applyCriteria({ date_from: from, date_to: today, page: 1 });
+    const error = applyCriteria({ time_scope: undefined, date_from: from, date_to: today, page: 1 });
     setValidation(error);
-    if (!error) { setDateFrom(from); setDateTo(today); }
+    if (!error) { setRangeMode("custom"); setDateFrom(from); setDateTo(today); }
   };
   return <section className="cash-flow-table" aria-label="现金流水">
     <form className="cash-toolbar" onSubmit={event => {
       event.preventDefault();
-      if (!(scoped && !dateFrom && !dateTo) && (!dateFrom || !dateTo || dateFrom > dateTo || (Date.parse(dateTo) - Date.parse(dateFrom)) / 86400000 > 365)) { setValidation("查询起止日期须有序，范围不超过 366 天。"); return; }
-      setValidation(applyCriteria({ keyword: search.trim(), date_from: dateFrom, date_to: dateTo, page: 1 }));
+      if (rangeMode === "custom" && (!dateFrom || !dateTo || dateFrom > dateTo || (Date.parse(dateTo) - Date.parse(dateFrom)) / 86400000 > 365)) { setValidation("查询起止日期须有序，范围不超过 366 天。"); return; }
+      setValidation(applyCriteria({ keyword: search.trim(), time_scope: rangeMode === "all" && !scoped ? "all" : undefined,
+        date_from: rangeMode === "all" ? "" : dateFrom, date_to: rangeMode === "all" ? "" : dateTo, page: 1 }));
     }}>
       {!scoped && <div className="cash-row-actions"><Button size="sm" variant="tertiary" onPress={() => quickPeriod(`${cashToday().slice(0, 7)}-01`)}>本月</Button><Button size="sm" variant="tertiary" onPress={() => quickPeriod(`${cashToday().slice(0, 4)}-01-01`)}>本年</Button></div>}
-      <CashInput label="起始日期" type="date" value={dateFrom} onChange={setDateFrom} />
-      <CashInput label="截止日期" type="date" value={dateTo} onChange={setDateTo} />
+      <CashSelect label="时间范围" value={rangeMode} onChange={setRangeMode} options={[{ value: "all", label: "全部" }, { value: "custom", label: "自定义" }]} />
+      {rangeMode === "custom" && <><CashInput label="起始日期" type="date" value={dateFrom} onChange={setDateFrom} />
+      <CashInput label="截止日期" type="date" value={dateTo} onChange={setDateTo} /></>}
       <CashInput label="搜索流水" value={search} onChange={setSearch} placeholder="用途、人员或项目" />
       <Button type="submit" size="sm" variant="secondary">查询</Button>
       <Button size="sm" variant="tertiary" onPress={reset}>重置</Button><Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
@@ -108,7 +111,7 @@ export default function CashFlowTable({ itemId, taskOccurrenceId, initialCriteri
         <FinanceTableHeader>{["日期", "账户", "项目", "人员", "分类", "用途", "收入", "支出", "互转金额", "来源 / 任务", "账户余额", "操作"].map((label, index) => <FinanceTableColumn key={label} id={index === 0 ? "occurred_on" : `flow-${index}`} allowsSorting={index === 0} isRowHeader={index === 0} columnRole={index >= 6 && index <= 8 || index === 10 ? "amount" : index === 11 ? "action" : index === 0 ? "date" : index === 1 ? "account" : "description"}>
           <CashColumnHeader label={label}>
             {index === 1 && <CashConfigurationFilter column name="accounts" label="账户" value={criteria.account_ids} selected={selected.account_ids} onApply={(value, labels) => applyResource("account_ids", value, labels)} />}
-            {index === 2 && <CashHistoricalProjectFilter column label="项目" value={criteria.project_ids} selected={selected.project_ids} scope={{ date_from: criteria.date_from, date_to: criteria.date_to, item_id: itemId, task_occurrence_id: taskOccurrenceId }} onApply={(value, labels) => applyResource("project_ids", value, labels)} />}
+            {index === 2 && <CashHistoricalProjectFilter column label="项目" value={criteria.project_ids} selected={selected.project_ids} scope={{ date_from: criteria.date_from, date_to: criteria.time_scope === "all" ? cashToday() : criteria.date_to, item_id: itemId, task_occurrence_id: taskOccurrenceId }} onApply={(value, labels) => applyResource("project_ids", value, labels)} />}
             {index === 3 && <CashTextFilter label="人员" value={criteria.person} onApply={person => applyCriteria({ person, page: 1 })} />}
             {index === 4 && <CashConfigurationFilter column name="categories" label="分类" value={criteria.category_ids} selected={selected.category_ids} onApply={(value, labels) => applyResource("category_ids", value, labels)} />}
             {index === 9 && <CashFilterPopover column label="来源" value={criteria.sources} onApply={sources => applyCriteria({ sources, page: 1 })} options={[{ value: "manual", label: "手动录入" }, { value: "monthly_task", label: "每月任务" }]} />}

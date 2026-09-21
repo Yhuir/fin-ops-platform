@@ -37,6 +37,7 @@ def bank_row(
         "id": row_id,
         "type": "bank",
         "trade_time": trade_time,
+        "bank_year": trade_time[:4] if trade_time else None,
         "counterparty_name": "批量账务集中处理",
         "debit_amount": amount,
         "signed_amount": f"-{amount}",
@@ -432,6 +433,26 @@ class BatchAccountingServiceTests(unittest.TestCase):
         self.assertNotIn("metadata", bucket)
         json.dumps(payload)
 
+    def test_all_is_read_only_and_unknown_year_never_becomes_a_write_year(self):
+        repository = FakeBatchAccountingQueryRepository()
+        target = service(repository)
+        payload = target.build_payload(bank_year="all",bucket="unsubmitted")
+        self.assertIsNone(payload["summary"]["bank_year"])
+        self.assertIsNone(repository.list_calls[0]["bank_year"])
+        status, response = BatchAccountingApiRoutes(lambda: target).list_payload({"bank_year":["all"]})
+        self.assertEqual(status,200)
+        self.assertIsNone(response["summary"]["bank_year"])
+
+        for year in ("all", "", None):
+            with self.assertRaises(BatchAccountingError) as caught:
+                target.submit(bank_year=year,bank_row_id=BANK_ROW_ID,oa_row_ids=[OA_ROW_ID],actor="test")
+            self.assertEqual(caught.exception.code,"invalid_batch_accounting_year")
+        for row in repository.submission_payload["bank_rows"]:
+            row["bank_year"] = None
+        with self.assertRaises(BatchAccountingError) as caught:
+            target.submit(bank_year="2026",bank_row_id=BANK_ROW_ID,oa_row_ids=[OA_ROW_ID],actor="test")
+        self.assertEqual(caught.exception.code,"invalid_batch_accounting_bank_row")
+
     def test_invalid_year_bucket_paging_and_search_fail_fast(self) -> None:
         cases = (
             ({"bank_year": "26", "bucket": "unsubmitted"}, "invalid_batch_accounting_year"),
@@ -648,6 +669,17 @@ class BatchAccountingServiceTests(unittest.TestCase):
             )
         self.assertEqual(context.exception.code, "batch_accounting_relation_conflict")
         self.assertEqual(context.exception.payload["conflicting_row_ids"], [OA_ROW_ID])
+
+    def test_unknown_canonical_year_does_not_remove_existing_withdrawal(self):
+        repository = FakeBatchAccountingQueryRepository()
+        repository.list_payload["bank_rows"] = [bank_row(trade_time="")]
+        command = RecordingRelationCommandService()
+        command.relation_by_case_id = active_relation(version=3)
+        target = service(repository,command)
+        self.assertIsNone(target.build_payload(bank_year="all",bucket="unsubmitted")["bank_rows"][0]["bank_year"])
+        result = target.withdraw(relation_id=RELATION_ID,actor="test",reason="更正",expected_version=3,idempotency_key="unknown-withdraw")
+        self.assertTrue(result["success"])
+        self.assertEqual(len(command.cancel_calls),1)
 
     def test_withdraw_requires_reason_active_batch_relation_and_matching_version(self) -> None:
         command = RecordingRelationCommandService()

@@ -276,7 +276,9 @@ describe("OaManualSearchImportTable", () => {
   test("searches OA rows with the shared HeroUI table and no DataGrid surface", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock();
-    renderTable();
+    const mounted = renderTable();
+    expect(screen.getByLabelText("开始日期")).toHaveValue("");
+    expect(screen.getByLabelText("结束日期")).toHaveValue("");
 
     expect(screen.getByRole("heading", { name: "OA全量搜索导入" })).toBeInTheDocument();
     expect(screen.getByRole("grid", { name: "OA全量搜索导入结果" })).toBeInTheDocument();
@@ -299,6 +301,16 @@ describe("OaManualSearchImportTable", () => {
     expect(url.searchParams.get("statuses")).toBe("completed,in_progress");
     expect(url.searchParams.get("date_from")).toBe("2025-12-01");
     expect(url.searchParams.get("date_to")).toBe("2025-12-31");
+    mounted.unmount();
+    renderTable();
+    expect(screen.getByLabelText("开始日期")).toHaveValue("");
+    expect(screen.getByLabelText("结束日期")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    await screen.findByRole("row", { name: "1981" });
+    const reentryCall = fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/workbench/settings/oa/manual-search?")).at(-1);
+    const reentryUrl = new URL(String(reentryCall?.[0]), "http://localhost");
+    expect(reentryUrl.searchParams.has("date_from")).toBe(false);
+    expect(reentryUrl.searchParams.has("date_to")).toBe(false);
   });
 
   test("selects importable rows, expands details, refreshes attachments, imports, and clears selection", async () => {

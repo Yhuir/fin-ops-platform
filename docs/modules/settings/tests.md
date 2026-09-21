@@ -73,3 +73,7 @@ cd web && npm run build
 - `web/e2e/permissions-role-matrix.spec.ts`：既有管理员/普通用户授权与撤销主链。
 
 本次无新 read model/cache/worker；第 4 类仅运行已有无关刷新隔离回归。其他六类均适用。
+
+## 原有全部范围回归（2026-09-21）
+
+`SettingsOaManualSearchImportTable.test.tsx` 在原有具体日期搜索用例中验证首次输入为空、卸载重进输入清空且首次搜索请求省略起止日期。组件仍仅在用户搜索时查询，表单类型/状态与可导入资格不变。

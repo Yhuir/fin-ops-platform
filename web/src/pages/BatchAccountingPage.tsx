@@ -40,6 +40,7 @@ import type {
 
 const EMPTY_PAYLOAD: BatchAccountingResponse = {
   summary: {
+    bankYear: null,
     unsubmittedCount: 0,
     submittedCount: 0,
   },
@@ -220,7 +221,7 @@ export default function BatchAccountingPage() {
   const { active, activationGeneration } = useOptionalPageActivation("batch-accounting");
   const { runOperation } = useGlobalOperationOverlay();
   const { canOperateData } = useSessionPermissions();
-  const [bankYear, setBankYear] = useState(currentYear);
+  const [bankYear, setBankYear] = useState("all");
   const [bucket, setBucket] = useState<BatchAccountingBucket>("unsubmitted");
   const [payload, setPayload] = useState<BatchAccountingResponse>(EMPTY_PAYLOAD);
   const [selectedBankRowId, setSelectedBankRowId] = useState<string | null>(null);
@@ -296,7 +297,7 @@ export default function BatchAccountingPage() {
   const canSubmit = Boolean(selectedBankRow)
     && canOperateData
     && selectedOaRows.length > 0
-    && isValidYear(bankYear)
+    && isValidYear(selectedBankRow?.bankYear ?? "")
     && !mutating
     && (differenceCents === 0 || differenceNote.trim().length > 0);
   const canWithdraw = Boolean(selectedBankRow?.relationId) && canOperateData && !mutating;
@@ -325,12 +326,12 @@ export default function BatchAccountingPage() {
     setSelectedBankRowId((current) => (
       current
         ? current
-        : nextPayload.bankRows[0]?.id ?? null
+        : nextPayload.bankRows.find((row) => row.bankYear !== null || row.relationId)?.id ?? null
     ));
   }, []);
 
   const reloadDataAfterMutation = useCallback(async () => {
-    if (!isValidYear(bankYear)) {
+    if (bankYear !== "all" && !isValidYear(bankYear)) {
       return null;
     }
     const nextPayload = await fetchBatchAccounting({
@@ -347,7 +348,7 @@ export default function BatchAccountingPage() {
   }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage, oaSearchQuery]);
 
   const loadData = useCallback((signal?: AbortSignal) => {
-    if (!isValidYear(bankYear)) {
+    if (bankYear !== "all" && !isValidYear(bankYear)) {
       return;
     }
     const requestId = loadRequestIdRef.current + 1;
@@ -397,10 +398,10 @@ export default function BatchAccountingPage() {
 
   useEffect(() => {
     setSelectedBankRowId((current) => {
-      if (current && payload.bankRows.some((row) => row.id === current)) {
+      if (current && payload.bankRows.some((row) => row.id === current && (row.bankYear !== null || row.relationId))) {
         return current;
       }
-      const nextBankRowId = payload.bankRows[0]?.id ?? null;
+      const nextBankRowId = payload.bankRows.find((row) => row.bankYear !== null || row.relationId)?.id ?? null;
       if (current !== nextBankRowId) {
         setSelectedOaRowIds(new Set());
         setDifferenceNote("");
@@ -438,6 +439,7 @@ export default function BatchAccountingPage() {
   };
 
   const handleSelectBankRow = (row: BatchAccountingBankRow) => {
+    if (bucket === "unsubmitted" && row.bankYear === null) return;
     setBankRowsById((current) => ({ ...current, [row.id]: row }));
     setSelectedBankRowId(row.id);
     setSelectedOaRowIds(new Set());
@@ -474,11 +476,12 @@ export default function BatchAccountingPage() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedBankRow || !canSubmit) {
+    if (!selectedBankRow?.bankYear || !canSubmit) {
       return;
     }
+    const submittedBankYear = selectedBankRow.bankYear;
     const submitFingerprint = JSON.stringify({
-      bankYear,
+      bankYear: submittedBankYear,
       bankRowId: selectedBankRow.id,
       oaRowIds: selectedOaRows.map((row) => row.id).sort(),
       expectedVersion: selectedBankRow.version,
@@ -495,7 +498,7 @@ export default function BatchAccountingPage() {
         setMutating(true);
         try {
           const submitResult = await submitBatchAccounting({
-            bankYear,
+            bankYear: submittedBankYear,
             bankRowId: selectedBankRow.id,
             oaRowIds: selectedOaRows.map((row) => row.id),
             expectedVersion: selectedBankRow.version,
@@ -696,12 +699,12 @@ export default function BatchAccountingPage() {
               <p className="batch-accounting-bank-panel__subtitle">对方户名精确匹配批量账务集中处理</p>
             </div>
             <BusinessPeriodPicker
-              allowAll={false}
+              allowAll
               allowedModes={["year"]}
               ariaLabel="流水年份"
-              onChange={(selection) => handleBankYearChange(selection.year)}
-              selection={{ mode: "year", year: bankYear, month: `${bankYear}-01` }}
-              years={nearbyBusinessYears(bankYear)}
+              onChange={(selection) => handleBankYearChange(selection.mode === "all" ? "all" : selection.year)}
+              selection={{ mode: bankYear === "all" ? "all" : "year", year: bankYear === "all" ? currentYear() : bankYear, month: `${bankYear === "all" ? currentYear() : bankYear}-01` }}
+              years={nearbyBusinessYears(bankYear === "all" ? currentYear() : bankYear)}
             />
             <PageControls
               disabled={loading}
@@ -720,16 +723,18 @@ export default function BatchAccountingPage() {
           ) : null}
           {!loading && !error && payload.bankRows.length === 0 ? (
             <div className="batch-accounting-bank-panel__state">
-              <StatePanel compact tone="empty" title="当前年份暂无批量账务流水" />
+              <StatePanel compact tone="empty" title="当前范围暂无批量账务流水" />
             </div>
           ) : null}
           <div className="batch-accounting-bank-list">
             {payload.bankRows.map((row) => {
               const selected = row.id === selectedBankRowId;
-              const tradeTimeLabel = formatDateTimeText(row.tradeTime);
+              const tradeTimeLabel = row.bankYear === null ? "日期未知" : formatDateTimeText(row.tradeTime);
               return (
                 <button
                   aria-label={`批量账务集中处理 ${formatMoney(row.amount)} ${tradeTimeLabel} ${row.directionLabel || "支出"} ${accountLabel(row)}`}
+                  disabled={bucket === "unsubmitted" && row.bankYear === null}
+                  title={bucket === "unsubmitted" && row.bankYear === null ? "缺少银行业务日期，无法提交" : undefined}
                   aria-pressed={selected}
                   className={cx("batch-accounting-bank-row", selected && "batch-accounting-bank-row--selected")}
                   key={row.id}
@@ -749,6 +754,7 @@ export default function BatchAccountingPage() {
                   </span>
                   <span className="batch-accounting-bank-row__tags">
                     <span className="batch-accounting-tag batch-accounting-tag--meta">{tradeTimeLabel}</span>
+                    {bucket === "unsubmitted" && row.bankYear === null ? <span className="batch-accounting-tag batch-accounting-tag--meta">缺少银行业务日期，无法提交</span> : null}
                     <span className="batch-accounting-tag batch-accounting-tag--direction">{row.directionLabel || "支出"}</span>
                     <span className="batch-accounting-tag batch-accounting-tag--meta">{accountLabel(row)}</span>
                   </span>

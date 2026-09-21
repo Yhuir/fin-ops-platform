@@ -1,10 +1,37 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import App from "../app/App";
 import { installMockApiFetch } from "./apiMock";
 
 describe("OperationHistoryPage", () => {
+  test("re-entry has no dates while refresh and detail close preserve the visit range", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/operations/history");
+    const fetchMock = installMockApiFetch({ sessionRole: "admin", sessionUsername: "YNSYLP005" });
+    const requests = () => fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"))
+      .filter((url) => url.pathname === "/api/operations/history");
+    const mounted = render(<App />);
+    await screen.findByRole("grid", { name: "操作历史" });
+    expect(requests().every((url) => !url.searchParams.has("date_from") && !url.searchParams.has("date_to"))).toBe(true);
+    fireEvent.change(screen.getByLabelText("开始日期"), { target: { value: "2025-01-01" } });
+    fireEvent.change(screen.getByLabelText("结束日期"), { target: { value: "2025-12-31" } });
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    await waitFor(() => expect(requests().at(-1)?.searchParams.get("date_from")).toBe("2025-01-01"));
+    await user.click(screen.getByRole("button", { name: "查看确认关联详情" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "操作详情" })).getByRole("button", { name: "关闭抽屉" }));
+    const count = requests().length;
+    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    await waitFor(() => expect(requests().length).toBeGreaterThan(count));
+    expect(requests().at(-1)?.searchParams.get("date_to")).toBe("2025-12-31");
+    mounted.unmount();
+    render(<App />);
+    await screen.findByRole("grid", { name: "操作历史" });
+    expect(requests().at(-1)?.searchParams.has("date_from")).toBe(false);
+    expect(requests().at(-1)?.searchParams.has("date_to")).toBe(false);
+    expect(screen.getByLabelText("开始日期")).toHaveValue("");
+  });
+
   test("only loads for an administrator and shows the durable event detail", async () => {
     window.history.pushState({}, "", "/operations/history");
     const fetchMock = installMockApiFetch({

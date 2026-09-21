@@ -65,3 +65,7 @@ FIN_OPS_TEST_DATABASE_URL=postgresql://localhost/<disposable_db> \
   PYTHONPATH=backend/src python3 -m unittest \
   tests.test_pending_invoice_postgres_integration -v
 ```
+
+## 原有全部范围回归（2026-09-21）
+
+`PendingInvoicesPage.test.tsx` 在选择已有进项发票→预览→确认→回读业务链路中验证候选日期初始为空、首个 candidate 请求无起止日期，并仍限定所选 transaction_ids 和既有分页/资格。主表不新增日期入口，候选日期仍由抽屉本地状态持有。

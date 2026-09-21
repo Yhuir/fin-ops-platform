@@ -6,11 +6,11 @@ from typing import Any, Iterator
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.bank_details_canonical_query import (
     PostgresBankDetailsCanonicalQueryRepository,
+    bank_category_classification_cte,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import (
     COMPLETED_WORKFLOW_STATUS_ALIASES,
 )
-
 
 BATCH_ACCOUNTING_COUNTERPARTY_NAME = "批量账务集中处理"
 
@@ -73,10 +73,25 @@ class PostgresBatchAccountingQueryRepository:
             raise ValueError("Batch accounting query repository requires a PostgreSQL connection.")
         self._connection = connection
 
+    @staticmethod
+    def _candidate_cte(bank_year: str | None) -> tuple[str, tuple[Any, ...]]:
+        bank_start = f"{bank_year}-01-01" if bank_year is not None else None
+        return (
+            f"""batch_bank_candidates as materialized (
+            select {_BANK_ID_SQL} as row_id
+            from app.bank_transactions bank
+            where bank.status <> 'deleted' and btrim(bank.counterparty_name_raw) = %s
+              and bank.txn_direction = 'outflow' and bank.amount > 0
+              and (%s::date is null or ({_BANK_DATE_SQL} >= %s::date
+                   and {_BANK_DATE_SQL} < %s::date + interval '1 year'))
+        )""",
+            (BATCH_ACCOUNTING_COUNTERPARTY_NAME, bank_start, bank_start, bank_start),
+        )
+
     def list_snapshot(
         self,
         *,
-        bank_year: str,
+        bank_year: str | None,
         bucket: str,
         bank_page: int,
         bank_page_size: int,
@@ -84,13 +99,14 @@ class PostgresBatchAccountingQueryRepository:
         oa_page_size: int,
         oa_search: str = "",
     ) -> dict[str, Any]:
-        bank_start = f"{bank_year}-01-01"
+        bank_start = f"{bank_year}-01-01" if bank_year is not None else None
         search = str(oa_search or "").strip()
         search_pattern = f"%{search}%"
         completed_statuses = sorted(COMPLETED_WORKFLOW_STATUS_ALIASES)
         with self._snapshot_transaction() as transaction:
-            source = transaction.fetch_one(
-                f"""
+            source = (
+                transaction.fetch_one(
+                    f"""
                 select
                     coalesce(
                         (
@@ -100,55 +116,6 @@ class PostgresBatchAccountingQueryRepository:
                         ),
                         '{{}}'::jsonb
                     ) as settings_payload,
-                    coalesce(
-                        (
-                            select jsonb_agg(to_jsonb(candidate) order by candidate.trade_time_sort desc, candidate.id)
-                            from (
-                                select
-                                    {_BANK_ID_SQL} as id,
-                                    'bank'::text as type,
-                                    coalesce(
-                                        to_char(bank.trade_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
-                                        to_char(bank.pay_receive_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
-                                        bank.txn_date::text,
-                                        ''
-                                    ) as trade_time,
-                                    coalesce(bank.trade_time, bank.pay_receive_time, bank.txn_date::timestamptz) as trade_time_sort,
-                                    bank.counterparty_name_raw as counterparty_name,
-                                    bank.amount as debit_amount,
-                                    bank.signed_amount,
-                                    bank.txn_direction as direction,
-                                    coalesce(
-                                        nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_name', ''),
-                                        nullif(bank.raw_payload->'normalized_payload'->>'bank_name', ''),
-                                        ''
-                                    ) as bank_name,
-                                    coalesce(
-                                        nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_last4', ''),
-                                        nullif(bank.raw_payload->'normalized_payload'->>'account_last4', ''),
-                                        right(
-                                            coalesce(
-                                                nullif(bank.raw_payload->'normalized_payload'->>'account_no', ''),
-                                                bank.account_no,
-                                                ''
-                                            ),
-                                            4
-                                        )
-                                    ) as account_last4,
-                                    bank.account_no,
-                                    1::integer as version,
-                                    not ({_BANK_NOT_LINKED_SQL}) as is_linked
-                                from app.bank_transactions bank
-                                where bank.status <> 'deleted'
-                                  and btrim(bank.counterparty_name_raw) = %s
-                                  and {_BANK_DATE_SQL} >= %s::date
-                                  and {_BANK_DATE_SQL} < (%s::date + interval '1 year')
-                                  and bank.txn_direction = 'outflow'
-                                  and bank.amount > 0
-                            ) candidate
-                        ),
-                        '[]'::jsonb
-                    ) as batch_bank_rows,
                     (
                         select count(*)::integer
                         from app.workbench_pair_relations relation
@@ -164,7 +131,7 @@ class PostgresBatchAccountingQueryRepository:
                                         )
                                     ]::text[]
                                 and submitted_bank.status <> 'deleted'
-                                and coalesce(
+                                and (%s::date is null or (coalesce(
                                       submitted_bank.txn_date,
                                       submitted_bank.trade_time::date,
                                       submitted_bank.pay_receive_time::date
@@ -173,7 +140,7 @@ class PostgresBatchAccountingQueryRepository:
                                       submitted_bank.txn_date,
                                       submitted_bank.trade_time::date,
                                       submitted_bank.pay_receive_time::date
-                                    ) < (%s::date + interval '1 year')
+                                    ) < (%s::date + interval '1 year')))
                           )
                     ) as submitted_count,
                     (
@@ -189,129 +156,147 @@ class PostgresBatchAccountingQueryRepository:
                           and {_OA_NOT_LINKED_TO_BANK_SQL}
                           and {_OA_SEARCH_SQL}
                     ) as oa_count
+
                 """,
-                (
-                    BATCH_ACCOUNTING_COUNTERPARTY_NAME,
-                    bank_start,
-                    bank_start,
-                    bank_start,
-                    bank_start,
-                    completed_statuses,
-                    search,
-                    search_pattern,
-                ),
-            ) or {}
-            settings = AppSettingsService.normalize_settings_payload(
-                source.get("settings_payload") if isinstance(source.get("settings_payload"), dict) else {}
-            )
-            batch_bank_rows = [
-                dict(row)
-                for row in list(source.get("batch_bank_rows") or [])
-                if isinstance(row, dict)
-            ]
-            categories_by_row_id = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
-                transaction,
-                settings=settings,
-                transaction_ids=[str(row.get("id") or "") for row in batch_bank_rows],
-            )
-            annotated_bank_rows = self._annotated_bank_rows(
-                batch_bank_rows,
-                categories_by_row_id=categories_by_row_id,
-            )
-            selected_tag_codes = {
-                str(code)
-                for code in list(
-                    settings.get("batch_accounting_tag_selection", {}).get("selected_tag_codes") or []
+                    (bank_start, bank_start, bank_start, completed_statuses, search, search_pattern),
                 )
-                if str(code).strip()
-            }
-            eligible_bank_rows = [
-                row
-                for row in annotated_bank_rows
-                if not bool(row.get("is_linked")) and str(row.get("tag_code") or "") in selected_tag_codes
-            ]
+                or {}
+            )
+            settings = AppSettingsService.normalize_settings_payload(source.get("settings_payload") or {})
+            candidates, candidate_params = self._candidate_cte(bank_year)
+            classifier, classifier_params = bank_category_classification_cte(
+                definitions=settings["bank_transaction_tags"]["definitions"],
+                date_from=None,
+                date_to=None,
+                candidate_transaction_relation="batch_bank_candidates",
+                defer_full_payload=True,
+            )
+            selected = settings["batch_accounting_tag_selection"]
+            tag_columns = """c.effective_category_code as tag_code,
+                c.effective_category_label as tag_label,
+                c.effective_category_primary_label as tag_primary_label,
+                c.effective_category_sub_label as tag_sub_label,
+                c.effective_category_source as tag_source"""
+            if bucket == "submitted":
+                page_cte = f"""selected_relations as ({self._submitted_relations_sql()}),
+                    tagged_relations as (select r.*, r.bank_row || jsonb_build_object(
+                        'tag_code', c.effective_category_code, 'tag_label', c.effective_category_label,
+                        'tag_primary_label', c.effective_category_primary_label,
+                        'tag_sub_label', c.effective_category_sub_label,
+                        'tag_source', c.effective_category_source) as tagged_bank_row
+                      from selected_relations r left join classified_with_semantics c
+                        on c.row_id=r.bank_row->>'id')"""
+                page_output = """'[]'::jsonb as bank_rows,
+                    coalesce((select jsonb_agg((to_jsonb(r)-'tagged_bank_row') ||
+                        jsonb_build_object('bank_row',r.tagged_bank_row)
+                        order by r.updated_at desc,r.case_id) from tagged_relations r),'[]'::jsonb) as relations"""
+                page_params = (bank_start, bank_start, bank_start, bank_page_size, (bank_page - 1) * bank_page_size)
+            else:
+                page_cte = f"""selected_keys as materialized (
+                    select e.row_id from eligible e join app.bank_transactions bank
+                      on {_BANK_ID_SQL}=e.row_id
+                    order by {_BANK_DATE_SQL} desc nulls last, e.row_id
+                    limit %s offset %s
+                ), page_rows as (select
+                    {_BANK_ID_SQL} as id,
+                    'bank'::text as type,
+                    coalesce(
+                        to_char(bank.trade_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
+                        to_char(bank.pay_receive_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
+                        bank.txn_date::text,
+                        ''
+                    ) as trade_time,
+                    bank.counterparty_name_raw as counterparty_name,
+                    bank.amount as debit_amount,
+                    bank.signed_amount,
+                    bank.txn_direction as direction,
+                    coalesce(
+                        nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_name', ''),
+                        nullif(bank.raw_payload->'normalized_payload'->>'bank_name', ''),
+                        ''
+                    ) as bank_name,
+                    coalesce(
+                        nullif(bank.raw_payload->'normalized_payload'->>'imported_bank_last4', ''),
+                        nullif(bank.raw_payload->'normalized_payload'->>'account_last4', ''),
+                        right(
+                            coalesce(
+                                nullif(bank.raw_payload->'normalized_payload'->>'account_no', ''),
+                                bank.account_no,
+                                ''
+                            ),
+                            4
+                        )
+                    ) as account_last4,
+                    bank.account_no,
+                    1::integer as version,
+                    to_char({_BANK_DATE_SQL}, 'YYYY') as bank_year,
+                    {_BANK_DATE_SQL} as bank_date,
+                    {tag_columns}
+                    from selected_keys p join app.bank_transactions bank on {_BANK_ID_SQL}=p.row_id
+                    join classified_with_semantics c on c.row_id=p.row_id)"""
+                page_output = """coalesce((select jsonb_agg(to_jsonb(p)-'bank_date'
+                    order by p.bank_date desc nulls last,p.id)
+                    from page_rows p),'[]'::jsonb) as bank_rows, '[]'::jsonb as relations"""
+                page_params = (bank_page_size, (bank_page - 1) * bank_page_size)
+            page = (
+                transaction.fetch_one(
+                    f"""with {candidates}, {classifier},
+                eligible as materialized (select c.row_id from classified_with_semantics c
+                    join batch_bank_candidates candidate on candidate.row_id=c.row_id
+                    join app.bank_transactions bank on {_BANK_ID_SQL}=c.row_id
+                    where c.effective_category_code=any(%s::text[]) and {_BANK_NOT_LINKED_SQL}),
+                {page_cte}
+                select (select count(*) from eligible) as unsubmitted_count, {page_output}
+                """,
+                    (*candidate_params, *classifier_params, selected["selected_tag_codes"], *page_params),
+                )
+                or {}
+            )
             summary = {
-                "unsubmitted_count": len(eligible_bank_rows),
+                "unsubmitted_count": self._int(page.get("unsubmitted_count")),
                 "submitted_count": self._int(source.get("submitted_count")),
                 "oa_count": self._int(source.get("oa_count")),
             }
-            if bucket == "submitted":
-                relations = self._submitted_relations(
-                    transaction,
-                    bank_start=bank_start,
-                    page=bank_page,
-                    page_size=bank_page_size,
-                )
-                member_rows = self._relation_member_rows(
-                    transaction,
-                    row_ids=[
-                        str(row_id)
-                        for relation in relations
-                        for row_id in list(relation.get("row_ids") or [])
-                        if str(row_id or "").strip()
-                    ],
-                )
-                bank_rows = [dict(relation.get("bank_row") or {}) for relation in relations]
-                bank_rows = self._annotated_bank_rows(
-                    bank_rows,
-                    categories_by_row_id=categories_by_row_id,
-                )
-                return {
-                    "summary": summary,
-                    "bank_rows": bank_rows,
-                    "oa_rows": [],
-                    "relations": relations,
-                    "member_rows": member_rows,
-                    "tag_selection_version": int(
-                        settings.get("batch_accounting_tag_selection", {}).get("version") or 1
-                    ),
-                    "pagination": {
-                        "bank_rows": self._page_payload(
-                            page=bank_page,
-                            page_size=bank_page_size,
-                            total=self._int(summary.get("submitted_count")),
-                        )
-                    },
-                }
-
-            bank_rows = eligible_bank_rows[
-                (bank_page - 1) * bank_page_size:bank_page * bank_page_size
-            ]
-            oa_rows = self._eligible_oa_rows(
-                transaction,
-                completed_statuses=completed_statuses,
-                page=oa_page,
-                page_size=oa_page_size,
-                search=search,
-                search_pattern=search_pattern,
+            relations = list(page.get("relations") or [])
+            bank_rows = (
+                [row["bank_row"] for row in relations] if bucket == "submitted" else list(page.get("bank_rows") or [])
             )
-            invoice_rows = self._oa_attachment_invoice_rows(
-                transaction,
-                oa_row_ids=[str(row.get("id") or "") for row in oa_rows],
-            )
-            return {
+            result = {
                 "summary": summary,
                 "bank_rows": bank_rows,
-                "oa_rows": oa_rows,
-                "invoice_rows": invoice_rows,
-                "relations": [],
+                "oa_rows": [],
+                "relations": relations,
                 "member_rows": [],
-                "tag_selection_version": int(
-                    settings.get("batch_accounting_tag_selection", {}).get("version") or 1
-                ),
+                "invoice_rows": [],
+                "tag_selection_version": int(selected["version"]),
                 "pagination": {
                     "bank_rows": self._page_payload(
                         page=bank_page,
                         page_size=bank_page_size,
-                        total=self._int(summary.get("unsubmitted_count")),
-                    ),
-                    "oa_rows": self._page_payload(
-                        page=oa_page,
-                        page_size=oa_page_size,
-                        total=self._int(summary.get("oa_count")),
-                    ),
+                        total=summary["submitted_count" if bucket == "submitted" else "unsubmitted_count"],
+                    )
                 },
             }
+            if bucket == "submitted":
+                result["member_rows"] = self._relation_member_rows(
+                    transaction, row_ids=[str(value) for relation in relations for value in relation["row_ids"]]
+                )
+            else:
+                result["oa_rows"] = self._eligible_oa_rows(
+                    transaction,
+                    completed_statuses=completed_statuses,
+                    page=oa_page,
+                    page_size=oa_page_size,
+                    search=search,
+                    search_pattern=search_pattern,
+                )
+                result["invoice_rows"] = self._oa_attachment_invoice_rows(
+                    transaction, oa_row_ids=[row["id"] for row in result["oa_rows"]]
+                )
+                result["pagination"]["oa_rows"] = self._page_payload(
+                    page=oa_page, page_size=oa_page_size, total=summary["oa_count"]
+                )
+            return result
 
     def load_submission_context(
         self,
@@ -329,6 +314,8 @@ class PostgresBatchAccountingQueryRepository:
                 select
                     {_BANK_ID_SQL} as id,
                     'bank'::text as type,
+                    to_char({_BANK_DATE_SQL}, 'YYYY') as bank_year,
+                    {_BANK_DATE_SQL}::text as canonical_bank_date,
                     coalesce(
                         to_char(bank.trade_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
                         to_char(bank.pay_receive_time, 'YYYY-MM-DD"T"HH24:MI:SSOF'),
@@ -432,9 +419,7 @@ class PostgresBatchAccountingQueryRepository:
                 "bank_rows": normalized_bank_rows,
                 "oa_rows": oa_rows,
                 "invoice_rows": invoice_rows,
-                "tag_selection_version": int(
-                    settings.get("batch_accounting_tag_selection", {}).get("version") or 1
-                ),
+                "tag_selection_version": int(settings.get("batch_accounting_tag_selection", {}).get("version") or 1),
                 "selected_tag_codes": list(
                     settings.get("batch_accounting_tag_selection", {}).get("selected_tag_codes") or []
                 ),
@@ -442,48 +427,28 @@ class PostgresBatchAccountingQueryRepository:
 
     def tag_rules_snapshot(self) -> dict[str, Any]:
         with self._snapshot_transaction() as transaction:
-            source = transaction.fetch_one(
-                f"""
-                select
-                    coalesce(
-                        (
-                            select settings_payload
-                            from app.app_settings
-                            where settings_key = 'app_settings'
-                        ),
-                        '{{}}'::jsonb
-                    ) as settings_payload,
-                    coalesce(
-                        array_agg({_BANK_ID_SQL} order by {_BANK_ID_SQL})
-                            filter (where bank.id is not null),
-                        '{{}}'::text[]
-                    ) as row_ids
-                from app.bank_transactions bank
-                where bank.status <> 'deleted'
-                  and btrim(bank.counterparty_name_raw) = %s
-                  and bank.txn_direction = 'outflow'
-                  and bank.amount > 0
-                """,
-                (BATCH_ACCOUNTING_COUNTERPARTY_NAME,),
-            ) or {}
-            settings = AppSettingsService.normalize_settings_payload(
-                source.get("settings_payload") if isinstance(source.get("settings_payload"), dict) else {}
+            source = (
+                transaction.fetch_one("select settings_payload from app.app_settings where settings_key='app_settings'")
+                or {}
             )
-            row_ids = self._dedupe([str(value) for value in list(source.get("row_ids") or [])])
-            categories = PostgresBankDetailsCanonicalQueryRepository.effective_category_projection_rows(
-                transaction,
-                settings=settings,
-                transaction_ids=row_ids,
+            settings = AppSettingsService.normalize_settings_payload(source.get("settings_payload") or {})
+            candidates, params = self._candidate_cte(None)
+            classifier, classifier_params = bank_category_classification_cte(
+                definitions=settings["bank_transaction_tags"]["definitions"],
+                date_from=None,
+                date_to=None,
+                candidate_transaction_relation="batch_bank_candidates",
+                defer_full_payload=True,
             )
-            return {
-                "observed_tag_codes": sorted(
-                    {
-                        str(category.get("effective_category_code") or "")
-                        for category in categories.values()
-                        if str(category.get("effective_category_code") or "").strip()
-                    }
-                )
-            }
+            rows = transaction.fetch_all(
+                f"""with {candidates}, {classifier}
+                select distinct c.effective_category_code as code from classified_with_semantics c
+                join batch_bank_candidates candidate on candidate.row_id=c.row_id
+                where c.effective_category_code is not null and c.effective_category_code<>''
+                order by code""",
+                (*params, *classifier_params),
+            )
+            return {"observed_tag_codes": [row["code"] for row in rows]}
 
     @contextmanager
     def _snapshot_transaction(self) -> Iterator[Any]:
@@ -632,15 +597,8 @@ class PostgresBatchAccountingQueryRepository:
         )
 
     @staticmethod
-    def _submitted_relations(
-        transaction: Any,
-        *,
-        bank_start: str,
-        page: int,
-        page_size: int,
-    ) -> list[dict[str, Any]]:
-        rows = transaction.fetch_all(
-            """
+    def _submitted_relations_sql() -> str:
+        return """
             select
                 relation.case_id,
                 relation.relation_mode,
@@ -659,6 +617,7 @@ class PostgresBatchAccountingQueryRepository:
                     'id', bank.row_id,
                     'type', 'bank',
                     'trade_time', bank.trade_time,
+                    'bank_year', bank.bank_year,
                     'counterparty_name', bank.counterparty_name,
                     'debit_amount', bank.amount,
                     'signed_amount', bank.signed_amount,
@@ -700,14 +659,15 @@ class PostgresBatchAccountingQueryRepository:
                             4
                         )
                     ) as account_last4,
-                    source.account_no
+                    source.account_no,
+                    to_char(coalesce(source.txn_date, source.trade_time::date, source.pay_receive_time::date), 'YYYY') as bank_year
                 from app.bank_transactions source
                 where coalesce(source.legacy_mongo_id, source.id::text) = any(relation.row_ids)
                   and source.status <> 'deleted'
-                  and coalesce(source.txn_date, source.trade_time::date, source.pay_receive_time::date)
+                  and (%s::date is null or (coalesce(source.txn_date, source.trade_time::date, source.pay_receive_time::date)
                         >= %s::date
                   and coalesce(source.txn_date, source.trade_time::date, source.pay_receive_time::date)
-                        < (%s::date + interval '1 year')
+                        < (%s::date + interval '1 year')))
                 order by array_position(
                     relation.row_ids,
                     coalesce(source.legacy_mongo_id, source.id::text)
@@ -718,10 +678,7 @@ class PostgresBatchAccountingQueryRepository:
               and relation.relation_mode = 'batch_accounting'
             order by relation.updated_at desc, relation.case_id
             limit %s offset %s
-            """,
-            (bank_start, bank_start, page_size, (page - 1) * page_size),
-        )
-        return [dict(row) for row in rows]
+        """
 
     @staticmethod
     def _relation_member_rows(transaction: Any, *, row_ids: list[str]) -> list[dict[str, Any]]:

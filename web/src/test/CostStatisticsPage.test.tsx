@@ -6,6 +6,7 @@ import { vi } from "vitest";
 import CostStatisticsTable from "../components/cost-statistics/CostStatisticsTable";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
+import { buildPageSessionStorageKey, createStoredPayload } from "../contexts/pageSessionStorage";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
@@ -63,6 +64,73 @@ async function waitUntilReady() {
 }
 
 describe("Cost statistics page", () => {
+  test("resets all restored time scopes on entry while retaining the chosen view and same-visit selections", async () => {
+    const value = {
+      viewMode: "time",
+      projectScopeMode: "year", projectScopeYear: "2026", projectScopeMonth: "2026-03",
+      bankAccountScopeMode: "month", bankAccountScopeYear: "2026", bankAccountScopeMonth: "2026-03",
+      costTagScopeMode: "month", costTagScopeYear: "2026", costTagScopeMonth: "2026-03",
+      bankFlowScopeMode: "month", bankFlowScopeYear: "2026", bankFlowScopeMonth: "2026-03",
+    };
+    const key = buildPageSessionStorageKey({ userScope: "1", pageKey: "cost-statistics", stateKey: "explorerState" });
+    sessionStorage.setItem(key, JSON.stringify(createStoredPayload({ version: 6, ttlMs: 60000, value })));
+    const fetchMock = installMockApiFetch();
+    const user = userEvent.setup();
+    const page = renderPage();
+    await waitUntilReady();
+    expect(screen.getByRole("radio", { name: "按时间" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/explorer?")).every(([url]) =>
+      new URL(String(url), "http://localhost").searchParams.get("scope") === "all")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "银行流水时间范围：年月" }));
+    const picker = screen.getByRole("dialog", { name: "银行流水时间范围选择器" });
+    await user.click(within(picker).getByRole("button", { name: "按月", exact: true }));
+    await user.click(within(picker).getByRole("button", { name: "三月", exact: true }));
+    await waitUntilReady();
+    await user.click(screen.getByRole("button", { name: "刷新成本统计" }));
+    await waitUntilReady();
+    expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: "导出中心" }));
+    const dialog = screen.getByRole("dialog", { name: "导出中心" });
+    expect(within(dialog).getByRole("radio", { name: "自定义月份", exact: true })).toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/export-preview\?month=2026-03&view=time/), expect.any(Object)));
+    page.unmount();
+    fetchMock.mockClear();
+    renderPage();
+    await waitUntilReady();
+    expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    for (const name of ["按项目", "按银行账户", "按成本标签", "按标签"]) {
+      await user.click(screen.getByRole("radio", { name, exact: true }));
+      await waitUntilReady();
+      expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+    }
+  });
+
+  test("exports all without fabricated date bounds and rejects an incomplete custom range", async () => {
+    const fetchMock = installMockApiFetch();
+    const user = userEvent.setup();
+    renderPage(); await waitUntilReady();
+    await user.click(screen.getByRole("button", { name: "导出中心" }));
+    const dialog = screen.getByRole("dialog", { name: "导出中心" });
+    await user.click(within(dialog).getByRole("tablist").querySelector("button")!);
+    expect(within(dialog).getByRole("radio", { name: "全部", exact: true })).toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
+    await within(dialog).findByText(/预计导出 \d+ 条银行流水/);
+    const previewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/export-preview?"));
+    const url = new URL(String(previewCalls().at(-1)![0]), "http://localhost");
+    expect(url.searchParams.get("month")).toBe("all");
+    expect(url.searchParams.has("start_date")).toBe(false);
+    expect(url.searchParams.has("end_date")).toBe(false);
+    const count = previewCalls().length;
+    await user.click(within(dialog).getByRole("radio", { name: "自定义时间区间（精确到日）" }));
+    await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
+    expect(await within(dialog).findByText("请先补全导出筛选条件。")).toBeVisible();
+    expect(previewCalls()).toHaveLength(count);
+  });
+
+
   test("preserves external turnover facets at the end and drills into each direction independently", async () => {
     installMockApiFetch();
     const originalFetch = globalThis.fetch;
@@ -273,15 +341,18 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("radio", { name: "按时间" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringMatching(/scope=2026-03&view=time&page_size=1(?:&|$)/),
+        expect.stringMatching(/scope=all&view=time&page_size=1(?:&|$)/),
         expect.any(Object),
       );
     });
 
-    await user.click(screen.getByRole("button", { name: "全部" }));
+    await user.click(screen.getByRole("button", { name: "银行流水时间范围：年月" }));
+    const picker = screen.getByRole("dialog", { name: "银行流水时间范围选择器" });
+    await user.click(within(picker).getByRole("button", { name: "按月", exact: true }));
+    await user.click(within(picker).getByRole("button", { name: "三月", exact: true }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringMatching(/scope=all&view=time&page_size=1(?:&|$)/),
+        expect.stringMatching(/scope=2026-03&view=time&page_size=1(?:&|$)/),
         expect.any(Object),
       );
     });
@@ -369,14 +440,14 @@ describe("Cost statistics page", () => {
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
     expect(await within(dialog).findByText(/预计导出 \d+ 条银行流水/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-preview\?month=2026-03&view=time/),
+      expect.stringMatching(/export-preview\?month=all&view=time/),
       expect.any(Object),
     );
     await user.click(within(tabs).getByRole("button", { name: "按银行账户" }));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
     expect(await within(dialog).findByText(/预计导出 \d+ 条成本明细/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/export-preview\?month=2026-03&view=bank_account.*bank_account_label=/),
+      expect.stringMatching(/export-preview\?month=all&view=bank_account.*bank_account_label=/),
       expect.any(Object),
     );
   });

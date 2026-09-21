@@ -14,9 +14,9 @@ import { CashConfigurationFilter, CashHistoricalProjectFilter } from "./CashFlow
 import type { CashPersonalContext, CashPersonalSetting } from "./CashItems.types";
 import { CashUnsettledBook, initialUnsettledCriteria, type CashUnsettledCriteria } from "./CashUnsettledBook";
 
-type Period = { date_from: string; date_to: string };
+type Period = { time_scope?: "all"; date_from: string; date_to: string };
 type BookFilters = Period & { keyword?: string; counterparty?: string; ticket_provider?: string; project_ids?: CashFilterValue[]; category_ids?: CashFilterValue[]; states?: string[] };
-function yearPeriod(year: string): Period { return { date_from: `${year}-01-01`, date_to: `${year}-12-31` }; }
+function allPeriod(): Period { return { time_scope: "all", date_from: "", date_to: "" }; }
 const currentYear = () => cashToday().slice(0, 4);
 type BookCriteria = { filters: BookFilters; group: string; page: number; sort: string; order: string; selected: Record<string, CashFilterOption[]> };
 type PersonalCriteria = { view: string; year: string; keyword: string; bills: CashFilterValue[]; projects: CashFilterValue[]; sourceProjects: CashFilterValue[]; categories: CashFilterValue[]; selected: Record<string, CashFilterOption[]>; page: number; sort: string; order: string };
@@ -24,8 +24,8 @@ export type CashBooksCriteria = { tab: string; turnoverView: string; ticketsView
 export function initialCashBooksCriteria(): CashBooksCriteria {
   return {
     tab: "turnover", turnoverView: "events", ticketsView: "period", unsettled: initialUnsettledCriteria(),
-    turnover: { filters: yearPeriod(currentYear()), group: "all", page: 1, sort: "occurred_on", order: "desc", selected: {} },
-    tickets: { filters: yearPeriod(currentYear()), group: "all", page: 1, sort: "ticket_provided_on", order: "desc", selected: {} },
+    turnover: { filters: allPeriod(), group: "all", page: 1, sort: "occurred_on", order: "desc", selected: {} },
+    tickets: { filters: allPeriod(), group: "all", page: 1, sort: "ticket_provided_on", order: "desc", selected: {} },
     pendingTickets: { filters: { date_from: "", date_to: cashToday() }, group: "all", page: 1, sort: "ticket_provided_on", order: "desc", selected: {} },
     personal: { view: "matrix", year: currentYear(), keyword: "", bills: [], projects: [], sourceProjects: [], categories: [], selected: {}, page: 1, sort: "bank_name", order: "asc" },
   };
@@ -56,20 +56,22 @@ function PeriodFilters({ onApply, onReset, children, initial, initialKeyword, cu
   onApply: (params: Period & { keyword: string }) => string | null; onReset: () => void;
   children?: ReactNode; initial: Period; initialKeyword: string; cutoffOnly?: boolean;
 }) {
-  const [dates, setDates] = useState(initial); const [keyword, setKeyword] = useState(initialKeyword);
+  const [dates, setDates] = useState<Period>(() => ({ time_scope: initial.time_scope, date_from: initial.date_from, date_to: initial.date_to }));
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [error, setError] = useState<string | null>(null);
   return <><form className="cash-toolbar cash-filterbar" onSubmit={event => {
     event.preventDefault();
-    if (cutoffOnly ? !dates.date_to || dates.date_to > cashToday() : dates.date_from > dates.date_to || (Date.parse(dates.date_to) - Date.parse(dates.date_from)) / 86400000 > 365) {
+    if (cutoffOnly ? !dates.date_to || dates.date_to > cashToday() : dates.time_scope !== "all" && (!dates.date_from || !dates.date_to || dates.date_from > dates.date_to || (Date.parse(dates.date_to) - Date.parse(dates.date_from)) / 86400000 > 365)) {
       setError(cutoffOnly ? "截至日期不能为空，且不能晚于今天。" : "查询起止日期须有序，范围不超过 366 天。"); return;
     }
     setError(onApply({ ...dates, keyword: keyword.trim() }));
   }}>
-    {!cutoffOnly && <CashInput label="开始日期" type="date" value={dates.date_from} onChange={date_from => setDates(value => ({ ...value, date_from }))} required />}
-    <CashInput label={cutoffOnly ? "截至日期" : "结束日期"} type="date" value={dates.date_to} onChange={date_to => setDates(value => ({ ...value, date_to }))} required />
+    {!cutoffOnly && <CashSelect label="时间范围" value={dates.time_scope === "all" ? "all" : "custom"} onChange={value => setDates(value === "all" ? allPeriod() : { time_scope: undefined, date_from: "", date_to: "" })} options={[{ value: "all", label: "全部" }, { value: "custom", label: "自定义" }]} />}
+    {!cutoffOnly && dates.time_scope !== "all" && <CashInput label="开始日期" type="date" value={dates.date_from} onChange={date_from => setDates(value => ({ ...value, date_from }))} required />}
+    {(cutoffOnly || dates.time_scope !== "all") && <CashInput label={cutoffOnly ? "截至日期" : "结束日期"} type="date" value={dates.date_to} onChange={date_to => setDates(value => ({ ...value, date_to }))} required />}
     <CashInput label="关键词" value={keyword} onChange={setKeyword} placeholder="搜索内容 / 对象" />
     <Button type="submit" size="sm" variant="secondary">查询</Button><Button size="sm" variant="tertiary" onPress={() => {
-      setDates(cutoffOnly ? { date_from: "", date_to: cashToday() } : yearPeriod(currentYear())); setKeyword(""); setError(null); onReset();
+      setDates(cutoffOnly ? { date_from: "", date_to: cashToday() } : allPeriod()); setKeyword(""); setError(null); onReset();
     }}>重置</Button>
     {children}
   </form><CashNotice error={error} /></>;
@@ -96,7 +98,7 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
   const query = useCashQuery<Report<TurnoverRow, TurnoverSummary>>("/reports/turnover", params);
   const data = !query.loading && !query.error ? query.data : null;
   useEffect(() => { if (query.data && page > 1 && query.data.rows.length === 0) setPage(Math.max(1, Math.ceil(query.data.pagination.total / 50))); }, [query.data, page]);
-  const period = { date_from: filters.date_from, date_to: filters.date_to };
+  const period = { date_from: filters.date_from, date_to: filters.time_scope === "all" ? cashToday() : filters.date_to };
   const applyFilters = (value: Partial<BookFilters>) => {
     const error = cashQueryError({ ...params, ...value, page: 1 });
     if (error) return error;
@@ -122,8 +124,8 @@ function TurnoverBook({ onItem, initial, onChange }: { onItem: (id: string) => v
   const sortColumns: Record<number, string> = { 0: "occurred_on", 9: "repayment_amount" };
   return <>
     <div className="cash-category-switch" role="group" aria-label="往来类别">{[{ id: "all", label: "全部", color: "" }, { id: "company", label: "公司", color: "company" }, { id: "external_person", label: "外部人员", color: "external-person" }, { id: "personal_principal", label: "个人借款 / 代付", color: "personal-principal" }, { id: "personal_settlement", label: "个人归还 / 冲抵", color: "personal-settlement" }].map(option => <Button key={option.id} size="sm" variant={group === option.id ? "secondary" : "tertiary"} aria-pressed={group === option.id} onPress={() => applyGroup(option.id)}><span className={"cash-color-dot cash-color-dot--" + option.color} aria-hidden="true" />{option.label}</Button>)}</div>
-    <PeriodFilters initial={period} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
-      setFilters(yearPeriod(currentYear())); setGroup("all"); setSelected({}); setSort("occurred_on"); setOrder("desc"); setPage(1); setValidation(null);
+    <PeriodFilters initial={filters} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
+      setFilters(allPeriod()); setGroup("all"); setSelected({}); setSort("occurred_on"); setOrder("desc"); setPage(1); setValidation(null);
     }} onApply={applyFilters}>
       <Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
       <CashFilterPopover label="处理状态" value={filters.states ?? []} onApply={states => applyFilters({ states })} options={[{ value: "open", label: "未结" }, { value: "partial", label: "部分结算" }, { value: "settled", label: "结清" }]} />
@@ -160,11 +162,11 @@ function TicketBook({ onItem, initial, onChange, view }: { onItem: (id: string) 
   const [validation, setValidation] = useState<string | null>(null);
   useEffect(() => { onChange({ filters, group: "all", page, sort, order, selected }); }, [filters, page, sort, order, selected, onChange]);
   const pending = view === "pending_collection";
-  const params = { ...filters, date_from: pending ? undefined : filters.date_from, states: pending ? undefined : filters.states, view, sort, order, page, page_size: 50 };
+  const params = { ...filters, time_scope: pending ? undefined : filters.time_scope, date_from: pending ? undefined : filters.date_from, states: pending ? undefined : filters.states, view, sort, order, page, page_size: 50 };
   const query = useCashQuery<Report<TicketRow, Record<string, string>>>("/reports/ticket-payments", params);
   const data = !query.loading && !query.error ? query.data : null;
   useEffect(() => { if (query.data && page > 1 && query.data.rows.length === 0) setPage(Math.max(1, Math.ceil(query.data.pagination.total / 50))); }, [query.data, page]);
-  const period = { date_from: pending ? undefined : filters.date_from, date_to: filters.date_to };
+  const period = { date_from: pending ? undefined : filters.date_from, date_to: filters.time_scope === "all" && !pending ? cashToday() : filters.date_to };
   const applyFilters = (value: Partial<BookFilters>) => {
     const error = cashQueryError({ ...params, ...value, page: 1 });
     if (error) return error;
@@ -176,7 +178,7 @@ function TicketBook({ onItem, initial, onChange, view }: { onItem: (id: string) 
   };
   const sortColumns: Record<number, string> = { 0: "ticket_provided_on", 4: "provided_amount", 6: "available_source_amount" };
   return <><PeriodFilters cutoffOnly={pending} initial={filters} initialKeyword={initial.filters.keyword ?? ""} onReset={() => {
-      setFilters(pending ? { date_from: "", date_to: cashToday() } : yearPeriod(currentYear())); setSelected({}); setSort("ticket_provided_on"); setOrder("desc"); setPage(1); setValidation(null);
+      setFilters(pending ? { date_from: "", date_to: cashToday() } : allPeriod()); setSelected({}); setSort("ticket_provided_on"); setOrder("desc"); setPage(1); setValidation(null);
     }} onApply={applyFilters}>
       <Button size="sm" variant="tertiary" onPress={query.reload}>刷新</Button>
     </PeriodFilters>
@@ -288,7 +290,15 @@ function PersonalBook({ onItem, onFlow, initial, onChange }: { onItem: (id: stri
 }
 
 export default function CashBooks({ initialCriteria, onCriteriaChange }: { initialCriteria?: CashBooksCriteria; onCriteriaChange?: (value: CashBooksCriteria) => void }) {
-  const [initial] = useState(() => initialCriteria ?? initialCashBooksCriteria());
+  const [initial] = useState(() => {
+    const value = initialCriteria ?? initialCashBooksCriteria();
+    return { ...value,
+      turnover: { ...value.turnover, filters: { ...value.turnover.filters, ...allPeriod() },
+        page: value.turnover.filters.time_scope === "all" && !value.turnover.filters.date_from && !value.turnover.filters.date_to ? value.turnover.page : 1 },
+      tickets: { ...value.tickets, filters: { ...value.tickets.filters, ...allPeriod() },
+        page: value.tickets.filters.time_scope === "all" && !value.tickets.filters.date_from && !value.tickets.filters.date_to ? value.tickets.page : 1 },
+    };
+  });
   const [turnover, setTurnover] = useState(initial.turnover); const [tickets, setTickets] = useState(initial.tickets); const [personal, setPersonal] = useState(initial.personal);
   const [turnoverView, setTurnoverView] = useState(initial.turnoverView); const [ticketsView, setTicketsView] = useState(initial.ticketsView);
   const [unsettled, setUnsettled] = useState(initial.unsettled); const [pendingTickets, setPendingTickets] = useState(initial.pendingTickets);

@@ -1,6 +1,7 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { buildPageSessionStorageKey, createStoredPayload } from "../contexts/pageSessionStorage";
 
 import { renderAuthenticatedAppAt } from "./renderHelpers";
 
@@ -364,6 +365,72 @@ afterEach(() => {
 });
 
 describe("销项发票收款情况", () => {
+  test("重进先清旧日期及范围关联详情，保留非日期条件，本次刷新不清月份", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    window.sessionStorage.setItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "output-invoice-collections", stateKey: "query" }),
+      JSON.stringify(createStoredPayload({ version: 2, ttlMs: 60_000, value: {
+        page: 4, pageSize: 50, keyword: "客户", month: "2025-12", invoiceDateFrom: "2025-12-01", invoiceDateTo: "2025-12-31",
+        filters: [{ field: "collection_status", operator: "in", values: ["pending_collection"] },
+          { field: "invoice_date", operator: "equals", value: "2025-12-01" },
+          { field: "bank_trade_time", operator: "equals", value: "2025-12-02" }],
+        sortField: "invoice_no", sortDirection: "asc", activeWorkflow: { kind: "export" },
+        detailTarget: { kind: "invoice", id: "old-invoice" },
+      } })));
+    const requests = () => fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"))
+      .filter((url) => url.pathname === "/api/output-invoice-collections/rows");
+    const mounted = renderAuthenticatedAppAt("/output-invoice-collections");
+    await screen.findByRole("grid", { name: "销项发票收款情况表" });
+    expect(requests().length).toBeGreaterThan(0);
+    for (const request of requests()) {
+      for (const field of ["month", "invoice_date_from", "invoice_date_to"]) expect(request.searchParams.has(field)).toBe(false);
+      expect(request.searchParams.get("page")).toBe("1");
+      expect(request.searchParams.get("page_size")).toBe("50");
+      expect(request.searchParams.get("keyword")).toBe("客户");
+      expect(JSON.parse(decodeURIComponent(request.searchParams.get("filters") ?? "[]"))).toEqual([{ field: "collection_status", operator: "in", values: ["pending_collection"] }]);
+      expect(request.searchParams.get("sort_direction")).toBe("asc");
+    }
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "销项发票月份：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "销项发票月份选择器" })).getByRole("button", { name: "四月" }));
+    await waitFor(() => expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04"));
+    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新", exact: true })).toBeEnabled());
+    expect(requests().at(-1)?.searchParams.get("month")).toBe("2026-04");
+    await waitFor(() => expect(window.sessionStorage.getItem(buildPageSessionStorageKey({ userScope: "101", pageKey: "output-invoice-collections", stateKey: "query" }))).toContain('"month":"2026-04"'));
+    const count = requests().length;
+    mounted.unmount();
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    await waitFor(() => expect(requests().length).toBeGreaterThan(count));
+    expect(requests().slice(count).every((url) => !url.searchParams.has("month"))).toBe(true);
+  });
+
+  test("切回全部后旧月份的迟到响应不能覆盖当前结果", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    let resolveMonth!: (response: Response) => void;
+    const monthResponse = new Promise<Response>((resolve) => { resolveMonth = resolve; });
+    fetchMock.mockImplementation((input, init) => {
+      const url = new URL(String(input), "http://localhost");
+      return url.pathname === "/api/output-invoice-collections/rows" && url.searchParams.get("month") === "2026-04"
+        ? monthResponse : originalFetch(input, init);
+    });
+    renderAuthenticatedAppAt("/output-invoice-collections");
+    await screen.findByRole("grid", { name: "销项发票收款情况表" });
+    await user.click(screen.getByRole("button", { name: "销项发票月份：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "销项发票月份选择器" })).getByRole("button", { name: "四月" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => new URL(String(input), "http://localhost").searchParams.get("month") === "2026-04")).toBe(true));
+    await user.click(screen.getByRole("button", { name: "全部", exact: true }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新", exact: true })).toBeEnabled());
+    await act(async () => {
+      resolveMonth(jsonResponse({ ...rowsPayload, rows: [], pagination: { ...rowsPayload.pagination, total: 0 } }));
+      await monthResponse;
+    });
+    expect(screen.getByRole("grid", { name: "销项发票收款情况表" })).toHaveTextContent("XSFP-BLUE-001");
+    expect(screen.getByRole("button", { name: "全部", exact: true })).toHaveAttribute("aria-pressed", "true");
+  });
+
   test("只显示销项发票、收款状态和收入流水三个事实源分组", async () => {
     installFetchMock();
 

@@ -8388,6 +8388,8 @@ function batchAccountingOaRows() {
 function batchAccountingBankRow(relationSubmitted: boolean) {
   return {
     id: "ba-bank-202604-001",
+    // Canonical date is in 2025 while the display trade time is in 2026.
+    bank_year: "2025",
     trade_time: "2026-04-03 09:20:00",
     counterparty_name: "批量账务集中处理",
     direction: "expense",
@@ -8424,20 +8426,23 @@ function batchAccountingPayload(
   selectedTagCodes: string[],
   tagSelectionVersion: number,
 ) {
+  const requestedYear = url.searchParams.get("bank_year");
+  const inYear = requestedYear === "all" || requestedYear === "2025";
   const bucket: BatchAccountingBucket = url.searchParams.get("bucket") === "submitted" ? "submitted" : "unsubmitted";
   const oaRows = batchAccountingOaRows();
   const bankRow = batchAccountingBankRow(relationSubmitted);
-  const showSubmittedRelation = bucket === "submitted" && relationSubmitted;
-  const showUnsubmittedRows = bucket === "unsubmitted"
+  const showSubmittedRelation = inYear && bucket === "submitted" && relationSubmitted;
+  const showUnsubmittedRows = inYear && bucket === "unsubmitted"
     && !relationSubmitted
     && selectedTagCodes.includes(bankRow.tag_code);
-  const unsubmittedCount = !relationSubmitted && selectedTagCodes.includes(bankRow.tag_code) ? 1 : 0;
+  const unsubmittedCount = inYear && !relationSubmitted && selectedTagCodes.includes(bankRow.tag_code) ? 1 : 0;
   const bankRows = showSubmittedRelation || showUnsubmittedRows ? [bankRow] : [];
   const visibleOaRows = showUnsubmittedRows ? oaRows : [];
   return {
     summary: {
+      bank_year: requestedYear === "all" ? null : requestedYear,
       unsubmitted_count: unsubmittedCount,
-      submitted_count: relationSubmitted ? 1 : 0,
+      submitted_count: inYear && relationSubmitted ? 1 : 0,
     },
     bank_rows: bankRows,
     oa_rows: visibleOaRows,

@@ -15,6 +15,7 @@ import type {
 import { apiRequestJson } from "../apiClient";
 
 type ApiBankRow = {
+  bank_year: string | null;
   id?: string | null;
   trade_time?: string | null;
   tradeTime?: string | null;
@@ -55,6 +56,7 @@ type ApiOaRow = {
 };
 
 type ApiSummary = {
+  bank_year: string | null;
   unsubmitted_count?: number | null;
   unsubmittedCount?: number | null;
   submitted_count?: number | null;
@@ -182,9 +184,10 @@ function stringList(value: string[] | null | undefined) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
-function mapBankRow(row: ApiBankRow = {}): BatchAccountingBankRow {
+function mapBankRow(row: ApiBankRow): BatchAccountingBankRow {
   return {
     id: text(row.id),
+    bankYear: row.bank_year,
     tradeTime: text(row.trade_time ?? row.tradeTime),
     counterpartyName: text(row.counterparty_name ?? row.counterpartyName),
     direction: text(row.direction),
@@ -327,6 +330,7 @@ export async function fetchBatchAccounting({
   const pagination = payload.pagination;
   return {
     summary: {
+      bankYear: payload.summary?.bank_year ?? null,
       unsubmittedCount: numberValue(payload.summary?.unsubmitted_count ?? payload.summary?.unsubmittedCount),
       submittedCount: numberValue(payload.summary?.submitted_count ?? payload.summary?.submittedCount),
     },

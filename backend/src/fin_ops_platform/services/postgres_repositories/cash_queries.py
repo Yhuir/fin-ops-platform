@@ -201,32 +201,33 @@ class CashQueryRepository:
                 row.pop("recorded_at")
             totals = tx.fetch_one(f"select count(*) as flow_count,coalesce(sum(amount) filter(where kind='receipt'),0) as income_amount,coalesce(sum(amount) filter(where kind='payment'),0) as expense_amount,coalesce(sum(amount) filter(where kind='transfer'),0) as transfer_amount,min(occurred_on) as first_day,max(occurred_on) as last_day from ({base_sql}) filtered", tuple(params))
             result = {"rows": rows, "pagination": {"page": query["page"], "page_size": query["page_size"], "total": totals["flow_count"]}}
-            start, end = query.get("date_from", totals.pop("first_day")), query.get("date_to", totals.pop("last_day"))
+            start = None if query.get("time_scope") == "all" else query.get("date_from", totals["first_day"])
+            end = query.get("date_to", totals["last_day"])
             totals.pop("first_day", None)
             totals.pop("last_day", None)
-            balances = self._balances(tx, start, end, account_ids) if start is not None else []
+            balances = self._balances(tx, start, end, account_ids) if start is not None or query.get("time_scope") == "all" else []
             result["summary"] = {"period": {"date_from": start, "date_to": end}, "filtered_totals": totals, "account_balances": balances}
             if context is not None:
                 result["selection_context"] = context
             return result
 
     @staticmethod
-    def _balances(tx: Any, start: date, end: date, account_ids: list[str] | None) -> list[dict[str, Any]]:
+    def _balances(tx: Any, start: date | None, end: date, account_ids: list[str] | None) -> list[dict[str, Any]]:
         return tx.fetch_all("""select a.id as account_id,a.name as account_name,a.opening_date,
-            case when a.opening_date>%s then 'not_started' when a.opening_date>%s then 'starts_during_period' else 'complete' end as coverage_state,
-            case when a.opening_date>%s then null else greatest(a.opening_date,%s) end as coverage_start,
-            case when a.opening_date<=%s then a.opening_amount+coalesce(d.before_net,0) end as opening_balance,
+            case when a.opening_date>%s then 'not_started' when a.opening_date>coalesce(%s::date,a.opening_date) then 'starts_during_period' else 'complete' end as coverage_state,
+            case when a.opening_date>%s then null else greatest(a.opening_date,coalesce(%s::date,a.opening_date)) end as coverage_start,
+            case when a.opening_date<=coalesce(%s::date,a.opening_date) and a.opening_date<=%s then a.opening_amount+coalesce(d.before_net,0) end as opening_balance,
             case when a.opening_date<=%s then a.opening_amount+coalesce(d.before_net,0) end as balance_at_coverage_start,
             case when a.opening_date<=%s then coalesce(d.inflow,0) end as period_inflow,
             case when a.opening_date<=%s then coalesce(d.outflow,0) end as period_outflow,
             case when a.opening_date<=%s then a.opening_amount+coalesce(d.before_net,0)+coalesce(d.inflow,0)-coalesce(d.outflow,0) end as ending_balance
             from cash.accounts a left join lateral (select
-              sum(case when f.to_account_id=a.id then f.amount else -f.amount end) filter(where f.occurred_on<%s) as before_net,
-              sum(f.amount) filter(where f.occurred_on>=%s and f.to_account_id=a.id) as inflow,
-              sum(f.amount) filter(where f.occurred_on>=%s and f.from_account_id=a.id) as outflow
+              sum(case when f.to_account_id=a.id then f.amount else -f.amount end) filter(where f.occurred_on<coalesce(%s::date,a.opening_date)) as before_net,
+              sum(f.amount) filter(where f.occurred_on>=coalesce(%s::date,a.opening_date) and f.to_account_id=a.id) as inflow,
+              sum(f.amount) filter(where f.occurred_on>=coalesce(%s::date,a.opening_date) and f.from_account_id=a.id) as outflow
               from cash.flows f where (f.from_account_id=a.id or f.to_account_id=a.id)
               and f.occurred_on>=a.opening_date and f.occurred_on<=%s) d on true
-            where (%s::uuid[] is null or a.id=any(%s::uuid[])) order by a.name,a.id""", (end, start, end, start, start, end, end, end, end, start, start, start, end, account_ids, account_ids))
+            where (%s::uuid[] is null or a.id=any(%s::uuid[])) order by a.name,a.id""", (end, start, end, start, start, end, end, end, end, end, start, start, start, end, account_ids, account_ids))
 
     def get_flow(self, flow_id: str) -> dict[str, Any]:
         with self.snapshot() as tx:
@@ -410,6 +411,10 @@ class CashQueryRepository:
                 return self._query_unsettled(tx, query)
             # Obligation events and expense events are separate contributions, never copies of cash.
             scope, scope_params = _where(query, {"ledger_group": "i.ledger_group", "counterparty": "i.counterparty", "project_id": "i.oa_project_id"})
+            bounded = "date_from" in query
+            origin_period = "i.origin_date>=%s" if bounded else "true"
+            settlement_period = "s.occurred_on between %s and %s" if bounded else "s.occurred_on<=%s"
+            expense_period = "e.origin_date between %s and %s" if bounded else "e.origin_date<=%s"
             cte = f"""with obligations as (
                 select i.id,i.original_amount,i.is_opening,i.origin_date,i.created_at,i.content,i.origin_flow_id,
                   i.ledger_group,i.counterparty,i.oa_project_id,i.project_name_snapshot,i.obligation_direction,
@@ -432,7 +437,7 @@ class CashQueryRepository:
                   case when i.origin_flow_id is not null and i.obligation_direction='receivable' and not i.is_opening then i.original_amount end as cash_paid_amount,
                   0::numeric as reduction,i.origin_flow_id as flow_id,null::uuid as settlement_id,null::uuid as expense_item_id,f.category_id
                 from obligations i left join cash.flows f on f.id=i.origin_flow_id
-                where i.origin_date>=%s
+                where {origin_period}
                 union all
                 select 'settlement:'||s.id,'settlement',s.item_id,s.occurred_on,s.created_at,1,coalesce(s.remark,i.content),null,
                   case when s.kind='cash_repayment' then s.amount end,
@@ -446,18 +451,18 @@ class CashQueryRepository:
                     when s.source_item_id is not null then source.category_id else s.category_id end
                 from cash.settlements s join obligations i on i.id=s.item_id
                 left join cash.flows f on f.id=s.flow_id left join cash.items source on source.id=s.source_item_id
-                where s.kind in ('cash_repayment','company_collection','ticket_offset','non_ticket_offset') and s.occurred_on between %s and %s
+                where s.kind in ('cash_repayment','company_collection','ticket_offset','non_ticket_offset') and {settlement_period}
                 union all
                 select 'expense:'||e.id,'expense',e.related_obligation_id,e.origin_date,e.created_at,2,e.content,
                   null,null,null,null,null,e.original_amount,null,null,0,e.origin_flow_id,null,e.id,e.category_id
                 from cash.items e join obligations i on i.id=e.related_obligation_id
-                where e.type='expense' and e.origin_date between %s and %s
+                where e.type='expense' and {expense_period}
                 union all
                 select 'expense_settlement:'||s.id,'expense',e.related_obligation_id,s.occurred_on,s.created_at,3,
                   coalesce(s.remark,e.content),null,null,null,null,null,
                   case when s.kind='expense_refund' then -s.amount end,null,null,0,s.flow_id,s.id,e.id,e.category_id
                 from cash.settlements s join cash.items e on e.id=s.item_id join obligations i on i.id=e.related_obligation_id
-                where s.kind in ('expense_payment','expense_refund') and s.occurred_on between %s and %s
+                where s.kind in ('expense_payment','expense_refund') and {settlement_period}
             ), complete_events as (
                 select e.*,i.ledger_group,i.counterparty,i.oa_project_id,i.project_name_snapshot,i.obligation_direction,i.remaining_amount,
                   i.original_amount as obligation_original_amount,i.ticket_collection_state,
@@ -476,7 +481,8 @@ class CashQueryRepository:
                 e.repayment_amount,e.reimbursement_received_amount,e.ticket_offset_amount,e.non_ticket_offset_amount,e.real_expense_amount,
                 e.cash_received_amount,e.cash_paid_amount,e.flow_id,e.settlement_id,e.expense_item_id,e.ticket_collection_state,
                 e.obligation_direction,e.remaining_amount,e.obligation_original_amount,e.created_at,e.category_id from complete_events e where {condition}"""
-            params = [query["date_to"], query["date_to"], *scope_params, query["date_from"], *([query["date_from"], query["date_to"]] * 3), *params]
+            period_params = [query["date_from"], *([query["date_from"], query["date_to"]] * 3)] if bounded else [query["date_to"]] * 3
+            params = [query["date_to"], query["date_to"], *scope_params, *period_params, *params]
             columns = ("repayment_amount", "reimbursement_received_amount", "ticket_offset_amount", "non_ticket_offset_amount", "real_expense_amount", "cash_received_amount", "cash_paid_amount")
             row_money = ("original_amount", *columns, "remaining_after_event")
             row_casts = ",".join(f"'{key}',p.{key}::text" for key in row_money)
@@ -539,7 +545,7 @@ class CashQueryRepository:
             condition, params = _where(query, {"ticket_provider": "i.ticket_provider", "project_id": "i.oa_project_id"})
             condition += " and i.type='ticket_source' and i.ticket_provided_on<=%s"
             params.append(query["date_to"])
-            if query["view"] == "period":
+            if "date_from" in query:
                 condition += " and i.ticket_provided_on>=%s"
                 params.append(query["date_from"])
             if "keyword" in query:

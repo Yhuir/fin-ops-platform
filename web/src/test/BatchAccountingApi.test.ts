@@ -13,6 +13,19 @@ afterEach(() => {
 });
 
 describe("batch accounting API", () => {
+  test("maps all-year scope and canonical unknown years without inferring from display dates", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+      summary: { bank_year: null, unsubmitted_count: 2, submitted_count: 0 },
+      bank_rows: [{ id: "old", bank_year: "2025", trade_time: "2026-01-01" },
+        { id: "unknown", bank_year: null, trade_time: "" }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await fetchBatchAccounting({ bankYear: "all", bucket: "unsubmitted" });
+    expect(result.summary.bankYear).toBeNull();
+    expect(result.bankRows.map(row => row.bankYear)).toEqual(["2025", null]);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("bank_year=all");
+  });
+
   test("maps the canonical page response and sends server-side OA search", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       summary: { unsubmitted_count: 0, submitted_count: 2 },
@@ -40,7 +53,7 @@ describe("batch accounting API", () => {
       oaSearch: "上海客户",
     });
 
-    expect(payload.summary).toEqual({ unsubmittedCount: 0, submittedCount: 2 });
+    expect(payload.summary).toEqual({ bankYear: null, unsubmittedCount: 0, submittedCount: 2 });
     expect(payload.pagination.bankRows).toEqual({ page: 2, pageSize: 50, total: 0 });
     expect(payload.pagination.oaRows).toEqual({ page: 3, pageSize: 25, total: 0 });
     expect(payload.tagSelectionVersion).toBe(4);

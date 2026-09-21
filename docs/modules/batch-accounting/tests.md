@@ -1,6 +1,6 @@
 # 批量账务测试合同
 
-日期：2026-08-05
+日期：2026-09-21
 
 ## 七类测试映射
 
@@ -76,7 +76,7 @@ bash scripts/verify.sh lint
 ## 性能验收
 
 - query-count guard 是强制门槛，不接受随数据量增长的 statement count。
-- page size 最大 200；标签分类只读取精确“批量账务集中处理”候选 ID 集合，附件/成员按当前 ID 集合查询。
+- page size 最大 200；标签分类由精确“批量账务集中处理”候选 CTE 限定，保留分类所需对手行，应用仅接收 SQL 当前页，附件/成员按当前 ID 集合查询。
 - 本地 100 次最大页 route/service assembly：p50 `3.637ms`、p95 `8.056ms`、max `28.213ms`。
 - 实库集成测试记录列表查询耗时上限 5 秒；生产 EXPLAIN/端点 SLO 由主控在部署验证阶段执行。
 
@@ -84,3 +84,11 @@ bash scripts/verify.sh lint
 
 - 本地未提供 `FIN_OPS_TEST_DATABASE_URL` 时，真实 PostgreSQL SQL 语法、执行计划和最大生产数据分布只能由合并后实库测试/生产只读验证确认。
 - 本分支不删除共享 Workbench/workbench-relation readers；其最终移除需要主控在所有页面迁移合并后运行 whole-repo 回归。
+
+## 全部年份增量覆盖
+
+- GET all 与具体年、缺失/非法范围；POST 拒绝 all/null/伪造年份。summary 与逐行 nullable 年份严格分离。
+- 多年/缺日期 SQL 分页、NULLS LAST、canonical 日期与显示时间跨年冲突、真实提交月份。
+- 缺日期行不可选，页面在 all 中提交行的真实年份；缺日期 active relation 可读/可撤回。
+- 公共分类候选 CTE 与 ID 输入实库等价，包含候选集合外内部转账对手；原银行明细、关联台分类投影、往来与规则批次查询回归。
+- 规则目录按全历史 distinct 标签读取，保持固定 query count，禁止把全部候选 ID 拉回应用。

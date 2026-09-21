@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { afterEach, vi } from "vitest";
 
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
+import { buildPageSessionStorageKey, createStoredPayload } from "../contexts/pageSessionStorage";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import { GlobalOperationOverlayProvider } from "../contexts/GlobalOperationOverlayContext";
 import type { SessionPayload } from "../features/session/api";
@@ -352,7 +353,7 @@ describe("Bank details page", () => {
     expect(within(page).queryByText("云南溯源科技有限公司")).not.toBeInTheDocument();
   });
 
-  test("requests the current year range for both accounts and transactions by default", async () => {
+  test("requests all history for both accounts and transactions by default", async () => {
     const fetchMock = installMockApiFetch();
     renderBankDetailsPage();
 
@@ -361,11 +362,44 @@ describe("Bank details page", () => {
     const accountRequest = requestUrls(fetchMock, "/api/bank-details/accounts").at(-1);
     const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
 
-    expect(accountRequest?.searchParams.get("date_from")).toBe("2026-01-01");
-    expect(accountRequest?.searchParams.get("date_to")).toBe("2026-12-31");
-    expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-01-01");
-    expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-12-31");
+    expect(accountRequest?.searchParams.get("date_from")).toBeNull();
+    expect(accountRequest?.searchParams.get("date_to")).toBeNull();
+    expect(transactionRequest?.searchParams.get("date_from")).toBeNull();
+    expect(transactionRequest?.searchParams.get("date_to")).toBeNull();
     expect(transactionRequest?.searchParams.get("account_key")).toBeNull();
+  });
+
+  test("ignores stored dates before the first request and retains this visit's month until re-entry", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+    const store = (stateKey: string, version: number, value: unknown) => window.sessionStorage.setItem(
+      buildPageSessionStorageKey({ userScope: "1", pageKey: "bank-details", stateKey }),
+      JSON.stringify(createStoredPayload({ version, ttlMs: 60_000, value })),
+    );
+    store("dateFilter", 4, { preset: "month", month: "2025-12", dateFrom: "2025-12-01", dateTo: "2025-12-31" });
+    store("selectedAccountKey", 2, "icbc:6386");
+    const mounted = renderBankDetailsPage();
+    const page = await screen.findByTestId("bank-details-page");
+    await within(page).findByText("云南溯源科技有限公司");
+    for (const path of ["/api/bank-details/accounts", "/api/bank-details/transactions"]) {
+      const requests = requestUrls(fetchMock, path);
+      expect(requests.length).toBeGreaterThan(0);
+      expect(requests.every((url) => !url.searchParams.has("date_from") && !url.searchParams.has("date_to"))).toBe(true);
+    }
+    expect(requestUrls(fetchMock, "/api/bank-details/transactions")[0]?.searchParams.get("account_key")).toBe("icbc:6386");
+    await user.click(within(page).getByRole("button", { name: "银行明细时间范围：年月" }));
+    const picker = await screen.findByRole("dialog", { name: "银行明细时间范围选择器" });
+    await user.click(within(picker).getByRole("button", { name: "按月" }));
+    await user.click(within(picker).getByRole("button", { name: "四月" }));
+    await waitFor(() => expect(requestUrls(fetchMock, "/api/bank-details/transactions").at(-1)?.searchParams.get("date_from")).toBe("2026-04-01"));
+    await user.click(within(page).getByRole("button", { name: "刷新银行明细" }));
+    await waitFor(() => expect(within(page).getByRole("button", { name: "刷新银行明细" })).toBeEnabled());
+    expect(requestUrls(fetchMock, "/api/bank-details/transactions").at(-1)?.searchParams.get("date_from")).toBe("2026-04-01");
+    const beforeReentry = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+    mounted.unmount();
+    renderBankDetailsPage();
+    await waitFor(() => expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(beforeReentry));
+    expect(requestUrls(fetchMock, "/api/bank-details/transactions").slice(beforeReentry).every((url) => !url.searchParams.has("date_from") && !url.searchParams.has("date_to"))).toBe(true);
   });
 
   test("renders accounts as a list and transactions in the bank transaction table", async () => {
@@ -1262,7 +1296,7 @@ describe("Bank details page", () => {
     expect(within(page).getByLabelText(/交通银行 3847 余额/)).toHaveTextContent("余额为空");
     expect(within(page).getAllByText("130500.50").length).toBeGreaterThan(0);
 
-    await user.click(within(page).getByRole("button", { name: "银行明细时间范围：2026年" }));
+    await user.click(within(page).getByRole("button", { name: "银行明细时间范围：年月" }));
     let datePicker = screen.getByRole("dialog", { name: "银行明细时间范围选择器" });
     await user.click(within(datePicker).getByRole("button", { name: "2025年" }));
     await waitFor(() => {
@@ -1320,7 +1354,7 @@ describe("Bank details page", () => {
       expect(transactionRequest?.searchParams.get("page_size")).toBe("100");
     });
 
-    await user.click(within(page).getByRole("button", { name: "银行明细时间范围：2026年" }));
+    await user.click(within(page).getByRole("button", { name: "银行明细时间范围：年月" }));
     const datePicker = screen.getByRole("dialog", { name: "银行明细时间范围选择器" });
     await user.click(within(datePicker).getByRole("button", { name: "按月" }));
     await user.click(within(datePicker).getByRole("button", { name: "四月" }));
@@ -1355,8 +1389,8 @@ describe("Bank details page", () => {
     await waitFor(() => {
       const transactionRequest = requestUrls(fetchMock, "/api/bank-details/transactions").at(-1);
       expect(transactionRequest?.searchParams.get("account_key")).toBe("icbc:6386");
-      expect(transactionRequest?.searchParams.get("date_from")).toBe("2026-01-01");
-      expect(transactionRequest?.searchParams.get("date_to")).toBe("2026-12-31");
+      expect(transactionRequest?.searchParams.get("date_from")).toBeNull();
+      expect(transactionRequest?.searchParams.get("date_to")).toBeNull();
       expect(transactionRequest?.searchParams.get("keyword")).toBe("跨页目标");
       expect(transactionRequest?.searchParams.get("page")).toBe("1");
       expect(transactionRequest?.searchParams.get("page_size")).toBe("100");
@@ -1390,8 +1424,8 @@ describe("Bank details page", () => {
     await waitFor(() => {
       const exportRequest = requestUrls(fetchMock, "/api/bank-details/transactions/export").at(-1);
       expect(exportRequest?.searchParams.get("mode")).toBe("all");
-      expect(exportRequest?.searchParams.get("date_from")).toBe("2026-01-01");
-      expect(exportRequest?.searchParams.get("date_to")).toBe("2026-12-31");
+      expect(exportRequest?.searchParams.get("date_from")).toBeNull();
+      expect(exportRequest?.searchParams.get("date_to")).toBeNull();
       expect(exportRequest?.searchParams.get("account_key")).toBeNull();
     });
     expect(clickSpy).toHaveBeenCalled();

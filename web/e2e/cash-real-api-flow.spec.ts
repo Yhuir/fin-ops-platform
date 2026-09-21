@@ -40,6 +40,11 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     await page.goto("/cash?section=flows");
     const grid = page.getByRole("grid", { name: "现金流水明细" });
     await expect(grid).toBeVisible();
+    await expect.poll(() => reads.length).toBeGreaterThan(0);
+    expect(reads[0].searchParams.get("time_scope")).toBe("all");
+    expect(reads[0].searchParams.has("date_from")).toBe(false);
+    await page.getByRole("button", { name: /时间范围$/ }).click();
+    await page.getByRole("option", { name: "自定义", exact: true }).click();
     await page.getByLabel("起始日期", { exact: true }).fill("2026-09-01");
     await page.getByLabel("截止日期", { exact: true }).fill("2026-09-30");
     await page.getByRole("button", { name: "查询", exact: true }).click();
@@ -81,6 +86,8 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
       const removed = page.waitForResponse(response => new URL(response.url()).pathname === `/api/cash/flows/${id}/delete`);
       await deletion.getByRole("button", { name: "确认删除", exact: true }).click();
       expect((await removed).status()).toBe(200);
+      await expect(deletion.getByRole("status")).toHaveText("现金流水已删除");
+      await deletion.getByRole("button", { name: "关闭抽屉", exact: true }).click();
       await expect(deletion).toHaveCount(0);
       await expectNoUnexpectedSuccessUiErrors(page);
       await expect(grid).not.toContainText(content);
@@ -96,6 +103,16 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     expect(finalBody.summary.account_balances.map((row: { ending_balance: string }) => row.ending_balance).sort()).toEqual(["0.00", "1000.00"]);
     await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "现金账目", exact: true }).click();
     await expect(page.getByRole("grid", { name: "往来账总表" })).toContainText("当前条件下暂无记录");
+    const beforeReentry = reads.length;
+    await page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "现金流水", exact: true }).click();
+    await expect.poll(() => reads.length).toBeGreaterThan(beforeReentry);
+    expect(reads[beforeReentry].searchParams.get("time_scope")).toBe("all");
+    expect(reads[beforeReentry].searchParams.has("date_from")).toBe(false);
+    expect(JSON.parse(reads[beforeReentry].searchParams.get("account_ids")!)).toEqual([account.id, secondAccount.id]);
+    const beforeReload = reads.length;
+    await page.reload();
+    await expect.poll(() => reads.length).toBeGreaterThan(beforeReload);
+    expect(reads[beforeReload].searchParams.get("time_scope")).toBe("all");
   });
 
   test("personal opening, task advance, classified noncash adjustment and old pending tickets form one real chain", async ({ page, baseURL }) => {
@@ -113,6 +130,8 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     await setting.getByLabel("个人账起算日期").fill("2026-01-01");
     await setting.getByRole("textbox", { name: "个人专账归属人" }).fill("真实浏览器合成人员");
     await setting.getByRole("button", { name: "保存起算", exact: true }).click();
+    await expect(setting.getByRole("status")).toHaveText("操作已完成");
+    await setting.getByRole("button", { name: "关闭抽屉", exact: true }).click();
     await expect(setting).toHaveCount(0); await expectNoUnexpectedSuccessUiErrors(page);
     await page.getByRole("button", { name: "登记期初未结", exact: true }).click();
     const opening = page.getByRole("dialog", { name: "新建事项" });
@@ -124,6 +143,8 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     await opening.getByRole("button", { name: "保存事项", exact: true }).click();
     const openingResponse = await openingSaved; expect(openingResponse.status()).toBe(201);
     const oldItem = (await openingResponse.json()).item;
+    await expect(opening.getByRole("status")).toHaveText("事项已保存");
+    await opening.getByRole("button", { name: "关闭抽屉", exact: true }).click();
     await expect(opening).toHaveCount(0); await expectNoUnexpectedSuccessUiErrors(page);
 
     const taskResponse = await page.request.post("/api/cash/tasks", { data: { id: crypto.randomUUID(), title: "合成信用卡代付任务", kind: "payment", execution_day: 5, remind_days: 2, effective_from_month: "2026-09", default_amount: "100.00", default_account_id: account.id, default_category_id: category.id } });
@@ -140,6 +161,8 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     await task.getByRole("button", { name: "保存并确认任务", exact: true }).click();
     const confirmedResponse = await confirmed; expect(confirmedResponse.status()).toBe(200);
     const confirmedBody = await confirmedResponse.json(); expect(confirmedBody.flow.source_kind).toBe("monthly_task");
+    await expect(task.getByRole("status")).toHaveText("现金流水已保存");
+    await task.getByRole("button", { name: "关闭抽屉", exact: true }).click();
     await expect(task).toHaveCount(0); await expectNoUnexpectedSuccessUiErrors(page);
     const personalResponse = await page.request.get("/api/cash/reports/personal?year=2026");
     const personal = await personalResponse.json(); expect(personal.summary.remaining_obligation_amount).toBe("600.00");
@@ -177,6 +200,8 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     const repaidResponse = await repaid; expect(repaidResponse.status(), await repaidResponse.text()).toBe(201);
     const repaidBody = await repaidResponse.json();
     expect(repaidBody.allocations).toEqual([expect.objectContaining({ item_id: oldItem.id, kind: "cash_repayment", amount: "25.00" })]);
+    await expect(repayment.getByRole("status")).toHaveText("现金流水已保存");
+    await repayment.getByRole("button", { name: "关闭抽屉", exact: true }).click();
     await expect(repayment).toHaveCount(0); await expectNoUnexpectedSuccessUiErrors(page);
     await expect(unsettled).toContainText("425.00");
     const afterRepayment = await (await page.request.get(`/api/cash/items/${oldItem.id}`)).json();
@@ -186,7 +211,14 @@ test.describe("cash browser -> real HTTP -> PostgreSQL", () => {
     expect(ticketResponse.status()).toBe(201); const ticketItem = (await ticketResponse.json()).item;
     const receivableResponse = await page.request.post("/api/cash/items", { data: { id: crypto.randomUUID(), type: "company_receivable", origin_date: "2025-12-20", original_amount: "80.00", ledger_group: "company", obligation_direction: "receivable", counterparty: "合成公司", ticket_source_id: ticketItem.id, expected_related_versions: { items: [{ id: ticketItem.id, version: ticketItem.version }] }, content: "明确旧年公司应收" } });
     expect(receivableResponse.status(), await receivableResponse.text()).toBe(201);
+    const allTickets = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/cash/reports/ticket-payments" && url.searchParams.get("time_scope") === "all" && response.status() === 200;
+    });
     await page.getByRole("tab", { name: "有票支付", exact: true }).click();
+    const allTicketResponse = await allTickets;
+    expect((await allTicketResponse.json()).rows).toEqual(expect.arrayContaining([expect.objectContaining({ id: ticketItem.id, ticket_provided_on: "2025-12-20" })]));
+    await expect(page.getByRole("grid", { name: "有票支付", exact: true })).toContainText("合成旧年待回款票据");
     await page.getByRole("button", { name: /有票支付视图$/ }).click(); await page.getByRole("option", { name: "待回款", exact: true }).click();
     const tickets = page.getByRole("grid", { name: "有票支付", exact: true });
     await expect(tickets).toContainText("合成旧年待回款票据");
@@ -211,6 +243,8 @@ async function enterReceipt(page: Page, account: string, category: string, amoun
   expect(response.status()).toBe(201);
   const body = await response.json();
   expect(body.flow.source_kind).toBe("manual");
+  await expect(dialog.getByRole("status")).toHaveText("现金流水已保存");
+  await dialog.getByRole("button", { name: "关闭抽屉", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("grid", { name: "现金流水明细" })).toContainText(content);
   await expectNoUnexpectedSuccessUiErrors(page);

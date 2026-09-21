@@ -29,6 +29,7 @@ from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 
 from fin_ops_platform.app.cash_runtime import CashRuntime
 from fin_ops_platform.app.http_adapter import WsgiHttpAdapter
+from fin_ops_platform.services.cash_queries import CashQueryService
 from fin_ops_platform.services.cash_service import CashService
 from fin_ops_platform.services.cash_tasks import CashTaskService
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
@@ -86,6 +87,7 @@ class CashHttpPostgresTests(unittest.TestCase):
         for target, value in (
             ("load_mongo_oa_settings", lambda _: None),
             ("CashService", partial(CashService, today=lambda: date(2026, 9, 7))),
+            ("CashQueryService", partial(CashQueryService, today=lambda: date(2026, 9, 7))),
             ("CashTaskService", partial(CashTaskService, today=lambda: date(2026, 9, 7))),
         ):
             patcher = patch("fin_ops_platform.app.cash_runtime." + target, value)
@@ -150,6 +152,27 @@ class CashHttpPostgresTests(unittest.TestCase):
         return {"id": self.uid(), "type": "loan", "origin_date": "2026-09-03", "original_amount": "100.00",
                 "content": "Synthetic HTTP loan", "oa_project_id": None, "counterparty": "Synthetic company",
                 "ledger_group": "company", "obligation_direction": "receivable"}
+
+    def test_all_history_reads_old_fact_and_rechecks_summary_after_real_write(self):
+        account = self.call("POST", "/settings/accounts", {"id": self.uid(), "name": "Synthetic historical account", "kind": "cash",
+                            "opening_date": "2020-01-01", "opening_amount": "500.00"}, status=201)["account"]
+        payload = self.flow_payload(amount="80.00", occurred_on="2020-03-01", from_account_id=account["id"], content="Synthetic old flow")
+        old = self.call("POST", "/flows", payload, status=201)["flow"]
+        current = self.call("POST", "/flows", self.flow_payload(amount="20.00", kind="receipt", to_account_id=account["id"]), status=201)["flow"]
+        path = "/flows?time_scope=all&account_id=" + account["id"] + "&keyword=Synthetic+old"
+        result = self.call("GET", path)
+        self.assertEqual(result["pagination"]["total"], 1)
+        self.assertEqual(result["rows"][0]["id"], old["id"])
+        self.assertEqual(result["summary"]["period"], {"date_from": None, "date_to": "2026-09-07"})
+        self.assertEqual(result["summary"]["filtered_totals"]["expense_amount"], "80.00")
+        self.assertEqual(result["summary"]["account_balances"][0]["ending_balance"], "440.00")
+        self.delete_flow(current["id"])
+        self.assertEqual(self.call("GET", path)["summary"]["account_balances"][0]["ending_balance"], "420.00")
+        self.delete_flow(old["id"])
+        empty = self.call("GET", path)
+        self.assertEqual(empty["rows"], [])
+        self.assertEqual(empty["summary"]["filtered_totals"]["flow_count"], 0)
+        self.assertEqual(empty["summary"]["account_balances"][0]["ending_balance"], "500.00")
 
     def item(self, identity):
         return self.call("GET", "/items/" + identity)

@@ -1446,9 +1446,10 @@ export default function BankDetailsPage() {
     pageKey: "bank-details",
     stateKey: "dateFilter",
     version: 4,
-    initialValue: createDateFilter("year", DEFAULT_BANK_YEAR),
+    initialValue: createDateFilter("all"),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
+    restore: () => createDateFilter("all"),
     validate: isBankDateFilter,
   });
   const [accountsData, setAccountsData] = useState<{

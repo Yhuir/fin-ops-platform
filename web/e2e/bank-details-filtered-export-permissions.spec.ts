@@ -63,11 +63,11 @@ test.describe("bank details filtered export and non-admin permissions", () => {
     expect(requestUrl.searchParams.get("account_key")).toBe("bank-account-1138");
     expect(requestUrl.searchParams.get("keyword")).toBe("智能工厂");
     expect(requestUrl.searchParams.get("category_code")).toBe("equipment_payment");
-    expect(requestUrl.searchParams.get("date_from")).toBe("2026-01-01");
-    expect(requestUrl.searchParams.get("date_to")).toBe("2026-12-31");
+    expect(requestUrl.searchParams.get("date_from")).toBeNull();
+    expect(requestUrl.searchParams.get("date_to")).toBeNull();
 
     const downloaded = await download;
-    expect(downloaded.suggestedFilename()).toBe("银行明细_当前账户_2026-01-01_2026-12-31.xlsx");
+    expect(downloaded.suggestedFilename()).toBe("银行明细_当前账户_全部_全部.xlsx");
     const downloadPath = testInfo.outputPath(downloaded.suggestedFilename());
     await downloaded.saveAs(downloadPath);
     const content = await readXlsxText(downloadPath);
@@ -90,7 +90,7 @@ test.describe("bank details filtered export and non-admin permissions", () => {
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     await expect(page.getByText("1-100 / 299")).toBeVisible();
 
-    await page.getByRole("button", { name: "银行明细时间范围：2026年" }).click();
+    await page.getByRole("button", { name: "银行明细时间范围：年月" }).click();
     const datePicker = page.getByRole("dialog", { name: "银行明细时间范围选择器" });
     await datePicker.getByRole("button", { name: "按月" }).click();
     const monthRowsRequest = page.waitForRequest((request) => {

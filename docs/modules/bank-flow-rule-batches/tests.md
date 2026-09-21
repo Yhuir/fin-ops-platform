@@ -126,3 +126,9 @@ git diff --check
 - 七类均有相关覆盖：1 状态/版本/金额，2 query/事务/回滚，3 API，4 页面详情缓存与 canonical 写后读（worker 未改），5 页面交互，6 PostgreSQL 完整生命周期，7 普通批次/关联撤回回归。
 
 - 发布验证补充：旧 no-OA identity 的撤回历史与新候选共存不误报重复；只有历史而缺候选仍阻断，两个真正的当前候选重叠仍阻断。真实 PostgreSQL 提交/撤回周期同时运行 canonical page audit。
+
+## 日期默认全部回归（2026-09-21）
+
+`BankFlowRuleBatchPage.test.tsx` 覆盖首请求省略 month、具体月与全部切换、同页刷新保留月份、卸载重进恢复全部；既有 candidate scope_month、选择清理、权限/CAS/冲突与写后回读继续回归。
+
+本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。

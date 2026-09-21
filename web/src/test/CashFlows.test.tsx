@@ -8,6 +8,7 @@ import CashFlows from "../components/cash/CashFlows";
 import CashFlowTable, { initialCashFlowCriteria } from "../components/cash/CashFlowTable";
 import type { CashFlow, CashFlowDetail, CashFlowSummary } from "../components/cash/CashFlows.types";
 import type { CashItem } from "../components/cash/CashItems.types";
+import { cashToday } from "../components/cash/CashItems.types";
 import { apiFetch } from "../features/apiClient";
 import { CashProvider } from "../features/cash/hooks";
 
@@ -296,6 +297,7 @@ describe("现金读取、更正、删除", () => {
     await screen.findByText("合成手工收款");
     const listCalls = () => http.mock.calls.filter(([url]) => url.startsWith("/api/cash/flows?"));
     const original = new URL(listCalls()[0][0], "http://test").searchParams;
+    await select(user, "时间范围", "自定义");
     fireEvent.change(screen.getByLabelText("起始日期"), { target: { value: "2026-06-01" } });
     await user.type(screen.getByRole("textbox", { name: "搜索流水" }), "未提交草稿");
     const before = listCalls().length;
@@ -417,14 +419,15 @@ describe("现金读取、更正、删除", () => {
     expect(http.mock.calls.length).toBe(before);
   });
 
-  it("独立流水限定期间、筛选包含停用账户；录入只请求启用账户", async () => {
+  it("独立流水默认全部、筛选包含停用账户；录入只请求启用账户", async () => {
     const user = userEvent.setup(); installHttp();
     const mounted = render(<CashProvider><CashFlowTable /></CashProvider>);
     await screen.findByText("合成手工收款");
     let urls = http.mock.calls.map(([url]) => new URL(url, "http://cash-test.invalid"));
     const list = urls.find(url => url.pathname === "/api/cash/flows")!;
-    expect(list.searchParams.get("date_from")).toMatch(/^\d{4}-01-01$/);
-    expect(list.searchParams.get("date_to")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(list.searchParams.get("time_scope")).toBe("all");
+    expect(list.searchParams.has("date_from")).toBe(false);
+    expect(list.searchParams.has("date_to")).toBe(false);
     expect(urls.some(url => url.pathname.endsWith("/settings/accounts"))).toBe(false);
     await user.click(screen.getByRole("button", { name: "筛选账户" }));
     await screen.findByRole("checkbox", { name: "合成储蓄账户" });
@@ -433,6 +436,37 @@ describe("现金读取、更正、删除", () => {
     mounted.unmount(); http.mockClear();
     render(<DrawerHarness kind="receipt" />);
     await waitFor(() => expect(http.mock.calls.some(([url]) => url.includes("/settings/accounts") && new URL(url, "http://cash-test.invalid").searchParams.get("enabled") === "true")).toBe(true));
+  });
+
+  it("section 首请求清旧日期但保留筛选；同页刷新和抽屉关闭保留自定义，重入恢复全部", async () => {
+    const user = userEvent.setup(); installHttp(); const onCriteriaChange = vi.fn();
+    const initial = { ...initialCashFlowCriteria(), time_scope: undefined, date_from: "2020-01-01", date_to: "2020-01-31", keyword: "history", account_ids: [accountA], sort: "amount", order: "asc", page: 9 };
+    const view = render(<CashProvider><CashFlows initialCriteria={initial} onCriteriaChange={onCriteriaChange} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    const listParams = () => http.mock.calls.filter(([url]) => url.startsWith("/api/cash/flows?")).map(([url]) => new URL(url, "http://test").searchParams);
+    expect(listParams()).toHaveLength(1);
+    expect(Object.fromEntries(listParams()[0])).toMatchObject({ time_scope: "all", keyword: "history", account_ids: JSON.stringify([accountA]), sort: "amount", order: "asc", page: "1" });
+    expect(listParams()[0].has("date_from")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "筛选项目" }));
+    await screen.findByRole("checkbox", { name: "合成历史项目甲" });
+    const candidate = new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/reports/project-options?"))![0], "http://test").searchParams;
+    expect(candidate.get("date_to")).toBe(cashToday()); expect(candidate.has("time_scope")).toBe(false); expect(candidate.has("date_from")).toBe(false);
+    await user.keyboard("{Escape}");
+    await select(user, "时间范围", "自定义");
+    fireEvent.change(screen.getByLabelText("起始日期"), { target: { value: "2020-01-01" } });
+    fireEvent.change(screen.getByLabelText("截止日期"), { target: { value: "2020-01-31" } });
+    await user.click(screen.getByRole("button", { name: "查询", exact: true }));
+    await waitFor(() => expect(listParams().at(-1)!.get("date_from")).toBe("2020-01-01"));
+    expect(listParams().at(-1)!.has("time_scope")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "刷新", exact: true }));
+    await user.click(screen.getByRole("button", { name: "新增流水" }));
+    await user.click(screen.getByRole("button", { name: "关闭抽屉", exact: true }));
+    expect(listParams().at(-1)!.get("date_from")).toBe("2020-01-01");
+    const saved = onCriteriaChange.mock.calls.at(-1)![0]; view.unmount(); http.mockClear();
+    render(<CashProvider><CashFlows initialCriteria={saved} onCriteriaChange={onCriteriaChange} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    expect(listParams()).toHaveLength(1); expect(listParams()[0].get("time_scope")).toBe("all");
+    expect(listParams()[0].has("date_from")).toBe(false); expect(listParams()[0].get("keyword")).toBe("history");
   });
 
   it.each([{ itemId }, { taskOccurrenceId: templateId }])("父对象 %s 默认全历史分页，仍只有一个现金查询入口", async props => {
@@ -444,6 +478,19 @@ describe("现金读取、更正、删除", () => {
     expect(url.searchParams.get("page_size")).toBe("50");
     expect(url.searchParams.get("item_id") || url.searchParams.get("task_occurrence_id")).toBe("itemId" in props ? itemId : templateId);
     expect(screen.queryByRole("button", { name: "新增流水" })).not.toBeInTheDocument();
+  });
+
+  it("section 原本全部时保留页码，复用父对象表挂载时保留其自定义期间", async () => {
+    installHttp({ list: () => ({ rows: [flow()], pagination: { page: 3, page_size: 50, total: 125 }, summary: summary() }) });
+    const view = render(<CashProvider><CashFlows initialCriteria={{ ...initialCashFlowCriteria(), page: 3 }} onCriteriaChange={() => {}} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    expect(new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/flows?"))![0], "http://test").searchParams.get("page")).toBe("3");
+    view.unmount(); http.mockClear();
+    render(<CashProvider><CashFlowTable itemId={itemId} initialCriteria={{ ...initialCashFlowCriteria(true), date_from: "2020-01-01", date_to: "2020-01-31", page: 3 }} /></CashProvider>);
+    await screen.findByText("合成手工收款");
+    const params = new URL(http.mock.calls.find(([url]) => url.startsWith("/api/cash/flows?"))![0], "http://test").searchParams;
+    expect(Object.fromEntries(params)).toMatchObject({ item_id: itemId, page: "3", date_from: "2020-01-01", date_to: "2020-01-31" });
+    expect(params.has("time_scope")).toBe(false);
   });
 
   it("删除末页最后一行后退至有效页，不重复删除命令", async () => {

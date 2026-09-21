@@ -721,6 +721,27 @@ afterEach(() => {
 });
 
 describe("OA pending payments page", () => {
+  test("starts each visit at all and preserves its chosen month on explicit refresh", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installOaPendingPaymentsFetch();
+    const mounted = renderAuthenticatedAppAt("/oa-pending-payments");
+    await screen.findByTestId("oa-pending-payments-page");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
+    expect(rowsRequests(fetchMock).every((url) => !url.searchParams.has("month"))).toBe(true);
+    await user.click(screen.getByRole("button", { name: "OA月份筛选：年月" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "OA月份筛选选择器" })).getByRole("button", { name: "四月" }));
+    await waitFor(() => expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("month")).toBe("2026-04"));
+    const count = rowsRequests(fetchMock).length;
+    await user.click(screen.getByRole("button", { name: "刷新 OA 待付款核对" }));
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(count));
+    expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("month")).toBe("2026-04");
+    const beforeReentry = rowsRequests(fetchMock).length;
+    mounted.unmount();
+    renderAuthenticatedAppAt("/oa-pending-payments");
+    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(beforeReentry));
+    expect(rowsRequests(fetchMock).slice(beforeReentry).every((url) => !url.searchParams.has("month"))).toBe(true);
+  });
+
   test("exports selected OA fact sources without reloading or leaking page filters", async () => {
     const exportDelay = deferred();
     const fetchMock = installOaPendingPaymentsFetch({

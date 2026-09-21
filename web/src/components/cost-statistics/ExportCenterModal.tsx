@@ -14,7 +14,7 @@ import type { CostStatisticsExportPreview } from "../../features/cost-statistics
 import { formatCostAmount } from "../../features/cost-statistics/format";
 
 export type ExportCenterMode = "time" | "bank_tag" | "bank_account" | "project" | "cost_tag";
-export type ExportRangeMode = "month" | "custom";
+export type ExportRangeMode = "all" | "month" | "custom";
 
 type ExportCenterModalProps = {
   mode: ExportCenterMode;
@@ -30,6 +30,7 @@ type ExportCenterModalProps = {
   bankAccountProjectNames: string[];
   projectNames: string[];
   projectAggregateBy: "month" | "year";
+  projectPeriodLabel: string;
   projectCostTags: string[];
   costTagRangeMode: ExportRangeMode;
   costTagMonth: string;
@@ -164,6 +165,7 @@ export default function ExportCenterModal({
   bankAccountProjectNames,
   projectNames,
   projectAggregateBy,
+  projectPeriodLabel,
   projectCostTags,
   costTagRangeMode,
   costTagMonth,
@@ -285,6 +287,10 @@ export default function ExportCenterModal({
                   onChange={(value) => onBankFlowRangeModeChange(value as ExportRangeMode)}
                   value={bankFlowRangeMode}
                 >
+                  <Radio className="project-export-choice" value="all">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
+                    <span>全部</span>
+                  </Radio>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
@@ -303,14 +309,14 @@ export default function ExportCenterModal({
                     selection={{ mode: "month", year: bankFlowMonth.slice(0, 4), month: bankFlowMonth }}
                     years={nearbyBusinessYears(bankFlowMonth)}
                   />
-                ) : (
+                ) : bankFlowRangeMode === "custom" ? (
                   <DateRangeFields
                     startDate={bankFlowStartDate}
                     endDate={bankFlowEndDate}
                     onStartDateChange={onBankFlowStartDateChange}
                     onEndDateChange={onBankFlowEndDateChange}
                   />
-                )}
+                ) : null}
               </section>
             </div>
           ) : null}
@@ -322,6 +328,10 @@ export default function ExportCenterModal({
                   <h3>时间范围</h3>
                 </div>
                 <RadioGroup aria-label="银行账户成本时间范围" className="project-export-radio-group" onChange={(value) => onBankAccountRangeModeChange(value as ExportRangeMode)} value={bankAccountRangeMode}>
+                  <Radio className="project-export-choice" value="all">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
+                    <span>全部</span>
+                  </Radio>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
@@ -340,14 +350,14 @@ export default function ExportCenterModal({
                     selection={{ mode: "month", year: bankAccountMonth.slice(0, 4), month: bankAccountMonth }}
                     years={nearbyBusinessYears(bankAccountMonth)}
                   />
-                ) : (
+                ) : bankAccountRangeMode === "custom" ? (
                   <DateRangeFields
                     startDate={bankAccountStartDate}
                     endDate={bankAccountEndDate}
                     onStartDateChange={onBankAccountStartDateChange}
                     onEndDateChange={onBankAccountEndDateChange}
                   />
-                )}
+                ) : null}
               </section>
               <CostTagSelector
                 title="银行账户"
@@ -370,6 +380,7 @@ export default function ExportCenterModal({
                 <div className="export-center-section-header">
                   <h3>项目</h3>
                 </div>
+                <p>时间范围：{projectPeriodLabel}</p>
                 <RadioGroup aria-label="项目聚合方式" className="project-export-radio-group" onChange={(value) => onProjectAggregateByChange(value as "month" | "year")} value={projectAggregateBy}>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
@@ -404,6 +415,10 @@ export default function ExportCenterModal({
                   <h3>时间范围</h3>
                 </div>
                 <RadioGroup aria-label="成本主标签时间范围" className="project-export-radio-group" onChange={(value) => onCostTagRangeModeChange(value as ExportRangeMode)} value={costTagRangeMode}>
+                  <Radio className="project-export-choice" value="all">
+                    <Radio.Control><Radio.Indicator /></Radio.Control>
+                    <span>全部</span>
+                  </Radio>
                   <Radio className="project-export-choice" value="month">
                     <Radio.Control><Radio.Indicator /></Radio.Control>
                     <span>自定义月份</span>
@@ -422,14 +437,14 @@ export default function ExportCenterModal({
                     selection={{ mode: "month", year: costTagMonth.slice(0, 4), month: costTagMonth }}
                     years={nearbyBusinessYears(costTagMonth)}
                   />
-                ) : (
+                ) : costTagRangeMode === "custom" ? (
                   <DateRangeFields
                     startDate={costTagStartDate}
                     endDate={costTagEndDate}
                     onStartDateChange={onCostTagStartDateChange}
                     onEndDateChange={onCostTagEndDateChange}
                   />
-                )}
+                ) : null}
               </section>
               <CostTagSelector
                 title="成本主标签"

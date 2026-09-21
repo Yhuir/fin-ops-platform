@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +32,37 @@ def session(*, allowed=True, admin=False):
 
 
 class CashApiTests(unittest.TestCase):
+    def test_all_history_query_contract_and_incompatible_ranges(self):
+        repository = Mock()
+        payload = {"rows": [], "summary": {}, "pagination": {"page": 1, "page_size": 50, "total": 0}}
+        self.routes.queries = CashQueryService(repository, today=lambda: date(2026, 9, 7))
+        for path, method in (("/flows", "list_flows"), ("/reports/turnover", "query_turnover"), ("/reports/ticket-payments", "query_tickets")):
+            query = getattr(repository, method)
+            query.return_value = payload
+            response = self.call(path="/api/cash" + path, query={"time_scope": ["all"]})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(json.loads(response.body), payload)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+            self.assertEqual(query.call_args.args[0]["date_to"], date(2026, 9, 7))
+            self.assertNotIn("date_from", query.call_args.args[0])
+            query.reset_mock()
+            for invalid in ({}, {"time_scope": ["year"]}, {"time_scope": ["all", "all"]},
+                            {"time_scope": ["all"], "date_to": ["2026-09-07"]},
+                            {"time_scope": ["all"], "date_from": ["2026-01-01"], "date_to": ["2026-09-07"]},
+                            {"date_from": ["2020-01-01"], "date_to": ["2026-09-07"]}):
+                with self.subTest(path=path, invalid=invalid):
+                    rejected = self.call(path="/api/cash" + path, query=invalid)
+                    self.assertEqual(rejected.status_code, 400)
+                    self.assertEqual(json.loads(rejected.body)["error"], "cash_invalid_input")
+            query.assert_not_called()
+        for path, extra in (("/reports/turnover", {"view": ["unsettled"]}),
+                            ("/reports/ticket-payments", {"view": ["pending_collection"]}),
+                            ("/reports/personal", {"year": ["2026"]}),
+                            ("/reports/project-options", {})):
+            response = self.call(path="/api/cash" + path, query={"time_scope": ["all"], **extra})
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(json.loads(response.body)["error"], "cash_invalid_input")
+
     def test_gunicorn_cash_request_atom_is_private_and_ordinary_is_unchanged(self):
         from fin_ops_platform.app.cash_access_logger import CashAccessLogger
         logger = CashAccessLogger.__new__(CashAccessLogger)

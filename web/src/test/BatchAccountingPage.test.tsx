@@ -46,6 +46,7 @@ const unsubmittedPayload = {
   bank_rows: [
     {
       id: "bank-row-001",
+      bank_year: "2026",
       trade_time: "2026-01-07T15:54:00+08",
       counterparty_name: "批量账务集中处理",
       direction: "expense",
@@ -62,6 +63,7 @@ const unsubmittedPayload = {
     },
     {
       id: "bank-row-002",
+      bank_year: "2026",
       trade_time: "2026-01-08 09:00:00",
       counterparty_name: "批量账务集中处理",
       direction: "expense",
@@ -108,6 +110,7 @@ const submittedPayload = {
   bank_rows: [
     {
       id: "bank-row-submitted-001",
+      bank_year: "2026",
       trade_time: "2026-02-10 12:30:00",
       counterparty_name: "批量账务集中处理",
       direction: "expense",
@@ -288,9 +291,9 @@ function installFetchMock() {
           ...unsubmittedPayload,
           summary: {
             ...unsubmittedPayload.summary,
-            unsubmitted_count: bankYear === "2026" ? unsubmittedPayload.bank_rows.length : 0,
+            unsubmitted_count: (bankYear === "2026" || bankYear === "all") ? unsubmittedPayload.bank_rows.length : 0,
           },
-          bank_rows: bankYear === "2026" ? unsubmittedPayload.bank_rows : [],
+          bank_rows: (bankYear === "2026" || bankYear === "all") ? unsubmittedPayload.bank_rows : [],
           oa_rows: [...unsubmittedPayload.oa_rows, ...oa2025Rows],
         };
       const oaSearch = String(url.searchParams.get("oa_search") ?? "").trim().toLowerCase();
@@ -502,6 +505,31 @@ describe("BatchAccountingPage", () => {
     expect(bankRowRule).not.toContain("120ms ease");
   });
 
+  test("all years keeps unknown dates visible but unselectable and submits a selected canonical year", async () => {
+    const unknown = { ...unsubmittedPayload.bank_rows[0], id: "unknown", bank_year: null, trade_time: "" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      return new Response(JSON.stringify(url.includes("/submit") ? { success: true, affected_months: ["2025-12", "2026-01"], message: "已关联" } : url.includes("tag-rules") ? {} : {
+        ...unsubmittedPayload, bank_rows: [unknown, { ...unsubmittedPayload.bank_rows[0], bank_year: "2025" }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    const unknownRow = await screen.findByRole("button", { name: /批量账务集中处理.*日期未知/ });
+    expect(unknownRow).toBeDisabled();
+    expect(screen.getByText("缺少银行业务日期，无法提交")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /批量账务集中处理.*2026-01-07/ })).toHaveAttribute("aria-pressed", "true");
+    expect(new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams.get("bank_year")).toBe("all");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("checkbox", { name: /^选择 刘晨/ }));
+    await user.click(screen.getByRole("checkbox", { name: /^选择 王青/ }));
+    await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input]) => String(input).includes("/submit"));
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ bank_year: "2025", bank_row_id: "bank-row-001" });
+    });
+  });
+
   test("renders controls, bank list, and selectable OA table for unsubmitted rows", async () => {
     const fetchMock = installFetchMock();
     renderPage();
@@ -514,6 +542,7 @@ describe("BatchAccountingPage", () => {
       });
       expect(firstGet).toBeTruthy();
       const url = new URL(typeof firstGet?.[0] === "string" ? firstGet[0] : firstGet?.[0] instanceof URL ? firstGet[0].toString() : firstGet?.[0].url ?? "", "http://localhost");
+      expect(url.searchParams.get("bank_year")).toBe("all");
       expect(url.searchParams.get("bank_page")).toBe("1");
       expect(url.searchParams.get("bank_page_size")).toBe("200");
       expect(url.searchParams.get("oa_page")).toBe("1");
@@ -523,7 +552,7 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
     expect(screen.queryByLabelText("年份")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "流水年份：2026年" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "流水年份：年月" })).toBeInTheDocument();
     expect(screen.queryByLabelText("OA年份")).not.toBeInTheDocument();
     const tagRulesButton = screen.getByRole("button", { name: "批量账务标签规则" });
     const refreshButton = screen.getByRole("button", { name: "刷新" });
@@ -640,7 +669,7 @@ describe("BatchAccountingPage", () => {
       oa_rows: [],
     }));
 
-    expect(await screen.findByText("当前年份暂无批量账务流水")).toBeInTheDocument();
+    expect(await screen.findByText("当前范围暂无批量账务流水")).toBeInTheDocument();
     expect(screen.getByText("暂无可关联 OA")).toBeInTheDocument();
   });
 
@@ -724,7 +753,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
 
     expect(await screen.findByText("批量账务数据加载暂时失败，请刷新后重试。")).toBeInTheDocument();
-    expect(screen.queryByText("当前年份暂无批量账务流水")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前范围暂无批量账务流水")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
@@ -892,7 +921,7 @@ describe("BatchAccountingPage", () => {
 
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
-    expect(await screen.findByText("当前年份暂无批量账务流水")).toBeInTheDocument();
+    expect(await screen.findByText("当前范围暂无批量账务流水")).toBeInTheDocument();
     expect(await screen.findByText("银行流水金额 0.00")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 0 项")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();

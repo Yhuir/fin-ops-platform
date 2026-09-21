@@ -42,14 +42,16 @@ function CorrectionFlowPicker({ excludeId, onSelect, onClose }: {
   excludeId?: string; onSelect: (row: FlowChoice) => void; onClose: () => void;
 }) {
   const [month, setMonth] = useState(cashToday().slice(0, 7));
+  const [rangeMode, setRangeMode] = useState("all");
   const [search, setSearch] = useState(""); const [keyword, setKeyword] = useState(""); const [page, setPage] = useState(1);
   const validMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
   const [year, number] = month.split("-").map(Number);
   const end = validMonth ? `${month}-${new Date(Date.UTC(year, number, 0)).getUTCDate()}` : "";
-  const query = useCashQuery<CashPageRows<FlowChoice>>(validMonth ? "/flows" : null,
-    { date_from: `${month}-01`, date_to: end, keyword, page, page_size: 20 });
+  const query = useCashQuery<CashPageRows<FlowChoice>>(rangeMode === "all" || validMonth ? "/flows" : null,
+    { time_scope: rangeMode === "all" ? "all" : undefined, date_from: rangeMode === "all" ? undefined : `${month}-01`, date_to: rangeMode === "all" ? undefined : end, keyword, page, page_size: 20 });
   return <section className="cash-picker" aria-label="选择正确现金流水">
-    <div className="cash-toolbar"><CashInput label="流水月份" type="month" value={month} onChange={value => { setMonth(value); setPage(1); }} />
+    <div className="cash-toolbar"><CashSelect label="流水时间范围" value={rangeMode} onChange={value => { setRangeMode(value); setPage(1); }} options={[{ value: "all", label: "全部" }, { value: "month", label: "指定月份" }]} />
+      {rangeMode === "month" && <CashInput label="流水月份" type="month" value={month} onChange={value => { setMonth(value); setPage(1); }} />}
       <CashInput label="搜索正确流水" value={search} onChange={setSearch} />
       <Button type="button" size="sm" variant="secondary" onPress={() => { setKeyword(search); setPage(1); }}>查询流水</Button>
       <Button type="button" size="sm" variant="tertiary" onPress={onClose}>取消选择</Button></div>
@@ -57,7 +59,7 @@ function CorrectionFlowPicker({ excludeId, onSelect, onClose }: {
     {query.data && <><ul className="cash-choice-list">{query.data.rows.map(row => <li key={row.id}>
       <Button type="button" size="sm" variant="tertiary" isDisabled={row.id === excludeId || row.kind === "transfer"} onPress={() => onSelect(row)}>
         {row.occurred_on} · {row.content} · {cashAmount(row.amount)}</Button></li>)}</ul>
-      {!query.data.rows.length && <p>本月没有匹配流水，可切换月份查询。不会自动新增现金。</p>}
+      {!query.data.rows.length && <p>当前范围没有匹配流水，可调整时间范围查询。不会自动新增现金。</p>}
       <FinanceTablePagination {...query.data.pagination} pageSize={20} onPageChange={setPage} /></>}
     {query.error && <Button type="button" size="sm" onPress={query.reload}>重新读取</Button>}
   </section>;

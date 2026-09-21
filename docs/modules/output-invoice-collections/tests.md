@@ -75,3 +75,9 @@ PostgreSQL 集成测试必须覆盖 `load_page() -> row.id -> load_row() -> rela
 
 - deterministic 测试不等价于生产历史数据分布；生产验证必须检查歧义红蓝票不会被自动关系吞并。
 - 历史 lifecycle/receipt 表仍存在但无运行时 reader/writer；本任务不执行不可逆 drop。
+
+## 日期默认全部回归（2026-09-21）
+
+`OutputInvoiceCollectionsPage.test.tsx` 注入旧年月、起止与日期列缓存，断言首请求全部、无隐藏日期、page=1、非日期筛选/排序/pageSize 保留及旧详情关闭；选择月份后的刷新保留月份，卸载重进重新全部；切回全部后旧月份迟到响应不得覆盖当前结果。正式详情、收款状态和导出既有回归保留。
+
+本次覆盖页面交互与既有功能回归；使用既有 API schema，不新增领域状态、写服务、read model 或 worker。导航、浏览器前后退与整页刷新由 App 进入规则浏览器验证补充。

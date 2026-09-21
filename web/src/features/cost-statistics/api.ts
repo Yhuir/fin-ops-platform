@@ -788,6 +788,8 @@ export async function fetchCostEntryDetail(
 
 export type ProjectCostExportParams = {
   month: string;
+  startDate?: string;
+  endDate?: string;
   view: "project";
   projectNames: string[];
   bankTagPrimaryKeys?: string[];
@@ -981,6 +983,8 @@ export type PreviewCostExportParams =
   | {
       month: string;
       view: "project";
+      startDate?: string;
+      endDate?: string;
       projectNames: string[];
       aggregateBy: "month" | "year";
       bankTagPrimaryKeys?: string[];

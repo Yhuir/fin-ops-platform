@@ -141,11 +141,11 @@ class CashQueryService:
         return serialize(self.repository.list_configuration(kind, query))
 
     def list_flows(self, raw: dict[str, Any]) -> dict[str, Any]:
-        query = query_input(raw, {"date_from", "date_to", "item_id", "task_occurrence_id", "account_id", "project_id", "category_id", "kind", "person", "source", "keyword", "purpose", "template_id", "month", "settlement_kind", "account_ids", "project_ids", "category_ids", "kinds", "sources"}, {"occurred_on", "amount"}, "occurred_on")
+        query = query_input(raw, {"time_scope", "date_from", "date_to", "item_id", "task_occurrence_id", "account_id", "project_id", "category_id", "kind", "person", "source", "keyword", "purpose", "template_id", "month", "settlement_kind", "account_ids", "project_ids", "category_ids", "kinds", "sources"}, {"occurred_on", "amount"}, "occurred_on")
         enum_fields(query, kind={"receipt", "payment", "transfer"}, source={"manual", "monthly_task"}, purpose={"list", "task_link", "settlement"}, settlement_kind={"cash_repayment", "company_collection", "expense_payment", "expense_refund"})
         purpose = query.setdefault("purpose", "list")
-        if "date_from" not in query and not ({"item_id", "task_occurrence_id"} & query.keys()):
-            invalid("A date range or explicit item/task parent is required.")
+        if "time_scope" in query or not ({"item_id", "task_occurrence_id"} & query.keys()):
+            self._period(query)
         if purpose == "task_link" and not {"template_id", "month"} <= query.keys():
             invalid("Task selection requires template_id and month.")
         if purpose == "settlement" and not {"item_id", "settlement_kind"} <= query.keys():
@@ -199,7 +199,7 @@ class CashQueryService:
             query = query_input(raw, common, {"origin_date", "remaining_amount", "counterparty"}, "origin_date", cutoff_only=True)
             self._cutoff(query)
         else:
-            query = query_input(raw, common | {"date_from", "personal_variant", "category_id", "state", "category_ids", "states"}, {"occurred_on", "original_amount", "repayment_amount"}, "occurred_on")
+            query = query_input(raw, common | {"time_scope", "date_from", "personal_variant", "category_id", "state", "category_ids", "states"}, {"occurred_on", "original_amount", "repayment_amount"}, "occurred_on")
             self._period(query)
         query["view"] = view
         enum_fields(query, view={"events", "unsettled"}, ledger_group={"company", "external_person", "personal"}, personal_variant={"principal", "settlement", "neutral"}, state={"open", "partial", "settled"})
@@ -211,7 +211,7 @@ class CashQueryService:
         view = raw.get("view", "period")
         allowed = {"view", "date_to", "ticket_provider", "project_id", "keyword", "project_ids"}
         if view != "pending_collection":
-            allowed |= {"date_from", "state", "states"}
+            allowed |= {"time_scope", "date_from", "state", "states"}
         query = query_input(raw, allowed, {"ticket_provided_on", "provided_amount", "available_source_amount"}, "ticket_provided_on", cutoff_only=view == "pending_collection")
         query["view"] = view
         enum_fields(query, view={"period", "pending_collection"}, state={"unused", "partial", "used"})
@@ -241,10 +241,14 @@ class CashQueryService:
             invalid("A cutoff date or explicit item/task parent is required.")
         return serialize(self.repository.project_options(query))
 
-    @staticmethod
-    def _period(query: dict[str, Any]) -> None:
+    def _period(self, query: dict[str, Any]) -> None:
+        if "time_scope" in query:
+            if query["time_scope"] != "all" or {"date_from", "date_to"} & query.keys():
+                invalid("time_scope must be all and cannot be combined with dates.")
+            query["date_to"] = self.today()
+            return
         if "date_from" not in query:
-            invalid("date_from and date_to are required.")
+            invalid("time_scope=all or date_from and date_to are required.")
 
     def _cutoff(self, query: dict[str, Any]) -> None:
         if "date_to" not in query or query["date_to"] > self.today():

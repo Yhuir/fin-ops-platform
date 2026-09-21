@@ -74,6 +74,9 @@ PUT manual allocation
 
 ### Explorer 与日期合同
 
+- 五个视图每次路由进入或整页刷新均默认 `scope=all`。旧会话只恢复视图和非日期偏好；四组日期 scope 在读取会话时统一为 all。同页刷新、分页、切换视图、抽屉操作不覆盖用户主动选择的范围。
+- 导出中心每次打开继承各视图的当前范围；全部传 `month=all` 且不传起止日，按年传明确年边界。项目预览与下载也继承项目视图范围。缺少自定义起止日明确提示补全，禁止回退到本月或全部。
+
 - `view=time|bank_tag|project|cost_tag|bank_account`；旧 `bank`、`expense_type` view 明确拒绝。
 - 三个成本 view 的路径分别为：项目→主标签→子标签→明细；主标签→子标签→明细；账户→项目→主标签→子标签→明细。
 - 成本标签筛选使用后端返回的 `bank_tag_primary_key`、`bank_tag_sub_key`；主、子标签身份包含层级，客户端不自行生成。其他上级参数为 `project_name`、`bank_account_label`。

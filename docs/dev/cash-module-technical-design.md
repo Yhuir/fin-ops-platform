@@ -76,7 +76,7 @@
 
 已应用条件由CashProvider子树内CashContent的四个普通state拥有，透过initialCriteria/onCriteriaChange传递；活动视图有自己的草稿/rows和唯一query owner。未保存表单不进入条件快照。共享PageScaffold/FinanceTable/AppDrawer和普通主题均未修改。现金表格采用参考列宽+原生auto布局，金额不换行不截断；长数字只扩展所在表格，不增加测宽循环、hash或浏览器算账。
 
-单表视图继续page_size=50、SQL聚合/稳定分页。独立流水默认本年1月1日至今天；明确itemId/taskOccurrenceId的关联明细默认全历史分页，不强加本年date_from/date_to，仅主动期间筛选才附加日期。未带父对象的独立流水仍须有界期间。删除末页最后一行后用成功查询的pagination.total定位最近有效页并重读，不重复提交删除。Make的“全部日期”、前端数组分页、浮点reduce、Date.now主键、300ms假保存和本地强制覆盖版本都不迁入。输入输出字段按既有DTO，不做Make兼容层。CashConfigurationSelect明确复用原组件增加mode，各调用点显式传入，不另建取数抽象；filter省略enabled而不是读取普通银行账户。
+单表视图继续page_size=50、SQL聚合/稳定分页。独立流水每次进入 section 默认 time_scope=all，表示全部已登记历史至上海今天；明确itemId/taskOccurrenceId的关联明细默认全历史分页，不强加本年date_from/date_to，仅主动期间筛选才附加日期。未带父对象的独立流水须显式 all 或合法日期期间。删除末页最后一行后用成功查询的pagination.total定位最近有效页并重读，不重复提交删除。前端数组分页、浮点reduce、Date.now主键、300ms假保存和本地强制覆盖版本都不迁入。输入输出字段按既有DTO，不做Make兼容层。CashConfigurationSelect明确复用原组件增加mode，各调用点显式传入，不另建取数抽象；filter省略enabled而不是读取普通银行账户。
 
 仅调整前端导航和布局，不新增数据库表、migration、索引、连接或备份。CashProvider保存提示与PageScaffold共同进入现金局部剩余高度分配；不改共享PageScaffold/FinanceTable/AppDrawer默认值，不给全App增加定高/滚动/导航拦截机制。切页卸载会取消浏览器等待，不代表服务端已接收的写命令回滚；提交中、结果未知和已有关闭确认不得被本次布局清理删除。
 
@@ -593,14 +593,14 @@ marked_unpaid只可在actual=0时设，不能盖掉partial/completed；办理后
 
 | 方法/路径 | 输入 | 输出 |
 | --- | --- | --- |
-| GET /api/cash/flows | date_from/date_to或明确父item_id/task_occurrence_id；account_id/project_id/category_id/kind/person/source/keyword/sort/order/page/page_size | rows,summary,pagination；选择器另见§8.7 |
+| GET /api/cash/flows | time_scope=all、date_from/date_to或明确父item_id/task_occurrence_id；account_id/project_id/category_id/kind/person/source/keyword/sort/order/page/page_size | rows,summary,pagination；选择器另见§8.7 |
 | GET /api/cash/flows/{id} | ID | flow,allocations,allocation_count,allocations_has_more,task,delete_impact |
 | POST /api/cash/flows | FlowCreate | 首次201/同次200：flow,related_items,origin_items,allocations,version；既有origin_items返回新版本 |
 | PUT /api/cash/flows/{id} | expected_version+§3.5可改字段+可选source_corrections/settlement_changes/item_reference_changes/expected_related_versions | flow,version,changed,affected_counts,affected_items,affected_tasks,affected_preview_truncated |
 | POST /api/cash/flows/{id}/delete | expected_version+必要source_corrections/settlement_changes/item_reference_changes/expected_related_versions | id,deleted,already_deleted,affected_counts,affected_items,affected_tasks,affected_preview_truncated |
 | POST /api/cash/flows/{id}/unlink-task | expected_version,expected_occurrence_version | manual flow/occurrence新版本；不改创建来源/分配；monthly_task拒绝 |
-| GET /api/cash/reports/turnover | date_from/date_to,ledger_group,counterparty,project_id,category_id,state,keyword,sort/order/page/page_size | 固定TurnoverRow及summary/pagination |
-| GET /api/cash/reports/ticket-payments | date_from/date_to(按提供日),ticket_provider,project_id,state,keyword,sort/order/page/page_size | TicketRow及summary/pagination |
+| GET /api/cash/reports/turnover | events: time_scope=all或date_from/date_to,ledger_group,counterparty,project_id,category_id,state,keyword,sort/order/page/page_size | 固定TurnoverRow及summary/pagination |
+| GET /api/cash/reports/ticket-payments | period: time_scope=all或date_from/date_to(按提供日),ticket_provider,project_id,state,keyword,sort/order/page/page_size | TicketRow及summary/pagination |
 | GET /api/cash/reports/personal | year,view,bill_label_id,project_id,bill_month?,keyword,sort/order/page/page_size | view=matrix/cash_repayments/ticket_offsets/non_ticket_offsets；只返回当前view |
 | GET /api/cash/reports/project-options | date_from/date_to或单独date_to，显式item/task父对象，keyword,page/page_size | 本地截至日历史rows/pagination，不查OA；单独date_to供未结/待回款跨年选择 |
 
@@ -760,13 +760,17 @@ selection中的新选/改选项目由OA owner批量只读验证，在现金事�
 
 | 字段 | 结构/公式范围 |
 | --- | --- |
-| `summary.period` | `date_from,date_to`，明确用户请求区间 |
+| `summary.period` | `date_from,date_to`，明确用户请求区间；all 时 date_from=null、date_to=上海今天 |
 | `summary.filtered_totals` | `flow_count,income_amount,expense_amount,transfer_amount`；按全部显示过滤匹配flow的唯一ID统计，不限当前页，不把transfer加到池外收支 |
 | `summary.account_balances[]` | 每项 `account_id,account_name,opening_date,coverage_state,coverage_start,opening_balance,balance_at_coverage_start,period_inflow,period_outflow,ending_balance`；按账户/期间，不受人员/项目/关键词过滤影响；停用但在范围内的账户不丢失 |
 | `coverage_state` | complete/not_started/starts_during_period；complete时opening_balance为请求起点余额，balance_at_coverage_start与之相同；not_started时金额均null；starts_during_period时opening_balance=null，其余只描述从已知起算点起的范围，明确提示部分期间 |
 | 多账户总金额 | 已确认人民币，按同一已知覆盖范围求和；不同起算覆盖范围必须说明，不把局部覆盖总和冒充完整期间总额。未批准多币种，不预建汇率/折算字段 |
 
 account_balances按本次账户选择范围返回：选择一个只返回一个；全账户视图汇总含各已配置账户。账户规模若实测使整组响应过大，再用独立分页账户查询配合显示，不先造余额快照。没有一个“未配置账户”的虚构余额行。
+
+普通历史范围（2026-09-21）：flows、turnover events、ticket period 允许 `time_scope=all`，与 date_from/date_to 互斥；service 注入上海今天作为统一截止，repository 不设日期下界。自定义期间继续成对、合法、有序且最多 366 天；独立查询漏时间表达仍 400。父对象无日期查询、任务身份/月份、个人年度、unsettled/pending 截止日和写入日期校验不变。all 的 account_balances 使用每个账户自己的真实开账日为 coverage_start，起算余额采用 opening_amount，截止固定今天；不使用过滤行最早/最晚日，空搜索也返回真实账户余额。过滤合计只计算匹配流水，完整账序余额不受关键词、项目及其他显示筛选影响。
+
+section 进入时 CashFlows wrapper/CashBooks lazy initializer 首次渲染即清普通日期（含隐藏视图）；仅日期确实改变才重置页码，其他偏好保留。内部 Tab、刷新、保存、抽屉返回不重新初始化。project-options 仍传既有 `date_to=上海今天` 而非 time_scope，父对象继续携带明确父 ID。全部/自定义输入互斥，不新建日期控件、全局状态、缓存或兼容路径。测试与多年份测量见[现金测试](../modules/cash/tests.md#2026-09-21-普通范围默认全部)。
 
 **已录现金/事项选择器**
 
@@ -825,7 +829,7 @@ ItemDetail.amounts使用四种精确判别类型：loan/company_receivable为ori
 
 | 项目 | 技术建议与明确处理 |
 | --- | --- |
-| 流水/报表期间 | 页面显式传月或年起止；未带范围的普通流水列表400，事项/任务明确父对象下钻可查该父对象全历史并分页。自定义期间建议单次不超过366天；所有年份都可选择，不删旧年数据；多年度同时查询若确需，先确定体验与测量，不无界拉到浏览器 |
+| 流水/报表期间 | 普通流水/events/period显式传 time_scope=all 或成对起止日期；all 与日期互斥且无下界、截至上海今天。缺全部时间参数的独立列表仍400，事项/任务明确父对象无日期下钻不变。自定义期间最多366天；全部历史仍SQL分页，不全量拉到浏览器 |
 | 月任务/提醒窗口 | month、reminder_from/reminder_to、overdue_as_of三选一；跨月提醒先计算受提醒天数影响的模板月份，再在服务端全范围过滤/计数分页。提醒天数0–31、窗口最多62天；逾期范围受真实启用区间限定，集合SQL分页 |
 | 列表/预览 | 常规50行、最大200行；详情与删除摘要每类最多20条+总数/has_more；单次复合写最多100条分配为待测建议。账户/分类/任务配置从初版就支持相同分页，不等变慢后才改API |
 | 排序 | flows默认occurred_on降序、次created_at降序/id降序，amount排序同样加稳定id；items默认origin_date降序/id降序，支持original_amount；settlements默认occurred_on降序/id降序，支持amount。账户/分类/模板等持久化列表在获准排序后追加id；混合虚拟待办的月任务追加template_id/month。报表只开放最终明确列并追加其确定行身份，所有分页都不能只按可能同值的名称/金额/日期排序 |
@@ -1128,7 +1132,7 @@ FinanceTable继续是纯UI，表头可直接放上述现金筛选组件。已核
 
 个人非现金明细另返回`category`，来源按上述事件规则。既有project_id/project_ids仍筛目标债务项目，列名明确“借款项目”；新增source_project_id/source_project_ids只筛来源项目，category_id/category_ids筛来源/明确调整分类。这些增量只适用有票/无票冲抵明细，不用于矩阵/现金归还；同字段单复数互斥、null/50项/总100项/3500编码长度沿用原机制。无来源记录的source_project=null明确显示“无来源调整”，不能把目标项目复制过去；筛源项目B不会把借款A改成B。相应列表count/summary用同一范围，不将明细筛选悄悄改变年度全账余额。
 
-**有票支付：** 扩现有GET `/api/cash/reports/ticket-payments` 的 `view=period|pending_collection`。period保留原提供期间筛选；pending_collection必传date_to且拒绝date_from/使用状态筛选，候选为截至该日已提供且关联公司应收未结>0的来源，不漏旧年。两种视图新增余额及回款列均按date_to计算，避免历史期间混入截止日之后回款；原有历史期间“读取当前余额”的行为已经修订并测试，不新增tickets别名。
+**有票支付：** 扩现有GET `/api/cash/reports/ticket-payments` 的 `view=period|pending_collection`。period支持全部历史至上海今天或原提供期间筛选；pending_collection必传date_to且拒绝date_from/使用状态筛选，候选为截至该日已提供且关联公司应收未结>0的来源，不漏旧年。两种视图新增余额及回款列均按date_to计算，避免历史期间混入截止日之后回款；原有历史期间“读取当前余额”的行为已经修订并测试，不新增tickets别名。
 
 票据行新增`remaining_receivable_amount`、`noncash_settled_amount`、`collection_state`；后者为unregistered/open/partial/settled：无明确公司应收为unregistered；有应收且现金回款=0为open；0<现金回款<明确应收为partial；现金回款=明确应收为settled。非现金结清不会把它变为settled，但已无未结时不再进催款列表；UI显示“未结0/非现金结清”及实际现金回款，不能继续催已清债务。票据使用状态仍独立存在。来源有多笔公司应收时按唯一应收ID及各自结算集合聚合，不能JOIN复制使用额或现金回款。
 

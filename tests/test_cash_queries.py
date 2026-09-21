@@ -88,6 +88,64 @@ class CashPostgresCase(unittest.TestCase):
 class CashQueryPostgresTests(CashPostgresCase):
     period = {"date_from": "2026-09-01", "date_to": "2026-09-30"}
 
+    def test_all_flows_use_full_account_history_even_when_filter_matches_old_or_no_rows(self):
+        self.connection.execute("update cash.accounts set opening_date='2020-01-01'")
+        old = self.flow("100.00", "payment", occurred_on="2020-03-01", content="Old history")
+        current = self.flow("40.00", "receipt", occurred_on="2026-09-03")
+        self.flow("900.00", "receipt", occurred_on="2026-10-01")
+        future = self.cash.create_account({"id": self.uid(), "name": "Future account", "kind": "cash", "opening_date": "2026-10-01", "opening_amount": "30.00"})["account"]
+        self.now = date(2026, 9, 7)
+        all_query = {"time_scope": "all", "account_id": self.account["id"], "page_size": 1, "sort": "occurred_on", "order": "asc"}
+        result = self.query.list_flows(all_query)
+        self.assertEqual(result["pagination"], {"page": 1, "page_size": 1, "total": 2})
+        self.assertEqual(result["rows"][0]["id"], old["id"])
+        self.assertEqual(result["rows"][0]["account_running_balance"], "900.00")
+        self.assertEqual(result["summary"]["period"], {"date_from": None, "date_to": "2026-09-07"})
+        balances = result["summary"]["account_balances"]
+        self.assertEqual(len(balances), 1)
+        self.assertEqual({key: balances[0][key] for key in ("coverage_start", "opening_balance", "period_inflow", "period_outflow", "ending_balance")},
+                         {"coverage_start": "2020-01-01", "opening_balance": "1000.00", "period_inflow": "40.00", "period_outflow": "100.00", "ending_balance": "940.00"})
+        second = self.query.list_flows({**all_query, "page": 2})
+        self.assertEqual(second["rows"][0]["id"], current["id"])
+        self.assertEqual(second["rows"][0]["account_running_balance"], "940.00")
+        self.assertEqual(second["summary"], result["summary"])
+        for keyword, total in (("Old history", 1), ("no match", 0)):
+            filtered = self.query.list_flows({**all_query, "keyword": keyword})
+            self.assertEqual(filtered["pagination"]["total"], total)
+            self.assertEqual(filtered["summary"]["filtered_totals"]["flow_count"], total)
+            self.assertEqual(filtered["summary"]["account_balances"], balances)
+            self.assertEqual(filtered["summary"]["period"], result["summary"]["period"])
+        unknown = self.query.list_flows({"time_scope": "all", "account_id": future["id"]})
+        self.assertEqual(unknown["pagination"]["total"], 0)
+        self.assertEqual(unknown["summary"]["account_balances"][0]["coverage_state"], "not_started")
+        for name in ("coverage_start", "opening_balance", "balance_at_coverage_start", "period_inflow", "period_outflow", "ending_balance"):
+            self.assertIsNone(unknown["summary"]["account_balances"][0][name])
+
+    def test_all_reports_include_multiyear_history_and_use_today_for_settlements(self):
+        old = self.item(amount="100.00", origin_date="2020-03-01")
+        ticket = self.item("ticket_source", "80.00", origin_date="2020-03-01", ticket_provided_on="2020-03-01")
+        self.settlement("non_ticket_offset", "20.00", item=old, occurred_on="2026-09-03", remark="Current adjustment")
+        old = self.query.get_item(old["id"])["item"]
+        self.settlement("non_ticket_offset", "80.00", item=old, occurred_on="2026-10-01", remark="Future adjustment")
+        self.settlement("ticket_use", "10.00", source=ticket, occurred_on="2026-09-03", remark="Current use")
+        ticket = self.query.get_item(ticket["id"])["item"]
+        self.settlement("ticket_use", "70.00", source=ticket, occurred_on="2026-10-01", remark="Future use")
+        self.now = date(2026, 9, 7)
+        result = self.query.query_turnover({"time_scope": "all", "page_size": 1})
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertEqual(len(result["rows"]), 1)
+        self.assertEqual(result["summary"]["principal_amount"], "100.00")
+        self.assertEqual(result["summary"]["non_ticket_offset_amount"], "20.00")
+        self.assertEqual(result["summary"]["remaining_obligation_amount"]["receivable"], "80.00")
+        self.assertEqual(self.query.query_turnover({"time_scope": "all", "page_size": 1, "page": 2})["summary"], result["summary"])
+        tickets = self.query.query_tickets({"time_scope": "all"})
+        self.assertEqual(tickets["pagination"]["total"], 1)
+        self.assertEqual(tickets["rows"][0]["ticket_provided_on"], "2020-03-01")
+        self.assertEqual(tickets["summary"]["provided_amount"], "80.00")
+        self.assertEqual(tickets["summary"]["used_amount"], "10.00")
+        self.assertEqual(tickets["summary"]["available_source_amount"], "70.00")
+        self.assertEqual(self.query.query_tickets({**self.period, "date_to": "2026-09-07"})["pagination"]["total"], 0)
+
     def test_unsettled_keeps_old_untouched_obligations_and_historical_cutoff(self):
         old = self.item(amount="1000.00", origin_date="2025-12-01")
         self.settlement("non_ticket_offset", "200.00", item=old, occurred_on="2025-12-31", remark="Old adjustment")

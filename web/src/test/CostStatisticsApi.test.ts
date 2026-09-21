@@ -233,6 +233,16 @@ describe("Cost statistics export API", () => {
       `/api/cost-statistics/export?month=all&view=project&project_name=${encodeURIComponent("云南溯源科技")}&aggregate_by=month`,
       expect.any(Object),
     );
+    const yearRange = { month: "all", view: "project" as const, projectNames: ["云南溯源科技"],
+      aggregateBy: "month" as const, startDate: "2025-01-01", endDate: "2025-12-31" };
+    await fetchCostStatisticsExportPreview(yearRange);
+    await exportCostStatisticsView(yearRange);
+    const scopedCalls = vi.mocked(global.fetch).mock.calls.slice(-2).map(([input]) => new URL(String(input), "http://localhost"));
+    expect(scopedCalls.map(url => url.pathname)).toEqual(["/api/cost-statistics/export-preview", "/api/cost-statistics/export"]);
+    expect(scopedCalls[0].search).toBe(scopedCalls[1].search);
+    expect(scopedCalls[0].searchParams.get("month")).toBe("all");
+    expect(scopedCalls[0].searchParams.get("start_date")).toBe("2025-01-01");
+    expect(scopedCalls[0].searchParams.get("end_date")).toBe("2025-12-31");
     expect(page.availableYears).toEqual(["2026", "2025"]);
     expect(page.facets.projects[0]).toMatchObject({
       projectName: "云南溯源科技",
