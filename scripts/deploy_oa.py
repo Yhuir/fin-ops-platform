@@ -53,6 +53,7 @@ class DeploymentConfig:
     activate_existing: bool = False
     runtime_worker_ensure_path: str = "/usr/local/sbin/finops-ensure-runtime-workers"
     remote_min_free_mb: int = 512
+    resume_forward_repair: bool = False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--skip-build", action="store_true", help="Skip local frontend build")
     parser.add_argument("--no-activate", action="store_true", help="Upload and validate the release without activating it")
+    parser.add_argument("--resume-forward-repair", action="store_true", help="Resume a proven forward-only failed release from stopped maintenance; full post-activation gates remain required")
     parser.add_argument(
         "--activate-existing",
         action="store_true",
@@ -108,6 +110,8 @@ def normalize_base_path(value: str) -> str:
 
 
 def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfig:
+    if args.resume_forward_repair and args.no_activate:
+        raise ValueError("--resume-forward-repair cannot be combined with --no-activate")
     if args.activate_existing:
         if args.release_name is None:
             raise ValueError("--activate-existing requires --release-name")
@@ -158,6 +162,7 @@ def build_config(args: argparse.Namespace, *, root_dir: Path) -> DeploymentConfi
         dry_run=bool(args.dry_run),
         activate_existing=bool(args.activate_existing),
         remote_min_free_mb=int(args.remote_min_free_mb),
+        resume_forward_repair=bool(args.resume_forward_repair),
     )
 
 
@@ -478,6 +483,7 @@ def build_release_gate_command(config: DeploymentConfig) -> list[str]:
         "sudo -n "
         f"{shlex.quote(config.deploy_control_path)} "
         f"release-gate-activate {shlex.quote(config.release_name)}"
+        + (" --resume-forward-repair" if config.resume_forward_repair else "")
     ]
 
 

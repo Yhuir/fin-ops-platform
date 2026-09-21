@@ -270,6 +270,113 @@ class DeployOAScriptTest(unittest.TestCase):
         )
         self.assertIn("ControlMaster=no", command)
 
+    def test_forward_repair_flag_is_explicit_and_requires_activation(self) -> None:
+        parser = self.module.build_parser()
+        config = self.module.build_config(parser.parse_args([
+            "--activate-existing", "--release-name", "repair", "--resume-forward-repair",
+        ]), root_dir=Path("/workspace"))
+        self.assertTrue(self.module.build_release_gate_command(config)[-1].endswith(
+            "release-gate-activate repair --resume-forward-repair"))
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            self.module.build_config(parser.parse_args([
+                "--no-activate", "--resume-forward-repair",
+            ]), root_dir=Path("/workspace"))
+
+    def test_forward_repair_requires_exact_failed_schema_and_stopped_runtime(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+        function = "forward_repair_maintenance_services() {" + script.split(
+            "forward_repair_maintenance_services() {", 1)[1].split("\nrelease_gate_activate() {", 1)[0]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            prior_dir = root / "failed"
+            (prior_dir / "t0").mkdir(parents=True)
+            contract = {"migration_head": "0175", "migration_fingerprint_sha256": "same"}
+            identity = {"release_name": "failed", "git_commit": "old-sha", "schema_contract": contract}
+            original_evidence = {"release_name": "failed", "git_commit": "old-sha",
+                                 "release_gate_status": "FAIL", "rolled_back": False, "failure_checkpoint": "t0"}
+            original_plan = {"candidate": identity, "forward_only": True, "rollback_supported": False}
+            current_plan = {"previous": identity, "candidate": {"schema_contract": contract},
+                            "database": {"applied_migration_head": "0175"}, "pending_migrations": []}
+            harness = root / "resume.sh"
+            harness.write_text(
+                'set -euo pipefail\n'
+                'release_src() { printf "/release/%s\\n" "$1"; }\n'
+                'registered_worker_instances() { [[ "$RUNNING_SERVICE" != registry_failure ]] || return 1; printf "import\\noa-sync\\nworkbench-matching\\nsettings-maintenance\\n"; }\n'
+                'systemctl() { if [[ "$1" == list-units ]]; then [[ "$RUNNING_SERVICE" != inventory_failure ]] || return 1; printf "fin-ops-worker@unexpected.service loaded inactive dead\\n"; elif [[ "$RUNNING_SERVICE" == state_read_failure ]]; then return 1; elif [[ "$1" == stop ]]; then [[ "$RUNNING_SERVICE" != stop_failure ]]; elif [[ "$2" == "$RUNNING_SERVICE" ]]; then printf "active\\n"; else printf "inactive\\n"; fi; }\n'
+                'die() { printf "%s\\n" "$*" >&2; exit 1; }\n'
+                + function + '\nif [[ "$RUNNING_SERVICE" == stop_failure ]]; then assert_forward_repair_maintenance failed stop; fi\nrecord_forward_repair_preflight failed "$1" "$2"\n')
+            cases = ["valid", "api_running", "registered_worker_running", "unknown_worker_running",
+                     "missing_evidence", "passed_evidence", "rolled_back", "wrong_release", "wrong_commit",
+                     "not_forward_only", "rollback_supported", "wrong_checkpoint", "wrong_schema",
+                     "pending_migration", "candidate_schema_changed", "inventory_failure", "registry_failure", "state_read_failure", "stop_failure"]
+            for case in cases:
+                with self.subTest(case=case):
+                    evidence = json.loads(json.dumps(original_evidence))
+                    old_plan = json.loads(json.dumps(original_plan))
+                    plan = json.loads(json.dumps(current_plan))
+                    checkpoint = {"release_name": "failed", "release_gate_status": "FAIL"}
+                    running = {"api_running": "fin-ops.service", "registered_worker_running": "fin-ops-worker@import.service",
+                               "unknown_worker_running": "fin-ops-worker@unexpected.service", "inventory_failure": "inventory_failure", "registry_failure": "registry_failure",
+                               "state_read_failure": "state_read_failure", "stop_failure": "stop_failure"}.get(case, "")
+                    if case == "passed_evidence": evidence["release_gate_status"] = "PASS"
+                    if case == "rolled_back": evidence["rolled_back"] = True
+                    if case == "wrong_release": evidence["release_name"] = "other"
+                    if case == "wrong_commit": evidence["git_commit"] = "other"
+                    if case == "not_forward_only": old_plan["forward_only"] = False
+                    if case == "rollback_supported": old_plan["rollback_supported"] = True
+                    if case == "wrong_checkpoint": checkpoint["release_gate_status"] = "PASS"
+                    if case == "wrong_schema": plan["database"]["applied_migration_head"] = "0174"
+                    if case == "pending_migration": plan["pending_migrations"] = [{"version": "0176"}]
+                    if case == "candidate_schema_changed": plan["candidate"]["schema_contract"] = {"migration_head": "0176"}
+                    evidence_path = prior_dir / "evidence.json"
+                    evidence_path.write_text(json.dumps(evidence))
+                    if case == "missing_evidence": evidence_path.unlink()
+                    (prior_dir / "schema-compatibility-plan.json").write_text(json.dumps(old_plan))
+                    (prior_dir / "t0/checkpoint.json").write_text(json.dumps(checkpoint))
+                    plan_path = root / "current-plan.json"
+                    plan_path.write_text(json.dumps(plan))
+                    destination = root / case
+                    destination.mkdir()
+                    result = subprocess.run(["bash", str(harness), str(plan_path), str(destination)],
+                        env={**os.environ, "RELEASE_GATE_EVIDENCE_ROOT": str(root), "API_PYTHON": sys.executable,
+                             "RUNNING_SERVICE": running}, text=True, capture_output=True, check=False)
+                    self.assertEqual(result.returncode == 0, case == "valid", result.stderr)
+                    if case == "valid":
+                        pre = json.loads((destination / "pre/checkpoint.json").read_text())
+                        self.assertEqual(pre["release_gate_status"], "FAIL")
+                        self.assertTrue(pre["resume_forward_repair"])
+                        self.assertEqual(pre["forward_only_origin_release"], "failed")
+                        self.assertEqual(json.loads(evidence_path.read_text()), original_evidence)
+                    else:
+                        self.assertFalse((destination / "pre/checkpoint.json").exists())
+
+    def test_failed_forward_repair_remains_in_maintenance_before_rollback(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+        rollback = "rollback_release_gate() {" + script.split("rollback_release_gate() {", 1)[1].split(
+            "\nforward_repair_maintenance_services() {", 1)[0]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "pre").mkdir()
+            (root / "t0").mkdir()
+            (root / "pre/checkpoint.json").write_text(json.dumps({"resume_forward_repair": True}))
+            (root / "t0/checkpoint.json").write_text(json.dumps({"release_gate_status": "FAIL"}))
+            (root / "schema-compatibility-plan.json").write_text(json.dumps({
+                "rollback_supported": True, "requires_compatibility_evidence": False}))
+            harness = root / "rollback.sh"
+            harness.write_text('set -euo pipefail\n'
+                'enter_runtime_maintenance() { echo stopped >> "$ACTION_LOG"; }\n'
+                'assert_forward_repair_maintenance() { echo "verified_stop $2" >> "$ACTION_LOG"; }\n'
+                'write_release_gate_evidence() { echo "$4 $5 $7" >> "$ACTION_LOG"; }\n'
+                'activate_release() { echo unsafe_rollback >> "$ACTION_LOG"; }\n'
+                'die() { echo "$*" >&2; exit 1; }\n' + rollback
+                + '\nrollback_release_gate repair failed token "$1" t0 runtime\n')
+            result = subprocess.run(["bash", str(harness), str(root)], env={**os.environ,
+                "API_PYTHON": sys.executable, "ACTION_LOG": str(root / "actions")},
+                text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual((root / "actions").read_text().splitlines(), ["stopped", "FAIL false t0", "verified_stop stop"])
+            self.assertIn("production remains in maintenance", result.stderr)
+
     def test_activate_existing_is_zero_build_upload_or_self_update(self) -> None:
         parser = self.module.build_parser()
         config = self.module.build_config(

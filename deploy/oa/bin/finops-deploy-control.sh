@@ -55,7 +55,7 @@ commands:
   settings-access-control-post-deploy <release-name> --http-tokens-stdin --json
                                       verify the approved production ACL flow and restore the probe account
   repair-active-api-runtime            restore the API drop-in for exactly the active release
-  release-gate-activate <release-name>
+  release-gate-activate <release-name> [--resume-forward-repair]
                                       auto-select frontend/runtime/ACL gate and activate exact release
   workbench-audit-identity <release-name> [args]
                                       run Workbench object identity audit using runtime env
@@ -2871,6 +2871,7 @@ payload = {
     "previous_release": os.environ["PREVIOUS_RELEASE"],
     "generated_at": datetime.now(UTC).isoformat(),
     "rolled_back": os.environ["ROLLED_BACK"] == "true",
+    "forward_only_origin_release": checkpoints.get("pre", {}).get("forward_only_origin_release"),
     "failure_checkpoint": os.environ.get("FAILURE_CHECKPOINT") or None,
     "unknown_worker_count": int(latest.get("unknown_worker_count", -1)),
     "required_worker_not_ready": int(latest.get("required_worker_not_ready", -1)),
@@ -2923,6 +2924,18 @@ print("true" if json.loads(Path(sys.argv[1]).read_text()).get("rollback_supporte
 PY
 )"
   fi
+  if [[ -f "$evidence_dir/pre/checkpoint.json" ]] && "$API_PYTHON" - "$evidence_dir/pre/checkpoint.json" <<'PYRESUME'
+import json
+from pathlib import Path
+import sys
+sys.exit(0 if json.loads(Path(sys.argv[1]).read_text()).get("resume_forward_repair") is True else 1)
+PYRESUME
+  then
+    write_release_gate_evidence \
+      "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint"
+    assert_forward_repair_maintenance "$candidate" stop
+    die "forward repair failed at $failure_checkpoint; production remains in maintenance with original failure evidence retained"
+  fi
   if [[ "$schema_rollback_supported" != "true" ]]; then
     write_release_gate_evidence \
       "$candidate" "$previous_release" "$evidence_dir" FAIL false "$release_profile" "$failure_checkpoint" || true
@@ -2966,9 +2979,99 @@ PY
   die "release gate failed at $failure_checkpoint; previous release $previous_release was restored"
 }
 
+forward_repair_maintenance_services() {
+  local release="$1" src workers units
+  src="$(release_src "$release")"
+  workers="$(registered_worker_instances "$src")" || die "cannot read registered workers for forward repair"
+  [[ -n "$workers" ]] || die "forward repair worker registry is empty"
+  units="$(systemctl list-units --type=service --all --plain --no-legend 'fin-ops-worker@*.service')" \
+    || die "cannot inspect runtime worker services for forward repair"
+  { printf '%s\n' fin-ops.service; printf '%s\n' "$workers" | sed 's#^#fin-ops-worker@#; s#$#.service#';
+    printf '%s\n' "$units" | awk '{print $1}' | sed -n '/^fin-ops-worker@[-A-Za-z0-9_.]*\.service$/p'; } | sort -u
+}
+
+assert_forward_repair_maintenance() {
+  local release="$1" operation="${2:-check}" services service state
+  services="$(forward_repair_maintenance_services "$release")" || die "forward repair service inventory failed"
+  while IFS= read -r service; do
+    [[ -n "$service" ]] || continue
+    if [[ "$operation" == stop ]]; then
+      systemctl stop "$service" || die "forward repair could not stop $service"
+    fi
+    state="$(systemctl show "$service" -p ActiveState --value)" || die "forward repair cannot inspect $service"
+    [[ "$state" == inactive ]] || die "forward repair requires inactive service: $service ($state)"
+  done <<< "$services"
+}
+
+record_forward_repair_preflight() {
+  local previous_release="$1" schema_plan_path="$2" evidence_dir="$3"
+  assert_forward_repair_maintenance "$previous_release"
+  "$API_PYTHON" - "$RELEASE_GATE_EVIDENCE_ROOT" "$previous_release" "$schema_plan_path" "$evidence_dir" <<'PY'
+from datetime import UTC, datetime
+import json
+from pathlib import Path
+import re
+import sys
+
+root, previous, current_plan_path, destination = sys.argv[1:]
+root, destination = Path(root), Path(destination)
+
+def read(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit("forward repair refused: " + message)
+
+prior = read(root / previous / "evidence.json")
+require(prior.get("release_name") == previous and prior.get("release_gate_status") == "FAIL"
+        and prior.get("rolled_back") is False, "active release has no exact unrolled-back failure evidence")
+checkpoint = prior.get("failure_checkpoint")
+require(checkpoint in {"activation", "t0", "t30", "evidence", "evidence_contract", "timer_start"}, "failure was not after activation")
+if checkpoint in {"t0", "t30"}:
+    failed = read(root / previous / checkpoint / "checkpoint.json")
+    require(failed.get("release_name") == previous and failed.get("release_gate_status") == "FAIL",
+            "failed runtime checkpoint does not match active release")
+origin = prior.get("forward_only_origin_release") or previous
+require(isinstance(origin, str) and re.fullmatch(r"[A-Za-z0-9._-]+", origin), "invalid forward-only origin")
+origin_evidence = read(root / origin / "evidence.json")
+origin_plan = read(root / origin / "schema-compatibility-plan.json")
+require(origin_evidence.get("release_name") == origin and origin_evidence.get("release_gate_status") == "FAIL"
+        and origin_evidence.get("rolled_back") is False, "forward-only origin has no retained failure evidence")
+require(origin_plan.get("forward_only") is True and origin_plan.get("rollback_supported") is False
+        and origin_plan.get("candidate", {}).get("release_name") == origin, "schema failure was not forward-only")
+current = read(Path(current_plan_path))
+require(current.get("previous", {}).get("release_name") == previous, "active release changed")
+require(current.get("previous", {}).get("git_commit") == prior.get("git_commit"), "active source differs from failure evidence")
+require(not current.get("pending_migrations"), "maintenance repair must use the already-applied schema")
+require(current.get("database", {}).get("applied_migration_head") ==
+        current.get("previous", {}).get("schema_contract", {}).get("migration_head"), "active schema is not applied")
+require(current.get("candidate", {}).get("schema_contract") ==
+        current.get("previous", {}).get("schema_contract"), "repair candidate changes the schema contract")
+require(origin_plan.get("candidate", {}).get("schema_contract") ==
+        current.get("previous", {}).get("schema_contract"), "forward-only origin schema differs from active schema")
+pre = destination / "pre"
+pre.mkdir(mode=0o700)
+payload = {
+    "release_gate_status": "FAIL", "release_name": previous, "checkpoint": "pre",
+    "profile": "forward_repair_maintenance", "resume_forward_repair": True,
+    "forward_only_origin_release": origin,
+    "source_failure_evidence": str(root / previous / "evidence.json"),
+    "source_failure_checkpoint": checkpoint, "services": "inactive",
+    "checked_at": datetime.now(UTC).isoformat(),
+    "detail": "Existing failed runtime remains stopped; full candidate T0/T30 validation is required.",
+}
+output = pre / "checkpoint.json"
+output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+output.chmod(0o600)
+PY
+}
+
 release_gate_activate() {
   local release="${1:-}"
-  [[ -n "$release" && "$#" -eq 1 ]] || die "release-gate-activate accepts only release name"
+  local resume_forward_repair="${2:-}"
+  [[ -n "$release" && ( "$#" -eq 1 || ( "$#" -eq 2 && "$resume_forward_repair" == --resume-forward-repair ) ) ]] \
+    || die "release-gate-activate accepts release name and optional --resume-forward-repair"
   local admin_token previous_release active_count evidence_dir profile_report release_profile
   local schema_plan_path schema_evidence_required
   release_src "$release" >/dev/null
@@ -3014,7 +3117,10 @@ PY
   install -d -m 0700 "$evidence_dir"
   install -m 0600 "$profile_report" "$evidence_dir/profile.json"
   install -m 0600 "$schema_plan_path" "$evidence_dir/schema-compatibility-plan.json"
-  if [[ "$release_profile" == "frontend" ]]; then
+  if [[ "$resume_forward_repair" == --resume-forward-repair ]]; then
+    [[ "$release_profile" != frontend ]] || die "forward repair requires a runtime candidate"
+    record_forward_repair_preflight "$previous_release" "$schema_plan_path" "$evidence_dir"
+  elif [[ "$release_profile" == "frontend" ]]; then
     if ! release_gate_frontend_checkpoint \
       "$previous_release" pre "$admin_token" "$evidence_dir"; then
       cat "$evidence_dir/pre/checkpoint.json" >&2
