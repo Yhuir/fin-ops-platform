@@ -520,7 +520,7 @@ schema_compatibility_evidence_install() {
   plan_path="$(mktemp /run/finops-schema-plan.XXXXXX)"
   input_path="$(mktemp /run/finops-schema-evidence-input.XXXXXX)"
   normalized_path="$(mktemp /run/finops-schema-evidence-normalized.XXXXXX)"
-  trap 'rm -f -- "$plan_path" "$input_path" "$normalized_path"' RETURN
+  trap "$(printf 'rm -f -- %q %q %q' "$plan_path" "$input_path" "$normalized_path")" RETURN
   schema_compatibility_plan "$release" --json >"$plan_path"
   requires_evidence="$("$API_PYTHON" - "$plan_path" <<'PY'
 import json
@@ -774,7 +774,7 @@ settings_access_control_preflight() (
   install -d -m 0700 "$evidence_dir"
   scratch="$(mktemp -d /run/finops-settings-acl-preflight.XXXXXX)"
   chmod 0700 "$scratch"
-  trap 'rm -rf -- "$scratch"' EXIT
+  trap "$(printf 'rm -rf -- %q' "$scratch")" EXIT
   IFS= read -r admin_token || true
   IFS= read -r bearer_token || true
   admin_session="$scratch/admin-session.json"
@@ -818,7 +818,7 @@ settings_access_control_post_deploy() (
   [[ -f "$preflight" && -f "$preflight.sha256" ]] || die "approved preflight artifact is missing"
   sha256sum --check "$preflight.sha256" >/dev/null
   status_file="$(mktemp /run/finops-settings-acl-postdeploy.XXXXXX)"
-  trap 'rm -f -- "$status_file"' EXIT
+  trap "$(printf 'rm -f -- %q' "$status_file")" EXIT
   candidate_status "$release" --json >"$status_file"
   candidate="$release" "$API_PYTHON" - "$status_file" <<'PY'
 import json
@@ -869,7 +869,7 @@ assert_settings_access_control_preflight() (
   [[ -f "$artifact" && -f "$artifact.sha256" ]] || die "approved settings access-control preflight is missing"
   sha256sum --check "$artifact.sha256" >/dev/null
   current="$(mktemp /run/finops-settings-acl-candidate.XXXXXX)"
-  trap 'rm -f -- "$current"' EXIT
+  trap "$(printf 'rm -f -- %q' "$current")" EXIT
   candidate_status "$release" --json >"$current"
   "$API_PYTHON" - "$artifact" "$current" <<'PY'
 import json
@@ -1220,7 +1220,7 @@ audit_python_dependencies() {
   local src="$1"
   local audit_env
   audit_env="$(mktemp -d /tmp/fin-ops-dependency-audit.XXXXXX)"
-  trap 'rm -rf "$audit_env"' RETURN
+  trap "$(printf 'rm -rf -- %q' "$audit_env")" RETURN
   "$API_PYTHON" -m venv "$audit_env"
   "$audit_env/bin/python" -m pip install -q -r "$src/backend/requirements-audit.txt"
   "$audit_env/bin/python" -m pip_audit \
@@ -1889,7 +1889,7 @@ write_operation_restore_point() {
     [[ -n "${FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL:-${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}}" ]] \
       || die "PostgreSQL DSN is empty after loading runtime env"
     umask 077
-    trap 'rm -f -- "$temp_path"; rmdir -- "$output_dir" 2>/dev/null || true' EXIT
+    trap "$(printf 'rm -f -- %q; rmdir -- %q 2>/dev/null || true' "$temp_path" "$output_dir")" EXIT
     "$API_PYTHON" - "$temp_path" <<'PY'
 import os
 import subprocess
@@ -2137,7 +2137,7 @@ write_operation_e2e_smoke() {
     local apply_args=()
     local report_path runner_status
     report_path="$(mktemp /tmp/finops-write-e2e-report.XXXXXX.json)"
-    trap 'rm -f -- "$report_path"' EXIT
+    trap "$(printf 'rm -f -- %q' "$report_path")" EXIT
     if [[ "$mode" == "--apply-stdin" ]]; then
       local admin_token approval_ticket
       IFS= read -r admin_token
@@ -2376,7 +2376,7 @@ release_gate_frontend_checkpoint() (
   install -d -m 0700 "$checkpoint_dir"
   scratch="$(mktemp -d /run/finops-frontend-gate.XXXXXX)"
   chmod 0700 "$scratch"
-  trap 'rm -rf -- "$scratch"' EXIT
+  trap "$(printf 'rm -rf -- %q' "$scratch")" EXIT
   inventory_report="$checkpoint_dir/worker-inventory.json"
   candidate_report="$checkpoint_dir/candidate-status.json"
   session_report="$scratch/session.json"
@@ -2986,7 +2986,7 @@ forward_repair_maintenance_services() {
   [[ -n "$workers" ]] || die "forward repair worker registry is empty"
   units="$(systemctl list-units --type=service --all --plain --no-legend 'fin-ops-worker@*.service')" \
     || die "cannot inspect runtime worker services for forward repair"
-  { printf '%s\n' fin-ops.service; printf '%s\n' "$workers" | sed 's#^#fin-ops-worker@#; s#$#.service#';
+  { printf '%s\n' fin-ops.service; printf '%s\n' "$workers" | tr ' ' '\n' | sed 's#^#fin-ops-worker@#; s#$#.service#';
     printf '%s\n' "$units" | awk '{print $1}' | sed -n '/^fin-ops-worker@[-A-Za-z0-9_.]*\.service$/p'; } | sort -u
 }
 
@@ -3086,7 +3086,7 @@ release_gate_activate() {
   [[ "$previous_release" != "$release" ]] || die "candidate release is already active"
   profile_report="$(mktemp /run/finops-release-profile.XXXXXX)"
   schema_plan_path="$(mktemp /run/finops-schema-plan.XXXXXX)"
-  trap 'rm -f -- "$profile_report" "$schema_plan_path"' EXIT
+  trap "$(printf 'rm -f -- %q %q' "$profile_report" "$schema_plan_path")" EXIT
   release_gate_profile "$release" --json >"$profile_report"
   release_profile="$("$API_PYTHON" - "$profile_report" <<'PY'
 import json

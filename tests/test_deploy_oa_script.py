@@ -286,6 +286,8 @@ class DeployOAScriptTest(unittest.TestCase):
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
         function = "forward_repair_maintenance_services() {" + script.split(
             "forward_repair_maintenance_services() {", 1)[1].split("\nrelease_gate_activate() {", 1)[0]
+        registry = "registered_worker_instances() {" + script.split(
+            "registered_worker_instances() {", 1)[1].split("\nrequired_worker_instances() {", 1)[0]
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             prior_dir = root / "failed"
@@ -300,9 +302,9 @@ class DeployOAScriptTest(unittest.TestCase):
             harness = root / "resume.sh"
             harness.write_text(
                 'set -euo pipefail\n'
-                'release_src() { printf "/release/%s\\n" "$1"; }\n'
-                'registered_worker_instances() { [[ "$RUNNING_SERVICE" != registry_failure ]] || return 1; printf "import\\noa-sync\\nworkbench-matching\\nsettings-maintenance\\n"; }\n'
-                'systemctl() { if [[ "$1" == list-units ]]; then [[ "$RUNNING_SERVICE" != inventory_failure ]] || return 1; printf "fin-ops-worker@unexpected.service loaded inactive dead\\n"; elif [[ "$RUNNING_SERVICE" == state_read_failure ]]; then return 1; elif [[ "$1" == stop ]]; then [[ "$RUNNING_SERVICE" != stop_failure ]]; elif [[ "$2" == "$RUNNING_SERVICE" ]]; then printf "active\\n"; else printf "inactive\\n"; fi; }\n'
+                'release_src() { printf "%s\\n" "$SOURCE_ROOT"; }\n'
+                + registry + "\n"
+                'systemctl() { if [[ "$1" == list-units ]]; then [[ "$RUNNING_SERVICE" != inventory_failure ]] || return 1; printf "fin-ops-worker@unexpected.service loaded inactive dead\\n"; elif [[ "$2" == *" "* ]]; then return 2; elif [[ "$RUNNING_SERVICE" == state_read_failure ]]; then return 1; elif [[ "$1" == stop ]]; then [[ "$RUNNING_SERVICE" != stop_failure ]]; elif [[ "$2" == "$RUNNING_SERVICE" ]]; then printf "active\\n"; else printf "inactive\\n"; fi; }\n'
                 'die() { printf "%s\\n" "$*" >&2; exit 1; }\n'
                 + function + '\nif [[ "$RUNNING_SERVICE" == stop_failure ]]; then assert_forward_repair_maintenance failed stop; fi\nrecord_forward_repair_preflight failed "$1" "$2"\n')
             cases = ["valid", "api_running", "registered_worker_running", "unknown_worker_running",
@@ -339,7 +341,8 @@ class DeployOAScriptTest(unittest.TestCase):
                     destination.mkdir()
                     result = subprocess.run(["bash", str(harness), str(plan_path), str(destination)],
                         env={**os.environ, "RELEASE_GATE_EVIDENCE_ROOT": str(root), "API_PYTHON": sys.executable,
-                             "RUNNING_SERVICE": running}, text=True, capture_output=True, check=False)
+                             "RUNNING_SERVICE": running, "WORKER_PYTHON": "false" if case == "registry_failure" else sys.executable,
+                             "SOURCE_ROOT": str(DEPLOY_CONTROL_SCRIPT_PATH.parents[3])}, text=True, capture_output=True, check=False)
                     self.assertEqual(result.returncode == 0, case == "valid", result.stderr)
                     if case == "valid":
                         pre = json.loads((destination / "pre/checkpoint.json").read_text())
@@ -349,6 +352,37 @@ class DeployOAScriptTest(unittest.TestCase):
                         self.assertEqual(json.loads(evidence_path.read_text()), original_evidence)
                     else:
                         self.assertFalse((destination / "pre/checkpoint.json").exists())
+
+    def test_release_cleanup_binds_temp_paths_before_dynamic_scope_changes(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+        activation = script.split("release_gate_activate() {", 1)[1]
+        trap_line = next(line.strip() for line in activation.splitlines() if line.strip().startswith("trap "))
+        for mode in ("normal_return", "nested_failure", "explicit_success"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                profile = root / "temporary profile'quoted.json"
+                schema = root / "temporary schema $(literal).json"
+                evidence = root / "schema-compatibility-plan.json"
+                profile.write_text("temporary")
+                schema.write_text("temporary")
+                evidence.write_text("retained exact failure evidence")
+                harness = root / "cleanup.sh"
+                harness.write_text('set -euo pipefail\n'
+                    'rollback() { local schema_plan_path="$EVIDENCE_PATH"; exit 7; }\n'
+                    'activation() {\n'
+                    'local profile_report="$PROFILE_PATH" schema_plan_path="$SCHEMA_PATH"\n'
+                    + trap_line + '\n'
+                    'if [[ "$MODE" == nested_failure ]]; then rollback; fi\n'
+                    'if [[ "$MODE" == explicit_success ]]; then rm -f -- "$profile_report" "$schema_plan_path"; trap - EXIT; fi\n'
+                    '}\nactivation\n')
+                result = subprocess.run(["bash", str(harness)], env={**os.environ,
+                    "MODE": mode, "PROFILE_PATH": str(profile), "SCHEMA_PATH": str(schema),
+                    "EVIDENCE_PATH": str(evidence)}, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 7 if mode == "nested_failure" else 0, result.stderr)
+                self.assertFalse(profile.exists())
+                self.assertFalse(schema.exists())
+                self.assertEqual(evidence.read_text(), "retained exact failure evidence")
+                self.assertNotIn("unbound variable", result.stderr)
 
     def test_failed_forward_repair_remains_in_maintenance_before_rollback(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
@@ -785,7 +819,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('--relation-preview-samples "$preview_samples"', script)
         self.assertIn("preview samples must be an integer between 1 and 20", script)
         self.assertIn('report_path="$(mktemp /tmp/finops-write-e2e-report.XXXXXX.json)"', script)
-        self.assertIn("trap 'rm -f -- \"$report_path\"' EXIT", script)
+        self.assertIn("$(printf 'rm -f -- %q' \"$report_path\")", script)
         self.assertIn('--output "$report_path"', script)
         self.assertIn('[[ -s "$report_path" ]] || die "write-operation E2E runner did not produce a JSON report"', script)
         self.assertIn('cat -- "$report_path"', script)
