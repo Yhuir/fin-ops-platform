@@ -219,3 +219,5 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 ## 银行身份迁移回归（2026-09-22）
 
 `tests/test_bank_identity_repair.py` 覆盖字段保护、原始证据保留、缺失/冲突拒绝、时区等价、合法 v4、canonical 身份读取、事务失败及旧值 CAS、CLI 精确范围/恢复工件/审计、迁移后重复导入和幂等。需真实可丢弃 PostgreSQL；既有 file API/service 测试覆盖 preview stale、权限、任务恢复。前端没有新交互，运行现有导入、明细和工作台回归，不新增仅镜像实现的组件测试。
+
+`test_historical_weak_key_survives_v3_migration_without_rewriting_import_history` 补充早期弱身份引用迁移后流水的全页审计回归：合法引用通过且历史行不变；canonical 身份、金额或官方参考号任一漂移仍报告错误。

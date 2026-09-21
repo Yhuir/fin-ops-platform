@@ -210,3 +210,5 @@ worker 不写独立 background job；全局进度从同一 import job 投影，�
 - canonical 流水身份读取只使用正式表列，删除 JSON 身份副本优先覆盖的旧路径。历史导入行保持原证据，继续通过已有指纹及官方参考号证明引用；不改写原文件或历史决策。仍有效的旧来源识别保留。
 - 身份时间将带时区值统一为上海时间；对象审计移除截断时区的旧代码，合法 v4 使用已有 statement-position policy，不能按 v3 误报。
 - 七类验证：业务、事务/审计、导入 API、worker 重载、现有前端回归、重复导入链路、下游回归。专项入口 `tests/test_bank_identity_repair.py`；复用 identity、object audit、bank import page audit、file service/API 与银行页面测试。
+
+- 历史弱身份行（`source_unique_key=bank:<业务指纹>` 且指纹列为空）引用已迁移流水时，Audit 必须用正式身份服务重算并同时核对 canonical 身份及业务指纹；不能仅按 v3 前缀放行。保留原历史行，账户、时间、方向、金额、对方字段检查不变。

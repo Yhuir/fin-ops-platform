@@ -500,6 +500,33 @@ class BankTransactionImportPageAuditTests(unittest.TestCase):
 
         self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
 
+    def test_historical_weak_key_survives_v3_migration_without_rewriting_import_history(self) -> None:
+        from copy import deepcopy
+
+        from fin_ops_platform.services.bank_transaction_identity_service import BankTransactionIdentityService
+
+        connection = FakeConnection()
+        transaction = connection.transactions[0]
+        transaction["bank_serial_no"] = "SERIAL-1"
+        identity = BankTransactionIdentityService().identity_for_mapping(transaction)
+        transaction.update(source_unique_key=identity.identity_key, data_fingerprint=identity.suspected_key)
+        connection.rows[0].update(source_unique_key=identity.suspected_key, data_fingerprint="")
+        connection.rows[0]["raw_payload"]["normalized_payload"].update(
+            source_unique_key=identity.suspected_key, data_fingerprint="")
+        before = deepcopy(connection.rows)
+        report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+        self.assertEqual(report["audit_status"]["integrity"], "pass")
+        self.assertEqual(connection.rows, before)
+        for changes in [{"source_unique_key": identity.identity_key + "wrong"},
+                        {"amount": "99.99"}, {"bank_serial_no": "OTHER"}]:
+            original = deepcopy(transaction)
+            transaction.update(changes)
+            with self.subTest(changes=changes):
+                report = bank_transaction_import_page_audit.audit_bank_transaction_import_page(connection)
+                self.assertIn("bank_import_transaction_field_mismatch", report["summary"]["issue_sample_counts_by_code"])
+            transaction.clear()
+            transaction.update(original)
+
     def test_v3_row_can_reference_unique_v2_transaction_with_same_fingerprint_and_reference(self) -> None:
         connection = FakeConnection()
         fingerprint = "bank:62220001:2026-07-01 10:00:00:outflow:100.00:供应商"

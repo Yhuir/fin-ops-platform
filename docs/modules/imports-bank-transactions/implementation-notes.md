@@ -355,3 +355,5 @@
 - 七类验证：业务、事务/审计、导入 API、worker 重载、现有前端回归、重复导入链路、下游回归。专项入口 `tests/test_bank_identity_repair.py`；复用 identity、object audit、bank import page audit、file service/API 与银行页面测试。
 
 本轮部署前验证：后端全量 4468 项中 4463 项通过，5 项现金 schema 兼容测试因专用测试库名限制拒绝，改用独立 fin_ops_cash_test 库重跑 5 项全部通过；前端 1442 项和构建通过，相关浏览器回归 39 项通过。生产只读试算为 158 条候选，约 97 ms；银行导入与关系审计通过。生产执行与性能结果以该次运维报告为准，不能将试算记为已迁移。
+
+生产迁移后复核发现早期弱身份导入行仍被旧 Audit 限定只能引用空身份或 v2，产生误报。修正为通过现有身份服务证明当前 canonical 身份和指纹完全相符；不改写导入历史，不添加新的导入写链。生产只读候选验证通过，原有 pre-contract provenance warning 保留。

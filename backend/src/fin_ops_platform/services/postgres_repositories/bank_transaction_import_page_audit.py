@@ -815,7 +815,23 @@ def _identity_matches(row: dict[str, Any], transaction: dict[str, Any]) -> bool:
         not row_fingerprint
         and row_source_key.startswith("bank:")
         and row_source_key == transaction_fingerprint
-        and (not transaction_source_key or transaction_source_key.startswith("bank-v2:"))
+        and (
+            not transaction_source_key
+            or transaction_source_key.startswith("bank-v2:")
+            or _current_bank_identity_matches(transaction)
+        )
+    )
+
+
+def _current_bank_identity_matches(transaction: dict[str, Any]) -> bool:
+    """Prove a historical fingerprint reference after canonical identity migration."""
+    values = _bank_statement_mapping(transaction, direction_key="txn_direction")
+    values["bank_serial_no"] = transaction.get("bank_serial_no") or values.get("bank_serial_no")
+    identity = BankTransactionIdentityService().identity_for_mapping(values)
+    return (
+        bool(identity.identity_key)
+        and identity.identity_key == _text(transaction.get("source_unique_key"))
+        and identity.suspected_key == _text(transaction.get("data_fingerprint"))
     )
 
 
