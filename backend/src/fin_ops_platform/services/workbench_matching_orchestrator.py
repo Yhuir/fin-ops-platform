@@ -19,6 +19,7 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
 from fin_ops_platform.services.workbench_invoice_expense_item_assignment_service import (
     WorkbenchInvoiceExpenseItemAssignmentService,
 )
+from fin_ops_platform.services.workbench_invoice_expense_item_matching import INVOICE_EXPENSE_ASSIGNMENT_RULE_VERSION
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_relation_requirements import (
     build_bank_relation_requirement_metadata,
@@ -85,7 +86,9 @@ class WorkbenchFormalRelationCommand:
             "source_reassignments": result.source_reassignments,
             "invoice_assignment_case_ids": invoice_assignment_case_ids,
             "relation_fingerprints": fingerprints,
-            "rule_versions": sorted({plan.rule_version for plan in plans}),
+            "rule_versions": sorted({plan.rule_version for plan in plans} | (
+                {INVOICE_EXPENSE_ASSIGNMENT_RULE_VERSION} if invoice_assignment_case_ids else set()
+            )),
             "etc_batch_links": links,
             "paired_requirements_by_case_id": requirements,
         }

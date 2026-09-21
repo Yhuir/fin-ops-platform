@@ -11,6 +11,8 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
     oa_row_source_ids,
 )
 
+INVOICE_EXPENSE_ASSIGNMENT_RULE_VERSION = "invoice-expense-remaining-v2"
+
 
 def invoice_needs_expense_assignment(links: Any) -> bool:
     """Neither attachment sources nor existing explicit assignments are inferred."""

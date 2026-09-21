@@ -517,6 +517,7 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(relation)
 
     def test_partial_item_multi_invoice_assignment_is_atomic_and_visible(self):
+        truncate_test_database(self.database_url)
         from fin_ops_platform.services.runtime_worker_handlers import WorkbenchMatchingWorkerFactory
         owner = 'oa-partial-71'
         item_id = owner + ':item:0'
@@ -540,12 +541,26 @@ class WorkbenchQueryPostgresIntegrationTests(unittest.TestCase):
             values ('CASE-PARTIAL', 'manual_confirmed', 'active', %s, %s, '{}'::jsonb)""",
             ([owner] + ids, ['oa', 'invoice', 'invoice', 'invoice']))
 
+        from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import PostgresWorkbenchFormalRelationFactRepository
+        from fin_ops_platform.services.workbench_free_matching_engine import WorkbenchFreeMatchingEngine
+        from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
+        orchestrator = WorkbenchMatchingOrchestrator(
+            fact_repository=PostgresWorkbenchFormalRelationFactRepository(self.raw_connection),
+            matcher=WorkbenchFreeMatchingEngine(),
+            relation_uow=WorkbenchWriteUnitOfWork(connection=self.raw_connection,
+                repository_factory=WorkbenchMatchingWorkerFactory._workbench_uow_repository_factory,
+                idempotency_store=PostgresWorkbenchIdempotencyRepository(self.raw_connection)),
+            bank_flow_rule_tag_rules_payload=lambda: {'rules': []})
+
         def assign():
-            with self.raw_connection.transaction() as transaction:
-                context = WorkbenchMatchingWorkerFactory._workbench_uow_repository_factory(transaction)
-                context.transaction = transaction
-                return WorkbenchInvoiceExpenseItemAssignmentService.assign_automatically(
-                    context, case_ids=['CASE-PARTIAL'], request_id='partial-multi-invoice')
+            return orchestrator.run(changed_scope_months=['2026-08'], reason='test', request_id='partial-multi-invoice')
+
+        # A deployed old rule can have a successful no-op cached for these same facts.
+        with patch('fin_ops_platform.services.workbench_matching_orchestrator.INVOICE_EXPENSE_ASSIGNMENT_RULE_VERSION', 'whole-item-v1'):
+            with patch.object(WorkbenchInvoiceExpenseItemAssignmentService, 'assign_automatically', return_value={'assigned_invoice_count': 0}) as old_rule:
+                self.assertEqual(assign()['assigned_invoice_count'], 0)
+                self.assertEqual(assign()['assigned_invoice_count'], 0)
+                self.assertEqual(old_rule.call_count, 1)
 
         before = self.raw_connection.fetch_all('select legacy_mongo_id, source_links from app.invoices order by legacy_mongo_id')
         with patch.object(PostgresOperationsAuditRepository, 'append_operation_event', side_effect=RuntimeError('audit unavailable')):
